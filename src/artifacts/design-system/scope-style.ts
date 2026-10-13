@@ -12,15 +12,16 @@ export interface ViewLease {
   release(): void;
 }
 
-/** One hold of a scope's style: its own loan of a view. */
-interface Hold {
-  loan: ViewLease;
+/** One view a scope's style observes, however many holds lent it, and the end of observing it. */
+interface Watch {
+  holds: number;
+  view: DesignSystemView | null; // null until a view on its way arrives
+  stop(): void;
 }
 interface Entry {
   element: HTMLStyleElement;
-  holds: Hold[];
-  /** The hold whose view the style follows, and the end of following it. */
-  following: { hold: Hold; stop(): void } | null;
+  /** By the view lent (or its arrival): two holds of one view observe it once. */
+  watches: Map<DesignSystemView | Promise<DesignSystemView>, Watch>;
 }
 const entries = new Map<string, Entry>();
 
@@ -33,11 +34,13 @@ export function scopeIdOf(system: string, medium: Medium, overrides: TokenOverri
 export const scopeSelector = (scopeId: string): string => `[data-ds-scope="${scopeId}"]`;
 
 /**
- * Holds the style of `scopeId` and returns the release. Each hold borrows its own view (`lease()`); the style follows
- * one holder's view at a time, written when that view is there and rewritten on each of its changes. When the holder
- * it follows lets go (its tab closed, its replica gone), the style follows the next holder's view at once, so a scope's
- * life never depends on whichever holder came first. The last release removes the element. A view that fails to
- * arrive leaves the style empty.
+ * Holds the style of `scopeId` and returns the release. Each hold borrows a view (`lease()`), and the style observes
+ * every distinct view its holds lent: whichever changes rewrites it at once, so two replicas of one system shown at
+ * once (a page in the panel and in a main tab) each restyle the shared scope in their own update, whatever the other's
+ * connection. A view already at hand is written at once (the page's own, so its previews style their first frame); one
+ * on its way, when it arrives. Releasing a hold returns its loan; the last hold of a view stops observing it and the
+ * style is rewritten from a view still held; the last hold of all removes the element. A view that fails to arrive
+ * leaves the style to the others, or empty.
  */
 export function holdScopeStyle(scopeId: string, medium: Medium, overrides: TokenOverrides | undefined, lease: () => ViewLease): () => void {
   let entry = entries.get(scopeId);
@@ -45,49 +48,52 @@ export function holdScopeStyle(scopeId: string, medium: Medium, overrides: Token
     const element = document.createElement('style');
     element.dataset.dsScopeStyle = scopeId;
     document.head.appendChild(element);
-    entry = { element, holds: [], following: null };
+    entry = { element, watches: new Map() };
     entries.set(scopeId, entry);
   }
   const current = entry;
-  const follow = () => {
-    current.following?.stop();
-    current.following = null;
-    const hold = current.holds[0];
-    if (!hold) return;
+  const write = (view: DesignSystemView) => {
+    current.element.textContent = view.css(scopeSelector(scopeId), medium, overrides);
+  };
+  const loan = lease();
+  let watch = current.watches.get(loan.view);
+  if (!watch) {
     let ended = false;
     let unsubscribe: (() => void) | null = null;
-    const show = (view: DesignSystemView) => {
-      if (ended) return;
-      const write = () => {
-        current.element.textContent = view.css(scopeSelector(scopeId), medium, overrides);
-      };
-      write();
-      unsubscribe = view.subscribe(write);
-    };
-    current.following = {
-      hold,
+    const created: Watch = {
+      holds: 0,
+      view: null,
       stop: () => {
         ended = true;
         unsubscribe?.();
       },
     };
-    // A view at hand is written at once (the page's own, so its previews style their first frame); one arriving, when
-    // it arrives.
-    if (hold.loan.view instanceof Promise) hold.loan.view.then(show, () => {});
-    else show(hold.loan.view);
-  };
-  const hold: Hold = { loan: lease() };
-  current.holds.push(hold);
-  if (!current.following) follow();
+    const show = (view: DesignSystemView) => {
+      if (ended) return;
+      created.view = view;
+      write(view);
+      unsubscribe = view.subscribe(() => write(view));
+    };
+    current.watches.set(loan.view, created);
+    if (loan.view instanceof Promise) loan.view.then(show, () => {});
+    else show(loan.view);
+    watch = created;
+  }
+  const held = watch;
+  held.holds += 1;
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    current.holds = current.holds.filter((other) => other !== hold);
-    if (current.following?.hold === hold) follow();
-    hold.loan.release();
-    if (current.holds.length) return;
-    current.following?.stop();
+    held.holds -= 1;
+    if (held.holds === 0) {
+      held.stop();
+      current.watches.delete(loan.view);
+      const remaining = [...current.watches.values()].find((other) => other.view !== null);
+      if (remaining) write(remaining.view!);
+    }
+    loan.release();
+    if (current.watches.size) return;
     current.element.remove();
     if (entries.get(scopeId) === current) entries.delete(scopeId);
   };

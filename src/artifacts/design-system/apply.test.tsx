@@ -319,6 +319,32 @@ describe('lifetimes (fix wave 1)', () => {
     expect(styles()).toHaveLength(0);
   });
 
+  it('I3: two replicas of one system shown at once: an edit on either restyles the shared style in its own update', () => {
+    const first = systemDoc();
+    const second = systemDoc(); // independent replicas, nothing syncing them (one disconnected)
+    const [a, b] = [liveView(first, toUrl), liveView(second, toUrl)];
+    const id = scopeIdOf('page:a', 'document', undefined);
+    const releaseA = holdScopeStyle(id, 'document', undefined, () => ({ view: a, release: () => a.close() }));
+    const releaseA2 = holdScopeStyle(id, 'document', undefined, () => ({ view: a, release: () => {} })); // a second hold of one view
+    const releaseB = holdScopeStyle(id, 'document', undefined, () => ({ view: b, release: () => b.close() }));
+    setToken(second, 'color.accent.$root', color('#123456'));
+    expect(styles()).toHaveLength(1);
+    expect(styles()[0]!.textContent).toContain('--ds-color-accent: #123456');
+    setToken(first, 'color.accent.$root', color('#654321'));
+    expect(styles()[0]!.textContent).toContain('--ds-color-accent: #654321');
+    releaseA2(); // one of a's holds: a is still observed
+    setToken(first, 'color.accent.$root', color('#111111'));
+    expect(styles()[0]!.textContent).toContain('--ds-color-accent: #111111');
+    releaseA(); // a's last hold: the style is rewritten from b, and b alone is observed
+    expect(styles()[0]!.textContent).toContain('--ds-color-accent: #123456');
+    setToken(first, 'color.accent.$root', color('#222222'));
+    expect(styles()[0]!.textContent).toContain('--ds-color-accent: #123456');
+    setToken(second, 'color.accent.$root', color('#333333'));
+    expect(styles()[0]!.textContent).toContain('--ds-color-accent: #333333');
+    releaseB();
+    expect(styles()).toHaveLength(0);
+  });
+
   it('I7: the last scope of a system still loading, gone before it syncs, closes the handle and drops its sync listener', async () => {
     const doc = systemDoc();
     const listeners = new Set<unknown>();
