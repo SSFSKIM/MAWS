@@ -63,7 +63,13 @@
     "test/support/shell-home.ts",
     "test/support/store-fixture.ts",
     "test/support/synth-transcript.ts",
-    "test/support/widget-backend.ts"
+    "test/support/widget-backend.ts",
+    // P3-B: e2e/support/document-seed.ts writes the 200-page document through the binding module and the schema module
+    "src/artifacts/yjs/*.ts",
+    "src/artifacts/document/ids.ts",
+    "src/artifacts/document/schema.ts",
+    "src/artifacts/document/tabs.ts",
+    "src/artifacts/document/threads.ts"
   ],
-  "exclude": ["src/shared/**/*.test.ts", "src/shared/**/*.test-d.ts"]
+  "exclude": ["src/shared/**/*.test.ts", "src/shared/**/*.test-d.ts", "src/artifacts/**/*.test.ts"]
 }
