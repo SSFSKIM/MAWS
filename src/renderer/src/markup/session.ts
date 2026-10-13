@@ -157,7 +157,7 @@ async function deliver(appSessionId: AppSessionId, picture: Blob, label: string)
   const composer = useComposerStore.getState().focusTargets.get(appSessionId);
   if (composer?.attachFiles) {
     if (await composer.attachFiles([file])) {
-      composer.insertText(text);
+      composer.insertText(text, { separated: true }); // a space first after a word, never joined to it
       composer.focusEditor();
       return true;
     }

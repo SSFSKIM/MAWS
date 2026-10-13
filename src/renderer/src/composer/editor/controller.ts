@@ -38,12 +38,18 @@ export interface DraftPort {
   clearsOnSend?(): boolean;
 }
 
+// P3-G: `separated` text (Mark-up's label) gets a space before it when it would otherwise join the text before the caret
+// (a word or a chip), and none at the start of a line, after whitespace or after a line break (dictation's rule).
+export interface InsertOptions {
+  separated?: boolean;
+}
+
 // A submission is asked for one way (W10): Enter and ⌘Enter, and the Composer's Send, reach the caller's `onSubmit`
 // through the same path, which decides what it does (while a turn runs the Composer makes it a `next` steer).
 export interface EditorHandle {
   focus(): void;
   submit(): void; // the submit control: as a key would (refused while one is in flight)
-  insertText(text: string): void; // at the caret, the one it left when not focused, else at the end (C11's insertComposerText)
+  insertText(text: string, options?: InsertOptions): void; // at the caret, the one it left when not focused, else at the end (C11's insertComposerText)
   doc(): ComposerDoc;
   serialize(): Serialized;
   clear(): void;
@@ -603,10 +609,15 @@ export class EditorController {
     return {
       focus: () => void editor().commands.focus(),
       submit: () => void this.submit(),
-      insertText: (text) => {
+      insertText: (text, options) => {
         if (this.busy) return;
-        if (editor().isFocused) editor().chain().insertContent(text).run();
-        else editor().chain().focus(this.caretLeft ? null : 'end').insertContent(text).run(); // `null`: the kept selection
+        const at = editor().isFocused ? editor().chain() : editor().chain().focus(this.caretLeft ? null : 'end'); // `null`: the kept selection
+        if (!options?.separated) {
+          at.insertContent(text).run();
+          return;
+        }
+        at.run(); // P3-G: the caret first, so the text before it can be read
+        editor().chain().insertContent(needsLeadingSpace(editor().state, editor().state.selection.from) ? ` ${text}` : text).run();
       },
       doc: () => editor().getJSON(),
       serialize: () => serializeDraft(editor().getJSON(), { sessionId: this.inputs.sessionId, cwd: this.inputs.cwd }),

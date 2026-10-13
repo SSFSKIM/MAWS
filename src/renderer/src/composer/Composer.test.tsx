@@ -1413,9 +1413,7 @@ describe('P3-G: a mark-up attached to the session’s draft', () => {
     queueComposerAttachment(A, { files: [markupPng()], text: LABEL });
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(stripNames()).toEqual(['shot.png', 'mark-up.png']));
-    const text = editorOf().editor.getText();
-    expect(text.startsWith('keep this thought'), text).toBe(true);
-    expect(text).toContain(LABEL.trim());
+    expect(editorOf().editor.getText()).toBe(`keep this thought ${LABEL}`); // a space between, the draft's text kept
     expect(useComposerStore.getState().attachmentQueue.has(A)).toBe(false);
   });
 

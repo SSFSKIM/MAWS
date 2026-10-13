@@ -94,7 +94,7 @@ describe('queueComposerAttachment', () => {
   const target = (accepts: () => boolean, log: string[]) => ({
     focusEditor: vi.fn(),
     focusFrame: vi.fn(),
-    insertText: (text: string) => void log.push(`text ${text}`),
+    insertText: (text: string, options?: { separated?: boolean }) => void log.push(`text ${text}${options?.separated ? '' : ' (not separated)'}`),
     attachFiles: async (files: File[]) => {
       const taken = accepts();
       log.push(`${taken ? 'took' : 'refused'} ${files.map((f) => f.name).join(',')}`);

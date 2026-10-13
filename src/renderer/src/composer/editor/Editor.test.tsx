@@ -450,6 +450,32 @@ it.each([false, true])('ignores a PDF read started before submission that finish
   expect(handle.current!.serialize().empty).toBe(true);
 });
 
+// P3-G (the M4 review's concern 2): Mark-up's label is inserted `separated`: after a word it gets one space first, never
+// joining it; at the start, after whitespace or after a line break it is inserted as it is.
+describe('insertText separated', () => {
+  const label = 'Mark-up of "Page A" — http://127.0.0.1/a.html ';
+  it.each([
+    ['draft text ending without a space', [paragraph(textNode('keep this thought'))], `keep this thought ${label}`],
+    ['draft text ending with a space', [paragraph(textNode('keep this thought '))], `keep this thought ${label}`],
+    ['an empty draft', [paragraph()], label],
+    ['a line break', [paragraph(textNode('first'), hardBreak())], `first\n${label}`],
+  ])('after %s', async (_, content, expected) => {
+    const handle = createRef<EditorHandle>();
+    render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={drafts({ doc: docOf(content), attachments: [], updatedAt: '2026-10-13T00:00:00.000Z' }).port} client={client} handle={handle} />);
+    await act(async () => {});
+    act(() => handle.current!.insertText(label, { separated: true }));
+    expect(handle.current!.serialize().display).toBe(expected.trimEnd()); // the display drops the label's trailing space
+  });
+
+  it('leaves text inserted without the option as it was (C11’s insertComposerText)', async () => {
+    const handle = createRef<EditorHandle>();
+    render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={drafts({ doc: docOf([paragraph(textNode('one'))]), attachments: [], updatedAt: '2026-10-13T00:00:00.000Z' }).port} client={client} handle={handle} />);
+    await act(async () => {});
+    act(() => handle.current!.insertText('two'));
+    expect(handle.current!.serialize().display).toBe('onetwo');
+  });
+});
+
 describe('no-op Enter retains pending draft work', () => {
   it('restores a stored draft after empty Enter during loading', async () => {
     let loaded!: (draft: Draft | null) => void;

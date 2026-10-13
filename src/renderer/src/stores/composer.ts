@@ -43,7 +43,7 @@ export interface InlineEdit {
 export interface FocusTarget {
   focusEditor(): void;
   focusFrame(): void;
-  insertText(text: string): void; // at the editor's caret, the one it left when not focused, else at the end (C11's insertComposerText)
+  insertText(text: string, options?: { separated?: boolean }): void; // at the editor's caret, the one it left when not focused, else at the end (C11's insertComposerText); P3-G: `separated`, a space first when it would join the text before the caret
   // P3-G (§D4.3): files attached as a drop or a paste attaches them (an image to the strip, downscaled and capped),
   // added to the draft once it is restored; Mark-up's Add to chat and the attachment queue. Whether the composer took
   // them: false while it is busy (a send in flight) or once it is no longer live.
@@ -248,7 +248,7 @@ async function drainAttachments(appSessionId: AppSessionId, target: FocusTarget)
   setQueue(appSessionId, []);
   for (const [index, attachment] of queued.entries()) {
     if (await target.attachFiles!([...attachment.files])) {
-      target.insertText(attachment.text);
+      target.insertText(attachment.text, { separated: true });
       continue;
     }
     setQueue(appSessionId, [...queued.slice(index), ...(useComposerStore.getState().attachmentQueue.get(appSessionId) ?? [])]);

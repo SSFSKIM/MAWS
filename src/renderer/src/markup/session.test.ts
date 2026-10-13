@@ -147,7 +147,7 @@ describe('addMarkupToChat', () => {
     registerFocusTarget(A, {
       focusEditor: () => calls.push('focus'),
       focusFrame: () => {},
-      insertText: (text) => calls.push(`insert ${text}`),
+      insertText: (text, options) => calls.push(`insert ${text}${options?.separated ? ' (separated)' : ''}`),
       attachFiles: async (attached) => {
         files.push(...attached);
         calls.push('attach');
@@ -160,7 +160,7 @@ describe('addMarkupToChat', () => {
     expect(render).toHaveBeenCalledWith(still, marks, 800);
     expect(files).toHaveLength(1);
     expect(files[0]).toMatchObject({ name: 'mark-up.png', type: 'image/png', size: 4 });
-    expect(calls).toEqual([`attach`, `insert ${LABEL}`, 'focus']);
+    expect(calls).toEqual([`attach`, `insert ${LABEL} (separated)`, 'focus']);
     expect(s.end).toHaveBeenCalledTimes(1);
     expect(useMarkup.getState().session).toBeNull();
     expect(useComposerStore.getState().prefills.size).toBe(0);
