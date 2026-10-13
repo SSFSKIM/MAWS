@@ -9,7 +9,9 @@
 // `maws-artifact://<id>/<revision>/<name>`; the body is chosen by the MIME the name types (an `html` artifact is always
 // its page): the HTML frame (sandboxed, carrying the scheme's pick bridge), the PDF frame, native media, else the file
 // viewer read-only under the session that made the file (the files service admits a delivered file by its session).
-// `onShown` is called once the content is on screen: the frame loaded, the media's metadata, the file read.
+// `onShown` is called once the content is ready (the frame loaded, the media's metadata, the file read) and the body is
+// visible, so content that loaded hidden counts when it shows. Export and Save a copy are disabled until the shown
+// version and its file are resolved.
 //
 // The header (X32): the title, read-only, the actions (Comment on an HTML page, Reload, Open externally for a kind the
 // OS opens as a document, Reveal in Finder, Open as file for a drawn file inside its session's directories) and the
@@ -22,7 +24,7 @@
 // shown revision's page URL, about the session that made the page. Picking belongs to one frame (a version switch or a
 // Reload ends it, as do Escape and a pick); the host re-pins the card through the frame's locate handle; an unclaimed
 // card (the Side pane's re-dock) is claimed by a viewer of its artifact in its mode.
-import { useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { artifactUrl } from '@shared/artifacts/scheme';
@@ -125,6 +127,15 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   const frameKey = content ? `${artifactId}/${content.revision}#${reloads}` : null;
   const commentable = kind === 'html' && body === 'html' && session !== null && frameKey !== null;
   const picking = useStore(state.view, (s) => commentable && s.pickingIn === frameKey);
+  // Fix wave 1: picking belongs to one mounted frame. When the frame is replaced (a version switch, a Reload) or the
+  // body unmounts (Back, the tab going inactive), its picking ends, so a version round trip or a remount, which can
+  // mount a frame under the same key again, never resumes a pick the owner left.
+  useEffect(() => {
+    if (frameKey === null) return;
+    return () => {
+      if (state.view.getState().pickingIn === frameKey) state.view.setState({ pickingIn: null });
+    };
+  }, [frameKey, state.view]);
   useEffect(() => {
     if (!picking) return;
     // an Escape something else already answered (a sheet, a menu) or one that ends an input method's composition is not ours
@@ -134,6 +145,14 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [picking, state.view]);
+
+  // Fix wave 1 (Decision Log 15, 23): the owner's view is recorded once the frame's content is ready and on screen; a
+  // body that loaded while hidden (the panel collapsed, a maximized panel over the main tab) says so when it shows.
+  const [readyKey, setReadyKey] = useState<string | null>(null);
+  const ready = useCallback(() => setReadyKey(frameKey), [frameKey]);
+  useEffect(() => {
+    if (visible && frameKey !== null && readyKey === frameKey) onShown();
+  }, [visible, frameKey, readyKey, onShown]);
 
   const hostId = useId();
   const bodyBox = useRef<HTMLDivElement>(null);
@@ -149,7 +168,10 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   const cardFrame: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: frameKey ?? '', locate: frameHandle?.locate, showVersion: choose };
   const restoreFocus = () => bodyBox.current?.querySelector('iframe')?.focus({ preventScroll: true });
 
-  useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, revision: content?.revision, versionId: shown && !shown.latest ? shown.version.id : undefined, commentable, picking, frameKey, reloads, onReload: reload });
+  // Fix wave 1: what an export or a copy takes, only once the shown version and its file are resolved (null during a
+  // read, a Reload or a remount), so a historical selection is never exported as the live revision
+  const selection = ordered !== null && content !== null ? { revision: content.revision, versionId: shown && !shown.latest ? shown.version.id : undefined } : null;
+  useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload: reload });
   useRegionMarkupSurface(bodyBox, title, body !== null); // P3-G (§D4.1): Mark-up over the drawn body
 
   const failed = versionsRead.status === 'error' ? versionsRead.error : contentRead.status === 'error' ? contentRead.error : null;
@@ -173,7 +195,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
             picking={picking}
             onPick={onPick}
             onFrame={setFrameHandle}
-            onShown={onShown}
+            onReady={ready}
           />
         )}
         {picking && (
@@ -244,10 +266,10 @@ interface BodyProps {
   picking: boolean;
   onPick(message: PickMessage): void;
   onFrame(handle: FrameHandle | null): void;
-  onShown(): void;
+  onReady(): void; // the content is loaded (whether or not it is on screen)
 }
 
-function Body({ artifactId, content, body, title, session, reloads, picking, onPick, onFrame, onShown }: BodyProps) {
+function Body({ artifactId, content, body, title, session, reloads, picking, onPick, onFrame, onReady }: BodyProps) {
   const url = artifactUrl(artifactId, content.revision, content.name);
   const frameTitle = VIEWERS_COPY.frameTitle(title);
   switch (body) {
@@ -258,17 +280,17 @@ function Body({ artifactId, content, body, title, session, reloads, picking, onP
           title={frameTitle}
           owner="artifact"
           onMount={() => clearArtifactConsole(artifactId, content.revision)}
-          onLoad={onShown}
+          onLoad={onReady}
           picking={picking}
           onPick={onPick}
           onFrame={onFrame}
         />
       );
     case 'pdf':
-      return <PdfFrame url={url} title={frameTitle} owner="artifact" onLoad={onShown} />;
+      return <PdfFrame url={url} title={frameTitle} owner="artifact" onLoad={onReady} />;
     case 'video':
     case 'audio':
-      return <Media kind={body} url={url} owner="artifact" onLoad={onShown} />;
+      return <Media kind={body} url={url} owner="artifact" onLoad={onReady} />;
     case 'file':
       if (session === null) {
         return (
@@ -277,7 +299,7 @@ function Body({ artifactId, content, body, title, session, reloads, picking, onP
           </p>
         );
       }
-      return <DrawnFile tabId={fileTabId(artifactId, content.revision, reloads)} session={session} path={content.path} onShown={onShown} />;
+      return <DrawnFile tabId={fileTabId(artifactId, content.revision, reloads)} session={session} path={content.path} onReady={onReady} />;
   }
 }
 
@@ -285,11 +307,11 @@ function Body({ artifactId, content, body, title, session, reloads, picking, onP
 // every view, so a Reload reads afresh even while another view holds the revision's entry).
 const fileTabId = (artifactId: string, revision: number, reloads: number) => `artifact:${artifactId}:${revision}${reloads > 0 ? `:r${reloads}` : ''}`;
 
-function DrawnFile({ tabId, session, path, onShown }: { tabId: string; session: AppSessionId; path: string; onShown(): void }) {
+function DrawnFile({ tabId, session, path, onReady }: { tabId: string; session: AppSessionId; path: string; onReady(): void }) {
   const read = useViewer((s) => s.entries.get(tabId)?.status === 'ready');
   useEffect(() => {
-    if (read) onShown();
-  }, [read, onShown]);
+    if (read) onReady();
+  }, [read, onReady]);
   return <FileBody tabId={tabId} appSessionId={session} path={path} readOnly />;
 }
 
@@ -304,8 +326,9 @@ interface HeaderInput {
   content: LibraryContent | null;
   body: BodyKind | null;
   session: AppSessionId | null;
-  revision: number | undefined; // the shown revision's
-  versionId: number | undefined; // the shown version's, when it is not the latest (an export of what is shown)
+  // the shown revision, and the shown version's id when it is not the latest (an export of what is shown); null while
+  // either is unresolved, when Export and Save a copy are disabled
+  selection: { revision: number; versionId: number | undefined } | null;
   commentable: boolean;
   picking: boolean;
   frameKey: string | null;
@@ -319,7 +342,8 @@ const answered = async (pending: Promise<{ ok: true; value: { opened?: boolean; 
   else if (result.value.message !== null) toastFailure(result.value.message);
 };
 
-function useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, revision, versionId, commentable, picking, frameKey, reloads, onReload }: HeaderInput): void {
+function useViewerHeader({ kind, artifactId, title, state, scope, content, body, session, selection, commentable, picking, frameKey, reloads, onReload }: HeaderInput): void {
+  const revision = selection?.revision;
   const formats = useExportFormats(kind);
   const sessionRecord = useSessions((s) => (session === null ? undefined : s.records.get(session)));
   const drawnKind = useViewer((s) => (content && body === 'file' ? (s.entries.get(fileTabId(artifactId, content.revision, reloads))?.kind ?? null) : null));
@@ -336,8 +360,24 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
   if (content && session !== null && drawnKind !== null && OPENS_AS_FILE.has(drawnKind) && underSession(content.path, sessionRecord)) {
     actions.push({ id: 'file', label: VIEWERS_COPY.openAsFile, icon: OpenAsFileIcon, onSelect: () => openFile(session, content.path) });
   }
-  const exports: EditorHostExport[] = formats.map((format) => ({ id: format, label: VIEWERS_COPY.exportFormats[format], onSelect: () => void exportArtifact(artifactId, format, versionId) }));
-  if (kind === 'file') exports.push({ id: 'copy', label: VIEWERS_COPY.saveCopy, onSelect: () => void saveArtifactCopy(artifactId, revision) });
+  const exports: EditorHostExport[] = formats.map((format) => ({
+    id: format,
+    label: VIEWERS_COPY.exportFormats[format],
+    disabled: selection === null,
+    onSelect: () => {
+      if (selection) void exportArtifact(artifactId, format, selection.versionId);
+    },
+  }));
+  if (kind === 'file') {
+    exports.push({
+      id: 'copy',
+      label: VIEWERS_COPY.saveCopy,
+      disabled: selection === null,
+      onSelect: () => {
+        if (selection) void saveArtifactCopy(artifactId, selection.revision);
+      },
+    });
+  }
   useEditorHost(scope, { title, saved: 'readonly', actions, exports });
 }
 

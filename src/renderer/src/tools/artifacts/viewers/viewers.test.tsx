@@ -18,7 +18,7 @@ import { editorHostOf, resetEditorHosts, type EditorHostScope } from '../../../p
 import { openComment } from '../../../side/register';
 import { openCard, useCommentCard } from '../../../side/card/store';
 import { useSessions } from '../../../stores/sessions';
-import { installFakeMain, ok } from '../../../test-support/code';
+import { deferred, installFakeMain, ok } from '../../../test-support/code';
 import { registerCommentComposer, type CommentContext } from '../../code/anchor/anchor';
 import { useViewer } from '../../code/viewer/viewer-store';
 import { byteViewer, type ByteViewerState } from './ByteViewer';
@@ -33,6 +33,7 @@ let row: LibraryRow;
 let versions: ArtifactVersion[];
 let names: Record<number, string>; // the stored file's name by revision
 let main: ReturnType<typeof installFakeMain>;
+let versionsAnswer: (() => Promise<ReturnType<typeof ok>>) | null; // fix wave 1: a read answered when the case says
 const offs: (() => void)[] = [];
 
 function rowOf(kind: ArtifactKind, over: Partial<LibraryRow> = {}): LibraryRow {
@@ -68,9 +69,10 @@ beforeEach(() => {
   row = rowOf('html');
   versions = [version(1, 4), version(2, 9)];
   names = { 4: 'index.html', 9: 'index.html' };
+  versionsAnswer = null;
   main = installFakeMain((name, input) => {
     if (name === 'library.get') return ok({ row });
-    if (name === 'artifacts.versions') return ok({ versions });
+    if (name === 'artifacts.versions') return versionsAnswer ? versionsAnswer() : ok({ versions });
     if (name === 'library.content') {
       const revision = (input.revision as number | undefined) ?? 9;
       return ok({ revision, kind: row.kind, name: names[revision], path: `/store/${revision}/${names[revision]}` });
@@ -93,8 +95,9 @@ function mount(kind: 'html' | 'file', over: { visible?: boolean } = {}) {
   const state = editor.createState!({ artifactId: ID, kind, surface: 'panel' });
   const onShown = vi.fn();
   const Body = editor.Panel;
-  const view = render(<Body artifactId={ID} state={state} scope={SCOPE} visible={over.visible ?? true} onShown={onShown} />);
-  return { onShown, view, state };
+  const draw = (visible: boolean) => <Body artifactId={ID} state={state} scope={SCOPE} visible={visible} onShown={onShown} />;
+  const view = render(draw(over.visible ?? true));
+  return { onShown, view, state, show: (visible: boolean) => view.rerender(draw(visible)) };
 }
 
 const frame = (kind: 'html' | 'pdf') => document.querySelector<HTMLIFrameElement>(`[data-artifact-frame="${kind}"]`);
@@ -140,6 +143,34 @@ describe('the HTML viewer', () => {
     expect(onShown).not.toHaveBeenCalled();
     load(frame('html')!);
     expect(onShown).toHaveBeenCalled();
+  });
+
+  // fix wave 1 (Decision Log 15, 23): content that loaded while hidden is not a view until it shows
+  it('says nothing for a page that loaded while hidden, and says it once the page shows', async () => {
+    const { onShown, show } = mount('html', { visible: false });
+    await waitFor(() => expect(frame('html')).not.toBeNull());
+    load(frame('html')!);
+    expect(onShown).not.toHaveBeenCalled();
+    show(true);
+    expect(onShown).toHaveBeenCalled();
+  });
+
+  // fix wave 1: an export or a copy takes the shown selection only once it is resolved, never the live revision instead
+  it('disables Export while a Reload reads the versions again, and then exports the chosen version, never the live one', async () => {
+    mount('html');
+    await waitFor(() => expect(frame('html')).not.toBeNull());
+    fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), { target: { value: '1' } });
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    const pending = deferred<ReturnType<typeof ok>>();
+    versionsAnswer = () => pending.promise;
+    act(() => action('Reload').onSelect());
+    await waitFor(() => expect(header().exports?.every((e) => e.disabled)).toBe(true));
+    act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect()); // a disabled entry does nothing
+    expect(main.callsOf('artifacts.export')).toEqual([]);
+    await act(async () => pending.resolve(ok({ versions })));
+    await waitFor(() => expect(header().exports?.find((e) => e.label === 'PDF')?.disabled).toBe(false));
+    act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
+    await waitFor(() => expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: ID, format: 'pdf', versionId: 1 }]));
   });
 
   it('Reload mounts a new frame and reads the versions again', async () => {
@@ -190,6 +221,29 @@ describe('Comment on an HTML page', () => {
     expect(document.querySelector('[data-card-host="artifact-page"] [data-comment-card]')).not.toBeNull();
     expect(useCommentCard.getState().open?.target).toEqual({ kind: 'artifact-page', artifactId: ID, revision: 9 });
     expect(action('Comment').pressed).toBe(false); // one pick per Comment
+  });
+
+  // fix wave 1: picking belongs to the frame it was asked of; another frame, even under the same key again, is not picking
+  it('a version round trip and a remount end picking rather than resume it', async () => {
+    const { state, view } = mount('html');
+    await waitFor(() => expect(frame('html')).not.toBeNull());
+    act(() => action('Comment').onSelect());
+    const picker = screen.getByRole('combobox', { name: 'Version' });
+    fireEvent.change(picker, { target: { value: '1' } });
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), { target: { value: '2' } });
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    expect(action('Comment').pressed).toBe(false);
+    expect(screen.queryByRole('status')).toBeNull();
+
+    act(() => action('Comment').onSelect());
+    expect(action('Comment').pressed).toBe(true);
+    view.unmount(); // the tab goes inactive: its body unmounts, the registration stays
+    expect(state.view.getState().pickingIn).toBeNull();
+    const Body = byteViewer('html').Panel;
+    render(<Body artifactId={ID} state={state} scope={SCOPE} visible onShown={() => {}} />);
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    expect(action('Comment').pressed).toBe(false);
   });
 
   it('Escape ends picking', async () => {
@@ -249,6 +303,15 @@ describe('the File viewer', () => {
     await waitFor(() => expect(document.querySelector('[data-file-viewer]')?.getAttribute('data-path')).toBe('/store/9/budget.csv'));
     expect(main.callsOf('files.read')[0]).toMatchObject({ appSessionId: P, path: '/store/9/budget.csv' });
     await waitFor(() => expect(onShown).toHaveBeenCalled());
+  });
+
+  it('a file read while hidden counts as shown only once it shows', async () => {
+    names = { 9: 'budget.csv' };
+    const { onShown, show } = mount('file', { visible: false });
+    await waitFor(() => expect(useViewer.getState().entries.get(`artifact:${ID}:9`)?.status).toBe('ready'));
+    expect(onShown).not.toHaveBeenCalled();
+    show(true);
+    expect(onShown).toHaveBeenCalled();
   });
 
   it('says where a file opens when no session made or touched it', async () => {

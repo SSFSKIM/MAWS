@@ -18,7 +18,8 @@ import { artifactUrl } from '../src/shared/artifacts/scheme';
 import { MIGRATIONS } from '../src/main/index/migrations';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { ownTitles } from './support/library';
-import { invoke, minimalPdf, pageParentJournal, recordedWebm, sideThreadOf, silentWav, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
+import { invoke, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
+import { minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // M5b
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
