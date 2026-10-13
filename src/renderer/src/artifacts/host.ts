@@ -6,7 +6,9 @@
 // detached host reset the channel, or the host evicted the document and closed it — is re-opened by itself: a fresh
 // `artifacts.open` after 250 ms, 1 s and 3 s, then at the engine host's next `ready`; the same provider reconnects, so
 // its step 2 re-sends exactly what the host lacks (unacked updates moved to carried at the disconnect). A dead utility
-// host's port may never report its close, so the host leaving `ready` (`engine.hostState`) drops every live port too.
+// host's port may never report its close, so the host leaving `ready` (`engine.hostState`) drops every live port too,
+// and invalidates an open in flight: a port it brings later belongs to the dead host and is closed, and the replica
+// opens afresh once that attempt settles (at once if the host is ready again, else at its next `ready`).
 // A refusal that names the document (not found, not a document) ends the attempts: the first open rejects with it.
 //
 // What an editor shows (P3-G's header maps it): the provider's SaveState, and `readOnly` when the store is (a newer app
@@ -95,6 +97,7 @@ const HUMAN: Actor = { kind: 'human' };
 export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[artifacts] ${line}`) }: ArtifactHostDeps): ArtifactHost {
   const replicas = new Set<Replica>();
   let hostRevision = -1; // the engine host's state revision last heard; a consumer keeps the higher (HostState)
+  let hostIsReady = false; // what that state said
 
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const result = await ipc.invoke(name, input);
@@ -105,6 +108,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
   ipc.on('engine.hostState', (state) => {
     if (state.revision <= hostRevision) return;
     hostRevision = state.revision;
+    hostIsReady = state.state === 'ready';
     for (const replica of replicas) {
       if (state.state === 'ready') replica.hostReady();
       else replica.hostGone();
@@ -117,6 +121,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     private readOnly = false;
     private closed = false;
     private connecting = false; // an open is in flight
+    private generation = 0; // bumped when the host leaves `ready`: an open begun before belongs to a dead host
     private attempt = 0; // reconnects since the last live connection
     private timer: ReturnType<typeof setTimeout> | null = null;
     private waitingForHost = false; // the backoff ran out: the next `ready` re-opens
@@ -161,19 +166,23 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       if (this.closed || this.connecting) return;
       this.connecting = true;
       this.waitingForHost = false;
+      const generation = this.generation;
+      const stale = () => this.closed || generation !== this.generation;
       try {
         const { channel } = await call('artifacts.open', { artifactId: this.artifactId });
+        if (stale()) return; // a port that still comes is closed by the window's route when nobody takes it
         const port = await ports.take(channel);
-        if (this.closed) return port.close();
+        if (stale()) return port.close();
         this.provider.connect(port);
         void this.readStatus();
       } catch (error) {
         const refusal = error instanceof ArtifactCommandError ? artifactRefusalOf(error.error) : null;
         if (refusal && (refusal.reason === 'notFound' || refusal.reason === 'invalid')) return this.fail(error);
         log(`could not open ${this.artifactId}: ${error instanceof Error ? error.message : String(error)}`);
-        this.retry();
+        if (!stale()) this.retry();
       } finally {
         this.connecting = false;
+        if (!this.closed && generation !== this.generation) this.resume();
       }
     }
 
@@ -186,7 +195,15 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     }
 
     hostGone(): void {
+      this.generation += 1;
       if (this.provider.state.phase !== 'off') this.provider.disconnect(); // the change listener schedules the reopen
+    }
+
+    // An open the host's loss interrupted has settled: open afresh on the host that is ready now, else at its next ready
+    // (a `ready` heard while the attempt was in flight found it connecting and did nothing).
+    private resume(): void {
+      if (hostIsReady) this.hostReady();
+      else this.waitingForHost = true;
     }
 
     private changed(state: SaveState): void {

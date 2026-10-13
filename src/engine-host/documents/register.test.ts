@@ -5,6 +5,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { MessageChannel, type MessagePort } from 'node:worker_threads';
 import type { MessagePortMain } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -68,6 +69,18 @@ const until = async (test: () => boolean) => {
   for (let i = 0; i < 400 && !test(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
   expect(test()).toBe(true);
 };
+
+// What is durable, read through a connection of its own as another process (or the store after a crash) would see it.
+const durable = (sql: string, ...params: string[]): number => {
+  const db = new DatabaseSync(join(dir, 'artifacts', 'store.sqlite'), { readOnly: true });
+  try {
+    return (db.prepare(sql).get(...params) as { n: number | null }).n ?? 0;
+  } finally {
+    db.close();
+  }
+};
+const committedRevision = (artifactId: string) => durable('SELECT MAX(seq) AS n FROM artifact_updates WHERE artifactId = ?', artifactId);
+const insert = (artifactId: string, text: string) => documents!.service.writeAs(artifactId, { kind: 'human' }, (doc) => doc.get('root').insert(0, text));
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'maws-artifacts-ipc-'));
@@ -185,6 +198,99 @@ describe('the artifacts and spaces surface (M4)', () => {
     const closed = new Promise<void>((resolve) => port2.once('close', () => resolve()));
     docHandler!({ t: 'doc', channel: 1, artifactId: '33333333-3333-4333-8333-333333333333', actor: { kind: 'human' } }, asPortMain(port1));
     await closed;
+  });
+});
+
+describe('answers released after the batch they read (Decision Log 33)', () => {
+  // Each read below is taken while another write's rows sit in the open batch.
+  const opened = () => expect(documents!.storage.db.isTransaction).toBe(true);
+
+  it('lists and searches rows only once the batch they saw commits', async () => {
+    await call('artifacts.create', { kind: 'document', title: 'Plan' });
+    const creating = call('artifacts.create', { kind: 'document', title: 'Second' });
+    opened();
+    expect((await call('artifacts.list', {})).artifacts).toHaveLength(durable('SELECT COUNT(*) AS n FROM artifacts'));
+    await creating;
+    const searching = call('artifacts.create', { kind: 'document', title: 'Planned' });
+    opened();
+    expect((await call('artifacts.search', { query: 'plan' })).artifacts).toHaveLength(durable("SELECT COUNT(*) AS n FROM artifacts WHERE title LIKE '%plan%'"));
+    await searching;
+  });
+
+  it('answers a row’s live revision only once the rows behind it commit', async () => {
+    const plan = (await call('artifacts.create', { kind: 'document', title: 'Plan' })).artifact;
+    void insert(plan.id, 'a');
+    opened();
+    const got = (await call('artifacts.get', { artifactId: plan.id })).artifact!;
+    expect(got.revision).toBe(plan.revision + 1);
+    expect(committedRevision(plan.id)).toBe(got.revision);
+  });
+
+  it('lists versions and reads a version’s state only once the batch they saw commits', async () => {
+    const plan = (await call('artifacts.create', { kind: 'document', title: 'Plan' })).artifact;
+    const saving = call('artifacts.saveVersion', { artifactId: plan.id, label: 'First' });
+    opened();
+    const versions = (await call('artifacts.versions', { artifactId: plan.id })).versions;
+    expect(versions).toHaveLength(durable('SELECT COUNT(*) AS n FROM artifact_versions WHERE artifactId = ?', plan.id));
+    const { versionId } = await saving;
+    void insert(plan.id, 'b');
+    opened();
+    expect((await call('artifacts.versionState', { artifactId: plan.id, versionId })).bytes).toBeInstanceOf(Uint8Array);
+    expect(committedRevision(plan.id)).toBe(plan.revision + 1);
+  });
+
+  it('serves a byte kind’s content only once its revision commits', async () => {
+    const page = (await call('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: new TextEncoder().encode('<p>v1</p>') } })).artifact;
+    void documents!.store.writeContent(page.id, { bytes: new TextEncoder().encode('<p>v2</p>') }, { kind: 'human' });
+    opened();
+    const content = await call('artifacts.content', { artifactId: page.id });
+    expect(content.revision).toBeGreaterThan(page.revision);
+    expect(committedRevision(page.id)).toBe(content.revision);
+  });
+
+  it('answers the attributions only once the rows they merge commit', async () => {
+    const plan = (await call('artifacts.create', { kind: 'document', title: 'Plan' })).artifact;
+    void insert(plan.id, 'a');
+    opened();
+    await call('artifacts.attributions', { artifactId: plan.id, fromSeq: 0, toSeq: 1_000 });
+    expect(committedRevision(plan.id)).toBe(plan.revision + 1);
+  });
+
+  it('lists Spaces only once the batch they saw commits', async () => {
+    const spacing = call('spaces.create', { name: 'Teaching' });
+    opened();
+    expect((await call('spaces.list', undefined)).spaces).toHaveLength(durable('SELECT COUNT(*) AS n FROM spaces'));
+    await spacing;
+  });
+
+  it('answers a write with the revision it reads only once any batch open at that read commits', async () => {
+    const plan = (await call('artifacts.create', { kind: 'document', title: 'Plan' })).artifact;
+    // Another writer whose batch opens between the update's commit and its answer's read.
+    void documents!.service.whenCommitted().then(() => void insert(plan.id, 'meanwhile'));
+    const updated = (await call('artifacts.update', { artifactId: plan.id, title: 'Plan B' })).artifact;
+    expect(updated.revision).toBe(plan.revision + 1);
+    expect(committedRevision(plan.id)).toBe(updated.revision);
+  });
+
+  it('fails the answers whose batch fails, rather than reveal rows the store took back', async () => {
+    const plan = (await call('artifacts.create', { kind: 'document', title: 'Plan' })).artifact;
+    const commit = vi.spyOn(documents!.storage, 'commit').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    const writing = insert(plan.id, 'lost');
+    const saving = call('artifacts.saveVersion', { artifactId: plan.id, label: 'lost' });
+    const reads = [
+      call('artifacts.get', { artifactId: plan.id }),
+      call('artifacts.list', {}),
+      call('artifacts.versions', { artifactId: plan.id }),
+      call('artifacts.versionState', { artifactId: plan.id, seq: plan.revision + 1 }),
+      call('artifacts.attributions', { artifactId: plan.id, fromSeq: 0, toSeq: 1_000 }),
+    ];
+    const outcomes = await Promise.allSettled([writing, saving, ...reads]);
+    expect(outcomes.map((o) => o.status)).toEqual(Array(7).fill('rejected'));
+    commit.mockRestore();
+    expect((await call('artifacts.get', { artifactId: plan.id })).artifact!.revision).toBe(plan.revision);
+    expect((await call('artifacts.versions', { artifactId: plan.id })).versions).toEqual([]);
   });
 });
 

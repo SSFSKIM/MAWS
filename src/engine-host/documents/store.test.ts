@@ -841,6 +841,61 @@ describe('ArtifactStore: the change feed and attributions', () => {
   });
 });
 
+describe('ArtifactStore: reads released after the batch they saw (Decision Log 33)', () => {
+  it('holds a read taken while a batch is open until that batch commits, and releases one taken with none open at once', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'document', title: 'Plan' }, human);
+    let released = false;
+    const listed = store.readCommitted(() => store.list().map((a) => a.title)).finally(() => (released = true));
+    const revision = store.readCommitted(() => store.revision((store.list()[0] as { id: string }).id));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(released).toBe(false); // the rows it read are not durable yet
+    expect(committed('SELECT COUNT(*) AS n FROM artifacts')[0].n).toBe(0);
+    tick();
+    expect(await listed).toEqual(['Plan']);
+    expect(await revision).toBe(0);
+    const doc = await creation;
+
+    void write(doc.id, human, (d) => d.get('root').insert(0, 'a')); // a document row: the live revision moves ahead of the disk
+    const live = store.readCommitted(() => store.revision(doc.id));
+    const versions = store.readCommitted(() => store.listVersions(doc.id).length);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    expect(await live).toBe(1);
+    expect(committed('SELECT MAX(seq) AS s FROM artifact_updates WHERE artifactId = ?', doc.id)[0].s).toBe(1);
+    expect(await versions).toBe(0);
+
+    const idle = store.readCommitted(() => store.get(doc.id)?.title); // nothing open: no commit to wait for
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(turns).toEqual([]);
+    expect(await idle).toBe('Plan');
+  });
+
+  it('fails a read whose batch fails, a refusal it read included, rather than reveal rolled-back rows', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'document', title: 'Plan' }, human);
+    tick();
+    const doc = await creation;
+    const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    const writing = write(doc.id, human, (d) => d.get('root').insert(0, 'lost'));
+    const versioning = store.createVersion(doc.id, { kind: 'named', actor: human, label: 'lost' });
+    const revision = store.readCommitted(() => store.revision(doc.id));
+    const state = store.readCommitted(() => store.versionState(doc.id, { seq: store.revision(doc.id) }));
+    const missing = store.readCommitted(() => store.versionState(doc.id, 99));
+    const outcomes = Promise.allSettled([writing, versioning, revision, state, missing]);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    const settled = await outcomes;
+    expect(settled.map((o) => o.status)).toEqual(['rejected', 'rejected', 'rejected', 'rejected', 'rejected']);
+    expect((settled[4] as PromiseRejectedResult).reason).not.toBeInstanceOf(ArtifactStoreError); // the batch's failure, not the read's answer
+    commit.mockRestore();
+    expect(await store.readCommitted(() => store.revision(doc.id))).toBe(0);
+    expect(store.listVersions(doc.id)).toEqual([]);
+  });
+});
+
 describe('ArtifactStore: refusals', () => {
   it('refuses wrong content per kind and unknown targets with typed errors', async () => {
     await expect(store.create({ kind: 'html', title: 'x' }, human)).rejects.toBeInstanceOf(ArtifactStoreError);

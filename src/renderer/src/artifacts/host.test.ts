@@ -94,7 +94,8 @@ type Answer = CommandResult<CommandName> | (() => CommandResult<CommandName>);
 
 // The bridge and main: `artifacts.open` hands the window a fresh port attached to the host, unless the test says the
 // host is down; other commands answer what the test set.
-function harness(options: { host?: TestHost } = {}) {
+// `holdPorts`: a port the window takes arrives only when the test releases it (`releasePort`), as a slow route would.
+function harness(options: { host?: TestHost; holdPorts?: boolean } = {}) {
   const host = options.host ?? new TestHost();
   let channel = 0;
   let hostUp = true;
@@ -102,11 +103,14 @@ function harness(options: { host?: TestHost } = {}) {
   const calls: { name: string; input: unknown }[] = [];
   const eventListeners = new Map<string, Set<(payload: unknown) => void>>();
   const waiting = new Map<number, AsyncPort>();
+  const held: (() => void)[] = [];
   const ports: DocPorts = {
     take: (n) => {
       const port = waiting.get(n);
       waiting.delete(n);
-      return port ? Promise.resolve(port) : Promise.reject(new Error(`no port for channel ${n}`));
+      if (!port) return Promise.reject(new Error(`no port for channel ${n}`));
+      if (!options.holdPorts) return Promise.resolve(port);
+      return new Promise((resolve) => held.push(() => resolve(port)));
     },
   };
   const ipc = {
@@ -143,6 +147,8 @@ function harness(options: { host?: TestHost } = {}) {
     answers,
     emit,
     setHostUp: (up: boolean) => void (hostUp = up),
+    heldPorts: () => held.length,
+    releasePort: () => held.shift()!(),
     hostState: (state: 'ready' | 'restarting', revision: number) => emit('engine.hostState', { state, pid: state === 'ready' ? 2 : null, restarts: 1, revision }),
   };
 }
@@ -223,6 +229,44 @@ describe('the renderer’s ArtifactHost (M4)', () => {
     expect(handle.state().phase).toBe('off');
     await settle(RECONNECT_BACKOFF_MS[0]);
     await vi.waitFor(() => expect(handle.state().phase).toBe('live'));
+    handle.close();
+  });
+
+  it('a host restart while an open awaits its port closes that port when it arrives, and opens afresh on the new host', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness({ holdPorts: true });
+    const opening = h.artifacts.open(ARTIFACT);
+    await vi.waitFor(() => expect(h.heldPorts()).toBe(1)); // the open was answered; its port is on the way
+    const stale = [...h.host.conns.keys()][0];
+    h.hostState('restarting', 1);
+    h.hostState('ready', 2); // the new host is ready while the old attempt still waits
+    h.releasePort(); // the old host's port arrives late (and, dead, would never say it closed)
+    await settle();
+    expect(stale.closed).toBe(true);
+    await vi.waitFor(() => expect(h.heldPorts()).toBe(1)); // a fresh open, without waiting for another ready
+    expect(h.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(2);
+    h.releasePort();
+    const handle = await opening;
+    expect(handle.state()).toMatchObject({ phase: 'live', synced: true });
+    handle.close();
+  });
+
+  it('an open interrupted by the host leaving ready, its port arriving while the host is still down, re-opens at the next ready', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness({ holdPorts: true });
+    const opening = h.artifacts.open(ARTIFACT);
+    await vi.waitFor(() => expect(h.heldPorts()).toBe(1));
+    const stale = [...h.host.conns.keys()][0];
+    h.hostState('restarting', 1);
+    h.releasePort();
+    await settle(60_000);
+    expect(stale.closed).toBe(true);
+    expect(h.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(1); // nothing to open until the host is back
+    h.hostState('ready', 2);
+    await vi.waitFor(() => expect(h.heldPorts()).toBe(1));
+    h.releasePort();
+    const handle = await opening;
+    expect(handle.state()).toMatchObject({ phase: 'live', synced: true });
     handle.close();
   });
 

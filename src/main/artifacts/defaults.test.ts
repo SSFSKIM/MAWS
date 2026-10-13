@@ -79,6 +79,39 @@ describe('the design-system defaults main relays (Decision Log 22d)', () => {
     expect(h.dispatch).not.toHaveBeenCalled();
   });
 
+  it('forgets a push whose dispatch failed, so the next notification of the same defaults retries it', async () => {
+    const h = harness('starting', withSlot(SYSTEM));
+    h.dispatch.mockResolvedValueOnce({ ok: false, error: { code: 'host_unavailable', message: 'restarting' } });
+    h.dispatch.mockRejectedValueOnce(new Error('the bridge closed'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    h.moveHost('ready'); // refused
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+    h.change(withSlot(SYSTEM)); // the same defaults: retried, and rejected
+    expect(h.dispatch).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(2));
+    h.change(withSlot(SYSTEM)); // retried again, and this one lands
+    expect(h.dispatch).toHaveBeenCalledTimes(3);
+    await Promise.resolve();
+    h.change(withSlot(SYSTEM)); // delivered: deduplicated from here on
+    expect(h.dispatch).toHaveBeenCalledTimes(3);
+    warn.mockRestore();
+  });
+
+  it('a failed push does not forget a newer one that replaced it', async () => {
+    const h = harness('starting', withSlot(SYSTEM));
+    let refuse!: (result: CommandResult<'artifacts.setDefaults'>) => void;
+    h.dispatch.mockReturnValueOnce(new Promise((resolve) => (refuse = resolve)));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    h.moveHost('ready'); // the first push is in flight
+    h.change(withSlot(null)); // a newer one replaces it, and lands
+    expect(h.dispatch).toHaveBeenCalledTimes(2);
+    refuse({ ok: false, error: { code: 'internal', message: 'disk full' } });
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+    h.change(withSlot(null)); // the newer push stands: nothing re-sent
+    expect(h.dispatch).toHaveBeenCalledTimes(2);
+    warn.mockRestore();
+  });
+
   it('stops listening when stopped', () => {
     const h = harness('ready', withSlot(SYSTEM));
     expect(h.listeners()).toBe(2);

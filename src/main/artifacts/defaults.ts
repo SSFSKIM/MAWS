@@ -34,20 +34,24 @@ export interface ArtifactDefaultsDeps {
 }
 
 export function startArtifactDefaults(deps: ArtifactDefaultsDeps): () => void {
-  let pushed: string | null = null; // what the host now serving was last sent, as JSON
+  // What the host now serving was last sent (its JSON), one object per push so a failed push forgets only itself: the
+  // next notification retries it, while a newer push that replaced it stands.
+  let pushed: { key: string } | null = null;
   const push = () => {
     if (deps.hostState().state !== 'ready') return;
     const defaults = defaultsOf(deps.settings());
     if (defaults === null) return;
     const key = JSON.stringify(defaults);
-    if (pushed === key) return;
-    pushed = key;
-    deps.dispatch(defaults).then(
-      (result) => {
-        if (!result.ok) console.warn('[artifacts] artifacts.setDefaults failed', result.error);
-      },
-      (error: unknown) => console.warn('[artifacts] artifacts.setDefaults failed', error),
-    );
+    if (pushed?.key === key) return;
+    const sent = { key };
+    pushed = sent;
+    const failed = (why: unknown) => {
+      if (pushed === sent) pushed = null;
+      console.warn('[artifacts] artifacts.setDefaults failed', why);
+    };
+    deps.dispatch(defaults).then((result) => {
+      if (!result.ok) failed(result.error);
+    }, failed);
   };
   const offs = [
     deps.onHostState((state) => {
