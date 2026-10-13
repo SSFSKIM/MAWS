@@ -179,6 +179,44 @@ export class ArtifactStore {
     return () => this.spaceListeners.delete(listener);
   }
 
+  // A read whose answer reveals store state (an IPC answer, a tool's result), released only once it may be revealed
+  // (Decision Log 33): reads share the batch's connection (26j), so `read` runs now and its answer waits for the batch
+  // open at the time of the read to commit — at once when none is — and fails if that batch is lost, so no caller sees
+  // rows that may yet be taken back. A refusal `read` throws is store state too and waits the same way.
+  async readCommitted<T>(read: () => T): Promise<T> {
+    let answer: { value: T } | { error: unknown };
+    try {
+      answer = { value: read() };
+    } catch (error) {
+      answer = { error };
+    }
+    if (this.storage.batchOpen) await this.service.whenCommitted();
+    if ('error' in answer) throw answer.error;
+    return answer.value;
+  }
+
+  // A write whose refusal is store state too (Decision Log 33): the validation that refused it (a row gone, a design
+  // system still governing one) read the batch's connection, so it may have seen an open batch's rows. `run` starts
+  // now; a refusal it ends with (an `ArtifactStoreError`) waits for the batch open when its synchronous part returned
+  // — where the store's writes validate — and that batch's failure replaces it. Success answers at once: an answer that
+  // carries store state is re-read through `readCommitted`.
+  async writeCommitted<T>(run: () => Promise<T>): Promise<T> {
+    let running: Promise<T>;
+    try {
+      running = run();
+    } catch (error) {
+      running = Promise.reject(error);
+    }
+    const barrier = this.storage.batchOpen ? this.service.whenCommitted() : null;
+    barrier?.catch(() => {}); // awaited only for a refusal; a write that fails with its batch reports that itself
+    try {
+      return await running;
+    } catch (error) {
+      if (error instanceof ArtifactStoreError && barrier) await barrier;
+      throw error;
+    }
+  }
+
   // ── artifacts ──
 
   get(artifactId: string, options: { includeDeleted?: boolean } = {}): Artifact | null {

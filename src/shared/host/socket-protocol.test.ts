@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   ClientExitSchema,
   ClientHelloSchema,
+  DOC_FRAME_CAP,
+  DocumentsCloseSchema,
+  DocumentsClosedSchema,
+  DocumentsOpenSchema,
+  encodeDocFrame,
   HelloPreambleSchema,
   LINE_CAP,
   ServerRefuseSchema,
@@ -9,6 +14,7 @@ import {
   SOCKET_PROTOCOL,
   SocketLineSchema,
   splitLines,
+  splitRecords,
   WRITABLE_CAP,
 } from './socket-protocol';
 
@@ -116,5 +122,127 @@ describe('the socket layer schemas', () => {
   it('caps writes at 256 MiB and lines at 64 MiB', () => {
     expect(LINE_CAP).toBe(64 * 1024 * 1024);
     expect(WRITABLE_CAP).toBe(256 * 1024 * 1024);
+  });
+});
+
+// P3-A M5 (docs/doperpowers/plans/2026-10-12-p3-a-store.md; the P3 ledger's X24 binary-channel row): socket protocol 2
+// carries document frames `0x00 | u32 length | u32 channel | payload` beside the JSON lines after the welcome.
+type Record_ = { line: string } | { doc: number; frame: Uint8Array };
+
+function records(lineCap?: number, frameCap?: number) {
+  const out: Record_[] = [];
+  const overflows: string[] = [];
+  const splitter = splitRecords(
+    {
+      line: (text) => void out.push({ line: text }),
+      doc: (channel, frame) => {
+        expect(frame).toBeInstanceOf(Uint8Array);
+        expect(frame.byteOffset).toBe(0); // its own buffer, so posting it on a MessagePort ships nothing more
+        expect(frame.buffer.byteLength).toBe(frame.length);
+        out.push({ doc: channel, frame });
+      },
+      overflow: (why) => void overflows.push(why),
+    },
+    lineCap,
+    frameCap,
+  );
+  return { out, overflows, splitter };
+}
+
+// A frame whose payload holds a newline and the doc mark, between two lines, and a line right after a frame.
+const PAYLOAD = Uint8Array.from([0x0a, 0x00, 0x7b, 0x0a, 0x00, 0xff]);
+const STREAM = Buffer.concat([
+  Buffer.from('{"t":"req","id":"1"}\n'),
+  encodeDocFrame(7, PAYLOAD),
+  Buffer.from('{"t":"évt"}\n'),
+  encodeDocFrame(0xffff_ffff, new Uint8Array(0)),
+  encodeDocFrame(3, Uint8Array.from([1, 2, 3])),
+  Buffer.from('\n{"t":"res"}\n'),
+]);
+const EXPECTED: Record_[] = [
+  { line: '{"t":"req","id":"1"}' },
+  { doc: 7, frame: PAYLOAD },
+  { line: '{"t":"évt"}' },
+  { doc: 0xffff_ffff, frame: new Uint8Array(0) },
+  { doc: 3, frame: Uint8Array.from([1, 2, 3]) },
+  { line: '{"t":"res"}' },
+];
+
+describe('socket protocol 2: document frames beside the JSON lines (P3-A M5)', () => {
+  it('is protocol 2', () => {
+    expect(SOCKET_PROTOCOL).toBe(2);
+  });
+
+  it('encodes a frame as the mark, the length of channel and payload, the channel and the payload', () => {
+    const frame = encodeDocFrame(0x0102_0304, Uint8Array.from([9, 8]));
+    expect([...frame]).toEqual([0x00, 0, 0, 0, 6, 1, 2, 3, 4, 9, 8]);
+  });
+
+  it('splits lines and frames identically whichever byte boundary a read is cut at', () => {
+    const whole = records();
+    whole.splitter.push(STREAM);
+    expect(whole.out).toEqual(EXPECTED);
+    for (let cut = 1; cut < STREAM.length; cut++) {
+      const two = records();
+      two.splitter.push(STREAM.subarray(0, cut));
+      two.splitter.push(STREAM.subarray(cut));
+      expect(two.out, `cut at ${cut}`).toEqual(EXPECTED);
+      expect(two.overflows).toEqual([]);
+    }
+    const bytewise = records();
+    for (const byte of STREAM) bytewise.splitter.push(Buffer.from([byte]));
+    expect(bytewise.out).toEqual(EXPECTED);
+  });
+
+  it('keeps a frame’s own 0x0A and 0x00 inside it and resumes on the line after it', () => {
+    const { out, splitter } = records();
+    splitter.push(Buffer.concat([encodeDocFrame(1, Buffer.from('a\nb\n\u0000c')), Buffer.from('{"after":1}\n')]));
+    expect(out).toEqual([{ doc: 1, frame: new Uint8Array(Buffer.from('a\nb\n\u0000c')) }, { line: '{"after":1}' }]);
+  });
+
+  it('accepts a frame of exactly the cap and goes deaf at one past it, or at a length too short for a channel', () => {
+    const at = records(64, 16);
+    at.splitter.push(encodeDocFrame(1, new Uint8Array(16)));
+    expect(at.out).toHaveLength(1);
+    at.splitter.push(encodeDocFrame(1, new Uint8Array(17)).subarray(0, 9)); // the header alone names the length
+    expect(at.overflows).toEqual(['a doc frame of 21 bytes']);
+    at.splitter.push(Buffer.from('{"later":1}\n'));
+    expect(at.out).toHaveLength(1);
+
+    const short = records();
+    short.splitter.push(Buffer.from([0x00, 0, 0, 0, 3, 0, 0, 0, 1]));
+    expect(short.overflows).toHaveLength(1);
+  });
+
+  it('still caps a line at the line cap, whole or split, and a frame does not count against it', () => {
+    const capped = records(8);
+    capped.splitter.push(Buffer.concat([Buffer.from('12345678\n'), encodeDocFrame(2, new Uint8Array(100)), Buffer.from('1234')]));
+    expect(capped.out.map((r) => ('line' in r ? r.line : r.doc))).toEqual(['12345678', 2]);
+    capped.splitter.push(Buffer.from('56789'));
+    expect(capped.overflows).toEqual(['a line over 8 bytes']);
+
+    const whole = records(8);
+    whole.splitter.push(Buffer.from('ok\n123456789\nnext\n'));
+    expect(whole.out).toEqual([{ line: 'ok' }]);
+    expect(whole.overflows).toHaveLength(1);
+  });
+
+  it('carries the real caps: a 64 MiB frame payload in pieces', () => {
+    expect(DOC_FRAME_CAP).toBe(64 * 1024 * 1024);
+    const { out, splitter, overflows } = records();
+    const frame = encodeDocFrame(5, new Uint8Array(DOC_FRAME_CAP).fill(0x0a));
+    for (let at = 0; at < frame.length; at += 1 << 20) splitter.push(frame.subarray(at, at + (1 << 20)));
+    expect(overflows).toEqual([]);
+    expect(out).toHaveLength(1);
+    expect((out[0] as { frame: Uint8Array }).frame.length).toBe(DOC_FRAME_CAP);
+  });
+
+  it('names the document messages: open and close from main, closed from the host', () => {
+    const open = { t: 'documents.open', channel: 4, artifactId: '11111111-1111-4111-8111-111111111111', actor: { kind: 'human' } };
+    expect(DocumentsOpenSchema.parse(open)).toEqual(open);
+    expect(DocumentsOpenSchema.safeParse({ ...open, channel: 2 ** 32 }).success).toBe(false);
+    expect(DocumentsCloseSchema.parse({ t: 'documents.close', channel: 4 })).toEqual({ t: 'documents.close', channel: 4 });
+    for (const reason of ['host', 'reset'] as const) expect(DocumentsClosedSchema.parse({ t: 'documents.closed', channel: 4, reason }).reason).toBe(reason);
+    expect(DocumentsClosedSchema.safeParse({ t: 'documents.closed', channel: 4, reason: 'client' }).success).toBe(false);
   });
 });

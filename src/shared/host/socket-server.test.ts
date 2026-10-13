@@ -1,7 +1,9 @@
-import { createServer } from 'node:net';
+import { createConnection, createServer, type Socket } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectLines, listenTemp, type LineClient, type TempSocket } from '../../../test/support/socket-lines';
-import { createHostRuntime, type HostEmit, type HostRuntime } from './runtime';
+import { createHostRuntime, type DocPortEnd, type DocPortHandler, type HostEmit, type HostRuntime } from './runtime';
+import { SocketPort } from './socket-port';
+import { splitLines } from './socket-protocol';
 import { serveSocketClients, type SocketClients } from './socket-server';
 
 const TOKEN = 'a'.repeat(64);
@@ -13,17 +15,20 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 40));
 
 let temp: TempSocket | null = null;
 const clients: LineClient[] = [];
+const sockets: Socket[] = []; // P3-A M5
 afterEach(async () => {
   for (const client of clients.splice(0)) client.socket.destroy();
+  for (const socket of sockets.splice(0)) socket.destroy();
   await temp?.dispose();
   temp = null;
 });
 
-async function start(options: { helloTimeoutMs?: number; hooks?: (() => void)[] } = {}) {
+async function start(options: { helloTimeoutMs?: number; hooks?: (() => void)[]; onDocPort?: DocPortHandler; docHighWater?: number } = {}) {
   let emit!: HostEmit;
-  const runtime: HostRuntime = createHostRuntime((on, e) => {
+  const runtime: HostRuntime = createHostRuntime((on, e, client) => {
     on('engine.ping', async () => ({ pid: 4242, uptimeMs: 1, hostVersion: 'test' }));
     emit = e;
+    if (options.onDocPort) client.onDocPort(options.onDocPort); // P3-A M5
   });
   for (const hook of options.hooks ?? []) runtime.onConnect(hook);
   const exits: string[] = [];
@@ -39,6 +44,7 @@ async function start(options: { helloTimeoutMs?: number; hooks?: (() => void)[] 
     onClient: (connected) => void changes.push(connected),
     log,
     helloTimeoutMs: options.helloTimeoutMs,
+    docHighWater: options.docHighWater, // P3-A M5
   });
   temp = await listenTemp(server);
   const connect = async () => {
@@ -46,7 +52,31 @@ async function start(options: { helloTimeoutMs?: number; hooks?: (() => void)[] 
     clients.push(client);
     return client;
   };
-  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, changes, log, served, connect };
+  // P3-A M5: a welcomed client whose later bytes are read as records (lines and document frames), as main reads them.
+  const connectPort = async (): Promise<{ socket: Socket; port: SocketPort; lines: unknown[]; frames: [number, number[]][] }> => {
+    const socket = createConnection(temp!.path);
+    sockets.push(socket);
+    await new Promise((resolve) => socket.once('connect', resolve));
+    const leftover = await new Promise<Buffer>((resolve) => {
+      let welcomed = false;
+      const splitter = splitLines(() => ((welcomed = true), 'stop'), () => {});
+      socket.on('data', function onData(chunk: Buffer) {
+        splitter.push(chunk);
+        if (!welcomed) return;
+        socket.off('data', onData);
+        resolve(splitter.rest());
+      });
+      socket.write(`${JSON.stringify(hello())}\n`);
+    });
+    const port = new SocketPort(socket, leftover, { log: () => {} });
+    const lines: unknown[] = [];
+    const frames: [number, number[]][] = [];
+    port.on('message', ({ data }) => void lines.push(data));
+    port.onDoc((channel, frame) => void frames.push([channel, [...frame]]));
+    port.start();
+    return { socket, port, lines, frames };
+  };
+  return { runtime, emit: () => emit('session.brokerItems', ITEMS as never), exits, changes, log, served, connect, connectPort };
 }
 
 describe('the socket layer handshake (server side)', () => {
@@ -243,5 +273,90 @@ describe('the socket layer handshake (server side)', () => {
     host.served.closeClient();
     await client.closed;
     await until(() => !host.served.connected());
+  });
+});
+
+// P3-A M5: the client's document channels (`documents.open`, frames, `documents.close`, `documents.closed`), served
+// through the runtime's document handler exactly as a utility host's parent-port doc messages are.
+describe('the socket layer’s document channels (server side, P3-A M5)', () => {
+  const ID = '11111111-1111-4111-8111-111111111111';
+  const open = (channel: number) => ({ t: 'documents.open', channel, artifactId: ID, actor: { kind: 'human' } });
+
+  function documentHandler() {
+    const opened: { channel: number; end: DocPortEnd; received: number[][]; closed: () => boolean }[] = [];
+    const onDocPort: DocPortHandler = (message, end) => {
+      const entry = { channel: message.channel, end, received: [] as number[][], closed: () => wasClosed };
+      let wasClosed = false;
+      end.on('message', ({ data }) => void entry.received.push([...(data as Uint8Array)]));
+      end.on('close', () => void (wasClosed = true));
+      end.start();
+      opened.push(entry);
+    };
+    return { opened, onDocPort };
+  }
+
+  it('opens a channel per documents.open, carries frames both ways, and tells the client a channel the host ended', async () => {
+    const docs = documentHandler();
+    const host = await start({ onDocPort: docs.onDocPort });
+    const client = await host.connectPort();
+    client.port.postMessage(open(3));
+    client.port.postDoc(3, Uint8Array.from([1, 2])); // in the same write as its open
+    client.port.postDoc(99, Uint8Array.from([9])); // a channel never opened: dropped
+    await until(() => docs.opened[0]?.received.length === 1);
+    expect(docs.opened.map((o) => o.channel)).toEqual([3]);
+    expect(docs.opened[0].received).toEqual([[1, 2]]);
+
+    docs.opened[0].end.postMessage(Uint8Array.from([7]));
+    await until(() => client.frames.length === 1);
+    expect(client.frames).toEqual([[3, [7]]]);
+
+    docs.opened[0].end.close(); // the service closed it (an eviction)
+    await until(() => client.lines.length === 1);
+    expect(client.lines).toEqual([{ t: 'documents.closed', channel: 3, reason: 'host' }]);
+    expect(host.served.connected()).toBe(true);
+  });
+
+  it('ends a channel quietly at the client’s documents.close, and every channel when the client goes', async () => {
+    const docs = documentHandler();
+    const host = await start({ onDocPort: docs.onDocPort });
+    const client = await host.connectPort();
+    client.port.postMessage(open(1));
+    client.port.postMessage(open(2));
+    await until(() => docs.opened.length === 2);
+    client.port.postMessage({ t: 'documents.close', channel: 1 });
+    await until(() => docs.opened[0].closed());
+    expect(docs.opened[1].closed()).toBe(false);
+    client.socket.destroy();
+    await until(() => docs.opened[1].closed());
+    expect(client.lines).toEqual([]);
+  });
+
+  it('ends a replaced client’s channels, and resets a channel whose frames the client does not read past the high-water mark', async () => {
+    const docs = documentHandler();
+    const host = await start({ onDocPort: docs.onDocPort, docHighWater: 64 * 1024 });
+    const first = await host.connectPort();
+    first.port.postMessage(open(1));
+    await until(() => docs.opened.length === 1);
+    const second = await host.connectPort();
+    await until(() => docs.opened[0].closed());
+
+    second.port.postMessage(open(5));
+    await until(() => docs.opened.length === 2);
+    second.socket.pause(); // main reads nothing: the host's writes queue
+    const end = docs.opened[1].end;
+    for (let i = 0; i < 200 && !docs.opened[1].closed(); i++) end.postMessage(new Uint8Array(32 * 1024));
+    expect(docs.opened[1].closed()).toBe(true);
+    second.socket.resume();
+    await until(() => second.lines.length === 1);
+    expect(second.lines).toEqual([{ t: 'documents.closed', channel: 5, reason: 'reset' }]);
+    expect(host.served.connected()).toBe(true);
+  });
+
+  it('closes every port of a channel when the host serves no documents', async () => {
+    const host = await start();
+    const client = await host.connectPort();
+    client.port.postMessage(open(4));
+    await until(() => client.lines.length === 1);
+    expect(client.lines).toEqual([{ t: 'documents.closed', channel: 4, reason: 'host' }]);
   });
 });

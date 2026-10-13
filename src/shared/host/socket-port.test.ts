@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { listenTemp, type TempSocket } from '../../../test/support/socket-lines';
 import { createHostRuntime, type HostEmit } from './runtime';
 import { SocketPort } from './socket-port';
+import { encodeDocFrame } from './socket-protocol';
 
 // A connected pair over a real Unix socket in a temp directory: `server` is the accepted end, `client` the dialer.
 let temp: TempSocket | null = null;
@@ -189,5 +190,113 @@ describe('SocketPort', () => {
     for (let i = 0; i < 8; i++) results.push(port.postMessage({ t: 'evt', name: 'x', payload: 'z'.repeat(256 * 1024) }));
     expect(results.at(-1)).toBe(false);
     expect(results.filter((written) => !written).length).toBeGreaterThan(0);
+  });
+});
+
+// P3-A M5: socket protocol 2's document frames beside the JSON lines, and the bytes codec of the line.
+describe('SocketPort: document frames and bytes (P3-A M5)', () => {
+  function frames(port: SocketPort) {
+    const got: [number, number[]][] = [];
+    port.onDoc((channel, frame) => void got.push([channel, [...frame]]));
+    return got;
+  }
+
+  it('carries frames both ways in order with the lines, both queued until start(), the leftover first', async () => {
+    const { server, client } = await pair();
+    const leftover = Buffer.concat([encodeDocFrame(1, Uint8Array.from([1])), Buffer.from('{"t":"ready"}\n')]);
+    const serverPort = new SocketPort(server, leftover);
+    const clientPort = new SocketPort(client, Buffer.alloc(0));
+    const order: string[] = [];
+    serverPort.on('message', ({ data }) => void order.push(`line ${(data as { t: string }).t}`));
+    serverPort.onDoc((channel, frame) => void order.push(`doc ${channel}:${[...frame].join(',')}`));
+    expect(clientPort.postDoc(2, Uint8Array.from([0x0a, 0x00]))).toBe(true);
+    clientPort.postMessage({ t: 'req', id: '1' });
+    expect(clientPort.postDoc(3, new Uint8Array(0))).toBe(true);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(order).toEqual([]);
+    serverPort.start();
+    await until(() => order.length === 5);
+    expect(order).toEqual(['doc 1:1', 'line ready', 'doc 2:10,0', 'line req', 'doc 3:']);
+
+    const atClient = frames(clientPort);
+    clientPort.start();
+    expect(serverPort.postDoc(0xffff_ffff, Uint8Array.from([7, 8]))).toBe(true);
+    await until(() => atClient.length === 1);
+    expect(atClient).toEqual([[0xffff_ffff, [7, 8]]]);
+  });
+
+  it('carries a Uint8Array in a line as bytes, and counts what it has queued for the peer', async () => {
+    const { server, client } = await pair();
+    const serverPort = new SocketPort(server, Buffer.alloc(0));
+    const clientPort = new SocketPort(client, Buffer.alloc(0));
+    const atServer = receiving(serverPort);
+    serverPort.start();
+    clientPort.postMessage({ t: 'req', id: '1', name: 'artifacts.uploadAsset', input: { bytes: Uint8Array.from([0, 255, 10]) } });
+    await until(() => atServer.length === 1);
+    expect((atServer[0] as { input: { bytes: unknown } }).input.bytes).toEqual(Uint8Array.from([0, 255, 10]));
+
+    client.pause();
+    expect(serverPort.queuedBytes()).toBe(0);
+    for (let i = 0; i < 64; i++) serverPort.postDoc(1, new Uint8Array(64 * 1024));
+    expect(serverPort.queuedBytes()).toBeGreaterThan(0);
+  });
+
+  it('closes the connection on a frame whose length is past the cap, with a log line', async () => {
+    const { server, client } = await pair();
+    const log = vi.fn();
+    const port = new SocketPort(server, Buffer.alloc(0), { log });
+    const got = frames(port);
+    const closed = vi.fn();
+    port.onClose(closed);
+    port.start();
+    client.write(Buffer.concat([encodeDocFrame(1, Uint8Array.from([1])), Buffer.from([0x00, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 1])]));
+    await until(() => closed.mock.calls.length === 1);
+    expect(got).toEqual([[1, [1]]]);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('doc frame'));
+  });
+
+  it('writes no frame once closing or closed, or while draining', async () => {
+    const { server } = await pair();
+    const port = new SocketPort(server, Buffer.alloc(0), { log: () => {} });
+    port.close({ drain: true });
+    expect(port.postDoc(1, Uint8Array.from([1]))).toBe(false);
+    const { server: other } = await pair();
+    const closedPort = new SocketPort(other, Buffer.alloc(0), { log: () => {} });
+    closedPort.close();
+    expect(closedPort.postDoc(1, Uint8Array.from([1]))).toBe(false);
+  });
+
+  it('a frame that stalls the peer past the writable cap closes the connection and reports nothing written', async () => {
+    const { server, client } = await pair();
+    client.pause();
+    const port = new SocketPort(server, Buffer.alloc(0), { log: () => {}, writableCap: 64 * 1024 });
+    const results: boolean[] = [];
+    for (let i = 0; i < 8; i++) results.push(port.postDoc(1, new Uint8Array(256 * 1024)));
+    expect(results.at(-1)).toBe(false);
+  });
+
+  it('serves a byte field as bytes, and refuses a malformed base64 one as invalid input', async () => {
+    const { server, client } = await pair();
+    const received: unknown[] = [];
+    const runtime = createHostRuntime((on) => {
+      on('artifacts.uploadAsset', async ({ bytes }) => {
+        received.push(bytes);
+        return { assetId: '11111111-1111-4111-8111-111111111111', ref: 'assets/a.bin' };
+      });
+    });
+    runtime.serve(new SocketPort(server, Buffer.alloc(0)));
+    const clientPort = new SocketPort(client, Buffer.alloc(0));
+    const answers = receiving(clientPort);
+    clientPort.start();
+    const input = { artifactId: '11111111-1111-4111-8111-111111111111', name: 'a.bin', mime: 'application/octet-stream' };
+    clientPort.postMessage({ t: 'req', id: '1', name: 'artifacts.uploadAsset', input: { ...input, bytes: Uint8Array.from([1, 2, 3]) } });
+    client.write(`${JSON.stringify({ t: 'req', id: '2', name: 'artifacts.uploadAsset', input: { ...input, bytes: { $bytes: 'not base64!' } } })}\n`);
+    await until(() => answers.length === 2);
+    expect(received).toEqual([Uint8Array.from([1, 2, 3])]);
+    const byId = (id: string) => answers.find((answer) => (answer as { id: string }).id === id);
+    expect([byId('1'), byId('2')]).toEqual([
+      { t: 'res', id: '1', ok: true, value: { assetId: '11111111-1111-4111-8111-111111111111', ref: 'assets/a.bin' } },
+      expect.objectContaining({ t: 'res', id: '2', ok: false, error: expect.objectContaining({ code: 'invalid_input' }) }),
+    ]);
   });
 });

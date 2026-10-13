@@ -56,6 +56,11 @@ export class SqliteDocumentStorage implements DocumentStorage {
     return this.frame;
   }
 
+  // A batch is open: rows on this connection that are not yet durable (a read here sees them, Decision Log 26j, 33).
+  get batchOpen(): boolean {
+    return this.open;
+  }
+
   private sql(text: string): StatementSync {
     let statement = this.statements.get(text);
     if (!statement) this.statements.set(text, (statement = this.db.prepare(text)));

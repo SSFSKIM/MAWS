@@ -5,14 +5,17 @@
 // this surface, and an agent's writes come through the tools (M6) as its session.
 //
 // Every command is answered from the store once its write has committed (the `immediate` deadline shape of
-// `ipc.ts`), so none can outlive the bridge's 10 s router timeout. A refusal the store names is a `HostCommandError`
-// whose `issues` is an `ArtifactRefusal` (schema/artifacts.ts); a store that failed to open answers `unavailable`.
+// `ipc.ts`), so none can outlive the bridge's 10 s router timeout. An answer that carries store state (a row, a
+// revision, versions, bytes) is read through `store.readCommitted`: the reads share the batch's connection, so the
+// answer waits for any batch open at the read to commit and fails with it (Decision Log 33). A refusal the store
+// names is a `HostCommandError` whose `issues` is an `ArtifactRefusal` (schema/artifacts.ts); a store that failed to
+// open answers `unavailable`; a refusal waits for the batch its validation read the same way (`writeCommitted`).
 import { join } from 'node:path';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { HostCommandError, type HostClientHooks, type HostEmit, type HostOn } from '@shared/host/runtime';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
-import { isDocKind } from '@shared/artifacts/entity';
+import { isDocKind, type Space } from '@shared/artifacts/entity';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { ArtifactRefusal, ArtifactRow, commands as ArtifactCommands } from '@shared/ipc/schema/artifacts';
@@ -65,11 +68,13 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   const e2eOnly = (name: string) => {
     if (!e2e) throw new HostCommandError(ipcError('internal', `${name} answers only when the engine host runs under MAWS_E2E=1`));
   };
-  // A handler whose store refusals reach the caller typed.
+  // A handler whose store refusals reach the caller typed, each released only after the batch its validation may have
+  // read (`store.writeCommitted`; a read's own refusal already waits in `readCommitted`).
   const serve = <N extends HostArtifactCommand>(name: N, handler: (input: CommandInput<N>) => CommandOutput<N> | Promise<CommandOutput<N>>) =>
     on(name, async (input) => {
       try {
-        return await handler(input);
+        const run = async () => handler(input);
+        return await (documents ? documents.store.writeCommitted(run) : run());
       } catch (error) {
         throw typed(error);
       }
@@ -83,22 +88,32 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     if (!found) throw new ArtifactStoreError('notFound', `no artifact ${artifactId}`);
     return found;
   };
+  const requiredSpace = (store: ArtifactStore, spaceId: string): Space => {
+    const found = store.getSpace(spaceId);
+    if (!found) throw new ArtifactStoreError('notFound', `no space ${spaceId}`);
+    return found;
+  };
+  // A write's answer: the row as it stands, read once the write committed, released after any batch open at that read.
+  const written = (store: ArtifactStore, artifactId: string) => store.readCommitted(() => ({ artifact: required(store, artifactId) }));
 
   serve('artifacts.list', ({ filter }) => {
     const store = storeOf();
-    return { artifacts: store.list(filter).map((artifact) => ({ ...artifact, revision: store.revision(artifact.id) })) };
+    return store.readCommitted(() => ({ artifacts: store.list(filter).map((artifact) => ({ ...artifact, revision: store.revision(artifact.id) })) }));
   });
-  serve('artifacts.get', ({ artifactId, includeDeleted }) => ({ artifact: row(storeOf(), artifactId, includeDeleted) }));
+  serve('artifacts.get', ({ artifactId, includeDeleted }) => {
+    const store = storeOf();
+    return store.readCommitted(() => ({ artifact: row(store, artifactId, includeDeleted) }));
+  });
   serve('artifacts.create', async ({ content, ...input }) => {
     const store = storeOf();
     const byteContent: ByteContent | undefined = content && ('bytes' in content ? { bytes: content.bytes, name: content.name } : { path: content.path });
     const artifact = await store.create({ ...input, content: byteContent }, HUMAN);
-    return { artifact: required(store, artifact.id) };
+    return written(store, artifact.id);
   });
   serve('artifacts.update', async ({ artifactId, ...change }) => {
     const store = storeOf();
     await store.update(artifactId, change);
-    return { artifact: required(store, artifactId) };
+    return written(store, artifactId);
   });
   serve('artifacts.delete', async ({ artifactId }) => {
     await storeOf().delete(artifactId);
@@ -106,16 +121,18 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   serve('artifacts.duplicate', async ({ artifactId, versionId }) => {
     const store = storeOf();
     const copy = await store.duplicate(artifactId, { versionId }, HUMAN);
-    return { artifact: required(store, copy.id) };
+    return written(store, copy.id);
   });
   serve('artifacts.search', ({ query }) => {
     const store = storeOf();
-    return { artifacts: store.list({ query }).map((artifact) => ({ ...artifact, revision: store.revision(artifact.id) })) };
+    return store.readCommitted(() => ({ artifacts: store.list({ query }).map((artifact) => ({ ...artifact, revision: store.revision(artifact.id) })) }));
   });
   serve('artifacts.versions', ({ artifactId }) => {
     const store = storeOf();
-    required(store, artifactId);
-    return { versions: store.listVersions(artifactId) };
+    return store.readCommitted(() => {
+      required(store, artifactId);
+      return { versions: store.listVersions(artifactId) };
+    });
   });
   serve('artifacts.saveVersion', async ({ artifactId, label, note }) => {
     const versionId = await storeOf().createVersion(artifactId, { kind: 'named', actor: HUMAN, label, note });
@@ -127,11 +144,16 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     await storeOf().markViewed(artifactId);
   });
   serve('artifacts.pruneVersions', async ({ artifactId, olderThan }) => ({ removed: await storeOf().pruneVersions(artifactId ?? null, olderThan) }));
-  serve('artifacts.versionState', ({ artifactId, versionId, seq }) => ({ bytes: storeOf().versionState(artifactId, versionId ?? { seq: seq! }) }));
+  serve('artifacts.versionState', ({ artifactId, versionId, seq }) => {
+    const store = storeOf();
+    return store.readCommitted(() => ({ bytes: store.versionState(artifactId, versionId ?? { seq: seq! }) }));
+  });
   serve('artifacts.attributions', ({ artifactId, fromSeq, toSeq }) => {
     const store = storeOf();
-    required(store, artifactId);
-    return { bytes: store.attributions(artifactId, fromSeq, toSeq) };
+    return store.readCommitted(() => {
+      required(store, artifactId);
+      return { bytes: store.attributions(artifactId, fromSeq, toSeq) };
+    });
   });
   serve('artifacts.uploadAsset', ({ artifactId, name, mime, bytes }) => storeOf().uploadAsset(artifactId, bytes, { name, mime }, HUMAN));
   serve('artifacts.testLoopDelay', ({ reset }) => {
@@ -146,15 +168,17 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   serve('artifacts.setDefaults', ({ owner, spaces }) => storeOf().setDefaults({ owner, spaces }));
   serve('artifacts.content', ({ artifactId, revision, path }) => {
     const store = storeOf();
-    required(store, artifactId);
-    if (path !== undefined && path.startsWith('assets/')) {
-      const asset = store.listAssets(artifactId).find((candidate) => candidate.ref === path);
-      if (!asset) throw new ArtifactStoreError('notFound', `no asset ${path} in ${artifactId}`);
-      return { revision: store.revision(artifactId), name: asset.name, size: asset.size, sha256: asset.sha256, path: join(store.files.dirOf(artifactId), ArtifactFiles.assetPath(asset.sha256)) };
-    }
-    const content = store.contentRef(artifactId, revision);
-    if (path !== undefined && path !== content.ref.name) throw new ArtifactStoreError('notFound', `no file ${path} in ${artifactId} at revision ${content.revision}`);
-    return { revision: content.revision, name: content.ref.name, size: content.ref.size, sha256: content.ref.sha256, path: content.path };
+    return store.readCommitted(() => {
+      required(store, artifactId);
+      if (path !== undefined && path.startsWith('assets/')) {
+        const asset = store.listAssets(artifactId).find((candidate) => candidate.ref === path);
+        if (!asset) throw new ArtifactStoreError('notFound', `no asset ${path} in ${artifactId}`);
+        return { revision: store.revision(artifactId), name: asset.name, size: asset.size, sha256: asset.sha256, path: join(store.files.dirOf(artifactId), ArtifactFiles.assetPath(asset.sha256)) };
+      }
+      const content = store.contentRef(artifactId, revision);
+      if (path !== undefined && path !== content.ref.name) throw new ArtifactStoreError('notFound', `no file ${path} in ${artifactId} at revision ${content.revision}`);
+      return { revision: content.revision, name: content.ref.name, size: content.ref.size, sha256: content.ref.sha256, path: content.path };
+    });
   });
   serve('artifacts.status', () => {
     if (!documents) return { status: 'unavailable' as const, reason: 'the artifact store could not be opened this run (the host log says why)' };
@@ -164,9 +188,20 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     e2eOnly('artifacts.testWrite');
     return storeOf().testWrite(artifactId, opId, ops, appSessionId ? { kind: 'session', appSessionId: appSessionId as AppSessionId } : HUMAN);
   });
-  serve('spaces.list', () => ({ spaces: storeOf().listSpaces() }));
-  serve('spaces.create', async (input) => ({ space: await storeOf().createSpace(input) }));
-  serve('spaces.update', async ({ spaceId, ...change }) => ({ space: await storeOf().updateSpace(spaceId, change) }));
+  serve('spaces.list', () => {
+    const store = storeOf();
+    return store.readCommitted(() => ({ spaces: store.listSpaces() }));
+  });
+  serve('spaces.create', async (input) => {
+    const store = storeOf();
+    const { id } = await store.createSpace(input);
+    return store.readCommitted(() => ({ space: requiredSpace(store, id) }));
+  });
+  serve('spaces.update', async ({ spaceId, ...change }) => {
+    const store = storeOf();
+    await store.updateSpace(spaceId, change);
+    return store.readCommitted(() => ({ space: requiredSpace(store, spaceId) }));
+  });
   serve('spaces.delete', async ({ spaceId }) => {
     await storeOf().deleteSpace(spaceId);
   });
