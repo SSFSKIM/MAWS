@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStore, STORE_MIGRATIONS } from './migrations';
 
-const TABLES = ['actors', 'artifact_assets', 'artifact_attributions', 'artifact_head', 'artifact_ops', 'artifact_sessions', 'artifact_threads', 'artifact_updates', 'artifact_versions', 'artifacts', 'client_actors', 'spaces'];
+const TABLES = ['actors', 'artifact_assets', 'artifact_attributions', 'artifact_head', 'artifact_ops', 'artifact_sessions', 'artifact_threads', 'artifact_updates', 'artifact_versions', 'artifacts', 'client_actors', 'meta', 'spaces'];
 
 let dir: string;
 const fresh = () => (dir = mkdtempSync(join(tmpdir(), 'maws-store-')));
@@ -20,6 +20,9 @@ describe('openStore', () => {
     expect(applied).toEqual([1]);
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map((row) => row.name);
     expect(tables).toEqual(TABLES);
+    expect(db.prepare("SELECT dflt_value, \"notnull\" FROM pragma_table_info('artifacts') WHERE name = 'agentEditsAsSuggestions'").get()).toEqual({ dflt_value: '0', notnull: 1 });
+    // the document tables are keyed by an opaque document key, never tied to an artifacts row
+    for (const table of ['artifact_updates', 'artifact_head', 'artifact_attributions', 'client_actors', 'artifact_versions']) expect(db.prepare(`SELECT * FROM pragma_foreign_key_list('${table}')`).all()).toEqual([]);
     expect(db.prepare('PRAGMA user_version').get()).toEqual({ user_version: 1 });
     expect(db.prepare('PRAGMA auto_vacuum').get()).toEqual({ auto_vacuum: 2 }); // INCREMENTAL, set before the first table
     expect(db.prepare('PRAGMA journal_mode').get()).toEqual({ journal_mode: 'wal' });

@@ -19,8 +19,9 @@ export const STORE_MIGRATIONS: readonly Migration[] = [
   {
     version: 1,
     // Times are epoch milliseconds; an actor column holds `actorKey(actor)` (X29), its JSON in `actors`. The log, the
-    // versions, the head and provenance carry no foreign key to `artifacts`: an artifact is deleted softly
-    // (`deletedAt`), and the document service writes rows for an id before the entity layer (M3) need exist.
+    // versions, the head, provenance and the bindings carry no foreign key to `artifacts`: their `artifactId` is an
+    // opaque document key (the artifact's id for its main doc; P3-B stores a suggestion doc as `<artifactId>:suggest`),
+    // an artifact is deleted softly (`deletedAt`), and the document service writes rows before the entity layer need.
     //   artifact_updates   the live revision is a global AUTOINCREMENT seq, never reused; `bytes` a V1 update for a Y
     //                      kind, `content` the JSON {name, sha256, size, path} of a byte kind's write (Decision Log 7)
     //   artifact_versions  `bytes` zstd V2, `enc` full or a delta from the previous retained version (Decision Log 8)
@@ -29,12 +30,14 @@ export const STORE_MIGRATIONS: readonly Migration[] = [
     //                      rows by maintenance, never dropped (Decision Log 5)
     //   client_actors      the actor a clientID is bound to; `host` marks the host's own replica of that actor
     //                      (Decision Log 6 and 18)
+    //   meta               host-held values: settings main relays (the design-system defaults, Decision Log 22d),
+    //                      the last maintenance time
     sql: `
 CREATE TABLE spaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, linkedDir TEXT, createdAt INTEGER NOT NULL);
 CREATE TABLE artifacts (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN (${KINDS})), title TEXT NOT NULL, handle TEXT,
   spaceId TEXT REFERENCES spaces(id) ON DELETE SET NULL, projectId TEXT, createdBy TEXT NOT NULL, createdAt INTEGER NOT NULL,
   updatedAt INTEGER NOT NULL, lastViewedAt INTEGER, pinned INTEGER NOT NULL DEFAULT 0, designSystemId TEXT, linkedPath TEXT,
-  bindingVersion TEXT, deletedAt INTEGER);
+  bindingVersion TEXT, deletedAt INTEGER, agentEditsAsSuggestions INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX artifacts_updated ON artifacts(updatedAt DESC);
 CREATE INDEX artifacts_space ON artifacts(spaceId) WHERE spaceId IS NOT NULL;
 CREATE INDEX artifacts_handle ON artifacts(handle) WHERE handle IS NOT NULL;
@@ -67,6 +70,7 @@ CREATE TABLE artifact_assets (artifactId TEXT NOT NULL, assetId TEXT NOT NULL, n
   sha256 TEXT NOT NULL, createdAt INTEGER NOT NULL, createdBy TEXT NOT NULL, PRIMARY KEY (artifactId, assetId));
 CREATE INDEX artifact_assets_sha ON artifact_assets(sha256);
 CREATE TABLE artifact_ops (opId TEXT PRIMARY KEY, artifactId TEXT, tool TEXT NOT NULL, result TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `,
   },
 ];

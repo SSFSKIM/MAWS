@@ -158,6 +158,7 @@ export interface EngineIpcDeps {
   onConnect?: (hook: () => void) => void; // E10: the runtime's connect hooks, where the connect burst registers
   hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready
   observedStore?: ObservedFactsStore; // P2-A (X17): default the file beside each state file under userData
+  afterShutdown?: () => void; // P3-A: runs at the end of engine.shutdown's body (closes the artifact store)
 }
 
 export interface EngineIpc {
@@ -299,6 +300,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // SIGKILL sooner than a cancel's so the stop fits main's quit bound
   const shutdown = async (graceMs: number) => {
     const [result] = await Promise.all([table.shutdown({ graceMs }), plugins.stop(SHUTDOWN_KILL_GRACE_MS)]);
+    deps.afterShutdown?.(); // P3-A: the artifact store, once the sessions writing to it are gone
     return result;
   };
   handle('engine.shutdown', async ({ graceMs }) => shutdown(graceMs));

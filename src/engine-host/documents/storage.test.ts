@@ -5,13 +5,15 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { applyV1, applyV2, attributionMap, contentIdsOf, decodeMap, deletedBy, diffV1, encodeMap, insertedBy, mergeMaps, newDoc, stateV2, stateVector } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
+import type { AppSessionId } from '@shared/graph/ids';
 import { SqliteDocumentStorage, StoreTooNewError } from './storage';
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
+const sid = (id: string) => id as AppSessionId;
 const human: Actor = { kind: 'human' };
-const agent: Actor = { kind: 'session', appSessionId: 'app-1' };
+const agent: Actor = { kind: 'session', appSessionId: sid('app-1') };
 const quiet = () => {};
 
 let dir: string;
@@ -200,6 +202,19 @@ describe('SqliteDocumentStorage: provenance tiering (Decision Log 5)', () => {
   });
 });
 
+describe('SqliteDocumentStorage: host-held values (`meta`)', () => {
+  it('gets and sets a value by key, durably', () => {
+    expect(storage.getMeta('maintenance.lastRun')).toBeNull();
+    storage.setMeta('maintenance.lastRun', '1000');
+    storage.setMeta('maintenance.lastRun', '2000');
+    storage.setMeta('designSystem.defaults', '{"id":"x"}');
+    storage.close();
+    storage = SqliteDocumentStorage.open(path, { log: quiet });
+    expect(storage.getMeta('maintenance.lastRun')).toBe('2000');
+    expect(storage.getMeta('designSystem.defaults')).toBe('{"id":"x"}');
+  });
+});
+
 describe('SqliteDocumentStorage on a newer app’s file', () => {
   it('reads, and refuses every write with storeTooNew', () => {
     const doc = newDoc();
@@ -218,5 +233,7 @@ describe('SqliteDocumentStorage on a newer app’s file', () => {
     expect(() => storage.writeHead('a1', 1, stateV2(doc))).toThrow(StoreTooNewError);
     expect(() => storage.tierAttributions(0)).toThrow(StoreTooNewError);
     expect(() => storage.pruneLog(0)).toThrow(StoreTooNewError);
+    expect(() => storage.setMeta('k', 'v')).toThrow(StoreTooNewError);
+    expect(storage.getMeta('k')).toBeNull();
   });
 });
