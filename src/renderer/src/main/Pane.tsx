@@ -109,6 +109,8 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
       );
     case 'settings':
       return <SettingsTab section={tab.section} />;
+    case 'artifacts': // P3-G (§D5)
+      return <ArtifactsTab />;
     case 'deliverable': // E2
       return <DeliverableTab tab={tab} />;
     case 'browser': // E4a
@@ -150,6 +152,13 @@ function SettingsTab({ section }: { section: Extract<TabRef, { kind: 'settings' 
   const Slot = useSlot('settingsTab');
   // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
   return <Slot section={section} />;
+}
+
+// P3-G (§D5): the Artifacts library, the slot P3-L registers (a placeholder until then).
+function ArtifactsTab() {
+  const Slot = useSlot('artifactsLibrary');
+  // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
+  return <Slot />;
 }
 
 // A child agent's transcript in the main area (C6's child variant): the transcript slot alone, since nobody types to a

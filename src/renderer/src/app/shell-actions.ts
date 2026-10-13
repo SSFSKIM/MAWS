@@ -66,6 +66,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       focusPaneElement(other);
     }),
     registerAction('diagnostics.open', () => layout().openTab({ kind: 'diagnostics' })),
+    registerAction('artifacts.open', () => layout().openTab({ kind: 'artifacts' })), // P3-G (§D5): a singleton, so a second open activates it
     registerAction('palette.open', togglePalette),
 
     registerSessionAction('open', (appSessionId) => layout().openSession(appSessionId)),

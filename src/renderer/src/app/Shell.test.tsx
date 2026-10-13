@@ -432,6 +432,58 @@ describe('right panel', () => {
   });
 });
 
+// P3-G (§D5, acceptance 12): the sidebar's Artifacts row, directly under New chat, opens the Artifacts main tab, a
+// singleton that a second open activates; until P3-L registers the library its slot shows a quiet placeholder.
+describe('the Artifacts entry', () => {
+  const artifactsTabs = () => useLayout.getState().main.sets[NO_PROJECT]!.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.kind === 'artifacts'));
+
+  it('the sidebar row opens the Artifacts tab once, titled and showing the placeholder; a second click activates it', async () => {
+    const user = userEvent.setup();
+    render(<Shell />);
+    const sidebar = region('sidebar');
+    const row = within(sidebar).getByRole('button', { name: 'Artifacts' });
+    expect(within(sidebar).getByRole('button', { name: 'New chat' }).nextElementSibling).toBe(row);
+    expect(row.getAttribute('aria-current')).toBeNull();
+
+    await user.click(row);
+    expect(artifactsTabs()).toEqual([{ id: 'artifacts', kind: 'artifacts', pinned: false }]);
+    expect(within(region('main')).getByRole('tab', { name: 'Artifacts' }).getAttribute('aria-selected')).toBe('true');
+    expect(within(screen.getByRole('banner')).getByText('Artifacts')).toBeTruthy();
+    const panel = within(region('main')).getByRole('tabpanel');
+    expect(within(panel).getByRole('heading', { name: 'Artifacts' })).toBeTruthy();
+    expect(within(panel).getByText('Documents, decks and files you make with your sessions will appear here.')).toBeTruthy();
+    expect(row.getAttribute('aria-current')).toBe('page');
+
+    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }));
+    expect(row.getAttribute('aria-current')).toBeNull();
+    await user.click(row);
+    expect(artifactsTabs()).toHaveLength(1);
+    expect(within(region('main')).getAllByRole('tab').map((tab) => [tab.getAttribute('aria-label'), tab.getAttribute('aria-selected')])).toEqual([
+      ['Artifacts', 'true'],
+      ['Diagnostics', 'false'],
+    ]);
+    expect(row.getAttribute('aria-current')).toBe('page');
+  });
+
+  it('draws the library a later child registers into the slot', () => {
+    registerSlot('artifactsLibrary', () => <section aria-label="Library">library</section>);
+    useLayout.setState({ main: withActive({ id: 'artifacts', kind: 'artifacts', pinned: false }) });
+    render(<Shell />);
+    expect(within(region('main')).getByRole('region', { name: 'Library' })).toBeTruthy();
+    expect(screen.queryByText('Documents, decks and files you make with your sessions will appear here.')).toBeNull();
+  });
+
+  it('the artifacts.open action opens or activates the same tab', () => {
+    offs.push(registerShellActions(fakeBridge()));
+    runAction('artifacts.open');
+    useLayout.getState().openTab({ kind: 'diagnostics' });
+    runAction('artifacts.open');
+    expect(artifactsTabs()).toHaveLength(1);
+    expect(toolbarTitle(useLayout.getState().main.sets[NO_PROJECT]!.panes[0].tabs.find((tab) => tab.id === 'artifacts')!, new Map()).title).toBe('Artifacts');
+    expect(useLayout.getState().main.sets[NO_PROJECT]!.panes[0].activeTabId).toBe('artifacts');
+  });
+});
+
 function fakeBridge() {
   return {
     invoke: vi.fn(async () => ({ ok: true, value: undefined })),

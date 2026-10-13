@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -155,7 +155,7 @@ describe('layout value shapes', () => {
       expect(StoredMainSchema.parse(main)).toEqual(main);
       const pane = { tabs: [session(1)], activeTabId: 'session:a1' };
       expect(StoredMainSchema.safeParse(stored({ panes: [pane, pane, pane] })).success).toBe(false);
-      expect(StoredMainSchema.safeParse(stored({ panes: [pane], closedTabs: [{ ...session(2), kind: 'nope' }] })).success).toBe(false);
+      expect(StoredMainSchema.safeParse(stored({ panes: [pane], closedTabs: [{ ...session(2), pinned: 'yes' }] })).success).toBe(false); // P3-G (§D5): a tab of an unknown kind is dropped instead
     });
 
     // A throw would reject hydration's reads as a whole, so the store would never hydrate (nor persist); a malformed
@@ -174,6 +174,94 @@ describe('layout value shapes', () => {
     expect(TabRefSchema.safeParse(accounts).success).toBe(false);
     const main = { version: 1, panes: [{ tabs: [session, accounts], activeTabId: 'accounts' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [accounts, session] };
     expect(StoredMainSchema.parse(main)).toEqual({ ...main, panes: [{ tabs: [session], activeTabId: 'session:a1' }], closedTabs: [session] });
+  });
+
+  // P3-G (§D5): the Artifacts tab, a singleton like Settings that the pin control never applies to.
+  it('admits the Artifacts tab as an unpinnable singleton', () => {
+    const artifacts = { id: 'artifacts', kind: 'artifacts', pinned: false };
+    expect(TabRefSchema.parse(artifacts)).toEqual(artifacts);
+    expect(TabRefSchema.safeParse({ ...artifacts, pinned: true }).success).toBe(false);
+    expect(TabRefSchema.safeParse({ ...artifacts, id: 'artifacts:2' }).success).toBe(false);
+    expect(tabId({ kind: 'artifacts' })).toBe('artifacts');
+    expect(UNPINNABLE_KINDS.has('artifacts')).toBe(true);
+  });
+
+  // P3-G (§D5; the coordinator's condition, 2026-10-12): `main.tabs` keeps version 2 when a tab kind is added, so its
+  // reader drops a tab of a kind it does not know (a later build's, after a downgrade) rather than failing the whole
+  // value back to the default; the rest of the layout is kept, and the read warns once.
+  describe('a stored main.tabs holding a tab of a kind this build does not know', () => {
+    const session = (n: number) => ({ id: `session:a${n}`, kind: 'session', appSessionId: `a${n}`, pinned: false });
+    const later = (n: number) => ({ id: `library:${n}`, kind: 'library', shelf: n, pinned: false });
+    const v2 = (panes: unknown[], over: object = {}) => ({ version: 2, current: 'proj-x', sets: { 'proj-x': { panes, focusedPane: 0, splitRatio: 0.4, ...over }, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs: [] });
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => warn.mockRestore());
+
+    it('drops the tab from a pane, keeping the pane’s active tab', () => {
+      const main = v2([{ tabs: [session(1), later(1), session(2)], activeTabId: 'session:a2' }]);
+      expect(StoredMainSchema.parse(main)).toEqual(v2([{ tabs: [session(1), session(2)], activeTabId: 'session:a2' }]));
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('[layout] dropped 1 tab(s) of unknown kind: library');
+    });
+
+    it('activates the pane’s first remaining tab when the dropped tab was the active one', () => {
+      const main = v2([{ tabs: [session(1), later(1), session(2)], activeTabId: 'library:1' }]);
+      expect(StoredMainSchema.parse(main)).toEqual(v2([{ tabs: [session(1), session(2)], activeTabId: 'session:a1' }]));
+    });
+
+    it('drops a pane the tab was alone in, focusing pane 0, and leaves one empty pane when nothing else was open', () => {
+      const split = v2([{ tabs: [session(1)], activeTabId: 'session:a1' }, { tabs: [later(1)], activeTabId: 'library:1' }], { focusedPane: 1 });
+      expect(StoredMainSchema.parse(split)).toEqual(v2([{ tabs: [session(1)], activeTabId: 'session:a1' }]));
+      const alone = v2([{ tabs: [later(1)], activeTabId: 'library:1' }]);
+      expect(StoredMainSchema.parse(alone)).toEqual(v2([{ tabs: [], activeTabId: '' }]));
+    });
+
+    it('drops the tab from the closed-tab history', () => {
+      const main = { ...v2([{ tabs: [session(1)], activeTabId: 'session:a1' }]), closedTabs: [session(2), later(1), session(3)] };
+      expect(StoredMainSchema.parse(main).closedTabs).toEqual([session(2), session(3)]);
+    });
+
+    it('warns once per read, naming every unknown kind, across sets, panes and the history', () => {
+      const other = (n: number) => ({ id: `canvas:${n}`, kind: 'canvas', pinned: false });
+      const main = {
+        version: 2,
+        current: 'proj-x',
+        sets: {
+          'proj-x': { panes: [{ tabs: [later(1), session(1)], activeTabId: 'session:a1' }, { tabs: [other(1), session(2)], activeTabId: 'canvas:1' }], focusedPane: 1, splitRatio: 0.4 },
+          none: { panes: [{ tabs: [later(3)], activeTabId: 'library:3' }], focusedPane: 0, splitRatio: 0.5 },
+        },
+        closedTabs: [later(2)],
+      };
+      expect(StoredMainSchema.parse(main)).toEqual({
+        version: 2,
+        current: 'proj-x',
+        closedTabs: [],
+        sets: {
+          'proj-x': { panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }, { tabs: [session(2)], activeTabId: 'session:a2' }], focusedPane: 1, splitRatio: 0.4 },
+          none: { panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5 },
+        },
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('[layout] dropped 4 tab(s) of unknown kind: library, canvas');
+    });
+
+    it('reads version 1 the same way', () => {
+      const main = { version: 1, panes: [{ tabs: [later(1), session(1)], activeTabId: 'library:1' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [later(2)] };
+      expect(StoredMainSchema.parse(main)).toEqual({ ...main, panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }], closedTabs: [] });
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('stays silent for a layout with only known kinds, and still fails a known kind that breaks its schema', () => {
+      const main = v2([{ tabs: [session(1)], activeTabId: 'session:a1' }]);
+      expect(StoredMainSchema.parse(main)).toEqual(main);
+      expect(StoredMainSchema.safeParse(v2([{ tabs: [{ ...session(1), pinned: 'yes' }], activeTabId: 'session:a1' }])).success).toBe(false);
+      expect(StoredMainSchema.safeParse({ ...main, closedTabs: [{ id: 'settings', kind: 'settings', pinned: false }] }).success).toBe(false);
+      // a tab with no kind at all is malformed, not of an unknown kind
+      expect(StoredMainSchema.safeParse(v2([{ tabs: [{ id: 'x', pinned: false }], activeTabId: 'x' }])).success).toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+    });
   });
 
   it('owns get, set, list, openExternal and setEnabledActions in main', () => {

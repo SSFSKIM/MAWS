@@ -37,6 +37,7 @@ const MAWS_PALETTE: Partial<Record<ActionId, { name: string; title: string; desc
   'tab.close': { name: 'close-tab', title: 'Close tab', description: 'Close the current tab' },
   'tab.reopen': { name: 'reopen-tab', title: 'Reopen closed tab', description: 'Bring back the tab closed last' },
   'tab.overview': { name: 'overview', title: 'Open Overview', description: 'Move to the Overview of every session' },
+  'artifacts.open': { name: 'artifacts', title: 'Open Artifacts', description: 'Open the Artifacts tab of documents, decks and files' }, // P3-G
   'pane.split': { name: 'split', title: 'Split / send to other pane', description: 'Split the view, or send this tab to the other pane' },
   'pane.focusOther': { name: 'focus-other-pane', title: 'Focus other pane', description: 'Put the keyboard in the other pane' },
   'sidebar.toggle': { name: 'sidebar', title: 'Toggle sidebar', description: 'Show or hide the sidebar' },
