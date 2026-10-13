@@ -8,9 +8,10 @@
 // X32's lifetime rule (the ledger's §5): an editor's `closeGuard` and actions outlive its mounted body, so they must read
 // state the tab owns, never a body's component state. `createState` makes that state when a surface starts showing an
 // artifact, and `dispose` ends it when the surface stops (the tab closes, the panel goes Back or shows another
-// artifact); a body unmounting because its tab went inactive keeps it. Every one of those stops asks the editor's
-// `closeGuard` first (the panel's Back and re-target too), so a replica with unacknowledged edits is not dropped by a
-// move the owner did not confirm. The mounting surface asks for it through
+// artifact); a body unmounting because its tab went inactive keeps it. The stops the owner makes ask the editor's
+// `closeGuard` first (closing the tab, and the panel's Back and re-target), so a replica with unacknowledged edits is not
+// dropped by a move the owner did not confirm; `dispose` itself asks nothing (a tab its session took away is disposed
+// unasked). The mounting surface asks for it through
 // `holdArtifactEditorState` and gives it back through `releaseArtifactEditorState`; a main tab's is given back here
 // when the tab leaves the main area by any path, as the editor host clears the tab's header registration.
 import type { ComponentType } from 'react';

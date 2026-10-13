@@ -11,6 +11,7 @@ export const ARTIFACTS_TOOL_COPY = {
   emptyAll: 'No artifacts yet.',
   reading: 'Reading…',
   couldNotList: (message: string) => `Couldn’t read the artifacts: ${message}`,
+  couldNotRefresh: (message: string) => `Couldn’t refresh the artifacts: ${message}`, // the last good list stays below
   retry: 'Try again',
   back: 'Back',
   openInTab: 'Open in tab',

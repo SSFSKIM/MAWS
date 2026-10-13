@@ -37,6 +37,13 @@ export function ArtifactsList({ appSessionId, scope, scrollTop, onScope, onScrol
   useEffect(() => {
     if (scroller.current) scroller.current.scrollTop = restoreTo;
   }, [restoreTo]);
+  // Another scope is another list: it starts at its top (the tool state's offset is zeroed with it).
+  const shownScope = useRef(scope);
+  useEffect(() => {
+    if (shownScope.current === scope) return;
+    shownScope.current = scope;
+    if (scroller.current) scroller.current.scrollTop = 0;
+  }, [scope]);
   const filter: LibraryFilter | null = scope === 'all' ? {} : appSessionId === null ? null : { appSessionId, lineage: true };
   return (
     <div data-artifacts-list="" ref={scroller} onScroll={(e) => onScroll(e.currentTarget.scrollTop)} className="flex h-full min-h-0 flex-col overflow-auto">
@@ -58,23 +65,29 @@ export function ArtifactsList({ appSessionId, scope, scrollTop, onScope, onScrol
   );
 }
 
+// A refused read, retryable: alone before the first answer, above the last good list after it (the store keeps it).
+function Failure({ message }: { message: string }) {
+  return (
+    <div role="alert" className="flex flex-col items-start gap-2 px-3 py-2 text-ui text-fg">
+      <p className="m-0">{message}</p>
+      <button type="button" onClick={() => refreshLibrary()} className={control}>
+        {ARTIFACTS_TOOL_COPY.retry}
+      </button>
+    </div>
+  );
+}
+
 function Groups({ filter, scope, onOpen }: { filter: LibraryFilter; scope: ArtifactsScope; onOpen(artifactId: string): void }) {
   const read = useLibraryList(filter);
+  const error = read.status === 'error' ? (read.error ?? '') : null;
   if (read.value === undefined) {
-    if (read.status !== 'error') return <Quiet>{ARTIFACTS_TOOL_COPY.reading}</Quiet>;
-    return (
-      <div role="alert" className="flex flex-col items-start gap-2 px-3 py-2 text-ui text-fg">
-        <p className="m-0">{ARTIFACTS_TOOL_COPY.couldNotList(read.error ?? '')}</p>
-        <button type="button" onClick={() => refreshLibrary()} className={control}>
-          {ARTIFACTS_TOOL_COPY.retry}
-        </button>
-      </div>
-    );
+    return error === null ? <Quiet>{ARTIFACTS_TOOL_COPY.reading}</Quiet> : <Failure message={ARTIFACTS_TOOL_COPY.couldNotList(error)} />;
   }
   const { rows } = read.value;
-  if (rows.length === 0) return <Quiet>{scope === 'all' ? ARTIFACTS_TOOL_COPY.emptyAll : ARTIFACTS_TOOL_COPY.emptySession}</Quiet>;
   return (
     <>
+      {error !== null && <Failure message={ARTIFACTS_TOOL_COPY.couldNotRefresh(error)} />}
+      {rows.length === 0 && <Quiet>{scope === 'all' ? ARTIFACTS_TOOL_COPY.emptyAll : ARTIFACTS_TOOL_COPY.emptySession}</Quiet>}
       {ARTIFACT_KINDS.map((kind) => {
         const ofKind = rows.filter((row) => row.kind === kind);
         if (ofKind.length === 0) return null;

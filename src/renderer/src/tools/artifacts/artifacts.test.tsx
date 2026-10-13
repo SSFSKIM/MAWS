@@ -197,6 +197,33 @@ describe('the list', () => {
     expect(listed()).toHaveLength(5);
   });
 
+  it('a refused refresh keeps the rows and says so, with Try again', async () => {
+    await mount();
+    expect(listed()).toHaveLength(5);
+    main = installFakeMain((name) => (name === 'library.list' ? fail('index unavailable') : fail(`unexpected ${name}`)));
+    offs.push(connectLibrary());
+    await act(async () => main.emit('library.changed', { revision: 2 }));
+    await settle();
+    expect(listed(), 'the last good rows stay').toHaveLength(5);
+    expect(screen.getByRole('alert').textContent).toContain('index unavailable');
+    installMain();
+    fireEvent.click(button('Try again')!);
+    await settle();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(listed()).toHaveLength(5);
+  });
+
+  it('a scope change starts the list at its top', async () => {
+    const { handle } = await mount();
+    const list = document.querySelector<HTMLElement>('[data-artifacts-list]')!;
+    list.scrollTop = 120;
+    fireEvent.scroll(list);
+    fireEvent.click(button('All')!);
+    await settle();
+    expect(document.querySelector<HTMLElement>('[data-artifacts-list]')!.scrollTop).toBe(0);
+    expect(handle.snapshot().scrollTop).toBe(0);
+  });
+
   it('with no session shown, This session says so and All still lists', async () => {
     await mount(undefined, null);
     expect(screen.getByText('Open a session to see its artifacts')).toBeTruthy();
@@ -408,5 +435,47 @@ describe('in the panel', () => {
     await act(() => panelHost.closeTab(tabId));
     expect(editor.dispose).toHaveBeenCalledTimes(2);
     expect(editorHostOf({ surface: 'panel', tabId })).toBeNull();
+  });
+
+  // The review's interleaving: closing the tab waits on the first artifact's guard while a re-target, which that guard
+  // allowed, shows a second artifact whose guard refuses; the first approval must not close over the second.
+  it('a close approved for the artifact it was asked about asks again when the tab moved to another meanwhile', async () => {
+    registerPanelTool(artifactsTool);
+    const dispose = vi.fn();
+    const createState = vi.fn(({ artifactId }: { artifactId: string }) => ({ artifactId, allowClose: true }));
+    let releaseFirst!: (allowed: boolean) => void;
+    let firstAsks = 0;
+    function Panel({ state, scope }: ArtifactEditorProps<{ artifactId: string; allowClose: boolean }>) {
+      useEditorHost(scope, {
+        title: state.artifactId,
+        closeGuard: () => {
+          if (state.artifactId !== NOTES.id) return Promise.resolve(state.allowClose);
+          firstAsks += 1;
+          return firstAsks === 1 ? new Promise<boolean>((resolve) => (releaseFirst = resolve)) : Promise.resolve(true);
+        },
+      });
+      return <p>editing {state.artifactId}</p>;
+    }
+    registerArtifactEditor('document', { Panel, createState, dispose });
+    render(<TestHost />);
+    let tabId = '';
+    act(() => void (tabId = panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: NOTES.id } })));
+    await screen.findByText(`editing ${NOTES.id}`);
+
+    let closed: Promise<boolean> | undefined;
+    act(() => void (closed = panelHost.closeTab(tabId))); // the first artifact's guard is still answering
+    act(() => void panelHost.addTool(ARTIFACTS_TOOL_ID, { appSessionId: A, params: { target: SPEC.id } })); // allowed at once
+    await screen.findByText(`editing ${SPEC.id}`);
+    const second = createState.mock.results[1]!.value as { allowClose: boolean };
+    second.allowClose = false;
+    await act(async () => releaseFirst(true));
+    expect(await closed, 'the second artifact’s guard was asked and refused').toBe(false);
+    expect(panelOf(A)!.tabs.map((t) => t.id)).toEqual([tabId]);
+    expect(dispose.mock.calls.map(([state]) => state), 'only the first artifact’s state went').toEqual([createState.mock.results[0]!.value]);
+    expect(screen.getByText(`editing ${SPEC.id}`)).toBeTruthy();
+
+    second.allowClose = true;
+    expect(await act(() => panelHost.closeTab(tabId))).toBe(true);
+    expect(dispose).toHaveBeenCalledTimes(2);
   });
 });

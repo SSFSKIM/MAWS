@@ -9,7 +9,9 @@
 // the list) and when the host disposes the instance; a body unmounting because the tab went inactive keeps both. Back
 // and a re-target ask the editor's closeGuard first, as closing the tab does (the host asks it before disposing): a
 // false keeps the record view, so a replica with unacknowledged edits is not dropped by a move the owner did not
-// confirm.
+// confirm. A close and a move can interleave (the host waits on one artifact's guard while a re-target shows another),
+// so the host's approval covers only the view it asked about: `beforeClose` asks the editor shown now when the view
+// moved since the close began.
 //
 // Artifacts belong to no session (§4.1), so a pinned tab keeps the artifact it shows when the shown session changes; its
 // list follows the shown session.
@@ -18,6 +20,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { Icon } from '../../app/IconButton';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
 import { askEditorHostClose, clearEditorHost, type EditorHostScope } from '../../panel/editor-host';
+import { usePanelHost } from '../../panel/host';
 import type { PanelTool, PanelToolContext } from '../../panel/tool';
 import { ARTIFACTS_TOOL_COPY } from './copy';
 import { ArtifactsList, type ArtifactsScope } from './List';
@@ -47,6 +50,8 @@ export class ArtifactsHandle {
   private state: ArtifactsState;
   private readonly listeners = new Set<() => void>();
   private disposed = false;
+  private viewAtClose: ArtifactsView | null = null; // what the host's close asked the editor guard about
+  private readonly unwatchClose: () => void;
 
   constructor(
     readonly editorScope: EditorHostScope,
@@ -55,6 +60,12 @@ export class ArtifactsHandle {
   ) {
     this.state = { appSessionId, view: LIST, scope: 'session', scrollTop: 0 };
     this.open(params);
+    // The host marks the tab closing in the tick it asks the editor's guard, before any move can land.
+    this.unwatchClose = usePanelHost.subscribe((now, before) => {
+      const closing = now.closing.has(editorScope.tabId);
+      if (closing === before.closing.has(editorScope.tabId)) return;
+      this.viewAtClose = closing ? this.state.view : null;
+    });
   }
 
   subscribe = (listener: () => void) => {
@@ -120,9 +131,23 @@ export class ArtifactsHandle {
     this.update({ appSessionId, scrollTop: 0 });
   };
 
+  // X5's beforeClose, after the host's editor guard allowed the close: when the view moved since the close began, that
+  // answer was about another artifact, so the editor shown now is asked too (again after each further move).
+  beforeClose = async (): Promise<boolean> => {
+    let asked = this.viewAtClose ?? this.state.view;
+    while (this.state.view !== asked) {
+      asked = this.state.view;
+      if (asked.kind !== 'record') continue;
+      const answer = askEditorHostClose(this.editorScope);
+      if (answer !== null && !(await answer)) return false;
+    }
+    return true;
+  };
+
   // The host disposes after the tab's close asked the guard, or without asking when the tab's session went.
   dispose = () => {
     this.disposed = true;
+    this.unwatchClose();
     this.leave();
   };
 }
@@ -165,7 +190,7 @@ export const artifactsTool: PanelTool<ArtifactsHandle, ArtifactsParams> = {
   menu: true,
   createState: (init) => new ArtifactsHandle({ surface: 'panel', tabId: init.instanceId }, init.appSessionId, init.params),
   open: (state, params) => state.open(params),
-  beforeClose: () => Promise.resolve(true), // the editor's own closeGuard is asked by the host first (X32)
+  beforeClose: (state) => state.beforeClose(), // the editor's own closeGuard is asked by the host first (X32)
   dispose: (state) => state.dispose(),
   render: ArtifactsBody,
 };
