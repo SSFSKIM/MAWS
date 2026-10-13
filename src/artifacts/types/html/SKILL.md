@@ -8,11 +8,11 @@ Use it for a page that should be looked at rather than co-edited: the user comme
 
 ## Creating one
 
-Write the page to a file in the working directory, then call `artifact_create` with `kind: "html"` (the default), the file's `path` and a `title`. You may give a short `handle` (letters, digits, `.`, `_`, `-`; up to 64 characters) to name it in later calls instead of its id; a handle belongs to your session and the sessions above it, and another session may use the same handle for its own artifact. The page is copied into MAWS's store; the file you wrote is not watched afterwards.
+Write the page to a file in the working directory, then call `artifact_create` with `kind: "html"` (the default), the file's `path` and a `title`; or give the page's text as `content` instead of a path. You may give a short `handle` (letters, digits, `.`, `_`, `-`; up to 64 characters) to name it in later calls instead of its id; a handle belongs to your session and the sessions above it, and another session may use the same handle for its own artifact. The page is copied into MAWS's store; the file you wrote is not watched afterwards.
 
 ## Reading and editing
 
-`artifact_read` returns the page's text and its `revision`. To change the page, call `artifact_publish` with the artifact, the `baseRevision` your last read returned, and `files: {"index.html": "<the whole new page>"}`. A publish against an older revision than the live one is refused and names the live revision: read again, apply your change to what you read, and publish again. Every publish is a new version the user can open and restore; after the user restores an older version, your next publish must start from a fresh read.
+`artifact_read` returns the page as its one file, `files: {"index.html": "…"}`, with its `revision`; `artifact_create` and `artifact_publish` return the revision they wrote too. To change the page, call `artifact_publish` with the artifact, the `baseRevision` your last read (or create, or publish) of it returned, and `files: {"index.html": "<the whole new page>"}`. If the user changed the page since (an edit, or a restore of an older version), the publish is refused naming it: read again, apply your change to what you read, and publish again; `force: true` overwrites their change, as a last resort. A `baseRevision` other than your last read's is refused and names the live revision; after MAWS restarts, read before you publish. Every publish is a new version the user can open and restore.
 
 ## How it is shown
 
