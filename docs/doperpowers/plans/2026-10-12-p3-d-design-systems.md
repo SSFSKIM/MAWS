@@ -32,7 +32,7 @@ What does not change: the engine and the wire (D-1); the app's own theme (`src/r
   - Re-review approved.
   - Gates: `src/artifacts/design-system` 228/228; the covering projects 362/362; typecheck and lint clean; `e2e:design-systems` 2/2; `e2e:settings` 10/10; A's artifacts-store spec 2/2. The full suite at e62438a8 passed 12729 with one failure, the E10 bundle guard, fixed in 09c599a3 and re-run green (engine-host and artifacts, 2224/2224).
 - [x] (2026-10-13 PDT) M6b — The `ask` input (D13) and seeding in one transaction per default, on A's ticked 355bde01 (merged 6f12c26e). Commits 9106ae51..c0b5327e (Decision Log 27). Review approved first time. Gates: typecheck and lint clean; the full unit suite 12815 passed (one new test's colour literal fixed and re-run green); `e2e:design-systems` 3/3; A's `e2e:tools` 8/8.
-- [ ] M7 — Acceptance: the e2e group, the live run, the gates.
+- [ ] M7 — Acceptance: the e2e group, the live run, the gates. Part 1 now, part 2 at A's M7 tick (Decision Log 28).
 - [ ] Whole-branch review, its fix wave, Outcomes, hand-back.
 
 ## Terms
@@ -606,6 +606,13 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
     - **Seeding.** Each default is created with its files in one transaction, through A's create with `initial(doc)`. Assets cannot join that transaction, so a seeding record in the store's meta (`designSystems.seeding`, written through A's `storage.setMeta`) makes seeding resumable. An interrupted run finishes the remaining defaults at the next start, and a failed asset upload is logged and retried at the next start.
     - **The e2e case** replays a journal derived from E1's recorded blocking ask, with only the questions and answers rewritten.
     - **Residue.** A system the owner picks and that is deleted before Submit is still sent by id. The chain skips a deleted id (D9), so the worst case is an agent told about a system that no longer exists. This goes to the tech-debt tracker.
+28. 2026-10-13 (the architect's ruling at M6b's tick). M7 runs in two parts.
+    - **Part 1, now.** On L's 6876c635 (merged as 5c02b275; it holds L's seed-agnostic e2e and A's 355bde01), part 1 delivers:
+      - the full `e2e:design-systems` for Acceptance 9 to 14, with the document fixture standing in for B's editor;
+      - Acceptance 15's live run, under `MAWS_LIVE=1` on the installed engine with a scratch config home, copying L's `e2e/library-live.spec.ts` for its cap and scratch layout: the relay, Haiku, `show: false`, a per-session `--max-budget-usd`, and the A-15 digest of `~/.claude.json` before and after;
+      - the gates.
+    - **Part 2, at A's M7 tick.** Merge A's ticked tip. Register `claudeExportFiles` through A's `ExporterRegistry.register({kind, format, run(request, context)})`, which main reaches as `startArtifacts().exporters`. Call `store.registerDesignSystemChain(designSystems.chain)`. Add the bundled-face and canon-image cases behind A's CSP. Re-run the gates, recheck the in-place `tools.ts` lines (entry 27), then run the whole-branch `reviewer-high` review.
+    - **What stays out of both parts.** The document and deck restyle e2e cases that need B's and C's editors are listed for P3-F in the hand-back, not faked by the fixture.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
