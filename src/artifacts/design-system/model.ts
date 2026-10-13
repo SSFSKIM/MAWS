@@ -570,7 +570,7 @@ function createSystem(doc: Doc, sent: Readonly<Record<string, string | null>>, o
  * publish over an empty doc) is written whole, as `writeSystem` writes a create: see `createSystem`.
  */
 export function publishSystem(live: Doc, base: Readonly<Record<string, string>>, sent: Readonly<Record<string, string | null>>, force: boolean, options: SystemWriteOptions = {}): PublishResult {
-  if (readSystem(live).meta === null) return createSystem(live, sent, options);
+  if (roots(live).meta.getAttr('formatVersion') === undefined) return createSystem(live, sent, options); // no system yet: a create
   const problems: FileProblem[] = [];
   for (const [path, text] of Object.entries(sent)) {
     const problem = pathProblem(path, text);
