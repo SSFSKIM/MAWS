@@ -22,7 +22,9 @@ const json = (page: Page, which: Replica) => page.evaluate((r) => JSON.stringify
 
 const replica = (page: Page, which: Replica): Locator => page.locator(`[data-replica="${which}"]`);
 const toolbar = (page: Page, which: Replica): Locator => replica(page, which).getByRole('toolbar', { name: 'Formatting' });
-const content = (page: Page, which: Replica): Locator => replica(page, which).locator('.ProseMirror');
+const content = (page: Page, which: Replica): Locator => replica(page, which).locator('.ProseMirror[data-editor="live"]');
+// M9 (fix wave): a version is drawn by a read-only editor of its own beside the live one, which stays bound, hidden
+const previewContent = (page: Page, which: Replica): Locator => replica(page, which).locator('.ProseMirror[data-editor="preview"]');
 
 // A 1×1 PNG.
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
@@ -313,13 +315,14 @@ test.describe('the document editor', () => {
     await today.getByRole('button', { name: /Added a sentence/ }).click();
     const bar = replica(page, 'a').getByRole('toolbar', { name: 'Version preview' });
     await expect(bar.getByText('1 change', { exact: true })).toBeVisible();
-    const inserted = content(page, 'a').locator('.doc-change-ins');
+    const inserted = previewContent(page, 'a').locator('.doc-change-ins');
     await expect(inserted).toHaveText(ADDED);
     await expect(inserted).toHaveAttribute('style', /--doc-author: var\(--author-\d\)/);
     expect(await inserted.evaluate((el) => getComputedStyle(el).textDecorationLine)).toContain('underline');
-    await expect(content(page, 'a')).toHaveAttribute('contenteditable', 'false');
+    await expect(previewContent(page, 'a')).toHaveAttribute('contenteditable', 'false');
+    await expect(content(page, 'a')).toBeHidden(); // the live editor, bound, out of sight
     await bar.getByRole('button', { name: 'Next change' }).click();
-    await expect(content(page, 'a').locator('.doc-change-current')).toHaveText(ADDED);
+    await expect(previewContent(page, 'a').locator('.doc-change-current')).toHaveText(ADDED);
     await expect(content(page, 'b')).toHaveAttribute('contenteditable', 'true'); // the other replica stays live
 
     await rail.getByRole('button', { name: /^Version Clean draft/ }).click();
@@ -330,6 +333,8 @@ test.describe('the document editor', () => {
     await bar.getByRole('button', { name: 'Restore this version' }).click();
     await replica(page, 'a').getByRole('alertdialog', { name: 'Restore this version?' }).getByRole('button', { name: 'Restore', exact: true }).click();
     await expect(replica(page, 'a').getByRole('status', { name: 'Restored' })).toContainText('Restored from Clean draft');
+    await expect(content(page, 'a')).toBeVisible();
+    await expect(previewContent(page, 'a')).toHaveCount(0);
     await expect(content(page, 'a')).toHaveAttribute('contenteditable', 'true');
     await expect.poll(() => blockText(page, 'a', 'para0002')).toBe('The river runs north; the river is cold.');
     await expect.poll(() => blockText(page, 'b', 'para0002')).toBe('The river runs north; the river is cold.');
