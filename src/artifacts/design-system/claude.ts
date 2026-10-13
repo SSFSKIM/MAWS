@@ -10,7 +10,7 @@ import { contrastRatio, relativeLuminance, rgbToHex, round4, toSrgb, type ColorV
 import { parseBoxShadow, parseCssColor, parseFontStack, parseLength } from './css-read';
 import { DECK_KEY } from './extensions';
 import { resolveTokens, resolveValueAgainst, type ResolvedToken } from './resolve';
-import { cssNamesOf, ROLES, splitPath, TYPE_ROLES, type TypeRole } from './roles';
+import { byIdentity, cssNamesOf, ROLES, splitPath, tokenIdentity, TYPE_ROLES, type TypeRole } from './roles';
 import { LIMITS, validateTokenFile, type Token, type TokenSet } from './tokens';
 import { aliasPath, isAlias, type DimensionValue, type FontFamilyValue, type ShadowLayer, type TokenType, type TypographyValue } from './values';
 
@@ -722,6 +722,8 @@ const COLOR_USAGE: Record<string, string> = {
   'color.status.info': 'Information.',
 };
 
+const COLOR_USAGE_BY_IDENTITY = new Map(Object.entries(COLOR_USAGE).map(([path, usage]) => [tokenIdentity(path), usage]));
+
 /** A Claude name from path segments: `-` joined, outside `[A-Za-z0-9_.-]` replaced, at most 64. */
 const claudeName = (segments: readonly string[]): string =>
   segments
@@ -753,7 +755,7 @@ function stackOf(value: FontFamilyValue): string {
 /** The composite a typography token is written as, followed through whole-token aliases. */
 function writtenComposite(token: ResolvedToken, resolved: ReadonlyMap<string, ResolvedToken>): Record<string, unknown> {
   let value = token.token.$value;
-  for (let i = 0; isAlias(value) && i < 32; i++) value = resolved.get(aliasPath(value))?.token.$value;
+  for (let i = 0; isAlias(value) && i < 32; i++) value = byIdentity(resolved, aliasPath(value))?.token.$value;
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
@@ -803,7 +805,7 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
     };
     switch (token.type) {
       case 'color':
-        colors.push(entry(claim(segments[0] === 'color' ? segments.slice(1) : segments), hex(token.value), usage ?? own(COLOR_USAGE, token.path)));
+        colors.push(entry(claim(segments[0] === 'color' ? segments.slice(1) : segments), hex(token.value), usage ?? COLOR_USAGE_BY_IDENTITY.get(tokenIdentity(token.path))));
         break;
       case 'fontFamily': {
         const key = familyKey(segments[0] === 'font' ? segments.slice(1) : segments);
@@ -876,7 +878,7 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
   for (const [key, list] of others) if (list.length > EXPORT_CAPS.otherTokens) reasons.push(`${key}: ${list.length} tokens; Claude reads at most ${EXPORT_CAPS.otherTokens} in a further family`);
   if (reasons.length) throw new ClaudeShapeError('Claude’s shape cannot hold this system', reasons);
 
-  const bg = resolved.tokens.get('color.bg.$root');
+  const bg = byIdentity(resolved.tokens, 'color.bg.$root');
   const light = !bg || bg.type !== 'color' || relativeLuminance(bg.value) > 0.4;
   const json = dict<unknown>();
   Object.assign(json, {

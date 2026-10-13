@@ -8,7 +8,7 @@ import { colorLiterals, parseBoxShadow, parseCssColor, parseFontStack, parseLeng
 import { DECK_KEY } from './extensions';
 import type { HardDont, Law } from './law';
 import { resolveTokens, resolveValueAgainst } from './resolve';
-import { cssNamesOf, splitPath, TYPE_ROLES } from './roles';
+import { byIdentity, cssNamesOf, splitPath, TYPE_ROLES } from './roles';
 import type { TokenSet } from './tokens';
 import type { DimensionValue, ShadowLayer } from './values';
 
@@ -127,7 +127,7 @@ function systemOf(tokens: TokenSet): System {
   }
   s.typeSizes = [...sizes].sort((a, b) => a - b);
   const role = (path: string) => {
-    const t = resolved.tokens.get(path);
+    const t = byIdentity(resolved.tokens, path);
     return t?.type === 'color' ? t.value : null;
   };
   const accent = role('color.accent.$root');

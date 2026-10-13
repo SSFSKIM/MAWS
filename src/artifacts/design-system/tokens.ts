@@ -5,7 +5,7 @@
 // path. Resolution (aliases, `$ref` pointers, `$extends`, `$type` inheritance) is `resolve.ts`'s.
 import { DECK_KEY, OFFICE_KEY, PAGE_KEY, readExtensions } from './extensions';
 import { resolveTokens, resolveValueAgainst, type ResolvedTokens } from './resolve';
-import { comparePaths, cssNamesOf, ROLES, splitPath } from './roles';
+import { byIdentity, comparePaths, cssNamesOf, ROLES, splitPath } from './roles';
 import { aliasPath, FAIL, isAlias, isPointer, isTokenType, KEEP, normalizeValue, pointerAsAlias, pointerSegments, type RefHandler, type TokenType } from './values';
 
 /** One token as written (canonical): its value keeps its references. `$type` only when the token sets it itself. */
@@ -39,7 +39,7 @@ export interface TokenProblem {
   message: string;
 }
 
-export { comparePaths, cssIdent, cssNamesOf, ROLES, splitPath, TYPE_ROLES, type Role, type TypeRole } from './roles';
+export { byIdentity, comparePaths, cssIdent, cssNamesOf, identityKey, ROLES, splitPath, tokenIdentity, TYPE_ROLES, type Role, type TypeRole } from './roles';
 
 // --- Reading ---------------------------------------------------------------------------------------------------------
 
@@ -346,7 +346,7 @@ export const LIMITS = { tokens: 512, tokensPerGroup: 64 } as const;
 export function validateRoles(resolved: ResolvedTokens, set: TokenSet, reported: ReadonlySet<string> = new Set()): TokenProblem[] {
   const problems: TokenProblem[] = [];
   for (const role of ROLES) {
-    const token = resolved.tokens.get(role.path);
+    const token = byIdentity(resolved.tokens, role.path); // `color.border` or `color.border.$root` (Decision Log 12)
     const names = cssNamesOf(role.path, role.type).join(', ');
     if (token) {
       if (token.type !== role.type) problems.push({ path: role.path, message: `the role ${role.path} (${names}) must be a ${role.type}, not a ${token.type}` });

@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import complete from './fixtures/complete.tokens.json';
 import { edited } from './fixtures/edit';
 import lenient from './fixtures/lenient.tokens.json';
+import { colorToCss } from './color';
+import { generateTokensCss } from './css';
+import { officeTheme } from './office';
 import { resolveTokens } from './resolve';
+import type { ColorValue } from './color';
 import { cssNamesOf, parseTokens, ROLES, serializeTokens, validateTokenFile, type TokenProblem, type TokenSet } from './tokens';
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -79,14 +83,37 @@ describe('the token file: validation (Acceptance 1)', () => {
     );
     const { problems } = validateTokenFile(file);
     expect(problemsAt(problems, 'space.3').join()).toMatch(/role .* must be a dimension, not a number/);
-    expect(problemsAt(problems, 'color.accent.$root').join()).toMatch(/missing role.*color\.accent is a token; the role needs color\.accent\.\$root/);
-    expect(problemsAt(problems, 'color.accent.text').join()).toMatch(/missing role/);
+    // A role is found by its identity (Decision Log 12): the token `color.accent` is the role `color.accent.$root`.
+    expect(problemsAt(problems, 'color.accent.$root')).toEqual([]);
+    expect(problemsAt(problems, 'color.accent.text').join()).toMatch(/missing role.*color\.accent is a token, so it cannot hold color\.accent\.text/);
     expect(problemsAt(problems, 'line.hairline').join()).toMatch(/\{color\.status\} names a group, not a token/);
   });
 
-  it('refuses a reference to a group’s base token without $root, and suggests it', () => {
+  it('reaches a group’s base token by its identity: {color.bg} is {color.bg.$root} (Decision Log 12)', () => {
     const file = edited(complete, ['color/accent/text/$value', '{color.bg}']);
-    expect(problemsAt(validateTokenFile(file).problems, 'color.accent.text').join()).toMatch(/did you mean \{color\.bg\.\$root\}/);
+    const checked = validateTokenFile(file);
+    expect(checked.problems).toEqual([]);
+    expect(checked.resolved!.tokens.get('color.accent.text')!.value).toEqual(checked.resolved!.tokens.get('color.bg.$root')!.value);
+    // A group with no $root is still no token.
+    expect(problemsAt(validateTokenFile(edited(complete, ['color/accent/text/$value', '{color.status}'])).problems, 'color.accent.text').join()).toMatch(/names a group, not a token/);
+  });
+
+  it('finds a role by its identity: a role with a token beneath it is written as its group’s $root and still validates', () => {
+    // Without the Office extension, so accent6 is derived from the border role.
+    const plainFile = structuredClone(complete) as { color: Record<string, unknown>; $extensions: Record<string, unknown> };
+    delete plainFile.$extensions['dev.maws.office'];
+    const file = structuredClone(plainFile);
+    const border = file.color.border;
+    file.color.border = { $root: border, strong: { $type: 'color', $value: '#000000' } };
+    const checked = validateTokenFile(file);
+    expect(checked.problems).toEqual([]);
+    const value = checked.resolved!.tokens.get('color.border.$root')!;
+    expect(value).toBeDefined();
+    const css = generateTokensCss(checked.tokens!);
+    expect(css).toContain(`--ds-color-border: ${colorToCss((value as { value: ColorValue }).value)};`);
+    expect(css).toContain('--ds-color-border-strong: #000000;');
+    const before = officeTheme(parseTokens(plainFile).tokens!);
+    expect(officeTheme(checked.tokens!).colors.accent6).toBe(before.colors.accent6); // accent6 derives from the border
   });
 
   it('refuses the structural mistakes the format names', () => {

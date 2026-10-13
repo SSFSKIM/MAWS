@@ -3,7 +3,7 @@
 // pointers are replaced by what they name, chained, inside composites and lists; cycles (of aliases by token, of
 // pointers by the value location they name) are refused with every member named. The result holds only the tokens
 // that resolved; `problems` names the rest.
-import { comparePaths, splitPath } from './roles';
+import { byIdentity, comparePaths, identityKey, splitPath } from './roles';
 import type { GroupProps, Token, TokenProblem, TokenSet } from './tokens';
 import { aliasPath, FAIL, isAlias, isPointer, normalizeValue, pointerSegments, type RefHandler, type ResolvedValueOf, type TokenType } from './values';
 
@@ -161,7 +161,8 @@ export function resolveTokens(set: TokenSet, broken: ReadonlySet<string> = new S
     const problem = (message: string) => {
       if (!cyclic.has(path)) problems.push({ path, message });
     };
-    const reach = (target: string, at: string, shown: string): ResolvedToken | typeof FAIL => {
+    const reach = (written: string, at: string, shown: string): ResolvedToken | typeof FAIL => {
+      const target = identityKey(entries, written) ?? written; // by identity: `{x}` reaches `x.$root` and the reverse
       if (!entries.has(target)) {
         if (groups.has(target)) {
           const root = entries.has(`${target}.$root`) ? `; did you mean {${target}.$root}?` : '';
@@ -292,7 +293,7 @@ export function resolveValueAgainst<T extends TokenType>(resolved: ResolvedToken
     mode: 'resolve',
     problem: (message) => problems.push(message),
     alias(alias, sub, where) {
-      const target = resolved.tokens.get(aliasPath(alias));
+      const target = byIdentity(resolved.tokens, aliasPath(alias));
       const expected = tokenTypeOf(sub);
       if (!target) problems.push(`${where}: ${alias} names no resolved token`);
       else if (target.type !== expected) problems.push(`${where}: ${alias} is a ${target.type}, not a ${expected}`);

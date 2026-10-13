@@ -18,7 +18,7 @@ import { CLAUDE_SOURCES, ClaudeShapeError, fromClaude, isClaudeShape } from './c
 import { generateTokensCss } from './css';
 import { LAW_LIMIT_BYTES, parseLaw } from './law';
 import { officeTheme } from './office';
-import { comparePaths, splitPath } from './roles';
+import { comparePaths, splitPath, tokenIdentity } from './roles';
 import { parseTokens, serializeTokens, validateTokenFile, type GroupProps, type Token, type TokenSet } from './tokens';
 
 import type { KindAdapter } from '../host';
@@ -91,8 +91,7 @@ function entriesOf(set: TokenSet): Map<string, Token | GroupProps> {
 }
 
 const ROOT = '.$root';
-/** A token's identity: its path with a trailing `$root` dropped, so `x` and `x.$root` are one unit (Decision Log 12). */
-const identity = (path: string) => (path.endsWith(ROOT) ? path.slice(0, -ROOT.length) : path);
+const identity = tokenIdentity; // `x` and `x.$root` are one token (Decision Log 12)
 
 /** The `tokens` node's attributes as stored: token paths and `<path>/$group` keys. */
 const storedEntries = (node: Node): Map<string, Token | GroupProps> => new Map([...(node.attrEntries() as IterableIterator<[string, Token | GroupProps]>)]);

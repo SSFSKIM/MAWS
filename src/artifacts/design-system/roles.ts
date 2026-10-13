@@ -24,6 +24,24 @@ const ROLE_INDEX = new Map(ROLES.map((role, i) => [role.path, i]));
 
 // --- Paths and CSS names ---------------------------------------------------------------------------------------------
 
+const ROOT = '.$root';
+/**
+ * A token's identity: its path with a trailing `$root` dropped. `x` and `x.$root` name one token (Decision Log 12 of
+ * docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md): a role, a reference and a merge find it under either.
+ */
+export const tokenIdentity = (path: string): string => (path.endsWith(ROOT) ? path.slice(0, -ROOT.length) : path);
+/** The key a map holds a token under, found by identity (`x` finds `x.$root` and the reverse), or undefined. */
+export function identityKey(map: { has(key: string): boolean }, path: string): string | undefined {
+  if (map.has(path)) return path;
+  const other = path.endsWith(ROOT) ? tokenIdentity(path) : `${path}${ROOT}`;
+  return map.has(other) ? other : undefined;
+}
+/** A token in a map keyed by path, found by identity. */
+export function byIdentity<T>(map: ReadonlyMap<string, T>, path: string): T | undefined {
+  const key = identityKey(map, path);
+  return key === undefined ? undefined : map.get(key);
+}
+
 export const splitPath = (path: string): string[] => (path === '' ? [] : path.split('.'));
 
 /** Canonical order: the roles in the ledger's order, then every other path by its segments, code unit by code unit. */

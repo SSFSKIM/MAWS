@@ -6,7 +6,7 @@
 import { colorToCss, round4 } from './color';
 import { CSS_KEY, DECK_KEY, type WordBreak } from './extensions';
 import { resolveTokens, resolveValueAgainst, type ResolvedToken, type ResolvedTokens } from './resolve';
-import { cssNamesOf, TYPE_ROLES } from './roles';
+import { byIdentity, cssNamesOf, TYPE_ROLES } from './roles';
 import type { TokenSet } from './tokens';
 import { aliasPath, isAlias, type CubicBezierValue, type DimensionValue, type DurationValue, type FontFamilyValue, type ShadowLayer, type StrokeStyleValue } from './values';
 
@@ -99,7 +99,7 @@ function writtenComposite(token: ResolvedToken, resolved: ResolvedTokens): Recor
   const seen = new Set<string>();
   while (isAlias(value) && !seen.has(value)) {
     seen.add(value);
-    const target = resolved.tokens.get(aliasPath(value));
+    const target = byIdentity(resolved.tokens, aliasPath(value));
     if (target?.type !== 'typography') return {};
     value = target.token.$value;
   }
@@ -124,13 +124,13 @@ export function generateTokensCss(tokens: TokenSet, options: TokensCssOptions = 
   // A class reads the custom property a reference names, when that token wrote it; otherwise the value itself.
   const varOf = (raw: unknown, type: ResolvedToken['type']): string | null => {
     if (!isAlias(raw)) return null;
-    const target = resolved.tokens.get(aliasPath(raw));
+    const target = byIdentity(resolved.tokens, aliasPath(raw));
     const name = target && target.type === type ? cssNamesOf(target.path, target.type)[0] : undefined;
     return name && written.get(name) === target!.path ? `var(${name})` : null;
   };
   const wordBreak: WordBreak = (tokens.groups.get('')?.$extensions?.[CSS_KEY] as { wordBreak?: WordBreak } | undefined)?.wordBreak ?? 'keep-all';
   for (const role of TYPE_ROLES) {
-    const token = resolved.tokens.get(`type.${role}`);
+    const token = byIdentity(resolved.tokens, `type.${role}`);
     if (!token || token.type !== 'typography') continue;
     const [size, line, weight] = cssNamesOf(token.path, 'typography');
     const raw = writtenComposite(token, resolved);

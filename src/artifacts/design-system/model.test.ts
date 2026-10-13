@@ -287,6 +287,24 @@ describe('the page’s edits: setToken, setLaw, setFile', () => {
     expect(readFiles(human)['tokens.css']).toContain('--ds-color-bg: #000000');
   });
 
+  it('accepts a token beneath a role from the page and from a publish: the role reads as its $root and the file validates', () => {
+    const { human, agent, base } = scene();
+    setToken(human, 'color.border.strong', color('#000000'));
+    sync(human, agent);
+    const out = readFiles(human);
+    expect(validateTokenFile(out['tokens.tokens.json']).problems).toEqual([]);
+    expect(parseTokens(out['tokens.tokens.json']).tokens!.tokens.has('color.border.$root')).toBe(true);
+    expect(out['tokens.css']).toMatch(/--ds-color-border: #[0-9a-f]{6,8};/);
+    expect(out['tokens.css']).toContain('--ds-color-border-strong: #000000;');
+    expect(out['office-theme.json']).toBeDefined();
+    // The agent, from its older read, adds another token beneath the same role (writing the role as its $root, as a
+    // file must): one token by identity, unchanged, so it merges with no conflict.
+    const border = parseTokens(base['tokens.tokens.json']!).tokens!.tokens.get('color.border')!;
+    const sent = { 'tokens.tokens.json': tokensWith(base['tokens.tokens.json']!, { 'color.border': undefined, 'color.border.$root': border, 'color.border.subtle': color('#cccccc') }) };
+    expect(publishSystem(agent, base, sent, false)).toEqual({ changed: ['tokens.tokens.json'], conflicts: [] });
+    expect(validateTokenFile(readFiles(agent)['tokens.tokens.json']).problems).toEqual([]);
+  });
+
   it('reads replicas that converged on a token and a token beneath it without loss, the parent as its group’s $root', () => {
     const { human, agent } = scene();
     setToken(human, 'color.branch', color('#112233'));

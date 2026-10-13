@@ -4,6 +4,7 @@
 import { flatten, rgbToHex, type ColorValue, type Rgb } from './color';
 import { OFFICE_FACES, OFFICE_KEY, OFFICE_SLOTS, type OfficeSlot } from './extensions';
 import { resolveTokens, resolveValueAgainst } from './resolve';
+import { byIdentity } from './roles';
 import type { TokenSet } from './tokens';
 
 export { OFFICE_SLOTS, type OfficeSlot } from './extensions';
@@ -47,7 +48,7 @@ export function officeTheme(tokens: TokenSet): OfficeTheme {
   const extension = (tokens.groups.get('')?.$extensions?.[OFFICE_KEY] ?? {}) as OfficeExtension;
 
   const role = (path: string): ColorValue => {
-    const token = resolved.tokens.get(path);
+    const token = byIdentity(resolved.tokens, path);
     if (token?.type !== 'color') throw new Error(`officeTheme: the role ${path} does not resolve to a colour`);
     return token.value;
   };
@@ -82,7 +83,7 @@ export function officeTheme(tokens: TokenSet): OfficeTheme {
     const given = extension.fonts?.[which] ?? {};
     let latin = given.latin;
     if (latin === undefined) {
-      const token = resolved.tokens.get(rolePath);
+      const token = byIdentity(resolved.tokens, rolePath);
       if (token?.type !== 'fontFamily') throw new Error(`officeTheme: the role ${rolePath} does not resolve to a font family`);
       latin = officeFace(token.value);
     }
