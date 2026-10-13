@@ -59,13 +59,42 @@ export function beneathDeliverable(frame: FrameLike | null | undefined): boolean
   }
 }
 
+// The artifact a frame shows (fix wave 1, Decision Log 44a): read from the nearest frame at or above it served by either
+// store scheme, its artifact id; null when that frame is a deliverable's; undefined when no store frame lies above it
+// (the app's own frames). Throws when a frame can no longer be read.
+export function shownArtifact(frame: FrameLike | null | undefined): string | null | undefined {
+  let current = frame ?? null;
+  for (let depth = 0; current && depth < MAX_DEPTH; depth++, current = current.parent) {
+    const url = current.url;
+    if (url.startsWith(ARTIFACT_PREFIX)) return artifactIdOf(url);
+    if (isDeliverable(url)) return null;
+  }
+  return undefined;
+}
+const ARTIFACT_PREFIX = `${ARTIFACT_SCHEME}://`;
+// The artifact a `maws-artifact:` URL names (its host, as Chromium lowercases it), whatever its path.
+const artifactIdOf = (url: string): string => url.slice(ARTIFACT_PREFIX.length).split(/[/?#]/, 1)[0]!.toLowerCase();
+
+// Whether a request or navigation to `url`, made from within store frames showing `shown`, reaches an artifact other
+// than the one shown: an artifact frame reaches its own artifact (any revision, its assets) and nothing of another's,
+// and a deliverable frame no artifact at all (X12's frame rule, Decision Log 44a). The app's own frames (`shown`
+// undefined) reach every artifact.
+function crossesArtifacts(url: string, shown: string | null | undefined): boolean {
+  if (!url.startsWith(ARTIFACT_PREFIX) || shown === undefined) return false;
+  return shown !== artifactIdOf(url);
+}
+
 // A request whose frame is (or lies beneath) a deliverable frame, or whose initiator is the scheme (an unsandboxed frame
 // reports it; a sandboxed one reports the opaque "null"), for anything outside the scheme, the PDF viewer's files and
 // `chrome://resources/`: http, https, ws, wss and file alike. `data:` and `blob:` never reach `webRequest`. Unlike the
 // navigation guard, a frame that can no longer be read counts as not beneath one here (only an initiator in the scheme
 // still cancels): safe because every scheme answer that can run script carries a CSP without network sources
-// (`protocol.ts`), so the frame's own policy refuses what this filter lets by.
-export function shouldCancelRequest(details: { url: string; beneath: boolean | null; initiatorOrigin?: string }): boolean {
+// (`protocol.ts`), so the frame's own policy refuses what this filter lets by. Fix wave 1 (Decision Log 44a): also a
+// request from within an artifact frame (`shown`, `shownArtifact` of its frame) for another artifact, unless the app
+// made it (an initiator that is neither opaque nor a store frame's origin: the app pointing its frame elsewhere).
+export function shouldCancelRequest(details: { url: string; beneath: boolean | null; initiatorOrigin?: string; shown?: string | null }): boolean {
+  const fromApp = details.initiatorOrigin !== undefined && details.initiatorOrigin !== 'null' && !isDeliverable(details.initiatorOrigin);
+  if (!fromApp && crossesArtifacts(details.url, details.shown)) return true;
   if (allowedBeneath(details.url)) return false;
   return details.beneath === true || isDeliverable(details.initiatorOrigin);
 }
@@ -73,7 +102,10 @@ export function shouldCancelRequest(details: { url: string; beneath: boolean | n
 // A subframe navigation of a frame that is (or lies beneath) a deliverable frame, or asked by one, to anything outside
 // the same three. The app never points a deliverable frame elsewhere (a version switch stays in the scheme; React
 // removes the frame rather than navigating it away). A frame that can no longer be read counts as beneath one.
-export function shouldBlockFrameNavigation(details: { url: string; frameBeneath: boolean | null; initiatorBeneath: boolean | null }): boolean {
+// Fix wave 1 (Decision Log 44a): a navigation an artifact frame asks for (`initiatorShows`, `shownArtifact` of the
+// initiator) to another artifact is prevented too; the app's own (initiator outside every store frame) is not.
+export function shouldBlockFrameNavigation(details: { url: string; frameBeneath: boolean | null; initiatorBeneath: boolean | null; initiatorShows?: string | null }): boolean {
+  if (crossesArtifacts(details.url, details.initiatorShows)) return true;
   if (allowedBeneath(details.url)) return false;
   return details.frameBeneath !== false || details.initiatorBeneath === true;
 }
@@ -165,6 +197,16 @@ export function consoleLimiter(now: () => number = Date.now): (message: Delivera
 
 // ---- installing them ------------------------------------------------------------------------------------------------
 
+// `shownArtifact` of a frame read from an Electron event; `unreadable` answers for a frame that can no longer be read
+// (by default undefined: the frame's own CSP holds).
+function shownRead(read: () => FrameLike | null | undefined, unreadable: () => string | null | undefined = () => undefined): string | null | undefined {
+  try {
+    return shownArtifact(read());
+  } catch {
+    return unreadable();
+  }
+}
+
 // `beneathDeliverable` of a frame read from an Electron event, whose getter itself throws for a disposed frame.
 function beneathRead(read: () => FrameLike | null | undefined): boolean | null {
   try {
@@ -201,7 +243,7 @@ export function installFramePolicies(session: Session, env: SeamEnv): void {
   session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
     const own = details.webContentsId === undefined ? undefined : ownFilters.get(details.webContentsId);
     if (own) return callback({ cancel: own(details.url) });
-    callback({ cancel: shouldCancelRequest({ url: details.url, beneath: beneathRead(() => details.frame), initiatorOrigin: details.initiatorOrigin }) });
+    callback({ cancel: shouldCancelRequest({ url: details.url, beneath: beneathRead(() => details.frame), initiatorOrigin: details.initiatorOrigin, shown: shownRead(() => details.frame) }) });
   });
   session.on('will-download', (event, item) => {
     if (!shouldCancelDownload({ url: item.getURL(), urlChain: item.getURLChain() })) return;
@@ -239,7 +281,9 @@ export function guardFrames(contents: WebContents, env: SeamEnv): void {
   contents.on('will-frame-navigate', (event) => {
     const frameBeneath = beneathRead(() => event.frame);
     const initiatorBeneath = beneathRead(() => event.initiator);
-    if (!shouldBlockFrameNavigation({ url: event.url, frameBeneath, initiatorBeneath })) return;
+    // an initiator that can no longer be read is judged by the frame it navigates (Decision Log 44a)
+    const initiatorShows = shownRead(() => event.initiator, () => shownRead(() => event.frame));
+    if (!shouldBlockFrameNavigation({ url: event.url, frameBeneath, initiatorBeneath, initiatorShows })) return;
     event.preventDefault();
     seam(env, `blocked-navigation ${event.url}`);
   });
