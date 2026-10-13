@@ -122,6 +122,9 @@ import { startArtifacts } from './artifacts';
 // P3-L start
 import { startLibrary } from './library';
 // P3-L end
+// P3-B start
+import { startDocumentExportSeam } from './artifacts/export-document-seam';
+// P3-B end
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -575,6 +578,7 @@ void startWithProfileLock(app, () => {
     openWindow,
   });
   shutdown.add('artifacts', artifacts.stop);
+  shutdown.add('document-export-seam', startDocumentExportSeam(process.env)); // P3-B M8: MAWS_E2E=1 only, until A's export service
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
   // connection, an entry per change) and library.* answered from it, before the first window loads. Its stop runs in the
   // same will-quit pass as the index's close, so no sync step runs between them, and after it applies nothing.
