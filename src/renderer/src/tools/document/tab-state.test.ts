@@ -4,7 +4,8 @@
 // progress, the close guard reading all of it, and the handle kept alive until a comment's sends settle.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
-import { addThread } from '@artifacts/document/threads';
+import { addThread, getThread, reply } from '@artifacts/document/threads';
+import type { PortProvider } from '@artifacts/provider/port';
 import { createDocument, listTabs, tabBody } from '@artifacts/document/tabs';
 import { schemaFor } from '@artifacts/document/schema';
 import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
@@ -201,7 +202,7 @@ describe('a document tab’s state', () => {
     expect(w.confirm).toHaveBeenCalledWith(expect.stringContaining('Launch plan'));
   });
 
-  it('closes the replica when disposed, after a comment’s sends in flight have settled', async () => {
+  it('closes the replica when disposed, after a comment’s sends in flight have settled and nothing is unsaved', async () => {
     const w = world();
     const state = w.open();
     await ready(state);
@@ -210,7 +211,45 @@ describe('a document tab’s state', () => {
     expect(w.handles[0].closed).toBeUndefined();
     release();
     release(); // twice is once
-    expect(w.handles[0].closed).toBe(true);
+    expect(w.handles[0].state().unsaved).toBe(0);
+    expect(w.handles[0].closed).toBe(true); // nothing to save: at once
+  });
+
+  // M8 fix wave 1 (the review's reproduction, with the real provider): a send that lands after the tab went records its
+  // message in the document; the replica stays open, reconnecting, until the host has acknowledged that message.
+  it('keeps a disposed tab’s replica until the message a late send recorded is acknowledged, across a reconnect', async () => {
+    const w = world();
+    const state = w.open();
+    await ready(state);
+    const handle = w.handles[0] as DocumentHandle & { provider: PortProvider; closed?: boolean };
+    addThread(handle.doc, { threadId: 'th1', tabId: 'tab00001', blockId: null, quote: 'q', anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
+    await until(() => handle.state().unsaved === 0, 'the thread acknowledged');
+    const release = state.holdForSend();
+    state.dispose();
+    w.memory.dropConnections();
+    await until(() => handle.state().phase === 'off', 'the port to go');
+    reply(handle.doc, 'th1', { id: 'th1:m1', body: 'Delivered comment', by: { kind: 'human' }, at: 2 });
+    release();
+    expect(handle.closed).toBeUndefined();
+    expect(handle.state().unsaved).toBe(1);
+    handle.provider.connect(w.memory.connect()); // the host is back (the renderer's replica re-opens by itself)
+    await until(() => handle.closed === true, 'the replica closed once acknowledged');
+    expect(getThread(w.memory.doc, 'th1')?.messages.map((m) => m.body)).toEqual(['Delivered comment']);
+  });
+
+  it('keeps a disposed tab’s replica until its own unsaved edit is acknowledged', async () => {
+    const w = world();
+    const state = w.open();
+    await ready(state);
+    const handle = w.handles[0] as DocumentHandle & { provider: PortProvider; closed?: boolean };
+    w.memory.dropConnections();
+    await until(() => handle.state().phase === 'off', 'the port to go');
+    handle.doc.get('scratch').setAttr('x', 1);
+    state.dispose();
+    expect(handle.closed).toBeUndefined();
+    handle.provider.connect(w.memory.connect());
+    await until(() => handle.closed === true, 'the replica closed once acknowledged');
+    expect(w.memory.doc.get('scratch').getAttr('x')).toBe(1);
   });
 
   it('closes a replica that opens after the tab went', async () => {

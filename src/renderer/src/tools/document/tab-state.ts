@@ -73,6 +73,7 @@ export class DocumentTabState {
   private sending = 0;
   private disposed = false;
   private handleClosed = false;
+  private closing = false; // disposed, waiting for the host to acknowledge what the replica holds
   private rowTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
@@ -227,7 +228,11 @@ export class DocumentTabState {
     };
   };
 
-  /** The tab stopped showing the document (L's `dispose`): the replica closes once no send needs it. */
+  /**
+   * The tab stopped showing the document (L's `dispose`): the replica closes once no send needs it and the host has
+   * acknowledged every edit it holds (a late send's recorded message, a withdrawn draft, the owner's last keystrokes);
+   * until then it stays open and reconnects by itself, as an open tab's does.
+   */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -239,10 +244,19 @@ export class DocumentTabState {
   }
 
   private closeHandle(): void {
-    if (this.handleClosed) return;
+    if (this.handleClosed || this.closing) return;
     const handle = this.current.handle;
     if (!handle) return; // still opening: `open` closes it when it comes
-    this.handleClosed = true;
-    handle.close();
+    const close = () => {
+      this.handleClosed = true;
+      handle.close();
+    };
+    if (handle.state().unsaved === 0 || handle.state().readOnly) return close();
+    this.closing = true;
+    const off = handle.subscribe((state) => {
+      if (state.unsaved > 0 && !state.readOnly) return;
+      off();
+      close();
+    });
   }
 }
