@@ -527,6 +527,7 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
 15. 2026-10-13 (B needs the page size for its editor; proposed to the architect for X28): `generateTokensCss` derives three properties from `$extensions["dev.maws.page"]`, emitted in the document medium only. M4 adds them.
     - `--ds-page-width` and `--ds-page-height` come from `size`: `letter` is 8.5in × 11in, `a4` is 210mm × 297mm, and the default is `letter`.
     - `--ds-page-margin` comes from `margin`: a dimension or an alias, defaulting to 1in.
+16. 2026-10-13: P3-G landed on master at d4e13f85, and master is merged here (ee1f9dfc). The page's X32 header registration (`registerEditorHost`/`useEditorHost`, entry 10's lifetime rule) and Mark-up's `useRegionMarkupSurface` move from M6 into M4, since they need nothing from A. The page's mount into L's `registerArtifactEditor` stays in M6, because L has not landed. The page-size names of entry 15 are on the ledger's X28 row (master 54f65cb0).
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
