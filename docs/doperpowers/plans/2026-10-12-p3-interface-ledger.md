@@ -113,3 +113,4 @@ Times are the recording commits' times (PDT).
 - 2026-10-13 04:38: D's one-line `vitest.config.ts` edit (M4; `.tsx` tests under `src/artifacts/design-system/`) noted under §7 beside B's `artifacts-dom` project.
 - 2026-10-13 04:46: P3-L's checkpoint 1 ruled (parent Decision Log 46): §1 gains the host's main-only `library.snapshot`/`entry`/`text`, the renderer's `library.*` reads, the cutover's import and the `import` version origin requested of A, and the one-implementation rule for `maws-artifact:` (A's M7); §5 the renamed surface; §7 the registry's full shape, `registerMirrorWriter`, L's shared files.
 - 2026-10-13 04:47: L's reads of A confirmed public; `ArtifactStore.lastWrite` requested of A (§1).
+- 2026-10-13 05:11: A's M4 ticked (86042ae1); its commit barriers `ArtifactStore.readCommitted(read)` and `writeCommitted(run)` (A's Decision Log 33) are consumed by L's host module, so their shape is shared (§1, L's row).
