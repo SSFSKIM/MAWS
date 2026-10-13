@@ -1,0 +1,40 @@
+## a word-level batch
+ops: [{"op":"replace_text","block":"p1","old":"jumps over","new":"leaps over"},{"op":"replace_block","id":"p2","markdown":"The review is scheduled for Monday and the owner signs off before it."},{"op":"set_cell","table":"tb1","row":2,"col":1,"markdown":"42"}]
+result: replaced 1 occurrence(s) in ^p1; replaced ^p2; set cell (2, 1) of ^tb1
+the agent's spans, raw ContentMap of the batch's update (19 chars inserted, 17 deleted):
+  -"jumps" in ^p1
+  +"leaps" in ^p1
+  -"Friday" in ^p2
+  +"Monday" in ^p2
+  -"after" in ^p2
+  +"before" in ^p2
+  -"2" in ^td2bp
+  +"42" in ^td2bp
+the agent's spans after the carry (19 inserted, 17 deleted):
+  -"jumps" in ^p1
+  +"leaps" in ^p1
+  -"Friday" in ^p2
+  +"Monday" in ^p2
+  -"after" in ^p2
+  +"before" in ^p2
+  -"2" in ^td2bp
+  +"42" in ^td2bp
+raw ContentMap insert ids 19 (chars, nodes, attrs, format markers), of which carried 0; encoded ContentMap 120 B
+
+## a type change (paragraph → heading)
+ops: [{"op":"replace_block","id":"p4","markdown":"### Closing paragraph of this section, with enough words to look like prose that a person wrote."}]
+result: replaced ^p4
+the agent's spans, raw ContentMap of the batch's update (92 chars inserted, 0 deleted):
+  +"Closing paragraph of this section, with enough words to look like prose that a person wrote." in ^p4
+the agent's spans after the carry (0 inserted, 0 deleted):
+raw ContentMap insert ids 95 (chars, nodes, attrs, format markers), of which carried 92; encoded ContentMap 105 B
+
+## a move
+ops: [{"op":"move","id":"p3","after":"p4"}]
+result: moved ^p3 after ^p4
+the agent's spans, raw ContentMap of the batch's update (54 chars inserted, 0 deleted):
+  +"A plain paragraph the human types into. " in ^p3
+  +"Words" in ^p3
+  +" to keep." in ^p3
+the agent's spans after the carry (0 inserted, 0 deleted):
+raw ContentMap insert ids 58 (chars, nodes, attrs, format markers), of which carried 54; encoded ContentMap 105 B

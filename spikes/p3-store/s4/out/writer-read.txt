@@ -1,0 +1,24 @@
+## Section 1 plan ^h1
+
+The quick brown fox jumps over the **lazy** [dog](https://example.com). It has two sentences. ^p1
+
+The review is scheduled for Friday and the owner signs off after it. ^p2
+
+A plain paragraph the human types into. Words to keep. ^p3
+
+- first item
+- second item with **bold**
+^l1
+
+| Name  | Value |
+| ----- | ----- |
+| alpha | 1     |
+| beta  | 2     |
+^tb1
+
+```ts
+const x = 1
+```
+^c1
+
+Closing paragraph of this section, with enough words to look like prose that a person wrote. ^p4

@@ -1,0 +1,73 @@
+agent marks (markdown-expressible): link, bold, italic, strike, underline, code
+## Section 1 plan ^h1
+
+The quick brown fox jumps over the **lazy** [dog](https://example.com). It has two sentences. ^p1
+
+The review is scheduled for Friday and the owner signs off after it. ^p2
+
+A plain paragraph the human types into. Words to keep. ^p3
+
+- first item
+- second item with **bold**
+^l1
+
+| Name  | Value |
+| ----- | ----- |
+| alpha | 1     |
+| beta  | 2     |
+^tb1
+
+```ts
+const x = 1
+```
+^c1
+
+Closing paragraph of this section, with enough words to look like prose that a person wrote. ^p4
+
+PASS replace_text exact in a block — {"ok":true,"revision":2,"lines":["replaced 1 occurrence(s) in ^p1"],"newIds":[],"orphaned":[],"ms":14.438167000000021,"updateBytes":60}
+PASS replace_text keeps unchanged words' marks — The |quick [c:t1]|brown[c:t1,c:t2]| fox[c:t2]| jumps over the |lazy[bold]| |dog[link]|. It has three short sentences.
+PASS replace_text not unique → error listing candidates — ["p1×1","p2×1"]
+PASS replace_text not found → error listing near blocks — {"code":"not_found","message":"op 0 (replace_text): \"review is planned\" not found","candidates":[{"id":"p2","text":"The review is scheduled for Friday and the owner signs off after it."}]}
+PASS replace_text all — - first entry
+- second entry with **bold**
+PASS replace_text all keeps the list items' ids
+PASS insert after: ids minted for every block written — {"ok":true,"revision":4,"lines":["inserted 2 block(s) after ^h1: ^z3aiwh9j ^o06hsqz4"],"newIds":["z3aiwh9j","o06hsqz4","29bby8x7","gwbnd1rr"],"orphaned":[],"ms":4.574415999999985,"updateBytes":251}
+PASS insert before — inserted 1 block(s) before ^p4: ^gl8sfs75
+PASS set_cell — | Name  | Value  |
+| ----- | ------ |
+| alpha | 1      |
+| beta  | **42** |
+PASS set_cell keeps the cell's ids
+PASS move: order — h1 z3aiwh9j o06hsqz4 p1 p2 l1 tb1 c1 p3 gl8sfs75 p4
+PASS move: id and marks kept — A plain paragraph the human types into. |Words[c:t4]| to keep.
+PASS delete: block gone, its comment reported orphaned (derived: no live text), its thread and stored quote untouched — {"ok":true,"revision":8,"lines":["deleted ^p2; orphaned thread(s) t3"],"newIds":[],"orphaned":["t3"],"ms":2.901374999999973,"updateBytes":24}
+PASS idempotent: a repeated tool-use id replays, writes nothing
+PASS replicas converge (host, agent)
+PASS no duplicate ids
+PASS type change paragraph → heading keeps the id — {"ok":true,"revision":2,"lines":["replaced ^p1"],"newIds":[],"orphaned":[],"ms":4.564999999999998,"updateBytes":492}
+PASS type change re-maps the comments onto the unchanged words — The |quick [c:t1]|brown[c:t1,c:t2]| fox[c:t2]| jumps over the lazy |dog[link]|.
+PASS type change paragraph → list item keeps the id (on the list) — {"ok":true,"revision":3,"lines":["replaced ^p2"],"newIds":[],"orphaned":[],"ms":5.899540999999999,"updateBytes":242} bulletList
+PASS …and re-maps the comment into the item's paragraph — The review is |scheduled for Friday[c:t3]|.
+PASS …the dropped words orphan nothing that still has text
+PASS type change into a code block: comments not allowed there → reported orphaned — {"ok":true,"revision":4,"lines":["replaced ^p3"],"newIds":[],"orphaned":["t4"],"ms":3.9572499999999877,"updateBytes":153}
+PASS same type, attribute change (heading level) is a setAttr, text untouched — {"ok":true,"revision":5,"lines":["replaced ^h1"],"newIds":[],"orphaned":[],"ms":2.92025000000001,"updateBytes":48}
+PASS converged
+PASS conflict on a target the human changed: the whole batch rejected, naming the block with its current text — {"ok":false,"revision":3,"conflicts":[{"op":1,"block":"p3","changedAt":2,"text":"A NEW plain paragraph the human types into. Words to keep."}]}
+PASS …and nothing applied (all or none)
+PASS the human's typing elsewhere never conflicts — {"ok":true,"revision":4,"lines":["replaced 1 occurrence(s) in ^p2","replaced ^p4"],"newIds":[],"orphaned":[],"ms":11.717291999999986,"updateBytes":59}
+PASS §4.4 literal: replace_text in a block the human typed in after the read is rejected — {"ok":false,"revision":4,"conflicts":[{"op":0,"block":"p1","changedAt":3,"text":"Well, The quick brown fox jumps over the **lazy** [dog](https://example.com). It has two sentences."}]}
+PASS amended: replace_text validated by its quote applies, and keeps the human's words — Well, The quick brown fox jumps over the **sleepy** [dog](https://example.com). It has two sentences.
+PASS a failing op in the batch → error with its index, nothing applied — {"ok":false,"revision":5,"error":{"code":"not_found","message":"op 1 (delete): no block ^nope","candidates":[]}}
+PASS schema validation: a list item replaced by a heading is rejected, nothing applied — "bulletList ^l1 would be invalid: Invalid content for node bulletList: <heading(\"not an item\"), listItem(paragraph(\"secon"
+PASS set_cell after another writer added a row: conflict on the table's shape — {"ok":false,"revision":6,"conflicts":[{"op":0,"block":"tb1","changedAt":6,"text":"| Name  | Value |\n| ----- | ----- |\n| zero  | 0     |\n| alpha | 1     |\n| beta  | 2     |"},{"op":0,"block":"durtanps","changedAt":6,"text":""},{"op":0,"block":"i3xti9y2","changedAt":6,"text":""}]}
+PASS converged (host, agent, human)
+PASS marks: a rewrite keeps overlapping comments, bold and link on unchanged words — The |quick [c:t1]|brown[c:t1,c:t2]| fox[c:t2]| leaps over the |lazy[bold]| |dog[link]| twice. It has two sentences.
+PASS marks: a word replaced inside overlapping comments stays covered by both — The |quick [c:t1]|red[c:t1,c:t2]| fox[c:t2]| leaps over the |lazy[bold]| |dog[link]| twice. It has two sentences.
+PASS marks: neither comment orphaned
+PASS marks (A5): rewording a comment's words in place keeps it on the new words — The review is |planned for Monday[c:t3]| and the owner signs off after it.
+PASS marks: a comment whose words are all deleted is orphaned (derived), its thread keeps its stored quote — {"ok":true,"revision":5,"lines":["replaced 1 occurrence(s) in ^p2"],"newIds":[],"orphaned":["t3"],"ms":3.269124999999974,"updateBytes":39}
+PASS marks: the agent removing ** and [] removes bold and link (its marks), comments stay — The |quick [c:t1]|red[c:t1,c:t2]| fox[c:t2]| leaps over the lazy dog twice.
+PASS marks: survive a type change and a move in one batch — The |quick [c:t1]|red[c:t1,c:t2]| fox[c:t2]| leaps over the lazy dog twice.
+PASS converged
+
+41/41 checks passed
