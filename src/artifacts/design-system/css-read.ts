@@ -166,7 +166,7 @@ function hue(text: string): Component | null {
   if (!match) return null;
   const unit = text.slice(match[0].length).toLowerCase();
   const scale: Record<string, number> = { '': 1, deg: 1, turn: 360, rad: 180 / Math.PI, grad: 0.9 };
-  if (!(unit in scale)) return null;
+  if (!Object.hasOwn(scale, unit)) return null;
   const degrees = (Number(match[0]) * scale[unit]!) % 360;
   return degrees < 0 ? degrees + 360 : degrees;
 }
@@ -200,7 +200,8 @@ export function parseCssColor(text: string): ColorValue | null {
   let colorSpace: ColorSpace;
   let parsed: (Component | null)[];
   if (name === 'color') {
-    const space = PREDEFINED[args.shift()?.toLowerCase() ?? ''];
+    const key = args.shift()?.toLowerCase() ?? '';
+    const space = Object.hasOwn(PREDEFINED, key) ? PREDEFINED[key] : undefined;
     if (!space) return null;
     colorSpace = space;
     parsed = args.map((a) => component(a, 1));

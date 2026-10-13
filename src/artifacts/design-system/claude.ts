@@ -5,17 +5,28 @@
 // and named in a warning), and Claude's files are kept untouched under `sources/claude/`. No law is written (Decision
 // Log 22): the page offers the adopt route. `toClaude` writes a system back as Claude's `tokens.json` (lists only, colours
 // as hex, type as `fonts`, `families` and `groups`), `README.md` from the law, and the assets. Portable (§4.10).
-import { readClaudeTokens, type ClaudeReading, type ClaudeStyle } from './claude-grammar';
+import { readClaudeTokens, validateClaudeTokens, type ClaudeReading, type ClaudeStyle } from './claude-grammar';
 import { contrastRatio, relativeLuminance, rgbToHex, round4, toSrgb, type ColorValue } from './color';
 import { parseBoxShadow, parseCssColor, parseFontStack, parseLength } from './css-read';
 import { DECK_KEY } from './extensions';
 import { resolveTokens, resolveValueAgainst, type ResolvedToken } from './resolve';
 import { cssNamesOf, ROLES, splitPath, TYPE_ROLES, type TypeRole } from './roles';
-import { LIMITS, parseTokens, type Token, type TokenSet } from './tokens';
+import { LIMITS, validateTokenFile, type Token, type TokenSet } from './tokens';
 import { aliasPath, isAlias, type DimensionValue, type FontFamilyValue, type ShadowLayer, type TokenType, type TypographyValue } from './values';
 
 /** Where an import keeps Claude's files, read-only. */
 export const CLAUDE_SOURCES = 'sources/claude/';
+
+/** A conversion refused: the import would not make a valid token file, or Claude's grammar cannot hold the export. */
+export class ClaudeShapeError extends Error {
+  constructor(
+    what: string,
+    readonly reasons: readonly string[],
+  ) {
+    super(`${what}: ${reasons.join('; ')}`);
+    this.name = 'ClaudeShapeError';
+  }
+}
 
 const unproject = (path: string) => (path.startsWith('project/') ? path.slice('project/'.length) : path);
 
@@ -42,8 +53,12 @@ export interface ClaudeImport {
 const ROLE_GROUPS = new Set(ROLES.flatMap((role) => splitPath(role.path).slice(0, -1).map((_, i, all) => all.slice(0, i + 1).join('.'))));
 const parentOf = (path: string) => splitPath(path).slice(0, -1).join('.');
 
+/** A dictionary with no prototype: a key such as `__proto__` from imported JSON is an ordinary entry. */
+const dict = <T>(): Record<string, T> => Object.create(null) as Record<string, T>;
+const own = <T>(record: Readonly<Record<string, T>>, key: string): T | undefined => (Object.hasOwn(record, key) ? record[key] : undefined);
+
 class Draft {
-  readonly root: Record<string, unknown> = {};
+  readonly root: Record<string, unknown> = dict();
   private readonly tokens = new Map<string, Token & Record<string, unknown>>();
   private readonly names = new Map<string, string>(); // a --ds-* name to the path that writes it
   private readonly perGroup = new Map<string, number>();
@@ -60,7 +75,10 @@ class Draft {
 
   private node(segments: readonly string[]): Record<string, unknown> {
     let node = this.root;
-    for (const segment of segments) node = (node[segment] ??= {}) as Record<string, unknown>;
+    for (const segment of segments) {
+      if (!Object.hasOwn(node, segment)) node[segment] = dict();
+      node = node[segment] as Record<string, unknown>;
+    }
     return node;
   }
 
@@ -71,7 +89,7 @@ class Draft {
   /** Writes a token at a path already chosen (a role, or what `place` returned). */
   put(path: string, token: Token) {
     const segments = splitPath(path);
-    const written = { ...token } as Token & Record<string, unknown>;
+    const written = Object.assign(dict(), token) as Token & Record<string, unknown>;
     this.node(segments.slice(0, -1))[segments.at(-1)!] = written;
     this.tokens.set(path, written);
   }
@@ -377,7 +395,7 @@ function importFonts(reading: ClaudeReading, d: Draft, warnings: string[]): (key
   return (key) => {
     if (key === null) return '{font.body}';
     const path = roleOfKey.get(key) ?? keyPath.get(key);
-    return path ? `{${path}}` : familyValue(reading.families[key] ?? 'sans-serif');
+    return path ? `{${path}}` : familyValue(own(reading.families, key) ?? 'sans-serif');
   };
 }
 
@@ -673,9 +691,10 @@ export function fromClaude(files: Readonly<Record<string, string>>): ClaudeImpor
   importOthers(reading, d, warnings);
   for (const [group, n] of d.overflow) warnings.push(`${group}: ${n} tokens beyond a group's ${LIMITS.tokensPerGroup} or the file's ${LIMITS.tokens} stay only in ${CLAUDE_SOURCES}tokens.json`);
 
-  const parsed = parseTokens(d.root);
-  for (const problem of parsed.problems) warnings.push(`${problem.path || 'tokens'}: ${problem.message}`);
-  return { title: title || null, tokens: parsed.tokens!, sources, warnings };
+  // The guarantee: a token file that validates, or a refusal naming why.
+  const checked = validateTokenFile(d.root);
+  if (!checked.ok) throw new ClaudeShapeError('the import does not make a valid token file', checked.problems.map((p) => `${p.path || 'tokens'}: ${p.message}`));
+  return { title: title || null, tokens: checked.tokens!, sources, warnings };
 }
 
 // --- The export ------------------------------------------------------------------------------------------------------
@@ -738,17 +757,24 @@ function writtenComposite(token: ResolvedToken, resolved: ReadonlyMap<string, Re
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
-/** A system as Claude's files: `tokens.json` in Claude's list grammar, `README.md` from the law, and the assets. */
+// Claude's caps on what its page reads (U1's grammar); an export over one is refused, not cut.
+const EXPORT_CAPS = { colors: 600, otherFamilies: 12, otherTokens: 60, styles: 80 } as const;
+
+/**
+ * A system as Claude's files: `tokens.json` in Claude's list grammar, `README.md` from the law, and the assets. Throws
+ * `ClaudeShapeError` when Claude's grammar cannot hold the system (its caps), naming each reason.
+ */
 export function toClaude(system: ClaudeExportSource): Record<string, string> {
   const resolved = resolveTokens(system.tokens);
-  const taken = new Set<string>();
-  const claim = (segments: readonly string[]) => {
-    const base = claudeName(segments);
+  // One namespace for every token family but type, one for styles, one for family keys; each name unique in its own.
+  const unique = (taken: Set<string>, base: string) => {
     let name = base;
     for (let n = 2; taken.has(name); n++) name = `${base.slice(0, 60)}-${n}`;
     taken.add(name);
     return name;
   };
+  const tokenNames = new Set<string>();
+  const claim = (segments: readonly string[]) => unique(tokenNames, claudeName(segments));
   type Entry = { name: string; value: string; usage?: string };
   const entry = (name: string, value: string, usage?: string): Entry => (usage ? { name, value, usage } : { name, value });
   const colors: Entry[] = [];
@@ -756,13 +782,13 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
   const radius: Entry[] = [];
   const shadow: Entry[] = [];
   const others = new Map<string, Entry[]>();
-  const families: Record<string, string> = {};
+  const families = dict<string>();
   const familyKeyOf = new Map<string, string>(); // a fontFamily token's path to its family key
   const typography: Extract<ResolvedToken, { type: 'typography' }>[] = [];
   const familyKey = (segments: readonly string[]) => {
     const base = claudeName(segments).toLowerCase();
     let key = base;
-    for (let n = 2; key in families; n++) key = `${base.slice(0, 60)}-${n}`;
+    for (let n = 2; Object.hasOwn(families, key); n++) key = `${base.slice(0, 60)}-${n}`;
     return key;
   };
 
@@ -773,11 +799,11 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
       const key = claudeName([segments[0]!]).toLowerCase();
       const family = ['name', 'version', 'color', 'type', 'spacing', 'radius', 'shadow'].includes(key) ? `ds-${key}` : key;
       const list = others.get(family) ?? others.set(family, []).get(family)!;
-      if (list.length < 60 && (others.size <= 12 || others.has(family))) list.push(entry(claim(segments.slice(1).length ? segments.slice(1) : segments), value, usage));
+      list.push(entry(claim(segments.slice(1).length ? segments.slice(1) : segments), value, usage));
     };
     switch (token.type) {
       case 'color':
-        colors.push(entry(claim(segments[0] === 'color' ? segments.slice(1) : segments), hex(token.value), usage ?? COLOR_USAGE[token.path]));
+        colors.push(entry(claim(segments[0] === 'color' ? segments.slice(1) : segments), hex(token.value), usage ?? own(COLOR_USAGE, token.path)));
         break;
       case 'fontFamily': {
         const key = familyKey(segments[0] === 'font' ? segments.slice(1) : segments);
@@ -805,10 +831,23 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
     }
   }
 
+  // Styles: the roles' names and their deck styles' names are reserved first, so an extra style never takes one.
+  const deckScale = (token: (typeof typography)[number]) => {
+    const scale = token.token.$extensions?.[DECK_KEY] as { fontSize?: unknown; lineHeight?: unknown } | undefined;
+    const size = scale?.fontSize === undefined ? null : resolveValueAgainst(resolved, 'dimension', scale.fontSize, 'fontSize').value;
+    if (!size) return null;
+    const line = scale?.lineHeight === undefined ? null : resolveValueAgainst(resolved, 'number', scale.lineHeight, 'lineHeight').value;
+    return { size, line };
+  };
   const styleNames = new Set<string>();
+  const isRole = (token: (typeof typography)[number]) => (TYPE_ROLES as readonly string[]).includes(token.path.replace(/^type\./, '')) && token.path.startsWith('type.');
+  for (const token of typography.filter(isRole)) {
+    const role = token.path.slice('type.'.length);
+    styleNames.add(role);
+    if (deckScale(token)) styleNames.add(`deck-${role}`);
+  }
   const style = (name: string, key: string, value: TypographyValue, size: DimensionValue, line: number) => {
     const lineHeight = line < 10 ? round4(line) : measure({ value: line * toPx(size), unit: 'px' });
-    styleNames.add(name);
     return { name, family: key, fontSize: measure(size), lineHeight, fontWeight: value.fontWeight, letterSpacing: measure(value.letterSpacing) };
   };
   const text: ReturnType<typeof style>[] = [];
@@ -817,23 +856,28 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
     const segments = splitPath(token.path).filter((s) => s !== '$root');
     const raw = writtenComposite(token, resolved.tokens).fontFamily;
     let key = isAlias(raw) ? familyKeyOf.get(aliasPath(raw)) : undefined;
-    const name = claudeName(segments[0] === 'type' ? segments.slice(1) : segments);
+    const role = isRole(token);
+    const name = role ? token.path.slice('type.'.length) : unique(styleNames, claudeName(segments[0] === 'type' ? segments.slice(1) : segments));
     if (!key) {
       key = familyKey([name]);
       families[key] = stackOf(token.value.fontFamily);
     }
     text.push(style(name, key, token.value, token.value.fontSize, token.value.lineHeight));
-    const scale = token.token.$extensions?.[DECK_KEY] as { fontSize?: unknown; lineHeight?: unknown } | undefined;
-    const deckSize = scale?.fontSize === undefined ? null : resolveValueAgainst(resolved, 'dimension', scale.fontSize, 'fontSize').value;
-    if (deckSize) {
-      const deckLine = scale?.lineHeight === undefined ? null : resolveValueAgainst(resolved, 'number', scale.lineHeight, 'lineHeight').value;
-      deck.push(style(`deck-${name}`, key, token.value, deckSize, deckLine ?? token.value.lineHeight));
-    }
+    const scale = role ? deckScale(token) : null;
+    if (scale) deck.push(style(`deck-${name}`, key, token.value, scale.size, scale.line ?? token.value.lineHeight));
   }
+
+  const reasons: string[] = [];
+  if (colors.length > EXPORT_CAPS.colors) reasons.push(`${colors.length} colours; Claude reads at most ${EXPORT_CAPS.colors}`);
+  if (text.length + deck.length > EXPORT_CAPS.styles) reasons.push(`${text.length + deck.length} type styles; Claude reads at most ${EXPORT_CAPS.styles}`);
+  if (others.size > EXPORT_CAPS.otherFamilies) reasons.push(`${others.size} further families; Claude reads at most ${EXPORT_CAPS.otherFamilies} (${[...others.keys()].join(', ')})`);
+  for (const [key, list] of others) if (list.length > EXPORT_CAPS.otherTokens) reasons.push(`${key}: ${list.length} tokens; Claude reads at most ${EXPORT_CAPS.otherTokens} in a further family`);
+  if (reasons.length) throw new ClaudeShapeError('Claude’s shape cannot hold this system', reasons);
 
   const bg = resolved.tokens.get('color.bg.$root');
   const light = !bg || bg.type !== 'color' || relativeLuminance(bg.value) > 0.4;
-  const json: Record<string, unknown> = {
+  const json = dict<unknown>();
+  Object.assign(json, {
     name: system.name,
     version: 1,
     color: { themes: [light ? { id: 'light', name: 'Light' } : { id: 'dark', name: 'Dark' }], tokens: colors },
@@ -841,13 +885,15 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
     spacing: { tokens: spacing },
     radius: { tokens: radius },
     shadow: { tokens: shadow },
-  };
+  });
   for (const [key, list] of others) json[key] = { tokens: list };
+  // The guarantee: what is written is what Claude's page reads.
+  const dropped = validateClaudeTokens(json);
+  if (dropped.length) throw new ClaudeShapeError('the export does not satisfy Claude’s grammar', dropped);
 
-  const files: Record<string, string> = {
-    'tokens.json': `${JSON.stringify(json, null, 2)}\n`,
-    'README.md': system.law.trim() ? system.law : `# ${system.name}\n`,
-  };
+  const files = dict<string>();
+  files['tokens.json'] = `${JSON.stringify(json, null, 2)}\n`;
+  files['README.md'] = system.law.trim() ? system.law : `# ${system.name}\n`;
   for (const [path, content] of Object.entries(system.assets ?? {})) if (path.startsWith('assets/')) files[path] = content;
   return files;
 }

@@ -130,7 +130,7 @@ function firstTheme(value: unknown, themes: string[], label: string, valid: (v: 
   if (!isObject(value)) return undefined;
   const order = themes.length ? [...themes, ...Object.keys(value).filter((k) => !themes.includes(k.toLowerCase()))] : Object.keys(value);
   const first = order[0];
-  const at = (key: string) => text(value[key]) ?? text(Object.entries(value).find(([k]) => k.toLowerCase() === key)?.[1]);
+  const at = (key: string) => text(Object.entries(value).find(([k]) => k === key)?.[1]) ?? text(Object.entries(value).find(([k]) => k.toLowerCase() === key)?.[1]);
   const own = first === undefined ? undefined : at(first);
   if (own !== undefined && valid(own)) return own;
   for (const key of order.slice(1)) {
@@ -145,7 +145,7 @@ function firstTheme(value: unknown, themes: string[], label: string, valid: (v: 
 
 /** Reads a `tokens.json` (parsed) as Claude's page would, naming every drop. */
 export function readClaudeTokens(json: unknown): ClaudeReading {
-  const reading: ClaudeReading = { name: null, themes: [], colors: [], families: {}, fonts: 0, styles: [], lists: [], issues: [] };
+  const reading: ClaudeReading = { name: null, themes: [], colors: [], families: Object.create(null) as Record<string, string>, fonts: 0, styles: [], lists: [], issues: [] };
   const issues = reading.issues;
   const drop = (message: string) => issues.push({ drop: true, message });
   if (!isObject(json)) {
@@ -153,19 +153,21 @@ export function readClaudeTokens(json: unknown): ClaudeReading {
     return reading;
   }
   reading.name = text(json.name)?.trim() || null;
-  const names = new Set<string>(); // one namespace for every family but type
-  const claim = (label: string, raw: unknown): string | null => {
+  const names = new Set<string>(); // one namespace for every family but type; the first claimant keeps a name
+  const claimName = (label: string, raw: unknown): { name: string } | { refusal: string } => {
     const name = nameOf(raw);
-    if (!name) {
-      drop(`${label} ${shown(raw)}: not a token name Claude reads`);
-      return null;
-    }
-    if (names.has(name)) {
-      drop(`${label} "${name}": the name is already used by another token`);
-      return null;
-    }
+    if (!name) return { refusal: `${label} ${shown(raw)}: not a token name Claude reads` };
+    if (names.has(name)) return { refusal: `${label} "${name}": the name is already used by another token` };
     names.add(name);
-    return name;
+    return { name };
+  };
+  const claim = (label: string, raw: unknown): string | null => {
+    const claimed = claimName(label, raw);
+    if ('refusal' in claimed) {
+      drop(claimed.refusal);
+      return null;
+    }
+    return claimed.name;
   };
   let others = 0;
   for (const [key, family] of Object.entries(json)) {
@@ -179,7 +181,7 @@ export function readClaudeTokens(json: unknown): ClaudeReading {
       continue;
     }
     if (key === 'color') {
-      readColors(family, reading, claim, drop);
+      readColors(family, reading, claimName, drop);
       continue;
     }
     const kind = key === 'spacing' || key === 'radius' ? 'length' : key === 'shadow' ? 'shadow' : 'plain';
@@ -214,7 +216,7 @@ export function readClaudeTokens(json: unknown): ClaudeReading {
   return reading;
 }
 
-function readColors(family: Record<string, unknown>, reading: ClaudeReading, claim: (label: string, raw: unknown) => string | null, drop: (m: string) => void) {
+function readColors(family: Record<string, unknown>, reading: ClaudeReading, claimName: (label: string, raw: unknown) => { name: string } | { refusal: string }, drop: (m: string) => void) {
   if (text(family.note)) reading.colorNote = text(family.note);
   if (Array.isArray(family.themes)) {
     for (const theme of family.themes.slice(0, CAPS.themes)) {
@@ -225,39 +227,56 @@ function readColors(family: Record<string, unknown>, reading: ClaudeReading, cla
   if (reading.themes.length > 1) {
     reading.issues.push({ drop: false, message: `color: themes after the first (${reading.themes.slice(1).join(', ')}) are kept only in sources/claude/tokens.json; a MAWS system has one theme` });
   }
-  // First the names and values on their own, then the aliases against what survived, each finding in token order.
-  const entries: { name: string | null; raw: unknown; value?: string; usage?: string; problem?: string }[] = [];
-  const pending: ClaudeIssue[][] = [];
+  // First every name is claimed (the first claimant keeps it) and every value read; then the aliases are resolved
+  // against the namespace that survived, so a later duplicate can never stand in for the token an alias reaches. Each
+  // finding is reported in token order.
+  type Entry = { name: string | null; value?: string; usage?: string; refusal?: string; notes: ClaudeIssue[] };
+  const entries: Entry[] = [];
   for (const token of (family.tokens as unknown[]).slice(0, CAPS.colors)) {
     if (!isObject(token)) continue;
-    const local: ClaudeIssue[] = [];
-    const name = nameOf(token.name);
-    const value = name ? firstTheme(token.value, reading.themes, `color "${name}"`, (v) => claudeColorProblem(v) === null, local) : undefined;
-    const problem = !name ? undefined : value === undefined ? 'has no value' : (claudeColorProblem(value) ?? undefined);
-    entries.push({ name, raw: token.name, value, usage: text(token.usage), problem });
-    pending.push(local);
-  }
-  const literal = new Map(entries.filter((e) => e.name && e.value !== undefined && !e.problem).map((e) => [e.name!, e.value!]));
-  const resolves = (name: string, seen: string[] = []): boolean => {
-    const value = literal.get(name);
-    if (value === undefined || seen.includes(name) || seen.length > 16) return false;
-    const alias = ALIAS.exec(value.trim());
-    return alias ? resolves(alias[1]!.trim(), [...seen, name]) : true;
-  };
-  entries.forEach((entry, i) => {
-    reading.issues.push(...pending[i]!);
-    const name = claim('color', entry.raw);
-    if (!name) return;
-    if (entry.problem) return drop(`color "${name}": ${entry.problem}`);
-    const alias = ALIAS.exec(entry.value!.trim());
-    if (alias && !resolves(name)) {
-      const target = alias[1]!.trim();
-      return drop(literal.has(target) ? `color "${name}": the alias {${target}} is circular or deeper than 16` : `color "${name}": the alias {${target}} names no colour`);
+    const notes: ClaudeIssue[] = [];
+    const claimed = claimName('color', token.name);
+    if ('refusal' in claimed) {
+      entries.push({ name: null, refusal: claimed.refusal, notes });
+      continue;
     }
-    const color: ClaudeColor = { name, value: entry.value!.trim() };
+    const name = claimed.name;
+    const value = firstTheme(token.value, reading.themes, `color "${name}"`, (v) => claudeColorProblem(v) === null, notes);
+    const problem = value === undefined ? 'has no value' : claudeColorProblem(value);
+    entries.push({ name, value: value?.trim(), usage: text(token.usage), refusal: problem ? `color "${name}": ${problem}` : undefined, notes });
+  }
+  const survivors = new Map(entries.filter((e) => e.name !== null && !e.refusal).map((e) => [e.name!, e.value!]));
+  /** Where a token's alias chain ends: a colour, a target that is missing or itself drops, or a loop back to the token. */
+  const chain = (name: string): 'colour' | 'missing' | 'circular' => {
+    const seen = [name];
+    let value = survivors.get(name)!;
+    for (;;) {
+      const alias = ALIAS.exec(value);
+      if (!alias) return 'colour';
+      const target = alias[1]!.trim();
+      if (target === name || seen.length > 16) return 'circular';
+      if (seen.includes(target) || !survivors.has(target)) return 'missing';
+      seen.push(target);
+      value = survivors.get(target)!;
+    }
+  };
+  for (const entry of entries) {
+    reading.issues.push(...entry.notes);
+    if (entry.refusal) {
+      drop(entry.refusal);
+      continue;
+    }
+    const name = entry.name!;
+    const end = chain(name);
+    if (end !== 'colour') {
+      const target = ALIAS.exec(entry.value!)![1]!.trim();
+      drop(end === 'circular' ? `color "${name}": the alias {${target}} is circular or deeper than 16` : `color "${name}": the alias {${target}} names no colour`);
+      continue;
+    }
+    const color: ClaudeColor = { name, value: entry.value! };
     if (entry.usage) color.usage = entry.usage;
     reading.colors.push(color);
-  });
+  }
 }
 
 function readType(type: unknown, reading: ClaudeReading, drop: (m: string) => void) {
@@ -283,7 +302,7 @@ function readType(type: unknown, reading: ClaudeReading, drop: (m: string) => vo
     if (!isObject(group)) continue;
     const groupName = text(group.name) ?? '';
     let groupFamily = text(group.family) ?? null;
-    if (groupFamily !== null && !(groupFamily in reading.families)) {
+    if (groupFamily !== null && !Object.hasOwn(reading.families, groupFamily)) {
       drop(`type group "${groupName}": family "${groupFamily}" is not in type.families`);
       groupFamily = null;
     }
@@ -305,7 +324,7 @@ function readType(type: unknown, reading: ClaudeReading, drop: (m: string) => vo
       const out: ClaudeStyle = { name, group: groupName, family: groupFamily, fontSize: style.fontSize as string | number };
       const own = text(style.family);
       if (own !== undefined) {
-        if (own in reading.families) out.family = own;
+        if (Object.hasOwn(reading.families, own)) out.family = own;
         else drop(`type style "${name}": family "${own}" is not in type.families`);
       }
       if (style.lineHeight !== undefined) {

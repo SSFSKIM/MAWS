@@ -158,7 +158,7 @@ export function readExtensions(raw: Record<string, unknown>, h: RefHandler): Rec
   const out: Record<string, unknown> = {};
   let failed = false;
   for (const key of Object.keys(raw).sort()) {
-    const reader = READERS[key];
+    const reader = Object.hasOwn(READERS, key) ? READERS[key] : undefined;
     const value = reader ? reader(raw[key], `$extensions["${key}"]`, h) : raw[key];
     if (value === FAIL) failed = true;
     else out[key] = value;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromClaude, isClaudeShape, toClaude } from './claude';
+import { ClaudeShapeError, fromClaude, isClaudeShape, toClaude } from './claude';
 import { validateClaudeTokens } from './claude-grammar';
 import { colorToCss } from './color';
 import complete from './fixtures/complete.tokens.json';
@@ -272,5 +272,53 @@ describe('Claude’s grammar: validateClaudeTokens', () => {
       'shadow "deep": "0 1px var(--c)" is not a box-shadow Claude reads',
       'zIndex "top": "url(x)" is not a plain CSS value',
     ]);
+  });
+});
+
+describe('fix wave 1: the converter’s safety and its guarantees', () => {
+  it('never writes through an inherited property: families named __proto__ or constructor stay ordinary groups', () => {
+    const text = '{"name":"P","__proto__":{"tokens":[{"name":"polluted","value":"1"}]},"constructor":{"tokens":[{"name":"x","value":"2"}]},"type":{"fonts":[],"families":{"sans":"Inter"},"groups":[{"name":"T","family":"constructor","styles":[{"name":"body","fontSize":"16px","family":"tostring"}]}]}}';
+    const result = fromClaude({ 'tokens.json': text });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(Object.prototype, 'polluted')).toBe(false);
+    expect(validateTokenFile(serializeTokens(result.tokens)).problems).toEqual([]);
+    const v = values(result.tokens);
+    expect(v['__proto__.polluted']).toBe('1');
+    expect(v['constructor.x']).toBe('2');
+    expect(validateClaudeTokens(JSON.parse(text))).toEqual([
+      'type group "T": family "constructor" is not in type.families',
+      'type style "body": family "tostring" is not in type.families',
+    ]);
+  });
+
+  it('resolves aliases against the namespace that survives deduplication, and the import always validates', () => {
+    const json = { color: { tokens: [{ name: 'a', value: '{b}' }, { name: 'b', value: '{a}' }, { name: 'b', value: '#000000' }, { name: 'c', value: '{a}' }] } };
+    expect(validateClaudeTokens(json)).toEqual([
+      'color "a": the alias {b} is circular or deeper than 16',
+      'color "b": the alias {a} is circular or deeper than 16',
+      'color "b": the name is already used by another token',
+      'color "c": the alias {a} names no colour',
+    ]);
+    const result = fromClaude({ 'tokens.json': JSON.stringify(json) });
+    expect(validateTokenFile(serializeTokens(result.tokens)).ok).toBe(true);
+  });
+
+  it('refuses an export Claude’s caps cannot hold, naming why', () => {
+    const groups = Object.fromEntries(Array.from({ length: 13 }, (_, i) => [`g${i}`, { n: { $type: 'number', $value: i } }]));
+    const many = parseTokens({ ...complete, ...groups }).tokens!;
+    expect(() => toClaude({ name: 'Many', law: LAW, tokens: many })).toThrow(ClaudeShapeError);
+    expect(() => toClaude({ name: 'Many', law: LAW, tokens: many })).toThrow(/13 further families; Claude reads at most 12/);
+    const wide = parseTokens({ ...complete, z: Object.fromEntries(Array.from({ length: 61 }, (_, i) => [`n${i}`, { $type: 'number', $value: i }])) }).tokens!;
+    expect(() => toClaude({ name: 'Wide', law: LAW, tokens: wide })).toThrow(/z: 61 tokens; Claude reads at most 60 in a further family/);
+  });
+
+  it('names styles in one namespace: an extra style never takes a role’s or a deck style’s name', () => {
+    const typed = parseTokens({ ...complete, type: { ...(complete as { type: object }).type, 'deck-title': { $value: '{type.body}' } } }).tokens!;
+    const exported = JSON.parse(toClaude({ name: 'T', law: LAW, tokens: typed })['tokens.json']!) as { type: { groups: { styles: { name: string }[] }[] } };
+    const names = exported.type.groups.flatMap((g) => g.styles.map((s) => s.name));
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toContain('deck-title');
+    expect(names).toContain('deck-title-2');
+    expect(validateClaudeTokens(exported)).toEqual([]);
   });
 });
