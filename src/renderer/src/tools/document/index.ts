@@ -21,6 +21,11 @@ const windowDeps = (): DocumentTabDeps => ({
     const record = useSessions.getState().records.get(appSessionId as AppSessionId);
     return record ? displayTitle(record) : undefined;
   },
+  sessions: () =>
+    [...useSessions.getState().records.values()]
+      .filter((record) => !record.archived)
+      .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1))
+      .map((record) => ({ appSessionId: record.appId, title: displayTitle(record) })),
 });
 
 /** Registers the document editor (App.tsx's P3-B block); returns the registration's removal. */

@@ -72,7 +72,7 @@ function world(answers: Partial<Record<CommandName, unknown>> = {}, memory = new
     attributions: async () => new Uint8Array(),
   } as unknown as ArtifactHost;
   const confirm = vi.fn(() => false);
-  const deps: DocumentTabDeps = { host, ipc, log: () => {}, confirm, sessionTitle: () => undefined };
+  const deps: DocumentTabDeps = { host, ipc, log: () => {}, confirm, sessionTitle: () => undefined, sessions: () => [] };
   const emit = (name: string, payload: unknown) => {
     for (const listener of listeners.get(name) ?? []) listener(payload);
   };

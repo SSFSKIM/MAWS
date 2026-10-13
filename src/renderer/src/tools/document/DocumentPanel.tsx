@@ -85,6 +85,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
         onPage={onPage}
         onPreviewChange={onPreviewChange}
         onEditor={onEditor}
+        mentions={state.mentions}
       />
     </SystemScope>
   );

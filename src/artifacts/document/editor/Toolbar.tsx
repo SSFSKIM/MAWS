@@ -11,6 +11,7 @@ import { useRef, useState, type ChangeEvent, type FormEvent, type MouseEvent, ty
 import { actorKey } from '@shared/artifacts/actor';
 import { nanoid8 } from '../schema';
 import type { EditorHost } from './host-types';
+import { MentionPicker, type MentionSource } from './MentionPicker';
 import { tableJSON } from './nodes/table';
 
 const BLOCK_STYLES = [
@@ -82,7 +83,7 @@ export interface HistoryControls {
   toggle(): void;
 }
 
-export function Toolbar({ editor, artifactId, host, onFind, comments, history }: { editor: Editor; artifactId: string; host: EditorHost; onFind(): void; comments: CommentControls; history?: HistoryControls }) {
+export function Toolbar({ editor, artifactId, host, onFind, comments, history, mentions }: { editor: Editor; artifactId: string; host: EditorHost; onFind(): void; comments: CommentControls; history?: HistoryControls; mentions?: MentionSource }) {
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -108,7 +109,7 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history }:
       table: e.isActive('table'),
     }),
   });
-  const [menu, setMenu] = useState<'insert' | 'link' | null>(null);
+  const [menu, setMenu] = useState<'insert' | 'link' | 'mention' | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const imageFile = useRef<HTMLInputElement>(null);
   const run = () => editor.chain().focus();
@@ -143,7 +144,8 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history }:
     ['Diagram', () => insertBlock(editor, { type: 'diagram', attrs: { source: DIAGRAM } }, 'edit')],
     ['Pending section', () => insertBlock(editor, { type: 'pending', attrs: { intent: '' } }, 'edit')],
     ['Date', () => insertInline(editor, { type: 'date', attrs: { iso: today() } }, true)],
-    ['Mention', () => insertInline(editor, { type: 'mention', attrs: { kind: 'person', ref: actorKey(host.identity().actor), label: host.identity().name } }, true)],
+    // with a source, a picker of people, sessions and artifacts; without one, the owner, named in place
+    ['Mention', () => (mentions ? setMenu('mention') : insertInline(editor, { type: 'mention', attrs: { kind: 'person', ref: actorKey(host.identity().actor), label: host.identity().name } }, true))],
     ['Status', () => insertInline(editor, { type: 'dropdown', attrs: { options: STATUSES, value: STATUSES[0] } }, false)],
   ];
 
@@ -263,6 +265,19 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history }:
               </button>
             ))}
           </div>
+        )}
+        {menu === 'mention' && mentions && (
+          <MentionPicker
+            source={mentions}
+            onClose={() => {
+              setMenu(null);
+              run().run();
+            }}
+            onPick={({ kind, ref, label }) => {
+              setMenu(null);
+              insertInline(editor, { type: 'mention', attrs: { kind, ref, label } }, false);
+            }}
+          />
         )}
       </span>
       <input ref={imageFile} type="file" accept="image/*" aria-label="Image file" hidden onChange={(event) => void uploadImage(event)} />

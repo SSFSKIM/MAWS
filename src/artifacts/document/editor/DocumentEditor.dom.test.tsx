@@ -12,6 +12,7 @@ import { listTabs, tabBody } from '../tabs';
 import { DocumentEditor } from './DocumentEditor';
 import type { DocumentHandle, EditorHost } from './host-types';
 import { memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
+import type { MentionSource, MentionTarget } from './MentionPicker';
 import { TAB, World, doc, endOf, para, until } from './test-world';
 
 let world: World | null = null;
@@ -254,5 +255,69 @@ describe('the page for the shell', () => {
     expect(pages.at(-1)).toBe(page);
     unmount();
     expect(pages.at(-1)).toBeNull();
+  });
+});
+
+// M8 (Decision Log 25): with a source of people, sessions and artifacts (the shell's, over L's library reads), Insert ›
+// Mention opens a picker; what is picked is the chip, its kind, its ref and its label.
+describe('the mention picker', () => {
+  const targets: MentionTarget[] = [
+    { kind: 'person', ref: 'human', label: 'Owner' },
+    { kind: 'session', ref: 'app-1', label: 'Fix the build', detail: 'Session' },
+    { kind: 'artifact', ref: '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e', label: 'Launch plan', detail: 'Document' },
+  ];
+  const source = (): MentionSource & { queries: string[] } => {
+    const queries: string[] = [];
+    return { queries, search: async (query) => (queries.push(query), targets.filter((t) => t.label.toLowerCase().includes(query.toLowerCase()))) };
+  };
+
+  async function mountWith(mentions: MentionSource) {
+    world = new World(doc(para('p1', 'See ')));
+    const handle = openMemoryHandle(world.host, { log: () => {} });
+    handles.push(handle);
+    await whenSynced(handle);
+    let current: Editor | null = null;
+    render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} mentions={mentions} onEditor={(e) => (current = e)} />);
+    await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
+    act(() => void current!.commands.setTextSelection(endOf(current!, 'p1')));
+    return () => current!;
+  }
+  const results = () => within(screen.getByRole('listbox', { name: 'Mention results' }));
+  const mentionAttrs = (editor: Editor) => {
+    let attrs: unknown = null;
+    editor.state.doc.descendants((node) => void (node.type.name === 'mention' && (attrs = node.attrs)));
+    return attrs;
+  };
+
+  it('searches as the owner types and inserts the artifact picked with Enter', async () => {
+    const mentions = source();
+    const editor = await mountWith(mentions);
+    insert('Mention');
+    const field = screen.getByRole('combobox', { name: 'Mention' });
+    await until(() => results().queryAllByRole('option').length === 3, 'the first results');
+    act(() => void fireEvent.change(field, { target: { value: 'laun' } }));
+    await until(() => results().queryAllByRole('option').length === 1, 'the narrowed results');
+    expect(mentions.queries.at(-1)).toBe('laun');
+    expect(results().getByRole('option', { name: /Launch plan/ }).getAttribute('aria-selected')).toBe('true');
+    act(() => void fireEvent.keyDown(field, { key: 'Enter' }));
+    expect(screen.queryByRole('combobox', { name: 'Mention' })).toBeNull();
+    expect(mentionAttrs(editor())).toMatchObject({ kind: 'artifact', ref: '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e', label: 'Launch plan' });
+    expect(editor().view.dom.textContent).toContain('See @Launch plan');
+  });
+
+  it('moves with the arrows, picks a session by click, and leaves nothing on Escape', async () => {
+    const editor = await mountWith(source());
+    insert('Mention');
+    const field = screen.getByRole('combobox', { name: 'Mention' });
+    await until(() => results().queryAllByRole('option').length === 3, 'the results');
+    act(() => void fireEvent.keyDown(field, { key: 'ArrowDown' }));
+    expect(results().getByRole('option', { name: /Fix the build/ }).getAttribute('aria-selected')).toBe('true');
+    act(() => void fireEvent.keyDown(field, { key: 'Escape' }));
+    expect(screen.queryByRole('combobox', { name: 'Mention' })).toBeNull();
+    expect(mentionAttrs(editor())).toBeNull();
+    insert('Mention');
+    await until(() => results().queryAllByRole('option').length === 3, 'the results again');
+    act(() => void fireEvent.click(results().getByRole('option', { name: /Fix the build/ })));
+    expect(mentionAttrs(editor())).toMatchObject({ kind: 'session', ref: 'app-1', label: 'Fix the build' });
   });
 });

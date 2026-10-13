@@ -70,7 +70,7 @@ function deps(): DocumentTabDeps {
     versionState: async () => new Uint8Array(),
     attributions: async () => new Uint8Array(),
   } as unknown as ArtifactHost;
-  return { host, ipc, log: () => {}, confirm: () => false, sessionTitle: () => undefined };
+  return { host, ipc, log: () => {}, confirm: () => false, sessionTitle: () => undefined, sessions: () => [] };
 }
 
 // What L's record view does: the kind's Panel with the state held for this scope.

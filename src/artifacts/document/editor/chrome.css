@@ -723,3 +723,38 @@
   margin: 0;
   color: var(--fg-muted);
 }
+
+/* the mention picker (M8): a search field and its results under Insert */
+.doc-mention-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: calc(var(--space) * 64);
+}
+.doc-mention-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: calc(var(--space) * 64);
+  overflow-y: auto;
+}
+.doc-mention-option {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: calc(var(--space) * 2);
+  padding: var(--space) calc(var(--space) * 2);
+  border-radius: var(--radius-sm);
+  cursor: default;
+}
+.doc-mention-option[aria-selected="true"] {
+  background: var(--bg-hover);
+}
+.doc-mention-detail,
+.doc-mention-empty {
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+}
+.doc-mention-empty {
+  padding: var(--space) calc(var(--space) * 2);
+}

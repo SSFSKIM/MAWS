@@ -46,6 +46,7 @@ import { cssColor, type DocumentHandle, type EditorHost } from './host-types';
 import type { ViewEnvironment } from './nodes/views';
 import { Tabs } from './Tabs';
 import { useTabs } from './tabs-store';
+import type { MentionSource } from './MentionPicker';
 import { Toolbar } from './Toolbar';
 import './chrome.css';
 import './theme.css';
@@ -77,6 +78,8 @@ export interface DocumentEditorProps {
   onPage?(element: HTMLElement | null): void;
   /** Whether a version is shown in place of the live document (the header says read-only meanwhile). */
   onPreviewChange?(previewing: boolean): void;
+  /** Who and what Insert › Mention can name (people, sessions, artifacts); without it, a mention names the owner. */
+  mentions?: MentionSource;
 }
 
 export type DocumentRail = 'comments' | 'history' | null;
@@ -204,7 +207,7 @@ interface TabEditorProps extends DocumentEditorProps {
   onPassageClick(): void;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
@@ -311,6 +314,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           onFind={() => setFindOpen(true)}
           comments={{ comment: comments ? () => commentRef.current() : null, railOpen: rail === 'comments', openCount, toggleRail: () => openRail(rail === 'comments' ? null : 'comments') }}
           history={historyController ? { open: rail === 'history', toggle: toggleHistory } : undefined}
+          mentions={mentions}
         />
       )}
       {findOpen && <FindBar editor={editor} onClose={() => setFindOpen(false)} />}

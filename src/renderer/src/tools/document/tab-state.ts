@@ -13,6 +13,8 @@ import { createDocument, listTabs } from '@artifacts/document/tabs';
 import { listThreads, observeThreads } from '@artifacts/document/threads';
 import type { DocumentRail } from '@artifacts/document/editor/DocumentEditor';
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
+import type { MentionSource } from '@artifacts/document/editor/MentionPicker';
+import { actorKey } from '@shared/artifacts/actor';
 import type { PageSize } from '@artifacts/document/export/design-system';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
@@ -20,6 +22,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import type { DocumentExportFormat, ExportStatus } from './header';
 import { createHistoryApi } from './history-api';
+import { documentMentions } from './mentions';
 
 const ROW_QUIET_MS = 500; // a burst of writes reads the row once
 const SAVE_WAIT_MS = 3_000; // how long the close guard waits for edits in flight before it asks
@@ -31,6 +34,8 @@ export interface DocumentTabDeps {
   /** Asks the owner a yes-or-no question (the close guard's, when edits would be lost). */
   confirm(message: string): boolean;
   sessionTitle(appSessionId: string): string | undefined;
+  /** The sessions a mention can name, most recent first, by their shown titles. */
+  sessions(): Array<{ appSessionId: string; title: string }>;
 }
 
 export interface DocumentTabSnapshot {
@@ -62,6 +67,7 @@ const messageOf = (error: unknown): string => (error instanceof Error ? error.me
 export class DocumentTabState {
   readonly artifactId: string;
   readonly history: HistoryApi;
+  readonly mentions: MentionSource;
   readonly host: ArtifactHost; // the editor's assets and the identity it writes as
   private current: DocumentTabSnapshot;
   private readonly listeners = new Set<() => void>();
@@ -87,6 +93,13 @@ export class DocumentTabState {
       host: deps.host,
       viewedAt: { get: () => this.viewedBefore, set: (at) => (this.viewedBefore = at) },
       sessionTitle: deps.sessionTitle,
+      log: deps.log,
+    });
+    this.mentions = documentMentions({
+      artifactId: this.artifactId,
+      ipc: deps.ipc,
+      sessions: deps.sessions,
+      owner: () => ({ ref: actorKey(deps.host.identity().actor), name: deps.host.identity().name }),
       log: deps.log,
     });
     this.stops.push(
