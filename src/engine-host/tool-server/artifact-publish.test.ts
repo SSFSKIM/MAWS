@@ -95,6 +95,21 @@ describe('artifact_publish of an html page', () => {
     expect(w.store.listVersions(created.artifactId)).toHaveLength(2);
   });
 
+  it('mirrors a side thread’s publish as a version of its own when its raw tool-use id equals one its parent already used', async () => {
+    const created = await create({ handle: 'dash', content: '<p>one</p>', title: 'D' });
+    const first = jsonOf(await publish({ artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>two</p>' } }, { toolUseId: 'toolu_reused' as ToolUseId }));
+    expect(first).toMatchObject({ version: 2 });
+    const CHILD = 'app-child' as AppSessionId;
+    const thread = { session: new ArtifactSession(), artifactScope: [SELF] };
+    const base = await read('dash', { appSessionId: CHILD }, thread);
+    const second = jsonOf(await publish({ artifact: 'dash', baseRevision: base.revision, files: { 'index.html': '<p>three</p>' } }, { appSessionId: CHILD, toolUseId: 'toolu_reused' as ToolUseId }, thread));
+    expect(second).toMatchObject({ version: 3, ownerAppSessionId: SELF });
+    const record = (await w.deliverables.get(SELF, created.artifactId))!;
+    expect(record.versions.map((v) => readFileSync(v.path, 'utf8'))).toEqual(['<p>one</p>', '<p>two</p>', '<p>three</p>']);
+    expect(record.versions.map((v) => [v.toolUseId, v.appSessionId ?? null])).toEqual([[expect.any(String), null], ['toolu_reused', null], ['toolu_reused', CHILD]]); // the parent's own versions name no session
+    expect(readFileSync(record.path, 'utf8')).toBe('<p>three</p>');
+  });
+
   it('a side thread publishes its parent’s page after reading it: the parent’s record gains the version, nothing under the thread', async () => {
     const PARENT = 'app-parent' as AppSessionId;
     const THREAD = 'app-thread' as AppSessionId;

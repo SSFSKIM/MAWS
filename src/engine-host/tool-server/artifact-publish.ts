@@ -116,10 +116,10 @@ async function mirrored(store: ArtifactStore, mirror: X12Mirror, recorded: Artif
   const owner = await creatorOf(store, recorded.artifactId);
   const artifact = await store.readCommitted(() => store.get(recorded.artifactId, { includeDeleted: true }));
   if (owner === null || !artifact) return recorded;
-  let version = await mirror.versionOf(artifact.id, owner, ctx.toolUseId); // a repeated call's, already written
+  let version = await mirror.versionOf(artifact.id, owner, ctx.appSessionId, ctx.toolUseId); // a repeated call's, already written
   if (version === null && fresh) {
     const { path } = await store.readCommitted(() => store.contentRef(artifact.id, recorded.revision));
-    version = await mirror.pageVersion(artifact.id, owner, artifact.title, path, ctx.toolUseId);
+    version = await mirror.pageVersion(artifact.id, owner, ctx.appSessionId, artifact.title, path, ctx.toolUseId);
   }
   if (version === null) return recorded;
   const text = input.files[Object.keys(input.files)[0]!] ?? '';

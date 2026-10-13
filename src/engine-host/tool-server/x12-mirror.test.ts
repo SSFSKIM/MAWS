@@ -22,7 +22,7 @@ describe('the X12 mirror', () => {
   it('appends one version per tool-use id, deduplicated inside the record’s write chain', async () => {
     const mirror = new X12Mirror({ deliverables });
     await mirror.page({ id: ID, title: 'D', handle: 'dash' }, OWNER, { path: join(dir, 'page.html') }, 'toolu_c' as ToolUseId);
-    const both = await Promise.all([1, 2].map(() => mirror.pageVersion(ID, OWNER, 'D', join(dir, 'page.html'), 'toolu_p' as ToolUseId)));
+    const both = await Promise.all([1, 2].map(() => mirror.pageVersion(ID, OWNER, OWNER, 'D', join(dir, 'page.html'), 'toolu_p' as ToolUseId)));
     expect(both).toEqual([2, 2]);
     expect((await deliverables.get(OWNER, ID))!.versions.map((v) => v.toolUseId)).toEqual(['toolu_c', 'toolu_p']);
   });
