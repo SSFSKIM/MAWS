@@ -1,8 +1,8 @@
 // P3-G (§D1.4, acceptance 1, 3, 4, 5, 7): the floating card inside C5's real Shell. The composer slot is a probe that
 // registers a focus target as C7's composer does, so "one composer per session" is the composer store's own count.
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
@@ -17,7 +17,7 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { mainShowing } from '../test-support/panel';
 import { resetShellStores } from '../test-support/shell-stores';
-import { useFloatingCard } from './floating';
+import { dockPanel, floatPanel, useColumnWidth, useFloatingCard } from './floating';
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -39,6 +39,25 @@ function ProbeComposer({ appSessionId }: { appSessionId: AppSessionId; paneIndex
 const region = (name: string) => document.querySelector<HTMLElement>(`[data-region="${name}"]`)!;
 const card = () => screen.queryByRole('region', { name: 'Session card' });
 const composers = () => screen.queryAllByTestId('composer').map((el) => el.dataset.session);
+// happy-dom lays nothing out: the panel body is 1000 × 700, and a probe column (the browser pane's spacer) lies at
+// (300, 220) in the window, `columnWidth()` wide and 560 high, under a layer at (300, 180).
+function mockColumnLayout(columnWidth: () => number): void {
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const r = this.hasAttribute('data-probe-column')
+      ? { left: 300, top: 220, width: columnWidth(), height: 560 }
+      : this.hasAttribute('data-floating-layer')
+        ? { left: 300, top: 180, width: 1000, height: 700 }
+        : { left: 0, top: 0, width: 0, height: 0 };
+    return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => ({}) } as DOMRect;
+  });
+}
+function probeColumn(): HTMLElement {
+  const column = document.body.appendChild(document.createElement('div'));
+  column.setAttribute('data-probe-column', '');
+  return column;
+}
 const setWindowWidth = (width: number) => (window as unknown as { happyDOM: { setWindowSize(size: { width: number }): void } }).happyDOM.setWindowSize({ width });
 
 let off: () => void;
@@ -47,7 +66,7 @@ beforeEach(() => {
   resetShellStores();
   useSessions.setState({ records: new Map([[A, { ...record('app-a'), title: { text: 'Alpha session', source: 'user' } }], [B, record('app-b')]]) });
   useLayout.setState({ main: mainShowing(A) });
-  useFloatingCard.setState({ closed: false, column: null });
+  useFloatingCard.setState({ closed: false, column: null, columnDrag: null, pillHost: null });
   useComposerStore.setState({ focusTargets: new Map(), focusOnMount: new Set() });
   focused.splice(0);
   registerSlot('composer', ProbeComposer);
@@ -209,19 +228,9 @@ describe('the floating card in the Shell', () => {
   // height, and is resized by its right edge only. The live width goes to the store the pane reads (the page moves with
   // the drag); on release the column's measured width (what the page's floor left it) is written for the panel tab.
   it('over a reserved column the card lies on the column’s rect and resizes from its right edge only', () => {
-    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000);
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(700);
     let columnWidth = 430;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const r = this.hasAttribute('data-probe-column')
-        ? { left: 300, top: 220, width: columnWidth, height: 560 }
-        : this.hasAttribute('data-floating-layer')
-          ? { left: 300, top: 180, width: 1000, height: 700 }
-          : { left: 0, top: 0, width: 0, height: 0 };
-      return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => ({}) } as DOMRect;
-    });
-    const column = document.body.appendChild(document.createElement('div'));
-    column.setAttribute('data-probe-column', '');
+    mockColumnLayout(() => columnWidth);
+    const column = probeColumn();
     let release = () => {};
     act(() => void (release = useFloatingCard.getState().reserveColumn(column)));
     useLayout.getState().setPanel({ floating: true });
@@ -246,5 +255,92 @@ describe('the floating card in the Shell', () => {
     act(() => release());
     expect([card()!.style.left, card()!.style.bottom]).toEqual(['16px', '16px']);
     column.remove();
+  });
+  // M2 review: a column is layout only. A reservation arriving re-lays the card before paint, the card and its session
+  // subtree stay mounted, and the composer that had the keyboard keeps it.
+  it('a reservation arriving re-lays the open card in place: its composer stays mounted, with the keyboard', () => {
+    function FocusComposer({ appSessionId }: { appSessionId: AppSessionId; paneIndex: 0 | 1 }) {
+      const field = useRef<HTMLInputElement>(null);
+      useEffect(
+        () => registerFocusTarget(appSessionId, { focusFrame: () => field.current?.focus() } as unknown as Parameters<typeof registerFocusTarget>[1]),
+        [appSessionId],
+      );
+      return <input ref={field} aria-label="Probe composer" />;
+    }
+    registerSlot('composer', FocusComposer);
+    mockColumnLayout(() => 420);
+    render(<Shell />);
+    act(() => floatPanel());
+    const original = screen.getByRole('textbox', { name: 'Probe composer' });
+    expect(document.activeElement).toBe(original);
+    const column = probeColumn();
+    act(() => void useFloatingCard.getState().reserveColumn(column));
+    expect(card()!.dataset.floatingCard).toBe('column');
+    expect(screen.getByRole('textbox', { name: 'Probe composer' }), 'the same editor, never remounted').toBe(original);
+    expect(document.activeElement).toBe(original);
+    column.remove();
+  });
+
+  // M2 review: a column drag the card loses is abandoned, unwritten, and its live width never outlives it
+  it('a column drag lost mid-way (the column released, the panel tab changed, the card docked) leaves the stored width in force', () => {
+    mockColumnLayout(() => 430);
+    const tabs = [
+      { id: 'browser:1', toolId: 'browser', pinned: false },
+      { id: 'browser:2', toolId: 'browser', pinned: false },
+    ];
+    useLayout.setState({ panelBySession: new Map([[A, { tabs, activeTabId: 'browser:1' }]]) });
+    useLayout.getState().setFloatingCardSize('browser:2', { w: 512, h: 400 });
+    useLayout.getState().setPanel({ floating: true });
+    const width = renderHook(() => useColumnWidth());
+    render(<Shell />);
+    const drag = () => {
+      const edge = card()!.querySelector<HTMLElement>('[data-card-resize="right"]')!;
+      act(() => void fireEvent.pointerDown(edge, { pointerId: 1, button: 0, clientX: 730, clientY: 500 }));
+      act(() => void fireEvent.pointerMove(edge, { pointerId: 1, clientX: 790, clientY: 500 }));
+      expect(useFloatingCard.getState().columnDrag).toBe(490);
+      return edge;
+    };
+    const column = probeColumn();
+
+    // the column released mid-drag (another pane took the page): the drag ends, and a late release writes nothing
+    let release = () => {};
+    act(() => void (release = useFloatingCard.getState().reserveColumn(column)));
+    const edge = drag();
+    act(() => release());
+    expect(useFloatingCard.getState().columnDrag).toBeNull();
+    act(() => void fireEvent.pointerUp(edge, { pointerId: 1, clientX: 790, clientY: 500 }));
+    expect(useLayout.getState().regions.floatingCard).toEqual({ 'browser:2': { w: 512, h: 400 } });
+
+    // the panel tab under the card changed mid-drag: over the other Browser tab its stored width wins
+    act(() => void (release = useFloatingCard.getState().reserveColumn(column)));
+    drag();
+    act(() => useLayout.setState({ panelBySession: new Map([[A, { tabs, activeTabId: 'browser:2' }]]) }));
+    expect(useFloatingCard.getState().columnDrag).toBeNull();
+    expect(width.result.current).toBe(512);
+
+    // docked by the keyboard mid-drag: the card unmounts, and floating again finds the stored width
+    drag();
+    act(() => dockPanel());
+    expect(card()).toBeNull();
+    expect(useFloatingCard.getState().columnDrag).toBeNull();
+    act(() => floatPanel());
+    expect(width.result.current).toBe(512);
+    expect(useLayout.getState().regions.floatingCard).toEqual({ 'browser:2': { w: 512, h: 400 } });
+    act(() => release());
+    column.remove();
+  });
+
+  // The coordinator's ruling on M2: over a page (a native view) the browser's chrome draws the pill in its tab row
+  it('draws no pill of its own while a browser chrome hosts it', () => {
+    useLayout.getState().setPanel({ floating: true });
+    useFloatingCard.setState({ closed: true });
+    render(<Shell />);
+    const pill = () => screen.queryByRole('button', { name: 'Show session card' });
+    expect(pill()).not.toBeNull();
+    let release = () => {};
+    act(() => void (release = useFloatingCard.getState().hostPill()));
+    expect(pill()).toBeNull();
+    act(() => release());
+    expect(pill()).not.toBeNull();
   });
 });

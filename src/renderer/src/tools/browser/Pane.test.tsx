@@ -295,8 +295,8 @@ describe('the comment card’s dock', () => {
 
 // P3-G (§D3, M2): with the floating card up over a Browser tab in the panel, the pane reserves a left column for it: a
 // spacer beside the page's column, outside the element the placement measures (so the view's bounds exclude it), and
-// registered as the card's column while the pane holds the view. Closed to its pill, the pane leaves a band under the
-// page instead (the native view is drawn over the DOM, so a pill under the page could be neither seen nor clicked).
+// registered as the card's column while the pane holds the view. Closed to its pill, the pane leaves nothing: the page
+// keeps its whole box (the chrome's row draws the pill, the coordinator's ruling on M2).
 describe('the floating card’s column', () => {
   const BROWSER_TAB = 'browser:1';
   const float = (over: Partial<{ closed: boolean }> = {}) =>
@@ -309,7 +309,6 @@ describe('the floating card’s column', () => {
       useFloatingCard.setState({ closed: false, columnDrag: null, ...over });
     });
   const spacer = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-browser-reserved-column]');
-  const band = (container: HTMLElement) => container.querySelector<HTMLElement>('[data-browser-pill-band]');
   beforeEach(() => useFloatingCard.setState({ closed: false, column: null, columnDrag: null }));
 
   it('reserves a 420 px column beside the page, outside the measured element, the page keeping at least 280 px; registered while it holds the view', async () => {
@@ -332,10 +331,21 @@ describe('the floating card’s column', () => {
     const { container } = render(<BrowserPane tab={tab()} surface="panel" />);
     await frames();
     expect(spacer(container)!.style.width).toBe('512px');
-    act(() => useFloatingCard.getState().setColumnDrag(600));
+    const drag = useFloatingCard.getState().startColumnDrag();
+    act(() => drag.width(600));
     expect(spacer(container)!.style.width).toBe('600px');
-    act(() => useFloatingCard.getState().setColumnDrag(null));
+    act(() => drag.end());
     expect(spacer(container)!.style.width).toBe('512px');
+  });
+
+  // M2 review: a width stored while the page's floor held the column under the card's minimum comes back to the minimum
+  // once there is room (the floor still wins while there is none: the spacer's max-width)
+  it('asks for no less than the card’s 360 px minimum, whatever width was stored', async () => {
+    float();
+    act(() => useLayout.getState().setFloatingCardSize(BROWSER_TAB, { w: 300, h: 400 }));
+    const { container } = render(<BrowserPane tab={tab()} surface="panel" />);
+    await frames();
+    expect([spacer(container)!.style.width, spacer(container)!.style.maxWidth]).toEqual(['360px', 'calc(100% - 280px)']);
   });
 
   it('reserves nothing on a main tab, while docked, or with the panel collapsed', async () => {
@@ -371,18 +381,15 @@ describe('the floating card’s column', () => {
     expect(useFloatingCard.getState().column).toBeNull();
   });
 
-  it('closed to its pill, the column goes and a band under the page holds the pill', async () => {
+  it('closed to its pill, the column goes and the page keeps its whole column: nothing under it but the comment strip', async () => {
     float({ closed: true });
     const { container } = render(<BrowserPane tab={tab()} surface="panel" />);
     await frames();
     expect(spacer(container)).toBeNull();
     expect(useFloatingCard.getState().column).toBeNull();
-    const strip = band(container)!;
-    expect(strip.style.height).toBe('60px'); // the 28 px pill and its 16 px margins
-    expect(strip.parentElement!.matches('[data-browser-column]')).toBe(true);
-    expect(strip.previousElementSibling!.matches('[data-card-dock]'), 'under the page and its comment strip').toBe(true);
+    const column = container.querySelector('[data-browser-column]')!;
+    expect([...column.children].map((child) => (child.matches('[data-browser-pane]') ? 'page' : child.matches('[data-card-dock]') ? 'strip' : child.outerHTML))).toEqual(['page', 'strip']);
     act(() => useFloatingCard.getState().setClosed(false));
-    expect(band(container)).toBeNull();
     expect(spacer(container)).not.toBeNull();
   });
 });

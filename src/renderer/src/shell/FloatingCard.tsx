@@ -1,22 +1,21 @@
 // The floating session card and its pill (P3-G execution document, §D1.4). Rendered by the panel region while the panel
 // floats, as a sibling of its clipping content (so the region's overflow never clips it), over the panel body below the
 // header: the shown session's whole pane (`SessionPane`: the report bar, the transcript, the docked request, the tab
-// notes, the composer) under a header with the session's title, Dock and Close; or, closed, a pill with the title and
-// the unread dot. Never `role="dialog"` and never a portal into `body`: the browser's cover watch classifies both as
+// notes, the composer) under a header with the session's title, Dock and Close; or, closed, its pill (`FloatingPill.tsx`).
+// Never `role="dialog"` and never a portal into `body`: the browser's cover watch classifies both as
 // covering and would freeze the page under it. The card is resized by its top and right edges and the top-right corner,
 // never moved; the size is written once on pointer-up, per panel tab (`cardSizeKey`). M2 (§D3): while a pane reserves a
 // column for it (the browser pane, over a page, a native view the card cannot float over), the card lies on the column's
 // rect instead, full height, resized by its right edge only; the drag's width goes live to the pane through the store.
-import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FloatingCardSize } from '@shared/ipc/schema/layout';
 import { IconButton, MaximizeIcon } from '../app/IconButton';
 import { SessionPane } from '../session/SessionPane';
-import { displayTitle } from '../sessions/title';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
-import { useSessions } from '../stores/sessions';
-import { CARD_MARGIN, CARD_MIN, cardSession, cardSizeKey, closeCard, dockPanel, openCard, placeCard, useFloatingCard } from './floating';
+import { CARD_MARGIN, CARD_MIN, cardSession, cardSizeKey, closeCard, dockPanel, placeCard, useFloatingCard, type ColumnDrag } from './floating';
+import { Pill, useSessionTitle } from './FloatingPill';
 
 type Bounds = { width: number; height: number };
 
@@ -87,7 +86,9 @@ function useRectIn(layer: RefObject<HTMLElement | null>, element: HTMLElement | 
 
 // The layer over the panel host's tool body (`body`: the region's element holding the host): the card, or the pill,
 // for the session the card draws; nothing when no session is shown (§D1.4). The card lies on a reserved column once its
-// rect is measured (§D3).
+// rect is measured (§D3): the measure is a layout effect, so a reservation arriving re-lays the card before paint, and
+// the card stays mounted through it (its session's composer keeps the keyboard). A browser chrome hosting the pill in its
+// row leaves the layer none to draw.
 export function FloatingCardLayer({ body }: { body: RefObject<HTMLElement | null> }) {
   const session = useLayout(cardSession);
   const closed = useFloatingCard((s) => s.closed);
@@ -96,36 +97,54 @@ export function FloatingCardLayer({ body }: { body: RefObject<HTMLElement | null
   const top = useBodyTop(area, body);
   const bounds = useSize(area);
   const columnRect = useRectIn(area, column);
-  const placed = column === null || columnRect !== null;
+  const pillHosted = useFloatingCard((s) => s.pillHost !== null);
   return (
     <div ref={area} data-floating-layer className="pointer-events-none absolute inset-x-0 bottom-0 z-20" style={{ top: top ?? 0 }}>
       {session !== null &&
         top !== null &&
         bounds &&
-        (closed ? <Pill appSessionId={session} /> : placed && <Card key={session} appSessionId={session} bounds={bounds} column={column && columnRect && { element: column, rect: columnRect }} />)}
+        (closed ? (
+          !pillHosted && <Pill appSessionId={session} placement="floating" />
+        ) : (
+          <Card key={session} appSessionId={session} bounds={bounds} column={column && columnRect && { element: column, rect: columnRect }} />
+        ))}
     </div>
   );
 }
 
-const useTitle = (appSessionId: AppSessionId) => useSessions((s) => displayTitle(s.records.get(appSessionId)));
-
-type Gesture = { top: boolean; right: boolean; pointerX: number; pointerY: number; start: FloatingCardSize; key: string };
+// `drag`: a column's width drag (the store's, so the pane's spacer follows it); null for the floating card's own size.
+type Gesture = { top: boolean; right: boolean; pointerX: number; pointerY: number; start: FloatingCardSize; key: string; drag: ColumnDrag | null };
 type Column = { element: HTMLElement; rect: Rect };
 
 function Card({ appSessionId, bounds, column }: { appSessionId: AppSessionId; bounds: Bounds; column: Column | null }) {
-  const title = useTitle(appSessionId);
+  const title = useSessionTitle(appSessionId);
   const paneIndex = useLayout((s) => currentSet(s.main).focusedPane);
-  const stored = useLayout((s) => s.regions.floatingCard[cardSizeKey(s)]);
+  const sizeKey = useLayout(cardSizeKey);
+  const stored = useLayout((s) => s.regions.floatingCard[sizeKey]);
   const [live, setLive] = useState<FloatingCardSize | null>(null); // the size while an edge is dragged
   const gesture = useRef<Gesture | null>(null);
   const size = live ?? placeCard(stored, bounds);
+  const columnElement = column?.element ?? null;
+
+  // A gesture the card loses (it unmounts, docked mid-drag; the column comes or goes; the panel tab under it changes) is
+  // abandoned, unwritten: its live size goes, and its column drag ends itself only, never a successor's.
+  useEffect(
+    () => () => {
+      gesture.current?.drag?.end();
+      gesture.current = null;
+      setLive(null);
+    },
+    [columnElement, sizeKey],
+  );
 
   const begin = (edges: { top: boolean; right: boolean }, event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     event.preventDefault();
     event.currentTarget.setPointerCapture?.(event.pointerId); // as the Resizer does: happy-dom has none
     const start = column ? { w: column.rect.width, h: size.h } : size;
-    gesture.current = { ...edges, pointerX: event.clientX, pointerY: event.clientY, start, key: cardSizeKey(useLayout.getState()) };
+    gesture.current?.drag?.end();
+    const drag = column ? useFloatingCard.getState().startColumnDrag() : null;
+    gesture.current = { ...edges, pointerX: event.clientX, pointerY: event.clientY, start, key: sizeKey, drag };
   };
   const move = (event: ReactPointerEvent<HTMLElement>) => {
     const g = gesture.current;
@@ -134,18 +153,18 @@ function Card({ appSessionId, bounds, column }: { appSessionId: AppSessionId; bo
     const w = g.start.w + (g.right ? event.clientX - g.pointerX : 0);
     const h = g.start.h + (g.top ? g.pointerY - event.clientY : 0);
     // A column's width goes to the pane, whose spacer holds the page's floor; the card follows the spacer's rect.
-    if (column) useFloatingCard.getState().setColumnDrag(Math.round(Math.max(CARD_MIN.w, w)));
+    if (g.drag) g.drag.width(Math.round(Math.max(CARD_MIN.w, w)));
     else setLive(placeCard({ w, h }, bounds));
   };
   const end = () => {
     const g = gesture.current;
     if (!g) return;
     gesture.current = null;
-    if (column) {
+    if (g.drag) {
       // What the pane gave the column (the page's floor may have held it narrower than the drag); the height stays the
       // panel tab's, for a card floating over it when another pane shows its page.
-      if (useFloatingCard.getState().columnDrag !== null) useLayout.getState().setFloatingCardSize(g.key, { w: Math.round(column.element.getBoundingClientRect().width), h: size.h });
-      useFloatingCard.getState().setColumnDrag(null);
+      if (column && useFloatingCard.getState().columnDrag !== null) useLayout.getState().setFloatingCardSize(g.key, { w: Math.round(column.element.getBoundingClientRect().width), h: size.h });
+      g.drag.end();
       return;
     }
     if (live) useLayout.getState().setFloatingCardSize(g.key, live);
@@ -212,24 +231,5 @@ function Card({ appSessionId, bounds, column }: { appSessionId: AppSessionId; bo
         />
       )}
     </div>
-  );
-}
-
-function Pill({ appSessionId }: { appSessionId: AppSessionId }) {
-  const title = useTitle(appSessionId);
-  const unread = useSessions((s) => s.records.get(appSessionId)?.unread === true);
-  return (
-    <button
-      type="button"
-      aria-label="Show session card"
-      title={unread ? `${title} · Unread` : title}
-      data-floating-pill
-      onClick={openCard}
-      style={{ left: CARD_MARGIN, bottom: CARD_MARGIN }}
-      className="pointer-events-auto absolute inline-flex h-7 items-center gap-2 rounded-full border border-border-strong bg-bg-raised px-3 text-ui-sm text-fg shadow-float outline-accent hover:bg-bg-hover focus-visible:outline-2"
-    >
-      <span className="max-w-[220px] truncate">{title}</span>
-      {unread && <span aria-label="Unread" role="img" className="block size-[5px] shrink-0 rounded-full bg-info" />}
-    </button>
   );
 }

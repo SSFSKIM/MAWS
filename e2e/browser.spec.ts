@@ -494,7 +494,7 @@ test('placement: the panel resized by the keyboard and by a 40-step drag, and th
 
 // ---- P3-G: the floating card's column over a Browser tab (docs/doperpowers/plans/2026-10-12-p3-g-shell.md, M2) ----------
 
-test('P3-G acceptance 6: over a Browser tab the floating card is a live column at the pane’s left, the view beside it and never covered; its right edge moves the page; the pill keeps a band under the page', async () => {
+test('P3-G acceptance 6: over a Browser tab the floating card is a live column at the pane’s left, the view beside it and never covered; its right edge moves the page; closed, the pill sits in the chrome’s tab row and the page keeps its full height', async () => {
   await browserScene(['P3-G: column'], async (s) => {
     const [id] = s.ids as [AppSessionId];
     await show(s, id);
@@ -548,14 +548,24 @@ test('P3-G acceptance 6: over a Browser tab the floating card is a live column a
     expect(Math.round((await box(card)).width)).toBe(500);
     expect((await tabState(s, t)).tab?.covered).toBe(false);
 
-    // Close: the column goes, the page takes the width, and the pill sits in a band under the page, clear of the view
+    // Close: the column goes and the page takes the pane's whole box; the pill sits at the right end of the chrome's tab
+    // row (DOM, above the page), never over the view (the coordinator's ruling on M2)
+    const pageBottom = async () => Math.round((await box(panel)).y + (await box(panel)).height);
     await card.getByRole('button', { name: 'Close session card' }).click();
     await expect(pill).toBeVisible();
+    await expect(pill).toHaveText('P3-G: column');
     await expect(column).toHaveCount(0);
+    await expect(s.panel.locator('[data-floating-layer] [data-floating-pill]'), 'the layer draws no second pill').toHaveCount(0);
     await expectOnPane(s, t, pane, 'panel');
-    const [view, chip] = [(await viewOf(s, t))!, await box(pill)];
-    expect(view.bounds!.y + view.bounds!.height, 'the view ends above the pill').toBeLessThanOrEqual(chip.y);    // the pill brings the card back as the column, at the width the drag left
+    const [view, chip, row] = [(await viewOf(s, t))!, await box(pill), await box(panel.locator('[data-browser-chrome] > div').first())];
+    expect(chip.y).toBeGreaterThanOrEqual(row.y);
+    expect(chip.y + chip.height, 'the pill inside the tab row').toBeLessThanOrEqual(row.y + row.height);
+    expect(Math.abs(chip.x + chip.width - (row.x + row.width)), 'at the row’s right end').toBeLessThanOrEqual(8);
+    expect(view.bounds!.y, 'the view below the pill').toBeGreaterThanOrEqual(chip.y + chip.height);
+    expect(Math.abs(view.bounds!.y + view.bounds!.height - (await pageBottom())), 'the view’s bottom at the pane’s bottom').toBeLessThanOrEqual(1);
+    // the pill brings the card back as the column, at the width the drag left
     await pill.click();
+    await expect(pill).toHaveCount(0);
     await expect(card).toHaveAttribute('data-floating-card', 'column');
     await expectOnPane(s, t, pane, 'panel');
     expect(Math.round((await box(column)).width)).toBe(500);

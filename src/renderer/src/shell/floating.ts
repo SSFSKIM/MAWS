@@ -1,9 +1,9 @@
 // The floating session card's state (P3-G execution document, §D1; X30). `regions.panel.floating` (persisted) puts the
 // panel in the main column's place and the shown session in the card; what is transient lives here: whether the card is
 // closed to its pill (a moment's choice, never restored: a launch with `floating` shows the card open; reset whenever
-// `floating` changes), the browser pane's column reservation and the column's width while its edge is dragged (§D3, M2).
-// The transitions the action table, the header's Float button, the divider and the card run are here too, so every path
-// marks focus the same way (§D1.2).
+// `floating` changes), the browser pane's column reservation, the column's width while its edge is dragged, and whether
+// a browser chrome hosts the pill (§D3, M2). The transitions the action table, the header's Float button, the divider and
+// the card run are here too, so every path marks focus the same way (§D1.2).
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FloatingCardSize, LayoutRegions } from '@shared/ipc/schema/layout';
@@ -16,32 +16,65 @@ export interface ColumnReservation {
   element: HTMLElement;
 }
 
+// One drag of the column's right edge: its widths reach the store only while it is the current drag, and its end clears
+// only itself, so an abandoned gesture can never clear or overwrite its successor's.
+export interface ColumnDrag {
+  width(width: number): void;
+  end(): void;
+}
+
 export interface FloatingCardState {
   closed: boolean; // the card closed to its pill
   column: ColumnReservation | null;
   // The column's width while the card's right edge is dragged (the pane's spacer follows it, so the page moves with the
   // drag); null otherwise. `regions` is written once, on release.
   columnDrag: number | null;
+  pillHost: object | null; // a browser chrome drawing the pill in its row (the layer then draws none)
   setClosed(closed: boolean): void;
-  // The latest reservation wins; its release clears only itself.
+  // The latest reservation, drag or host wins; each one's release clears only itself.
   reserveColumn(element: HTMLElement): () => void;
-  setColumnDrag(width: number | null): void;
+  startColumnDrag(): ColumnDrag;
+  hostPill(): () => void;
 }
 
-export const useFloatingCard = create<FloatingCardState>()((set, get) => ({
-  closed: false,
-  column: null,
-  columnDrag: null,
-  setClosed: (closed) => set({ closed }),
-  setColumnDrag: (columnDrag) => set({ columnDrag }),
-  reserveColumn(element) {
-    const reservation: ColumnReservation = { element };
-    set({ column: reservation });
-    return () => {
-      if (get().column === reservation) set({ column: null });
-    };
-  },
-}));
+export const useFloatingCard = create<FloatingCardState>()((set, get) => {
+  let drag: object | null = null; // the current column drag's token
+  return {
+    closed: false,
+    column: null,
+    columnDrag: null,
+    pillHost: null,
+    setClosed: (closed) => set({ closed }),
+    reserveColumn(element) {
+      const reservation: ColumnReservation = { element };
+      set({ column: reservation });
+      return () => {
+        if (get().column === reservation) set({ column: null });
+      };
+    },
+    startColumnDrag() {
+      const token = {};
+      drag = token;
+      return {
+        width: (width) => {
+          if (drag === token) set({ columnDrag: width });
+        },
+        end: () => {
+          if (drag !== token) return;
+          drag = null;
+          set({ columnDrag: null });
+        },
+      };
+    },
+    hostPill() {
+      const host = {};
+      set({ pillHost: host });
+      return () => {
+        if (get().pillHost === host) set({ pillHost: null });
+      };
+    },
+  };
+});
 
 useLayout.subscribe((state, before) => {
   if (state.regions.panel.floating !== before.regions.panel.floating && useFloatingCard.getState().closed) useFloatingCard.setState({ closed: false });
@@ -81,23 +114,19 @@ export function placeCard(stored: FloatingCardSize | undefined, bounds: { width:
 // ---- the room a native-view pane leaves the card (§D3) -----------------------------------------------------------------
 
 // A page in the panel is a native view, drawn over the DOM: the card cannot float over it. The pane showing one leaves
-// the card a column at its left instead (the page live beside it), and the pill a band under the page.
+// the card a column at its left instead (the page live beside it); the pill moves into the browser's chrome row (the
+// coordinator's ruling on M2: the page keeps its full height).
 export const COLUMN_PAGE_MIN = 280; // the page keeps at least this much beside the column
-export const PILL_BAND = 28 + 2 * CARD_MARGIN; // the pill's 28 px and its margins
 
-export interface CardRoom {
-  column: number | null; // the column's width (before the page's floor), while the card is open
-  pill: boolean; // the card is closed to its pill
-}
-
-// What the card asks of the panel's pane under it now: the column's width is the live drag's, else the stored width of
-// the panel tab under the card, else the card's default.
-export function useCardRoom(): CardRoom {
+// The column the open card asks of the panel's pane under it (null while no card is open): the live drag's width, else
+// the stored width of the panel tab under the card, else the card's default; never under the card's minimum (a width
+// stored while the page's floor held the column narrower comes back to it once there is room).
+export function useColumnWidth(): number | null {
   const up = useLayout((s) => cardSession(s) !== null);
   const stored = useLayout((s) => s.regions.floatingCard[cardSizeKey(s)]?.w);
   const closed = useFloatingCard((s) => s.closed);
   const drag = useFloatingCard((s) => s.columnDrag);
-  return { column: up && !closed ? (drag ?? stored ?? CARD_DEFAULT.w) : null, pill: up && closed };
+  return up && !closed ? Math.max(CARD_MIN.w, drag ?? stored ?? CARD_DEFAULT.w) : null;
 }
 
 // ---- transitions (§D1.2) ----------------------------------------------------------------------------------------------

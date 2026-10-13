@@ -40,7 +40,7 @@ let off: () => void;
 beforeEach(() => {
   resetShellStores();
   useLayout.setState({ main: mainShowing(A) });
-  useFloatingCard.setState({ closed: false, column: null });
+  useFloatingCard.setState({ closed: false, column: null, columnDrag: null, pillHost: null });
   useComposerStore.setState({ focusOnMount: new Set() });
   off = registerShellActions(fakeClient({}).client);
 });
@@ -130,6 +130,29 @@ describe('the floating card’s closed state and focus', () => {
     expect(useFloatingCard.getState().column?.element).toBe(two);
     releaseTwo();
     expect(useFloatingCard.getState().column).toBeNull();
+  });
+
+  // M2 review: an abandoned column drag can neither write its width over its successor's nor clear it
+  it('a column drag reaches the store only while it is the current one, and its end clears only itself', () => {
+    const first = useFloatingCard.getState().startColumnDrag();
+    first.width(400);
+    expect(useFloatingCard.getState().columnDrag).toBe(400);
+    const second = useFloatingCard.getState().startColumnDrag();
+    second.width(500);
+    first.width(410);
+    first.end();
+    expect(useFloatingCard.getState().columnDrag).toBe(500);
+    second.end();
+    expect(useFloatingCard.getState().columnDrag).toBeNull();
+  });
+
+  it('the pill’s host is the latest chrome’s, and releasing an earlier one leaves it', () => {
+    const releaseOne = useFloatingCard.getState().hostPill();
+    const releaseTwo = useFloatingCard.getState().hostPill();
+    releaseOne();
+    expect(useFloatingCard.getState().pillHost).not.toBeNull();
+    releaseTwo();
+    expect(useFloatingCard.getState().pillHost).toBeNull();
   });
 });
 
