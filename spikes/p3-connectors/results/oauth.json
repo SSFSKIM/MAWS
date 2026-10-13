@@ -1,0 +1,100 @@
+{
+  "unauthenticated": {
+    "status": 401,
+    "wwwAuthenticate": "Bearer error=\"invalid_token\", error_description=\"Missing Authorization header\", resource_metadata=\"http://127.0.0.1:47821/.well-known/oauth-protected-resource/mcp\""
+  },
+  "mawsFlow": {
+    "ms": 70.4,
+    "steps": [
+      "401 -> discovery, registration, authorize redirect",
+      "code exchanged at token endpoint",
+      "connected"
+    ],
+    "clientId": "bac94786-7ea2-40aa-b1ee-4b3664cb7808",
+    "authorizationUrlParams": {
+      "response_type": "code",
+      "client_id": "bac94786-7ea2-40aa-b1ee-4b3664cb7808",
+      "code_challenge_method": "S256",
+      "redirect_uri": "http://127.0.0.1:51750/callback",
+      "scope": "metrics:read",
+      "resource": "http://127.0.0.1:47821/mcp"
+    },
+    "tokenFields": [
+      "access_token",
+      "token_type",
+      "expires_in",
+      "scope",
+      "refresh_token",
+      "issuer"
+    ]
+  },
+  "mawsCall": {
+    "server": {
+      "name": "toy-metrics",
+      "version": "0.0.1"
+    },
+    "protocolVersion": "2025-11-25",
+    "tools": [
+      {
+        "name": "metrics_snapshot",
+        "annotations": {
+          "readOnlyHint": true,
+          "openWorldHint": false
+        },
+        "hasOutputSchema": true
+      },
+      {
+        "name": "send_document",
+        "annotations": {
+          "readOnlyHint": false,
+          "destructiveHint": false,
+          "idempotentHint": false
+        },
+        "hasOutputSchema": false
+      },
+      {
+        "name": "call_count",
+        "annotations": null,
+        "hasOutputSchema": false
+      }
+    ],
+    "listMs": 16,
+    "callMs": [
+      11.6,
+      9.3
+    ],
+    "firstResult": {
+      "series": "revenue",
+      "at": "2026-10-13T01:16:02.445Z",
+      "rows": [
+        {
+          "t": 1791854102445,
+          "v": 107
+        },
+        {
+          "t": 1791854162445,
+          "v": 110
+        }
+      ]
+    },
+    "isError": false
+  },
+  "mawsReconnect": {
+    "steps": [
+      "connected with stored tokens"
+    ]
+  },
+  "crossAudience": {
+    "status": 401,
+    "wwwAuthenticate": "Bearer error=\"invalid_token\", error_description=\"token audience http://127.0.0.1:47821/mcp is not http://127.0.0.1:47822/mcp\", resource_metadata=\"http://127.0.0.1:47822/.well-known/oauth-protected-resource/mcp\""
+  },
+  "borrowedAccessToken": {
+    "works": true,
+    "note": "a bearer token works for whoever holds it, within its audience and lifetime"
+  },
+  "mawsRefreshedEnginesGrant": {
+    "ok": true,
+    "rotated": true
+  },
+  "enginesNextRefresh": "InvalidGrantError: refresh token unknown, rotated away, or not issued to this client"
+}

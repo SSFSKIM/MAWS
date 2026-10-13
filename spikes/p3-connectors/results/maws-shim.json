@@ -1,0 +1,25 @@
+{
+  "connectMs": 58.5,
+  "server": {
+    "name": "maws",
+    "version": "0.0.0-shim"
+  },
+  "protocolVersion": null,
+  "tools": [
+    {
+      "name": "shim_echo",
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "hasOutputSchema": false
+    }
+  ],
+  "listMs": 0.4,
+  "callMs": [
+    0.7,
+    0.6
+  ],
+  "firstResult": "{\n  \"echoed\": \"hello\"\n}",
+  "isError": false
+}

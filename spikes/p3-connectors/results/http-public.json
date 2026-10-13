@@ -1,0 +1,35 @@
+{
+  "url": "https://mcp.deepwiki.com/mcp",
+  "connectMs": 498.1,
+  "server": {
+    "name": "DeepWiki",
+    "version": "2.14.3"
+  },
+  "protocolVersion": "2025-11-25",
+  "tools": [
+    {
+      "name": "ask_wiki_question",
+      "annotations": null,
+      "hasOutputSchema": true
+    },
+    {
+      "name": "read_wiki_contents",
+      "annotations": null,
+      "hasOutputSchema": true
+    },
+    {
+      "name": "read_wiki_structure",
+      "annotations": null,
+      "hasOutputSchema": true
+    }
+  ],
+  "listMs": 154.3,
+  "callMs": [
+    187,
+    204.9
+  ],
+  "firstResult": {
+    "result": "Available pages for modelcontextprotocol/typescript-sdk:\n\n- 1 Overview\n  - 1.1 Installation and Setup\n  - 1.2 Monorepo Structure and Packages\n  - 1.3 Core Protocol Concepts\n- 2 Architecture\n  - 2.1 Protocol Foundation\n  - 2.2 Type System and Message Schemas\n  - 2.3 Communication Lifecycle\n  - 2.4 Wire Codecs and Era-Aware Schemas\n- 3 Server Implementation\n  - 3.1 McpServer High-Level API\n  - 3.2 Tool Registration and Execution\n  - 3.3 Resource and Prompt Management\n  - 3.4 Low-Level Server Protocol Class\n  - 3.5 Serving over HTTP\n  - 3.6 Middleware Integration\n  - 3.7 Serving over Stdio\n  - 3.8 Server Examples and Patterns\n- 4 Client Implementation\n  - 4.1 Client Class and High-Level API\n  - 4.2 Streamable HTTP Client Transport\n  - 4.3 SSE Client Transport\n  - 4.4 Stdio and In-Memory Transports\n  - 4.5 Response Caching\n  - 4.6 Client Examples and Patterns\n- 5 OAuth Authentication\n  - 5.1 OAuth Client Flow and Providers\n  - 5.2 Machine-to-Machine Authentication\n  - 5.3 OAuth Server Integration\n- 6 Transport System\n  - 6.1 Transport Interface and Contract\n  - 6.2 Transport Comparison and Selection\n- 7 Advanced Features\n  - 7.1 Session Management and Resumability\n  - 7.2 Elicitation and Input Required\n  - 7.3 Sampling and LLM Requests\n  - 7.4 Capabilities System\n  - 7.5 Notification System and Subscriptions\n  - 7.6 Schema Validation\n  - 7.7 Custom Methods and Extensions\n- 8 Development Guide\n  - 8.1 Building and Testing\n  - 8.2 Conformance Testing\n  - 8.3 CI/CD and Release Process\n  - 8.4 Package Structure and Distribution\n  - 8.5 Contributing Guidelines\n- 9 Migration Guides\n  - 9.1 Migrating from v1 to v2\n  - 9.2 Adopting the 2026-07-28 Protocol\n- 10 Troubleshooting and FAQ\n- 11 Glossary"
+  },
+  "isError": false
+}

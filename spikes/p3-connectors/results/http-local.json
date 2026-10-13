@@ -1,0 +1,59 @@
+{
+  "connectMs": 43.7,
+  "server": {
+    "name": "toy-metrics",
+    "version": "0.0.1"
+  },
+  "protocolVersion": "2025-11-25",
+  "tools": [
+    {
+      "name": "metrics_snapshot",
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      },
+      "hasOutputSchema": true
+    },
+    {
+      "name": "send_document",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false
+      },
+      "hasOutputSchema": false
+    },
+    {
+      "name": "call_count",
+      "annotations": null,
+      "hasOutputSchema": false
+    }
+  ],
+  "listMs": 6.8,
+  "callMs": [
+    6.1,
+    4.7,
+    4.2,
+    4.1,
+    6.9
+  ],
+  "firstResult": {
+    "series": "revenue",
+    "at": "2026-10-13T01:16:00.599Z",
+    "rows": [
+      {
+        "t": 1791854040599,
+        "v": 107
+      },
+      {
+        "t": 1791854100599,
+        "v": 110
+      },
+      {
+        "t": 1791854160599,
+        "v": 104
+      }
+    ]
+  },
+  "isError": false
+}
