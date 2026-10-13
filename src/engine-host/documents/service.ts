@@ -19,9 +19,14 @@
 // the doc and the other connections go on. Each content frame runs inside a savepoint of the batch: the kind's
 // `beforeApply` with the raw bytes, the apply, the forwarding edit it returned, `afterUpdate` (Decision Log 18 and 21).
 // If anything fails after the apply (a hook, or state the check let through left pending), the frame's rows are taken
-// back, nothing of it is sent, and the doc is evicted: dropped with its connections, reloaded by the next attach. The
-// frame's own update gets its attribution row after `afterUpdate` returns, so authorship the hook carries (a move, a
-// retype) lands in it; the thread rows the hooks return are written in the same savepoint (Decision Log 23c, 25j).
+// back, nothing of it is sent, and the doc is evicted: dropped with its connections, reloaded by the next attach. Every
+// row the frame writes (its own update, the forwarding edit, `afterUpdate`'s write) gets its attribution row after
+// `afterUpdate` returns, so authorship the hook carries (a move, a retype) lands in each of them; the thread rows the
+// hooks return are written in the same savepoint (Decision Log 23c, 25j, 29a).
+//
+// Memory (Decision Log 29b; parent Decision Log 37). A document nobody holds (no renderer and no agent replica attached)
+// stays loaded for `IDLE_UNLOAD_MS` after its last connection closes or its last committed write, so a window reopened
+// within that time gets the same doc without a reload; then it is unloaded. Shutdown unloads at once.
 //
 // The artifact store (store.ts, M3) writes its own rows (entities, versions, ops) through `inBatch` and a write's
 // `inFrame`, inside the same batch, so they too commit before anything reveals them.
@@ -65,6 +70,7 @@ import { AgentReplica } from './replica';
 export const HEAD_TAIL_ROWS = 2_000; // the head is rewritten once the log tail behind it passes this many rows …
 export const HEAD_TAIL_BYTES = 1024 * 1024; // … or this many bytes (Decision Log 8)
 export const REPLICA_IDLE_MS = 10 * 60_000; // an agent replica closes after this long without a call (Decision Log 9)
+export const IDLE_UNLOAD_MS = 60_000; // a document nobody holds is unloaded after this long (Decision Log 29b)
 const REJECTIONS_KEPT = 100;
 
 export interface Connection {
@@ -107,11 +113,12 @@ interface HostDoc {
   restored: Restored | null; // the latest restore, re-announced after every step 2
   provenance: { merged: ContentMap | null; pending: ContentMap[] };
   lastApplied: Uint8Array | null; // the update the last apply integrated, if any
-  // While a frame's own update integrates, its attribution row waits until the kind's `afterUpdate` has returned (any
-  // carried authorship applies first, Decision Log 25j); written in the same savepoint.
-  deferAttribution: boolean;
-  pendingAttribution: { seq: number; at: number; map: ContentMap } | null;
+  // From a frame's own update until the kind's `afterUpdate` has returned, the attribution rows of every update the frame
+  // writes wait here, in seq order, so the authorship the hook carries applies to each (Decision Log 25j, 29a); written
+  // in the same savepoint. Null outside that span: a row is attributed as it is written.
+  deferred: { seq: number; at: number; map: ContentMap }[] | null;
   readonly loadMs: number;
+  idleTimer: ReturnType<typeof setTimeout> | null; // set while nobody holds the doc: its unload
 }
 
 // One artifact's rows in a commit: the revision they reached and who wrote them (the store's change feed, its version
@@ -148,6 +155,7 @@ export interface ServiceOptions {
   headTailRows?: number;
   headTailBytes?: number;
   replicaIdleMs?: number;
+  idleUnloadMs?: number;
 }
 
 const LOAD = Symbol('load'); // the origin of a load's applies, which are already in the log
@@ -176,6 +184,7 @@ export class DocumentService {
   private readonly headTailRows: number;
   private readonly headTailBytes: number;
   private readonly replicaIdleMs: number;
+  private readonly idleUnloadMs: number;
 
   constructor(
     readonly storage: DocumentStorage,
@@ -188,6 +197,7 @@ export class DocumentService {
     this.headTailRows = options.headTailRows ?? HEAD_TAIL_ROWS;
     this.headTailBytes = options.headTailBytes ?? HEAD_TAIL_BYTES;
     this.replicaIdleMs = options.replicaIdleMs ?? REPLICA_IDLE_MS;
+    this.idleUnloadMs = options.idleUnloadMs ?? IDLE_UNLOAD_MS;
     for (const adapter of options.adapters ?? []) this.registerAdapter(adapter);
   }
 
@@ -215,6 +225,7 @@ export class DocumentService {
   attach(artifactId: string, port: HostPort, actor: Actor): Connection {
     if (this.closed) throw new Error('the document service is closed');
     const hostDoc = this.open(artifactId);
+    this.cancelIdle(hostDoc);
     const conn: Connection = { kind: 'connection', id: this.nextConnId++, artifactId, actor, key: actorKey(actor), received: 0, ackDue: false, closed: false, awarenessClients: new Set(), port };
     hostDoc.conns.add(conn);
     port.onMessage((data) => this.receive(conn, data));
@@ -324,7 +335,7 @@ export class DocumentService {
     }
   }
 
-  // The live doc, opened if it is not (unloaded again at the end of a flush if no connection holds it). Read-only: a
+  // The live doc, opened if it is not (unloaded after the idle grace period if no connection holds it). Read-only: a
   // write goes through `writeAs`.
   live(artifactId: string): Doc {
     if (this.closed) throw new Error('the document service is closed');
@@ -437,9 +448,9 @@ export class DocumentService {
       restored: stored.restored,
       provenance: { merged: null, pending: [] },
       lastApplied: null,
-      deferAttribution: false,
-      pendingAttribution: null,
+      deferred: null,
       loadMs: performance.now() - started,
+      idleTimer: null,
     };
     hostDoc.awareness.setLocalState(null); // the host has no presence of its own
     onUpdate(doc, (update, origin) => this.integrated(hostDoc, update, origin));
@@ -539,22 +550,17 @@ export class DocumentService {
     return failed === null;
   }
 
-  // Applies a frame's own update (an incoming one, or a host-originated edit), holding back its attribution row; answers
-  // what it integrated, if anything.
+  // Applies a frame's own update (an incoming one, or a host-originated edit) and starts holding back the attribution rows
+  // of the frame's writes until `afterUpdate` returns; answers what the update integrated, if anything.
   private applyOwn(hostDoc: HostDoc, apply: () => void): Uint8Array | null {
     hostDoc.lastApplied = null;
-    hostDoc.pendingAttribution = null;
-    hostDoc.deferAttribution = true;
-    try {
-      apply();
-    } finally {
-      hostDoc.deferAttribution = false;
-    }
+    hostDoc.deferred = [];
+    apply();
     return hostDoc.lastApplied as Uint8Array | null;
   }
 
-  // The kind's `afterUpdate` on what the frame's own update integrated (through the actor's host replica), then that
-  // update's attribution row with any authorship the hook carried, and the hook's thread rows.
+  // The kind's `afterUpdate` on what the frame's own update integrated (through the actor's host replica), then the
+  // attribution rows of the frame's writes with any authorship the hook carried, and the hook's thread rows.
   private afterUpdate(hostDoc: HostDoc, adapter: KindAdapter | undefined, actor: Actor, applied: Uint8Array | null): void {
     const after: { outcome?: ReturnType<NonNullable<KindAdapter['afterUpdate']>> } = {};
     if (applied && adapter?.afterUpdate) this.writeThrough(hostDoc, actor, (doc) => (after.outcome = adapter.afterUpdate!(doc, { artifactId: hostDoc.id, update: applied, actor })));
@@ -562,13 +568,16 @@ export class DocumentService {
     if (after.outcome?.threads) this.storage.writeThreads(hostDoc.id, after.outcome.threads);
   }
 
+  // The held-back rows in seq order, each carried against the provenance before it (an earlier row of the same frame
+  // included, so a repair copying forwarded text credits that text's author).
   private attribute(hostDoc: HostDoc, carries?: Carry[]): void {
-    const pending = hostDoc.pendingAttribution;
-    if (!pending) return;
-    hostDoc.pendingAttribution = null;
-    const map = carries && carries.length > 0 ? carryAttribution(pending.map, this.provenance(hostDoc.id), carries) : pending.map;
-    this.storage.attributeInBatch({ artifactId: hostDoc.id, seq: pending.seq, at: pending.at, provenance: encodeMap(map) });
-    hostDoc.provenance.pending.push(map);
+    const rows = hostDoc.deferred;
+    hostDoc.deferred = null;
+    for (const row of rows ?? []) {
+      const map = carries && carries.length > 0 ? carryAttribution(row.map, this.provenance(hostDoc.id), carries) : row.map;
+      this.storage.attributeInBatch({ artifactId: hostDoc.id, seq: row.seq, at: row.at, provenance: encodeMap(map) });
+      hostDoc.provenance.pending.push(map);
+    }
   }
 
   // Runs one frame's work inside a savepoint of the batch. On a throw the frame's rows are taken back and the doc is
@@ -652,9 +661,9 @@ export class DocumentService {
     const hostClient = writer.kind === 'replica' ? writer.doc.clientID : undefined;
     if (hostClient !== undefined && fresh.includes(hostClient)) hostDoc.hostClients.set(writer.key, hostClient);
     const map = attributionMap(ids, { insertActor: (client) => hostDoc.bindings.get(client) ?? writer.key, deleteActor: writer.key, at });
-    const deferred = hostDoc.deferAttribution && hostDoc.pendingAttribution === null;
+    const deferred = hostDoc.deferred;
     const seq = this.storage.appendInBatch({ artifactId: hostDoc.id, actor: writer.actor, at, update, provenance: deferred ? undefined : encodeMap(map), bindClients: fresh, hostClient });
-    if (deferred) hostDoc.pendingAttribution = { seq, at, map };
+    if (deferred) deferred.push({ seq, at, map });
     else hostDoc.provenance.pending.push(map);
     hostDoc.revision = seq;
     hostDoc.tailRows += 1;
@@ -727,7 +736,26 @@ export class DocumentService {
         }
       }
     }
-    for (const hostDoc of [...this.docs.values()]) if (hostDoc.conns.size === 0) this.unload(hostDoc);
+    // A doc nobody holds starts its grace period, restarted by a write it just committed.
+    const written = new Set(committed.map((change) => change.artifactId));
+    for (const hostDoc of this.docs.values()) {
+      if (hostDoc.conns.size > 0 || (hostDoc.idleTimer && !written.has(hostDoc.id))) continue;
+      this.cancelIdle(hostDoc);
+      hostDoc.idleTimer = setTimeout(() => this.unloadIdle(hostDoc), this.idleUnloadMs);
+      hostDoc.idleTimer.unref?.();
+    }
+  }
+
+  // The grace period ended. A doc with rows in the open batch stays: the commit starts a new period.
+  private unloadIdle(hostDoc: HostDoc): void {
+    hostDoc.idleTimer = null;
+    if (this.closed || this.docs.get(hostDoc.id) !== hostDoc || hostDoc.conns.size > 0 || this.dirty.has(hostDoc.id)) return;
+    this.unload(hostDoc);
+  }
+
+  private cancelIdle(hostDoc: HostDoc): void {
+    if (hostDoc.idleTimer) clearTimeout(hostDoc.idleTimer);
+    hostDoc.idleTimer = null;
   }
 
   // The head checkpoint at the doc's committed revision (an open doc's live state, else read from the store).
@@ -784,6 +812,7 @@ export class DocumentService {
   }
 
   private unload(hostDoc: HostDoc): void {
+    this.cancelIdle(hostDoc);
     for (const conn of [...hostDoc.conns]) this.closeConn(conn);
     for (const replica of hostDoc.replicas.values()) {
       replica.off();
@@ -826,6 +855,6 @@ export class DocumentService {
     const hostDoc = this.docs.get(conn.artifactId);
     if (!hostDoc || !hostDoc.conns.delete(conn)) return;
     if (conn.awarenessClients.size > 0) awarenessProtocol.removeAwarenessStates(hostDoc.awareness, [...conn.awarenessClients], null);
-    if (hostDoc.conns.size === 0) this.scheduleFlush(); // the flush unloads a doc nobody holds
+    if (hostDoc.conns.size === 0) this.scheduleFlush(); // the flush starts the grace period of a doc nobody holds
   }
 }
