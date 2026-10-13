@@ -16,6 +16,12 @@ export interface TokensCssOptions {
   /** The selector the properties are set on: `:root` for a standalone page or a frame, `[data-ds-scope="<id>"]` in the app. */
   scope?: string;
   medium?: Medium;
+  /**
+   * Private family names to set before authored ones (lower-cased authored name → alias): an in-app scope's faces are
+   * declared under names of their own, so a system's bundled face neither collides with another system's nor stands in
+   * for a family the window already uses. `tokens.css` as a file never has them.
+   */
+  fontAliases?: ReadonlyMap<string, string>;
 }
 
 const n = (value: number) => String(round4(value));
@@ -32,15 +38,22 @@ const CSS_WIDE = new Set(['inherit', 'initial', 'unset', 'revert', 'revert-layer
 export const cssString = (text: string): string =>
   `"${[...text].map((ch) => (/["\\;{}:<>]/.test(ch) || ch.charCodeAt(0) < 0x20 || ch === '\u007f' ? `\\${ch.charCodeAt(0).toString(16)} ` : ch)).join('')}"`;
 
-/** A family list in CSS: a single identifier (Inter, serif, -apple-system) as is, any other name quoted. */
-export function fontFamilyCss(value: FontFamilyValue): string {
+/**
+ * A family list in CSS: a single identifier (Inter, serif, -apple-system) as is, any other name quoted. With aliases,
+ * each aliased family is preceded by its alias, so the stack's order of fallbacks is kept.
+ */
+export function fontFamilyCss(value: FontFamilyValue, aliases?: ReadonlyMap<string, string>): string {
   return (typeof value === 'string' ? [value] : value)
+    .flatMap((name) => {
+      const alias = aliases?.get(name.toLowerCase());
+      return alias ? [alias, name] : [name];
+    })
     .map((name) => (/^-?[A-Za-z_][A-Za-z0-9_-]*$/.test(name) && !CSS_WIDE.has(name.toLowerCase()) ? name : cssString(name)))
     .join(', ');
 }
 
 /** One token's value in CSS (a typography token has three, written by `declarations`). */
-export function cssValue(token: Exclude<ResolvedToken, { type: 'typography' }>): string {
+export function cssValue(token: Exclude<ResolvedToken, { type: 'typography' }>, aliases?: ReadonlyMap<string, string>): string {
   switch (token.type) {
     case 'color':
       return colorToCss(token.value);
@@ -48,7 +61,7 @@ export function cssValue(token: Exclude<ResolvedToken, { type: 'typography' }>):
     case 'duration':
       return measure(token.value);
     case 'fontFamily':
-      return fontFamilyCss(token.value);
+      return fontFamilyCss(token.value, aliases);
     case 'fontWeight':
     case 'number':
       return n(token.value);
@@ -78,9 +91,9 @@ function deckScale(token: Extract<ResolvedToken, { type: 'typography' }>, resolv
   return lineHeight === null ? { fontSize } : { fontSize, lineHeight };
 }
 
-function declarations(token: ResolvedToken, medium: Medium, resolved: ResolvedTokens): [string, string][] {
+function declarations(token: ResolvedToken, medium: Medium, resolved: ResolvedTokens, aliases?: ReadonlyMap<string, string>): [string, string][] {
   const names = cssNamesOf(token.path, token.type);
-  if (token.type !== 'typography') return names.map((name) => [name, cssValue(token)]);
+  if (token.type !== 'typography') return names.map((name) => [name, cssValue(token, aliases)]);
   const deck = medium === 'deck' ? deckScale(token, resolved) : null;
   const size = deck?.fontSize ?? token.value.fontSize;
   const line = deck?.lineHeight ?? token.value.lineHeight;
@@ -125,11 +138,11 @@ function pageDeclarations(tokens: TokenSet, resolved: ResolvedTokens): [string, 
  * The custom properties of a system at the medium's scale, in order: each name's value and the token path that wrote it
  * (`''` for the page's). On a collision the first (a role) wins, and the page's names are never a token's.
  */
-function properties(tokens: TokenSet, medium: Medium, resolved: ResolvedTokens): Map<string, { value: string; path: string }> {
+function properties(tokens: TokenSet, medium: Medium, resolved: ResolvedTokens, aliases?: ReadonlyMap<string, string>): Map<string, { value: string; path: string }> {
   const written = new Map<string, { value: string; path: string }>();
   const reserved = new Set<string>(PAGE_CSS_NAMES);
   for (const token of resolved.tokens.values()) {
-    for (const [name, value] of declarations(token, medium, resolved)) {
+    for (const [name, value] of declarations(token, medium, resolved, aliases)) {
       if (written.has(name) || reserved.has(name)) continue;
       written.set(name, { value, path: token.path });
     }
@@ -145,9 +158,9 @@ export function tokenProperties(tokens: TokenSet, medium: Medium = 'document'): 
 
 /** The stylesheet for `tokens` inside `scope`, at the medium's type scale. Byte-stable for equal input. */
 export function generateTokensCss(tokens: TokenSet, options: TokensCssOptions = {}): string {
-  const { scope = ':root', medium = 'document' } = options;
+  const { scope = ':root', medium = 'document', fontAliases } = options;
   const resolved = resolveTokens(tokens);
-  const props = properties(tokens, medium, resolved);
+  const props = properties(tokens, medium, resolved, fontAliases);
   const written = new Map([...props].map(([name, { path }]) => [name, path]));
   const lines = [...props].map(([name, { value }]) => `  ${name}: ${value};`);
   const out = ['/* tokens.css, generated from tokens.tokens.json: edits here are not kept */', `${scope} {`, ...lines, '}'];
@@ -168,7 +181,7 @@ export function generateTokensCss(tokens: TokenSet, options: TokensCssOptions = 
     out.push(
       '',
       `${scope} .ds-type-${role} {`,
-      `  font-family: ${varOf(raw.fontFamily, 'fontFamily') ?? fontFamilyCss(token.value.fontFamily)};`,
+      `  font-family: ${varOf(raw.fontFamily, 'fontFamily') ?? fontFamilyCss(token.value.fontFamily, fontAliases)};`,
       `  font-size: var(${size});`,
       `  line-height: var(${line});`,
       `  font-weight: var(${weight});`,

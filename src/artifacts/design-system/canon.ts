@@ -151,7 +151,7 @@ const FIXED_NAMES = new Set(ROLES.flatMap((role) => cssNamesOf(role.path, role.t
 const FORBIDDEN_TAGS = new Set([...OUTSIDE_TAGS, 'iframe', 'frame', 'frameset', 'object', 'embed', 'portal', 'applet']);
 const URL_ATTRS = new Set(['href', 'src', 'srcset', 'poster', 'data', 'action', 'formaction', 'xlink:href', 'background', 'cite', 'ping']);
 // SVG presentation attributes whose values are CSS (a `url()` paint, a `var()`): validated as the declarations they are.
-const PRESENTATION_ATTRS = new Set([
+export const PRESENTATION_ATTRS: ReadonlySet<string> = new Set([
   'fill', 'stroke', 'filter', 'clip-path', 'mask', 'marker-start', 'marker-mid', 'marker-end', 'cursor', 'color', 'stop-color', 'flood-color', 'lighting-color',
 ]);
 const OUTSIDE_ASSETS = 'points outside assets/; canon reads only its own assets/ files';
