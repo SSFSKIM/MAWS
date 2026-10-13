@@ -24,10 +24,12 @@ import { askSheet } from '../tools/maws/ask/store';
 import { openAnchor, ownerAnchorOf } from './anchor'; // P2-C
 import { nextNeedsYou } from './derive';
 import { displayTitle } from '../sessions/title';
+import { panelInMain } from '../app/regions'; // P3-G
+import { openCardSession } from '../shell/floating'; // P3-G
 
 const openInFocusedPane = (appSessionId: AppSessionId) => {
   const layout = useLayout.getState();
-  layout.setPanel({ maximized: false });
+  layout.revealMain(); // P3-G: a maximized or floating panel docks
   layout.openTab({ kind: 'session', appSessionId }, { pane: 'focused' });
 };
 
@@ -54,7 +56,8 @@ function openItem(appSessionId: AppSessionId, item: AttentionItem | undefined): 
 
 // E11 (W-C; E1's live sitting): a session whose tab is in front in a pane has its request on screen already, the
 // docked card (C7); a toast would only cover the panel's action bar. A file tab of the session does not count (the
-// docked card is in the session's own pane), and neither does a pane under a maximized panel (visibility.ts's rule).
+// docked card is in the session's own pane), and neither does a pane under a maximized panel (visibility.ts's rule). P3-G:
+// nor one under a floating panel, where the open floating card is the session's pane (its docked request included).
 // W-C review m1: an ask's surface is the panel's Question sheet, which E1 opens whenever the session is the shown one
 // (a file tab of it counting), so for a `maws` ask the open panel showing that session is on screen too. Scale-review C
 // scalpel-3#1: only a `maws` ask; the engine's AskUserQuestion is a `question` item as well, but its card docks in the
@@ -64,7 +67,8 @@ function requestOnScreen(appSessionId: AppSessionId, item: AttentionItem | undef
   const { main, regions } = useLayout.getState();
   const panelOpen = !regions.panel.collapsed;
   const inFront = currentSet(main).panes.some((pane) => pane.activeTabId === tabId({ kind: 'session', appSessionId }));
-  if (inFront && !(regions.panel.maximized && panelOpen)) return true;
+  if (inFront && !panelInMain(regions)) return true;
+  if (openCardSession({ main, regions }) === appSessionId) return true; // P3-G
   const shown = shownSession(main);
   if (panelOpen && shown !== null && sideChildrenShown().get(shown) === appSessionId) return true;
   // P2-E1 start (2026-10-09): a thread a comment card draws on screen shows its requests inline (C7's card in the card's

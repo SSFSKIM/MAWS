@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -28,20 +28,34 @@ describe('layout value shapes', () => {
   });
 
   // W11: version 3's expanded projects replace version 2's open page and version 1's collapsed lists; an earlier value
-  // keeps its sizes, sort and Overview rect.
-  it('reads a version-1 or version-2 regions value as version 3', () => {
+  // keeps its sizes, sort and Overview rect. P3-G (§D1.1): version 4 adds the floating state and the card's sizes; every
+  // earlier version reads as version 4, not floating and with no card sizes.
+  it('reads a version-1, version-2 or version-3 regions value as version 4', () => {
     const v1 = {
       version: 1,
       sidebar: { width: 240, collapsed: true, sort: 'recency', collapsedProjects: ['proj-a'], collapsedSections: ['pinned'] },
-      panel: { width: 320, collapsed: false, maximized: false },
+      panel: { width: 320, collapsed: false, maximized: true },
     };
-    expect(StoredRegionsSchema.parse(v1)).toEqual({ version: 3, sidebar: { width: 240, collapsed: true, sort: 'recency', expandedProjects: [] }, panel: v1.panel, overview: null });
+    const panel = { ...v1.panel, floating: false };
+    expect(StoredRegionsSchema.parse(v1)).toEqual({ version: 4, sidebar: { width: 240, collapsed: true, sort: 'recency', expandedProjects: [] }, panel, overview: null, floatingCard: {} });
     const v2 = { version: 2, sidebar: { width: 260, collapsed: false, sort: 'priority', openProject: 'other' }, panel: v1.panel, overview: { x: 40, y: 12, width: 880, height: 640 } };
-    expect(StoredRegionsSchema.parse(v2)).toEqual({ version: 3, sidebar: { width: 260, collapsed: false, sort: 'priority', expandedProjects: ['other'] }, panel: v1.panel, overview: v2.overview });
+    expect(StoredRegionsSchema.parse(v2)).toEqual({ version: 4, sidebar: { width: 260, collapsed: false, sort: 'priority', expandedProjects: ['other'] }, panel, overview: v2.overview, floatingCard: {} });
     expect(StoredRegionsSchema.parse({ ...v2, sidebar: { ...v2.sidebar, openProject: null } }).sidebar.expandedProjects).toEqual([]);
-    const v3 = { ...LAYOUT_DEFAULTS.regions, sidebar: { ...LAYOUT_DEFAULTS.regions.sidebar, expandedProjects: ['proj-a', 'other'] } };
-    expect(StoredRegionsSchema.parse(v3)).toEqual(v3);
+    const v3 = { version: 3, sidebar: { width: 280, collapsed: false, sort: 'recency', expandedProjects: ['proj-a', 'other'] }, panel: { width: 500, collapsed: true, maximized: false }, overview: v2.overview };
+    expect(StoredRegionsSchema.parse(v3)).toEqual({ ...v3, version: 4, panel: { ...v3.panel, floating: false }, floatingCard: {} });
     expect(StoredRegionsSchema.safeParse({ ...v3, sidebar: { ...v3.sidebar, openProject: null } }).success).toBe(false);
+    // An older shape never carries the newer fields
+    expect(StoredRegionsSchema.safeParse({ ...v3, panel: { ...v3.panel, floating: true } }).success).toBe(false);
+    expect(StoredRegionsSchema.safeParse({ ...v3, floatingCard: {} }).success).toBe(false);
+  });
+
+  it('reads version 4 as it is: the floating state and the card sizes per panel tab', () => {
+    const v4 = { ...LAYOUT_DEFAULTS.regions, panel: { width: 420, collapsed: false, maximized: false, floating: true }, floatingCard: { summary: { w: 420, h: 380 }, 'browser:t1': { w: 500, h: 600 } } };
+    expect(StoredRegionsSchema.parse(v4)).toEqual(v4);
+    expect(LayoutRegionsSchema.safeParse({ ...v4, panel: { ...v4.panel, floating: undefined } }).success).toBe(false);
+    expect(LayoutRegionsSchema.safeParse({ ...v4, floatingCard: { summary: { w: 420.5, h: 380 } } }).success).toBe(false);
+    expect(LayoutRegionsSchema.safeParse({ ...v4, floatingCard: { summary: { w: 420, h: 380, x: 0 } } }).success).toBe(false);
+    expect(LAYOUT_DEFAULTS.regions).toMatchObject({ version: 4, panel: { floating: false }, floatingCard: {} });
   });
 
   it('accepts the key grammar and nothing else', () => {
@@ -141,7 +155,7 @@ describe('layout value shapes', () => {
       expect(StoredMainSchema.parse(main)).toEqual(main);
       const pane = { tabs: [session(1)], activeTabId: 'session:a1' };
       expect(StoredMainSchema.safeParse(stored({ panes: [pane, pane, pane] })).success).toBe(false);
-      expect(StoredMainSchema.safeParse(stored({ panes: [pane], closedTabs: [{ ...session(2), kind: 'nope' }] })).success).toBe(false);
+      expect(StoredMainSchema.safeParse(stored({ panes: [pane], closedTabs: [{ ...session(2), pinned: 'yes' }] })).success).toBe(false); // P3-G (§D5): a tab of an unknown kind is dropped instead
     });
 
     // A throw would reject hydration's reads as a whole, so the store would never hydrate (nor persist); a malformed
@@ -162,6 +176,94 @@ describe('layout value shapes', () => {
     expect(StoredMainSchema.parse(main)).toEqual({ ...main, panes: [{ tabs: [session], activeTabId: 'session:a1' }], closedTabs: [session] });
   });
 
+  // P3-G (§D5): the Artifacts tab, a singleton like Settings that the pin control never applies to.
+  it('admits the Artifacts tab as an unpinnable singleton', () => {
+    const artifacts = { id: 'artifacts', kind: 'artifacts', pinned: false };
+    expect(TabRefSchema.parse(artifacts)).toEqual(artifacts);
+    expect(TabRefSchema.safeParse({ ...artifacts, pinned: true }).success).toBe(false);
+    expect(TabRefSchema.safeParse({ ...artifacts, id: 'artifacts:2' }).success).toBe(false);
+    expect(tabId({ kind: 'artifacts' })).toBe('artifacts');
+    expect(UNPINNABLE_KINDS.has('artifacts')).toBe(true);
+  });
+
+  // P3-G (§D5; the coordinator's condition, 2026-10-12): `main.tabs` keeps version 2 when a tab kind is added, so its
+  // reader drops a tab of a kind it does not know (a later build's, after a downgrade) rather than failing the whole
+  // value back to the default; the rest of the layout is kept, and the read warns once.
+  describe('a stored main.tabs holding a tab of a kind this build does not know', () => {
+    const session = (n: number) => ({ id: `session:a${n}`, kind: 'session', appSessionId: `a${n}`, pinned: false });
+    const later = (n: number) => ({ id: `library:${n}`, kind: 'library', shelf: n, pinned: false });
+    const v2 = (panes: unknown[], over: object = {}) => ({ version: 2, current: 'proj-x', sets: { 'proj-x': { panes, focusedPane: 0, splitRatio: 0.4, ...over }, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs: [] });
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+      warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => warn.mockRestore());
+
+    it('drops the tab from a pane, keeping the pane’s active tab', () => {
+      const main = v2([{ tabs: [session(1), later(1), session(2)], activeTabId: 'session:a2' }]);
+      expect(StoredMainSchema.parse(main)).toEqual(v2([{ tabs: [session(1), session(2)], activeTabId: 'session:a2' }]));
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('[layout] dropped 1 tab(s) of unknown kind: library');
+    });
+
+    it('activates the pane’s first remaining tab when the dropped tab was the active one', () => {
+      const main = v2([{ tabs: [session(1), later(1), session(2)], activeTabId: 'library:1' }]);
+      expect(StoredMainSchema.parse(main)).toEqual(v2([{ tabs: [session(1), session(2)], activeTabId: 'session:a1' }]));
+    });
+
+    it('drops a pane the tab was alone in, focusing pane 0, and leaves one empty pane when nothing else was open', () => {
+      const split = v2([{ tabs: [session(1)], activeTabId: 'session:a1' }, { tabs: [later(1)], activeTabId: 'library:1' }], { focusedPane: 1 });
+      expect(StoredMainSchema.parse(split)).toEqual(v2([{ tabs: [session(1)], activeTabId: 'session:a1' }]));
+      const alone = v2([{ tabs: [later(1)], activeTabId: 'library:1' }]);
+      expect(StoredMainSchema.parse(alone)).toEqual(v2([{ tabs: [], activeTabId: '' }]));
+    });
+
+    it('drops the tab from the closed-tab history', () => {
+      const main = { ...v2([{ tabs: [session(1)], activeTabId: 'session:a1' }]), closedTabs: [session(2), later(1), session(3)] };
+      expect(StoredMainSchema.parse(main).closedTabs).toEqual([session(2), session(3)]);
+    });
+
+    it('warns once per read, naming every unknown kind, across sets, panes and the history', () => {
+      const other = (n: number) => ({ id: `canvas:${n}`, kind: 'canvas', pinned: false });
+      const main = {
+        version: 2,
+        current: 'proj-x',
+        sets: {
+          'proj-x': { panes: [{ tabs: [later(1), session(1)], activeTabId: 'session:a1' }, { tabs: [other(1), session(2)], activeTabId: 'canvas:1' }], focusedPane: 1, splitRatio: 0.4 },
+          none: { panes: [{ tabs: [later(3)], activeTabId: 'library:3' }], focusedPane: 0, splitRatio: 0.5 },
+        },
+        closedTabs: [later(2)],
+      };
+      expect(StoredMainSchema.parse(main)).toEqual({
+        version: 2,
+        current: 'proj-x',
+        closedTabs: [],
+        sets: {
+          'proj-x': { panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }, { tabs: [session(2)], activeTabId: 'session:a2' }], focusedPane: 1, splitRatio: 0.4 },
+          none: { panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5 },
+        },
+      });
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith('[layout] dropped 4 tab(s) of unknown kind: library, canvas');
+    });
+
+    it('reads version 1 the same way', () => {
+      const main = { version: 1, panes: [{ tabs: [later(1), session(1)], activeTabId: 'library:1' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [later(2)] };
+      expect(StoredMainSchema.parse(main)).toEqual({ ...main, panes: [{ tabs: [session(1)], activeTabId: 'session:a1' }], closedTabs: [] });
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('stays silent for a layout with only known kinds, and still fails a known kind that breaks its schema', () => {
+      const main = v2([{ tabs: [session(1)], activeTabId: 'session:a1' }]);
+      expect(StoredMainSchema.parse(main)).toEqual(main);
+      expect(StoredMainSchema.safeParse(v2([{ tabs: [{ ...session(1), pinned: 'yes' }], activeTabId: 'session:a1' }])).success).toBe(false);
+      expect(StoredMainSchema.safeParse({ ...main, closedTabs: [{ id: 'settings', kind: 'settings', pinned: false }] }).success).toBe(false);
+      // a tab with no kind at all is malformed, not of an unknown kind
+      expect(StoredMainSchema.safeParse(v2([{ tabs: [{ id: 'x', pinned: false }], activeTabId: 'x' }])).success).toBe(false);
+      expect(warn).not.toHaveBeenCalled();
+    });
+  });
+
   it('owns get, set, list, openExternal and setEnabledActions in main', () => {
     expect(Object.fromEntries(Object.entries(commands).map(([name, spec]) => [name, spec.owner]))).toEqual({
       'layout.get': 'main',
@@ -176,6 +278,7 @@ describe('layout value shapes', () => {
       'layout.quitWaitAnswer': 'main', // C12: its banner's Quit now and Cancel
       'layout.unsavedFiles': 'main', // E5: a window's dirty file tabs, for the quit question
       'layout.saveAllDone': 'main', // E5: a window's answer to the quit question's Save all
+      'layout.captureRegion': 'main', // P3-G: Mark-up's still of a region the window draws
     });
   });
 

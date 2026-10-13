@@ -72,6 +72,7 @@ import { readRecentTurns } from './sessions/recent-turns'; // P2-D
 import type { CommandResult } from '@shared/ipc/schema';
 import { saveTextFile } from './files/save-text';
 import { captureChords } from './settings/capture-chords';
+import { captureRegion } from './layout/capture-region'; // P3-G
 import { createClaudeUsageApp, execRunner } from './gateway/claude-usage-app';
 import { startEngineConfigure } from './settings/engine-configure';
 import { startHostConfigure } from './settings/host-configure'; // E10
@@ -488,6 +489,8 @@ void startWithProfileLock(app, () => {
     revealPath(path, { configHome: () => claudeConfigDir(process.env, home), sessionDirectories, showItemInFolder: (p) => shell.showItemInFolder(p) }),
   );
   registerMainHandler('layout.captureChords', captureChords); // the Settings tab's chord capture sets the menu aside (M5 fix wave)
+  // P3-G (§D4.1): Mark-up's still of a region the sender's window draws
+  registerMainHandler('layout.captureRegion', (input, { sender }) => captureRegion(input, sender, BrowserWindow.fromWebContents(sender)));
   registerMainHandler('layout.saveTextFile', (input, { sender }) =>
     saveTextFile(input, {
       downloads: app.getPath('downloads'),

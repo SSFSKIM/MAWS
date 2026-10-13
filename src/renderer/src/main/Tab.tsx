@@ -83,6 +83,8 @@ function useTabLabel(tab: TabRef): TabLabel {
       return { title: 'Diagnostics', secondary: null, glyph: null, fileType: null };
     case 'settings':
       return { title: 'Settings', secondary: null, glyph: null, fileType: null };
+    case 'artifacts': // P3-G
+      return { title: 'Artifacts', secondary: null, glyph: null, fileType: null };
     case 'deliverable': // E2
       return { title: deliverableTitle ?? DELIVERABLES_COPY.fallbackTitle, secondary: null, glyph: null, fileType: null };
     case 'browser': // E4a

@@ -66,7 +66,7 @@ const titles: (string | null)[] = [];
 function Mounted({ state }: { state: LogHandle }) {
   const ctx: PanelToolContext = {
     appSessionId: A, session: null, status: null, pinned: false, visible: true, focusRequest: 0, setTitle: (suffix) => void titles.push(suffix), close: () => {},
-    openTool: panelHost.addTool,
+    openTool: panelHost.addTool, editorHost: { surface: 'panel', tabId: 'log:test' },
   };
   const Body = logTool.render;
   return <Body state={state} ctx={ctx} />;
@@ -340,7 +340,7 @@ describe('log tool: openLog and openFullLog', () => {
 function HostedBody({ tabId }: { tabId: string }) {
   const ctx: PanelToolContext = {
     appSessionId: A, session: null, status: null, pinned: false, visible: true, focusRequest: 0, setTitle: (suffix) => setTitle(tabId, suffix), close: () => {},
-    openTool: panelHost.addTool,
+    openTool: panelHost.addTool, editorHost: { surface: 'panel', tabId: 'log:test' },
   };
   const Body = logTool.render;
   return <Body state={instanceOf(tabId)!.state as LogHandle} ctx={ctx} />;

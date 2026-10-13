@@ -21,6 +21,7 @@ import { BROWSER_DIALOG_EXCERPT_MAX_CHARS } from '../../browser/dialog';
 import { BROWSER_ACTIVITIES_KEPT, BrowserAgentActivitySchema } from '../../browser/activity';
 // E13 end
 import type { CommandSpec } from './common';
+import { CaptureAnswerSchema } from '../../markup/image'; // P3-G
 // E4d start
 import { AnchorSchema } from '../../anchor/anchor';
 import { CommentDisarmReasonSchema } from '../../browser/comment';
@@ -318,6 +319,11 @@ export const commands = {
   },
   'browser.extensions.puzzle': { input: z.strictObject({ tabId: BrowserTabIdSchema, anchor: ControlRectSchema }), output: z.void(), owner: 'main' },
   // cua #90 end
+  // P3-G start
+  // P3-G (§D4.1): the still of the tab's page that Mark-up draws over (its view captured at device pixels, under the
+  // crop's caps); refused for a tab not placed in the sender's window, `image: null` when no picture could be taken.
+  'browser.view.capture': { input: TabOnly, output: CaptureAnswerSchema, owner: 'main' },
+  // P3-G end
 } as const satisfies Record<`browser.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

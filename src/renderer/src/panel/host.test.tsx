@@ -24,6 +24,7 @@ import {
 } from '../test-support/panel';
 import type { PanelTool } from './tool';
 import { connectPanelHost, panelHost, pendingAdds, registerPanelTool, restoredLogIds, togglePinned, usePanelHost } from './host';
+import { editorHostOf, registerEditorHost } from './editor-host'; // P3-G
 
 const cleanups: (() => void)[] = [];
 const connect = () => cleanups.push(connectPanelHost());
@@ -258,6 +259,29 @@ describe('panel host transitions', () => {
     await act(async () => void expect(await panelHost.closeTab(id)).toBe(true));
     expect(panelOf(A)!.tabs).toEqual([]);
     expect(probe.disposed).toEqual([id]);
+  });
+
+  // P3-G (§D2.3): an editor's X32 closeGuard is asked before the tool's beforeClose; either false vetoes, and a disposed
+  // instance's registration goes with it.
+  it('closeTab asks the tab’s editor-host closeGuard before beforeClose; disposal clears the registration', async () => {
+    const { tool, probe } = probeTool('t');
+    register(tool);
+    const id = panelHost.addTool('t', { appSessionId: A });
+    const scope = { surface: 'panel', tabId: id } as const;
+    let answer = false;
+    registerEditorHost(scope, { title: 'Doc', closeGuard: async () => answer });
+    expect(await panelHost.closeTab(id)).toBe(false);
+    expect(probe.beforeClose, 'the guard’s veto stops before the tool is asked').toEqual([]);
+    expect(panelOf(A)!.tabs.map((r) => r.id)).toEqual([id]);
+    expect(usePanelHost.getState().closing.has(id)).toBe(false);
+    answer = true;
+    probe.veto = () => true;
+    expect(await panelHost.closeTab(id)).toBe(false);
+    expect(probe.beforeClose, 'past the guard the tool still vetoes').toEqual([id]);
+    probe.veto = () => false;
+    expect(await panelHost.closeTab(id)).toBe(true);
+    expect(probe.disposed).toEqual([id]);
+    expect(editorHostOf(scope)).toBeNull();
   });
 
   it('a beforeClose that throws keeps the tab', async () => {

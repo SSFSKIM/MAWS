@@ -11,7 +11,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { PickedFile } from '@shared/ipc/schema/layout';
 import type { Draft } from '@shared/ipc/schema/session';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
-import { memoryTargetOf, requestChipWidget, takePrefill, useComposerStore, type Prefill } from '../../stores/composer';
+import { drainComposerAttachments, memoryTargetOf, requestChipWidget, takePrefill, useComposerStore, type AttachOptions, type Prefill } from '../../stores/composer';
 import { toast } from '../../stores/notices';
 import { useTranscriptStore } from '../../transcript';
 import { popupTakesKeys } from '../mentions/popup';
@@ -38,17 +38,27 @@ export interface DraftPort {
   clearsOnSend?(): boolean;
 }
 
+// P3-G: `separated` text (Mark-up's label) gets a space before it when it would otherwise join the text before the caret
+// (a word or a chip), and none at the start of a line, after whitespace or after a line break (dictation's rule).
+export interface InsertOptions {
+  separated?: boolean;
+}
+
 // A submission is asked for one way (W10): Enter and ⌘Enter, and the Composer's Send, reach the caller's `onSubmit`
 // through the same path, which decides what it does (while a turn runs the Composer makes it a `next` steer).
 export interface EditorHandle {
   focus(): void;
   submit(): void; // the submit control: as a key would (refused while one is in flight)
-  insertText(text: string): void; // at the caret, the one it left when not focused, else at the end (C11's insertComposerText)
+  insertText(text: string, options?: InsertOptions): void; // at the caret, the one it left when not focused, else at the end (C11's insertComposerText)
   doc(): ComposerDoc;
   serialize(): Serialized;
   clear(): void;
   removeAttachment(id: string): void;
   attachPicked(files: PickedFile[]): Promise<void>; // `layout.pickFiles`'s answer: bytes attach, a path is mentioned
+  // P3-G (§D4.3): as a drop of the files at the caret, once the stored draft is restored (Mark-up's Add to chat, the
+  // composer store's attachment queue); whether the editor took them (false while busy, once unmounted, or once the
+  // options' `signal` aborted, nothing added then)
+  attachFiles(files: File[], options?: AttachOptions): Promise<boolean>;
   openSlash(): void; // the "+" menu's Slash commands: the palette at `/`
   openWidget(name: string, args?: string): boolean; // whether a widget is registered for the name (C11: `args`, default '')
   // R2: the engine's prompt requests on a plugin's behalf: the box as it stands (its text as sent, the caret at its end:
@@ -146,6 +156,7 @@ export class EditorController {
   private silent = false;
   private busy = false;
   private loaded = false;
+  private restoring: Promise<void> = Promise.resolve(); // P3-G: this mount's draft restoration
   private revision = 0; // local edits and submission invalidate pending restoration
   private lifetime = 0;
   private live = false;
@@ -259,7 +270,7 @@ export class EditorController {
       this.setDoc(flight.doc, { silently: true, caret: null });
       void this.followSubmission(flight);
     }
-    void this.drafts.load().then((draft) => {
+    this.restoring = this.drafts.load().then((draft) => {
       if (!this.live || this.lifetime !== lifetime) return;
       const doc = docOfDraft(draft);
       if (this.revision === revision && !this.busy && doc && this.editor && isEmptyDoc(this.editor.getJSON())) {
@@ -404,6 +415,7 @@ export class EditorController {
       void this.refreshHistory();
     }
     this.takePrefill();
+    drainComposerAttachments(this.inputs.appSessionId); // P3-G: what the queue held while this composer was busy, after a prefill (it adds to the document)
   }
 
   // Replaces the document; with a caret, also takes focus there at once (Tiptap's own focus waits a frame, and a key
@@ -489,38 +501,64 @@ export class EditorController {
     if (this.editor) this.setAttachments([...attachmentsOf(this.editor.getJSON()), attachment]);
   }
 
-  private async attachImage(name: string, blob: Blob, mediaType: string, epoch: number): Promise<void> {
+  // Whether attachments started at `epoch` may still land: the editor live and not busy, no submission or unmount since,
+  // and the asker's `signal` (P3-G: Mark-up discarded meanwhile) not aborted.
+  private taking(epoch: number, signal?: AbortSignal): boolean {
+    return this.live && !this.busy && this.attachmentEpoch === epoch && !signal?.aborted;
+  }
+
+  // False when the editor stopped taking attachments meanwhile (a submission, an unmount, the asker's cancel); a refused
+  // or unreadable image is warned about and counts as taken.
+  private async attachImage(name: string, blob: Blob, mediaType: string, epoch: number, signal?: AbortSignal): Promise<boolean> {
     try {
       const out = await downscaleImage(blob, mediaType);
-      if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
+      if (!this.taking(epoch, signal)) return false;
       const refusal = imageRefusal(name, out.bytes);
-      if (refusal) return warn(refusal);
-      this.addAttachment({ id: atomId('attachment'), kind: 'image', name, mediaType: out.mediaType, bytes: out.bytes, data: out.data, persisted: true });
+      if (refusal) warn(refusal);
+      else this.addAttachment({ id: atomId('attachment'), kind: 'image', name, mediaType: out.mediaType, bytes: out.bytes, data: out.data, persisted: true });
     } catch {
       warn(`${name} could not be read as an image`);
     }
+    return true;
   }
 
   // `at`: the document position a drop landed on (FileHandler answers 0 when it could not tell, never a place a chip
-  // can go, so the caret stays where it is then); mentions and read-in text go there, attachments to the strip.
-  async addFiles(files: File[], at?: number): Promise<void> {
-    if (this.busy || !this.live) return;
+  // can go, so the caret stays where it is then); mentions and read-in text go there, attachments to the strip. Whether
+  // every file was taken: false when the editor was busy or unmounted, or became so before the last one landed, or when
+  // `signal` aborted first (P3-G).
+  async addFiles(files: File[], at?: number, signal?: AbortSignal): Promise<boolean> {
     const epoch = this.attachmentEpoch;
+    const taking = () => this.taking(epoch, signal);
+    if (!taking()) return false;
     if (at !== undefined && at > 0 && this.editor) this.editor.commands.setTextSelection(at);
     for (const file of files) {
-      if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
+      if (!taking()) return false;
       const action = classifyFile(file, this.client.pathForFile(file));
-      if (action.kind === 'image') await this.attachImage(file.name, file, file.type, epoch);
-      else if (action.kind === 'pdf') {
+      if (action.kind === 'image') {
+        if (!(await this.attachImage(file.name, file, file.type, epoch, signal))) return false;
+      } else if (action.kind === 'pdf') {
         const data = await fileBase64(file);
-        if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
+        if (!taking()) return false;
         this.addAttachment({ id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.size, data, persisted: true });
       } else if (action.kind === 'mention') this.insertMention(action.path);
       else if (action.kind === 'text') {
         const text = await file.text();
-        if (!this.live || this.busy || this.attachmentEpoch !== epoch) return;
+        if (!taking()) return false;
         this.insertPasted(text, file.name);
       } else warn(action.reason);
+    }
+    return true;
+  }
+
+  // P3-G (§D4.3): files from outside the editor (Mark-up's Add to chat, the attachment queue) wait for the stored draft
+  // to be restored, so they join it: the restoration fills only an editor still empty, and would otherwise be skipped
+  // (and the draft written over). A remount meanwhile is waited for in its turn. An aborted `signal` adds nothing.
+  private async attachFromOutside(files: File[], signal?: AbortSignal): Promise<boolean> {
+    for (;;) {
+      const lifetime = this.lifetime;
+      await this.restoring;
+      if (!this.live || signal?.aborted) return false;
+      if (this.lifetime === lifetime) return this.addFiles(files, undefined, signal);
     }
   }
 
@@ -580,10 +618,15 @@ export class EditorController {
     return {
       focus: () => void editor().commands.focus(),
       submit: () => void this.submit(),
-      insertText: (text) => {
+      insertText: (text, options) => {
         if (this.busy) return;
-        if (editor().isFocused) editor().chain().insertContent(text).run();
-        else editor().chain().focus(this.caretLeft ? null : 'end').insertContent(text).run(); // `null`: the kept selection
+        const at = editor().isFocused ? editor().chain() : editor().chain().focus(this.caretLeft ? null : 'end'); // `null`: the kept selection
+        if (!options?.separated) {
+          at.insertContent(text).run();
+          return;
+        }
+        at.run(); // P3-G: the caret first, so the text before it can be read
+        editor().chain().insertContent(needsLeadingSpace(editor().state, editor().state.selection.from) ? ` ${text}` : text).run();
       },
       doc: () => editor().getJSON(),
       serialize: () => serializeDraft(editor().getJSON(), { sessionId: this.inputs.sessionId, cwd: this.inputs.cwd }),
@@ -603,6 +646,7 @@ export class EditorController {
           }
         }
       },
+      attachFiles: (files, options) => this.attachFromOutside(files, options?.signal), // P3-G
       openSlash: () => { if (!this.busy) editor().chain().focus().insertContentAt(1, '/').run(); },
       openWidget: (name, args = '' /* C11: the argument a widget opens with */) => this.openWidget(name, args),
       // R2

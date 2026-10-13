@@ -21,6 +21,7 @@ import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } fr
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { deliverableUrl, type DeliverableRecord } from '@shared/maws/deliverable';
+import { useRegionMarkupSurface } from '../../markup/surface'; // P3-G
 import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
 import type { OpenCard } from '../../side/card/store';
 import { useLayout } from '../../stores/layout';
@@ -195,6 +196,8 @@ function Shown({ record, shown, present, checked, reloads, mode, visible, onBack
   const restoreFocus = () => (commentButton.current ?? bodyBox.current?.querySelector('iframe'))?.focus({ preventScroll: true });
   // P2-E1 end
   const comment = commentable ? { picking, toggle: () => setPickingIn(picking ? null : frame) } : null;
+  // P3-G (§D4.1): Mark-up over the drawn body (an artifact's frame, a PDF, media, a file), captured from the window
+  useRegionMarkupSurface(bodyBox, title, checked && present);
   return (
     <div data-deliverable-viewer="" data-deliverable-id={record.id} data-version={shown} data-body={body} className="flex h-full min-h-0 flex-col bg-bg">
       <header className="flex shrink-0 flex-col gap-1.5 border-b border-border px-2 py-2">

@@ -125,6 +125,7 @@ const create = (params?: DeliverablesParams, appSessionId: AppSessionId | null =
 function Mounted({ state, appSessionId = A }: { state: DeliverablesHandle; appSessionId?: AppSessionId | null }) {
   const ctx: PanelToolContext = {
     appSessionId, session: null, status: null, pinned: false, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool,
+    editorHost: { surface: 'panel', tabId: 'deliverables:test' },
   };
   const Body = deliverablesTool.render;
   return <Body state={state} ctx={ctx} />;

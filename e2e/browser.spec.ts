@@ -17,6 +17,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, value } from './support/c7-replay';
 import { closedPort, startBrowserServer } from './support/browser-server';
 import { closeScene, scratchProject, seamLines, show, type Scene } from './support/maws-tools';
+import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
 import {
@@ -488,6 +489,174 @@ test('placement: the panel resized by the keyboard and by a 40-step drag, and th
     await resizeWindow(s, pane, 100, 60);
     await expectOnPane(s, t, pane, 'panel', 1_000);
     expect(await offPaneAfterFrames(s, t, pane)).toBeNull();
+  });
+});
+
+// ---- P3-G: the floating card's column over a Browser tab (docs/doperpowers/plans/2026-10-12-p3-g-shell.md, M2) ----------
+
+test('P3-G acceptance 6: over a Browser tab the floating card is a live column at the pane’s left, the view beside it and never covered; its right edge moves the page; closed, the pill sits in the chrome’s tab row and the page keeps its full height', async () => {
+  await browserScene(['P3-G: column'], async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    await show(s, id);
+    const panel = await openBrowser(s);
+    const A = s.server.url('/a.html');
+    await address(panel, A);
+    const t = await tabAt(s, id, A);
+    const pane = paneIn(panel);
+    await expectOnPane(s, t, pane, 'panel');
+    const card = s.panel.getByRole('region', { name: 'Session card' });
+    const column = s.panel.locator('[data-browser-reserved-column]');
+    const pill = s.panel.getByRole('button', { name: 'Show session card' });
+    const box = async (locator: Locator) => (await locator.boundingBox())!;
+    // the view's left edge as main holds it, against the column's right edge
+    const edges = async () => {
+      const [view, c] = await Promise.all([viewOf(s, t), box(column)]);
+      return { view: view?.bounds?.x ?? null, column: Math.round(c.x + c.width) };
+    };
+    const near = (a: number, b: number) => Math.abs(a - b) <= 1;
+
+    // The menu item by id: Playwright's synthetic ⌥⌘B reaches the page, never the menu's key equivalent (e2e/panel.spec.ts)
+    await menu(s.maws.app, 'panel.float');
+    await expect(card).toHaveAttribute('data-floating-card', 'column');
+    await expectOnPane(s, t, pane, 'panel');
+    const at = await edges();
+    expect(near(at.view!, at.column), JSON.stringify(at)).toBe(true);
+    // the card lies on the column, the pane's full height from its top
+    const [c, k, p] = [await box(column), await box(card), await box(pane)];
+    for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(k[key] - c[key]), `the card's ${key} on the column's`).toBeLessThanOrEqual(1);
+    expect(Math.abs(c.y - p.y)).toBeLessThanOrEqual(1);
+    expect(c.y + c.height).toBeGreaterThanOrEqual(p.y + p.height - 1);
+    expect(c.width).toBe(420);    // the card is DOM inside #root: no cover is raised, now or a cover's 200 ms later
+    await s.page.waitForTimeout(300);
+    expect((await tabState(s, t)).tab?.covered).toBe(false);
+    expect(await offPaneAfterFrames(s, t, pane)).toBeNull();
+
+    // The column's right edge, dragged 80 px right in 8 steps: the page moves with the drag, not only on release
+    const handle = card.locator('[data-card-resize="right"]');
+    await expect(card.locator('[data-card-resize]')).toHaveCount(1); // the right edge only
+    const h = await box(handle);
+    const [x, y] = [h.x + h.width / 2, h.y + h.height / 2];
+    await s.page.mouse.move(x, y);
+    await s.page.mouse.down();
+    for (let k = 1; k <= 8; k++) await s.page.mouse.move(x + 10 * k, y);
+    expect(await offPaneAfterFrames(s, t, pane), 'mid-drag').toBeNull();
+    await s.page.mouse.up();
+    await expectOnPane(s, t, pane, 'panel');
+    const moved = await edges();
+    expect(near(moved.view!, at.view! + 80), JSON.stringify({ at, moved })).toBe(true);
+    expect(near(moved.view!, moved.column)).toBe(true);
+    expect(Math.round((await box(card)).width)).toBe(500);
+    expect((await tabState(s, t)).tab?.covered).toBe(false);
+
+    // Close: the column goes and the page takes the pane's whole box; the pill sits at the right end of the chrome's tab
+    // row (DOM, above the page), never over the view (the coordinator's ruling on M2)
+    const pageBottom = async () => Math.round((await box(panel)).y + (await box(panel)).height);
+    await card.getByRole('button', { name: 'Close session card' }).click();
+    await expect(pill).toBeVisible();
+    await expect(pill).toHaveText('P3-G: column');
+    await expect(column).toHaveCount(0);
+    await expect(s.panel.locator('[data-floating-layer] [data-floating-pill]'), 'the layer draws no second pill').toHaveCount(0);
+    await expectOnPane(s, t, pane, 'panel');
+    const [view, chip, row] = [(await viewOf(s, t))!, await box(pill), await box(panel.locator('[data-browser-chrome] > div').first())];
+    expect(chip.y).toBeGreaterThanOrEqual(row.y);
+    expect(chip.y + chip.height, 'the pill inside the tab row').toBeLessThanOrEqual(row.y + row.height);
+    expect(Math.abs(chip.x + chip.width - (row.x + row.width)), 'at the row’s right end').toBeLessThanOrEqual(8);
+    expect(view.bounds!.y, 'the view below the pill').toBeGreaterThanOrEqual(chip.y + chip.height);
+    expect(Math.abs(view.bounds!.y + view.bounds!.height - (await pageBottom())), 'the view’s bottom at the pane’s bottom').toBeLessThanOrEqual(1);
+    // the pill brings the card back as the column, at the width the drag left
+    await pill.click();
+    await expect(pill).toHaveCount(0);
+    await expect(card).toHaveAttribute('data-floating-card', 'column');
+    await expectOnPane(s, t, pane, 'panel');
+    expect(Math.round((await box(column)).width)).toBe(500);
+
+    // Dock: no card, no column, the view on the whole pane again
+    await menu(s.maws.app, 'panel.float');
+    await expect(card).toHaveCount(0);
+    await expect(column).toHaveCount(0);
+    await expectOnPane(s, t, pane, 'panel');
+    expect((await tabState(s, t)).tab?.covered).toBe(false);
+  });
+});
+
+// ---- P3-G: Mark-up over a Browser tab (docs/doperpowers/plans/2026-10-12-p3-g-shell.md, M4) ---------------------------
+
+test('P3-G acceptance 11: Mark up freezes the page to a still under the overlay; Pen, Box, Arrow and Text leave marks; Add to chat attaches one PNG and the label, the page untouched; Escape attaches nothing; the view is live after either', async () => {
+  await browserScene(['P3-G: mark-up'], async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    await show(s, id);
+    const panel = await openBrowser(s);
+    const B = s.server.url('/b.html');
+    await address(panel, B);
+    const t = await tabAt(s, id, B);
+    const pane = paneIn(panel);
+    await expectOnPane(s, t, pane, 'panel');
+    const page = await pageAt(s, B);
+    await expect(page.locator('#opener')).toHaveText('false');
+    const dom = () => page.evaluate(() => document.documentElement.outerHTML);
+    const before = await dom();
+
+    const markUp = s.panel.locator('[data-editor-header]').getByRole('button', { name: 'Mark up' });
+    const layer = s.page.getByRole('region', { name: 'Mark-up' });
+    const marks = layer.locator('[data-markup-canvas] > *');
+    const strip = s.pane.getByRole('list', { name: 'attachments' });
+    const message = s.pane.getByRole('textbox', { name: 'Message', exact: true });
+    const box = async (locator: Locator) => (await locator.boundingBox())!;
+    const drag = async (from: [number, number], to: [number, number]) => {
+      const l = await box(layer);
+      await s.page.mouse.move(l.x + from[0], l.y + from[1]);
+      await s.page.mouse.down();
+      for (let k = 1; k <= 4; k++) await s.page.mouse.move(l.x + from[0] + ((to[0] - from[0]) * k) / 4, l.y + from[1] + ((to[1] - from[1]) * k) / 4);
+      await s.page.mouse.up();
+    };
+
+    // Mark up: the still over the page's box, the page held covered beneath it (frozen, never changed)
+    await markUp.click();
+    await expect(layer).toBeVisible();
+    await expect(layer.locator('img')).toHaveAttribute('src', /^data:image\/(png|jpeg);base64,/);
+    const [l, p] = [await box(layer), await box(pane)];
+    for (const key of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(l[key] - p[key]), `the layer's ${key} on the page's`).toBeLessThanOrEqual(1);
+    await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(true);
+    await expect(markUp).toHaveAttribute('aria-pressed', 'true');
+
+    // Pen (the default), Box, Arrow, Text in another ink
+    await drag([40, 40], [120, 70]);
+    await layer.getByRole('radio', { name: 'Box' }).click();
+    await drag([60, 100], [180, 160]);
+    await layer.getByRole('radio', { name: 'Arrow' }).click();
+    await layer.getByRole('radio', { name: 'Blue' }).click();
+    await drag([200, 60], [140, 120]);
+    await layer.getByRole('radio', { name: 'Text' }).click();
+    await s.page.mouse.click(l.x + 60, l.y + 190);
+    await layer.getByRole('textbox', { name: 'Mark-up text' }).fill('this one');
+    await s.page.keyboard.press('Enter');
+    await expect(marks).toHaveCount(4);
+    await expect(layer.locator('text')).toHaveText('this one');
+    await expect(layer.getByRole('button', { name: 'Undo' })).toBeEnabled();
+
+    // Add to chat: one image in the composer's strip, the page's label in the draft, the overlay gone, the page live
+    await layer.getByRole('button', { name: 'Add to chat' }).click();
+    await expect(layer).toHaveCount(0);
+    await expect(strip.getByRole('listitem')).toHaveCount(1);
+    await expect(strip.getByText('mark-up.png')).toBeVisible();
+    await expect(strip.locator('img')).toHaveAttribute('src', /^data:image\/(png|jpeg);base64,/);
+    await expect(message).toContainText(`Mark-up of "Page B" — ${B}`);
+    await expect(message).toBeFocused();
+    await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
+    await expectOnPane(s, t, pane, 'panel');
+    expect(await dom(), 'the page’s DOM is unchanged').toBe(before);
+
+    // Escape: everything discarded, nothing attached, the page live again
+    await markUp.click();
+    await expect(layer).toBeVisible();
+    await drag([40, 40], [140, 90]);
+    await expect(marks).toHaveCount(1);
+    await s.page.keyboard.press('Escape');
+    await expect(layer).toHaveCount(0);
+    await expect(strip.getByRole('listitem')).toHaveCount(1);
+    await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
+    await expectOnPane(s, t, pane, 'panel');
+    expect(await dom()).toBe(before);
   });
 });
 

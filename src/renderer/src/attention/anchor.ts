@@ -21,7 +21,7 @@ let waiting: (() => void) | null = null; // the latest open wins: an earlier one
 // The session's tab in the focused pane, as navigation opens it (the caller may open it its own way: the Needs-you row's).
 const inFocusedPane = (appSessionId: AppSessionId) => {
   const layout = useLayout.getState();
-  layout.setPanel({ maximized: false });
+  layout.revealMain(); // P3-G: a maximized or floating panel docks
   layout.openTab({ kind: 'session', appSessionId }, { pane: 'focused' });
 };
 

@@ -118,6 +118,7 @@ function context(overrides: Partial<PanelToolContext> = {}): PanelToolContext {
     setTitle: vi.fn(),
     close: vi.fn(),
     openTool: vi.fn(() => 'terminal:new'),
+    editorHost: { surface: 'panel', tabId: 'terminal:1' },
     ...overrides,
   };
 }

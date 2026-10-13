@@ -2,8 +2,9 @@
 // main's order, and "+". In the panel a chip selects its tab (the tool shows the session's selected tab); in a main tab,
 // which shows its own tab, a chip opens that tab's own main tab, so one tab of a session is reachable from another.
 // Chips shrink to a minimum and the strip then scrolls sideways; a suspended tab's chip is muted, a loading one's title
-// shimmers. Closing a chip closes the browser tab.
-import type { KeyboardEvent } from 'react';
+// shimmers. Closing a chip closes the browser tab. P3-G (M2): `trailing` sits at the row's right end (the floating
+// card's pill while the card is closed over this page in the panel).
+import type { KeyboardEvent, ReactNode } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { closeTab, openMainTab, openTab, selectTab } from '../actions';
@@ -17,9 +18,10 @@ export interface TabStripProps {
   surface: 'panel' | 'main';
   tabs: BrowserTab[];
   shownId: string | null; // the tab the surface shows
+  trailing?: ReactNode;
 }
 
-export function TabStrip({ appSessionId, surface, tabs, shownId }: TabStripProps) {
+export function TabStrip({ appSessionId, surface, tabs, shownId, trailing }: TabStripProps) {
   const show = (tabId: string) => {
     if (tabId === shownId) return;
     if (surface === 'panel') selectTab(appSessionId, tabId);
@@ -56,6 +58,7 @@ export function TabStrip({ appSessionId, surface, tabs, shownId }: TabStripProps
       >
         <PlusIcon className="size-3.5" />
       </button>
+      {trailing && <div className="ml-auto flex shrink-0 items-center pl-1">{trailing}</div>}
     </div>
   );
 }

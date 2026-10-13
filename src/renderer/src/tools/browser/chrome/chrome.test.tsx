@@ -11,9 +11,13 @@ import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { record } from '../../../../../../test/support/builders';
+import { useFloatingCard } from '../../../shell/floating';
 import { useLayout } from '../../../stores/layout';
+import { useSessions } from '../../../stores/sessions';
 import { browserTab, T1, T2 } from '../../../test-support/browser';
 import { installFakeMain, ok, type Handler } from '../../../test-support/code';
+import { mainShowing } from '../../../test-support/panel';
 import { BROWSER_COPY } from '../copy';
 import { coverPane, resetCovering } from '../covering';
 import { registerChromeExtra, type ChromeExtraProps } from '../extras';
@@ -474,6 +478,47 @@ describe('the tab strip', () => {
       { kind: 'browser', appSessionId: A, browserTabId: T2 },
     ]);
     expect(listedAtOpen[1]).toContain(T2);
+  });
+
+  // P3-G (M2, the coordinator's ruling): the page is a native view, so a pill floating over it could not be seen; while
+  // the card is closed, the panel's chrome whose pane holds the page draws the pill at its tab row's right end
+  describe('the floating card’s pill', () => {
+    const pill = () => screen.queryByRole('button', { name: 'Show session card' });
+    beforeEach(() => {
+      useLayout.setState({ main: mainShowing(A), regions: { ...LAYOUT_DEFAULTS.regions, panel: { ...LAYOUT_DEFAULTS.regions.panel, floating: true } } });
+      useFloatingCard.setState({ closed: true, column: null, columnDrag: null, pillHost: null });
+    });
+
+    it('sits at the tab row’s right end with the session’s title, hosts it while shown, and a click reopens the card', () => {
+      useSessions.setState({ records: new Map([[A, { ...record('app-a'), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) });
+      const { unmount } = show({ tab: tab(), owns: true });
+      const shown = pill()!;
+      expect(shown.textContent).toBe('Alpha session');
+      expect(shown.querySelector('[aria-label="Unread"]')).not.toBeNull();
+      expect(shown.parentElement!.parentElement, 'in the tab row, after "+"').toBe(screen.getByRole('button', { name: BROWSER_COPY.newTabAction }).parentElement);
+      expect(useFloatingCard.getState().pillHost).not.toBeNull();
+      fireEvent.click(shown);
+      expect(useFloatingCard.getState().closed).toBe(false);
+      expect(pill()).toBeNull();
+      expect(useFloatingCard.getState().pillHost).toBeNull();
+      act(() => useFloatingCard.getState().setClosed(true));
+      expect(pill()).not.toBeNull();
+      unmount();
+      expect(useFloatingCard.getState().pillHost).toBeNull();
+    });
+
+    it('is not drawn by a chrome whose pane does not hold the page, by a main tab’s chrome, or while docked', () => {
+      const elsewhere = show({ tab: tab(), owns: false });
+      expect(pill()).toBeNull();
+      elsewhere.unmount();
+      const main = show({ tab: tab(), owns: true, surface: 'main' });
+      expect(pill()).toBeNull();
+      main.unmount();
+      show({ tab: tab(), owns: true });
+      act(() => useLayout.getState().setPanel({ floating: false }));
+      expect(pill()).toBeNull();
+      expect(useFloatingCard.getState().pillHost).toBeNull();
+    });
   });
 });
 
