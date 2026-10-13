@@ -19,7 +19,7 @@ Purpose: P3-A, P3-L, P3-B, P3-C and P3-D each extend the artifact surface and th
 |---|---|---|---|
 | Yjs v14 pinned: `@y/y` 14.0.0-rc.28, `@y/prosemirror` 2.0.0-15, one `@y/y` by pnpm override; the binding in `src/artifacts/yjs/` (one module); documents tagged with `bindingVersion` | A | B, C, D, E | fixed 2026-10-12 (S1) |
 | `src/engine-host/documents/` (the service), the port provider `src/artifacts/provider/port.ts` (y-protocols sync `0` and awareness `1` frames over `MessagePort`), `DocumentStorage` and `ArtifactHost` interfaces in `src/artifacts/host.ts` | A | B, C, D, E | reserved at approval |
-| The detached transport's binary channel (X13 amended): a length-prefixed frame kind `doc` beside the JSON lines | A (with S2) | main's host client | reserved at approval |
+| The detached transport's binary channel (X13 amended, S2): socket protocol 2, doc frames `0x00 \| u32 length \| u32 channel \| payload` beside the JSON lines on one socket; `documents.open`, `documents.close`, `documents.closed {reason: 'host' \| 'reset'}`; an 8 MB high-water reset; the port provider's frames: sync `0`, awareness `1`, ack `100` (the host commits before revealing any update; a replica sends only step 1 and awareness until it has answered the host's step 1; a pending or malformed update evicts the document); the live revision = the global log seq; one reopen path in main | A (from S2's code) | main's host client, B, C | fixed 2026-10-12 (S2) |
 | `Actor = {kind: 'human'} \| {kind: 'session', appSessionId}`; `ArtifactVersion {seq, at, actor, kind: 'auto' \| 'turn' \| 'named' \| 'restore' \| 'import', label?, note?, summary?, designSystemRef?, assetRefs}`; provenance as Yjs v14's native attribution maps (encoded `ContentMap`s), persisted and merged by the host beside the update log, actor and time per id range surviving compaction (X29; Decision Log 25 supersedes the clock-range rows) | A | B, C, the history UI | amended 2026-10-12 (S1) |
 
 ## 3. X25 — the agent's tools (`src/shared/maws/tools.ts`)
@@ -34,7 +34,7 @@ Purpose: P3-A, P3-L, P3-B, P3-C and P3-D each extend the artifact surface and th
 | Name | Owner | Consumers | State |
 |---|---|---|---|
 | `src/artifacts/document/schema.ts` (the one module; `ychange`, `comment {threadId, orphan}`, block ids as `id`, chips `date`, `mention`, `dropdown`, `pending {intent}`); the `threads` map; `^id` and `<chip …/>` in the agent's markdown | B | A's test writer (schema-agnostic until B lands), E, the exporters | reserved at approval |
-| `src/artifacts/slides/` (`format.md` adopted from Claude's list, the parser and canonical serializer, the Y.Map model, object anchors `{slideId, elementId}`); `deck.json` v4 keys | C | E, the exporters | reserved at approval |
+| `src/artifacts/slides/` (`format.md` adopted from Claude's list, the parser and canonical serializer, the Y.Map model with `order` for flow children, `z` for pinned children, `parent`, `raw` for svg and x-embed, `held` on a slide, ids minted from the publish's tool-use id; object anchors `{slideId, elementId}`; table rows with ids); `deck.json` v4 keys; the publish diff against the agent's base; property-level merging | C (from S6's code) | E, the exporters | amended 2026-10-12 (S6) |
 | The design system directory: `DESIGN.md` (the designer skill's nine sections), `tokens.tokens.json` (DTCG), `layouts/*.html`, `components/*.html`, generated `tokens.css`; **CSS names fixed now so B can theme before D lands:** `--ds-color-bg`, `--ds-color-bg-raised`, `--ds-color-text`, `--ds-color-text-muted`, `--ds-color-accent`, `--ds-color-accent-text`, `--ds-color-border`, `--ds-color-status-{ok,warn,error,info}`, `--ds-font-display`, `--ds-font-body`, `--ds-font-mono`, `--ds-type-{title,subtitle,h1,h2,h3,body,caption,quote}-{size,line,weight}`, `--ds-space-{1..8}`, `--ds-radius-{sm,md,lg,full}`, `--ds-shadow-{sm,md,lg}`; type classes `.ds-type-<role>`; the Office extension key `dev.maws.office` | D | B, C, E, the exporters | names fixed at approval |
 
 ## 5. X30, X32 — the shell
@@ -61,5 +61,6 @@ Purpose: P3-A, P3-L, P3-B, P3-C and P3-D each extend the artifact surface and th
 ## 8. Record
 
 - 2026-10-12 18:06 PDT: opened at the owner's approval; every row reserved; X28's CSS names and the X32 shape fixed so B and G can code before D and the others land.
+- 2026-10-12 20:00 PDT: S2's and S6's amendments recorded (X13 protocol 2, the ack frame, the live revision; the slide model's keys and the base-relative publish).
 - 2026-10-12 19:30 PDT: S1's verdict recorded: Yjs v14 pinned, provenance native, `bindingVersion` on documents.
 - 2026-10-12 18:40 PDT: G's residue recorded (X32's scope argument and hooks, the Mark-up captures, the chord, the `artifacts` tab kind); P3-H's and P3-0's findings files are `.txt` (the harness refuses report-shaped `.md` from subagents; the protocol-probe convention).
