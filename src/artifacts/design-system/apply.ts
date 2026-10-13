@@ -35,23 +35,45 @@ export class DesignSystemMissing extends Error {
   }
 }
 
-const synced = (handle: Awaited<ReturnType<ArtifactHost['open']>>) =>
-  handle.state().synced
-    ? Promise.resolve()
-    : new Promise<void>((resolve) => {
-        const stop = handle.subscribe((state) => {
-          if (!state.synced) return;
-          stop();
-          resolve();
-        });
-      });
+type Handle = Awaited<ReturnType<ArtifactHost['open']>>;
+
+/** Resolves once the replica has synced; rejects when `signal` aborts first, its listener gone either way. */
+function synced(handle: Handle, signal: AbortSignal | undefined): Promise<void> {
+  if (handle.state().synced) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    let done = false;
+    let stop: (() => void) | null = null;
+    const finish = (settle: () => void) => {
+      if (done) return;
+      done = true;
+      stop?.();
+      signal?.removeEventListener('abort', aborted);
+      settle();
+    };
+    const aborted = () => finish(() => reject(signal!.reason));
+    stop = handle.subscribe((state) => {
+      if (state.synced) finish(resolve);
+    });
+    if (done) stop();
+    signal?.addEventListener('abort', aborted, { once: true });
+    if (signal?.aborted) aborted();
+  });
+}
 
 /**
  * Opens a system for reading. A live ref opens the system's replica through the host and follows it until `close`; a
  * version ref reads the pinned state once (`ArtifactHost.versionState`) and never subscribes; the floor reads the
  * bundled house tokens with no store at all. Rejects with `DesignSystemMissing` when the system is not there.
  */
-export async function openDesignSystem(host: ArtifactHost, ref: DesignSystemRef | { builtin: 'maws' }): Promise<DesignSystemView> {
+export function openDesignSystem(host: ArtifactHost, ref: DesignSystemRef | { builtin: 'maws' }): Promise<DesignSystemView> {
+  return openSystem(host, ref, undefined);
+}
+
+/**
+ * `openDesignSystem`, cancellable: when `signal` aborts before the view is ready, a handle already open is closed at
+ * once (its sync listener gone), one still opening is closed when it arrives, and the promise rejects.
+ */
+async function openSystem(host: ArtifactHost, ref: SystemRef, signal: AbortSignal | undefined): Promise<DesignSystemView> {
   if ('builtin' in ref) return builtinView();
   const toUrl = (asset: string) => host.assetUrl(ref.id, asset);
   if (ref.versionSeq !== undefined) {
@@ -71,13 +93,19 @@ export async function openDesignSystem(host: ArtifactHost, ref: DesignSystemRef 
       doc.destroy();
     }
   }
-  let handle: Awaited<ReturnType<ArtifactHost['open']>>;
+  let handle: Handle;
   try {
     handle = await host.open(ref.id);
   } catch (error) {
     throw new DesignSystemMissing(ref, error);
   }
-  await synced(handle);
+  try {
+    signal?.throwIfAborted();
+    await synced(handle, signal);
+  } catch (error) {
+    handle.close();
+    throw error;
+  }
   if (!snapshotOfDoc(handle.doc)) {
     handle.close();
     throw new DesignSystemMissing(ref);
@@ -103,6 +131,8 @@ function refOfKey(key: string): SystemRef {
 interface Shared {
   view: DesignSystemView | Promise<DesignSystemView>;
   refs: number;
+  /** Cancels an open still under way: the last lease returned before the view was ready. */
+  cancel: AbortController;
 }
 const NO_HOST = {};
 const sharedViews = new WeakMap<object, Map<string, Shared>>();
@@ -112,9 +142,10 @@ function lend(host: ArtifactHost | null, key: string): ViewLease {
   const byKey = sharedViews.get(host ?? NO_HOST) ?? sharedViews.set(host ?? NO_HOST, new Map()).get(host ?? NO_HOST)!;
   let shared = byKey.get(key);
   if (!shared) {
-    const view = 'builtin' in ref ? builtinView() : host ? openDesignSystem(host, ref) : Promise.reject(new DesignSystemMissing(ref));
+    const cancel = new AbortController();
+    const view = 'builtin' in ref ? builtinView() : host ? openSystem(host, ref, cancel.signal) : Promise.reject(new DesignSystemMissing(ref));
     if (view instanceof Promise) view.catch(() => byKey.get(key) === shared && byKey.delete(key)); // a failed open is tried again by the next lease
-    shared = { view, refs: 0 };
+    shared = { view, refs: 0, cancel };
     byKey.set(key, shared);
   }
   shared.refs += 1;
@@ -128,6 +159,7 @@ function lend(host: ArtifactHost | null, key: string): ViewLease {
       held.refs -= 1;
       if (held.refs > 0) return;
       if (byKey.get(key) === held) byKey.delete(key);
+      held.cancel.abort(); // an open under way closes its handle now, not when it syncs
       Promise.resolve(held.view).then((view) => view.close(), () => {});
     },
   };

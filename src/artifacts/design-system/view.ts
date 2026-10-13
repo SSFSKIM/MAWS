@@ -3,7 +3,7 @@
 // the page builds one over the replica it already holds. Portable (§4.10); Yjs only through the binding module.
 import { HOUSE_KEY, defaultSystem } from '../types/design_system/defaults';
 import { onUpdate, type Doc } from '../yjs';
-import { fontFaceCss, type AssetUrl } from './assets';
+import { fontFaces, type AssetUrl } from './assets';
 import { DOCUMENT_CSS_PATH } from './canon';
 import { generateTokensCss, type Medium } from './css';
 import { readSystem } from './model';
@@ -44,24 +44,25 @@ export function safeOverrides(overrides: TokenOverrides | undefined): [string, s
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
-/** The stylesheet of a snapshot for a scope (D3, D8). */
+/**
+ * The stylesheet of a snapshot for a scope (D3, D8): the system's faces under their private names, `tokens.css` with
+ * each bundled family's private name before its authored one, then the overrides.
+ */
 export function snapshotCss(snapshot: SystemSnapshot, toUrl: AssetUrl | null, scope: string, medium: Medium, overrides?: TokenOverrides): string {
-  const faces = fontFaceCss(snapshot.files[DOCUMENT_CSS_PATH], snapshot.tokens, toUrl);
+  const faces = fontFaces(snapshot.files[DOCUMENT_CSS_PATH], snapshot.tokens, toUrl, { aliased: true });
   const own = safeOverrides(overrides);
   const after = own.length ? `\n${scope} {\n${own.map(([name, value]) => `  ${name}: ${value};`).join('\n')}\n}\n` : '';
-  return `${faces}${generateTokensCss(snapshot.tokens, { scope, medium })}${after}`;
+  return `${faces.css}${generateTokensCss(snapshot.tokens, { scope, medium, fontAliases: faces.aliases })}${after}`;
 }
 
 class View implements DesignSystemView {
   private readonly listeners = new Set<() => void>();
+  private closed = false;
   constructor(
-    private current: () => SystemSnapshot,
+    private readonly current: () => SystemSnapshot,
     private readonly toUrl: AssetUrl | null,
-    private readonly watch: ((changed: () => void) => () => void) | null,
     private readonly release: () => void,
   ) {}
-  private stop: (() => void) | null = null;
-  private closed = false;
 
   get tokens() {
     return this.current().tokens;
@@ -76,25 +77,18 @@ class View implements DesignSystemView {
     return snapshotCss(this.current(), this.toUrl, scope, medium, overrides);
   }
   subscribe(listener: () => void): () => void {
-    if (!this.watch || this.closed) return () => {};
+    if (this.closed) return () => {};
     this.listeners.add(listener);
-    this.stop ??= this.watch(() => {
-      for (const each of [...this.listeners]) each();
-    });
-    return () => {
-      this.listeners.delete(listener);
-      if (this.listeners.size === 0) {
-        this.stop?.();
-        this.stop = null;
-      }
-    };
+    return () => this.listeners.delete(listener);
+  }
+  /** Tells the listeners the system changed. */
+  emit(): void {
+    for (const each of [...this.listeners]) each();
   }
   close(): void {
     if (this.closed) return;
     this.closed = true;
     this.listeners.clear();
-    this.stop?.();
-    this.stop = null;
     this.release();
   }
 }
@@ -108,26 +102,26 @@ export function snapshotOfDoc(doc: Doc): SystemSnapshot | null {
 const EMPTY: SystemSnapshot = { tokens: { tokens: new Map(), groups: new Map() }, law: '', name: '', files: {} };
 
 /**
- * A live view over a replica: read once per change (the snapshot is cached until the doc next updates), its listeners
- * fired after every update. `release` runs on close (the handle's close, for a view `openDesignSystem` opened).
+ * A live view over a replica: read once per change, its listeners fired after every update. It observes the doc for
+ * its whole life, listened to or not, so the snapshot it caches is dropped by every update and a read after a quiet
+ * spell is current. `release` runs on close (the handle's close, for a view `openDesignSystem` opened).
  */
 export function liveView(doc: Doc, toUrl: AssetUrl | null, release: () => void = () => {}): DesignSystemView {
   let cached: SystemSnapshot | null = null;
   const current = () => (cached ??= snapshotOfDoc(doc) ?? EMPTY);
-  return new View(
-    current,
-    toUrl,
-    (changed) =>
-      onUpdate(doc, () => {
-        cached = null;
-        changed();
-      }),
-    release,
-  );
+  const view: View = new View(current, toUrl, () => {
+    stop();
+    release();
+  });
+  const stop = onUpdate(doc, () => {
+    cached = null;
+    view.emit();
+  });
+  return view;
 }
 
 /** A view of a fixed state: a retained version, read once, never subscribed (D8's version ref). */
-export const staticView = (snapshot: SystemSnapshot, toUrl: AssetUrl | null): DesignSystemView => new View(() => snapshot, toUrl, null, () => {});
+export const staticView = (snapshot: SystemSnapshot, toUrl: AssetUrl | null): DesignSystemView => new View(() => snapshot, toUrl, () => {});
 
 let floor: DesignSystemView | null = null;
 /** The built-in floor (D8): the bundled house system, no store, no assets. One view, never closed. */
@@ -137,6 +131,6 @@ export function builtinView(): DesignSystemView {
   const tokens = source && parseTokens(source.files['tokens.tokens.json'] ?? '').tokens;
   if (!source || !tokens) throw new Error(`the bundled house system (${HOUSE_KEY}) is missing or unreadable`);
   const snapshot: SystemSnapshot = { tokens, law: source.files['DESIGN.md'] ?? '', name: source.name, files: source.files };
-  floor = new View(() => snapshot, null, null, () => {});
+  floor = new View(() => snapshot, null, () => {});
   return floor;
 }
