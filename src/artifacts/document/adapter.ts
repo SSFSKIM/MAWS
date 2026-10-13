@@ -31,6 +31,7 @@ import { CarryRegistry } from './carries';
 import type { Carry, Slot } from './edit-ops';
 import { allBlocks, applyRepair, planRepair, repairNeeded } from './repair';
 import { nanoid8 } from './schema';
+import { createDocument, listTabs } from './tabs';
 import { deepSlotIds, formatAt, itemAt, itemOf, locateSlot, nodeAt, slotKey, textblocksY, charSlots } from './structs';
 import { THREADS, getThread, isCommentKey, listThreads, refreshAnchors, stripMarklessComments, type Thread } from './threads';
 
@@ -348,6 +349,11 @@ export function documentAdapter({ generateID = nanoid8 }: DocumentAdapterOptions
 
   return {
     kind: 'document',
+    // A new document's first tab, titled as the document, written by the host in the create's own commit when the
+    // creator gives no content (A's seed hook, parent Decision Log 48): replicas never initialise a document.
+    initial: (doc, { title }) => {
+      if (listTabs(doc).length === 0) createDocument(doc, { title, generateID });
+    },
     registerCarries: (artifactId, carries) => registryFor(artifactId).register(carries),
     forgetArtifact: (artifactId) => void registries.delete(artifactId),
     stats: () => {

@@ -77,7 +77,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
 
   if (snapshot.failed !== null) return <Notice>{`This document could not be opened: ${snapshot.failed}`}</Notice>;
   if (!snapshot.ready || !snapshot.handle) return <Notice>Opening the document…</Notice>;
-  if (snapshot.noContent) return <Notice>This document has no content yet; it was created before the host could initialise it. MAWS gives it its first page when the host next starts.</Notice>;
+  if (snapshot.noContent) return <Notice>This document has no content yet: it was created before MAWS gave every new document its first page.</Notice>;
   return (
     <SystemScope placement={snapshot.placement} handle={snapshot.handle}>
       <DocumentEditor

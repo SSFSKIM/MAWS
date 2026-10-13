@@ -588,7 +588,8 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
                 if (taken) return refusedAfterCommit(store, refuse(TOOL, { reason: 'handleTaken', handle }, `an artifact "${handle}" already exists in ${taken}; edit it with artifact_edit`));
               }
               const made: { artifact?: Artifact; doc?: Doc; answer?: { artifactId: string; title: string; revision: number; handle?: string } } = {};
-              const creating = store.create({ kind: 'document', title: input.title, ...(handle !== undefined && { handle }) }, actor, (artifact) => (made.artifact = artifact));
+              // `initial` given (empty), so the kind's seed hook writes no first tab: the content's is written below
+              const creating = store.create({ kind: 'document', title: input.title, initial: () => {}, ...(handle !== undefined && { handle }) }, actor, (artifact) => (made.artifact = artifact));
               // the first tab, written through the session's host replica in the batch that holds the entity row
               const writing = made.artifact
                 ? store.service.writeAs(made.artifact.id, actor, (doc) => {

@@ -162,7 +162,7 @@ describe('the document editor in L’s registry', () => {
     memory = new MemoryDocumentHost();
     mount();
     await until(() => screen.queryByText(/This document has no content yet/) !== null, 'the notice');
-    expect(screen.getByRole('status').textContent).toContain('it was created before the host could initialise it');
+    expect(screen.getByRole('status').textContent).toContain('it was created before MAWS gave every new document its first page');
     act(() => memory.write((doc) => createDocument(doc, { title: 'Launch plan' })));
     await shown();
     expect(screen.queryByText(/This document has no content yet/)).toBeNull();

@@ -8,8 +8,8 @@
 // through its draft's withdrawal, a send in flight that records its message, Decision Log 27): the replica closes
 // only once nothing holds it and the host has acknowledged every edit.
 //
-// A replica never initialises its document: the host writes a new document's first tab (kinds/document.ts in the
-// engine host; fix wave 1), and the editor shows "Loading…" until that tab has arrived, then binds it.
+// A replica never initialises its document: the host writes a new document's first tab in the create's own commit (the
+// document adapter's `initial`, A's seed hook), and the editor shows "Loading…" until that tab has arrived, then binds it.
 import { listTabs } from '@artifacts/document/tabs';
 import { listThreads, observeThreads } from '@artifacts/document/threads';
 import { onUpdate } from '@artifacts/yjs';
@@ -184,9 +184,9 @@ export class DocumentTabState {
     this.set({ handle, document: handle.state(), unresolved: openThreads(), ready: true });
   }
 
-  // A document's first tab is the host's (kinds/document.ts); until A's `initial` hook writes it with the creation, a
-  // host that stopped between the two leaves the document without one until its next start. Past the bound the tab
-  // says so rather than loading forever, and the tab arriving clears it.
+  // A document's first tab is the host's, written with the creation (A's seed hook); only a document made before that
+  // hook (development data, no migration) has none. Past the bound the tab says so rather than loading forever, and a
+  // tab arriving clears it.
   private awaitFirstTab(handle: DocumentHandle): () => void {
     if (listTabs(handle.doc).length > 0) return () => {};
     const timer = setTimeout(() => {

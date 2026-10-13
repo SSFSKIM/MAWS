@@ -15,15 +15,6 @@ import { addThread, anchorOfMark } from '@artifacts/document/threads';
 import { body, dupes, ids, nodeOf, now, TAB, textOf } from '@artifacts/document/writer.fixture';
 import { pmnodeToDelta } from '@artifacts/yjs/prosemirror';
 import { HUMAN, liveText, openDocumentWorld, sessionActor, type DocumentWorld } from './document-world.fixture';
-import { registerDocumentKind } from './document';
-
-const until = async (check: () => boolean): Promise<void> => {
-  const give = Date.now() + 2_000;
-  while (!check()) {
-    if (Date.now() > give) throw new Error('timed out');
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-};
 
 const AGENT = sessionActor('app-agent');
 const OTHER = sessionActor('app-other');
@@ -44,14 +35,19 @@ describe('the document kind on A’s store', () => {
     expect(world.store.service.adapterFor('document')?.kind).toBe('document');
   });
 
-  // M8 fix wave 1: a document is created with its first tab (the spec's Terms), written once, by the host, as the
-  // creator: replicas never initialise it themselves, so two editors opening a new document bind the one live body.
-  it('gives a document created empty its first tab, once, titled as the document and credited to its creator', async () => {
+  // M8 fix wave 1, then M9's fix wave (A's `KindAdapter.initial`, parent Decision Log 48): a document is created with its
+  // first tab (the spec's Terms), written by the host as the creator in the create's own commit, so replicas never
+  // initialise it and the store announces exactly one `created` (no later write that could fail or be interrupted).
+  it('gives a document created empty its first tab in the create’s own commit, titled as the document and credited to its creator', async () => {
+    const changes: string[] = [];
+    const off = world.store.onChange((change) => changes.push(change.change));
     const artifact = await world.store.create({ kind: 'document', title: 'Launch plan' }, AGENT);
-    await committed();
-    await committed();
     const tabs = listTabs(world.service.live(artifact.id));
-    expect(tabs.map((tab) => tab.title)).toEqual(['Launch plan']);
+    expect(tabs.map((tab) => tab.title)).toEqual(['Launch plan']); // at once: no write after the create
+    await committed();
+    await committed();
+    expect(changes).toEqual(['created']);
+    off();
     const version = await world.store.create({ kind: 'document', title: 'Seeded', initial: (doc) => createDocument(doc, { title: 'Own tab' }) }, HUMAN);
     await committed();
     expect(listTabs(world.service.live(version.id)).map((tab) => tab.title)).toEqual(['Own tab']); // content given: untouched
@@ -59,26 +55,6 @@ describe('the document kind on A’s store', () => {
     await committed();
     expect(listTabs(world.service.live(copy.id)).map((tab) => tab.id)).toEqual([tabs[0].id]); // a copy keeps the source's
     expect(world.store.lastWrite(artifact.id)?.actor).toEqual(AGENT); // the first tab is the creator's write
-  });
-
-  // M8 fix wave 2: the first-tab write after `created` is its own commit, so a host that stopped between the two leaves
-  // a durable document never written (revision 0) and no new `created` to retry on; the kind's registration at the
-  // next host start gives every such document its first tab (until A's `KindAdapter.initial` makes it one commit).
-  it('gives a document left without its first tab (never written) that tab when the kind registers at host start', async () => {
-    world.kind.close(); // the host stopped before its first-tab write: nothing listens
-    const left = await world.store.create({ kind: 'document', title: 'Interrupted' }, HUMAN);
-    const written = await world.store.create({ kind: 'document', title: 'Written', initial: (doc) => createDocument(doc, { title: 'Own tab' }) }, HUMAN);
-    await committed();
-    expect(listTabs(world.service.live(left.id))).toEqual([]);
-    expect(world.store.revision(left.id)).toBe(0);
-    const again = registerDocumentKind(world.store);
-    try {
-      await until(() => listTabs(world.service.live(left.id)).length === 1);
-      expect(listTabs(world.service.live(left.id)).map((tab) => tab.title)).toEqual(['Interrupted']);
-      expect(listTabs(world.service.live(written.id)).map((tab) => tab.title)).toEqual(['Own tab']);
-    } finally {
-      again.close();
-    }
   });
 
   it('registers the document mirror writer while the kind is registered (M8: a linked Space mirrors <slug>.md)', () => {
