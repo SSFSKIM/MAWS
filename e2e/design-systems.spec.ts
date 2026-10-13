@@ -198,11 +198,14 @@ test('a document fixture restyles with its system, its retained version keeps th
   await expect(fixture(page, 'retained')).toHaveAttribute('data-status', 'ready', { timeout: 15_000 });
   await expect.poll(() => fixtureAccent(page, 'retained')).toBe(rgbOf(BEFORE));
 
-  // the owner recolours the system on its page
-  await openSystemPage(page, 'Copy of Classroom', system.id);
+  // the owner recolours the system on its page, which is titled as the library names the copy (Decision Log 29) while
+  // its law keeps the original's title
+  const tab = await openSystemPage(page, 'Copy of Classroom', system.id);
+  await expect(tab.locator('.dsp-title')).toHaveText('Copy of Classroom');
+  await expect(tab.locator('[data-ds-section="law"] h1').first()).toContainText('Classroom');
+  const docRevision = (await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId: doc.id })).artifact.revision;
   expect(await recolourAccent(page, system.id, AFTER)).toEqual({ swatch: rgbOf(AFTER), property: AFTER });
   // Acceptance 10: the live fixture restyles, with no write to the document
-  const docRevision = (await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId: doc.id })).artifact.revision;
   await expect.poll(() => fixtureAccent(page, 'live')).toBe(rgbOf(AFTER));
   expect((await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId: doc.id })).artifact.revision).toBe(docRevision);
   // Acceptance 11: the retained version still renders the revision it pinned, beside the live one
