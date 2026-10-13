@@ -159,6 +159,12 @@ describe('type changes (S4 1b)', () => {
 });
 
 describe('the atomic batch (S4 1c)', () => {
+  it('a quote not found in the block it names is refused with that block’s current text, whatever words the quote shares with it', () => {
+    const doc = seedDoc();
+    expect(refusal(() => applyEdit(doc, [{ op: 'replace_text', block: 'p2', old: 'gone entirely', new: 'x' }]))).toMatchObject({ reason: 'notFound', candidates: [{ id: 'p2', text: textOf(doc, 'p2') }] });
+    expect(refusal(() => applyEdit(doc, [{ op: 'replace_text', block: 'lp1', old: 'gone entirely', new: 'x' }]))).toMatchObject({ reason: 'notFound', candidates: [{ id: 'lp1', text: 'first item' }] });
+  });
+
   it('a batch that would leave a tab with more top-level blocks than `blocksPerTab` is refused before any write; one that does not grow it lands', () => {
     const doc = seedDoc(); // 8 top-level blocks
     const sv = stateVector(doc);

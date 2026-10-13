@@ -610,9 +610,10 @@ class Planner {
     const total = hits.reduce((sum, hit) => sum + hit.n, 0);
     const idOf = (key: string) => (key.startsWith('\u0000') ? '?' : key);
     if (total === 0) {
+      // the block the op named, as it is now; else the blocks sharing the quote's longer words
       const words = wordsOf(quote);
       const near = live
-        .filter(({ key }) => words.some((word) => textOf(key).includes(word)))
+        .filter(({ key }) => scope !== null || words.some((word) => textOf(key).includes(word)))
         .slice(0, 10)
         .map(({ key }) => ({ id: idOf(key), text: textOf(key) }));
       refuse({ reason: 'notFound', opIndex: this.opIndex, target: op.old, candidates: near }, `op ${this.opIndex}: "${op.old}" not found${op.block ? ` in ^${op.block}` : ''}`);
@@ -654,8 +655,7 @@ class Planner {
     const total = occurrences(markdown, quote);
     const text = node.textBetween(0, node.content.size, '\n');
     if (total === 0) {
-      const near = wordsOf(quote).some((word) => text.includes(word)) ? [{ id, text }] : [];
-      refuse({ reason: 'notFound', opIndex: this.opIndex, target: op.old, candidates: near }, `op ${this.opIndex}: "${op.old}" not found in ^${id}`);
+      refuse({ reason: 'notFound', opIndex: this.opIndex, target: op.old, candidates: [{ id, text }] }, `op ${this.opIndex}: "${op.old}" not found in ^${id}`);
     }
     if (total > 1 && !op.all) {
       refuse({ reason: 'notUnique', opIndex: this.opIndex, candidates: [{ id, text, matches: total }] }, `op ${this.opIndex}: "${op.old}" matches ${total} times in ^${id}; quote more context or pass all`);
