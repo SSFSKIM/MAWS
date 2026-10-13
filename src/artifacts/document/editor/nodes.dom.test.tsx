@@ -186,3 +186,23 @@ describe('code blocks', () => {
     expect(e.getJSON().content![0].content).toEqual([{ type: 'text', text: 'const x = 1;' }]);
   });
 });
+
+describe('table cells', () => {
+  const emptyTable = (e: Editor) => e.schema.nodeFromJSON({ type: 'table', content: [{ type: 'tableRow', content: [{ type: 'tableCell' }, { type: 'tableCell' }] }] });
+  const cellContents = (e: Editor) => {
+    const out: number[] = [];
+    e.state.doc.descendants((node) => {
+      if (node.type.name === 'tableCell') out.push(node.childCount);
+      return true;
+    });
+    return out;
+  };
+
+  it('a local change leaves no cell without a paragraph to type in; a remote write is left as it came', () => {
+    const e = make(doc(para('p1', 'x')));
+    e.view.dispatch(e.state.tr.insert(e.state.doc.content.size, emptyTable(e)).setMeta('y-sync-transaction', true));
+    expect(cellContents(e)).toEqual([0, 0]);
+    e.view.dispatch(e.state.tr.insert(e.state.doc.content.size, emptyTable(e)));
+    expect(cellContents(e)).toEqual([0, 0, 1, 1]);
+  });
+});
