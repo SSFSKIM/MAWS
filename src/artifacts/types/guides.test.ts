@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ARTIFACT_KINDS, type ArtifactKind } from '@shared/artifacts/entity';
 import { KIND_GUIDES } from './guides';
 
-const OWNED_ELSEWHERE: ArtifactKind[] = ['document', 'presentation', 'design', 'design_system', 'dashboard'];
+const OWNED_ELSEWHERE: ArtifactKind[] = ['document', 'presentation', 'design', 'dashboard']; // design_system: P3-D wrote its own (its M5)
 const headings = (text: string) => text.split('\n').filter((line) => line.startsWith('## '));
 
 describe('the kinds’ guides and format references', () => {
@@ -16,7 +16,7 @@ describe('the kinds’ guides and format references', () => {
     }
   });
 
-  it('shapes the kinds B, C, D and E own as placeholders: every section named and marked not yet written', () => {
+  it('shapes the kinds B, C and E own as placeholders: every section named and marked not yet written', () => {
     for (const kind of OWNED_ELSEWHERE) {
       for (const text of [KIND_GUIDES[kind].guide, KIND_GUIDES[kind].format]) {
         const sections = text.split('\n## ').slice(1);

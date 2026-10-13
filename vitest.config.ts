@@ -88,7 +88,16 @@ export default defineConfig({
       ...liveProjects, // C3
       // P3-A start: the portable artifact layer (src/artifacts/, docs/doperpowers/plans/2026-10-12-p3-a-store.md) under
       // Node; its code imports no Node or Electron module (eslint.config.js), so it runs here as it will in a renderer.
-      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'] } },
+      {
+        resolve: { alias },
+        test: {
+          name: 'artifacts',
+          environment: 'node',
+          include: ['src/artifacts/**/*.test.ts'],
+          // P3-D M5: a design system's `document.css` is bundled as text (`?raw`); vitest empties unprocessed CSS, raw included.
+          css: { include: [/\/design_system\/defaults\/.+\.css/] },
+        },
+      },
       // P3-A end
       // C8a start: the panel host's suites again under the React Compiler, as electron-vite builds the app, so a render
       // that reads mutable module state (the instance map, a tool's state) without selecting it is caught in a test.
