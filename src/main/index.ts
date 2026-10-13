@@ -578,7 +578,7 @@ void startWithProfileLock(app, () => {
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
   // connection, an entry per change) and library.* answered from it, before the first window loads. Its stop runs in the
   // same will-quit pass as the index's close, so no sync step runs between them, and after it applies nothing.
-  const library = startLibrary({ index, hosts, register: registerMainHandler, emit });
+  const library = startLibrary({ index, hosts, register: registerMainHandler, emit, e2e: process.env.MAWS_E2E === '1' });
   shutdown.add('library', library.stop);
   openWindow();
 

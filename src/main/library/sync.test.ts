@@ -323,6 +323,39 @@ describe('LibrarySync', () => {
     expect(title(1)).toBe('Snapshot');
   });
 
+  // The e2e seam (M7a): a write main misses on purpose, which only the next connection's reconciliation brings in.
+  it('holds change-driven refreshes once the reads already out have landed, until the next connection reconciles', async () => {
+    await start();
+    source.snapshots[0].resolve(snapshot([entry(1)]));
+    await settle();
+    source.changed(1, 'updated', 2);
+    await settle();
+    let held = false;
+    void sync.holdRefreshes().then(() => (held = true));
+    await settle();
+    expect(held).toBe(false); // the read of 1 is still out
+    source.pendingEntry(1).resolve({ artifact: entry(1, { revision: 2 }), links: [] });
+    await settle();
+    expect(held).toBe(true);
+    expect(index.library.get(uuid(1))?.revision).toBe(2);
+
+    source.changed(1, 'updated', 3);
+    source.changed(2, 'created');
+    await settle();
+    expect(source.calls.filter((call) => call.startsWith('entry'))).toHaveLength(1); // missed
+    expect(index.library.get(uuid(1))?.revision).toBe(2);
+
+    source.connect();
+    await settle();
+    source.snapshots[1].resolve(snapshot([entry(1, { revision: 3 }), entry(2)]));
+    await settle();
+    expect(index.library.get(uuid(1))?.revision).toBe(3);
+    expect(ids()).toEqual([uuid(1), uuid(2)]);
+    source.changed(1, 'updated', 4); // followed again
+    await settle();
+    expect(source.calls.filter((call) => call.startsWith('entry'))).toHaveLength(2);
+  });
+
   it('refreshes the Spaces on spaces.changed, queued behind a reconciliation', async () => {
     await start();
     source.spacesChanged();

@@ -3,7 +3,7 @@
 // what `artifacts.create` and the writer made in the right date group with their kind counts; search finds a word in
 // a document's text and in an HTML page; Pin moves a row into Pinned; a Space made and an artifact moved into it shows
 // under By Space; Rename and Delete land after the host's event; and the library is right after the host process is
-// killed and restarted (M7: with writes main's index had not followed when it died). M7's upgrade case: an index rewound
+// killed and restarted (M7: with a write main's index had missed, through main's e2e seam). M7's upgrade case: an index rewound
 // to version 8 beside a populated host store migrates to 9 at launch and the first connection's snapshot fills it.
 // `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -40,38 +40,10 @@ async function libraryRevision(page: Page, artifactId: string): Promise<number |
   return (await ok<{ row: { revision: number } | null }>(page, 'library.get', { artifactId })).row?.revision ?? null;
 }
 
-// A session's stand-in typing into a document through the test writer, one acknowledged write after another, each a
-// fresh token at the start, until a write is refused (the host gone) or it is stopped.
-interface Burst {
-  acked: number;
-  lastToken: string | null;
-  refused: boolean; // it ended at a refusal, so no write of it reached a successor host
-}
-type BurstWindow = { __burst: Burst & { stop: boolean; done: Promise<void> }; maws: { invoke(name: string, input: unknown): Promise<{ ok: boolean }> } };
-async function startBurst(page: Page, artifactId: string, prefix: string): Promise<void> {
-  await page.evaluate(([id, p, agent]) => {
-    const w = window as unknown as BurstWindow;
-    const burst = { acked: 0, lastToken: null as string | null, refused: false, stop: false, done: Promise.resolve() };
-    burst.done = (async () => {
-      for (let n = 0; !burst.stop && n < 10_000; n++) {
-        const token = `${p}${String(n).padStart(4, '0')}`;
-        const answer = await w.maws.invoke('artifacts.testWrite', { artifactId: id, opId: token, appSessionId: agent, ops: [{ op: 'insertText', index: 0, text: `${token} ` }] });
-        if (!answer.ok) return void (burst.refused = true);
-        burst.acked = n + 1;
-        burst.lastToken = token;
-      }
-    })();
-    w.__burst = burst;
-  }, [artifactId, prefix, AGENT] as const);
-}
-const burstAcked = (page: Page) => page.evaluate(() => (window as unknown as BurstWindow).__burst.acked);
-async function stopBurst(page: Page): Promise<Burst> {
-  return page.evaluate(async () => {
-    const burst = (window as unknown as BurstWindow).__burst;
-    burst.stop = true;
-    await burst.done;
-    return { acked: burst.acked, lastToken: burst.lastToken, refused: burst.refused };
-  });
+// Main's library stops following change events until the next host connection (src/main/library/index.ts's seam,
+// MAWS_E2E=1 only), once the reads it has already taken have landed.
+async function holdLibraryRefreshes(launch: MawsLaunch): Promise<void> {
+  await launch.app.evaluate(() => (globalThis as unknown as { __maws_library: { holdRefreshes(): Promise<void> } }).__maws_library.holdRefreshes());
 }
 
 const AGENT = 'app-e2e-library-agent';
@@ -174,31 +146,33 @@ test('the library lists, finds, pins, files into a Space, renames and deletes, a
   expect(await ok(page, 'artifacts.get', { artifactId: budget.id })).toEqual({ artifact: null });
   await expect.poll(titles).toEqual(['Launch plan', 'Pricing, 2027']);
 
-  // the host killed while a session's stand-in types into the plan: the writes it committed last die with their change
-  // events (the store sends a document's at most every 250 ms), so main's index is behind the host's store when the
-  // host goes; the restarted host's connection reconciles it, the text included. A kill that happens to land with main
-  // caught up proves nothing about the reconciliation, so a second burst and kill follow it (three host exits within
-  // 60 s leave the host crashed for good).
-  let behind: { stale: number; host: number } | null = null;
-  for (let round = 0; round < 2 && behind === null; round++) {
-    const { pid } = await hostState(page);
-    await startBurst(page, plan.id, `kiwi${round}x`);
-    await expect.poll(() => burstAcked(page), { message: 'the stand-in is typing' }).toBeGreaterThanOrEqual(20);
-    process.kill(pid!, 'SIGKILL');
-    const stale = await libraryRevision(page, plan.id); // well before a successor (its restart waits 500 ms at least)
-    const burst = await stopBurst(page);
-    await expect.poll(async () => (await hostState(page)).pid, { timeout: 30_000, message: 'the host restarts' }).not.toBe(pid);
-    await expect.poll(async () => (await hostState(page)).state, { timeout: 30_000 }).toBe('ready');
-    const host = (await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId: plan.id })).artifact.revision;
-    await expect.poll(() => libraryRevision(page, plan.id), { timeout: 15_000, message: 'main’s index at the host’s revision' }).toBe(host);
-    await search.fill(burst.lastToken!);
-    await expect.poll(titles, { timeout: 15_000, message: 'the last acknowledged write is searchable' }).toEqual(['Launch plan']);
-    // proving only when no write reached the successor (each one after the kill was refused, so its event could not
-    // have carried the plan forward) and main was behind at the kill
-    if (burst.refused && stale !== null && stale < host) behind = { stale, host };
-    test.info().annotations.push({ type: 'host kill', description: `round ${round + 1}: ${burst.acked} writes acknowledged, ${burst.refused ? 'the next refused' : 'stopped'}; main's index at revision ${stale} at the kill, the host's at ${host}` });
-  }
-  expect(behind, 'a kill landed with main’s index behind the host’s store, and the reconciliation caught it up').not.toBeNull();
+  // a write main misses: its library holds change-driven refreshes (the seam), the stand-in writes, and the change event
+  // reaches the window (main has it too) while main's index stays behind; the host is killed, and the restarted host's
+  // connection reconciles the index, the text included
+  await page.evaluate((id) => {
+    const seen = { revision: 0 };
+    (window as unknown as { __changed: typeof seen }).__changed = seen;
+    window.maws.on('artifacts.changed', (change) => {
+      if (change.artifactId === id) seen.revision = Math.max(seen.revision, change.revision);
+    });
+  }, plan.id);
+  await holdLibraryRefreshes(launch);
+  const { revision: missed } = await ok<{ revision: number }>(page, 'artifacts.testWrite', {
+    artifactId: plan.id, opId: 'lib-missed', appSessionId: AGENT,
+    ops: [{ op: 'insertText', index: 0, text: 'The iguana signs off on Thursday. ' }],
+  });
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __changed: { revision: number } }).__changed.revision), { message: 'the write’s change event was told' }).toBe(missed);
+  const stale = await libraryRevision(page, plan.id);
+  expect(stale, 'main’s index missed the write').toBeLessThan(missed);
+  await search.fill('iguana');
+  await expect(library.getByText('No artifacts match “iguana”.')).toBeVisible();
+  const { pid } = await hostState(page);
+  process.kill(pid!, 'SIGKILL');
+  await expect.poll(async () => (await hostState(page)).pid, { timeout: 30_000, message: 'the host restarts' }).not.toBe(pid);
+  await expect.poll(async () => (await hostState(page)).state, { timeout: 30_000 }).toBe('ready');
+  expect((await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId: plan.id })).artifact.revision).toBe(missed);
+  await expect.poll(() => libraryRevision(page, plan.id), { timeout: 15_000, message: 'the reconciliation brought in the missed write' }).toBe(missed);
+  await expect.poll(titles, { timeout: 15_000, message: 'and its text' }).toEqual(['Launch plan']);
   await search.fill('');
   await expect.poll(titles).toEqual(['Launch plan', 'Pricing, 2027']);
   await ok(page, 'artifacts.update', { artifactId: plan.id, title: 'Launch plan, final' });

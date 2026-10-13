@@ -16,6 +16,9 @@
 //   once more after it.
 // - A host that is not streaming, or cannot answer, leaves the index as it is (logged): the library shows the last known
 //   state, which the next connection's reconciliation makes right again.
+// - The e2e seam `holdRefreshes` (index.ts installs it under MAWS_E2E=1 only) makes main miss changes on purpose: change
+//   events refresh nothing from the moment the reads already taken have landed until the next connection, whose
+//   reconciliation is untouched.
 import type { Space } from '@shared/artifacts/entity';
 import type { ArtifactsChanged } from '@shared/ipc/schema/artifacts';
 import type { LibraryEntryAnswer, LibrarySnapshot } from '@shared/ipc/schema/library';
@@ -59,6 +62,7 @@ export class LibrarySync {
   private readonly settling = new Map<string, { revision: number; handle: unknown }>(); // text waiting for its revision to settle
   private offs: (() => void)[] = [];
   private stopped = false;
+  private refreshesHeld = false; // the e2e seam's hold, until the next connection
   private readonly settleMs: number;
   private readonly timers: NonNullable<LibrarySyncOptions['timers']>;
 
@@ -73,8 +77,12 @@ export class LibrarySync {
 
   start(): void {
     this.offs = [
-      this.source.onStreaming(() => this.reconcile()),
+      this.source.onStreaming(() => {
+        this.refreshesHeld = false;
+        this.reconcile();
+      }),
       this.source.onArtifactChanged(({ artifactId, change }) => {
+        if (this.refreshesHeld) return;
         this.waiting.set(artifactId, change === 'deleted' ? 'delete' : 'refresh');
         this.drain();
       }),
@@ -94,6 +102,17 @@ export class LibrarySync {
     this.textQueue.clear();
     for (const { handle } of this.settling.values()) this.timers.clear(handle);
     this.settling.clear();
+  }
+
+  // The e2e seam: from now until the next host connection a change event refreshes nothing, so what the host commits
+  // meanwhile is missed until that connection's reconciliation; resolves once every step already on the chain (the
+  // entry reads taken or queued before the hold) has applied or failed.
+  async holdRefreshes(): Promise<void> {
+    this.refreshesHeld = true;
+    for (let chain = this.chain; ; chain = this.chain) {
+      await chain;
+      if (chain === this.chain) return;
+    }
   }
 
   private enqueue(step: () => Promise<void>): void {

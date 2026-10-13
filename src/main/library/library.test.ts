@@ -73,8 +73,9 @@ describe('startLibrary', () => {
     dir.dispose();
     vi.restoreAllMocks();
   });
-  const start = (host: ReturnType<typeof fakeHost>, target: Pick<Index, 'library' | 'unavailable'> = index, tickMs = 0) => {
+  const start = (host: ReturnType<typeof fakeHost>, target: Pick<Index, 'library' | 'unavailable'> = index, tickMs = 0, e2e = false) => {
     ({ stop } = startLibrary({
+      e2e,
       index: target,
       hosts: host as never,
       register: ((name: string, handler: Handler) => handlers.set(name, handler)) as never,
@@ -144,6 +145,23 @@ describe('startLibrary', () => {
     expect(call('library.spaces')).toEqual({ spaces: [] });
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('user_version 99 is newer than this app knows (9)'));
     expect(host.dispatched).toEqual([]);
+  });
+
+  it('installs the e2e seam only under MAWS_E2E=1, and removes it at stop', async () => {
+    const seam = () => (globalThis as { __maws_library?: { holdRefreshes(): Promise<void> } }).__maws_library;
+    const host = fakeHost({ 'library.snapshot': () => ({ artifacts: [], links: [], spaces: [] }) });
+    start(host);
+    expect(seam()).toBeUndefined();
+    stop();
+    start(host, index, 0, true);
+    await settle(5);
+    await seam()!.holdRefreshes();
+    host.dispatched.length = 0;
+    host.tell('artifacts.changed', { artifactId: uuid(1), kind: 'html', revision: 2, change: 'updated' });
+    await settle(5);
+    expect(host.dispatched).toEqual([]); // held: the change is missed
+    stop();
+    expect(seam()).toBeUndefined();
   });
 
   it('after stop tells nothing more and follows no event', async () => {
