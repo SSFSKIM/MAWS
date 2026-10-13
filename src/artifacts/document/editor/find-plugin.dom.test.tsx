@@ -1,7 +1,7 @@
 // Find in the active tab (M3 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): a decoration plugin over the
 // editor's text with a count, next and previous.
 import { Editor, type JSONContent } from '@tiptap/core';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { coreExtensionOptions } from '../ids';
 import { extensions } from '../schema';
 import { Find, findState } from './find-plugin';
@@ -45,6 +45,35 @@ describe('find', () => {
     expect(selected(e)).toBe('APPLE');
     e.commands.setFindQuery('straße');
     expect(decorated(e, 'find-match')).toEqual(['Straße']);
+  });
+
+  // A search that never leaves its loop would hang the test (and the renderer) synchronously, out of a timeout's reach;
+  // the cap on regexp executions turns one into a failure.
+  const boundedQuery = (e: Editor, query: string) => {
+    let runs = 0;
+    const exec = RegExp.prototype.exec;
+    const spy = vi.spyOn(RegExp.prototype, 'exec').mockImplementation(function (this: RegExp, text: string) {
+      if ((runs += 1) > 10_000) throw new Error(`the search for ${JSON.stringify(query)} never ended`);
+      return exec.call(this, text);
+    });
+    try {
+      e.commands.setFindQuery(query);
+    } finally {
+      spy.mockRestore();
+    }
+  };
+
+  it('finds an astral character, alone and at the start of a match, and still counts overlapping matches', () => {
+    const e = make(doc(para('p1', '😀'), para('p2', 'a😀b then 😀B'), para('p3', 'aaa')));
+    boundedQuery(e, '😀');
+    expect(findState(e.state).count).toBe(3);
+    expect(decorated(e, 'find-match')).toEqual(['😀', '😀', '😀']);
+    boundedQuery(e, '😀b');
+    expect(decorated(e, 'find-match')).toEqual(['😀b', '😀B']);
+    e.commands.findNext();
+    expect(selected(e)).toBe('😀B');
+    boundedQuery(e, 'aa');
+    expect(findState(e.state).count).toBe(2);
   });
 
   it('steps forward and back through the matches, wrapping, and selects the current one', () => {

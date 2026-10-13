@@ -63,7 +63,9 @@ function matchesIn(doc: PMNode, query: string): Match[] {
     needle.lastIndex = 0;
     for (let found = needle.exec(text); found; found = needle.exec(text)) {
       matches.push({ from: at[found.index], to: at[found.index + found[0].length - 1] + 1 });
-      needle.lastIndex = found.index + 1; // overlapping matches count, as each start is a place to step to
+      // Overlapping matches count, as each start is a place to step to; the next try starts one code point on, since a
+      // 'u' regexp started inside a surrogate pair backs up to the pair and finds this match again, for ever.
+      needle.lastIndex = found.index + (text.codePointAt(found.index)! > 0xffff ? 2 : 1);
     }
     return false;
   });
