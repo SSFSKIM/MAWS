@@ -1,36 +1,32 @@
-// An editable value on the page: a draft while the owner types, written when they leave the field or press Enter,
-// dropped on Escape. A write the model refuses (Decision Log 19) shows its reason beside the field and keeps the draft.
+// An editable value on the page. Every edit that reads is written as it is made (Decision Log 17: the page holds no
+// unsaved buffer, so it needs no close guard and a tab closed mid-edit loses nothing written); what the owner typed
+// stays in the field until they leave it, so the stored form (`16px` for `16`) does not jump under the caret. An edit
+// that does not read yet (`#12`, `1e`) stays in the field, shown as invalid with the model's reason, and is not
+// written; Escape drops it. A remote change replaces an invalid draft; a written draft stands until the field is left.
 import { useState, type KeyboardEvent } from 'react';
 
 export function CommitField(props: {
   label: string;
   value: string;
-  /** Writes the value; returns a refusal to show, or null when it was written. */
+  /** Writes the value if it reads; returns why not, or null when it was written. */
   commit(text: string): string | null;
   disabled?: boolean;
   className?: string;
   width?: string;
 }) {
   const { label, value, commit, disabled, className, width } = props;
-  const [draft, setDraft] = useState<{ base: string; text: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // A draft is over the value it started from; when the value changes under it (a remote edit), the draft goes.
-  const text = draft && draft.base === value ? draft.text : value;
-  const write = () => {
-    if (!draft || draft.base !== value || draft.text === value) {
-      setDraft(null);
-      return;
-    }
-    const refused = commit(draft.text.trim());
-    setError(refused);
-    if (!refused) setDraft(null);
+  // A draft is what the owner typed: written to the doc (`refusal` null), or not, with why; `base` is the value it was
+  // typed over, so an unwritten draft goes when the value changes under it.
+  const [draft, setDraft] = useState<{ text: string; base: string; refusal: string | null } | null>(null);
+  const live = draft && (draft.refusal === null || draft.base === value) ? draft : null;
+  const text = live ? live.text : value;
+  const error = live?.refusal ?? null;
+  const edit = (next: string) => {
+    const refusal = next.trim() === '' ? 'Type a value' : commit(next.trim());
+    setDraft({ text: next, base: value, refusal });
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === 'Enter') write();
-    else if (event.key === 'Escape') {
-      setDraft(null);
-      setError(null);
-    }
+    if (event.key === 'Escape') setDraft(null);
   };
   return (
     <span className={`dsp-field${className ? ` ${className}` : ''}`}>
@@ -42,8 +38,8 @@ export function CommitField(props: {
         disabled={disabled}
         spellCheck={false}
         style={width ? { width } : undefined}
-        onChange={(event) => setDraft({ base: value, text: event.target.value })}
-        onBlur={write}
+        onChange={(event) => edit(event.target.value)}
+        onBlur={() => setDraft((d) => (d && d.refusal !== null ? d : null))}
         onKeyDown={onKeyDown}
       />
       {error ? (
