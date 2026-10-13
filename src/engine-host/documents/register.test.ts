@@ -441,3 +441,12 @@ describe('suggestions over IPC (M8; Decision Log 45)', () => {
     expect(await refusal('artifacts.acceptSuggestion', { artifactId: artifact.id, ranges: [{ start: nothing, end: nothing }] })).toMatchObject({ code: 'invalid_input', issues: { reason: 'invalid' } });
   });
 });
+
+describe('the export service’s asset listing (Decision Log 45e)', () => {
+  it('lists an artifact’s assets by ref, and refuses an unknown artifact notFound', async () => {
+    const { artifact } = await call('artifacts.create', { kind: 'design', title: 'Site' });
+    await call('artifacts.uploadAsset', { artifactId: artifact.id, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array([1, 2, 3]) });
+    expect(await call('artifacts.assets', { artifactId: artifact.id })).toEqual({ assets: [{ ref: 'assets/logo.png', name: 'logo.png', mime: 'image/png', size: 3 }] });
+    expect(await refusal('artifacts.assets', { artifactId: '55555555-5555-4555-8555-555555555555' })).toMatchObject({ issues: { reason: 'notFound' } });
+  });
+});

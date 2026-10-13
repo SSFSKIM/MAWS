@@ -197,6 +197,12 @@ export const commands = {
   // A document kind's live V2 state and the revision it is at (M7: an exporter's state when no version is named).
   // Main-only.
   'artifacts.state': host(z.strictObject({ artifactId: Id }), z.strictObject({ revision: Seq, bytes: Bytes })),
+  // The artifact's assets, each by the ref a format names it with (`assets/<name>`), so an exporter can carry those its
+  // content does not name (P3-D's request, Decision Log 45e). Main-only.
+  'artifacts.assets': host(
+    z.strictObject({ artifactId: Id }),
+    z.strictObject({ assets: z.array(z.strictObject({ ref: z.string(), name: z.string(), mime: z.string(), size: z.number().int().nonnegative() })) }),
+  ),
   // The store's health (Decision Log 12, 24h): `recovered` when a broken file was moved aside this run.
   'artifacts.status': host(z.void(), z.strictObject({ status: z.enum(ARTIFACT_STORE_STATUSES), reason: z.string().nullable() })),
   // The schema-agnostic test writer (M3), idempotent by `opId`, as the session named (an agent) or the human; refused

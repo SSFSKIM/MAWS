@@ -36,7 +36,7 @@ export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShap
   'artifacts.delete': 'immediate', 'artifacts.duplicate': 'immediate', 'artifacts.search': 'immediate', 'artifacts.versions': 'immediate',
   'artifacts.saveVersion': 'immediate', 'artifacts.nameVersion': 'immediate', 'artifacts.restore': 'immediate', 'artifacts.markViewed': 'immediate', 'artifacts.pruneVersions': 'immediate',
   'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.acceptSuggestion': 'immediate', 'artifacts.rejectSuggestion': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.testLoopDelay': 'immediate',
-  'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.state': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
+  'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.state': 'immediate', 'artifacts.assets': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
   'spaces.list': 'immediate', 'spaces.create': 'immediate', 'spaces.update': 'immediate', 'spaces.delete': 'immediate',
 };
 
@@ -209,6 +209,13 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
       const content = store.contentRef(artifactId, revision);
       if (path !== undefined && path !== content.ref.name) throw new ArtifactStoreError('notFound', `no file ${path} in ${artifactId} at revision ${content.revision}`);
       return { revision: content.revision, kind, name: content.ref.name, size: content.ref.size, sha256: content.ref.sha256, path: content.path };
+    });
+  });
+  serve('artifacts.assets', ({ artifactId }) => {
+    const store = storeOf();
+    return store.readCommitted(() => {
+      required(store, artifactId);
+      return { assets: store.listAssets(artifactId).map(({ ref, name, mime, size }) => ({ ref, name, mime, size })) };
     });
   });
   serve('artifacts.state', ({ artifactId }) => {
