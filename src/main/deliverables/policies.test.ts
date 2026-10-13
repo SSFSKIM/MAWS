@@ -10,6 +10,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { ArtifactConsoleSchema } from '@shared/ipc/schema/artifacts';
 import { artifactUrl } from '@shared/artifacts/scheme';
 import {
+  appOriginOf,
   artifactConsoleMessageOf,
   attributeConsole,
   consoleMessageOf,
@@ -168,7 +169,7 @@ describe('the policies over a maws-artifact: frame', () => {
   // fix wave 1 (Decision Log 44a): an artifact frame reaches its own artifact only; the app reaches every one
   it('refuses a request from an artifact frame, or beneath one, for another artifact by its UUID, and lets the app’s own through', () => {
     const OTHER = '9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f';
-    const fromFrame = (url: string, frame: FrameLike | null, initiatorOrigin = 'null') => shouldCancelRequest({ url, beneath: beneathDeliverable(frame), shown: shownArtifact(frame), initiatorOrigin });
+    const fromFrame = (url: string, frame: FrameLike | null, initiatorOrigin = 'null') => shouldCancelRequest({ url, beneath: beneathDeliverable(frame), shown: shownArtifact(frame), initiatorOrigin, appOrigin: 'file://' });
     expect(fromFrame(artifactUrl(OTHER, 'live', 'index.html'), chain(APP, PAGE))).toBe(true); // a sandboxed page's request
     expect(fromFrame(artifactUrl(OTHER, 'live', 'assets/a.png'), chain(APP, PAGE, 'about:blank'))).toBe(true); // a frame beneath it
     expect(fromFrame(artifactUrl(OTHER, 3, 'index.html'), chain(APP, PAGE), `maws-artifact://${ARTIFACT}`)).toBe(true); // an unsandboxed one's
@@ -176,7 +177,22 @@ describe('the policies over a maws-artifact: frame', () => {
     expect(fromFrame(artifactUrl(ARTIFACT, 3, 'assets/a.png'), chain(APP, PAGE))).toBe(false); // its own artifact, any revision
     expect(fromFrame(artifactUrl(OTHER, 'live', 'index.html'), chain(APP, PAGE), 'file://')).toBe(false); // the app points its frame elsewhere
     expect(fromFrame(artifactUrl(OTHER, 'live', 'assets/a.png'), chain(APP), 'file://')).toBe(false); // the app page's own image
-    expect(shouldCancelRequest({ url: artifactUrl(OTHER, 'live', 'a.png'), beneath: null, shown: undefined, initiatorOrigin: 'null' })).toBe(false); // unreadable: the page's CSP holds
+    expect(shouldCancelRequest({ url: artifactUrl(OTHER, 'live', 'a.png'), beneath: null, shown: undefined, initiatorOrigin: 'null', appOrigin: 'file://' })).toBe(false); // unreadable: the page's CSP holds
+  });
+
+  // fix wave 2 (the re-review's finding 4): only the app's renderer is the app, not any origin that is not opaque
+  it('trusts the app’s renderer origin alone: the file-loaded page or the dev server, never another origin beneath an artifact frame', () => {
+    const OTHER = '9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f';
+    const cross = (initiatorOrigin: string, appOrigin: string) =>
+      shouldCancelRequest({ url: artifactUrl(OTHER, 'live', 'index.html'), beneath: true, shown: ARTIFACT, initiatorOrigin, appOrigin });
+    expect(cross('file://', 'file://')).toBe(false);
+    expect(cross('http://localhost:5173', 'http://localhost:5173')).toBe(false);
+    expect(cross('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai', 'file://')).toBe(true); // the PDF viewer beneath an artifact frame
+    expect(cross('https://example.com', 'file://')).toBe(true);
+    expect(cross('http://localhost:5173', 'file://')).toBe(true); // a dev server origin is the app's only in development
+    expect(appOriginOf('file:///Applications/MAWS.app/Contents/Resources/app/out/renderer/index.html')).toBe('file://');
+    expect(appOriginOf('http://localhost:5173/')).toBe('http://localhost:5173');
+    expect(appOriginOf('http://localhost:5173/harness.html')).toBe('http://localhost:5173');
   });
 
   it('prevents an artifact frame’s navigation to another artifact, and lets the app navigate it anywhere', () => {

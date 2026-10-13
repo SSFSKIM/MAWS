@@ -91,9 +91,10 @@ function crossesArtifacts(url: string, shown: string | null | undefined): boolea
 // still cancels): safe because every scheme answer that can run script carries a CSP without network sources
 // (`protocol.ts`), so the frame's own policy refuses what this filter lets by. Fix wave 1 (Decision Log 44a): also a
 // request from within an artifact frame (`shown`, `shownArtifact` of its frame) for another artifact, unless the app
-// made it (an initiator that is neither opaque nor a store frame's origin: the app pointing its frame elsewhere).
-export function shouldCancelRequest(details: { url: string; beneath: boolean | null; initiatorOrigin?: string; shown?: string | null }): boolean {
-  const fromApp = details.initiatorOrigin !== undefined && details.initiatorOrigin !== 'null' && !isDeliverable(details.initiatorOrigin);
+// made it: an initiator that is exactly the app's renderer origin (`appOrigin`, fix wave 2), the app pointing its frame
+// elsewhere; no other origin is trusted, an opaque one, a store frame's or the PDF viewer's included.
+export function shouldCancelRequest(details: { url: string; beneath: boolean | null; initiatorOrigin?: string; shown?: string | null; appOrigin?: string | null }): boolean {
+  const fromApp = details.appOrigin != null && details.initiatorOrigin === details.appOrigin;
   if (!fromApp && crossesArtifacts(details.url, details.shown)) return true;
   if (allowedBeneath(details.url)) return false;
   return details.beneath === true || isDeliverable(details.initiatorOrigin);
@@ -237,13 +238,20 @@ export function restrictRequests(webContentsId: number, cancel: (url: string) =>
   };
 }
 
+// The app's renderer origin as Chromium reports it for a request the app page starts (fix wave 2): the dev server's
+// origin in development; `file://` for the page loaded from the app's files (a file page's origin, which `URL` would call
+// opaque).
+export function appOriginOf(appUrl: string): string {
+  return appUrl.startsWith('file:') ? 'file://' : new URL(appUrl).origin;
+}
+
 // The session's request filter (its only `onBeforeRequest` listener: nothing else in main installs one) and download
-// filter.
-export function installFramePolicies(session: Session, env: SeamEnv): void {
+// filter. `appOrigin`: the app's renderer origin (`appOriginOf`), the one initiator trusted to reach every artifact.
+export function installFramePolicies(session: Session, env: SeamEnv, appOrigin: string | null = null): void {
   session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
     const own = details.webContentsId === undefined ? undefined : ownFilters.get(details.webContentsId);
     if (own) return callback({ cancel: own(details.url) });
-    callback({ cancel: shouldCancelRequest({ url: details.url, beneath: beneathRead(() => details.frame), initiatorOrigin: details.initiatorOrigin, shown: shownRead(() => details.frame) }) });
+    callback({ cancel: shouldCancelRequest({ url: details.url, beneath: beneathRead(() => details.frame), initiatorOrigin: details.initiatorOrigin, shown: shownRead(() => details.frame), appOrigin }) });
   });
   session.on('will-download', (event, item) => {
     if (!shouldCancelDownload({ url: item.getURL(), urlChain: item.getURLChain() })) return;
