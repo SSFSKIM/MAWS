@@ -453,3 +453,27 @@ describe('lifetimes (fix wave 1)', () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('the view’s origin (M6b: the ask sheet’s rows)', () => {
+  it('a live view, a version view and a hook’s snapshot carry how the system came to exist; the floor has none', async () => {
+    const doc = systemDoc();
+    const { host } = fakeHost({ a: doc }, { 'a@3': stateV2(systemDoc()) });
+    const live = await openDesignSystem(host, { id: 'a' });
+    expect(live.origin).toEqual({ route: 'derived', at: AT });
+    expect((await openDesignSystem(host, { id: 'a', versionSeq: 3 })).origin).toEqual({ route: 'derived', at: AT });
+    expect((await openDesignSystem(host, { builtin: 'maws' })).origin).toBeNull();
+    live.close();
+    let seen: DesignSystemView | null = null;
+    function Probe() {
+      seen = useDesignSystem({ id: 'a' }).view;
+      return null;
+    }
+    render(
+      <DesignSystemHostContext.Provider value={host}>
+        <Probe />
+      </DesignSystemHostContext.Provider>,
+    );
+    await flush();
+    expect(seen!.origin).toEqual({ route: 'derived', at: AT });
+  });
+});

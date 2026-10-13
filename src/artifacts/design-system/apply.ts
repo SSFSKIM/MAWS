@@ -202,8 +202,8 @@ export function useDesignSystem(ref: DesignSystemRef | { builtin: 'maws' } | nul
 
 /** A view's current state as a fixed object that still renders and follows like the view; closing it does nothing. */
 function snapshotOf(view: DesignSystemView): DesignSystemView {
-  const { tokens, law, name } = view;
-  return { tokens, law, name, css: (scope, medium, overrides) => view.css(scope, medium, overrides), subscribe: (listener) => view.subscribe(listener), close: () => {} };
+  const { tokens, law, name, origin = null } = view;
+  return { tokens, law, name, origin, css: (scope, medium, overrides) => view.css(scope, medium, overrides), subscribe: (listener) => view.subscribe(listener), close: () => {} };
 }
 
 /**

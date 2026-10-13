@@ -45,4 +45,29 @@ export const SHEET = {
   answerDecided: 'Decided for me',
   answerNone: 'Not answered',
   otherAnswer: (text: string) => `Other: ${text}`,
+  // P3-D start: a design_system question (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D13)
+  buildSystem: 'Build one with me',
+  buildSystemDetail: 'The agent works out a new design system with you.',
+  noSystems: 'You have no design systems yet.',
+  readingSystems: 'Reading your design systems…',
+  systemsUnread: "Couldn't read your design systems.",
+  systemOrigin: (origin: { route: string; from?: string } | null | undefined): string | null => {
+    if (!origin) return null;
+    const from = origin.from ? ` from ${origin.from}` : '';
+    switch (origin.route) {
+      case 'default':
+        return 'Built in';
+      case 'adopted':
+        return `Adopted${from}`;
+      case 'derived':
+        return `Derived${from}`;
+      case 'imported':
+        return `Imported${from || ' from Claude'}`;
+      case 'blank':
+        return 'Started blank';
+      default:
+        return null;
+    }
+  },
+  // P3-D end
 } as const;

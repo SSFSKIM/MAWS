@@ -6,7 +6,7 @@ import { onUpdate, type Doc } from '../yjs';
 import { fontFaces, type AssetUrl } from './assets';
 import { DOCUMENT_CSS_PATH } from './canon';
 import { generateTokensCss, type Medium } from './css';
-import { readSystem } from './model';
+import { readSystem, type SystemOrigin } from './model';
 import { parseTokens, type TokenSet } from './tokens';
 
 /** Per-consumer values of `--ds-*` names, set after the system's (the chain's first link, D8). */
@@ -16,6 +16,8 @@ export interface DesignSystemView {
   readonly tokens: TokenSet;
   readonly law: string;
   readonly name: string;
+  /** How the system came to exist (`meta.origin`); null for the floor. Optional so a consumer's fake view need not give it. */
+  readonly origin?: SystemOrigin | null;
   /** The system's stylesheet for a scope: its faces, `tokens.css` at the medium's scale, then the overrides. */
   css(scope: string, medium: Medium, overrides?: TokenOverrides): string;
   /** Fires on every change of a live system; a version's or the floor's never fires. Returns the unsubscribe. */
@@ -29,6 +31,7 @@ export interface SystemSnapshot {
   law: string;
   name: string;
   files: Readonly<Record<string, string>>;
+  origin: SystemOrigin | null;
 }
 
 const OVERRIDE_NAME = /^--ds-[A-Za-z0-9_-]+$/;
@@ -73,6 +76,9 @@ class View implements DesignSystemView {
   get name() {
     return this.current().name;
   }
+  get origin() {
+    return this.current().origin;
+  }
   css(scope: string, medium: Medium, overrides?: TokenOverrides): string {
     return snapshotCss(this.current(), this.toUrl, scope, medium, overrides);
   }
@@ -96,10 +102,10 @@ class View implements DesignSystemView {
 /** The snapshot of a system doc, or null while it holds none (not yet synced, or not a system). */
 export function snapshotOfDoc(doc: Doc): SystemSnapshot | null {
   const state = readSystem(doc);
-  return state.meta ? { tokens: state.tokens, law: state.law, name: state.meta.name, files: state.files } : null;
+  return state.meta ? { tokens: state.tokens, law: state.law, name: state.meta.name, files: state.files, origin: state.meta.origin } : null;
 }
 
-const EMPTY: SystemSnapshot = { tokens: { tokens: new Map(), groups: new Map() }, law: '', name: '', files: {} };
+const EMPTY: SystemSnapshot = { tokens: { tokens: new Map(), groups: new Map() }, law: '', name: '', files: {}, origin: null };
 
 /**
  * A live view over a replica: read once per change, its listeners fired after every update. It observes the doc for
@@ -130,7 +136,7 @@ export function builtinView(): DesignSystemView {
   const source = defaultSystem(HOUSE_KEY);
   const tokens = source && parseTokens(source.files['tokens.tokens.json'] ?? '').tokens;
   if (!source || !tokens) throw new Error(`the bundled house system (${HOUSE_KEY}) is missing or unreadable`);
-  const snapshot: SystemSnapshot = { tokens, law: source.files['DESIGN.md'] ?? '', name: source.name, files: source.files };
+  const snapshot: SystemSnapshot = { tokens, law: source.files['DESIGN.md'] ?? '', name: source.name, files: source.files, origin: null };
   floor = new View(() => snapshot, null, () => {});
   return floor;
 }

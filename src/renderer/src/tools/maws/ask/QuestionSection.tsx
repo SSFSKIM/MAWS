@@ -8,6 +8,7 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { SHEET } from './copy';
 import { setDecide, setSkip, type Draft } from './draft';
 import { Choice } from './modalities/Choice';
+import { DesignSystem } from './modalities/DesignSystem'; // P3-D
 import { Paths } from './modalities/Paths';
 import { Repository } from './modalities/Repository';
 import { Text } from './modalities/Text';
@@ -73,6 +74,9 @@ export function QuestionSection({ question, draft, disabled, edit, directory, pr
     case 'repository':
       control = <Repository {...props} projects={projects} />;
       break;
+    case 'design_system': // P3-D
+      control = <DesignSystem {...props} />;
+      break;
   }
   return (
     <Shell question={question}>
@@ -125,6 +129,8 @@ function AnswerValue({ question, answer }: { question: AskQuestion; answer: AskA
           <span className={answer.name !== undefined ? 'text-ui-sm text-fg-muted' : 'text-fg'}>{values.join(', ')}</span>
         </div>
       );
+    case 'design_system': // P3-D: the system by its name (its id when the answer has none), or the build request
+      return <p className="m-0 text-ui text-fg">{answer.create === true ? SHEET.buildSystem : (answer.name ?? answer.designSystemId)}</p>;
   }
 }
 

@@ -53,7 +53,7 @@ describe('faces (I4, I5)', () => {
 
   it('put the private family before its authored one in the scope, keeping the stack’s order; tokens.css as a file keeps the authored names', () => {
     const files = { 'components/document.css': FACE };
-    const css = snapshotCss({ tokens, law: '', name: 'Harbor', files }, urlOf('a'), '[data-ds-scope="s"]', 'document');
+    const css = snapshotCss({ tokens, law: '', name: 'Harbor', files, origin: null }, urlOf('a'), '[data-ds-scope="s"]', 'document');
     const alias = fontFaces(FACE, tokens, urlOf('a'), { aliased: true }).aliases.get('iowan old style')!;
     expect(css).toContain(`--ds-font-display: ${alias}, "Iowan Old Style", Georgia, serif;`);
     expect(css).toContain('--ds-font-mono: "JetBrains Mono";'); // no bundled face: unchanged
