@@ -40,6 +40,7 @@ import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol'; // P3-A M5
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint'; // P3-A M5
 import { invoke, launchReady, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { menu, otherThemeColours } from './support/code-product';
+import { ownTitles } from './support/library'; // P3-L M7
 import { documents, seamReady } from './support/documents'; // P3-A M5
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, killScratchProcesses, ps } from './support/processes';
@@ -1015,7 +1016,7 @@ test('(j) P3-L M7: the library is right after a detached edit: what a kept sessi
     // the Artifacts tab shows it: the rows, the words written while away found, the deleted draft absent
     await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
     const library = page.locator('[data-library]');
-    const titles = () => library.getByRole('article').evaluateAll((rows) => rows.map((r) => r.getAttribute('aria-label')));
+    const titles = () => ownTitles(page, library); // without the seeded design systems (P3-D)
     await expect.poll(titles, { timeout: 15_000 }).toEqual(['Away report', 'Field notes']);
     const search = library.getByRole('searchbox', { name: 'Search artifacts' });
     await search.fill('okapi');

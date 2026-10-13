@@ -13,6 +13,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { MIGRATIONS } from '../src/main/index/migrations';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { ownTitles } from './support/library';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -78,7 +79,7 @@ test('the library lists, finds, pins, files into a Space, renames and deletes, a
   await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
   const library = page.locator('[data-library]');
   const row = (title: string): Locator => library.getByRole('article', { name: title, exact: true });
-  const titles = () => library.getByRole('article').evaluateAll((rows) => rows.map((r) => r.getAttribute('aria-label')));
+  const titles = () => ownTitles(page, library); // without the seeded design systems (P3-D)
   for (const title of ['Pricing page', 'budget.csv', 'Launch plan']) await expect(row(title)).toBeVisible({ timeout: 15_000 });
 
   // the date group and the kinds' counts
@@ -91,7 +92,8 @@ test('the library lists, finds, pins, files into a Space, renames and deletes, a
   await expect(menu.getByRole('menuitemradio', { name: /^Documents/ })).toHaveText('Documents1');
   await expect(menu.getByRole('menuitemradio', { name: /^HTML pages/ })).toHaveText('HTML pages1');
   await expect(menu.getByRole('menuitemradio', { name: /^Files/ })).toHaveText('Files1');
-  await expect(menu.getByRole('menuitemradio', { name: /^All types/ })).toHaveText('All types3');
+  const seeded = Number((await menu.getByRole('menuitemradio', { name: /^Design systems/ }).textContent())!.replace(/\D/g, '')); // P3-D's seeds: the baseline
+  await expect(menu.getByRole('menuitemradio', { name: /^All types/ })).toHaveText(`All types${3 + seeded}`);
   await page.keyboard.press('Escape');
 
   // search: a word inside the document's text (indexed once its revision settles), and inside the HTML page's body
@@ -240,7 +242,7 @@ test('an index at version 8 beside a populated host store migrates to 9 at launc
   await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
   await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
   const library = page.locator('[data-library]');
-  const titles = () => library.getByRole('article').evaluateAll((rows) => rows.map((r) => r.getAttribute('aria-label')));
+  const titles = () => ownTitles(page, library); // without the seeded design systems (P3-D)
   await expect.poll(async () => (await titles()).sort(), { timeout: 15_000, message: 'the snapshot filled the library' }).toEqual(['Harbour page', 'Ship log', 'ledger.csv']);
   expect(await libraryRevision(page, log.id), 'the log at the session’s write').toBe(revision);
   // the session that wrote it is its last editor (the test writer links no session: a link comes from a session's own
@@ -249,7 +251,8 @@ test('an index at version 8 beside a populated host store migrates to 9 at launc
   await expect(library.getByRole('article', { name: 'Ship log', exact: true })).toContainText('by Claude'); // the writer's session has no record here
   await library.getByRole('button', { name: /Filter by type/ }).click();
   const menu = page.getByRole('menu');
-  await expect(menu.getByRole('menuitemradio', { name: /^All types/ })).toHaveText('All types3');
+  const seeded = Number((await menu.getByRole('menuitemradio', { name: /^Design systems/ }).textContent())!.replace(/\D/g, '')); // P3-D's seeds: the baseline
+  await expect(menu.getByRole('menuitemradio', { name: /^All types/ })).toHaveText(`All types${3 + seeded}`);
   await page.keyboard.press('Escape');
   const search = library.getByRole('searchbox', { name: 'Search artifacts' });
   await search.fill('walrus');
@@ -268,7 +271,7 @@ test('an index at version 8 beside a populated host store migrates to 9 at launc
   const db = new DatabaseSync(join(userData, 'index.sqlite'), { readOnly: true });
   try {
     expect(schemaOf(db).version, 'the index is at 9 again').toBe(9);
-    expect((db.prepare('SELECT count(*) AS n FROM library_artifacts').get() as { n: number }).n).toBe(3);
+    expect((db.prepare("SELECT count(*) AS n FROM library_artifacts WHERE kind <> 'design_system'").get() as { n: number }).n).toBe(3); // the case's own three (P3-D seeds design systems)
   } finally {
     db.close();
   }
