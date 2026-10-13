@@ -145,7 +145,7 @@ const PAINT_ATTRS: Record<string, string> = { fill: 'fill', stroke: 'stroke', 's
 
 function declarationsOf(element: CanonElement): Declaration[] {
   const fromAttrs = Object.entries(element.attrs).flatMap(([name, value]): Declaration[] => {
-    const property = PAINT_ATTRS[name.toLowerCase()];
+    const property = Object.hasOwn(PAINT_ATTRS, name.toLowerCase()) ? PAINT_ATTRS[name.toLowerCase()] : undefined;
     return property ? [{ property, value }] : [];
   });
   return [...fromAttrs, ...element.style];
@@ -203,6 +203,18 @@ interface Found {
   message: string;
 }
 type Rule = (unit: CheckUnit, system: System, param: number) => Found[];
+
+const isNotes = (element: CanonElement) => element.tag === 'aside' || element.attrs['data-ph'] === 'notes';
+
+/** Every element on the slide or component itself: speaker notes are not on it. */
+function eachOnSlide(unit: CheckUnit, fn: (element: CanonElement) => void) {
+  const walk = (element: CanonElement) => {
+    if (isNotes(element)) return;
+    fn(element);
+    element.children.forEach(walk);
+  };
+  unit.elements.forEach(walk);
+}
 
 function each(unit: CheckUnit, fn: (element: CanonElement) => void) {
   const walk = (element: CanonElement) => {
@@ -278,7 +290,7 @@ const paintsAccent = (element: CanonElement, system: System): boolean =>
 const accentMax: Rule = (unit, system, max) => {
   if (unit.kind !== 'slide' && unit.kind !== 'component') return [];
   const painted: string[] = [];
-  each(unit, (element) => {
+  eachOnSlide(unit, (element) => {
     if (paintsAccent(element, system)) painted.push(element.at);
   });
   if (painted.length <= max) return [];
@@ -321,12 +333,9 @@ const WORD = /[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu;
 const maxWords: Rule = (unit, _system, max) => {
   if (unit.kind !== 'slide' && unit.kind !== 'component') return [];
   let count = 0;
-  const walk = (element: CanonElement) => {
-    if (element.tag === 'aside' || element.attrs['data-ph'] === 'notes') return; // speaker notes are not on the slide
+  eachOnSlide(unit, (element) => {
     count += element.text.match(WORD)?.length ?? 0;
-    element.children.forEach(walk);
-  };
-  unit.elements.forEach(walk);
+  });
   return count > max ? [{ element: unit.elements[0]?.at ?? unit.name, message: `${count} words; at most ${max} per ${unit.kind}` }] : [];
 };
 

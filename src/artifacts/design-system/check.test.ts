@@ -122,3 +122,13 @@ describe('the hard-don’ts check (Acceptance 5)', () => {
     expect(summary(report)).toEqual(['contrast:4.5 | Field trip letter | p#a1 | text #c9663f on #faf9f6 is 3.66:1, below 4.5:1']);
   });
 });
+
+describe('fix wave 1: the per-slide counts', () => {
+  it('does not count the speaker notes toward the accent limit', () => {
+    const law = parseLaw("## 0. S\n## 1. P\n## 2. T\n## 3. C\n## 4. L\n## 5. C\n## 6. V\n## 7. M\n## 8. Hard don'ts\n\n- One accent a slide. [check: accent-max:1]\n");
+    const slide = `<section id="n" style="background:var(--ds-color-bg)"><p style="color:var(--ds-color-accent)">x</p><aside data-ph="notes"><span style="color:var(--ds-color-accent)">y</span></aside><aside><b style="color:var(--ds-color-accent)">z</b></aside></section>`;
+    const report = checkHardDonts(law, tokens, canonUnits({ 'layouts/n.html': slide }, parser));
+    expect(report.violations).toEqual([]);
+    expect(report.checks).toEqual([{ dont: 0, rule: 'accent-max:1', violations: 0 }]);
+  });
+});
