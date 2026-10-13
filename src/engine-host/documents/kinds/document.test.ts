@@ -15,6 +15,15 @@ import { addThread, anchorOfMark } from '@artifacts/document/threads';
 import { body, dupes, ids, nodeOf, now, TAB, textOf } from '@artifacts/document/writer.fixture';
 import { pmnodeToDelta } from '@artifacts/yjs/prosemirror';
 import { HUMAN, liveText, openDocumentWorld, sessionActor, type DocumentWorld } from './document-world.fixture';
+import { registerDocumentKind } from './document';
+
+const until = async (check: () => boolean): Promise<void> => {
+  const give = Date.now() + 2_000;
+  while (!check()) {
+    if (Date.now() > give) throw new Error('timed out');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+};
 
 const AGENT = sessionActor('app-agent');
 const OTHER = sessionActor('app-other');
@@ -50,6 +59,26 @@ describe('the document kind on A’s store', () => {
     await committed();
     expect(listTabs(world.service.live(copy.id)).map((tab) => tab.id)).toEqual([tabs[0].id]); // a copy keeps the source's
     expect(world.store.lastWrite(artifact.id)?.actor).toEqual(AGENT); // the first tab is the creator's write
+  });
+
+  // M8 fix wave 2: the first-tab write after `created` is its own commit, so a host that stopped between the two leaves
+  // a durable document never written (revision 0) and no new `created` to retry on; the kind's registration at the
+  // next host start gives every such document its first tab (until A's `KindAdapter.initial` makes it one commit).
+  it('gives a document left without its first tab (never written) that tab when the kind registers at host start', async () => {
+    world.kind.close(); // the host stopped before its first-tab write: nothing listens
+    const left = await world.store.create({ kind: 'document', title: 'Interrupted' }, HUMAN);
+    const written = await world.store.create({ kind: 'document', title: 'Written', initial: (doc) => createDocument(doc, { title: 'Own tab' }) }, HUMAN);
+    await committed();
+    expect(listTabs(world.service.live(left.id))).toEqual([]);
+    expect(world.store.revision(left.id)).toBe(0);
+    const again = registerDocumentKind(world.store);
+    try {
+      await until(() => listTabs(world.service.live(left.id)).length === 1);
+      expect(listTabs(world.service.live(left.id)).map((tab) => tab.title)).toEqual(['Interrupted']);
+      expect(listTabs(world.service.live(written.id)).map((tab) => tab.title)).toEqual(['Own tab']);
+    } finally {
+      again.close();
+    }
   });
 
   it('registers the document mirror writer while the kind is registered (M8: a linked Space mirrors <slug>.md)', () => {

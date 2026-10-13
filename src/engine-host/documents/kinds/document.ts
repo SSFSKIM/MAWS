@@ -11,7 +11,12 @@
 // its `created` the host writes the first tab, titled as the document, as the creator, unless the document already has
 // a tab (the agent's write and a copy's state are queued before the store announces the creation). One writer, the
 // host, before any editor binds: replicas never initialise a document themselves (two would each write a tab of their
-// own under the same key, and one replica's body would lose). A failed write is logged; the editor waits for a tab.
+// own under the same key, and one replica's body would lose). The write is its own commit after the creation's, so a
+// host that stopped (or a write that failed) between the two leaves a document never written (revision 0) and no new
+// `created`: the kind's registration at host start gives every such document its first tab (fix wave 2). The hole
+// closes with A's `KindAdapter.initial` (parent Decision Log 48), which writes it in the creation's own commit. A
+// failure is logged; the registration has no channel to the renderer, whose editor says, after a bound, that the
+// document has no content yet.
 import { documentAdapter, type DocumentAdapter } from '@artifacts/document/adapter';
 import { documentMirrorWriter } from '@artifacts/document/mirror';
 import { createDocument, listTabs } from '@artifacts/document/tabs';
@@ -32,6 +37,8 @@ export function registerDocumentKind(store: ArtifactStore, { log = (line: string
     if (change.change === 'created') void firstTab(store, change.artifactId, log);
   });
   const offMirror = registerMirrorWriter('document', documentMirrorWriter);
+  // documents a stopped host left without their first tab (created, never written)
+  for (const artifact of store.list({ kind: 'document' })) if (store.revision(artifact.id) === 0) void firstTab(store, artifact.id, log);
   return {
     adapter,
     close: () => {
