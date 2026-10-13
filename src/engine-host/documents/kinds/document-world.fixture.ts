@@ -59,9 +59,9 @@ export function openDocumentWorld(): DocumentWorld {
   const world: DocumentWorld = {
     dir, storage, service, store, kind, logs,
     async seeded(by = HUMAN) {
-      const artifact = await store.create({ kind: 'document', title: 'Plan' }, by);
+      // created with its content, as the agent's create is (an empty one gets the host's first tab, M8 fix wave 1)
       const seed = diffV1(seedDoc());
-      await service.writeAs(artifact.id, by, (doc) => applyV1(doc, seed));
+      const artifact = await store.create({ kind: 'document', title: 'Plan', initial: (doc) => applyV1(doc, seed) }, by);
       return artifact.id;
     },
     connect(artifactId, actor) {

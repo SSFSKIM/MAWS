@@ -8,6 +8,7 @@ import { carriedBy, decodeMap, idAt, mergeMaps, transact } from '@artifacts/yjs'
 import { DocIndex } from '@artifacts/document/block-index';
 import { documentMirrorWriter } from '@artifacts/document/mirror';
 import { mirrorWriterFor } from '@artifacts/library/mirror';
+import { createDocument, listTabs } from '@artifacts/document/tabs';
 import { applyEdit } from '@artifacts/document/patch-writer';
 import { schemaFor } from '@artifacts/document/schema';
 import { addThread, anchorOfMark } from '@artifacts/document/threads';
@@ -32,6 +33,23 @@ describe('the document kind on A’s store', () => {
   it('registers its adapter for the document kind', () => {
     expect(world.service.adapterFor('document')).toBe(world.kind.adapter);
     expect(world.store.service.adapterFor('document')?.kind).toBe('document');
+  });
+
+  // M8 fix wave 1: a document is created with its first tab (the spec's Terms), written once, by the host, as the
+  // creator: replicas never initialise it themselves, so two editors opening a new document bind the one live body.
+  it('gives a document created empty its first tab, once, titled as the document and credited to its creator', async () => {
+    const artifact = await world.store.create({ kind: 'document', title: 'Launch plan' }, AGENT);
+    await committed();
+    await committed();
+    const tabs = listTabs(world.service.live(artifact.id));
+    expect(tabs.map((tab) => tab.title)).toEqual(['Launch plan']);
+    const version = await world.store.create({ kind: 'document', title: 'Seeded', initial: (doc) => createDocument(doc, { title: 'Own tab' }) }, HUMAN);
+    await committed();
+    expect(listTabs(world.service.live(version.id)).map((tab) => tab.title)).toEqual(['Own tab']); // content given: untouched
+    const copy = await world.store.duplicate(artifact.id, {}, HUMAN);
+    await committed();
+    expect(listTabs(world.service.live(copy.id)).map((tab) => tab.id)).toEqual([tabs[0].id]); // a copy keeps the source's
+    expect(world.store.lastWrite(artifact.id)?.actor).toEqual(AGENT); // the first tab is the creator's write
   });
 
   it('registers the document mirror writer while the kind is registered (M8: a linked Space mirrors <slug>.md)', () => {

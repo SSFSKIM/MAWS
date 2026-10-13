@@ -5,10 +5,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
 import { addThread } from '@artifacts/document/threads';
-import { listTabs } from '@artifacts/document/tabs';
+import { createDocument, listTabs, tabBody } from '@artifacts/document/tabs';
+import { schemaFor } from '@artifacts/document/schema';
+import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
 import type { ArtifactHost, DocumentHandle } from '@artifacts/host';
 import type { CommandName, EventName, MawsBridge } from '@shared/ipc/schema';
-import { DocumentTabState, firstTabId, type DocumentTabDeps } from './tab-state';
+import { DocumentTabState, type DocumentTabDeps } from './tab-state';
 
 const A = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
 const row = (fields: Record<string, unknown> = {}) => ({ id: A, kind: 'document', title: 'Launch plan', lastViewedAt: 1_000, agentEditsAsSuggestions: false, revision: 3, ...fields });
@@ -94,20 +96,29 @@ describe('a document tab’s state', () => {
     await ready(state);
     const snapshot = state.snapshot();
     expect(snapshot.title).toBe('Launch plan');
-    expect(snapshot.document).toMatchObject({ phase: 'live', readOnly: false });
-    await until(() => state.snapshot().document?.unsaved === 0, 'the first tab acknowledged');
+    expect(snapshot.document).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false });
     expect(snapshot.suggestions).toBe(false);
     expect(await state.history.lastViewedAt()).toBe(1_000);
   });
 
-  it('gives an empty document its first tab, titled as the artifact, under one id every replica uses', async () => {
+  // M8 fix wave 1 (the review's reproduction: two replicas each initialising the empty document kept one body, and one
+  // editor stayed bound to the losing one): the host writes a document's first tab (kinds/document.ts); a replica
+  // writes none, waits for it, and every replica's typing lands in the one live body.
+  it('writes nothing into an empty document: every replica binds the first tab the host writes', async () => {
     const w = world();
     const [one, two] = [w.open(), w.open()];
     await Promise.all([ready(one), ready(two)]);
-    await until(() => listTabs(w.memory.doc).length > 0, 'the first tab at the host');
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(listTabs(w.memory.doc)).toEqual([{ id: firstTabId(A), title: 'Launch plan', order: expect.any(String) }]);
-    expect(firstTabId(A)).toMatch(/^[0-9a-z]{8}$/);
+    expect(listTabs(w.memory.doc)).toEqual([]);
+    expect(w.handles.map((h) => h.state().unsaved)).toEqual([0, 0]);
+    w.memory.write((doc) => createDocument(doc, { title: 'Launch plan', id: 'tab00001' }));
+    await until(() => w.handles.every((h) => tabBody(h.doc, 'tab00001') !== undefined), 'the host’s tab at both replicas');
+    const bound = w.handles.map((h) => tabBody(h.doc, 'tab00001')!);
+    w.handles.forEach((h, i) => (tabBody(h.doc, 'tab00001')!.get(0) as unknown as { insert(at: number, text: string): void }).insert(0, i === 0 ? 'Alpha' : 'Beta'));
+    const text = (doc: Parameters<typeof tabBody>[0]) => ynodeToPmnode(tabBody(doc, 'tab00001')!, schemaFor()).textContent;
+    await until(() => [w.memory.doc, ...w.handles.map((h) => h.doc)].every((doc) => text(doc).includes('Alpha') && text(doc).includes('Beta')), 'both replicas’ typing everywhere');
+    expect(w.handles.map((h, i) => tabBody(h.doc, 'tab00001') === bound[i])).toEqual([true, true]);
+    expect(listTabs(w.memory.doc)).toHaveLength(1);
   });
 
   it('counts the open threads and follows the replica’s saved state', async () => {
@@ -115,7 +126,7 @@ describe('a document tab’s state', () => {
     const state = w.open();
     await ready(state);
     const handle = w.handles[0];
-    addThread(handle.doc, { threadId: 'th1', tabId: firstTabId(A), blockId: null, quote: 'q', anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
+    addThread(handle.doc, { threadId: 'th1', tabId: 'tab00001', blockId: null, quote: 'q', anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
     expect(state.snapshot().unresolved).toBe(1);
     w.memory.dropConnections();
     await until(() => state.snapshot().document?.phase !== 'live', 'the replica to see its port go');

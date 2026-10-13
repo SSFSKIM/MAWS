@@ -9,6 +9,7 @@ import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
 import { setDsOverrides } from '@artifacts/document/meta';
+import { createDocument } from '@artifacts/document/tabs';
 import type { ArtifactHost } from '@artifacts/host';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
@@ -36,6 +37,7 @@ beforeEach(() => {
   resetArtifactEditors();
   window.maws = fakeClient({ 'session.intent.get': null }).client;
   memory = new MemoryDocumentHost();
+  memory.write((doc) => createDocument(doc, { title: 'Launch plan' })); // the host's first tab (kinds/document.ts)
 });
 afterEach(() => {
   cleanup();

@@ -7,9 +7,8 @@
 // the rail the header toggles, an export's progress, and the comment sends in flight: the replica stays open until
 // they settle, since a send that lands records its message in the document's thread (Decision Log 27).
 //
-// An empty document (the owner's "Make something new" creates none of its content) gets its first tab here, under an
-// id every replica derives from the artifact's, so two replicas opening it at once write the same key and one tab wins.
-import { createDocument, listTabs } from '@artifacts/document/tabs';
+// A replica never initialises its document: the host writes a new document's first tab (kinds/document.ts in the
+// engine host; fix wave 1), and the editor shows "Loading…" until that tab has arrived, then binds it.
 import { listThreads, observeThreads } from '@artifacts/document/threads';
 import type { DocumentRail } from '@artifacts/document/editor/DocumentEditor';
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
@@ -55,9 +54,6 @@ export interface DocumentTabSnapshot {
   exporting: ExportStatus | null;
 }
 
-/** The first tab's id, from the artifact's: the same on every replica (`[0-9a-z]{8}`, the block ids' alphabet). */
-export const firstTabId = (artifactId: string): string => artifactId.replace(/[^0-9a-z]/gi, '').toLowerCase().slice(0, 8).padEnd(8, '0');
-
 // `ArtifactHost.export` with the page size (Letter or A4, the owner's Decision Log 43), which A's service is asked to
 // take with the request; until it does, the argument is not read.
 type ExportWithPage = (artifactId: string, format: string, version: number | undefined, options: { pageSize: PageSize }) => Promise<{ path: string }>;
@@ -72,7 +68,6 @@ export class DocumentTabState {
   private current: DocumentTabSnapshot;
   private readonly listeners = new Set<() => void>();
   private readonly stops: Array<() => void> = [];
-  private row: ArtifactRow | null = null;
   private rowRead = false;
   private viewedBefore: number | null = null;
   private sending = 0;
@@ -133,7 +128,6 @@ export class DocumentTabState {
     }
     const handle = opened.value;
     if (this.disposed) return void handle.close();
-    if (listTabs(handle.doc).length === 0) createDocument(handle.doc, { title: this.row?.title || 'Tab 1', id: firstTabId(this.artifactId) });
     const openThreads = () => listThreads(handle.doc).filter((thread) => thread.status === 'open').length;
     this.stops.push(
       handle.subscribe((document) => this.set({ document })),
@@ -157,7 +151,6 @@ export class DocumentTabState {
   private adopt(row: ArtifactRow | null): void {
     if (!this.rowRead) this.viewedBefore = row?.lastViewedAt ?? null;
     this.rowRead = true;
-    this.row = row;
     if (this.disposed || !row) return;
     const placement = { ...(row.designSystemId ? { designSystemId: row.designSystemId } : {}), ...(row.spaceId ? { spaceId: row.spaceId } : {}) };
     this.set({ title: row.title, placement, suggestions: row.agentEditsAsSuggestions ?? false });

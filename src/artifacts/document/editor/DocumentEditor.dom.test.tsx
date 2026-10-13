@@ -8,10 +8,10 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ynodeToPmnode } from '../../yjs/prosemirror';
 import { schemaFor } from '../schema';
-import { listTabs, tabBody } from '../tabs';
+import { createDocument, listTabs, tabBody } from '../tabs';
 import { DocumentEditor } from './DocumentEditor';
 import type { DocumentHandle, EditorHost } from './host-types';
-import { memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
+import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import type { MentionSource, MentionTarget } from './MentionPicker';
 import { TAB, World, doc, endOf, para, until } from './test-world';
 
@@ -319,5 +319,36 @@ describe('the mention picker', () => {
     await until(() => results().queryAllByRole('option').length === 3, 'the results again');
     act(() => void fireEvent.click(results().getByRole('option', { name: /Fix the build/ })));
     expect(mentionAttrs(editor())).toMatchObject({ kind: 'session', ref: 'app-1', label: 'Fix the build' });
+  });
+});
+
+// M8 fix wave 1: a new document's first tab is the host's; two editors open on the empty document wait for it, both bind
+// that one body, and what each types lands in it.
+describe('an empty document', () => {
+  it('shows Loading… in every editor until the host’s first tab, then both bind it and both typings land', async () => {
+    const host = new MemoryDocumentHost();
+    try {
+      const editors: Array<Editor | null> = [null, null];
+      for (const i of [0, 1]) {
+        const handle = openMemoryHandle(host, { log: () => {} });
+        handles.push(handle);
+        await whenSynced(handle);
+        render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} onEditor={(e) => (editors[i] = e)} />);
+      }
+      expect(screen.getAllByRole('status').filter((s) => s.textContent === 'Loading…')).toHaveLength(2);
+      host.write((d) => createDocument(d, { title: 'Draft', id: 'tab00001' }));
+      await until(() => editors.every((e) => e !== null && !e.isDestroyed), 'both editors bound');
+      await act(async () => {
+        editors[0]!.commands.insertContentAt(1, 'Alpha ');
+        editors[1]!.commands.insertContentAt(1, 'Beta ');
+      });
+      const live = () => ynodeToPmnode(tabBody(host.doc, 'tab00001')!, schemaFor()).textContent;
+      await until(() => live().includes('Alpha') && live().includes('Beta'), 'both typings at the host');
+      await until(() => editors.every((e) => e!.getText().includes('Alpha') && e!.getText().includes('Beta')), 'both typings in both editors');
+      expect(listTabs(host.doc)).toHaveLength(1);
+    } finally {
+      cleanup();
+      host.destroy();
+    }
   });
 });
