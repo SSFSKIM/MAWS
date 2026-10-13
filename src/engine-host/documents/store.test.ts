@@ -458,7 +458,9 @@ describe('ArtifactStore: versions (Decision Log 8)', () => {
     expect(store.listVersions(doc.id)).toEqual([named]);
     expect(changes.map((change) => change.change)).toEqual(['updated']);
     const renamed = await store.nameVersion(doc.id, auto.id, { label: 'Draft 1' });
-    expect(renamed).toEqual({ ...auto, label: 'Draft 1' }); // the note is what the call sets: none
+    expect(renamed).toEqual({ ...auto, label: 'Draft 1', note: 'before review' }); // an omitted note is kept (Decision Log 38c)
+    expect(await store.nameVersion(doc.id, auto.id, { label: 'Draft 1', note: 'after review' })).toEqual({ ...auto, label: 'Draft 1', note: 'after review' }); // a string replaces it
+    expect(await store.nameVersion(doc.id, auto.id, { label: 'Draft 1', note: null })).toEqual({ ...auto, label: 'Draft 1' }); // null clears it
     expect(committed('SELECT kind, label, note FROM artifact_versions WHERE id = ?', auto.id)).toEqual([{ kind: 'auto', label: 'Draft 1', note: null }]);
 
     const page = await store.create({ kind: 'html', title: 'Page', content: { bytes: html('v1') } }, agent);

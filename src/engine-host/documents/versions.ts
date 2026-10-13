@@ -168,9 +168,11 @@ export class VersionStore {
     return id;
   }
 
-  // Names a version (Decision Log 37d): its label and note become these, its kind and everything else stay.
-  name(id: number, label: string, note: string | null): void {
-    this.db.prepare('UPDATE artifact_versions SET label = ?, note = ? WHERE id = ?').run(label, note, id);
+  // Names a version (Decision Log 37d, 38c): its label becomes this, its note this one unless `undefined` (kept; `null`
+  // clears it); its kind and everything else stay.
+  name(id: number, label: string, note: string | null | undefined): void {
+    if (note === undefined) this.db.prepare('UPDATE artifact_versions SET label = ? WHERE id = ?').run(label, id);
+    else this.db.prepare('UPDATE artifact_versions SET label = ?, note = ? WHERE id = ?').run(label, note, id);
   }
 
   // A Y kind's version state (V2): its keyframe merged with the deltas after it (Decision Log 22c).

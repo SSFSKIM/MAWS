@@ -387,7 +387,7 @@ export class ArtifactStore {
   // The import write of P3-L's cutover (Decision Log 35f, 37b): one X12 record as a byte-kind artifact under its own id,
   // with its explicit times, creator, handle and project, its versions written in order as `import` versions at their
   // own times by their own actors, and its session links with their roles and times; no X12 mirror (the records exist).
-  // One savepoint: all of it commits or none (a version that fails takes the whole artifact back, its files with it). An
+  // Imported versions carry no design-system pin (Decision Log 38d). One savepoint: all of it commits or none (a version that fails takes the whole artifact back, its files with it). An
   // id already present, deleted or not, is skipped whole (`imported: false`), so a rerun skips what landed.
   async importArtifact(input: ImportInput): Promise<{ artifactId: string; imported: boolean }> {
     const { id } = input;
@@ -415,7 +415,8 @@ export class ArtifactStore {
           .run(id, input.kind, input.title, handle ?? null, input.projectId ?? null, actorKey(input.createdBy), input.createdAt, input.updatedAt, 'path' in latest ? latest.path : null);
         for (const link of input.links) this.linkInFrame(id, link.appSessionId, link.role, link.lastAt);
         const row = this.entity(id)!;
-        for (const version of input.versions) this.writeBytesInFrame(row, version.actor, version.content, { kind: 'import', at: version.at });
+        // no design-system pin: a historic version was not seen under today's system (Decision Log 38d)
+        for (const version of input.versions) this.writeBytesInFrame(row, version.actor, version.content, { kind: 'import', at: version.at, pin: false });
         this.storage.db.prepare('UPDATE artifacts SET updatedAt = ? WHERE id = ?').run(input.updatedAt, id);
       } catch (error) {
         this.files.removeAll(id); // the rows go back with the savepoint; the files the versions placed go here
@@ -539,8 +540,9 @@ export class ArtifactStore {
     return row.kind === 'html' ? { bytes: this.files.read(row.id, ref), name: ref.name } : { path: ref.path };
   }
 
-  // Inside a savepoint: one byte-kind write (its log row, its file in place, its version).
-  private writeBytesInFrame(row: EntityRow, actor: Actor, content: ByteContent, version: { kind: VersionKind; label?: string; at?: number }): { revision: number; versionId: number } {
+  // Inside a savepoint: one byte-kind write (its log row, its file in place, its version, pinned to the governing design
+  // system unless `pin` is false: an imported historic version).
+  private writeBytesInFrame(row: EntityRow, actor: Actor, content: ByteContent, version: { kind: VersionKind; label?: string; at?: number; pin?: boolean }): { revision: number; versionId: number } {
     const at = version.at ?? this.now();
     let make: (seq: number) => ContentRef;
     let staged: string | null = null;
@@ -564,7 +566,7 @@ export class ArtifactStore {
       const seq = this.storage.appendContentInBatch({ artifactId: row.id, actor, at, content: (s) => JSON.stringify((ref = make(s))) });
       if (staged) this.files.place(row.id, staged, ref!.path);
       staged = null;
-      const versionId = this.versions.writeContent(row.id, seq, ref!, { kind: version.kind, actor: actorKey(actor), at, label: version.label, designSystemRef: this.pinInFrame(row), assetRefs: this.assetIds(row.id) });
+      const versionId = this.versions.writeContent(row.id, seq, ref!, { kind: version.kind, actor: actorKey(actor), at, label: version.label, designSystemRef: version.pin === false ? null : this.pinInFrame(row), assetRefs: this.assetIds(row.id) });
       this.storage.db.prepare('UPDATE artifacts SET updatedAt = ? WHERE id = ?').run(at, row.id);
       return { revision: seq, versionId };
     } finally {
@@ -644,14 +646,15 @@ export class ArtifactStore {
     return id;
   }
 
-  // The owner names an existing version, any kind (Decision Log 37d, §4.7: any automatic version is nameable): its label
-  // and note become these (no note, none), its kind and the rest stay; a named `auto` version is never thinned.
-  async nameVersion(artifactId: string, versionId: number, name: { label: string; note?: string }, inFrame?: InFrame<ArtifactVersion>): Promise<ArtifactVersion> {
+  // The owner names an existing version, any kind (Decision Log 37d, 38c; §4.7: any automatic version is nameable): its
+  // label becomes this, its note this one when given (`null` clears it, omitted keeps it), its kind and the rest stay; a
+  // named `auto` version is never thinned.
+  async nameVersion(artifactId: string, versionId: number, name: { label: string; note?: string | null }, inFrame?: InFrame<ArtifactVersion>): Promise<ArtifactVersion> {
     this.requireLive(artifactId);
     this.requireVersion(artifactId, versionId);
     if (name.label.trim() === '') throw new ArtifactStoreError('invalid', 'a version’s name cannot be empty');
     await this.service.inBatch(() => {
-      this.versions.name(versionId, name.label, name.note ?? null);
+      this.versions.name(versionId, name.label, name.note);
       inFrame?.(this.versions.version(artifactId, versionId)!);
     });
     this.emit(artifactId, 'updated');

@@ -195,6 +195,16 @@ describe('ArtifactStore.importArtifact (Decision Log 35f, 37b)', () => {
     for (const v of before) expect(text(readFileSync(store.contentRef(ID, v.seq).path))).toContain(`v${before.indexOf(v)}`);
   });
 
+  it('pins no design system to an imported version, even with an owner default set, while a live write still pins (Decision Log 38d)', async () => {
+    const system = await store.create({ kind: 'design_system', title: 'House' }, human);
+    await store.setDefaults({ owner: system.id, spaces: {} });
+    await store.importArtifact(htmlRecord());
+    expect(store.listVersions(ID).map((v) => v.designSystemRef)).toEqual([undefined, undefined]);
+    expect(store.listVersions(system.id)).toEqual([]); // no system version written for a pin either
+    const { versionId } = await store.writeContent(ID, { bytes: page('v3') }, second);
+    expect(store.listVersions(ID).find((v) => v.id === versionId)?.designSystemRef).toEqual({ id: system.id, versionSeq: expect.any(Number) });
+  });
+
   it('refuses what it cannot land, before writing anything', async () => {
     await expect(store.importArtifact(htmlRecord({ id: 'report' }))).rejects.toMatchObject({ code: 'invalid' });
     await expect(store.importArtifact(htmlRecord({ kind: 'document' as 'html' }))).rejects.toMatchObject({ code: 'invalid' });

@@ -152,6 +152,9 @@ describe('the artifacts and spaces surface (M4)', () => {
     const { version } = await call('artifacts.nameVersion', { artifactId: artifact.id, versionId: auto.id, label: 'Before review', note: 'the agent’s draft' });
     expect(version).toEqual({ ...auto, label: 'Before review', note: 'the agent’s draft' });
     expect((await call('artifacts.versions', { artifactId: artifact.id })).versions).toEqual([version]);
+    // Decision Log 38c: an omitted note keeps it, null clears it
+    expect((await call('artifacts.nameVersion', { artifactId: artifact.id, versionId: auto.id, label: 'Renamed' })).version).toEqual({ ...version, label: 'Renamed' });
+    expect((await call('artifacts.nameVersion', { artifactId: artifact.id, versionId: auto.id, label: 'Renamed', note: null })).version).toEqual({ ...auto, label: 'Renamed' });
     expect(emitted).toContainEqual({ name: 'artifacts.changed', payload: { artifactId: artifact.id, kind: 'document', revision: expect.any(Number), change: 'updated' } });
     expect(await refusal('artifacts.nameVersion', { artifactId: artifact.id, versionId: auto.id + 1, label: 'x' })).toMatchObject({ code: 'invalid_input', issues: { reason: 'notFound' } });
     expect(validateCommandInput('artifacts.nameVersion', { artifactId: artifact.id, versionId: auto.id, label: '' }).ok).toBe(false);

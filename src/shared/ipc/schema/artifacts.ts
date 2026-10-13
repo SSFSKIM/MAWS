@@ -121,10 +121,11 @@ export const commands = {
   'artifacts.search': host(z.strictObject({ query: z.string().min(1).max(1_000) }), z.strictObject({ artifacts: z.array(ArtifactRowSchema) })),
   'artifacts.versions': host(z.strictObject({ artifactId: Id }), z.strictObject({ versions: z.array(ArtifactVersionSchema) })),
   'artifacts.saveVersion': host(z.strictObject({ artifactId: Id, label: z.string().min(1).max(200), note: z.string().max(10_000).optional() }), z.strictObject({ versionId: z.number().int().positive() })),
-  // Names an existing version, any kind (Decision Log 37d; §4.7: any automatic one is nameable): its label and note
-  // become these (no note, none), its kind stays, and a named `auto` version is never thinned. Answers the version.
+  // Names an existing version, any kind (Decision Log 37d, 38c; §4.7: any automatic one is nameable): its label becomes
+  // this, its note this one when given (`null` clears it, omitted keeps it), its kind stays, and a named `auto` version
+  // is never thinned. Answers the version.
   'artifacts.nameVersion': host(
-    z.strictObject({ artifactId: Id, versionId: z.number().int().positive(), label: z.string().min(1).max(200), note: z.string().max(10_000).optional() }),
+    z.strictObject({ artifactId: Id, versionId: z.number().int().positive(), label: z.string().min(1).max(200), note: z.string().max(10_000).nullable().optional() }),
     z.strictObject({ version: ArtifactVersionSchema }),
   ),
   // Artifact-wide restore (Decision Log 16): `versionId` the new `restore` version, `revision` the revert's.
