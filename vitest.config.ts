@@ -34,6 +34,7 @@ const TIMING_NODE_TESTS = [
   'src/main/sessions/pause-take-over.pty.test.ts', // real bash and zsh job control in a PTY, read through real `ps` calls
   'src/main/usage/claude-usage-reader.test.ts',
   'test/artifacts/portability.test.ts', // P3-A: loads the repository's whole ESLint config and lints through it
+  'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
 ];
 const TIMING_RENDERER_TESTS = ['src/renderer/src/App.test.tsx'];
 

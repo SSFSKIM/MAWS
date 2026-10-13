@@ -49,6 +49,7 @@ import {
 } from '@artifacts/yjs';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
+import type { AppSessionId } from '@shared/graph/ids';
 import { StoreTooNewError } from './errors';
 import { fromNodePort, type HostPort } from './ports';
 import { AgentReplica } from './replica';
@@ -234,7 +235,7 @@ export class DocumentService {
   }
 
   // The agent session's replica of the artifact (Decision Log 9), made on first use, reconnected if the host closed it.
-  replica(appSessionId: string, artifactId: string): AgentReplica {
+  replica(appSessionId: AppSessionId, artifactId: string): AgentReplica {
     if (this.closed) throw new Error('the document service is closed');
     const key = `${appSessionId}\u0000${artifactId}`;
     let replica = this.agentReplicas.get(key);
@@ -257,7 +258,7 @@ export class DocumentService {
   }
 
   // At the session's end (Decision Log 9): nothing is lost, every write already waited for its durable ack.
-  closeSession(appSessionId: string): void {
+  closeSession(appSessionId: AppSessionId): void {
     for (const [key, replica] of this.agentReplicas) {
       if (!key.startsWith(`${appSessionId}\u0000`)) continue;
       replica.close();

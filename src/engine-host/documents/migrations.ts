@@ -29,6 +29,8 @@ export const STORE_MIGRATIONS: readonly Migration[] = [
     //                      rows by maintenance, never dropped (Decision Log 5)
     //   client_actors      the actor a clientID is bound to; `host` marks the host's own replica of that actor
     //                      (Decision Log 6 and 18)
+    //   meta               host-held values: settings main relays (the design-system defaults, Decision Log 22d),
+    //                      the last maintenance time
     sql: `
 CREATE TABLE spaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, linkedDir TEXT, createdAt INTEGER NOT NULL);
 CREATE TABLE artifacts (id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN (${KINDS})), title TEXT NOT NULL, handle TEXT,
@@ -67,6 +69,7 @@ CREATE TABLE artifact_assets (artifactId TEXT NOT NULL, assetId TEXT NOT NULL, n
   sha256 TEXT NOT NULL, createdAt INTEGER NOT NULL, createdBy TEXT NOT NULL, PRIMARY KEY (artifactId, assetId));
 CREATE INDEX artifact_assets_sha ON artifact_assets(sha256);
 CREATE TABLE artifact_ops (opId TEXT PRIMARY KEY, artifactId TEXT, tool TEXT NOT NULL, result TEXT NOT NULL, at INTEGER NOT NULL);
+CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 `,
   },
 ];

@@ -8,6 +8,7 @@ import type { KindAdapter } from '@artifacts/host';
 import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
 import { applyV1, applyV2, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, idAt, insertedBy, mergeMaps, newDoc, stateVector, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { HostPort } from './ports';
 import { DocumentService, type ServiceOptions } from './service';
 import { SqliteDocumentStorage, StoreTooNewError } from './storage';
@@ -20,8 +21,9 @@ vi.mock('@artifacts/yjs', async (importOriginal) => {
 
 const MIN = 60_000;
 const DAY = 24 * 60 * MIN;
+const sid = (id: string) => id as AppSessionId;
 const human: Actor = { kind: 'human' };
-const agent: Actor = { kind: 'session', appSessionId: 'app-1' };
+const agent: Actor = { kind: 'session', appSessionId: sid('app-1') };
 
 let dir: string;
 let path: string;
@@ -99,8 +101,8 @@ const until = async (test: () => boolean) => {
 describe('DocumentService: replicas, durability and reload', () => {
   it('reloads a doc written through two replicas identically from a fresh service on the same file', async () => {
     make({}, true);
-    const a = service.replica('app-a', 'a1');
-    const b = service.replica('app-b', 'a1');
+    const a = service.replica(sid('app-a'), 'a1');
+    const b = service.replica(sid('app-b'), 'a1');
     await Promise.all([a.whenSynced(), b.whenSynced()]);
     a.doc.get('root').setAttr('title', 'Plan');
     a.doc.get('root').insert(0, 'hello');
@@ -112,7 +114,7 @@ describe('DocumentService: replicas, durability and reload', () => {
     await until(() => same('root') && same('files') && a.doc.get('files').getAttr('index.md') === '# notes');
 
     reopen({}, true);
-    const c = service.replica('app-c', 'a1');
+    const c = service.replica(sid('app-c'), 'a1');
     await c.whenSynced();
     for (const name of ['root', 'files']) expect(c.doc.get(name).toJSON()).toEqual(a.doc.get(name).toJSON());
     expect(c.doc.get('root').getAttr('title')).toBe('Plan');
@@ -364,7 +366,7 @@ describe('DocumentService: authorship and provenance', () => {
 describe('DocumentService: host-originated writes', () => {
   it('writes through the actor’s host replica: one row per write credited to the actor, answered after the commit', async () => {
     make({}, true);
-    const watcher = service.replica('app-9', 'a1');
+    const watcher = service.replica(sid('app-9'), 'a1');
     await watcher.whenSynced();
     const r1 = await service.writeAs('a1', agent, (doc) => doc.get('t').insert(0, 'hello'));
     expect(r1).toBe(service.revision('a1'));
@@ -385,7 +387,7 @@ describe('DocumentService: host-originated writes', () => {
       { clientId, actor: 'session:app-1' }, // reused across the reload: one host clientID per actor
     ]);
     expect(committed('SELECT actor FROM artifact_updates ORDER BY seq').map((row) => (row as { actor: string }).actor)).toEqual(['session:app-1', 'session:app-1', 'session:app-1', 'human']);
-    const reader = service.replica('app-9', 'a1');
+    const reader = service.replica(sid('app-9'), 'a1');
     await reader.whenSynced();
     expect(reader.doc.get('t').toString()).toBe('# > hello!');
   });
@@ -400,7 +402,7 @@ describe('DocumentService: host-originated writes', () => {
       }),
     ).rejects.toThrow(/broken edit/);
     expect(logs.join('\n')).toMatch(/evicted a1: broken edit/);
-    const reader = service.replica('app-9', 'a1');
+    const reader = service.replica(sid('app-9'), 'a1');
     await reader.whenSynced();
     expect(reader.doc.get('t').toString()).toBe('kept');
     expect(rowCount()).toBe(1);
@@ -438,10 +440,10 @@ describe('DocumentService on a newer app’s store', () => {
 describe('DocumentService: agent replicas (Decision Log 9)', () => {
   it('keys a replica by session and artifact, captures its base, and answers each save with the revision', async () => {
     make({}, true);
-    const r = service.replica('app-1', 'a1');
-    expect(service.replica('app-1', 'a1')).toBe(r);
-    expect(service.replica('app-2', 'a1')).not.toBe(r);
-    expect(service.replica('app-1', 'a2')).not.toBe(r);
+    const r = service.replica(sid('app-1'), 'a1');
+    expect(service.replica(sid('app-1'), 'a1')).toBe(r);
+    expect(service.replica(sid('app-2'), 'a1')).not.toBe(r);
+    expect(service.replica(sid('app-1'), 'a2')).not.toBe(r);
     await r.whenSynced();
     r.doc.get('t').insert(0, 'abc');
     const revision = await r.whenSaved();
@@ -463,8 +465,8 @@ describe('DocumentService: agent replicas (Decision Log 9)', () => {
       },
     };
     make({ adapters: [adapter], kindOf: () => 'document' }, true);
-    const r = service.replica('app-1', 'a1');
-    const other = service.replica('app-2', 'a1');
+    const r = service.replica(sid('app-1'), 'a1');
+    const other = service.replica(sid('app-2'), 'a1');
     await Promise.all([r.whenSynced(), other.whenSynced()]);
     r.doc.get('t').insert(0, 'abc');
     await r.whenSaved();
@@ -472,19 +474,19 @@ describe('DocumentService: agent replicas (Decision Log 9)', () => {
     await until(() => r.provider.state.phase === 'off');
     await expect(r.whenSaved()).rejects.toThrow(/closed/);
     r.doc.get('t').insert(3, 'def'); // made while disconnected: carried
-    expect(service.replica('app-1', 'a1')).toBe(r); // reconnected
+    expect(service.replica(sid('app-1'), 'a1')).toBe(r); // reconnected
     await r.whenSaved();
     expect(service.loaded('a1')?.get('t').toString()).toContain('abcdef');
 
     now += 9 * 60_000;
-    service.replica('app-1', 'a1'); // a call: app-1's replica is used now, app-2's is not
+    service.replica(sid('app-1'), 'a1'); // a call: app-1's replica is used now, app-2's is not
     now += 2 * 60_000;
     service.closeIdleReplicas();
     expect(other.closed).toBe(true);
     expect(r.closed).toBe(false);
-    service.closeSession('app-1');
+    service.closeSession(sid('app-1'));
     expect(r.closed).toBe(true);
-    expect(service.replica('app-1', 'a1')).not.toBe(r);
+    expect(service.replica(sid('app-1'), 'a1')).not.toBe(r);
   });
 });
 

@@ -194,6 +194,17 @@ describe('E8 operations', () => {
     expect((await host.done(opId)).outcome).toMatchObject({ ok: false, error: { code: 'cancelled', message: 'stopped with the engine host' } });
   });
 
+  // P3-A: the artifact store closes in the shutdown path of both modes (engine.shutdown in utility mode, the detached
+  // exit order and host.stopAll through `ipc.shutdown`), after the sessions it serves have stopped
+  it('runs afterShutdown once the sessions and the runner have stopped, on engine.shutdown and on ipc.shutdown', async () => {
+    let closed = 0;
+    const host = engineHost({ afterShutdown: () => void (closed += 1) });
+    expect(await host.call('engine.shutdown', { graceMs: 5_000 })).toEqual({ stopped: 0, forced: 0 });
+    expect(closed).toBe(1);
+    await host.ipc.shutdown(5_000);
+    expect(closed).toBe(2);
+  });
+
   it('engine.shutdown stops a running CLI with the host', async () => {
     behave('sleep 30\n');
     const host = engineHost();

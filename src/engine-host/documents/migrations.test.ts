@@ -5,7 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openStore, STORE_MIGRATIONS } from './migrations';
 
-const TABLES = ['actors', 'artifact_assets', 'artifact_attributions', 'artifact_head', 'artifact_ops', 'artifact_sessions', 'artifact_threads', 'artifact_updates', 'artifact_versions', 'artifacts', 'client_actors', 'spaces'];
+const TABLES = ['actors', 'artifact_assets', 'artifact_attributions', 'artifact_head', 'artifact_ops', 'artifact_sessions', 'artifact_threads', 'artifact_updates', 'artifact_versions', 'artifacts', 'client_actors', 'meta', 'spaces'];
 
 let dir: string;
 const fresh = () => (dir = mkdtempSync(join(tmpdir(), 'maws-store-')));

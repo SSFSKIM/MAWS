@@ -183,6 +183,17 @@ export class SqliteDocumentStorage implements DocumentStorage {
     return row?.kind ?? null;
   }
 
+  // A host-held value (`meta`): settings main relays, the last maintenance time. A set inside the open batch commits
+  // with it; outside one it commits at once.
+  getMeta(key: string): string | null {
+    return (this.sql('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined)?.value ?? null;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.writable();
+    this.sql('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
   // Maintenance (Decision Log 8): deletes the Y-kind log rows a head covers that are older than `keepMs`. Byte kinds'
   // rows have no head and stay. Answers the number of rows deleted.
   pruneLog(now: number, keepMs = LOG_KEEP_MS): number {

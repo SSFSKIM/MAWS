@@ -21,8 +21,11 @@ function engineHostChunk(): string | null {
 const chunk = engineHostChunk();
 
 describe.skipIf(chunk === null)('the built engine-host chunk', () => {
+  // P3-A: the inlined Yjs sources keep their JSDoc, whose type annotations read `import('../ynode.js')`; a comment line
+  // (one starting with `*`, `/*` or `//`) is not code.
   it('has no dynamic import()', () => {
-    expect(chunk!.match(/\bimport\s*\(/g) ?? []).toEqual([]);
+    const code = chunk!.split('\n').filter((line) => !/^\s*(\*|\/\*|\/\/)/.test(line));
+    expect(code.filter((line) => /\bimport\s*\(/.test(line))).toEqual([]);
   });
 
   it('requires only Node builtins and zod', () => {
