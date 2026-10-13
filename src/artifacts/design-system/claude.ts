@@ -758,7 +758,7 @@ function writtenComposite(token: ResolvedToken, resolved: ReadonlyMap<string, Re
 }
 
 // Claude's caps on what its page reads (U1's grammar); an export over one is refused, not cut.
-const EXPORT_CAPS = { colors: 600, otherFamilies: 12, otherTokens: 60, styles: 80 } as const;
+const EXPORT_CAPS = { colors: 600, families: 12, otherFamilies: 12, otherTokens: 60, styles: 80 } as const;
 
 /**
  * A system as Claude's files: `tokens.json` in Claude's list grammar, `README.md` from the law, and the assets. Throws
@@ -870,6 +870,8 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
   const reasons: string[] = [];
   if (colors.length > EXPORT_CAPS.colors) reasons.push(`${colors.length} colours; Claude reads at most ${EXPORT_CAPS.colors}`);
   if (text.length + deck.length > EXPORT_CAPS.styles) reasons.push(`${text.length + deck.length} type styles; Claude reads at most ${EXPORT_CAPS.styles}`);
+  const familyCount = Object.keys(families).length;
+  if (familyCount > EXPORT_CAPS.families) reasons.push(`${familyCount} type families; Claude reads at most ${EXPORT_CAPS.families}`);
   if (others.size > EXPORT_CAPS.otherFamilies) reasons.push(`${others.size} further families; Claude reads at most ${EXPORT_CAPS.otherFamilies} (${[...others.keys()].join(', ')})`);
   for (const [key, list] of others) if (list.length > EXPORT_CAPS.otherTokens) reasons.push(`${key}: ${list.length} tokens; Claude reads at most ${EXPORT_CAPS.otherTokens} in a further family`);
   if (reasons.length) throw new ClaudeShapeError('Claude’s shape cannot hold this system', reasons);

@@ -242,18 +242,29 @@ function htmlProblems(kind: 'layout' | 'component', html: string, parser: HtmlPa
 const SELECTOR_ROOT = /^\.ds-doc(?![\w-])/;
 const SIBLING_OF_ROOT = 'selects outside .ds-doc (a sibling of the root); its subject must be .ds-doc or sit under it';
 
+/** A selector as its top level only: strings, and everything inside parentheses or attribute brackets at any depth, left out. */
+function topLevelOf(selector: string): string {
+  let out = '';
+  let depth = 0;
+  for (let i = 0; i < selector.length; i++) {
+    const c = selector[i]!;
+    if (c === '\\') i++;
+    else if (c === '"' || c === "'") {
+      for (i++; i < selector.length && selector[i] !== c; i++) if (selector[i] === '\\') i++;
+    } else if (c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']') depth = Math.max(0, depth - 1);
+    else if (depth === 0) out += c;
+  }
+  return out;
+}
+
 /**
  * Where a selector under `.ds-doc` leads: the first combinator after the root compound must be a descendant or child
- * one, so the subject is `.ds-doc` itself or sits under it (siblings further down stay inside). Strings, attribute
- * brackets and functional pseudo-classes are blanked first, so their contents are not read as combinators.
+ * one, so the subject is `.ds-doc` itself or sits under it (siblings further down stay inside). Only the selector's
+ * top level is read, so a combinator inside a functional pseudo-class (at any nesting) or a bracket is not taken for one.
  */
 function leavesRoot(selector: string): boolean {
-  let text = selector.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""').replace(/\[[^\]]*\]/g, '[]');
-  for (let previous = ''; previous !== text; ) {
-    previous = text;
-    text = text.replace(/\([^()]*\)/g, '()');
-  }
-  const after = text.replace(SELECTOR_ROOT, '').replace(/^[^\s>+~]*/, '').trimStart();
+  const after = topLevelOf(selector).replace(SELECTOR_ROOT, '').replace(/^[^\s>+~]*/, '').trimStart();
   return after.startsWith('+') || after.startsWith('~');
 }
 const STATEMENTS_REFUSED: Record<string, string> = {

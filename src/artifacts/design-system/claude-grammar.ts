@@ -283,6 +283,10 @@ function readType(type: unknown, reading: ClaudeReading, drop: (m: string) => vo
   if (!isObject(type)) return drop('type: must be {"fonts": [...], "families": {...}, "groups": [...]}');
   if (Array.isArray(type.fonts)) reading.fonts = type.fonts.length;
   if (isObject(type.families)) {
+    const keys = Object.keys(type.families);
+    if (keys.length > CAPS.families) {
+      drop(`type.families: ${keys.length} families; a system holds at most ${CAPS.families} (${keys.slice(CAPS.families).join(', ')} ${keys.length - CAPS.families === 1 ? 'is' : 'are'} not read)`);
+    }
     for (const [key, stack] of Object.entries(type.families).slice(0, CAPS.families)) {
       let ok = true;
       if (!CLAUDE_KEY.test(key)) {

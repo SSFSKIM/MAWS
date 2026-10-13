@@ -312,6 +312,17 @@ describe('fix wave 1: the converter’s safety and its guarantees', () => {
     expect(() => toClaude({ name: 'Wide', law: LAW, tokens: wide })).toThrow(/z: 61 tokens; Claude reads at most 60 in a further family/);
   });
 
+  it('refuses an export of more than 12 type.families, and the grammar reader reports the overflow it does not read', () => {
+    const font = (name: string) => ({ $type: 'fontFamily', $value: [name] });
+    const extra = Object.fromEntries(Array.from({ length: 10 }, (_, i) => [`x${i}`, font(`Face ${i}`)]));
+    const fonts = (complete as { font: object }).font;
+    const crowded = parseTokens({ ...complete, font: { ...fonts, ...extra } }).tokens!;
+    expect(() => toClaude({ name: 'Crowded', law: LAW, tokens: crowded })).toThrow(ClaudeShapeError);
+    expect(() => toClaude({ name: 'Crowded', law: LAW, tokens: crowded })).toThrow(/\d+ type families; Claude reads at most 12/);
+    const json = { type: { fonts: [], families: Object.fromEntries(Array.from({ length: 14 }, (_, i) => [`f${i}`, `Face${i}`])), groups: [] } };
+    expect(validateClaudeTokens(json)).toEqual(['type.families: 14 families; a system holds at most 12 (f12, f13 are not read)']);
+  });
+
   it('names styles in one namespace: an extra style never takes a role’s or a deck style’s name', () => {
     const typed = parseTokens({ ...complete, type: { ...(complete as { type: object }).type, 'deck-title': { $value: '{type.body}' } } }).tokens!;
     const exported = JSON.parse(toClaude({ name: 'T', law: LAW, tokens: typed })['tokens.json']!) as { type: { groups: { styles: { name: string }[] }[] } };

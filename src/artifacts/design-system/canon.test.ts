@@ -166,6 +166,24 @@ describe('fix wave 1: the canon’s escapes', () => {
     ]);
   });
 
+  it('finds the root-level combinator past nested functional pseudo-classes, and keeps what stays under the root', () => {
+    const sibling = (selector: string) => `the selector "${selector}" selects outside .ds-doc (a sibling of the root); its subject must be .ds-doc or sit under it`;
+    const css = [
+      '.ds-doc:is(:not(p) div) + p { }',
+      '.ds-doc:is(:where(a, b) :not(i:is(u v))) ~ p { }',
+      '.ds-doc:is(:not(p) div) p + p { }',
+      '.ds-doc:is(:not(p) div) > p { }',
+      '.ds-doc:not(:is(p) div) { }',
+      '.ds-doc[data-x="(+"]:is(:not(p) div) + p { }',
+    ].join('\n');
+    const problems = validateCanon({ 'components/document.css': css }, parser);
+    expect(problems.map((p) => p.message)).toEqual([
+      sibling('.ds-doc:is(:not(p) div) + p'),
+      sibling('.ds-doc:is(:where(a, b) :not(i:is(u v))) ~ p'),
+      sibling('.ds-doc[data-x="(+"]:is(:not(p) div) + p'),
+    ]);
+  });
+
   it('checks SVG presentation attributes as declarations, and an asset path once decoded and normalized', () => {
     const problems = validateCanon(
       {
