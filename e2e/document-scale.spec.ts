@@ -37,6 +37,8 @@ import {
   PerfSeam,
   processMemory,
   readAll,
+  readFirst,
+  readRest,
   remoteSeen,
   replicaState,
   Rows,
@@ -222,16 +224,29 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
   rows.write({ windows: { A: visibility[0], B: visibility[1] } });
 
   // ---- the agents read (the 200-block read on a cold replica), the host's heap with everything open ----------------
+  // each agent's first read (its replica made by it), at once its first batch — five ops, every target among what that read
+  // showed — on that replica (Decision Log 20's "first batch after a read"), then the rest of the tab for the steady state
   const agents = agentsFor();
-  const firstReads: Array<CallAnswer<ReadResult>> = [];
-  for (const agent of agents) firstReads.push(await readAll(seam, agent, id));
-  for (const [k, read] of firstReads.entries()) rows.add(`read idle ${k + 1}`, `the 200-block read, ${agents[k]!.session}'s first (its replica made), host loop max over the call`, read.loop.max, 'ms', null, 'recorded (36–44 ms headless, Decision Log 34)', `wall ${read.wallMs.toFixed(1)} ms`);
+  for (const [k, agent] of agents.entries()) {
+    const read = await readFirst(seam, agent, id);
+    rows.add(`read idle ${k + 1}`, `the 200-block read, ${agent.session}'s first (its replica made), host loop max over the call`, read.loop.max, 'ms', null, 'recorded (36–44 ms headless, Decision Log 34)', `wall ${read.wallMs.toFixed(1)} ms`);
+    const shown = Math.max(...[...agent.blocks.keys()].map((blockId) => /^s(\d+)p5$/.exec(blockId)).filter((m) => m !== null).map((m) => Number(m![1]))) + 1;
+    const { ops, run } = agent.firstBatch(shown);
+    const answer = await seam.call<{ revision: number; results: Array<{ newIds?: string[] }> }>(agent.session, 'artifact_edit', { artifact: id, baseRevision: 'last', ops });
+    agent.record(run, answer);
+    expect(answer.isError, answer.text).toBe(false);
+    expect(ops, 'a five-op batch').toHaveLength(5);
+    rows.add(`5 first after read ${k + 1}`, `the first batch after a read: ${agent.session}'s five ops right after its 200-block read, on the replica that read made (sections 0 to ${shown - 1}), host loop max over the call`, answer.loop.max, 'ms', 50, '≤ 50 ms (Decision Log 20, 37)', `wall ${answer.wallMs.toFixed(1)} ms; ops ${ops.map((op) => op.op).join(', ')}`);
+    await readRest(seam, agent, id, read.result!);
+  }
+  const steadyFrom = agents.map((agent) => agent.applied.length); // the steady state's batches follow
 
   await test.step('1 to 5: typing in A, painted in B, two agents writing, the host loop', async () => {
     const { clientID } = await instrumentTyping(page, id);
     await watchRemote(pageB, id, clientID);
     await caretAtEnd(page, id, `s${TYPING_SECTION}p2`);
     await ok(page, 'artifacts.testLoopDelay', { reset: true });
+    await seam.send({ cmd: 'loop', reset: true });
     await startMeasuring(page);
     loads.steadyStart = load1();
     const reads: Array<{ session: string; answer: CallAnswer<ReadResult> }> = [];
@@ -251,10 +266,10 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
     rows.add('4 p95', 'keystroke painted in window B, p95', painted.p95, 'ms', 100, 'p95 ≤ 100 ms', `n ${painted.n}; p50 ${painted.p50}, max ${painted.max}`);
     rows.add('5 p99', 'host event-loop delay over the run (A’s testLoopDelay), p99, documents live with the writer’s batches', loop.p99, 'ms', 50, 'p99 ≤ 50 ms');
     rows.add('5 max', 'host event-loop delay over the run, max', loop.max, 'ms', 100, 'max ≤ 100 ms');
-    const all = agents.flatMap((a) => a.applied);
-    const firsts = all.filter((b) => b.firstAfterRead);
-    rows.add('5 batch max', 'an agent batch of five ops: the host loop’s max over the batch (every batch, warm replicas)', Math.max(...all.map((b) => b.loop.max)), 'ms', 50, '≤ 50 ms (Decision Log 37)', `${all.length} batches; loop max p95 ${stats(all.map((b) => b.loop.max)).p95}; call wall p95 ${stats(all.map((b) => b.wallMs)).p95} ms`);
-    rows.add('5 first after read', 'the first batch after a read (measured: the batch each agent sent after its read, not a cold replica)', Math.max(...firsts.map((b) => b.loop.max)), 'ms', 50, '≤ 50 ms (Decision Log 20, 37)', `${firsts.length} batches: ${firsts.map((b) => b.loop.max.toFixed(1)).join(', ')} ms`);
+    const all = agents.flatMap((a, k) => a.applied.slice(steadyFrom[k]));
+    rows.add('5 batch max', 'an agent batch of five ops in the steady state (replicas fully read, typing and the other agent running): the host loop’s max over each batch', Math.max(...all.map((b) => b.loop.max)), 'ms', 50, '≤ 50 ms (Decision Log 37)', `${all.length} batches; loop max p95 ${stats(all.map((b) => b.loop.max)).p95}; call wall p95 ${stats(all.map((b) => b.wallMs)).p95} ms`);
+    const seamLoop = await seam.send<{ loop: { max: number; p99: number } }>({ cmd: 'loop' });
+    rows.add('5 max (gaps)', 'host loop over the run measured by the seam’s 1 ms tick gaps (beside A’s monitorEventLoopDelay), max', seamLoop.loop.max, 'ms', 100, 'max ≤ 100 ms', `p99 ${seamLoop.loop.p99.toFixed(1)} ms`);
     for (const [k, r] of reads.entries()) rows.add(`read load ${k + 1}`, `the 200-block read under load (${r.session}, typing and the other agent running), host loop max over the call`, r.answer.loop.max, 'ms', 100, 'held to row 5’s max ≤ 100 ms', `wall ${r.answer.wallMs.toFixed(1)} ms`);
     rows.write({ steady: { loads, typing: keys, painted, loop, agents: agents.map((a) => ({ session: a.session, applied: a.applied.length, refused: a.refused })) } });
     expect(agents.flatMap((a) => a.refused), 'every agent batch applied').toEqual([]);
@@ -422,24 +437,42 @@ test('11: a host SIGKILL under load loses no acknowledged edit, and every replic
     await expect.poll(async () => (await hostState(page)).state, { timeout: 30_000, intervals: [50] }).toBe('ready');
     restarted = true;
   })();
+  // the agents: a batch every 0.8 to 1.6 s until the kill (a batch in flight then is abandoned, unacknowledged); while the
+  // host is down each waits; at the re-fork each reads again at once (its replica made anew), the moment it is answered
+  // being its replica live again, then reads the rest
+  const agentLive: number[] = agents.map(() => NaN);
+  const killed = new Promise<void>((resolve) => {
+    const check = setInterval(() => {
+      if (!killedAt) return;
+      clearInterval(check);
+      resolve();
+    }, 5);
+  });
   const agentLoops = Promise.all(
-    agents.map(async (agent) => {
-      let rereadAfterRestart = false;
-      while (!killedAt || !restarted || !rereadAfterRestart) {
-        await sleep(800 + Math.random() * 800);
-        if (restarted && !rereadAfterRestart) {
-          await readAll(seam, agent, id);
-          rereadAfterRestart = true;
+    agents.map(async (agent, k) => {
+      for (;;) {
+        if (restarted) {
+          const read = await readFirst(seam, agent, id);
+          agentLive[k] = Date.now();
+          await readRest(seam, agent, id, read.result!);
+          return;
+        }
+        if (killedAt) {
+          await sleep(5);
           continue;
         }
-        if (killedAt && !restarted) continue; // the host is down: the agent waits as a session's call would
-        try {
-          const sentAt = Date.now();
-          const answer = await batch(seam, agent, id);
-          if (!answer.isError && (!killedAt || sentAt < killedAt)) acked.push(...(answer.result!.results[2]?.newIds ?? []));
-        } catch {
-          // a command the killed host never answered: not acknowledged
-        }
+        await Promise.race([sleep(800 + Math.random() * 800), killed]);
+        if (killedAt) continue;
+        const sentAt = Date.now();
+        await Promise.race([
+          batch(seam, agent, id).then(
+            (answer) => {
+              if (!answer.isError && sentAt < (killedAt || Infinity)) acked.push(...(answer.result!.results[2]?.newIds ?? []));
+            },
+            () => {}, // a command the killed host never answered: not acknowledged
+          ),
+          killed,
+        ]);
       }
     }),
   );
@@ -448,7 +481,8 @@ test('11: a host SIGKILL under load loses no acknowledged edit, and every replic
   await expect.poll(async () => (await replicaState(page, id))?.unsaved, { timeout: 30_000 }).toBe(0);
   const phases = await Promise.all([page, pageB].map((p) => p.evaluate(() => (window as unknown as { __phases: Array<{ at: number; phase: string; synced: boolean }> }).__phases)));
   const liveAgain = phases.map((samples) => samples.find((s) => s.at > killedAt && s.phase === 'live' && s.synced)?.at ?? NaN);
-  const allLive = Math.max(...liveAgain);
+  const windowsLive = Math.max(...liveAgain);
+  const allLive = Math.max(windowsLive, ...agentLive);
   const expected = `${before}${typed}`;
   await expect.poll(() => blockText(pageB, id, `s${TYPING_SECTION}p2`), { timeout: 15_000 }).toBe(expected);
   const check = new Agent('perf-check', [], prng(3));
@@ -458,7 +492,7 @@ test('11: a host SIGKILL under load loses no acknowledged edit, and every replic
   const hostText = check.blocks.get(`s${TYPING_SECTION}p2`) ?? '';
   const keysLost = hostText.includes(typedAtKill.trimEnd()) ? 0 : 1;
   rows.add('11 acked lost', 'host SIGKILL under load: acknowledged edits lost (keystrokes acked before the kill; agent batches acked before it)', missing.length + keysLost, 'edits', 0, '0', `${ackedKeysAtKill} keystrokes acked of ${typedAtKill.length} typed before the kill, ${typed.length} typed in all, all in the host after; ${acked.length} acked agent inserts before the kill (${acked.filter((b) => deletedSince.has(b)).length} deleted by the agent's own later batches), ${missing.length} missing`);
-  rows.add('11 fork → live', 'host SIGKILL: re-fork → both windows’ replicas live and synced', allLive - forkedAt, 'ms', 1000, '≤ 1,000 ms', `kill → re-fork ${forkedAt - killedAt} ms (the supervisor’s restart delay); kill → all live ${allLive - killedAt} ms; per window ${liveAgain.map((t) => t - killedAt).join(', ')} ms from the kill`);
+  rows.add('11 fork → live', 'host SIGKILL: re-fork → every replica live: both windows’ (live and synced) and both agents’ (their first read after the re-fork answered)', allLive - forkedAt, 'ms', 1000, '≤ 1,000 ms', `kill → re-fork ${forkedAt - killedAt} ms (the supervisor’s restart delay); kill → all live ${allLive - killedAt} ms; from the re-fork: windows ${liveAgain.map((t) => t - forkedAt).join(', ')} ms, agents ${agentLive.map((t) => t - forkedAt).join(', ')} ms`);
   rows.write({ sigkill: { load: load1() } });
   const failed = rows.rows.filter((r) => r.pass === false);
   expect(failed, 'bounds missed').toEqual([]);

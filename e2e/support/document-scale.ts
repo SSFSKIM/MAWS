@@ -162,9 +162,34 @@ export class Agent {
     this.readSince = true;
   }
 
+  private within: ((s: number) => boolean) | null = null; // a batch confined to what one read showed
+
   private pick(offset: number, filter: (s: number) => boolean = () => true): number {
-    const pool = this.sections.filter(filter);
+    const pool = this.sections.filter((s) => filter(s) && (this.within?.(s) ?? true));
     return pool[(this.turn * 7 + offset) % pool.length]!;
+  }
+
+  /**
+   * The first batch after the agent's first read (M9's review): five ops, every target among the sections that read
+   * showed (`sections` below `upTo`), the fifth an unscoped quote of a sentence it read (no insert of its own yet).
+   */
+  firstBatch(upTo: number): { ops: Record<string, unknown>[]; run: number } {
+    this.within = (s) => s < upTo;
+    try {
+      const batch = this.nextBatch();
+      if (batch.ops.length < 5) {
+        const s = this.pick(4);
+        const known = this.blocks.get(`s${s}p5`);
+        if (!known) throw new Error(`${this.session} never read ^s${s}p5`);
+        const sentence = known.split('. ')[1] ?? known.split('. ')[0]!;
+        const quote = sentence.split(' ').slice(0, 6).join(' ');
+        batch.ops.push({ op: 'replace_text', old: quote, new: quote.replace(/^(\S+)/, `$1 (${this.session})`) });
+        this.blocks.set(`s${s}p5`, known.replace(quote, quote.replace(/^(\S+)/, `$1 (${this.session})`)));
+      }
+      return batch;
+    } finally {
+      this.within = null;
+    }
   }
 
   /** The next five-op batch (S7b's mix: a quoted word, a block rewrite, an insert after a heading, a cell, and a delete of an earlier insert or an unscoped quote). */
@@ -223,12 +248,17 @@ export class Agent {
   }
 }
 
-/** Reads the whole first tab as an agent would, 1,000 blocks at a time after the measured first read of 200. */
-export async function readAll(seam: PerfSeam, agent: Agent, artifactId: string): Promise<CallAnswer<ReadResult>> {
+/** The agent's first read: the default 200 blocks from the start (the measured read, its replica made). */
+export async function readFirst(seam: PerfSeam, agent: Agent, artifactId: string): Promise<CallAnswer<ReadResult>> {
   const first = await seam.call<ReadResult>(agent.session, 'artifact_read', { artifact: artifactId });
   if (first.isError) throw new Error(`${agent.session}'s read was refused: ${first.text}`);
   agent.learn(first.result!);
-  let last = [...blocksOf(first.result!.markdown).keys()].at(-1);
+  return first;
+}
+
+/** The rest of the first tab after what the agent read, 1,000 blocks at a time. */
+export async function readRest(seam: PerfSeam, agent: Agent, artifactId: string, after: ReadResult): Promise<void> {
+  let last = [...blocksOf(after.markdown).keys()].at(-1);
   for (let k = 0; k < 10 && last; k++) {
     const more = await seam.call<ReadResult>(agent.session, 'artifact_read', { artifact: artifactId, from: last, count: 1000 });
     if (more.isError) throw new Error(`${agent.session}'s read from ^${last} was refused: ${more.text}`);
@@ -237,6 +267,12 @@ export async function readAll(seam: PerfSeam, agent: Agent, artifactId: string):
     if (ids.length <= 1) break;
     last = ids.at(-1);
   }
+}
+
+/** Reads the whole first tab as an agent would, 1,000 blocks at a time after the first read of 200. */
+export async function readAll(seam: PerfSeam, agent: Agent, artifactId: string): Promise<CallAnswer<ReadResult>> {
+  const first = await readFirst(seam, agent, artifactId);
+  await readRest(seam, agent, artifactId, first.result!);
   return first;
 }
 
@@ -540,7 +576,7 @@ export async function armHistory(page: Page, artifactId: string, mode: 'enter' |
       const ready = () => {
         if (which === 'enter') {
           const shown = preview();
-          return !!shown && shown.editor?.storage.collaboration?.history != null && shown.childElementCount >= min && /\d+ changes?/.test(bar()?.textContent ?? '');
+          return !!shown && shown.editor?.storage.collaboration?.history != null && shown.querySelectorAll('p, h1, h2, h3').length >= min && /\d+ changes?/.test(bar()?.textContent ?? '');
         }
         const back = live();
         return preview() === null && bar() === null && !!back && back.closest('[hidden]') === null;
