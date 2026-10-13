@@ -17,6 +17,8 @@ export const uniqueId = ({ types, generateID }: { types: string[]; generateID: (
 
 /**
  * The editor's `coreExtensionOptions` (M3): Tiptap core's Delete extension also filters only v13's meta (S1 pitfall 1),
- * so it takes the same predicate.
+ * so it is told which transactions are the binding's. Its filter is the inverse of UniqueID's: a transaction it answers
+ * true for is ignored (M9 found the first form, UniqueID's predicate, reporting every remote and rebinding transaction
+ * and none of the person's: the extension's work is quadratic in a transaction's steps, seconds on a 200-page rebind).
  */
-export const coreExtensionOptions = { delete: { filterTransaction: isLocalTransaction } };
+export const coreExtensionOptions = { delete: { filterTransaction: isBindingTransaction } };

@@ -128,4 +128,25 @@ describe('UniqueID under the real binding', () => {
     expect([minted, remoteBlock]).toEqual([expect.stringMatching(/^n\d+$/), null]);
     expect(ynodeToPmnode(tabBody(local, tab)!, schemaFor()).child(1).attrs.id).toBe(minted);
   });
+
+  // M9 (the scale gate): Tiptap core's Delete extension *ignores* a transaction its filter answers true for (UniqueID's
+  // keeps one), and its work is quadratic in a transaction's steps (getChangedRanges); the binding's rebind of a
+  // 200-page tab is one transaction of a step per block, so it must be the binding's transactions it ignores.
+  it('reports a local deletion to the core Delete extension, never a remote binding transaction’s', async () => {
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 0)); // the extension reports after the update
+    const editor = editorWith(doc(para('p1', 'one'), para('p2', 'two'), para('p3', 'three')));
+    const deleted: string[] = [];
+    editor.on('delete', ({ type }) => deleted.push(type));
+    const second = () => editor.state.doc.child(0).nodeSize;
+
+    editor.view.dispatch(editor.state.tr.delete(second(), second() + editor.state.doc.child(1).nodeSize).setMeta('y-sync-transaction', true));
+    expect(editor.getText()).not.toContain('two');
+    await tick();
+    expect(deleted).toEqual([]);
+
+    editor.view.dispatch(editor.state.tr.delete(second(), second() + editor.state.doc.child(1).nodeSize));
+    expect(editor.getText()).not.toContain('three');
+    await tick();
+    expect(deleted).toContain('node');
+  });
 });
