@@ -34,8 +34,11 @@ const TIMING_NODE_TESTS = [
   'src/main/sessions/pause-take-over.pty.test.ts', // real bash and zsh job control in a PTY, read through real `ps` calls
   'src/main/usage/claude-usage-reader.test.ts',
   'test/artifacts/portability.test.ts', // P3-A: loads the repository's whole ESLint config and lints through it
+  'test/artifacts/one-schema.test.ts', // P3-B: the same, for the one-schema rule
 ];
 const TIMING_RENDERER_TESTS = ['src/renderer/src/App.test.tsx'];
+// P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md).
+const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
 
 // C3 start: the `live` project runs the engine-host suite against the pinned binary through the relay
 // (`MAWS_LIVE=1 pnpm test:live`); it exists only under MAWS_LIVE=1 so `pnpm test` and `pnpm verify` never see it.
@@ -87,8 +90,12 @@ export default defineConfig({
       ...liveProjects, // C3
       // P3-A start: the portable artifact layer (src/artifacts/, docs/doperpowers/plans/2026-10-12-p3-a-store.md) under
       // Node; its code imports no Node or Electron module (eslint.config.js), so it runs here as it will in a renderer.
-      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'] } },
+      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'], exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS] } }, // P3-B: exclude
       // P3-A end
+      // P3-B start: the document kind's suites that need a DOM (a real Tiptap editor: UniqueID through split and paste,
+      // the editor, comments, history) run under happy-dom; its model, markdown and writer stay in `artifacts` (Node).
+      { resolve: { alias }, test: { name: 'artifacts-dom', environment: 'happy-dom', include: [ARTIFACTS_DOM_TESTS] } },
+      // P3-B end
       // C8a start: the panel host's suites again under the React Compiler, as electron-vite builds the app, so a render
       // that reads mutable module state (the instance map, a tool's state) without selecting it is caught in a test.
       {
