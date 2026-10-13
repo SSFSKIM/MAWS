@@ -66,6 +66,7 @@ describe('LibraryStore', () => {
     expect(ids(rows)).toEqual([uuid(2), uuid(3), uuid(1)]);
     expect(rows[2]).toEqual({
       ...entry(1, { updatedAt: 3_000, spaceId: SPACE_A, projectId: project.id, lastEditor: { kind: 'session', appSessionId: reviewer }, lastEditedAt: 2_900 }),
+      lastEditorTitle: 'Review it',
       sessions: [
         { appSessionId: maker, title: 'Make the deck', roles: ['created', 'edited'], lastAt: 30 },
         { appSessionId: reviewer, title: 'Review it', roles: ['commented'], lastAt: 20 },
@@ -86,6 +87,23 @@ describe('LibraryStore', () => {
     expect(row.sessions).toEqual([{ appSessionId: 'unknown-session', title: '', roles: ['created'], lastAt: 10 }]);
     expect(row).not.toHaveProperty('project');
     expect(row.projectId).toBe('gone');
+  });
+
+  it('names a session last editor by its title in the index, linked or not; a human editor has none, an unknown session \'\' (M6a)', () => {
+    const writer = session('Fix the dashboard');
+    index.library.reconcile({
+      artifacts: [
+        entry(1, { lastEditor: { kind: 'session', appSessionId: writer } }), // edited without a link (A's test writer, a tool before M6 links)
+        entry(2, { lastEditor: { kind: 'human' } }),
+        entry(3, { lastEditor: { kind: 'session', appSessionId: 'unknown-session' as AppSessionId } }),
+      ],
+      links: [],
+      spaces: [],
+    });
+    expect(index.library.get(uuid(1))).toMatchObject({ sessions: [], lastEditorTitle: 'Fix the dashboard' });
+    expect(index.library.get(uuid(2))).not.toHaveProperty('lastEditorTitle');
+    expect(index.library.get(uuid(3))).toMatchObject({ lastEditorTitle: '' });
+    expect(index.library.list().rows.map((row) => row.lastEditorTitle)).toEqual(['', undefined, 'Fix the dashboard']);
   });
 
   it('filters by kind, Space (none included), pinned and session, and counts each kind over the same filter without the kind', () => {

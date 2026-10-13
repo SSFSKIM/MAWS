@@ -12,7 +12,6 @@ import type { LibraryEntry, LibraryEntryAnswer, LibrarySnapshot } from '@shared/
 import { ArtifactStoreError } from '../documents/errors';
 import type { DocumentService } from '../documents/service';
 import type { ArtifactStore } from '../documents/store';
-import { actorFromKey } from '../documents/versions';
 
 // The two of A's objects the library reads (`Documents` as `openDocuments` returns it fits).
 export interface LibraryDocuments {
@@ -20,19 +19,17 @@ export interface LibraryDocuments {
   readonly service: DocumentService;
 }
 
-// Who last edited an artifact, and when. Before its first log row (revision 0): its creator at `createdAt`. After: the
-// last row's actor (`lastWriter`, an actor key, read back by `actorFromKey`) and, until A's requested
-// `ArtifactStore.lastWrite` gives that row's time, the entity's `updatedAt` (which a rename or a move also stamps).
-// The one place to change when `lastWrite` lands.
-export function lastEdit(store: ArtifactStore, artifact: Artifact, revision: number): { lastEditor: Actor; lastEditedAt: number } {
-  if (revision === 0) return { lastEditor: artifact.createdBy, lastEditedAt: artifact.createdAt };
-  return { lastEditor: actorFromKey(store.lastWriter(artifact.id)), lastEditedAt: artifact.updatedAt };
+// Who last edited an artifact, and when: the actor and time of its last log row (A's `lastWrite`, which survives log
+// pruning), so a rename or a move, which stamp `updatedAt`, do not read as an edit; its creator at `createdAt` before
+// any write.
+export function lastEdit(store: ArtifactStore, artifact: Artifact): { lastEditor: Actor; lastEditedAt: number } {
+  const write = store.lastWrite(artifact.id);
+  return write ? { lastEditor: write.actor, lastEditedAt: write.at } : { lastEditor: artifact.createdBy, lastEditedAt: artifact.createdAt };
 }
 
 // Inside a read: one live artifact as the library sees it.
 function entryOf(store: ArtifactStore, artifact: Artifact): LibraryEntry {
-  const revision = store.revision(artifact.id);
-  return { ...artifact, revision, ...lastEdit(store, artifact, revision) };
+  return { ...artifact, revision: store.revision(artifact.id), ...lastEdit(store, artifact) };
 }
 
 // Every live artifact, their session links and the Spaces: §4.1's one host read at every connection.

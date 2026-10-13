@@ -74,9 +74,7 @@ const Dot = () => (
 
 export function Row({ row, stop, menuOpen, onMenuOpen, onFocus, onFocusWithin, onKeyDown }: RowProps) {
   const now = useNow();
-  const editor = row.lastEditor;
-  const editorTitle = editor.kind === 'session' ? row.sessions.find((s) => s.appSessionId === editor.appSessionId)?.title : undefined;
-  const by = actorDisplay(editor, editorTitle).name;
+  const by = actorDisplay(row.lastEditor, row.lastEditorTitle).name;
   const tabIndex = stop ? 0 : -1; // the row's own controls are reachable by Tab from the list's stop row only
   return (
     <RowContextMenu row={row}>

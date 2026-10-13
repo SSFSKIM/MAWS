@@ -150,6 +150,44 @@ describe('the library reads (M2)', () => {
     expect(theirs.revision).toBeGreaterThan(mine.revision);
   });
 
+  it('dates the last edit at the last write, not at a later rename or move, and keeps it across a reopen (M6a, Decision Log 29)', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Notes' }, human);
+    now += 60_000;
+    const wroteAt = now;
+    await store.testWrite(doc.id, 'w1', [{ op: 'insertText', index: 0, text: 'theirs' }], agent);
+    now += 60_000;
+    await store.update(doc.id, { title: 'Renamed' });
+    const space = await store.createSpace({ name: 'Elsewhere' });
+    now += 60_000;
+    await store.update(doc.id, { spaceId: space.id });
+    expect(store.get(doc.id)!.updatedAt).toBeGreaterThan(wroteAt);
+    expect((await call('library.entry', { artifactId: doc.id })).artifact).toMatchObject({ title: 'Renamed', lastEditor: agent, lastEditedAt: wroteAt });
+
+    store.close();
+    service.close();
+    storage.close();
+    make();
+    expect((await call('library.snapshot', undefined)).artifacts.find((a) => a.id === doc.id)).toMatchObject({ lastEditor: agent, lastEditedAt: wroteAt });
+  });
+
+  it('dates an imported artifact’s last edit at its last imported version, by that version’s actor (M6a)', async () => {
+    const id = '0f8e2a1c-4b3d-4e5f-8a7b-6c5d4e3f2a1b';
+    await store.importArtifact({
+      id,
+      kind: 'html',
+      title: 'Report',
+      createdAt: now - 5_000,
+      updatedAt: now - 1_000,
+      createdBy: agent,
+      versions: [
+        { at: now - 5_000, actor: agent, content: page('<p>v1</p>') },
+        { at: now - 1_000, actor: other, content: page('<p>v2</p>') },
+      ],
+      links: [{ appSessionId: sid('app-1'), role: 'created', lastAt: now - 5_000 }],
+    });
+    expect((await call('library.entry', { artifactId: id })).artifact).toMatchObject({ lastEditor: other, lastEditedAt: now - 1_000 });
+  });
+
   it('answers a read issued during an open batch only once that batch commits', async () => {
     store.close();
     service.close();

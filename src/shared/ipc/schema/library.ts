@@ -44,9 +44,11 @@ export const LibrarySessionSchema = z.strictObject({
 });
 export type LibrarySession = z.infer<typeof LibrarySessionSchema>;
 
-// A row of the library: the entry, the sessions that touched it (by last touch, newest first), its Space and project by
-// name, and, under a search, the matched passage of its text.
+// A row of the library: the entry, the last editor's title when it is a session (from main's index, linked to the
+// artifact or not; '' when the index has no record of it), the sessions that touched it (by last touch, newest first),
+// its Space and project by name, and, under a search, the matched passage of its text.
 export const LibraryRowSchema = LibraryEntrySchema.extend({
+  lastEditorTitle: z.string().optional(),
   sessions: z.array(LibrarySessionSchema),
   space: z.strictObject({ id: Id, name: z.string() }).optional(),
   project: z.strictObject({ id: ProjectIdSchema, name: z.string() }).optional(),

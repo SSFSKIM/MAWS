@@ -139,8 +139,7 @@ function NoEditor({ artifact, scope }: { artifact: LibraryRow | ArtifactRow; sco
   useNoEditor(scope, artifact.title);
   const now = useNow();
   const row = 'sessions' in artifact ? artifact : null;
-  const lastEditor = row?.lastEditor.kind === 'session' ? row.lastEditor.appSessionId : null;
-  const by = row && actorDisplay(row.lastEditor, row.sessions.find((s) => s.appSessionId === lastEditor)?.title).name;
+  const by = row && actorDisplay(row.lastEditor, row.lastEditorTitle).name;
   return (
     <Quiet>
       <p className="m-0 text-fg">{LIBRARY_COPY.noEditor(artifact.kind)}</p>

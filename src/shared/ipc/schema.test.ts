@@ -1765,7 +1765,7 @@ describe('ipc schema validates both directions', () => {
   describe('P3-L entries', () => {
     const id = '22222222-2222-4222-8222-222222222222';
     const entry = { id, kind: 'html', title: 'Page', createdBy: { kind: 'human' }, createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 3, lastEditor: { kind: 'session', appSessionId: 'sess-1' }, lastEditedAt: 2 };
-    const row = { ...entry, sessions: [{ appSessionId: 'sess-1', title: 'Make a page', roles: ['created', 'edited'], lastAt: 2 }], space: { id, name: 'Work' }, snippet: 'the page' };
+    const row = { ...entry, lastEditorTitle: 'Make a page', sessions: [{ appSessionId: 'sess-1', title: 'Make a page', roles: ['created', 'edited'], lastAt: 2 }], space: { id, name: 'Work' }, snippet: 'the page' };
     const counts = { document: 0, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 1, file: 0 };
 
     it('owns the three reads in main and the three host reads in the engine host, main-only, and emits library.changed from main', () => {
@@ -1779,6 +1779,8 @@ describe('ipc schema validates both directions', () => {
     it('answers rows with the entry, its sessions, Space, project and snippet, and every kind counted', () => {
       expect(validateCommandOutput('library.list', { rows: [row], counts }).ok).toBe(true);
       expect(validateCommandOutput('library.get', { row: null }).ok).toBe(true);
+      expect(validateCommandOutput('library.get', { row: { ...row, lastEditor: { kind: 'human' }, lastEditorTitle: undefined } }).ok).toBe(true);
+      expect(validateCommandOutput('library.snapshot', { artifacts: [{ ...entry, lastEditorTitle: 'x' }], links: [], spaces: [] }).ok, 'the title is main\'s, never the host\'s').toBe(false);
       const missing: Record<string, number> = { ...counts };
       delete missing.html;
       expect(validateCommandOutput('library.list', { rows: [], counts: missing }).ok).toBe(false);

@@ -341,11 +341,12 @@ export class LibraryStore {
       if (title === undefined) titles.set(appSessionId, (title = this.deps.sessionTitle(appSessionId as AppSessionId)));
       return title;
     };
-    return rows.map((row) => this.toRow(row, sessionsOf(links.get(row.id) ?? [], titleOf)));
+    return rows.map((row) => this.toRow(row, sessionsOf(links.get(row.id) ?? [], titleOf), titleOf));
   }
 
-  private toRow(row: ListedRow, sessions: LibrarySession[]): LibraryRow {
+  private toRow(row: ListedRow, sessions: LibrarySession[], titleOf: (appSessionId: string) => string): LibraryRow {
     const snippet = passageOf(row);
+    const lastEditor = actorOf(row.last_editor);
     return {
       id: row.id,
       kind: row.kind,
@@ -362,8 +363,9 @@ export class LibraryStore {
       ...(row.linked_path !== null ? { linkedPath: row.linked_path } : {}),
       agentEditsAsSuggestions: row.agent_edits_as_suggestions === 1,
       revision: row.revision,
-      lastEditor: actorOf(row.last_editor),
+      lastEditor,
       lastEditedAt: row.last_edited_at,
+      ...(lastEditor.kind === 'session' ? { lastEditorTitle: titleOf(lastEditor.appSessionId) } : {}), // linked or not (DL 27f)
       sessions,
       ...(row.space_id !== null && row.space_name !== null ? { space: { id: row.space_id, name: row.space_name } } : {}),
       ...(row.project_id !== null && row.project_name !== null ? { project: { id: row.project_id as ProjectId, name: row.project_name } } : {}),
