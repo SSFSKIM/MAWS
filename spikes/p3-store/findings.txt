@@ -6,19 +6,22 @@ commit c73ba534. A spike: findings, never a merge. The spikes are research/p3-yj
 (Written as .txt, the protocol-probe convention: the harness refuses a subagent's .md write; the coordinator's ruling
 of 2026-10-12.)
 
-Status: S1 in (2026-10-12); S2 and S6 running; S3 to S5 and S7 follow.
+Status: complete 2026-10-12. Every spike's verdict is in and each was accepted by the architect (spec Decision Log 25
+to 36, and the S7b entry that follows this hand-back); every question is marked answered under its spike except
+S7b's, which went to the architect with this file's last commit.
 
 ## Verdicts
 
-| Spike | Verdict |
-|---|---|
-| S1 | v14 (`@y/y` 14.0.0-rc.28 + `@y/prosemirror` 2.0.0-15, exact pins): every functional gate passes; API churn in `@y/prosemirror` is the one open risk, contained in one module |
-| S2 | pending |
-| S6 | pending |
-| S3 | pending |
-| S4 | pending |
-| S5 | pending |
-| S7 | pending |
+| Spike | Verdict | Decision Log |
+|---|---|---|
+| S1 | v14 (`@y/y` 14.0.0-rc.28 + `@y/prosemirror` 2.0.0-15, exact pins): every functional gate passes; API churn in `@y/prosemirror` is the one open risk, contained in one module | 25 |
+| S2 | The topology holds on v14 in real Electron: utility-process host with its own fullfsync SQLite store, one port per document, ack and commit-before-reveal, 0 acknowledged edits lost to a SIGKILL, a detached host serving over a binary channel beside E10's JSON lines; ContentMap provenance through compaction | 26, 30 |
+| S6 | The Y.Map (v14 Y.Node) slide model is proven: canonical dialect round trip at a fixed point, base-relative diff-apply in one transaction, every concurrency case converged in 200/200 trials; two paint keys | 26, 28 |
+| S3 | History on the real editor passes on v14 (DiffRenderer from ContentMap provenance through compaction, N changes, Show editors, undo guards); restore is one kind-agnostic revert-since-version | 29 |
+| S5 | Comment marks hold on v14 through every ordinary edit, restart and restore; the mark frozen at `{threadId}`, resolve in the threads map, orphaned derived, the anchor refreshed by the host | 31, 32 |
+| S4 | The patch writer works on v14 with an atomic batch; Korean IME survives agent edits with four additions (the composition hold, the span move, caret follows id, host forwarding): 68/68 | 33, 34 |
+| S7a | The spec's full-state versions fail the storage bounds (178 MB per document per 6 months); the proposed delta policy passes the normal profile except a marginal history preview; a v14-only revert gap and its 3-line fix | 36 |
+| S7b | Pass against the proposed bounds in Electron once four fixes apply (the hold, its merged flush, touched-parent validation, awareness destroyed on close with an idle unload); the writer's host-loop max (126–148 ms) is the one bound still open; B and C may start | 35; S7b's own pending |
 
 ## How to run
 
@@ -1423,3 +1426,177 @@ Not tested in S7a: Electron rendering, IME, replicas, first sync, memory (S7b); 
 store; maintenance alongside live writes; the document soak never changes a block attribute twice (its restore exactness
 does not exercise the gap; `probe-revert-attr.mjs` does); the heavy word-writer soak ran before the restore fix (its
 in-sim restores used S3's revert; its month-6 check and age sweep are exact).
+
+## S7b — The scale gate in Electron
+
+**Verdict: pass against the proposed bounds once four fixes found here apply; B and C may start with them binding in
+their briefs.** Three are already ruled (Decision Log 35: the composition hold, its merged flush, touched-parent
+validation); the fourth is new: an agent replica's awareness is destroyed when its replica closes, and the host unloads
+idle documents. One bound stays open: the host event-loop **max** while S4's patch writer runs (126 to 148 ms on 5-op
+batches with touched-parent validation; its p99 38 to 40 ms meets Decision Log 35's ≤ 50 ms condition, so the
+worker_thread writer stays deferred). Nothing failed on v14 alone; the one correctness failure (Korean composition
+corrupted by an agent edit into the composing block) is the one S4 found on v13 too.
+
+Method: real Electron 44.4.5 on S1's exact v14 pins, one `@y/y`, lib0 and prosemirror-model per bundle (checked from
+esbuild's metafiles). Host: a utility process running S2's v14 `DocumentService`, its SQLite storage with fullfsync on,
+and `AgentReplica`, imported in place. Editor windows hidden (`show:false`, `paintWhenInitiallyHidden`,
+`backgroundThrottling:false`; they render at 120 fps and report visible), each a real Tiptap 3.31.3 editor through S3's
+`YCollaboration` (history mode and undo guards) and S3's schema on S2's `PortProvider` over a `MessageChannelMain`. Window
+A driven through CDP. Agents: two `AgentReplica`s, each sending one batch (one transaction) every 0.8 to 1.6 s of 3 to 6
+ops (word replacements, paragraph rewrites, inserts after headings, cells, deletes), away from the five sections around
+the human's caret except in the same-block IME runs; with `S7_AGENT_WRITER` they use a copy of S4's patch writer.
+Timing points: keystroke start = the input event's `timeStamp`; "frame" = the `requestAnimationFrame` after the
+ProseMirror transaction; "post-paint" = the task after it; "presented" = Event Timing duration (8 ms steps); "ack" = the
+provider's durable count reaching the keystroke's update; "B" = window B's frame after A's clock arrives; host loop =
+`monitorEventLoopDelay` at 5 ms (what engine supervision on the same loop would wait behind).
+The 200-page document: built in Node, 160 sections through `pmnodeToDelta` with the editor's schema, then roughened (two
+writer clients for the sections; a third typing 42,000 one-character transactions, 412 word deletions, 282 bold
+formats): 104,055 words, 741k characters, 1,454 top-level blocks, 2,503 text blocks (headings, paragraphs with bold,
+italic, links and a comment mark every third section, lists, tables, code, quotes, task lists, callouts); V2 1.05 MB, V1
+1.36 MB, 28,676 structs, 5,781 DOM nodes. The baseline: 16 sections, 10,383 words, 144 blocks, V2 104 KB.
+
+### Bounds and results (steady state unless marked; load = 1-minute average at measurement time)
+
+| # | Measure (200 pages, 2 windows, 2 agents) | Proposed bound | Why | Result | Load |
+|---|---|---|---|---|---|
+| 1 | Keystroke → frame in A | p95 ≤ 16 ms, max ≤ 50 ms | one 60 Hz frame; 50 ms is the long-task limit a typist feels | no agents 7.7 / 10.6 / 20.1 ms (p50 / p95 / max); agents 7.8 / 10.6 / 29.5. Pass (an earlier run at load 39: p95 13.1, max 42) | 13–16 |
+| 2 | Keystroke → presented (Event Timing) | p95 ≤ 50 ms | where typing lag becomes noticeable | 24 / 32 ms, max 72 with agents (20-page floor 16 / 24). Pass | 13–16 |
+| 3 | Keystroke → durable ack | p95 ≤ 100 ms | X32's saved state must not flicker; a tool call waits on the ack | 11.7 / 16.6 / 58.4 ms. Pass | 13–16 |
+| 4 | Keystroke painted in window B | p95 ≤ 100 ms | 0.1 s reads as instant | 16.4 / 21.6 / 48.8 ms. Pass | 13–16 |
+| 5 | Host event-loop delay, documents live | p99 ≤ 50 ms, max ≤ 100 ms | the engine supervisor shares the loop | S7b's agents: p99 12.9, max 65. Pass. S4's writer, whole-document validation: p99 125, max 212. Fail. Touched-parent validation, three runs: p99 40.3 / 40.1 / 38.0 (pass), max 145 / 148 / 126 (fail) | 12–34 |
+| 6 | First sync to interactive (open → editor painted with content) | 200 pages ≤ 1,000 ms; 20 pages ≤ 200 ms | Nielsen's 1 s for the extreme case; ~0.2 s for an ordinary panel open | 200 pages cold 495–502 ms, warm 463–472; 20 pages cold 124–137, warm 105–108. Pass | 11.9–16 |
+| 7 | History preview | enter ≤ 1,000 ms; leave ≤ 500 ms | a view switch (RAIL's transition budget) | enter 327–468 ms including the fetch; leave 180–204. Pass | 11.7 |
+| 8 | Memory | host +≤ 100 MB per open 200-page doc with two agents; renderer ≤ 500 MB; after close and unload, host heap within 5 MB of idle | the owner's 32 GB machine runs many sessions 24/7 | host heap 12.6 idle → 39.7 MB (pass); renderers 200–278 MB (pass), 484–497 just after three previews (pass, at the edge); after close as built: fail (39.7 MB, nothing collected); with awareness destroyed and an unload: 15.0 MB (pass) | 11.6–16 |
+| 9 | Deck: 100 slides plus 100 live thumbnails | open ≤ 1,000 ms; drag move → frame p95 ≤ 16 ms; renderer ≤ 500 MB | the documents' budgets | open cold 116 ms, warm 83; drag 0.7 / 8.9 / 10.6 ms; 157 MB. Pass | 11.7 |
+| 10 | IME under load | exact 100 %; input → frame p95 ≤ 16 ms; flush no long task (≤ 50 ms); the 5 s cap never fires | exactness is correctness | exact: agents elsewhere 3/3; same block without the hold 0/3; with the hold 3/3; hold plus merged flush 3/3; frame p95 11–13 ms; per-frame flush 79–89 ms (fail), merged flush 19–24 ms (pass); cap fired 0 of 24 holds | 11.8–15.8 |
+| 11 | Host SIGKILL under load | acked lost = 0; re-fork → all replicas live ≤ 1,000 ms | S2's accounting; "reconnecting" brief | 0 lost; 441 ms. Pass | 8.95 |
+
+Re-measurements within 20 % of a budget (the machine never fell below 12): bound 1's run at load 39 (p95 13.1) re-run at
+13–16 (10.6); bound 5 with touched validation three runs at loads 12–15, 19–34 and 13–15 (p99 40.3 / 40.1 / 38.0, stable,
+so structural, not contention); bound 8's post-history renderer twice (496, 484 MB); bound 10's frame p95 11–13 ms across
+27 reps at loads up to 50. Executor re-check: `s7/out/b-kill.json` (0 acked lost, host loop p99 57.3 ms after the
+restart, store reload 54 ms) and `b-typing-writer-touched-quiet.json` (host loop p99 38 ms) read back.
+
+### Measurements (from the repository root)
+Install `pnpm -C spikes/p3-store/s7/electron install --ignore-workspace`; build `node spikes/p3-store/s7/electron/
+build.mjs` (to `/tmp/p3-s7b/build`); seeds `ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/Electron.app/Contents/MacOS/
+Electron /tmp/p3-s7b/build/seed.cjs /tmp/p3-s7b 160` and `… /tmp/p3-s7b/small 16`; one scenario `zsh spikes/p3-store/s7/
+electron/run.sh <scenario> [tag]` (through waitload20 and with-slot; writes `s7/out/b-<scenario>[-tag].json` with the
+load averages inside). Variants: the 20-page document `S7_SEED=/tmp/p3-s7b/small/seed-200p.v2 S7_SECTION=8`; patch-writer
+agents `S7_RUNS=writer-document,writer-touched` (typing) and `S7_AGENT_WRITER=touched` (ime); awareness destroyed on close
+`S7_DESTROY_AWARENESS=1` (memory).
+1. Typing (`typing`, `typing small`; 300 keystrokes at 60–180 ms through `Input.dispatchKeyEvent`, caret in s80p2, with no
+   agent and with two): A's per-keystroke cost at 200 pages is about 5 ms above the 20-page baseline (frame p95 10.6
+   against 2.6–4.8 ms), linear in size; applying an agent batch into A p95 7.9 ms, max 9.4; window B spends 3.4 ms p50
+   (5.3 p95) per incoming frame at 200 pages (0.6 at 20), half of those frames A's cursor awareness (one per keystroke,
+   about 330 B, rebuilding y-prosemirror's cursor decorations).
+2. First sync (`firstsync`; a version plus 67 agent rows; three cold trials on a fresh host and three warm): cold open →
+   synced 116–118 ms (host load 48, a 1.39 MB step 2 applied in 53–54); the binding render (`ynodeToPmnode` plus the
+   ProseMirror DOM) 242–250 ms; Chromium's style, layout and paint about 115 ms more; warm synced in 65–71 ms. The store
+   and wire are under a quarter of the cost; the editor's full render is the rest.
+3. History (`history`; an auto version via S2's compaction after 60 keystrokes, then 150 keystrokes and about 70 agent
+   batches over 40 s; three previews): attribution build — the host merges provenance from its rows in 3.2–6.5 ms
+   (8.4 KB), the renderer decodes it in 0.8–1.7 ms, the host's live V2 encode 6.5–16.7 ms; doc-pair open (`openDiff`, two
+   gc-off docs) 46–100 ms; editor path — `showVersion` renders in 226–285 ms, enter → post-paint 314–437 ms, `changeList`
+   1.5–2 ms for 200 changes, leave → post-paint 180–204 ms; total with the fetch 327–468 ms against 1 s, the merge assumed
+   in memory. The history is short: per top-level block (1,498), render about 0.15–0.19 ms and doc-pair open about
+   0.03–0.07 ms; S7a's 1.08–1.30 s headless figure for a three-month history is dominated by attributions, which this run
+   does not stress; Chromium adds about 250 ms of render at 200 pages on top of that build.
+4. Memory (`memory`, as built and with `S7_DESTROY_AWARENESS=1`): host heap 12.6 MB idle → 21.1 loaded → 21.2 with A and B
+   → 39.7 with two agent replicas after typing. As built, closing everything retains 39.7 MB: the agent replicas are never
+   collected because the provider's `destroy()` leaves the Awareness it created running, and its check interval keeps
+   the doc alive; S2's service has no unload (dropping the doc by hand collects it: 31.3 MB). With awareness destroyed:
+   agents collected (23.5 MB), then unload brings the heap to 15.0 MB (idle + 2.4), collection verified with a
+   FinalizationRegistry under forced GC. RSS is not returned to the OS (129 → 147 MB). Renderers at 200 pages 200–278 MB
+   working set, 37–45 MB JS heap; at 20 pages 150–170 MB.
+5. Deck (`deck`; S6's 100-slide bench deck imported through `publish` on an agent replica in 84–104 ms, saved in
+   301–341 ms; S6's `SlideCanvas` at half scale with S6's drag plus 100 thumbnail canvases): open cold 116 ms (host load
+   18), warm 83–84; drag: 200 CDP mouse moves while an agent republished, ack p95 13.7 ms, host loop max 13.7 ms, 1,908 DOM
+   nodes, converged.
+6. IME (`ime`; S4's 2-set step model and drive copied: rawKeyDown 229, `imeSetComposition`, keyUp, `insertText` commit;
+   " 안녕하세요 한글 입력 테스트입니다", 41 jamo keystrokes per rep, 3 reps per variant; agents at a stress pace of
+   150–400 ms per batch, one op into the composing block per batch in the same-block variants): without the hold the
+   doubled jamo appears in every same-block rep ("한한ㄱ글글이입입ㄹ력"); the hold (Decision Log 33's shape) spans a
+   whole word, because commit-and-restart keeps composing true: 1.03–1.29 s, buffering 7–9 frames (5.9–10.6 KB); flushed
+   frame by frame, 79–89 ms long tasks and post-paint p99 96–115 ms; flushed as one `Y.mergeUpdates` update, 19–24 ms,
+   compositionend → caught up 25–38 ms, no long task; composition input → frame p95 11–13 ms (14–23 from the keydown,
+   since CDP sends the composition as a second command). With touched-writer agents at the same stress pace: the same
+   exactness pattern, merged flush 13–17 ms, host loop p99 110–140 ms (the stress pace times the writer's cost; load rose
+   from 12 to 50).
+7. Host restart (`kill`; A types for 12 s, SIGKILL at 5 s, re-fork after 1 s, both windows' ports and both agents
+   reopened): 119 keystrokes, 49 acked before the kill and 0 lost, 15 typed while down, 119 in the store at the end;
+   agents 10 acked batches, 0 lost; fork → started 162 ms, store reload 54 ms, fork → all live 441 ms, kill → all live
+   1,455 ms (with the 1 s respawn delay); host loop max 57 ms right after; converged.
+8. V1 against V2: host encode 1.39 MB V1 against 1.08 MB V2 (1.29×), 8.3 against 9.0 ms; renderer apply 28–39 ms V1
+   against 21–39 ms V2 (at most about 10 ms of a 500 ms open); deck 362 against 213 KB (1.70×), step 2 applies in about
+   25 ms. Not a first-sync cost worth a V2 sync message (S2's question 6 answered: v14's slower cold sync is inside
+   bound 6 at 200 pages).
+9. S4's patch writer at scale (`typing` with `S7_RUNS`; S4's writer copied with a `validate` option and a nested-root
+   option; agents alternate one replace_text with a 5-op batch):
+
+| | Whole-document validation (load 19–20) | Touched parents only (three runs, load 12–34) |
+|---|---|---|
+| replace_text apply, p50 / p95 | 126–134 / 180–206 ms | 39–52 / 51–98 ms |
+| batch of 5, p50 / p95 | 149–164 / 166–177 ms | 83–95 / 112–155 ms |
+| validation p50 | 77–90 ms | 4–8 (single op) / 24–31 ms (batch) |
+| clone dry-run p50 | 27–36 ms (max 88) | same |
+| A frame p95 | 13.6 ms | 8.5–11.9 ms |
+| ack p95 | 142 ms | 47–79 ms |
+| B p95 | 131 ms | 39–63 ms |
+
+Typing in A is untouched; the cost lands on the host's loop, and so on acks, on B and on engine supervision; the host
+heap reached 127–172 MB (clone garbage), RSS 255–319 MB.
+
+### Pitfalls
+1. S2's provider leaks every replica's doc: `destroy()` does not destroy the Awareness it created and its interval
+   retains the Y.Doc (about 8–9 MB per agent replica at 200 pages).
+2. S2's service never unloads a doc; once dropped, it is collectable.
+3. Remote edits into the composing block break Korean composition (edits elsewhere in the 200-page document do not); a
+   hold spans a word (about 1–1.3 s); a frame-by-frame flush is a long task, the merged flush is not.
+4. Cursor awareness costs the other window per keystroke in proportion to document size (about 3.4 ms per frame at
+   200 pages).
+5. History preview roughly doubles the renderer working set (about 480–500 MB) until GC.
+6. S4's writer works in proportion to the whole document on every batch: the clone dry-run, two runs, strict
+   whole-document validation, `find` walking the tree per op, replace_text without `block` serializing every top-level
+   block.
+7. Harness and app: reading `win.webContents` of a destroyed window inside an `ipcMain` listener throws and starves later
+   listeners (compare `event.sender.id`); `--expose-gc` in `utilityProcess.fork`'s `execArgv` does not reach V8 (use
+   `v8.setFlagsFromString`); `performance.memory` needs `--enable-precise-memory-info`; Event Timing in hidden windows
+   includes compositor presentation (a 16–24 ms floor).
+
+### Amendments proposed
+- §4.2 / X24 (binding): the provider destroys the Awareness it created; the host unloads a document a grace period after
+  its last connection closes; A's tests check the heap returns within 5 MB of its pre-open value.
+- §4.2 (Decision Log 35, numbers attached): the composition hold buffers sync frames and flushes them as one merged update.
+- §4.4: "an agent batch occupies the host loop ≤ 50 ms at 200 pages" becomes P3-B's acceptance check; the route: drop the
+  whole-document clone (dry-run against the touched blocks' ProseMirror nodes), an id → node index, replace_text scoped
+  by block; a worker_thread only if still over.
+- X24 (advisory): throttle cursor awareness to about 50 ms.
+- §4.12: S7's bounds tables (S7a's and this one) as the scale gate, re-run in P3-F's scale review.
+- §8: the scale risk mitigated, the writer's host-loop max the residual.
+
+### Questions for the architect (S7b)
+1. Adopt the bounds above as the B and C gate and as P3-F's re-run? Recommended: yes.
+2. The host-loop max over 100 ms with touched-parent validation (126–148 ms on 5-op batches): make removing the clone
+   binding now, or advisory? Recommended: binding for P3-B as the 50 ms-per-batch check, the worker deferred.
+3. 0.5 s to open a 200-page document is mostly the editor's full render: accept, or require progressive rendering?
+   Recommended: accept; show the panel shell at once with a loading state past 100 ms.
+4. A V2 sync message? Recommended: no.
+5. The idle unload's grace period? Recommended: 60 s after the last connection, never while an agent session is linked
+   and live.
+Not tested in S7b: v13 in Electron; a long (months) history in the editor path (S7a covers it headless); power loss.
+
+## P3-0 closing record (2026-10-12)
+
+Delegation: each spike was run by one worker (opus) under the P3-0 executor, who briefed it, relayed the architect's
+rulings mid-run, re-ran each spike's headline commands, committed its code and outputs, and folded its section in here.
+S2 and S6 ran first on v13 and were ported to v14 after S1's ruling; S3, S4, S5 and S7 ran on v14 from the start.
+Environment: `/tmp/maws-review/waitload20.sh` and `with-slot.sh` had been purged by `/tmp`'s three-day rule and were
+recreated by the executor (the coordinator later patched `with-slot.sh` to 2 slots and `MAWS_E2E_QUIET=1`); the brief's
+IME capture path named `p3-finish` for `p2-finish`. The machine's load average stayed between 9 and 50 throughout; the
+timing spikes record it beside every number.
+Open items left to the children: the writer's host-loop max (S7b question 2, P3-B); S7b's other questions; the heavy deck
+preview's per-element change count reading 0 after month 1 (S7a pitfall 10, P3-C); zstd inside Electron 44.4.5 (P3-A);
+the upstream filing of the `Y.undoContentIds` gap (the owner); power loss, E10's real `SocketPort`, a detached-mode kill
+and main's reopen after a reset (P3-A); the OS clipboard round trip of comment marks and the drag-move guard (P3-B); the
+under-layer paint rule in a real paint (P3-C).
