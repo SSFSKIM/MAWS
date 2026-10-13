@@ -392,6 +392,19 @@ describe('DocumentService: host-originated writes', () => {
     expect(reader.doc.get('t').toString()).toBe('# > hello!');
   });
 
+  it('treats the document key as opaque: `<artifactId>:suggest` is a doc of its own beside the artifact’s', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'main'));
+    await service.writeAs('a1:suggest', agent, (doc) => doc.get('t').insert(0, 'suggested'));
+    reopen({}, true);
+    for (const [key, text] of [['a1', 'main'], ['a1:suggest', 'suggested']] as const) {
+      const reader = service.replica(sid('app-9'), key);
+      await reader.whenSynced();
+      expect(reader.doc.get('t').toString()).toBe(text);
+    }
+    expect(committed('SELECT artifactId, actor FROM artifact_updates ORDER BY seq')).toEqual([{ artifactId: 'a1', actor: 'human' }, { artifactId: 'a1:suggest', actor: 'session:app-1' }]);
+  });
+
   it('rejects a write whose edit throws, takes back its rows and evicts the doc', async () => {
     make({}, true);
     await service.writeAs('a1', agent, (doc) => doc.get('t').insert(0, 'kept'));
