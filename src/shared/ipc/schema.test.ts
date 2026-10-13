@@ -1720,6 +1720,36 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k' }] }).ok).toBe(false);
     });
 
+    // The value is checked all the way down: what JSON would drop or rewrite (undefined to null or nothing, NaN and
+    // Infinity to null) is refused at any depth, since the detached line would carry something else than was sent.
+    it('refuses a non-JSON value at any depth in a setAttr value', () => {
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      const nonJson: [string, unknown][] = [
+        ['undefined in an array', [undefined]],
+        ['undefined in a record', { nested: undefined }],
+        ['undefined at depth', { a: [{ b: [1, { c: undefined }] }] }],
+        ['a function', { f: () => 1 }],
+        ['a function at depth', [[{ f: () => 1 }]]],
+        ['NaN', [Number.NaN]],
+        ['Infinity at depth', { a: { b: [Number.POSITIVE_INFINITY] } }],
+        ['-Infinity', { a: Number.NEGATIVE_INFINITY }],
+        ['a bigint', [1n]],
+        ['a symbol', { s: Symbol('x') }],
+        ['a Date', { d: new Date(0) }],
+        ['a Map', { m: new Map() }],
+        ['a typed array', { b: new Uint8Array(2) }],
+        ['a sparse array', [1, , 3]], // eslint-disable-line no-sparse-arrays
+        ['a cycle', cyclic],
+      ];
+      for (const [label, value] of nonJson) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, label).toBe(false);
+      }
+      for (const value of [[], {}, [[], {}], { a: { b: [0, -0, 1.5, 'x', true, null] } }]) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, JSON.stringify(value)).toBe(true);
+      }
+    });
+
     it('reads a store refusal back out of an IpcError, and nothing out of any other error', () => {
       const refusal = { reason: 'designSystemInUse', data: { artifactIds: [id] } };
       expect(artifactRefusalOf({ code: 'invalid_input', message: 'in use', issues: refusal })).toEqual(refusal);
