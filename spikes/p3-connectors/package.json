@@ -1,0 +1,13 @@
+{
+  "name": "maws-spike-p3-connectors",
+  "private": true,
+  "type": "module",
+  "description": "P3-H's spike U2 (docs/doperpowers/plans/2026-10-12-p3-co-work.md §4.12 U2, §5 P3-H, parent pin blob 8474a047 at c73ba534): can MAWS call an engine-configured connector's MCP tool outside a session? Findings only, never product code.",
+  "scripts": {
+    "probe": "node run-all.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "zod": "4.6.5"
+  }
+}

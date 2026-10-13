@@ -1,0 +1,355 @@
+P3-H SPIKE U2: CONNECTORS FOR ARTIFACTS — FINDINGS
+
+Cites docs/doperpowers/plans/2026-10-12-p3-co-work.md, child P3-H (§4.12 U2, §5 P3-H, §4.3, §4.10), parent pin
+blob 8474a047 of that file at commit c73ba534. Run 2026-10-12 on branch worktree-agent-a86d5efe07cdbf2ec.
+Engine: Claude Code 2.1.296 (the pinned binary, run live once in a scratch config home); code read in the 2.1.292
+readable bundle (~/claude-code-bundle/2.1.292/cli.pretty.js, cited cli:<line>; the key strings re-checked present in
+the 2.1.296 binary with `strings`). Nothing under ~/.claude or ~/.claude.json was read or written; no credential,
+Keychain item or token was read; no model was called.
+
+
+VERDICT
+
+YES. MAWS can call an engine-configured connector's MCP tool outside a model turn, by two routes that complement
+each other, and needs neither a model turn nor the engine's tokens for either:
+
+  Route E, the engine's own `mcp_call` (verified live): a control request on a live session's engine that calls any
+  MCP tool that engine has connected, with no model turn, no tokens and no permission check. It reaches everything the
+  session reaches: user, project, local, plugin and --mcp-config servers, HTTP servers the engine authenticated with
+  its own OAuth grant, and the claude.ai-hosted connectors. Its one limit is X16's: only while that engine is live.
+
+  Route D, MAWS as its own MCP client (verified with the official SDK): stdio servers (MAWS spawns its own instance
+  of the same config), unauthenticated HTTP, and OAuth-protected HTTP through MAWS's OWN grant per server (its own
+  registration, PKCE, RFC 8707 resource binding, tokens sealed by MAWS). Works with no engine at all. It cannot reach
+  claude.ai-hosted connectors (they need the owner's Claude account token).
+
+  Reusing the engine's OAuth tokens from MAWS: NO. Illegitimate under the MCP authorization spec, keyed to Claude
+  Code's client registration, stored in the Keychain item that also holds the owner's Claude login, and unsafe: a
+  refresh by MAWS rotates the refresh token out from under the engine (simulated: the engine's next refresh fails
+  invalid_grant). Route E makes it unnecessary: the engine uses its own grant.
+
+Recommended route for P3-H's brief: one connector bridge in main with both backends behind the ArtifactHost
+adapter. Route E first (the smallest build: one control request MAWS's control plumbing already speaks, exact parity
+with the engine's resolution and auth, claude.ai connectors included); route D second, for engine-less refresh of
+stdio and HTTP servers. MAWS's per-artifact, per-tool grant is the only gate on both (mcp_call bypasses the engine's
+permission rules and plan mode, verified). Route M (a model turn) only for agent actions such as "Send to".
+
+What P3-E's dashboards may bind to: files always; a configured connector's read-only tool with a grant, refreshed by
+a page-owned watch through route D when the server is direct-capable, else through route E while a live engine has
+it connected, else the block shows its cached value and "paused: no live session" with a Start gesture; never a
+timer that acquires an engine.
+
+
+1. HOW THE ENGINE RESOLVES AND AUTHENTICATES ITS MCP SERVERS
+
+(Bundle read by a delegated reader with line citations; the starred items re-read by me or verified live.)
+
+Scopes (cli:671373 enum local, user, project, dynamic, enterprise, claudeai, managed, agent; readers cli:756604-756665):
+- user: top-level `mcpServers` of the global config (~/.claude.json, or $CLAUDE_CONFIG_DIR/.claude.json) (cli:756637).*
+- local: `projects[<path>].mcpServers` in the same file (cli:756644).
+- project: every .mcp.json from the filesystem root down to cwd, deeper files winning (cli:756613-756635).*
+- managed: `policySettings.managedMcpServers`, http/sse with https only (cli:755818-755831, 671418-671425).
+- enterprise: managed-mcp.json in the managed-settings directory; when present ONLY enterprise and managed load,
+  --strict-mcp-config and --mcp-config are refused, claude.ai connectors off unless allowed by policy
+  (cli:755832, 756707-756716, 757022-757090).
+- dynamic: --mcp-config (cli:453444-453460); the only scope that may declare type "sdk" (cli:756907-756910).*
+- plugin: `plugin:<plugin>:<server>`, scope dynamic with pluginSource and pluginPath (cli:755556-755563); tools
+  surface as mcp__plugin_<plugin>_<server>__<tool>; suppressed when duplicating a manual server's endpoint (cli:755997).
+- sdk: names declared at initialize (`sdkMcpServers`), served over mcp_message (cli:597373-597384); MAWS's `maws`.
+- claudeai: fetched GET ${BASE_API_URL}/v1/mcp_servers?limit=1000 with the owner's claude.ai OAuth bearer
+  (cli:754862-754864), named "claude.ai <display_name>", type claudeai-proxy; calls go to
+  https://mcp-proxy.anthropic.com/v1/mcp/{server_id} with that same bearer (cli:197371, 930376-930393, 929756-929790).
+  Off when ENABLE_CLAUDEAI_MCP_SERVERS is falsy, `disableClaudeAiConnectors` is set, the login lacks scope
+  user:mcp_servers, an API key takes precedence, strict/lockdown applies, or policy blocks it (cli:754840-754859, 757052).
+
+--setting-sources gates three of these: user needs userSettings, project needs projectSettings, local needs
+localSettings (cli:756607-756609); enterprise and managed are not gated. MAWS launches with user,project,local
+(src/engine-host/launch.ts:53), so all load.
+
+.mcp.json approval: disabledMcpjsonServers rejects; enabledMcpjsonServers or enableAllProjectMcpServers approves;
+otherwise pending, EXCEPT that a non-interactive session with projectSettings enabled approves (cli:757291-757314,
+`Ee()` = !isInteractive, cli:579618).* Verified live: a scratch project's .mcp.json server `projtoy`, never approved,
+came up `connected`, scope `project`, in a stream-json engine (results/engine-mcp-call.json). So every MAWS session
+runs every .mcp.json server of a trusted directory (MAWS's trust sheet already lists them: src/main/sessions/trust.ts:175-177).
+
+Precedence on a name collision: Object.assign(plugins, user, approvedProject, local, managed) (cli:756790), so
+managed > local > project > user > plugin; then --mcp-config over all file scopes (cli:454026); claude.ai connectors
+lowest, dropped when they duplicate a configured server's URL (cli:756820, 756055). Allow/deny policy
+(deniedMcpServers, then allowedMcpServers, by name, command or URL glob; enterprise and managed bypass the allowlist)
+(cli:756232-756316). The per-project toggle (`/mcp disable`, control mcp_toggle) writes `disabledMcpServers` into the
+project entry of ~/.claude.json (cli:757107-757123).
+
+Transports (union cli:671448): stdio (command, args, env, timeout), sse and http ("streamable-http" normalized;
+url, headers, headersHelper, oauth {clientId, callbackPort, authServerMetadataUrl, scopes, xaa}, per-tool
+permission_policy), ws (url, headers, headersHelper; no oauth), sdk, claudeai-proxy, and the internal sse-ide and
+ws-ide. ${VAR} and ${VAR:-default} expand in stdio command/args/env and in url/headers (cli:708777, 756382-756414);
+credential-like variables expand to empty toward remote sinks (cli:708797-708808).
+
+Remote servers' OAuth, from code only:
+- Storage: one secure-storage blob per config home, the same one that holds the owner's Claude login. macOS Keychain
+  service "Claude Code-credentials" (suffixed -<sha256(configDir)[:8]> when CLAUDE_CONFIG_DIR is set), account $USER;
+  plaintext fallback <config home>/.credentials.json (cli:1018459-1018471, 519353-519395, 519528-519529). MCP tokens
+  under the key `mcpOAuth`, client secrets under `mcpOAuthClientConfig` (cli:44063-44066).
+- Entry key: `${serverName}|${sha256(JSON.stringify({type, url, headers}))[:16]}` (cli:865242-865245): a changed URL
+  or header orphans the grant. Fields: serverName, serverUrl, accessToken, refreshToken, expiresAt, scope, issuer,
+  clientId, clientSecret, redirectUri, stepUpScope, discoveryState (cli:43607-43678).
+- Registration: a stored clientId, else the config's oauth.clientId, else CIMD with client_id
+  https://claude.ai/oauth/claude-code-client-metadata when the server supports it, else DCR as
+  "Claude Code (<server>)", public client (cli:43567-43593, 43504-43509, 42995).
+- Redirect http://localhost:<port>/callback (configured port, else MCP_OAUTH_CALLBACK_PORT, else the registered port,
+  else random 49152-65535), PKCE S256 always (cli:528457-528480, 510939).
+- Refresh proactively at <= 300 s left under a file lock `mcp-refresh-<key>.lock`; ACCEPTS ROTATION
+  (`refreshToken: e.refresh_token ?? previous`, cli:43675); invalid_grant clears the tokens and marks needs-auth
+  (cli:43619-43666, 43921-44040). Step-up on 403 insufficient_scope (cli:43454-43467).
+- Control requests: mcp_authenticate {serverName, redirectUri?} answering {authUrl, requiresUserAction, ...},
+  mcp_oauth_callback_url {serverName, callbackUrl}, mcp_clear_auth {serverName} (revokes, clears, reconnects)
+  (cli:598528-598740). So MAWS can drive the ENGINE's own OAuth flow for a server from its UI (open authUrl in the
+  browser) without touching the tokens: the right way to repair a needs-auth server for route E.
+
+mcp_status (verified live): returns per server {name, status, scope, config, tools[{name, annotations}]}; config is
+{type, command, args} for stdio (env omitted) and {type, url, headers} for HTTP WITH HEADER VALUES VERBATIM after env
+expansion (the probe's fake header came back as its expanded value), redacted only for the managed scope
+(cli:560993-561012, 1009964-1009968). MAWS must never log or persist mcp_status's config.
+
+The `claude mcp` CLI: list and get health-check every approved server by connecting (stdio servers spawned, 5 s
+tools/list), claude.ai connectors included; no subcommand calls a tool (cli:962313-962345, 1062714-1062934).
+
+
+2. ROUTE E: THE ENGINE'S mcp_call (verified live)
+
+The control subtype list includes it (cli:372003); the handler is cli:598393-598497 (re-read); the schema and its
+description are in cli:961255 and in the official Agent SDK's types (~/claude-code-bundle/agent-sdk-0.3.259/sdk.d.ts:4054-4070):
+"Invokes an MCP tool via the subprocess MCP client without a model turn. No permission check (control channel is
+trusted, same as other subtypes). SDK-type MCP servers ... are rejected ... A target server that is not yet connected
+is brought up on demand ... waits up to 30s ... Cancellable via control_cancel_request." Request
+{subtype:'mcp_call', tool:'mcp__<server>__<tool>', arguments}; success {content, structuredContent, _meta}; errors
+name the repair ("send mcp_authenticate and retry", "send mcp_reconnect and retry", "MCP server not connected: x").
+Staged calls (input_files, output_files, expires_at, timeout_ms) sit behind a feature gate (tengu_ptc_enabled); plain
+calls do not.
+
+Probe engine-mcp-call-probe.mjs (fixture fixtures/engine-mcp-call.jsonl, every frame out and in; summary
+results/engine-mcp-call.json). Scratch CLAUDE_CONFIG_DIR and project under $TMPDIR, inherited CLAUDE*/ANTHROPIC*
+variables dropped, MAWS's flags (-p, stream-json, --permission-prompt-tool stdio, --setting-sources user,project,local)
+plus --mcp-config. Servers: usertoy (stdio, user scope), userhttp (Streamable HTTP, user scope, an env-expanded
+fake header), projtoy (stdio, the project's .mcp.json, never approved), dyntoy (stdio, --mcp-config). Scratch user
+settings: permissions.deny ["mcp__usertoy__metrics_snapshot"], defaultMode "plan". No user message was sent.
+
+  initialize answered in 322 to 353 ms (two runs) with no credentials present; mcp_status after 4 s: all four `connected`.
+  list_permission_rules: the deny rule in force (source userSettings); get_settings: defaultMode plan.
+  mcp_call mcp__dyntoy__metrics_snapshot      success  7 ms, then 1 ms; structuredContent intact
+  mcp_call mcp__usertoy__metrics_snapshot     success  5 ms  <- the tool a deny rule names
+  mcp_call mcp__dyntoy__send_document         success  2 ms  <- a write tool, in plan mode
+  mcp_call mcp__userhttp__metrics_snapshot    success  9 ms  (HTTP)
+  mcp_call mcp__projtoy__metrics_snapshot     success  5 ms  (the unapproved .mcp.json server)
+  mcp_call mcp__nosuch__tool                  error    "MCP server not connected: nosuch"
+  The engine sent no control_request (no can_use_tool) and produced no `result` frame: zero model turns.
+
+So: mcp_call ignores the engine's deny rules and permission mode. MAWS's own per-artifact, per-tool grant is the
+only gate on route E, and it must be enforced in main before the control request is written (the renderer never
+reaches the engine host's control channel directly). Cost: no tokens. Latency: the server's own plus a few ms.
+
+Claude.ai-hosted connectors and engine-authenticated HTTP servers are reachable through route E only, and
+legitimately so: the engine calls them with its own grant; no token leaves it. Not exercised live (the scratch home
+has no Claude login, by design); the handler resolves them like any connected server (cli:598393-598497 does not
+distinguish claudeai-proxy).
+
+Limits: (a) X16: only on an engine that is live; nothing may acquire one on a timer (charter §13 X16), and a watch
+must not keep one alive (§4.4: connected MCP servers keep a session alive only when the owner marks them stateful).
+(b) Per session: the servers are those resolved for that session's cwd and settings. (c) Shared instance: the
+artifact's calls go to the same server process the model uses, interleaved. (d) It is a wire surface of the pinned
+engine (declared in the SDK's types, so supported, but it can change between versions: the engine-compat check
+should probe it).
+
+
+3. ROUTE D: MAWS AS ITS OWN MCP CLIENT (probes)
+
+@modelcontextprotocol/sdk is NOT in the root node_modules (no @modelcontextprotocol directory, no .pnpm entry).
+The probes use a spike-local package.json (SDK 1.32.1, the latest; own pnpm-workspace.yaml and lockfile; the root
+lockfile untouched). Run: pnpm -C spikes/p3-connectors install; node spikes/p3-connectors/run-all.mjs
+(results/<probe>.json). Single runs, indicative:
+
+  probe        what                                                  connect            tools/list  tools/call
+  stdio        toy-server.mjs over StdioClientTransport              336-418 ms (spawn) 15 ms       3.8 ms, then 0.5-0.7 ms
+  http-local   the same server, stateless Streamable HTTP            44-71 ms           7-17 ms     4-38 ms
+  http-public  DeepWiki https://mcp.deepwiki.com/mcp (no auth)       498-704 ms         154-171 ms  114-205 ms
+  oauth        toy server behind auth-server.mjs (below)             first flow 70-162 ms; reconnect from stored grant, no browser
+  maws-shim    MAWS's own `maws` server, stock SDK client            59 ms              0.4 ms      0.6 ms
+
+- Structured results reach the client as a dashboard wants them: the toy tool's outputSchema yields
+  structuredContent {series, at, rows:[{t,v}]}; DeepWiki's tools declare output schemas too.
+- Annotations (readOnlyHint, destructiveHint, ...) arrive with tools/list. They are the server's hints, not
+  guarantees; MAWS uses them to default a grant and to refuse watching a tool not declared read-only (Claude's
+  rule, §5), never as the gate.
+- Protocol 2025-11-25 negotiated with both HTTP servers, the version the engine offers
+  (src/engine-host/tool-server/server.ts:60).
+- The `maws` server is not launchable standalone as it ships: MawsToolServer has no transport; the host feeds it
+  mcp_message frames (src/engine-host/tool-server/server.ts:1-12, 87-125;
+  spikes/protocol-probe/findings-pass3-p1-extension.txt:138-146). maws-shim.ts (40 lines, bundled from src/ by
+  esbuild) wraps each stdin line as an mcp_message and writes each mcp_response back; a stock client then lists and
+  calls through MAWS's class unchanged. Evidence of conformance only, not a proposal.
+- Stdio environment: the SDK passes only HOME, PATH, SHELL, TERM, USER, LOGNAME plus the config's env. Route D must
+  pass the same captured login-shell environment the engine launches with (@shared/host/shell-env) plus the config's
+  env, with ${VAR} expanded as the engine does.
+- A second instance: route D spawns MAWS's own copy of a stdio server beside any copy a session holds. A server
+  holding an exclusive resource (a browser profile, a lock file) may refuse; such a server is marked route E only.
+
+Config for route D: mirror by lookup, never by re-resolution. The precedence, approval, policy and enterprise rules
+of §1 are too many to re-implement faithfully. The engine already reports the resolved set: mcp_status gives each
+server's name, scope and config fingerprint (MAWS's observed facts can keep the name, scope and a hash, never the
+headers). Route D takes a server only when the engine reported it, reads that one entry read-only from the file its
+scope names (user and local: the global config's mcpServers or projects[cwd].mcpServers; project: the .mcp.json the
+engine used; plugin: the plugin's own manifest at its reported path), checks the fingerprint matches, and otherwise
+falls back to route E. It never reads secure storage, and never writes any of these files.
+
+
+4. OAUTH: MAWS'S OWN GRANT, NEVER THE ENGINE'S
+
+The MCP authorization spec (https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization, fetched
+2026-10-12; the 2025-06-18 revision introduced the resource-indicator and audience rules):
+- "MCP clients MUST NOT send tokens to the MCP server other than ones issued by the MCP server's authorization
+  server"; servers "MUST validate that access tokens were issued specifically for them as the intended audience";
+  clients "MUST implement Resource Indicators ... RFC 8707" in both the authorization and the token request.
+- Registration priority: pre-registered, then Client ID Metadata Documents when the server advertises
+  client_id_metadata_document_supported, then Dynamic Client Registration, then ask the user for client information.
+- "For public clients, authorization servers MUST rotate refresh tokens" (OAuth 2.1 §4.3.1).
+- PKCE S256 mandatory; redirect URIs localhost or https; 403 insufficient_scope means step-up.
+- Stdio: "SHOULD NOT follow this specification, and instead retrieve credentials from the environment".
+
+Probe oauth (auth-server.mjs: the SDK's mcpAuthRouter with RFC 8414 metadata, RFC 7591 registration, PKCE, the RFC
+8707 audience recorded in each token, refresh rotation, an auto-approving /authorize in place of the consent page;
+two toy servers A and B behind requireBearerAuth with an audience check):
+ 1. Unauthenticated: 401 with WWW-Authenticate resource_metadata=".../.well-known/oauth-protected-resource/mcp".
+ 2. MAWS's own flow with the SDK's auth(): RFC 9728 then RFC 8414 discovery, DCR as "MAWS" with a loopback redirect
+    http://127.0.0.1:<ephemeral>/callback, the authorization URL with code_challenge_method=S256 and
+    resource=<A's URL>, the code to the loopback, the token exchange, then tools/list and tools/call. The provider
+    MAWS implements is a handful of get/save pairs plus redirectToAuthorization (shell.openExternal in MAWS).
+ 3. A fresh connection from the stored grant: no browser, no registration.
+ 4. Audience: A's token at B is refused 401 invalid_token ("token audience .../47821/mcp is not .../47822/mcp"). A
+    grant is per server; one consent never covers another.
+ 5. The engine's grant, simulated with a second registration "Claude Code (stand-in)": its access token works from
+    MAWS (a bearer works for whoever holds it), but keeping it alive means refreshing as the engine's client, which
+    rotates the refresh token, and the engine's next refresh fails "InvalidGrantError: refresh token unknown,
+    rotated away, or not issued to this client". On a real server: the owner's connector logged out in every Claude
+    Code session. The engine accepts rotation (cli:43675) and clears tokens on invalid_grant (cli:43921-44040), so
+    this failure mode is real, not hypothetical.
+
+Real connectors (probe discovery: one unauthenticated initialize each, no credentials, then the public metadata the
+401 names; nothing registered; results/discovery.json):
+
+  Notion, Linear, Sentry, Canva     401 + resource_metadata; CIMD and DCR       -> MAWS's own flow, no setup
+  Atlassian                         401 without resource_metadata; DCR          -> SDK origin fallback, then DCR
+  Stripe                            DCR                                         -> no setup
+  Figma                             DCR (confidential methods only)             -> unverified whether it admits an unknown client
+  Asana, Slack, GitHub              no DCR, no CIMD                             -> a pre-registered client id the owner enters once
+  DeepWiki                          open (200)                                  -> no auth
+
+For CIMD MAWS needs one HTTPS-hosted client metadata document (its client_id URL); until it has one, DCR serves every
+server above that offers CIMD. Route E covers all of them through the engine's existing grants, which is the main
+reason to build route E first.
+
+
+5. ROUTE M: A MODEL TURN
+
+The artifact's request becomes a prompt to a session. Measured on the E0a fixture
+(spikes/protocol-probe/fixtures/pass3/p1-sdk-mcp-roundtrip.jsonl, the three result frames): 3.5 to 4.3 s per call
+(duration_ms 4,278, 3,687, 3,504; num_turns 3, the model first searching for the deferred tool), 56,661 to 70,341
+cached input tokens and about 290 output tokens, $0.021 to $0.039 per call on Haiku 4.5, several times that on the
+owner's default model; a cold engine adds about 0.9 s (spawn to system/init in the same fixture). Every call is a
+visible turn in a transcript. With mcp_call available it has no use for reading data; it remains the route for agent
+actions that need judgment, "Send to" a connector among them (P3-H's own definition).
+
+
+6. THE ROUTES SIDE BY SIDE
+
+                 reaches                                       needs                     latency          cost      on a timer
+  D (MAWS)       stdio; HTTP open; HTTP with MAWS's grant      nothing live              1-200 ms         none      yes, while a page is open
+  E (mcp_call)   everything the session has, incl. claude.ai   a live engine (X16)       server + ~5 ms   none      only on an already-live engine; never acquires
+  M (a turn)     everything the session has                    a live engine + a model   3.5-4.3 s (Haiku) 2-4 cents (Haiku) no (X16 and cost)
+
+
+7. PERMISSION AND LIFECYCLE
+
+Prior art, Claude's own artifact runtime (~/claude-desktop-re/readable/app-2.16120.0/web/app/v1/frame-shell-broker-nYVT-Jae.js):
+the host page brokers mcp.callTool and mcp.watchTool, never the model; a per-frame grant set (server -> tools) is
+checked on every call, unknown pairs classified ask, revoked or refused (:26345-26392); "declared-write tools cannot
+be watched" (:26393-26397); at most 64 watches (w_ = 64, :21701, enforced :26368, :26407); the refetch interval
+clamped to at most 24 h (:26429-26434) and at least 30 s (T_ = 30000, :21702, applied :21866); a poll falling due
+while the page is hidden is deferred and caught up on visibility (H_ reads document.hidden, :21834-21848, :21876);
+watches live in the broker's memory keyed by frame, account and org (:21785-21788), so they die with the page.
+
+The design recommended for the brief:
+ 1. Declaration. An artifact declares the {server, tool} pairs it may call (Claude's dashboard datasets,
+    {kind:'query', connector, tool, args}, U1). A declaration grants nothing.
+ 2. The grant: the owner's, in the editor header ("This page wants to read notion · search: Allow / Allow once /
+    Deny"), per artifact and per tool, never per server. Record {artifactId, server name, server fingerprint (scope,
+    transport, command+args or URL; never header values), tool, mode read|write, grantedAt}; a changed fingerprint
+    re-asks. A tool not declared read-only is callable only on an explicit gesture, once per grant of "Allow once",
+    and never watched. Because mcp_call skips the engine's rules, this grant is the only gate on route E as on D.
+    WHERE: in the engine host's artifact store, beside the artifact (P3-A owns the store, §4.3; the grant belongs to
+    the artifact: deleted with it; a version restore never restores a revoked grant; an export or transfer carries the
+    declaration and never a grant). It is not a secret, and main reads it through the host on every call.
+ 3. The credential (route D's OAuth grant for an HTTP server) is per server, MAWS's own, made once ("Connect Notion"
+    opens the system browser), sealed with Electron safeStorage in main, in MAWS's user-data directory, never under
+    ~/.claude. Main, because safeStorage is an Electron main-process API and the detached engine host runs Electron as
+    Node (src/engine-host/detached.ts:1-4). Disconnect deletes it and revokes at the server (RFC 7009) when offered.
+    Route E needs no MAWS credential; a needs-auth server is repaired through the engine's own mcp_authenticate.
+ 4. The bridge runs in main, not the engine host: the host is detached and outlives the app (E10), so a client
+    there could keep stdio servers running and tokens refreshing with no app connected; in main everything dies with
+    the app, which is the rule "when the app is closed, nothing runs" held by construction. Main writes route E's
+    mcp_call to the host's control channel for the chosen session. The renderer reaches the bridge only through the
+    ArtifactHost adapter (callTool, watchTool, unwatch), never window.maws from src/artifacts/ (§4.10); each request
+    carries the artifact id and main checks the grant before any call.
+ 5. Route choice per call: D when the server is direct-capable (stdio, open HTTP, or HTTP MAWS has connected) and not
+    marked engine-only; else E on a live engine whose mcp_status lists the server connected (the artifact's own
+    session first); else no call: the block shows its cached value with "paused: no live session" and a Start button
+    (an owner gesture, which X16 allows). Never acquire an engine for a watch; never let a watch keep one alive.
+ 6. Watches belong to the page, as Claude's do: interval clamped to 30 s .. 24 h, at most 64 across the app, paused
+    while the page is hidden and caught up when shown, gone when the page closes; the last good result cached per
+    (artifact, server, tool, args) with its time, so a block shows "as of" while loading, offline or paused. A
+    dashboard opened after a day shows its cache and refreshes once.
+ 7. Revocation (the header, or Settings per artifact or per server) deletes the grant; main refuses the next call and
+    stops every live watch of that pair (the host's artifact.changed for the grant row). A failed authorization shows
+    "Reconnect" on the block, never stale data presented as live.
+ 8. Closed app: nothing runs. No background refresh, no token refresh, no server kept alive.
+
+
+8. WHAT P3-E's DASHBOARDS MAY BIND TO
+
+  {kind:'file'}             a data file an agent wrote          refresh on the store's change event   no gate beyond the artifact
+  {kind:'query'} via D      configured stdio or HTTP server     page-owned watch, 30 s .. 24 h         the per-artifact, per-tool grant
+  {kind:'query'} via E      anything a live session has,        same watch, only while that engine     the same grant (the only gate)
+                            claude.ai connectors included       is live; "paused" otherwise
+  a model turn (M)          anything                            an owner gesture only                  the session's own permission prompt
+
+
+9. QUESTIONS FOR THE ARCHITECT (each with a recommendation)
+
+ Q1. Build order: E then D, or both at once? Recommend E first in P3-H's brief (one control request, no OAuth, no
+     config mirror, every connector the owner already uses, claude.ai's included), D as a second milestone for
+     engine-less refresh. If the owner's dashboards are mostly opened with no session live, swap the order.
+ Q2. Which live engine serves a route E call for an artifact with no live owning session? Recommend: the artifact's
+     own session if live, else any live session in the same project directory whose mcp_status lists the server
+     connected, else paused. Never a session in another project (its .mcp.json and local servers differ).
+ Q3. Should the engine's headless auto-approval of .mcp.json servers (§1, verified) change MAWS's trust sheet? It
+     already names the servers (trust.ts); recommend the sheet say they will run without per-server approval, and a
+     tracker row, since this is P1 behaviour, not P3-H's.
+ Q4. Charter wording: mcp_call is a new engine surface MAWS would depend on; recommend a dated Decision Log line in the
+     charter (D-1 stands: a documented control request of the pinned engine, no patch) and an engine-compat probe of
+     the subtype.
+ Q5. mcp_status returns HTTP header values verbatim (§1). Recommend a hard rule in the brief: the bridge reads it in
+     memory only, persists name, scope and a fingerprint, never logs it; and a tracker row to audit today's
+     session.mcpStatus IPC (src/engine-host/ipc.ts:565), which forwards the whole answer to the renderer.
+ Q6. CIMD: MAWS needs an HTTPS URL for its client metadata document to use CIMD; until then DCR. Recommend DCR now and
+     a residue row for the hosted document (it needs a domain the owner controls).
+
+
+EVIDENCE INDEX (spikes/p3-connectors/)
+
+ toy-server.mjs          a data-shaped toy connector: stdio, or HTTP, optionally bearer-guarded with an audience check
+ auth-server.mjs         the local OAuth 2.1 authorization server (DCR, PKCE, RFC 8707, rotation)
+ client-probe.mjs        route D's probes: stdio, http-local, http-public, oauth, maws-shim
+ discovery-probe.mjs     real connectors' public auth metadata
+ maws-shim.ts            the maws server over stdio (bundled by run-all.mjs into build/, gitignored)
+ engine-mcp-call-probe.mjs  route E live in a scratch config home: node engine-mcp-call-probe.mjs [binary]
+ run-all.mjs             builds the shim, runs route D's probes and the discovery probe
+ results/*.json          every probe's summary;  fixtures/engine-mcp-call.jsonl  the mcp_call exchange, every frame

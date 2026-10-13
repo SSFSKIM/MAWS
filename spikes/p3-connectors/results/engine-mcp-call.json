@@ -1,0 +1,205 @@
+{
+  "bin": "~/.local/share/claude/versions/2.1.296",
+  "initialize": {
+    "subtype": "success",
+    "ms": 321
+  },
+  "mcpStatus": [
+    {
+      "name": "usertoy",
+      "status": "connected",
+      "scope": "user",
+      "config": {
+        "type": "stdio",
+        "command": "~/.nvm/versions/node/v22.23.2/bin/node",
+        "args": [
+          "~/Developer/GitHub/MAWS/.claude/worktrees/agent-a86d5efe07cdbf2ec/spikes/p3-connectors/toy-server.mjs",
+          "stdio"
+        ]
+      },
+      "tools": [
+        "metrics_snapshot",
+        "send_document",
+        "call_count"
+      ]
+    },
+    {
+      "name": "userhttp",
+      "status": "connected",
+      "scope": "user",
+      "config": {
+        "type": "http",
+        "url": "http://127.0.0.1:47831/mcp",
+        "headers": {
+          "X-Probe-Header": "fake-value-not-a-credential"
+        }
+      },
+      "tools": [
+        "metrics_snapshot",
+        "send_document",
+        "call_count"
+      ]
+    },
+    {
+      "name": "projtoy",
+      "status": "connected",
+      "scope": "project",
+      "config": {
+        "type": "stdio",
+        "command": "~/.nvm/versions/node/v22.23.2/bin/node",
+        "args": [
+          "~/Developer/GitHub/MAWS/.claude/worktrees/agent-a86d5efe07cdbf2ec/spikes/p3-connectors/toy-server.mjs",
+          "stdio"
+        ]
+      },
+      "tools": [
+        "metrics_snapshot",
+        "send_document",
+        "call_count"
+      ]
+    },
+    {
+      "name": "dyntoy",
+      "status": "connected",
+      "scope": "dynamic",
+      "config": {
+        "type": "stdio",
+        "command": "~/.nvm/versions/node/v22.23.2/bin/node",
+        "args": [
+          "~/Developer/GitHub/MAWS/.claude/worktrees/agent-a86d5efe07cdbf2ec/spikes/p3-connectors/toy-server.mjs",
+          "stdio"
+        ]
+      },
+      "tools": [
+        "metrics_snapshot",
+        "send_document",
+        "call_count"
+      ]
+    }
+  ],
+  "permissionRules": {
+    "state": {
+      "rules": [
+        {
+          "behavior": "deny",
+          "source": "userSettings",
+          "rule": "mcp__usertoy__metrics_snapshot",
+          "description": {
+            "prefix": "Any use of the ",
+            "emphasis": "mcp__usertoy__metrics_snapshot",
+            "suffix": " tool"
+          },
+          "editability": "persistent"
+        }
+      ],
+      "workspaceDirectories": [],
+      "originalCwd": "<scratch>/project",
+      "managedOnly": false
+    }
+  },
+  "effectivePermissions": {
+    "deny": [
+      "mcp__usertoy__metrics_snapshot"
+    ],
+    "defaultMode": "plan"
+  },
+  "calls": [
+    {
+      "tool": "mcp__dyntoy__metrics_snapshot",
+      "ms": 7,
+      "subtype": "success",
+      "structuredContent": {
+        "series": "revenue",
+        "at": "2026-10-13T01:21:04.800Z",
+        "rows": [
+          {
+            "t": 1791854404800,
+            "v": 107
+          },
+          {
+            "t": 1791854464800,
+            "v": 110
+          }
+        ]
+      }
+    },
+    {
+      "tool": "mcp__dyntoy__metrics_snapshot",
+      "ms": 1,
+      "subtype": "success",
+      "structuredContent": {
+        "series": "revenue",
+        "at": "2026-10-13T01:21:04.804Z",
+        "rows": [
+          {
+            "t": 1791854404804,
+            "v": 107
+          },
+          {
+            "t": 1791854464804,
+            "v": 110
+          }
+        ]
+      }
+    },
+    {
+      "tool": "mcp__usertoy__metrics_snapshot",
+      "ms": 5,
+      "subtype": "success",
+      "structuredContent": {
+        "series": "denied-by-rule",
+        "at": "2026-10-13T01:21:04.808Z",
+        "rows": [
+          {
+            "t": 1791854464808,
+            "v": 110
+          }
+        ]
+      }
+    },
+    {
+      "tool": "mcp__dyntoy__send_document",
+      "ms": 2,
+      "subtype": "success",
+      "text": "delivered \"plan-mode write\" (1 chars) as doc-697a25b0"
+    },
+    {
+      "tool": "mcp__userhttp__metrics_snapshot",
+      "ms": 9,
+      "subtype": "success",
+      "structuredContent": {
+        "series": "http",
+        "at": "2026-10-13T01:21:04.819Z",
+        "rows": [
+          {
+            "t": 1791854464819,
+            "v": 92
+          }
+        ]
+      }
+    },
+    {
+      "tool": "mcp__projtoy__metrics_snapshot",
+      "ms": 5,
+      "subtype": "success",
+      "structuredContent": {
+        "series": "project",
+        "at": "2026-10-13T01:21:04.824Z",
+        "rows": [
+          {
+            "t": 1791854464824,
+            "v": 107
+          }
+        ]
+      }
+    },
+    {
+      "tool": "mcp__nosuch__tool",
+      "ms": 3,
+      "subtype": "error",
+      "error": "MCP server not connected: nosuch"
+    }
+  ],
+  "engineAskedPermission": false,
+  "modelTurns": 0
+}

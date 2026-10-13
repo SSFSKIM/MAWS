@@ -1,0 +1,369 @@
+{
+  "at": "2026-10-13T01:16:09.093Z",
+  "rows": [
+    {
+      "url": "https://mcp.notion.com/mcp",
+      "status": 401,
+      "wwwAuthenticate": "Bearer realm=\"OAuth\", resource_metadata=\"https://mcp.notion.com/.well-known/oauth-protected-resource/mcp\", scope=\"default\"",
+      "protectedResource": {
+        "resource": "https://mcp.notion.com/mcp",
+        "authorization_servers": [
+          "https://mcp.notion.com"
+        ],
+        "scopes_supported": [
+          "default"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "https://mcp.notion.com",
+        "registration_endpoint": "https://mcp.notion.com/register",
+        "client_id_metadata_document_supported": true,
+        "code_challenge_methods_supported": [
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "client_secret_basic",
+          "client_secret_post",
+          "none"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token",
+          "urn:ietf:params:oauth:grant-type:jwt-bearer"
+        ]
+      }
+    },
+    {
+      "url": "https://mcp.linear.app/mcp",
+      "status": 401,
+      "wwwAuthenticate": "Bearer realm=\"OAuth\", resource_metadata=\"https://mcp.linear.app/.well-known/oauth-protected-resource/mcp\", scope=\"read write\"",
+      "protectedResource": {
+        "resource": "https://mcp.linear.app/mcp",
+        "authorization_servers": [
+          "https://mcp.linear.app"
+        ],
+        "scopes_supported": [
+          "read",
+          "write"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "https://mcp.linear.app",
+        "registration_endpoint": "https://mcp.linear.app/register",
+        "client_id_metadata_document_supported": true,
+        "code_challenge_methods_supported": [
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "client_secret_basic",
+          "client_secret_post",
+          "none"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token",
+          "urn:ietf:params:oauth:grant-type:jwt-bearer"
+        ]
+      }
+    },
+    {
+      "url": "https://mcp.atlassian.com/v1/mcp",
+      "status": 401,
+      "wwwAuthenticate": "Bearer realm=\"OAuth\", error=\"invalid_token\", error_description=\"Missing or invalid access token\"",
+      "protectedResource": "none: Resource server does not implement OAuth 2.0 Protected Resource Metadata.",
+      "authorizationServer": {
+        "issuer": "https://mcp.atlassian.com",
+        "registration_endpoint": "https://mcp.atlassian.com/v1/register",
+        "client_id_metadata_document_supported": null,
+        "code_challenge_methods_supported": [
+          "plain",
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "client_secret_basic",
+          "client_secret_post",
+          "none"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token"
+        ]
+      }
+    },
+    {
+      "url": "https://mcp.sentry.dev/mcp",
+      "status": 401,
+      "wwwAuthenticate": "Bearer realm=\"OAuth\", resource_metadata=\"https://mcp.sentry.dev/.well-known/oauth-protected-resource/mcp\"",
+      "protectedResource": {
+        "resource": "https://mcp.sentry.dev/mcp",
+        "authorization_servers": [
+          "https://mcp.sentry.dev"
+        ],
+        "scopes_supported": [
+          "org:read",
+          "project:write",
+          "team:write",
+          "event:write",
+          "alerts:write"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "https://mcp.sentry.dev",
+        "registration_endpoint": "https://mcp.sentry.dev/oauth/register",
+        "client_id_metadata_document_supported": true,
+        "code_challenge_methods_supported": [
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "client_secret_basic",
+          "client_secret_post",
+          "none"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token"
+        ]
+      }
+    },
+    {
+      "url": "https://mcp.asana.com/v2/mcp",
+      "status": 401,
+      "wwwAuthenticate": "Bearer realm=\"Asana MCP\", resource_metadata=\"https://mcp.asana.com/.well-known/oauth-protected-resource/v2\", error=\"invalid_request\", error_description=\"Authorization header is required for MCP V2 access\"",
+      "protectedResource": {
+        "resource": "https://mcp.asana.com/v2/mcp",
+        "authorization_servers": [
+          "https://app.asana.com"
+        ],
+        "scopes_supported": [
+          "default"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "https://app.asana.com",
+        "registration_endpoint": null,
+        "client_id_metadata_document_supported": null,
+        "code_challenge_methods_supported": [
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "client_secret_post",
+          "client_secret_basic"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token",
+          "urn:ietf:params:oauth:grant-type:jwt-bearer"
+        ]
+      }
+    },
+    {
+      "url": "https://mcp.stripe.com/",
+      "status": 401,
+      "wwwAuthenticate": "Bearer resource_metadata=\"https://mcp.stripe.com/.well-known/oauth-protected-resource\"",
+      "protectedResource": {
+        "resource": "https://mcp.stripe.com",
+        "authorization_servers": [
+          "https://access.stripe.com/mcp"
+        ],
+        "scopes_supported": [
+          "mcp"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "https://access.stripe.com/mcp",
+        "registration_endpoint": "https://access.stripe.com/mcp/oauth2/register",
+        "client_id_metadata_document_supported": null,
+        "code_challenge_methods_supported": [
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "none"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token"
+        ]
+      }
+    },
+    {
+      "url": "https://mcp.canva.com/mcp",
+      "status": 401,
+      "wwwAuthenticate": "Bearer realm=\"OAuth\", resource_metadata=\"https://mcp.canva.com/.well-known/oauth-protected-resource/mcp\", error=\"invalid_token\", error_description=\"Missing or invalid access token\"",
+      "protectedResource": {
+        "resource": "https://mcp.canva.com/mcp",
+        "authorization_servers": [
+          "https://mcp.canva.com"
+        ],
+        "scopes_supported": [
+          "profile:read",
+          "design:meta:read",
+          "design:content:write",
+          "design:content:read",
+          "folder:read",
+          "folder:write",
+          "brandtemplate:content:read",
+          "brandtemplate:meta:read",
+          "brandtemplate:content:write",
+          "comment:write",
+          "comment:read",
+          "asset:read",
+          "asset:write",
+          "brandkit:read",
+          "help:answers:read",
+          "help:answers:write"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "https://mcp.canva.com",
+        "registration_endpoint": "https://mcp.canva.com/register",
+        "client_id_metadata_document_supported": true,
+        "code_challenge_methods_supported": [
+          "plain",
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "client_secret_basic",
+          "client_secret_post",
+          "none"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token",
+          "urn:ietf:params:oauth:grant-type:jwt-bearer"
+        ]
+      }
+    },
+    {
+      "url": "https://mcp.figma.com/mcp",
+      "status": 401,
+      "wwwAuthenticate": "Bearer resource_metadata=\"https://mcp.figma.com/.well-known/oauth-protected-resource\",scope=\"mcp:connect\",authorization_uri=\"https://api.figma.com/.well-known/oauth-authorization-server\"",
+      "protectedResource": {
+        "resource": "https://mcp.figma.com/mcp",
+        "authorization_servers": [
+          "https://api.figma.com"
+        ],
+        "scopes_supported": [
+          "mcp:connect"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "https://api.figma.com",
+        "registration_endpoint": "https://api.figma.com/v1/oauth/mcp/register",
+        "client_id_metadata_document_supported": null,
+        "code_challenge_methods_supported": [
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "client_secret_basic",
+          "client_secret_post"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token",
+          "urn:ietf:params:oauth:grant-type:jwt-bearer"
+        ]
+      }
+    },
+    {
+      "url": "https://mcp.slack.com/mcp",
+      "status": 401,
+      "wwwAuthenticate": "Bearer resource_metadata=\"https://mcp.slack.com/.well-known/oauth-protected-resource\"",
+      "protectedResource": {
+        "resource": "https://mcp.slack.com",
+        "authorization_servers": [
+          "https://mcp.slack.com"
+        ],
+        "scopes_supported": [
+          "canvases:read",
+          "canvases:write",
+          "channels:history",
+          "channels:read",
+          "channels:write",
+          "chat:write",
+          "emoji:read",
+          "files:read",
+          "files:write",
+          "groups:history",
+          "groups:read",
+          "groups:write",
+          "im:history",
+          "im:read",
+          "im:write",
+          "lists:read",
+          "lists:write",
+          "mpim:history",
+          "mpim:read",
+          "mpim:write",
+          "reactions:read",
+          "reactions:write",
+          "search:read.files",
+          "search:read.im",
+          "search:read.mpim",
+          "search:read.private",
+          "search:read.public",
+          "search:read.users",
+          "users:read",
+          "users:read.email"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "https://mcp.slack.com",
+        "registration_endpoint": null,
+        "client_id_metadata_document_supported": null,
+        "code_challenge_methods_supported": [
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": [
+          "client_secret_post"
+        ],
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token",
+          "urn:ietf:params:oauth:grant-type:jwt-bearer"
+        ]
+      }
+    },
+    {
+      "url": "https://api.githubcopilot.com/mcp/",
+      "status": 401,
+      "wwwAuthenticate": "Bearer error=\"invalid_request\", error_description=\"No access token was provided in this request\", resource_metadata=\"https://api.githubcopilot.com/.well-known/oauth-protected-resource/mcp/\"",
+      "protectedResource": {
+        "resource": "https://api.githubcopilot.com/mcp/",
+        "authorization_servers": [
+          "https://github.com/login/oauth"
+        ],
+        "scopes_supported": [
+          "repo",
+          "read:org",
+          "read:user",
+          "user:email",
+          "read:packages",
+          "write:packages",
+          "read:project",
+          "project",
+          "gist",
+          "notifications"
+        ]
+      },
+      "authorizationServer": {
+        "issuer": "https://github.com/login/oauth",
+        "registration_endpoint": null,
+        "client_id_metadata_document_supported": null,
+        "code_challenge_methods_supported": [
+          "S256"
+        ],
+        "token_endpoint_auth_methods_supported": null,
+        "grant_types_supported": [
+          "authorization_code",
+          "refresh_token",
+          "urn:ietf:params:oauth:grant-type:device_code"
+        ]
+      }
+    },
+    {
+      "url": "https://mcp.deepwiki.com/mcp",
+      "status": 200,
+      "wwwAuthenticate": null
+    }
+  ]
+}
