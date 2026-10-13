@@ -60,7 +60,7 @@ const host: ArtifactHost = {
   versionState: async () => new Uint8Array(),
   attributions: async () => new Uint8Array(),
   uploadAsset: async () => ({ assetId: '', ref: '' }),
-  identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '#000000' }),
+  identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: 'var(--author-1)' }),
 };
 
 // Rows as main's index answers them (the client validates answers), out of title order.
@@ -135,9 +135,10 @@ describe('the design_system question', () => {
     expect(rowOf(HOUSE).querySelector('[data-ds-scope]')).toBeNull();
     expect(document.head.querySelectorAll('style[data-ds-scope-style]')).toHaveLength(0);
 
-    // a system the owner recolours is redrawn in place
-    act(() => setToken(docs[HOUSE]!, 'color.accent.$root', { $value: '#123456' }));
-    expect(rowOf(HOUSE).querySelector<HTMLElement>('[data-swatch="--ds-color-accent"]')!.dataset.swatchValue).toBe('#123456');
+    // a system the owner recolours is redrawn in place: here the accent takes the text colour
+    act(() => setToken(docs[HOUSE]!, 'color.accent.$root', { $value: '{color.text.$root}' }));
+    expect(rowOf(HOUSE).querySelector<HTMLElement>('[data-swatch="--ds-color-accent"]')!.dataset.swatchValue).toBe(values.get('--ds-color-text'));
+    expect(values.get('--ds-color-text')).not.toBe(values.get('--ds-color-accent'));
 
     expect(within(section('s1')).getByRole('button', { name: 'Decide for me' })).toBeTruthy();
     expect(within(section('s1')).getByRole('button', { name: 'Skip' })).toBeTruthy();
