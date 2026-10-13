@@ -8,6 +8,7 @@
 import katex from 'katex';
 import type { Mark, Node as PMNode } from '@tiptap/pm/model';
 import type { ThemedToken } from 'shiki';
+import { chipText } from './values';
 
 export interface RenderedImage {
   /** What the page shows (a data: URL or an address it may load); absent when the image cannot be shown. */
@@ -29,14 +30,6 @@ const attrs = (pairs: Array<[string, unknown]>): string =>
     .filter(([, value]) => value !== null && value !== undefined && value !== false)
     .map(([name, value]) => (value === true ? ` ${name}` : ` ${name}="${escapeAttr(String(value))}"`))
     .join('');
-
-// Dates in the owner's United States frame, read as calendar days (the editor's chip, nodes/views.ts).
-const DATE = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' });
-function formatDate(iso: unknown): string {
-  const text = typeof iso === 'string' ? iso : '';
-  const at = /^\d{4}-\d{2}-\d{2}$/.test(text) ? Date.parse(`${text}T00:00:00Z`) : NaN;
-  return Number.isNaN(at) ? text : DATE.format(at);
-}
 
 const math = (latex: unknown, displayMode: boolean): string => katex.renderToString(String(latex ?? ''), { displayMode, output: 'mathml', throwOnError: false });
 
@@ -69,13 +62,11 @@ function wrapMark(mark: Mark, inner: string): string {
   }
 }
 
-function inline(node: PMNode, env: RenderEnvironment): string {
+// An inline node without its marks.
+function bare(node: PMNode, env: RenderEnvironment): string {
   switch (node.type.name) {
-    case 'text': {
-      // the link outermost, so adjacent runs of one link read as one address
-      const marks = [...node.marks].sort((a, b) => Number(b.type.name === 'link') - Number(a.type.name === 'link'));
-      return marks.reduceRight((inner, mark) => wrapMark(mark, inner), escapeText(node.text ?? ''));
-    }
+    case 'text':
+      return escapeText(node.text ?? '');
     case 'hardBreak':
       return '<br>';
     case 'image': {
@@ -99,24 +90,31 @@ function inline(node: PMNode, env: RenderEnvironment): string {
         ['class', 'doc-chip'],
         ['data-chip', 'date'],
         ['data-iso', node.attrs.iso],
-      ])}>${escapeText(formatDate(node.attrs.iso))}</span>`;
+      ])}>${escapeText(chipText(node))}</span>`;
     case 'mention':
       return `<span${attrs([
         ['class', 'doc-chip'],
         ['data-chip', 'mention'],
         ['data-kind', node.attrs.kind],
         ['data-ref', node.attrs.ref],
-      ])}>${escapeText(String(node.attrs.label ?? ''))}</span>`;
+      ])}>${escapeText(chipText(node))}</span>`;
     case 'dropdown':
       return `<span${attrs([
         ['class', 'doc-chip'],
         ['data-chip', 'dropdown'],
         ['data-options', JSON.stringify(node.attrs.options ?? [])],
         ['data-value', node.attrs.value],
-      ])}>${escapeText(String(node.attrs.value ?? ''))}</span>`;
+      ])}>${escapeText(chipText(node))}</span>`;
     default:
       return escapeText(node.textContent);
   }
+}
+
+// Every inline node with its marks, atoms as text: a bold linked date is `<a><strong><span data-chip…>`, so the import
+// reads the marks back. The link outermost, so adjacent runs of one link read as one address.
+function inline(node: PMNode, env: RenderEnvironment): string {
+  const marks = [...node.marks].sort((a, b) => Number(b.type.name === 'link') - Number(a.type.name === 'link'));
+  return marks.reduceRight((inner, mark) => wrapMark(mark, inner), bare(node, env));
 }
 
 const inlines = (node: PMNode, env: RenderEnvironment): string => {

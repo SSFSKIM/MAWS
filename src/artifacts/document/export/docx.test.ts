@@ -5,7 +5,7 @@
 import JSZip from 'jszip';
 import mammoth from 'mammoth';
 import { describe, expect, it } from 'vitest';
-import { everyKindSource } from '../convert.fixture';
+import { AGENT, everyKindSource, HUMAN, sourceOf, threadOf } from '../convert.fixture';
 import { HOUSE_TOKENS, houseSystem, type DesignSystemExport, type LocalTokens } from './design-system';
 import { exportDocx } from './docx';
 import { imageSize } from './image-size';
@@ -127,6 +127,87 @@ describe('exportDocx', () => {
     expect(html).toContain('<h2>회의 메모</h2>');
     const { value: text } = await mammoth.extractRawText(input(bytes));
     for (const phrase of ['Plain, bold, italic, underline, strike, code, a link and highlight.', 'A quoted line.', 'console.log(x)', 'The end.', '안녕하세요, 팀 여러분.']) expect(text).toContain(phrase);
+  });
+});
+
+describe('exportDocx, fix wave 1', () => {
+  // review finding 1: a link wraps whatever it marks, and marks format chips, math, breaks and pictures
+  it('links and formats inline atoms as it does text', async () => {
+    const link = { type: 'link', attrs: { href: 'https://example.com/due', title: null } };
+    const source = sourceOf([
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'date', attrs: { iso: '2026-10-12' }, marks: [{ type: 'bold' }, link] },
+          { type: 'math', attrs: { latex: 'x^2' }, marks: [{ type: 'underline' }] },
+          { type: 'hardBreak', marks: [{ type: 'italic' }] },
+          { type: 'image', attrs: { src: 'https://example.com/a.png', alt: 'A', assetId: null }, marks: [link] },
+        ],
+      },
+    ]);
+    const xml = await parts(await exportDocx(source, { loadImage: async () => ({ bytes: PNG, mime: 'image/png' }) }));
+    const document = xml['word/document.xml'];
+    const links = [...document.matchAll(/<w:hyperlink[^>]*r:id="([^"]+)"[^>]*>(.*?)<\/w:hyperlink>/gs)];
+    expect(links).toHaveLength(2);
+    expect(links[0][2]).toMatch(/<w:rStyle w:val="Hyperlink"\/>.*<w:b\/>.*Oct 12, 2026/s);
+    expect(links[1][2]).toContain('<w:drawing>');
+    expect(document).toMatch(/<w:u w:val="single"\/>.*x\^2/s);
+    expect(document).toMatch(/<w:r><w:rPr><w:i\/><w:iCs\/><\/w:rPr><w:br\/><\/w:r>/);
+    for (const [, id] of links) expect(xml['word/_rels/document.xml.rels']).toMatch(new RegExp(`Id="${id}"[^>]*Target="https://example.com/due"|Target="https://example.com/due"[^>]*Id="${id}"`));
+  });
+
+  // review finding 3: a cell after a column a rowspan above still holds takes that column's width
+  it('places cells after a rowspan in the columns they occupy', async () => {
+    const cell = (type: string, text: string, attrs: Record<string, unknown> = {}) => ({ type, attrs: { colspan: 1, rowspan: 1, colwidth: null, ...attrs }, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] });
+    const source = sourceOf([
+      {
+        type: 'table',
+        content: [
+          { type: 'tableRow', content: [cell('tableCell', 'Left', { rowspan: 2, colwidth: [100] }), cell('tableCell', 'Right', { colwidth: [200] })] },
+          { type: 'tableRow', content: [cell('tableCell', 'Below right')] },
+        ],
+      },
+    ]);
+    const document = (await parts(await exportDocx(source)))['word/document.xml'];
+    expect(document).toMatch(/<w:gridCol w:w="1500"\/><w:gridCol w:w="3000"\/>/);
+    const rows = [...document.matchAll(/<w:tr>(.*?)<\/w:tr>/gs)].map(([, row]) => [...row.matchAll(/<w:tc>(.*?)<\/w:tc>/gs)].map(([, tc]) => [/<w:tcW w:type="dxa" w:w="(\d+)"\/>|<w:tcW w:w="(\d+)"/.exec(tc)?.slice(1).find(Boolean), tc.replace(/<[^>]+>/g, '')]));
+    expect(rows).toEqual([
+      [
+        ['1500', 'Left'],
+        ['3000', 'Right'],
+      ],
+      [
+        ['1500', ''], // the continuation of the merged cell
+        ['3000', 'Below right'],
+      ],
+    ]);
+    expect(document).toMatch(/<w:vMerge w:val="continue"\/>/);
+  });
+
+  // review finding 4: a resolved thread is done in Word even when no thread has a reply
+  it('marks a resolved thread done when the file has no replies', async () => {
+    const comment = (threadId: string) => ({ type: 'comment', attrs: { threadId } });
+    const source = sourceOf(
+      [{ type: 'paragraph', content: [{ type: 'text', text: 'Settled', marks: [comment('r1')] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'open', marks: [comment('o1')] }] }],
+      [threadOf('r1', 'resolved', [[HUMAN, 'Settled it.']]), threadOf('o1', 'open', [[AGENT, 'Still open.']])],
+    );
+    const xml = await parts(await exportDocx(source));
+    const extended = xml['word/commentsExtended.xml'];
+    expect(extended).toBeDefined();
+    const paraIds = [...xml['word/comments.xml'].matchAll(/<w:comment w:id="(\d+)".*?<w:p w14:paraId="([0-9A-F]{8})"/gs)].map(([, id, para]) => [id, para]);
+    expect(paraIds).toHaveLength(2);
+    expect(extended).toContain(`<w15:commentEx w15:paraId="${paraIds[0][1]}" w15:done="1"/>`);
+    expect(extended).toContain(`<w15:commentEx w15:paraId="${paraIds[1][1]}" w15:done="0"/>`);
+    expect(xml['word/_rels/document.xml.rels']).toContain('Type="http://schemas.microsoft.com/office/2011/relationships/commentsExtended" Target="commentsExtended.xml"');
+    expect(xml['[Content_Types].xml']).toContain('PartName="/word/commentsExtended.xml"');
+  });
+
+  // review finding 5: a loader that fails is an error; a loader that has nothing is the alt text
+  it('fails when the image loader rejects, and writes the alt text when it answers null', async () => {
+    const source = sourceOf([{ type: 'paragraph', content: [{ type: 'image', attrs: { src: 'maws-artifact:as1/a.png', alt: 'Chart', assetId: 'as1' } }] }]);
+    await expect(exportDocx(source, { loadImage: async () => Promise.reject(new Error('asset store offline')) })).rejects.toThrow('asset store offline');
+    const named = (await parts(await exportDocx(source, { loadImage: async () => null })))['word/document.xml'];
+    expect(named).toContain('[Image: Chart]');
   });
 });
 

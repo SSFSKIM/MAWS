@@ -2,6 +2,9 @@
 // drawn through html-render.ts with the editor's own theme.css inlined, every `--ds-*` in it resolved to a literal by
 // the governing system's `resolveDsVars(cssText, tokens, 'document')` (X28) after the document's `dsOverrides`, so the
 // file needs neither the app's tokens nor D's scope; math is MathML and code is highlighted before it is written.
+// The text's whitespace is kept as stored: the page sets `white-space: pre-wrap` on its article, marked
+// `data-whitespace="preserve"`, which the HTML import reads as "parse with whitespace kept". A loader or highlighter
+// that fails fails the export (a loader answering null shows the alt text; an unknown language is plain code).
 // Nothing loads from outside the file: a Content-Security-Policy says so, images are inlined as `data:` URLs through
 // the caller's loader (`images: 'inline'`, the default; the stored address rides in `data-src` for a re-import) or
 // referenced by address (`images: 'reference'`: assets as `maws-artifact:` URLs through `assetUrl`, https as stored).
@@ -23,7 +26,7 @@ import { tabsOf, type ExportOptions, type ExportSource, type ImageLoader } from 
 export interface HtmlExportOptions<T> extends ExportOptions<T> {
   /** `inline` (default): every image a `data:` URL through `loadImage`; `reference`: images by their address. */
   images?: 'inline' | 'reference';
-  /** Reads an image's bytes for `inline`; an image it cannot read is shown by its alt text. */
+  /** Reads an image's bytes for `inline`: null shows the image by its alt text; a rejection fails the export. */
   loadImage?: ImageLoader;
   /** An asset's URL for `reference` (the renderer's `ArtifactHost.assetUrl` bound to the artifact); as stored if absent. */
   assetUrl?: (ref: string) => string;
@@ -36,6 +39,7 @@ html, body { margin: 0; }
 body { background: var(--ds-color-bg); }
 .ds-doc { min-height: 100vh; }
 .ds-doc-page { max-width: ${page.width}; }
+.ds-doc-page[data-whitespace="preserve"] { white-space: pre-wrap; }
 .ds-doc-page p:empty::after { content: "\\a0"; }
 .ds-doc .doc-tab + .doc-tab { margin-top: var(--ds-space-8); }
 .ds-doc .doc-tab-title { font-family: var(--ds-font-display); font-size: var(--ds-type-title-size); line-height: var(--ds-type-title-line); font-weight: var(--ds-type-title-weight); }
@@ -85,10 +89,9 @@ async function imagesOf(bodies: PMNode[], options: HtmlExportOptions<unknown>): 
       inlined.set(key, null);
       if (options.loadImage)
         pending.push(
-          options
-            .loadImage({ src, assetId })
-            .then((image) => void (image && /^image\/[\w.+-]+$/i.test(image.mime) && inlined.set(key, `data:${image.mime.toLowerCase()};base64,${base64(image.bytes)}`)))
-            .catch(() => undefined),
+          options.loadImage({ src, assetId }).then((image) => {
+            if (image && /^image\/[\w.+-]+$/i.test(image.mime)) inlined.set(key, `data:${image.mime.toLowerCase()};base64,${base64(image.bytes)}`);
+          }),
         );
       return false;
     });
@@ -111,7 +114,7 @@ export async function exportHtml<T>(source: ExportSource, options: HtmlExportOpt
   const content =
     tabs.length === 1
       ? renderBody(tabs[0].body, env)
-      : tabs.map(({ id, title, body }) => `<section class="doc-tab" data-tab="${escapeAttr(id)}"><h1 class="doc-tab-title">${escapeText(title)}</h1>${renderBody(body, env)}</section>`).join('\n');
+      : tabs.map(({ id, title, body }) => `<section class="doc-tab" data-tab="${escapeAttr(id)}"><h1 class="doc-tab-title">${escapeText(title)}</h1>${renderBody(body, env)}</section>`).join('');
   const css = design.resolveCss(`${themeForFile(themeCss)}\n${pageCss(pageOf(design, options.pageSize))}`);
   const imgSrc = options.images === 'reference' ? 'data: maws-artifact: https:' : 'data: maws-artifact:';
   return [
@@ -126,7 +129,8 @@ export async function exportHtml<T>(source: ExportSource, options: HtmlExportOpt
     `<style>\n${css}\n</style>`,
     '</head>',
     '<body>',
-    `<main class="ds-doc"><article class="ds-doc-page doc-content">\n${content}\n</article></main>`,
+    // no whitespace between blocks: the text's own whitespace is content (`data-whitespace`, read back by the import)
+    `<main class="ds-doc"><article class="ds-doc-page doc-content" data-whitespace="preserve">${content}</article></main>`,
     '</body>',
     '</html>',
     '',

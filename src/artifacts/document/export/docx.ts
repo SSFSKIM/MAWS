@@ -29,6 +29,7 @@ import {
   TableRow,
   TextRun,
   WidthType,
+  commentIdToParaId,
   type ICommentOptions,
   type ILevelsOptions,
   type IParagraphOptions,
@@ -36,11 +37,14 @@ import {
   type IRunOptions,
   type ParagraphChild,
 } from 'docx';
+import JSZip from 'jszip';
 import type { Mark, Node as PMNode } from '@tiptap/pm/model';
+import { TableMap } from '@tiptap/pm/tables';
 import type { Actor } from '@shared/artifacts/actor';
 import { CALLOUT_TONES } from '../schema';
 import { dsValue, exportDesign, hexOf, houseSystem, officeFace, pageOf, twipsOf, type DsName, type ExportDesign } from './design-system';
 import { imageSize } from './image-size';
+import { chipText } from './values';
 import { defaultAuthorName, tabsOf, type ExportOptions, type ExportSource, type ImageLoader } from './source';
 
 export interface DocxExportOptions<T> extends ExportOptions<T> {
@@ -62,14 +66,6 @@ const ORDERED: Record<string, (typeof LevelFormat)[keyof typeof LevelFormat]> = 
 };
 const INDENT = 720; // twips per list level
 const IMAGE_TYPES: Record<string, 'png' | 'jpg' | 'gif' | 'bmp'> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif', 'image/bmp': 'bmp' };
-
-// Dates in the owner's United States frame, read as calendar days (the editor's chip).
-const DATE = new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' });
-function formatDate(iso: unknown): string {
-  const text = typeof iso === 'string' ? iso : '';
-  const at = /^\d{4}-\d{2}-\d{2}$/.test(text) ? Date.parse(`${text}T00:00:00Z`) : NaN;
-  return Number.isNaN(at) ? text : DATE.format(at);
-}
 
 interface LoadedImage {
   type: 'png' | 'jpg' | 'gif' | 'bmp';
@@ -148,49 +144,36 @@ class Writer {
     return run as IRunOptions;
   }
 
-  private text(text: string, marks: readonly Mark[], place: Place): ParagraphChild {
-    const run = new TextRun({ text, ...this.format(marks, place) });
-    const link = marks.find((mark) => mark.type.name === 'link');
-    const href = typeof link?.attrs.href === 'string' ? link.attrs.href : '';
-    return href ? new ExternalHyperlink({ link: href, children: [run] }) : run;
-  }
-
+  // Every inline node with its marks; a link wraps whatever it marks (text, a chip, math, a break, a picture).
   private inlineNode(node: PMNode, place: Place): ParagraphChild[] {
     const index = this.next();
-    const plain = (text: string, extra: IRunOptions = {}) => [new TextRun({ text, ...this.format(node.marks, place), ...extra })];
-    let children: ParagraphChild[];
+    const format = this.format(node.marks, place);
+    let runs: ParagraphChild[];
     switch (node.type.name) {
       case 'text':
-        children = [this.text(node.text ?? '', node.marks, place)];
+        runs = [new TextRun({ text: node.text ?? '', ...format })];
         break;
       case 'hardBreak':
-        children = [new TextRun({ break: 1 })];
+        runs = [new TextRun({ break: 1, ...format })];
         break;
       case 'image':
-        children = this.image(node, place);
+        runs = this.image(node, format);
         break;
       case 'math':
-        children = plain(String(node.attrs.latex ?? ''), { font: 'Cambria Math', italics: true });
-        break;
-      case 'date':
-        children = plain(formatDate(node.attrs.iso));
-        break;
-      case 'mention':
-        children = plain(String(node.attrs.label ?? ''));
-        break;
-      case 'dropdown':
-        children = plain(String(node.attrs.value ?? ''));
+        runs = [new TextRun({ text: String(node.attrs.latex ?? ''), ...format, font: 'Cambria Math', italics: true })];
         break;
       default:
-        children = plain(node.textContent);
+        runs = [new TextRun({ text: chipText(node), ...format })];
     }
-    return this.withComments(index, children);
+    const link = node.marks.find((mark) => mark.type.name === 'link');
+    const href = typeof link?.attrs.href === 'string' ? link.attrs.href : '';
+    return this.withComments(index, href ? [new ExternalHyperlink({ link: href, children: runs })] : runs);
   }
 
-  private image(node: PMNode, place: Place): ParagraphChild[] {
+  private image(node: PMNode, format: IRunOptions): ParagraphChild[] {
     const loaded = this.images.get(imageKey(node));
     const alt = String(node.attrs.alt ?? '');
-    if (!loaded) return [new TextRun({ text: alt ? `[Image: ${alt}]` : '[Image]', ...this.format(node.marks, place), italics: true })];
+    if (!loaded) return [new TextRun({ text: alt ? `[Image: ${alt}]` : '[Image]', ...format, italics: true })];
     const maxWidth = this.textWidth / 15; // px at 96 to the inch
     const scale = Math.min(1, maxWidth / loaded.width);
     return [
@@ -199,6 +182,7 @@ class Writer {
         data: loaded.bytes,
         transformation: { width: Math.round(loaded.width * scale), height: Math.round(loaded.height * scale) },
         altText: { name: alt || 'Image', description: alt, title: alt },
+        run: format,
       }),
     ];
   }
@@ -281,32 +265,31 @@ class Writer {
   }
 
   private table(node: PMNode, place: Place): Table {
-    // the grid: the widest row's columns, widths from the cells' `colwidth` where every column has one
-    const widths: Array<number | null> = [];
-    let columns = 0;
-    node.forEach((row) => {
-      let column = 0;
-      row.forEach((cell) => {
-        const span = Number(cell.attrs.colspan ?? 1);
+    // the grid from ProseMirror's table map, which places every cell in the columns it occupies, a rowspan from a row
+    // above included; widths from the cells' `colwidth` where every column has one
+    const map = TableMap.get(node);
+    const columns = map.width;
+    const columnOf = (rowOffset: number, cellOffset: number) => map.findCell(rowOffset + 1 + cellOffset).left;
+    const widths: Array<number | null> = Array.from({ length: columns }, () => null);
+    node.forEach((row, rowOffset) => {
+      row.forEach((cell, cellOffset) => {
+        const left = columnOf(rowOffset, cellOffset);
         const given = cell.attrs.colwidth as number[] | null;
-        for (let i = 0; i < span; i++) if (given?.[i]) widths[column + i] ??= given[i] * 15;
-        column += span;
+        for (let i = 0; i < Number(cell.attrs.colspan ?? 1); i++) if (given?.[i]) widths[left + i] ??= given[i] * 15;
       });
-      columns = Math.max(columns, column);
     });
     const available = this.textWidth - INDENT * place.level;
-    const known = widths.length === columns && widths.every((width) => width != null);
+    const known = widths.every((width) => width != null);
     const grid = known ? (widths as number[]) : Array.from({ length: columns }, () => Math.floor(available / Math.max(1, columns)));
     const rows: TableRow[] = [];
     let index = 0;
-    node.forEach((row) => {
+    node.forEach((row, rowOffset) => {
       const header = row.childCount > 0 && [...Array(row.childCount).keys()].every((i) => row.child(i).type.name === 'tableHeader');
       const cells: TableCell[] = [];
-      let column = 0;
-      row.forEach((cell) => {
+      row.forEach((cell, cellOffset) => {
         const span = Number(cell.attrs.colspan ?? 1);
-        const width = grid.slice(column, column + span).reduce((a, b) => a + b, 0);
-        column += span;
+        const left = columnOf(rowOffset, cellOffset);
+        const width = grid.slice(left, left + span).reduce((a, b) => a + b, 0);
         const isHeader = cell.type.name === 'tableHeader';
         const align = cell.attrs.align as string | null;
         const cellPlace: Place = {
@@ -404,13 +387,12 @@ async function loadImages(bodies: PMNode[], loadImage: ImageLoader | undefined):
       images.set(key, null);
       if (loadImage)
         pending.push(
-          loadImage({ src: String(node.attrs.src ?? ''), assetId: (node.attrs.assetId as string | null) ?? null })
-            .then((image) => {
-              const type = image && IMAGE_TYPES[image.mime.toLowerCase()];
-              const size = image && imageSize(image.bytes);
-              if (type && size && size.width > 0 && size.height > 0) images.set(key, { type, bytes: image.bytes, ...size });
-            })
-            .catch(() => undefined),
+          loadImage({ src: String(node.attrs.src ?? ''), assetId: (node.attrs.assetId as string | null) ?? null }).then((image) => {
+            // a format Word cannot embed, or a header that names no size, is shown as the alt text, as null is
+            const type = image && IMAGE_TYPES[image.mime.toLowerCase()];
+            const size = image && imageSize(image.bytes);
+            if (type && size && size.width > 0 && size.height > 0) images.set(key, { type, bytes: image.bytes, ...size });
+          }),
         );
       return false;
     });
@@ -478,6 +460,8 @@ export async function exportDocx<T>(source: ExportSource, options: DocxExportOpt
         children: message.body.split('\n').map((line) => new Paragraph({ children: [new TextRun(line)] })),
         ...(i > 0 ? { parentId: root } : {}),
         ...(thread.status === 'resolved' ? { resolved: true } : {}),
+        // gives each comment's paragraph its `w14:paraId`, which commentsExtended.xml names (and Word's durable id)
+        durableId: commentIdToParaId(id),
       });
       writer.starts.set(extent.first, [...(writer.starts.get(extent.first) ?? []), id]);
       writer.ends.set(extent.last, [...(writer.ends.get(extent.last) ?? []), id]);
@@ -557,5 +541,31 @@ export async function exportDocx<T>(source: ExportSource, options: DocxExportOpt
     },
     sections,
   });
-  return Packer.pack(file, 'uint8array', false, [{ path: 'word/theme/theme1.xml', data: design.officeThemeXml() }]);
+  const bytes = await Packer.pack(file, 'uint8array', false, [{ path: 'word/theme/theme1.xml', data: design.officeThemeXml() }]);
+  return comments.length > 0 && !comments.some((comment) => comment.parentId !== undefined) ? withCommentsExtended(bytes, comments) : bytes;
+}
+
+/**
+ * `docx` writes `word/commentsExtended.xml`, where Word keeps a comment's done flag, only when some comment is a reply;
+ * a file whose threads have no replies would lose their resolution. This adds the part, its relationship and its
+ * content type, one `w15:commentEx` per comment on the paragraph id `durableId` gave it.
+ */
+async function withCommentsExtended(bytes: Uint8Array, comments: ICommentOptions[]): Promise<Uint8Array> {
+  const zip = await JSZip.loadAsync(bytes);
+  const entries = comments.map((comment) => `<w15:commentEx w15:paraId="${commentIdToParaId(comment.id)}" w15:done="${comment.resolved ? 1 : 0}"/>`).join('');
+  zip.file(
+    'word/commentsExtended.xml',
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w15:commentsEx xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml" mc:Ignorable="w15">${entries}</w15:commentsEx>`,
+  );
+  const rels = await zip.file('word/_rels/document.xml.rels')!.async('string');
+  zip.file(
+    'word/_rels/document.xml.rels',
+    rels.replace('</Relationships>', '<Relationship Id="rIdMawsCommentsExtended" Type="http://schemas.microsoft.com/office/2011/relationships/commentsExtended" Target="commentsExtended.xml"/></Relationships>'),
+  );
+  const types = await zip.file('[Content_Types].xml')!.async('string');
+  zip.file(
+    '[Content_Types].xml',
+    types.replace('</Types>', '<Override PartName="/word/commentsExtended.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.commentsExtended+xml"/></Types>'),
+  );
+  return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
 }

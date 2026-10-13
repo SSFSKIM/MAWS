@@ -37,7 +37,7 @@ export function exportSource(doc: Doc, title: string): ExportSource {
   return { title, tabs, threads: listThreads(doc), overrides: dsOverrides(doc) };
 }
 
-/** An image the export embeds: its bytes and MIME type, or null when it cannot be had. */
+/** An image the export embeds: its bytes and MIME type, or null when it cannot be had (shown by its alt text); a rejection fails the export. */
 export type ImageLoader = (image: { src: string; assetId: string | null }) => Promise<{ bytes: Uint8Array; mime: string } | null>;
 
 /** What every exporter takes. */

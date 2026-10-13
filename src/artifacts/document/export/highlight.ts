@@ -11,7 +11,7 @@ export type CodeTokens = (code: string, language: unknown) => ThemedToken[][] | 
 
 const keyOf = (code: string, language: string) => `${language}\u0000${code}`;
 
-/** Every code block's tokens, highlighted ahead; a block whose grammar fails to load stays plain. */
+/** Every code block's tokens, highlighted ahead; an unknown language stays plain, a failing highlighter rejects. */
 export async function codeTokensFor(bodies: PMNode[]): Promise<CodeTokens> {
   const tokens = new Map<string, ThemedToken[][]>();
   const pending: Array<Promise<void>> = [];
@@ -24,9 +24,7 @@ export async function codeTokensFor(bodies: PMNode[]): Promise<CodeTokens> {
       if (language && key && code && !tokens.has(key)) {
         tokens.set(key, []);
         pending.push(
-          highlightCode(code, language)
-            .then((lines) => void tokens.set(key, lines))
-            .catch(() => void tokens.delete(key)),
+          highlightCode(code, language).then((lines) => void tokens.set(key, lines)),
         );
       }
       return false;

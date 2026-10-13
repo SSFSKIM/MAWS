@@ -79,3 +79,18 @@ export function everyKindSource(): ExportSource {
     overrides: {},
   };
 }
+
+/** One tab of the given blocks (ids filled in), and the given threads, as an export source. */
+export function sourceOf(blocks: JSONContent[], threads: Thread[] = []): ExportSource {
+  let n = 0;
+  const withIds = (json: JSONContent): JSONContent => ({
+    ...json,
+    ...(json.type !== 'text' && !['hardBreak', 'image', 'math', 'date', 'mention', 'dropdown'].includes(json.type ?? '') ? { attrs: { id: `b${++n}`, ...json.attrs } } : {}),
+    ...(json.content ? { content: json.content.map(withIds) } : {}),
+  });
+  return { title: 'Probe', tabs: [{ id: 'tab-1', title: 'Probe', body: schemaFor().nodeFromJSON({ type: 'doc', content: blocks.map(withIds) }) }], threads, overrides: {} };
+}
+
+/** A thread with the given messages on tab-1. */
+export const threadOf = (id: string, status: Thread['status'], messages: Array<[Actor, string]>): Thread => thread(id, '', status, messages);
+

@@ -93,7 +93,9 @@ export async function importHtml(html: string, { generateID = nanoid8, uploadAss
   const template = document.createElement('template');
   template.innerHTML = html;
   await sanitize(template.content, uploadAsset);
-  const parsed = PMDOMParser.fromSchema(schema).parse(template.content);
+  // a MAWS export marks its text's whitespace as content; any other page's whitespace is layout and is normalised
+  const exported = template.content.querySelector('[data-whitespace="preserve"]');
+  const parsed = exported ? PMDOMParser.fromSchema(schema).parse(exported, { preserveWhitespace: 'full' }) : PMDOMParser.fromSchema(schema).parse(template.content);
   const body = schema.nodeFromJSON(freshIds(parsed.childCount ? parsed : schema.node('doc', null, [schema.node('paragraph')]), generateID));
   body.check();
   return body;

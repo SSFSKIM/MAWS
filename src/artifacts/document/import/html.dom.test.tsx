@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import corpus from '../../../../test/fixtures/document/corpus.md?raw';
 import page from '../../../../test/fixtures/document/page.html?raw';
-import { comparable, everyKindSource } from '../convert.fixture';
+import { comparable, everyKindSource, sourceOf } from '../convert.fixture';
 import { exportHtml } from '../export/html';
 import { exportMarkdown } from '../export/markdown';
 import { importHtml } from './html';
@@ -83,5 +83,43 @@ describe('importHtml', () => {
       expect(comparable(fromHtml)).toEqual(comparable(fromMarkdown));
     }
     expect((await importHtml(await exportHtml(source, { tab: 'tab-2' }))).textContent).toContain('안녕하세요, 팀 여러분.');
+  });
+
+  // fix wave 1 (review finding 1): marks and links ride on inline atoms too
+  it('reads marks and links on images, chips, math and hard breaks back from the HTML export', async () => {
+    const bold = { type: 'bold' };
+    const link = { type: 'link', attrs: { href: 'https://example.com/due', title: null } };
+    const source = sourceOf([
+      {
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: 'Due ' },
+          { type: 'date', attrs: { iso: '2026-10-12' }, marks: [bold, link] },
+          { type: 'text', text: ' then', marks: [{ type: 'italic' }] },
+          { type: 'hardBreak', marks: [{ type: 'italic' }] },
+          { type: 'math', attrs: { latex: 'x^2' }, marks: [{ type: 'underline' }] },
+          { type: 'mention', attrs: { kind: 'person', ref: 'owner', label: 'Owner' }, marks: [{ type: 'strike' }, link] },
+          { type: 'image', attrs: { src: 'https://example.com/a.png', alt: 'A', assetId: null }, marks: [bold, link] },
+          { type: 'dropdown', attrs: { options: ['Todo', 'Done'], value: 'Done' }, marks: [{ type: 'highlight', attrs: { color: '#fde68a' } }] },
+        ],
+      },
+    ]);
+    const back = await importHtml(await exportHtml(source, { images: 'reference' }));
+    expect(comparable(back)).toEqual(comparable(source.tabs[0].body));
+  });
+
+  // fix wave 1 (review finding 2): an exported file keeps its text's whitespace; an ordinary page is normalised
+  it('keeps leading, repeated and trailing spaces and newlines through the HTML export, and normalises an ordinary page', async () => {
+    const source = sourceOf([
+      { type: 'paragraph', content: [{ type: 'text', text: '  A  B  \nC  ' }] },
+      { type: 'heading', attrs: { level: 2 }, content: [{ type: 'text', text: ' lead' }, { type: 'text', text: '  bold  ', marks: [{ type: 'bold' }] }] },
+      { type: 'bulletList', content: [{ type: 'listItem', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'trail   ' }] }] }] },
+      { type: 'blockquote', content: [{ type: 'paragraph', content: [{ type: 'text', text: '\tTabbed\n\nlines' }] }] },
+      { type: 'paragraph', content: [] },
+    ]);
+    const back = await importHtml(await exportHtml(source));
+    expect(comparable(back)).toEqual(comparable(source.tabs[0].body));
+    const ordinary = await importHtml('<div>\n  <p>\n    A   B\n  </p>\n  <ul>\n    <li>  Item  </li>\n  </ul>\n</div>');
+    expect(ordinary.content.content.map((block) => block.textContent)).toEqual(['A B', 'Item']);
   });
 });
