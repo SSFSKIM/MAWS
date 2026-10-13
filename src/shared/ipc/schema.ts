@@ -51,6 +51,9 @@ import * as ownerChannel from './schema/owner-channel'; // M4
 import * as artifacts from './schema/artifacts';
 import * as spaces from './schema/spaces';
 // P3-A end
+// P3-L start (M1)
+import * as library from './schema/library';
+// P3-L end
 
 export {
   HostPingSchema,
@@ -142,6 +145,7 @@ export const commands = {
   ...ownerChannel.commands, // P2-C M4 (2026-10-09)
   ...artifacts.commands, // P3-A M4
   ...spaces.commands, // P3-A M4
+  ...library.commands, // P3-L M1
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -183,6 +187,7 @@ export const events = {
   ...ownerChannel.events, // P2-C M4 (2026-10-09)
   ...artifacts.events, // P3-A M4
   ...spaces.events, // P3-A M4
+  ...library.events, // P3-L M1
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

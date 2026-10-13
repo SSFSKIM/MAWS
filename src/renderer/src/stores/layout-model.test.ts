@@ -433,6 +433,24 @@ describe('tab sets per project', () => {
     expect(ids(moved)).toEqual([['session:y1', 'session:y2', 'file:/r/f.ts']]);
   });
 
+  // P3-L (M3): an artifact's tab is the workspace's, not a session's: it follows the strip as Settings does, keeps its
+  // pin, and one artifact has one tab, opened again only activated.
+  it('an artifact tab follows the current set, keeps its pin, and opening it again activates its one tab', () => {
+    const artifact = { kind: 'artifact' as const, artifactId: '00000000-0000-4000-8000-000000000001' };
+    const id = `artifact:${artifact.artifactId}`;
+    expect(sessionOfTab(artifact)).toBeNull();
+    let m = togglePinned(openTab(switchSet(two(), X), artifact), id);
+    expect(setIds(m, X)).toEqual([[id, 'session:a', 'session:b']]);
+    m = openTab(m, { kind: 'diagnostics' });
+    m = openTab(m, artifact);
+    expect(activeTab(m)).toEqual({ id, ...artifact, pinned: true });
+    m = openTab(switchSet(m, Y), artifact);
+    expect(setIds(m, X)).toEqual([['diagnostics', 'session:a', 'session:b']]);
+    expect(ids(m), 'pinned first').toEqual([[id, 'session:y1', 'session:y2']]);
+    expect(activeTab(m)).toMatchObject({ id, pinned: true });
+    expect(LayoutMainSchema.safeParse(m).success).toBe(true);
+  });
+
   it('closing, ⌘⇧T and session.removed find a tab in whichever set holds it', () => {
     const closed = closeTab(two(), 'session:a');
     expect(setIds(closed, X)).toEqual([['session:b']]);

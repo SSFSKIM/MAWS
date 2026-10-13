@@ -179,6 +179,35 @@ CREATE INDEX owner_channel_marks_session ON owner_channel_marks(app_session_id, 
 `,
   },
   // P2-C end
+  // P3-L start (2026-10-13)
+  {
+    version: 9,
+    // P3-L (the P3-L document, Decision Log 6; X15's slot 9): the library, a view derived from the engine host's artifact
+    // store (main never opens it), rebuilt from the host's change events and replaced whole by a reconciliation at every
+    // host connection. `library_artifacts` holds each live artifact as the host's `library.entry` answers it (actors as
+    // `actorKey`, times in epoch ms) with the revision its indexed text was extracted at (`text_revision`, null until
+    // fetched) and its row in `library_text` (`text_rowid`, so the text is reached by rowid, never by scanning the
+    // unindexed id); `library_links` its session links; `library_spaces` the Spaces. `library_text` is the search index
+    // over titles and extracted text: FTS5 with the trigram tokenizer (substring matching that works for Korean and for
+    // identifiers). Deleted artifacts are not kept.
+    sql: `
+CREATE TABLE library_artifacts (id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK (kind IN ('document','presentation','design','design_system','dashboard','html','file')),
+  title TEXT NOT NULL, handle TEXT, space_id TEXT, project_id TEXT,
+  created_by TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, last_viewed_at INTEGER,
+  pinned INTEGER NOT NULL DEFAULT 0, design_system_id TEXT, linked_path TEXT, agent_edits_as_suggestions INTEGER NOT NULL DEFAULT 0,
+  revision INTEGER NOT NULL, last_editor TEXT NOT NULL, last_edited_at INTEGER NOT NULL,
+  text_revision INTEGER, text_rowid INTEGER NOT NULL);
+CREATE INDEX library_artifacts_updated ON library_artifacts(updated_at DESC);
+CREATE TABLE library_links (artifact_id TEXT NOT NULL REFERENCES library_artifacts(id) ON DELETE CASCADE, app_session_id TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('created','edited','viewed','commented')), last_at INTEGER NOT NULL,
+  PRIMARY KEY (artifact_id, app_session_id, role));
+CREATE INDEX library_links_session ON library_links(app_session_id);
+CREATE TABLE library_spaces (id TEXT PRIMARY KEY, name TEXT NOT NULL, linked_dir TEXT, created_at INTEGER NOT NULL);
+CREATE VIRTUAL TABLE library_text USING fts5(artifact_id UNINDEXED, title, body, tokenize = 'trigram');
+`,
+  },
+  // P3-L end
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

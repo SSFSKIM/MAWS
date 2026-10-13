@@ -114,6 +114,12 @@ import { connectBrowserActivity } from './tools/browser/agent/activity'; // E13
 import { connectBrowserAgent } from './tools/browser/agent/connect';
 import { registerTranscriptActions as registerBrowserAgentTranscriptActions } from './transcript';
 // E4c end
+// P3-L start
+import { registerArtifactTabs } from './library/ArtifactTab';
+import { artifactsTool } from './tools/artifacts/ArtifactsTool';
+import { Library } from './library/Library';
+import { connectLibrary } from './library/store';
+// P3-L end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -241,6 +247,7 @@ export function App() {
   // artifact row and a delivered file's name open the viewer through openDeliverable
   useEffect(() => {
     registerPanelTool(deliverablesTool);
+    registerPanelTool(artifactsTool); // P3-L (M5): the Artifacts tool, beside Deliverables until the cutover (M6)
     registerSlot('deliverableTab', DeliverableTab);
   }, []);
   useEffect(() => connectDeliverables(), []);
@@ -275,6 +282,12 @@ export function App() {
   useEffect(() => registerBrowserAgentTranscriptActions({ openBrowserTab }), []);
   useEffect(() => connectBrowserAgent(), []);
   // E4c end
+  // P3-L start: the library store reads main's index again at every committed change (`library.changed`), and the
+  // `artifact` tab kind's handlers
+  useEffect(() => connectLibrary(), []);
+  useEffect(() => registerArtifactTabs(), []); // an `artifact` tab with unsaved changes is not replaced by a session
+  useEffect(() => registerSlot('artifactsLibrary', Library), []); // the Artifacts tab's library, in P3-G's slot
+  // P3-L end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

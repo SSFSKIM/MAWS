@@ -27,6 +27,9 @@ import { openSupervisorLog } from './supervisor-log';
 import { openDocuments, type Documents } from './documents';
 import { registerArtifacts } from './documents/register'; // M4
 // P3-A end
+// P3-L start
+import { registerLibrary } from './library'; // M2
+// P3-L end
 import { registerDocumentKind } from './documents/kinds/document'; // P3-B
 
 const HOST_VERSION = __MAWS_VERSION__;
@@ -66,10 +69,12 @@ const register: HostRegister = (on, emit, client) => {
   documents = openDocuments(userData);
   if (documents) registerDocumentKind(documents.store); // P3-B: the document kind's hooks on every document update
   const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env });
+  const library = registerLibrary(on, { documents }); // P3-L: main's library reads and the linked-directory mirror
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
       artifacts.close(); // P3-A
+      library.close(); // P3-L
       documents?.close(); // P3-A
     },
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
