@@ -195,6 +195,46 @@ describe('the token file: the model', () => {
     expect(problemsAt(self.problems, 'button.secondary').join()).toMatch(/circular \$extends/);
   });
 
+  it('inherits through a nested group’s own $extends, whichever group sorts first', () => {
+    // `a` extends `z`, whose nested `inner` extends `mix`: a.inner.x comes from mix through two extensions.
+    const forward = resolveTokens(parsed({ mix: { $type: 'number', x: { $value: 7 } }, z: { inner: { $extends: '{mix}' } }, a: { $extends: '{z}' } }));
+    expect(forward.problems).toEqual([]);
+    expect(forward.tokens.get('z.inner.x')).toMatchObject({ type: 'number', value: 7, inherited: true });
+    expect(forward.tokens.get('a.inner.x')).toMatchObject({ type: 'number', value: 7, inherited: true });
+    // The same with the extended group sorting after the one that extends it.
+    const backward = resolveTokens(parsed({ mix: { $type: 'number', x: { $value: 7 } }, b: { $extends: '{z}' }, z: { inner: { $extends: '{mix}' } } }));
+    expect(backward.problems).toEqual([]);
+    expect(backward.tokens.get('b.inner.x')).toMatchObject({ type: 'number', value: 7, inherited: true });
+    // A local override beneath the nested extension still wins.
+    const local = resolveTokens(parsed({ mix: { $type: 'number', x: { $value: 7 } }, z: { inner: { $extends: '{mix}' } }, a: { $extends: '{z}', inner: { x: { $value: 8 } } } }));
+    expect(local.tokens.get('a.inner.x')).toMatchObject({ value: 8, inherited: false });
+  });
+
+  it('tracks pointer cycles by value location: a token may point into its own value, a real loop is refused', () => {
+    const acyclic = resolveTokens(parsed({ a: { $type: 'color', $value: { colorSpace: 'srgb', components: [0.5, { $ref: '#/a/$value/components/0' }, 0] } } }));
+    expect(acyclic.problems).toEqual([]);
+    expect(acyclic.tokens.get('a')?.value).toEqual({ colorSpace: 'srgb', components: [0.5, 0.5, 0], hex: '#808000' });
+    const loop = resolveTokens(
+      parsed({ a: { $type: 'color', $value: { colorSpace: 'srgb', components: [{ $ref: '#/a/$value/components/1' }, { $ref: '#/a/$value/components/0' }, 0] } } }),
+    );
+    expect(loop.tokens.has('a')).toBe(false);
+    expect(problemsAt(loop.problems, 'a').join()).toMatch(/circular reference/);
+    // Across tokens: b points into a, whose component points back into b.
+    const across = resolveTokens(
+      parsed({
+        a: { $type: 'color', $value: { colorSpace: 'srgb', components: [{ $ref: '#/b/$value/components/0' }, 0, 0] } },
+        b: { $type: 'color', $value: { colorSpace: 'srgb', components: [{ $ref: '#/a/$value/components/0' }, 0, 0] } },
+      }),
+    );
+    expect(across.tokens.size).toBe(0);
+    expect(problemsAt(across.problems, 'a').join()).toMatch(/circular reference/);
+    expect(problemsAt(across.problems, 'b').join()).toMatch(/circular reference/);
+    // Pointing into another token's resolved value is still fine.
+    const other = resolveTokens(parsed({ a: { $type: 'number', $value: 3 }, b: { $type: 'dimension', $value: { value: { $ref: '#/a/$value' }, unit: 'px' } } }));
+    expect(other.problems).toEqual([]);
+    expect(other.tokens.get('b')?.value).toEqual({ value: 3, unit: 'px' });
+  });
+
   it('keeps $description, $deprecated and every $extensions entry, ours and others’', () => {
     const set = parsed(complete);
     expect(set.groups.get('')?.$extensions?.['com.example.tool']).toEqual({ z: 1, a: [2, 1] });
@@ -284,6 +324,8 @@ describe('the token file: canonical writing', () => {
       lenient,
       { a: { $type: 'color', $value: '#ABC' } },
       { a: { $type: 'color', $value: '#aabbcc80' } },
+      { a: { $type: 'color', $value: '#ffff' } }, // opaque alpha written in hex: dropped on the first pass, as an object's is
+      { a: { $type: 'color', $value: '#ffffffff' } },
       { a: { $type: 'dimension', $value: 3 }, b: { $type: 'dimension', $value: '1.5rem' } },
       { a: { $type: 'duration', $value: 200 }, b: { $type: 'duration', $value: '0.2s' } },
       { a: { $type: 'fontFamily', $value: 'A, "B C", serif' } },

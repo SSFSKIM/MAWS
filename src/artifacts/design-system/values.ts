@@ -186,13 +186,16 @@ function substitute(value: unknown, at: string, h: RefHandler): unknown | typeof
 const MEASURE = /^\s*(-?(?:\d+\.?\d*|\.\d+))\s*([a-z]+)\s*$/;
 
 function color(raw: unknown, at: string, h: RefHandler): Out {
+  let object = raw;
   if (typeof raw === 'string') {
-    const parsed = colorFromHex(raw);
-    if (parsed) return parsed;
-    h.problem(`${at}: ${JSON.stringify(raw)} is not a colour (write a colour object or a hex string)`);
-    return FAIL;
+    // A hex string becomes its object form, then takes the object's rules (an opaque alpha is not written).
+    object = colorFromHex(raw);
+    if (!object) {
+      h.problem(`${at}: ${JSON.stringify(raw)} is not a colour (write a colour object or a hex string)`);
+      return FAIL;
+    }
   }
-  const lowered = isObject(raw) && typeof raw.hex === 'string' ? { ...raw, hex: raw.hex.toLowerCase() } : raw;
+  const lowered = isObject(object) && typeof object.hex === 'string' ? { ...object, hex: object.hex.toLowerCase() } : object;
   const value = viaSchema(ColorValueSchema, lowered, at, h);
   if (value === FAIL) return FAIL;
   const out: ColorValue = { colorSpace: value.colorSpace, components: value.components };
