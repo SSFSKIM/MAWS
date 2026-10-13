@@ -302,6 +302,12 @@ describe('resolveDsVars (the export helper)', () => {
     expect(resolveDsVars('p { color: var(--ds-nope); margin: var(--x, var(--ds-space-2)); }', tokens, 'document')).toBe('p { color: var(--ds-nope); margin: var(--x, 8px); }');
     expect(resolveDsVars('@page { size: var(--ds-page-width) var(--ds-page-height); }', tokens, 'document')).toBe('@page { size: 8.5in 11in; }');
   });
+
+  it('takes a consumer’s overrides after the system’s values, as its scope does (Decision Log 25)', () => {
+    const overrides = { '--ds-color-accent': '#123456', '--ds-brand-x': '3px', '--ds-color-text': 'red; }' /* unsafe: dropped */ };
+    expect(resolveDsVars('p { color: var(--ds-color-accent); border: var(--ds-brand-x) solid var(--ds-color-text); }', tokens, 'deck', overrides)).toBe('p { color: #123456; border: 3px solid #1f1e1b; }');
+    expect(resolveDsVars('p { color: var(--ds-nope, var(--ds-color-accent)); }', tokens, 'document', overrides)).toBe('p { color: #123456; }');
+  });
 });
 
 describe('lifetimes (fix wave 1)', () => {

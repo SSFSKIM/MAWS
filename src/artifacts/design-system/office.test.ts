@@ -107,3 +107,53 @@ describe('the Office mapping (Acceptance 3)', () => {
     expect(() => officeTheme(set(file))).toThrow(/color\.text\.\$root/);
   });
 });
+
+describe('overrides reach Office (Decision Log 25; B’s `dsOverrides`)', () => {
+  it('replaces a role’s colour before mapping, so the slots derived from it follow', () => {
+    const base = set(withoutOffice(complete));
+    const theme = officeTheme(base, { '--ds-color-accent': '#123456', '--ds-color-text': 'rgb(16, 32, 48)', '--ds-color-status-ok': 'hsl(120 100% 25%)' });
+    expect(theme.colors.accent1).toBe('123456');
+    expect(theme.colors.hlink).toBe('123456');
+    expect(theme.colors.dk1).toBe('102030');
+    expect(theme.colors.accent3).toBe('008000');
+    expect(theme.colors.accent2).toBe('3B6FD1'); // untouched roles stay
+  });
+
+  it('flattens onto an overridden ground', () => {
+    const theme = officeTheme(set(withoutOffice(complete)), { '--ds-color-bg': '#000000' });
+    expect(theme.colors.lt1).toBe('000000');
+    expect(theme.colors.dk2).not.toBe('72716E'); // text-muted (translucent) now sits on black
+    expect(theme.colors.dk2).toBe(officeTheme(set(withoutOffice(complete, ['color/bg/$root/$value', '#000000']))).colors.dk2);
+  });
+
+  it('a dev.maws.office slot aliasing the overridden token follows it; a slot written as a literal stays', () => {
+    const theme = officeTheme(set(complete), { '--ds-color-accent': '#123456', '--ds-color-text-muted': '#00ff00', '--ds-color-status-info': '#abcdef', '--ds-color-highlight': '#fedcba' });
+    expect(theme.colors.accent1).toBe('123456'); // "{color.accent.$root}"
+    expect(theme.colors.hlink).toBe('123456');
+    expect(theme.colors.accent2).toBe('ABCDEF'); // "{color.status.info}"
+    expect(theme.colors.accent6).toBe('FEDCBA'); // "{color.highlight}", a system's extra token
+    expect(theme.colors.dk2).toBe('2C2B28'); // a literal slot
+    expect(theme.colors.folHlink).toBe('6B6A66');
+  });
+
+  it('ignores an override that is not a plain colour or font, and names that are not --ds-*', () => {
+    const plain = officeTheme(set(withoutOffice(complete)));
+    for (const value of ['var(--brand)', 'linear-gradient(red, blue)', 'color-mix(in srgb, red, blue)', 'not a colour', '']) {
+      expect(officeTheme(set(withoutOffice(complete)), { '--ds-color-accent': value }).colors).toEqual(plain.colors);
+    }
+    expect(officeTheme(set(withoutOffice(complete)), { 'color-accent': '#123456', '--ds-font-display': 'var(--ds-font-body)' })).toEqual(plain);
+  });
+
+  it('replaces a font role with an override that reads as a font stack, unless the extension names the face', () => {
+    const theme = officeTheme(set(withoutOffice(complete)), { '--ds-font-display': '"Source Serif 4", Georgia, serif', '--ds-font-body': 'system-ui, sans-serif' });
+    expect(theme.fonts).toEqual({ major: { latin: 'Source Serif 4' }, minor: { latin: 'Arial' } });
+    expect(officeTheme(set(complete), { '--ds-font-display': '"Source Serif 4", serif' }).fonts.major).toEqual({ latin: 'Georgia', ea: 'Batang' });
+  });
+
+  it('carries the overrides into the theme part', () => {
+    const doc = parser.parseFromString(officeThemeXml(set(complete), 'x', { '--ds-color-accent': '#123456', '--ds-font-display': 'Avenir' }), 'application/xml');
+    expect(doc.getElementsByTagName('parsererror')).toHaveLength(0);
+    expect(one(one(doc, 'clrScheme'), 'accent1').firstElementChild!.getAttribute('val')).toBe('123456');
+    expect(one(one(doc, 'majorFont'), 'latin').getAttribute('typeface')).toBe('Georgia'); // the extension's face stays
+  });
+});

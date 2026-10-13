@@ -1,11 +1,15 @@
 // The Office mapping (D4): the 12 DrawingML theme colours and the major and minor fonts a PPTX or DOCX export writes,
 // from the token file's `$extensions["dev.maws.office"]`, each slot or face it leaves out derived from the roles. One
 // generator for both exporters (X31: P3-B's DOCX, P3-C's PPTX), so a deck and a document of one system match in Office.
+// A consumer's overrides (X28's `TokenOverrides`, B's `dsOverrides`) reach the theme too (Decision Log 25).
 import { flatten, rgbToHex, type ColorValue, type Rgb } from './color';
+import { parseCssColor, parseFontStack } from './css-read';
 import { OFFICE_FACES, OFFICE_KEY, OFFICE_SLOTS, type OfficeSlot } from './extensions';
 import { resolveTokens, resolveValueAgainst } from './resolve';
-import { byIdentity } from './roles';
+import { byIdentity, cssNamesOf } from './roles';
 import type { TokenSet } from './tokens';
+import { aliasPath, isAlias, isPointer, pointerAsAlias } from './values';
+import type { TokenOverrides } from './view';
 
 export { OFFICE_SLOTS, type OfficeSlot } from './extensions';
 
@@ -42,12 +46,47 @@ function officeFace(family: string | readonly string[]): string {
 
 const WHITE: Rgb = { r: 1, g: 1, b: 1, alpha: 1 };
 
-/** The resolved Office theme of a token set. Throws when a slot needs a role the set does not resolve. */
-export function officeTheme(tokens: TokenSet): OfficeTheme {
+const OVERRIDE_NAME = /^--ds-[A-Za-z0-9_-]+$/;
+
+/**
+ * The overrides the theme can take, by `--ds-*` name: a value that reads as a colour (a hex, a named colour, `rgb()`,
+ * `hsl()` and the other colour functions with plain arguments), or as a font stack of plain names. Anything else (a
+ * `var()`, a gradient, a `color-mix()`) is left to the CSS a consumer renders with.
+ */
+function themeOverrides(overrides: TokenOverrides | undefined): { colors: Map<string, ColorValue>; fonts: Map<string, string[]> } {
+  const colors = new Map<string, ColorValue>();
+  const fonts = new Map<string, string[]>();
+  for (const [name, value] of Object.entries(overrides ?? {})) {
+    if (!OVERRIDE_NAME.test(name) || typeof value !== 'string') continue;
+    const color = parseCssColor(value);
+    if (color) colors.set(name, color);
+    const stack = parseFontStack(value.trim());
+    if (stack && stack.every((face) => face !== '' && !/[()]/.test(face))) fonts.set(name, stack);
+  }
+  return { colors, fonts };
+}
+
+/** The `--ds-*` name of the token a slot's value refers to (an alias or a pointer to one), else null (a literal). */
+function referencedName(raw: unknown): string | null {
+  const alias = isAlias(raw) ? raw : isPointer(raw) ? pointerAsAlias(raw.$ref) : null;
+  return alias === null ? null : (cssNamesOf(aliasPath(alias), 'color')[0] ?? null);
+}
+
+/**
+ * The resolved Office theme of a token set. Throws when a slot needs a role the set does not resolve.
+ *
+ * `overrides` (Decision Log 25): before mapping, an override replaces its role's value when it reads as a colour or a
+ * font stack, so the slots derived from that role and any `dev.maws.office` slot aliasing it follow, while a slot the
+ * system wrote as a literal stays. A face the extension names stays too. An override that is neither is ignored here.
+ */
+export function officeTheme(tokens: TokenSet, overrides?: TokenOverrides): OfficeTheme {
   const resolved = resolveTokens(tokens);
   const extension = (tokens.groups.get('')?.$extensions?.[OFFICE_KEY] ?? {}) as OfficeExtension;
+  const over = themeOverrides(overrides);
 
   const role = (path: string): ColorValue => {
+    const overridden = over.colors.get(cssNamesOf(path, 'color')[0]!);
+    if (overridden) return overridden;
     const token = byIdentity(resolved.tokens, path);
     if (token?.type !== 'color') throw new Error(`officeTheme: the role ${path} does not resolve to a colour`);
     return token.value;
@@ -69,6 +108,9 @@ export function officeTheme(tokens: TokenSet): OfficeTheme {
   const slot = (name: OfficeSlot): ColorValue => {
     const raw = extension.theme?.[name];
     if (raw === undefined) return role(DERIVED[name]);
+    const referenced = referencedName(raw);
+    const overridden = referenced === null ? undefined : over.colors.get(referenced);
+    if (overridden) return overridden;
     const { value, problems } = resolveValueAgainst(resolved, 'color', raw, `${OFFICE_KEY}.theme.${name}`);
     if (!value) throw new Error(`officeTheme: ${problems.join('; ')}`);
     return value;
@@ -82,6 +124,8 @@ export function officeTheme(tokens: TokenSet): OfficeTheme {
   const faces = (which: 'major' | 'minor', rolePath: string): OfficeFonts => {
     const given = extension.fonts?.[which] ?? {};
     let latin = given.latin;
+    const overridden = over.fonts.get(cssNamesOf(rolePath, 'fontFamily')[0]!);
+    if (latin === undefined && overridden) latin = officeFace(overridden);
     if (latin === undefined) {
       const token = byIdentity(resolved.tokens, rolePath);
       if (token?.type !== 'fontFamily') throw new Error(`officeTheme: the role ${rolePath} does not resolve to a font family`);
@@ -109,10 +153,11 @@ const line = (width: number) => `<a:ln w="${width}" cap="flat" cmpd="sng" algn="
 
 /**
  * The DrawingML theme part (`ppt/theme/theme1.xml`, `word/theme/theme1.xml`) of a token set: the colour scheme, the
- * font scheme and a plain format scheme (solid fills and lines, no effects; the schema requires three of each).
+ * font scheme and a plain format scheme (solid fills and lines, no effects; the schema requires three of each), with a
+ * consumer's overrides as `officeTheme` takes them.
  */
-export function officeThemeXml(tokens: TokenSet, name: string): string {
-  const theme = officeTheme(tokens);
+export function officeThemeXml(tokens: TokenSet, name: string, overrides?: TokenOverrides): string {
+  const theme = officeTheme(tokens, overrides);
   const title = xmlAttr(name);
   const fonts = (set: OfficeFonts) => OFFICE_FACES.map((face) => `<a:${face} typeface="${xmlAttr(set[face] ?? '')}"/>`).join('');
   return [

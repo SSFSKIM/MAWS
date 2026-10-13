@@ -19,7 +19,7 @@ import { tokenProperties, type Medium } from './css';
 import { holdScopeStyle, scopeIdOf, type ViewLease } from './scope-style';
 import type { DesignSystemRef } from './governing';
 import type { TokenSet } from './tokens';
-import { builtinView, liveView, snapshotOfDoc, staticView, type DesignSystemView, type TokenOverrides } from './view';
+import { builtinView, liveView, safeOverrides, snapshotOfDoc, staticView, type DesignSystemView, type TokenOverrides } from './view';
 
 export { officeTheme, officeThemeXml, type OfficeTheme } from './office';
 export type { DesignSystemView, TokenOverrides } from './view';
@@ -238,10 +238,13 @@ export function DesignSystemScope(props: {
 /**
  * CSS text with every `var(--ds-*)` the system defines replaced by its value at the medium's scale (the Claude-shaped
  * deck of §4.5, which carries no custom properties). A name the system does not define takes its fallback, resolved the
- * same way, else stays as written; any other `var()` stays, its fallback resolved.
+ * same way, else stays as written; any other `var()` stays, its fallback resolved. `overrides` set after the system's
+ * values, as a scope sets them (the same names and values a scope accepts; Decision Log 25), so a deck's overrides
+ * reach its literals.
  */
-export function resolveDsVars(cssText: string, tokens: TokenSet, medium: Medium): string {
+export function resolveDsVars(cssText: string, tokens: TokenSet, medium: Medium, overrides?: TokenOverrides): string {
   const values = tokenProperties(tokens, medium);
+  for (const [name, value] of safeOverrides(overrides)) values.set(name, value);
   const resolve = (text: string): string => {
     let out = '';
     let i = 0;
