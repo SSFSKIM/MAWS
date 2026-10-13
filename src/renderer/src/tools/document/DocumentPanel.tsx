@@ -3,7 +3,7 @@
 // state L's registry made for this tab), the X32 header registered under the scope the surface gives, the page
 // registered as a Mark-up surface, comments going to the session the main area shows, the history rail on A's IPC,
 // the page in the governing design system's scope when D's is provided, `onShown` once the document is on screen.
-import { useCallback, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { DocumentEditor, type DocumentRail } from '@artifacts/document/editor/DocumentEditor';
 import type { Editor } from '@tiptap/core';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -60,12 +60,18 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   }, []);
   useRegionMarkupSurface(page, `“${title}”`, visible && pageShown);
 
-  const onEditor = useCallback(
-    (editor: Editor | null) => {
-      if (editor) requestAnimationFrame(() => onShown());
-    },
-    [onShown],
-  );
+  // The owner's view (L's `onShown`, then `markViewed`): once per showing (the tab's state remembers it), only once the
+  // synced document is drawn (an editor bound to its tab, a frame later) while the body is visible; a body that goes or
+  // hides first cancels the frame.
+  const [drawn, setDrawn] = useState(false);
+  const onEditor = useCallback((editor: Editor | null) => setDrawn(editor !== null), []);
+  useEffect(() => {
+    if (!visible || !drawn || state.shown()) return;
+    const frame = requestAnimationFrame(() => {
+      if (state.markShown()) onShown();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [visible, drawn, state, onShown]);
   const onRailChange = useCallback((rail: DocumentRail) => state.setRail(rail), [state]);
   const onPreviewChange = useCallback((previewing: boolean) => state.setPreviewing(previewing), [state]);
 

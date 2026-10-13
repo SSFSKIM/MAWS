@@ -3,7 +3,8 @@
 // renderer's bridge and `ArtifactHost` (a version's V2 state, the merged provenance between two seqs). "Name this
 // version" sends the label alone, so the version keeps its note (A's Decision Log 38c). `lastViewedAt` answers the time
 // the tab read from the artifact's row before the surface recorded this showing's view (the "See N new changes" pill
-// compares against the view before this one), and the time of the rail's own `markViewed` after it. New versions are
+// compares against the view before this one), and the time of the rail's own `markViewed` after it, which waits until
+// the document is first on screen (a document behind a maximised or floating panel is not viewed). New versions are
 // heard from `artifacts.changed` for this artifact, coalesced; the rail's failures go to the renderer's log.
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { ArtifactHost } from '@artifacts/host';
@@ -17,11 +18,13 @@ export interface HistoryApiDeps {
   host: Pick<ArtifactHost, 'versionState' | 'attributions'>;
   /** The owner's last view of the artifact as the tab holds it (read from the row before this showing's view). */
   viewedAt: { get(): number | null; set(at: number): void };
+  /** Settles once the document is first on screen: the rail's view (`markViewed`) waits for it (D10: "on open"). */
+  whenShown?(): Promise<void>;
   sessionTitle?(appSessionId: string): string | undefined;
   log(line: string): void;
 }
 
-export function createHistoryApi({ artifactId, ipc, host, viewedAt, sessionTitle, log }: HistoryApiDeps): HistoryApi {
+export function createHistoryApi({ artifactId, ipc, host, viewedAt, whenShown, sessionTitle, log }: HistoryApiDeps): HistoryApi {
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const result = await ipc.invoke(name, input);
     if (!result.ok) throw new Error(result.error.message);
@@ -39,6 +42,7 @@ export function createHistoryApi({ artifactId, ipc, host, viewedAt, sessionTitle
     restore: (versionId) => call('artifacts.restore', { artifactId, versionId }),
     duplicate: async (versionId) => ({ artifactId: (await call('artifacts.duplicate', { artifactId, versionId })).artifact.id }),
     markViewed: async () => {
+      await whenShown?.();
       await call('artifacts.markViewed', { artifactId });
       viewedAt.set(Date.now());
     },

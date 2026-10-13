@@ -75,6 +75,9 @@ export class DocumentTabState {
   private handleClosed = false;
   private closing = false; // disposed, waiting for the host to acknowledge what the replica holds
   private rowTimer: ReturnType<typeof setTimeout> | null = null;
+  private wasShown = false;
+  private readonly whenShown: Promise<void>;
+  private resolveShown: () => void = () => {};
 
   constructor(
     target: ArtifactEditorTarget,
@@ -83,11 +86,13 @@ export class DocumentTabState {
     this.artifactId = target.artifactId;
     this.host = deps.host;
     this.current = { ready: false, failed: null, handle: null, title: '', placement: {}, document: null, unresolved: 0, suggestions: null, rail: null, saveVersionRequest: 0, previewing: false, exporting: null };
+    this.whenShown = new Promise((resolve) => (this.resolveShown = resolve));
     this.history = createHistoryApi({
       artifactId: this.artifactId,
       ipc: deps.ipc,
       host: deps.host,
       viewedAt: { get: () => this.viewedBefore, set: (at) => (this.viewedBefore = at) },
+      whenShown: () => this.whenShown,
       sessionTitle: deps.sessionTitle,
       log: deps.log,
     });
@@ -158,6 +163,16 @@ export class DocumentTabState {
   }
 
   // ── what the header and the body ask ──
+
+  /** Whether this showing's content was on screen yet (the owner's view, recorded once). */
+  shown = (): boolean => this.wasShown;
+  /** The content is on screen: true the first time (the surface records the view then), false after. */
+  markShown = (): boolean => {
+    if (this.wasShown) return false;
+    this.wasShown = true;
+    this.resolveShown();
+    return true;
+  };
 
   setRail(rail: DocumentRail): void {
     if (rail !== this.current.rail) this.set({ rail });

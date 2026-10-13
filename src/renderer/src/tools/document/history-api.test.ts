@@ -86,6 +86,20 @@ describe('the history api on A’s IPC', () => {
     expect(await api.lastViewedAt()).toBe(5_000);
   });
 
+  // M8 fix wave 1: the rail's view on open waits until the document is on screen (a hidden one is not viewed).
+  it('sends the rail’s view only once the document is shown', async () => {
+    const b = bridge({ 'artifacts.markViewed': undefined });
+    let shown!: () => void;
+    const whenShown = new Promise<void>((resolve) => (shown = resolve));
+    const api = createHistoryApi({ artifactId: A, ipc: b.ipc, host: { versionState: vi.fn(), attributions: vi.fn() }, viewedAt: { get: () => null, set: () => {} }, whenShown: () => whenShown, log: vi.fn() });
+    const viewed = api.markViewed();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(b.calls).toEqual([]);
+    shown();
+    await viewed;
+    expect(b.calls).toEqual([['artifacts.markViewed', { artifactId: A }]]);
+  });
+
   it('rejects with the store’s message when a command is refused', async () => {
     const { api } = make({ 'artifacts.restore': new Error('the version is gone') });
     await expect(api.restore(3)).rejects.toThrow('the version is gone');

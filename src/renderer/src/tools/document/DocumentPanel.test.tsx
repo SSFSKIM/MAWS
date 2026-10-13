@@ -36,6 +36,7 @@ beforeEach(() => {
   resetMarkupSurfaces();
   resetArtifactEditors();
   window.maws = fakeClient({ 'session.intent.get': null }).client;
+  sent = [];
   memory = new MemoryDocumentHost();
   memory.write((doc) => createDocument(doc, { title: 'Launch plan' })); // the host's first tab (kinds/document.ts)
 });
@@ -55,9 +56,12 @@ const until = async (check: () => boolean, what: string) => {
   }
 };
 
+// The commands the tab sent, by name.
+let sent: string[] = [];
+
 function deps(): DocumentTabDeps {
   const ipc: Pick<MawsBridge, 'invoke' | 'on'> = {
-    invoke: (async (name: CommandName) => ({ ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, spaceId: SPACE, revision: 1 } } : undefined })) as MawsBridge['invoke'],
+    invoke: (async (name: CommandName) => (sent.push(name), { ok: true, value: name === 'artifacts.get' ? { artifact: { id: A, kind: 'document', title: 'Launch plan', lastViewedAt: null, spaceId: SPACE, revision: 1 } } : name === 'artifacts.versions' ? { versions: [] } : undefined })) as MawsBridge['invoke'],
     on: (() => () => {}) as MawsBridge['on'],
   };
   const editor = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
@@ -87,7 +91,7 @@ function mount({ visible = true, onShown = vi.fn<() => void>() }: { visible?: bo
     </EditorHostScopeContext.Provider>
   );
   const view = render(tree(visible));
-  return { state: hold.state as DocumentTabState, onShown, view, setVisible: (now: boolean) => view.rerender(tree(now)) };
+  return { state: hold.state as DocumentTabState, onShown, view, setVisible: (now: boolean) => view.rerender(tree(now)), remount: (now: boolean) => (view.unmount(), render(tree(now))) };
 }
 const shown = () => until(() => document.querySelector('.ds-doc .ProseMirror') !== null, 'the page');
 
@@ -109,6 +113,44 @@ describe('the document editor in L’s registry', () => {
     await until(() => onShown.mock.calls.length > 0, 'onShown');
     await act(() => new Promise((resolve) => setTimeout(resolve, 30)));
     expect(onShown).toHaveBeenCalledOnce();
+  });
+
+  // M8 fix wave 1 (the review's reproduction: the editor said shown with `visible={false}`, and again per editor):
+  // `onShown` is the owner's view, so it fires once per showing (the tab's state), only once the synced document is
+  // drawn and the body is visible, and never after the body went; the history rail's first `markViewed` waits the same.
+  it('says shown only once the document is visible, once per showing, and the rail’s first view waits for it', async () => {
+    const first = mount({ visible: false });
+    await shown();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
+    expect(first.onShown).not.toHaveBeenCalled();
+    expect(sent.filter((name) => name === 'artifacts.markViewed')).toEqual([]);
+    first.setVisible(true);
+    await until(() => first.onShown.mock.calls.length === 1, 'onShown');
+    await until(() => sent.filter((name) => name === 'artifacts.markViewed').length === 1, 'the rail’s view');
+    // another tab of the document mounts another editor; the body remounting (its panel tab reselected) keeps the showing
+    act(() => screen.getByRole('button', { name: 'Add tab' }).click());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
+    first.remount(true);
+    await shown();
+    await act(() => new Promise((resolve) => setTimeout(resolve, 60)));
+    expect(first.onShown).toHaveBeenCalledOnce();
+  });
+
+  it('says nothing for a body that went before its document was drawn', async () => {
+    const frames: FrameRequestCallback[] = [];
+    const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => frames.push(callback));
+    const caf = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => void (frames[id - 1] = () => {}));
+    try {
+      const { onShown, view } = mount();
+      await shown();
+      await until(() => frames.length > 0, 'the frame asked for');
+      view.unmount();
+      for (const frame of frames.splice(0)) frame(0);
+      expect(onShown).not.toHaveBeenCalled();
+    } finally {
+      raf.mockRestore();
+      caf.mockRestore();
+    }
   });
 
   it('registers the X32 header under the scope given: the title, the saved word, the rail the tab holds, the tab’s guard', async () => {
