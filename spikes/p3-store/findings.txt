@@ -592,7 +592,13 @@ variants beside S1's blockquote and listItem).
    `y-attributed-format`; not tested beyond seeing the key); attribute marks on new nodes are not shown as attribute
    changes; same-id type changes may later be drawn as "type changed".
 
-### Questions for the architect (S3)
+### Questions for the architect (S3) — answered 2026-10-12 (spec Decision Log 29; ledger X24, X26)
+All six amendments accepted. (1) Yes: revert-since-version is the one restore operation, host-side, one update credited
+to the restorer, an auto version before and a restore version after, every bound editor clearing its UndoManager on
+landing. (2) Not now: credit the restorer. (3) Yes: the host rejects that session's next batch whose targets vanished,
+naming the blocks "removed by restore"; the agent re-reads. (4) Yes: an auto version when the owner views an artifact
+whose live revision moved since its last version, thinned like any auto version. (5) Yes: floor to the minute at write.
+Pitfall 9 (one scratch clientID per restore) accepted as is. The questions as asked:
 1. Adopt (a) revert-since-version as the one restore operation? Recommended: yes.
 2. Restore lineage (new id range → original range) so "Show editors" says "restored by X, originally by Y"? Recommended:
    not now; credit the restorer as §4.7 and Google Docs do.
