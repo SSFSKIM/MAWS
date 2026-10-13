@@ -41,7 +41,8 @@ Purpose: P3-A, P3-L, P3-B, P3-C and P3-D each extend the artifact surface and th
 | Name | Owner | Consumers | State |
 |---|---|---|---|
 | `regions` schema version 4: `panel.floating: boolean`, `floatingCard {w, h}` per tab; keymap action `panel.float`; X5's host prop reads floating as maximized; the browser pane's `reservedColumn` | G | the browser pane, the panel host | reserved at approval |
-| The editor host contract `src/renderer/src/panel/editor-host.ts`: `registerEditorHost({title, breadcrumb?, saved: 'saved' \| 'saving' \| 'unsaved' \| 'reconnecting' \| 'readonly', unresolved, actions, exports, closeGuard})` returning an update handle; the existing tools register a title only | G | L, B, C, D, E | reserved at approval |
+| The editor host contract `src/renderer/src/panel/editor-host.ts`: `registerEditorHost(scope: {surface: 'panel' \| 'main', tabId}, {title, breadcrumb?, saved: 'saved' \| 'saving' \| 'unsaved' \| 'reconnecting' \| 'readonly', unresolved, actions, exports, closeGuard})` returning an update handle, with `useEditorHost` and `useEditorHostScope`; the existing tools register nothing (the header falls back to the strip label); the header a 40 px row (G's document, 2026-10-12) | G | L, B, C, D, E | names fixed 2026-10-12 (G's proposal, recorded) |
+| X2 additions for Mark-up: `browser.view.capture {tabId}` and `layout.captureRegion {rect}` (stills captured before drawing, composited in the renderer); optional `FocusTarget.attachFiles`; keymap `panel.float` = Cmd+Alt+B; `floatingCard` keyed by the panel tab id; the pill transient; main tab kind `artifacts` rendered through a slot `artifactsLibrary` that L fills (the tabs reader tolerant of unknown kinds, or `main.tabs` bumped through §6) | G | L, B, C | names fixed 2026-10-12 |
 
 ## 6. X15 — version slots reserved (the P1 ledger's §4 table carries the numbers)
 
@@ -59,3 +60,4 @@ Purpose: P3-A, P3-L, P3-B, P3-C and P3-D each extend the artifact surface and th
 ## 8. Record
 
 - 2026-10-12 18:06 PDT: opened at the owner's approval; every row reserved; X28's CSS names and the X32 shape fixed so B and G can code before D and the others land.
+- 2026-10-12 18:40 PDT: G's residue recorded (X32's scope argument and hooks, the Mark-up captures, the chord, the `artifacts` tab kind); P3-H's and P3-0's findings files are `.txt` (the harness refuses report-shaped `.md` from subagents; the protocol-probe convention).
