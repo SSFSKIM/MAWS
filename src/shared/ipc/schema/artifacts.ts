@@ -12,8 +12,9 @@ import * as z from 'zod';
 import { ArtifactKindSchema, ArtifactSchema } from '../../artifacts/entity';
 import { ArtifactVersionSchema } from '../../artifacts/version';
 import { AppSessionIdSchema } from '../../graph/ids';
-import { ARTIFACT_MAX_BYTES } from '../../maws/tools';
+import { ARTIFACT_EXPORT_FORMATS, ARTIFACT_MAX_BYTES } from '../../maws/tools';
 import type { IpcError } from '../errors';
+import { DELIVERABLE_CONSOLE_MESSAGE_MAX } from './deliverables';
 import type { CommandSpec } from './common';
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
@@ -81,7 +82,7 @@ export const ArtifactsChangedSchema = z.strictObject({
 export type ArtifactsChanged = z.infer<typeof ArtifactsChangedSchema>;
 
 // What a store refusal carries in `IpcError.issues`.
-export const ARTIFACT_REFUSALS = ['notFound', 'invalid', 'tooLarge', 'handleTaken', 'designSystemInUse', 'storeTooNew', 'unavailable'] as const;
+export const ARTIFACT_REFUSALS = ['notFound', 'invalid', 'tooLarge', 'handleTaken', 'designSystemInUse', 'storeTooNew', 'unavailable', 'exportUnavailable' /* M7 */] as const;
 export const ArtifactRefusalSchema = z.strictObject({ reason: z.enum(ARTIFACT_REFUSALS), data: z.record(z.string(), z.unknown()) });
 export type ArtifactRefusal = z.infer<typeof ArtifactRefusalSchema>;
 
@@ -92,6 +93,21 @@ export function artifactRefusalOf(error: IpcError): ArtifactRefusal | null {
 }
 
 const ArtifactAnswer = z.strictObject({ artifact: ArtifactRowSchema });
+
+// The largest side of an exported picture, in CSS px (M7): within what an offscreen window renders.
+export const EXPORT_SIZE_MAX = 8_192;
+
+// An error or a warning an artifact's frame logged in an app window (M7; `deliverables.console`'s twin for the
+// `maws-artifact:` scheme), main's, cut and rate-bounded. `revision` null: the frame showed the live content.
+export const ArtifactConsoleSchema = z.strictObject({
+  artifactId: Id,
+  revision: Seq.nullable(),
+  level: z.enum(['error', 'warning']),
+  message: z.string().max(DELIVERABLE_CONSOLE_MESSAGE_MAX),
+  line: z.number().int().nullable(),
+  source: z.string().max(DELIVERABLE_CONSOLE_MESSAGE_MAX).nullable(),
+});
+export type ArtifactConsole = z.infer<typeof ArtifactConsoleSchema>;
 
 export const commands = {
   'artifacts.list': host(z.strictObject({ filter: ArtifactListFilterSchema.optional() }), z.strictObject({ artifacts: z.array(ArtifactRowSchema) })),
@@ -153,11 +169,13 @@ export const commands = {
   ),
   // Main's relay of the design-system defaults (Decision Log 22d): at every host connection and on every change. Main-only.
   'artifacts.setDefaults': host(z.strictObject({ owner: Id.nullable(), spaces: z.record(Id, Id) }), z.void()),
-  // A byte kind's stored file (the `maws-artifact:` scheme, M7): the content at `revision` (the latest when omitted), or
-  // one of the artifact's assets by its ref (`assets/<name>`). `path` in the answer is absolute. Main-only.
+  // A byte kind's stored file (the `maws-artifact:` scheme, M7): the content at exactly `revision` (the latest when
+  // omitted; `path`, when given, must be its name), or one of any artifact's assets by its ref (`assets/<name>`, whatever
+  // the revision). `path` in the answer is absolute; `kind` is the artifact's (the scheme gives an `html` page the bridge
+  // script). Main-only.
   'artifacts.content': host(
     z.strictObject({ artifactId: Id, revision: Seq.optional(), path: z.string().min(1).max(1_000).optional() }),
-    z.strictObject({ revision: Seq, name: z.string(), size: z.number().int().nonnegative(), sha256: z.string(), path: z.string() }),
+    z.strictObject({ revision: Seq, kind: ArtifactKindSchema, name: z.string(), size: z.number().int().nonnegative(), sha256: z.string(), path: z.string() }),
   ),
   // The store's health (Decision Log 12, 24h): `recovered` when a broken file was moved aside this run.
   'artifacts.status': host(z.void(), z.strictObject({ status: z.enum(ARTIFACT_STORE_STATUSES), reason: z.string().nullable() })),
@@ -170,6 +188,20 @@ export const commands = {
   // A replica's port to the document (X24, Decision Log 13): main posts the port to the asking window on `maws:doc-port`
   // with this `channel`, and the host attaches the other end with the human as actor. Refused for a byte kind (`invalid`).
   'artifacts.open': main(z.strictObject({ artifactId: Id }), z.strictObject({ channel: z.number().int().nonnegative().max(0xffff_ffff) })),
+  // The library's Export (X31; M7): main's export service writes the artifact's live revision, or a version's, as
+  // `format` under the store's directory (`<id>/exports/<revision>-<format>.<ext>`) and answers its path. A PNG is
+  // `width` CSS px wide (1280 when omitted) and `height` high (the page's whole height when omitted). A kind and format
+  // no exporter serves is refused `exportUnavailable {kind, format}`.
+  'artifacts.export': main(
+    z.strictObject({
+      artifactId: Id,
+      format: z.enum(ARTIFACT_EXPORT_FORMATS),
+      versionId: z.number().int().positive().optional(),
+      width: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
+      height: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
+    }),
+    z.strictObject({ path: z.string(), revision: Seq }),
+  ),
 } as const satisfies Record<`artifacts.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -178,4 +210,6 @@ export const events = {
   // modes: the store's events emitted while no client was connected or ready are not replayed, so a view that mirrors
   // the store (P3-L's library) reads it afresh here. Its one reconcile hook.
   'artifacts.resync': z.strictObject({}),
+  // P3-A M7: emitted by main, an artifact frame's console error or warning in an app window (`ArtifactConsoleSchema`).
+  'artifacts.console': ArtifactConsoleSchema,
 } as const satisfies Record<`artifacts.${string}`, z.ZodType>;

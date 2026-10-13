@@ -116,7 +116,7 @@ export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], 
 // E1: the `maws` tool server's commands (P1 ledger §5), each immediate: answered from the host's table or at the
 // answer's flushed write
 type MawsCommand = keyof typeof MawsCommands;
-export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.asks.list': 'immediate', 'maws.ask.answer': 'immediate', 'maws.pane.answer': 'immediate', 'maws.artifact.captured': 'immediate' /* E2 */, 'maws.download.recorded': 'bounded' /* E13 */ };
+export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.asks.list': 'immediate', 'maws.ask.answer': 'immediate', 'maws.pane.answer': 'immediate', 'maws.artifact.captured': 'immediate' /* E2 */, 'maws.download.recorded': 'bounded' /* E13 */, 'maws.artifact.exported': 'immediate' /* P3-A M7 */ };
 // E3: the side-question log's commands (P1 ledger §5), each answered from the host's log at once
 type SideHostCommand = { [N in keyof typeof SideCommands]: (typeof SideCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof SideCommands];
 export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 'side.question.list': 'immediate', 'side.question.clear': 'immediate' };
@@ -280,6 +280,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       session.on('deliverableChanged', (change) => emit('deliverables.changed', change));
       session.on('artifactCapture', (request) => emit('maws.artifact.capture', request));
       // E2 end
+      session.on('artifactExport', (request) => emit('maws.artifact.export', request)); // P3-A M7: main's export service answers
     },
   });
 
@@ -793,6 +794,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   });
   handleMaws('maws.pane.answer', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerPane(requestId as RequestId, result) ?? 'not_pending' }));
   handleMaws('maws.artifact.captured', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerCapture(requestId as RequestId, result) ?? 'not_pending' })); // E2
+  handleMaws('maws.artifact.exported', async ({ appSessionId, requestId, answer }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerExport(requestId as RequestId, answer) ?? 'not_pending' })); // P3-A M7
   // E13: an agent's finished download, recorded once per path by the session that holds it
   handleMaws('maws.download.recorded', async (download) => {
     const session = table.get(download.appSessionId as AppSessionId);

@@ -12,20 +12,27 @@
 //
 // Console attribution (Design §8, Decision Log 9) lives here too: a message an app window's deliverable frame logged,
 // read by the frame's URL, becomes the main-owned event `deliverables.console`, cut and rate-bounded.
+//
+// P3-A M7 (Decision Log 35e): one implementation for both of the app's store schemes. A "deliverable frame" below is a
+// frame of either: `maws-deliverable:` or `maws-artifact:`; each scheme's frames, and every frame beneath one, get the
+// same request and download filters, navigation guard and permission denials, and an artifact frame's console becomes
+// `artifacts.console`. P3-L's cutover deletes the deliverable scheme from this list.
 import { appendFile } from 'node:fs/promises';
 import type { Session, WebContents } from 'electron';
+import { ARTIFACT_SCHEME, parseArtifactUrl } from '@shared/artifacts/scheme';
+import type { ArtifactConsole } from '@shared/ipc/schema/artifacts';
 import { DELIVERABLE_CONSOLE_MESSAGE_MAX, type DeliverableConsole } from '@shared/ipc/schema/deliverables';
 import { DELIVERABLE_SCHEME, parseDeliverableUrl } from '@shared/maws/deliverable';
 
-const PREFIX = `${DELIVERABLE_SCHEME}://`;
-const isDeliverable = (url: string | null | undefined): boolean => typeof url === 'string' && url.startsWith(PREFIX);
+const PREFIXES = [`${DELIVERABLE_SCHEME}://`, `${ARTIFACT_SCHEME}://`];
+const isDeliverable = (url: string | null | undefined): boolean => typeof url === 'string' && PREFIXES.some((prefix) => url.startsWith(prefix));
 
 // Chromium's built-in PDF viewer (Electron's internal extension, a fixed id): the PDF frame asks it for its bundled
 // files (`pdf_embedder.css`, measured in the trial), and the viewer's own page loads `chrome://resources/` scripts.
 // These are files inside Electron, never the network. Its Save writes a `blob:` of its own origin.
 const PDF_VIEWER = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/';
 const PDF_VIEWER_BLOB = `blob:${PDF_VIEWER}`;
-const ALLOWED_BENEATH = [PREFIX, PDF_VIEWER, 'chrome://resources/'];
+const ALLOWED_BENEATH = [...PREFIXES, PDF_VIEWER, 'chrome://resources/'];
 const allowedBeneath = (url: string) => ALLOWED_BENEATH.some((prefix) => url.startsWith(prefix));
 
 // ---- the decisions --------------------------------------------------------------------------------------------------
@@ -92,47 +99,59 @@ export function isDeliverablePermission(origins: readonly (string | null | undef
   return origins.some(isDeliverable);
 }
 
-// A console message of a deliverable frame, as `deliverables.console` carries it (the message and the source cut to
-// their schema's bound); null for anything else.
-export function consoleMessageOf(details: {
-  frame: { url: string } | null;
-  level: string;
-  message: string;
-  lineNumber: number;
-  sourceId: string;
-}): DeliverableConsole | null {
-  if (details.level !== 'error' && details.level !== 'warning') return null;
+type ConsoleDetails = { frame: { url: string } | null; level: string; message: string; lineNumber: number; sourceId: string };
+
+// A console message's level, text, line and source as both events carry them (cut to their schemas' bound), and the
+// frame's URL; null for a level neither carries or a frame that can no longer be read.
+type ConsoleFields = Pick<DeliverableConsole, 'level' | 'message' | 'line' | 'source'>;
+function consoleParts(details: ConsoleDetails): { url: string; fields: ConsoleFields } | null {
+  const level = details.level;
+  if (level !== 'error' && level !== 'warning') return null;
   let url: string | null;
   try {
     url = details.frame?.url ?? null;
   } catch {
     url = null;
   }
-  const target = url === null ? null : parseDeliverableUrl(url);
-  if (!target) return null;
+  if (url === null) return null;
   return {
-    appSessionId: target.appSessionId,
-    deliverableId: target.id,
-    version: target.version,
-    level: details.level,
-    message: details.message.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX),
-    line: Number.isInteger(details.lineNumber) ? details.lineNumber : null,
-    source: details.sourceId ? details.sourceId.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX) : null,
+    url,
+    fields: {
+      level,
+      message: details.message.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX),
+      line: Number.isInteger(details.lineNumber) ? details.lineNumber : null,
+      source: details.sourceId ? details.sourceId.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX) : null,
+    },
   };
 }
 
-// The console's rate bound: at most CONSOLE_BURST messages per (appSessionId, deliverableId, version) in any
-// CONSOLE_WINDOW_MS window; the rest of that window is dropped. 50 is what the renderer's ring buffer keeps per key, so
+// A console message of a deliverable frame, as `deliverables.console` carries it (the message and the source cut to
+// their schema's bound); null for anything else.
+export function consoleMessageOf(details: ConsoleDetails): DeliverableConsole | null {
+  const parts = consoleParts(details);
+  const target = parts && parseDeliverableUrl(parts.url);
+  return target ? { appSessionId: target.appSessionId, deliverableId: target.id, version: target.version, ...parts!.fields } : null;
+}
+
+// A console message of an artifact frame (`maws-artifact:`), as `artifacts.console` carries it; null for anything else.
+export function artifactConsoleMessageOf(details: ConsoleDetails): ArtifactConsole | null {
+  const parts = consoleParts(details);
+  const target = parts && parseArtifactUrl(parts.url);
+  return target ? { artifactId: target.artifactId, revision: target.revision === 'live' ? null : target.revision, ...parts!.fields } : null;
+}
+
+// The console's rate bound: at most CONSOLE_BURST messages per (appSessionId, deliverableId, version), or per
+// (artifactId, revision), in any CONSOLE_WINDOW_MS window; the rest of that window is dropped. 50 is what the renderer's ring buffer keeps per key, so
 // a page logging in a loop costs at most one buffer's worth of IPC every ten seconds.
 export const CONSOLE_BURST = 50;
 export const CONSOLE_WINDOW_MS = 10_000;
 const CONSOLE_KEYS_PRUNE_AT = 256;
 
-export function consoleLimiter(now: () => number = Date.now): (message: DeliverableConsole) => boolean {
+export function consoleLimiter(now: () => number = Date.now): (message: DeliverableConsole | ArtifactConsole) => boolean {
   const windows = new Map<string, { start: number; count: number }>();
   return (message) => {
     const at = now();
-    const key = `${message.appSessionId}/${message.deliverableId}/${message.version}`;
+    const key = 'artifactId' in message ? `artifact/${message.artifactId}/${message.revision ?? 'live'}` : `${message.appSessionId}/${message.deliverableId}/${message.version}`;
     let window = windows.get(key);
     if (!window || at - window.start >= CONSOLE_WINDOW_MS) {
       if (windows.size >= CONSOLE_KEYS_PRUNE_AT) for (const [k, w] of windows) if (at - w.start >= CONSOLE_WINDOW_MS) windows.delete(k);
@@ -214,11 +233,21 @@ export function guardFrames(contents: WebContents, env: SeamEnv): void {
 }
 
 // An app window's deliverable frames' errors and warnings, as `deliverables.console` (the capture window's go into the
-// screenshot's result instead: `capture.ts`), at most CONSOLE_BURST per deliverable version per window of time.
-export function attributeConsole(contents: WebContents, emit: (name: 'deliverables.console', payload: DeliverableConsole) => unknown, now?: () => number): void {
+// screenshot's result instead: `capture.ts`), at most CONSOLE_BURST per deliverable version per window of time; an
+// artifact frame's as `artifacts.console`, bounded the same way per artifact revision.
+type ConsoleEmit = {
+  (name: 'deliverables.console', payload: DeliverableConsole): unknown;
+  (name: 'artifacts.console', payload: ArtifactConsole): unknown;
+};
+export function attributeConsole(contents: WebContents, emit: ConsoleEmit, now?: () => number): void {
   const admit = consoleLimiter(now);
   contents.on('console-message', (event) => {
-    const message = consoleMessageOf(event);
-    if (message && admit(message)) emit('deliverables.console', message);
+    const deliverable = consoleMessageOf(event);
+    if (deliverable) {
+      if (admit(deliverable)) emit('deliverables.console', deliverable);
+      return;
+    }
+    const artifact = artifactConsoleMessageOf(event);
+    if (artifact && admit(artifact)) emit('artifacts.console', artifact);
   });
 }

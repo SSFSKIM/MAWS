@@ -7,7 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeliverableConsoleSchema } from '@shared/ipc/schema/deliverables';
 import { deliverableUrl } from '@shared/maws/deliverable';
 import type { AppSessionId } from '@shared/graph/ids';
+import { ArtifactConsoleSchema } from '@shared/ipc/schema/artifacts';
+import { artifactUrl } from '@shared/artifacts/scheme';
 import {
+  artifactConsoleMessageOf,
   attributeConsole,
   consoleMessageOf,
   guardFrames,
@@ -29,6 +32,8 @@ const A = 'App-A' as AppSessionId;
 const ID = '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';
 const FRAME = deliverableUrl(A, ID, 2);
 const APP = 'file:///Applications/MAWS.app/Contents/Resources/app/out/renderer/index.html';
+const ARTIFACT = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
+const PAGE = artifactUrl(ARTIFACT, 'live', 'index.html'); // P3-A M7: the artifact store's frame
 
 let dir: string;
 let log: string;
@@ -141,6 +146,42 @@ describe('the app-wide policy’s exemption', () => {
     expect(isCspExempt('chrome-extension://aaaabbbbccccddddeeeeffffgggghhhh/index.html')).toBe(false);
     expect(isCspExempt(APP)).toBe(false);
     expect(isCspExempt('http://localhost:5173/')).toBe(false);
+  });
+});
+
+// P3-A M7 (Decision Log 35e): the artifact store's frames get every policy the deliverable ones do
+describe('the policies over a maws-artifact: frame', () => {
+  it('judges a maws-artifact: frame and what lies beneath it as a deliverable frame, and lets it reach either scheme', () => {
+    expect(beneathDeliverable(chain(APP, PAGE, 'about:blank'))).toBe(true);
+    expect(shouldCancelRequest({ url: 'https://example.com/x.png', beneath: beneathDeliverable(chain(APP, PAGE)) })).toBe(true);
+    expect(shouldCancelRequest({ url: 'https://example.com/', beneath: null, initiatorOrigin: `maws-artifact://${ARTIFACT}` })).toBe(true);
+    expect(shouldCancelRequest({ url: artifactUrl(ARTIFACT, 3, 'assets/a.png'), beneath: true })).toBe(false);
+    expect(shouldBlockFrameNavigation({ url: 'https://example.invalid/', frameBeneath: beneathDeliverable(chain(APP, PAGE)), initiatorBeneath: null })).toBe(true);
+    expect(shouldBlockFrameNavigation({ url: artifactUrl(ARTIFACT, 3, 'index.html'), frameBeneath: beneathDeliverable(chain(APP, PAGE)), initiatorBeneath: null })).toBe(false); // a revision switch
+    expect(shouldCancelDownload({ url: PAGE, urlChain: [PAGE] })).toBe(true);
+    expect(isDeliverablePermission([`maws-artifact://${ARTIFACT}`])).toBe(true);
+    expect(isCspExempt(PAGE)).toBe(true); // its answers carry their own policy
+  });
+
+  it('reads an artifact frame’s error and warning as artifacts.console, live or at a revision, cut to the schema’s bound', () => {
+    const at = { frame: { url: `${PAGE}#top` }, lineNumber: 4, sourceId: PAGE };
+    expect(artifactConsoleMessageOf({ ...at, level: 'error', message: 'boom' })).toEqual({ artifactId: ARTIFACT, revision: null, level: 'error', message: 'boom', line: 4, source: PAGE });
+    expect(artifactConsoleMessageOf({ ...at, frame: { url: artifactUrl(ARTIFACT, 12, 'index.html') }, level: 'warning', message: 'w' })).toMatchObject({ revision: 12, level: 'warning' });
+    expect(artifactConsoleMessageOf({ ...at, level: 'info', message: 'i' })).toBeNull();
+    expect(artifactConsoleMessageOf({ ...at, frame: { url: FRAME }, level: 'error', message: 'a deliverable’s' })).toBeNull();
+    expect(consoleMessageOf({ ...at, level: 'error', message: 'an artifact’s' })).toBeNull();
+    expect(ArtifactConsoleSchema.safeParse(artifactConsoleMessageOf({ ...at, level: 'error', message: 'x'.repeat(5000) })).success).toBe(true);
+  });
+
+  it('emits artifacts.console from the window’s webContents, bounded per artifact revision apart from the deliverables’', () => {
+    const contents = new EventEmitter();
+    const emit = vi.fn();
+    attributeConsole(contents as unknown as WebContents, emit, () => 0);
+    for (let k = 0; k < CONSOLE_BURST + 5; k++) contents.emit('console-message', { frame: { url: PAGE }, level: 'error', message: `m${k}`, lineNumber: 1, sourceId: PAGE });
+    contents.emit('console-message', { frame: { url: FRAME }, level: 'error', message: 'deliverable', lineNumber: 1, sourceId: FRAME });
+    expect(emit.mock.calls.filter(([name]) => name === 'artifacts.console')).toHaveLength(CONSOLE_BURST);
+    expect(emit).toHaveBeenCalledWith('artifacts.console', expect.objectContaining({ artifactId: ARTIFACT, message: 'm0' }));
+    expect(emit).toHaveBeenCalledWith('deliverables.console', expect.objectContaining({ deliverableId: ID, message: 'deliverable' }));
   });
 });
 

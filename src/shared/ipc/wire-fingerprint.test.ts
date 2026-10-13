@@ -33,6 +33,7 @@ describe('HOST_EVENTS', () => {
         'deliverables.changed',
         'maws.pane.show',
         'maws.artifact.capture',
+        'maws.artifact.export', // P3-A M7
         'host.supervisorStatus', // E10 M2
         'artifacts.changed', // P3-A M4
         'spaces.changed', // P3-A M4

@@ -212,6 +212,12 @@ export const ARTIFACT_EXPORT_FORMATS = ['pdf', 'png', 'docx', 'pptx', 'md', 'htm
 export type ArtifactExportFormat = (typeof ARTIFACT_EXPORT_FORMATS)[number];
 export const ArtifactExportInputSchema = z.strictObject({ artifact: ArtifactIdSchema, format: z.enum(ARTIFACT_EXPORT_FORMATS), version: z.number().int().min(1).optional(), to: PathSchema.optional() });
 export type ArtifactExportInput = z.infer<typeof ArtifactExportInputSchema>;
+// How long the host waits for main's export service to answer (P3-A M7, X31) before the call answers an error; main's
+// own guard and queue keep its answer inside it.
+export const EXPORT_ANSWER_MS = 60_000;
+const EXPORT_EXTENSIONS: Record<ArtifactExportFormat, string> = { pdf: 'pdf', png: 'png', docx: 'docx', pptx: 'pptx', md: 'md', html: 'html' };
+// An export's file name under `<userData>/artifacts/<id>/exports/` (the tool's and the library's alike).
+export const artifactExportName = (revision: number, format: ArtifactExportFormat): string => `${revision}-${format}.${EXPORT_EXTENSIONS[format]}`;
 // P3-A (M6) end
 
 // ---------------------------------------------------------------------------------------------------------------------

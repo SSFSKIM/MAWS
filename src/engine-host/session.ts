@@ -44,7 +44,7 @@ import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionSurface } from './surface'; // R2
 // E1 start (E11: the wiring in session-maws.ts)
-import type { MawsArtifactCapturedResult, MawsDownloadRecorded, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
+import type { MawsArtifactCapturedResult, MawsArtifactExportAnswer, MawsDownloadRecorded, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import type { PendingAsk } from '@shared/maws/ask';
 import type { AskAnswer } from '@shared/maws/tools';
 import type { DeliverableWriter, OnDeliverableWritten } from './deliverables/store';
@@ -138,7 +138,7 @@ interface SessionListeners {
   catalog: (catalog: Catalog) => void; // C7: the whole catalogue, whenever its revision moved
   models: (models: unknown[]) => void; // C10: the initialize response's model list, for the catalogue cache
 }
-// E1, E2: paneShow, deliverableChanged, artifactCapture (session-maws.ts)
+// E1, E2: paneShow, deliverableChanged, artifactCapture; P3-A M7: artifactExport (session-maws.ts)
 type Listeners = SessionListeners & MawsListeners;
 
 type ProcessState = EngineSessionStatus['process'];
@@ -166,7 +166,7 @@ export class EngineSession {
   readonly sideQuestions = new SideQuestionLog(); // E3: this process's `/btw` exchanges (host memory, X13)
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, deliverableChanged: new Set(), artifactCapture: new Set() /* E2 */ };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, deliverableChanged: new Set(), artifactCapture: new Set() /* E2 */, artifactExport: new Set() /* P3-A M7 */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
@@ -392,6 +392,10 @@ export class EngineSession {
 
   answerCapture(requestId: RequestId, result: MawsArtifactCapturedResult): 'delivered' | 'not_pending' {
     return this.maws.answerCapture(requestId, result);
+  }
+
+  answerExport(requestId: RequestId, answer: MawsArtifactExportAnswer): 'delivered' | 'not_pending' {
+    return this.maws.answerExport(requestId, answer); // P3-A M7
   }
 
   // E13: an agent's finished download through cua, as a file deliverable once per path

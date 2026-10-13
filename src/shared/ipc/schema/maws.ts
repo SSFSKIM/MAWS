@@ -8,7 +8,8 @@ import * as z from 'zod';
 import { AppSessionIdSchema, RequestIdSchema } from '../../graph/ids';
 import { PendingAskSchema } from '../../maws/ask';
 import { PaneSchema } from '../../maws/panes';
-import { AskAnswerSchema, ShowPaneOpenedSchema } from '../../maws/tools';
+import { ARTIFACT_EXPORT_FORMATS, AskAnswerSchema, ShowPaneOpenedSchema } from '../../maws/tools';
+import { ArtifactKindSchema } from '../../artifacts/entity'; // P3-A M7
 import type { CommandSpec } from './common';
 import { BrowserTabIdSchema } from '../../browser/tab'; // E13
 import { AbsolutePathSchema } from './settings'; // E13
@@ -52,6 +53,29 @@ export const MawsArtifactCapturedResultSchema = z.discriminatedUnion('ok', [
 export type MawsArtifactCapturedResult = z.infer<typeof MawsArtifactCapturedResultSchema>;
 // E2 end
 
+// P3-A M7 start (X31; the P3-A document's M7): `artifact_export`'s bridge, the capture bridge's twin. The host asks main
+// once (`maws.artifact.export`) to export an artifact's revision as `format` into `path` (under the store's directory,
+// which the host named and created), and main answers through `maws.artifact.exported`: the file is there, or why not
+// (`unavailable`: no exporter for that kind and format). The host gives up after EXPORT_ANSWER_MS.
+export const MawsArtifactExportSchema = z.strictObject({
+  appSessionId: AppSessionIdSchema,
+  requestId: RequestIdSchema, // the engine's `mcp_message` request the answer goes back to
+  artifactId: z.uuid(),
+  kind: ArtifactKindSchema,
+  format: z.enum(ARTIFACT_EXPORT_FORMATS),
+  revision: z.number().int().nonnegative(), // the live revision, or the version's
+  versionId: z.number().int().positive().optional(),
+  path: AbsolutePathSchema, // where main writes the file
+});
+export type MawsArtifactExport = z.infer<typeof MawsArtifactExportSchema>;
+
+export const MawsArtifactExportAnswerSchema = z.discriminatedUnion('ok', [
+  z.strictObject({ ok: z.literal(true) }),
+  z.strictObject({ ok: z.literal(false), unavailable: z.boolean().optional(), error: z.string() }),
+]);
+export type MawsArtifactExportAnswer = z.infer<typeof MawsArtifactExportAnswerSchema>;
+// P3-A M7 end
+
 // E13 start (the in-app browser spec of 2026-10-08 in the cua repository, "Downloads"): a file an agent downloaded through
 // cua finished in ~/Downloads; main asks the session's engine host to record it as a file deliverable, once per path. The
 // host writes through its DeliverableWriter (which announces the change) and answers `duplicate` for a path it recorded
@@ -92,9 +116,16 @@ export const commands = {
   // E2 end
   // E13: main's report of an agent's finished download (once per path)
   'maws.download.recorded': { input: MawsDownloadRecordedSchema, output: z.strictObject({ outcome: z.enum(['recorded', 'duplicate', 'not_held']) }), owner: 'engine-host' },
+  // P3-A M7: main's answer to `maws.artifact.export`: `not_pending` when the call ended or was answered already.
+  'maws.artifact.exported': {
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, requestId: RequestIdSchema, answer: MawsArtifactExportAnswerSchema }),
+    output: z.strictObject({ outcome: z.enum(['delivered', 'not_pending']) }),
+    owner: 'engine-host',
+  },
 } as const satisfies Record<`maws.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
   'maws.pane.show': MawsPaneShowSchema,
   'maws.artifact.capture': MawsArtifactCaptureSchema, // E2
+  'maws.artifact.export': MawsArtifactExportSchema, // P3-A M7
 } as const satisfies Record<`maws.${string}`, z.ZodType>;

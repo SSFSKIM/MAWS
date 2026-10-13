@@ -17,6 +17,7 @@ import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/hos
 import { PortProvider, type PortLike, type Restored, type SaveState } from '@artifacts/provider/port';
 import { newDoc } from '@artifacts/yjs';
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
+import { artifactUrl } from '@shared/artifacts/scheme';
 import type { CommandInput, CommandName, CommandOutput, IpcError, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf } from '@shared/ipc/schema/artifacts';
 
@@ -211,9 +212,13 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       await replica.first;
       return replica;
     },
-    assetUrl: (artifactId, ref) => `maws-artifact://${encodeURIComponent(artifactId)}/live/${ref.split('/').map(encodeURIComponent).join('/')}`,
-    // The export service is M7's (`artifacts.export`, main's); until it lands nothing can export.
-    export: () => Promise.reject(new Error('exporting an artifact is not available yet')),
+    assetUrl: (artifactId, ref) => artifactUrl(artifactId, 'live', ref),
+    // Main's export service (M7, X31): the file's path under the store's directory. A format the IPC does not know, or a
+    // kind and format no exporter serves, rejects (`exportUnavailable` for the latter).
+    export: async (artifactId, format, version) => {
+      const { path } = await call('artifacts.export', { artifactId, format: format as CommandInput<'artifacts.export'>['format'], ...(version !== undefined && { versionId: version }) });
+      return { path };
+    },
     versionState: async (artifactId, version) => (await call('artifacts.versionState', typeof version === 'number' ? { artifactId, versionId: version } : { artifactId, seq: version.seq })).bytes,
     attributions: async (artifactId, fromSeq, toSeq) => (await call('artifacts.attributions', { artifactId, fromSeq, toSeq })).bytes,
     uploadAsset: (artifactId, bytes, { name, mime }) => call('artifacts.uploadAsset', { artifactId, bytes, name, mime }),
