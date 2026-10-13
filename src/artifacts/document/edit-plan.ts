@@ -63,8 +63,38 @@ export function textblocksOf(node: PMNode): PMNode[] {
 // put back into `neu` where `neu` still agrees with `base` (a run inside the agent's rewritten words is the agent's).
 const UNWRITTEN_WHITESPACE = /^\s|\s$|\s\s|[^\S ]/;
 
+/** True when a textblock of `node` (or `node` itself) holds whitespace its markdown might not carry. */
+const hasUnwrittenWhitespace = (node: PMNode): boolean => textblocksOf(node).some((textblock) => UNWRITTEN_WHITESPACE.test(textblock.textContent));
+
+/** Where base cell `at` (an insertion point before it) lands in the other side of `hunks`; undefined inside a change. */
+function mapInsertion(at: number, hunks: readonly Hunk[]): number | undefined {
+  let shift = 0;
+  for (const hunk of hunks) {
+    if (at < hunk.from) return at + shift;
+    if (at === hunk.from) return hunk.nFrom;
+    if (at < hunk.to) return undefined;
+    if (at === hunk.to) return hunk.nTo;
+    shift = hunk.nTo - hunk.to;
+  }
+  return at + shift;
+}
+
 function keepUnwrittenWhitespace(old: PMNode, base: PMNode | undefined, neu: PMNode): PMNode {
-  if (!base || !old.isTextblock || !neu.isTextblock || base.type !== neu.type) return neu;
+  if (!base || base.type !== neu.type || old.type !== base.type) return neu;
+  if (!old.isTextblock) {
+    // a container: its textblocks paired child by child where old, base and new keep one shape (a quote rewriting
+    // words does); a changed shape is the agent's to write
+    if (old.childCount !== base.childCount || base.childCount !== neu.childCount) return neu;
+    const children: PMNode[] = [];
+    let changed = false;
+    for (let k = 0; k < neu.childCount; k++) {
+      const kept = old.child(k).type === base.child(k).type && base.child(k).type === neu.child(k).type ? keepUnwrittenWhitespace(old.child(k), base.child(k), neu.child(k)) : neu.child(k);
+      changed ||= kept !== neu.child(k);
+      children.push(kept);
+    }
+    return changed ? neu.type.createChecked(neu.attrs, children, neu.marks) : neu;
+  }
+  if (!neu.isTextblock) return neu;
   const oldCells = pmCells(old);
   const baseCells = pmCells(base);
   const lost: Array<{ at: number; cells: PMCell[] }> = []; // `cells` stood before base cell `at`
@@ -74,15 +104,9 @@ function keepUnwrittenWhitespace(old: PMNode, base: PMNode | undefined, neu: PMN
   }
   if (lost.length === 0) return neu;
   const cells = pmCells(neu);
-  const toNeu = equalMap(baseCells.length, diffCells(baseCells, cells, { mergeWhitespace: false }));
-  const where = (at: number): number | undefined => {
-    if (at < baseCells.length && toNeu[at] !== undefined) return toNeu[at];
-    if (at === 0) return baseCells.length === 0 ? 0 : undefined;
-    const before = toNeu[at - 1];
-    return before === undefined ? undefined : before + 1;
-  };
+  const toNeu = diffCells(baseCells, cells, { mergeWhitespace: false });
   for (const { at, cells: run } of [...lost].reverse()) {
-    const index = where(at);
+    const index = mapInsertion(at, toNeu); // beside a replaced word too: a run outside the change is the person's
     if (index !== undefined) cells.splice(index, 0, ...run);
   }
   const node = neu.type.createChecked(neu.attrs, inlineOf(cells, cells.map((cell) => cell.marks)), neu.marks);
@@ -431,7 +455,7 @@ class Planner {
 
   /** `neu`, parsed from `old`'s markdown with a quote replaced, with the whitespace of `old` the markdown does not carry. */
   private keptWhitespace(old: PMNode, markdown: string, neu: PMNode, unwrap: (parsed: PMNode | undefined) => PMNode | undefined = (parsed) => parsed): PMNode {
-    if (!old.isTextblock || !UNWRITTEN_WHITESPACE.test(old.textContent)) return neu;
+    if (!hasUnwrittenWhitespace(old)) return neu;
     return keepUnwrittenWhitespace(old, unwrap(this.parse(markdown)[0]), neu);
   }
 

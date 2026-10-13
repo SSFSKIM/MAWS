@@ -48,6 +48,28 @@ describe('the ops (S4 1)', () => {
     expect(textOf(doc, 'lp1')).toBe('An item alpha1 typed ');
   });
 
+  // M9's review: the whitespace is kept whatever the scope (unscoped, a list, a list item, a cell) and when the replaced
+  // word is the last one before it.
+  it('replace_text keeps the person’s whitespace in every scope and next to a replaced word', () => {
+    const list = (id: string) => ({ type: 'bulletList', attrs: { id }, content: [{ type: 'listItem', attrs: { id: `${id}i` }, content: [{ type: 'paragraph', attrs: { id: `${id}p` }, content: [{ type: 'text', text: `An item ${id}zero typed ` }] }] }] });
+    const cell = (id: string, text: string) => ({ type: 'tableCell', attrs: { id }, content: [{ type: 'paragraph', attrs: { id: `${id}p` }, content: [{ type: 'text', text }] }] });
+    const doc = seedDoc({ type: 'doc', content: [
+      list('la'), list('lb'), list('lc'),
+      { type: 'table', attrs: { id: 'tb' }, content: [{ type: 'tableRow', attrs: { id: 'tr0' }, content: [cell('c0', 'Head'), cell('c1', 'Head two')] }, { type: 'tableRow', attrs: { id: 'tr1' }, content: [cell('c2', 'cell tdzero typed '), cell('c3', 'x')] }] },
+      { type: 'paragraph', attrs: { id: 'w1' }, content: [{ type: 'text', text: 'The word is wzero ' }] },
+    ] }, {});
+    applyEdit(doc, [{ op: 'replace_text', old: 'lazero', new: 'laone' }]); // unscoped
+    expect(textOf(doc, 'lap')).toBe('An item laone typed ');
+    applyEdit(doc, [{ op: 'replace_text', block: 'lb', old: 'lbzero', new: 'lbone' }]); // scoped to the list
+    expect(textOf(doc, 'lbp')).toBe('An item lbone typed ');
+    applyEdit(doc, [{ op: 'replace_text', block: 'lci', old: 'lczero', new: 'lcone' }]); // scoped to the list item
+    expect(textOf(doc, 'lcp')).toBe('An item lcone typed ');
+    applyEdit(doc, [{ op: 'replace_text', block: 'c2', old: 'tdzero', new: 'tdone' }]); // scoped to the cell
+    expect(textOf(doc, 'c2p')).toBe('cell tdone typed ');
+    applyEdit(doc, [{ op: 'replace_text', block: 'w1', old: 'wzero', new: 'wone' }]); // the last word, before the space
+    expect(textOf(doc, 'w1')).toBe('The word is wone ');
+  });
+
   it('replace_text not unique: refused, listing the candidate blocks and their match counts', () => {
     const doc = seedDoc();
     const r = refusal(() => applyEdit(doc, [{ op: 'replace_text', old: 'The ', new: 'A ' }]));
