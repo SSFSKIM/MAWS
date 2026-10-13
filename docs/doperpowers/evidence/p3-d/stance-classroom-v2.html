@@ -1,0 +1,228 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Classroom stance specimen</title>
+<style>
+@font-face{font-family:"Seravek";font-weight:400;src:local("Seravek")}
+@font-face{font-family:"Seravek";font-weight:500;src:local("Seravek-Medium"),local("Seravek Medium")}
+@font-face{font-family:"Seravek";font-weight:700;src:local("Seravek-Bold"),local("Seravek Bold")}
+:root{
+  --ds-color-bg:#ffffff;--ds-color-bg-raised:#f2f5f9;--ds-color-text:#15181d;--ds-color-text-muted:#4b5361;
+  --ds-color-accent:#2453c9;--ds-color-accent-text:#ffffff;--ds-color-border:#8a94a3;
+  --ds-color-status-ok:#18804a;--ds-color-status-warn:#a35a00;--ds-color-status-error:#c8322b;--ds-color-status-info:#0f7488;
+  --ds-font-display:Seravek, "Apple SD Gothic Neo", "Trebuchet MS", "Malgun Gothic", sans-serif;
+  --ds-font-body:Seravek, "Apple SD Gothic Neo", "Trebuchet MS", "Malgun Gothic", sans-serif;
+  --ds-font-mono:ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ds-type-title-size:30px;--ds-type-title-line:1.25;--ds-type-title-weight:700;
+  --ds-type-subtitle-size:17px;--ds-type-subtitle-line:1.45;--ds-type-subtitle-weight:400;
+  --ds-type-h1-size:23px;--ds-type-h1-line:1.3;--ds-type-h1-weight:700;
+  --ds-type-h2-size:19px;--ds-type-h2-line:1.35;--ds-type-h2-weight:700;
+  --ds-type-h3-size:16px;--ds-type-h3-line:1.45;--ds-type-h3-weight:700;
+  --ds-type-body-size:16px;--ds-type-body-line:1.65;--ds-type-body-weight:400;
+  --ds-type-caption-size:13px;--ds-type-caption-line:1.45;--ds-type-caption-weight:400;
+  --ds-type-quote-size:17px;--ds-type-quote-line:1.55;--ds-type-quote-weight:400;
+  --ds-space-1:4px;--ds-space-2:8px;--ds-space-3:12px;--ds-space-4:20px;--ds-space-5:28px;--ds-space-6:40px;--ds-space-7:56px;--ds-space-8:80px;
+  --ds-radius-sm:4px;--ds-radius-md:8px;--ds-radius-lg:12px;--ds-radius-full:9999px;
+  --ds-shadow-sm:0 1px 2px rgba(21,24,29,0.08);--ds-shadow-md:0 2px 4px rgba(21,24,29,0.06), 0 8px 20px rgba(21,24,29,0.08);--ds-shadow-lg:0 4px 8px rgba(21,24,29,0.08), 0 24px 56px rgba(21,24,29,0.14);
+}
+/* The deck surface: the same role names, the deck column's values, on a 1920x1080 canvas. */
+.deck{
+  --ds-type-title-size:112px;--ds-type-title-line:1.15;--ds-type-title-weight:700;
+  --ds-type-subtitle-size:52px;--ds-type-subtitle-line:1.3;--ds-type-subtitle-weight:500;
+  --ds-type-h1-size:80px;--ds-type-h1-line:1.2;--ds-type-h1-weight:700;
+  --ds-type-h2-size:64px;--ds-type-h2-line:1.25;--ds-type-h2-weight:700;
+  --ds-type-h3-size:52px;--ds-type-h3-line:1.3;--ds-type-h3-weight:700;
+  --ds-type-body-size:48px;--ds-type-body-line:1.4;--ds-type-body-weight:500;
+  --ds-type-caption-size:36px;--ds-type-caption-line:1.4;--ds-type-caption-weight:500;
+  --ds-type-quote-size:56px;--ds-type-quote-line:1.35;--ds-type-quote-weight:500;
+  --ds-space-1:12px;--ds-space-2:24px;--ds-space-3:36px;--ds-space-4:60px;--ds-space-5:84px;--ds-space-6:120px;--ds-space-7:168px;--ds-space-8:240px;
+  --ds-radius-sm:8px;--ds-radius-md:16px;--ds-radius-lg:24px;
+  
+}
+
+*{box-sizing:border-box}
+html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{margin:0;background:var(--ds-color-bg);color:var(--ds-color-text);font-family:var(--ds-font-body);
+  font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight);
+  word-break:keep-all;overflow-wrap:break-word;line-break:strict}
+.t-title{font-size:var(--ds-type-title-size);line-height:var(--ds-type-title-line);font-weight:var(--ds-type-title-weight);margin:0}
+.t-subtitle{font-size:var(--ds-type-subtitle-size);line-height:var(--ds-type-subtitle-line);font-weight:var(--ds-type-subtitle-weight);margin:0}
+.t-h1{font-size:var(--ds-type-h1-size);line-height:var(--ds-type-h1-line);font-weight:var(--ds-type-h1-weight);margin:0}
+.t-h2{font-size:var(--ds-type-h2-size);line-height:var(--ds-type-h2-line);font-weight:var(--ds-type-h2-weight);margin:0}
+.t-h3{font-size:var(--ds-type-h3-size);line-height:var(--ds-type-h3-line);font-weight:var(--ds-type-h3-weight);margin:0}
+.t-body{font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight);margin:0}
+.t-caption{font-size:var(--ds-type-caption-size);line-height:var(--ds-type-caption-line);font-weight:var(--ds-type-caption-weight);margin:0}
+.t-quote{font-size:var(--ds-type-quote-size);line-height:var(--ds-type-quote-line);font-weight:var(--ds-type-quote-weight);margin:0}
+.t-title,.t-subtitle,.t-h1,.t-h2,.t-h3{font-family:var(--ds-font-display)}
+.t-body,.t-caption,.t-quote{font-family:var(--ds-font-body)}
+.t-subtitle,.t-caption{color:var(--ds-color-text-muted)}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--ds-font-mono);font-size:12px;line-height:1.5;letter-spacing:0}
+.muted{color:var(--ds-color-text-muted)}
+.wrap{width:1152px;margin:0 auto;padding:64px 0 96px}
+.spec-head{display:grid;gap:8px;padding-bottom:32px;border-bottom:1px solid var(--ds-color-border)}
+.spec-head .key{font-family:var(--ds-font-mono);font-size:12px;color:var(--ds-color-text-muted)}
+.axis{font-size:13px;line-height:1.6;color:var(--ds-color-text-muted);max-width:980px}
+.sec{margin-top:56px}
+.sec-label{font-family:var(--ds-font-display);font-size:13px;line-height:1.4;font-weight:600;color:var(--ds-color-text-muted);margin:0 0 16px}
+/* palette */
+.swatches{display:grid;grid-template-columns:repeat(7,1fr);gap:16px}
+.swatches.status{grid-template-columns:repeat(4,1fr);margin-top:16px}
+.sw .chip{height:72px;border-radius:var(--ds-radius-md);border:1px solid var(--ds-color-border);display:flex;align-items:flex-end;padding:8px 10px;font-family:var(--ds-font-display);font-weight:700;font-size:20px;line-height:1}
+.sw .role{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.4;margin-top:8px;color:var(--ds-color-text)}
+.sw .hex{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.4;color:var(--ds-color-text-muted)}
+.sw .cr{font-size:12.5px;line-height:1.45;margin-top:2px}
+/* type roles */
+.roles{display:grid;grid-template-columns:96px 1fr 236px;border-top:1px solid var(--ds-color-border)}
+.roles>div{padding:14px 0;border-bottom:1px solid var(--ds-color-border);align-self:stretch}
+.roles .rn{font-family:var(--ds-font-mono);font-size:12px;color:var(--ds-color-text-muted);padding-top:18px}
+.roles .rs{padding-right:24px}
+.roles .rv{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.6;color:var(--ds-color-text-muted);padding-top:18px}
+/* scales */
+.scales{display:grid;grid-template-columns:repeat(3,1fr);gap:32px;align-items:start}
+.bar{height:12px;background:var(--ds-color-text);border-radius:2px;opacity:.85}
+.srow{display:grid;grid-template-columns:44px 1fr;align-items:center;gap:8px;font-family:var(--ds-font-mono);font-size:11.5px;color:var(--ds-color-text-muted);margin-bottom:6px}
+.rbox{width:64px;height:48px;border:1.5px solid var(--ds-color-text);background:var(--ds-color-bg-raised)}
+.rlist{display:flex;gap:14px;align-items:flex-end}
+.rlist figure,.slist figure{margin:0;text-align:center;font-family:var(--ds-font-mono);font-size:11.5px;color:var(--ds-color-text-muted)}
+.slist{display:flex;gap:18px}
+.stile{width:84px;height:56px;background:var(--ds-color-bg-raised);border-radius:var(--ds-radius-md);margin-bottom:8px}
+/* document + notes */
+.docrow{display:grid;grid-template-columns:816px 1fr;gap:40px;align-items:start}
+.sheet{width:816px;min-height:600px;padding:64px 72px 72px}
+.rs .ko{margin-top:6px}
+.notes{display:grid;gap:14px;font-size:13.5px;line-height:1.6}
+.notes h4{font-family:var(--ds-font-display);font-size:14px;line-height:1.4;font-weight:700;margin:0}
+.notes p{margin:0}
+/* slide */
+.slide-frame{width:1152px;height:648px;overflow:hidden;border-radius:var(--ds-radius-md);border:1px solid var(--ds-color-border)}
+.deck{width:1920px;height:1080px;transform:scale(.6);transform-origin:0 0;position:relative;overflow:hidden;
+  font-family:var(--ds-font-body);font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight)}
+.deck-meta{display:flex;justify-content:space-between;margin-top:12px;font-size:12.5px;color:var(--ds-color-text-muted)}
+
+
+.sheet{background:var(--ds-color-bg);border:1px solid var(--ds-color-border);border-radius:2px}
+.ws-top{display:flex;justify-content:space-between;align-items:baseline}
+.ws-top .t-caption{margin:0}
+.name{color:var(--ds-color-text)!important}
+.blank{display:inline-block;vertical-align:-4px;border-bottom:1.5px solid var(--ds-color-border);height:20px;margin:0 8px 0 4px}
+.blank.s{width:36px}.blank.m{width:84px}.blank.l{width:150px}
+.part{display:flex;align-items:center;gap:var(--ds-space-3);margin:var(--ds-space-6) 0 var(--ds-space-3);padding-top:var(--ds-space-3);border-top:1px solid var(--ds-color-text)}
+.tab{flex:none;display:inline-grid;place-items:center;width:30px;height:30px;border-radius:var(--ds-radius-sm);background:var(--ds-color-accent);color:var(--ds-color-accent-text);font-family:var(--ds-font-display);font-weight:700;font-size:17px;line-height:1}
+.part .t-h1{margin:0}
+.sheet .t-body{margin:0}
+.choices{display:flex;gap:var(--ds-space-5);margin-top:var(--ds-space-3)}
+.opt{display:inline-flex;align-items:center;gap:10px;font-size:16px}
+.opt i{width:18px;height:18px;border:1.5px solid var(--ds-color-text);border-radius:2px}
+.answer{margin-top:var(--ds-space-2);height:84px;border:1.5px solid var(--ds-color-border);border-radius:var(--ds-radius-sm)}
+.answer.lines{background:linear-gradient(to bottom,transparent 41px,var(--ds-color-border) 41px,var(--ds-color-border) 42px,transparent 42px) no-repeat;background-size:calc(100% - 32px) 100%;background-position:16px 0}
+.data{width:100%;border-collapse:collapse;font-size:15px}
+.data th{text-align:left;font-weight:400;padding:10px 12px 10px 0;width:44%;border-bottom:1px solid var(--ds-color-border)}
+.data td{border:1.5px solid var(--ds-color-border);height:42px}
+.data td.u{width:44px;border-left:0;text-align:center;color:var(--ds-color-text-muted)}
+.data td:nth-child(2){border-right:0}
+.tip{display:flex;gap:var(--ds-space-3);align-items:baseline;margin-top:var(--ds-space-4);padding:var(--ds-space-3) var(--ds-space-4);background:var(--ds-color-bg-raised);border-radius:var(--ds-radius-sm)}
+.tip-k{flex:none;font-family:var(--ds-font-display);font-weight:700;font-size:15px;color:var(--ds-color-status-info)}
+.qs{margin:0;padding-left:1.3em}.qs li{padding-left:4px;margin-bottom:var(--ds-space-3)}
+.work{height:72px;margin-top:6px;border-bottom:1.5px solid var(--ds-color-border)}
+.deck{background:var(--ds-color-bg)}
+.s-wrap{padding:var(--ds-space-5) var(--ds-space-6) 0}
+.s-wrap>.t-caption{margin:0}
+.s-wrap>.t-h1{margin-bottom:0}
+.s-steps{list-style:none;margin:var(--ds-space-5) 0 0;padding:0;display:grid;gap:var(--ds-space-3)}
+.s-steps li{display:grid;grid-template-columns:96px 380px 1fr;align-items:center;gap:var(--ds-space-3);padding:var(--ds-space-2) 0;border-top:2px solid var(--ds-color-border)}
+.s-steps .lbl{font-weight:700}
+.s-steps .eq{font-variant-numeric:tabular-nums}
+.tab.sm{width:80px;height:80px;font-size:48px;border-radius:var(--ds-radius-sm)}
+.s-steps li.done .tab,.s-steps li.next .tab{background:transparent;color:var(--ds-color-text-muted);box-shadow:inset 0 0 0 3px var(--ds-color-border)}
+.s-steps li.done,.s-steps li.next{color:var(--ds-color-text-muted)}
+.s-steps li.now{color:var(--ds-color-text)}
+.s-foot{position:absolute;left:var(--ds-space-6);right:var(--ds-space-6);bottom:var(--ds-space-4);display:flex;justify-content:space-between;align-items:baseline;border-top:2px solid var(--ds-color-border);padding-top:var(--ds-space-2)}.s-foot p{margin:0}
+
+</style></head><body><main class="wrap">
+<header class="spec-head">
+  <div class="key">stance-classroom v2 · after the owner's rulings (Decision Log 42, 43) · 2026-10-12</div>
+  <h1 class="t-title">Classroom</h1>
+  <p class="t-subtitle">White paper and dark ink that survive the copier and the lecture-room projector, set in a humanist sans whose l, I and 1 never collide; one solid cobalt tab marks the part of the work the room is on.</p>
+  <p class="axis">density standard, leaning spacious (a student reads, writes in the margins, and reads slides from the back of a lecture room) · criticality exploratory · energy composed · type humanist sans, criteria: l, I and 1 distinct (HCl, 1 L), large x-height, tabular figures (Seravek + Apple SD Gothic Neo) · material printed · colour restrained · accent directional (the current part) · ground light · temperature cool, ink-tinted.</p>
+</header>
+
+<section class="sec"><h2 class="sec-label">Palette (contrast measured on the surface the colour sits on)</h2>
+<div class="swatches">
+<div class="sw"><div class="chip" style="background:#ffffff"></div><div class="role">--ds-color-bg</div><div class="hex">#ffffff</div><div class="cr">ground</div></div>
+<div class="sw"><div class="chip" style="background:#f2f5f9"></div><div class="role">--ds-color-bg-raised</div><div class="hex">#f2f5f9</div><div class="cr">sheet, panel</div></div>
+<div class="sw"><div class="chip" style="background:#15181d;border-color:#15181d"></div><div class="role">--ds-color-text</div><div class="hex">#15181d</div><div class="cr">17.8 : 1 on bg</div></div>
+<div class="sw"><div class="chip" style="background:#4b5361;border-color:#4b5361"></div><div class="role">--ds-color-text-muted</div><div class="hex">#4b5361</div><div class="cr">7.8 : 1 on bg · held high for the projector</div></div>
+<div class="sw"><div class="chip" style="background:#2453c9;border-color:#2453c9;color:#ffffff">가 Aa</div><div class="role">--ds-color-accent</div><div class="hex">#2453c9</div><div class="cr">6.7 : 1 on bg</div></div>
+<div class="sw"><div class="chip" style="background:#ffffff"></div><div class="role">--ds-color-accent-text</div><div class="hex">#ffffff</div><div class="cr">6.7 : 1 on accent</div></div>
+<div class="sw"><div class="chip" style="background:#ffffff;border:2px solid #8a94a3"></div><div class="role">--ds-color-border</div><div class="hex">#8a94a3</div><div class="cr">3.1 : 1 · write-in boxes are controls</div></div>
+</div>
+<div class="swatches status">
+<div class="sw"><div class="chip" style="background:#18804a;border-color:#18804a"></div><div class="role">--ds-color-status-ok</div><div class="hex">#18804a</div><div class="cr">5.0 : 1</div></div>
+<div class="sw"><div class="chip" style="background:#a35a00;border-color:#a35a00"></div><div class="role">--ds-color-status-warn</div><div class="hex">#a35a00</div><div class="cr">5.2 : 1</div></div>
+<div class="sw"><div class="chip" style="background:#c8322b;border-color:#c8322b"></div><div class="role">--ds-color-status-error</div><div class="hex">#c8322b</div><div class="cr">5.3 : 1</div></div>
+<div class="sw"><div class="chip" style="background:#0f7488;border-color:#0f7488"></div><div class="role">--ds-color-status-info</div><div class="hex">#0f7488</div><div class="cr">5.4 : 1</div></div>
+</div></section>
+
+<section class="sec"><h2 class="sec-label">Type roles: face · document px/line/weight · deck px on 1920×1080</h2>
+<div class="roles"><div class="rn">title</div><div class="rs"><p class="t-title">Measuring the mass of air</p><p class="t-title ko" lang="ko">공기의 질량 측정하기</p></div><div class="rv">Seravek + SD Gothic Neo<br>doc&nbsp; 30/1.25/700<br>deck 112/1.15/700</div><div class="rn">subtitle</div><div class="rs"><p class="t-subtitle">AP Chemistry · Lab 3.4 · Ideal Gas Law</p><p class="t-subtitle ko" lang="ko">AP 화학 · 실험 3.4 · 이상 기체 법칙</p></div><div class="rv">Seravek + SD Gothic Neo<br>doc&nbsp; 17/1.45/400<br>deck 52/1.3/500</div><div class="rn">h1</div><div class="rs"><p class="t-h1">Part B: Measure</p><p class="t-h1 ko" lang="ko">활동 B: 측정하기</p></div><div class="rv">Seravek + SD Gothic Neo<br>doc&nbsp; 23/1.3/700<br>deck 80/1.2/700</div><div class="rn">h2</div><div class="rs"><p class="t-h2">Data table</p><p class="t-h2 ko" lang="ko">자료 표</p></div><div class="rv">Seravek + SD Gothic Neo<br>doc&nbsp; 19/1.35/700<br>deck 64/1.25/700</div><div class="rn">h3</div><div class="rs"><p class="t-h3">Explain your reasoning</p><p class="t-h3 ko" lang="ko">그렇게 생각한 까닭을 쓰시오</p></div><div class="rv">Seravek + SD Gothic Neo<br>doc&nbsp; 16/1.45/700<br>deck 52/1.3/700</div><div class="rn">body</div><div class="rs"><p class="t-body">Tare the balance with the needle adapter on it, then record each mass to 0.01 g. HCl, Cl₂ and 1 L stay unambiguous.</p><p class="t-body ko" lang="ko">바늘 어댑터를 올린 채 영점을 맞추고, 각 질량을 0.01 g까지 기록한다.</p></div><div class="rv">Seravek + SD Gothic Neo<br>doc&nbsp; 16/1.65/400<br>deck 48/1.4/500</div><div class="rn">caption</div><div class="rs"><p class="t-caption">M(air) = 28.97 g/mol; R = 0.08206 L·atm/(mol·K)</p><p class="t-caption ko" lang="ko">공기의 몰질량 28.97 g/mol, 기체 상수 0.08206</p></div><div class="rv">Seravek + SD Gothic Neo<br>doc&nbsp; 13/1.45/400<br>deck 36/1.4/500</div><div class="rn">quote</div><div class="rs"><p class="t-quote">“If it has mass, it has to take up space too, right?”</p><p class="t-quote ko" lang="ko">“질량이 있다면 공간도 차지해야 하지 않나요?”</p></div><div class="rv">Seravek + SD Gothic Neo<br>doc&nbsp; 17/1.55/400<br>deck 56/1.35/500</div></div></section>
+
+<section class="sec"><h2 class="sec-label">Space · radius · shadow (document values; the deck doubles radius and multiplies space ×3)</h2>
+<div class="scales">
+<div><div class="srow"><span>1 · 4</span><div class="bar" style="width:8px"></div></div><div class="srow"><span>2 · 8</span><div class="bar" style="width:16px"></div></div><div class="srow"><span>3 · 12</span><div class="bar" style="width:24px"></div></div><div class="srow"><span>4 · 20</span><div class="bar" style="width:40px"></div></div><div class="srow"><span>5 · 28</span><div class="bar" style="width:56px"></div></div><div class="srow"><span>6 · 40</span><div class="bar" style="width:80px"></div></div><div class="srow"><span>7 · 56</span><div class="bar" style="width:112px"></div></div><div class="srow"><span>8 · 80</span><div class="bar" style="width:160px"></div></div></div>
+<div class="rlist"><figure><div class="rbox" style="border-radius:var(--ds-radius-sm)"></div>sm 4</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-md)"></div>md 8</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-lg)"></div>lg 12</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-full)"></div>full 9999</figure></div>
+<div class="slist"><figure><div class="stile" style="box-shadow:var(--ds-shadow-sm)"></div>sm</figure><figure><div class="stile" style="box-shadow:var(--ds-shadow-md)"></div>md</figure><figure><div class="stile" style="box-shadow:var(--ds-shadow-lg)"></div>lg</figure></div>
+</div>
+<p class="t-caption" style="margin-top:12px">Handouts and slides carry no shadow (a copier turns it into a grey smear, a projector into nothing). The tiers exist only for MAWS’s own floating editing UI over a classroom document.</p></section>
+
+<section class="sec"><h2 class="sec-label">Document fragment: an AP Chemistry lab handout (US Letter, printed on the school copier)</h2>
+<div class="docrow"><article class="sheet">
+<div class="ws-top">
+  <p class="t-caption">AP Chemistry · Lab 3.4</p>
+  <p class="t-caption name">Name <span class="blank l"></span> Period <span class="blank s"></span> Date <span class="blank m"></span></p>
+</div>
+<h1 class="t-title" style="margin-top:var(--ds-space-4)">Measuring the mass of air</h1>
+<p class="t-subtitle" style="margin-top:var(--ds-space-1)">A sealed ball, a hand pump, and a 0.01 g balance</p>
+
+<div class="part"><span class="tab">A</span><h2 class="t-h1">Predict</h2></div>
+<p class="t-body">Your group will pump 20 more strokes of air into a sealed ball. Its mass will:</p>
+<div class="choices"><span class="opt"><i></i>increase</span><span class="opt"><i></i>decrease</span><span class="opt"><i></i>stay the same</span></div>
+<p class="t-h3" style="margin-top:var(--ds-space-4)">Explain your reasoning in one or two sentences.</p>
+<div class="answer lines"></div>
+
+<div class="part"><span class="tab">B</span><h2 class="t-h1">Measure</h2></div>
+<table class="data num">
+<tr><th>Mass before pumping</th><td></td><td class="u">g</td></tr>
+<tr><th>Mass after 20 strokes</th><td></td><td class="u">g</td></tr>
+<tr><th>Change in mass, Δm</th><td></td><td class="u">g</td></tr>
+<tr><th>Room temperature</th><td></td><td class="u">K</td></tr>
+</table>
+<div class="tip"><span class="tip-k">Tip</span><p class="t-body">Let the reading settle for three seconds before you record it.</p></div>
+
+<div class="part"><span class="tab">C</span><h2 class="t-h1">Analyze</h2></div>
+<ol class="qs t-body num">
+<li>Find the moles of air added. Use M(air) = 28.97 g/mol.<div class="work"></div></li>
+<li>The ball holds 5.00 L at the room temperature you recorded. Use PV = nRT to find the pressure increase, in atm.<div class="work"></div></li>
+</ol>
+</article><aside class="notes">
+<h4>What the cobalt may do</h4>
+<p>Fill the part tab (A, B, C on paper, the current step on a slide) and nothing else. It is the only filled colour on the page.</p>
+<h4>Copier first</h4>
+<p>Every meaning survives a black-and-white copy: the tab prints as a dark block with a white letter, write-in boxes are 1.5 px grey lines at 3.1 : 1, and no tint carries meaning.</p>
+<h4>Lecture room first</h4>
+<p>Room light roughly halves a projector’s contrast, so muted text is held at 7.8 : 1 and nothing is lighter. Slide body is 48 px (24 pt) and nothing goes below 36 px (18 pt).</p>
+<h4>Why Seravek</h4>
+<p>Chemistry puts l, I and 1 side by side (HCl, 1 L). Seravek’s tailed l keeps them apart, and so does Trebuchet MS, its stand-in on Windows.</p></aside></div></section>
+
+<section class="sec"><h2 class="sec-label">Slide: an intro university lecture, read from the back of the room</h2>
+<div class="slide-frame"><div class="deck">
+<div class="s-wrap">
+  <p class="t-caption">CHEM 1210 · Lecture 14 · Gases</p>
+  <h1 class="t-h1" style="margin-top:var(--ds-space-1)">How much air did we add?</h1>
+  <ol class="s-steps num">
+    <li class="done"><span class="tab sm">1</span><span class="lbl">Mass gained</span><span class="eq">Δm = 2.38 g</span></li>
+    <li class="now"><span class="tab sm">2</span><span class="lbl">Moles</span><span class="eq">n = 2.38 g ÷ 28.97 g/mol = 0.0822 mol</span></li>
+    <li class="next"><span class="tab sm">3</span><span class="lbl">Pressure rise</span><span class="eq">ΔP = nRT ÷ V = ?</span></li>
+  </ol>
+</div>
+<footer class="s-foot"><p class="t-caption">Westbrook University · Fall 2026</p><p class="t-caption num">Step 2 of 3</p></footer></div></div>
+<div class="deck-meta"><span>Drawn on the 1920×1080 canvas at 60 %. Deck values in pt for PowerPoint: px ÷ 2.</span><span>body 48 px = 24 pt · caption 36 px = 18 pt</span></div>
+</section>
+</main></body></html>
