@@ -8,7 +8,7 @@ import committedFingerprint from '@artifacts/document/fingerprint.json';
 import { schemaFor } from '@artifacts/document/schema';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
-import { mawsToolList } from '@shared/maws/tools';
+import { mawsToolList, parseToolArguments } from '@shared/maws/tools';
 import { MemoryDeliverableStore } from '../deliverables/store';
 import { openDocumentWorld, type DocumentWorld } from '../documents/kinds/document-world.fixture';
 import { AskTable } from './asks';
@@ -83,6 +83,27 @@ describe('the document tools on the maws server', () => {
     expect(json(await call('artifact_reply', { artifact: id, threadId: 't1', body: 'Done.' }))).toMatchObject({ status: 'replied', threadId: 't1' });
     expect(json(await call('artifact_resolve', { artifact: id, threadId: 't1' }))).toMatchObject({ status: 'resolved', threadId: 't1' });
     expect(json<{ threads: { threadId: string }[] }>(await call('artifact_comments', { artifact: id, status: 'resolved' })).threads.map((thread) => thread.threadId)).toEqual(['t1']);
+  });
+
+  // The re-merge wave: one definition (A's shared schemas) serves `tools/list`, the normaliser's parser and the handlers.
+  it('advertises the document calls it serves: a ranged read with tab, from, count and sinceRevision, and a create with content', () => {
+    const read = { artifact: 'brief', tab: 'tab1', from: 'p1', count: 50, sinceRevision: 3 };
+    const create = { kind: 'document', title: 'Brief', handle: 'brief', content: '# Brief ^h1' };
+    expect(parseToolArguments('artifact_read', read)).toMatchObject({ ok: true, data: read });
+    expect(parseToolArguments('artifact_create', create)).toMatchObject({ ok: true, data: create });
+    const schemaOf = (name: string) => tools.get(name)!.inputSchema as { properties: Record<string, unknown> };
+    expect(Object.keys(schemaOf('artifact_read').properties)).toEqual(expect.arrayContaining(['tab', 'from', 'count', 'sinceRevision']));
+    expect(Object.keys(schemaOf('artifact_create').properties)).toContain('content');
+  });
+
+  it('refuses a document call in the shared parser’s words, the ones the normaliser reads it by', async () => {
+    const create = { kind: 'document', title: 'Brief', files: { 'a.md': 'x' } };
+    const parsed = parseToolArguments('artifact_create', create);
+    expect(parsed.ok).toBe(false);
+    expect(text(await call('artifact_create', create))).toBe((parsed as { error: string }).error);
+    const id = await world.seeded();
+    const read = { artifact: id, count: 1001 };
+    expect(text(await call('artifact_read', read))).toBe((parseToolArguments('artifact_read', read) as { error: string }).error);
   });
 
   it('artifact_describe_type answers the document kind’s written guide and format reference', async () => {

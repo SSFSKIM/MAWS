@@ -3,7 +3,7 @@
 // `artifact_edit`, `artifact_comments`, `artifact_reply` and `artifact_resolve`, the fields a document's
 // `artifact_read` adds, and a document's `artifact_create`, with their descriptions, the limits the tools enforce and
 // the refusals an agent can act on. `./tools` appends these names and entries after A's (its P3-B blocks); this file
-// imports only the leaf `./artifact-id`, so the two never import each other.
+// imports only the leaf `./artifact-id`, so the two never import each other. The read and create fields live in `./tools`.
 import * as z from 'zod';
 import { ARTIFACT_ID } from './artifact-id';
 
@@ -58,32 +58,9 @@ export type ArtifactReplyInput = z.infer<typeof ArtifactReplyInputSchema>;
 export const ArtifactResolveInputSchema = z.strictObject({ artifact: ArtifactRefSchema, threadId: ThreadIdSchema, reopen: z.boolean().optional() });
 export type ArtifactResolveInput = z.infer<typeof ArtifactResolveInputSchema>;
 
-// The fields a document's `artifact_read` takes beside A's (`artifact`, `version`; `revision` and `paths` are the file
-// kinds'): one tab, a range of top-level blocks from a block id, and only what changed since a revision.
-export const DOCUMENT_READ_FIELDS = {
-  tab: z.string().min(1).max(64).optional(),
-  from: BlockIdSchema.optional(),
-  count: z.number().int().min(1).max(DOCUMENT_LIMITS.readCountMax).optional(),
-  sinceRevision: z.number().int().min(0).optional(),
-};
-export const DocumentReadInputSchema = z.strictObject({
-  artifact: ArtifactRefSchema,
-  revision: z.number().int().min(1).optional(),
-  version: z.number().int().min(1).optional(),
-  paths: z.array(z.string().min(1).max(512)).min(1).max(200).optional(),
-  ...DOCUMENT_READ_FIELDS,
-});
-export type DocumentReadInput = z.infer<typeof DocumentReadInputSchema>;
-
-// A document's `artifact_create`: its first tab's content as the kind's markdown (empty: one empty paragraph).
-export const DocumentCreateInputSchema = z.strictObject({
-  kind: z.literal('document'),
-  title: z.string().min(1).max(200),
-  handle: ArtifactRefSchema.optional(),
-  id: ArtifactRefSchema.optional(), // E2's name for `handle`
-  content: MarkdownSchema.optional(),
-});
-export type DocumentCreateInput = z.infer<typeof DocumentCreateInputSchema>;
+// A document's `artifact_read` fields (`tab`, `from`, `count`, `sinceRevision`) and its `artifact_create` `content` are
+// A's schemas in `./tools` (`DOCUMENT_READ_FIELDS`, `ArtifactCreateInputSchema`; A's Decision Log 41a): one definition
+// serves `tools/list`, the normaliser's parser and this child's handlers, which parse with `parseToolArguments`.
 
 // ── results ──
 

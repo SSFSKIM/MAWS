@@ -38,15 +38,12 @@ import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import type { Artifact, ArtifactKind } from '@shared/artifacts/entity';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
-import * as z from 'zod';
 import {
   ArtifactCommentsInputSchema,
   ArtifactEditInputSchema,
   ArtifactReplyInputSchema,
   ArtifactResolveInputSchema,
   DOCUMENT_LIMITS,
-  DocumentCreateInputSchema,
-  DocumentReadInputSchema,
   documentRefused,
   parseDocumentArguments,
   type ArtifactCommentsResult,
@@ -60,6 +57,7 @@ import {
   type DocumentVersionSummary,
   type ListedThread,
 } from '@shared/maws/document-tools';
+import { parseToolArguments } from '@shared/maws/tools';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
 import { documentAdapterOf } from '../documents/kinds/document';
 import { changesSince, DocumentViews, onSessionReplica, warmInSlices } from '../documents/kinds/document-host';
@@ -469,15 +467,14 @@ function versionSummary(version: ArtifactVersion, self: AppSessionId): DocumentV
 
 const readRefusal = (error: ReadError): Refusal => refuse('artifact_read', { reason: error.reason, target: error.target }, error.message);
 
-/** A document's `artifact_read`; `fallback` answers every other kind (A's tool, once it is here). */
+/** A document's `artifact_read`, parsed by the shared parser (A's schema, with the document fields); `fallback` answers
+ * every other kind (A's tool). */
 export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefinition): McpToolDefinition {
   const TOOL = 'artifact_read';
-  return {
-    ...(fallback ?? { name: TOOL, title: 'Read artifact', description: '', inputSchema: z.toJSONSchema(DocumentReadInputSchema) as Record<string, unknown>, annotations: { readOnlyHint: true, openWorldHint: false, title: 'Read artifact' } }),
-    call: (args, ctx) =>
+  const call: McpToolDefinition['call'] = (args, ctx) =>
       answering(TOOL, async () => {
         if (fallback && !(await namesDocument(deps, args, ctx))) return fallback.call(args, ctx);
-        const parsed = parseDocumentArguments(TOOL, DocumentReadInputSchema, args);
+        const parsed = parseToolArguments(TOOL, args);
         if (!parsed.ok) return toolError(parsed.error);
         const input = parsed.data;
         const store = storeOf(TOOL, deps);
@@ -531,8 +528,8 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
           await store.writeCommitted(() => store.link(artifact.id, ctx.appSessionId, 'viewed'));
         }
         return toolText(result);
-      }),
-  };
+      });
+  return fallback ? { ...fallback, call } : defineMawsTool(TOOL, call);
 }
 
 const publicRead = (read: ReturnType<typeof readDocument>) => ({ tabs: read.tabs, tab: read.tab, markdown: read.markdown, next: read.next });
@@ -552,17 +549,20 @@ async function namesDocument(deps: DocumentToolDeps, args: unknown, ctx: McpTool
 
 // ── artifact_create (a document) ────────────────────────────────────────────────────────────────────────────────
 
-/** A document's `artifact_create`; `fallback` answers every other kind (A's tool, once it is here). */
+/** A document's `artifact_create`, parsed by the shared parser (A's schema admits a document's `content`); `fallback`
+ * answers every other kind (A's tool). */
 export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDefinition): McpToolDefinition {
   const TOOL = 'artifact_create';
-  return {
-    ...(fallback ?? { name: TOOL, title: 'Create artifact', description: '', inputSchema: z.toJSONSchema(DocumentCreateInputSchema) as Record<string, unknown>, annotations: { readOnlyHint: false, openWorldHint: false, title: 'Create artifact' } }),
-    call: (args, ctx) =>
+  const call: McpToolDefinition['call'] = (args, ctx) =>
       answering(TOOL, async () => {
         if (fallback && (args as { kind?: unknown } | null)?.kind !== 'document') return fallback.call(args, ctx);
-        const parsed = parseDocumentArguments(TOOL, DocumentCreateInputSchema, args);
+        const parsed = parseToolArguments(TOOL, args);
         if (!parsed.ok) return toolError(parsed.error);
         const input = parsed.data;
+        if (input.kind !== 'document') throw refuse(TOOL, { reason: 'invalid', kind: input.kind ?? 'html' }, 'this tool creates documents');
+        if (input.content !== undefined && input.content.length > DOCUMENT_LIMITS.markdownChars) {
+          throw refuse(TOOL, { reason: 'invalid' }, `the content is ${input.content.length} characters; a document's content is at most ${DOCUMENT_LIMITS.markdownChars}`);
+        }
         if (input.id !== undefined && input.handle !== undefined) throw refuse(TOOL, { reason: 'invalid' }, 'give handle or id (its older name), not both');
         const handle = input.handle ?? input.id;
         const store = storeOf(TOOL, deps);
@@ -618,8 +618,8 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
         const system = await store.designSystemContextFor(created.artifactId);
         if (system !== null) result.designSystem = system;
         return toolText(result);
-      }),
-  };
+      });
+  return fallback ? { ...fallback, call } : defineMawsTool(TOOL, call);
 }
 
 /** The four document tools, in `tools/list` order (appended after A's artifact tools). */
