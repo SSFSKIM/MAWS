@@ -43,9 +43,12 @@ export const ArtifactContentInputSchema = z.union([
   z.strictObject({ path: z.string().min(1) }),
 ]);
 
-// The schema-agnostic test writer's operations, on a root type (`root` unless named).
+// The schema-agnostic test writer's operations, on a root type (`root` unless named). A setAttr value is a JSON value
+// (P3-A M5): never `undefined`, which the detached JSON line would drop. One level is spelled out and the rest is
+// `unknown`, since a recursive JSON type makes Playwright's typed `page.evaluate` over CommandInput infinitely deep.
+const TestValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.unknown()), z.record(z.string(), z.unknown())]);
 export const ArtifactTestOpSchema = z.discriminatedUnion('op', [
-  z.strictObject({ op: z.literal('setAttr'), key: z.string().min(1), value: z.unknown(), root: z.string().min(1).optional() }),
+  z.strictObject({ op: z.literal('setAttr'), key: z.string().min(1), value: TestValueSchema, root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('insertText'), index: Seq, text: z.string(), root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('deleteText'), index: Seq, length: z.number().int().positive(), root: z.string().min(1).optional() }),
 ]);
@@ -147,4 +150,8 @@ export const commands = {
 
 export const events = {
   'artifacts.changed': ArtifactsChangedSchema,
+  // P3-A M5: emitted by main (never by the host) each time the engine host's connection starts streaming, in both
+  // modes: the store's events emitted while no client was connected or ready are not replayed, so a view that mirrors
+  // the store (P3-L's library) reads it afresh here. Its one reconcile hook.
+  'artifacts.resync': z.strictObject({}),
 } as const satisfies Record<`artifacts.${string}`, z.ZodType>;

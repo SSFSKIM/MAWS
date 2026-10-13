@@ -19,17 +19,34 @@ function harness(answer: CommandResult<'artifacts.get'>, posted = true) {
   };
   const dispatch = vi.fn(async () => answer);
   const postDocPort = vi.fn(() => posted);
+  const closeDocPorts = vi.fn(); // P3-A M5
   let next = 0;
   const deps: DocOpenDeps = {
     dispatch: dispatch as never,
     postDocPort: postDocPort as never,
+    closeDocPorts,
     channel: () => {
       next += 1;
       return { port1: port(`host-${next}`), port2: port(`window-${next}`) } as never;
     },
   };
-  const sender = { postMessage: vi.fn(), isDestroyed: () => false };
-  return { deps, dispatch, postDocPort, sender, ports };
+  const sender = fakeWindow(nextWindow++);
+  return { deps, dispatch, postDocPort, closeDocPorts, sender, ports };
+}
+
+// P3-A M5: a window's webContents as open.ts uses it, with the lifecycle events it listens to.
+let nextWindow = 1;
+function fakeWindow(id: number) {
+  const handlers = new Map<string, (() => void)[]>();
+  const add = (event: string, handler: () => void) => void handlers.set(event, [...(handlers.get(event) ?? []), handler]);
+  return {
+    id,
+    postMessage: vi.fn(),
+    isDestroyed: () => false,
+    on: vi.fn((event: string, handler: () => void) => add(event, handler)),
+    once: vi.fn((event: string, handler: () => void) => add(event, handler)),
+    fire: (event: string) => (handlers.get(event) ?? []).forEach((handler) => handler()),
+  };
 }
 
 describe('artifacts.open (main)', () => {
@@ -39,7 +56,7 @@ describe('artifacts.open (main)', () => {
     const second = await openDocument(h.deps, ID, h.sender as never);
     expect(first.channel).not.toBe(second.channel);
     expect(h.dispatch).toHaveBeenCalledWith('engine-host', 'artifacts.get', { artifactId: ID });
-    expect(h.postDocPort).toHaveBeenNthCalledWith(1, { t: 'doc', channel: first.channel, artifactId: ID, actor: { kind: 'human' } }, h.ports[0]);
+    expect(h.postDocPort).toHaveBeenNthCalledWith(1, { t: 'doc', channel: first.channel, artifactId: ID, actor: { kind: 'human' } }, h.ports[0], h.sender.id);
     expect(h.sender.postMessage).toHaveBeenNthCalledWith(1, DOC_PORT_CHANNEL, { channel: first.channel, artifactId: ID }, [h.ports[1]]);
     expect(h.ports.every((p) => !p.closed)).toBe(true);
   });
@@ -74,8 +91,24 @@ describe('artifacts.open (main)', () => {
 
   it('opens nothing for a window that went while the lookup was in flight', async () => {
     const h = harness({ ok: true, value: { artifact: row('document') as never } });
-    const gone = { postMessage: vi.fn(), isDestroyed: () => true };
+    const gone = { ...fakeWindow(99), isDestroyed: () => true };
     await expect(openDocument(h.deps, ID, gone as never)).rejects.toBeInstanceOf(CommandFailure);
     expect(h.postDocPort).not.toHaveBeenCalled();
+  });
+});
+
+// P3-A M5 (Decision Log 34b): a detached host's ports are relayed by main, which ends a window's channels when it closes
+// or reloads; open.ts names the window and watches it.
+describe('artifacts.open: the window’s channels (P3-A M5)', () => {
+  it('ends the window’s relayed channels when it closes or navigates, watching each window once', async () => {
+    const h = harness({ ok: true, value: { artifact: row('document') as never } });
+    await openDocument(h.deps, ID, h.sender as never);
+    await openDocument(h.deps, ID, h.sender as never);
+    expect(h.sender.once).toHaveBeenCalledTimes(1);
+    expect(h.sender.on).toHaveBeenCalledTimes(1);
+    h.sender.fire('did-navigate');
+    expect(h.closeDocPorts).toHaveBeenCalledWith(h.sender.id);
+    h.sender.fire('destroyed');
+    expect(h.closeDocPorts).toHaveBeenCalledTimes(2);
   });
 });

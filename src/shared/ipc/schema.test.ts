@@ -1703,6 +1703,23 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('spaces.changed', { spaceId: id, change: 'linked' }).ok).toBe(false);
     });
 
+    // P3-A M5: main's one hook for a reconcile read after events the renderer may have missed (Decision Log in M5)
+    it('announces a resync from main, outside the host wire, with nothing in it', () => {
+      expect(validateEventPayload('artifacts.resync', {}).ok).toBe(true);
+      expect(validateEventPayload('artifacts.resync', { artifactId: id }).ok).toBe(false);
+      expect([...NAMES.artifacts.events]).toContain('artifacts.resync');
+      expect(HOST_EVENTS).not.toContain('artifacts.resync');
+    });
+
+    // P3-A M5: a setAttr value is a JSON value, never `undefined`, so the detached JSON line cannot drop it
+    it('takes a JSON value for the test writer’s setAttr, and no undefined', () => {
+      for (const value of ['s', 1, true, null, [1, { a: 2 }], { nested: { deep: [null] } }]) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, JSON.stringify(value)).toBe(true);
+      }
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value: undefined }] }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k' }] }).ok).toBe(false);
+    });
+
     it('reads a store refusal back out of an IpcError, and nothing out of any other error', () => {
       const refusal = { reason: 'designSystemInUse', data: { artifactIds: [id] } };
       expect(artifactRefusalOf({ code: 'invalid_input', message: 'in use', issues: refusal })).toEqual(refusal);
