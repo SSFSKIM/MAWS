@@ -17,6 +17,8 @@ import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { openDocuments, type Documents } from '../documents';
 import { ArtifactStoreError } from '../documents/errors';
+import { artifactCreateTool, artifactDescribeTypeTool } from '../tool-server/artifact-tools';
+import { jsonOf, openWorld } from '../tool-server/artifact-world.fixture';
 import { registerDesignSystems, type DesignSystems } from '.';
 
 const HUMAN: Actor = { kind: 'human' };
@@ -139,6 +141,65 @@ describe('the default chain (Acceptance 12)', () => {
     expect(chain.house()).toBe(house);
     await store().delete(house);
     expect(chain.house()).toBe(copy.id);
+  });
+});
+
+// D's chain registered in A's store (X23, A's M7): what A's pin and A's tools ask the store, D's chain answers, with the
+// house link and a deleted default's fall-through that A's own chain lacks.
+describe('the chain registered in A’s store (X23; Acceptance 12)', () => {
+  const pinOf = async (artifactId: string) => {
+    await service().writeAs(artifactId, AGENT, (d) => d.get('root').setAttr('n', Math.random()));
+    const versionId = (await store().createVersion(artifactId, { kind: 'named', actor: HUMAN, label: 'v' }))!;
+    return store().listVersions(artifactId).find((v) => v.id === versionId)!.designSystemRef ?? null;
+  };
+
+  it('pins a document with no system of its own, and no defaults set, to the house system', async () => {
+    await systems.seeded;
+    const doc = await store().create({ kind: 'document', title: 'Note' }, AGENT);
+    expect(await pinOf(doc.id)).toEqual({ id: byKey(HOUSE_KEY), versionSeq: expect.any(Number) });
+  });
+
+  it('lets a deleted default fall through: a Space’s to the owner’s, the owner’s to the house system', async () => {
+    await systems.seeded;
+    const [house, classroom, official] = [byKey(HOUSE_KEY), byKey('classroom'), byKey('official')];
+    const space = (await store().createSpace({ name: 'Teaching' })).id;
+    await store().setDefaults({ owner: official, spaces: { [space]: classroom } });
+    const doc = await store().create({ kind: 'document', title: 'Lab notes', spaceId: space }, AGENT);
+    expect((await pinOf(doc.id))!.id).toBe(classroom);
+    await store().delete(classroom); // a default names it, no artifact does: the delete goes through
+    expect((await pinOf(doc.id))!.id).toBe(official);
+    await store().delete(official);
+    expect((await pinOf(doc.id))!.id).toBe(house);
+  });
+
+  it('attaches the governing system’s law to artifact_create and artifact_describe_type, down the chain', async () => {
+    const world = openWorld();
+    const mounted = registerDesignSystems({ documents: { storage: world.storage, service: world.service, store: world.store, close: () => {} }, log: () => {}, loadAssets: async () => [] });
+    try {
+      await mounted.seeded;
+      const keyed = (key: string) => world.store.list({ kind: 'design_system' }).find((s) => s.title === DEFAULT_SYSTEMS.find((d) => d.key === key)!.name)!.id;
+      const lawOf = (key: string) => DEFAULT_SYSTEMS.find((d) => d.key === key)!.files['DESIGN.md']!.trim();
+      const describeType = async () => jsonOf<{ designSystem?: string }>(await artifactDescribeTypeTool({ artifacts: () => world.store }).call({ kind: 'document' }, world.ctx())).designSystem;
+      const create = async (title: string) => jsonOf<{ designSystem?: string; artifactId: string }>(await artifactCreateTool(world.deps()).call({ kind: 'document', title }, world.ctx()));
+
+      // no defaults: the house system's law
+      expect(await describeType()).toContain(lawOf(HOUSE_KEY));
+      const first = await create('First');
+      expect(first.designSystem).toContain(lawOf(HOUSE_KEY));
+      expect(world.store.get(first.artifactId)!.designSystemId).toBeUndefined(); // governed by reference
+      // the owner's default
+      const classroom = keyed('classroom');
+      await world.store.setDefaults({ owner: classroom, spaces: {} });
+      expect(await describeType()).toContain(lawOf('classroom'));
+      expect((await create('Second')).designSystem).toContain(lawOf('classroom'));
+      // deleted, it falls through to the house system
+      await world.store.delete(classroom);
+      expect(await describeType()).toContain(lawOf(HOUSE_KEY));
+      expect((await create('Third')).designSystem).toContain(lawOf(HOUSE_KEY));
+    } finally {
+      mounted.close();
+      world.close();
+    }
   });
 });
 

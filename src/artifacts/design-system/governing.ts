@@ -11,11 +11,11 @@ export type DesignSystemRef = { id: string; versionSeq?: number };
  * down the chain, never an error. Without it every id is taken as live.
  */
 export function governingSystem(
-  a: { designSystemId?: string; spaceId?: string },
+  a: { designSystemId?: string | null; spaceId?: string | null },
   d: { owner: string | null; spaces: Record<string, string>; house: string | null },
   live: (id: string) => boolean = () => true,
 ): DesignSystemRef | { builtin: 'maws' } {
-  const space = a.spaceId !== undefined && Object.hasOwn(d.spaces, a.spaceId) ? d.spaces[a.spaceId] : undefined;
+  const space = a.spaceId != null && Object.hasOwn(d.spaces, a.spaceId) ? d.spaces[a.spaceId] : undefined;
   for (const id of [a.designSystemId, space, d.owner, d.house]) if (id && live(id)) return { id };
   return { builtin: 'maws' };
 }

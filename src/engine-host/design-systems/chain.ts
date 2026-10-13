@@ -2,17 +2,19 @@
 // an artifact the agent makes or asks about, from the defaults main relays (`artifacts.setDefaults`, persisted in the
 // store's meta) and the store's live systems. Own id, then the Space's default, then the owner's, then the house system
 // (the earliest-created live system whose origin key is `maws`), else the bundled floor; a deleted or missing id is
-// skipped down the chain, never an error. The order is `governingSystem`'s (governing.ts), the renderer's too.
+// skipped down the chain, never an error. The order is `governingSystem`'s (governing.ts), the renderer's too. Registered
+// in A's store (`registerDesignSystemChain`, X23), so A's pin and A's tools ask this chain: synchronous over the store's
+// committed state, as a version's frame needs.
 import { governingSystem, type DesignSystemRef } from '@artifacts/design-system/governing';
 import { readOrigin } from '@artifacts/design-system/model';
 import { HOUSE_KEY } from '@artifacts/types/design_system/defaults';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { DocumentService } from '../documents/service';
-import type { ArtifactStore } from '../documents/store';
+import type { ArtifactStore, DesignSystemChain as StoreChain } from '../documents/store';
 
 export type GoverningSystem = DesignSystemRef | { builtin: 'maws' };
 
-export class DesignSystemChain {
+export class DesignSystemChain implements StoreChain {
   constructor(
     private readonly store: ArtifactStore,
     private readonly service: DocumentService,
@@ -30,7 +32,7 @@ export class DesignSystemChain {
   }
 
   /** The system governing an artifact (or one about to be made) with these fields. */
-  governing(target: { designSystemId?: string; spaceId?: string }): GoverningSystem {
+  governing(target: { designSystemId?: string | null; spaceId?: string | null }): GoverningSystem {
     const { owner, spaces } = this.store.defaults();
     const live = (id: string) => this.live(id);
     const before = governingSystem(target, { owner, spaces, house: null }, live);
