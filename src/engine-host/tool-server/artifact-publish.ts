@@ -35,12 +35,18 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (!parsed.ok) return toolError(parsed.error);
       const input = parsed.data;
       const store = storeOf(TOOL, deps);
-      const artifactId = await resolveArtifact(TOOL, store, input.artifact, lineageOf(ctx, deps));
+      // a repeated call answers what the first one did, before the artifact or the session's base is looked at again
+      const replayed = await store.replayOf(opIdOf(ctx));
+      if (replayed.found) {
+        const recorded = replayed.result as ArtifactPublishResult;
+        return toolText(recorded.kind === 'html' ? await mirrored(store, mirror, recorded, input, ctx, false) : recorded);
+      }
+      const artifactId = await resolveArtifact(TOOL, deps, store, input.artifact, lineageOf(ctx, deps));
       const artifact = await store.readCommitted(() => store.get(artifactId));
       if (!artifact) throw refuse(TOOL, { reason: 'notFound', artifactId }, `the artifact ${input.artifact} was deleted`);
       if (artifact.kind === 'file') throw refuse(TOOL, { reason: 'invalid', kind: 'file' }, 'a file artifact is delivered again with send_file, not published');
       if (artifact.kind === 'document') throw refuse(TOOL, { reason: 'invalid', kind: 'document' }, 'a document is edited block by block, not published');
-      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx) : await publishPage(deps, store, mirror, artifact, input, ctx);
+      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx) : await mirrored(store, mirror, await publishPage(deps, store, artifact, input, ctx), input, ctx, true);
       return toolText(result);
     }),
   );
@@ -57,18 +63,16 @@ function conflict(conflicts: { path: string; detail?: string }[]): ToolRefusal {
   return refuse(TOOL, { reason: 'conflict', paths, conflicts }, `changed by someone else since your read: ${named}; read the artifact again, apply your change to what you read and publish again (force: true overwrites them)`);
 }
 
-async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, mirror: X12Mirror, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
+async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
   const actor = actorOf(ctx);
   const paths = Object.keys(input.files);
   const base = deps.session.byteBases.get(artifact.id);
-  let fresh = false;
   const recorded = await store.writeCommitted(() =>
     store.withOp(
       opIdOf(ctx),
       TOOL,
       artifact.id,
       async (op) => {
-        fresh = true;
         // checked and written in one turn of the event loop: the state checked is the state written over
         const live = store.contentRef(artifact.id);
         const names = new Set([PAGE, live.ref.name]);
@@ -101,20 +105,25 @@ async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, mirror:
       { actor },
     ),
   );
-  const result = { ...recorded };
-  if (result.changed.length === 0) return result;
-  const owner = await creatorOf(store, artifact.id);
-  if (owner === null) return result;
-  let version: number | null;
-  if (fresh) {
-    const { path } = await store.readCommitted(() => store.contentRef(artifact.id, result.revision));
+  return recorded;
+}
+
+// An html publish's answer with its X12 mirror's new version (Decision Log 4): written now after a fresh publish, found
+// by the call's tool-use id for a repeated one; nothing to add for a publish that changed nothing or a page without a
+// record.
+async function mirrored(store: ArtifactStore, mirror: X12Mirror, recorded: ArtifactPublishResult, input: ArtifactPublishInput, ctx: McpToolContext, fresh: boolean): Promise<ArtifactPublishResult> {
+  if (recorded.changed.length === 0) return recorded;
+  const owner = await creatorOf(store, recorded.artifactId);
+  const artifact = await store.readCommitted(() => store.get(recorded.artifactId, { includeDeleted: true }));
+  if (owner === null || !artifact) return recorded;
+  let version = await mirror.versionOf(artifact.id, owner, ctx.toolUseId); // a repeated call's, already written
+  if (version === null && fresh) {
+    const { path } = await store.readCommitted(() => store.contentRef(artifact.id, recorded.revision));
     version = await mirror.pageVersion(artifact.id, owner, artifact.title, path, ctx.toolUseId);
-  } else {
-    version = await mirror.versionOf(artifact.id, owner, ctx.toolUseId);
   }
-  if (version === null) return result;
+  if (version === null) return recorded;
   const text = input.files[Object.keys(input.files)[0]!] ?? '';
-  return { ...result, id: artifact.handle ?? artifact.id, deliverableId: artifact.id, version, externalReferences: externalReferenceCount(text), ...(owner !== ctx.appSessionId && { ownerAppSessionId: owner }) };
+  return { ...recorded, id: artifact.handle ?? artifact.id, deliverableId: artifact.id, version, externalReferences: externalReferenceCount(text), ...(owner !== ctx.appSessionId && { ownerAppSessionId: owner }) };
 }
 
 async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
@@ -144,7 +153,11 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
               if (published.conflicts.length > 0) outcome.conflicts = published.conflicts;
               else outcome.result = { status: 'published', artifactId: artifact.id, kind: artifact.kind, title: artifact.title, revision: 0, changed: published.changed, kept: [], removed: [] };
             } catch (error) {
-              outcome.failure = error; // the kind refused the files before writing any (KindAdapter.publish's contract)
+              // Only the kind's documented refusal of the files, made before it writes anything (`code: 'invalid'`, as
+              // `FilesError` and P3-D's `SystemFilesError`), is answered after the write; anything else escapes the write,
+              // whose savepoint then takes back whatever the publish had written.
+              if (!isFilesRefusal(error)) throw error;
+              outcome.failure = error;
             }
           },
           {
@@ -185,6 +198,8 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
   }
   return recorded;
 }
+
+const isFilesRefusal = (error: unknown): boolean => error instanceof Error && (error as { code?: unknown }).code === 'invalid' && typeof (error as { data?: unknown }).data === 'object';
 
 // The session that created the artifact (whose X12 record mirrors it), or null.
 async function creatorOf(store: ArtifactStore, artifactId: string): Promise<AppSessionId | null> {

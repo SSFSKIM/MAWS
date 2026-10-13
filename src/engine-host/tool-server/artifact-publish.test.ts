@@ -96,6 +96,21 @@ describe('artifact_publish of an html page', () => {
   });
 });
 
+describe('the turn version of an html page', () => {
+  it('turns the auto version of the session’s last write into the turn’s checkpoint; a turn that only created keeps its import', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' });
+    await w.store.endTurn(SELF);
+    expect(w.store.listVersions(created.artifactId).map((v) => v.kind)).toEqual(['import']);
+    await publish({ artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>v2</p>' } });
+    await w.store.endTurn(SELF);
+    const versions = w.store.listVersions(created.artifactId);
+    expect(versions.map((v) => v.kind)).toEqual(['import', 'turn']);
+    expect(versions[1]).toMatchObject({ actor: { kind: 'session', appSessionId: SELF }, summary: '1 edit' });
+    await w.store.endTurn(SELF); // nothing written since: nothing more
+    expect(w.store.listVersions(created.artifactId)).toHaveLength(2);
+  });
+});
+
 describe('artifact_publish of a file kind (the generic file model)', () => {
   const design = () => create({ kind: 'design', title: 'Site', files: { 'a.html': 'A', 'b.css': 'B' } });
 
@@ -172,6 +187,20 @@ describe('artifact_publish of a file kind (the generic file model)', () => {
     expect(answer).toMatchObject({ changed: ['view.json'], kept: [] });
     expect(calls[0]).toEqual({ base: { 'view.json': '{}' }, sent: { 'view.json': '{"a":1}' }, force: false });
     expect(await read(created.artifactId)).toMatchObject({ files: { 'view.json': '{"a":1}' } });
+  });
+
+  it('lets an unexpected adapter exception escape the write: nothing it wrote before throwing is committed', async () => {
+    w.store.registerAdapter({ kind: 'design', publish: (doc) => {
+      doc.get('files').setAttr('a.html', 'partial');
+      throw new Error('adapter broke');
+    } });
+    const created = await create({ kind: 'design', title: 'Design' });
+    const outcome = await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { 'a.html': 'sent' } }).catch((error: unknown) => error);
+    expect(String(outcome instanceof Error ? outcome.message : textOf(outcome as never))).toContain('adapter broke');
+    w.service.commitNow();
+    expect(w.store.revision(created.artifactId)).toBe(created.revision);
+    expect(liveFiles(created.artifactId)).toEqual({});
+    expect(w.store.listVersions(created.artifactId)).toEqual([]);
   });
 
   it('shows the session’s presence on the artifact and writes one turn version at the turn’s end', async () => {

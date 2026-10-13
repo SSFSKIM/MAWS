@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { KIND_GUIDES } from '@artifacts/types/guides';
@@ -103,6 +103,48 @@ describe('artifact_create', () => {
     // the same tool-use id in another session is another call
     const other = jsonOf(await create({ content: '<p>once</p>', title: 'Once' }, { toolUseId: 'toolu_same' as ToolUseId, appSessionId: 'app-other' as AppSessionId }));
     expect(other.artifactId).not.toBe(first.artifactId);
+  });
+
+  it('answers a repeated call from its ledger before any precondition: a named create, its guide and X12 fields as first answered', async () => {
+    const ctx = w.ctx({ toolUseId: 'toolu_named' as ToolUseId });
+    const first = await artifactCreateTool(w.deps()).call({ handle: 'named', content: '<p>one</p>', title: 'Named' }, ctx);
+    expect(ArtifactCreateResultSchema.parse(jsonOf(first)).guide).toEqual(KIND_GUIDES.html);
+    const again = await artifactCreateTool(w.deps()).call({ handle: 'named', content: '<p>one</p>', title: 'Named' }, ctx);
+    expect(again).toEqual(first); // not "already exists", and the guide still there
+    expect(rows('SELECT id FROM artifacts')).toHaveLength(1);
+    writeFileSync(join(w.cwd, 'gone.html'), '<p>x</p>');
+    const fromFile = w.ctx({ toolUseId: 'toolu_file' as ToolUseId });
+    const created = await create({ path: 'gone.html', title: 'Gone' }, fromFile);
+    rmSync(join(w.cwd, 'gone.html'));
+    expect(await artifactCreateTool(w.deps()).call({ path: 'gone.html', title: 'Gone' }, fromFile)).toEqual(created);
+  });
+
+  it('is atomic for a Y kind with files: an entity whose first content fails to land leaves nothing', async () => {
+    let calls = 0;
+    w.store.registerAdapter({ kind: 'design', publish: (live) => {
+      if (++calls === 2) throw new Error('the write broke'); // the dry run passes, the write itself fails
+      live.get('files').setAttr('a.css', 'x');
+      return { changed: ['a.css'], conflicts: [] };
+    } });
+    const result = await create({ kind: 'design', title: 'Broken', files: { 'a.css': 'x' } }).catch((error: unknown) => error);
+    expect(result instanceof Error || (result as { isError?: boolean }).isError).toBeTruthy();
+    expect(rows('SELECT id FROM artifacts')).toEqual([]);
+    expect(rows('SELECT seq FROM artifact_updates')).toEqual([]);
+  });
+
+  it('reads the governing design system behind the read barrier: no answer reveals a batch still open', async () => {
+    const system = await w.store.create({ kind: 'design_system', title: 'Brand' }, HUMAN);
+    w.store.registerDesignSystemContext(async (s) => `LAW:${s.title}`);
+    const original = w.store.designSystemContextFor.bind(w.store);
+    let pending: Promise<void> | null = null;
+    w.store.designSystemContextFor = (target) => {
+      pending = w.store.setDefaults({ owner: system.id, spaces: {} }); // the owner's default lands in a batch still open
+      return original(target);
+    };
+    const answer = jsonOf(await create({ kind: 'presentation', title: 'Deck' }));
+    expect(w.storage.batchOpen).toBe(false);
+    expect(answer.designSystem).toBe('LAW:Brand');
+    await pending;
   });
 
   it('attaches the governing design system’s guide to a document, presentation or design through D’s provider', async () => {
@@ -216,6 +258,15 @@ describe('artifact_upload_asset and artifact_list_assets', () => {
     const listed = ArtifactListAssetsResultSchema.parse(jsonOf(await artifactListAssetsTool(w.deps()).call({ artifact: design.artifactId }, w.ctx())));
     expect(listed.assets).toEqual([expect.objectContaining({ assetId: answer.assetId, ref: 'assets/logo.png', mime: 'image/png', size: 4 })]);
     expect(w.store.links(design.artifactId as string).map((l) => l.role).sort()).toEqual(['created', 'edited']);
+  });
+
+  it('answers a repeated upload from its ledger even after its source file is gone', async () => {
+    const design = jsonOf(await create({ kind: 'design', title: 'Site' }));
+    writeFileSync(join(w.cwd, 'logo.png'), 'png');
+    const ctx = w.ctx({ toolUseId: 'toolu_up' as ToolUseId });
+    const first = await artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path: 'logo.png' }, ctx);
+    rmSync(join(w.cwd, 'logo.png'));
+    expect(await artifactUploadAssetTool(w.deps()).call({ artifact: design.artifactId, path: 'logo.png' }, ctx)).toEqual(first);
   });
 
   it('refuses a path outside the working directory and a missing file', async () => {

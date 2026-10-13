@@ -30,33 +30,47 @@ export function sendFileTool(deps: SendFileDeps): McpToolDefinition {
     const parsed = parseToolArguments('send_file', args);
     if (!parsed.ok) return toolError(parsed.error);
     const { files, caption } = parsed.data; // `urgency` is the row's (its event carries it), not the record's
+    const store = deps.artifacts?.() ?? null;
+    // a repeated call answers what the first one did, before its files are looked at again (their records written if
+    // the first call never got that far)
+    const replayed = store ? await store.replayOf(opIdOf(ctx)) : ({ found: false } as const);
+    if (replayed.found) {
+      const answer = replayed.result as SendFileResult;
+      await mirrorMissing(deps, mirror, answer, ctx, caption);
+      return toolText(answer);
+    }
     const paths = files.map((file) => resolve(ctx.cwd, file));
     for (const path of paths) {
       const found = await stat(path).catch(() => null);
       if (!found?.isFile()) return toolError(TOOL_ERRORS.notAFile(path));
     }
-    const store = deps.artifacts?.() ?? null;
     if (store === null) return recordsAlone(deps, paths, caption, ctx);
-    let fresh = false;
     const result = await store.writeCommitted(() =>
       store.withOp(opIdOf(ctx), 'send_file', null, async (op) => {
-        fresh = true;
-        // every create's rows join the one open batch (each validates and writes synchronously), the answer recorded in
-        // the last one's savepoint, so the delivery commits whole or not at all
-        const answer: SendFileResult = { status: 'delivered', deliverables: [] };
-        const creating = paths.map((path, index) =>
-          store.create({ kind: 'file', title: basename(path), content: { path } }, actorOf(ctx), (artifact) => {
-            answer.deliverables.push({ id: artifact.id, path, name: basename(path) });
-            if (index === paths.length - 1) op.record(answer);
-          }),
+        // one savepoint for the whole delivery: every artifact, its content and link, and the op row (createAll), so it
+        // commits whole or not at all and a retry never duplicates a file
+        let answer: SendFileResult | undefined;
+        await store.createAll(
+          paths.map((path) => ({ kind: 'file', title: basename(path), content: { path } })),
+          actorOf(ctx),
+          (artifacts) => {
+            answer = { status: 'delivered', deliverables: artifacts.map((artifact, index) => ({ id: artifact.id, path: paths[index]!, name: basename(paths[index]!) })) };
+            op.record(answer);
+          },
         );
-        await Promise.all(creating);
-        return answer;
+        return answer!;
       }),
     );
-    if (fresh) await mirror.files(result.deliverables.map((file) => ({ id: file.id, path: file.path, title: file.name })), ctx.appSessionId, caption, ctx.toolUseId);
+    await mirrorMissing(deps, mirror, result, ctx, caption);
     return toolText(result);
   });
+}
+
+// The delivered files' X12 records (Decision Log 4), each written unless it is there already.
+async function mirrorMissing(deps: SendFileDeps, mirror: X12Mirror, answer: SendFileResult, ctx: McpToolContext, caption: string | undefined): Promise<void> {
+  const missing = [];
+  for (const file of answer.deliverables) if (!(await deps.deliverables.get(ctx.appSessionId, file.id).catch(() => null))) missing.push({ id: file.id, path: file.path, title: file.name });
+  if (missing.length > 0) await mirror.files(missing, ctx.appSessionId, caption, ctx.toolUseId);
 }
 
 // E1's delivery, for a run whose artifact store did not open: one X12 record per file.

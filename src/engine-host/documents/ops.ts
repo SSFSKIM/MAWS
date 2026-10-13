@@ -35,6 +35,18 @@ export class OpLedger {
     return row ? { found: true, result: JSON.parse(row.result) as unknown } : { found: false };
   }
 
+  // The answer of an op still running, waited for (an original that fails answers nothing, so its retry runs);
+  // `found: false` when none runs (the stored row is the caller's to read, behind its read barrier).
+  async replayRunning(opId: string): Promise<{ found: true; result: unknown } | { found: false }> {
+    const running = this.running.get(opId);
+    if (!running) return { found: false };
+    try {
+      return { found: true, result: await running };
+    } catch {
+      return { found: false };
+    }
+  }
+
   // Runs `run` once per `opId` (every time without one: nothing to record, but the recording rule still holds); `fresh`
   // is false for an answer that was stored or already running.
   async once<R>(opId: string | null, tool: string, artifactId: string | null, run: (scope: OpScope) => Promise<R>, readOnly: boolean): Promise<{ result: R; fresh: boolean }> {

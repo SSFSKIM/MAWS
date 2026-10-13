@@ -7,17 +7,18 @@
 // `readCommitted` or built in the write's `inFrame`. A refusal computed from store state (a stale base, a conflict, a
 // missing artifact) is held the same way, so no answer names rows a failed batch takes back.
 import { readFile, stat } from 'node:fs/promises';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { basename, isAbsolute, relative, resolve } from 'node:path';
 import { publishFiles, readFiles } from '@artifacts/files';
 import type { KindAdapter } from '@artifacts/host';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { DeliverableRecord } from '@shared/maws/deliverable';
 import { ARTIFACT_MAX_BYTES, TOOL_ERRORS, type ArtifactEditor, type ArtifactRefusal, type ArtifactToolName } from '@shared/maws/tools';
 import type { DeliverableWriter } from '../deliverables/store';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
-import type { ArtifactStore } from '../documents/store';
+import type { ArtifactStore, ImportInput } from '../documents/store';
 import type { McpToolContext, McpToolResult } from './server';
 import { toolError } from './server';
 
@@ -66,14 +67,65 @@ export function storeOf(tool: ArtifactToolName, deps: Pick<ArtifactToolDeps, 'ar
   return store;
 }
 
-// The artifact a ref names (its id, or a handle in the lineage), answered once the batch it was read in committed.
-export async function resolveArtifact(tool: ArtifactToolName, store: ArtifactStore, ref: string, lineage: readonly string[]): Promise<string> {
-  return store.readCommitted(() => {
-    const id = store.resolve(ref, lineage);
-    if (id === null) throw new ToolRefusal(TOOL_ERRORS.noArtifact(tool, ref));
-    return id;
-  });
+// The artifact a ref names (its id, or a handle in the lineage), answered once the batch it was read in committed. A
+// ref the store lacks but an X12 record in the lineage answers to (a page or file delivered before the store) is
+// imported first (Decision Log 40a), then named.
+export async function resolveArtifact(tool: ArtifactToolName, deps: Pick<ArtifactToolDeps, 'deliverables' | 'log'>, store: ArtifactStore, ref: string, lineage: readonly AppSessionId[]): Promise<string> {
+  const found = await store.readCommitted(() => store.resolve(ref, lineage));
+  if (found !== null) return found;
+  const record = await x12RecordOf(deps.deliverables, ref, lineage);
+  if (record && (await importRecord(deps, store, record))) {
+    const imported = await store.readCommitted(() => store.resolve(ref, lineage) ?? store.resolve(record.id));
+    if (imported !== null) return imported;
+  }
+  throw new ToolRefusal(TOOL_ERRORS.noArtifact(tool, ref));
 }
+
+// The nearest X12 page or file record the ref names in the lineage: by its id, or an artifact record by its name.
+async function x12RecordOf(deliverables: DeliverableWriter, ref: string, lineage: readonly AppSessionId[]): Promise<DeliverableRecord | null> {
+  for (const session of lineage) {
+    const record = UUID.test(ref) ? await deliverables.get(session, ref).catch(() => null) : await deliverables.findArtifact(session, ref).catch(() => null);
+    if (record && (record.kind === 'artifact' || record.kind === 'file')) return record;
+  }
+  return null;
+}
+
+// An X12 record imported as P3-L's cutover walker imports it (Decision Log 35f, 40a): its id, title, times, versions in
+// order credited to its session, and its session's `created` link; a page's handle, dropped when its session already
+// holds it in the store. Answers whether the artifact is there now (imported, or already present); a record that cannot
+// be imported (a version gone from disk) is logged and answers false.
+async function importRecord(deps: Pick<ArtifactToolDeps, 'log'>, store: ArtifactStore, record: DeliverableRecord): Promise<boolean> {
+  const kind = record.kind === 'artifact' ? 'html' : 'file';
+  const actor: Actor = { kind: 'session', appSessionId: record.appSessionId };
+  const createdAt = Date.parse(record.createdAt);
+  const updatedAt = Date.parse(record.updatedAt ?? record.createdAt);
+  try {
+    const versions = await Promise.all(
+      record.versions.map(async (version) => ({
+        at: Date.parse(version.at),
+        actor,
+        content: kind === 'html' ? { bytes: await readFile(version.path), name: version.sourcePath ? basename(version.sourcePath) : 'index.html' } : { path: version.path },
+      })),
+    );
+    const input: ImportInput = {
+      id: record.id, kind, title: record.title ?? record.artifactId ?? basename(record.path), createdAt, updatedAt, createdBy: actor,
+      ...(kind === 'html' && record.artifactId !== undefined && { handle: record.artifactId }),
+      versions, links: [{ appSessionId: record.appSessionId, role: 'created', lastAt: updatedAt }],
+    };
+    try {
+      await store.writeCommitted(() => store.importArtifact(input));
+    } catch (error) {
+      if (!(error instanceof ArtifactStoreError && error.code === 'handleTaken')) throw error;
+      await store.writeCommitted(() => store.importArtifact({ ...input, handle: undefined }));
+    }
+    return true;
+  } catch (error) {
+    deps.log?.(`the X12 record ${record.id} of ${record.appSessionId} was not imported: ${messageOf(error)}`);
+    return false;
+  }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // A refusal computed from what the store holds now, released once the batch open now has committed (and replaced by
 // that batch's failure).

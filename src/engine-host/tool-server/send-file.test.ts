@@ -48,6 +48,43 @@ describe('send_file over the artifact store', () => {
   });
 });
 
+describe('send_file over the artifact store: replays and failures', () => {
+  let w: World;
+  beforeEach(() => {
+    w = openWorld();
+    writeFileSync(join(w.cwd, 'one.txt'), 'one');
+    writeFileSync(join(w.cwd, 'two.txt'), 'two');
+  });
+  afterEach(() => w.close());
+
+  it('answers a repeated delivery from its ledger even after a file is gone', async () => {
+    const ctx = w.ctx({ toolUseId: 'toolu_twice' as ToolUseId });
+    const first = await sendFileTool(w.deps()).call({ files: ['one.txt'] }, ctx);
+    rmSync(join(w.cwd, 'one.txt'));
+    expect(await sendFileTool(w.deps()).call({ files: ['one.txt'] }, ctx)).toEqual(first);
+  });
+
+  it('a delivery whose second file fails leaves no artifact and no op, and its retry delivers each file once', async () => {
+    const original = w.store.create.bind(w.store);
+    const createAll = w.store.createAll?.bind(w.store);
+    const vanish = (titles: string[]) => {
+      if (titles.includes('two.txt')) rmSync(join(w.cwd, 'two.txt'));
+    };
+    w.store.create = ((input, ...rest) => (vanish([input.title]), original(input, ...rest))) as typeof w.store.create;
+    if (createAll) w.store.createAll = ((inputs, ...rest) => (vanish(inputs.map((i) => i.title)), createAll(inputs, ...rest))) as typeof w.store.createAll;
+    const ctx = w.ctx({ toolUseId: 'toolu_fail' as ToolUseId });
+    const failed = await sendFileTool(w.deps()).call({ files: ['one.txt', 'two.txt'] }, ctx).catch((error: unknown) => error);
+    expect(failed instanceof Error || (failed as { isError?: boolean }).isError).toBeTruthy();
+    w.service.commitNow();
+    expect(w.store.list({ kind: 'file' })).toEqual([]);
+    w.store.create = original;
+    if (createAll) w.store.createAll = createAll;
+    writeFileSync(join(w.cwd, 'two.txt'), 'two');
+    jsonOf(await sendFileTool(w.deps()).call({ files: ['one.txt', 'two.txt'] }, ctx));
+    expect(w.store.list({ kind: 'file' }).map((a) => a.title).sort()).toEqual(['one.txt', 'two.txt']);
+  });
+});
+
 describe('send_file without the artifact store (G2, host half)', () => {
   it('records each file in place and answers the deliverable ids', async () => {
     n = 0;

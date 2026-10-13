@@ -22,6 +22,7 @@ import {
   type ListedArtifact,
   type VersionSummary,
 } from '@shared/maws/tools';
+import type { Doc } from '@artifacts/yjs';
 import type { ArtifactStore, ByteContent } from '../documents/store';
 import {
   actorOf,
@@ -95,6 +96,14 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
       const path = input.path ?? input.html_path;
       const store = storeOf('artifact_create', deps);
       const actor = actorOf(ctx);
+      // a repeated call answers what the first one did, before anything that may have moved since is checked
+      const replayed = await store.replayOf(opIdOf(ctx));
+      if (replayed.found) {
+        const answer = replayed.result as ArtifactCreateResult;
+        deps.session.guided.add(answer.kind);
+        await ensureMirrored(store, deps, mirror, answer, ctx);
+        return toolText(answer);
+      }
 
       // What the artifact starts from, read and checked before anything is written
       let content: ByteContent | undefined;
@@ -119,13 +128,20 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
         withDoc(null, (scratch) => publisherOf(store, kind)(scratch, {}, input.files!, false));
       }
 
-      // E2 and P2-E1: a handle the session, or a session it was opened from, already holds is refused
+      // E2 and P2-E1: a handle the session, or a session it was opened from, already holds is refused (in the store, or
+      // on an X12 record not yet imported, Decision Log 40a)
       if (handle !== undefined) {
-        const taken = await store.readCommitted(() => (store.resolve(handle, [ctx.appSessionId]) ? 'self' : deps.artifactScope?.length && store.resolve(handle, deps.artifactScope) ? 'above' : null));
+        const taken = await handleHolder(store, deps, handle, ctx);
         if (taken === 'self') return toolError(TOOL_ERRORS.artifactExists(handle));
         if (taken === 'above') return toolError(TOOL_ERRORS.artifactExistsInParent(handle));
       }
 
+      // The first answer's decorations, settled before the write so the recorded answer is the whole first answer: the
+      // kind's guide when this session has not had it, the governing design system's guide (Decision Log 22d; a new
+      // artifact has no system or Space of its own, so the owner's default governs)
+      const guide = deps.session.guided.has(kind) ? undefined : KIND_GUIDES[kind];
+      const designSystem = DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor({}) : null;
+      const files = isDocKind(kind) ? input.files : undefined;
       let base: { revision: number; state: Uint8Array } | null = null;
       let fresh = false; // the call ran here, not answered from the ledger
       const recorded = await store.writeCommitted(() =>
@@ -135,55 +151,60 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
           null,
           async (op) => {
             fresh = true;
-            const made: { artifact?: Artifact; answer?: ArtifactCreateResult } = {};
-            // the answer, built and recorded inside the savepoint of the write that completes the create
-            const complete = (artifact: Artifact, revision: number) => {
-              made.answer = { status: 'created', artifactId: artifact.id, kind, title: artifact.title, revision, ...(handle !== undefined && { handle }) };
+            let answer: ArtifactCreateResult | undefined;
+            // the answer, built and recorded inside the savepoint of the write that completes the create (with the first
+            // files when there are any: Decision Log 40b)
+            const complete = (artifact: Artifact) => {
+              const revision = store.revision(artifact.id);
+              answer = {
+                status: 'created', artifactId: artifact.id, kind, title: artifact.title, revision, ...(handle !== undefined && { handle }),
+                ...(page !== null && { id: handle ?? artifact.id, deliverableId: artifact.id, version: 1 as const, externalReferences: externalReferenceCount(page.bytes.toString('utf8')) }),
+                ...(guide && { guide }), ...(designSystem !== null && { designSystem }),
+              };
               if (isDocKind(kind)) base = { revision, state: store.service.readState(artifact.id).state };
-              op.record(made.answer);
+              op.record(answer);
             };
-            const files = isDocKind(kind) ? input.files : undefined;
-            const creating = store.create({ kind, title: input.title, ...(handle !== undefined && { handle }), ...(content && { content }) }, actor, (artifact) => {
-              made.artifact = artifact;
-              if (!files) complete(artifact, store.revision(artifact.id));
-            });
-            // a Y kind's first files: written through the session's host replica in the batch that holds the entity row
-            const { artifact } = made;
-            const writing = files && artifact ? store.service.writeAs(artifact.id, actor, (doc) => void publisherOf(store, kind)(doc, {}, files, false), { inFrame: (revision) => complete(artifact, revision) }) : null;
-            await Promise.all([creating, writing]); // one batch: a failure of either is the call's
-            return made.answer!;
+            await store.create(
+              { kind, title: input.title, ...(handle !== undefined && { handle }), ...(content && { content }), ...(files && { initial: (doc: Doc) => void publisherOf(store, kind)(doc, {}, files, false) }) },
+              actor,
+              complete,
+            );
+            return answer!;
           },
           { actor },
         ),
       );
-      const result = { ...recorded };
+      deps.session.guided.add(kind);
       // the session's base: what it just wrote (a replayed call leaves none for a Y kind: the agent reads first)
-      if (base) store.service.replica(ctx.appSessionId, result.artifactId).base = base;
-      if (page !== null) {
-        const sha256 = createHash('sha256').update(page.bytes).digest('hex');
-        deps.session.byteBases.set(result.artifactId, { revision: result.revision, sha256 });
-        const version = fresh ? await mirrorPage(store, mirror, result, ctx.appSessionId, page.sourcePath, ctx.toolUseId) : await mirror.versionOf(result.artifactId, ctx.appSessionId, ctx.toolUseId);
-        if (version !== null) Object.assign(result, { id: handle ?? result.artifactId, deliverableId: result.artifactId, version, externalReferences: externalReferenceCount(page.bytes.toString('utf8')) });
-      } else if (kind === 'file' && fresh && content && 'path' in content) {
-        await mirror.files([{ id: result.artifactId, path: content.path, title: result.title }], ctx.appSessionId, undefined, ctx.toolUseId);
-      }
-      if (!deps.session.guided.has(kind)) {
-        deps.session.guided.add(kind);
-        result.guide = KIND_GUIDES[kind];
-      }
-      if (DESIGN_CONTEXT_KINDS.includes(kind)) {
-        const system = await store.designSystemContextFor(result.artifactId);
-        if (system !== null) result.designSystem = system;
-      }
-      return toolText(result);
+      if (base) store.service.replica(ctx.appSessionId, recorded.artifactId).base = base;
+      if (page !== null) deps.session.byteBases.set(recorded.artifactId, { revision: recorded.revision, sha256: createHash('sha256').update(page.bytes).digest('hex') });
+      if (fresh) await ensureMirrored(store, deps, mirror, recorded, ctx, page?.sourcePath);
+      return toolText(recorded);
     }),
   );
 }
 
-// The page's X12 record, its copy the store's own content file.
-async function mirrorPage(store: ArtifactStore, mirror: X12Mirror, created: ArtifactCreateResult, owner: AppSessionId, sourcePath: string | undefined, toolUseId: McpToolContext['toolUseId']): Promise<number | null> {
+// Who already holds a handle a create names: this session, a session above it, in the store or on an X12 record.
+async function handleHolder(store: ArtifactStore, deps: ArtifactToolDeps, handle: string, ctx: McpToolContext): Promise<'self' | 'above' | null> {
+  const above = deps.artifactScope ?? [];
+  const inStore = await store.readCommitted(() => (store.resolve(handle, [ctx.appSessionId]) ? 'self' : above.length > 0 && store.resolve(handle, above) ? 'above' : null));
+  if (inStore) return inStore;
+  if (await deps.deliverables.findArtifact(ctx.appSessionId, handle)) return 'self';
+  for (const session of above) if (await deps.deliverables.findArtifact(session, handle)) return 'above';
+  return null;
+}
+
+// A created `html` or `file` artifact's X12 record (Decision Log 4), written when it is not there yet: after the first
+// call's commit, or by its retry when the first never got that far. Its copy is the store's own content file.
+async function ensureMirrored(store: ArtifactStore, deps: ArtifactToolDeps, mirror: X12Mirror, created: ArtifactCreateResult, ctx: McpToolContext, sourcePath?: string): Promise<void> {
+  if (created.kind !== 'html' && created.kind !== 'file') return;
+  if (await deps.deliverables.get(ctx.appSessionId, created.artifactId).catch(() => null)) return;
   const { path } = await store.readCommitted(() => store.contentRef(created.artifactId, created.revision));
-  return mirror.page({ id: created.artifactId, title: created.title, ...(created.handle !== undefined && { handle: created.handle }) }, owner, { path, ...(sourcePath !== undefined && { sourcePath }) }, toolUseId);
+  if (created.kind === 'html') {
+    await mirror.page({ id: created.artifactId, title: created.title, ...(created.handle !== undefined && { handle: created.handle }) }, ctx.appSessionId, { path, ...(sourcePath !== undefined && { sourcePath }) }, ctx.toolUseId);
+  } else {
+    await mirror.files([{ id: created.artifactId, path, title: created.title }], ctx.appSessionId, undefined, ctx.toolUseId);
+  }
 }
 
 export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
@@ -193,7 +214,7 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (!parsed.ok) return toolError(parsed.error);
       const input = parsed.data;
       const store = storeOf('artifact_read', deps);
-      const artifactId = await resolveArtifact('artifact_read', store, input.artifact, lineageOf(ctx, deps));
+      const artifactId = await resolveArtifact('artifact_read', deps, store, input.artifact, lineageOf(ctx, deps));
       const read = await store.readCommitted(() => {
         const artifact = store.get(artifactId);
         if (!artifact) throw new ToolRefusal(TOOL_ERRORS.noArtifact('artifact_read', input.artifact));

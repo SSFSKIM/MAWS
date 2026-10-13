@@ -28,14 +28,14 @@ export type CaptureBridge = HostBridge<ArtifactCaptureRequest, MawsArtifactCaptu
 const WITHDRAWN = 'artifact_screenshot: the request was withdrawn';
 const ENDED = 'artifact_screenshot: the session ended';
 
-export function artifactScreenshotTool(deps: Pick<ArtifactToolDeps, 'artifacts' | 'deliverables' | 'artifactScope'> & { capture: CaptureBridge }): McpToolDefinition {
+export function artifactScreenshotTool(deps: Pick<ArtifactToolDeps, 'artifacts' | 'deliverables' | 'artifactScope' | 'log'> & { capture: CaptureBridge }): McpToolDefinition {
   return defineMawsTool('artifact_screenshot', (args, ctx) =>
     answering('artifact_screenshot', async () => {
       const parsed = parseToolArguments('artifact_screenshot', args);
       if (!parsed.ok) return toolError(parsed.error);
       const { id: ref } = parsed.data;
       const store = storeOf('artifact_screenshot', deps);
-      const artifactId = await resolveArtifact('artifact_screenshot', store, ref, lineageOf(ctx, deps));
+      const artifactId = await resolveArtifact('artifact_screenshot', deps, store, ref, lineageOf(ctx, deps));
       const creator = await store.readCommitted(() => store.links(artifactId).find((link) => link.role === 'created')?.appSessionId as AppSessionId | undefined);
       const record = creator === undefined ? null : await deps.deliverables.get(creator, artifactId);
       if (record === null || record.kind !== 'artifact') return toolError(TOOL_ERRORS.noArtifact('artifact_screenshot', ref));
