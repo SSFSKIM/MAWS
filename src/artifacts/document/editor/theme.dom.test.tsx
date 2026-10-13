@@ -4,6 +4,7 @@
 // system's value, once defined, wins over it.
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { AUTHOR_COLORS } from '@shared/artifacts/actor';
 import tokensCss from '../../../renderer/src/styles/tokens.css?raw';
 import chromeCss from './chrome.css?raw';
 import { DocumentEditor } from './DocumentEditor';
@@ -56,6 +57,16 @@ describe('the stylesheets', () => {
       if (COLOUR_PROPERTIES.test(property) && value.includes('var(') && !value.includes('--shiki-dark')) {
         for (const [, token] of value.replace(/var\(--ds-[a-z0-9-]+\s*,[^)]*\)\)?/g, '').matchAll(/var\((--[a-z0-9-]+)/g)) expect.fail(`${where}: reads ${token} outside a --ds-* fallback`);
       }
+    }
+  });
+});
+
+describe('the author colours', () => {
+  it('are app tokens defined for both themes, one per AUTHOR_COLORS entry', () => {
+    const [light, dark] = tokensCss.split('[data-theme="dark"]');
+    for (const color of AUTHOR_COLORS) {
+      expect(light).toMatch(new RegExp(`${color}:\\s*[^;]+;`));
+      expect(dark).toMatch(new RegExp(`${color}:\\s*[^;]+;`));
     }
   });
 });
