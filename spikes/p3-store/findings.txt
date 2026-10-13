@@ -425,7 +425,10 @@ provenance from v14 attributions.
 
 ### Questions (S6; the architect's answers of 2026-10-12 in brackets)
 1. Tables: row ids, positional cells [accepted]. 2. Refusals at property level, naming element and property [accepted].
-3. Unknown inline tags hold the slide [accepted]. 4. Repairs by the host only [accepted]. 5. A7 above [new].
+3. Unknown inline tags hold the slide [accepted]. 4. Repairs by the host only [accepted]. 5. A7 above [accepted 2026-10-12, spec
+Decision Log 28; the two single-copy constraints on the ledger's X24 row: A owns the pnpm overrides for `@y/y` and
+prosemirror-model 1.25.12 with a check that one copy of each resolves; B and C import the binding only from
+`src/artifacts/yjs/`].
 
 ## S3 — History on the real editor and artifact-wide restore
 
