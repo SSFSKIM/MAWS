@@ -60,7 +60,7 @@ function withThreads(...threads: SessionRecord[]) {
 }
 
 function ctx(over: Partial<PanelToolContext> = {}): PanelToolContext {
-  return { appSessionId: A, session: record(A), status: null, pinned: false, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool, ...over };
+  return { appSessionId: A, session: record(A), status: null, pinned: false, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool, editorHost: { surface: 'panel', tabId: 'side:test' }, ...over };
 }
 
 function mount(over: Partial<PanelToolContext> = {}) {

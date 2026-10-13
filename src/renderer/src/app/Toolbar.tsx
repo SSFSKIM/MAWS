@@ -52,6 +52,8 @@ export function toolbarTitle(
       return { title: 'Diagnostics', branch: null };
     case 'settings':
       return { title: 'Settings', branch: null };
+    case 'artifacts': // P3-G
+      return { title: 'Artifacts', branch: null };
     case 'deliverable': // E2
       return { title: deliverableTitle ?? DELIVERABLES_COPY.fallbackTitle, branch: null };
     case 'browser': // E4a

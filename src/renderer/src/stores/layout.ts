@@ -15,6 +15,7 @@ import {
   PanelSessionStateSchema,
   StoredMainSchema,
   StoredRegionsSchema,
+  type FloatingCardSize,
   type LayoutKey,
   type LayoutMain,
   type LayoutRegions,
@@ -76,7 +77,15 @@ export interface LayoutState {
   // A patch, or an updater for a change that depends on the sidebar it lands on (an early one is replayed over the
   // hydrated value, not the default it was made against).
   setSidebar(patch: Partial<LayoutRegions['sidebar']> | ((sidebar: LayoutRegions['sidebar']) => Partial<LayoutRegions['sidebar']>)): void;
+  // P3-G (§D1.1): every writer of the panel's state comes here, which keeps `floating` and `maximized` exclusive and both
+  // off while collapsed (`panelAfter`).
   setPanel(patch: Partial<LayoutRegions['panel']>): void;
+  // P3-G (§D1.2): brings the main area back, a maximized or floating panel docking (the Overview opening over main,
+  // attention navigation showing a session's pane).
+  revealMain(): void;
+  // P3-G (§D1.5): the floating card's size over a panel tab (its id, or 'summary'); entries of tabs in no panel list are
+  // dropped and at most FLOATING_CARD_SIZES_MAX kept, the oldest first out.
+  setFloatingCardSize(key: string, size: FloatingCardSize): void;
   setOverviewOpen(open: boolean): void;
   setOverviewRect(rect: LayoutRegions['overview']): void;
   setPanelTabPinned(appSessionId: AppSessionId, tabId: string, pinned: boolean): void;
@@ -128,6 +137,21 @@ export function registerReplaceGuard(guard: ReplaceGuard): () => void {
     if (replaceGuard === guard) replaceGuard = null;
   };
 }
+
+// P3-G (§D1.1): the panel after a patch. Collapsing clears both maximized and floating; floating or maximizing clears
+// the other and shows a collapsed panel (the action table's transitions, §D1.2).
+type PanelRegionState = LayoutRegions['panel'];
+export function panelAfter(panel: PanelRegionState, patch: Partial<PanelRegionState>): PanelRegionState {
+  const next = { ...panel, ...patch };
+  if (patch.collapsed === true) return { ...next, maximized: false, floating: false };
+  if (patch.floating === true) return { ...next, collapsed: false, maximized: false };
+  if (patch.maximized === true) return { ...next, collapsed: false, floating: false };
+  return next;
+}
+
+export const FLOATING_CARD_SIZES_MAX = 64;
+// The panel tab key of the resting summary (no tab selected), in `regions.floatingCard`.
+export const SUMMARY_CARD_KEY = 'summary';
 
 const samePins = (a: PanelTabRef[], b: PanelTabRef[]) =>
   a.length === b.length && a.every((t, i) => t.id === b[i].id && t.toolId === b[i].toolId && t.pinned === b[i].pinned);
@@ -342,10 +366,19 @@ export function createLayoutStore() {
       },
 
       setSidebar: (patch) => regions((r) => ({ ...r, sidebar: { ...r.sidebar, ...(typeof patch === 'function' ? patch(r.sidebar) : patch) } })),
-      setPanel: (patch) => regions((r) => ({ ...r, panel: { ...r.panel, ...patch } })),
+      setPanel: (patch) => regions((r) => ({ ...r, panel: panelAfter(r.panel, patch) })),
+      revealMain: () => regions((r) => (r.panel.maximized || r.panel.floating ? { ...r, panel: { ...r.panel, maximized: false, floating: false } } : r)),
+      setFloatingCardSize(key, size) {
+        regions((r) => {
+          const state = get();
+          const live = new Set([SUMMARY_CARD_KEY, ...state.panelPinned.map((t) => t.id), ...[...state.panelBySession.values()].flatMap((s) => s.tabs.map((t) => t.id))]);
+          const kept = Object.entries(r.floatingCard).filter(([k]) => k !== key && live.has(k));
+          return { ...r, floatingCard: Object.fromEntries([...kept, [key, size]].slice(-FLOATING_CARD_SIZES_MAX)) };
+        });
+      },
       setOverviewOpen(overviewOpen) {
         // Overview lives over main, so opening it restores main, including when regions are still hydrating.
-        if (overviewOpen) regions((r) => r.panel.maximized ? { ...r, panel: { ...r.panel, maximized: false } } : r);
+        if (overviewOpen) get().revealMain();
         set({ overviewOpen });
       },
       setOverviewRect: (overview) => regions((r) => ({ ...r, overview })),

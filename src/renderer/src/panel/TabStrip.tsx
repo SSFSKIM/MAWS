@@ -10,7 +10,7 @@ import { Icon, IconButton } from '../app/IconButton';
 import { COPY } from './copy';
 import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
-import { instanceOf, panelHost, requestFocus, togglePinned, usePanelHost, type PanelHostState } from './host';
+import { panelHost, requestFocus, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
 import type { PanelHostProps } from './host-slot';
 
 interface TabStripProps {
@@ -52,13 +52,8 @@ export function TabStrip({ appSessionId, tabs, activeTabId, onChange, bodyId }: 
 }
 
 function Tab({ tab, selected, canPin, bodyId, onSelect }: { tab: PanelTabRef; selected: boolean; canPin: boolean; bodyId: string; onSelect(): void }) {
-  const registered = usePanelHost((s) => s.tools.get(tab.toolId));
-  // A tab whose tool was unregistered while its veto kept it renders with the declaration it was created under.
-  const created = usePanelHost((s) => (s.version >= 0 ? instanceOf(tab.id)?.tool : undefined));
-  const tool = registered ?? created;
-  const suffix = usePanelHost((s) => s.titles[tab.id] ?? null);
+  const { tool, title, suffix } = useTabLabel(tab); // the header reads the same label (P3-G)
   const closing = usePanelHost((s) => s.closing.has(tab.id));
-  const title = tool?.title ?? tab.toolId; // a placeholder shows its tool id
   const pinnable = tool ? tool.pinnable : true;
   const ToolIcon = tool?.icon;
   const revealed = selected ? '' : 'hidden group-hover:inline-flex group-focus-within:inline-flex'; // unrevealed glyphs take no width

@@ -12,6 +12,10 @@ import { registerReplaceGuard, useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { useSettings } from '../stores/settings';
+import { togglePanelFloat } from '../shell/floating'; // P3-G
+import { startMarkup } from '../markup/session'; // P3-G
+import { openArtifacts } from '../main/artifacts'; // P3-G
+import { panelInMain } from './regions';
 import { registerSessionAction } from './session-actions';
 
 export function registerShellActions(client: MawsBridge = ipc): () => void {
@@ -25,6 +29,9 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
     registerAction('panel.maximize', () =>
       layout().setPanel(layout().regions.panel.maximized ? { maximized: false } : { maximized: true, collapsed: false }),
     ),
+    // P3-G (§D1.2): the floating state; the store's `setPanel` keeps it exclusive with maximized and collapsed.
+    registerAction('panel.float', togglePanelFloat),
+    registerAction('markup.start', () => void startMarkup()), // P3-G (§D4.4)
     registerAction('theme.light', () => useSettings.getState().setTheme('light')),
     registerAction('theme.dark', () => useSettings.getState().setTheme('dark')),
     registerAction('theme.system', () => useSettings.getState().setTheme('system')),
@@ -41,7 +48,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       before.setOverviewOpen(true);
       if (before.overviewOpen) {
         // An already-open dialog cannot take focus until React removes main's inert state.
-        if (before.regions.panel.maximized) requestAnimationFrame(focusOverview);
+        if (panelInMain(before.regions)) requestAnimationFrame(focusOverview);
         else focusOverview();
       }
     }),
@@ -60,6 +67,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       focusPaneElement(other);
     }),
     registerAction('diagnostics.open', () => layout().openTab({ kind: 'diagnostics' })),
+    registerAction('artifacts.open', openArtifacts), // P3-G (§D5): a singleton, so a second open activates it
     registerAction('palette.open', togglePalette),
 
     registerSessionAction('open', (appSessionId) => layout().openSession(appSessionId)),

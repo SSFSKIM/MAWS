@@ -9,7 +9,10 @@ import { useSlot } from '../app/slots';
 import { useChordHint } from '../app/IconButton';
 import { createSession, focusedProject, NEW_CHAT, runAction, useActionEnabled, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { useKeyChord } from '../keymap/useKeyChord';
+import { EditorHostScopeContext, useEditorHostRegistration, type EditorHostScope } from '../panel/editor-host'; // P3-G
+import { EditorHeader } from '../panel/PanelHeader'; // P3-G
 import { SessionPane } from '../session/SessionPane';
+import { cardSession } from '../shell/floating'; // P3-G
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { focusPaneElement, paneDomId } from './pane-dom';
@@ -60,16 +63,38 @@ export function Pane({ index, split, column }: { index: PaneIndex; split: boolea
         className="relative min-h-0 min-w-0 overflow-hidden"
         style={{ gridRow: 3, gridColumn: column }}
       >
-        {active ? <TabContent key={active.id} tab={active} paneIndex={index} /> : <EmptyPane />}
+        {active ? <TabBody key={active.id} tab={active} paneIndex={index} /> : <EmptyPane />}
       </div>
     </section>
   );
 }
 
+// P3-G (§D2.4, X32): the tab's body renders in its main-tab scope, and a body that registers there gets the pane
+// header's row above it (no region controls). The wrapper is always drawn, so a registration arriving never remounts the
+// body; with none, the row is absent and the content fills the panel as before.
+function TabBody({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
+  const scope: EditorHostScope = { surface: 'main', tabId: tab.id };
+  return (
+    <EditorHostScopeContext.Provider value={scope}>
+      <div className="flex h-full min-h-0 flex-col">
+        <TabHeader scope={scope} />
+        <div className="relative min-h-0 flex-1">
+          <TabContent tab={tab} paneIndex={paneIndex} />
+        </div>
+      </div>
+    </EditorHostScopeContext.Provider>
+  );
+}
+
+function TabHeader({ scope }: { scope: EditorHostScope }) {
+  const registration = useEditorHostRegistration(scope);
+  return registration && <EditorHeader title={registration.title} registration={registration} />;
+}
+
 function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
   switch (tab.kind) {
     case 'session':
-      return <SessionPane appSessionId={tab.appSessionId} paneIndex={paneIndex} />;
+      return <SessionTab tab={tab} paneIndex={paneIndex} />;
     case 'agent':
       return <AgentTab tab={tab} paneIndex={paneIndex} />;
     case 'file':
@@ -84,11 +109,21 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
       );
     case 'settings':
       return <SettingsTab section={tab.section} />;
+    case 'artifacts': // P3-G (§D5)
+      return <ArtifactsTab />;
     case 'deliverable': // E2
       return <DeliverableTab tab={tab} />;
     case 'browser': // E4a
       return <BrowserTab tab={tab} />;
   }
+}
+
+// P3-G (§D1.4): while the panel floats, the floating card is the only mount of the session it draws (one composer per
+// session, one focus target); the main region is at 0 px and inert then, so nothing is lost on screen. Held through the
+// pill too, so closing and reopening the card does not remount the pane behind it.
+function SessionTab({ tab, paneIndex }: { tab: Extract<TabRef, { kind: 'session' }>; paneIndex: PaneIndex }) {
+  const inCard = useLayout((s) => cardSession(s) === tab.appSessionId);
+  return inCard ? <div data-session-in-card className="h-full" /> : <SessionPane appSessionId={tab.appSessionId} paneIndex={paneIndex} />;
 }
 
 const TEXT_BUTTON =
@@ -117,6 +152,13 @@ function SettingsTab({ section }: { section: Extract<TabRef, { kind: 'settings' 
   const Slot = useSlot('settingsTab');
   // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
   return <Slot section={section} />;
+}
+
+// P3-G (§D5): the Artifacts library, the slot P3-L registers (a placeholder until then).
+function ArtifactsTab() {
+  const Slot = useSlot('artifactsLibrary');
+  // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
+  return <Slot />;
 }
 
 // A child agent's transcript in the main area (C6's child variant): the transcript slot alone, since nobody types to a

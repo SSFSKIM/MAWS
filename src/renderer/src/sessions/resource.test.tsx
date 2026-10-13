@@ -75,6 +75,7 @@ afterEach(() => {
 
 const ctxOf = (appSessionId: AppSessionId): PanelToolContext => ({
   appSessionId, session: useSessions.getState().records.get(appSessionId) ?? null, status: null, pinned: false, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool,
+  editorHost: { surface: 'panel', tabId: 'resource:test' },
 });
 
 // The panel's tools as App.tsx registers them, once (the app never unregisters them).

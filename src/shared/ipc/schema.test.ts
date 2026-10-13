@@ -1169,7 +1169,7 @@ describe('ipc schema validates both directions', () => {
     };
 
     it('adds the browser namespace, main-owned throughout, every name bridged', () => {
-      expect(Object.keys(browser.commands).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.')) /* E4b, cua #90: their blocks are pinned below */).toEqual([
+      expect(Object.keys(browser.commands).filter((name) => !name.startsWith('browser.import.') && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') && name !== 'browser.view.capture') /* E4b, cua #90: their blocks are pinned below; P3-G appended last */).toEqual([
         'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select', 'browser.tabs.navigate', 'browser.tabs.zoom',
         'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload', 'browser.view.place',
         'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
@@ -1323,7 +1323,7 @@ describe('ipc schema validates both directions', () => {
         'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
         'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
       ]);
-      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
+      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.agent.activities.list' /* E13, appended after E4b */ && !name.startsWith('browser.bookmarks.') && !name.startsWith('browser.extensions.') /* cua #90 */ && name !== 'browser.view.capture' /* P3-G */).slice(-added.length)).toEqual(added); // nothing of E4a's reordered
       for (const name of added) expect(commands[name as keyof typeof commands].owner, name).toBe('main');
       const events = importNames(Object.keys(browser.events));
       expect(events).toEqual(['browser.import.progress', 'browser.import.finished', 'browser.import.changed']);
@@ -1417,7 +1417,7 @@ describe('ipc schema validates both directions', () => {
     };
 
     it('appends browser.bookmarks.tree, .sync and .changed after E13’s entries, main-owned, every name bridged', () => {
-      expect(Object.keys(browser.commands).slice(-10, -5)).toEqual(['browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons']); // M1b: the bar's three
+      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.view.capture' /* P3-G, appended last */).slice(-10, -5)).toEqual(['browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons']); // M1b: the bar's three
       expect(Object.keys(browser.events).slice(-4, -3)).toEqual(['browser.bookmarks.changed']);
       for (const name of ['browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons'] as const) expect(commands[name].owner).toBe('main');
       expect([...NAMES.browser.commands]).toEqual(Object.keys(browser.commands));
@@ -1469,7 +1469,8 @@ describe('ipc schema validates both directions', () => {
     // M3: the extensions action bar
     it('appends browser.extensions.* after the bookmarks, main-owned, every name bridged', () => {
       const names = ['browser.extensions.actions', 'browser.extensions.action.click', 'browser.extensions.action.options', 'browser.extensions.action.menu', 'browser.extensions.puzzle'] as const;
-      expect(Object.keys(browser.commands).slice(-5)).toEqual([...names]);
+      expect(Object.keys(browser.commands).filter((name) => name !== 'browser.view.capture' /* P3-G, appended last */).slice(-5)).toEqual([...names]);
+      expect(Object.keys(browser.commands).at(-1)).toBe('browser.view.capture'); // P3-G
       expect(Object.keys(browser.events).slice(-3)).toEqual(['browser.extensions.actions.changed', 'browser.extensions.popup', 'browser.extensions.reveal']);
       for (const name of names) expect(commands[name].owner).toBe('main');
     });

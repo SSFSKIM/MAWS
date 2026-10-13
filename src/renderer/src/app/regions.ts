@@ -24,10 +24,11 @@ export interface RegionWidths {
 
 // Each side region inside its own bounds and, together, inside the window less the main column's floor. The panel
 // yields first: the sidebar may grow into the panel down to the panel's minimum, the panel only into what the sidebar
-// leaves. A maximized panel stands in the main column, so the floor is its own and the sidebar is sized against it.
+// leaves. A maximized panel stands in the main column, so the floor is its own and the sidebar is sized against it; so
+// does a floating one (P3-G, §D1.3).
 export function regionWidths(regions: LayoutRegions, windowWidth: number): RegionWidths {
   const room = windowWidth - MAIN_MIN_WIDTH;
-  const panelBeside = !regions.panel.collapsed && !regions.panel.maximized;
+  const panelBeside = !regions.panel.collapsed && !panelInMain(regions);
   const sidebarMax = Math.max(SIDEBAR_BOUNDS.min, Math.min(SIDEBAR_BOUNDS.max, room - (panelBeside ? PANEL_BOUNDS.min : 0)));
   const sidebar = clamp(regions.sidebar.width, SIDEBAR_BOUNDS.min, sidebarMax);
   const panelMax = Math.max(PANEL_BOUNDS.min, Math.min(PANEL_BOUNDS.max, room - (regions.sidebar.collapsed ? 0 : sidebar)));
@@ -38,12 +39,16 @@ export function regionWidths(regions: LayoutRegions, windowWidth: number): Regio
 export const sidebarWidth = (regions: LayoutRegions, windowWidth: number): number => regionWidths(regions, windowWidth).sidebar;
 export const panelWidth = (regions: LayoutRegions, windowWidth: number): number => regionWidths(regions, windowWidth).panel;
 
-// `<sidebar> minmax(0, 1fr) <panel>`, a collapsed region at 0; a maximized panel takes the main column's place while
-// the main region keeps its state offscreen at 0.
+// P3-G (§D1.3): whether the panel stands in the main column's place, maximized or floating (the main region is at 0 px
+// and inert then).
+export const panelInMain = (regions: LayoutRegions): boolean => (regions.panel.maximized || regions.panel.floating) && !regions.panel.collapsed;
+
+// `<sidebar> minmax(0, 1fr) <panel>`, a collapsed region at 0; a maximized or floating panel takes the main column's
+// place while the main region keeps its state offscreen at 0.
 export function gridColumns(regions: LayoutRegions, windowWidth: number): string {
   const widths = regionWidths(regions, windowWidth);
   const sidebar = regions.sidebar.collapsed ? 0 : widths.sidebar;
-  if (regions.panel.maximized && !regions.panel.collapsed) return `${sidebar}px 0px minmax(0, 1fr)`;
+  if (panelInMain(regions)) return `${sidebar}px 0px minmax(0, 1fr)`;
   const panel = regions.panel.collapsed ? 0 : widths.panel;
   return `${sidebar}px minmax(0, 1fr) ${panel}px`;
 }

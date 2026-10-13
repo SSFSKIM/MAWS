@@ -5,6 +5,7 @@
 import { useCallback, useState } from 'react';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import type { DeliverableRecord } from '@shared/maws/deliverable';
+import { panelInMain } from '../../app/regions'; // P3-G
 import { useLayout } from '../../stores/layout';
 import { DELIVERABLES_COPY } from './copy';
 import { DeliverablesList, type DeliverablesScope } from './List';
@@ -22,7 +23,7 @@ export function DeliverableTab({ tab }: { tab: DeliverableTabRef }) {
   const onGone = useCallback(() => setGone(true), []);
   // P2-E1: the tab is on screen while its pane shows it (the pane mounts the active tab only), unless a maximized panel
   // covers the main region, which stays mounted and inert (the Shell's rule): then its comment card is offscreen too
-  const onScreen = useLayout((s) => !(s.regions.panel.maximized && !s.regions.panel.collapsed));
+  const onScreen = useLayout((s) => !panelInMain(s.regions)); // P3-G: nor under a floating panel
   if (gone) {
     return (
       <div data-deliverable-tab="" className="h-full bg-bg">

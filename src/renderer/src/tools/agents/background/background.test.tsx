@@ -88,7 +88,7 @@ const openTool = vi.fn();
 function Mounted({ state, visible = true }: { state: BackgroundHandle; visible?: boolean }) {
   const session = useSessions((s) => s.records.get(A) ?? null);
   const engine = useSessions((s) => s.engine.get(A) ?? null);
-  const ctx: PanelToolContext = { appSessionId: A, session, status: engine, pinned: false, visible, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool };
+  const ctx: PanelToolContext = { appSessionId: A, session, status: engine, pinned: false, visible, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool, editorHost: { surface: 'panel', tabId: 'background:test' } };
   const Body = backgroundTool.render;
   return (
     <QueryClientProvider client={query.queryClient}>

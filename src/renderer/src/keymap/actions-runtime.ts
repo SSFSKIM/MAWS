@@ -7,6 +7,7 @@ import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { NO_PROJECT, type LayoutMain, type TabRef, type TabTarget } from '@shared/ipc/schema/layout';
 import type { ActionId } from '@shared/keymap/actions';
 import type { Location } from '@shared/sessions/intent';
+import { askEditorHostClose } from '../panel/editor-host'; // P3-G
 import { markFocusOnMount } from '../stores/composer';
 import { useLayout, type ReplaceVerdict } from '../stores/layout';
 import { toast } from '../stores/notices';
@@ -81,6 +82,9 @@ export const registerCloseGuard = (kind: TabRef['kind'], guard: CloseGuard): (()
 const findTab = (main: LayoutMain, id: string): TabRef | null => allTabs(main).find((t) => t.id === id) ?? null;
 
 async function guardAllows(ref: TabRef): Promise<boolean> {
+  // P3-G (§D2.3): an editor registered in the tab (X32) is asked first; its veto stops before the kind's guard.
+  const editor = askEditorHostClose({ surface: 'main', tabId: ref.id });
+  if (editor !== null && !(await editor)) return false;
   const guard = closeGuards.get(ref.kind) as CloseGuard | undefined;
   if (!guard) return true;
   try {

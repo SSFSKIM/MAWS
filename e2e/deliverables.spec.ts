@@ -32,6 +32,7 @@ import {
   scene, scratchProject, seamLines, seedArtifact, seedFile, shoot, show, unfoldWork, viewerOf, type Scene,
 } from './support/maws-tools';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { menu } from './support/menu'; // P3-G
 import { solidPng } from './support/side-replay';
 
 test.describe.configure({ timeout: 120_000 });
@@ -1219,5 +1220,69 @@ test('a capture while a notification’s navigation is on its way: the page hear
     // the replay finishes as recorded
     for (let k = 0; k < 3; k++) await allowNext(s, id);
     await idle(s, id);
+  });
+});
+
+// ---- P3-G: Mark-up over the deliverable viewer (docs/doperpowers/plans/2026-10-12-p3-g-shell.md, M4 and its review) -----
+
+// The window's own pixel at a point (main's capture of the page, as the still's DOM route takes it), as [r, g, b].
+async function windowPixel(s: Scene, at: { x: number; y: number }): Promise<number[]> {
+  return s.maws.app.evaluate(async ({ BrowserWindow }, at) => {
+    const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
+    const bitmap = (await win.webContents.capturePage({ x: Math.round(at.x), y: Math.round(at.y), width: 1, height: 1 })).toBitmap(); // BGRA
+    return [bitmap[2]!, bitmap[1]!, bitmap[0]!];
+  }, at);
+}
+const nearColour = (rgb: number[], expected: number[], tolerance = 16) => rgb.every((c, k) => Math.abs(c - expected[k]!) <= tolerance);
+
+// The M4 review's ruling 2: the DOM route's still is the surface alone. The floating card overlaps the viewer's body;
+// Mark up takes the still with the card's layer hidden (never unmounted), so the still holds the artifact where the card
+// stands, and the card is back, the same element, once the still is taken.
+test('P3-G: Mark up over the deliverable viewer under the floating card takes the artifact alone; the card stays mounted and shows again', async () => {
+  await scene({ titles: ['P3-G: mark-up over a viewer'] }, async (s) => {
+    const [id] = s.ids;
+    const TEAL = [0x00, 0x69, 0x5c];
+    const artifact = seedArtifact(s.maws.userData, id, 'swatch', 'Swatch', [pageOf('SWATCH', '#00695c')]);
+    await show(s, id);
+    await openDeliverables(s);
+    await rowOf(listOf(s), artifact).click();
+    await expect((await frameAt(s.page, deliverableUrl(id, artifact.id, 1))).locator('#heading')).toHaveText('SWATCH');
+
+    await menu(s.maws.app, 'panel.float');
+    const card = s.page.getByRole('region', { name: 'Session card' });
+    await expect(card).toBeVisible();
+    await card.evaluate((el) => void (el.dataset.e2eSame = 'yes')); // the element itself, to tell a remount apart
+    const box = (await card.boundingBox())!;
+    const inCard = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const frame = (await viewerOf(s.panel).locator('iframe').boundingBox())!;
+    expect(inCard.y > frame.y && inCard.y < frame.y + frame.height && inCard.x > frame.x && inCard.x < frame.x + frame.width, 'the card stands over the artifact').toBe(true);
+    expect(nearColour(await windowPixel(s, inCard), TEAL), 'the card is drawn over the artifact').toBe(false);
+
+    // Mark up: the still under the overlay holds the artifact where the card stands
+    await s.panel.locator('[data-editor-header]').getByRole('button', { name: 'Mark up' }).click();
+    const layer = s.page.getByRole('region', { name: 'Mark-up' });
+    const still = layer.locator('img');
+    await expect(still).toHaveAttribute('src', /^data:image\/(png|jpeg);base64,/);
+    const pixel = await still.evaluate(async (img: HTMLImageElement, at) => {
+      await img.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const context = canvas.getContext('2d')!;
+      context.drawImage(img, 0, 0);
+      const rect = img.getBoundingClientRect();
+      const x = Math.round(((at.x - rect.left) * img.naturalWidth) / rect.width);
+      const y = Math.round(((at.y - rect.top) * img.naturalHeight) / rect.height);
+      return Array.from(context.getImageData(x, y, 1, 1).data.slice(0, 3));
+    }, inCard);
+    expect(nearColour(pixel, TEAL), `the still under the card is the artifact’s teal, not the card (${pixel.join(',')})`).toBe(true);
+
+    // the card was hidden for the capture only: it shows again, the same element
+    await expect(card).toBeVisible();
+    expect(await card.evaluate((el) => el.dataset.e2eSame)).toBe('yes');
+    expect(await s.page.locator('[data-markup-occluder]').evaluateAll((els) => els.map((el) => (el as HTMLElement).style.visibility))).not.toContain('hidden');
+    await s.page.keyboard.press('Escape');
+    await expect(layer).toHaveCount(0);
+    await expect(card).toBeVisible();
   });
 });

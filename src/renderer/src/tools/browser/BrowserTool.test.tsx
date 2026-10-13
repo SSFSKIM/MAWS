@@ -27,6 +27,7 @@ const ctxOf = (appSessionId: AppSessionId | null): PanelToolContext => ({
   setTitle: () => {},
   close: () => {},
   openTool: () => '',
+  editorHost: { surface: 'panel', tabId: 'browser:test' },
 });
 
 describe('BrowserHandle.open', () => {

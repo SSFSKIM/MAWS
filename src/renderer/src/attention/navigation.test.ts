@@ -266,10 +266,16 @@ describe('the fallback toast', () => {
   });
 });
 
-it.each(['next', 'notification'] as const)('restores main when attention arrives through %s while the panel is maximized', (via) => {
-  useLayout.getState().setPanel({ maximized: true, collapsed: false, width: 444 });
+// P3-G (§D1.2, the table's last row): a floating panel docks the same way.
+it.each([
+  ['next', 'maximized'],
+  ['notification', 'maximized'],
+  ['next', 'floating'],
+  ['notification', 'floating'],
+] as const)('restores main when attention arrives through %s while the panel is %s', (via, state) => {
+  useLayout.getState().setPanel({ [state]: true, collapsed: false, width: 444 });
   if (via === 'next') runAction('attention.next');
   else fake.event('attention.navigate', { appSessionId: idOf('Fix sidebar drag'), attentionId: null, source: 'notification' });
   expect(active()).toBe(`session:${idOf('Fix sidebar drag')}`);
-  expect(useLayout.getState().regions.panel).toEqual({ maximized: false, collapsed: false, width: 444 });
+  expect(useLayout.getState().regions.panel).toEqual({ maximized: false, floating: false, collapsed: false, width: 444 });
 });

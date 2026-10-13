@@ -43,7 +43,7 @@ let titles: (string | null)[];
 function ctx(over: Partial<PanelToolContext> = {}): PanelToolContext {
   return {
     appSessionId: A, session: record(A, { directory: '/work/app-a' }), status: null, pinned: false, visible: true, focusRequest: 0,
-    setTitle: (suffix) => titles.push(suffix), close: () => {}, openTool: (() => '') as never, ...over,
+    setTitle: (suffix) => titles.push(suffix), close: () => {}, openTool: (() => '') as never, editorHost: { surface: 'panel', tabId: 'ask:test' }, ...over,
   };
 }
 

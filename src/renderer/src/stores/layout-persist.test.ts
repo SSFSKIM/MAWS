@@ -132,7 +132,7 @@ describe('layout persistence', () => {
   });
 
   it('opening Overview restores and persists only the regions, with the normal write delay', async () => {
-    const regions = { ...LAYOUT_DEFAULTS.regions, panel: { width: 444, collapsed: false, maximized: true } };
+    const regions = { ...LAYOUT_DEFAULTS.regions, panel: { width: 444, collapsed: false, maximized: true, floating: false } };
     const { store, hydrate, sets } = setup({ regions });
     await hydrate();
     store.getState().setOverviewOpen(true);

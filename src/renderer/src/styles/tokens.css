@@ -56,6 +56,9 @@
      accent's tint, theirs in the added green's, the base neutral, each read beside --diff-*-bg and --accent-soft. */
   --code-conflict-mine-bg: rgba(201,102,63,0.12); --code-conflict-theirs-bg: rgba(31,143,85,0.12); --code-conflict-base-bg: rgba(20,18,14,0.06);
   /* E5 end */
+  /* P3-G (§D4.2): Mark-up's five inks (Claude's annotate inks). They mark content, not chrome, so they are the same in
+     both themes and the dark block leaves them be. */
+  --markup-ink-red: #E03131; --markup-ink-blue: #1971C2; --markup-ink-green: #2F9E44; --markup-ink-black: #1F1E1D; --markup-ink-white: #FFFFFF;
   /* P3-B start: the author colours (the ledger's §7, B's): eight hues at one lightness, each readable as a 2 px underline
      and as a 12 % ground behind text; an actor's colour is `actorDisplay(actor).color` (src/shared/artifacts/actor.ts).
      App tokens, not a design system's: they follow the app theme by design. */

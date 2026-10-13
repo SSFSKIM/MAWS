@@ -17,6 +17,7 @@ import type { SidebarSort } from '../overview/derive';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
+import { openArtifacts } from '../main/artifacts'; // P3-G
 import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
 import { openDialog } from '../sessions/dialogs';
 import { filterProjectList, nestLineage, OTHER_SESSIONS, projectList, projectSessions, PROJECTS_FIRST, SESSIONS_CAP, sessionMatcher, shownCount, type ProjectEntry, type ProjectKey, type SessionTreeRow } from './derive';
@@ -39,6 +40,7 @@ export function Sidebar() {
       <div className="px-2.5 pt-2.5">
         <div data-sidebar-wordmark className="flex h-(--row-h) items-center px-[9px] text-ui-sm font-semibold tracking-[0.08em] text-fg-muted">MAWS</div>
         <NewChatRow />
+        <ArtifactsRow />
       </div>
       {loaded ? <SidebarBody /> : <SidebarSkeleton />}
       <Footer />
@@ -348,6 +350,34 @@ const NewChatIcon = ({ className }: { className?: string }) => (
   <svg viewBox="0 0 16 16" aria-hidden className={`shrink-0 fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.5] ${className ?? ''}`}>
     <path d="M7 2.5H3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V9" />
     <path d="M11.5 2.5l2 2L8 10H6V8z" />
+  </svg>
+);
+
+// P3-G (§D5): Artifacts, under New chat in its row style, opens or activates the singleton Artifacts tab (the action
+// `artifacts.open` does the same from the palette and the View menu); it reads as the current page while that tab is
+// the one shown.
+function ArtifactsRow() {
+  const current = useLayout((s) => activeTab(s.main)?.kind === 'artifacts');
+  return (
+    <button
+      type="button"
+      aria-current={current ? 'page' : undefined}
+      onClick={openArtifacts}
+      className={`flex h-(--row-h) w-full cursor-default items-center gap-[7px] rounded-sm pr-1 pl-[9px] text-ui text-fg outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 ${current ? 'bg-bg-active' : ''}`}
+    >
+      <ArtifactsIcon className="size-[13px]" />
+      <span className="min-w-0 flex-1 truncate text-left">Artifacts</span>
+    </button>
+  );
+}
+
+// A grid of four squares, the library's glyph (tokens only: it draws in the current colour).
+const ArtifactsIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 16 16" aria-hidden className={`shrink-0 fill-none stroke-current [stroke-linejoin:round] [stroke-width:1.5] ${className ?? ''}`}>
+    <rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1" />
+    <rect x="9" y="2.5" width="4.5" height="4.5" rx="1" />
+    <rect x="2.5" y="9" width="4.5" height="4.5" rx="1" />
+    <rect x="9" y="9" width="4.5" height="4.5" rx="1" />
   </svg>
 );
 
