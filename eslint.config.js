@@ -4,6 +4,27 @@ const js = require('@eslint/js');
 const globals = require('globals');
 const reactHooks = require('eslint-plugin-react-hooks');
 const tseslint = require('typescript-eslint');
+// P3-A start
+const { builtinModules } = require('node:module');
+
+// §4.10 of docs/doperpowers/plans/2026-10-12-p3-co-work.md: src/artifacts/ (the editors, the schema, the provider, the
+// kinds' guides) runs in a renderer today and a web client in P4, so it imports no Electron and no Node module and
+// never reaches for the preload's `window.maws`; the renderer adapts it through `ArtifactHost` (src/artifacts/host.ts).
+const PORTABLE = 'src/artifacts/ is portable (§4.10): no Electron, no Node, no window.maws; reach the app through ArtifactHost (src/artifacts/host.ts).';
+const NODE_MODULES = builtinModules.filter((name) => !name.startsWith('_'));
+const PORTABLE_PATHS = ['electron', ...NODE_MODULES].map((name) => ({ name, message: PORTABLE }));
+const PORTABLE_PATTERNS = [{ group: ['node:*'], message: PORTABLE }];
+// esquery's regex literal cannot hold a `/`, so a subpath's slash is matched by `.`.
+const PORTABLE_DYNAMIC = new RegExp(`^(?:node:.*|electron|${NODE_MODULES.map((name) => name.replace(/\//g, '.')).join('|')})$`);
+// Decision Log 25: Yjs and its ProseMirror binding are called only from the binding module, so a re-pin edits one
+// directory. `@y/protocols` (awareness) stays importable anywhere.
+const YJS_PATTERNS = [
+  {
+    group: ['@y/y', '@y/y/*', '@y/prosemirror', '@y/prosemirror/*'],
+    message: 'Yjs is called only through the binding module, src/artifacts/yjs/ (Decision Log 25): import from there, or add what you need to it.',
+  },
+];
+// P3-A end
 
 module.exports = defineConfig(
   { ignores: ['.doperpowers/', 'out/', 'dist/', 'node_modules/', 'mockups/', 'research/', 'spikes/', 'plugins/', 'test-results/', 'playwright-report/', '.claude/'] },
@@ -46,4 +67,33 @@ module.exports = defineConfig(
     },
   },
   // E4b end
+  // P3-A start: one `no-restricted-imports` per file (a later block's options replace an earlier one's), so the three
+  // blocks below partition src/ by what each part may not import.
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/artifacts/**'],
+    rules: { 'no-restricted-imports': ['error', { patterns: YJS_PATTERNS }] },
+  },
+  {
+    files: ['src/artifacts/**/*.{ts,tsx}'],
+    ignores: ['src/artifacts/yjs/**'],
+    rules: { 'no-restricted-imports': ['error', { paths: PORTABLE_PATHS, patterns: [...PORTABLE_PATTERNS, ...YJS_PATTERNS] }] },
+  },
+  {
+    files: ['src/artifacts/yjs/**/*.{ts,tsx}'],
+    rules: { 'no-restricted-imports': ['error', { paths: PORTABLE_PATHS, patterns: PORTABLE_PATTERNS }] },
+  },
+  {
+    files: ['src/artifacts/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-syntax': ['error', { selector: `ImportExpression[source.value=/${PORTABLE_DYNAMIC.source}/]`, message: PORTABLE }],
+      'no-restricted-properties': [
+        'error',
+        { object: 'window', property: 'maws', message: PORTABLE },
+        { object: 'globalThis', property: 'maws', message: PORTABLE },
+      ],
+      'no-restricted-globals': ['error', ...['process', 'Buffer', 'global', '__dirname', '__filename'].map((name) => ({ name, message: PORTABLE }))],
+    },
+  },
+  // P3-A end
 );
