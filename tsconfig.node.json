@@ -12,6 +12,7 @@
     "src/engine-host/**/*",
     "src/pty-host/**/*",
     "src/shared/**/*",
+    "src/artifacts/**/*", // P3-A: the portable artifact layer, typechecked as the host will import it
     "test/**/*",
     // C8a start: test/support/panel-child-fixture.ts measures its fixture through C6's pure model (createState,
     // applyEvents, rowsOf) and journalToEvents; vitest's typecheck runs this project composite, which refuses a file

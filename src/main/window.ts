@@ -101,8 +101,12 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
     mkdirSync(app.getPath('logs'), { recursive: true });
     recordImeTrace(win.webContents, (line) => appendFile(join(app.getPath('logs'), 'ime-trace.log'), line));
   }
-  if (pageUrl) void win.loadURL(traced ? `${pageUrl}${pageUrl.includes('?') ? '&' : '?'}imeTrace=1` : pageUrl);
-  else void win.loadFile(pageFile, traced ? { query: { imeTrace: '1' } } : {});
+  // P3-A M4: under MAWS_E2E=1 the page learns it serves the e2e harness from its URL too (`e2e=1`: the artifact store's
+  // seam, renderer/src/artifacts/e2e-seam.ts)
+  const query: Record<string, string> = { ...(traced ? { imeTrace: '1' } : {}), ...(process.env.MAWS_E2E === '1' ? { e2e: '1' } : {}) };
+  const search = new URLSearchParams(query).toString();
+  if (pageUrl) void win.loadURL(search ? `${pageUrl}${pageUrl.includes('?') ? '&' : '?'}${search}` : pageUrl);
+  else void win.loadFile(pageFile, { query });
   return win;
 }
 

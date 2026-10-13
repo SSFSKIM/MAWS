@@ -23,6 +23,10 @@ import { Supervision } from './supervision';
 import { buildIdOf } from './supervisor-files';
 import { openSupervisorLog } from './supervisor-log';
 // E10 end
+// P3-A start
+import { openDocuments, type Documents } from './documents';
+import { registerArtifacts } from './documents/register'; // M4
+// P3-A end
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -45,6 +49,7 @@ const entryFile = mode === 'detached' ? process.argv[1] : __filename;
 let ipc: EngineIpc | null = null; // the detached entry reaches the table through it
 let supervision: Supervision | null = null; // the host.* commands and the supervisor's clocks
 // E10 end
+let documents: Documents | null = null; // P3-A: the artifact store (M4's IPC and document ports; M5 and M6 serve it too)
 
 const register: HostRegister = (on, emit, client) => {
   on('engine.ping', async () => hostPing(HOST_VERSION));
@@ -54,8 +59,17 @@ const register: HostRegister = (on, emit, client) => {
   let table: ProcessTable | null = null;
   const fs = registerFs(on, emit, process.env, { ownPids: () => new Set(table?.list().flatMap((s) => (s.pid !== null && s.lifecycle !== 'exited' ? [s.pid] : [])) ?? []) });
   // C4 end
+  // P3-A: the artifact store and its document service, closed at the end of engine.shutdown's body, which both modes run
+  // on the way out (utility: main's quit; detached: the exit order and host.stopAll). M4: `artifacts.*`, `spaces.*` and
+  // the document ports main posts on the parent port; a store that failed to open answers `unavailable`.
+  documents = openDocuments(userData);
+  const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env });
   // C3 start
   ipc = registerEngineIpc(on, emit, {
+    afterShutdown: () => {
+      artifacts.close(); // P3-A
+      documents?.close(); // P3-A
+    },
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,
     replayRowMs: replayRowDelayMs(process.env), // E10: the e2e pacing seam
     diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,

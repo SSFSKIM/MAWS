@@ -116,6 +116,9 @@ import { startBrowser, type Browser } from './browser';
 // E4b start
 import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './browser/import';
 // E4b end
+// P3-A start
+import { startArtifacts } from './artifacts';
+// P3-A end
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -557,6 +560,17 @@ void startWithProfileLock(app, () => {
     tracked(win); // C5: tracked placement
     return win; // C5: the notifier re-creates the window through here
   };
+  // P3-A M4: `artifacts.open` (a document's port to the asking window) and the design-system defaults' relay, before the
+  // first window loads
+  const artifacts = startArtifacts({
+    hosts,
+    register: registerMainHandler,
+    settings: () => settings.state().settings,
+    onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
+    env: process.env,
+    openWindow,
+  });
+  shutdown.add('artifacts', artifacts.stop);
   openWindow();
 
   // E5 start: each window's unsaved editor files for the quit guard (E5 execution document, M5): the page pushes its

@@ -10,7 +10,7 @@ import type { Rollup } from 'vite';
 import { createRequire } from 'node:module';
 // C8c end
 
-const alias = { '@shared': resolve(__dirname, 'src/shared') };
+const alias = { '@shared': resolve(__dirname, 'src/shared'), '@artifacts': resolve(__dirname, 'src/artifacts') }; // P3-A: @artifacts
 const { version } = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf8')) as { version: string };
 
 // E11 §2.7: main's build stamp, the checkout's commit and the time this config was evaluated (a build's start; the dev
