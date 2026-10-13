@@ -196,13 +196,17 @@ export const ArtifactReadInputSchema = z.strictObject({
 });
 export type ArtifactReadInput = z.infer<typeof ArtifactReadInputSchema>;
 // `files` maps a path to its whole new text, `null` removing it (Decision Log 10); an `html` page is its one file
-// (`index.html`, or the name it was created under).
+// (`index.html`, or the name it was created under). `mode: 'suggest'` writes the files as a suggestion the user accepts
+// or rejects (M8; parent Decision Log 27), as does any publish to an artifact whose owner set `agentEditsAsSuggestions`;
+// the default is a direct write, which never overrides the owner's setting.
+export const PUBLISH_MODES = ['direct', 'suggest'] as const;
 export const ArtifactPublishInputSchema = z.strictObject({
   artifact: ArtifactIdSchema,
   baseRevision: z.number().int().min(0),
   files: z.record(FilePathSchema, FileTextSchema.nullable()).refine((files) => Object.keys(files).length > 0, { message: 'name at least one file' }),
   force: z.boolean().optional(), // default false
   message: z.string().max(2000).optional(),
+  mode: z.enum(PUBLISH_MODES).optional(), // default 'direct'
 });
 export type ArtifactPublishInput = z.infer<typeof ArtifactPublishInputSchema>;
 export const ArtifactUploadAssetInputSchema = z.strictObject({ artifact: ArtifactIdSchema, path: PathSchema, name: z.string().min(1).max(200).optional() });
@@ -325,9 +329,10 @@ export const ArtifactReadResultSchema = z.strictObject({
 });
 export type ArtifactReadResult = z.infer<typeof ArtifactReadResultSchema>;
 // `changed` and `removed` are the paths the publish wrote; `kept`, the artifact's other files, as they are live. An
-// `html` publish also answers E2's fields for its X12 mirror's new version.
+// `html` publish also answers E2's fields for its X12 mirror's new version. A suggestion (`status: 'suggested'`) answers
+// the artifact's live revision, which it did not move, and its paths as the suggestions stand.
 export const ArtifactPublishResultSchema = z.strictObject({
-  status: z.literal('published'), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0),
+  status: z.enum(['published', 'suggested']), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0),
   changed: z.array(z.string()), kept: z.array(z.string()), removed: z.array(z.string()),
   id: z.string().optional(), deliverableId: z.uuid().optional(), version: z.number().int().min(1).optional(), externalReferences: z.number().int().min(0).optional(),
   ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1: the X12 record is its creator's
@@ -417,7 +422,7 @@ export const MAWS_TOOLS = {
   artifact_publish: {
     title: 'Publish artifact',
     description:
-      "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html); baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed.",
+      "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html); baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed. mode: \"suggest\" proposes the files instead: the user accepts or rejects them and the artifact stays as it is until then (an artifact the user set to take agent edits as suggestions takes every publish so; an html page takes none).",
     input: ArtifactPublishInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },

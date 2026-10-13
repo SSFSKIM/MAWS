@@ -12,6 +12,12 @@
 // (else the generic file model) inside the session's host-replica write, so the check and the write see one state and
 // the op row commits in the write's savepoint; the session's base then becomes what it knows: the files it read with
 // its own changes applied, at the new revision. The session's presence shows on the artifact until its turn ends.
+//
+// A suggestion (M8; parent Decision Log 27): `mode: 'suggest'`, or any publish to an artifact whose owner set
+// `agentEditsAsSuggestions` (which `mode: 'direct'` does not override), goes through the same layers and the same write
+// into the artifact's suggestion doc instead (the artifact with the pending suggestions on it), as the session; the
+// artifact itself does not move, so the answer carries its live revision and no turn version follows. An html page,
+// which has no document to suggest into, is refused.
 import { createHash } from 'node:crypto';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { isDocKind, type Artifact } from '@shared/artifacts/entity';
@@ -46,7 +52,12 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (!artifact) throw refuse(TOOL, { reason: 'notFound', artifactId }, `the artifact ${input.artifact} was deleted`);
       if (artifact.kind === 'file') throw refuse(TOOL, { reason: 'invalid', kind: 'file' }, 'a file artifact is delivered again with send_file, not published');
       if (artifact.kind === 'document') throw refuse(TOOL, { reason: 'invalid', kind: 'document' }, 'a document is edited block by block, not published');
-      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx) : await mirrored(store, mirror, await publishPage(deps, store, artifact, input, ctx), input, ctx, true);
+      const suggest = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
+      if (suggest && !isDocKind(artifact.kind)) {
+        const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;
+        throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: input.mode !== 'suggest' }, `${why}, and an html page takes none; nothing was written`);
+      }
+      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx, suggest) : await mirrored(store, mirror, await publishPage(deps, store, artifact, input, ctx), input, ctx, true);
       return toolText(result);
     })),
   );
@@ -126,9 +137,10 @@ async function mirrored(store: ArtifactStore, mirror: X12Mirror, recorded: Artif
   return { ...recorded, id: artifact.handle ?? artifact.id, deliverableId: artifact.id, version, externalReferences: externalReferenceCount(text), ...(owner !== ctx.appSessionId && { ownerAppSessionId: owner }) };
 }
 
-async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
+async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext, suggest: boolean): Promise<ArtifactPublishResult> {
   const actor = actorOf(ctx);
   const replica = store.service.replica(ctx.appSessionId, artifact.id);
+  const status = suggest ? 'suggested' : 'published';
   const base = replica.base;
   const publish = publisherOf(store, artifact.kind);
   const outcome: { conflicts?: { path: string; detail?: string }[]; failure?: unknown; result?: ArtifactPublishResult } = {};
@@ -144,14 +156,15 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
         const restoredSince = store.listVersions(artifact.id).some((v) => v.kind === 'restore' && v.seq > base.revision);
         const linked = store.link(artifact.id, ctx.appSessionId, 'edited');
         linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
+        const target = suggest ? store.service.suggestionDoc(artifact.id) : artifact.id;
         await store.service.writeAs(
-          artifact.id,
+          target,
           actor,
           (doc) => {
             try {
               const published = publish(doc, baseFiles, input.files, input.force ?? false);
               if (published.conflicts.length > 0) outcome.conflicts = published.conflicts;
-              else outcome.result = { status: 'published', artifactId: artifact.id, kind: artifact.kind, title: artifact.title, revision: 0, changed: published.changed, kept: [], removed: [] };
+              else outcome.result = { status, artifactId: artifact.id, kind: artifact.kind, title: artifact.title, revision: 0, changed: published.changed, kept: [], removed: [] };
             } catch (error) {
               // Only the kind's documented refusal of the files, made before it writes anything (`code: 'invalid'`, as
               // `FilesError` and P3-D's `SystemFilesError`), is answered after the write; anything else escapes the write,
@@ -161,9 +174,10 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
             }
           },
           {
-            inFrame: (revision) => {
+            inFrame: (written) => {
               if (!outcome.result) return;
-              const live = filesOf(store, artifact.kind, store.service.live(artifact.id));
+              const revision = suggest ? store.service.revision(artifact.id) : written;
+              const live = filesOf(store, artifact.kind, store.service.live(target));
               const changed = outcome.result.changed;
               const removed = changed.filter((path) => !(path in live));
               outcome.result = { ...outcome.result, revision, changed: changed.filter((path) => path in live), removed, kept: Object.keys(live).filter((path) => !changed.includes(path)) };
@@ -174,7 +188,7 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
         await linked;
         if (outcome.failure !== undefined) throw outcome.failure;
         if (outcome.conflicts) {
-          const restored = (path: string) => restoredSince && path in baseFiles && !(path in filesOf(store, artifact.kind, store.service.live(artifact.id)));
+          const restored = (path: string) => restoredSince && path in baseFiles && !(path in filesOf(store, artifact.kind, store.service.live(target)));
           throw conflict(outcome.conflicts.map((c) => (restored(c.path) ? { path: c.path, detail: 'removed by restore' } : c)));
         }
         return outcome.result!;
@@ -194,7 +208,7 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
     } catch {
       replica.base = null;
     }
-    replica.setPresence(actorDisplay(actor));
+    if (!suggest) replica.setPresence(actorDisplay(actor));
   }
   return recorded;
 }
