@@ -387,8 +387,9 @@ export class ArtifactStore {
   // The import write of P3-L's cutover (Decision Log 35f, 37b): one X12 record as a byte-kind artifact under its own id,
   // with its explicit times, creator, handle and project, its versions written in order as `import` versions at their
   // own times by their own actors, and its session links with their roles and times; no X12 mirror (the records exist).
-  // Imported versions carry no design-system pin (Decision Log 38d). One savepoint: all of it commits or none (a version that fails takes the whole artifact back, its files with it). An
-  // id already present, deleted or not, is skipped whole (`imported: false`), so a rerun skips what landed.
+  // Imported versions carry no design-system pin (Decision Log 38d). One savepoint: all of it commits or none (a version
+  // or a commit that fails takes the whole artifact back, its files with it). An id already present, deleted or not, is
+  // skipped whole (`imported: false`), so a rerun skips what landed.
   async importArtifact(input: ImportInput): Promise<{ artifactId: string; imported: boolean }> {
     const { id } = input;
     if (!UUID.test(id)) throw new ArtifactStoreError('invalid', `an imported artifact's id must be a UUID, not ${JSON.stringify(id)}`);
@@ -407,8 +408,8 @@ export class ArtifactStore {
       }
     }
     const latest = input.versions[input.versions.length - 1].content;
-    await this.service.inBatch(() => {
-      try {
+    try {
+      await this.service.inBatch(() => {
         this.storage.actorInBatch(input.createdBy, input.createdAt);
         this.storage.db
           .prepare('INSERT INTO artifacts (id, kind, title, handle, projectId, createdBy, createdAt, updatedAt, pinned, linkedPath) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)')
@@ -418,11 +419,14 @@ export class ArtifactStore {
         // no design-system pin: a historic version was not seen under today's system (Decision Log 38d)
         for (const version of input.versions) this.writeBytesInFrame(row, version.actor, version.content, { kind: 'import', at: version.at, pin: false });
         this.storage.db.prepare('UPDATE artifacts SET updatedAt = ? WHERE id = ?').run(input.updatedAt, id);
-      } catch (error) {
-        this.files.removeAll(id); // the rows go back with the savepoint; the files the versions placed go here
-        throw error;
-      }
-    });
+      });
+    } catch (error) {
+      // The rows went back (the savepoint, or the whole batch when its commit failed); the files the versions placed go
+      // too, unless a retry of the same id has rows again by now (open or committed): a retry writes synchronously inside
+      // one frame and reuses the seqs taken back, so the directory then holds only what that retry placed.
+      if (!this.entity(id)) this.files.removeAll(id);
+      throw error;
+    }
     this.emit(id, 'created');
     return { artifactId: id, imported: true };
   }

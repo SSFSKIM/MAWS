@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
@@ -178,6 +178,23 @@ describe('ArtifactStore.importArtifact (Decision Log 35f, 37b)', () => {
 
     expect(await store.importArtifact(htmlRecord())).toEqual({ artifactId: ID, imported: true });
     expect(text(readFileSync(store.contentRef(ID).path))).toContain('v2');
+  });
+
+  it('leaves nothing when the import’s commit fails, rows, files or event, and a retry after it lands whole (M6a fix wave 1)', async () => {
+    const changes: ArtifactChanged[] = [];
+    store.onChange((change) => changes.push(change));
+    const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    await expect(store.importArtifact(htmlRecord())).rejects.toThrow(/failed to commit/);
+    commit.mockRestore();
+    expect(store.get(ID, { includeDeleted: true })).toBeNull();
+    expect(counts(ID)).toEqual({ artifacts: 0, artifact_updates: 0, artifact_versions: 0, artifact_sessions: 0 });
+    expect(existsSync(join(dir, ID))).toBe(false);
+    expect(changes).toEqual([]);
+
+    expect(await store.importArtifact(htmlRecord())).toEqual({ artifactId: ID, imported: true });
+    for (const v of store.listVersions(ID)) expect(existsSync(store.contentRef(ID, v.seq).path)).toBe(true);
   });
 
   it('keeps every imported version through maintenance, however old', async () => {

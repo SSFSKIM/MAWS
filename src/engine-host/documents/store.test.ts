@@ -337,6 +337,32 @@ describe('ArtifactStore: duplicate (Decision Log 23b)', () => {
   });
 });
 
+describe('ArtifactStore: duplicate whose commit fails (M6a fix wave 1)', () => {
+  it('leaves no copy of a Y kind or a byte kind when the batch it wrote in fails to commit, rows, files or event', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await store.uploadAsset(doc.id, new Uint8Array([1, 2]), { name: 'logo.png', mime: 'image/png' }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'first'));
+    const page = await store.create({ kind: 'html', title: 'Page', content: { bytes: html('page') } }, agent);
+    await store.uploadAsset(page.id, new Uint8Array([3]), { name: 'chart.png', mime: 'image/png' }, agent);
+    const changes: ArtifactChanged[] = [];
+    store.onChange((change) => changes.push(change));
+    const ids = () => committed('SELECT id FROM artifacts ORDER BY id');
+    const before = ids();
+
+    for (const source of [doc.id, page.id]) {
+      const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+        throw new Error('disk full');
+      });
+      await expect(store.duplicate(source, {}, agent)).rejects.toThrow();
+      commit.mockRestore();
+      expect(ids()).toEqual(before);
+      expect(store.list({ appSessionId: 'app-1' }).map((a) => a.id)).toEqual([page.id]);
+      expect(readdirSync(dir).filter((name) => !name.startsWith('store.sqlite')).sort()).toEqual([doc.id, page.id].sort()); // no copy's directory
+    }
+    expect(changes.filter((change) => change.change === 'created')).toEqual([]);
+  });
+});
+
 describe('ArtifactStore: lastWrite (Decision Log 35c, 37a)', () => {
   it('answers the actor and time of the artifact’s last log row, null when it has none', async () => {
     expect(store.lastWrite('7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d')).toBeNull();
