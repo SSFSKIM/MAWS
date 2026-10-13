@@ -7,7 +7,10 @@
 // deletion of an earlier insert (S7b's agents' mix); the host side applies each batch's update as A's service would
 // (the binding check, the apply, the document adapter's hooks, the attribution map). Printed: p50, p95 and max of the
 // writer, of the host's frame and of both together, and the cold costs paid once per replica (the block index, the
-// first unscoped search reading every block's text).
+// first unscoped search reading every block's text). M7 (Decision Log 20): the first batch after a read, on fresh
+// replicas: the read of 200 blocks through the block index, the index then warmed in 4 ms slices as the host does
+// after a read (the slices' total and the longest), and the first five-op batch on the warm replica; M9's 50 ms gate
+// measures this case, not a cold one.
 import { describe, expect, it } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
 import { applyV1, applyV2, attributionMap, checkUpdate, contentIdsOf, newDoc, onUpdate, transact } from '@artifacts/yjs';
@@ -15,6 +18,7 @@ import { documentAdapter } from '@artifacts/document/adapter';
 import { DocIndex } from '@artifacts/document/block-index';
 import type { Op } from '@artifacts/document/edit-ops';
 import { applyEdit } from '@artifacts/document/patch-writer';
+import { readDocument } from '@artifacts/document/read';
 import { prng, SEED_TAB, seedDocument, sentence } from '../../e2e/support/document-seed';
 
 const bench = process.env.MAWS_DOC_BENCH === '1' ? it : it.skip;
@@ -27,6 +31,26 @@ const percentile = (values: number[], p: number): number => {
   return sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)];
 };
 const summary = (values: number[]) => ({ p50: +percentile(values, 50).toFixed(1), p95: +percentile(values, 95).toFixed(1), max: +Math.max(...values).toFixed(1) });
+const FIRST_AFTER_READ_ROUNDS = 7;
+const WARM_SLICE_MS = 4;
+
+/** S7b's agents' five-op mix for run `run`, quoting what `index` (the agent's replica) holds. */
+function batchOf(index: DocIndex, r: () => number, run: number, inserted: string[]): Op[] {
+  const pick = (n: number) => Math.floor(r() * n);
+  const a = pick(SECTIONS);
+  const first = index.md(index.find(`s${a}p2`)!.top).split('.')[0];
+  const words = first.split(' ');
+  const plain = words.findIndex((word, k) => k >= 2 && /^[a-z]+$/.test(word));
+  words[plain >= 0 ? plain : words.length - 1] = `agentword${run}`;
+  const t = 1 + 3 * pick(Math.floor((SECTIONS - 2) / 3) + 1); // a section with a table (s % 3 === 1)
+  return [
+    { op: 'replace_text', block: `s${a}p2`, old: first, new: words.join(' ') },
+    { op: 'replace_block', id: `s${pick(SECTIONS)}p4`, markdown: `Agent ${run} rewrote this block. ${sentence(r)} ${sentence(r)} ${sentence(r)}` },
+    { op: 'insert', after: `s${pick(SECTIONS)}h`, markdown: `Agent ${run} inserted this paragraph. ${sentence(r)} ${sentence(r)}` },
+    { op: 'set_cell', table: `s${t}t`, row: 1 + pick(3), col: pick(3), markdown: String(pick(10_000)) },
+    run % 2 === 1 && inserted.length > 0 ? { op: 'delete', id: inserted.shift()! } : { op: 'replace_text', old: `Agent ${run - 1} inserted this paragraph.`, new: `Agent ${run - 1} added this paragraph.` },
+  ];
+}
 
 describe('the patch writer at 200 pages', () => {
   bench('a five-op batch: writer p95 under 40 ms', { timeout: 600_000 }, () => {
@@ -54,26 +78,12 @@ describe('the patch writer at 200 pages', () => {
     DocIndex.of(replica).tabIds();
 
     const r = prng(5);
-    const pick = (n: number) => Math.floor(r() * n);
-    const markdownOf = (id: string) => index.md(index.find(id)!.top); // what the agent read and quotes
     const writer: number[] = [];
     const host: number[] = [];
     const total: number[] = [];
     const inserted: string[] = [];
     for (let run = 0; run < WARMUP + RUNS; run++) {
-      const a = pick(SECTIONS);
-      const first = markdownOf(`s${a}p2`).split('.')[0];
-      const words = first.split(' ');
-      const plain = words.findIndex((word, k) => k >= 2 && /^[a-z]+$/.test(word));
-      words[plain >= 0 ? plain : words.length - 1] = `agentword${run}`;
-      const t = 1 + 3 * pick(Math.floor((SECTIONS - 2) / 3) + 1); // a section with a table (s % 3 === 1)
-      const ops: Op[] = [
-        { op: 'replace_text', block: `s${a}p2`, old: first, new: words.join(' ') },
-        { op: 'replace_block', id: `s${pick(SECTIONS)}p4`, markdown: `Agent ${run} rewrote this block. ${sentence(r)} ${sentence(r)} ${sentence(r)}` },
-        { op: 'insert', after: `s${pick(SECTIONS)}h`, markdown: `Agent ${run} inserted this paragraph. ${sentence(r)} ${sentence(r)}` },
-        { op: 'set_cell', table: `s${t}t`, row: 1 + pick(3), col: pick(3), markdown: String(pick(10_000)) },
-        run % 2 === 1 && inserted.length > 0 ? { op: 'delete', id: inserted.shift()! } : { op: 'replace_text', old: `Agent ${run - 1} inserted this paragraph.`, new: `Agent ${run - 1} added this paragraph.` },
-      ];
+      const ops = batchOf(index, r, run, inserted);
       if (run === 0) ops[4] = { op: 'replace_text', old: 'Begin.', new: 'Start.' };
       updates = [];
       t0 = performance.now();
@@ -100,9 +110,40 @@ describe('the patch writer at 200 pages', () => {
         total.push(wrote + framed);
       }
     }
+    // the first batch after a read, each round on a fresh replica (Decision Log 20)
+    const reads: number[] = [];
+    const warmTotal: number[] = [];
+    const warmSlice: number[] = [];
+    const firstBatch: number[] = [];
+    for (let round = 0; round < FIRST_AFTER_READ_ROUNDS; round++) {
+      const fresh = newDoc();
+      applyV2(fresh, state);
+      t0 = performance.now();
+      readDocument(fresh, { tab: SEED_TAB, count: 200 });
+      reads.push(performance.now() - t0);
+      const freshIndex = DocIndex.of(fresh);
+      let total = 0;
+      let longest = 0;
+      for (let done = false; !done; ) {
+        const start = performance.now();
+        done = freshIndex.warm(() => performance.now() >= start + WARM_SLICE_MS);
+        const took = performance.now() - start;
+        total += took;
+        longest = Math.max(longest, took);
+      }
+      warmTotal.push(total);
+      warmSlice.push(longest);
+      const ops = batchOf(freshIndex, prng(100 + round), round, []);
+      ops[4] = { op: 'replace_text', old: 'Start.', new: `Round ${round}.` }; // an unscoped search, the cold case's worst op
+      t0 = performance.now();
+      applyEdit(fresh, ops);
+      firstBatch.push(performance.now() - t0);
+      fresh.destroy();
+    }
     const result = {
       seed: stats,
       coldMs: { index: +coldIndex.toFixed(1), firstUnscopedSearch: +coldSearch.toFixed(1) },
+      firstBatchAfterRead: { rounds: FIRST_AFTER_READ_ROUNDS, readMs: summary(reads), warmTotalMs: summary(warmTotal), warmLongestSliceMs: summary(warmSlice), batchMs: summary(firstBatch) },
       writer: summary(writer),
       hostFrame: summary(host),
       batchTotal: summary(total),
@@ -110,5 +151,6 @@ describe('the patch writer at 200 pages', () => {
     };
     console.log(`document writer bench: ${JSON.stringify(result)}`);
     expect(result.writer.p95).toBeLessThan(40);
+    expect(result.firstBatchAfterRead.batchMs.max).toBeLessThan(40);
   });
 });
