@@ -119,16 +119,43 @@ class FakeSource implements LibrarySource {
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+// The text settle's clock, advanced by the test (the promise ticks stay real).
+class FakeClock {
+  now = 0;
+  private next = 0;
+  private readonly timers = new Map<number, { at: number; fn: () => void }>();
+  readonly set = (fn: () => void, ms: number): number => {
+    this.timers.set(++this.next, { at: this.now + ms, fn });
+    return this.next;
+  };
+  readonly clear = (handle: unknown): void => void this.timers.delete(handle as number);
+  pending(): number {
+    return this.timers.size;
+  }
+  async advance(ms: number): Promise<void> {
+    this.now += ms;
+    for (const [handle, timer] of [...this.timers].sort((a, b) => a[1].at - b[1].at)) {
+      if (timer.at > this.now) continue;
+      this.timers.delete(handle);
+      timer.fn();
+    }
+    await settle();
+  }
+}
+const SETTLE_MS = 1_000;
+
 describe('LibrarySync', () => {
   let dir: ReturnType<typeof tempDir>;
   let index: Index;
   let source: FakeSource;
   let sync: LibrarySync;
   let warn: ReturnType<typeof vi.spyOn>;
+  let clock: FakeClock;
   beforeEach(() => {
     dir = tempDir();
     index = new Index(join(dir.path, 'index.sqlite'));
     source = new FakeSource();
+    clock = new FakeClock();
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
   afterEach(() => {
@@ -138,12 +165,13 @@ describe('LibrarySync', () => {
     vi.restoreAllMocks();
   });
   const start = async () => {
-    sync = new LibrarySync(index.library, source);
+    sync = new LibrarySync(index.library, source, { settleMs: SETTLE_MS, timers: { set: clock.set, clear: clock.clear } });
     sync.start();
     await settle();
   };
   const ids = () => index.library.list().rows.map((row) => row.id).sort();
   const title = (n: number) => index.library.get(uuid(n))?.title;
+  const textReads = () => source.calls.filter((call) => call.startsWith('text'));
 
   it('reconciles at start when the host is already streaming, and at every connection after', async () => {
     await start();
@@ -308,15 +336,19 @@ describe('LibrarySync', () => {
     expect(index.library.spaces()).toMatchObject([{ name: 'Fresh', count: 0 }]);
   });
 
+  // Decision Log 18(a): text is read only after a revision settles (the mirror's settle, 1 s)
   describe('text', () => {
-    it('fetches the text of the rows a reconciliation lands, two at a time, and keeps it', async () => {
+    it('reads no text before a landed row’s revision settles, then the rows a reconciliation landed, two at a time', async () => {
       await start();
       source.snapshots[0].resolve(snapshot([entry(1, { updatedAt: 30 }), entry(2, { updatedAt: 20 }), entry(3, { updatedAt: 10 })]));
       await settle();
-      expect(source.calls.filter((call) => call.startsWith('text'))).toEqual([`text ${uuid(1)}`, `text ${uuid(2)}`]);
+      await clock.advance(SETTLE_MS - 1);
+      expect(textReads()).toEqual([]);
+      await clock.advance(1);
+      expect(textReads()).toEqual([`text ${uuid(1)}`, `text ${uuid(2)}`]);
       source.pendingText(1).resolve({ revision: 1, text: 'alpha words' });
       await settle();
-      expect(source.calls.filter((call) => call.startsWith('text'))).toHaveLength(3);
+      expect(textReads()).toHaveLength(3);
       source.pendingText(2).resolve({ revision: 1, text: 'beta words' });
       source.pendingText(3).resolve({ revision: 1, text: 'gamma words' });
       await settle();
@@ -324,53 +356,98 @@ describe('LibrarySync', () => {
       expect(index.library.needingText()).toEqual([]);
     });
 
-    it('fetches again after a revision move, and not after a change that left the revision', async () => {
+    it('postpones the read while new revisions keep arriving, and indexes the latest once editing stops', async () => {
       await start();
       source.snapshots[0].resolve(snapshot([entry(1, { revision: 1 })]));
       await settle();
+      for (const revision of [2, 3, 4]) {
+        await clock.advance(SETTLE_MS - 100); // another revision lands before the last one settled
+        source.changed(1, 'updated', revision);
+        await settle();
+        source.pendingEntry(1).resolve({ artifact: entry(1, { revision }), links: [] });
+        await settle();
+        expect(textReads()).toEqual([]);
+      }
+      await clock.advance(SETTLE_MS - 1);
+      expect(textReads()).toEqual([]);
+      await clock.advance(1);
+      expect(textReads()).toEqual([`text ${uuid(1)}`]);
+      source.pendingText(1).resolve({ revision: 4, text: 'the latest words' });
+      await settle();
+      expect(index.library.list({ query: 'latest' }).rows).toHaveLength(1);
+      expect(index.library.needingText()).toEqual([]);
+    });
+
+    it('a change that leaves the revision (a rename) neither reads nor postpones the text', async () => {
+      await start();
+      source.snapshots[0].resolve(snapshot([entry(1, { revision: 1 })]));
+      await settle();
+      await clock.advance(SETTLE_MS);
       source.pendingText(1).resolve({ revision: 1, text: 'first' });
       await settle();
-      source.changed(1, 'updated', 1); // a rename: the revision did not move
+      source.changed(1, 'updated', 1);
       await settle();
       source.pendingEntry(1).resolve({ artifact: entry(1, { revision: 1, title: 'Renamed' }), links: [] });
       await settle();
-      expect(source.pendingTexts()).toBe(0);
+      await clock.advance(SETTLE_MS);
+      expect(textReads()).toHaveLength(1);
+
       source.changed(1, 'updated', 2);
       await settle();
       source.pendingEntry(1).resolve({ artifact: entry(1, { revision: 2 }), links: [] });
       await settle();
+      await clock.advance(SETTLE_MS - 500);
+      source.changed(1, 'updated', 2); // a rename during the settle: the timer is not reset
+      await settle();
+      source.pendingEntry(1).resolve({ artifact: entry(1, { revision: 2, title: 'Again' }), links: [] });
+      await settle();
+      await clock.advance(500);
       source.pendingText(1).resolve({ revision: 2, text: 'second' });
       await settle();
       expect(index.library.list({ query: 'second' }).rows).toHaveLength(1);
       expect(index.library.list({ query: 'first' }).rows).toHaveLength(0);
     });
 
-    it('coalesces repeats: a row wanted again while its read is out is read once more after it, never twice at once', async () => {
+    it('a row wanted again while its read is out is read once more after it, never twice at once', async () => {
       await start();
       source.snapshots[0].resolve(snapshot([entry(1, { revision: 1 })]));
       await settle();
-      source.changed(1, 'updated', 2);
-      await settle();
-      source.pendingEntry(1).resolve({ artifact: entry(1, { revision: 2 }), links: [] });
-      await settle();
+      await clock.advance(SETTLE_MS);
       source.changed(1, 'updated', 3);
       await settle();
       source.pendingEntry(1).resolve({ artifact: entry(1, { revision: 3 }), links: [] });
       await settle();
-      expect(source.calls.filter((call) => call.startsWith('text'))).toHaveLength(1);
+      await clock.advance(SETTLE_MS);
+      expect(textReads()).toHaveLength(1);
       source.pendingText(1).resolve({ revision: 1, text: 'old' }); // the read sent at revision 1
       await settle();
-      expect(source.calls.filter((call) => call.startsWith('text'))).toHaveLength(2);
+      expect(textReads()).toHaveLength(2);
       source.pendingText(1).resolve({ revision: 3, text: 'current' });
       await settle();
-      expect(source.calls.filter((call) => call.startsWith('text'))).toHaveLength(2);
+      expect(textReads()).toHaveLength(2);
       expect(index.library.needingText()).toEqual([]);
+    });
+
+    it('a deletion during the settle cancels the read', async () => {
+      await start();
+      source.snapshots[0].resolve(snapshot([entry(1), entry(2)]));
+      await settle();
+      source.changed(1, 'deleted', 2);
+      await settle();
+      source.changed(2, 'updated', 2);
+      await settle();
+      source.pendingEntry(2).resolve({ artifact: null, links: [] });
+      await settle();
+      expect(clock.pending()).toBe(0);
+      await clock.advance(SETTLE_MS);
+      expect(textReads()).toEqual([]);
     });
 
     it('a text the host cannot read is logged and left until the row’s revision moves', async () => {
       await start();
       source.snapshots[0].resolve(snapshot([entry(1)]));
       await settle();
+      await clock.advance(SETTLE_MS);
       source.pendingText(1).reject(new Error('library.text: internal: gone'));
       await settle();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('[library]'), expect.stringContaining('gone'));
@@ -379,11 +456,38 @@ describe('LibrarySync', () => {
 
     it('reads no text while the host is not streaming', async () => {
       await start();
-      source.live = false;
       source.snapshots[0].resolve(snapshot([entry(1)]));
       await settle();
-      expect(source.calls.filter((call) => call.startsWith('text'))).toEqual([]);
+      source.live = false;
+      await clock.advance(SETTLE_MS);
+      expect(textReads()).toEqual([]);
     });
+
+    it('stop cancels every settle', async () => {
+      await start();
+      source.snapshots[0].resolve(snapshot([entry(1), entry(2)]));
+      await settle();
+      expect(clock.pending()).toBe(2);
+      sync.stop();
+      expect(clock.pending()).toBe(0);
+      await clock.advance(SETTLE_MS);
+      expect(textReads()).toEqual([]);
+    });
+  });
+
+  it('a stopped drain sends no further entry read, its later batches included', async () => {
+    await start();
+    source.snapshots[0].resolve(snapshot([]));
+    await settle();
+    for (let n = 1; n <= 12; n++) source.changed(n, 'created');
+    await settle();
+    const reads = () => source.calls.filter((call) => call.startsWith('entry'));
+    expect(reads()).toHaveLength(8); // ENTRY_READS_IN_FLIGHT
+    sync.stop();
+    for (let n = 1; n <= 8; n++) source.pendingEntry(n).resolve({ artifact: entry(n), links: [] });
+    await settle();
+    expect(reads()).toHaveLength(8);
+    expect(ids()).toEqual([]);
   });
 
   it('after stop applies nothing that comes back and follows no event', async () => {

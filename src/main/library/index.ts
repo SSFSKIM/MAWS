@@ -15,11 +15,12 @@ export interface LibraryDeps {
   register: typeof registerMainHandler;
   emit: <N extends EventName>(name: N, payload: EventPayload<N>) => boolean;
   tickMs?: number; // library.changed coalescing; 16 ms
+  settleMs?: number; // the text's settle (sync.ts's TEXT_SETTLE_MS)
 }
 
 const TICK_MS = 16;
 
-export function startLibrary({ index, hosts, register, emit, tickMs = TICK_MS }: LibraryDeps): { stop(): void } {
+export function startLibrary({ index, hosts, register, emit, tickMs = TICK_MS, settleMs }: LibraryDeps): { stop(): void } {
   registerLibraryHandlers(index, register);
   if (index.unavailable !== null) {
     console.warn(`[library] the index is unavailable (${index.unavailable}); the library answers empty and follows no host change this run`);
@@ -32,7 +33,7 @@ export function startLibrary({ index, hosts, register, emit, tickMs = TICK_MS }:
       emit('library.changed', { revision: index.library.revision });
     }, tickMs);
   });
-  const sync = new LibrarySync(index.library, hostLibrarySource(hosts));
+  const sync = new LibrarySync(index.library, hostLibrarySource(hosts), { settleMs });
   sync.start();
   return {
     stop: () => {

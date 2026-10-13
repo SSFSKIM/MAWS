@@ -273,6 +273,10 @@ export class LibraryStore {
       clauses.push('a.space_id = ?');
       params.push(filter.spaceId);
     }
+    if (filter.projectId !== undefined) {
+      clauses.push('a.project_id = ?');
+      params.push(filter.projectId);
+    }
     if (filter.pinned !== undefined) {
       clauses.push('a.pinned = ?');
       params.push(filter.pinned ? 1 : 0);

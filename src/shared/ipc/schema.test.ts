@@ -1746,6 +1746,8 @@ describe('ipc schema validates both directions', () => {
     it('filters by a Space or by none, and caps the query', () => {
       expect(validateCommandInput('library.list', { filter: { spaceId: null, lineage: true, appSessionId: 'sess-1', query: '회의' } }).ok).toBe(true);
       expect(validateCommandInput('library.list', { filter: { spaceId: 'not-a-uuid' } }).ok).toBe(false);
+      expect(validateCommandInput('library.list', { filter: { projectId: 'project-1', spaceId: null } }).ok).toBe(true); // §4.1: filterable, never a Space
+      expect(validateCommandInput('library.list', { filter: { projectId: 42 } }).ok).toBe(false);
       expect(validateCommandInput('library.list', { filter: { query: 'x'.repeat(1_001) } }).ok).toBe(false);
       expect(validateCommandInput('library.list', { filter: { kind: 'slides' } }).ok).toBe(false);
       expect(validateEventPayload('library.changed', { revision: 4 }).ok).toBe(true);

@@ -115,6 +115,29 @@ describe('LibraryStore', () => {
     expect(index.library.list({ appSessionId: a, pinned: true, kind: 'document' }).rows.map((r) => r.id)).toEqual([uuid(3)]);
   });
 
+  // §4.1 [binding]: `projectId` is a fact from the creating session, filterable, never a Space
+  it('filters by project, independently of the Space, and counts each kind of that project without the kind filter', () => {
+    const one = index.projects.add(dir.path);
+    const other = 'another-project' as ProjectId;
+    index.library.reconcile({
+      artifacts: [
+        entry(1, { kind: 'html', projectId: one.id, spaceId: SPACE_A }),
+        entry(2, { kind: 'document', projectId: one.id }),
+        entry(3, { kind: 'html', projectId: other, spaceId: SPACE_A }),
+        entry(4, { kind: 'file' }),
+      ],
+      links: [],
+      spaces: [space(SPACE_A, 'Work')],
+    });
+    const zero = { document: 0, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 0, file: 0 };
+    expect(ids(index.library.list({ projectId: one.id }).rows).sort()).toEqual([uuid(1), uuid(2)]);
+    expect(ids(index.library.list({ projectId: other }).rows)).toEqual([uuid(3)]);
+    expect(ids(index.library.list({ projectId: one.id, spaceId: SPACE_A }).rows)).toEqual([uuid(1)]);
+    expect(ids(index.library.list({ projectId: one.id, spaceId: null }).rows)).toEqual([uuid(2)]);
+    const html = index.library.list({ projectId: one.id, kind: 'html' });
+    expect([ids(html.rows), html.counts]).toEqual([[uuid(1)], { ...zero, html: 1, document: 1 }]);
+  });
+
   it('the lineage filter adds the artifacts of a side thread’s ancestors, up the side-thread chain to the family root, and never a descendant’s', () => {
     const root = session('Root');
     const thread = session('Thread');

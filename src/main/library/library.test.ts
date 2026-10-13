@@ -79,6 +79,7 @@ describe('startLibrary', () => {
       register: ((name: string, handler: Handler) => handlers.set(name, handler)) as never,
       emit: ((name: string, payload: unknown) => emitted.push({ name, payload }) > 0) as never,
       tickMs: 0,
+      settleMs: 0,
     }));
   };
   const call = (name: string, input?: unknown) => handlers.get(name)!(input);

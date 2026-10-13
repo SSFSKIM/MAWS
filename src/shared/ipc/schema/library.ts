@@ -59,6 +59,7 @@ export const LIBRARY_QUERY_MAX = 1_000;
 export const LibraryFilterSchema = z.strictObject({
   kind: ArtifactKindSchema.optional(),
   spaceId: Id.nullable().optional(), // null: in no Space
+  projectId: ProjectIdSchema.optional(), // the creating session's project (§4.1: filterable, never a Space)
   pinned: z.boolean().optional(),
   appSessionId: AppSessionIdSchema.optional(), // linked to this session in any role
   lineage: z.boolean().optional(), // with `appSessionId`: or to one of its side-thread ancestors (X9's scope)
