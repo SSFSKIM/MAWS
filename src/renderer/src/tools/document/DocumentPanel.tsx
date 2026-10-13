@@ -42,7 +42,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   useEditorHost(
     scope,
     documentHeader(
-      { title, document: snapshot.document, previewing: snapshot.previewing, unresolved: snapshot.unresolved, rail: snapshot.rail, history: true, suggestions: snapshot.suggestions, exporting: snapshot.exporting },
+      { title, document: snapshot.document, saving: snapshot.saving, previewing: snapshot.previewing, unresolved: snapshot.unresolved, rail: snapshot.rail, history: true, suggestions: snapshot.suggestions, exporting: snapshot.exporting },
       commands,
     ),
   );

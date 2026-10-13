@@ -1,7 +1,8 @@
 // The document editor in the product app (M8 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md, "Proves (e2e,
 // product)"; `pnpm e2e:document-app`, the product build, MAWS_HARNESS=0): a document the owner creates opens through L's
 // registry in an `artifact` main tab and in the panel's Artifacts tool as two replicas of one host doc, each typing
-// reaching the other; the X32 header says Saving… then All changes saved around a keystroke and Reconnecting… across a
+// reaching the other; the X32 header stays All changes saved around an acknowledged keystroke (M9: "Saving…" only for
+// edits left waiting past the tab's delay, so it never flickers) and says Reconnecting… across a
 // host restart, after which the typing still lands; History lists A's versions, Save version adds a named one, and
 // Restore brings it back with the banner. The exporters run in main (through their e2e seam, until A's export service
 // registers them) and write `.md`, `.html`, `.docx` and a `.pdf` beginning `%PDF-` with one page per tab on Letter and
@@ -80,7 +81,7 @@ async function openInPanel(page: Page, artifactId: string): Promise<Locator> {
   return record;
 }
 
-// Every text the header's saved word showed since this call, in order (a keystroke's "Saving…" lasts milliseconds).
+// Every text the header's saved word showed since this call, in order.
 async function watchSaved(page: Page, header: Locator): Promise<() => Promise<string[]>> {
   const handle = await header.elementHandle();
   await page.evaluate((row) => {
@@ -119,13 +120,15 @@ test('a document opens in a main tab and in the panel as two replicas; the heade
     await expect(mainText).toContainText('Typed in the main tab. And in the panel.', { timeout: 10_000 });
   });
 
-  await test.step('the header says Saving… then All changes saved around a keystroke', async () => {
+  await test.step('the header stays All changes saved around a keystroke the host acknowledges (no flicker)', async () => {
     await expect(mainHeader.locator('[data-header-saved]')).toHaveText('All changes saved', { timeout: 10_000 });
     const seen = await watchSaved(page, mainHeader);
     await mainText.click();
     await page.keyboard.press('End');
     await page.keyboard.type('!');
-    await expect.poll(seen, { timeout: 10_000, message: 'saving, then saved' }).toEqual(['All changes saved', 'Saving…', 'All changes saved']);
+    await expect(panelText).toContainText('And in the panel.!', { timeout: 10_000 }); // the host has it
+    await page.waitForTimeout(1_000); // past the tab's 500 ms delay
+    expect(await seen(), 'no Saving… for an acknowledged keystroke').toEqual(['All changes saved']);
   });
 
   await test.step('across a host restart the header says Reconnecting…, and what was typed meanwhile lands', async () => {

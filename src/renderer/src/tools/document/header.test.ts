@@ -14,6 +14,7 @@ function commands(): DocumentHeaderCommands {
 const state = (fields: Partial<DocumentHeaderState> = {}): DocumentHeaderState => ({
   title: 'Launch plan',
   document: live(),
+  saving: false,
   previewing: false,
   unresolved: 0,
   rail: null,
@@ -25,20 +26,21 @@ const state = (fields: Partial<DocumentHeaderState> = {}): DocumentHeaderState =
 
 describe('savedOf (D13)', () => {
   it('maps the replica’s state to the header’s word', () => {
-    expect(savedOf(null, false)).toBeNull(); // still opening: no word yet
-    expect(savedOf(live(), false)).toBe('saved');
-    expect(savedOf(live({ unsaved: 2 }), false)).toBe('saving');
-    expect(savedOf(live({ phase: 'off', synced: false, unsaved: 2 }), false)).toBe('reconnecting');
-    expect(savedOf(live({ phase: 'handshake', synced: false }), false)).toBe('reconnecting');
-    expect(savedOf(live({ readOnly: true }), false)).toBe('readonly');
-    expect(savedOf(live({ readOnly: true, phase: 'off' }), false)).toBe('readonly');
-    expect(savedOf(live({ unsaved: 1 }), true)).toBe('readonly'); // a version is shown, not the live document
+    expect(savedOf(null, false, false)).toBeNull(); // still opening: no word yet
+    expect(savedOf(live(), false, false)).toBe('saved');
+    expect(savedOf(live({ unsaved: 2 }), false, false)).toBe('saved'); // acknowledged within the tab's delay: no flicker (M9)
+    expect(savedOf(live({ unsaved: 2 }), false, true)).toBe('saving'); // edits waited past it
+    expect(savedOf(live({ phase: 'off', synced: false, unsaved: 2 }), false, true)).toBe('reconnecting');
+    expect(savedOf(live({ phase: 'handshake', synced: false }), false, false)).toBe('reconnecting');
+    expect(savedOf(live({ readOnly: true }), false, false)).toBe('readonly');
+    expect(savedOf(live({ readOnly: true, phase: 'off' }), false, false)).toBe('readonly');
+    expect(savedOf(live({ unsaved: 1 }), true, true)).toBe('readonly'); // a version is shown, not the live document
   });
 });
 
 describe('documentHeader', () => {
   it('carries the title, the saved word and the open threads', () => {
-    const header = documentHeader(state({ unresolved: 3, document: live({ unsaved: 1 }) }), commands());
+    const header = documentHeader(state({ unresolved: 3, document: live({ unsaved: 1 }), saving: true }), commands());
     expect(header).toMatchObject({ title: 'Launch plan', saved: 'saving', unresolved: 3 });
   });
 

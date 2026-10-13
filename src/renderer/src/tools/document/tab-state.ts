@@ -29,6 +29,11 @@ import { documentMentions } from './mentions';
 const ROW_QUIET_MS = 500; // a burst of writes reads the row once
 const SAVE_WAIT_MS = 3_000; // how long the close guard waits for edits in flight before it asks
 const NO_CONTENT_MS = 5_000; // the wait for a new document's first tab before saying it has none
+// M9 (the scale gate): how long edits wait for the host's acknowledgement before the header says "Saving…". An edit
+// acknowledged sooner (tens of milliseconds) publishes nothing, so a keystroke neither flickers the saved word (S7b's
+// bound 3: X32's saved state must not flicker) nor re-renders the tab; every React commit while the editor has the
+// focus walks the editor's whole DOM to save its selection, milliseconds a keystroke at 200 pages.
+const SAVING_SHOWN_MS = 500;
 
 export interface DocumentTabDeps {
   host: ArtifactHost;
@@ -41,6 +46,8 @@ export interface DocumentTabDeps {
   sessions(): Array<{ appSessionId: string; title: string }>;
   /** How long an open document may wait for its first tab before the tab says it has no content yet (5 s). */
   noContentMs?: number;
+  /** How long edits wait for the host's acknowledgement before the tab says it is saving (500 ms). */
+  savingShownMs?: number;
 }
 
 export interface DocumentTabSnapshot {
@@ -51,7 +58,10 @@ export interface DocumentTabSnapshot {
   title: string;
   /** Where the artifact sits, as the governing design system is chosen by it (its own system, its Space's). */
   placement: { designSystemId?: string; spaceId?: string };
+  /** The replica's state as of its last change of phase, sync or read-only (its counts are not followed: `handle.state()` has them). */
   document: DocumentState | null;
+  /** Edits have waited past the delay for the host's acknowledgement. */
+  saving: boolean;
   unresolved: number;
   suggestions: boolean | null;
   rail: DocumentRail;
@@ -93,7 +103,7 @@ export class DocumentTabState {
   ) {
     this.artifactId = target.artifactId;
     this.host = deps.host;
-    this.current = { ready: false, failed: null, handle: null, title: '', placement: {}, document: null, unresolved: 0, suggestions: null, rail: null, saveVersionRequest: 0, noContent: false, previewing: false, exporting: null };
+    this.current = { ready: false, failed: null, handle: null, title: '', placement: {}, document: null, saving: false, unresolved: 0, suggestions: null, rail: null, saveVersionRequest: 0, noContent: false, previewing: false, exporting: null };
     this.whenShown = new Promise((resolve) => (this.resolveShown = resolve));
     this.history = createHistoryApi({
       artifactId: this.artifactId,
@@ -134,6 +144,28 @@ export class DocumentTabState {
     for (const listener of [...this.listeners]) listener();
   }
 
+  // What the header reads of the replica's state: its phase, sync and read-only, published as they change, and edits left
+  // waiting for the host past the delay (an edit acknowledged sooner publishes nothing).
+  private savingTimer: ReturnType<typeof setTimeout> | null = null;
+  private follow(handle: DocumentHandle, document: DocumentState): void {
+    if (document.unsaved === 0) this.stopSavingTimer();
+    else if (this.savingTimer === null && !this.current.saving) {
+      this.savingTimer = setTimeout(() => {
+        this.savingTimer = null;
+        if (!this.disposed && handle.state().unsaved > 0) this.set({ document: handle.state(), saving: true });
+      }, this.deps.savingShownMs ?? SAVING_SHOWN_MS);
+    }
+    const shown = this.current.document;
+    const saving = this.current.saving && document.unsaved > 0;
+    if (shown && shown.phase === document.phase && shown.synced === document.synced && shown.readOnly === document.readOnly && saving === this.current.saving) return;
+    this.set({ document, saving });
+  }
+
+  private stopSavingTimer(): void {
+    if (this.savingTimer !== null) clearTimeout(this.savingTimer);
+    this.savingTimer = null;
+  }
+
   private async open(): Promise<void> {
     const [opened] = await Promise.allSettled([this.deps.host.open(this.artifactId), this.readRow()]);
     if (opened.status === 'rejected') {
@@ -144,7 +176,8 @@ export class DocumentTabState {
     if (this.disposed) return void handle.close();
     const openThreads = () => listThreads(handle.doc).filter((thread) => thread.status === 'open').length;
     this.stops.push(
-      handle.subscribe((document) => this.set({ document })),
+      handle.subscribe((document) => this.follow(handle, document)),
+      () => this.stopSavingTimer(),
       observeThreads(handle.doc, () => this.set({ unresolved: openThreads() })),
       this.awaitFirstTab(handle),
     );

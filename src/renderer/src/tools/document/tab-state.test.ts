@@ -9,7 +9,8 @@ import type { PortProvider } from '@artifacts/provider/port';
 import { createDocument, listTabs, tabBody } from '@artifacts/document/tabs';
 import { schemaFor } from '@artifacts/document/schema';
 import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
-import type { ArtifactHost, DocumentHandle } from '@artifacts/host';
+import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
+import { newDoc } from '@artifacts/yjs';
 import type { CommandName, EventName, MawsBridge } from '@shared/ipc/schema';
 import { DocumentTabState, type DocumentTabDeps } from './tab-state';
 
@@ -143,6 +144,38 @@ describe('a document tab’s state', () => {
     expect(state.snapshot().unresolved).toBe(1);
     w.memory.dropConnections();
     await until(() => state.snapshot().document?.phase !== 'live', 'the replica to see its port go');
+  });
+
+  // M9 (the scale gate): every React commit while the editor has the focus walks the editor's whole DOM (React saves the
+  // selection), so the tab must not re-render twice a keystroke for a "Saving…" that lasts the ack's few milliseconds
+  // (S7b's bound 3: the saved state must not flicker). Only edits left unacknowledged past the delay say saving.
+  it('changes nothing the header reads for an edit acknowledged within the delay, and says saving once edits wait past it', async () => {
+    const pushed = new Set<(state: DocumentState) => void>();
+    let current: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
+    const push = (patch: Partial<DocumentState>) => {
+      current = { ...current, ...patch };
+      for (const listener of pushed) listener(current);
+    };
+    const handle = { doc: newDoc(), state: () => current, subscribe: (listener: (state: DocumentState) => void) => (pushed.add(listener), () => pushed.delete(listener)), close: () => {}, onRestored: () => () => {}, holdRemote: () => {} } as unknown as DocumentHandle;
+    const w = world({}, new MemoryDocumentHost(), { savingShownMs: 40, host: { open: async () => handle } as unknown as ArtifactHost });
+    const state = w.open();
+    await ready(state);
+    let published = 0;
+    state.subscribe(() => (published += 1));
+
+    push({ unsaved: 1 });
+    push({ unsaved: 0, revision: 2 });
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(published).toBe(0);
+    expect(state.snapshot().saving).toBe(false);
+
+    push({ unsaved: 1 });
+    await until(() => state.snapshot().saving, 'saving after the delay');
+    push({ unsaved: 0, revision: 3 });
+    expect(state.snapshot().saving).toBe(false);
+
+    push({ phase: 'off', synced: false });
+    expect(state.snapshot().document?.phase).toBe('off'); // a dropped port is said at once
   });
 
   it('toggles the rail the header asks for and counts Save version requests', async () => {
