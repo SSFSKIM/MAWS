@@ -19,7 +19,7 @@ import { transact, type Doc, type Node } from '../yjs';
 import { ContentString, ContentType, Item, YNode, findIndexSS } from '../yjs/document';
 import { pmnodeToDelta, ynodeToPmnode } from '../yjs/prosemirror';
 import type { Applied, ApplyOptions, Carry, Op, Slot } from './edit-ops';
-import { joinedCells, pmCells, planEdit, textblocksOf, type Plan, type RootAction } from './edit-plan';
+import { canonicalJSON, joinedCells, pmCells, planEdit, textblocksOf, type Plan, type RootAction } from './edit-plan';
 import { diffCells, equalMap, textOf } from './inline-diff';
 import { schemaFor } from './schema';
 import { sentenceHunks } from './sentence';
@@ -334,7 +334,7 @@ class YWriter {
     for (const [key, state] of this.plan.tops) {
       if (!state.pm) continue;
       const node = this.nodes.get(key) ?? state.base?.node;
-      if (!node || !ynodeToPmnode(node, this.schema).eq(state.pm)) throw new Error(`the patch writer's write of ^${key} diverged from its plan`);
+      if (!node || JSON.stringify(canonicalJSON(ynodeToPmnode(node, this.schema))) !== JSON.stringify(canonicalJSON(state.pm))) throw new Error(`the patch writer's write of ^${key} diverged from its plan`);
     }
   }
 

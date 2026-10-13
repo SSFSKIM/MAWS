@@ -115,7 +115,8 @@ function mergeMarks(old: readonly PMCell[], neu: readonly PMCell[], hunks: reado
   const build = (n: number, kept: readonly Mark[]): readonly Mark[] => {
     let set: readonly Mark[] = Mark.none;
     for (const mark of neu[n].marks) if (!carried(mark)) set = mark.addToSet(set);
-    for (const mark of kept) if (allows(n, mark.type)) set = mark.addToSet(set);
+    // marks of one type may overlap (comments) and a set keeps them in the order added: add them in one order
+    for (const mark of [...kept].sort(byJSON)) if (allows(n, mark.type)) set = mark.addToSet(set);
     return set;
   };
   equalMap(old.length, hunks).forEach((n, o) => {
@@ -137,6 +138,30 @@ function mergeMarks(old: readonly PMCell[], neu: readonly PMCell[], hunks: reado
     for (let n = hunk.nFrom; n < hunk.nTo; n++) out[n] = build(n, inherit);
   }
   return out;
+}
+
+const markKey = (mark: Mark): string => JSON.stringify(mark.toJSON());
+const byJSON = (a: Mark, b: Mark): number => (markKey(a) < markKey(b) ? -1 : markKey(a) > markKey(b) ? 1 : 0);
+
+/**
+ * A node as JSON with every textblock's text regrouped by its marks in one order: two nodes equal in content compare
+ * equal however their overlapping marks were ordered or their text split (the plan against Yjs's read-back).
+ */
+export function canonicalJSON(node: PMNode): unknown {
+  const marks = (list: readonly Mark[]) => (list.length ? [...list].sort((a, b) => a.type.rank - b.type.rank || byJSON(a, b)).map((mark) => mark.toJSON()) : undefined);
+  if (node.isTextblock) {
+    const runs: Array<{ text?: string; node?: unknown; marks?: unknown }> = [];
+    node.forEach((child) => {
+      const key = marks(child.marks);
+      const last = runs.at(-1);
+      if (child.isText && last?.text !== undefined && JSON.stringify(last.marks) === JSON.stringify(key)) last.text += child.text ?? '';
+      else runs.push(child.isText ? { text: child.text ?? '', marks: key } : { node: { type: child.type.name, attrs: child.attrs }, marks: key });
+    });
+    return { type: node.type.name, attrs: node.attrs, content: runs };
+  }
+  const content: unknown[] = [];
+  node.forEach((child) => content.push(canonicalJSON(child)));
+  return { type: node.type.name, attrs: node.attrs, marks: marks(node.marks), content };
 }
 
 /** Inline content from cells and their marks: text runs of one mark set, inline nodes with theirs. */
