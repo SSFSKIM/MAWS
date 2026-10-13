@@ -34,6 +34,7 @@ afterEach(() => world.close());
 
 const ctx = (over: Partial<McpToolContext> = {}): McpToolContext => ({ appSessionId: SELF, cwd: world.dir, toolUseId: `toolu_w${++calls}` as ToolUseId, requestId: `r${calls}` as RequestId, signal: new AbortController().signal, ...over });
 const call = (name: string, args: unknown, over: Partial<McpToolContext> = {}) => tools.get(name)!.call(args, ctx(over));
+const index = (id: string, top: Parameters<ReturnType<typeof DocIndex.of>['pm']>[0]) => DocIndex.of(world.service.live(id)).pm(top).textContent;
 const text = (result: McpToolResult) => (result.content[0] as { text: string }).text;
 const json = <T = Record<string, unknown>>(result: McpToolResult): T => {
   if (result.isError) throw new Error(`a refusal: ${text(result)}`);
@@ -67,6 +68,21 @@ describe('the document tools on the maws server', () => {
     const page = json<{ artifactId: string; kind: string }>(await call('artifact_create', { title: 'Page', content: '<p>Hi</p>' }));
     expect(page.kind).toBe('html');
     expect(json<{ files: Record<string, string> }>(await call('artifact_read', { artifact: page.artifactId })).files['index.html']).toBe('<p>Hi</p>');
+  });
+
+  it('replays a repeated tool-use id through the server, and serves the comment tools on a document’s threads', async () => {
+    const id = await world.seeded();
+    const { revision } = json<{ revision: number }>(await call('artifact_read', { artifact: id }));
+    const args = { artifact: id, baseRevision: revision, ops: [{ op: 'insert', after: 'h1', markdown: 'Once.' }] };
+    const toolUseId = 'toolu_wired_once' as ToolUseId;
+    const first = await call('artifact_edit', args, { toolUseId });
+    expect(await call('artifact_edit', args, { toolUseId })).toEqual(first);
+    expect(DocIndex.of(world.service.live(id)).tops('tab1').filter((top) => index(id, top) === 'Once.')).toHaveLength(1);
+    const open = json<{ threads: { threadId: string }[] }>(await call('artifact_comments', { artifact: id }));
+    expect(open.threads.map((thread) => thread.threadId)).toEqual(['t1', 't2', 't3', 't4']);
+    expect(json(await call('artifact_reply', { artifact: id, threadId: 't1', body: 'Done.' }))).toMatchObject({ status: 'replied', threadId: 't1' });
+    expect(json(await call('artifact_resolve', { artifact: id, threadId: 't1' }))).toMatchObject({ status: 'resolved', threadId: 't1' });
+    expect(json<{ threads: { threadId: string }[] }>(await call('artifact_comments', { artifact: id, status: 'resolved' })).threads.map((thread) => thread.threadId)).toEqual(['t1']);
   });
 
   it('artifact_describe_type answers the document kind’s written guide and format reference', async () => {

@@ -17,6 +17,7 @@ import { expect, test, type Locator } from '@playwright/test';
 import type { AskAnswer } from '@shared/maws/tools';
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
 import { invoke, value } from './support/c7-replay';
+import { asDocumentReplay } from './support/document-replay'; // P3-B (M7)
 import { REPO_ROOT } from './support/launch';
 import {
   allowNext, clearToasts, fixtureRows, idle, mcpCalls, mcpResultOf, metaEvents, ofKind, PASS3, recordedCwd, recordEvents, replay, resultText, scene as sharedScene, shootThemes, show,
@@ -395,7 +396,7 @@ test('show_pane: the Terminal opens in the panel, a deliverable no record answer
 
 // ---- G1 and G7 in the app: E0a's round trip ------------------------------------------------------------------------
 
-test('the SDK MCP round trip: the app answers the engine’s handshake with the twelve tools and refuses the probe’s own tool', async () => {
+test('the SDK MCP round trip: the app answers the engine’s handshake with the sixteen tools and refuses the probe’s own tool', async () => {
   // The probe's journal: its scratch directory is the engine cwd, and from seq 96 on it holds at the probe's own writes,
   // which the app never makes (M1's decisions), so the case ends after the first turn.
   await scene({ titles: ['E1 tools: round trip'] }, async (s) => {
@@ -425,10 +426,78 @@ test('the SDK MCP round trip: the app answers the engine’s handshake with the 
       ['artifact_upload_asset', { title: 'Upload artifact asset', readOnlyHint: false, openWorldHint: false }],
       ['artifact_list_assets', { title: 'List artifact assets', readOnlyHint: true, openWorldHint: false }],
       ['artifact_export', { title: 'Export artifact', readOnlyHint: false, openWorldHint: false }],
+      // P3-B (M7): the document tools, appended after A's
+      ['artifact_edit', { title: 'Edit document', readOnlyHint: false, openWorldHint: false }],
+      ['artifact_comments', { title: 'List document comments', readOnlyHint: true, openWorldHint: false }],
+      ['artifact_reply', { title: 'Reply to a document comment', readOnlyHint: false, openWorldHint: false }],
+      ['artifact_resolve', { title: 'Resolve a document comment', readOnlyHint: false, openWorldHint: false }],
     ]);
     const [echo] = mcpCalls(rows);
     expect(mcpResultOf(rows, echo!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true });
     const [init] = ofKind(await s.events(id), 'session.init');
     expect(init!.mcpServers).toContainEqual({ name: 'maws', status: 'connected', source: 'sdk' });
   });
+});
+
+// ---- P3-B (M7): the document tools through the real server --------------------------------------------------------
+
+// E2's recorded artifact session (`pass3/p1-maws-artifacts`, as `e2e:deliverables` replays it) with its five `maws` calls
+// made a document's: a create from the kind's markdown, the kind's guide, a batch, a batch from a stale base whose quote
+// is intact, and a half-invalid batch whose second op quotes text the first batch changed. The host's tool server
+// answers each against the real store; the engine's recorded results and the model's words are never asserted.
+const ARTIFACTS = `${PASS3}/p1-maws-artifacts.jsonl`;
+const DOCUMENT_MARKDOWN = '# Plan ^h1\n\nThe review is scheduled for Friday. ^p1\n\nThe owner signs off after it. ^p2';
+
+test('the document tools on the real server: a document from markdown, its guide, a batch, a stale base with an intact quote applying, a half-invalid batch refused naming the block with nothing written', async () => {
+  const repo = recordedCwd(ARTIFACTS);
+  const replayed = asDocumentReplay(
+    ARTIFACTS,
+    [
+      { name: 'artifact_create', input: { kind: 'document', title: 'Plan', handle: 'dash', content: DOCUMENT_MARKDOWN } },
+      { name: 'artifact_describe_type', input: { kind: 'document' } },
+      { name: 'artifact_edit', input: { artifact: 'dash', baseRevision: 1, ops: [{ op: 'replace_text', block: 'p1', old: 'scheduled for Friday', new: 'moved to Monday' }] } },
+      { name: 'artifact_edit', input: { artifact: 'dash', baseRevision: 1, ops: [{ op: 'replace_text', block: 'p2', old: 'The owner signs off', new: 'The lead signs off' }] } },
+      { name: 'artifact_edit', input: { artifact: 'dash', baseRevision: 1, ops: [{ op: 'insert', after: 'h1', markdown: 'Would land first.' }, { op: 'replace_text', block: 'p1', old: 'scheduled for Friday', new: 'set for Tuesday' }] } },
+    ],
+    'document',
+  );
+  const existed = existsSync(repo);
+  mkdirSync(repo, { recursive: true });
+  try {
+    await scene({ titles: ['P3-B: document tools'], repo }, async (s) => {
+      const [id] = s.ids;
+      await show(s, id);
+      await replay(s, id, replayed);
+      for (let k = 0; k < 7; k++) await allowNext(s, id); // Write, the create, the guide, Edit, the three batches
+      await idle(s, id);
+
+      const rows = s.journal(id);
+      const calls = mcpCalls(rows);
+      expect(calls.map((c) => c.name)).toEqual(['artifact_create', 'artifact_describe_type', 'artifact_edit', 'artifact_edit', 'artifact_edit']);
+      const answer = (k: number) => mcpResultOf(rows, calls[k]!.requestId)!;
+      const json = (k: number) => {
+        const result = answer(k);
+        expect(result.isError, resultText(result)).toBeUndefined();
+        return JSON.parse(resultText(result)) as Record<string, unknown>;
+      };
+      expect(json(0)).toMatchObject({ status: 'created', kind: 'document', title: 'Plan', handle: 'dash', revision: 1 });
+      const described = json(1) as { kind: string; guide: string; format: string };
+      expect(described.kind).toBe('document');
+      expect(described.guide.startsWith('# Document: guide')).toBe(true);
+      expect(described.format).toContain('## Limits');
+      const first = json(2) as { revision: number; results: { line: string }[] };
+      expect(first.revision).toBe(2);
+      expect(first.results.map((r) => r.line)).toEqual(['replaced 1 occurrence(s) in ^p1']);
+      // a stale baseRevision whose quote is intact applies (quote validation, Decision Log 34)
+      expect(json(3)).toMatchObject({ status: 'edited', revision: 3 });
+      // a quote the first batch changed: refused naming the block with its current text, the valid insert not written
+      const refused = answer(4);
+      expect(refused.isError).toBe(true);
+      const refusal = JSON.parse(resultText(refused).slice(resultText(refused).indexOf(' {"reason":') + 1)) as Record<string, unknown>;
+      expect(refusal).toMatchObject({ reason: 'notFound', opIndex: 1, liveRevision: 3 });
+      expect(refusal.candidates).toContainEqual({ id: 'p1', text: 'The review is moved to Monday.' });
+    });
+  } finally {
+    if (!existed) rmSync(repo, { recursive: true, force: true });
+  }
 });
