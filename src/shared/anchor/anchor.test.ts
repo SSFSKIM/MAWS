@@ -116,3 +116,23 @@ describe('anchorField', () => {
     expect(anchorField('abc\u{1F600}', 4, { ellipsis: false })).toBe('abc');
   });
 });
+
+// P3-B start: the document comment's two fields (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9; ledger X26's
+// X10 amendment), each one line, non-empty and capped
+describe('artifact-comment (P3-B)', () => {
+  const comment: Anchor = { kind: 'artifact-comment', locator: 'ships quarterly', label: 'Q3 plan, Main', artifactId: 'art-7f3a', threadId: 'k2m9x0qa' };
+
+  it('accepts the kind with its artifact and thread ids', () => {
+    expect(AnchorSchema.parse(comment)).toEqual(comment);
+  });
+
+  it('caps both ids, refuses an empty one and a control character', () => {
+    for (const field of ['artifactId', 'threadId'] as const) {
+      expect(AnchorSchema.safeParse({ ...comment, [field]: 'x'.repeat(200) }).success, field).toBe(true);
+      expect(AnchorSchema.safeParse({ ...comment, [field]: 'x'.repeat(201) }).success, field).toBe(false);
+      expect(AnchorSchema.safeParse({ ...comment, [field]: '' }).success, field).toBe(false);
+      expect(AnchorSchema.safeParse({ ...comment, [field]: 'a\nb' }).success, field).toBe(false);
+    }
+  });
+});
+// P3-B end

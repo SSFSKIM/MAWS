@@ -65,12 +65,12 @@ afterEach(() => {
 
 const cardPlacement = (over: Partial<Extract<CommentPlacement, { kind: 'card' }>> = {}): CommentPlacement => ({ kind: 'card', host: 'deliverable', hostId: 'h1', rect: RECT, ...over });
 
-function mount(layout: 'anchored' | 'docked' = 'anchored') {
+function mount(layout: 'anchored' | 'docked' = 'anchored', frame: CardFrame = FRAME /* P3-B */) {
   return render(
     <>
       <CommentComposerHost />
       <div className="relative">
-        <CommentCardHost hostId="h1" host="deliverable" mode="panel" layout={layout} accepts={() => true} frame={FRAME} visible restoreFocus={restoreFocus} />
+        <CommentCardHost hostId="h1" host="deliverable" mode="panel" layout={layout} accepts={() => true} frame={frame} visible restoreFocus={restoreFocus} />
       </div>
     </>,
   );
@@ -316,5 +316,38 @@ describe('dismissal', () => {
     unmount();
     await act(async () => {});
     expect(useCommentCard.getState().open).toBeNull();
+  });
+});
+
+// P3-B (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): a host's frame may add actions to the card's header
+// (the document's Resolve) and is told of a send that went, before the card turns into its thread or closes (the
+// document records the comment in its thread); a send that did not go tells it nothing
+describe('the frame’s card hooks (P3-B)', () => {
+  it('draws the frame’s actions in the card’s header, for the card it shows', () => {
+    mount('anchored', { ...FRAME, actions: (shown) => <button type="button">Resolve {shown.anchor.locator}</button> });
+    pick();
+    expect(card()!.querySelector('header')!.textContent).toContain('Resolve #hero');
+  });
+
+  it('tells the frame of a Send to main and a Side thread that went, with the text sent; not of a refusal', async () => {
+    const onSent = vi.fn();
+    mount('anchored', { ...FRAME, onSent });
+    pick();
+    await userEvent.click(screen.getByRole('radio', { name: 'Send to main' }));
+    await userEvent.type(field(), ' Look here {Enter}');
+    expect(onSent).toHaveBeenCalledTimes(1);
+    expect(onSent.mock.calls[0]![0]).toMatchObject({ anchor: ANCHOR });
+    expect(onSent.mock.calls[0]![1]).toEqual({ text: 'Look here', destination: 'main' });
+
+    fake = fakeClient({ 'session.intent.get': null });
+    window.maws = fake.client;
+    pick();
+    await userEvent.type(field(), 'Why?{Enter}');
+    await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: 'b2222222-2222-4222-8222-222222222222', reason: 'no_engine_session', message: 'Not yet' }));
+    expect(onSent).toHaveBeenCalledTimes(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: 'b2222222-2222-4222-8222-222222222222' }));
+    expect(onSent).toHaveBeenCalledTimes(2);
+    expect(onSent.mock.calls[1]![1]).toEqual({ text: 'Why?', destination: 'thread' });
   });
 });

@@ -184,6 +184,43 @@ describe('the anchored message (X10)', () => {
   });
   // E4d end
 
+  // P3-B start: the document comment (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9; ledger X26's X10
+  // amendment): the kind `artifact-comment`, its two fields appended to the tag's order after E4d's, so every older tag
+  // keeps its bytes; the lead names the document and tab (the label), the quoted passage (the locator) and the two ids
+  // the agent's tools take
+  describe('artifact-comment (P3-B)', () => {
+    const comment: Anchor = { kind: 'artifact-comment', locator: 'ships quarterly with "design" review', label: 'Q3 plan, Main', artifactId: 'art-7f3a', threadId: 'k2m9x0qa' };
+    const TAG = '<maws_anchor kind="artifact-comment" label="Q3 plan, Main" locator="ships quarterly with &quot;design&quot; review" artifactId="art-7f3a" threadId="k2m9x0qa"/>';
+
+    it('writes the tag byte for byte, the ids last', () => {
+      expect(anchorTag(comment)).toBe(TAG);
+    });
+
+    it('writes a lead naming the document and tab, the passage and the ids', () => {
+      expect(anchorLead(comment, false)).toBe('Comment on "Q3 plan, Main" (passage "ships quarterly with "design" review" in document art-7f3a, thread k2m9x0qa):');
+      const { artifactId: _a, threadId: _t, ...bare } = comment;
+      expect(anchorLead(bare, false)).toBe('Comment on "Q3 plan, Main" (passage "ships quarterly with "design" review"):');
+    });
+
+    it('round-trips both destinations, with and without a screenshot', () => {
+      for (const destination of ['thread', 'main'] as Destination[])
+        for (const screenshot of [false, true]) {
+          const message = anchoredMessage({ anchor: screenshot ? { ...comment, screenshot: { path: '/u/s.png', width: 4, height: 4 } } : comment, text: 'Should this be monthly?', destination, screenshot });
+          expect(parseAnchoredText(message), `${destination} ${screenshot}`).toEqual({ anchor: comment, text: 'Should this be monthly?', destination });
+        }
+    });
+
+    it('keeps a reordered tag, or an id with a control character, as text', () => {
+      expect(parseAnchoredText(`hello\n\n${TAG.replace(' artifactId="art-7f3a" threadId="k2m9x0qa"', ' threadId="k2m9x0qa" artifactId="art-7f3a"')}`)).toBeNull();
+      expect(parseAnchoredText(`hello\n\n${TAG.replace('threadId="k2m9x0qa"', 'threadId="k2m9\tx0qa"')}`)).toBeNull();
+    });
+
+    it('leaves every other kind’s tag as it was', () => {
+      for (const anchor of ANCHORS) expect(anchorTag(anchor)).not.toMatch(/artifactId|threadId/);
+    });
+  });
+  // P3-B end
+
   it('names the preamble the side thread’s prompt carries', () => {
     expect(anchoredMessage({ anchor: fileLine, text: 'x', destination: 'thread', screenshot: false })).toContain(`\n\n${SIDE_THREAD_PREAMBLE}\n\n<maws_anchor`);
     expect(anchoredMessage({ anchor: fileLine, text: 'x', destination: 'main', screenshot: false })).not.toContain(SIDE_THREAD_PREAMBLE);

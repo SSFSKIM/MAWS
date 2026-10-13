@@ -94,6 +94,7 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss }: 
         <h3 className="m-0 min-w-0 flex-1 truncate text-ui-sm font-medium text-fg" title={`${anchor.label}\n${anchor.locator}`}>
           {anchor.label}
         </h3>
+        {frame.actions?.(card) /* P3-B */}
         {thread && (
           <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => openThreadAsTab(serial, thread.child)}>
             {COPY.openAsTab}
@@ -111,7 +112,7 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss }: 
           </svg>
         </button>
       </header>
-      {thread ? <CardThread card={card} child={thread.child} echo={thread.echo} frame={frame} visible={visible} /> : <CardComposer card={card} onDismiss={onDismiss} />}
+      {thread ? <CardThread card={card} child={thread.child} echo={thread.echo} frame={frame} visible={visible} /> : <CardComposer card={card} frame={frame} onDismiss={onDismiss} />}
     </div>
   );
 }
@@ -126,10 +127,15 @@ function ThreadGlyph({ child }: { child: AppSessionId }) {
 
 // The composer half. Its Side thread is not revealed while the card holds it (the card becomes the thread); a card closed
 // or replaced before the fork answered asks for the reveal, so a thread is never created unseen. Send to main closes it.
-function CardComposer({ card, onDismiss }: { card: OpenCard; onDismiss(): void }) {
+function CardComposer({ card, frame, onDismiss }: { card: OpenCard; frame: CardFrame; onDismiss(): void }) {
   const { anchor, parent, serial } = card;
   const gone = () => cardGone(serial);
-  const form = useCommentForm({ anchor, parent, gone, reveal: gone, onSent: ({ child, text }) => (child ? enterThread(serial, child, text) : onDismiss()) });
+  const onSent = ({ child, text }: { child?: AppSessionId; text: string }) => {
+    frame.onSent?.(card, { text, destination: child ? 'thread' : 'main' }); // P3-B
+    if (child) enterThread(serial, child, text);
+    else onDismiss();
+  };
+  const form = useCommentForm({ anchor, parent, gone, reveal: gone, onSent });
   return (
     <>
       {form.screenshot !== null && <ScreenshotThumbnail parent={parent} screenshot={form.screenshot} disabled={form.sending} onRemove={form.removeScreenshot} />}

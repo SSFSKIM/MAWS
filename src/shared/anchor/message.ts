@@ -31,6 +31,8 @@ function leadParts(anchor: Anchor): string[] {
       return [`element ${anchor.locator}${pageUrl !== undefined ? ` on ${pageUrl}` : ''}`];
     case 'artifact-element':
       return present(`element ${anchor.locator} in the artifact`, pageUrl);
+    case 'artifact-comment': // P3-B: the passage, then the ids the agent's document tools take
+      return present(`passage "${anchor.locator}"${anchor.artifactId !== undefined ? ` in document ${anchor.artifactId}` : ''}`, anchor.threadId !== undefined && `thread ${anchor.threadId}`);
     case 'none':
       return [];
   }
@@ -52,7 +54,7 @@ const unescapeAttribute = (value: string) => value.replace(/&(amp|quot|lt|gt);/g
 
 // The tag's attributes, in the order they are written (Interfaces): the tag is byte-stable, and the parse accepts it
 // only when re-writing the anchor it read gives the same bytes.
-const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box' /* E4d */] as const;
+const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box' /* E4d */, 'artifactId', 'threadId' /* P3-B */] as const;
 const NUMERIC_FIELDS: ReadonlySet<string> = new Set(['line', 'prNumber']);
 
 // E4d start: the browser-element box (E4d execution document, Design §6) is one attribute, `x,y,width,height`; any other

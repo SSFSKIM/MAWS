@@ -35,6 +35,25 @@ describe('targetOf', () => {
   });
 });
 
+// P3-B (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): a comment on a document's passage names the artifact
+// and its thread; its card is the artifact host's, as the editor's placement says or, re-docked, by the target's kind
+describe('the artifact target (P3-B)', () => {
+  const comment: Anchor = { kind: 'artifact-comment', locator: 'ships quarterly', label: 'Q3 plan, Main', artifactId: 'art-1', threadId: 'k2m9x0qa' };
+
+  it('reads an artifact-comment anchor into its artifact and thread; without both ids it names none', () => {
+    expect(targetOf(comment)).toEqual({ kind: 'artifact', artifactId: 'art-1', threadId: 'k2m9x0qa' });
+    expect(targetOf({ ...comment, threadId: undefined })).toBeNull();
+    expect(targetOf({ ...comment, artifactId: undefined })).toBeNull();
+  });
+
+  it('opens the card for the editor that commented, and an unplaced one for the artifact host kind', () => {
+    openCard(comment, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact', hostId: 'doc-host-1' } });
+    expect(open()).toMatchObject({ host: 'artifact', hostId: 'doc-host-1', anchor: comment, target: { kind: 'artifact', artifactId: 'art-1', threadId: 'k2m9x0qa' }, phase: { kind: 'composing' } });
+    openCard(comment, { appSessionId: PARENT, claimMode: 'panel' });
+    expect(open()).toMatchObject({ host: 'artifact', hostId: null, claimMode: 'panel' });
+  });
+});
+
 describe('the one card', () => {
   it('opens composing for the host that picked, with the pick’s rect; a second open replaces it', () => {
     openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'deliverable', hostId: 'h1', rect: RECT } });

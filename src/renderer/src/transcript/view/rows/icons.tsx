@@ -32,6 +32,7 @@ const ANCHOR_PATHS: Record<AnchorKind, string> = {
   'browser-element': 'M2 3h12v10H2zM2 6h12M4 4.5h.01M6 4.5h.01', // a browser window
   'artifact-element': 'M3 3h10v10H3zM6 6h4v4H6z', // an element inside a frame
   none: 'M13 3H3v8h3l3 3v-3h4z', // a message
+  'artifact-comment': 'M3 2h7l3 3v9H3zM5 8h6M5 10.5h4M9.5 5.5h1.5', // P3-B: a page with a highlighted line (a document comment)
 };
 export const AnchorIcon = ({ kind }: { kind: AnchorKind }) => <Icon path={ANCHOR_PATHS[kind]} data-icon={kind} />;
 export const ThreadIcon = () => <Icon path="M4 2v12M4 9c0-2.2 1.8-4 4-4h4M10 3l2 2-2 2" />;

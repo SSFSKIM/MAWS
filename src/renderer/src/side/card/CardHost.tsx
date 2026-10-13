@@ -20,7 +20,7 @@
 // with the view's box: it measures that column, draws the card in flow (`stripCard`), so the strip grows with the card
 // and the view's box shrinks by as much, and draws the pin as a caret on the strip's top edge under the element. The strip
 // never takes more than half the column (`stripMax`), clipping a card whose floor is taller than that.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
 import { CommentCard } from './CommentCard';
@@ -33,6 +33,12 @@ export interface CardFrame {
   key: string; // changes when the frame is replaced (the viewer's `frame` string)
   locate?(selector: string): Promise<CardRect | null>; // the HTML frame's handle: one function per mounted frame
   showVersion?(version: number | null): void; // the host viewer's onVersion; null: the latest
+  // P3-B start (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): a document's own card controls, drawn in the
+  // card's header before Close (its Resolve or Reopen), and a send of the card's composer that went (a refusal is not),
+  // told before the card turns into its thread or closes (the document records the comment in its thread)
+  actions?(card: OpenCard): ReactNode;
+  onSent?(card: OpenCard, sent: { text: string; destination: 'thread' | 'main' }): void;
+  // P3-B end
 }
 
 interface Props {
