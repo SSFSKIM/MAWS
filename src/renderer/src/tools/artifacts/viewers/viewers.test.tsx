@@ -155,6 +155,22 @@ describe('the HTML viewer', () => {
     expect(onShown).toHaveBeenCalled();
   });
 
+  // fix wave 2: readiness belongs to the frame that loaded; a frame mounted again under the same key is not ready until
+  // its own load
+  it('a page loaded hidden, then switched away and back, is not shown until the new frame loads', async () => {
+    const { onShown, show } = mount('html', { visible: false });
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    load(frame('html')!);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), { target: { value: '1' } });
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), { target: { value: '2' } });
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    show(true);
+    expect(onShown).not.toHaveBeenCalled();
+    load(frame('html')!);
+    expect(onShown).toHaveBeenCalled();
+  });
+
   // fix wave 1: an export or a copy takes the shown selection only once it is resolved, never the live revision instead
   it('disables Export while a Reload reads the versions again, and then exports the chosen version, never the live one', async () => {
     mount('html');

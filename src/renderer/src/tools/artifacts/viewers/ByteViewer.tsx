@@ -129,11 +129,14 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   const picking = useStore(state.view, (s) => commentable && s.pickingIn === frameKey);
   // Fix wave 1: picking belongs to one mounted frame. When the frame is replaced (a version switch, a Reload) or the
   // body unmounts (Back, the tab going inactive), its picking ends, so a version round trip or a remount, which can
-  // mount a frame under the same key again, never resumes a pick the owner left.
+  // mount a frame under the same key again, never resumes a pick the owner left. Fix wave 2: so does its readiness,
+  // so a frame mounted again under the same key is ready only after its own load.
+  const [readyKey, setReadyKey] = useState<string | null>(null);
   useEffect(() => {
     if (frameKey === null) return;
     return () => {
       if (state.view.getState().pickingIn === frameKey) state.view.setState({ pickingIn: null });
+      setReadyKey((ready) => (ready === frameKey ? null : ready));
     };
   }, [frameKey, state.view]);
   useEffect(() => {
@@ -148,7 +151,6 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
 
   // Fix wave 1 (Decision Log 15, 23): the owner's view is recorded once the frame's content is ready and on screen; a
   // body that loaded while hidden (the panel collapsed, a maximized panel over the main tab) says so when it shows.
-  const [readyKey, setReadyKey] = useState<string | null>(null);
   const ready = useCallback(() => setReadyKey(frameKey), [frameKey]);
   useEffect(() => {
     if (visible && frameKey !== null && readyKey === frameKey) onShown();
