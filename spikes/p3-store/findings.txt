@@ -216,3 +216,213 @@ suggestions" (put to the owner). Pitfalls 1 and 8 go into P3-A's brief.
    default as §2 item 2 assumes; a product call for the owner (a suggestion doc is gc-off and grows).
 4. Vendor `@y/prosemirror` at a pinned commit? Recommended only if upstream has not fixed the partial-accept gap before
    P3-B lands.
+
+## S6 — The slide model
+
+**Verdict: proven on Yjs v14 (S1's exact pins), v13 kept for comparison; nothing fails on v14 alone.** Every check passes
+on both versions, the concurrency results are identical over 200 trials per scenario, and v14 improves two things: line
+breaks merge at character level, and v14's native attributions carry per-element provenance for deck history. The
+amendments to §4.5 (A1 to A7 below) were accepted by the architect (spec Decision Log 26, ledger X27) except A7, new
+with the v14 port.
+
+Run: v14 (default) `node spikes/p3-store/s6/exp/<x>.ts` (Node 22.23 strips types), outputs `s6/out/<x>-v14.*`; v13
+`node --import ./spikes/p3-store/s6/exp/use-v13.mjs spikes/p3-store/s6/exp/<x>.ts` (a resolve hook swaps `src/ydoc.ts`
+for `src/ydoc-v13.ts`; each report prints the seam it loaded), outputs `s6/out/<x>.*`; the bench under with-slot;
+typecheck `node_modules/.bin/tsc -p spikes/p3-store/s6/tsconfig.json` clean. `s6/package.json` pins the v14 stack exactly
+with a pnpm override forcing one `@y/y`.
+
+| Experiment | v14 | v13 |
+|---|---|---|
+| roundtrip | 58/58 | 58/58 |
+| publish | 19/19 | 19/19 |
+| concurrency (200 trials per scenario) | 28/28 | 28/28 |
+| canvas | 18/18 | 18/18 |
+| binding | 10/10 (`binding-v14.ts`) | 7/7 (`binding.ts`) |
+| provenance | 7/7 (`provenance-v14.ts`) | — |
+| bench | 2/2 | 2/2 |
+
+Executor re-runs: v13 roundtrip 58/58, publish 18/18 and concurrency 28/28 before the port; v14 concurrency 28/28,
+provenance 7/7 and binding 10/10 after it.
+
+### 1. The model (verified)
+On v14 the model is built of `Y.Node`s (one type: a name, attributes that are values or nested nodes, children that are
+text with formats and nodes in one sequence; `src/ydoc.ts`, header comment):
+- `deck`: a root node whose attributes are deck.json's keys except `order`; `sections` and `faces` nested nodes
+  (key → JSON) so concurrent edits to different entries merge; unknown keys kept.
+- `slides`: a root node, attribute id → `<slide>` with `order`, `style:*`, `attr:*` (`attr:data-transition`,
+  `attr:hidden`), `held?: {source, reasons}` as attributes, `notes` a `<notes>` text node, `elements` an `<elements>`
+  node, attribute id → `<el>`.
+- `<el>`: `tag`, `parent` (an element id or `''` for the section), `order` (flow children) or `z` (pinned children), one
+  key per `style:*` property and `attr:*` attribute, `raw?` (svg and x-embed inner markup, opaque), `text?`: a `<doc>`
+  node of `p` or `li` blocks holding text with marks as formats (`{b:{}}`, `{a:{href}}`, `{span:{color}}`) and `br`
+  nodes inline — `@y/prosemirror` 2's node shape. h1 to h3, p, th, td hold one `p` block; ul and ol one `li` per item.
+- v13 is the same model on Y.Map, Y.Text and Y.XmlFragment (`src/ydoc-v13.ts`); every other module (`model.ts`,
+  `publish.ts`, `canvas.ts`, `order.ts`, the parser, the serializer, `repair()`) talks only to the seam's API.
+
+Nesting: a `parent` key per element plus a key among its siblings, all in one flat map; re-parenting is one key, so it
+never duplicates (the XmlFragment-style child delete-plus-insert re-order duplicated in 200 of 200 trials on both
+versions: `exp/concurrency.ts`, "contrast"; v14 has no move operation either). Read rules (`resolveParents`,
+`src/model.ts`): a missing or non-container parent resolves to the section; a cycle sends its smallest id to the section;
+the host writes the resolutions with `repair()`.
+
+Paint order needs two keys: the dialect paints all flow content as one layer where the first flow child sits, so flow
+children carry `order` (layout order) and pinned children carry `z` compared against the fixed key `FLOW_LAYER = 'a0'`
+(below: under the flow content; above: over; no element holds `'a0'`; `src/order.ts`). The canonical file writes
+[pinned under] [flow] [pinned over] (`partition`, `src/serialize.ts`). A backdrop sent to the back stays under while
+another replica inserts a new first flow child, 200 of 200 on both versions.
+
+Object anchors `{slideId, elementId}` resolve by id alone (`resolveAnchor`): stable through a move, a z change, a slide
+re-order, a regroup and a republish combined; orphaned after a delete; live again after a re-add with the same id.
+
+### 2. The canonical parser and serializer (verified; independent of the Yjs version)
+One loader, `loadSlide` (`src/parse.ts`), over a small `RawNode` interface with two adapters, parse5 for the host
+(`src/parse5-adapter.ts`) and a `<template>` in fragment context for the renderer (`src/dom-adapter.ts`); both give
+byte-identical canonical files on every corpus slide. `serializeSlide` (`src/serialize.ts`); `parseStyle` and
+`serializeStyle` (`src/css.ts`) adopt Claude's table property for property.
+- Fixed point: `serialize(parse(x))` after one pass on four of Claude's examples (SKILL.md's plan slide, layout.md's kpis
+  slide, diagrams.md's connectors with the arc svg, the recipes' rotated label; excerpts in `s6/fixtures/
+  claude-examples.ts`) and on a deliberately messy slide; IR → Y → IR → file gives identical bytes.
+- Equality by meaning: six variants of each example (reversed attribute and declaration order, whitespace and case,
+  bare numbers for px, `rgb()` for hex, entities) canonicalize to the same bytes.
+- Ids: minted `e<n>-<hash(section id, publish seed)>`, deterministic per seed (an idempotent replay mints the same ids),
+  never an id the live slide holds, always written into the file.
+- Held with reasons, never trimmed: two sections, an unknown tag, text directly in a div, `aside` not last, a nested
+  list, an `x-embed` inside a div, an svg with script, `colspan`, 16 nested divs, 201 elements, a bad section id, an
+  unknown inline tag, a section id differing from the file name. Unknown properties and attributes are dropped with a
+  warning; `class` and `data-*` get a note.
+- Normalization: attributes `id` first, the rest alphabetical, `style` last, `hidden` bare; style in Claude's table
+  order as `prop:value; …`, names lowercased, `!important` stripped, the cascade inside one attribute applied (a later
+  duplicate wins, a shorthand resets earlier longhands); `padding-*` → `padding` and `border-*-radius` →
+  `border-radius` in the shortest 1 to 4 value form, `background-color` → `background`, `font` → longhands; no-ops
+  (`margin:0`, `box-sizing:border-box`, `grid-template:none`, `position:static`) dropped with a note, other margins with a
+  warning; bare numbers become px only where the grammar says LEN, pt → px ×2, shortest numbers; keywords lowercased,
+  `bold`/`normal` → `700`/`400`; colours lowercase 6/8-digit hex, opaque integer `rgb()` → hex, normalized `rgba()` and
+  `hsl[a]()`, `currentcolor` dropped with a warning; borders `W style color` with Claude's defaults explicit; generic
+  font families lowercased, quotes only where needed; HTML whitespace collapsing, minimal escaping (U+00A0 as `&#160;`),
+  marks nested a > span > b > i > u, `strong`/`em` → `b`/`i`, a span with weight ≥ 600, italic or underline → `b`/`i`/`u`;
+  comments dropped, `tbody`/`thead`/`tfoot` unwrapped, one element per line with 2-space indents.
+- Kept verbatim: svg and x-embed inner markup (after one parse5 pass), svg root attributes, href, src, alt, notes
+  (trimmed), and flex, transform, filter, background and grid values beyond token normalization.
+- `var(--ds-*)` (Decision Log 12) survives the round trip, fallback included; any other `var()` is dropped with a
+  warning; `serializeSlide(ir, {resolveVar})` resolves tokens to literals for the mirror and the Claude-compatible export.
+
+### 3. Diff-apply of a published file as one transaction (verified, 19/19 both versions)
+`publish`, `diffSlide`, `diffDeck` (`src/publish.ts`); topology: host H, a live human replica U, the agent's replica A
+brought up to H only when the agent reads.
+
+| Case | Result |
+|---|---|
+| No-op republish, or one equal by meaning | 0 writes, no update |
+| One property changed | 1 write; 21 B V1 / 33 B V2 (both versions) |
+| The human recolours after the agent's read; the agent republishes the element moved with its stale colour | only the 2 moved properties land; the human's colour stays |
+| Contrast: the same file diffed against the live doc | writes the stale colour over the human's |
+| Element removed / re-added with the same id | id gone, anchor orphaned / the same element, anchor live |
+| Agent word change plus bold while the human types in the same box | character-level merge; 42 B V1 / 44 B V2 |
+| Agent adds a `<br>` while the human types elsewhere in the box | v14: both survive (a `br` sits in the block's sequence); v13: the block is replaced and the human's text lost |
+| Flow re-order of two siblings; pinned under → over | 1 key each (the longest in-order run keeps its keys) |
+| Structurally invalid file | held with reasons, last good model kept, a read returns the held source, a valid republish clears it |
+| One invalid path in a multi-file map | the whole publish refused, nothing written |
+| deck.json re-order / removal | 1 slide key; unknown keys kept; a removal (`null` plus order) one update |
+
+### 4. Concurrency on two replicas (verified, 200 trials each, random client ids; identical on both versions)
+- Concurrent move (left plus top): always one replica's whole position, never mixed (v14 A 102 / B 98; v13 A 89 / B 111),
+  in one transaction or two.
+- Move plus restyle of one element: both land.
+- Z-order: different maxima deterministic; the same maximum mints the same key, broken by id, and both replicas'
+  `repair()` writes identical values.
+- One slide re-ordered two ways: one wins, no duplicate. Two slides into the same gap: the same key, `s1,s3,s4,s2` by id,
+  one repair write separates them.
+- Delete versus edit: the delete wins silently, the anchor orphans. Move into a group versus the element's deletion:
+  deleted, group intact. Move into a group versus the group's deletion: the orphan shows at the section, one repair.
+  A cycle: the smallest id to the section, one repair. Agent publish versus a human move of the same element: merged.
+
+### 5. A minimal canvas (verified in happy-dom; not in Chromium)
+`SlideCanvas` (`src/canvas.ts`) renders from the model and patches the DOM from the seam's change records (v14 from
+`deltaDeep`), never importing Yjs; after every step the second replica's patched DOM equals a fresh render: a 3-move drag
+(`attachDrag`, one transaction per move) is 6 style writes on one node; bring to front or send to back moves 1 node (plus
+`data-layer="under"`); a text edit re-renders 1 box; an agent publish adding, restyling and removing one element each is
+1 create, 1 style write, 1 remove, 1 placement (keyed placement: the longest in-order run stays). Under-layer rendering
+isolates the section and gives its under pinned children `z-index:-1`, because plain CSS paints positioned elements over
+all flow content (CSS 2.1 Appendix E; source, not checked in a real paint — P3-C's export window needs the same rule and
+a pixel check).
+The Tiptap binding on v14 (`exp/binding-v14.ts`, 10/10, `@y/prosemirror` 2.0.0-15 with a slide-text schema no wider than
+Claude's inline set): `ynodeToPmnode` reads the model's `<doc>` for `p` and `ul`; what `pmnodeToDelta` writes the model
+reads back identically; a live Tiptap 3.31.3 editor bound through S1's `YCollaboration` (copied into
+`exp/collab-v14.mjs`) holds the model's document, writes no normalization update on bind, its typing reaches the other
+replica with marks and `<br>`, a model patch reaches the editor, and marks are stored under plain names.
+
+### 6. Numbers (verified; 100 slides, 120,583 B of source, 1,273 elements; medians of 7 under the slot)
+
+| Measure | v14 | v13 |
+|---|---|---|
+| Parse 100 files | 13–14 ms | 14 ms |
+| Serialize 100 slides | 2.5–3.0 ms | 2.5–2.6 ms |
+| Import the whole deck (one transaction) | 59–73 ms | 39–41 ms |
+| V2 state / V1 state | 212,510 B (1.76× source) / 272,546 B | 208,396 B / 269,276 B |
+| Apply V2 into a fresh replica (first sync) | 12–20 ms | 7–7.4 ms |
+| Encode V2 | 2.7–3.5 ms | 2.5–3.5 ms |
+| Read the deck back to files | 10–16 ms | 7–8 ms |
+| No-op republish of 101 files | 26–34 ms | 23–24 ms |
+| One-slide, one-property publish | 0.45–0.64 ms | 0.46–0.53 ms |
+| Update: a move / a character / a one-property publish | 35/43, 16/26, 21/33 B (V1/V2) | identical |
+
+Whole-deck operations are about 1.5 to 1.8× slower on v14 but under 75 ms at 100 slides (S1's replay finding again);
+update bytes are equal. S7 watches first sync at scale.
+
+### Per-element provenance from v14 attributions (verified, `exp/provenance-v14.ts`, 7/7)
+Two stored V2 states of a gc-on host doc with a logged window of three updates (a human move, an agent publish with a
+restyle, an inserted word and a new element, a human deletion), attributions built with S1's recipe, then
+`createDiffRenderer(prev, next, {attributions})` and `slides.toDeltaDeep({renderer})`: `foot`'s left and bottom
+attributed to the human at 19:02, `title`'s font-size to session B at 19:03, the run "clear " in `card`'s text to session
+B, the new element and every key in it to session B, the deleted `pic` returned as content attributed
+`delete = human, 19:04`; the attributed set exactly `card, foot, note, pic, title`. 4.2 ms; the window's ContentMap is
+160 B. That is what §4.5's per-slide history needs (changed elements outlined in the author's colour, deleted ones
+ghosted). The renderer gives new values only; "was 128px" needs the previous doc. Not tested: attributions across
+compaction and thinning (S3, S7).
+
+### Pitfalls
+v14-specific: `Y.Node.toString()` returns markup, read plain text from the delta; `observeDeep` delivers one event per
+transaction on the observed node with empty `keysChanged`, so change records come from `ev.deltaDeep`; with a renderer,
+`toDeltaDeep` returns the whole document with attributions on changed leaves and deletions as content attributed
+`delete` (walk attributions, not op types); S1's `collab.mjs` cannot be imported across packages (it loads that package's
+`@y/y` and trips the duplicate guard): P3's binding module lives in `src/` with one `@y/y`; two prosemirror-model copies in
+one process break the binding: one prosemirror copy shared by Tiptap and the binding; inserts pass every mark key
+explicitly (`null` for absent) so nothing inherits from the left.
+Both versions: diff a publish against the agent's base, never the live doc; equal fractional keys are the common case
+for "to front" and "after X" (`generateKeyBetween` is deterministic), handled by the id tie-break and the deterministic
+repair; delete beats a concurrent edit silently, so the publish protocol names that conflict; Claude's connector example
+uses `border-width` and `border-style`, missing from its table (added); the canvas drags left/top-pinned elements only
+(right/bottom pins need converting); the `font` shorthand expands only the parts given; Claude's minted ids are computed
+from position and shift on insertion, which is why MAWS writes every id and seeds minting per publish (re-minting a
+deleted id would re-attach an orphaned comment to a new element); parse5 reports parse errors and `DOMParser` none, so
+hold decisions come from tree checks only.
+
+### Copy (P3-C)
+- `src/ydoc.ts`: the v14 seam (294 lines). `src/ydoc-v13.ts`: reference, drop with v13.
+- `src/ir.ts`, `src/parse5-adapter.ts`, `src/dom-adapter.ts`, `src/serialize.ts`, `src/order.ts` as is (optionally
+  jittered keys); `src/css.ts` adding the applies-to column, value ranges (font-size 8 to 400, gap 0 to 512, padding ≤ 256
+  …), the full gradient, transform and filter grammars, grid tracks ≤ 24, a PPTX warning for named colours, `--ds-*`
+  names checked against X28; `src/parse.ts` adding the `data-build-*` grammar, at most 24 pinned children per host,
+  x-connector coordinate rules, MAWS's asset `src` form, tool-shaped diagnostics; `src/model.ts` with `repair()` host-only
+  after each applied update; `src/publish.ts` as the write half, wrapped in the protocol (baseRevision, the layers,
+  idempotency) with conflict naming.
+- `src/canvas.ts`: reference (change record → per-key DOM patch, keyed placement, the under-layer rule, `CANVAS_CSS`;
+  x-embed as a sandboxed `srcdoc` iframe).
+- `exp/binding-v14.ts`: the slide-text schema as Tiptap extensions. `exp/provenance-v14.ts`: the attributed-delta walker
+  for per-slide history.
+
+### §4.5 amendments
+A1 paint order: `order` for flow children, `z` for pinned children against the flow-layer key, the canonical [under]
+[flow] [over] interleave (normalization moves pinned elements written after the first flow child to after all flow
+content; paint and layout unchanged). A2 nesting: `parent` with the orphan and cycle read rules; the host writes repairs
+and separates equal sibling keys; ties by id until then. A3 minted ids: `e<n>-<hash>` over the section id and the
+publish's tool-use id, skipping live ids, always written. A4 the publish base: diffed against the agent's base (the
+agent's replica syncs from the host only at a read; touches §4.2 and X24). A5: `raw` for svg and x-embed; `held` on the
+slide (a held slide keeps its last good model; a read returns the held source). A6: connector `border-width` and
+`border-style`. **A7 (new with the v14 port):** each text element's text is a `<doc>` node in `@y/prosemirror` 2's shape
+(`p`/`li` blocks, `br` inline), so line-break edits merge at character level; per-slide history reads element-level
+provenance from v14 attributions.
+
+### Questions (S6; the architect's answers of 2026-10-12 in brackets)
+1. Tables: row ids, positional cells [accepted]. 2. Refusals at property level, naming element and property [accepted].
+3. Unknown inline tags hold the slide [accepted]. 4. Repairs by the host only [accepted]. 5. A7 above [new].
