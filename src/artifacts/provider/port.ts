@@ -23,14 +23,16 @@
 // The composition hold (this child's Decision Log 20). While an editor composes text through an IME, a remote update
 // that touches the composing node ends the composition early and doubles jamo. `holdRemote(true)` buffers inbound
 // step 2 and update frames in arrival order (and a `restored` behind them); a host step 1 is still answered, and
-// awareness and acks pass. `holdRemote(false)` applies the buffer in order; the hold clears itself after 5 s; a
-// disconnect discards the buffer, since the next step 2 re-delivers everything.
+// awareness and acks pass. `holdRemote(false)` applies the buffer in order, each run of consecutive updates merged and
+// applied once (a held Korean word buffers 7 to 9 frames: singly 63 to 103 ms, merged 21 to 27 ms; parent Decision
+// Log 35); a step 2 or `restored` keeps its place between runs. The hold clears itself after 5 s, and says so in the
+// log; a disconnect discards the buffer, since the next step 2 re-delivers everything.
 //
 // A broken peer is one whose frame does not decode or whose payload fails to apply: the provider logs, disconnects and
 // keeps its accounting. An exception from an application listener (`subscribe`, `onRestored`) is the application's:
 // every listener still runs, the connection stays, and the first error is rethrown to the caller once state is settled.
 import * as awarenessProtocol from '@y/protocols/awareness';
-import { applyV1, diffV1, onUpdate, stateVector, type Doc } from '../yjs';
+import { applyV1, diffV1, mergeUpdates, onUpdate, stateVector, type Doc } from '../yjs';
 import { decodeFrame, encodeFrame, type Frame } from './frames';
 
 // The shape shared by a DOM MessagePort and a Node MessagePort (worker_threads), which is all the provider touches.
@@ -151,7 +153,10 @@ export class PortProvider {
     this.holdTimer = null;
     this.held = on;
     if (on) {
-      this.holdTimer = setTimeout(() => this.holdRemote(false), HOLD_LIMIT_MS);
+      this.holdTimer = setTimeout(() => {
+        this.log(`the composition hold reached its ${HOLD_LIMIT_MS / 1000} s cap and was cleared, applying ${this.buffered.length} buffered frame(s)`);
+        this.holdRemote(false);
+      }, HOLD_LIMIT_MS);
       return;
     }
     const frames = this.buffered;
@@ -206,14 +211,25 @@ export class PortProvider {
     this.process([frame]);
   }
 
-  // Applies frames in order; a payload that fails ends the connection (the rest are dropped with it). Listeners run
-  // once, after the frames.
+  // Applies frames in order, each run of consecutive updates merged into one; a payload that fails ends the connection
+  // (the rest are dropped with it). Listeners run once, after the frames.
   private process(frames: Frame[]): void {
     const restores: Restored[] = [];
-    for (const frame of frames) {
+    for (let i = 0; i < frames.length; i += 1) {
       if (!this.port) break;
       let restored: Restored | null;
       try {
+        let frame = frames[i];
+        if (frame.type === 'update' && frames[i + 1]?.type === 'update') {
+          const run = [frame.update];
+          while (i + 1 < frames.length) {
+            const next = frames[i + 1];
+            if (next.type !== 'update') break;
+            run.push(next.update);
+            i += 1;
+          }
+          frame = { type: 'update', update: mergeUpdates(run) };
+        }
         restored = this.apply(frame);
       } catch (error) {
         this.broken(error);

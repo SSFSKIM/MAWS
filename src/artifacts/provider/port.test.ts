@@ -1,6 +1,6 @@
 import { encodeAwarenessUpdate } from '@y/protocols/awareness';
 import { describe, expect, it, vi } from 'vitest';
-import { applyV1, checkUpdate, diffV1, newDoc, stateVector, transact, type Doc } from '../yjs';
+import { applyV1, checkUpdate, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '../yjs';
 import { decodeFrame, encodeFrame, type Frame } from './frames';
 import { PortProvider, type PortLike, type SaveState } from './port';
 
@@ -393,26 +393,53 @@ describe('PortProvider', () => {
       const [replicaEnd, hostEnd] = MemoryPort.pair();
       host.attach(hostEnd);
       const doc = newDoc();
-      const provider = new PortProvider(doc, { log: quiet });
+      const log = vi.fn();
+      const provider = new PortProvider(doc, { log });
       provider.connect(replicaEnd);
       pump(replicaEnd, hostEnd);
+      // The remote changes the replica's doc integrates, one per apply.
+      const applies: number[] = [];
+      onUpdate(doc, (update, origin) => {
+        if (origin === provider) applies.push(update.length);
+      });
       const write = (at: number, value: string) => {
         const before = stateVector(host.doc);
         type(host.doc, at, value);
         hostEnd.postMessage(encodeFrame({ type: 'update', update: diffV1(host.doc, before) }));
       };
-      return { host, provider, doc, replicaEnd, hostEnd, write };
+      return { host, provider, doc, log, applies, replicaEnd, hostEnd, write };
     }
 
-    it('buffers remote updates while held and applies them in order when cleared', () => {
-      const { provider, doc, replicaEnd, hostEnd, write } = heldReplica();
+    it('buffers remote updates while held and applies the run merged, once, when cleared', () => {
+      const { host, provider, doc, log, applies, replicaEnd, hostEnd, write } = heldReplica();
       provider.holdRemote(true);
       write(0, 'one ');
       write(4, 'two'); // depends on the first
+      write(7, ' three');
       pump(replicaEnd, hostEnd);
       expect(text(doc)).toBe('');
       provider.holdRemote(false);
-      expect(text(doc)).toBe('one two');
+      expect(applies).toHaveLength(1);
+      expect(text(doc)).toBe('one two three');
+      expect(text(doc)).toBe(text(host.doc));
+      expect(log).not.toHaveBeenCalled(); // cleared by the editor, not the cap
+    });
+
+    it('splits the merged runs at a buffered restored frame', () => {
+      const { host, provider, doc, applies, replicaEnd, hostEnd, write } = heldReplica();
+      const events: string[] = [];
+      provider.onRestored(({ versionId }) => events.push(`${versionId}:${text(doc)}`));
+      provider.holdRemote(true);
+      write(0, 'a');
+      write(1, 'b');
+      hostEnd.postMessage(encodeFrame({ type: 'restored', revision: 9, versionId: 4 }));
+      write(2, 'c');
+      write(3, 'd');
+      pump(replicaEnd, hostEnd);
+      provider.holdRemote(false);
+      expect(applies).toHaveLength(2);
+      expect(events).toEqual(['4:abcd']); // listeners run after the frames of one release
+      expect(text(doc)).toBe(text(host.doc));
     });
 
     it('answers a host step 1 at once while held, and buffers the host’s step 2', () => {
@@ -429,7 +456,18 @@ describe('PortProvider', () => {
       expect(provider.state).toMatchObject({ phase: 'live', synced: false, unsaved: 0 });
       expect(text(host.doc)).toContain('composing');
       expect(text(doc)).toBe('composing ');
+      const applies: number[] = [];
+      onUpdate(doc, (update, origin) => {
+        if (origin === provider) applies.push(update.length);
+      });
+      for (const value of ['x', 'y']) {
+        const before = stateVector(host.doc);
+        type(host.doc, 0, value);
+        hostEnd.postMessage(encodeFrame({ type: 'update', update: diffV1(host.doc, before) }));
+      }
+      pump(replicaEnd, hostEnd);
       provider.holdRemote(false);
+      expect(applies).toHaveLength(2); // the step 2 keeps its place; the two updates after it merge
       expect(provider.state.synced).toBe(true);
       expect(text(doc)).toBe(text(host.doc));
     });
@@ -478,14 +516,16 @@ describe('PortProvider', () => {
     it('clears a hold by itself after 5 s', () => {
       vi.useFakeTimers();
       try {
-        const { provider, doc, replicaEnd, hostEnd, write } = heldReplica();
+        const { provider, doc, log, replicaEnd, hostEnd, write } = heldReplica();
         provider.holdRemote(true);
         write(0, 'late');
         pump(replicaEnd, hostEnd);
         vi.advanceTimersByTime(4999);
         expect(text(doc)).toBe('');
+        expect(log).not.toHaveBeenCalled();
         vi.advanceTimersByTime(1);
         expect(text(doc)).toBe('late');
+        expect(log).toHaveBeenCalledWith(expect.stringMatching(/hold reached its 5 s cap.*1 buffered frame/));
         write(4, ' and live'); // the hold is off: applied on arrival
         pump(replicaEnd, hostEnd);
         expect(text(doc)).toBe('late and live');
