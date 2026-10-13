@@ -30,6 +30,8 @@ export function DeleteSystemSheet({ artifactId, name, onClose }: { artifactId: s
   const all = useLibraryList();
   const systems = useLibraryList({ kind: 'design_system' });
   const titleOf = (id: string) => all.value?.rows.find((row) => row.id === id)?.title ?? id;
+  // The library's row the owner is deleting, by its title: a copy keeps its law's title, which would name the original.
+  const shown = all.value?.rows.find((row) => row.id === artifactId)?.title ?? name;
   const others = (systems.value?.rows ?? []).filter((row) => row.id !== artifactId).sort((a, b) => a.title.localeCompare(b.title, 'en'));
 
   const remove = async () => {
@@ -58,7 +60,7 @@ export function DeleteSystemSheet({ artifactId, name, onClose }: { artifactId: s
 
   if (inUse === null) {
     return (
-      <Sheet title={C.deleteTitle(name)} onClose={onClose}>
+      <Sheet title={C.deleteTitle(shown)} onClose={onClose}>
         <SheetForm focusSubmit canSubmit={!busy} onSubmit={() => void run(remove)} submitLabel={C.delete} submitClass={DANGER}>
           <p className="m-0 text-fg-muted">{C.deleteBody}</p>
           {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}
@@ -69,7 +71,7 @@ export function DeleteSystemSheet({ artifactId, name, onClose }: { artifactId: s
   return (
     <Sheet title={C.inUseTitle} onClose={onClose}>
       <SheetForm canSubmit={!busy} onSubmit={() => void run(moveAndDelete)} submitLabel={C.moveAndDelete} submitClass={DANGER}>
-        <p className="m-0 text-fg-muted">{C.inUseBody(name, inUse.length)}</p>
+        <p className="m-0 text-fg-muted">{C.inUseBody(shown, inUse.length)}</p>
         <ul aria-label={C.inUseList} className="m-0 flex max-h-48 list-none flex-col overflow-auto p-0">
           {inUse.map((id) => (
             <li key={id}>

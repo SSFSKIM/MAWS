@@ -1,31 +1,45 @@
-// Design systems in utility mode (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md; `pnpm e2e:design-systems`).
-// It reads the host's store file once (`pnpm e2e:design-systems` silences node:sqlite's ExperimentalWarning). M6's first cases, through A's store and L's library on a scratch instance: a fresh store is seeded with the built-in
-// systems, which open from the library as the Design System page in an artifact tab (L's registry); and the owner's
-// default chosen in Settings › Artifacts reaches the engine host (main's `artifacts.setDefaults`), so a document that
-// names no system is pinned to it when a version is written (Acceptance 12 over the settings). M6b's case: the agent's
-// `ask` with design_system questions, over C3's replay of a journal derived from E1's recorded blocking ask with only the
-// ask's questions and its recorded answers rewritten (the replay matches the host's answers by request id; what the
-// sheet submitted is asserted on the journal's own rows): the sheet lists the seeded systems with their swatches and
-// origin, offers "Build one with me" where allowed, and answers `{designSystemId, name}` and `{create: true}`
-// (Acceptance 14). M7 adds the rest of the group (Acceptance 9 to 14).
+// Design systems in utility mode (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md, Acceptance 9 to 14;
+// `pnpm e2e:design-systems`, which silences node:sqlite's ExperimentalWarning, since a case reads the host's store file).
+// Every case runs through A's store and L's library on a scratch instance:
+// - a fresh store is seeded with the built-in systems, which open from the library as the Design System page; editing
+//   the accent restyles the swatch and the page's `--ds-color-accent` within one frame and the canon preview at its
+//   frame's next load (Decision Log 22), and the edit survives a reload (Acceptance 9);
+// - the document fixture (`window.__maws_design_system_fixture`, the e2e seam standing for B's editor until it lands: a
+//   minimal page in a `DesignSystemScope`, through `tokens.css`) restyles with its live system (10); a retained version
+//   of a document pinned to an older revision of its system renders that revision while the live fixture shows the new
+//   values (11); deleting the system is refused naming the document, succeeds once the page's sheet moves it, and the
+//   retained version still renders the pinned state (13);
+// - the defaults chosen in Settings › Artifacts reach the host (main's `artifacts.setDefaults`): a document's own
+//   system, else its Space's default, else the owner's governs the pin its version is written with (12, as A's store
+//   chain holds it until A's M7 registers D's chain: the house link and a deleted id's fall-through wait for it);
+// - the agent's `ask` with design_system questions, over C3's replay of a journal derived from E1's recorded blocking ask
+//   with only the ask's questions and its recorded answers rewritten (the replay matches the host's answers by request
+//   id; what the sheet submitted is asserted on the journal's own rows): the sheet lists the seeded systems with their
+//   swatches and origin, offers "Build one with me" where allowed, and answers `{designSystemId, name}` and
+//   `{create: true}` (14).
+// Not here: the bundled faces and canon images (behind A's CSP, Decision Log 23), the Claude export and the chain's
+// registration (M7's second part), and the document and deck restyle through B's and C's own editors (P3-F).
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
+import { artifactRefusalOf, type ArtifactRefusal } from '@shared/ipc/schema/artifacts';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { allowNext, fixtureRows, mcpResultOf, ofKind, PASS3, resultText, scene, show, type Frame, type McpResult, type Scene } from './support/maws-tools';
 
-type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
+type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; issues?: unknown } };
 interface Row {
   id: string;
   title: string;
 }
 
+const call = async <T>(page: Page, name: string, input?: unknown): Promise<Result<T>> =>
+  (await page.evaluate(([n, i]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke(n as string, i), [name, input] as const)) as Result<T>;
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
-  const result = (await page.evaluate(([n, i]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke(n as string, i), [name, input] as const)) as Result<T>;
+  const result = await call<T>(page, name, input);
   if (!result.ok) throw new Error(`${name} failed: ${result.error.code} ${result.error.message}`);
   return result.value;
 }
@@ -60,8 +74,60 @@ async function ready(): Promise<Page> {
   return page;
 }
 
-test('a fresh store holds the built-in systems, and one opens from the library as the Design System page', async () => {
-  test.setTimeout(90_000);
+// A default's colour as its bundled token file writes it (a literal srgb colour with its hex), and as CSS computes it.
+const bundledHex = (key: string, role: 'bg' | 'accent'): string =>
+  (JSON.parse(readFileSync(join(REPO_ROOT, `src/artifacts/types/design_system/defaults/${key}/tokens.tokens.json`), 'utf8')) as { color: Record<'bg' | 'accent', { $root: { $value: { hex: string } } }> }).color[role].$root.$value.hex;
+const rgbOf = (hex: string) => `rgb(${[1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).join(', ')})`;
+
+// A system opened from the library: its page in the artifact main tab (L's registry).
+async function openSystemPage(page: Page, title: string, artifactId: string) {
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  await page.locator('[data-library]').getByRole('article', { name: title, exact: true }).click();
+  const tab = page.locator(`[data-artifact-tab="${artifactId}"]`);
+  await expect(tab.locator(`[data-ds-page="${artifactId}"]`)).toBeVisible({ timeout: 15_000 });
+  return tab;
+}
+
+// Types `hex` into the page's accent field as one input event (the page writes the token as it is typed, Decision Log
+// 24) and reads, in the first animation frame after that event, before the frame paints, the accent swatch's painted
+// colour and the palette scope's `--ds-color-accent`.
+function recolourAccent(page: Page, artifactId: string, hex: string): Promise<{ swatch: string; property: string }> {
+  return page.evaluate(([id, value]) => {
+    const tab = document.querySelector(`[data-artifact-tab="${id}"]`)!;
+    const field = tab.querySelector<HTMLInputElement>('input[aria-label="--ds-color-accent hex"]')!;
+    const chip = tab.querySelector<HTMLElement>('[data-ds-section="palette"] [data-token="color.accent"] .dsp-chip')!;
+    const scope = chip.closest<HTMLElement>('[data-ds-scope]')!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    return new Promise<{ swatch: string; property: string }>((resolve) =>
+      requestAnimationFrame(() => resolve({ swatch: getComputedStyle(chip).backgroundColor, property: getComputedStyle(scope).getPropertyValue('--ds-color-accent').trim() })),
+    );
+  }, [artifactId, hex] as const);
+}
+
+// The document fixture (the renderer's e2e seam, standing for B's editor): a minimal page in a `DesignSystemScope`.
+type SystemRef = { id: string; versionSeq?: number } | { builtin: 'maws' } | null;
+interface FixtureSeam {
+  __maws_design_system_fixture: { mount(name: string, system: SystemRef): void; unmount(name: string): void };
+}
+const mountFixture = (page: Page, name: string, system: SystemRef) => page.evaluate(([n, ref]) => (window as unknown as FixtureSeam).__maws_design_system_fixture.mount(n, ref), [name, system] as const);
+const unmountFixture = (page: Page, name: string) => page.evaluate((n) => (window as unknown as FixtureSeam).__maws_design_system_fixture.unmount(n), name);
+const fixture = (page: Page, name: string) => page.locator(`[data-ds-fixtures] article[data-ds-fixture="${name}"]`);
+const fixtureAccent = (page: Page, name: string) => fixture(page, name).locator('[data-part="accent"]').evaluate((element) => getComputedStyle(element).color);
+const fixtureGround = (page: Page, name: string) => fixture(page, name).evaluate((element) => getComputedStyle(element).backgroundColor);
+
+interface Version {
+  id: number;
+  designSystemRef?: { id: string; versionSeq: number } | null;
+}
+async function saveVersion(page: Page, artifactId: string, label: string): Promise<Version> {
+  const { versionId } = await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId, label });
+  const { versions } = await ok<{ versions: Version[] }>(page, 'artifacts.versions', { artifactId });
+  return versions.find((version) => version.id === versionId)!;
+}
+
+test('a fresh store holds the built-in systems; one opens from the library as the Design System page, and an accent edit restyles it at once and persists', async () => {
+  test.setTimeout(120_000);
   const page = await ready();
   // `official` is seeded with its bundled faces, read from the build beside the engine-host chunk
   const official = (await systems(page)).find((s) => s.title === 'Official')!;
@@ -76,41 +142,148 @@ test('a fresh store holds the built-in systems, and one opens from the library a
   await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
   const library = page.locator('[data-library]');
   for (const title of BUILT_IN) await expect(library.getByRole('article', { name: title, exact: true })).toBeVisible({ timeout: 15_000 });
-  await library.getByRole('article', { name: 'MAWS', exact: true }).click();
   const house = (await systems(page)).find((s) => s.title === 'MAWS')!;
-  const tab = page.locator(`[data-artifact-tab="${house.id}"]`);
-  await expect(tab.locator(`[data-ds-page="${house.id}"]`)).toBeVisible({ timeout: 15_000 });
+  const tab = await openSystemPage(page, 'MAWS', house.id);
   await expect(tab.locator('.dsp-title')).toHaveText('MAWS');
   for (const section of ['palette', 'type', 'measures', 'canon', 'law', 'check']) await expect(tab.locator(`[data-ds-section="${section}"]`)).toBeAttached();
-  await expect(tab.getByLabel('--ds-color-accent hex')).toBeVisible();
+  const field = tab.getByLabel('--ds-color-accent hex');
+  await expect(field).toHaveValue(bundledHex('maws', 'accent'));
   // the owner looked at it: L's surface recorded the view once the page said it was on screen
   await expect.poll(async () => (await ok<{ artifact: { lastViewedAt: number | null } }>(page, 'artifacts.get', { artifactId: house.id })).artifact.lastViewedAt, { timeout: 10_000 }).not.toBeNull();
+
+  // Acceptance 9: the accent edited on the page; the swatch and the page's --ds-color-accent follow within one frame
+  const canon = tab.locator('[data-ds-section="canon"] iframe').first();
+  const canonAccent = async () => {
+    const frame = await (await canon.elementHandle())!.contentFrame();
+    return frame!.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--ds-color-accent').trim());
+  };
+  await expect.poll(canonAccent, { message: 'the canon preview is drawn in the system' }).toBe(bundledHex('maws', 'accent'));
+  const RECOLOURED = '#2f6b4f';
+  expect(await recolourAccent(page, house.id, RECOLOURED)).toEqual({ swatch: rgbOf(RECOLOURED), property: RECOLOURED });
+  // the canon preview at its frame's next load (Decision Log 22: the frames stay sandboxed and swap their source)
+  await expect(canon).toHaveAttribute('srcdoc', new RegExp(`--ds-color-accent: ${RECOLOURED};`));
+  await expect.poll(canonAccent, { message: 'the canon preview follows at its next load' }).toBe(RECOLOURED);
+
+  // the edit persists: after a reload the page opens with it
+  await page.reload();
+  await expect.poll(async () => (await ok<{ state: string }>(page, 'engine.hostState')).state, { timeout: 20_000 }).toBe('ready');
+  const reopened = await openSystemPage(page, 'MAWS', house.id);
+  await expect(reopened.getByLabel('--ds-color-accent hex')).toHaveValue(RECOLOURED);
+  await expect.poll(() => reopened.locator('[data-ds-section="palette"] [data-token="color.accent"] .dsp-chip').evaluate((chip) => getComputedStyle(chip).backgroundColor)).toBe(rgbOf(RECOLOURED));
   expect(launch!.consoleErrors()).toEqual([]);
 });
 
-test('the owner’s default chosen in Settings reaches the host: a document naming no system is pinned to it', async () => {
-  test.setTimeout(90_000);
+// Acceptance 10, 11 and 13 over the document fixture: a copy of Classroom (so no default is touched) governs a document.
+test('a document fixture restyles with its system, its retained version keeps the pinned revision, and the system’s delete waits until the document moves', async () => {
+  test.setTimeout(150_000);
   const page = await ready();
   const classroom = (await systems(page)).find((s) => s.title === 'Classroom')!;
+  const { artifact: system } = await ok<{ artifact: Row }>(page, 'artifacts.duplicate', { artifactId: classroom.id });
+  expect(system.title).toBe('Copy of Classroom');
+  const { artifact: doc } = await ok<{ artifact: Row }>(page, 'artifacts.create', { kind: 'document', title: 'Syllabus', designSystemId: system.id });
+  await ok(page, 'artifacts.testWrite', { artifactId: doc.id, opId: 'ds-e2e-fixture', ops: [{ op: 'insertText', index: 0, text: 'Week one.' }] });
+  const BEFORE = bundledHex('classroom', 'accent');
+  const AFTER = '#8a2be2';
+
+  // the live fixture, in the document's system
+  await mountFixture(page, 'live', { id: system.id });
+  await expect(fixture(page, 'live')).toHaveAttribute('data-status', 'ready', { timeout: 15_000 });
+  await expect.poll(() => fixtureAccent(page, 'live')).toBe(rgbOf(BEFORE));
+  expect(await fixtureGround(page, 'live')).toBe(rgbOf(bundledHex('classroom', 'bg')));
+  // a version of the document, pinned to the system's state as it is now (X29), rendered from that pin
+  const handedOut = await saveVersion(page, doc.id, 'Handed out');
+  const pin = handedOut.designSystemRef!;
+  expect(pin).toEqual({ id: system.id, versionSeq: expect.any(Number) });
+  await mountFixture(page, 'retained', pin);
+  await expect(fixture(page, 'retained')).toHaveAttribute('data-status', 'ready', { timeout: 15_000 });
+  await expect.poll(() => fixtureAccent(page, 'retained')).toBe(rgbOf(BEFORE));
+
+  // the owner recolours the system on its page
+  await openSystemPage(page, 'Copy of Classroom', system.id);
+  expect(await recolourAccent(page, system.id, AFTER)).toEqual({ swatch: rgbOf(AFTER), property: AFTER });
+  // Acceptance 10: the live fixture restyles, with no write to the document
+  const docRevision = (await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId: doc.id })).artifact.revision;
+  await expect.poll(() => fixtureAccent(page, 'live')).toBe(rgbOf(AFTER));
+  expect((await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId: doc.id })).artifact.revision).toBe(docRevision);
+  // Acceptance 11: the retained version still renders the revision it pinned, beside the live one
+  expect(await fixtureAccent(page, 'retained')).toBe(rgbOf(BEFORE));
+  // and a version written now pins the newer revision, which renders the new accent
+  const revised = await saveVersion(page, doc.id, 'Revised');
+  expect(revised.designSystemRef!.id).toBe(system.id);
+  expect(revised.designSystemRef!.versionSeq).toBeGreaterThan(pin.versionSeq);
+  await mountFixture(page, 'revised', revised.designSystemRef!);
+  await expect.poll(() => fixtureAccent(page, 'revised'), { timeout: 15_000 }).toBe(rgbOf(AFTER));
+
+  // Acceptance 13: A's store refuses the delete, naming the document
+  const refused = await call(page, 'artifacts.delete', { artifactId: system.id });
+  expect(refused.ok).toBe(false);
+  const refusal: ArtifactRefusal | null = refused.ok ? null : artifactRefusalOf(refused.error as Parameters<typeof artifactRefusalOf>[0]);
+  expect(refusal).toEqual({ reason: 'designSystemInUse', data: { artifactIds: [doc.id] } });
+  // the page's delete sheet names it by title and moves it to another system, then deletes
+  await page.getByRole('button', { name: 'Delete design system…' }).click();
+  const confirm = page.getByRole('dialog', { name: 'Delete “Copy of Classroom”?' });
+  await confirm.getByRole('button', { name: 'Delete', exact: true }).click();
+  const inUse = page.getByRole('dialog', { name: 'Still in use' });
+  await expect(inUse.getByRole('list', { name: 'Artifacts styled by this system' }).getByRole('listitem')).toHaveText(['Syllabus']);
+  await inUse.getByRole('combobox', { name: 'Move them to…' }).selectOption({ label: 'Classroom' });
+  await inUse.getByRole('button', { name: 'Move and delete', exact: true }).click();
+  await expect(inUse).toBeHidden({ timeout: 15_000 });
+  await expect.poll(async () => (await ok<{ artifact: Row | null }>(page, 'artifacts.get', { artifactId: system.id })).artifact, { timeout: 10_000 }).toBeNull();
+  expect((await ok<{ artifact: { designSystemId: string | null } }>(page, 'artifacts.get', { artifactId: doc.id })).artifact.designSystemId).toBe(classroom.id);
+  // the retained version still renders the pinned state: as shown, and read again from the store
+  expect(await fixtureAccent(page, 'retained')).toBe(rgbOf(BEFORE));
+  await unmountFixture(page, 'retained');
+  await unmountFixture(page, 'revised');
+  await expect(fixture(page, 'retained')).toHaveCount(0);
+  await mountFixture(page, 'retained', pin);
+  await expect(fixture(page, 'retained')).toHaveAttribute('data-status', 'ready', { timeout: 15_000 });
+  await expect.poll(() => fixtureAccent(page, 'retained')).toBe(rgbOf(BEFORE));
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// Acceptance 12 over the settings, as far as A's store chain holds it today: a document's own system, else its Space's
+// default, else the owner's (A's M7 registers D's chain, which adds the house link and a deleted id's fall-through).
+test('the defaults chosen in Settings reach the host: a document’s own system, else its Space’s, else the owner’s governs its pin', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const byTitle = Object.fromEntries((await systems(page)).map((s) => [s.title, s.id])) as Record<string, string>;
+  const { space } = await ok<{ space: { id: string } }>(page, 'spaces.create', { name: 'Chemistry' });
   await menu(launch!.app, 'settings.open');
   const panel = page.locator('[data-region="main"]').getByRole('tabpanel');
-  const select = panel.getByRole('combobox', { name: 'Default design system' });
-  await expect(select).toBeVisible({ timeout: 15_000 });
-  await expect(select.locator('option')).toHaveText(['House system', ...BUILT_IN]);
-  await select.selectOption({ label: 'Classroom' });
+  const owner = panel.getByRole('combobox', { name: 'Default design system' });
+  const chemistry = panel.getByRole('combobox', { name: 'Design system for Chemistry' });
+  await expect(owner).toBeVisible({ timeout: 15_000 });
+  await expect(owner.locator('option')).toHaveText(['House system', ...BUILT_IN]);
+  await owner.selectOption({ label: 'Classroom' });
+  await expect(chemistry).toBeVisible({ timeout: 15_000 });
+  await expect(chemistry.locator('option')).toHaveText(['Use my default', ...BUILT_IN]);
+  await chemistry.selectOption({ label: 'MAWS' });
   const settingsFile = join(launch!.userData, 'settings.json');
-  await expect.poll(() => (JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: classroom.id, spaceDesignSystems: {} });
+  await expect.poll(() => (JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: byTitle.Classroom, spaceDesignSystems: { [space.id]: byTitle.MAWS } });
 
-  const { artifact: doc } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Syllabus' });
-  await ok(page, 'artifacts.testWrite', { artifactId: doc.id, opId: 'ds-e2e-1', ops: [{ op: 'insertText', index: 0, text: 'Week one.' }] });
-  // main pushes the defaults on every settings change; the pin follows once the host has them
-  await expect
-    .poll(async () => {
-      await ok(page, 'artifacts.saveVersion', { artifactId: doc.id, label: `check ${Date.now()}` });
-      const { versions } = await ok<{ versions: { designSystemRef?: { id: string } | null }[] }>(page, 'artifacts.versions', { artifactId: doc.id });
-      return versions.at(-1)?.designSystemRef?.id ?? null;
-    }, { timeout: 10_000 })
-    .toBe(classroom.id);
+  // three documents that differ only in where their system comes from
+  const create = async (title: string, placement: { spaceId?: string; designSystemId?: string }) => {
+    const { artifact } = await ok<{ artifact: Row }>(page, 'artifacts.create', { kind: 'document', title, ...placement });
+    await ok(page, 'artifacts.testWrite', { artifactId: artifact.id, opId: `ds-e2e-${title}`, ops: [{ op: 'insertText', index: 0, text: `${title}.` }] });
+    return artifact.id;
+  };
+  const own = await create('Letter home', { spaceId: space.id, designSystemId: byTitle.Official });
+  const inSpace = await create('Lab notes', { spaceId: space.id });
+  const loose = await create('Syllabus', {});
+  // main pushes the defaults on every settings change; a pin follows them once the host has them
+  const pinOf = async (artifactId: string) => (await saveVersion(page, artifactId, `check ${Date.now()}`)).designSystemRef?.id ?? null;
+  await expect.poll(() => pinOf(loose), { timeout: 10_000, message: 'no Space: the owner’s default' }).toBe(byTitle.Classroom);
+  await expect.poll(() => pinOf(inSpace), { timeout: 10_000, message: 'in the Space: its default' }).toBe(byTitle.MAWS);
+  expect(await pinOf(own), 'its own system first').toBe(byTitle.Official);
+  // the Space's pinned version renders the Space's system
+  const pinned = (await saveVersion(page, inSpace, 'Shown')).designSystemRef!;
+  await mountFixture(page, 'lab-notes', pinned);
+  await expect.poll(() => fixtureAccent(page, 'lab-notes'), { timeout: 15_000 }).toBe(rgbOf(bundledHex('maws', 'accent')));
+
+  // the Space back on "Use my default": its document follows the owner's
+  await chemistry.selectOption({ label: 'Use my default' });
+  await expect.poll(() => (JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: byTitle.Classroom, spaceDesignSystems: {} });
+  await expect.poll(() => pinOf(inSpace), { timeout: 10_000, message: 'the Space has none: the owner’s default' }).toBe(byTitle.Classroom);
   expect(launch!.consoleErrors()).toEqual([]);
 });
 
@@ -178,8 +351,6 @@ async function replayJournal(s: Scene, id: AppSessionId, journal: string): Promi
   value(await invoke(s.page, 'session.send', { appSessionId: id, content: prompt }));
 }
 
-const rgbOf = (hex: string) => `rgb(${[1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).join(', ')})`;
-
 test('the agent asks for a design system: the sheet lists the systems with their swatches and origin, offers Build one with me where allowed, and answers the chosen id or create', async () => {
   test.setTimeout(120_000);
   await scene({ titles: ['P3-D: a design system ask'], label: 'p3d-ask' }, async (s) => {
@@ -209,10 +380,8 @@ test('the agent asks for a design system: the sheet lists the systems with their
     const row = section('q1').locator(`[data-design-system="${classroom.id}"]`);
     await expect(row).toContainText('Built in');
     await expect(row.locator('[data-swatch]')).toHaveCount(5);
-    // (the bundled file writes both as literal srgb colours with their hex)
-    const bundled = JSON.parse(readFileSync(join(REPO_ROOT, 'src/artifacts/types/design_system/defaults/classroom/tokens.tokens.json'), 'utf8')) as { color: Record<'bg' | 'accent', { $root: { $value: { hex: string } } }> };
     for (const [swatch, role] of [['--ds-color-bg', 'bg'], ['--ds-color-accent', 'accent']] as const) {
-      await expect.poll(() => row.locator(`[data-swatch="${swatch}"]`).evaluate((element) => getComputedStyle(element).backgroundColor), { message: swatch }).toBe(rgbOf(bundled.color[role].$root.$value.hex));
+      await expect.poll(() => row.locator(`[data-swatch="${swatch}"]`).evaluate((element) => getComputedStyle(element).backgroundColor), { message: swatch }).toBe(rgbOf(bundledHex('classroom', role)));
     }
 
     await section('q1').getByRole('radio', { name: 'Classroom' }).click();

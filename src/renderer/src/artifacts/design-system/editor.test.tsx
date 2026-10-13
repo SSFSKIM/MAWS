@@ -183,6 +183,15 @@ describe('the header’s app actions', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  // M7's e2e: a copy of a system keeps its law's title, so the sheet names the library's row the owner chose to delete
+  it('the delete sheet names the system by its library title, not its law’s title', async () => {
+    installFakeMain((_, input) => listed(input));
+    await opened(systemDoc('# Classroom\n'));
+    act(() => action('Delete design system…').onSelect());
+    await act(async () => {});
+    expect(screen.getByRole('dialog', { name: 'Delete “Harbor”?' })).toBeTruthy();
+  });
+
   it('a system with no law asks the agent to adopt it through the shown session’s message box, without replacing its draft', async () => {
     installFakeMain((_, input) => listed(input));
     useLayout.setState({ main: mainShowing() });
