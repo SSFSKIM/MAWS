@@ -1201,3 +1201,217 @@ only touched parents, advisory until S7b's 200-page numbers. The questions as as
    applies to drag-versus-move.
 4. Whole-document validation twice per batch costs about 22 ms at 320 blocks. Recommended: P3-B validates touched
    parents only; S7 measures at 200 pages.
+
+## S7a — The storage soak
+
+**Verdict: FAIL against the proposed bounds for the spec as written; PASS for the normal profile under the policy
+proposed here, with one marginal exception.** Every version as a full V2 state costs 178 MB for one ordinary 200-page
+document after 6 months (31 MB for a deck), and S3's restore silently drops any map attribute changed twice since the
+version. Under the proposed policy (delta-encoded versions, a load checkpoint, the thinning below, the fixed restore) the
+normal document and both decks meet every bound except the document's history preview (1.08 to 1.30 s against 1 s, on a
+document grown to 136k words). The heavy document fails the time bounds because word-level rewriting leaves tombstones;
+a writer replacing whole sentences cures most of that, but its preview still takes 1.6 s.
+**v14-only: yes, one.** `Y.undoContentIds`, the v14 primitive under S3's restore, cannot restore a map attribute
+overwritten two or more times since the version; a 3-line workaround on the public API (`revertUpdateFixed`) is exact
+at every age tested. Not a reason to return to v13, which has no artifact-wide revert primitive at all (question 9).
+Executor re-runs: `node spikes/p3-store/s7/soak/doc/probe-revert-attr.mjs` (S3's revert: a heading level changed twice
+comes back 1, want 2; fixed: 2) and `node spikes/p3-store/s7/soak/deck/probe-revert-map.mjs` (S3's revert throws or drops
+`left`; fixed: exact).
+
+Method: Node 22.23, `@y/y` 14.0.0-rc.28 and `@y/prosemirror` 2.0.0-15, one copy each; a real `node:sqlite` store (WAL,
+`synchronous=FULL`, `auto_vacuum=INCREMENTAL`) in S2's layout with ContentMap provenance under `/tmp/p3-s7a/`; one gc-on
+host Y.Doc; every edit its own transaction under its writer's clientID (a new human client per session, one per agent
+session, a scratch client per restore); replicas and sync not simulated (S2 proved them; storage depends only on the
+updates); rows committed every 2,000 rows or at each version (bytes identical to per-update commits; fsync count not
+representative). Times are headless Node under a load average of 9 to 20 on 10 cores (no quiet window was found):
+pessimistic.
+
+### The simulated use
+183 days from Monday 2026-04-06, 5 working days a week, maintenance nightly at 03:00, measurements at each 30.5-day
+boundary after maintenance; only time is compressed (every keystroke and pointer move is its own update). Run times:
+normal document 113 s, heavy 787 s, heavy with the sentence writer 315 s, decks 43 to 190 s.
+- Document, normal: starts at 310 sections, about 101k words (headings, lists, tables, code, callouts, task lists, quotes,
+  inline images, 51 comment marks with threads) built through the S1/S3 writer into S3's schema. Human: 2 sessions a day
+  of 1,500 keystrokes in bursts of 60 to 250 keys at 120 to 320 ms per key (7 % backspace, 0.4 % Enter, 0.3 % word
+  deletions, 0.2 % bolding; 30 % of pauses ≥ 2.5 min). Agent: 12 turns a day, each 1 to 2 `artifact_edit` batches of 1
+  to 4 ops (replace_text of 40 % of an 8 to 20 word span 42 %, paragraph rewrite at 70 % 15 %, set_cell 10 %, insert
+  section 7 %, delete section 7 %, insert paragraph 6 %, resolve 5.5 %, move 4 %, add row 3 %). Also a comment and 0.8
+  resolutions a day, an image a week (50 to 500 KB), a named version every Friday, a restore of a 1 to 2-day-old version
+  monthly, a design-system revision every 3 weeks, 3 agent sessions a day. Totals: 393k keystrokes, 1,572 turns, 395,571
+  updates; the document grew to 136k words (about 270 pages).
+- Document, heavy: 4 sessions of 2,500 keystrokes a day; 40 turns a day of 1 to 3 batches × 1 to 6 ops, 12 % of ops
+  rewriting a whole section at 80 %; 8 agent sessions a day; 4 comments a day; named versions Monday, Wednesday, Friday;
+  a restore every 2 weeks. Totals 1.31M keystrokes, 5,240 turns, 1.32M updates. `heavySentence`: the same with a writer
+  that replaces a sentence as one run once at least half of its words change.
+- Deck, normal: 100 slides of S6's seven bench shapes imported in one `publish`; the human 1 session a day (12 drags of
+  15 to 30 pointer-move transactions, 15 restyles, about 250 keystrokes in text boxes through `patchText`, 2 z-order
+  changes, 1 slide re-order, 0.4 slide adds and 0.5 deletes); the agent 8 turns a day, each 1 to 2 publishes of 1 to 4
+  slides (6 % add a slide, 7 % delete one). Heavy: 3 sessions, about 3× the operations, 30 turns a day, 1 to 6 slides per
+  publish.
+
+### The policy proposed for the spec
+§4.7's triggers stand (2 min human idle, every 10 min of activity, each turn's end, before restore or import).
+1. Version encoding: a version row is a V2 delta from the previous retained row (the structs since that row's state
+   vector, intersected with the deletions since: `Y.intersectUpdateWithContentIdsV2`); a keyframe (full V2 state) when
+   the deltas since the last keyframe would exceed the state's size; one `head` checkpoint per artifact (full V2) rewritten
+   when the log tail behind it reaches 1,000 rows or 256 KB; load = head + tail; version and head blobs zstd-compressed
+   (measured offline, not in the soak: 2.5× on version chains, 2.7× on heads; 7 ms to compress, 2 ms to decompress a
+   1.5 MB state).
+2. Thinning, `auto` rows only: all for 24 h, the newest per hour to 7 days, per day to 30 days, per ISO week after;
+   `turn`, `named`, `restore`, `import` kept, with the newest row and pinned rows (the owner's last-seen version, a version
+   open in a preview); a dropped delta folds into the next retained row with `mergeUpdatesV2` (re-deriving gc'd deltas
+   saves only 4 %, `probe-recode.mjs`).
+3. Log compaction: an update row is deleted once the head covers it and it is older than 7 days.
+4. Provenance: one ContentMap per update, time floored to the minute at write; rows older than 24 h merged per hour, hour
+   rows older than 30 days per day (lossless at minute granularity); "Show editors" reads a merged map the host keeps per
+   open artifact, updated as each update lands (recommended, not measured; question 4).
+5. Assets and design-system states kept while the live artifact or a retained version references them; collected nightly.
+6. Nightly maintenance per artifact: thin, compact the log, bucket provenance, collect references, `PRAGMA
+   incremental_vacuum`, `wal_checkpoint(TRUNCATE)`.
+7. Restore: S3's revert with the fixed stack item (`s7/soak/revert.mjs` `revertUpdateFixed`).
+8. Writer (§4.4): an agent edit changing at least half the words of a sentence writes the sentence as one delete plus one
+   insert with marks re-applied.
+Comparison: Google Docs keeps every revision of a Docs-editor file (the Drive API cannot delete them; listings of
+frequently edited files omit older ones; Drive API "Manage revisions", read 2026-10-13); Notion versions every 10 minutes
+of activity and 2 minutes after the last edit, deleting after 7, 30 or 90 days by plan (`research/p3-editors-export-
+history.md` §4). This policy keeps everything with a restore value forever and thins only automatic snapshots: close to
+Google's behaviour at about 9 MB per normal document per 6 months.
+
+### Bounds and results at 6 months (time cells "in the soak / bench", bench = median of 5 to 9 runs on the finished store)
+
+| Bound | Proposed | Reason | Doc normal | Doc heavy, word writer | Doc heavy, sentence writer | Deck normal | Deck heavy |
+|---|---|---|---|---|---|---|---|
+| Retained database per artifact (assets apart) | doc ≤ 25 MB normal / ≤ 100 MB heavy; deck ≤ 10 / ≤ 40 MB | userData is on the system SSD and in Time Machine; a year of ~20 active artifacts plus hundreds of small ones under ~1 GB | 9.20 pass (full states: 177.5, fail) | 75.5 pass | 49.4 pass | 2.10 pass (full states: 30.9, fail) | 10.27 pass |
+| Load: head + log tail applied | ≤ 200 ms p50 | the host's share of a 1 s open; first sync and render are S7b's | 133 / 177 pass | 796 / 607 fail | 155 / 134 pass | 41 / 51 pass | 40 / 41 pass |
+| History preview, headless: a 3-month-old version against today (state, attributions, two gc-off docs, DiffRenderer, change list) | ≤ 1,000 ms p50 | a version click shows the preview within a second (the editor's render adds about 1.2×, S3) | 1,078 / 1,128 fail (marginal) | 6,840 / 9,681 fail | 1,657 / 1,605 fail | 188 / 187 pass | 422 / 353 pass |
+| Restore of a 3-month-old version, host compute | ≤ 1,000 ms p50 and exact | the single-threaded host stalls every open document's sync meanwhile | 779 / 737, exact, pass | 3,721 / 3,242 fail, exact | 652 / 416, exact, pass | 103 / 113, exact, pass | 141 / 121, exact, pass |
+| Nightly maintenance (worst of 183 nights) | total ≤ 1 s, one step ≤ 500 ms | the detached host serves agent writes at any hour | 259 (thinning 216) pass | 1,436 (thinning 1,271) fail | 625 (thinning 485) pass | 63 pass | 935, one night's thinning 871 ms: fail on the step (median night 33 ms) |
+| "Show editors" vs recorded truth (who, time to the minute) at months 1, 3, 6 in four age groups | 100 %; ≤ 100 ms per selection on a merged map; cold merge ≤ 300 ms | a right-click menu | 28/28; merge 210 ms + 21 ms per selection, pass | 25/25; cold merge 3,405 ms fail | 25/25; cold merge 1,023 ms fail | 33/33; merge 45 ms, pass | 23/23; merge 230 ms, pass |
+| Tombstone overhead: live V2 ÷ a fresh import of the same content | ≤ 2× | else load, preview and restore scale with history, not content | 1.57 pass | 3.77 fail | 1.82 pass | 1.33 pass | 1.62 pass |
+
+Every sampled reconstructed version, in every run and month, matched the content hash recorded on the day it was taken
+(7/7 at month 6); restore equality checked at month 6 against the version's body and threads (decks: files and threads).
+
+### Measurements: code paths and commands (from the repository root)
+Install `pnpm_config_verify_deps_before_run=false pnpm -C spikes/p3-store/s7 install --ignore-workspace`; refresh the
+copied sources `node spikes/p3-store/s7/soak/copy-sources.mjs`; all soaks `/tmp/maws-review/waitload20.sh &&
+/tmp/maws-review/with-slot.sh node spikes/p3-store/s7/soak/run-all.mjs` (then `… run-all.mjs second`); one soak
+`node spikes/p3-store/s7/soak/soak.mjs --kind doc|deck --profile normal|heavy|heavySentence --encoding delta|full
+[--suffix x --policy '{…}']`.
+- Retained bytes by table, db file and WAL after checkpoint and incremental vacuum, by page through `dbstat`:
+  `Store.sizes` (`s7/soak/store.mjs`); month tables `node spikes/p3-store/s7/soak/summary.mjs`, `table.mjs <tag>`.
+- Live state, re-encoding through a fresh doc, a fresh import of the same content, struct count: `measure` in
+  `s7/soak/doc/sim.mjs` and `s7/soak/deck/sim.ts`.
+- Load: `Store.load` (median of 5 in the soak; 7 to 9 in `node spikes/p3-store/s7/soak/bench.mjs <tag> [runs]`).
+- History preview: `Store.stateAt` (keyframe merged with its deltas), `Store.attributions(fromSeq)`, then S3's `openDiff`,
+  `renderDiff`, `changeList` (copied to `s7/soak/doc/history.mjs`); decks `createDiffRenderer` then
+  `slides.toDeltaDeep({renderer})`.
+- Restore: `revertUpdateFixed` (`s7/soak/revert.mjs`); exactness by age for S3's revert, the fixed one and S3's id-paired
+  structural diff: `node spikes/p3-store/s7/soak/doc/probe-restore.mjs doc-normal-delta|doc-heavy-delta`,
+  `node spikes/p3-store/s7/soak/deck/probe-restore.ts deck-normal-delta|deck-heavy-delta`; minimal reproductions
+  `deck/probe-revert-map.mjs`, `doc/probe-revert-attr.mjs`.
+- "Show editors": `checkShowEditors` (`doc/sim.mjs`, S3's `showEditors` copied and extended to return the raw time); decks
+  `editorsOf` (`deck/sim.ts`); the truth `Store.truthFor`, a separate never-thinned database of exact per-update maps.
+- Maintenance: `Store.maintain` (`thin`, `compactLog`, `bucketProvenance`, `gcRefs`, `checkpoint`), timed nightly.
+- Delta reconstruction: `node spikes/p3-store/s7/soak/doc/probe-versions.mjs` (the newest version from keyframe plus
+  deltas equals head plus tail, merged or applied one by one).
+- Tombstones `node spikes/p3-store/s7/soak/doc/tombstones.mjs 1000`; chain re-coding and zstd
+  `node spikes/p3-store/s7/soak/probe-recode.mjs doc-heavy-delta`.
+
+### Month by month (`s7/out/summary.txt`; months 2, 4 and 5 there)
+
+| run | m | live V2 KB (fresh import) | size | db MB | versions / head / provenance / log MB | versions kept | assets MB | load ms | preview ms | restore ms | Show editors |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| doc normal | 1 | 1017 (855) | 116k words | 3.37 | 1.28 / 1.00 / 0.42 / 0.64 | 82 | 7.90 | 72 | 558 | 380 | 8/8 |
+| doc normal | 3 | 1264 (904) | 126k | 5.55 | 3.21 / 1.24 / 0.41 / 0.66 | 86 | 9.10 | 93 | 821 | 485 | 11/11 |
+| doc normal | 6 | 1508 (960) | 136k | 9.20 | 5.89 / 1.47 / 1.11 / 0.67 | 129 | 10.82 | 133 | 1078 | 779 | 9/9 |
+| doc heavy | 1 | 2635 (946) | 135k | 19.63 | 10.82 / 2.55 / 2.45 / 3.76 | 156 | 9.00 | 413 | 3242 | 1365 | 9/9 |
+| doc heavy | 3 | 3106 (874) | 127k | 39.23 | 28.00 / 3.05 / 4.59 / 3.50 | 121 | 13.91 | 534 | 5460 | 1348 | 9/9 |
+| doc heavy | 6 | 3924 (1042) | 144k | 75.46 | 57.64 / 3.86 / 9.88 / 3.89 | 252 | 22.53 | 796 | 6840 | 3721 | 7/7 |
+| doc heavy, sentence writer | 1 | 1069 (802) | 114k | 12.28 | 6.81 / 1.05 / 1.48 / 2.89 | 152 | 10.22 | 69 | 811 | 169 | 8/8 |
+| doc heavy, sentence writer | 3 | 1393 (927) | 132k | 25.32 | 19.65 / 1.37 / 1.43 / 2.79 | 122 | 16.11 | 93 | 875 | 222 | 9/9 |
+| doc heavy, sentence writer | 6 | 1454 (798) | 112k | 49.38 | 41.14 / 1.42 / 3.60 / 3.08 | 246 | 25.38 | 155 | 1657 | 652 | 8/8 |
+| doc normal, full states (spec as written) | 1 / 3 / 6 | as doc normal | | 79.05 / 102.61 / 177.50 | 175.45 MB of versions at month 6 | 82 / 86 / 129 | | 47 / 87 / 109 | 415 / 899 / 890 | 317 / 468 / 365 | |
+| doc normal, turn versions kept | 6 | 1508 (960) | 136k | 10.91 | 7.59 / 1.47 / 1.11 / 0.67 | 1647 | 11.02 | 133 | 1141 | 763 | |
+| deck normal | 1 | 245 (225) | 97 slides | 0.85 | 0.37 / 0.24 / 0.09 / 0.12 | 64 | 4.65 | 28 | 91 | 45 | 11/11 |
+| deck normal | 3 | 232 (189) | 79 | 1.29 | 0.79 / 0.23 / 0.13 / 0.12 | 68 | 5.35 | 33 | 112 | 64 | 11/11 |
+| deck normal | 6 | 297 (224) | 91 | 2.10 | 1.32 / 0.29 / 0.30 / 0.13 | 114 | 8.18 | 41 | 188 | 103 | 11/11 |
+| deck heavy | 1 | 223 (171) | 79 | 2.81 | 1.61 / 0.22 / 0.35 / 0.60 | 148 | 8.91 | 34 | 234 | 67 | 11/11 |
+| deck heavy | 3 | 261 (189) | 82 | 5.16 | 3.80 / 0.27 / 0.53 / 0.51 | 120 | 18.57 | 34 | 251 | 75 | 6/6 |
+| deck heavy | 6 | 330 (204) | 88 | 10.27 | 8.07 / 0.32 / 1.20 / 0.59 | 232 | 35.07 | 40 | 422 | 141 | 6/6 |
+| deck normal, full states | 6 | 297 (224) | 91 | 30.91 | 30.38 MB of versions | 114 | 8.18 | 43 | 166 | 96 | 11/11 |
+
+Per-update cost in the normal document: 23 µs to land, 8.8 ms per delta version. Write volume over 6 months: full states
+4.39 GB per normal document (572 MB per normal deck); delta mode about 6 MB of version rows, the head rewrites its main
+write cost (381 MB normal; 3.0 GB heavy with the word writer, 1.3 GB with the sentence writer).
+Tombstones (`s7/out/tombstones.txt`): with gc on, a word-level rewrite of a 7-paragraph section (80 % of words replaced)
+adds about 2.5 KB and 194 deleted structs to the live state every pass, linear and unbounded (1,000 passes add 2.5 MB to
+a 0.78 MB document); the same rewrites as whole-paragraph replacements add 31 B per pass (about 80× less); random-position
+typing with 45 % deletions adds about 4.5 KB per 1,000 keystrokes; re-encoding through a fresh doc never shrinks anything.
+
+### Pitfalls (verified)
+1. **The v14 restore gap.** `Y.undoContentIds` builds its stack item as inserts minus deletes and deletes minus inserts;
+   an item both inserted and deleted since the version (an intermediate value of an attribute overwritten twice or more)
+   lands in neither; `redoItem`'s map branch (`UndoManager.js`) meets it on the key's overwrite chain, reads it as a
+   concurrent remote change and gives up, so the key ends up deleted. Decks: S3's revert left 9 of 83 files wrong for a
+   1-day-old version and 49 for a 30-day-old one (heavy deck up to 58 of 94). Documents: a heading level changed twice
+   comes back as the default; likewise a task's checked, a callout's tone, a code block's language. Fix: push the stack
+   item directly with every item inserted since and only (deletes minus inserts) to redo (`revert.mjs`); exact at every
+   age on all four stores. The upstream function is marked `@experimental`.
+2. S3's `revertUpdate` returns 13 zero bytes when nothing changed, not a decodable V2 update (`applyUpdateV2` throws
+   "Unexpected end of array"): return `encodeStateAsUpdateV2(new Y.Doc())`.
+3. `YNode.toDelta()` returns the live doc's own child YNodes; applying that delta to another doc re-parents them and the
+   live doc's next write to them throws in `tryGcDeleteSet`. Copy values, or `toDeltaDeep` plus S3's `materialize`.
+4. A doc loaded from a state may list a node's attributes in another order: compare canonically (sorted keys).
+5. `encodeStateAsUpdateV2(doc, sv)` writes the doc's entire delete set every time: filter a delta with the deletions since.
+6. pnpm 11.23 ignores `pnpm.overrides` in `package.json` (S5's pitfall 8, again).
+7. Word-level hunks leave one tombstone per replaced word forever.
+8. Provenance merge cost scales with row count (3.2k rows 105 ms; 10.4k rows 646 to 709 ms in the heavy preview; a full
+   merge 3.4 s on the heavy store).
+9. In heavy use retained asset bytes outweigh the database (heavy deck: 35 MB of assets against a 10 MB database).
+10. Unexplained: in the heavy deck the preview's per-element count reads 0 after month 1, while slide counts and
+    per-element "Show editors" are right. Not investigated.
+
+### Amendments proposed
+- §4.2: versions as zstd-compressed V2 deltas from the previous retained row (keyframes when the deltas since the last
+  keyframe exceed the state's size); one head checkpoint per artifact rewritten when the log tail reaches 1,000 rows or
+  256 KB; load = head + tail; update rows deleted once the head covers them and they are older than 7 days. Provenance:
+  one ContentMap per update, times floored to the minute, merged per hour after 24 h and per day after 30 days
+  (lossless), one merged map kept in memory per open artifact. Restore: S3's revert with the stack item built directly;
+  the regression test is the overwrite-twice case on a deck element and a heading level. The nightly maintenance pass
+  (thin, compact, bucket, collect references, incremental vacuum, WAL checkpoint); the database created with
+  `auto_vacuum=INCREMENTAL`.
+- §4.7: only `auto` rows thin (all for 24 h, newest per hour to 7 days, per day to 30 days, per ISO week after); `turn`,
+  `named`, `restore`, `import`, the newest and pinned rows kept; an owner action "Delete versions older than…" (Google's
+  "Delete this and older versions") as the escape valve.
+- §4.4: an agent edit changing at least half the words of a sentence writes the sentence as one replacement with marks
+  re-applied.
+- X29: version row `{seq, at, actor, kind, label?, note?, summary?, enc: 'full' | 'delta', bytes (zstd V2),
+  designSystemRef, assetRefs[]}`; `artifact_head {artifactId, seq, state}`; provenance row `{fromSeq, toSeq, fromAt, toAt,
+  tier: 'update' | 'hour' | 'day', contentMap}`; the thinning policy and retention rule above.
+
+### Questions for the architect (S7a)
+1. Delta-encoded versions with a head checkpoint instead of full states? Recommended: yes (full states cost 19× the
+   database, 178 against 9.2 MB, and 4.4 GB of writes per normal document per 6 months).
+2. Keep turn versions? Recommended: yes, as the spec says (+1.7 MB per normal document per 6 months for all 1,539).
+3. The sentence-replacement writer rule into §4.4? Recommended: yes, for agent rewrites at ≥ 50 % (coarser attribution:
+   a rewritten sentence is credited and diffed whole; without it a heavy document's live state grows about 0.4 MB a
+   month without bound); B owns the threshold.
+4. The previews still exceed 1 s (mostly attributions, `openDiff` and render). Recommended: keep the merged provenance in
+   memory, updated as each update lands (about 0.1 to 0.7 s off); merge per-update rows into hour rows after 1 h rather
+   than 24 h; keep the version doc pair open while the owner browses the list; S7b re-measures the editor path.
+5. zstd? Recommended: yes (2.5 to 2.7× for 2 ms of decompression); P3-A confirms zstd in Electron 44's Node.
+6. Heavy-use keyframes (31 of 57 MB in the heavy document): defer (about 23 MB with zstd, under the bound; thinning old
+   keyframes to one a month is the next lever).
+7. Asset retention in heavy decks: keep the reference rule, show each artifact's history size in the library, and offer
+   the owner's delete action.
+8. Head rewrite writes (1.3 to 3 GB per heavy document per 6 months): acceptable; raise the thresholds if SSD wear
+   matters.
+9. Does the restore gap send S1's ruling back to v13? No: the failing primitive is a v14-only API, but the fix is 3 lines
+   on the public API, v13 has no artifact-wide revert at all, and S3's id-paired structural diff was also exact on every
+   store here (0.2 to 3.6 s) as a fallback. P3-A copies `revertUpdateFixed` and the reproductions; filing upstream is
+   outward-facing and the architect's call (recommended).
+Not tested in S7a: Electron rendering, IME, replicas, first sync, memory (S7b); per-update fsync cost; zstd inside the
+store; maintenance alongside live writes; the document soak never changes a block attribute twice (its restore exactness
+does not exercise the gap; `probe-revert-attr.mjs` does); the heavy word-writer soak ran before the restore fix (its
+in-sim restores used S3's revert; its month-6 check and age sweep are exact).
