@@ -67,18 +67,19 @@ describe('startLibrary', () => {
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
   afterEach(() => {
+    vi.useRealTimers();
     stop();
     index.close();
     dir.dispose();
     vi.restoreAllMocks();
   });
-  const start = (host: ReturnType<typeof fakeHost>, target: Pick<Index, 'library' | 'unavailable'> = index) => {
+  const start = (host: ReturnType<typeof fakeHost>, target: Pick<Index, 'library' | 'unavailable'> = index, tickMs = 0) => {
     ({ stop } = startLibrary({
       index: target,
       hosts: host as never,
       register: ((name: string, handler: Handler) => handlers.set(name, handler)) as never,
       emit: ((name: string, payload: unknown) => emitted.push({ name, payload }) > 0) as never,
-      tickMs: 0,
+      tickMs,
       settleMs: 0,
     }));
   };
@@ -89,23 +90,30 @@ describe('startLibrary', () => {
       'library.snapshot': () => ({ artifacts: [entry(1, { updatedAt: 5 }), entry(2, { updatedAt: 9 })], links: [], spaces: [] }),
       'library.text': (input) => ({ revision: 1, text: `text of ${(input as { artifactId: string }).artifactId.slice(-1)}` }),
     });
-    start(host);
-    await settle(5);
+    // The clock is the test's, so a tick is a tick whatever the machine's load: the host's answers and the texts' settles
+    // (0 ms) all run inside the first 16 ms tick, and the tick then tells the whole of it once.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const TICK = 16;
+    start(host, index, TICK);
+    await vi.advanceTimersByTimeAsync(TICK - 1);
     expect(call('library.list', {})).toMatchObject({ rows: [{ id: uuid(2) }, { id: uuid(1) }], counts: { html: 2, document: 0 } });
     expect(call('library.get', { artifactId: uuid(1) })).toMatchObject({ row: { id: uuid(1), title: 'Page 1' } });
     expect(call('library.spaces')).toEqual({ spaces: [] });
     expect(call('library.list', { filter: { query: 'text of 2' } })).toMatchObject({ rows: [{ id: uuid(2), snippet: 'text of 2' }] });
-    // the reconciliation and the two texts committed three times; the ticks coalesced them
-    expect(emitted.every(({ name }) => name === 'library.changed')).toBe(true);
-    expect(emitted.length).toBeGreaterThanOrEqual(1);
-    expect(emitted.length).toBeLessThan(3);
-    expect(emitted.at(-1)).toEqual({ name: 'library.changed', payload: { revision: index.library.revision } });
+    // the reconciliation and the two texts committed three times within the tick, and nothing was told before it ended
+    const committed = index.library.revision;
+    expect(committed).toBe(3);
+    expect(emitted).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(emitted).toEqual([{ name: 'library.changed', payload: { revision: committed } }]);
 
     emitted.length = 0;
     host.tell('artifacts.changed', { artifactId: uuid(1), kind: 'html', revision: 2, change: 'deleted' });
     host.tell('artifacts.changed', { artifactId: uuid(2), kind: 'html', revision: 2, change: 'deleted' });
-    await settle(5);
+    await vi.advanceTimersByTimeAsync(TICK - 1);
     expect(call('library.list', {})).toMatchObject({ rows: [] });
+    expect(emitted).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
     expect(emitted).toEqual([{ name: 'library.changed', payload: { revision: index.library.revision } }]);
   });
 
