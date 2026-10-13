@@ -161,8 +161,8 @@ describe('the document editor in L’s registry', () => {
       expect(screen.getByTestId('system-scope').contains(document.querySelector('.ds-doc'))).toBe(true);
       expect(systemFor).toHaveBeenLastCalledWith({ spaceId: SPACE });
       expect(scopes.at(-1)).toMatchObject({ system: { id: 'ds-1' }, medium: 'document', overrides: {} });
-      act(() => setDsOverrides(state.snapshot().handle!.doc, { '--ds-color-accent': '#0b5fff' }));
-      await until(() => scopes.at(-1)?.overrides?.['--ds-color-accent'] === '#0b5fff', 'the overrides');
+      act(() => setDsOverrides(state.snapshot().handle!.doc, { '--ds-font-body': 'Georgia, serif' }));
+      await until(() => scopes.at(-1)?.overrides?.['--ds-font-body'] === 'Georgia, serif', 'the overrides');
     } finally {
       offSystem();
     }
