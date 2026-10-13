@@ -19,6 +19,8 @@ import {
 } from './apply';
 import complete from './fixtures/complete.tokens.json';
 import { setToken, writeSystem } from './model';
+import { holdScopeStyle, scopeIdOf } from './scope-style';
+import { liveView } from './view';
 import { parseTokens, serializeTokens, type Token } from './tokens';
 
 const AT = Date.UTC(2026, 9, 13);
@@ -147,7 +149,9 @@ describe('openDesignSystem (D8)', () => {
     const css = (await openDesignSystem(host, { id: 'a' })).css('[data-ds-scope="x"]', 'document');
     const faces = css.match(/@font-face \{[^}]*\}/g) ?? [];
     expect(faces).toHaveLength(1);
-    expect(faces[0]).toContain('font-family: "Iowan Old Style";');
+    const alias = /font-family: (ds-face-[a-z0-9]+);/.exec(faces[0]!)?.[1];
+    expect(alias).toBeDefined(); // the face under a name private to this system (fix wave 1, I5)
+    expect(css).toContain(`--ds-font-display: ${alias}, "Iowan Old Style", Georgia, serif;`);
     expect(faces[0]).toContain('font-weight: 400;');
     expect(faces[0]).toMatch(/src: url\("maws-artifact\\3a \/\/a\/live\/assets\/iowan\.woff2"\) format\("woff2"\);/);
     expect(css).not.toContain('fonts.example');
@@ -284,3 +288,81 @@ describe('resolveDsVars (the export helper)', () => {
   });
 });
 
+describe('lifetimes (fix wave 1)', () => {
+  const toUrl = (ref: string) => `maws-artifact://a/live/${ref}`;
+
+  it('I2: a live view read again after a quiet spell with no listener is current', () => {
+    const doc = systemDoc();
+    const view = liveView(doc, toUrl);
+    const stop = view.subscribe(() => {});
+    expect(view.css(':root', 'document')).toContain('--ds-color-accent: #c9663f');
+    stop();
+    setToken(doc, 'color.accent.$root', color('#123456'));
+    expect(view.css(':root', 'document')).toContain('--ds-color-accent: #123456');
+    view.close();
+    setToken(doc, 'color.accent.$root', color('#654321')); // closed: no longer observed, nothing breaks
+  });
+
+  it('I3: when the holder whose replica a shared style follows lets go, the style follows the survivor’s replica', () => {
+    const first = systemDoc();
+    const second = systemDoc();
+    const [a, b] = [liveView(first, toUrl), liveView(second, toUrl)];
+    const id = scopeIdOf('page:a', 'document', undefined);
+    const releaseA = holdScopeStyle(id, 'document', undefined, () => ({ view: a, release: () => a.close() }));
+    const releaseB = holdScopeStyle(id, 'document', undefined, () => ({ view: b, release: () => b.close() }));
+    releaseA();
+    first.destroy();
+    setToken(second, 'color.accent.$root', color('#123456'));
+    expect(styles()).toHaveLength(1);
+    expect(styles()[0]!.textContent).toContain('--ds-color-accent: #123456');
+    releaseB();
+    expect(styles()).toHaveLength(0);
+  });
+
+  it('I7: the last scope of a system still loading, gone before it syncs, closes the handle and drops its sync listener', async () => {
+    const doc = systemDoc();
+    const listeners = new Set<unknown>();
+    const close = vi.fn();
+    const handle: DocumentHandle = {
+      doc,
+      awareness: null as never,
+      state: () => ({ phase: 'handshake', synced: false, unsaved: 0, revision: 0 }),
+      subscribe: (listener) => (listeners.add(listener), () => listeners.delete(listener)),
+      onRestored: () => () => {},
+      close,
+    };
+    const { host } = fakeHost({});
+    host.open = async () => handle;
+    const view = render(
+      <DesignSystemHostContext.Provider value={host}>
+        <DesignSystemScope system={{ id: 'a' }} medium="document">
+          <p>text</p>
+        </DesignSystemScope>
+      </DesignSystemHostContext.Provider>,
+    );
+    await flush();
+    expect(listeners.size).toBe(1); // waiting for the first sync
+    view.unmount();
+    await flush();
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(listeners.size).toBe(0);
+    expect(styles()).toHaveLength(0);
+  });
+
+  it('I7: a handle that arrives after the last scope went is closed at once', async () => {
+    let arrive!: (handle: DocumentHandle) => void;
+    const close = vi.fn();
+    const { host } = fakeHost({});
+    host.open = () => new Promise<DocumentHandle>((resolve) => (arrive = resolve));
+    const view = render(
+      <DesignSystemHostContext.Provider value={host}>
+        <DesignSystemScope system={{ id: 'a' }} medium="document">
+          <p>text</p>
+        </DesignSystemScope>
+      </DesignSystemHostContext.Provider>,
+    );
+    view.unmount();
+    await act(async () => arrive({ doc: systemDoc(), awareness: null as never, state: () => ({ phase: 'handshake', synced: false, unsaved: 0, revision: 0 }), subscribe: () => () => {}, onRestored: () => () => {}, close }));
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+});

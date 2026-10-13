@@ -9,6 +9,8 @@ import complete from '../fixtures/complete.tokens.json';
 import { readSystem, setToken, writeSystem } from '../model';
 import { parseTokens, serializeTokens } from '../tokens';
 import { DesignSystemPage } from './DesignSystemPage';
+import { CommitField } from './fields';
+import { rewriteHtmlAssets } from './frame';
 
 const AT = Date.UTC(2026, 9, 13);
 const LAW = `# Harbor
@@ -170,5 +172,51 @@ describe('the Design System page (D14)', () => {
     const inputs = [...view.container.querySelectorAll('input')];
     expect(inputs.length).toBeGreaterThan(0);
     expect(inputs.every((input) => input.disabled)).toBe(true);
+  });
+});
+
+describe('fix wave 1', () => {
+  it('I1: a valid edit is written as it is typed, so a body removed without a blur loses nothing', () => {
+    let persisted = '#c9663f';
+    const shown = render(<CommitField label="Accent hex" value={persisted} commit={(text) => ((persisted = text), null)} />);
+    act(() => {
+      fireEvent.change(shown.getByLabelText('Accent hex'), { target: { value: '#123456' } });
+    });
+    shown.unmount();
+    expect(persisted).toBe('#123456');
+  });
+
+  it('I1: on the page, a typed hex lands in the doc before any blur, and the field keeps what was typed until it is left', () => {
+    const doc = systemDoc();
+    const view = render(<DesignSystemPage artifactId="ds1" handle={{ doc }} host={host} />);
+    const input = screen.getByLabelText('--ds-color-accent hex') as HTMLInputElement;
+    act(() => {
+      fireEvent.change(input, { target: { value: '#12345' } }); // does not read yet: shown as invalid, not written
+    });
+    expect(input.getAttribute('aria-invalid')).toBe('true');
+    expect(token(doc, 'color.accent.$root')!.$value).toMatchObject({ hex: '#c9663f' });
+    act(() => {
+      fireEvent.change(input, { target: { value: '#123456' } });
+    });
+    expect(token(doc, 'color.accent.$root')!.$value).toMatchObject({ hex: '#123456' });
+    act(() => {
+      fireEvent.change(screen.getByLabelText('h1 size'), { target: { value: '30' } });
+    });
+    expect((screen.getByLabelText('h1 size') as HTMLInputElement).value).toBe('30'); // as typed, not the stored 30px
+    expect(token(doc, 'type.h1')!.$value).toMatchObject({ fontSize: { value: 30, unit: 'px' } });
+    act(() => {
+      fireEvent.blur(screen.getByLabelText('h1 size'));
+    });
+    expect((screen.getByLabelText('h1 size') as HTMLInputElement).value).toBe('30px');
+    view.unmount();
+    expect(token(doc, 'color.accent.$root')!.$value).toMatchObject({ hex: '#123456' });
+  });
+
+  it('I6: canon’s SVG references keep their fragments and load through the host, presentation attributes included', () => {
+    const toUrl = (ref: string) => `maws-artifact://ds/live/${ref}`;
+    const html = rewriteHtmlAssets('<svg><use href="assets/symbols.svg#mark"></use><rect fill="url(assets/paint.svg#grad)" mask="url(#local)"></rect></svg>', toUrl);
+    expect(html).toContain('href="maws-artifact://ds/live/assets/symbols.svg#mark"');
+    expect(html).toMatch(/fill="url\(&quot;maws-artifact\\3a \/\/ds\/live\/assets\/paint\.svg#grad&quot;\)"/);
+    expect(html).toContain('mask="url(#local)"');
   });
 });
