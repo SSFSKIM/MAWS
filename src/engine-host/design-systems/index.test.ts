@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { colorFromHex } from '@artifacts/design-system/color';
 import { designSystemMirrorWriter } from '@artifacts/design-system/mirror';
 import { isGeneratedPath, readFiles, readSystem, setToken, writeSystem } from '@artifacts/design-system/model';
+import { parseTokens, serializeTokens } from '@artifacts/design-system/tokens';
 import { snapshotOfDoc, staticView } from '@artifacts/design-system/view';
 import { mirrorWriterFor } from '@artifacts/library/mirror';
 import { DEFAULT_SYSTEMS, HOUSE_KEY } from '@artifacts/types/design_system/defaults';
@@ -70,7 +71,10 @@ describe('seeding (D9; Decision Log 7)', () => {
       expect(store().get(id)).toMatchObject({ createdBy: HUMAN, kind: 'design_system' });
       // the files the agent reads are the bundled files, the generated two beside them
       const files = filesOf(id);
-      for (const [path, text] of Object.entries(source.files)) expect(files[path], path).toBe(path === 'tokens.tokens.json' ? files[path] : text);
+      // the token file as the canonical writer writes the bundled one, read on its own (M6 fix wave 1, I4)
+      const canonical = parseTokens(JSON.parse(source.files['tokens.tokens.json']!));
+      expect(canonical.problems, source.key).toEqual([]);
+      for (const [path, text] of Object.entries(source.files)) expect(files[path], path).toBe(path === 'tokens.tokens.json' ? serializeTokens(canonical.tokens!) : text);
       expect(Object.keys(files)).toEqual(expect.arrayContaining(['tokens.css', 'office-theme.json']));
     }
     expect(store().listAssets(byKey('official')).map((a) => a.ref)).toEqual(['assets/face.woff2']);
