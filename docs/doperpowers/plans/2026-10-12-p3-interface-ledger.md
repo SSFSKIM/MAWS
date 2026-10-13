@@ -90,4 +90,5 @@ Times are the recording commits' times (PDT).
 - 2026-10-12 21:53: B's second checkpoint recorded (Decision Log 41): X23 `uploadAsset`; X24 `AgentReplica.edit(fn)`, the `provenance?: Carry[]` hook return, `holdRemote` on `DocumentHandle`; X26 `math` and `mathBlock`; §7 B's two re-export files in A's seam directory. Relayed to A for names.
 - 2026-10-12 21:54: A keeps B's five names (its Decision Log 25) and names the IPC `artifacts.uploadAsset`; placement M3 and M4 recorded on X23 and X24.
 - 2026-10-12 21:59: X32 amended by G's M3 review: a registration lives as long as its tab; `closeGuard` and actions read tab-owned state, never a body's component state (binding on L, B, C, D, E). Relayed to B and D.
+- 2026-10-12 22:14: the owner on D's defaults (Decision Log 42): no emblem colour; the baseline reader is a high-school and university student, mature register; `classroom` redrawn, specimens re-set, revised previews to return for approval; Noto Serif KR bundled as WOFF2 (architect). Relayed to D.
 - 2026-10-12 19:55: A's `afterUpdate` and `revertScope {keepConversations?}` hooks recorded; host repairs credited to the triggering actor, no system actor.
