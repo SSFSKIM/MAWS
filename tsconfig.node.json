@@ -51,5 +51,7 @@
     // P3-B: test/artifacts/document-writer-bench.test.ts benches the patch writer on the 200-page seed M9's gate uses
     "e2e/support/document-seed.ts"
   ],
-  "exclude": ["src/artifacts/document/editor/**/*"] // P3-B: the document editor's React and DOM, typechecked by tsconfig.web.json
+  // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6), typechecked by
+  // tsconfig.web.json
+  "exclude": ["src/artifacts/document/editor/**/*", "src/artifacts/document/import/html*", "src/artifacts/document/import/docx*"]
 }
