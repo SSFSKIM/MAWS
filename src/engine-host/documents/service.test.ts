@@ -405,7 +405,7 @@ describe('DocumentService: authorship and provenance', () => {
     expect(committed("SELECT seq FROM artifact_head WHERE artifactId = 'a1'")).toEqual([{ seq: service.revision('a1') }]);
 
     now += 40 * DAY;
-    expect(storage.pruneLog(now)).toBe(2); // the log is gone; provenance is not
+    expect(storage.pruneLog(now)).toBe(1); // the log is gone but its newest row (Decision Log 37a); provenance is not
     expect(storage.tierAttributions(now)).toEqual({ merged: 3, written: 2 });
     expect(committed("SELECT DISTINCT tier FROM artifact_attributions WHERE artifactId = 'a1'")).toEqual([{ tier: 'day' }]);
     expect(fromStore()).toEqual(fresh);

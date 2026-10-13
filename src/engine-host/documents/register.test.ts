@@ -140,6 +140,26 @@ describe('the artifacts and spaces surface (M4)', () => {
     expect(await call('artifacts.pruneVersions', { olderThan: 0 })).toEqual({ removed: 0 });
   });
 
+  it('names an automatic version as the human, answering the version row, and refuses an unknown one (Decision Log 37d)', async () => {
+    register({ MAWS_E2E: '1' });
+    const { artifact } = await call('artifacts.create', { kind: 'document', title: 'Notes' });
+    await call('artifacts.testWrite', { artifactId: artifact.id, opId: 'w1', ops: [{ op: 'insertText', index: 0, text: 'agent work' }], appSessionId: 'app-1' });
+    await call('artifacts.markViewed', { artifactId: artifact.id });
+    const [auto] = (await call('artifacts.versions', { artifactId: artifact.id })).versions;
+    expect(auto).toMatchObject({ kind: 'auto', actor: { kind: 'session', appSessionId: 'app-1' } });
+    await new Promise((resolve) => setTimeout(resolve, 300)); // the write's coalesced change (250 ms) is out
+    emitted.length = 0;
+    const { version } = await call('artifacts.nameVersion', { artifactId: artifact.id, versionId: auto.id, label: 'Before review', note: 'the agent’s draft' });
+    expect(version).toEqual({ ...auto, label: 'Before review', note: 'the agent’s draft' });
+    expect((await call('artifacts.versions', { artifactId: artifact.id })).versions).toEqual([version]);
+    // Decision Log 38c: an omitted note keeps it, null clears it
+    expect((await call('artifacts.nameVersion', { artifactId: artifact.id, versionId: auto.id, label: 'Renamed' })).version).toEqual({ ...version, label: 'Renamed' });
+    expect((await call('artifacts.nameVersion', { artifactId: artifact.id, versionId: auto.id, label: 'Renamed', note: null })).version).toEqual({ ...auto, label: 'Renamed' });
+    expect(emitted).toContainEqual({ name: 'artifacts.changed', payload: { artifactId: artifact.id, kind: 'document', revision: expect.any(Number), change: 'updated' } });
+    expect(await refusal('artifacts.nameVersion', { artifactId: artifact.id, versionId: auto.id + 1, label: 'x' })).toMatchObject({ code: 'invalid_input', issues: { reason: 'notFound' } });
+    expect(validateCommandInput('artifacts.nameVersion', { artifactId: artifact.id, versionId: auto.id, label: '' }).ok).toBe(false);
+  });
+
   it('answers the store’s refusals as typed IpcErrors carrying the reason and its data', async () => {
     const missing = '22222222-2222-4222-8222-222222222222';
     expect(await refusal('artifacts.update', { artifactId: missing, title: 'x' })).toMatchObject({ code: 'invalid_input', issues: { reason: 'notFound', data: {} } });
