@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   attributionMap,
+  carriedBy,
+  carryAttribution,
   contentIdsOf,
   decodeMap,
   deletedBy,
@@ -92,5 +94,50 @@ describe('attribution maps (X29 on v14)', () => {
     const map = attributionMap(contentIdsOf(diffV1(doc)), { insertActor: 'human', deleteActor: 'human', at: T0 });
     expect(insertedClients(contentIdsOf(diffV1(doc)))).toEqual([]);
     expect(decodeMap(encodeMap(map)).inserts.isEmpty()).toBe(true);
+  });
+});
+
+describe('carried authorship (a move or a retype, Decision Log 25j)', () => {
+  const pair = (id: { client: number; clock: number }): [number, number] => [id.client, id.clock];
+
+  it('credits the moved content to its original author and time, records the carry kind, and leaves the rest to the mover', () => {
+    const { doc, maps, edit } = recorded(MINUTE * 5);
+    const text = doc.get('content');
+    edit('session:a', () => text.insert(0, 'ab'));
+    const original = [idAt(text, 0)!, idAt(text, 1)!];
+    // the human "moves" the two characters: deletes them and re-inserts them after one character of their own
+    edit('human', () => {
+      text.delete(0, 2);
+      text.insert(0, 'x');
+      text.insert(1, 'ab');
+    });
+    const moved = [idAt(text, 1)!, idAt(text, 2)!];
+    const own = idAt(text, 0)!;
+    const prior = mergeMaps(maps.slice(0, 1));
+    const carried = carryAttribution(maps[1], prior, [{ kind: 'move', from: original.map(pair), to: moved.map(pair) }]);
+    moved.forEach((id, i) => {
+      expect(insertedBy(carried, id)).toEqual(insertedBy(prior, original[i]));
+      expect(carriedBy(carried, id)).toBe('move');
+    });
+    expect(insertedBy(carried, own)?.actor).toBe('human');
+    expect(carriedBy(carried, own)).toBeNull();
+    expect(deletedBy(carried, original[0])?.actor).toBe('human'); // the deletion stays the mover's
+    expect(insertedBy(mergeMaps([prior, carried]), moved[0])?.actor).toBe('session:a');
+  });
+
+  it('ignores a pair whose target the update did not insert or whose source has no recorded author', () => {
+    const { doc, maps, edit } = recorded();
+    const text = doc.get('content');
+    edit('session:a', () => text.insert(0, 'a'));
+    const first = idAt(text, 0)!;
+    edit('human', () => text.insert(1, 'b'));
+    const second = idAt(text, 1)!;
+    const carried = carryAttribution(maps[1], maps[0], [
+      { kind: 'retype', from: [pair(first)], to: [pair(first)] }, // not inserted by this update
+      { kind: 'retype', from: [[999, 0]], to: [pair(second)] }, // no author recorded for the source
+    ]);
+    expect(insertedBy(carried, second)?.actor).toBe('human');
+    expect(carriedBy(carried, second)).toBeNull();
+    expect(insertedBy(carried, first)).toBeNull();
   });
 });

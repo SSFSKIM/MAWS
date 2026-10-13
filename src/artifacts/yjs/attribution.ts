@@ -62,6 +62,50 @@ const authorship = (attrs: readonly { name: string; val: unknown }[] | null | un
 export const insertedBy = (map: ContentMap, id: ItemId): Authorship | null => authorship(map.inserts.slice(id.client, id.clock, 1)[0]?.attrs, 'insert');
 export const deletedBy = (map: ContentMap, id: ItemId): Authorship | null => authorship(map.deletes.slice(id.client, id.clock, 1)[0]?.attrs, 'delete');
 
+// A move or a retype as a kind's `afterUpdate` reports it (Decision Log 25j; parent Decision Log 34): the update
+// re-inserted the content at `from` (ids as `[client, clock]`, one per character or element) as the content at `to`,
+// pairwise, so `to` keeps `from`'s author and time and the mover is credited with no characters.
+export interface Carry {
+  kind: 'move' | 'retype';
+  from: [number, number][];
+  to: [number, number][];
+}
+
+// `map` (one update's attribution) with each carried `to` id re-credited to its `from` id's author and time (looked up
+// in `prior`, the artifact's attribution before this update, then in `map` itself) and marked `carry = <kind>`, so
+// history can show moved and retyped blocks. A pair whose `to` the update did not insert, or whose `from` has no
+// recorded author, is left as it was. Deletions are untouched: they stay the mover's.
+export function carryAttribution(map: ContentMap, prior: ContentMap, carries: Carry[]): ContentMap {
+  const taken = Y.createIdSet();
+  const groups = new Map<string, { attrs: Y.ContentAttribute<unknown>[]; ids: Y.IdSet }>();
+  for (const carry of carries) {
+    for (let i = 0; i < Math.min(carry.from.length, carry.to.length); i++) {
+      const to = { client: carry.to[i][0], clock: carry.to[i][1] };
+      const from = { client: carry.from[i][0], clock: carry.from[i][1] };
+      if (!insertedBy(map, to)) continue;
+      const author = insertedBy(prior, from) ?? insertedBy(map, from);
+      if (!author) continue;
+      taken.add(to.client, to.clock, 1);
+      const key = `${author.actor}\u0000${author.at}\u0000${carry.kind}`;
+      const group = groups.get(key) ?? {
+        attrs: [Y.createContentAttribute('insert', author.actor), Y.createContentAttribute('insertAt', author.at), Y.createContentAttribute('carry', carry.kind)],
+        ids: Y.createIdSet(),
+      };
+      group.ids.add(to.client, to.clock, 1);
+      groups.set(key, group);
+    }
+  }
+  if (taken.isEmpty()) return map;
+  const carried = [...groups.values()].map(({ attrs, ids }) => Y.createIdMapFromIdSet(ids, attrs));
+  return Y.createContentMap(Y.mergeIdMaps([Y.diffIdMap(map.inserts, taken), ...carried]), map.deletes);
+}
+
+// The carry kind recorded on an inserted id, or null when it was not carried.
+export function carriedBy(map: ContentMap, id: ItemId): Carry['kind'] | null {
+  const value = map.inserts.slice(id.client, id.clock, 1)[0]?.attrs?.find((attr: { name: string }) => attr.name === 'carry')?.val;
+  return value === 'move' || value === 'retype' ? value : null;
+}
+
 // The id of the content at `index` of a node's text and children (what a selection's start resolves to).
 export function idAt(node: Node, index: number): ItemId | null {
   const position = Y.createRelativePositionFromTypeIndex(node, index);
