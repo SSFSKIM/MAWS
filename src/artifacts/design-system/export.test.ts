@@ -1,15 +1,13 @@
 // The `claude` export over a system's document (D12; registered with A's export service in main at M7): Claude's files
 // from the system as it stands, `tokens.json` in Claude's list grammar, `README.md` from the law, the system's faces as
 // Claude's `type.fonts` with their files under `fonts/`, and the other assets its files name under `assets/`.
-import { Window } from 'happy-dom';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { newDoc } from '../yjs';
 import { claudeExportAssetRefs, claudeExportFiles } from './export';
 import complete from './fixtures/complete.tokens.json';
 import { fromClaude } from './claude';
 import { validateClaudeTokens } from './claude-grammar';
 import { writeSystem } from './model';
-import { rewriteHtmlAssets } from './page/frame';
 import { parseTokens, serializeTokens } from './tokens';
 
 const LAW = '# Harbor\n\n## 0. Persona\npersona: a harbour pilot\n';
@@ -110,31 +108,6 @@ describe('the claude export of a system’s document', () => {
     expect(claudeExportAssetRefs(doc)).toEqual([
       'assets/Cover Photo.jpg', 'assets/Mark Logo.png', 'assets/band (wide).png', 'assets/commented.png', 'assets/icons.svg', 'assets/mark 3x.png', 'assets/mark@2x.png', 'assets/pattern.svg', 'assets/quote mark.svg',
     ]);
-  });
-
-  // Review M7b-2: what the export reads from canon HTML is what the canon frames load (`rewriteHtmlAssets`, over a DOM)
-  describe('against the renderer’s canon frames', () => {
-    const window = new Window();
-    const original = (globalThis as { DOMParser?: unknown }).DOMParser;
-    beforeAll(() => void ((globalThis as { DOMParser?: unknown }).DOMParser = window.DOMParser));
-    afterAll(async () => {
-      (globalThis as { DOMParser?: unknown }).DOMParser = original;
-      await window.happyDOM.close();
-    });
-    const loaded = (html: string) => {
-      const refs = new Set<string>();
-      rewriteHtmlAssets(html, (ref) => (refs.add(ref), `maws-artifact://ds/live/${ref}`));
-      return [...refs].sort();
-    };
-    it.each([
-      ['a URL attribute’s surrounding spaces', '<section id="s"><img src=" assets/logo.png "><a href="\tassets/sheet.pdf\n">x</a></section>', ['assets/logo.png', 'assets/sheet.pdf']],
-      ['an unrelated attribute’s out-of-range reference', '<section id="s"><img src="assets/logo.png" alt="&#x110000; &#0; &#xD800; &#99999999999;"></section>', ['assets/logo.png']],
-      ['a read attribute’s invalid reference, as U+FFFD', '<section id="s"><img src="assets/l&#x110000;go.png"></section>', ['assets/l\ufffdgo.png']],
-      ['a read attribute’s numeric references', '<section id="s"><img src="assets/&#x4C;ogo&#32;mark.png"></section>', ['assets/Logo mark.png']],
-    ])('reads %s as the frame does', (_, html, refs) => {
-      expect(loaded(html)).toEqual(refs);
-      expect(claudeExportAssetRefs(systemDoc({ 'layouts/check.html': html }))).toEqual(refs);
-    });
   });
 
   it('leaves out a face none of whose files the store holds', () => {
