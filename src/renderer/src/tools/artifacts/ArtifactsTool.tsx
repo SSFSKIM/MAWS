@@ -6,7 +6,10 @@
 // X32's lifetime rule: the editor a record view mounts keeps its state in the registry's hold for this tab's scope, so
 // its closeGuard and actions read it while the tab is hidden. The handle gives that state back, and clears the editor's
 // header registration, whenever the tab stops showing that artifact: at Back, at a re-target to another artifact (or to
-// the list) and when the host disposes the instance; a body unmounting because the tab went inactive keeps both.
+// the list) and when the host disposes the instance; a body unmounting because the tab went inactive keeps both. Back
+// and a re-target ask the editor's closeGuard first, as closing the tab does (the host asks it before disposing): a
+// false keeps the record view, so a replica with unacknowledged edits is not dropped by a move the owner did not
+// confirm.
 //
 // Artifacts belong to no session (§4.1), so a pinned tab keeps the artifact it shows when the shown session changes; its
 // list follows the shown session.
@@ -14,7 +17,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { Icon } from '../../app/IconButton';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
-import { clearEditorHost, type EditorHostScope } from '../../panel/editor-host';
+import { askEditorHostClose, clearEditorHost, type EditorHostScope } from '../../panel/editor-host';
 import type { PanelTool, PanelToolContext } from '../../panel/tool';
 import { ARTIFACTS_TOOL_COPY } from './copy';
 import { ArtifactsList, type ArtifactsScope } from './List';
@@ -43,6 +46,7 @@ const LIST: ArtifactsView = { kind: 'list' };
 export class ArtifactsHandle {
   private state: ArtifactsState;
   private readonly listeners = new Set<() => void>();
+  private disposed = false;
 
   constructor(
     readonly editorScope: EditorHostScope,
@@ -71,6 +75,22 @@ export class ArtifactsHandle {
     clearEditorHost(this.editorScope);
   }
 
+  // Moves away from the artifact shown (if any) once its editor's closeGuard allows: at once when there is no guard,
+  // else after it answers true, and only if nothing else moved the view meanwhile.
+  private leaveThen(view: ArtifactsView): void {
+    const shown = this.state.view;
+    const go = () => {
+      this.leave();
+      this.update({ view });
+    };
+    if (shown.kind !== 'record') return go();
+    const asked = askEditorHostClose(this.editorScope);
+    if (asked === null) return go();
+    void asked.then((allowed) => {
+      if (allowed && !this.disposed && this.state.view === shown) go();
+    });
+  }
+
   // X5's `open`: a target shows that artifact (the one already shown keeps its state); no target shows the list.
   open = (params: ArtifactsParams | undefined) => {
     if (params?.scope !== undefined && params.scope !== this.state.scope) this.update({ scope: params.scope, scrollTop: 0 });
@@ -78,14 +98,11 @@ export class ArtifactsHandle {
     if (target === undefined) return this.back();
     const { view } = this.state;
     if (view.kind === 'record' && view.artifactId === target) return;
-    this.leave();
-    this.update({ view: { kind: 'record', artifactId: target } });
+    this.leaveThen({ kind: 'record', artifactId: target });
   };
 
   back = () => {
-    if (this.state.view.kind === 'list') return;
-    this.leave();
-    this.update({ view: LIST });
+    if (this.state.view.kind !== 'list') this.leaveThen(LIST);
   };
 
   setScope = (scope: ArtifactsScope) => {
@@ -103,14 +120,18 @@ export class ArtifactsHandle {
     this.update({ appSessionId, scrollTop: 0 });
   };
 
-  dispose = () => this.leave();
+  // The host disposes after the tab's close asked the guard, or without asking when the tab's session went.
+  dispose = () => {
+    this.disposed = true;
+    this.leave();
+  };
 }
 
 function ArtifactsBody({ state, ctx }: { state: ArtifactsHandle; ctx: PanelToolContext }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
   useEffect(() => state.follow(ctx.appSessionId), [state, ctx.appSessionId]);
   const { view } = snapshot;
-  if (view.kind === 'record') return <ArtifactRecordView key={view.artifactId} artifactId={view.artifactId} scope={state.editorScope} onBack={state.back} />;
+  if (view.kind === 'record') return <ArtifactRecordView key={view.artifactId} artifactId={view.artifactId} scope={state.editorScope} visible={ctx.visible} onBack={state.back} />;
   const own = snapshot.appSessionId === ctx.appSessionId; // until the follow lands, another session's scroll is not restored
   return (
     <ArtifactsList

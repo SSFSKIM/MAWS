@@ -168,6 +168,18 @@ describe('an artifact in a main tab', () => {
     expect(tabOpen(), 'saved: it gives its place').toBe(false);
   });
 
+  it('tells the editor whether its tab is on screen: not while the panel takes the main column’s place', async () => {
+    registerArtifactEditor('document', {
+      Panel: ({ visible }: ArtifactEditorProps) => <p data-visible={String(visible)}>shown editor</p>,
+    });
+    render(<Shell />);
+    act(() => openArtifactTab(A));
+    expect((await screen.findByText('shown editor')).dataset.visible).toBe('true');
+    const { regions } = useLayout.getState();
+    act(() => useLayout.setState({ regions: { ...regions, panel: { ...regions.panel, collapsed: false, maximized: true } } }));
+    expect(screen.getByText('shown editor').dataset.visible).toBe('false');
+  });
+
   it('a kind registered with Panel alone mounts Panel in the main tab', async () => {
     const { Panel } = testEditor();
     registerArtifactEditor('document', { Panel });

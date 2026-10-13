@@ -95,9 +95,9 @@ const create = (params?: ArtifactsParams, appSessionId: AppSessionId | null = A)
   return handle;
 };
 
-function Mounted({ state, appSessionId = A }: { state: ArtifactsHandle; appSessionId?: AppSessionId | null }) {
+function Mounted({ state, appSessionId = A, visible = true }: { state: ArtifactsHandle; appSessionId?: AppSessionId | null; visible?: boolean }) {
   const ctx: PanelToolContext = {
-    appSessionId, session: null, status: null, pinned: false, visible: true, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool,
+    appSessionId, session: null, status: null, pinned: false, visible, focusRequest: 0, setTitle: () => {}, close: () => {}, openTool: panelHost.addTool,
     editorHost: SCOPE,
   };
   const Body = artifactsTool.render;
@@ -124,16 +124,20 @@ async function openRow(n: number) {
   await settle();
 }
 
-// A test editor for documents whose header and closeGuard read the state its tab owns, and which says its content is on
-// screen at mount.
-type TestState = { artifactId: string; surface: string };
-function testEditor() {
-  const createState = vi.fn(({ artifactId, surface }: { artifactId: string; surface: string }): TestState => ({ artifactId, surface }));
+// A test editor for documents whose header (and, when guarded, closeGuard) read the state its tab owns, and which says
+// its content is on screen at mount.
+type TestState = { artifactId: string; surface: string; allowClose: boolean };
+function testEditor({ guarded = false } = {}) {
+  const createState = vi.fn(({ artifactId, surface }: { artifactId: string; surface: string }): TestState => ({ artifactId, surface, allowClose: false }));
   const dispose = vi.fn();
-  function Panel({ artifactId, state, scope, onShown }: ArtifactEditorProps<TestState>) {
-    useEditorHost(scope, { title: `Editing ${artifactId.slice(-1)}`, saved: 'saved' });
+  function Panel({ artifactId, state, scope, visible, onShown }: ArtifactEditorProps<TestState>) {
+    useEditorHost(scope, { title: `Editing ${artifactId.slice(-1)}`, saved: 'saved', closeGuard: guarded ? async () => state.allowClose : undefined });
     useEffect(() => onShown(), [onShown]);
-    return <p>panel editor for {state.artifactId} in {scope.surface}:{scope.tabId}</p>;
+    return (
+      <p data-visible={String(visible)}>
+        panel editor for {state.artifactId} in {scope.surface}:{scope.tabId}
+      </p>
+    );
   }
   const Main = () => <p>main editor</p>;
   const editor = { Panel, Main, createState, dispose };
@@ -281,6 +285,56 @@ describe('the record view', () => {
     act(() => artifactsTool.open!(handle, { target: PAGE.id }));
     expect(editor.dispose).toHaveBeenCalledTimes(1);
     expect(editorHostOf(SCOPE)).toBeNull();
+  });
+
+  it('Back and a re-target ask the editor’s closeGuard first: false keeps the record view and its state', async () => {
+    const editor = testEditor({ guarded: true });
+    const { handle } = await mount({ target: NOTES.id });
+    await screen.findByText(`panel editor for ${NOTES.id} in panel:${TAB}`);
+    const state = editor.createState.mock.results[0]!.value as TestState;
+
+    fireEvent.click(button('Back')!);
+    await settle();
+    expect(handle.snapshot().view, 'the guard kept it').toEqual({ kind: 'record', artifactId: NOTES.id });
+    act(() => artifactsTool.open!(handle, { target: SPEC.id }));
+    await settle();
+    expect(handle.snapshot().view).toEqual({ kind: 'record', artifactId: NOTES.id });
+    expect(editor.dispose).not.toHaveBeenCalled();
+    expect(editorHostOf(SCOPE)?.title).toBe('Editing 1');
+
+    state.allowClose = true;
+    act(() => artifactsTool.open!(handle, { target: SPEC.id }));
+    await screen.findByText(`panel editor for ${SPEC.id} in panel:${TAB}`);
+    expect(editor.dispose).toHaveBeenCalledWith(state);
+    const next = editor.createState.mock.results[1]!.value as TestState;
+    next.allowClose = true;
+    fireEvent.click(button('Back')!);
+    await settle();
+    expect(editor.dispose).toHaveBeenCalledTimes(2);
+    expect(listed()).toHaveLength(5);
+  });
+
+  it('a guarded move the view left meanwhile, or a disposed instance, does not apply', async () => {
+    const editor = testEditor({ guarded: true });
+    const { handle } = await mount({ target: NOTES.id });
+    await screen.findByText(/panel editor for/);
+    (editor.createState.mock.results[0]!.value as TestState).allowClose = true;
+    act(() => {
+      handle.back(); // asked, pending
+      artifactsTool.dispose(handle); // the tab closed meanwhile
+    });
+    await settle();
+    expect(handle.snapshot().view, 'nothing moves after disposal').toEqual({ kind: 'record', artifactId: NOTES.id });
+    expect(editor.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('the editor is told whether the panel shows it', async () => {
+    testEditor();
+    const handle = create({ target: NOTES.id });
+    const view = render(<Mounted state={handle} />);
+    expect((await screen.findByText(/panel editor for/)).dataset.visible).toBe('true');
+    view.rerender(<Mounted state={handle} visible={false} />);
+    expect(screen.getByText(/panel editor for/).dataset.visible).toBe('false');
   });
 
   it('disposing the instance gives the state back', async () => {

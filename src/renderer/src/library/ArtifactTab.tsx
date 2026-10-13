@@ -19,13 +19,14 @@ import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { formatAgo } from '../app/date-format';
+import { panelInMain } from '../app/regions';
 import { useNow } from '../app/use-now';
 import { heldArtifactEditorState, holdArtifactEditorState, releaseArtifactEditorState, useArtifactEditor, type RegisteredArtifactEditor } from '../artifacts/registry';
 import { ipc } from '../ipc/client';
 import { registerReplaceVerdict } from '../keymap/actions-runtime';
 import { editorHostOf, useEditorHost, type EditorHostScope } from '../panel/editor-host';
 import { useHosts } from '../stores/hosts';
-import type { ReplaceVerdict } from '../stores/layout';
+import { useLayout, type ReplaceVerdict } from '../stores/layout';
 import { markArtifactViewed } from './actions';
 import { KIND_LABELS, LIBRARY_COPY } from './copy';
 import { library, libraryRow, refreshLibrary, useLibraryRow, type LibraryRead } from './store';
@@ -37,13 +38,16 @@ const viewed = new WeakSet<object>();
 
 export function ArtifactTab({ tab }: { tab: ArtifactTabRef }) {
   const scope = useMemo<EditorHostScope>(() => ({ surface: 'main', tabId: tab.id }), [tab.id]);
-  return <ArtifactView artifactId={tab.artifactId} scope={scope} />;
+  // A main tab's body is mounted only while it is its pane's active tab; it is on screen unless the panel has taken the
+  // main column's place (maximized or floating).
+  const visible = useLayout((s) => !panelInMain(s.regions));
+  return <ArtifactView artifactId={tab.artifactId} scope={scope} visible={visible} />;
 }
 
 // One artifact shown in a tab's scope, by whichever surface holds it: an `artifact` main tab mounts the kind's `Main`,
 // the panel's Artifacts tool (its record view, M5) the kind's `Panel`. The surface gives the editor's state back when it
 // stops showing the artifact (a main tab when it leaves the main area, the panel at Back, a re-target and disposal).
-export function ArtifactView({ artifactId, scope }: { artifactId: string; scope: EditorHostScope }) {
+export function ArtifactView({ artifactId, scope, visible }: { artifactId: string; scope: EditorHostScope; visible: boolean }) {
   const read = useLibraryRow(artifactId);
   const host = useHostAnswer(artifactId, read);
   const indexless = read.value === null;
@@ -52,7 +56,7 @@ export function ArtifactView({ artifactId, scope }: { artifactId: string; scope:
   const kept = heldArtifactEditorState(scope);
   const held = kept?.artifactId === artifactId ? kept : null;
   const editor = useArtifactEditor(artifact?.kind ?? held?.kind ?? null);
-  if (artifact && editor) return <MountedEditor artifactId={artifact.id} kind={artifact.kind} editor={editor} scope={scope} />;
+  if (artifact && editor) return <MountedEditor artifactId={artifact.id} kind={artifact.kind} editor={editor} scope={scope} visible={visible} />;
   if (artifact) return <NoEditor artifact={artifact} scope={scope} />;
   if (indexless && host.answer?.status === 'absent') return <Gone scope={scope} />;
   // Unconfirmed: the index has no row (or its read failed) and the host has not said the artifact is gone.
@@ -71,7 +75,7 @@ export function ArtifactView({ artifactId, scope }: { artifactId: string; scope:
   );
   if (held && editor && held.editor === editor) {
     return (
-      <MountedEditor artifactId={held.artifactId} kind={held.kind} editor={editor} scope={scope}>
+      <MountedEditor artifactId={held.artifactId} kind={held.kind} editor={editor} scope={scope} visible={visible}>
         {notice && <div role="status" className="flex shrink-0 items-center gap-3 border-b border-border bg-bg-raised px-3 py-1.5 text-ui-sm text-fg-muted">{notice}</div>}
       </MountedEditor>
     );
@@ -105,7 +109,7 @@ function useHostAnswer(artifactId: string, read: LibraryRead<LibraryRow | null>)
   return { answer: answer?.artifactId === artifactId ? answer.answer : undefined, retry: () => setAttempt((n) => n + 1) };
 }
 
-function MountedEditor({ artifactId, kind, editor, scope, children }: { artifactId: string; kind: ArtifactKind; editor: RegisteredArtifactEditor; scope: EditorHostScope; children?: ReactNode }) {
+function MountedEditor({ artifactId, kind, editor, scope, visible, children }: { artifactId: string; kind: ArtifactKind; editor: RegisteredArtifactEditor; scope: EditorHostScope; visible: boolean; children?: ReactNode }) {
   const hold = holdArtifactEditorState(scope, artifactId, kind, editor);
   // Decision Log 15: the owner's view, recorded at the editor's first word that the content is on screen, once per showing.
   const onShown = useCallback(() => {
@@ -118,7 +122,7 @@ function MountedEditor({ artifactId, kind, editor, scope, children }: { artifact
     <div data-artifact-tab={scope.surface === 'main' ? artifactId : undefined} className="flex h-full flex-col">
       {children}
       <div className="relative min-h-0 flex-1">
-        <Body artifactId={artifactId} state={hold.state} scope={scope} onShown={onShown} />
+        <Body artifactId={artifactId} state={hold.state} scope={scope} visible={visible} onShown={onShown} />
       </div>
     </div>
   );

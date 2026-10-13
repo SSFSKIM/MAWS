@@ -2,13 +2,15 @@
 // §7; parent Decision Log 39): which component edits each artifact kind, wherever an artifact is shown. B, C, D and E
 // register their kind's editor here; the panel's Artifacts tool (its record view) and the `artifact` main tab mount the
 // kind's `Panel` or `Main` with the artifact, the state the editor keeps for that tab, the tab's X32 scope, under
-// which the editor registers its own header (`useEditorHost`), and `onShown`, which the editor calls once the
-// artifact's content is on screen so the surface records the owner's view.
+// which the editor registers its own header (`useEditorHost`), whether the body is on screen (`visible`), and
+// `onShown`, which the editor calls once the artifact's content is on screen so the surface records the owner's view.
 //
 // X32's lifetime rule (the ledger's §5): an editor's `closeGuard` and actions outlive its mounted body, so they must read
 // state the tab owns, never a body's component state. `createState` makes that state when a surface starts showing an
 // artifact, and `dispose` ends it when the surface stops (the tab closes, the panel goes Back or shows another
-// artifact); a body unmounting because its tab went inactive keeps it. The mounting surface asks for it through
+// artifact); a body unmounting because its tab went inactive keeps it. Every one of those stops asks the editor's
+// `closeGuard` first (the panel's Back and re-target too), so a replica with unacknowledged edits is not dropped by a
+// move the owner did not confirm. The mounting surface asks for it through
 // `holdArtifactEditorState` and gives it back through `releaseArtifactEditorState`; a main tab's is given back here
 // when the tab leaves the main area by any path, as the editor host clears the tab's header registration.
 import type { ComponentType } from 'react';
@@ -22,6 +24,10 @@ export interface ArtifactEditorProps<S = unknown> {
   artifactId: string;
   state: S; // what the editor's createState made for this tab (undefined without one)
   scope: EditorHostScope; // the tab the editor registers its X32 header under
+  // The body is on screen: the panel tab is selected with the panel open, or the main tab is active with the main region
+  // shown (not behind a maximized or floating panel). A body that floats things over its content (the comment card)
+  // hides them while false.
+  visible: boolean;
   // The editor calls it when the artifact's content is first on screen (loaded, not while it loads); idempotent. The
   // surface records the owner's view (`artifacts.markViewed`) once per showing on the first call (Decision Log 15).
   onShown(): void;
