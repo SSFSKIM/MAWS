@@ -129,7 +129,7 @@ export interface ReadResult {
 export function blocksOf(markdown: string): Map<string, string> {
   const blocks = new Map<string, string>();
   for (const line of markdown.split('\n')) {
-    const marker = / \^([0-9a-z]+)$/.exec(line);
+    const marker = /(?:^| )\^([0-9a-z]+)$/.exec(line); // a table's marker stands on a line of its own
     if (marker) blocks.set(marker[1]!, line.slice(0, marker.index));
   }
   return blocks;
