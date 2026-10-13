@@ -267,15 +267,38 @@ describe('the page’s edits: setToken, setLaw, setFile', () => {
     for (let i = 0; i < 61; i++) setFile(human, `components/c${i}.html`, CHIP); // 64 canon files with the scene's three
     expect(() => setFile(human, 'components/one-more.html', CHIP)).toThrow(/at most 64/);
     setFile(human, 'components/c0.html', CHIP.replace('Due', 'Done')); // replacing one keeps the count
-    expect(() => setFile(human, 'components/bad.html', '<div onclick="x()">x</div>', { parser })).toThrow(SystemFilesError);
     expect(readSystem(human).files['components/big.html']).toBeUndefined();
   });
 
-  it('refuses a token where the tokens hold a group, and a token beneath a token (the file could not hold both)', () => {
+  it('checks a set canon file’s structure when given a parser', () => {
+    const { human } = scene(); // three canon files: well under the count, so only the parser can refuse
+    const bad = '<div onclick="x()">x</div>';
+    expect(() => setFile(human, 'components/chip.html', bad, { parser })).toThrow(/components\/chip\.html/);
+    expect(readSystem(human).files['components/chip.html']).toBe(CHIP);
+    setFile(human, 'components/chip.html', bad); // without a parser, only paths and limits are checked
+    expect(readSystem(human).files['components/chip.html']).toBe(bad);
+  });
+
+  it('writes a token by its identity: `x` replaces `x.$root`, one stored key per token', () => {
     const { human } = scene();
-    expect(() => setToken(human, 'color.bg', color('#000000'))).toThrow(/color\.bg/);
-    expect(() => setToken(human, 'color.border.strong', color('#000000'))).toThrow(/color\.border/);
-    expect(tokenOf(human, 'color.bg')).toBeUndefined();
+    setToken(human, 'color.bg', color('#000000'));
+    expect(human.get('tokens').hasAttr('color.bg.$root')).toBe(false);
+    expect(tokenOf(human, 'color.bg.$root')).toEqual(color('#000000')); // read as the group's $root: color.bg holds raised
+    expect(readFiles(human)['tokens.css']).toContain('--ds-color-bg: #000000');
+  });
+
+  it('reads replicas that converged on a token and a token beneath it without loss, the parent as its group’s $root', () => {
+    const { human, agent } = scene();
+    setToken(human, 'color.branch', color('#112233'));
+    setToken(agent, 'color.branch.light', color('#ddeeff'));
+    sync(human, agent);
+    for (const doc of [human, agent]) {
+      const tokens = parseTokens(readFiles(doc)['tokens.tokens.json']!).tokens!;
+      expect(tokens.tokens.get('color.branch.$root')).toEqual(color('#112233'));
+      expect(tokens.tokens.get('color.branch.light')).toEqual(color('#ddeeff'));
+      expect(readFiles(doc)['tokens.css']).toContain('--ds-color-branch: #112233');
+      expect(readFiles(doc)['tokens.css']).toContain('--ds-color-branch-light: #ddeeff');
+    }
   });
 });
 
@@ -463,19 +486,51 @@ describe('publish: the agent’s change over the live doc (Acceptance 7, A’s l
     expect(readSystem(human).law).toBe(expected);
   });
 
-  it('refuses a merge the token file cannot hold (a token beneath where the other side made a token), even with force', () => {
+  it('merges a token and a token the other side made beneath it, losslessly: the parent reads as its group’s $root', () => {
     const { human, agent, base } = scene();
     setToken(human, 'color.branch.light', color('#ddeeff'));
     sync(human, agent);
-    const before = stateVector(agent);
     const sent = { 'tokens.tokens.json': tokensWith(base['tokens.tokens.json']!, { 'color.branch': color('#112233') }) };
-    for (const force of [false, true]) {
-      const result = publishSystem(agent, base, sent, force);
-      expect(result.changed).toEqual([]);
-      expect(result.conflicts).toEqual([{ path: 'tokens.tokens.json', detail: expect.stringMatching(/color\.branch\b.*color\.branch\.light|color\.branch\.light.*color\.branch\b/) }]);
-    }
+    expect(publishSystem(agent, base, sent, false)).toEqual({ changed: ['tokens.tokens.json'], conflicts: [] });
+    sync(human, agent);
+    const tokens = parseTokens(readFiles(human)['tokens.tokens.json']!).tokens!;
+    expect(tokens.tokens.get('color.branch.$root')).toEqual(color('#112233'));
+    expect(tokens.tokens.get('color.branch.light')).toEqual(color('#ddeeff'));
+    // The agent's next publish, from a read of that file, sees `color.branch.$root` as the same token it wrote.
+    const reread = readFiles(agent);
+    expect(publishSystem(agent, reread, { 'tokens.tokens.json': reread['tokens.tokens.json']! }, false)).toEqual({ changed: [], conflicts: [] });
+  });
+
+  it('keys tokens by identity: a token both sides created with different values conflicts, though a stale base hides one form', () => {
+    // The agent read only the child; a human then made the parent; the agent converts the child into the parent.
+    const { human, agent } = scene();
+    setToken(human, 'color.branch.light', color('#ddeeff'));
+    sync(human, agent);
+    const base = readFiles(agent);
+    const other = newDoc();
+    sync(human, agent, other);
+    setToken(other, 'color.branch', color('#112233'));
+    sync(other, agent);
+    const before = stateVector(agent);
+    const sent = { 'tokens.tokens.json': tokensWith(base['tokens.tokens.json']!, { 'color.branch.light': undefined, 'color.branch': color('#445566') }) };
+    const result = publishSystem(agent, base, sent, false);
+    expect(result).toEqual({ changed: [], conflicts: [{ path: 'tokens.tokens.json', detail: expect.stringContaining('the token color.branch changed') }] });
     expect(stateVector(agent)).toEqual(before);
-    expect(tokenOf(agent, 'color.branch.light')).toEqual(color('#ddeeff'));
+    expect(tokenOf(agent, 'color.branch.$root')).toEqual(color('#112233'));
+    // With force the agent wins that token: one stored key, its value, the child it removed gone.
+    expect(publishSystem(agent, base, sent, true).changed).toEqual(['tokens.tokens.json']);
+    expect(tokenOf(agent, 'color.branch')).toEqual(color('#445566'));
+    expect(tokenOf(agent, 'color.branch.light')).toBeUndefined();
+    expect([...agent.get('tokens').attrKeys()].filter((key) => String(key).startsWith('color.branch'))).toEqual(['color.branch']);
+  });
+
+  it('takes a token stored under both `x` and `x.$root` with different values as changed live, so an agent change to it conflicts', () => {
+    const { human, agent, base } = scene();
+    human.get('tokens').setAttr('color.highlight.$root', color('#123456')); // a second replica's write of the same token
+    sync(human, agent);
+    expect(tokenOf(agent, 'color.highlight.$root')).toEqual(color('#123456')); // the $root form is the one read
+    const sent = { 'tokens.tokens.json': tokensWith(base['tokens.tokens.json']!, { 'color.highlight': color('#abcdef') }) };
+    expect(publishSystem(agent, base, sent, false).conflicts).toEqual([{ path: 'tokens.tokens.json', detail: expect.stringContaining('color.highlight') }]);
   });
 
   it('writes only the tokens that change, so token-level authorship stays with whoever set each one', () => {

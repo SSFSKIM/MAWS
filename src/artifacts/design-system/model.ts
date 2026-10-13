@@ -18,7 +18,7 @@ import { CLAUDE_SOURCES, ClaudeShapeError, fromClaude, isClaudeShape } from './c
 import { generateTokensCss } from './css';
 import { LAW_LIMIT_BYTES, parseLaw } from './law';
 import { officeTheme } from './office';
-import { comparePaths } from './roles';
+import { comparePaths, splitPath } from './roles';
 import { parseTokens, serializeTokens, validateTokenFile, type GroupProps, type Token, type TokenSet } from './tokens';
 
 import type { KindAdapter } from '../host';
@@ -90,16 +90,39 @@ function entriesOf(set: TokenSet): Map<string, Token | GroupProps> {
   return entries;
 }
 
-function tokenSetOf(node: Node): TokenSet {
-  const tokens: [string, Token][] = [];
+const ROOT = '.$root';
+/** A token's identity: its path with a trailing `$root` dropped, so `x` and `x.$root` are one unit (Decision Log 12). */
+const identity = (path: string) => (path.endsWith(ROOT) ? path.slice(0, -ROOT.length) : path);
+
+/** The `tokens` node's attributes as stored: token paths and `<path>/$group` keys. */
+const storedEntries = (node: Node): Map<string, Token | GroupProps> => new Map([...(node.attrEntries() as IterableIterator<[string, Token | GroupProps]>)]);
+
+/**
+ * Stored entries as one token file's set, without loss (Decision Log 12). Replicas may converge on states no single
+ * write makes: a token at `x` beside tokens or groups beneath `x`, or both `x` and `x.$root`. Per identity one token is
+ * read (the `$root` form when both are stored), and a token with anything beneath it is read as its group's `$root`,
+ * which DTCG defines for exactly this; its CSS name is the same.
+ */
+function tokenSetOfEntries(entries: Iterable<readonly [string, Token | GroupProps]>): TokenSet {
   const groups: [string, GroupProps][] = [];
-  for (const [key, value] of node.attrEntries() as IterableIterator<[string, unknown]>) {
+  const byIdentity = new Map<string, [string, Token]>();
+  for (const [key, value] of entries) {
     if (key.endsWith(GROUP)) groups.push([key.slice(0, -GROUP.length), value as GroupProps]);
-    else tokens.push([key, value as Token]);
+    else if (!byIdentity.has(identity(key)) || key.endsWith(ROOT)) byIdentity.set(identity(key), [key, value as Token]);
   }
+  const holders = new Set<string>(); // every path something lies beneath, and every group's own path
+  const hold = (path: string, self: boolean) => {
+    const segments = splitPath(path);
+    for (let i = 1; i < segments.length; i++) holders.add(segments.slice(0, i).join('.'));
+    if (self) holders.add(path);
+  };
+  for (const id of byIdentity.keys()) hold(id, false);
+  for (const [path] of groups) hold(path, true);
+  const tokens: [string, Token][] = [...byIdentity].map(([id, [key, token]]) => [holders.has(id) ? `${id}${ROOT}` : key, token]);
   const byPath = <T>(list: [string, T][]) => new Map(list.sort(([a], [b]) => comparePaths(a, b)));
   return { tokens: byPath(tokens), groups: byPath(groups) };
 }
+const tokenSetOf = (node: Node): TokenSet => tokenSetOfEntries(storedEntries(node));
 
 const lawOf = (node: Node): string =>
   node
@@ -163,20 +186,10 @@ function pathProblem(path: string, value: string | null): string | null {
   return null;
 }
 
-/**
- * Where the entries could not be one token file: a token where a group is, or beneath another token. The serializer
- * writes such a pair as two equal JSON keys, and a read keeps only one, so it is caught on the model, before any text.
- */
-function hierarchyProblems(entries: ReadonlyMap<string, unknown>): string[] {
-  const tokens = [...entries.keys()].filter((key) => !key.endsWith(GROUP));
-  const groups = [...entries.keys()].filter((key) => key.endsWith(GROUP)).map((key) => key.slice(0, -GROUP.length));
-  const problems: string[] = [];
-  for (const path of tokens) {
-    const below = `${path}.`;
-    const inside = [...tokens.filter((other) => other.startsWith(below)), ...groups.filter((group) => group === path || group.startsWith(below))];
-    if (inside.length) problems.push(`the token ${path} and ${[...new Set(inside)].sort(comparePaths).join(', ')} cannot both exist: a token holds no tokens or groups`);
-  }
-  return problems;
+/** What a set would lose written as one file and read back: each token missing or changed, by path. */
+function lossOf(set: TokenSet): string[] {
+  const back = parseTokens(serializeTokens(set)).tokens;
+  return [...set.tokens].filter(([path, token]) => !same(back?.tokens.get(path), token)).map(([path]) => path);
 }
 
 /** A token file read and fully checked, or its problems named by token path. */
@@ -284,22 +297,19 @@ export function writeSystem(doc: Doc, files: Readonly<Record<string, string>>, o
 
 /**
  * The page's edit of one token: `token` as the canonical object (`$value` in its object form), or null to remove it.
- * One attribute, one transaction: the token's authorship stays per token.
+ * One attribute, one transaction: the token's authorship stays per token. The token is its identity: `x` and `x.$root`
+ * name the same one.
  */
 export function setToken(doc: Doc, path: string, token: Token | null): void {
   if (path.endsWith(GROUP)) throw new SystemFilesError([{ path: TOKENS_PATH, message: `${path}: a token's name may not end with "${GROUP}"` }]);
   const node = roots(doc).tokens;
-  if (token) {
-    const keys = [...node.attrKeys()].map(String);
-    const holder = keys.find((key) => !key.endsWith(GROUP) && path.startsWith(`${key}.`));
-    const inside = keys.filter((key) => key !== path && (key === groupKey(path) || key.startsWith(`${path}.`)));
-    if (holder) throw new SystemFilesError([{ path: TOKENS_PATH, message: `${path}: the token ${holder} cannot hold a token` }]);
-    if (inside.length) {
-      const names = [...new Set(inside.map((key) => (key.endsWith(GROUP) ? key.slice(0, -GROUP.length) : key)))].sort(comparePaths);
-      throw new SystemFilesError([{ path: TOKENS_PATH, message: `${path}: ${names.join(', ')} already there; a token holds no tokens or groups` }]);
-    }
-  }
-  transact(doc, () => (token ? node.setAttr(path, plain(token)) : node.deleteAttr(path)));
+  // One identity, one stored key: `x` replaces `x.$root` and the reverse (Decision Log 12).
+  const others = [...node.attrKeys()].map(String).filter((key) => key !== path && !key.endsWith(GROUP) && identity(key) === identity(path));
+  transact(doc, () => {
+    for (const key of others) node.deleteAttr(key);
+    if (token) node.setAttr(path, plain(token));
+    else node.deleteAttr(path);
+  });
 }
 
 /** The law replaced by `text`, written as the character diff from the current law. */
@@ -439,15 +449,37 @@ function stable(value: unknown): string {
 }
 const same = (a: unknown, b: unknown) => (a === undefined || b === undefined ? a === b : stable(a) === stable(b));
 
-/** The token file's entries as an author reads them: the canonical file read back, so equality is by meaning. */
-function readEntries(text: string | undefined): Map<string, Token | GroupProps> {
-  const set = text === undefined ? null : parseTokens(text).tokens;
-  return set ? entriesOf(set) : new Map();
+/**
+ * A token file's merge units: a token by its identity, a group's own properties by `<path>/$group`. Each unit keeps its
+ * value and the keys it is stored under; replicas that stored both `x` and `x.$root` with different values make the unit
+ * ambiguous, which reads as changed from any base so a change by the agent to it conflicts.
+ */
+interface Unit {
+  value: unknown;
+  keys: string[];
 }
+const AMBIGUOUS = { $ambiguous: 'stored under two keys with different values' };
+function unitsOf(entries: Iterable<readonly [string, Token | GroupProps]>): Map<string, Unit> {
+  const units = new Map<string, Unit>();
+  for (const [key, value] of entries) {
+    const id = key.endsWith(GROUP) ? key : identity(key);
+    const unit = units.get(id);
+    if (!unit) units.set(id, { value, keys: [key] });
+    else {
+      unit.keys.push(key);
+      if (!same(unit.value, value)) unit.value = AMBIGUOUS;
+    }
+  }
+  return units;
+}
+const fileUnits = (text: string | undefined) => {
+  const set = text === undefined ? null : parseTokens(text).tokens;
+  return set ? unitsOf(entriesOf(set)) : new Map<string, Unit>();
+};
 
-function describeKey(key: string): string {
-  if (key === GROUP) return "the token file's root properties";
-  return key.endsWith(GROUP) ? `the group ${key.slice(0, -GROUP.length)}'s properties` : `the token ${key}`;
+function describeUnit(id: string): string {
+  if (id === GROUP) return "the token file's root properties";
+  return id.endsWith(GROUP) ? `the group ${id.slice(0, -GROUP.length)}'s properties` : `the token ${id}`;
 }
 
 /**
@@ -494,38 +526,44 @@ export function publishSystem(live: Doc, base: Readonly<Record<string, string>>,
     }
   }
 
-  // The tokens.
-  const tokenWrites = new Map<string, Token | GroupProps | null>();
+  // The tokens, unit by unit: live from the stored attributes (no unit hidden by a file round trip), base and sent
+  // from their files, a token keyed by its identity so `x` and `x.$root` are one unit (Decision Log 12).
+  const tokenWrites = new Map<string, { key: string; value: Token | GroupProps } | null>();
+  const stored = storedEntries(roots(live).tokens);
+  const theirs = unitsOf(stored);
   let merged = state.tokens;
   if (sentTokens?.set) {
-    const mine = entriesOf(sentTokens.set);
-    const theirs = readEntries(serializeTokens(state.tokens));
-    const before = readEntries(base[TOKENS_PATH]);
-    const keys = new Set([...mine.keys(), ...theirs.keys(), ...before.keys()]);
+    const mine = unitsOf(entriesOf(sentTokens.set));
+    const before = fileUnits(base[TOKENS_PATH]);
+    const ids = new Set([...mine.keys(), ...theirs.keys(), ...before.keys()]);
     const tokenConflicts: string[] = [];
-    for (const key of keys) {
-      const sentValue = mine.get(key);
-      const liveValue = theirs.get(key);
+    for (const id of ids) {
+      const sentValue = mine.get(id)?.value;
+      const liveValue = theirs.get(id)?.value;
+      const beforeValue = before.get(id)?.value;
       if (same(sentValue, liveValue)) continue;
-      if (same(sentValue, before.get(key))) continue; // the agent left it as it read it, even under force
-      if (!same(liveValue, before.get(key)) && !force) {
-        tokenConflicts.push(key);
+      if (same(sentValue, beforeValue)) continue; // the agent left it as it read it, even under force
+      if (!same(liveValue, beforeValue) && !force) {
+        tokenConflicts.push(id);
         continue;
       }
-      tokenWrites.set(key, sentValue ?? null); // the agent's change; under force it wins a token both sides changed
+      // The agent's change; under force it wins a unit both sides changed.
+      tokenWrites.set(id, sentValue === undefined ? null : { key: mine.get(id)!.keys[0]!, value: sentValue as Token | GroupProps });
     }
-    for (const key of tokenConflicts.sort(comparePaths)) conflicts.push({ path: TOKENS_PATH, detail: `${describeKey(key)} changed since your read, and you changed it too` });
+    // Named as the agent wrote it (`color.accent.$root`), else as it read it.
+    const named = (id: string) => (id.endsWith(GROUP) ? id : (mine.get(id)?.keys[0] ?? before.get(id)?.keys[0] ?? id));
+    for (const id of tokenConflicts.sort(comparePaths)) conflicts.push({ path: TOKENS_PATH, detail: `${describeUnit(named(id))} changed since your read, and you changed it too` });
     if (!tokenConflicts.length && tokenWrites.size) {
-      const entries = entriesOf(state.tokens);
-      for (const [key, value] of tokenWrites) {
-        if (value) entries.set(key, value);
-        else entries.delete(key);
+      const entries = new Map(stored);
+      for (const [id, write] of tokenWrites) {
+        for (const key of theirs.get(id)?.keys ?? []) entries.delete(key);
+        if (write) entries.set(write.key, write.value);
       }
       merged = tokenSetOfEntries(entries);
-      // No winner makes these representable, so they conflict under force too; only a holdable file is serialized.
-      const shape = hierarchyProblems(entries);
-      for (const problem of shape) conflicts.push({ path: TOKENS_PATH, detail: `merged with the live tokens, ${problem}` });
-      if (!shape.length) {
+      // The read is lossless by construction; a merge it could not hold conflicts under force too (no winner fixes it).
+      const lost = lossOf(merged);
+      for (const path of lost) conflicts.push({ path: TOKENS_PATH, detail: `merged with the live tokens, ${path} cannot be written as one token file` });
+      if (!lost.length) {
         for (const problem of readTokenFile(serializeTokens(merged)).problems) conflicts.push({ path: TOKENS_PATH, detail: `merged with the live tokens, ${problem.message}` });
       }
       changed.push(TOKENS_PATH);
@@ -562,9 +600,9 @@ export function publishSystem(live: Doc, base: Readonly<Record<string, string>>,
   const r = roots(live);
   transact(live, () => {
     if (lawHunks) applyHunks(r.law, lawHunks);
-    for (const [key, value] of tokenWrites) {
-      if (value) r.tokens.setAttr(key, plain(value));
-      else r.tokens.deleteAttr(key);
+    for (const [id, write] of tokenWrites) {
+      for (const key of theirs.get(id)?.keys ?? []) if (key !== write?.key) r.tokens.deleteAttr(key);
+      if (write) r.tokens.setAttr(write.key, plain(write.value));
     }
     for (const [path, text] of canonWrites) {
       if (text === null) r.files.deleteAttr(path);
@@ -572,16 +610,6 @@ export function publishSystem(live: Doc, base: Readonly<Record<string, string>>,
     }
   });
   return { changed, conflicts };
-}
-
-function tokenSetOfEntries(entries: ReadonlyMap<string, Token | GroupProps>): TokenSet {
-  const tokens = new Map<string, Token>();
-  const groups = new Map<string, GroupProps>();
-  for (const [key, value] of entries) {
-    if (key.endsWith(GROUP)) groups.set(key.slice(0, -GROUP.length), value as GroupProps);
-    else tokens.set(key, value as Token);
-  }
-  return { tokens, groups };
 }
 
 // --- The kind adapter ------------------------------------------------------------------------------------------------
