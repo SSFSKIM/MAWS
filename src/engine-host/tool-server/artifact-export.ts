@@ -41,7 +41,8 @@ export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportB
       const to = input.to === undefined ? null : pathUnderCwd('artifact_export', ctx.cwd, input.to);
       const artifactId = await resolveArtifact('artifact_export', store, input.artifact, lineageOf(ctx, deps));
       const target = await store.readCommitted(() => {
-        const artifact = store.get(artifactId)!;
+        const artifact = store.get(artifactId);
+        if (!artifact) throw new ToolRefusal(TOOL_ERRORS.noArtifact('artifact_export', input.artifact));
         if (input.version === undefined) return { kind: artifact.kind, revision: store.revision(artifactId) };
         const version = store.versions.version(artifactId, input.version);
         if (!version) throw refuse('artifact_export', { reason: 'notFound', version: input.version }, `version ${input.version} does not exist; artifact_read lists the versions it has`);
