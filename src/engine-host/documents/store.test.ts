@@ -776,6 +776,21 @@ describe('ArtifactStore: restore (Decision Log 16)', () => {
   });
 });
 
+describe('ArtifactStore: the test writer on an html page (M7 fix wave 1)', () => {
+  it('writes a new page as a new revision, idempotent by op id, and takes no document op on a page nor a page op on a document', async () => {
+    const page = await store.create({ kind: 'html', title: 'Page', content: { bytes: html('one') } }, human);
+    const first = store.revision(page.id);
+    const written = await store.testWrite(page.id, 'p1', [{ op: 'page', text: '<p>two</p>' }], agent);
+    expect(written.revision).toBeGreaterThan(first);
+    expect(text(store.files.read(page.id, store.contentRef(page.id).ref))).toBe('<p>two</p>');
+    expect(text(store.files.read(page.id, store.contentRef(page.id, first).ref))).toContain('one');
+    expect(await store.testWrite(page.id, 'p1', [{ op: 'page', text: '<p>three</p>' }], agent)).toEqual(written);
+    await expect(store.testWrite(page.id, 'p2', [{ op: 'insertText', index: 0, text: 'x' }], agent)).rejects.toMatchObject({ code: 'invalid' });
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await expect(store.testWrite(doc.id, 'p3', [{ op: 'page', text: '<p/>' }], agent)).rejects.toMatchObject({ code: 'invalid' });
+  });
+});
+
 describe('ArtifactStore: idempotency (Decision Log 11)', () => {
   it('answers a repeated op id with the first result and writes nothing, and runs a concurrent repeat once', async () => {
     const doc = await store.create({ kind: 'document', title: 'Plan' }, human);

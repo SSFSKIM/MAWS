@@ -6,6 +6,8 @@
 // the host while a renderer types loses no acknowledged edit, every replica re-opening by itself. M7: the scheme and the
 // export service (the last case).
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -213,7 +215,9 @@ test('maws-artifact: serves an html page and its assets to the app, and the expo
   if (!created.ok) throw new Error(`artifacts.create failed: ${created.error.message}`);
   const { artifact } = created.value;
 
-  // The page, live and at its revision: the deliverable scheme's headers and policy, the bridge script in its head.
+  // A newer page (the test writer's page op), then each revision as it was: the deliverable scheme's headers and policy,
+  // the bridge script in its head, the older revision's bytes not the live ones.
+  const newer = await ok<{ revision: number }>(page, 'artifacts.testWrite', { artifactId: artifact.id, opId: 'page-2', ops: [{ op: 'page', text: PAGE.replace('M7_EXPORT', 'M7_NEWER') }] });
   const live = await served(app, `maws-artifact://${artifact.id}/live/index.html`);
   const atRevision = await served(app, `maws-artifact://${artifact.id}/${artifact.revision}/index.html`);
   for (const answer of [live, atRevision]) {
@@ -221,8 +225,11 @@ test('maws-artifact: serves an html page and its assets to the app, and the expo
     expect(answer.headers).toMatchObject({ 'content-type': 'text/html', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'access-control-allow-origin': '*' });
     expect(answer.headers['content-security-policy']).toMatch(/^sandbox allow-scripts; default-src 'none'/);
     expect(answer.text).toContain('data-maws-bridge');
-    expect(answer.text).toContain('M7_EXPORT');
   }
+  expect(live.text).toContain('M7_NEWER');
+  expect(atRevision.text).toContain('M7_EXPORT');
+  expect(atRevision.text).not.toBe(live.text);
+  expect((await served(app, `maws-artifact://${artifact.id}/${newer.revision}/index.html`)).text).toBe(live.text);
   expect((await served(app, `maws-artifact://${artifact.id}/${artifact.revision + 1_000}/index.html`)).status).toBe(404);
   expect((await served(app, `maws-artifact://${artifact.id}/live/%2e%2e/store.sqlite`)).status).toBe(404);
 
@@ -256,7 +263,7 @@ test('maws-artifact: serves an html page and its assets to the app, and the expo
 
   // The library's Export: a PDF on the page's own page size, a PNG of the asked size, a whole-page PNG by default.
   const pdf = await ok<{ path: string; revision: number }>(page, 'artifacts.export', { artifactId: artifact.id, format: 'pdf' });
-  expect(pdf).toEqual({ path: join(profile, 'artifacts', artifact.id, 'exports', `${artifact.revision}-pdf.pdf`), revision: artifact.revision });
+  expect(pdf).toEqual({ path: join(profile, 'artifacts', artifact.id, 'exports', `${newer.revision}-pdf.pdf`), revision: newer.revision });
   expect(readFileSync(pdf.path).subarray(0, 5).toString('latin1')).toBe('%PDF-');
   const sized = await ok<{ path: string }>(page, 'artifacts.export', { artifactId: artifact.id, format: 'png', width: 640, height: 480 });
   expect(pngSize(readFileSync(sized.path))).toEqual({ width: 640, height: 480 });
@@ -269,4 +276,85 @@ test('maws-artifact: serves an html page and its assets to the app, and the expo
   const { artifact: doc } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Notes' });
   const refused = await invoke(page, 'artifacts.export', { artifactId: doc.id, format: 'pdf' });
   expect(refused).toMatchObject({ ok: false, error: { code: 'invalid_input', issues: { reason: 'exportUnavailable', data: { kind: 'document', format: 'pdf' } } } });
+});
+
+// M7 fix wave 1 (Decision Log 44a, 44b): the scheme's reach. Only the app's own session and the capture partition serve
+// it, never the browser pane's; an artifact frame's XHR to the scheme is refused (its own policy's `connect-src`), its
+// navigation to another artifact is prevented (the frame policies) while the app may point it anywhere; and the PDF
+// printer refuses a page's remote requests and counts them.
+const postTo = (message: string) => `parent.postMessage({ m7: ${JSON.stringify(message)} }, '*')`;
+
+test('maws-artifact: reaches the app and the capture partition only, an artifact frame its own artifact only, and the PDF printer nothing remote', async () => {
+  profile = mkdtempSync(join(tmpdir(), 'maws-e2e-artifacts-'));
+  launch = await launchMaws({ userData: profile });
+  const { app, page } = launch;
+  await seamReady(page);
+  await hostReady(page);
+
+  // Which sessions serve the scheme.
+  const handled = await app.evaluate(({ session }) => ({
+    app: session.defaultSession.protocol.isProtocolHandled('maws-artifact'),
+    capture: session.fromPartition('maws-capture').protocol.isProtocolHandled('maws-artifact'),
+    browser: session.fromPartition('persist:maws-browser').protocol.isProtocolHandled('maws-artifact'),
+  }));
+  expect(handled).toEqual({ app: true, capture: true, browser: false });
+
+  // Y says it loaded; X says so, tries an XHR to its own page, then navigates itself to Y.
+  const create = async (html: string) => {
+    const result = (await page.evaluate(
+      (text) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke('artifacts.create', { kind: 'html', title: 'Frame', content: { bytes: new TextEncoder().encode(text), name: 'index.html' } }),
+      html,
+    )) as Result<{ artifact: { id: string } }>;
+    if (!result.ok) throw new Error(`artifacts.create failed: ${result.error.message}`);
+    return result.value.artifact.id;
+  };
+  const y = await create(`<!doctype html><script>${postTo('Y')}</script>`);
+  const yUrl = `maws-artifact://${y}/live/index.html`;
+  const x = await create(
+    `<!doctype html><script>${postTo('X')};
+    try { const xhr = new XMLHttpRequest(); xhr.open('GET', new URL('index.html', location.href).href); xhr.onload = () => ${postTo('xhr-loaded')}; xhr.onerror = () => ${postTo('xhr-refused')}; xhr.send(); } catch { ${postTo('xhr-refused')}; }
+    setTimeout(() => { location.href = ${JSON.stringify(yUrl)}; }, 300);</script>`,
+  );
+  await page.evaluate((src) => {
+    const w = window as unknown as { __m7: string[] };
+    w.__m7 = [];
+    window.addEventListener('message', (event) => {
+      const data = event.data as { m7?: string } | null;
+      if (data && typeof data.m7 === 'string') w.__m7.push(data.m7);
+    });
+    const frame = document.createElement('iframe');
+    frame.id = 'm7-frame';
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.src = src;
+    document.body.append(frame);
+  }, `maws-artifact://${x}/live/index.html`);
+  const heard = () => page.evaluate(() => (window as unknown as { __m7: string[] }).__m7);
+  await expect.poll(heard, { message: 'X loads and its XHR is refused' }).toEqual(expect.arrayContaining(['X', 'xhr-refused']));
+  await page.waitForTimeout(1_500); // X's navigation to Y had its time
+  expect(await heard()).not.toContain('Y');
+  expect(await heard()).not.toContain('xhr-loaded');
+  // The app points its frame at Y: allowed.
+  await page.evaluate((src) => void ((document.getElementById('m7-frame') as HTMLIFrameElement).src = src), yUrl);
+  await expect.poll(heard, { message: 'the app’s own navigation of the frame to Y' }).toContain('Y');
+
+  // The PDF printer: a page naming remote resources prints, and none of them is fetched.
+  const hits: string[] = [];
+  const server = createServer((request, response) => {
+    hits.push(request.url ?? '');
+    response.end('x');
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address() as AddressInfo;
+    const remote = `http://127.0.0.1:${port}`;
+    const printed = await app.evaluate(
+      (_electron, html) => (globalThis as unknown as { __maws_exports: { print(html: string): Promise<{ head: string; blocked: string[] }> } }).__maws_exports.print(html),
+      `<!doctype html><html><head><link rel="stylesheet" href="${remote}/style.css"></head><body><h1>printed</h1><img src="${remote}/a.png"><img src="data:image/png;base64,${PIXEL.toString('base64')}"></body></html>`,
+    );
+    expect(printed.head).toBe('%PDF-');
+    expect(printed.blocked).toEqual(expect.arrayContaining([`${remote}/style.css`, `${remote}/a.png`]));
+    expect(hits).toEqual([]);
+  } finally {
+    server.close();
+  }
 });

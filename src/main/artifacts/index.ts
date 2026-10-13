@@ -18,7 +18,7 @@ import { CAPTURE_PARTITION } from '../deliverables/capture';
 import type { HostSupervisor } from '../hosts/supervisor';
 import type { registerMainHandler } from '../ipc/router';
 import { startArtifactDefaults } from './defaults';
-import { ExporterRegistry, registerHtmlExporters, startExportService } from './export';
+import { ExporterRegistry, printHtmlToPdf, registerHtmlExporters, startExportService } from './export';
 import { openDocument } from './open';
 import { serveArtifacts, type ContentLookup } from './protocol';
 
@@ -61,8 +61,18 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
     dispatch: (input) => hosts.dispatch('engine-host', 'artifacts.setDefaults', input) as Promise<CommandResult<'artifacts.setDefaults'>>,
   });
   const stopResync = hosts.onStreaming('engine-host', () => void emit('artifacts.resync', {})); // P3-A M5
-  const seam = globalThis as { __maws_documents?: { openWindow(): number } };
-  if (env.MAWS_E2E === '1') seam.__maws_documents = { openWindow: () => openWindow().id };
+  const seam = globalThis as { __maws_documents?: { openWindow(): number }; __maws_exports?: { print(html: string): Promise<{ head: string; blocked: string[] }> } };
+  if (env.MAWS_E2E === '1') {
+    seam.__maws_documents = { openWindow: () => openWindow().id };
+    // M7 fix wave 1: the PDF printer alone, as an exporter's context calls it (the e2e proves its request filter)
+    seam.__maws_exports = {
+      print: async (html) => {
+        const blocked: string[] = [];
+        const pdf = await printHtmlToPdf(html, { signal: new AbortController().signal, blocked: (url) => blocked.push(url) });
+        return { head: Buffer.from(pdf.subarray(0, 5)).toString('latin1'), blocked };
+      },
+    };
+  }
   return {
     exporters,
     stop: () => {
@@ -71,6 +81,7 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
       exports.stop();
       stopHtml();
       delete seam.__maws_documents;
+      delete seam.__maws_exports;
     },
   };
 }

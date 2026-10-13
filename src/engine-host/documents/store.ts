@@ -105,7 +105,8 @@ export interface Asset {
 export type TestOp =
   | { op: 'setAttr'; key: string; value: unknown; root?: string }
   | { op: 'insertText'; index: number; text: string; root?: string }
-  | { op: 'deleteText'; index: number; length: number; root?: string };
+  | { op: 'deleteText'; index: number; length: number; root?: string }
+  | { op: 'page'; text: string }; // M7 fix wave 1: an html page's new content, its only op
 
 // A store write's recording seam (Decision Log 26c): run inside the savepoint of the write that completes the operation,
 // with what it produced, so whatever it writes (an op row, `OpScope.record`) commits with the write or not at all. Every
@@ -890,7 +891,22 @@ export class ArtifactStore {
   // `actor` as one write, idempotent by `opId`.
   async testWrite(artifactId: string, opId: string, ops: TestOp[], actor: Actor): Promise<{ revision: number }> {
     const row = this.requireLive(artifactId);
+    const pages = ops.filter((op): op is Extract<TestOp, { op: 'page' }> => op.op === 'page');
+    if (row.kind === 'html') {
+      if (pages.length !== ops.length) throw new ArtifactStoreError('invalid', 'an html page takes only page ops');
+      return this.withOp(
+        opId,
+        'testWrite',
+        artifactId,
+        async (scope) => {
+          const { revision } = await this.writeContent(artifactId, { bytes: new TextEncoder().encode(pages.at(-1)!.text), name: this.contentRef(artifactId).ref.name }, actor, {}, (at) => scope.record({ revision: at.revision }));
+          return { revision };
+        },
+        { actor },
+      );
+    }
     if (!isDocKind(row.kind)) throw new ArtifactStoreError('invalid', `a ${row.kind} artifact is not a document`);
+    if (pages.length > 0) throw new ArtifactStoreError('invalid', `a ${row.kind} artifact takes no page op`);
     return this.withOp(
       opId,
       'testWrite',
@@ -1141,10 +1157,11 @@ function uniqueName(name: string, taken: Set<string>): string {
 
 function applyTestOps(doc: Doc, ops: TestOp[]): void {
   for (const op of ops) {
+    if (op.op === 'page') continue; // a page's, refused before
     const node = doc.get(op.root ?? 'root');
     if (op.op === 'setAttr') node.setAttr(op.key, op.value);
     else if (op.op === 'insertText') node.insert(op.index, op.text);
-    else node.delete(op.index, op.length);
+    else if (op.op === 'deleteText') node.delete(op.index, op.length);
   }
 }
 

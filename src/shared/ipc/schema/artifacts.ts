@@ -69,6 +69,7 @@ export const ArtifactTestOpSchema = z.discriminatedUnion('op', [
   z.strictObject({ op: z.literal('setAttr'), key: z.string().min(1), value: TestValueSchema, root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('insertText'), index: Seq, text: z.string(), root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('deleteText'), index: Seq, length: z.number().int().positive(), root: z.string().min(1).optional() }),
+  z.strictObject({ op: z.literal('page'), text: z.string().max(ARTIFACT_MAX_BYTES) }), // M7 fix wave 1: an html page's new content
 ]);
 
 export const ARTIFACT_STORE_STATUSES = ['ok', 'readOnly', 'recovered', 'unavailable'] as const;
