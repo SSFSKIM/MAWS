@@ -30,6 +30,8 @@ export interface DesignSystemPageProps {
   parser?: HtmlParser;
   /** A system without a law offers to ask the agent to adopt it (the app's route to the shown session); none, no offer. */
   askAdopt?: AskAdopt;
+  /** The page's title: the artifact's (Decision Log 29); the system's name when absent. The law keeps its own title. */
+  title?: string;
 }
 
 export function DesignSystemPage(props: DesignSystemPageProps) {
@@ -57,7 +59,7 @@ export function DesignSystemPage(props: DesignSystemPageProps) {
   return (
     <div className="dsp-page" data-ds-page={artifactId}>
       <header className="dsp-intro">
-        <h1 className="dsp-title">{system.meta.name}</h1>
+        <h1 className="dsp-title">{props.title ?? system.meta.name}</h1>
         {system.meta.persona ? <p className="dsp-muted">persona: {system.meta.persona}</p> : null}
         {resolved.problems.length ? (
           <p role="status" className="dsp-problems">

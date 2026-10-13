@@ -75,6 +75,15 @@ describe('the Design System body (X32, Mark-up)', () => {
     expect(editorHostOf(SCOPE)!.title).toBe('Harbor Press');
   });
 
+  // Decision Log 29: the page and the header show the artifact's title; the law's title stays in the rendered law
+  it('shows the artifact’s title in the header, the Mark-up surface and the page; the law keeps its own', () => {
+    const { view } = mount({ title: 'Copy of Harbor' });
+    expect(editorHostOf(SCOPE)!.title).toBe('Copy of Harbor');
+    expect(markupSurfaceOf(SCOPE)!.label()).toBe('Copy of Harbor');
+    expect(view.container.querySelector('.dsp-title')!.textContent).toBe('Copy of Harbor');
+    expect(view.container.querySelector('[data-ds-section="law"]')!.textContent).toContain('Harbor');
+  });
+
   it('Check against law brings the page’s check into view, from the registration even after the body has gone', () => {
     const { view } = mount();
     const check = view.container.querySelector('[data-ds-section="check"]');

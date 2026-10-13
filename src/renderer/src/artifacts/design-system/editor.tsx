@@ -15,6 +15,7 @@ import { shownSession } from '../../panel/host';
 import { EditorHostScopeContext } from '../../panel/editor-host';
 import { writeSettings } from '../../settings-tab/parts';
 import { queueComposerAttachment } from '../../stores/composer';
+import { useArtifactTitle } from '../../library/store';
 import { useLayout } from '../../stores/layout';
 import { toast } from '../../stores/notices';
 import { useSettings } from '../../stores/settings';
@@ -113,7 +114,9 @@ function DesignSystemPanel({ artifactId, state, scope, visible, onShown }: Artif
 
 function OpenBody(props: { artifactId: string; handle: DocumentHandle; state: OpenedSystem; visible: boolean; onShown(): void }) {
   const { artifactId, handle, state, visible, onShown } = props;
-  const name = usePageState(handle.doc).system.meta?.name ?? C.untitled;
+  const title = useArtifactTitle(artifactId); // Decision Log 29: the artifact's title, the library's
+  const systemName = usePageState(handle.doc).system.meta?.name;
+  const name = title ?? systemName ?? C.untitled;
   const isDefault = useSettings((s) => s.state?.settings.artifacts.defaultDesignSystem === artifactId);
   const deleting = useSyncExternalStore(state.subscribe, state.deleting);
   const session = useLayout((s) => shownSession(s.main));
@@ -137,6 +140,7 @@ function OpenBody(props: { artifactId: string; handle: DocumentHandle; state: Op
         onSetDefault={() => void writeSettings({ artifacts: { defaultDesignSystem: artifactId } })}
         onDelete={() => state.requestDelete()}
         askAdopt={askAdopt}
+        title={title ?? undefined}
       />
       {deleting && visible && <DeleteSystemSheet artifactId={artifactId} name={name} onClose={() => state.endDelete()} />}
     </>

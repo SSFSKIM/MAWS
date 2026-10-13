@@ -183,6 +183,14 @@ describe('the header’s app actions', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  // Decision Log 29: the editor gives the body the library's title, so a copy reads as itself in the header
+  it('titles the header with the library’s title, not the law’s', async () => {
+    installFakeMain((name, input) => (name === 'library.get' ? ok({ row: ROWS[0]! }) : listed(input)));
+    await opened(systemDoc('# Classroom\n'));
+    await act(async () => {});
+    expect(editorHostOf(SCOPE)!.title).toBe('Harbor');
+  });
+
   // M7's e2e: a copy of a system keeps its law's title, so the sheet names the library's row the owner chose to delete
   it('the delete sheet names the system by its library title, not its law’s title', async () => {
     installFakeMain((_, input) => listed(input));

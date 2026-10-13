@@ -59,10 +59,13 @@ export interface DesignSystemBodyProps {
   visible?: boolean;
   /** Called once the system's content is on screen (L's `onShown`). */
   onShown?: () => void;
+  /** The artifact's title (the library's), which the header, Mark-up and the page show (Decision Log 29); the system's
+   * name when absent. */
+  title?: string;
 }
 
 export function DesignSystemBody(props: DesignSystemBodyProps) {
-  const { artifactId, handle, host, onSetDefault, isDefault = false, onDelete, askAdopt, visible = true, onShown } = props;
+  const { artifactId, handle, host, onSetDefault, isDefault = false, onDelete, askAdopt, visible = true, onShown, title } = props;
   const scope = useEditorHostScope();
   const key = keyOf(scope, artifactId);
   const reveal = useCheckRequests((s) => s.serials[key] ?? 0);
@@ -71,9 +74,10 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
     () => savedStateOf(handle.state()),
   );
   const name = usePageState(handle.doc).system.meta?.name ?? null;
+  const shownTitle = title ?? name ?? DESIGN_SYSTEM_COPY.untitled;
 
   useEditorHost(scope, {
-    title: name ?? DESIGN_SYSTEM_COPY.untitled,
+    title: shownTitle,
     saved,
     actions: [
       { id: 'design-system.check', label: DESIGN_SYSTEM_COPY.check, onSelect: () => requestCheck(key) },
@@ -84,7 +88,7 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
   });
 
   const surface = useRef<HTMLDivElement>(null);
-  useRegionMarkupSurface(surface, name ?? DESIGN_SYSTEM_COPY.untitled, visible);
+  useRegionMarkupSurface(surface, shownTitle, visible);
 
   const shown = name !== null && visible;
   useEffect(() => {
@@ -93,7 +97,7 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
 
   return (
     <div ref={surface} className="h-full min-h-0 overflow-auto bg-bg">
-      <DesignSystemPage artifactId={artifactId} handle={handle} host={host} readOnly={saved === 'readonly'} revealCheck={reveal} askAdopt={askAdopt} />
+      <DesignSystemPage artifactId={artifactId} handle={handle} host={host} readOnly={saved === 'readonly'} revealCheck={reveal} askAdopt={askAdopt} title={title} />
     </div>
   );
 }
