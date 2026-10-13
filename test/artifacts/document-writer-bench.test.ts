@@ -1,6 +1,7 @@
 // The patch writer's headless bench (D6 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md: p95 under 40 ms in
 // Node at 200 pages for a five-op batch, the pre-gate for M9's 50 ms host-loop bound; parent Decision Log 37). Gated:
-//   MAWS_DOC_BENCH=1 pnpm exec vitest run test/artifacts/document-writer-bench.test.ts
+//   MAWS_DOC_BENCH=1 pnpm exec vitest run test/artifacts/document-writer-bench.test.ts --silent=false
+// (vitest prints a passing test's console only with --silent=false; the numbers are wall time, so run at low load)
 // On S7b's 200-page seed (e2e/support/document-seed.ts): an agent replica applies batches mixing a quoted word edit,
 // a block rewrite, an inserted paragraph after a heading, a table cell and, alternately, an unscoped quote or the
 // deletion of an earlier insert (S7b's agents' mix); the host side applies each batch's update as A's service would
