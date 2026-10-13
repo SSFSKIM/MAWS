@@ -46,6 +46,7 @@ import { SIDE_DEADLINE_SHAPES } from './ipc';
 import * as hostSchema from '@shared/ipc/schema/host';
 import { HOST_DEADLINE_SHAPES } from './ipc';
 import { Supervision } from './supervision';
+import { openDocuments, type Documents } from './documents'; // P3-A (M6)
 // E11 end
 
 const REPO_ROOT = resolve(__dirname, '../..');
@@ -1070,11 +1071,18 @@ describe('maws.download.recorded (E13: an agent\'s download through cua)', () =>
 });
 
 describe('deliverables.changed and the capture bridge (E2 M1)', () => {
+  // P3-A (M6): the artifact tools write through the host's artifact store, handed to every launch
+  let documents: Documents;
+  beforeEach(() => {
+    documents = openDocuments(userData, () => {})!;
+  });
+  afterEach(() => documents.close());
+
   it("relays the launcher's store writes as deliverables.changed and a screenshot's request as maws.artifact.capture, answered by maws.artifact.captured", async () => {
     const page = join(userData, 'dashboard.html');
     writeFileSync(page, '<h1>HELLO_E2</h1>');
     const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
-    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }), artifacts: () => documents.store });
     const id = 'app-ipc' as AppSessionId;
     expect(await host.call('maws.artifact.captured', { appSessionId: 'app-none', requestId: 'r1', result: { ok: false, error: 'x' } })).toEqual({ outcome: 'not_pending' });
     await host.call('session.launch', { spec: spec() });
@@ -1104,7 +1112,7 @@ describe('deliverables.changed and the capture bridge (E2 M1)', () => {
     const transports = [scriptedTransport({ onWrite: autoResponder(handshakeResponder()) }), scriptedTransport({ onWrite: autoResponder(handshakeResponder()) })];
     const [parentT, threadT] = transports as [ScriptedTransport, ScriptedTransport];
     const queue = [...transports];
-    const host = engineHost({ spawn: () => queue.shift()!, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const host = engineHost({ spawn: () => queue.shift()!, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }), artifacts: () => documents.store });
     const parent = 'app-parent' as AppSessionId;
     const thread = 'app-thread' as AppSessionId;
     const launch = commands['session.launch'].input;
@@ -1123,12 +1131,17 @@ describe('deliverables.changed and the capture bridge (E2 M1)', () => {
       return JSON.parse(answerOf(transport, requestId)!) as Record<string, unknown>;
     };
     call(parentT, 'mcp-create', 'artifact_create', { id: 'dash', html_path: page, title: 'Dashboard' });
-    const { deliverableId } = await answered(parentT, 'mcp-create');
-    call(threadT, 'mcp-thread-1', 'artifact_update', { id: 'dash', html_path: page });
-    expect(await answered(threadT, 'mcp-thread-1')).toMatchObject({ deliverableId, version: 2, ownerAppSessionId: parent });
-    // racing writes from both sessions take distinct versions, in the order they entered the owner's chain
-    call(parentT, 'mcp-parent-2', 'artifact_update', { id: 'dash', html_path: page });
-    call(threadT, 'mcp-thread-2', 'artifact_update', { id: 'dash', html_path: page });
+    const { deliverableId, revision } = await answered(parentT, 'mcp-create');
+    // P3-A (M6): the thread reads the parent's page, then publishes over it (the retired update's call)
+    call(threadT, 'mcp-thread-read', 'artifact_read', { artifact: 'dash' });
+    const read = await answered(threadT, 'mcp-thread-read');
+    call(threadT, 'mcp-thread-1', 'artifact_publish', { artifact: 'dash', baseRevision: read.revision, files: { 'index.html': '<h1>thread 1</h1>' } });
+    const first = await answered(threadT, 'mcp-thread-1');
+    expect(first).toMatchObject({ deliverableId, version: 2, ownerAppSessionId: parent });
+    // racing writes from both sessions take distinct versions, in the order they entered the owner's chain (each forced:
+    // the other's write is a change since its read)
+    call(parentT, 'mcp-parent-2', 'artifact_publish', { artifact: 'dash', baseRevision: revision, files: { 'index.html': '<h1>parent 2</h1>' }, force: true });
+    call(threadT, 'mcp-thread-2', 'artifact_publish', { artifact: 'dash', baseRevision: first.revision, files: { 'index.html': '<h1>thread 2</h1>' }, force: true });
     const raced = [await answered(parentT, 'mcp-parent-2'), await answered(threadT, 'mcp-thread-2')].map((answer) => answer.version);
     expect(raced.sort()).toEqual([3, 4]);
     const record = JSON.parse(readFileSync(join(userData, 'deliverables', parent, `${String(deliverableId)}.json`), 'utf8')) as { versions: unknown[] };

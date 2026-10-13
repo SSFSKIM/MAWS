@@ -508,9 +508,13 @@ export const ARTIFACT = {
   open: 'Open',
 } as const;
 
-// The host's refusal is written for the model: the tool's own prefix and, last, which tool to call instead. The human
-// reads the reason alone, as the artifact cells show theirs.
-const refusalForHuman = (error: string) => error.replace(/^artifact_(create|update): /, '').replace(/; use artifact_(create|update)$/, '');
+// The host's refusal is written for the model: the tool's own prefix and, last, which tool to call instead (P3-A: or the
+// refusal's machine-readable JSON). The human reads the reason alone, as the artifact cells show theirs.
+const refusalForHuman = (error: string) =>
+  error
+    .replace(/^artifact_(create|update|publish): /, '')
+    .replace(/ \{"reason":.*\}$/, '')
+    .replace(/; use artifact_(create|update|publish)$/, '');
 
 // The row's one line: its refusal, else Registering until the result is in (never answered when its turn closed first,
 // E11), else the version it registered (without a version when the result named none).

@@ -123,6 +123,14 @@ export class VersionStore {
     return id;
   }
 
+  // A byte kind's checkpoint at `seq` (a turn's end): the `auto` version written there takes `meta` in place, as a Y
+  // kind's does in `writeState`; null when the version at `seq` is not an `auto` (an `import` or a named one already
+  // marks it) or there is none.
+  checkpoint(artifactId: string, seq: number, meta: VersionMeta): number | null {
+    const latest = this.latest(artifactId);
+    return latest && latest.seq === seq && latest.kind === 'auto' ? this.upgrade(latest.id, meta) : null;
+  }
+
   // A byte kind's version of one write.
   writeContent(artifactId: string, seq: number, content: ContentRef, meta: VersionMeta): number {
     return this.insert(artifactId, seq, meta, { enc: null, bytes: null, content: JSON.stringify(content) });

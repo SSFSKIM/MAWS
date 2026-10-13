@@ -69,6 +69,7 @@ const register: HostRegister = (on, emit, client) => {
   documents = openDocuments(userData);
   if (documents) registerDocumentKind(documents.store); // P3-B: the document kind's hooks on every document update
   const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env });
+  const store = documents?.store ?? null; // M6: the artifact tools' store (a session's tools answer `unavailable` without one)
   const library = registerLibrary(on, { documents }); // P3-L: main's library reads and the linked-directory mirror
   // C3 start
   ipc = registerEngineIpc(on, emit, {
@@ -81,6 +82,7 @@ const register: HostRegister = (on, emit, client) => {
     replayRowMs: replayRowDelayMs(process.env), // E10: the e2e pacing seam
     diskEvents: (id) => fs.eventsSnapshot(id, null) /* C4 */, heldElsewhere: (id, since) => fs.heldElsewhere(id, since) /* W7 */,
     onConnect: client.onConnect, hasClient: client.hasClient, // E10: the connect burst; a refused batch told from a client gone
+    artifacts: () => store, // P3-A (M6)
   });
   ({ table } = ipc);
   table.startSampling();

@@ -7,13 +7,23 @@
 // first `tools/list` (Decision Log 3), each with its own annotations (Decision Log 4).
 // E4c appended six browser tools after the artifact tools; they left the server on 2026-10-08 (P1 A-54: cua_repl drives
 // the in-app browser), and `./browser` keeps their names and schemas only to read journals written before.
+// P3-A (M6; X25, the P3 composite spec §4.3) gives the artifact namespace its shape over the engine host's artifact store:
+// `artifact_create` gains kinds, six tools are appended, and `artifact_update` is retired into `artifact_publish`
+// (`./artifact-update` keeps its schemas for the journals written before). P3-B, P3-C, P3-H and P3-D append after A:
+// a name to `MAWS_TOOL_NAMES`, its schemas, its `MAWS_TOOLS` entry and its refusals, each in a block of its own.
 import * as z from 'zod';
+import { ArtifactKindSchema } from '../artifacts/entity'; // P3-A
 import { AppSessionIdSchema } from '../graph/ids'; // P2-E1
+import { ARTIFACT_ID } from './artifact-id';
 import { CAPTURE_ANSWER_MS, PANE_ANSWER_MS, PANE_NAMES, PaneSchema } from './panes';
+
+export { ARTIFACT_ID } from './artifact-id';
 
 export const MAWS_SERVER_NAME = 'maws';
 export const MAWS_TOOL_NAMES = [
-  'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_update', 'artifact_list', 'artifact_screenshot',
+  'send_file', 'ask', 'show_pane', 'artifact_create', 'artifact_list', 'artifact_screenshot',
+  // P3-A (M6)
+  'artifact_describe_type', 'artifact_read', 'artifact_publish', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export',
 ] as const;
 export type MawsToolName = (typeof MAWS_TOOL_NAMES)[number];
 export const isMawsToolName = (name: unknown): name is MawsToolName => typeof name === 'string' && (MAWS_TOOL_NAMES as readonly string[]).includes(name);
@@ -29,9 +39,8 @@ export const MAWS_TOOL_ANNOTATIONS = { readOnlyHint: true, openWorldHint: false 
 // output is not planning.
 const ARTIFACT_WRITER_ANNOTATIONS = { readOnlyHint: false, openWorldHint: false } as const;
 
-// E2: an artifact's id is the short name the agent gives it, unique within a session; the size cap of its HTML; the
-// screenshot's default viewport and the cap on its PNG (applied in main).
-export const ARTIFACT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+// E2: the size cap of an artifact's HTML (`ARTIFACT_ID`, its short name, is `./artifact-id`'s); the screenshot's default
+// viewport and the cap on its PNG (applied in main).
 export const ARTIFACT_MAX_BYTES = 16 * 1024 * 1024;
 export const ARTIFACT_SCREENSHOT_DEFAULT = { width: 1280, height: 800 } as const;
 export const ARTIFACT_SCREENSHOT_MAX_BYTES = 3.5 * 1024 * 1024; // A-34: its base64 stays under the API's 5 MB per image
@@ -112,17 +121,51 @@ export const ShowPaneInputSchema = z
   });
 export type ShowPaneInput = z.infer<typeof ShowPaneInputSchema>;
 
-// E2: `html_path` is resolved against the working directory; `title` on an update renames the artifact with its new
-// version (Decision Log 5); the screenshot's size defaults to ARTIFACT_SCREENSHOT_DEFAULT where it is read.
+// E2: a path is resolved against the working directory; the screenshot's size defaults to ARTIFACT_SCREENSHOT_DEFAULT
+// where it is read. P3-A (Decision Log 3): every tool that names an artifact takes its id (the store's UUID) or a handle
+// the calling session or one above it created; both match ARTIFACT_ID.
 const ArtifactIdSchema = z.string().regex(ARTIFACT_ID);
-const HtmlPathSchema = z.string().min(1).max(4096);
+const PathSchema = z.string().min(1).max(4096);
 const ArtifactTitleSchema = z.string().min(1).max(200);
+// P3-A: a file of a file kind (the generic file model, Decision Log 10), by its relative path
+const FilePathSchema = z.string().min(1).max(512);
+const FileTextSchema = z.string().max(ARTIFACT_MAX_BYTES); // characters; the store caps the bytes
 
-export const ArtifactCreateInputSchema = z.strictObject({ id: ArtifactIdSchema, html_path: HtmlPathSchema, title: ArtifactTitleSchema });
+// P3-A (M6): `kind` defaults to `html`; an `html` page comes from `path` (an `.html` file) or `content` (its text), a
+// `file` artifact from `path` (in place), a Y kind from nothing or `files`. E2's `id` and `html_path` are accepted as
+// `handle` and `path`, so the call skills already make keeps working.
+export const ArtifactCreateInputSchema = z
+  .strictObject({
+    kind: ArtifactKindSchema.optional(),
+    title: ArtifactTitleSchema,
+    handle: ArtifactIdSchema.optional(),
+    path: PathSchema.optional(),
+    files: z.record(FilePathSchema, FileTextSchema).optional(),
+    content: FileTextSchema.optional(),
+    id: ArtifactIdSchema.optional(), // E2's name for `handle`
+    html_path: PathSchema.optional(), // E2's name for `path`
+  })
+  .superRefine((input, ctx) => {
+    const issue = (path: string, message: string) => ctx.addIssue({ code: 'custom', path: [path], message });
+    if (input.id !== undefined && input.handle !== undefined) issue('id', 'give handle or id (its older name), not both');
+    if (input.html_path !== undefined && input.path !== undefined) issue('html_path', 'give path or html_path (its older name), not both');
+    const kind = input.kind ?? 'html';
+    const path = input.path ?? input.html_path;
+    if (kind === 'html' && (path === undefined) === (input.content === undefined)) issue('path', 'an html artifact takes path or content, one of them');
+    if (kind === 'file' && path === undefined) issue('path', 'a file artifact takes the path of the file');
+    if (kind !== 'html' && input.content !== undefined) issue('content', `a ${kind} artifact takes no content`);
+    if (kind !== 'html' && kind !== 'file' && path !== undefined) issue('path', `a ${kind} artifact takes files, not a path`);
+    if ((kind === 'html' || kind === 'file' || kind === 'document') && input.files !== undefined) issue('files', `a ${kind} artifact takes no files`);
+  });
 export type ArtifactCreateInput = z.infer<typeof ArtifactCreateInputSchema>;
-export const ArtifactUpdateInputSchema = z.strictObject({ id: ArtifactIdSchema, html_path: HtmlPathSchema, title: ArtifactTitleSchema.optional() });
-export type ArtifactUpdateInput = z.infer<typeof ArtifactUpdateInputSchema>;
-export const ArtifactListInputSchema = z.strictObject({});
+// `scope` defaults to `session`: the artifacts linked to this session and the sessions above it (X9's ancestors).
+export const ArtifactListInputSchema = z.strictObject({
+  kind: ArtifactKindSchema.optional(),
+  spaceId: z.uuid().optional(),
+  scope: z.enum(['session', 'all']).optional(),
+  query: z.string().min(1).max(200).optional(),
+});
+export type ArtifactListInput = z.infer<typeof ArtifactListInputSchema>;
 export const ArtifactScreenshotInputSchema = z.strictObject({
   id: ArtifactIdSchema,
   version: z.number().int().min(1).optional(), // the latest by default
@@ -130,6 +173,35 @@ export const ArtifactScreenshotInputSchema = z.strictObject({
   height: z.number().int().min(240).max(2560).optional(),
 });
 export type ArtifactScreenshotInput = z.infer<typeof ArtifactScreenshotInputSchema>;
+// P3-A (M6) start
+export const ArtifactDescribeTypeInputSchema = z.strictObject({ kind: ArtifactKindSchema });
+// `revision` reads a byte kind's content as of an earlier write; `version` a retained version, read-only; `paths` names
+// the files of a file kind to return (all by default).
+export const ArtifactReadInputSchema = z.strictObject({
+  artifact: ArtifactIdSchema,
+  revision: z.number().int().min(1).optional(),
+  version: z.number().int().min(1).optional(),
+  paths: z.array(FilePathSchema).min(1).max(200).optional(),
+});
+export type ArtifactReadInput = z.infer<typeof ArtifactReadInputSchema>;
+// `files` maps a path to its whole new text, `null` removing it (Decision Log 10); an `html` page is its one file
+// (`index.html`, or the name it was created under).
+export const ArtifactPublishInputSchema = z.strictObject({
+  artifact: ArtifactIdSchema,
+  baseRevision: z.number().int().min(0),
+  files: z.record(FilePathSchema, FileTextSchema.nullable()).refine((files) => Object.keys(files).length > 0, { message: 'name at least one file' }),
+  force: z.boolean().optional(), // default false
+  message: z.string().max(2000).optional(),
+});
+export type ArtifactPublishInput = z.infer<typeof ArtifactPublishInputSchema>;
+export const ArtifactUploadAssetInputSchema = z.strictObject({ artifact: ArtifactIdSchema, path: PathSchema, name: z.string().min(1).max(200).optional() });
+export type ArtifactUploadAssetInput = z.infer<typeof ArtifactUploadAssetInputSchema>;
+export const ArtifactListAssetsInputSchema = z.strictObject({ artifact: ArtifactIdSchema });
+export const ARTIFACT_EXPORT_FORMATS = ['pdf', 'png', 'docx', 'pptx', 'md', 'html'] as const;
+export type ArtifactExportFormat = (typeof ARTIFACT_EXPORT_FORMATS)[number];
+export const ArtifactExportInputSchema = z.strictObject({ artifact: ArtifactIdSchema, format: z.enum(ARTIFACT_EXPORT_FORMATS), version: z.number().int().min(1).optional(), to: PathSchema.optional() });
+export type ArtifactExportInput = z.infer<typeof ArtifactExportInputSchema>;
+// P3-A (M6) end
 
 // ---------------------------------------------------------------------------------------------------------------------
 // Results (the text block of a successful call is this JSON, pretty-printed; `isError` absent)
@@ -165,24 +237,39 @@ export type ShowPaneOpened = z.infer<typeof ShowPaneOpenedSchema>;
 export const ShowPaneResultSchema = z.strictObject({ status: z.literal('shown'), pane: PaneSchema, opened: ShowPaneOpenedSchema });
 export type ShowPaneResult = z.infer<typeof ShowPaneResultSchema>;
 
-// E2: `id` is the agent's short name, `deliverableId` the record's uuid; `externalReferences` counts the http(s) URLs
-// the page names (advisory: the frame loads none of them). The screenshot's text block follows its image block and
-// carries the title the transcript's cell names it by (Decision Log 23); `bytes` is the PNG's size.
+// P2-E1 (2026-10-09, a dated exception inside E2's result schemas; D10): `ownerAppSessionId` names the session whose
+// X12 record the result is about when that is a side thread's ancestor, not the calling session; absent for its own.
+const OwnerAppSessionIdSchema = AppSessionIdSchema.optional();
+const IsoTimeSchema = z.string();
+
+// E2's artifact row and `maws.delivery.artifact` read these fields of an answer that registered an X12 version (E2's
+// create and update; P3-A's create and publish of an `html` artifact, whose X12 mirror it reports, Decision Log 4): `id`
+// the name the agent gave it (its handle, else its id), `deliverableId` the record's uuid (the artifact's id),
+// `version` the record's 1-based version. Loose on purpose: every answer shape that carries them reads alike.
+export const ArtifactDeliverySchema = z.object({
+  id: z.string(), deliverableId: z.uuid(), version: z.number().int().min(1), title: z.string(),
+  ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1
+});
+export type ArtifactDelivery = z.infer<typeof ArtifactDeliverySchema>;
+
+// P3-A (M6): the kind's guide, attached once per session to the first create of that kind (§4.3).
+const KindGuideSchema = z.strictObject({ guide: z.string(), format: z.string() });
+// An `html` create also answers E2's fields for its X12 mirror (`id`, `deliverableId`, `version` 1,
+// `externalReferences`: the http(s) URLs the page names, advisory: the frame loads none of them).
 export const ArtifactCreateResultSchema = z.strictObject({
-  status: z.literal('created'), id: z.string(), deliverableId: z.uuid(), version: z.literal(1), title: z.string(), externalReferences: z.number().int().min(0),
+  status: z.literal('created'), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0),
+  handle: z.string().optional(),
+  id: z.string().optional(), deliverableId: z.uuid().optional(), version: z.literal(1).optional(), externalReferences: z.number().int().min(0).optional(),
+  guide: KindGuideSchema.optional(),
+  designSystem: z.string().optional(), // the governing design system's DESIGN.md (Decision Log 22d)
 });
 export type ArtifactCreateResult = z.infer<typeof ArtifactCreateResultSchema>;
-// P2-E1 (2026-10-09, a dated exception inside E2's result schemas; D10): `ownerAppSessionId` names the session whose
-// record the result is about when that is a side thread's ancestor, not the calling session; absent for its own.
-const OwnerAppSessionIdSchema = AppSessionIdSchema.optional();
-export const ArtifactUpdateResultSchema = z.strictObject({
-  status: z.literal('updated'), id: z.string(), deliverableId: z.uuid(), version: z.number().int().min(2), title: z.string(), externalReferences: z.number().int().min(0),
-  ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1
-});
-export type ArtifactUpdateResult = z.infer<typeof ArtifactUpdateResultSchema>;
+// Who wrote an artifact last: the user, the calling session, or another session (named).
+export const ArtifactEditorSchema = z.strictObject({ by: z.enum(['user', 'this session', 'another session']), appSessionId: AppSessionIdSchema.optional(), at: IsoTimeSchema });
+export type ArtifactEditor = z.infer<typeof ArtifactEditorSchema>;
 export const ListedArtifactSchema = z.strictObject({
-  id: z.string(), deliverableId: z.uuid(), title: z.string(), versions: z.number().int().min(1), createdAt: z.string(), updatedAt: z.string(),
-  ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1
+  id: z.uuid(), handle: z.string().optional(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0), updatedAt: IsoTimeSchema,
+  lastEditor: ArtifactEditorSchema.nullable(),
 });
 export type ListedArtifact = z.infer<typeof ListedArtifactSchema>;
 export const ArtifactListResultSchema = z.strictObject({ status: z.literal('listed'), artifacts: z.array(ListedArtifactSchema) });
@@ -193,6 +280,47 @@ export const ArtifactScreenshotResultSchema = z.strictObject({
   ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1
 });
 export type ArtifactScreenshotResult = z.infer<typeof ArtifactScreenshotResultSchema>;
+// P3-A (M6) start
+export const ArtifactDescribeTypeResultSchema = z.strictObject({ status: z.literal('described'), kind: ArtifactKindSchema, guide: z.string(), format: z.string() });
+export type ArtifactDescribeTypeResult = z.infer<typeof ArtifactDescribeTypeResultSchema>;
+const VersionSummarySchema = z.strictObject({ id: z.number().int().min(1), kind: z.string(), revision: z.number().int().min(0), at: IsoTimeSchema, by: ArtifactEditorSchema.shape.by, label: z.string().optional() });
+export type VersionSummary = z.infer<typeof VersionSummarySchema>;
+// A file kind's and an `html` artifact's `files`; a Y kind's other root types as `json` (the generic reader, until the
+// kind registers its own); a `file` artifact's `file`. `versions`: the latest ones, newest first (ids `version` takes).
+export const ArtifactReadResultSchema = z.strictObject({
+  status: z.literal('read'), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0),
+  handle: z.string().optional(),
+  version: VersionSummarySchema.optional(), // when a version was read
+  files: z.record(z.string(), z.string()).optional(),
+  missing: z.array(z.string()).optional(), // named paths the artifact has no file at
+  json: z.record(z.string(), z.unknown()).optional(),
+  file: z.strictObject({ name: z.string(), path: z.string(), size: z.number().int().min(0), sha256: z.string(), text: z.string().optional(), exists: z.boolean() }).optional(),
+  versions: z.array(VersionSummarySchema),
+});
+export type ArtifactReadResult = z.infer<typeof ArtifactReadResultSchema>;
+// `changed` and `removed` are the paths the publish wrote; `kept`, the artifact's other files, as they are live. An
+// `html` publish also answers E2's fields for its X12 mirror's new version.
+export const ArtifactPublishResultSchema = z.strictObject({
+  status: z.literal('published'), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0),
+  changed: z.array(z.string()), kept: z.array(z.string()), removed: z.array(z.string()),
+  id: z.string().optional(), deliverableId: z.uuid().optional(), version: z.number().int().min(1).optional(), externalReferences: z.number().int().min(0).optional(),
+  ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1: the X12 record is its creator's
+});
+export type ArtifactPublishResult = z.infer<typeof ArtifactPublishResultSchema>;
+export const ArtifactUploadAssetResultSchema = z.strictObject({ status: z.literal('uploaded'), artifactId: z.uuid(), assetId: z.string(), ref: z.string(), name: z.string(), size: z.number().int().min(0) });
+export type ArtifactUploadAssetResult = z.infer<typeof ArtifactUploadAssetResultSchema>;
+export const ListedAssetSchema = z.strictObject({ assetId: z.string(), ref: z.string(), name: z.string(), mime: z.string(), size: z.number().int().min(0), createdAt: IsoTimeSchema });
+export const ArtifactListAssetsResultSchema = z.strictObject({ status: z.literal('listed'), artifactId: z.uuid(), assets: z.array(ListedAssetSchema) });
+export type ArtifactListAssetsResult = z.infer<typeof ArtifactListAssetsResultSchema>;
+export const ArtifactExportResultSchema = z.strictObject({ status: z.literal('exported'), artifactId: z.uuid(), format: z.enum(ARTIFACT_EXPORT_FORMATS), revision: z.number().int().min(0), path: z.string(), copiedTo: z.string().optional() });
+export type ArtifactExportResult = z.infer<typeof ArtifactExportResultSchema>;
+
+// A refusal an agent can act on: the `isError` text is `<tool>: <sentence> <this JSON>` (`artifactRefusalOf` reads it).
+export const ARTIFACT_REFUSAL_REASONS = ['notFound', 'invalid', 'tooLarge', 'handleTaken', 'staleBase', 'conflict', 'exportUnavailable', 'unavailable'] as const;
+export type ArtifactRefusalReason = (typeof ARTIFACT_REFUSAL_REASONS)[number];
+export const ArtifactRefusalSchema = z.looseObject({ reason: z.enum(ARTIFACT_REFUSAL_REASONS) });
+export type ArtifactRefusal = z.infer<typeof ArtifactRefusalSchema>;
+// P3-A (M6) end
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The tools as `tools/list` describes them (descriptions exact; A-18: the fallback sentence first)
@@ -219,35 +347,72 @@ export const MAWS_TOOLS = {
     input: ShowPaneInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
-  // E2 start
+  // E2 start (P3-A M6: `artifact_create` gains kinds and `artifact_list` the library; `artifact_update` retired)
   artifact_create: {
     title: 'Create artifact',
     description:
-      "Register a self-contained HTML file you wrote as a MAWS artifact the user can view and comment on; without this tool, write the HTML file and tell the user its path. Give it a short id you will reuse for updates, the path of the HTML file (absolute or relative to the working directory) and a title. MAWS copies the file, keeps every version, shows it in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs) and reports how many external URLs it found. Returns the artifact's deliverable id and version 1.",
+      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; document, presentation, design, design_system and dashboard start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Returns the artifact's id and revision, and the first time this session creates a kind, that kind's guide and format reference.",
     input: ArtifactCreateInputSchema,
-    annotations: ARTIFACT_WRITER_ANNOTATIONS,
-  },
-  artifact_update: {
-    title: 'Update artifact',
-    description:
-      "Add a new version of a MAWS artifact from an HTML file you rewrote; without this tool, write the HTML file and tell the user its path. Names the artifact by the id you gave artifact_create; the user can switch between versions, and a title replaces the artifact's title. Returns the new version number.",
-    input: ArtifactUpdateInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
   artifact_list: {
     title: 'List artifacts',
-    description: 'List the artifacts this session registered with MAWS, with their ids, titles and version counts; without this tool, keep your own list of the HTML files you wrote.',
+    description:
+      'List MAWS artifacts with their ids, handles, kinds, titles, revisions and who edited them last; without this tool, keep your own list of what you made. By default the artifacts this session and the sessions it was opened from created, edited or viewed; scope "all" lists the whole library. Filter by kind, Space or a title substring (query).',
     input: ArtifactListInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
   artifact_screenshot: {
     title: 'Screenshot artifact',
     description:
-      'Capture a PNG screenshot of a MAWS artifact as the user sees it, rendered in a sandboxed frame with no network; without this tool, describe the page from its source. Names the artifact by id and optionally a version (the latest by default) and a viewport size (1280 by 800 by default). Returns the image and the console errors the page logged while loading, so you can check your work.',
+      'Capture a PNG screenshot of a MAWS html artifact as the user sees it, rendered in a sandboxed frame with no network; without this tool, describe the page from its source. Names the artifact by id or handle and optionally a version (the latest by default) and a viewport size (1280 by 800 by default). Returns the image and the console errors the page logged while loading, so you can check your work.',
     input: ArtifactScreenshotInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
   // E2 end
+  // P3-A (M6) start
+  artifact_describe_type: {
+    title: 'Describe artifact kind',
+    description:
+      "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file.",
+    input: ArtifactDescribeTypeInputSchema,
+    annotations: MAWS_TOOL_ANNOTATIONS,
+  },
+  artifact_read: {
+    title: 'Read artifact',
+    description:
+      "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure, a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it. Read before you publish: artifact_publish takes the revision this read returned.",
+    input: ArtifactReadInputSchema,
+    annotations: MAWS_TOOL_ANNOTATIONS,
+  },
+  artifact_publish: {
+    title: 'Publish artifact',
+    description:
+      "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html); baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed.",
+    input: ArtifactPublishInputSchema,
+    annotations: ARTIFACT_WRITER_ANNOTATIONS,
+  },
+  artifact_upload_asset: {
+    title: 'Upload artifact asset',
+    description:
+      "Add a file under the working directory (an image, a font; at most 16 MiB) to a MAWS artifact's assets; without this tool, inline it as a data URL. Returns the asset's ref (assets/<name>), the path the artifact's format uses to refer to it.",
+    input: ArtifactUploadAssetInputSchema,
+    annotations: ARTIFACT_WRITER_ANNOTATIONS,
+  },
+  artifact_list_assets: {
+    title: 'List artifact assets',
+    description: "List a MAWS artifact's assets with their refs, names, types and sizes; without this tool, keep your own list of what you uploaded.",
+    input: ArtifactListAssetsInputSchema,
+    annotations: MAWS_TOOL_ANNOTATIONS,
+  },
+  artifact_export: {
+    title: 'Export artifact',
+    description:
+      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too. Needs the MAWS app open.',
+    input: ArtifactExportInputSchema,
+    annotations: ARTIFACT_WRITER_ANNOTATIONS,
+  },
+  // P3-A (M6) end
 } as const satisfies Record<MawsToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean } }>;
 
 export interface MawsToolListEntry {
@@ -286,23 +451,37 @@ export const TOOL_ERRORS = {
   artifactNotAFile: (tool: ArtifactToolName, path: string) => `${tool}: not a file: ${path}`,
   notHtml: (tool: ArtifactToolName, path: string) => `${tool}: not an HTML file: ${path}`,
   tooLarge: (tool: ArtifactToolName, path: string, bytes: number) => `${tool}: too large: ${path} (${bytes} bytes; the limit is ${ARTIFACT_MAX_BYTES / MIB} MiB)`,
-  artifactExists: (id: string) => `artifact_create: an artifact "${id}" already exists in this session; use artifact_update`,
+  artifactExists: (id: string) => `artifact_create: an artifact "${id}" already exists in this session; use artifact_publish`,
   // P2-E1 (D10, D12): a side thread's create of an id one of its ancestors holds
-  artifactExistsInParent: (id: string) => `artifact_create: an artifact "${id}" already exists in the conversation this side thread was opened from; use artifact_update`,
-  noArtifact: (tool: ArtifactToolName, id: string) => `${tool}: no artifact "${id}" in this session${tool === 'artifact_update' ? '; use artifact_create' : ''}`,
+  artifactExistsInParent: (id: string) => `artifact_create: an artifact "${id}" already exists in the conversation this side thread was opened from; use artifact_publish`,
+  noArtifact: (tool: ArtifactToolName, id: string) => `${tool}: no artifact "${id}" in this session`,
   noVersion: (id: string, version: number, versions: number) => `artifact_screenshot: version ${version} does not exist; "${id}" has ${versions} version(s)`,
   captureFailed: (reason: string) => `artifact_screenshot: MAWS could not capture the artifact: ${reason}`,
   captureTimeout: `artifact_screenshot: MAWS did not answer within ${CAPTURE_ANSWER_MS / 1000} s`,
-  notRecorded: (tool: ArtifactToolName, path: string, message: string) => `${tool}: ${path} was not recorded: ${message}`,
   deliverableNotFound: (id: string) => `show_pane: no deliverable "${id}" in this session`,
   deliverableUnreadable: (id: string, message: string) => `show_pane: could not read deliverable "${id}": ${message}`, // E2: main refused the read
   // E2 end
   // E10: a bridge request made while no app is connected to the engine host (the detached supervisor), answered at once
-  appNotOpen: (tool: 'show_pane' | 'artifact_screenshot') => `${tool}: MAWS is not open; the ${tool === 'show_pane' ? 'pane cannot be shown' : 'artifact cannot be captured'}`,
+  appNotOpen: (tool: 'show_pane' | 'artifact_screenshot' | 'artifact_export') => `${tool}: MAWS is not open; the ${tool === 'show_pane' ? 'pane cannot be shown' : tool === 'artifact_export' ? 'artifact cannot be exported' : 'artifact cannot be captured'}`,
+  // P3-A (M6) start: a refusal the agent can act on, its machine-readable reason last (`artifactRefusalOf`)
+  refused: (tool: ArtifactToolName, refusal: ArtifactRefusal, sentence: string) => `${tool}: ${sentence} ${JSON.stringify(refusal)}`,
+  // P3-A (M6) end
   // E4a start: a target the browser refuses (not http or https; `validateBrowserUrl`)
   navigationRefused: (target: string) => `show_pane: MAWS opens only http and https pages in its browser; refused "${target}"`,
   // E4a end
 } as const;
+
+// P3-A (M6): the machine-readable part of an artifact tool's refusal (`TOOL_ERRORS.refused`), or null for any other text.
+export function artifactRefusalOf(text: string): ArtifactRefusal | null {
+  const start = text.indexOf(' {"reason":');
+  if (start === -1) return null;
+  try {
+    const parsed = ArtifactRefusalSchema.safeParse(JSON.parse(text.slice(start + 1)));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 function issuesText(error: z.ZodError): string {
   return error.issues.map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`).join('; ');

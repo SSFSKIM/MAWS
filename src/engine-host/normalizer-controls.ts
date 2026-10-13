@@ -11,7 +11,8 @@ import { CanUseToolRequestSchema, ElicitationRequestSchema, HookCallbackRequestS
 // E1 start
 import { withQuestionIds } from '@shared/maws/ask';
 import { readMcpMessage, toolCallOf } from '@shared/maws/rpc';
-import { ArtifactCreateResultSchema, ArtifactUpdateResultSchema, AskAnswerSchema, AskResultSchema, isMawsToolName, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
+import { ArtifactDeliverySchema, AskAnswerSchema, AskResultSchema, isMawsToolName, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
+import { ArtifactUpdateInputSchema, HISTORICAL_ARTIFACT_UPDATE } from '@shared/maws/artifact-update'; // P3-A: retired, read as before
 // E1 end
 // E4c start (frozen since the browser tools left the server, P1 A-54)
 import { browserCallOf, browserToolResultSchemaOf, isBrowserToolName, parseBrowserToolArguments, type BrowserToolName, type BrowserWaitReason } from '@shared/maws/browser';
@@ -139,7 +140,12 @@ export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFr
       const tool = typeof name === 'string' ? name : '';
       // E4c: a call of a removed browser tool (P1 A-54) is admitted as the server admitted it then, so a journal written
       // before the removal maps as it always did
-      const admitted = isMawsToolName(tool) ? parseToolArguments(tool, args).ok : isBrowserToolName(tool) && parseBrowserToolArguments(tool, args).ok;
+      // P3-A: so is a call of the retired `artifact_update`
+      const admitted = isMawsToolName(tool)
+        ? parseToolArguments(tool, args).ok
+        : tool === HISTORICAL_ARTIFACT_UPDATE
+          ? ArtifactUpdateInputSchema.safeParse(args).success
+          : isBrowserToolName(tool) && parseBrowserToolArguments(tool, args).ok;
       const ask = admitted && tool === 'ask' ? parseToolArguments('ask', args) : null;
       const askId = ask?.ok ? (toolUseId ?? requestId) : null;
       remember({ kind: 'mcp', toolUseId, callbackId: null, mcp: { tool, askId, toolUseId, args, admitted } });
@@ -227,14 +233,16 @@ function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: E
     out.emit({ kind: 'maws.pane.shown', toolUseId: call.toolUseId, requestId, pane: args.data.pane, target: args.data.target ?? null, opened: parsed.success ? parsed.data.opened : null, error: isError ? text : null }, attribution);
     return;
   }
-  // E2 start: `maws.delivery.artifact` for an `artifact_create` or `artifact_update` whose answer parses as its result (a
-  // refusal is an `isError` text and yields nothing). Their answers are the host's one text block; the engine's own
-  // pointer block beside an image block reaches the transcript, never this answer (E2 M0).
-  if (call.tool === 'artifact_create' || call.tool === 'artifact_update') {
-    const parsed = call.tool === 'artifact_create' ? ArtifactCreateResultSchema.safeParse(json) : ArtifactUpdateResultSchema.safeParse(json);
+  // E2 start: `maws.delivery.artifact` for an `artifact_create` or `artifact_update` whose answer registered an X12
+  // version (a refusal is an `isError` text and yields nothing). P3-A: `artifact_publish` replaces `artifact_update`, and
+  // its answer and `artifact_create`'s carry the version when the artifact is an `html` page mirrored into X12; any other
+  // kind's answer yields nothing here. Their answers are the host's one text block; the engine's own pointer block beside
+  // an image block reaches the transcript, never this answer (E2 M0).
+  if (call.tool === 'artifact_create' || call.tool === 'artifact_publish' || call.tool === HISTORICAL_ARTIFACT_UPDATE) {
+    const parsed = ArtifactDeliverySchema.safeParse(json);
     if (!parsed.success) return;
-    const { id: artifactId, deliverableId, version, title } = parsed.data;
-    const owner = 'ownerAppSessionId' in parsed.data && parsed.data.ownerAppSessionId !== undefined ? { ownerAppSessionId: parsed.data.ownerAppSessionId } : {}; // P2-E1: an ancestor's record
+    const { id: artifactId, deliverableId, version, title, ownerAppSessionId } = parsed.data;
+    const owner = ownerAppSessionId !== undefined ? { ownerAppSessionId } : {}; // P2-E1: an ancestor's record
     out.emit({ kind: 'maws.delivery.artifact', toolUseId: call.toolUseId, requestId, action: call.tool === 'artifact_create' ? 'create' : 'update', artifactId, deliverableId, version, title, ...owner }, attribution);
     return;
   }

@@ -5,7 +5,8 @@ import type { SafeguardVerdict } from '@shared/graph/enums';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { TaskId, ToolUseId } from '@shared/graph/ids';
 import { ShowPaneResultSchema } from '@shared/maws/tools'; // E1
-import { ArtifactListResultSchema, ArtifactScreenshotResultSchema } from '@shared/maws/tools'; // E2
+import { ArtifactScreenshotResultSchema } from '@shared/maws/tools'; // E2
+import * as z from 'zod'; // P3-A
 import { classifyTool, MAWS_TOOL_USE, MCP_TOOL, tableRowOf, type ClassifyContext } from './classify';
 import { baseName, cellLabel, hostOf, PANE_CELL, thinkingLabel } from './copy';
 import { ARTIFACT_CELL } from './copy'; // E2
@@ -261,11 +262,13 @@ function paneLabel(rec: ToolRecord): string {
 
 // E2 start: an `artifact_list` call reads how many artifacts it listed, an `artifact_screenshot` call what it captured
 // (the result's title, version and size), or the host's refusal without the tool's own prefix.
+// P3-A: E2's listing and the library's alike, counted
+const LISTED = z.object({ status: z.literal('listed'), artifacts: z.array(z.unknown()) });
 function artifactListLabel(rec: ToolRecord): string {
   const { result } = rec;
   if (!result) return ARTIFACT_CELL.listing;
   if (result.isError) return ARTIFACT_CELL.listFailed(toolErrorText(resultText(result.content)).replace(/^artifact_list: /, ''));
-  const parsed = ArtifactListResultSchema.safeParse(firstJsonBlock(result.content));
+  const parsed = LISTED.safeParse(firstJsonBlock(result.content));
   return ARTIFACT_CELL.listed(parsed.success ? parsed.data.artifacts.length : null);
 }
 
