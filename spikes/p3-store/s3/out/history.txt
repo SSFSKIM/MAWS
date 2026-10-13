@@ -1,0 +1,36 @@
+doc {"sections":25,"topLevelBlocks":302,"blockIds":1159,"chars":23052,"liveStateBytes":72879}
+versions {"V0":{"seq":1,"at":"09:00:01","actor":"import","kind":"import","bytes":72028},"V1":{"seq":44,"at":"09:00:44","actor":"human","kind":"auto","bytes":72143},"V2":{"seq":48,"at":"09:00:48","actor":"agent:session-1","kind":"turn","bytes":72375},"V3":{"seq":53,"at":"09:00:53","actor":"human","kind":"auto","bytes":72443},"V4":{"seq":57,"at":"09:00:57","actor":"agent:session-2","kind":"turn","bytes":72780},"V5":{"seq":64,"at":"09:01:04","actor":"human","kind":"auto","bytes":72797}}
+compaction {"logRowsBefore":53,"folded":{"rows":53,"bytes":73913,"baseBytes":72443},"logRowsAfter":16,"provenanceRows":27,"bucketedRows":43,"provenanceBytes":2486,"hubLogRows":69}
+diff V0→V5 (provenance after compaction): 19/19 expectations, check valid, headless 32.2 ms, N changes 17, ↑↓ ok true
+  ok   h-type-s0p2      ins by human at 09:00:21
+  ok   h-newpara        ins by human at 09:00:22
+  ok   a1-rewrite-ins   ins by agent:session-1 at 09:00:45
+  ok   a1-rewrite-del   del by agent:session-1 at 09:00:45
+  ok   a1-section       ins by agent:session-1 at 09:00:46
+  ok   a1-cell          ins by agent:session-1 at 09:00:47
+  ok   a1-code          ins by agent:session-1 at 09:00:48
+  ok   h-level          attrs(level) by human at 09:00:49
+  ok   h-check          attrs(checked) by human at 09:00:50
+  ok   h-tone           attrs(tone) by human at 09:00:51
+  ok   h-img-alt        attrs(alt) by human at 09:00:52
+  ok   h-bold           fmt by human at 09:00:53
+  ok   a2-row           ins by agent:session-2 at 09:00:54
+  ok   a2-lang          attrs(language) by agent:session-2 at 09:00:55
+  ok   a2-code-ins      ins by agent:session-2 at 09:00:55
+  ok   a2-code-del      del by agent:session-2 at 09:00:55
+  ok   a2-delpara       del by agent:session-2 at 09:00:56
+  ok   h-type-s13p2     ins by human at 09:01:03
+  ok   h-del-s0p2       del by human at 09:01:04
+after compaction, spans identical to the log-window build: {"v0v3":true,"v1v3":true} | V2→V4 authors agent:session-2,human
+provenance quantized (full log merged): {"exact":{"mergedBytes":1256,"runs":102},"tenSeconds":{"mergedBytes":386,"runs":62},"minute":{"mergedBytes":301,"runs":58}}
+show editors (after compaction = full-log truth): true
+  s0p2      ok   human@09:00:21[ins]  import@09:00:01[ins]
+  s2p2      ok   agent:session-1@09:00:45[del,ins]  import@09:00:01[ins]
+  s4r1c1p   ok   agent:session-1@09:00:47[ins]
+  s6h       ok   human@09:00:49[attrs:level]  import@09:00:01[ins]
+  s10c      ok   agent:session-2@09:00:55[attrs:language,ins]  import@09:00:01[ins]
+  s12p2     ok   agent:session-2@09:00:57[fmt]  import@09:00:01[ins]
+  s9p2      ok   human@09:00:53[fmt]  import@09:00:01[ins]
+preview {"msShowVersionMedian":34.9,"msLeaveMedian":20.4,"msShow":[42.5,34.9,35.6,32.9,33.3],"nChangesView":17,"nChangesHeadless":17,"viewCheck":"valid","editable":false,"domMarks":{"ins":64,"del":5,"fmt":2,"attr":13},"navVisited":true,"undoCommandReturned":false,"undoStackUnchanged":true,"liveUnchangedByUndoAndTyping":true,"insertCommandReturned":true,"versionDocsUnchanged":true,"exitLiveByteUnchanged":true,"exitHostByteUnchanged":true,"exitShowsLive":true}
+live during history {"previewHasAgentEdit":false,"exitShowsAgentEdit":true,"typingReachesHost":true,"undoWorksAfterExit":true}
+control (S1 commands, unguarded) {"undoReturned":true,"liveChangedWhileInHistory":true,"typedTextLostOnHost":true}

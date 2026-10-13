@@ -1,0 +1,867 @@
+{
+  "document": [
+    {
+      "mechanism": "revert",
+      "undoPolicy": "keep",
+      "sizes": {
+        "V0": 286181,
+        "live": 286536,
+        "restoreUpdate": 1141,
+        "restoreLogRows": 1,
+        "provenanceBytes": 3003
+      },
+      "ms": {
+        "compute": 71.9,
+        "applyAtHost": 0.4
+      },
+      "doc": {
+        "topLevelBlocks": 1201,
+        "ids": 4601,
+        "chars": 91016
+      },
+      "checks": [
+        {
+          "name": "replicas converge (human, agent 1, agent 2)",
+          "ok": true
+        },
+        {
+          "name": "tab t1 equals V0 except the concurrent edit (no other block differs)",
+          "ok": true,
+          "got": ""
+        },
+        {
+          "name": "concurrent edit in kept content survives (s10p2 ends with \" [concurrent]\")",
+          "ok": true
+        },
+        {
+          "name": "concurrent edit into removed content is dropped (CRDT rule: nA1 gone)",
+          "ok": true
+        },
+        {
+          "name": "concurrent insert inside rewritten text (s5p2) survives; the rest is V0",
+          "ok": true,
+          "got": "\"Draft editor users r[c2]estore plan review ships q\""
+        },
+        {
+          "name": "moved block s11p1 back at its V0 place; th1 mark span back to \"bold words\"",
+          "ok": true
+        },
+        {
+          "name": "replaced paragraph: s20p2 back exactly as V0, nB gone, the concurrent edit into nB not grafted into s20p2",
+          "ok": true,
+          "got": "{\"type\":\"paragraph\",\"attrs\":{\"id\":\"s20p2\"},\"content\":[{\"type\":\"text\",\"text\":\"Callout version budget budget history scope"
+        },
+        {
+          "name": "block ids in V0 order, none duplicated",
+          "ok": true
+        },
+        {
+          "name": "deleted paragraph s2p4 back",
+          "ok": true
+        },
+        {
+          "name": "heading s3h level back to 2",
+          "ok": true
+        },
+        {
+          "name": "task s0ti1 unchecked again",
+          "ok": true
+        },
+        {
+          "name": "callout s1co tone back to info",
+          "ok": true
+        },
+        {
+          "name": "bold in s4h removed",
+          "ok": true
+        },
+        {
+          "name": "code block s8c text and language back",
+          "ok": true
+        },
+        {
+          "name": "table cell s7r1c1p back",
+          "ok": true
+        },
+        {
+          "name": "tab t2 title back to \"Appendix\"",
+          "ok": true,
+          "got": "Appendix"
+        },
+        {
+          "name": "tab t2 body equals V0 (x3 back, x2 text back)",
+          "ok": true
+        },
+        {
+          "name": "tab t3 (created since) gone",
+          "ok": true,
+          "got": "t1,t2"
+        },
+        {
+          "name": "thread th2 (resolved since) unresolved again",
+          "ok": true
+        },
+        {
+          "name": "thread th3 (created since) gone",
+          "ok": true
+        },
+        {
+          "name": "comment marks: th1 and th2 present, th3 gone",
+          "ok": true,
+          "got": "th1,th2"
+        },
+        {
+          "name": "threads map equals V0",
+          "ok": true
+        },
+        {
+          "name": "human editor shows the restored doc (= host t1), doc.check() valid",
+          "ok": true,
+          "got": null
+        },
+        {
+          "name": "diff L→restored attributes every change to the restorer (or the concurrent agent)",
+          "ok": true,
+          "got": "agent:session-2,human:restore"
+        },
+        {
+          "name": "untouched paragraph s12p2: editors = import only",
+          "ok": true,
+          "got": "[{\"who\":\"import\",\"at\":\"09:00:01\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "restored paragraph s2p4: credited to the restorer",
+          "ok": true,
+          "got": "[{\"who\":\"human:restore\",\"at\":\"09:00:40\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "s10p2: import + agent 2 (concurrent), not the restorer",
+          "ok": true,
+          "got": "[{\"who\":\"agent:session-2\",\"at\":\"09:00:41\",\"kinds\":[\"ins\"]},{\"who\":\"import\",\"at\":\"09:00:01\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "undo after restore (policy keep): no undo step duplicates a block id",
+          "ok": false,
+          "got": "[{\"step\":0,\"dups\":[\"s2p4\"],\"changedVsRestored\":[]},{\"step\":1,\"dups\":[\"s2p4\"],\"changedVsRestored\":[]}]"
+        }
+      ],
+      "undoAfterRestore": {
+        "stackBefore": 26,
+        "firstUndoReturned": true,
+        "dupSteps": [
+          {
+            "step": 0,
+            "dups": [
+              "s2p4"
+            ],
+            "changedVsRestored": []
+          },
+          {
+            "step": 1,
+            "dups": [
+              "s2p4"
+            ],
+            "changedVsRestored": []
+          }
+        ],
+        "steps": 2
+      },
+      "reverse": null
+    },
+    {
+      "mechanism": "revert",
+      "undoPolicy": "clear",
+      "sizes": {
+        "V0": 286181,
+        "live": 286536,
+        "restoreUpdate": 1142,
+        "restoreLogRows": 1,
+        "provenanceBytes": 3117
+      },
+      "ms": {
+        "compute": 23.4,
+        "applyAtHost": 0.4
+      },
+      "doc": {
+        "topLevelBlocks": 1200,
+        "ids": 4600,
+        "chars": 91016
+      },
+      "checks": [
+        {
+          "name": "replicas converge (human, agent 1, agent 2)",
+          "ok": true
+        },
+        {
+          "name": "tab t1 equals V0 except the concurrent edit (no other block differs)",
+          "ok": true,
+          "got": ""
+        },
+        {
+          "name": "concurrent edit in kept content survives (s10p2 ends with \" [concurrent]\")",
+          "ok": true
+        },
+        {
+          "name": "concurrent edit into removed content is dropped (CRDT rule: nA1 gone)",
+          "ok": true
+        },
+        {
+          "name": "concurrent insert inside rewritten text (s5p2) survives; the rest is V0",
+          "ok": true,
+          "got": "\"Draft editor users r[c2]estore plan review ships q\""
+        },
+        {
+          "name": "moved block s11p1 back at its V0 place; th1 mark span back to \"bold words\"",
+          "ok": true
+        },
+        {
+          "name": "replaced paragraph: s20p2 back exactly as V0, nB gone, the concurrent edit into nB not grafted into s20p2",
+          "ok": true,
+          "got": "{\"type\":\"paragraph\",\"attrs\":{\"id\":\"s20p2\"},\"content\":[{\"type\":\"text\",\"text\":\"Callout version budget budget history scope"
+        },
+        {
+          "name": "block ids in V0 order, none duplicated",
+          "ok": true
+        },
+        {
+          "name": "deleted paragraph s2p4 back",
+          "ok": true
+        },
+        {
+          "name": "heading s3h level back to 2",
+          "ok": true
+        },
+        {
+          "name": "task s0ti1 unchecked again",
+          "ok": true
+        },
+        {
+          "name": "callout s1co tone back to info",
+          "ok": true
+        },
+        {
+          "name": "bold in s4h removed",
+          "ok": true
+        },
+        {
+          "name": "code block s8c text and language back",
+          "ok": true
+        },
+        {
+          "name": "table cell s7r1c1p back",
+          "ok": true
+        },
+        {
+          "name": "tab t2 title back to \"Appendix\"",
+          "ok": true,
+          "got": "Appendix"
+        },
+        {
+          "name": "tab t2 body equals V0 (x3 back, x2 text back)",
+          "ok": true
+        },
+        {
+          "name": "tab t3 (created since) gone",
+          "ok": true,
+          "got": "t1,t2"
+        },
+        {
+          "name": "thread th2 (resolved since) unresolved again",
+          "ok": true
+        },
+        {
+          "name": "thread th3 (created since) gone",
+          "ok": true
+        },
+        {
+          "name": "comment marks: th1 and th2 present, th3 gone",
+          "ok": true,
+          "got": "th1,th2"
+        },
+        {
+          "name": "threads map equals V0",
+          "ok": true
+        },
+        {
+          "name": "human editor shows the restored doc (= host t1), doc.check() valid",
+          "ok": true,
+          "got": null
+        },
+        {
+          "name": "diff L→restored attributes every change to the restorer (or the concurrent agent)",
+          "ok": true,
+          "got": "agent:session-2,human:restore"
+        },
+        {
+          "name": "untouched paragraph s12p2: editors = import only",
+          "ok": true,
+          "got": "[{\"who\":\"import\",\"at\":\"09:00:01\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "restored paragraph s2p4: credited to the restorer",
+          "ok": true,
+          "got": "[{\"who\":\"human:restore\",\"at\":\"09:00:40\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "s10p2: import + agent 2 (concurrent), not the restorer",
+          "ok": true,
+          "got": "[{\"who\":\"agent:session-2\",\"at\":\"09:00:41\",\"kinds\":[\"ins\"]},{\"who\":\"import\",\"at\":\"09:00:01\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "undo after restore (policy clear): no undo step duplicates a block id",
+          "ok": true,
+          "got": "[]"
+        },
+        {
+          "name": "policy clear: undo is a no-op and the restored doc stays",
+          "ok": true
+        },
+        {
+          "name": "restore of the pre-restore version gives L back exactly (the concurrent edits, made after L, are undone too)",
+          "ok": true,
+          "got": ""
+        }
+      ],
+      "undoAfterRestore": {
+        "stackBefore": 26,
+        "firstUndoReturned": false,
+        "dupSteps": [],
+        "steps": 1
+      },
+      "reverse": {
+        "bytes": 1350,
+        "differ": []
+      }
+    },
+    {
+      "mechanism": "diff",
+      "undoPolicy": "clear",
+      "sizes": {
+        "V0": 286181,
+        "live": 286527,
+        "restoreUpdate": 1124,
+        "restoreLogRows": 1,
+        "provenanceBytes": 3097
+      },
+      "ms": {
+        "compute": 118.5,
+        "applyAtHost": 0.3
+      },
+      "doc": {
+        "topLevelBlocks": 1200,
+        "ids": 4600,
+        "chars": 91035
+      },
+      "checks": [
+        {
+          "name": "replicas converge (human, agent 1, agent 2)",
+          "ok": true
+        },
+        {
+          "name": "tab t1 equals V0 except the concurrent edit (no other block differs)",
+          "ok": false,
+          "got": "s20p2"
+        },
+        {
+          "name": "concurrent edit in kept content survives (s10p2 ends with \" [concurrent]\")",
+          "ok": true
+        },
+        {
+          "name": "concurrent edit into removed content is dropped (CRDT rule: nA1 gone)",
+          "ok": true
+        },
+        {
+          "name": "concurrent insert inside rewritten text (s5p2) survives; the rest is V0",
+          "ok": true,
+          "got": "\"[c2]Draft editor users restore plan review ships q\""
+        },
+        {
+          "name": "moved block s11p1 back at its V0 place; th1 mark span back to \"bold words\"",
+          "ok": true
+        },
+        {
+          "name": "replaced paragraph: s20p2 back exactly as V0, nB gone, the concurrent edit into nB not grafted into s20p2",
+          "ok": false,
+          "got": "{\"type\":\"paragraph\",\"attrs\":{\"id\":\"s20p2\"},\"content\":[{\"type\":\"text\",\"text\":\"[into-replacement] Callout version budget b"
+        },
+        {
+          "name": "block ids in V0 order, none duplicated",
+          "ok": true
+        },
+        {
+          "name": "deleted paragraph s2p4 back",
+          "ok": true
+        },
+        {
+          "name": "heading s3h level back to 2",
+          "ok": true
+        },
+        {
+          "name": "task s0ti1 unchecked again",
+          "ok": true
+        },
+        {
+          "name": "callout s1co tone back to info",
+          "ok": true
+        },
+        {
+          "name": "bold in s4h removed",
+          "ok": true
+        },
+        {
+          "name": "code block s8c text and language back",
+          "ok": true
+        },
+        {
+          "name": "table cell s7r1c1p back",
+          "ok": true
+        },
+        {
+          "name": "tab t2 title back to \"Appendix\"",
+          "ok": true,
+          "got": "Appendix"
+        },
+        {
+          "name": "tab t2 body equals V0 (x3 back, x2 text back)",
+          "ok": true
+        },
+        {
+          "name": "tab t3 (created since) gone",
+          "ok": true,
+          "got": "t1,t2"
+        },
+        {
+          "name": "thread th2 (resolved since) unresolved again",
+          "ok": true
+        },
+        {
+          "name": "thread th3 (created since) gone",
+          "ok": true
+        },
+        {
+          "name": "comment marks: th1 and th2 present, th3 gone",
+          "ok": true,
+          "got": "th1,th2"
+        },
+        {
+          "name": "threads map equals V0",
+          "ok": true
+        },
+        {
+          "name": "human editor shows the restored doc (= host t1), doc.check() valid",
+          "ok": true,
+          "got": null
+        },
+        {
+          "name": "diff L→restored attributes every change to the restorer (or the concurrent agent)",
+          "ok": true,
+          "got": "agent:session-2,human:restore"
+        },
+        {
+          "name": "untouched paragraph s12p2: editors = import only",
+          "ok": true,
+          "got": "[{\"who\":\"import\",\"at\":\"09:00:01\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "restored paragraph s2p4: credited to the restorer",
+          "ok": true,
+          "got": "[{\"who\":\"human:restore\",\"at\":\"09:00:40\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "s10p2: import + agent 2 (concurrent), not the restorer",
+          "ok": true,
+          "got": "[{\"who\":\"agent:session-2\",\"at\":\"09:00:41\",\"kinds\":[\"ins\"]},{\"who\":\"import\",\"at\":\"09:00:01\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "undo after restore (policy clear): no undo step duplicates a block id",
+          "ok": true,
+          "got": "[]"
+        },
+        {
+          "name": "policy clear: undo is a no-op and the restored doc stays",
+          "ok": true
+        },
+        {
+          "name": "restore of the pre-restore version gives L back exactly (the concurrent edits, made after L, are undone too)",
+          "ok": true,
+          "got": ""
+        }
+      ],
+      "undoAfterRestore": {
+        "stackBefore": 26,
+        "firstUndoReturned": false,
+        "dupSteps": [],
+        "steps": 1
+      },
+      "reverse": {
+        "bytes": 1305,
+        "differ": []
+      }
+    },
+    {
+      "mechanism": "diff-by-id",
+      "undoPolicy": "clear",
+      "sizes": {
+        "V0": 286181,
+        "live": 286533,
+        "restoreUpdate": 1164,
+        "restoreLogRows": 1,
+        "provenanceBytes": 3146
+      },
+      "ms": {
+        "compute": 134.9,
+        "applyAtHost": 0.3
+      },
+      "doc": {
+        "topLevelBlocks": 1200,
+        "ids": 4600,
+        "chars": 91016
+      },
+      "checks": [
+        {
+          "name": "replicas converge (human, agent 1, agent 2)",
+          "ok": true
+        },
+        {
+          "name": "tab t1 equals V0 except the concurrent edit (no other block differs)",
+          "ok": true,
+          "got": ""
+        },
+        {
+          "name": "concurrent edit in kept content survives (s10p2 ends with \" [concurrent]\")",
+          "ok": true
+        },
+        {
+          "name": "concurrent edit into removed content is dropped (CRDT rule: nA1 gone)",
+          "ok": true
+        },
+        {
+          "name": "concurrent insert inside rewritten text (s5p2) survives; the rest is V0",
+          "ok": true,
+          "got": "\"[c2]Draft editor users restore plan review ships q\""
+        },
+        {
+          "name": "moved block s11p1 back at its V0 place; th1 mark span back to \"bold words\"",
+          "ok": true
+        },
+        {
+          "name": "replaced paragraph: s20p2 back exactly as V0, nB gone, the concurrent edit into nB not grafted into s20p2",
+          "ok": true,
+          "got": "{\"type\":\"paragraph\",\"attrs\":{\"id\":\"s20p2\"},\"content\":[{\"type\":\"text\",\"text\":\"Callout version budget budget history scope"
+        },
+        {
+          "name": "block ids in V0 order, none duplicated",
+          "ok": true
+        },
+        {
+          "name": "deleted paragraph s2p4 back",
+          "ok": true
+        },
+        {
+          "name": "heading s3h level back to 2",
+          "ok": true
+        },
+        {
+          "name": "task s0ti1 unchecked again",
+          "ok": true
+        },
+        {
+          "name": "callout s1co tone back to info",
+          "ok": true
+        },
+        {
+          "name": "bold in s4h removed",
+          "ok": true
+        },
+        {
+          "name": "code block s8c text and language back",
+          "ok": true
+        },
+        {
+          "name": "table cell s7r1c1p back",
+          "ok": true
+        },
+        {
+          "name": "tab t2 title back to \"Appendix\"",
+          "ok": true,
+          "got": "Appendix"
+        },
+        {
+          "name": "tab t2 body equals V0 (x3 back, x2 text back)",
+          "ok": true
+        },
+        {
+          "name": "tab t3 (created since) gone",
+          "ok": true,
+          "got": "t1,t2"
+        },
+        {
+          "name": "thread th2 (resolved since) unresolved again",
+          "ok": true
+        },
+        {
+          "name": "thread th3 (created since) gone",
+          "ok": true
+        },
+        {
+          "name": "comment marks: th1 and th2 present, th3 gone",
+          "ok": true,
+          "got": "th1,th2"
+        },
+        {
+          "name": "threads map equals V0",
+          "ok": true
+        },
+        {
+          "name": "human editor shows the restored doc (= host t1), doc.check() valid",
+          "ok": true,
+          "got": null
+        },
+        {
+          "name": "diff L→restored attributes every change to the restorer (or the concurrent agent)",
+          "ok": true,
+          "got": "agent:session-2,human:restore"
+        },
+        {
+          "name": "untouched paragraph s12p2: editors = import only",
+          "ok": true,
+          "got": "[{\"who\":\"import\",\"at\":\"09:00:01\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "restored paragraph s2p4: credited to the restorer",
+          "ok": true,
+          "got": "[{\"who\":\"human:restore\",\"at\":\"09:00:40\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "s10p2: import + agent 2 (concurrent), not the restorer",
+          "ok": true,
+          "got": "[{\"who\":\"agent:session-2\",\"at\":\"09:00:41\",\"kinds\":[\"ins\"]},{\"who\":\"import\",\"at\":\"09:00:01\",\"kinds\":[\"ins\"]}]"
+        },
+        {
+          "name": "undo after restore (policy clear): no undo step duplicates a block id",
+          "ok": true,
+          "got": "[]"
+        },
+        {
+          "name": "policy clear: undo is a no-op and the restored doc stays",
+          "ok": true
+        },
+        {
+          "name": "restore of the pre-restore version gives L back exactly (the concurrent edits, made after L, are undone too)",
+          "ok": true,
+          "got": ""
+        }
+      ],
+      "undoAfterRestore": {
+        "stackBefore": 26,
+        "firstUndoReturned": false,
+        "dupSteps": [],
+        "steps": 1
+      },
+      "reverse": {
+        "bytes": 1333,
+        "differ": []
+      }
+    }
+  ],
+  "deck": [
+    {
+      "mechanism": "revert",
+      "sizes": {
+        "V0": 8461,
+        "live": 7917,
+        "restoreUpdate": 955
+      },
+      "ms": {
+        "compute": 0.69
+      },
+      "checks": [
+        {
+          "name": "replicas converge",
+          "ok": true
+        },
+        {
+          "name": "slide s3 (deleted since) back with its 5 elements, notes and text",
+          "ok": true
+        },
+        {
+          "name": "slide s13 (added since) gone",
+          "ok": true
+        },
+        {
+          "name": "moved element s1/e2 back",
+          "ok": true,
+          "got": "208px"
+        },
+        {
+          "name": "deck title back",
+          "ok": true
+        },
+        {
+          "name": "slide order s2 back",
+          "ok": true
+        },
+        {
+          "name": "notes s4 back",
+          "ok": true
+        },
+        {
+          "name": "element text s6/e3 back",
+          "ok": true
+        },
+        {
+          "name": "deleted element s7/e4 back",
+          "ok": true
+        },
+        {
+          "name": "thread dk1 unresolved",
+          "ok": true
+        },
+        {
+          "name": "concurrent move s8/e1 survives",
+          "ok": true
+        },
+        {
+          "name": "concurrent notes edit s9 survives",
+          "ok": true
+        },
+        {
+          "name": "deck equals V0 plus the concurrent edits (deep)",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "mechanism": "diff",
+      "sizes": {
+        "V0": 8461,
+        "live": 7925,
+        "restoreUpdate": 962
+      },
+      "ms": {
+        "compute": 3.16
+      },
+      "checks": [
+        {
+          "name": "replicas converge",
+          "ok": true
+        },
+        {
+          "name": "slide s3 (deleted since) back with its 5 elements, notes and text",
+          "ok": true
+        },
+        {
+          "name": "slide s13 (added since) gone",
+          "ok": true
+        },
+        {
+          "name": "moved element s1/e2 back",
+          "ok": true,
+          "got": "208px"
+        },
+        {
+          "name": "deck title back",
+          "ok": true
+        },
+        {
+          "name": "slide order s2 back",
+          "ok": true
+        },
+        {
+          "name": "notes s4 back",
+          "ok": true
+        },
+        {
+          "name": "element text s6/e3 back",
+          "ok": true
+        },
+        {
+          "name": "deleted element s7/e4 back",
+          "ok": true
+        },
+        {
+          "name": "thread dk1 unresolved",
+          "ok": true
+        },
+        {
+          "name": "concurrent move s8/e1 survives",
+          "ok": true
+        },
+        {
+          "name": "concurrent notes edit s9 survives",
+          "ok": true
+        },
+        {
+          "name": "deck equals V0 plus the concurrent edits (deep)",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "mechanism": "diff-by-id",
+      "sizes": {
+        "V0": 8461,
+        "live": 7919,
+        "restoreUpdate": 965
+      },
+      "ms": {
+        "compute": 3.21
+      },
+      "checks": [
+        {
+          "name": "replicas converge",
+          "ok": true
+        },
+        {
+          "name": "slide s3 (deleted since) back with its 5 elements, notes and text",
+          "ok": true
+        },
+        {
+          "name": "slide s13 (added since) gone",
+          "ok": true
+        },
+        {
+          "name": "moved element s1/e2 back",
+          "ok": true,
+          "got": "208px"
+        },
+        {
+          "name": "deck title back",
+          "ok": true
+        },
+        {
+          "name": "slide order s2 back",
+          "ok": true
+        },
+        {
+          "name": "notes s4 back",
+          "ok": true
+        },
+        {
+          "name": "element text s6/e3 back",
+          "ok": true
+        },
+        {
+          "name": "deleted element s7/e4 back",
+          "ok": true
+        },
+        {
+          "name": "thread dk1 unresolved",
+          "ok": true
+        },
+        {
+          "name": "concurrent move s8/e1 survives",
+          "ok": true
+        },
+        {
+          "name": "concurrent notes edit s9 survives",
+          "ok": true
+        },
+        {
+          "name": "deck equals V0 plus the concurrent edits (deep)",
+          "ok": true
+        }
+      ]
+    }
+  ]
+}

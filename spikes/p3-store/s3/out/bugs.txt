@@ -1,0 +1,54 @@
+ok   #82 deleted heading keeps level and id
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | del@heading#hX | deleted [{"type":"heading","attrs":{"id":"hX","level":3}}]
+ok   #82 deleted callout keeps tone
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | del@callout--attributed#co | deleted [{"type":"callout--attributed","attrs":{"id":"co","tone":"warn"}}]
+ok   #82 deleted image keeps src and alt
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | del@image#? | deleted [{"type":"image","attrs":{"src":"asset://one.png","alt":"one","assetId":"one"}}]
+ok   #82 deleted checked task item keeps checked
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | del@taskItem--attributed#ti1 | deleted [{"type":"taskItem--attributed","attrs":{"id":"ti1","checked":true}}]
+ok   #82/#189 deleted code block keeps language and text
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | del@codeBlock#cb | deleted [{"type":"codeBlock","attrs":{"id":"cb","language":"py"}}]
+ok   #128 no attributions at all (null) renders
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | ins@paragraph#p2
+ok   #177 task item checked toggle shows
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | attrs(checked)@taskItem#ti2
+ok   #189 inserted code block renders with its text
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | ins@codeBlock#cb2 attrs(id)@codeBlock#cb2 attrs(language)@codeBlock#cb2
+ok   code block: text edit and language change
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 2 | attrs(language)@codeBlock#cb ins@codeBlock#cb
+ok   callout tone change
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | attrs(tone)@callout#co
+ok   image src and alt change
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | attrs(src)@image#? attrs(alt)@image#?
+ok   image inserted inline
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | ins@image#? attrs(src)@image#? attrs(alt)@image#? attrs(assetId)@image#?
+ok   heading level change
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | attrs(level)@heading#hX
+ok   heading → paragraph (type change)
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | del@heading#hX ins@paragraph#hX attrs(id)@paragraph#hX | deleted [{"type":"heading","attrs":{"id":"hX","level":3}}]
+ok   table: add a row
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | ins@tableRow#yioqb0g6 attrs(id)@tableRow#yioqb0g6 ins@tableCell#dw32tj05 attrs(id)@tableCell#dw32tj05 attrs(colspan)@tableCell#dw32tj05 attrs(rowspan)@tableCell#dw32tj05 attrs(colwidth)@tableCell#dw32tj05 attrs(align)@tableCell#dw32tj05
+ok   table: delete a row
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | del@tableRow#r1 | deleted [{"type":"tableRow","attrs":{"id":"r1"}}]
+ok   table: add a column
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 3 | ins@tableHeader#7m1yzhtp attrs(id)@tableHeader#7m1yzhtp attrs(colspan)@tableHeader#7m1yzhtp attrs(rowspan)@tableHeader#7m1yzhtp attrs(colwidth)@tableHeader#7m1yzhtp attrs(align)@tableHeader#7m1yzhtp ins@tableCell#3f1pcjgf attrs(id)@tableCell#3f1pcjgf
+ok   table: delete a column
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 3 | del@tableHeader#r0b del@tableCell#r1b del@tableCell#r2b | deleted [{"type":"tableHeader","attrs":{"id":"r0b","colspan":1,"rowspan":1,"colwidth":null,"align":null}},{"type":"tableCell","attrs":{"id":"r1b","colspan":1,"rowspan":1,"colwidth":null,"align":null}},{"type":"tableCell","attrs":{"id":"r2b","colspan":1,"rowspan":1,"colwidth":null,"align":null}}]
+ok   table: bold, link and comment marks inside cells
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 3 | fmt@paragraph#r1ap fmt@paragraph#r1bp fmt@paragraph#r2ap | fmt keys bold,link,comment--Mone5A==
+ok   link href change (a mark attribute)
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | fmt@paragraph#p1 | fmt keys link
+ok   nested list: indent (sink)
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 2 | ins@listItem#li4 attrs(id)@listItem#li4 ins@paragraph#li4p attrs(id)@paragraph#li4p del@listItem--attributed#li4 | deleted [{"type":"listItem--attributed","attrs":{"id":"li4"}}]
+ok   nested list: outdent (lift)
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 2 | del@bulletList#ul2 ins@listItem#li3 attrs(id)@listItem#li3 ins@paragraph#li3p attrs(id)@paragraph#li3p | deleted [{"type":"bulletList","attrs":{"id":"ul2"}}]
+ok   list type toggle bullet → ordered
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | del@bulletList#ul ins@orderedList#ytrpgku4 attrs(id)@orderedList#ytrpgku4 attrs(start)@orderedList#ytrpgku4 attrs(type)@orderedList#ytrpgku4 ins@listItem#li1 attrs(id)@listItem#li1 ins@paragraph#li1p | deleted [{"type":"bulletList","attrs":{"id":"ul"}}]
+ok   deleted list item with a nested list (listItem--attributed)
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | del@listItem--attributed#li2 | deleted [{"type":"listItem--attributed","attrs":{"id":"li2"}}]
+ok   deleted blockquote (blockquote--attributed)
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | del@blockquote--attributed#q | deleted [{"type":"blockquote--attributed","attrs":{"id":"q"}}]
+ok   agent replaces a callout's paragraph text (container kept)
+     want true | check valid | view ok, valid, sameAsHeadless true | live unchanged true | N 1 | del@paragraph#cop ins@paragraph#cop
+
+passed 26/26

@@ -1,0 +1,189 @@
+
+== document / revert / undo keep ==
+  sizes {"V0":72028,"live":72377,"restoreUpdate":1142,"restoreLogRows":1,"provenanceBytes":3032}  ms {"compute":14.8,"applyAtHost":0.4}  doc {"topLevelBlocks":301,"ids":1151,"chars":23020}
+  ok   replicas converge (human, agent 1, agent 2)
+  ok   tab t1 equals V0 except the concurrent edit (no other block differs)
+  ok   concurrent edit in kept content survives (s10p2 ends with " [concurrent]")
+  ok   concurrent edit into removed content is dropped (CRDT rule: nA1 gone)
+  ok   concurrent insert inside rewritten text (s5p2) survives; the rest is V0
+  ok   moved block s11p1 back at its V0 place; th1 mark span back to "bold words"
+  ok   replaced paragraph: s20p2 back exactly as V0, nB gone, the concurrent edit into nB not grafted into s20p2
+  ok   block ids in V0 order, none duplicated
+  ok   deleted paragraph s2p4 back
+  ok   heading s3h level back to 2
+  ok   task s0ti1 unchecked again
+  ok   callout s1co tone back to info
+  ok   bold in s4h removed
+  ok   code block s8c text and language back
+  ok   table cell s7r1c1p back
+  ok   tab t2 title back to "Appendix"
+  ok   tab t2 body equals V0 (x3 back, x2 text back)
+  ok   tab t3 (created since) gone
+  ok   thread th2 (resolved since) unresolved again
+  ok   thread th3 (created since) gone
+  ok   comment marks: th1 and th2 present, th3 gone
+  ok   threads map equals V0
+  ok   human editor shows the restored doc (= host t1), doc.check() valid
+  ok   diff L→restored attributes every change to the restorer (or the concurrent agent)
+  ok   untouched paragraph s12p2: editors = import only  → [{"who":"import","at":"09:00:01","kinds":["ins"]}]
+  ok   restored paragraph s2p4: credited to the restorer  → [{"who":"human:restore","at":"09:00:40","kinds":["ins"]}]
+  ok   s10p2: import + agent 2 (concurrent), not the restorer  → [{"who":"agent:session-2","at":"09:00:41","kinds":["ins"]},{"who":"import","at":"09:00:01","kinds":["ins"]}]
+  FAIL undo after restore (policy keep): no undo step duplicates a block id  → [{"step":0,"dups":["s2p4"],"changedVsRestored":[]},{"step":1,"dups":["s2p4"],"changedVsRestored":[]}]
+  passed 27/28
+  undo after restore: {"stackBefore":26,"firstUndoReturned":true,"dupSteps":[{"step":0,"dups":["s2p4"],"changedVsRestored":[]},{"step":1,"dups":["s2p4"],"changedVsRestored":[]}],"steps":2}
+
+== document / revert / undo clear ==
+  sizes {"V0":72028,"live":72379,"restoreUpdate":1142,"restoreLogRows":1,"provenanceBytes":3117}  ms {"compute":7.5,"applyAtHost":0.4}  doc {"topLevelBlocks":300,"ids":1150,"chars":23020}
+  ok   replicas converge (human, agent 1, agent 2)
+  ok   tab t1 equals V0 except the concurrent edit (no other block differs)
+  ok   concurrent edit in kept content survives (s10p2 ends with " [concurrent]")
+  ok   concurrent edit into removed content is dropped (CRDT rule: nA1 gone)
+  ok   concurrent insert inside rewritten text (s5p2) survives; the rest is V0
+  ok   moved block s11p1 back at its V0 place; th1 mark span back to "bold words"
+  ok   replaced paragraph: s20p2 back exactly as V0, nB gone, the concurrent edit into nB not grafted into s20p2
+  ok   block ids in V0 order, none duplicated
+  ok   deleted paragraph s2p4 back
+  ok   heading s3h level back to 2
+  ok   task s0ti1 unchecked again
+  ok   callout s1co tone back to info
+  ok   bold in s4h removed
+  ok   code block s8c text and language back
+  ok   table cell s7r1c1p back
+  ok   tab t2 title back to "Appendix"
+  ok   tab t2 body equals V0 (x3 back, x2 text back)
+  ok   tab t3 (created since) gone
+  ok   thread th2 (resolved since) unresolved again
+  ok   thread th3 (created since) gone
+  ok   comment marks: th1 and th2 present, th3 gone
+  ok   threads map equals V0
+  ok   human editor shows the restored doc (= host t1), doc.check() valid
+  ok   diff L→restored attributes every change to the restorer (or the concurrent agent)
+  ok   untouched paragraph s12p2: editors = import only  → [{"who":"import","at":"09:00:01","kinds":["ins"]}]
+  ok   restored paragraph s2p4: credited to the restorer  → [{"who":"human:restore","at":"09:00:40","kinds":["ins"]}]
+  ok   s10p2: import + agent 2 (concurrent), not the restorer  → [{"who":"agent:session-2","at":"09:00:41","kinds":["ins"]},{"who":"import","at":"09:00:01","kinds":["ins"]}]
+  ok   undo after restore (policy clear): no undo step duplicates a block id
+  ok   policy clear: undo is a no-op and the restored doc stays
+  ok   restore of the pre-restore version gives L back exactly (the concurrent edits, made after L, are undone too)
+  passed 30/30
+  undo after restore: {"stackBefore":26,"firstUndoReturned":false,"dupSteps":[],"steps":1}
+
+== deck / revert ==
+  sizes {"V0":8460,"live":7913,"restoreUpdate":951}  ms {"compute":0.77}
+  ok   replicas converge
+  ok   slide s3 (deleted since) back with its 5 elements, notes and text
+  ok   slide s13 (added since) gone
+  ok   moved element s1/e2 back
+  ok   deck title back
+  ok   slide order s2 back
+  ok   notes s4 back
+  ok   element text s6/e3 back
+  ok   deleted element s7/e4 back
+  ok   thread dk1 unresolved
+  ok   concurrent move s8/e1 survives
+  ok   concurrent notes edit s9 survives
+  ok   deck equals V0 plus the concurrent edits (deep)
+  passed 13/13
+
+== document / diff / undo clear ==
+  sizes {"V0":72028,"live":72373,"restoreUpdate":1124,"restoreLogRows":1,"provenanceBytes":3096}  ms {"compute":26.8,"applyAtHost":0.3}  doc {"topLevelBlocks":300,"ids":1150,"chars":23039}
+  ok   replicas converge (human, agent 1, agent 2)
+  FAIL tab t1 equals V0 except the concurrent edit (no other block differs)  → s20p2
+  ok   concurrent edit in kept content survives (s10p2 ends with " [concurrent]")
+  ok   concurrent edit into removed content is dropped (CRDT rule: nA1 gone)
+  ok   concurrent insert inside rewritten text (s5p2) survives; the rest is V0
+  ok   moved block s11p1 back at its V0 place; th1 mark span back to "bold words"
+  FAIL replaced paragraph: s20p2 back exactly as V0, nB gone, the concurrent edit into nB not grafted into s20p2  → {"type":"paragraph","attrs":{"id":"s20p2"},"content":[{"type":"text","text":"[into-replacement] Callout version budget b
+  ok   block ids in V0 order, none duplicated
+  ok   deleted paragraph s2p4 back
+  ok   heading s3h level back to 2
+  ok   task s0ti1 unchecked again
+  ok   callout s1co tone back to info
+  ok   bold in s4h removed
+  ok   code block s8c text and language back
+  ok   table cell s7r1c1p back
+  ok   tab t2 title back to "Appendix"
+  ok   tab t2 body equals V0 (x3 back, x2 text back)
+  ok   tab t3 (created since) gone
+  ok   thread th2 (resolved since) unresolved again
+  ok   thread th3 (created since) gone
+  ok   comment marks: th1 and th2 present, th3 gone
+  ok   threads map equals V0
+  ok   human editor shows the restored doc (= host t1), doc.check() valid
+  ok   diff L→restored attributes every change to the restorer (or the concurrent agent)
+  ok   untouched paragraph s12p2: editors = import only  → [{"who":"import","at":"09:00:01","kinds":["ins"]}]
+  ok   restored paragraph s2p4: credited to the restorer  → [{"who":"human:restore","at":"09:00:40","kinds":["ins"]}]
+  ok   s10p2: import + agent 2 (concurrent), not the restorer  → [{"who":"agent:session-2","at":"09:00:41","kinds":["ins"]},{"who":"import","at":"09:00:01","kinds":["ins"]}]
+  ok   undo after restore (policy clear): no undo step duplicates a block id
+  ok   policy clear: undo is a no-op and the restored doc stays
+  ok   restore of the pre-restore version gives L back exactly (the concurrent edits, made after L, are undone too)
+  passed 28/30
+  undo after restore: {"stackBefore":26,"firstUndoReturned":false,"dupSteps":[],"steps":1}
+
+== deck / diff ==
+  sizes {"V0":8461,"live":7918,"restoreUpdate":963}  ms {"compute":3.28}
+  ok   replicas converge
+  ok   slide s3 (deleted since) back with its 5 elements, notes and text
+  ok   slide s13 (added since) gone
+  ok   moved element s1/e2 back
+  ok   deck title back
+  ok   slide order s2 back
+  ok   notes s4 back
+  ok   element text s6/e3 back
+  ok   deleted element s7/e4 back
+  ok   thread dk1 unresolved
+  ok   concurrent move s8/e1 survives
+  ok   concurrent notes edit s9 survives
+  ok   deck equals V0 plus the concurrent edits (deep)
+  passed 13/13
+
+== document / diff-by-id / undo clear ==
+  sizes {"V0":72028,"live":72382,"restoreUpdate":1164,"restoreLogRows":1,"provenanceBytes":3146}  ms {"compute":39.2,"applyAtHost":1.6}  doc {"topLevelBlocks":300,"ids":1150,"chars":23020}
+  ok   replicas converge (human, agent 1, agent 2)
+  ok   tab t1 equals V0 except the concurrent edit (no other block differs)
+  ok   concurrent edit in kept content survives (s10p2 ends with " [concurrent]")
+  ok   concurrent edit into removed content is dropped (CRDT rule: nA1 gone)
+  ok   concurrent insert inside rewritten text (s5p2) survives; the rest is V0
+  ok   moved block s11p1 back at its V0 place; th1 mark span back to "bold words"
+  ok   replaced paragraph: s20p2 back exactly as V0, nB gone, the concurrent edit into nB not grafted into s20p2
+  ok   block ids in V0 order, none duplicated
+  ok   deleted paragraph s2p4 back
+  ok   heading s3h level back to 2
+  ok   task s0ti1 unchecked again
+  ok   callout s1co tone back to info
+  ok   bold in s4h removed
+  ok   code block s8c text and language back
+  ok   table cell s7r1c1p back
+  ok   tab t2 title back to "Appendix"
+  ok   tab t2 body equals V0 (x3 back, x2 text back)
+  ok   tab t3 (created since) gone
+  ok   thread th2 (resolved since) unresolved again
+  ok   thread th3 (created since) gone
+  ok   comment marks: th1 and th2 present, th3 gone
+  ok   threads map equals V0
+  ok   human editor shows the restored doc (= host t1), doc.check() valid
+  ok   diff L→restored attributes every change to the restorer (or the concurrent agent)
+  ok   untouched paragraph s12p2: editors = import only  → [{"who":"import","at":"09:00:01","kinds":["ins"]}]
+  ok   restored paragraph s2p4: credited to the restorer  → [{"who":"human:restore","at":"09:00:40","kinds":["ins"]}]
+  ok   s10p2: import + agent 2 (concurrent), not the restorer  → [{"who":"agent:session-2","at":"09:00:41","kinds":["ins"]},{"who":"import","at":"09:00:01","kinds":["ins"]}]
+  ok   undo after restore (policy clear): no undo step duplicates a block id
+  ok   policy clear: undo is a no-op and the restored doc stays
+  ok   restore of the pre-restore version gives L back exactly (the concurrent edits, made after L, are undone too)
+  passed 30/30
+  undo after restore: {"stackBefore":26,"firstUndoReturned":false,"dupSteps":[],"steps":1}
+
+== deck / diff-by-id ==
+  sizes {"V0":8461,"live":7920,"restoreUpdate":965}  ms {"compute":3.23}
+  ok   replicas converge
+  ok   slide s3 (deleted since) back with its 5 elements, notes and text
+  ok   slide s13 (added since) gone
+  ok   moved element s1/e2 back
+  ok   deck title back
+  ok   slide order s2 back
+  ok   notes s4 back
+  ok   element text s6/e3 back
+  ok   deleted element s7/e4 back
+  ok   thread dk1 unresolved
+  ok   concurrent move s8/e1 survives
+  ok   concurrent notes edit s9 survives
+  ok   deck equals V0 plus the concurrent edits (deep)
+  passed 13/13
