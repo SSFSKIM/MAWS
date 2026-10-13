@@ -57,7 +57,8 @@ Chips are inline:
 
 - `artifact_edit`: at most 100 ops per batch; `replace_text`'s `old` and `new` and a cell's markdown at most 20,000 characters each; `replace_block`'s and `insert`'s markdown at most 1,000,000 characters.
 - Keep a block's text under 20,000 characters: split long passages into paragraphs.
-- A tab holding 2,000 top-level blocks takes no more inserts; start another document, or ask the user for a new tab.
+- A tab holds at most 2,000 top-level blocks: a batch, or a create's content, that would leave a tab with more is refused (a tab the user typed past it can still be edited without growing it). Start another document, or ask the user for a new tab.
+- A document holds at most 50 tabs; the user adds them.
 - `artifact_read` returns 1 to 1,000 top-level blocks per call, 200 by default; read on from the `next` id it returns.
 - An image or other asset is at most 16 MiB.
 

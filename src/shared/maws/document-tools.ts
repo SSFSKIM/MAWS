@@ -16,7 +16,8 @@ export const DOCUMENT_LIMITS = {
   opsPerBatch: 100,
   textChars: 20_000, // replace_text's old and new, a cell's markdown, a reply
   markdownChars: 1_000_000, // replace_block's and insert's markdown, a create's content
-  blocksPerTab: 2_000, // a tab holding this many top-level blocks takes no more inserts
+  blocksPerTab: 2_000, // a batch or a create that would leave a tab with more top-level blocks is refused
+  tabs: 50, // a document's tabs (the user adds them; no tool makes one)
   readCount: 200,
   readCountMax: 1_000,
 } as const;

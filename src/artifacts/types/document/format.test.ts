@@ -55,5 +55,6 @@ describe('the document format reference', () => {
     const limits = format.split('## Limits')[1].split('## Examples')[0];
     const number = (value: number) => value.toLocaleString('en-US');
     for (const value of [DOCUMENT_LIMITS.opsPerBatch, DOCUMENT_LIMITS.textChars, DOCUMENT_LIMITS.markdownChars, DOCUMENT_LIMITS.blocksPerTab, DOCUMENT_LIMITS.readCountMax, DOCUMENT_LIMITS.readCount]) expect(limits).toContain(number(value));
+    expect(limits).toContain(`at most ${DOCUMENT_LIMITS.tabs} tabs`);
   });
 });
