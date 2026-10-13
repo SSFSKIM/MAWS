@@ -25,11 +25,16 @@ const STYLE_BLOCK = /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi;
 const TAG = /<[a-zA-Z][^\s/>]*((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
 const ATTRIBUTE = /([^\s"'>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
 const ENTITIES: Record<string, string> = { amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', nbsp: '\u00a0' };
+// A numeric reference's character as HTML parses it: zero, a surrogate or one past U+10FFFF is U+FFFD, never an error.
+function codePoint(body: string): string {
+  const value = body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : Number(body.slice(1));
+  const valid = Number.isInteger(value) && value > 0 && value <= 0x10ffff && !(value >= 0xd800 && value <= 0xdfff);
+  return valid ? String.fromCodePoint(value) : '\ufffd';
+}
+// The character references of an attribute value: numeric ones, and the few named ones a URL plausibly holds (a fuller
+// table is not needed once A's export context lists the assets).
 const decodeEntities = (text: string) =>
-  text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, body: string) => {
-    if (body[0] === '#') return String.fromCodePoint(body[1] === 'x' || body[1] === 'X' ? parseInt(body.slice(2), 16) : Number(body.slice(1)));
-    return ENTITIES[body.toLowerCase()] ?? entity;
-  });
+  text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, body: string) => (body[0] === '#' ? codePoint(body) : (ENTITIES[body.toLowerCase()] ?? entity)));
 
 /**
  * The URLs a canon HTML file loads, read as the canon frames read them (`rewriteHtmlAssets`, which has the renderer's
@@ -43,10 +48,10 @@ function htmlUrls(html: string): string[] {
   for (const [, attributes = ''] of markup.replace(STYLE_BLOCK, '').matchAll(TAG)) {
     for (const [, rawName = '', double, single, bare] of attributes.matchAll(ATTRIBUTE)) {
       const name = rawName.toLowerCase();
-      const value = decodeEntities(double ?? single ?? bare ?? '');
-      if (URL_ATTRS.has(name)) urls.push(value);
-      else if (name === 'srcset') urls.push(...value.split(',').map((candidate) => candidate.trim().split(/\s+/)[0] ?? ''));
-      else if (name === 'style' || PRESENTATION_ATTRS.has(name)) urls.push(...urlsIn(value));
+      const value = () => decodeEntities(double ?? single ?? bare ?? ''); // only the attributes read are decoded
+      if (URL_ATTRS.has(name)) urls.push(value());
+      else if (name === 'srcset') urls.push(...value().split(',').map((candidate) => candidate.trim().split(/\s+/)[0] ?? ''));
+      else if (name === 'style' || PRESENTATION_ATTRS.has(name)) urls.push(...urlsIn(value()));
     }
   }
   return urls;
@@ -68,7 +73,7 @@ export function claudeExportAssetRefs(doc: Doc): string[] {
   const { law, tokens, files } = readExportable(doc);
   const refs = new Set<string>();
   const add = (url: string) => {
-    const ref = assetPathOf(url);
+    const ref = assetPathOf(url.trim()); // as the renderer's `assetUrlOf` takes it
     if (ref) refs.add(ref);
   };
   for (const face of systemFaces(files[DOCUMENT_CSS_PATH], tokens)) for (const ref of face.refs) refs.add(ref);
