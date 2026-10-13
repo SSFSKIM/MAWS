@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { validateClaudeTokens } from '@artifacts/design-system/claude-grammar';
 import { writeSystem } from '@artifacts/design-system/model';
-import { DEFAULT_SYSTEMS } from '@artifacts/types/design_system/defaults';
+import { DEFAULT_SYSTEMS, type DefaultSystemSource } from '@artifacts/types/design_system/defaults';
 import { newDoc, stateV2 } from '@artifacts/yjs';
 import { artifactExportName } from '@shared/maws/tools';
 
@@ -22,7 +22,8 @@ const ID = '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b';
 // `official` as bundled; its document.css read from the file, since the test runner gives a stylesheet's `?raw` import as ''
 const OFFICIAL_CSS = 'components/document.css';
 const bundled = DEFAULT_SYSTEMS.find((system) => system.key === 'official')!;
-const official = { ...bundled, files: { ...bundled.files, [OFFICIAL_CSS]: readFileSync(new URL(`../../artifacts/types/design_system/defaults/official/${OFFICIAL_CSS}`, import.meta.url), 'utf8') } };
+const officialCss = readFileSync(new URL(`../../artifacts/types/design_system/defaults/official/${OFFICIAL_CSS}`, import.meta.url), 'utf8');
+const official: DefaultSystemSource = { ...bundled, files: { ...bundled.files, [OFFICIAL_CSS]: officialCss } };
 const bytes = (text: string) => new TextEncoder().encode(text);
 
 let root: string;

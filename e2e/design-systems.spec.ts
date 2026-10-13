@@ -9,16 +9,19 @@
 //   of a document pinned to an older revision of its system renders that revision while the live fixture shows the new
 //   values (11); deleting the system is refused naming the document, succeeds once the page's sheet moves it, and the
 //   retained version still renders the pinned state (13);
-// - the defaults chosen in Settings › Artifacts reach the host (main's `artifacts.setDefaults`): a document's own
-//   system, else its Space's default, else the owner's governs the pin its version is written with (12, as A's store
-//   chain holds it until A's M7 registers D's chain: the house link and a deleted id's fall-through wait for it);
+// - D's chain, registered in A's store, governs the pin a version is written with: with no defaults, the house system;
+//   then the defaults chosen in Settings › Artifacts (main's `artifacts.setDefaults`): a document's own system, else its
+//   Space's default, else the owner's; a deleted default falls through to the next link (12);
+// - `official`'s bundled face sets its page's Type section through the app's CSP, a canon frame shows the system's
+//   image asset, and the header's "Export for Claude" writes the system as a zip of Claude's files (A's export service;
+//   D12);
 // - the agent's `ask` with design_system questions, over C3's replay of a journal derived from E1's recorded blocking ask
 //   with only the ask's questions and its recorded answers rewritten (the replay matches the host's answers by request
 //   id; what the sheet submitted is asserted on the journal's own rows): the sheet lists the seeded systems with their
 //   swatches and origin, offers "Build one with me" where allowed, and answers `{designSystemId, name}` and
 //   `{create: true}` (14).
-// Not here: the bundled faces and canon images (behind A's CSP, Decision Log 23), the Claude export and the chain's
-// registration (M7's second part), and the document and deck restyle through B's and C's own editors (P3-F).
+// Not here: the document and deck restyle through B's and C's own editors (P3-F).
+import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -244,13 +247,98 @@ test('a document fixture restyles with its system, its retained version keeps th
   expect(launch!.consoleErrors()).toEqual([]);
 });
 
-// Acceptance 12 over the settings, as far as A's store chain holds it today: a document's own system, else its Space's
-// default, else the owner's (A's M7 registers D's chain, which adds the house link and a deleted id's fall-through).
-test('the defaults chosen in Settings reach the host: a document’s own system, else its Space’s, else the owner’s governs its pin', async () => {
+// A one-pixel PNG, the canon's image asset.
+const PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+const unzip = (...args: string[]) => execFileSync('/usr/bin/unzip', args, { encoding: 'utf8' });
+
+// What A's M7 opened (its CSP admits `maws-artifact:` in img-src and font-src) and registered (the exporter registry).
+test('Official’s bundled face sets its Type section, a canon frame shows an image asset, and the page exports the system for Claude', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const official = (await systems(page)).find((s) => s.title === 'Official')!;
+  // a canon component that shows an image the system holds (written through the store's e2e seam)
+  await page.evaluate(
+    ([id, b64]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke('artifacts.uploadAsset', { artifactId: id, name: 'mark.png', mime: 'image/png', bytes: Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)) }),
+    [official.id, PIXEL_PNG] as const,
+  );
+  const MARK = '<div class="mark"><img src="assets/mark.png" alt="The office mark" width="24" height="24"></div>';
+  await ok(page, 'artifacts.testWrite', { artifactId: official.id, opId: 'ds-e2e-mark', ops: [{ op: 'setAttr', root: 'files', key: 'components/mark.html', value: MARK }] });
+  const tab = await openSystemPage(page, 'Official', official.id);
+
+  // the body role's document specimen is set in Noto Serif KR, loaded from the system's assets under its private family
+  // name (Decision Log 21, 24), so its Hangul is drawn in the bundled face
+  const specimen = tab.locator('[data-ds-section="type"] [data-role="body"] .dsp-specimen p.ds-type-body').first();
+  const alias = await specimen.evaluate((element) =>
+    getComputedStyle(element).fontFamily.split(',').map((name) => name.trim().replace(/^["']|["']$/g, '')).find((name) => name.startsWith('ds-face-')) ?? null,
+  );
+  expect(alias, 'the specimen names the system’s face').not.toBeNull();
+  const faceStatus = () =>
+    page.evaluate(async (family) => {
+      const faces = await document.fonts.load(`400 16px "${family}"`, '밀도'); // one per scope that declares it
+      return { loaded: faces.length > 0 && faces.every((face) => face.status === 'loaded'), drawn: document.fonts.check(`400 16px "${family}"`, '밀도') };
+    }, alias!);
+  await expect.poll(faceStatus, { timeout: 15_000, message: 'Noto Serif KR loads through the app’s CSP' }).toEqual({ loaded: true, drawn: true });
+
+  // the canon frame draws the image from the system's assets (its srcdoc's img-src and the app's CSP admit the scheme)
+  const markFrame = tab.locator('[data-ds-section="canon"] iframe[title="components/mark.html"]');
+  await expect(markFrame).toHaveAttribute('srcdoc', /maws-artifact:\/\/[^"]*assets\/mark\.png/);
+  const markImage = async () => {
+    const frame = await (await markFrame.elementHandle())!.contentFrame();
+    return frame!.evaluate(() => {
+      const image = document.querySelector('img');
+      return image ? { complete: image.complete, width: image.naturalWidth } : null;
+    });
+  };
+  await expect.poll(markImage, { timeout: 15_000, message: 'the canon frame shows the image asset' }).toEqual({ complete: true, width: 1 });
+
+  // Export for Claude (the header's export, A's export service, D's exporter): one zip of Claude's files under the store
+  await page.getByRole('button', { name: 'Export', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Export for Claude' }).click();
+  const told = page.locator('[data-toast-viewport]').getByText(/^Exported for Claude to /);
+  await expect(told).toBeVisible({ timeout: 30_000 });
+  const path = (await told.textContent())!.replace(/^Exported for Claude to /, '').trim();
+  expect(path.startsWith(join(launch!.userData, 'artifacts', official.id, 'exports'))).toBe(true);
+  expect(path).toMatch(/\/\d+-claude\.zip$/);
+  expect(unzip('-t', path)).toContain('No errors detected');
+  expect(unzip('-Z1', path).trim().split('\n').sort()).toEqual([
+    'README.md', 'assets/OFL.txt', 'assets/mark.png', 'fonts/NotoSerifKR-Bold-full.woff2', 'fonts/NotoSerifKR-Regular-full.woff2', 'tokens.json',
+  ]);
+  expect(unzip('-p', path, 'README.md')).toBe(readFileSync(join(REPO_ROOT, 'src/artifacts/types/design_system/defaults/official/DESIGN.md'), 'utf8'));
+  const tokens = JSON.parse(unzip('-p', path, 'tokens.json')) as { name: string; color: { tokens: { name: string; value: string }[] }; type: { fonts: unknown[] } };
+  expect(tokens.name).toBe('Official');
+  expect(tokens.color.tokens.find((t) => t.name === 'bg')!.value.slice(0, 7)).toBe(bundledHex('official', 'bg'));
+  expect(tokens.type.fonts).toEqual([
+    { family: 'Noto Serif KR', file: 'NotoSerifKR-Regular-full.woff2', weight: '400', style: 'normal' },
+    { family: 'Noto Serif KR', file: 'NotoSerifKR-Bold-full.woff2', weight: '700', style: 'normal' },
+  ]);
+  const bundledFont = readFileSync(join(REPO_ROOT, 'src/artifacts/types/design_system/defaults/official/assets/NotoSerifKR-Regular-full.woff2'));
+  expect(Buffer.from(execFileSync('/usr/bin/unzip', ['-p', path, 'fonts/NotoSerifKR-Regular-full.woff2'], { maxBuffer: 16 * 1024 * 1024 })).equals(bundledFont)).toBe(true);
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// Acceptance 12 through D's chain in A's store and the settings: with no defaults the house system; a document's own
+// system, else its Space's default, else the owner's; a deleted default falls through to the next link.
+test('the chain governs the pin: the house system with no defaults, then a document’s own system, its Space’s, the owner’s, and past a deleted default', async () => {
   test.setTimeout(120_000);
   const page = await ready();
   const byTitle = Object.fromEntries((await systems(page)).map((s) => [s.title, s.id])) as Record<string, string>;
   const { space } = await ok<{ space: { id: string } }>(page, 'spaces.create', { name: 'Chemistry' });
+
+  // three documents that differ only in where their system comes from
+  const create = async (title: string, placement: { spaceId?: string; designSystemId?: string }) => {
+    const { artifact } = await ok<{ artifact: Row }>(page, 'artifacts.create', { kind: 'document', title, ...placement });
+    await ok(page, 'artifacts.testWrite', { artifactId: artifact.id, opId: `ds-e2e-${title}`, ops: [{ op: 'insertText', index: 0, text: `${title}.` }] });
+    return artifact.id;
+  };
+  const own = await create('Letter home', { spaceId: space.id, designSystemId: byTitle.Official });
+  const inSpace = await create('Lab notes', { spaceId: space.id });
+  const loose = await create('Syllabus', {});
+  const pinOf = async (artifactId: string) => (await saveVersion(page, artifactId, `check ${Date.now()}`)).designSystemRef?.id ?? null;
+  // the house link: no default is set, so a document with no system of its own pins to the house system (A's own chain
+  // pinned nothing here)
+  expect(await pinOf(loose), 'no defaults: the house system').toBe(byTitle.MAWS);
+  expect(await pinOf(inSpace), 'a Space with no default: the house system').toBe(byTitle.MAWS);
+
   await menu(launch!.app, 'settings.open');
   const panel = page.locator('[data-region="main"]').getByRole('tabpanel');
   const owner = panel.getByRole('combobox', { name: 'Default design system' });
@@ -264,17 +352,7 @@ test('the defaults chosen in Settings reach the host: a document’s own system,
   const settingsFile = join(launch!.userData, 'settings.json');
   await expect.poll(() => (JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: byTitle.Classroom, spaceDesignSystems: { [space.id]: byTitle.MAWS } });
 
-  // three documents that differ only in where their system comes from
-  const create = async (title: string, placement: { spaceId?: string; designSystemId?: string }) => {
-    const { artifact } = await ok<{ artifact: Row }>(page, 'artifacts.create', { kind: 'document', title, ...placement });
-    await ok(page, 'artifacts.testWrite', { artifactId: artifact.id, opId: `ds-e2e-${title}`, ops: [{ op: 'insertText', index: 0, text: `${title}.` }] });
-    return artifact.id;
-  };
-  const own = await create('Letter home', { spaceId: space.id, designSystemId: byTitle.Official });
-  const inSpace = await create('Lab notes', { spaceId: space.id });
-  const loose = await create('Syllabus', {});
   // main pushes the defaults on every settings change; a pin follows them once the host has them
-  const pinOf = async (artifactId: string) => (await saveVersion(page, artifactId, `check ${Date.now()}`)).designSystemRef?.id ?? null;
   await expect.poll(() => pinOf(loose), { timeout: 10_000, message: 'no Space: the owner’s default' }).toBe(byTitle.Classroom);
   await expect.poll(() => pinOf(inSpace), { timeout: 10_000, message: 'in the Space: its default' }).toBe(byTitle.MAWS);
   expect(await pinOf(own), 'its own system first').toBe(byTitle.Official);
@@ -287,6 +365,17 @@ test('the defaults chosen in Settings reach the host: a document’s own system,
   await chemistry.selectOption({ label: 'Use my default' });
   await expect.poll(() => (JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: byTitle.Classroom, spaceDesignSystems: {} });
   await expect.poll(() => pinOf(inSpace), { timeout: 10_000, message: 'the Space has none: the owner’s default' }).toBe(byTitle.Classroom);
+
+  // a deleted default falls through: the Space's to the owner's, the owner's to the house system, the settings unchanged
+  await chemistry.selectOption({ label: 'Official' });
+  await expect.poll(() => pinOf(inSpace), { timeout: 10_000, message: 'in the Space: its new default' }).toBe(byTitle.Official);
+  await ok(page, 'artifacts.update', { artifactId: own, designSystemId: null }); // the one document naming Official moves
+  await ok(page, 'artifacts.delete', { artifactId: byTitle.Official });
+  expect(await pinOf(inSpace), 'its Space’s default deleted: the owner’s').toBe(byTitle.Classroom);
+  await ok(page, 'artifacts.delete', { artifactId: byTitle.Classroom });
+  expect(await pinOf(loose), 'the owner’s default deleted: the house system').toBe(byTitle.MAWS);
+  expect(await pinOf(inSpace), 'both deleted: the house system').toBe(byTitle.MAWS);
+  expect((JSON.parse(readFileSync(settingsFile, 'utf8')) as { artifacts: unknown }).artifacts).toEqual({ defaultDesignSystem: byTitle.Classroom, spaceDesignSystems: { [space.id]: byTitle.Official } });
   expect(launch!.consoleErrors()).toEqual([]);
 });
 
