@@ -18,6 +18,8 @@ import {
   DOCUMENT_READ_FIELDS,
   ArtifactScreenshotInputSchema,
   ArtifactScreenshotResultSchema,
+  ASK_MODALITIES, // P3-D
+  AskAnswerSchema, // P3-D
   AskInputSchema,
   AskResultSchema,
   MAWS_SERVER_NAME,
@@ -56,7 +58,7 @@ describe('X9: the maws server and its twelve tools', () => {
       'Deliver files to the user inside MAWS; without this tool, write the file and tell the user its path. Each delivered file becomes a row in the MAWS transcript with your caption and buttons to open it or reveal it in Finder; use it when you have produced something the user should look at (a PDF, an HTML page, an image, a document). Paths may be absolute or relative to the working directory and must name existing files. Returns the deliverable ids MAWS recorded.',
     );
     expect(MAWS_TOOLS.ask.description).toBe(
-      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), or "repository" (one of the user\'s MAWS projects). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile.',
+      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), "repository" (one of the user\'s MAWS projects), or "design_system" (one of the user\'s design systems, answered with its designSystemId and name; unless allowCreate is false, the user may answer create: true instead, asking you to build a new one with them). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile.',
     );
     expect(MAWS_TOOLS.show_pane.description).toBe(
       'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "deliverable", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), a deliverable id for deliverable, a URL for browser. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
@@ -310,3 +312,31 @@ describe('E4a: the browser refusal', () => {
   });
 });
 // E4a end
+// P3-D start: the `design_system` modality (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D13; ledger X25)
+describe('P3-D: the design_system ask', () => {
+  const ok = (question: Record<string, unknown>) => AskInputSchema.safeParse({ questions: [{ question: 'Q?', ...question }] }).success;
+
+  it('is a modality, and allowCreate is its own field', () => {
+    expect(ASK_MODALITIES).toContain('design_system');
+    expect(ok({ modality: 'design_system' })).toBe(true);
+    expect(ok({ modality: 'design_system', allowCreate: false })).toBe(true);
+    expect(ok({ modality: 'design_system', options: [{ label: 'x' }] })).toBe(false);
+    expect(ok({ modality: 'design_system', allowCreate: 'yes' })).toBe(false);
+    expect(ok({ modality: 'choice', options: [{ label: 'a' }], allowCreate: true })).toBe(false);
+    // validators never default: allowCreate stays absent when not sent
+    expect(AskInputSchema.parse({ questions: [{ question: 'Q?', modality: 'design_system' }] })).toEqual({ questions: [{ question: 'Q?', modality: 'design_system' }] });
+    const listed = mawsToolList().find((tool) => tool.name === 'ask')!.inputSchema as { properties: { questions: { items: { properties: { modality: { enum: string[] }; allowCreate: unknown } } } } };
+    expect(listed.properties.questions.items.properties.modality.enum).toContain('design_system');
+    expect(listed.properties.questions.items.properties.allowCreate).toEqual({ type: 'boolean' });
+  });
+
+  it('is answered {designSystemId} with the name, or {create: true}', () => {
+    const ID = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
+    const answer = (patch: Record<string, unknown>) => AskAnswerSchema.safeParse({ id: 'q1', question: 'Which system?', status: 'answered', ...patch }).success;
+    expect(answer({ designSystemId: ID, name: 'MAWS' })).toBe(true);
+    expect(answer({ create: true })).toBe(true);
+    expect(answer({ create: false })).toBe(false);
+    expect(answer({ designSystemId: 'maws' })).toBe(false); // an artifact id
+  });
+});
+// P3-D end

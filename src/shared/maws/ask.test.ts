@@ -122,6 +122,43 @@ describe('askAnswersProblem (residue 12: a mismatch is invalid input, never writ
     expect(askAnswersProblem(held, swap('q4', { value: '/r/assets' }))).toBe('question q4 (folder) needs a list value');
     expect(askAnswersProblem(held, swap('q1', { value: ['Red', 'Blue'] }))).toBe('question q1 is single-select and has 2 choices');
     expect(askAnswersProblem(held, swap('q3', { otherText: 'x' }))).toBe('question q3 carries otherText, which only a choice answer has');
-    expect(askAnswersProblem(held, swap('q3', { name: 'x' }))).toBe('question q3 carries name, which only a repository answer has');
+    expect(askAnswersProblem(held, swap('q3', { name: 'x' }))).toBe('question q3 carries name, which only a repository or design_system answer has'); // P3-D: a design system's name too
   });
 });
+
+// P3-D start: the `design_system` modality (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D13; ledger X25)
+describe('P3-D: a design_system question', () => {
+  const ID = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
+  const pick: AskQuestion = { id: 's1', question: 'Which design system?', header: 'System', modality: 'design_system' };
+  const noCreate: AskQuestion = { id: 's2', question: 'Which existing system?', modality: 'design_system', allowCreate: false };
+  const chosen: AskAnswer = { id: 's1', question: 'Which design system?', status: 'answered', designSystemId: ID, name: 'MAWS' };
+  const build: AskAnswer = { id: 's1', question: 'Which design system?', status: 'answered', create: true };
+
+  it('is answered with a system id (and its name) or create, never a value', () => {
+    expect(askAnswersProblem([pick], [chosen])).toBeNull();
+    expect(askAnswersProblem([pick], [{ ...chosen, name: undefined }])).toBeNull();
+    expect(askAnswersProblem([pick], [build])).toBeNull();
+    expect(askAnswersProblem([pick], [{ id: 's1', question: 'x', status: 'decide_for_me' }])).toBeNull();
+    expect(askAnswersProblem([pick], [{ id: 's1', question: 'x', status: 'answered' }])).toBe('question s1 is answered with neither a designSystemId nor create');
+    expect(askAnswersProblem([pick], [{ ...chosen, create: true }])).toBe('question s1 is answered with both a designSystemId and create');
+    expect(askAnswersProblem([pick], [{ ...chosen, value: ID }])).toBe('question s1 (design_system) carries a value; it is answered with designSystemId or create');
+    expect(askAnswersProblem([pick], [{ ...build, name: 'MAWS' }])).toBe('question s1 carries name without a designSystemId');
+  });
+
+  it('refuses create when the question did not allow it, and the fields elsewhere', () => {
+    expect(askAnswersProblem([noCreate], [{ ...build, id: 's2' }])).toBe('question s2 does not allow create');
+    expect(askAnswersProblem([noCreate], [{ ...chosen, id: 's2' }])).toBeNull();
+    expect(askAnswersProblem([pick], [{ id: 's1', question: 'x', status: 'skipped', designSystemId: ID }])).toBe('question s1 is skipped and carries a value');
+    expect(askAnswersProblem([pick], [{ id: 's1', question: 'x', status: 'skipped', create: true }])).toBe('question s1 is skipped and carries a value');
+    expect(askAnswersProblem([{ ...questions[2]!, id: 'q3' }], [{ id: 'q3', question: 'x', status: 'answered', value: 't', designSystemId: ID }])).toBe('question q3 carries designSystemId, which only a design_system answer has');
+    expect(askAnswersProblem([{ ...questions[2]!, id: 'q3' }], [{ id: 'q3', question: 'x', status: 'answered', value: 't', create: true }])).toBe('question q3 carries create, which only a design_system answer has');
+  });
+
+  it('reads in the steer as the system by name and id, or the build request', () => {
+    const text = askSteerText('a2', [pick, { ...pick, id: 's3', header: undefined }], [chosen, { ...build, id: 's3' }]);
+    expect(text.split('\n').slice(1, 3)).toEqual([`1. System — MAWS (${ID})`, '2. Which design system? — build a new one with me']);
+    expect(parseAskSteer(text)?.result.answers).toEqual([chosen, { ...build, id: 's3' }]);
+    expect(askSteerText('a3', [pick], [{ ...chosen, name: undefined }]).split('\n')[1]).toBe(`1. System — ${ID}`);
+  });
+});
+// P3-D end

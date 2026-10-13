@@ -11,6 +11,9 @@
 // `artifact_create` gains kinds, six tools are appended, and `artifact_update` is retired into `artifact_publish`
 // (`./artifact-update` keeps its schemas for the journals written before). P3-B, P3-C, P3-H and P3-D append after A:
 // a name to `MAWS_TOOL_NAMES`, its schemas, its `MAWS_TOOLS` entry and its refusals, each in a block of its own.
+// P3-D (D13 of docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md; ledger X25) gives `ask` a sixth modality,
+// `design_system` with its `allowCreate`, answered `{designSystemId, name?}` or `{create: true}`. E1's ask schemas are
+// declared before A's blocks and read at module load, so its lines sit in them, each marked `P3-D`.
 import * as z from 'zod';
 import { ArtifactKindSchema } from '../artifacts/entity'; // P3-A
 import { AppSessionIdSchema } from '../graph/ids'; // P2-E1
@@ -56,14 +59,15 @@ export const SendFileInputSchema = z.strictObject({
 });
 export type SendFileInput = z.infer<typeof SendFileInputSchema>;
 
-export const ASK_MODALITIES = ['choice', 'text', 'file', 'folder', 'repository'] as const;
+export const ASK_MODALITIES = ['choice', 'text', 'file', 'folder', 'repository', 'design_system' /* P3-D */] as const;
 export type AskModality = (typeof ASK_MODALITIES)[number];
 
 export const AskOptionSchema = z.strictObject({ label: z.string().min(1).max(200), description: z.string().max(500).optional() });
 
 // The fields that belong to one modality only; any of them on another modality is refused.
-const MODALITY_FIELDS: Record<'options' | 'multi' | 'allowOther' | 'multiple' | 'placeholder', readonly AskModality[]> = {
+const MODALITY_FIELDS: Record<'options' | 'multi' | 'allowOther' | 'multiple' | 'placeholder' | 'allowCreate', readonly AskModality[]> = {
   options: ['choice'], multi: ['choice'], allowOther: ['choice'], multiple: ['file', 'folder'], placeholder: ['text'],
+  allowCreate: ['design_system'], // P3-D
 };
 
 export const AskQuestionSchema = z
@@ -77,6 +81,7 @@ export const AskQuestionSchema = z
     allowOther: z.boolean().optional(), // default true
     multiple: z.boolean().optional(), // default false
     placeholder: z.string().max(200).optional(),
+    allowCreate: z.boolean().optional(), // P3-D: design_system; default true ("Build one with me" offered)
   })
   .superRefine((question, ctx) => {
     if (question.modality === 'choice' && question.options === undefined) ctx.addIssue({ code: 'custom', path: ['options'], message: 'a choice question needs options' });
@@ -227,10 +232,12 @@ export const AskAnswerSchema = z.strictObject({
   question: z.string(),
   status: z.enum(['answered', 'skipped', 'decide_for_me']),
   // choice: the chosen labels (one entry for single-select); text: the text; file and folder: absolute paths;
-  // repository: the project's directory
+  // repository: the project's directory; design_system: none (its answer is `designSystemId` or `create`)
   value: z.union([z.string(), z.array(z.string())]).optional(),
   otherText: z.string().optional(), // choice: what was typed under Other, present only when used
-  name: z.string().optional(), // repository: the project's name
+  name: z.string().optional(), // repository: the project's name; design_system: the chosen system's (P3-D)
+  designSystemId: z.uuid().optional(), // P3-D: design_system: the chosen system's artifact id
+  create: z.literal(true).optional(), // P3-D: design_system: the user asked to build a new one with the agent
 });
 export type AskAnswer = z.infer<typeof AskAnswerSchema>;
 
@@ -347,7 +354,7 @@ export const MAWS_TOOLS = {
   ask: {
     title: 'Ask questions',
     description:
-      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), or "repository" (one of the user\'s MAWS projects). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile.',
+      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), "repository" (one of the user\'s MAWS projects), or "design_system" (one of the user\'s design systems, answered with its designSystemId and name; unless allowCreate is false, the user may answer create: true instead, asking you to build a new one with them). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile.',
     input: AskInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
