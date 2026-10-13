@@ -89,3 +89,19 @@
 /* Check */
 .dsp-violations, .dsp-manual { display: flex; flex-direction: column; gap: calc(var(--space) * 2); margin: 0; padding-left: calc(var(--space) * 5); }
 .dsp-violation > div { margin-top: 2px; }
+
+/* The law's "Ask the agent to adopt it" (M6): a quiet button in the app's chrome. */
+.dsp-actions { display: flex; flex-direction: column; gap: calc(var(--space) * 2); }
+.dsp-actions > p { margin: 0; }
+.dsp-row { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--space) * 3); }
+.dsp-button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--bg-raised);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+}
+.dsp-button:hover:not(:disabled) { background: var(--bg-hover); }
+.dsp-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.dsp-button:disabled { color: var(--fg-faint); }

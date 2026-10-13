@@ -1,30 +1,25 @@
 // The Design System page in the app (Decision Log 16 and 17 of docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md):
 // the renderer-side body that mounts the portable page and registers what only the app has, the tab's header (X32) and
-// its Mark-up surface. It is the component L's `registerArtifactEditor` mounts in M6; until then the caller gives it
-// the system's open handle and the host.
+// its Mark-up surface. The editor L's `registerArtifactEditor` mounts (./editor.tsx) gives it the system's open handle,
+// the host and the app's handlers.
 //
 // The header (X32, final rule of G's M3): the system's name, the saved state of its replica, "Check against law",
-// "Set as my default" (its handler M6's, through settings 14; shown disabled until then) and the export "Export for
-// Claude". A registration outlives this body, so its actions read the tab's state, never this component's: the check's
-// request goes through a store keyed by the tab, the export through the host, the default through the given handler.
-// Every edit writes through to the replica, so there is nothing unsaved to guard on close.
+// "Set as my default" (settings 14; disabled when it is already the default, or without a handler), "Delete design
+// system…" (with a handler) and the export "Export for Claude". A registration outlives this body, so its actions read
+// the tab's state, never this component's: the check's request goes through a store keyed by the tab, the export
+// through the host, the default and the delete through the given handlers. Every edit writes through to the replica, so
+// there is nothing unsaved to guard on close. Hidden (`visible` false), the body reports nothing shown and offers no
+// Mark-up surface.
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { DesignSystemPage } from '@artifacts/design-system/page/DesignSystemPage';
+import type { AskAdopt } from '@artifacts/design-system/page/Law';
 import { usePageState } from '@artifacts/design-system/page/use-system';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost, useEditorHostScope, type EditorHostScope, type SavedState } from '../../panel/editor-host';
 import { toast } from '../../stores/notices';
-
-export const DESIGN_SYSTEM_COPY = {
-  untitled: 'Design system',
-  check: 'Check against law',
-  setDefault: 'Set as my default',
-  exportClaude: 'Export for Claude',
-  exported: (path: string) => `Exported for Claude to ${path}`,
-  exportFailed: (reason: string) => `Could not export for Claude: ${reason}`,
-} as const;
+import { DESIGN_SYSTEM_COPY } from './copy';
 
 // "Check against law" asks the tab's page to bring its check into view: a serial per tab, outside any component.
 const useCheckRequests = create<{ serials: Readonly<Record<string, number>> }>()(() => ({ serials: {} }));
@@ -52,14 +47,22 @@ export interface DesignSystemBodyProps {
   /** The system's replica, opened by the tab (L's `createState` in M6) and closed with it. */
   handle: DocumentHandle;
   host: Pick<ArtifactHost, 'assetUrl' | 'export'>;
-  /** "Set as my default": makes this system the owner's default (M6, settings 14). Absent, the action is disabled. */
+  /** "Set as my default": makes this system the owner's default (settings 14). Absent, the action is disabled. */
   onSetDefault?: () => void;
+  /** This system is the owner's default already: "Set as my default" is disabled. */
+  isDefault?: boolean;
+  /** "Delete design system…": the editor's delete sheet. Absent, no such action. */
+  onDelete?: () => void;
+  /** A system with no law offers "Ask the agent to adopt it" through this. */
+  askAdopt?: AskAdopt;
+  /** Whether the body is on screen (L's `visible`); true when absent. */
+  visible?: boolean;
   /** Called once the system's content is on screen (L's `onShown`). */
   onShown?: () => void;
 }
 
 export function DesignSystemBody(props: DesignSystemBodyProps) {
-  const { artifactId, handle, host, onSetDefault, onShown } = props;
+  const { artifactId, handle, host, onSetDefault, isDefault = false, onDelete, askAdopt, visible = true, onShown } = props;
   const scope = useEditorHostScope();
   const key = keyOf(scope, artifactId);
   const reveal = useCheckRequests((s) => s.serials[key] ?? 0);
@@ -74,22 +77,23 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
     saved,
     actions: [
       { id: 'design-system.check', label: DESIGN_SYSTEM_COPY.check, onSelect: () => requestCheck(key) },
-      { id: 'design-system.set-default', label: DESIGN_SYSTEM_COPY.setDefault, onSelect: () => onSetDefault?.(), disabled: !onSetDefault },
+      { id: 'design-system.set-default', label: DESIGN_SYSTEM_COPY.setDefault, onSelect: () => onSetDefault?.(), disabled: !onSetDefault || isDefault },
+      ...(onDelete ? [{ id: 'design-system.delete', label: DESIGN_SYSTEM_COPY.deleteAction, onSelect: () => onDelete() }] : []),
     ],
     exports: [{ id: 'design-system.export-claude', label: DESIGN_SYSTEM_COPY.exportClaude, onSelect: () => exportForClaude(host, artifactId) }],
   });
 
   const surface = useRef<HTMLDivElement>(null);
-  useRegionMarkupSurface(surface, name ?? DESIGN_SYSTEM_COPY.untitled, true);
+  useRegionMarkupSurface(surface, name ?? DESIGN_SYSTEM_COPY.untitled, visible);
 
-  const shown = name !== null;
+  const shown = name !== null && visible;
   useEffect(() => {
     if (shown) onShown?.();
   }, [shown, onShown]);
 
   return (
     <div ref={surface} className="h-full min-h-0 overflow-auto bg-bg">
-      <DesignSystemPage artifactId={artifactId} handle={handle} host={host} readOnly={saved === 'readonly'} revealCheck={reveal} />
+      <DesignSystemPage artifactId={artifactId} handle={handle} host={host} readOnly={saved === 'readonly'} revealCheck={reveal} askAdopt={askAdopt} />
     </div>
   );
 }

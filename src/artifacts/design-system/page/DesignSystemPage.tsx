@@ -9,7 +9,7 @@ import type { ArtifactHost, DocumentHandle } from '../../host';
 import type { HtmlParser } from '../canon';
 import { Canon } from './Canon';
 import { Check } from './Check';
-import { Law } from './Law';
+import { Law, type AskAdopt } from './Law';
 import { Measures } from './Measures';
 import { Palette } from './Palette';
 import { TypeScale } from './TypeScale';
@@ -28,6 +28,8 @@ export interface DesignSystemPageProps {
   revealCheck?: number;
   /** Reads canon for the check; the window's `DOMParser` when absent. */
   parser?: HtmlParser;
+  /** A system without a law offers to ask the agent to adopt it (the app's route to the shown session); none, no offer. */
+  askAdopt?: AskAdopt;
 }
 
 export function DesignSystemPage(props: DesignSystemPageProps) {
@@ -68,7 +70,7 @@ export function DesignSystemPage(props: DesignSystemPageProps) {
       <TypeScale {...sections} />
       <Measures {...sections} />
       <Canon tokens={system.tokens} files={system.files} toUrl={toUrl} />
-      <Law law={system.law} />
+      <Law law={system.law} askAdopt={props.askAdopt} />
       <Check law={system.law} tokens={system.tokens} files={system.files} parser={parser} sectionRef={check} />
     </div>
   );

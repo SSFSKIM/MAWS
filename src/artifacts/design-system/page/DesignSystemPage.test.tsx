@@ -220,3 +220,34 @@ describe('fix wave 1', () => {
     expect(html).toContain('mask="url(#local)"');
   });
 });
+
+describe('a system with no law (D12: a Claude import)', () => {
+  function lawless(): Doc {
+    const doc = newDoc();
+    writeSystem(doc, { 'tokens.tokens.json': FILES['tokens.tokens.json'] }, { route: 'imported', at: AT }, { name: 'Imported' });
+    return doc;
+  }
+
+  it('offers "Ask the agent to adopt it", which asks once per press', () => {
+    const asked: number[] = [];
+    render(<DesignSystemPage artifactId="ds1" handle={{ doc: lawless() }} host={host} askAdopt={{ onAsk: () => asked.push(1), unavailable: null }} />);
+    expect(screen.getByText(/No law yet/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Ask the agent to adopt it' }));
+    expect(asked).toEqual([1]);
+  });
+
+  it('says why it cannot ask when no session is there to take it', () => {
+    render(<DesignSystemPage artifactId="ds1" handle={{ doc: lawless() }} host={host} askAdopt={{ onAsk: () => {}, unavailable: 'Open a session to ask the agent.' }} />);
+    const button = screen.getByRole('button', { name: 'Ask the agent to adopt it' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.getByText('Open a session to ask the agent.')).toBeTruthy();
+  });
+
+  it('shows no action without a route to the agent, nor when the system has a law', () => {
+    const view = render(<DesignSystemPage artifactId="ds1" handle={{ doc: lawless() }} host={host} />);
+    expect(screen.queryByRole('button', { name: 'Ask the agent to adopt it' })).toBeNull();
+    view.unmount();
+    render(<DesignSystemPage artifactId="ds1" handle={{ doc: systemDoc() }} host={host} askAdopt={{ onAsk: () => {}, unavailable: null }} />);
+    expect(screen.queryByRole('button', { name: 'Ask the agent to adopt it' })).toBeNull();
+  });
+});

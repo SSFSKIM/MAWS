@@ -5,11 +5,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { ArtifactHost } from '@artifacts/host';
-import { openDesignSystem } from '@artifacts/design-system/apply';
 import { colorFromHex } from '@artifacts/design-system/color';
 import { designSystemMirrorWriter } from '@artifacts/design-system/mirror';
 import { isGeneratedPath, readFiles, readSystem, setToken, writeSystem } from '@artifacts/design-system/model';
+import { snapshotOfDoc, staticView } from '@artifacts/design-system/view';
 import { mirrorWriterFor } from '@artifacts/library/mirror';
 import { DEFAULT_SYSTEMS, HOUSE_KEY } from '@artifacts/types/design_system/defaults';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
@@ -211,9 +210,14 @@ describe('the agent’s publish through the store (Acceptance 7)', () => {
 });
 
 describe('deletion and the pin (Acceptance 13; D10)', () => {
-  // The renderer's ArtifactHost, as far as a version ref reads it: the store's retained state.
-  const hostOver = (): ArtifactHost =>
-    ({ assetUrl: (artifactId: string, ref: string) => `maws-artifact://${artifactId}/live/${ref}`, versionState: async (artifactId: string, version: number | { seq: number }) => store().versionState(artifactId, version) }) as unknown as ArtifactHost;
+  // A version ref's read as apply.ts's `openDesignSystem` makes it (its unit test drives that over a fake host): the
+  // retained state `ArtifactHost.versionState` answers, which the renderer's host asks the store for
+  // (`artifacts.versionState`), as a view that never follows the system.
+  const pinnedView = (ref: { id: string; versionSeq: number }) => {
+    const doc = newDoc();
+    applyV2(doc, store().versionState(ref.id, { seq: ref.versionSeq }));
+    return staticView(snapshotOfDoc(doc)!, (asset) => `maws-artifact://${ref.id}/live/${asset}`);
+  };
 
   it('refuses to delete a system a live artifact names, naming it; after it moves, deletes, and the pinned version still renders', async () => {
     await systems.seeded;
@@ -237,7 +241,7 @@ describe('deletion and the pin (Acceptance 13; D10)', () => {
     expect(store().get(classroom)).toBeNull();
 
     // the retained version's pin still reads the system's state as it was, through the host's version read
-    const pinned = await openDesignSystem(hostOver(), { id: pin.id, versionSeq: pin.versionSeq });
+    const pinned = pinnedView({ id: pin.id, versionSeq: pin.versionSeq! });
     expect((pinned.tokens.tokens.get('color.accent.$root')!.$value as { hex: string }).hex).toBe(firstAccent);
     expect(pinned.css(':root', 'document')).toContain(`--ds-color-accent: ${firstAccent}`);
     expect(firstAccent).not.toBe('#123456');
