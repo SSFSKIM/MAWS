@@ -180,8 +180,8 @@ export type ArtifactScreenshotInput = z.infer<typeof ArtifactScreenshotInputSche
 // P3-A (M6) start
 export const ArtifactDescribeTypeInputSchema = z.strictObject({ kind: ArtifactKindSchema });
 // P3-B's document read fields (ledger X25, the architect 2026-10-13): a tab, a block id to start from, how many blocks,
-// and the changes since a revision. B's reader serves them for a document; A's generic reader ignores them. Defined here
-// until B's `document-tools.ts` lands, which re-points this export at its own at the re-merge.
+// and the changes since a revision. B's reader serves them for a document; A's generic reader ignores them. A owns them
+// here, and B's `document-tools.ts` imports this export (it keeps no copy of its own; Decision Log 44d).
 export const DOCUMENT_READ_FIELDS = {
   tab: z.string().min(1).max(64).optional(),
   from: z.string().min(1).max(64).optional(), // a block id
@@ -213,8 +213,20 @@ export type ArtifactUploadAssetInput = z.infer<typeof ArtifactUploadAssetInputSc
 export const ArtifactListAssetsInputSchema = z.strictObject({ artifact: ArtifactIdSchema });
 export const ARTIFACT_EXPORT_FORMATS = ['pdf', 'png', 'docx', 'pptx', 'md', 'html'] as const;
 export type ArtifactExportFormat = (typeof ARTIFACT_EXPORT_FORMATS)[number];
-export const ArtifactExportInputSchema = z.strictObject({ artifact: ArtifactIdSchema, format: z.enum(ARTIFACT_EXPORT_FORMATS), version: z.number().int().min(1).optional(), to: PathSchema.optional() });
+// The paper an export prints on when asked (P3-A Decision Log 42, P3-B's M8); omitted, the exporter's own default.
+export const ARTIFACT_EXPORT_PAGE_SIZES = ['letter', 'a4'] as const;
+export type ArtifactExportPageSize = (typeof ARTIFACT_EXPORT_PAGE_SIZES)[number];
+export const ArtifactExportInputSchema = z.strictObject({
+  artifact: ArtifactIdSchema, format: z.enum(ARTIFACT_EXPORT_FORMATS), version: z.number().int().min(1).optional(), to: PathSchema.optional(),
+  pageSize: z.enum(ARTIFACT_EXPORT_PAGE_SIZES).optional(),
+});
 export type ArtifactExportInput = z.infer<typeof ArtifactExportInputSchema>;
+// How long the host waits for main's export service to answer (P3-A M7, X31) before the call answers an error; main's
+// own guard and queue keep its answer inside it.
+export const EXPORT_ANSWER_MS = 60_000;
+const EXPORT_EXTENSIONS: Record<ArtifactExportFormat, string> = { pdf: 'pdf', png: 'png', docx: 'docx', pptx: 'pptx', md: 'md', html: 'html' };
+// An export's file name under `<userData>/artifacts/<id>/exports/` (the tool's and the library's alike).
+export const artifactExportName = (revision: number, format: ArtifactExportFormat): string => `${revision}-${format}.${EXPORT_EXTENSIONS[format]}`;
 // P3-A (M6) end
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -295,7 +307,10 @@ export const ArtifactScreenshotResultSchema = z.strictObject({
 });
 export type ArtifactScreenshotResult = z.infer<typeof ArtifactScreenshotResultSchema>;
 // P3-A (M6) start
-export const ArtifactDescribeTypeResultSchema = z.strictObject({ status: z.literal('described'), kind: ArtifactKindSchema, guide: z.string(), format: z.string() });
+export const ArtifactDescribeTypeResultSchema = z.strictObject({
+  status: z.literal('described'), kind: ArtifactKindSchema, guide: z.string(), format: z.string(),
+  designSystem: z.string().optional(), // a document, presentation or design: the governing design system's DESIGN.md (Decision Log 42)
+});
 export type ArtifactDescribeTypeResult = z.infer<typeof ArtifactDescribeTypeResultSchema>;
 const VersionSummarySchema = z.strictObject({ id: z.number().int().min(1), kind: z.string(), revision: z.number().int().min(0), at: IsoTimeSchema, by: ArtifactEditorSchema.shape.by, label: z.string().optional() });
 export type VersionSummary = z.infer<typeof VersionSummarySchema>;
@@ -326,7 +341,10 @@ export type ArtifactUploadAssetResult = z.infer<typeof ArtifactUploadAssetResult
 export const ListedAssetSchema = z.strictObject({ assetId: z.string(), ref: z.string(), name: z.string(), mime: z.string(), size: z.number().int().min(0), createdAt: IsoTimeSchema });
 export const ArtifactListAssetsResultSchema = z.strictObject({ status: z.literal('listed'), artifactId: z.uuid(), assets: z.array(ListedAssetSchema) });
 export type ArtifactListAssetsResult = z.infer<typeof ArtifactListAssetsResultSchema>;
-export const ArtifactExportResultSchema = z.strictObject({ status: z.literal('exported'), artifactId: z.uuid(), format: z.enum(ARTIFACT_EXPORT_FORMATS), revision: z.number().int().min(0), path: z.string(), copiedTo: z.string().optional() });
+export const ArtifactExportResultSchema = z.strictObject({
+  status: z.literal('exported'), artifactId: z.uuid(), format: z.enum(ARTIFACT_EXPORT_FORMATS), revision: z.number().int().min(0), path: z.string(), copiedTo: z.string().optional(),
+  blockedRequests: z.number().int().positive().optional(), // remote resources the page named, which the export did not load (P3-A Decision Log 44b)
+});
 export type ArtifactExportResult = z.infer<typeof ArtifactExportResultSchema>;
 
 // A refusal an agent can act on: the `isError` text is `<tool>: <sentence> <this JSON>` (`artifactRefusalOf` reads it).
@@ -388,7 +406,7 @@ export const MAWS_TOOLS = {
   artifact_describe_type: {
     title: 'Describe artifact kind',
     description:
-      "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file.",
+      "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs.",
     input: ArtifactDescribeTypeInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
@@ -422,7 +440,7 @@ export const MAWS_TOOLS = {
   artifact_export: {
     title: 'Export artifact',
     description:
-      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too. Needs the MAWS app open.',
+      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default. Needs the MAWS app open.',
     input: ArtifactExportInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },

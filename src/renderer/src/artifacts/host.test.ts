@@ -314,15 +314,20 @@ describe('the renderer’s ArtifactHost (M4)', () => {
     h.answers.set('artifacts.versionState', { ok: true, value: { bytes } });
     h.answers.set('artifacts.attributions', { ok: true, value: { bytes } });
     h.answers.set('artifacts.uploadAsset', { ok: true, value: { assetId: '22222222-2222-4222-8222-222222222222', ref: 'assets/a.png' } });
+    h.answers.set('artifacts.export', { ok: true, value: { path: '/u/artifacts/x/exports/4-pdf.pdf', revision: 4 } }); // M7
     expect(await h.artifacts.versionState(ARTIFACT, 4)).toBe(bytes);
     expect(await h.artifacts.versionState(ARTIFACT, { seq: 9 })).toBe(bytes);
     expect(await h.artifacts.attributions(ARTIFACT, 1, 9)).toBe(bytes);
     expect(await h.artifacts.uploadAsset(ARTIFACT, bytes, { name: 'a.png', mime: 'image/png' })).toEqual({ assetId: '22222222-2222-4222-8222-222222222222', ref: 'assets/a.png' });
+    expect(await h.artifacts.export(ARTIFACT, 'pdf')).toEqual({ path: '/u/artifacts/x/exports/4-pdf.pdf' });
+    expect(await h.artifacts.export(ARTIFACT, 'png', 7)).toEqual({ path: '/u/artifacts/x/exports/4-pdf.pdf' });
     expect(h.calls.map((c) => [c.name, c.input])).toEqual([
       ['artifacts.versionState', { artifactId: ARTIFACT, versionId: 4 }],
       ['artifacts.versionState', { artifactId: ARTIFACT, seq: 9 }],
       ['artifacts.attributions', { artifactId: ARTIFACT, fromSeq: 1, toSeq: 9 }],
       ['artifacts.uploadAsset', { artifactId: ARTIFACT, bytes, name: 'a.png', mime: 'image/png' }],
+      ['artifacts.export', { artifactId: ARTIFACT, format: 'pdf' }],
+      ['artifacts.export', { artifactId: ARTIFACT, format: 'png', versionId: 7 }],
     ]);
     h.answers.set('artifacts.versionState', { ok: false, error: { code: 'invalid_input', message: 'gone', issues: { reason: 'notFound', data: {} } } });
     await expect(h.artifacts.versionState(ARTIFACT, 4)).rejects.toMatchObject({ error: { code: 'invalid_input' } });

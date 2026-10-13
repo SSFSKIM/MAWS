@@ -1101,6 +1101,17 @@ describe('deliverables.changed and the capture bridge (E2 M1)', () => {
     expect(await host.call('maws.artifact.captured', { appSessionId: id, requestId: 'mcp-shot', result })).toEqual({ outcome: 'delivered' });
     expect(await host.call('maws.artifact.captured', { appSessionId: id, requestId: 'mcp-shot', result })).toEqual({ outcome: 'not_pending' });
     await until(() => transport.writes.some((w) => w.type === 'control_response' && (w as { response: { request_id: string } }).response.request_id === 'mcp-shot'), 'the answer');
+    // P3-A M7: `artifact_export` asks main over maws.artifact.export, answered by maws.artifact.exported
+    expect(await host.call('maws.artifact.exported', { appSessionId: 'app-none', requestId: 'r1', answer: { ok: false, error: 'x' } })).toEqual({ outcome: 'not_pending' });
+    call('mcp-export', 'artifact_export', { artifact: 'dash', format: 'pdf' });
+    await until(() => host.emitted.some((e) => e.name === 'maws.artifact.export'), 'the export request');
+    const asked = host.emitted.find((e) => e.name === 'maws.artifact.export')!.payload as { path: string; revision: number };
+    expect(asked).toEqual({ appSessionId: id, requestId: 'mcp-export', artifactId: changed.id, kind: 'html', format: 'pdf', revision: documents.store.revision(changed.id), path: join(userData, 'artifacts', changed.id, 'exports', `${asked.revision}-pdf.pdf`) });
+    writeFileSync(asked.path, '%PDF-1.7'); // main writes it where the host named
+    const exported = { ok: true as const, revision: asked.revision, path: asked.path };
+    expect(await host.call('maws.artifact.exported', { appSessionId: id, requestId: 'mcp-export', answer: exported })).toEqual({ outcome: 'delivered' });
+    expect(await host.call('maws.artifact.exported', { appSessionId: id, requestId: 'mcp-export', answer: exported })).toEqual({ outcome: 'not_pending' });
+    await until(() => transport.writes.some((w) => w.type === 'control_response' && JSON.stringify(w).includes('mcp-export') && JSON.stringify(w).includes('exported')), 'the export’s answer');
     transport.exit(0);
     await host.ipc.table.get(id)!.exited;
   });

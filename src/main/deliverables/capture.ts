@@ -38,7 +38,7 @@ export interface CaptureDeps {
   env: SeamEnv;
 }
 
-class CaptureFailure extends Error {}
+export class CaptureFailure extends Error {}
 
 // One capture, start to finish: the version checked on disk, the window opened, loaded, settled, captured, encoded and
 // destroyed. Never rejects: every failure is an answer with its reason.
@@ -69,7 +69,8 @@ export async function captureArtifact(request: MawsArtifactCapture, { reader, en
   }
 }
 
-function openCaptureWindow(width: number, height: number, env: SeamEnv): BrowserWindow {
+// The capture window (P3-A M7: the export service's too, `../artifacts/export.ts`).
+export function openCaptureWindow(width: number, height: number, env: SeamEnv): BrowserWindow {
   const win = new BrowserWindow({
     show: false,
     width,
@@ -93,10 +94,17 @@ function openCaptureWindow(width: number, height: number, env: SeamEnv): Browser
 }
 
 async function render(win: BrowserWindow, url: string, consoleErrors: string[]): Promise<NativeImage> {
-  const contents = win.webContents;
-  contents.on('console-message', (event) => {
+  win.webContents.on('console-message', (event) => {
     if (event.level === 'error' && consoleErrors.length < CONSOLE_ERRORS_MAX) consoleErrors.push(event.message.slice(0, CONSOLE_ERROR_CHARS));
   });
+  await loadSettled(win, url);
+  return win.webContents.capturePage();
+}
+
+// Loads `url` in a capture window and waits for its first paint after the load (or CAPTURE_SETTLE_MS); rejects with the
+// load's failure. The export service's renders wait the same way.
+export async function loadSettled(win: BrowserWindow, url: string): Promise<void> {
+  const contents = win.webContents;
   const loaded = new Promise<void>((resolve, reject) => {
     contents.once('did-finish-load', () => resolve());
     contents.on('did-fail-load', (_event, code, description, _url, isMainFrame) => {
@@ -105,14 +113,18 @@ async function render(win: BrowserWindow, url: string, consoleErrors: string[]):
   });
   contents.loadURL(url).catch(() => {}); // the load events above decide
   await loaded;
-  await new Promise<void>((resolve) => {
+  await settled(win);
+}
+
+// The window's next paint, or CAPTURE_SETTLE_MS.
+export function settled(win: BrowserWindow): Promise<void> {
+  return new Promise<void>((resolve) => {
     const timer = setTimeout(resolve, CAPTURE_SETTLE_MS);
-    contents.once('paint', () => {
+    win.webContents.once('paint', () => {
       clearTimeout(timer);
       resolve();
     });
   });
-  return contents.capturePage();
 }
 
 // The PNG under ARTIFACT_SCREENSHOT_MAX_BYTES: as captured, else resized to half its width once, else refused.
@@ -146,8 +158,8 @@ export function startCaptureService({ onEvent, dispatch, ...deps }: CaptureServi
 }
 
 // Runs at most `max` tasks at once; a finished task hands its slot to the oldest waiting one, and a task that waited
-// `maxWaitMs` without a slot leaves the queue unrun, answered by `expired`.
-function slots(max: number, maxWaitMs: number): <T>(task: () => Promise<T>, expired: () => T) => Promise<T> {
+// `maxWaitMs` without a slot leaves the queue unrun, answered by `expired`. (P3-A M7: the export service has its own.)
+export function slots(max: number, maxWaitMs: number): <T>(task: () => Promise<T>, expired: () => T) => Promise<T> {
   let running = 0;
   const waiting: { start(): void }[] = [];
   const release = () => {
