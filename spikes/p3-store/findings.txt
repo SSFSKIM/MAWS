@@ -1185,7 +1185,12 @@ the hold in `src/port-link.ts` (`hold`, `release`, the cap, awareness and ack pa
 8. §8 "Human and agent in one block" gains the composition hold (provider holds, binding drives, 5 s cap; Decision Log
    33) and caret-follows-id as binding requirements for P3-B.
 
-### Questions for the architect (S4)
+### Questions for the architect (S4) — answered 2026-10-12 (spec Decision Log 34; ledger X24, X25, X26)
+All amendments folded into §4.4 and §8. (1) The 5 s cap stays and flushes when it fires, no deferral to the next
+compositionend (a deferral would leave a stuck composition unbounded); every firing is logged. (2) The whole-frame hold
+is accepted for P3; narrowing to frames touching the composing block is deferred to P4. (3) Yes: the host detects a move
+per update (a delete and an insert of the same id), so keep-later applies to a human drag racing a move. (4) B validates
+only touched parents, advisory until S7b's 200-page numbers. The questions as asked:
 1. The 5 s cap reproduces doubled jamo once when it fires. Recommended: keep 5 s (never fired in normal typing; longest
    hold 447 ms); consider having the binding defer the flush to the next compositionend instead of flushing under an
    open composition, and log cap firings.
