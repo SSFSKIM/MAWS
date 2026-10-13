@@ -64,9 +64,11 @@ export const deletedBy = (map: ContentMap, id: ItemId): Authorship | null => aut
 
 // A move or a retype as a kind's `afterUpdate` reports it (Decision Log 25j; parent Decision Log 34): the update
 // re-inserted the content at `from` (ids as `[client, clock]`, one per character or element) as the content at `to`,
-// pairwise, so `to` keeps `from`'s author and time and the mover is credited with no characters.
+// pairwise, so `to` keeps `from`'s author and time and the mover is credited with no characters. The host's own
+// suggestion copies carry the same way (Decision Log 45): `accept`, an accepted proposal's copy keeping its author and
+// time; `reject`, content a rejected deletion brings back keeping its original author.
 export interface Carry {
-  kind: 'move' | 'retype';
+  kind: 'move' | 'retype' | 'accept' | 'reject';
   from: [number, number][];
   to: [number, number][];
 }
@@ -103,7 +105,7 @@ export function carryAttribution(map: ContentMap, prior: ContentMap, carries: Ca
 // The carry kind recorded on an inserted id, or null when it was not carried.
 export function carriedBy(map: ContentMap, id: ItemId): Carry['kind'] | null {
   const value = map.inserts.slice(id.client, id.clock, 1)[0]?.attrs?.find((attr: { name: string }) => attr.name === 'carry')?.val;
-  return value === 'move' || value === 'retype' ? value : null;
+  return value === 'move' || value === 'retype' || value === 'accept' || value === 'reject' ? value : null;
 }
 
 // The id of the content at `index` of a node's text and children (what a selection's start resolves to).

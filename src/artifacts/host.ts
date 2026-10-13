@@ -47,8 +47,10 @@ export interface DocumentStorage {
   // one if none is), and returns the row's seq: the live revision it makes. `hostClient` names the clientID of the
   // host's replica that wrote the row, if one did, so its binding is marked as the host's for that actor. Without
   // `provenance` the row's map is written later in the same frame by `attributeInBatch` (a kind's `afterUpdate` may
-  // first carry authorship onto it, Decision Log 25j).
-  appendInBatch(row: { artifactId: string; actor: Actor; at: number; update: Uint8Array; provenance?: Uint8Array; bindClients: number[]; hostClient?: number }): number;
+  // first carry authorship onto it, Decision Log 25j). `credit` binds named clientIDs among `bindClients` to another
+  // actor than the row's: an accepted suggestion's copy, written by the acceptor under a clientID bound to the
+  // suggester (Decision Log 45).
+  appendInBatch(row: { artifactId: string; actor: Actor; at: number; update: Uint8Array; provenance?: Uint8Array; bindClients: number[]; hostClient?: number; credit?: Map<number, Actor> }): number;
   attributeInBatch(row: { artifactId: string; seq: number; at: number; provenance: Uint8Array }): void;
   // The threads mirror a kind's hooks feed (Decision Log 23c), written in the open batch with the update.
   writeThreads(artifactId: string, change: ThreadChange): void;

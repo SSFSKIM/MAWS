@@ -55,7 +55,7 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
       const suggest = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
       if (suggest && !isDocKind(artifact.kind)) {
         const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;
-        throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: input.mode !== 'suggest' }, `${why}, and an html page takes none; nothing was written`);
+        throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}, and an html page takes none; nothing was written`);
       }
       const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx, suggest) : await mirrored(store, mirror, await publishPage(deps, store, artifact, input, ctx), input, ctx, true);
       return toolText(result);

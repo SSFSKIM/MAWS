@@ -4,3 +4,4 @@ export * from './check';
 export * from './attribution';
 export * from './revert';
 export * from './versions';
+export * from './suggest';

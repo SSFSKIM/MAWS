@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
-import { applyV1, applyV2, carriedBy, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, idAt, insertedBy, mergeMaps, newDoc, stateVector, type Doc, type Node } from '@artifacts/yjs';
+import { adoptClientId, applyV1, applyV2, carriedBy, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, hasPending, idAt, insertedBy, mergeMaps, newDoc, stateVector, SuggestionError, type Doc, type Node } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostPort } from './ports';
@@ -620,6 +620,167 @@ describe('DocumentService: suggestion docs (M8; Decision Log 23e)', () => {
     expect(replicaGc).toBe(false);
     expect(text(key)).toBe('ac');
     expect(text('a1')).toBe('abc');
+  });
+});
+
+describe('DocumentService: inherited bindings and suggestion replicas (M8 review findings 1 and 2)', () => {
+  const synced = (end: ReturnType<typeof raw>) => {
+    end.send({ type: 'step1', sv: stateVector(end.doc) });
+    tick();
+    for (const frame of end.take()) if (frame.type === 'step2') applyV1(end.doc, frame.update);
+  };
+  // A replica of the suggestion doc that extends `client` (a clientID of the main doc) as the human: a forgery.
+  const extendAs = (client: number) => {
+    const end = raw('a1:suggest', human);
+    synced(end);
+    adoptClientId(end.doc, client);
+    end.edit((doc) => doc.get('t').insert(0, 'forged '));
+    return end;
+  };
+  const sessionClient = (artifactId: string, actor: string) =>
+    (committed('SELECT clientId FROM client_actors WHERE artifactId = ? AND actor = ? ORDER BY firstSeq DESC', artifactId, actor)[0] as { clientId: number }).clientId;
+
+  it('refuses a suggestion-doc frame extending a clientID the main doc binds to another actor, the main doc loaded or not', () => {
+    make();
+    void service.writeAs('a1', agent, (doc) => doc.get('t').insert(0, 'base'));
+    tick();
+    service.suggestionDoc('a1');
+    const client = sessionClient('a1', 'session:app-1');
+    expect(extendAs(client).closed).toBe(true);
+    expect(service.stats.rejected.at(-1)?.reason).toMatch(/bound to another actor \(session:app-1\)/);
+    reopen();
+    service.suggestionDoc('a1');
+    expect(service.loaded('a1')).toBeNull();
+    expect(extendAs(client).closed).toBe(true);
+    expect(service.live('a1:suggest').get('t').toString()).toBe('base');
+  });
+
+  it('refuses one extending a clientID that reached the suggestion doc from a later main-doc write', () => {
+    make();
+    void service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'base'));
+    tick();
+    service.suggestionDoc('a1');
+    const other: Actor = { kind: 'session', appSessionId: sid('app-2') };
+    void service.writeAs('a1', other, (doc) => doc.get('t').insert(4, '!')); // flows into the loaded suggestion doc unlogged
+    tick();
+    expect(extendAs(sessionClient('a1', 'session:app-2')).closed).toBe(true);
+    expect(service.live('a1:suggest').get('t').toString()).toBe('base!');
+  });
+
+  it('gives an agent replica of the suggestion doc a suggestion doc of its own (gc off), also when it is rebuilt', async () => {
+    make({}, true);
+    const replica = service.replica(sid('app-7'), service.suggestionDoc('a1'));
+    await replica.whenSynced();
+    expect(replica.doc.gc).toBe(false);
+    expect(replica.doc.isSuggestionDoc).toBe(true);
+    expect(() => replica.edit(() => { throw new Error('a failed plan'); })).toThrow(/a failed plan/);
+    expect(replica.doc.gc).toBe(false);
+    expect(replica.doc.isSuggestionDoc).toBe(true);
+  });
+});
+
+describe('DocumentService: accepting and rejecting suggestions (M8; Decision Log 45)', () => {
+  const text = (key: string) => service.live(key).get('t').toString();
+  const at = (key: string, index: number) => idAt(service.live(key).get('t'), index)!;
+  const span = (key: string, from: number, to: number) => ({ start: at(key, from), end: at(key, to) });
+  const rows = (key: string) => committed('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq', key).map((row) => (row as { actor: string }).actor);
+  const proposedAt = 10 * DAY;
+  // The main doc reads "The plan."; the agent proposes, in one write, " Zed." at its end and then "Intro. " at its
+  // start, so "Intro. " holds the later clocks.
+  async function proposed(): Promise<string> {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'The plan.'));
+    const key = service.suggestionDoc('a1');
+    await service.writeAs(key, agent, (doc) => {
+      const t = doc.get('t');
+      t.insert(9, ' Zed.');
+      t.insert(0, 'Intro. ');
+    });
+    expect(text(key)).toBe('Intro. The plan. Zed.');
+    return key;
+  }
+
+  it('accepts out of write order by copy: the acceptor’s row, the suggester’s provenance and time, the proposals gone from the suggestion doc, no gap on any replica', async () => {
+    const key = await proposed();
+    const mainReplica = service.replica(sid('app-8'), 'a1');
+    const suggestionReplica = service.replica(sid('app-9'), key);
+    await Promise.all([mainReplica.whenSynced(), suggestionReplica.whenSynced()]);
+    now += 5 * MIN;
+    const revision = await service.acceptSuggestion('a1', [span(key, 0, 6)], human); // "Intro. ": the later clocks first
+    expect(revision).toBe(service.revision('a1'));
+    expect(text('a1')).toBe('Intro. The plan.');
+    expect(text(key)).toBe('Intro. The plan. Zed.');
+    expect(rows('a1')).toEqual(['human', 'human']);
+    expect(rows(key)).toEqual(['session:app-1', 'human']); // the proposal, then its originals deleted by the acceptor
+    const provenance = service.provenance('a1');
+    expect(insertedBy(provenance, at('a1', 0))).toEqual({ actor: 'session:app-1', at: proposedAt });
+    expect(carriedBy(provenance, at('a1', 0))).toBe('accept');
+    const copyClient = at('a1', 0).client;
+    expect(at(key, 0).client).toBe(copyClient); // the suggestion doc shows the copy, its original deleted
+    expect(copyClient).not.toBe((committed('SELECT clientId FROM client_actors WHERE artifactId = ?', key)[0] as { clientId: number }).clientId);
+    expect(committed('SELECT actor, host FROM client_actors WHERE artifactId = ? AND clientId = ?', 'a1', copyClient)).toEqual([{ actor: 'session:app-1', host: 0 }]);
+
+    await service.acceptSuggestion('a1', [span(key, 16, 20)], human); // " Zed."
+    expect(text('a1')).toBe('Intro. The plan. Zed.');
+    await until(() => mainReplica.doc.get('t').toString() === 'Intro. The plan. Zed.' && suggestionReplica.doc.get('t').toString() === 'Intro. The plan. Zed.');
+    for (const doc of [service.live('a1'), service.live(key), mainReplica.doc, suggestionReplica.doc]) expect(hasPending(doc)).toBe(false);
+    // nothing proposed is left: an accept over the whole text writes nothing
+    const before = rows('a1').length;
+    await service.acceptSuggestion('a1', [span(key, 0, 20)], human);
+    expect(rows('a1')).toHaveLength(before);
+  });
+
+  it('rejects: a proposed insert leaves the suggestion doc only; a proposed deletion comes back content-identical, written by the rejector and still credited to its author', async () => {
+    make({}, true);
+    const writer: Actor = { kind: 'session', appSessionId: sid('app-2') };
+    await service.writeAs('a1', writer, (doc) => doc.get('t').insert(0, 'The plan.'));
+    const key = service.suggestionDoc('a1');
+    await service.writeAs(key, agent, (doc) => doc.get('t').insert(9, ' Zed.'));
+    await service.writeAs(key, agent, (doc) => doc.get('t').delete(0, 4)); // "The " struck, apart from " Zed."
+    expect(text(key)).toBe('plan. Zed.');
+    const mainRows = rows('a1').length;
+    await service.rejectSuggestion('a1', [span(key, 5, 5)]); // " Zed."
+    expect(text(key)).toBe('plan.');
+    expect(text('a1')).toBe('The plan.');
+    expect(rows('a1')).toHaveLength(mainRows); // the main doc was not written
+    let struck = service.live(key).get('t')._start;
+    while (struck && !struck.deleted) struck = struck.right as typeof struck;
+    const original = { client: struck!.id.client, clock: struck!.id.clock };
+    now += 5 * MIN;
+    await service.rejectSuggestion('a1', [{ start: original, end: original }]);
+    expect(text('a1')).toBe('The plan.');
+    expect(text(key)).toBe('The plan.');
+    expect(rows('a1').at(-1)).toBe('human'); // the rejector writes the copy
+    const restored = at('a1', 0);
+    expect(restored).not.toEqual(original);
+    expect(insertedBy(service.provenance('a1'), restored)).toEqual({ actor: 'session:app-2', at: proposedAt }); // its author, its time
+    expect(carriedBy(service.provenance('a1'), restored)).toBe('reject');
+  });
+
+  it('keeps a human’s concurrent edit to the main doc through an accept and a reject', async () => {
+    const key = await proposed();
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(4, 'whole '));
+    expect(text(key)).toBe('Intro. The whole plan. Zed.');
+    await service.acceptSuggestion('a1', [span(key, 0, 6)], human);
+    await service.rejectSuggestion('a1', [span(key, 22, 26)]);
+    expect(text('a1')).toBe('Intro. The whole plan.');
+    expect(text(key)).toBe('Intro. The whole plan.');
+  });
+
+  it('refuses a range with no content or that would split an inserted block from its words, writing nothing; a forged clientID stays refused after an accept', async () => {
+    const key = await proposed();
+    const count = rowCount();
+    await expect(service.acceptSuggestion('a1', [{ start: { client: 1, clock: 0 }, end: { client: 1, clock: 0 } }], human)).rejects.toBeInstanceOf(SuggestionError);
+    expect(rowCount()).toBe(count);
+    await service.acceptSuggestion('a1', [span(key, 0, 6)], human);
+    // a replica of the main doc writing under the copy's clientID (bound to the suggester) is refused
+    const copyClient = at('a1', 0).client;
+    const forger = service.replica(sid('app-5'), 'a1');
+    await forger.whenSynced();
+    adoptClientId(forger.doc, copyClient);
+    forger.doc.get('t').insert(0, 'forged ');
+    await until(() => service.stats.rejected.some((r) => r.reason.includes(`clientID ${copyClient}, bound to another actor`)));
+    expect(text('a1')).toBe('Intro. The plan.');
   });
 });
 

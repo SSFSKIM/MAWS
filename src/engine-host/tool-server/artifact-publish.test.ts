@@ -297,6 +297,9 @@ describe('artifact_publish as a suggestion (M8; parent Decision Log 27)', () => 
     await w.store.update(created.artifactId, { agentEditsAsSuggestions: true });
     const set = await publish({ artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>v2</p>' } });
     expect(artifactRefusalOf(textOf(set))).toEqual({ reason: 'invalid', kind: 'html', mode: 'suggest', setting: true });
+    // `setting` reports the artifact's setting, not the call's mode (M8 review finding 3)
+    const both = await publish({ artifact: 'dash', baseRevision: created.revision, mode: 'suggest', files: { 'index.html': '<p>v2</p>' } });
+    expect(artifactRefusalOf(textOf(both))).toEqual({ reason: 'invalid', kind: 'html', mode: 'suggest', setting: true });
     expect(page(created.artifactId)).toBe('<p>v1</p>');
   });
 });
