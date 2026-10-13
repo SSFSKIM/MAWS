@@ -15,8 +15,10 @@ const scenario = (process.argv.find((a) => a.startsWith('--scenario=')) ?? '').s
 const base = process.env.S2_BASE ?? `/tmp/p3-s2/run-${scenario}`;
 const outDir = process.env.S2_OUT_DIR ?? '/tmp/p3-s2/out';
 const build = __dirname;
-const SEED_1MB = '/tmp/p3-s2/seed-1mb.v2';
-const SEED_5MB = '/tmp/p3-s2/seed-5mb.v2';
+// The Yjs generation this bundle was built for (build.mjs, S2_YJS): it picks the seeds and suffixes the outputs.
+const GEN = process.env.S2_YJS === '14' ? '-v14' : '';
+const SEED_1MB = `/tmp/p3-s2/seed-1mb${GEN}.v2`;
+const SEED_5MB = `/tmp/p3-s2/seed-5mb${GEN}.v2`;
 const HUMAN: Actor = { kind: 'human' };
 mkdirSync(base, { recursive: true });
 mkdirSync(outDir, { recursive: true });
@@ -142,7 +144,7 @@ const metrics = (host: Host | null) => {
   const pick = (type: string) => m.filter((p) => p.type === type).map((p) => ({ pid: p.pid, workingSetKB: p.memory.workingSetSize, privateKB: p.memory.privateBytes }));
   return { utility: pick('Utility').filter((p) => !host || p.pid === host.child.pid), renderers: pick('Tab'), browser: pick('Browser') };
 };
-const write = (name: string, data: unknown) => writeFileSync(join(outDir, `${name}.json`), `${JSON.stringify(data, null, 2)}\n`);
+const write = (name: string, data: unknown) => writeFileSync(join(outDir, `${name}${GEN}.json`), `${JSON.stringify(data, null, 2)}\n`);
 
 // ---- scenarios -----------------------------------------------------------------------------------------------------
 async function scenarioSync() {
@@ -234,8 +236,11 @@ async function scenarioLatency() {
       const whoBefore = await host.request('who', { docId, marker: 'human:', offset: 8 });
       const compacted = await host.request('compact', { docId });
       const whoAfter = await host.request('who', { docId, marker: 'human:', offset: 8 });
+      const provenanceBytesAfterCompaction = (await host.request('stats', { docId })).provenanceBytes;
+      const thinned = await host.request('thin', { docId, bucketMs: 60_000 });
+      const whoAfterThin = await host.request('who', { docId, marker: 'human:', offset: 8 });
       const reloadAfter = await host.request('reload', { docId });
-      return { compacted, whoBefore, whoAfter, reloadEqualsLive: reloadAfter.digest.fnv === (await host.request('live', { docId })).digest.fnv, reloadMs: reloadAfter.ms };
+      return { compacted, whoBefore, whoAfter, provenanceBytesAfterCompaction, thinned, whoAfterThin, reloadEqualsLive: reloadAfter.digest.fnv === (await host.request('live', { docId })).digest.fnv, reloadMs: reloadAfter.ms };
     })(),
   });
   host.child.kill();
@@ -435,7 +440,7 @@ async function scenarioDetachedConnect() {
   await sleep(300);
   const seen = await B.cmd<[number, number][]>('watched');
   const [dA, dB, live, reload] = await Promise.all([A.cmd('digest'), B.cmd('digest'), request('live', { docId }), request('reload', { docId })]);
-  const startOut = JSON.parse(readFileSync(join(outDir, 'detached-start.json'), 'utf8'));
+  const startOut = JSON.parse(readFileSync(join(outDir, `detached-start${GEN}.json`), 'utf8'));
   write('detached-connect', {
     scenario: 'detached-connect',
     mainAbsent: { exitedAt: startOut.mainExitAt, connectedAt: tConnected, absentMs: tConnected - startOut.mainExitAt },

@@ -139,6 +139,19 @@ export class SqliteDocumentStorage implements DocumentStorage {
     return Math.max(u.s ?? 0, v.s ?? 0);
   }
 
+  // Harness reads (the same names on the v14 storage): table sizes, provenance's size and a per-actor summary.
+  rowCounts(): { t: string; n: number }[] {
+    return this.query("SELECT 'updates' AS t, COUNT(*) AS n FROM updates UNION ALL SELECT 'provenance', COUNT(*) FROM provenance UNION ALL SELECT 'versions', COUNT(*) FROM versions");
+  }
+
+  provenanceBytes(docId: string): number {
+    return this.query<{ n: number | null }>('SELECT SUM(length(docId) + 8 * 5 + length(op) + length(actor)) AS n FROM provenance WHERE docId = ?', docId)[0].n ?? 0;
+  }
+
+  provenanceSummary(docId: string): { actor: string; op: string; ranges: number; clocks: number }[] {
+    return this.query('SELECT actor, op, COUNT(*) AS ranges, SUM(clockEnd - clockStart) AS clocks FROM provenance WHERE docId = ? GROUP BY actor, op', docId);
+  }
+
   // Spike-only reads for the harness's checks.
   query<T>(text: string, ...params: (string | number)[]): T[] {
     return this.sql(text).all(...params) as T[];

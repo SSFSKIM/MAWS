@@ -1,0 +1,140 @@
+{
+  "scenario": "latency",
+  "fullfsync": false,
+  "doc": {
+    "stateV2": 1005666
+  },
+  "runs": {
+    "human 60-180 ms": {
+      "keystrokes": 300,
+      "ackMs": {
+        "n": 300,
+        "p50": 0.9,
+        "p95": 2.2,
+        "max": 13.8
+      },
+      "visibleInBMs": {
+        "n": 300,
+        "p50": 0.9,
+        "p95": 2.3,
+        "max": 13.7
+      },
+      "unacked": 0
+    },
+    "fast 10 ms": {
+      "keystrokes": 300,
+      "ackMs": {
+        "n": 300,
+        "p50": 0.8,
+        "p95": 1.8,
+        "max": 7.6
+      },
+      "visibleInBMs": {
+        "n": 300,
+        "p50": 0.7,
+        "p95": 1.9,
+        "max": 7.5
+      },
+      "unacked": 0
+    },
+    "flood (one task)": {
+      "keystrokes": 300,
+      "ackMs": {
+        "n": 300,
+        "p50": 6.7,
+        "p95": 10.6,
+        "max": 11.2
+      },
+      "visibleInBMs": {
+        "n": 300,
+        "p50": 6.6,
+        "p95": 10.6,
+        "max": 10.8
+      },
+      "unacked": 0
+    }
+  },
+  "converged": true,
+  "hostCommits": {
+    "n": 605,
+    "p50": 0.22,
+    "p95": 0.72,
+    "max": 6.6
+  },
+  "hostRows": [
+    {
+      "t": "updates",
+      "n": 906
+    },
+    {
+      "t": "attributions",
+      "n": 906
+    },
+    {
+      "t": "versions",
+      "n": 1
+    }
+  ],
+  "hostMem": {
+    "heapUsedMB": 15,
+    "rssMB": 85
+  },
+  "store": {
+    "db": 1146880,
+    "wal": 4136512
+  },
+  "provenanceBytes": 46083,
+  "metrics": {
+    "utility": [
+      {
+        "pid": 68112,
+        "workingSetKB": 150944
+      }
+    ],
+    "renderers": [
+      {
+        "pid": 68160,
+        "workingSetKB": 107488
+      },
+      {
+        "pid": 68161,
+        "workingSetKB": 107392
+      }
+    ],
+    "browser": [
+      {
+        "pid": 67971,
+        "workingSetKB": 130752
+      }
+    ]
+  },
+  "compaction": {
+    "compacted": {
+      "seq": 906,
+      "stateBytes": 1005666,
+      "rowsFolded": 906,
+      "ms": 24.848916000002646,
+      "rowsLeft": 0
+    },
+    "whoBefore": {
+      "found": true,
+      "client": 3775322926026429,
+      "clock": 9,
+      "inserted": {
+        "actor": "human",
+        "at": 1791856788503
+      }
+    },
+    "whoAfter": {
+      "found": true,
+      "client": 3775322926026429,
+      "clock": 9,
+      "inserted": {
+        "actor": "human",
+        "at": 1791856788503
+      }
+    },
+    "reloadEqualsLive": true,
+    "reloadMs": 69.66129199999705
+  }
+}

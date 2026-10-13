@@ -1,0 +1,17 @@
+{
+  "scenario": "fuzz",
+  "hostAlive": true,
+  "rejected": 120,
+  "reasons": [
+    "a frame that is not bytes (string)",
+    "a frame that is not bytes (object)",
+    "undecodable update (Unexpected end of array)",
+    "an unknown frame type N",
+    "Unexpected end of array"
+  ],
+  "converged": true,
+  "replicasStillLive": [
+    "live",
+    "live"
+  ]
+}

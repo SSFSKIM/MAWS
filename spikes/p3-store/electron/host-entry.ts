@@ -64,10 +64,8 @@ async function handle(name: string, input: Input): Promise<unknown> {
         fullfsync,
         mem: process.memoryUsage(),
         store: { db: size(dbPath), wal: size(`${dbPath}-wal`) },
-        rows: storage.query<{ table: string; n: number }>(
-          "SELECT 'updates' AS t, COUNT(*) AS n FROM updates UNION ALL SELECT 'provenance', COUNT(*) FROM provenance UNION ALL SELECT 'versions', COUNT(*) FROM versions",
-        ),
-        provenanceBytes: storage.query<{ n: number }>('SELECT SUM(length(docId) + 8 * 5 + length(op) + length(actor)) AS n FROM provenance')[0].n,
+        rows: storage.rowCounts(),
+        provenanceBytes: storage.provenanceBytes(docId),
         revision: service.revision(docId),
         loadMs: loaded?.loadMs ?? null,
         stateV2: loaded ? Y.encodeStateAsUpdateV2(loaded.doc).length : null,
@@ -101,12 +99,20 @@ async function handle(name: string, input: Input): Promise<unknown> {
     case 'actors':
       return storage.query('SELECT actor, COUNT(*) AS rows, MIN(at) AS firstAt, MAX(at) AS lastAt FROM updates WHERE docId = ? GROUP BY actor', docId);
     case 'provenanceActors':
-      return storage.query('SELECT actor, op, COUNT(*) AS rows, SUM(clockEnd - clockStart) AS clocks FROM provenance WHERE docId = ? GROUP BY actor, op', docId);
+      return storage.provenanceSummary(docId);
     case 'compact': {
       const before = storage.query<{ n: number }>('SELECT COUNT(*) AS n FROM updates WHERE docId = ?', docId)[0].n;
       const t = performance.now();
       const out = service.compact(docId, { kind: 'human' });
       return { ...out, rowsFolded: before, ms: performance.now() - t, rowsLeft: storage.query<{ n: number }>('SELECT COUNT(*) AS n FROM updates WHERE docId = ?', docId)[0].n };
+    }
+    case 'thin': {
+      // v14 only: the merged attribution's times bucketed (the v13 storage has no thinning)
+      const s = storage as unknown as { thin?: (d: string, seq: number, ms: number) => void };
+      if (!s.thin) return null;
+      const before = storage.provenanceBytes(docId);
+      s.thin(docId, service.revision(docId), Number(input.bucketMs ?? 60_000));
+      return { bytesBefore: before, bytesAfter: storage.provenanceBytes(docId), summary: storage.provenanceSummary(docId) };
     }
     case 'agent': {
       const actor: Actor = { kind: 'session', appSessionId: String(input.sessionId) };

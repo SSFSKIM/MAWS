@@ -2,7 +2,7 @@
 // would), runs the environment-agnostic provider on a DOM MessagePort, and answers main's measurement commands.
 import * as Y from 'yjs';
 import { PortProvider, type PortLike, type SaveState } from '../s2/src/provider/port';
-import { digest, newParagraph, now } from './doc-model';
+import { clockOf, digest, newParagraph, now } from './doc-model';
 
 interface Harness {
   report(message: unknown): void;
@@ -30,7 +30,7 @@ function fresh(): void {
   doc.on('update', (_u: Uint8Array, origin: unknown) => {
     if (origin !== provider) localTotal += 1;
     if (watch) {
-      const clock = Y.getState(doc.store, watch.client);
+      const clock = clockOf(doc, watch.client);
       if (clock > watch.last) {
         watch.last = clock;
         watch.seen.push([clock, now()]);
@@ -93,7 +93,7 @@ async function type(input: Record<string, unknown>) {
   for (let i = 0; i < count && now() < until; i++) {
     const t0 = now();
     text.insert(text.length, String.fromCharCode(97 + (i % 26)));
-    keys.push({ t0, local: localTotal - 1, clock: Y.getState(doc.store, doc.clientID) });
+    keys.push({ t0, local: localTotal - 1, clock: clockOf(doc, doc.clientID) });
     if (!flood) await sleep(minMs + Math.random() * (maxMs - minMs));
   }
   const deadline = now() + Number(input.ackWaitMs ?? 15000);
@@ -113,7 +113,7 @@ harness.onCommand(async ({ id, name, input }) => {
         value = await type(input);
         break;
       case 'watch':
-        watch = { client: Number(input.client), last: Y.getState(doc.store, Number(input.client)), seen: [] };
+        watch = { client: Number(input.client), last: clockOf(doc, Number(input.client)), seen: [] };
         value = true;
         break;
       case 'watched':

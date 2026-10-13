@@ -1,0 +1,17 @@
+{
+  "name": "maws-spike-p3-s2-v14",
+  "private": true,
+  "type": "module",
+  "description": "P3-0 spike S2 (docs/doperpowers/plans/2026-10-12-p3-co-work.md, child P3-0, parent pin blob 8474a047 at c73ba534): the host document service and port provider on Yjs v14, the S1 ruling's exact pins. Throwaway; installed on its own (pnpm --ignore-workspace).",
+  "dependencies": {
+    "@y/y": "14.0.0-rc.28",
+    "@y/protocols": "1.0.6-rc.1",
+    "lib0": "1.0.0-rc.36"
+  },
+  "pnpm": {
+    "overrides": {
+      "@y/y": "14.0.0-rc.28",
+      "lib0": "1.0.0-rc.36"
+    }
+  }
+}

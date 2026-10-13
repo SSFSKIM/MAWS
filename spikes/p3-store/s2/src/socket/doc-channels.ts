@@ -13,7 +13,7 @@
 // which needs nothing that was dropped. One recovery path serves reset, host restart and reconnect alike. A single
 // frame is always written when the queue is under the mark, however large (a first sync's step 2).
 import type { Socket } from 'node:net';
-import type { DocumentService, HostPort } from '../host/document-service';
+import type { HostPort } from '../host/document-service';
 import type { Actor } from '../host/storage';
 import { encodeDocFrame } from './framing';
 
@@ -33,7 +33,7 @@ export class HostDocChannels {
 
   constructor(
     private readonly socket: Socket,
-    private readonly service: DocumentService,
+    private readonly service: { attach(docId: string, port: HostPort, actor: Actor): unknown }, // either generation's DocumentService
     private readonly event: (name: string, input: unknown) => void, // a JSON `evt` line to the client
     private readonly highWater = DOC_HIGH_WATER,
   ) {}

@@ -1,0 +1,49 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    dependencies:
+      '@y/protocols':
+        specifier: 1.0.6-rc.1
+        version: 1.0.6-rc.1(@y/y@14.0.0-rc.28)
+      '@y/y':
+        specifier: 14.0.0-rc.28
+        version: 14.0.0-rc.28
+      lib0:
+        specifier: 1.0.0-rc.36
+        version: 1.0.0-rc.36
+
+packages:
+
+  '@y/protocols@1.0.6-rc.1':
+    resolution: {integrity: sha512-e/qs7hXcLk/SeNitxMXv2ymozyWFTULwbJEi7cAf/K/iXw9nGwGXHrR5TNluQ/bMwOX1cwuUT0hjEojkfH0gsA==}
+    engines: {node: '>=16.0.0', npm: '>=8.0.0'}
+    peerDependencies:
+      '@y/y': '*'
+
+  '@y/y@14.0.0-rc.28':
+    resolution: {integrity: sha512-Hzw2sSch5RpT4aKz0643LQnoN7qSm63VyWb5D3zzCDEgSe5G0CKu5W7zcAXKDlVwkXg5puKTNX5k/wdVg4LtMA==}
+    engines: {node: '>=22.0.0', npm: '>=8.0.0'}
+
+  lib0@1.0.0-rc.36:
+    resolution: {integrity: sha512-7t/I+PCQqakal22rhXq5giOUtDP/RfecQtdeKvzCtnAvPkxSLAE+/Zvzi/kJDopg+hBAYKo46qmxmlkhX0tYlQ==}
+    engines: {node: '>=22'}
+    hasBin: true
+
+snapshots:
+
+  '@y/protocols@1.0.6-rc.1(@y/y@14.0.0-rc.28)':
+    dependencies:
+      '@y/y': 14.0.0-rc.28
+      lib0: 1.0.0-rc.36
+
+  '@y/y@14.0.0-rc.28':
+    dependencies:
+      lib0: 1.0.0-rc.36
+
+  lib0@1.0.0-rc.36: {}

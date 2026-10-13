@@ -41,3 +41,4 @@ export function findMarker(doc: Y.Doc, marker: string): { text: Y.XmlText; index
 }
 
 export const now = () => performance.timeOrigin + performance.now();
+export const clockOf = (doc: Y.Doc, client: number): number => Y.getState(doc.store, client);

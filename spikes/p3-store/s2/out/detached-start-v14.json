@@ -1,0 +1,6 @@
+{
+  "scenario": "detached-start",
+  "hostPid": 16981,
+  "socket": true,
+  "mainExitAt": 1791857505744
+}

@@ -1,0 +1,270 @@
+{
+  "scenario": "sync",
+  "electron": "44.4.5",
+  "trials": [
+    {
+      "label": "1mb",
+      "trial": 0,
+      "coldOpenToSyncedMs": 119,
+      "coldHostLoadMs": 48,
+      "coldPortToSyncedMs": 118,
+      "warmOpenToSyncedMs": 68,
+      "stateV2": 1004664,
+      "converged": true,
+      "hostHeapUsedMB": 18,
+      "hostRssMB": 139,
+      "store": {
+        "db": 4096,
+        "wal": 1079472
+      },
+      "metrics": {
+        "utility": [
+          {
+            "pid": 55652,
+            "workingSetKB": 154176
+          }
+        ],
+        "renderers": [
+          {
+            "pid": 55485,
+            "workingSetKB": 141424
+          },
+          {
+            "pid": 55545,
+            "workingSetKB": 141840
+          }
+        ],
+        "browser": [
+          {
+            "pid": 55343,
+            "workingSetKB": 158848
+          }
+        ]
+      },
+      "rendererHeap": {
+        "usedJSHeapSize": 19300000,
+        "totalJSHeapSize": 35100000
+      }
+    },
+    {
+      "label": "1mb",
+      "trial": 1,
+      "coldOpenToSyncedMs": 159,
+      "coldHostLoadMs": 90,
+      "coldPortToSyncedMs": 159,
+      "warmOpenToSyncedMs": 56,
+      "stateV2": 1004664,
+      "converged": true,
+      "hostHeapUsedMB": 25,
+      "hostRssMB": 140,
+      "store": {
+        "db": 4096,
+        "wal": 1079472
+      },
+      "metrics": {
+        "utility": [
+          {
+            "pid": 55755,
+            "workingSetKB": 145280
+          }
+        ],
+        "renderers": [
+          {
+            "pid": 55485,
+            "workingSetKB": 154512
+          },
+          {
+            "pid": 55545,
+            "workingSetKB": 157984
+          }
+        ],
+        "browser": [
+          {
+            "pid": 55343,
+            "workingSetKB": 141840
+          }
+        ]
+      },
+      "rendererHeap": {
+        "usedJSHeapSize": 19300000,
+        "totalJSHeapSize": 35100000
+      }
+    },
+    {
+      "label": "1mb",
+      "trial": 2,
+      "coldOpenToSyncedMs": 138,
+      "coldHostLoadMs": 78,
+      "coldPortToSyncedMs": 138,
+      "warmOpenToSyncedMs": 47,
+      "stateV2": 1004664,
+      "converged": true,
+      "hostHeapUsedMB": 22,
+      "hostRssMB": 144,
+      "store": {
+        "db": 4096,
+        "wal": 1079472
+      },
+      "metrics": {
+        "utility": [
+          {
+            "pid": 55806,
+            "workingSetKB": 164368
+          }
+        ],
+        "renderers": [
+          {
+            "pid": 55485,
+            "workingSetKB": 164176
+          },
+          {
+            "pid": 55545,
+            "workingSetKB": 165968
+          }
+        ],
+        "browser": [
+          {
+            "pid": 55343,
+            "workingSetKB": 141680
+          }
+        ]
+      },
+      "rendererHeap": {
+        "usedJSHeapSize": 19300000,
+        "totalJSHeapSize": 35100000
+      }
+    },
+    {
+      "label": "5mb",
+      "trial": 0,
+      "coldOpenToSyncedMs": 487,
+      "coldHostLoadMs": 222,
+      "coldPortToSyncedMs": 486,
+      "warmOpenToSyncedMs": 261,
+      "stateV2": 5011288,
+      "converged": true,
+      "hostHeapUsedMB": 60,
+      "hostRssMB": 254,
+      "store": {
+        "db": 6066176,
+        "wal": 6142952
+      },
+      "metrics": {
+        "utility": [
+          {
+            "pid": 55943,
+            "workingSetKB": 256032
+          }
+        ],
+        "renderers": [
+          {
+            "pid": 55485,
+            "workingSetKB": 269808
+          },
+          {
+            "pid": 55545,
+            "workingSetKB": 270256
+          }
+        ],
+        "browser": [
+          {
+            "pid": 55343,
+            "workingSetKB": 141904
+          }
+        ]
+      },
+      "rendererHeap": {
+        "usedJSHeapSize": 19300000,
+        "totalJSHeapSize": 35100000
+      }
+    },
+    {
+      "label": "5mb",
+      "trial": 1,
+      "coldOpenToSyncedMs": 454,
+      "coldHostLoadMs": 209,
+      "coldPortToSyncedMs": 454,
+      "warmOpenToSyncedMs": 237,
+      "stateV2": 5011288,
+      "converged": true,
+      "hostHeapUsedMB": 60,
+      "hostRssMB": 250,
+      "store": {
+        "db": 6066176,
+        "wal": 6142952
+      },
+      "metrics": {
+        "utility": [
+          {
+            "pid": 56323,
+            "workingSetKB": 251456
+          }
+        ],
+        "renderers": [
+          {
+            "pid": 55485,
+            "workingSetKB": 332528
+          },
+          {
+            "pid": 55545,
+            "workingSetKB": 333408
+          }
+        ],
+        "browser": [
+          {
+            "pid": 55343,
+            "workingSetKB": 141968
+          }
+        ]
+      },
+      "rendererHeap": {
+        "usedJSHeapSize": 19300000,
+        "totalJSHeapSize": 35100000
+      }
+    },
+    {
+      "label": "5mb",
+      "trial": 2,
+      "coldOpenToSyncedMs": 444,
+      "coldHostLoadMs": 211,
+      "coldPortToSyncedMs": 444,
+      "warmOpenToSyncedMs": 224,
+      "stateV2": 5011288,
+      "converged": true,
+      "hostHeapUsedMB": 62,
+      "hostRssMB": 268,
+      "store": {
+        "db": 6066176,
+        "wal": 6142952
+      },
+      "metrics": {
+        "utility": [
+          {
+            "pid": 56393,
+            "workingSetKB": 251104
+          }
+        ],
+        "renderers": [
+          {
+            "pid": 55485,
+            "workingSetKB": 402016
+          },
+          {
+            "pid": 55545,
+            "workingSetKB": 401792
+          }
+        ],
+        "browser": [
+          {
+            "pid": 55343,
+            "workingSetKB": 142032
+          }
+        ]
+      },
+      "rendererHeap": {
+        "usedJSHeapSize": 19300000,
+        "totalJSHeapSize": 35100000
+      }
+    }
+  ]
+}

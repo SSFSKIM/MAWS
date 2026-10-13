@@ -1,0 +1,4 @@
+pure gap {"state":{"pendingStructs":false,"pendingDs":false,"skips":true,"sv":[0]},"y":"def","events":[["_Item:3+3"]]}
+newcomer synced from the holey doc {"state":{"pendingStructs":false,"pendingDs":false,"skips":true,"sv":[0]},"y":"def"}
+parent-missing gap {"state":{"pendingStructs":true,"pendingDs":false,"skips":false,"sv":[]},"events":[]}
+2000 mutated updates applied with no check {"threw":1482,"parkedOrHole":374,"clean":144,"checkRefused":1856,"checkPassedButParked":0}

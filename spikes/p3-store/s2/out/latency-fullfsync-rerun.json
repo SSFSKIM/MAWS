@@ -1,0 +1,154 @@
+{
+  "scenario": "latency",
+  "fullfsync": true,
+  "doc": {
+    "stateV2": 1008641
+  },
+  "runs": {
+    "human 60-180 ms": {
+      "keystrokes": 300,
+      "ackMs": {
+        "n": 300,
+        "p50": 5.6,
+        "p95": 8.5,
+        "max": 23.4
+      },
+      "visibleInBMs": {
+        "n": 300,
+        "p50": 5.7,
+        "p95": 8.5,
+        "max": 19.6
+      },
+      "unacked": 0
+    },
+    "fast 10 ms": {
+      "keystrokes": 300,
+      "ackMs": {
+        "n": 300,
+        "p50": 6.3,
+        "p95": 9.2,
+        "max": 16.6
+      },
+      "visibleInBMs": {
+        "n": 300,
+        "p50": 6.3,
+        "p95": 9.2,
+        "max": 16.6
+      },
+      "unacked": 0
+    },
+    "flood (one task)": {
+      "keystrokes": 300,
+      "ackMs": {
+        "n": 300,
+        "p50": 15.6,
+        "p95": 18.6,
+        "max": 20.1
+      },
+      "visibleInBMs": {
+        "n": 300,
+        "p50": 18.5,
+        "p95": 19.2,
+        "max": 19.7
+      },
+      "unacked": 0
+    }
+  },
+  "converged": true,
+  "hostCommits": {
+    "n": 603,
+    "p50": 5.2,
+    "p95": 7.14,
+    "max": 18.84
+  },
+  "hostRows": [
+    {
+      "t": "updates",
+      "n": 906
+    },
+    {
+      "t": "provenance",
+      "n": 906
+    },
+    {
+      "t": "versions",
+      "n": 1
+    }
+  ],
+  "hostMem": {
+    "heapUsedMB": 15,
+    "rssMB": 88
+  },
+  "store": {
+    "db": 1134592,
+    "wal": 4132392
+  },
+  "provenanceBytes": 52548,
+  "metrics": {
+    "utility": [
+      {
+        "pid": 66532,
+        "workingSetKB": 150400
+      }
+    ],
+    "renderers": [
+      {
+        "pid": 66541,
+        "workingSetKB": 110032
+      },
+      {
+        "pid": 66546,
+        "workingSetKB": 110800
+      }
+    ],
+    "browser": [
+      {
+        "pid": 66449,
+        "workingSetKB": 136080
+      }
+    ]
+  },
+  "compaction": {
+    "compacted": {
+      "seq": 906,
+      "stateBytes": 1008641,
+      "rowsFolded": 906,
+      "ms": 28.001124999995227,
+      "rowsLeft": 0
+    },
+    "whoBefore": {
+      "found": true,
+      "client": 3931787130,
+      "clock": 10,
+      "inserted": {
+        "actor": "human",
+        "at": 1791857251938,
+        "seq": 5
+      }
+    },
+    "whoAfter": {
+      "found": true,
+      "client": 3931787130,
+      "clock": 10,
+      "inserted": {
+        "actor": "human",
+        "at": 1791857251938,
+        "seq": 5
+      }
+    },
+    "provenanceBytesAfterCompaction": 52548,
+    "thinned": null,
+    "whoAfterThin": {
+      "found": true,
+      "client": 3931787130,
+      "clock": 10,
+      "inserted": {
+        "actor": "human",
+        "at": 1791857251938,
+        "seq": 5
+      }
+    },
+    "reloadEqualsLive": true,
+    "reloadMs": 42.74550000000454
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "model": {
+    "rootString": "<paragraph>hello world</paragraph>",
+    "length": 11,
+    "child": true,
+    "delta": "{\"type\":\"delta\",\"name\":\"paragraph\",\"children\":[{\"type\":\"insert\",\"insert\":\"hello world\"}]}"
+  },
+  "relpos": {
+    "client": 7465439878265581,
+    "clock": 4,
+    "ownClient": 7465439878265581
+  },
+  "gap": {
+    "after": {
+      "pendingStructs": true,
+      "pendingDs": false,
+      "skips": false,
+      "sv": []
+    },
+    "updateEvents": [
+      51
+    ],
+    "rootString": ""
+  },
+  "gapFilled": {
+    "after": {
+      "pendingStructs": false,
+      "pendingDs": false,
+      "skips": false,
+      "sv": [
+        [
+          3037945998238744,
+          7
+        ]
+      ]
+    },
+    "equal": true
+  },
+  "missingOrigin": {
+    "after": {
+      "pendingStructs": true,
+      "pendingDs": false,
+      "skips": false,
+      "sv": [
+        [
+          7871970168709571,
+          1
+        ]
+      ]
+    },
+    "updateEvents": [],
+    "text": "<paragraph />"
+  },
+  "pendingLeaksIntoStep2": {
+    "thirdHasPending": true,
+    "leakBytes": 61
+  },
+  "unknownDeletion": {
+    "pendingStructs": false,
+    "pendingDs": true,
+    "skips": false,
+    "sv": []
+  },
+  "contentMap": {
+    "perUpdateBytes": [
+      52,
+      52,
+      48,
+      48,
+      48,
+      48,
+      48,
+      48
+    ],
+    "mergedBytes": 196,
+    "insertOfFirstChar": [
+      [
+        "insert=session:a",
+        "insertAt=1791856428984"
+      ]
+    ],
+    "deleteOfFirstChar": [
+      [
+        "delete=human",
+        "deleteAt=1791856434984"
+      ]
+    ],
+    "insertOfH": [
+      [
+        "insert=human",
+        "insertAt=1791856429984"
+      ]
+    ]
+  }
+}

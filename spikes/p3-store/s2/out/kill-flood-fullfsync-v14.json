@@ -1,0 +1,171 @@
+{
+  "scenario": "kill",
+  "fullfsync": true,
+  "flood": {
+    "clientId": 8071813864236575,
+    "keystrokes": 300,
+    "ackedBeforeKill": 11,
+    "ackedBeforeKillLost": 0,
+    "typedBeforeKillUnacked": 289,
+    "unackedButDurableAtKill": 0,
+    "typedWhileDown": 0,
+    "inStoreAtEnd": 300,
+    "lostAtEnd": 0,
+    "neverAcked": 0
+  },
+  "timeline": {
+    "killAtMs": 2512,
+    "exitSeenMs": 2524,
+    "restartedMs": 4107,
+    "reconnectedMs": 4246,
+    "exitCode": 9
+  },
+  "reopened": [
+    {
+      "loadMs": 40.464917000000014,
+      "syncedMs": 50
+    },
+    {
+      "loadMs": 40.464917000000014,
+      "syncedMs": 70
+    }
+  ],
+  "A": {
+    "clientId": 8071813864236575,
+    "keystrokes": 262,
+    "ackedBeforeKill": 93,
+    "ackedBeforeKillLost": 0,
+    "typedBeforeKillUnacked": 1,
+    "unackedButDurableAtKill": 0,
+    "typedWhileDown": 66,
+    "inStoreAtEnd": 262,
+    "lostAtEnd": 0,
+    "neverAcked": 0
+  },
+  "B": {
+    "clientId": 713749975825020,
+    "keystrokes": 170,
+    "ackedBeforeKill": 61,
+    "ackedBeforeKillLost": 0,
+    "typedBeforeKillUnacked": 0,
+    "unackedButDurableAtKill": 0,
+    "typedWhileDown": 42,
+    "inStoreAtEnd": 170,
+    "lostAtEnd": 0,
+    "neverAcked": 0
+  },
+  "converged": {
+    "AeqB": true,
+    "AeqHost": true,
+    "storeEqHost": true,
+    "svEqual": true
+  },
+  "rendererPhases": {
+    "A": [
+      {
+        "phase": "handshake",
+        "synced": false,
+        "unsaved": 0,
+        "t": -183
+      },
+      {
+        "phase": "live",
+        "synced": false,
+        "unsaved": 0,
+        "t": -133
+      },
+      {
+        "phase": "live",
+        "synced": true,
+        "unsaved": 0,
+        "t": -65
+      },
+      {
+        "phase": "off",
+        "synced": false,
+        "unsaved": 290,
+        "t": 2514
+      },
+      {
+        "phase": "handshake",
+        "synced": false,
+        "unsaved": 353,
+        "t": 4177
+      },
+      {
+        "phase": "live",
+        "synced": false,
+        "unsaved": 355,
+        "t": 4220
+      },
+      {
+        "phase": "live",
+        "synced": true,
+        "unsaved": 355,
+        "t": 4226
+      }
+    ],
+    "B": [
+      {
+        "phase": "handshake",
+        "synced": false,
+        "unsaved": 0,
+        "t": -63
+      },
+      {
+        "phase": "live",
+        "synced": false,
+        "unsaved": 0,
+        "t": -63
+      },
+      {
+        "phase": "live",
+        "synced": true,
+        "unsaved": 0,
+        "t": 0
+      },
+      {
+        "phase": "off",
+        "synced": false,
+        "unsaved": 0,
+        "t": 2514
+      },
+      {
+        "phase": "handshake",
+        "synced": false,
+        "unsaved": 40,
+        "t": 4177
+      },
+      {
+        "phase": "live",
+        "synced": false,
+        "unsaved": 41,
+        "t": 4227
+      },
+      {
+        "phase": "live",
+        "synced": true,
+        "unsaved": 41,
+        "t": 4246
+      }
+    ]
+  },
+  "hostAfter": {
+    "rows": [
+      {
+        "t": "updates",
+        "n": 344
+      },
+      {
+        "t": "attributions",
+        "n": 344
+      },
+      {
+        "t": "versions",
+        "n": 1
+      }
+    ],
+    "rejected": 0,
+    "log": []
+  }
+}

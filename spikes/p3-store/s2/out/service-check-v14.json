@@ -1,0 +1,212 @@
+{
+  "failed": 0,
+  "results": {
+    "converged": {
+      "ok": true,
+      "detail": {
+        "length": 119,
+        "agentRevision": 1
+      }
+    },
+    "rows carry the actor": {
+      "ok": true,
+      "detail": [
+        {
+          "actor": "human",
+          "n": 100
+        },
+        {
+          "actor": "session:s1",
+          "n": 1
+        }
+      ]
+    },
+    "awareness crosses, and leaves with its connection": {
+      "ok": true,
+      "detail": {
+        "bSeesA": true,
+        "agentSeesA": true,
+        "bLostA": true
+      }
+    },
+    "offline edits are unsaved": {
+      "ok": true,
+      "detail": {
+        "phase": "off",
+        "synced": false,
+        "unsaved": 20,
+        "revision": 101
+      }
+    },
+    "offline and handshake edits reached the host": {
+      "ok": true,
+      "detail": {
+        "rejected": [],
+        "revision": 102
+      }
+    },
+    "who wrote it, before and after compaction": {
+      "ok": true,
+      "detail": {
+        "before": {
+          "agent": "session:s1",
+          "human": "human"
+        },
+        "after": {
+          "agent": "session:s1",
+          "human": "human",
+          "deletedBy": [
+            "human"
+          ]
+        },
+        "rowsBefore": 103,
+        "rowsAfter": 0,
+        "compacted": {
+          "seq": 103,
+          "stateBytes": 243
+        }
+      }
+    },
+    "thinning to the minute keeps who, coalesces ranges": {
+      "ok": true,
+      "detail": {
+        "beforeThin": {
+          "rows": [
+            {
+              "kind": "merged",
+              "n": 1,
+              "bytes": 358
+            }
+          ],
+          "ranges": [
+            {
+              "actor": "session:s1",
+              "op": "insert",
+              "ranges": 1,
+              "clocks": 19
+            },
+            {
+              "actor": "human",
+              "op": "insert",
+              "ranges": 18,
+              "clocks": 125
+            },
+            {
+              "actor": "human",
+              "op": "delete",
+              "ranges": 1,
+              "clocks": 3
+            }
+          ],
+          "humanAt": 1791857572265
+        },
+        "afterThin": {
+          "rows": [
+            {
+              "kind": "merged",
+              "n": 1,
+              "bytes": 138
+            }
+          ],
+          "ranges": [
+            {
+              "actor": "session:s1",
+              "op": "insert",
+              "ranges": 1,
+              "clocks": 19
+            },
+            {
+              "actor": "human",
+              "op": "insert",
+              "ranges": 2,
+              "clocks": 125
+            },
+            {
+              "actor": "human",
+              "op": "delete",
+              "ranges": 1,
+              "clocks": 3
+            }
+          ],
+          "who": {
+            "actor": "human",
+            "at": 1791857520000
+          },
+          "agent": "session:s1",
+          "deletedBy": [
+            "human"
+          ]
+        }
+      }
+    },
+    "restart from version + log equals the live doc": {
+      "ok": true,
+      "detail": {
+        "length": 157,
+        "revision": 104
+      }
+    },
+    "malformed frames: the host lives, replicas converge, the store equals the live doc": {
+      "ok": true,
+      "detail": {
+        "outcomes": {
+          "random": {
+            "accepted": 0,
+            "rejected": 200
+          },
+          "truncated": {
+            "accepted": 0,
+            "rejected": 48
+          },
+          "mutated": {
+            "accepted": 24,
+            "rejected": 476
+          },
+          "gap": {
+            "accepted": 0,
+            "rejected": 1
+          },
+          "gap behind a skip": {
+            "accepted": 0,
+            "rejected": 1
+          },
+          "ack from replica": {
+            "accepted": 0,
+            "rejected": 1
+          },
+          "string": {
+            "accepted": 0,
+            "rejected": 1
+          },
+          "object": {
+            "accepted": 0,
+            "rejected": 1
+          },
+          "huge length": {
+            "accepted": 0,
+            "rejected": 1
+          }
+        },
+        "evictions": 0,
+        "liveStartsWith": "still alive posXaZXYZXYZXYZXYZXYZXYZ\u001dYZX",
+        "pendingStructs": false,
+        "pendingDs": false,
+        "skips": false,
+        "sampleReasons": [
+          "an unknown frame type N",
+          "Integer out of Range",
+          "Unexpected end of array",
+          "an origin that does not exist (N:N)",
+          "undecodable update (Unexpected end of array)",
+          "undecodable update (Integer out of Range)",
+          "a deletion past clock N for client N",
+          "a right origin that does not exist (N:N)",
+          "undecodable update (The encoded data was not valid for encoding utf-N)",
+          "a gap for client N (clock N, have N)",
+          "undecodable update (contentRefs[(info & BITSN)] is not a function)",
+          "a frame with N trailing bytes or a short read"
+        ]
+      }
+    }
+  }
+}
