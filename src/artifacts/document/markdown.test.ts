@@ -185,6 +185,13 @@ describe('a parse', () => {
     expect(blocks[0].textContent).toBe('line ^aa\n^bb');
   });
 
+  it('stores a link’s address and title without control characters, and the stored link reads back exactly (Decision Log 18)', () => {
+    const [block] = md.parse('[Link](<https://example.com/a\u0001b\tc\u007f> "say\u0007 \\"hi\\"\u001f") ^p1');
+    const link = { type: 'link', attrs: { href: 'https://example.com/abc', title: 'say "hi"' } };
+    expect(block.toJSON()).toEqual({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Link', marks: [link] }] });
+    expect(md.parse(md.serialize(docOf([block])))[0].toJSON()).toEqual(block.toJSON());
+  });
+
   it('keeps an empty paragraph and its id', () => {
     const doc = docOf([schema.nodes.paragraph.create({ id: 'e1' }), schema.nodes.paragraph.create({ id: 'e2' }, schema.text('after'))]);
     const text = md.serialize(doc);

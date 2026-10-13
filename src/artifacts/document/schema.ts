@@ -6,7 +6,7 @@
 // (node views and the editor live in editor/). Copied and typed from P3-0's spikes (s1/v14/schema.mjs, S3's and S4's
 // additions, S5's comment mark), Tiptap 3.31.3 on `@y/prosemirror` 2.0.0-15; the attribution hardening adapted from
 // upstream's yhub-tiptap-demo/src/schema.js (MIT).
-import { getSchema, Mark, mergeAttributes, Node, type AnyExtension, type Extensions } from '@tiptap/core';
+import { getSchema, Mark, mergeAttributes, Node, type AnyExtension, type Extensions, type RawCommands } from '@tiptap/core';
 import type { Schema } from '@tiptap/pm/model';
 import { Plugin, type EditorState } from '@tiptap/pm/state';
 import { Blockquote } from '@tiptap/extension-blockquote';
@@ -266,6 +266,17 @@ const variants = [
   variant(Callout, 'callout--attributed', 'block', (a) => ['aside', mergeAttributes(a), 0]),
 ];
 
+// ── the link mark's values (Decision Log 18) ──
+// A link's `href` and `title` carry no ASCII control character: no URL grammar admits one, and the agent's markdown
+// could not write an address holding a line break. They are stripped where a link enters (pasted HTML, the link
+// commands, the markdown parser), so the state is never stored.
+// eslint-disable-next-line no-control-regex -- matching the control characters is the point
+const CONTROLS = /[\u0000-\u001F\u007F]/g;
+/** The value without U+0000–U+001F and U+007F; anything but a string as it was. */
+export const withoutControls = <T>(value: T): T => (typeof value === 'string' ? (value.replace(CONTROLS, '') as T) : value);
+const linkAttrs = <T extends object>(attrs: T): T =>
+  Object.fromEntries(Object.entries(attrs).map(([key, value]) => [key, key === 'href' || key === 'title' ? withoutControls(value) : value])) as T;
+
 /** The binding's `attributedNodes`: a strict container holding a deletion renders as its `--attributed` variant. */
 export const attributedNodes = (name: string, kinds: { insert?: boolean; delete?: boolean; format?: boolean }): boolean =>
   kinds.delete === true && (STRICT as readonly string[]).includes(name);
@@ -312,7 +323,15 @@ export const extensions = ({ generateID = (): string => nanoid8() }: { generateI
     // `{href, title}` only (D2): Link's `target`, `rel` and `class` defaults would ride in every stored link
     addAttributes(this: { parent?: () => Attrs }) {
       const parent = this.parent?.() ?? {};
-      return { href: parent.href, title: parent.title };
+      return {
+        href: { ...(parent.href as Attrs), parseHTML: (el: Attributed) => withoutControls(el.getAttribute('href')) },
+        title: { ...(parent.title as Attrs), parseHTML: (el: Attributed) => withoutControls(el.getAttribute('title')) },
+      };
+    },
+    addCommands(this: { parent?: () => Partial<RawCommands> }): Partial<RawCommands> {
+      const parent = this.parent?.() ?? {};
+      const { setLink, toggleLink } = parent as Pick<RawCommands, 'setLink' | 'toggleLink'>;
+      return { ...parent, setLink: (attrs) => setLink(linkAttrs(attrs)), toggleLink: (attrs) => toggleLink(attrs && linkAttrs(attrs)) };
     },
   }),
   Highlight.configure({ multicolor: true }),

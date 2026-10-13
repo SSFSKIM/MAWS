@@ -5,6 +5,7 @@
 // and milestones around them.
 import type { JSONContent, MarkdownToken } from '@tiptap/core';
 import { ORDERED_LIST_MARKER_PATTERN, OrderedList } from '@tiptap/extension-list';
+import { withoutControls } from './schema';
 
 // ── attributes: `key="value"` (or single quotes), HTML-escaped ──
 const escapeAttr = (value: string, quote = '"'): string =>
@@ -472,16 +473,17 @@ export const MARKDOWN: Record<string, object> = {
     renderMarkdown: (node: Json, h: Render) =>
       node.attrs?.color == null ? `==${h.renderChildren(node)}==` : `<mark ${attrString({ color: String(node.attrs.color) })}>${h.renderChildren(node)}</mark>`,
   },
-  // An address with spaces, parentheses or brackets goes in `<…>`; a title keeps its quotes; an empty title stays.
+  // An address with spaces, parentheses or brackets goes in `<…>`; a title keeps its quotes; an empty title stays. Neither
+  // holds a control character (the schema's contract, Decision Log 18): none is read in, and none is written out.
   link: {
     // marked reads an empty title (`""`) as none: the raw text tells them apart
     parseMarkdown: (token: MarkdownToken, h: Parse) => {
       const title = token.title || (/\s(?:""|''|\(\))\)$/.test(token.raw ?? '') ? '' : null);
-      return h.applyMark('link', h.parseInline(token.tokens ?? []), { href: token.href, title });
+      return h.applyMark('link', h.parseInline(token.tokens ?? []), { href: withoutControls(token.href), title: withoutControls(title) });
     },
     renderMarkdown: (node: Json, h: Render) => {
-      const href = str(node.attrs?.href);
-      const title = node.attrs?.title as string | null | undefined;
+      const href = withoutControls(str(node.attrs?.href));
+      const title = withoutControls(node.attrs?.title as string | null | undefined);
       const destination = /^[^\s()<>\\]*$/.test(href) ? href : `<${href.replace(/[\\<>]/g, '\\$&')}>`;
       return `[${h.renderChildren(node)}](${destination}${title == null ? '' : ` "${title.replace(/[\\"]/g, '\\$&')}"`})`;
     },
