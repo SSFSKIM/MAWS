@@ -434,6 +434,10 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
    - Pretendard is not bundled.
    - HWP/HWPX export is a tracker row added at landing (residue).
    - M5 is unblocked and starts from the revised previews (`stance-<key>-v2.png`).
+7. 2026-10-12 (the owner, parent Decision Log 44): **the defaults matter less than the machinery.** The three ship at a good-enough level from the redraw, with no polish loop. More defaults come later, and a school or a teacher gets their own system and components in P4. So:
+   - **Defaults are data.** The defaults are a list of bundled directories under `src/artifacts/types/design_system/defaults/`, enumerated by one bundle module. Seeding, validation tests and the page read that list, never three hard-coded keys, so a fourth default is a new directory and one line.
+   - **The house key is the only named default.** `maws` is the one key the code names, and only for the floor of D8 and D9.
+   - **A per-school or per-teacher system is an ordinary artifact.** Nothing in the apply API, the chain or `artifacts.setDefaults` distinguishes a seeded system from an authored one.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
