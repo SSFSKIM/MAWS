@@ -164,9 +164,6 @@ export class HistoryController {
   dismissBanner(): void {
     this.set({ banner: null });
   }
-  dismissStatus(): void {
-    this.set({ status: null, error: null });
-  }
 
   setShowChanges(on: boolean): void {
     const loaded = this.loaded;
@@ -251,7 +248,7 @@ export class HistoryController {
   private async open(target: PreviewTarget): Promise<void> {
     const load = ++this.load;
     const selected = target.kind === 'version' ? [target.versionId] : target.kind === 'compare' ? [...target.versionIds] : [];
-    this.set({ selected, loading: true, error: null });
+    this.set({ selected, loading: true, status: null, error: null });
     try {
       const versions = this.snapshot.versions ?? (await this.api.versions());
       const byId = (id: number) => {
