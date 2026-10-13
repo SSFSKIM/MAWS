@@ -5,6 +5,7 @@
 // field's events and the view's own mutations. A remote change to the node redraws it, never under a focused field.
 import type { Editor, NodeViewRenderer, NodeViewRendererProps } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
+import { Selection } from '@tiptap/pm/state';
 import type { NodeView } from '@tiptap/pm/view';
 
 export interface AtomField {
@@ -57,12 +58,21 @@ export const atomView =
       control.value = String(node.attrs[field.attr] ?? '');
       control.addEventListener('input', () => setAttr(editor, getPos, field.attr, control.value));
       (control as HTMLElement).addEventListener('keydown', (event: KeyboardEvent) => {
-        // Escape, or Enter in a one-line field, hands the caret back to the document after the node
+        // Escape, or Enter in a one-line field, hands the caret back to the document after the node: right after an
+        // inline atom, in the nearest text after a block one (before it, or the atom itself, when nothing follows)
         const done = event.key === 'Escape' || (event.key === 'Enter' && !(control instanceof HTMLTextAreaElement && !event.metaKey && !event.ctrlKey));
         if (!done) return;
         event.preventDefault();
         const pos = getPos();
-        if (typeof pos === 'number') editor.chain().focus().setTextSelection(pos + node.nodeSize).run();
+        if (typeof pos !== 'number') return;
+        editor
+          .chain()
+          .focus()
+          .command(({ tr }) => {
+            tr.setSelection(Selection.near(tr.doc.resolve(pos + node.nodeSize)));
+            return true;
+          })
+          .run();
       });
       input = control;
       panel.append(control);

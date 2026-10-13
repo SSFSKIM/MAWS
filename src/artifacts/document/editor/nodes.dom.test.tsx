@@ -4,7 +4,7 @@
 // editor half of D4's identity test (the editor builds the schema module's schema).
 import { Editor, type JSONContent } from '@tiptap/core';
 import { NodeSelection } from '@tiptap/pm/state';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { coreExtensionOptions } from '../ids';
 import { fingerprint } from '../fingerprint';
 import { schemaFor } from '../schema';
@@ -16,12 +16,17 @@ let editor: Editor | null = null;
 afterEach(() => {
   editor?.destroy();
   editor = null;
+  vi.restoreAllMocks();
 });
 
 const host = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-1' });
 host.assets.set('maws-artifact:a1/cat.png', 'blob:cat');
 const diagrams: string[] = [];
-const make = (content: JSONContent) => {
+const drawn = async (source: string) => {
+  diagrams.push(source);
+  return `<svg data-rendered="${source.length}"></svg>`;
+};
+const make = (content: JSONContent, renderDiagram: (source: string) => Promise<string> = drawn) => {
   editor = new Editor({
     element: document.body.appendChild(document.createElement('div')),
     coreExtensionOptions,
@@ -30,10 +35,7 @@ const make = (content: JSONContent) => {
       env: {
         artifactId: 'doc1',
         host,
-        renderDiagram: async (source) => {
-          diagrams.push(source);
-          return `<svg data-rendered="${source.length}"></svg>`;
-        },
+        renderDiagram,
       },
     }),
     content,
@@ -95,6 +97,17 @@ describe('diagrams', () => {
     typeInto(view(e, 'diagram').querySelector<HTMLTextAreaElement>('[aria-label="Diagram source"]')!, 'graph LR; X-->Y');
     expect(attrsOf(e, 'diagram').source).toBe('graph LR; X-->Y');
     await until(() => diagrams.at(-1) === 'graph LR; X-->Y', 'the redraw');
+  });
+
+  it('cleared before an earlier drawing answers, stay cleared (the late drawing is dropped)', async () => {
+    let answer!: (svg: string) => void;
+    const e = make(doc({ type: 'diagram', attrs: { id: 'd1', source: 'graph TD; A-->B' } }), () => new Promise((resolve) => (answer = resolve)));
+    e.view.dispatch(e.state.tr.setNodeAttribute(atPos(e, 'diagram'), 'source', ''));
+    expect(view(e, 'diagram').textContent).toContain('Diagram');
+    answer('<svg data-obsolete=""></svg>');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(view(e, 'diagram').querySelector('svg')).toBeNull();
+    expect(view(e, 'diagram').textContent).toContain('Diagram');
   });
 });
 
@@ -173,6 +186,38 @@ describe('placeholders', () => {
     select(e, 'pending');
     typeInto(view(e, 'pending').querySelector<HTMLInputElement>('[aria-label="Intent"]')!, 'Methods');
     expect(attrsOf(e, 'pending').intent).toBe('Methods');
+  });
+});
+
+describe('leaving an atom’s field', () => {
+  const leave = (e: Editor, type: string, label: string) => {
+    select(e, type);
+    view(e, type).querySelector(`[aria-label="${label}"]`)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  };
+
+  it('puts the caret in the text after a block atom, through a valid selection only', () => {
+    const warn = vi.spyOn(console, 'warn');
+    const e = make(doc({ type: 'pending', attrs: { id: 'x1', intent: 'Results' } }, para('p1', 'After')));
+    leave(e, 'pending', 'Intent');
+    expect(e.state.selection.empty).toBe(true);
+    expect(e.state.selection.$head.parent.attrs.id).toBe('p1');
+    expect(e.state.selection.$head.parentOffset).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('after the last block, leaves a valid selection without a warning', () => {
+    const warn = vi.spyOn(console, 'warn');
+    const e = make(doc({ type: 'pending', attrs: { id: 'x1', intent: 'Results' } }));
+    leave(e, 'pending', 'Intent');
+    expect(e.state.selection.$head.parent.inlineContent || e.state.selection instanceof NodeSelection).toBe(true);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('puts the caret right after an inline atom', () => {
+    const e = make(doc({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Due ' }, { type: 'math', attrs: { latex: 'x' } }, { type: 'text', text: ' now' }] }));
+    leave(e, 'math', 'LaTeX');
+    expect(e.state.selection.empty).toBe(true);
+    expect(e.state.selection.from).toBe(atPos(e, 'math') + 1);
   });
 });
 
