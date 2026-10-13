@@ -120,7 +120,16 @@ export interface DocumentReadResult {
   changed?: string[]; // with sinceRevision: the top-level blocks shown, which changed since it
   deleted?: string[]; // with sinceRevision: the block ids that existed then and exist nowhere now
   complete?: true; // with sinceRevision: the revision is beyond what the host can compare, so the whole range is shown
-  version?: { id: number; kind: string; revision: number; at: string; label?: string };
+  version?: DocumentVersionSummary; // when a retained version was read
+  versions: DocumentVersionSummary[]; // the latest ones, newest first (the ids `version` takes)
+}
+export interface DocumentVersionSummary {
+  id: number;
+  kind: string;
+  revision: number;
+  at: string;
+  by: CommentAuthor['by'];
+  label?: string;
 }
 export type CommentAuthor = { by: 'user' | 'this session' | 'another session'; appSessionId?: string };
 export interface ListedThread {

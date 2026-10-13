@@ -56,6 +56,7 @@ import {
   type DocumentRefusal,
   type DocumentReadResult,
   type DocumentToolName,
+  type DocumentVersionSummary,
   type ListedThread,
 } from '@shared/maws/document-tools';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
@@ -279,16 +280,15 @@ function refuseInsertsIntoFullTabs(doc: Doc, ops: readonly Op[]): void {
   });
 }
 
-// The suggest path (D14): A's suggestion service when the store has it (A's M8), else refused with nothing written.
+// The suggest path (D14): refused with nothing written until A's suggestion service is on this branch (A's M8; Decision
+// Log 8: behind this flag). Then the batch is planned and applied on `service.suggestionDoc(artifact.id)` as the
+// session, and the editor offers Accept and Reject per range; the routing above (an explicit mode, or the owner's
+// setting, which the agent cannot bypass) stands as it is.
 async function suggest(store: ArtifactStore, artifact: Artifact, asked: boolean): Promise<never> {
-  const service = store.service as unknown as Partial<SuggestionService>;
-  const why = asked ? 'mode "suggest" asks' : 'the owner set this document to take agent edits as suggestions, which needs';
-  if (typeof service.suggestionDoc !== 'function') {
-    return refusedAfterCommit(store, refuse('artifact_edit', { reason: 'unavailable', mode: 'suggest', setting: !asked }, `${why} MAWS's suggestion service, which this build does not have yet; nothing was written`));
-  }
-  // A's M8: the batch applied on `service.suggestionDoc(artifact.id)` as the session, the editor offering Accept and
-  // Reject per range. Not wired until A's service exists to code against (Decision Log 8: behind this flag).
-  return refusedAfterCommit(store, refuse('artifact_edit', { reason: 'unavailable', mode: 'suggest', setting: !asked }, `suggested edits to ${artifact.title} are not wired to MAWS's suggestion service yet; nothing was written`));
+  const ready = typeof (store.service as unknown as Partial<SuggestionService>).suggestionDoc === 'function';
+  const why = asked ? 'mode "suggest" asks for' : `the owner set ${artifact.title} to take agent edits as suggestions, which needs`;
+  const missing = ready ? 'which is not wired to the document tools yet' : 'which this build does not have yet';
+  return refusedAfterCommit(store, refuse('artifact_edit', { reason: 'unavailable', mode: 'suggest', setting: !asked }, `${why} MAWS's suggestion service, ${missing}; nothing was written`));
 }
 
 // ── artifact_comments, artifact_reply, artifact_resolve ─────────────────────────────────────────────────────────────
@@ -423,8 +423,10 @@ export function artifactResolveTool(deps: DocumentToolDeps): McpToolDefinition {
 
 // ── artifact_read (a document) ──────────────────────────────────────────────────────────────────────────────────
 
-function versionSummary(version: ArtifactVersion): NonNullable<DocumentReadResult['version']> {
-  return { id: version.id, kind: version.kind, revision: version.seq, at: iso(version.at), ...(version.label !== undefined && { label: version.label }) };
+const VERSIONS_LISTED = 10; // a read lists this many of the latest versions (A's read does too)
+
+function versionSummary(version: ArtifactVersion, self: AppSessionId): DocumentVersionSummary {
+  return { id: version.id, kind: version.kind, revision: version.seq, at: iso(version.at), by: authorOf(version.actor, self).by, ...(version.label !== undefined && { label: version.label }) };
 }
 
 const readRefusal = (error: ReadError): Refusal => refuse('artifact_read', { reason: error.reason, target: error.target }, error.message);
@@ -444,7 +446,8 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
         const artifact = await documentOf(TOOL, store, input.artifact, ctx, deps);
         if (input.revision !== undefined || input.paths !== undefined) throw refuse(TOOL, { reason: 'invalid' }, 'a document is read by tab, range and sinceRevision (or a retained version), not by revision or paths');
         const options = { tab: input.tab, from: input.from, count: input.count ?? DOCUMENT_LIMITS.readCount };
-        const head = { status: 'read' as const, artifactId: artifact.id, kind: 'document' as const, title: artifact.title, ...(artifact.handle !== undefined && { handle: artifact.handle }) };
+        const versions = await store.readCommitted(() => store.listVersions(artifact.id).slice(-VERSIONS_LISTED).reverse().map((version) => versionSummary(version, ctx.appSessionId)));
+        const head = { status: 'read' as const, artifactId: artifact.id, kind: 'document' as const, title: artifact.title, ...(artifact.handle !== undefined && { handle: artifact.handle }), versions };
         let result: DocumentReadResult;
         if (input.version !== undefined) {
           if (input.sinceRevision !== undefined) throw refuse(TOOL, { reason: 'invalid' }, 'a retained version is read whole, without sinceRevision');
@@ -462,7 +465,7 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
               doc.destroy();
             }
           });
-          result = { ...head, revision: read.version.seq, ...publicRead(read.read), version: versionSummary(read.version) };
+          result = { ...head, revision: read.version.seq, ...publicRead(read.read), version: versionSummary(read.version, ctx.appSessionId) };
         } else {
           const actor = actorOf(ctx);
           store.service.replica(ctx.appSessionId, artifact.id); // the session's replica keeps the document loaded

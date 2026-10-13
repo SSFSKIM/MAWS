@@ -147,8 +147,9 @@ describe('artifact_read of a document', () => {
     const person = world.connect(id, HUMAN);
     person.edit((doc) => transact(doc, () => nodeOf(doc, 'p1').insert(0, 'Later: ')));
     await world.service.whenCommitted();
-    const answer = json<{ markdown: string; version: { id: number; label: string } }>(await read({ artifact: id, version: versionId }));
-    expect(answer.version).toMatchObject({ id: versionId, label: 'v1' });
+    const answer = json<{ markdown: string; version: { id: number; label: string }; versions: Array<{ id: number; by: string }> }>(await read({ artifact: id, version: versionId }));
+    expect(answer.version).toMatchObject({ id: versionId, label: 'v1', by: 'user' });
+    expect(answer.versions[0]).toMatchObject({ id: versionId, by: 'user' });
     expect(answer.markdown).not.toContain('Later: ');
   });
 
