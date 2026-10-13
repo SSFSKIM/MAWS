@@ -134,6 +134,7 @@
     "happy-dom": "^20",
     "katex": "^0.16.47",
     "lib0": "1.0.0-rc.36",
+    "marked": "17.0.6",
     "nanoid": "5.1.16",
     "node-api-headers": "1.9.0",
     "radix-ui": "^1.6.7",
