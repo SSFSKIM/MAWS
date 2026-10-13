@@ -56,8 +56,8 @@ export function groupVersions(versions: readonly ArtifactVersion[], { now, named
 /** A row's title: its label, else its time. */
 export const versionTitle = (version: ArtifactVersion): string => version.label ?? TIME.format(version.at);
 
-/** A version's date and time, for a banner or a heading. */
-export const versionWhen = (version: ArtifactVersion): string => WHEN.format(version.at);
+/** A date and time (epoch ms) as the preview's heading and Show editors write it: "Oct 12, 9:41 AM". */
+export const formatWhen = (at: number): string => WHEN.format(at);
 
 /** A row's one line: the turn's summary, the note's first line, or what made the version; null for a plain auto. */
 export function versionSummary(version: ArtifactVersion): string | null {

@@ -15,7 +15,7 @@ import { dsOverrides, type TokenOverrides } from '../../meta';
 import { listTabs, tabBody, type TabInfo } from '../../tabs';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { HistoryApi } from './api';
-import { authorOf, newChangesBase, versionTitle, versionWhen } from './model';
+import { authorOf, formatWhen, newChangesBase, versionTitle } from './model';
 
 export type PreviewTarget = { kind: 'version'; versionId: number } | { kind: 'compare'; versionIds: [number, number] } | { kind: 'since'; versionId: number | null };
 
@@ -243,7 +243,7 @@ export class HistoryController {
     const provenance = decodeMap(await this.api.attributions(0, LIVE));
     return showEditors({ doc, from, to, liveRoot, provenance }).map(({ who, at, kinds }) => {
       const author = authorOf(who, this.api.sessionTitle?.bind(this.api));
-      return { name: author.name, color: author.color, at, when: versionWhen({ at } as ArtifactVersion), kinds };
+      return { name: author.name, color: author.color, at, when: formatWhen(at), kinds };
     });
   }
 
@@ -265,7 +265,7 @@ export class HistoryController {
       if (target.kind === 'version') {
         next = byId(target.versionId);
         prev = versions.filter((v) => v.seq < next!.seq || (v.seq === next!.seq && v.id < next!.id)).sort((a, b) => b.seq - a.seq || b.id - a.id)[0] ?? null;
-        title = versionTitle(next) === versionWhen(next) ? versionWhen(next) : `${versionTitle(next)} · ${versionWhen(next)}`;
+        title = next.label ? `${next.label} · ${formatWhen(next.at)}` : formatWhen(next.at);
       } else if (target.kind === 'compare') {
         [prev, next] = target.versionIds.map(byId).sort((a, b) => a.seq - b.seq || a.id - b.id);
         title = `${versionTitle(prev)} → ${versionTitle(next)}`;

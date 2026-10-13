@@ -48,6 +48,16 @@ export function cursorBuilders(awareness: Awareness): { cursorBuilder: (user: un
 
 const presenceKey = new PluginKey<DecorationSet>('agentEditing');
 
+// Who edits which blocks, as one comparable string.
+function editingSignature(awareness: Awareness): string {
+  const parts: string[] = [];
+  awareness.getStates().forEach((value, clientId) => {
+    const blocks = clientId === awareness.clientID ? [] : editingOf(value);
+    if (blocks.length > 0) parts.push(`${clientId}:${JSON.stringify(presenceOf(value))}:${blocks.join(',')}`);
+  });
+  return parts.sort().join('|');
+}
+
 function editingDecorations(state: EditorState, awareness: Awareness): DecorationSet {
   if ((ySyncPluginKey.getState(state) as { renderer?: unknown } | undefined)?.renderer != null) return DecorationSet.empty; // a diff is shown
   const byBlock = new Map<string, { name: string; color: string }>();
@@ -83,8 +93,12 @@ export const Presence = Extension.create<{ awareness: Awareness | null }>({
         },
         props: { decorations: (state) => presenceKey.getState(state) },
         view: (view) => {
-          const changed = ({ added, updated, removed }: { added: number[]; updated: number[]; removed: number[] }) => {
-            if ([...added, ...updated, ...removed].every((id) => id === awareness.clientID) || view.isDestroyed) return;
+          // redrawn only when what the others are editing changed, not on every cursor move
+          let last = editingSignature(awareness);
+          const changed = () => {
+            const now = editingSignature(awareness);
+            if (now === last || view.isDestroyed) return;
+            last = now;
             view.dispatch(view.state.tr.setMeta(presenceKey, true).setMeta('addToHistory', false));
           };
           awareness.on('change', changed);
