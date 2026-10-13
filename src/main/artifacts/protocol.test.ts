@@ -17,7 +17,7 @@ const MARKER = 'data-maws-bridge';
 
 let root: string;
 let asked: CommandInput<'artifacts.content'>[];
-let files: Map<string, { kind: ArtifactKind; path: string }>; // `<id> <revision|live> <path>` → the host's answer
+let files: Map<string, { kind: ArtifactKind; path: string; name: string }>; // `<id> <revision|live> <path>` → the host's answer
 let handle: (request: Request) => Promise<Response>;
 
 beforeEach(async () => {
@@ -29,17 +29,19 @@ beforeEach(async () => {
     asked.push(input);
     const found = files.get(`${input.artifactId} ${input.revision ?? 'live'} ${input.path}`);
     if (!found) return { ok: false, error: { code: 'invalid_input', message: 'not found' } } as CommandResult<'artifacts.content'>;
-    return { ok: true, value: { revision: 1, kind: found.kind, name: 'x', size: 0, sha256: 'x', path: found.path } };
+    return { ok: true, value: { revision: 1, kind: found.kind, name: found.name, size: 0, sha256: 'x', path: found.path } };
   });
 });
 afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
+// The store keeps an asset under its hash and a page under its name: the file on disk has no extension to read a type
+// from, so the host's answer's name gives it.
 async function hold(artifactId: string, revision: number | 'live', path: string, kind: ArtifactKind, content: string): Promise<void> {
-  const file = join(root, `${artifactId}-${revision}-${path.replaceAll('/', '_')}`);
+  const file = join(root, `${artifactId}-${revision}-${files.size}`);
   await writeFile(file, content);
-  files.set(`${artifactId} ${revision} ${path}`, { kind, path: file });
+  files.set(`${artifactId} ${revision} ${path}`, { kind, path: file, name: path.split('/').at(-1)! });
 }
 const get = (url: string, init: RequestInit = {}) => handle(new Request(url, init));
 
@@ -83,6 +85,7 @@ describe('the maws-artifact: handler (Decision Log 14, 35e): the files the host 
 
   it('answers a byte range 206, and an unsatisfiable one 416', async () => {
     await hold(DOC, 'live', 'assets/clip.mp4', 'document', '0123456789');
+    expect((await get(artifactUrl(DOC, 'live', 'assets/clip.mp4'))).headers.get('content-type')).toBe('video/mp4');
     const part = await get(artifactUrl(DOC, 'live', 'assets/clip.mp4'), { headers: { Range: 'bytes=2-5' } });
     expect(part.status).toBe(206);
     expect(part.headers.get('content-range')).toBe('bytes 2-5/10');
@@ -103,8 +106,8 @@ describe('the maws-artifact: handler (Decision Log 14, 35e): the files the host 
   });
 
   it('answers 404 when the host’s answer names a file that cannot be served (gone, a directory)', async () => {
-    files.set(`${PAGE} live index.html`, { kind: 'html', path: join(root, 'gone.html') });
-    files.set(`${PAGE} live assets/dir`, { kind: 'html', path: root });
+    files.set(`${PAGE} live index.html`, { kind: 'html', path: join(root, 'gone.html'), name: 'index.html' });
+    files.set(`${PAGE} live assets/dir`, { kind: 'html', path: root, name: 'dir' });
     expect((await get(artifactUrl(PAGE, 'live', 'index.html'))).status).toBe(404);
     expect((await get(artifactUrl(PAGE, 'live', 'assets/dir'))).status).toBe(404);
   });

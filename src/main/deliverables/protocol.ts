@@ -56,9 +56,11 @@ export function createDeliverableHandler(reader: Pick<DeliverableReader, 'get'>)
   return createSchemeHandler(deliverableResolver(reader));
 }
 
-// The file a scheme's URL names: its path on disk, and whether it is an artifact's page, which gets the bridge script.
+// The file a scheme's URL names: its path on disk, the name its type is read from (an artifact's asset is stored under
+// its hash, with no extension), and whether it is an artifact's page, which gets the bridge script.
 export interface SchemeFile {
   path: string;
+  name: string;
   bridge: boolean;
 }
 // A URL to the file it names, or null (unknown, malformed, unreadable: nothing is said about which). Never throws.
@@ -74,7 +76,7 @@ export function deliverableResolver(reader: Pick<DeliverableReader, 'get'>): Sch
       () => null, // an id that is not a record uuid, an unreadable directory: nothing is said about either
     );
     const version = record?.versions[target.version - 1];
-    return record && version ? { path: version.path, bridge: record.kind === 'artifact' } : null;
+    return record && version ? { path: version.path, name: basename(version.path), bridge: record.kind === 'artifact' } : null;
   };
 }
 
@@ -95,7 +97,7 @@ export function createSchemeHandler(resolve: SchemeResolver, options: { cors?: b
     try {
       const stat = await file.stat();
       if (!stat.isFile()) throw new Error('not a regular file');
-      const mime = typeOf(basename(resolved.path));
+      const mime = typeOf(resolved.name);
       const headers = new Headers({
         'Content-Type': mime,
         'X-Content-Type-Options': 'nosniff',

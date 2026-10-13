@@ -155,8 +155,9 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
         ? (await required('artifacts.versionState', { artifactId: request.artifactId, versionId: request.versionId })).bytes
         : (await required('artifacts.state', { artifactId: request.artifactId })).bytes,
     readAsset: async (ref) => {
+      if (!ref.startsWith('assets/')) return null; // the content file is not an asset
       const found = await call('artifacts.content', { artifactId: request.artifactId, path: ref });
-      if (!found.ok || !ref.startsWith('assets/')) return null;
+      if (!found.ok) return null;
       return { bytes: new Uint8Array(await readFile(found.value.path)), mime: mimeOf(found.value.name) };
     },
     printToPdf,

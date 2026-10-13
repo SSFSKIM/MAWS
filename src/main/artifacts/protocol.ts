@@ -33,7 +33,7 @@ export function artifactResolver(content: ContentLookup): SchemeResolver {
     if (!target) return null;
     const answer = await content({ artifactId: target.artifactId, path: target.path, ...(target.revision !== 'live' && { revision: target.revision }) });
     if (!answer.ok) return null;
-    return { path: answer.value.path, bridge: answer.value.kind === 'html' && !target.path.startsWith('assets/') };
+    return { path: answer.value.path, name: answer.value.name, bridge: answer.value.kind === 'html' && !target.path.startsWith('assets/') };
   };
 }
 
