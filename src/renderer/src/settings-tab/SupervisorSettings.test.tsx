@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge, Settings } from '@shared/ipc/schema';
 import type { HostStatus, SupervisorStatus } from '@shared/ipc/schema/host';
-import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
 import { useHosts } from '../stores/hosts';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
@@ -55,7 +55,7 @@ let unsubscribe = () => {};
 const settings = () => useSettings.getState().state!.settings;
 
 // The hosts store connects on mount and reads main's snapshot: the bridge answers it with `initialStatus`.
-async function renderGroup(initialStatus: HostStatus = status(), initial: Settings = SETTINGS_DEFAULTS_V13, whole = false) {
+async function renderGroup(initialStatus: HostStatus = status(), initial: Settings = SETTINGS_DEFAULTS_V14, whole = false) {
   b = settingsBridge(initial);
   b.answers['host.status'] = () => initialStatus;
   window.maws = b.bridge;
@@ -323,7 +323,7 @@ describe('Stop all', () => {
 
 describe('inside Settings › Engine', () => {
   it('is a Background supervisor group of the Engine section, after the engine rows', async () => {
-    await renderGroup(status(), SETTINGS_DEFAULTS_V13, true);
+    await renderGroup(status(), SETTINGS_DEFAULTS_V14, true);
     const group = screen.getByRole('group', { name: 'Background supervisor' });
     expect(within(group).getByRole('group', { name: 'Status' })).toBeTruthy();
     expect(within(group).getByRole('group', { name: 'Exit when idle' })).toBeTruthy();

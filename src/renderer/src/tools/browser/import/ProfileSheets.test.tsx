@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
 import { useSettings } from '../../../stores/settings';
 import { importBridge, RECORD, type ImportBridge } from '../../../test-support/browser-import';
 import { ProfileSheets } from './ProfileSheets';
@@ -17,7 +17,7 @@ const calls = (name: string) => b.calls.filter((c) => c.name === name).map((c) =
 const dialog = () => screen.getByRole('dialog');
 
 async function renderHost() {
-  b = importBridge({ ...SETTINGS_DEFAULTS_V13, browser: { ...SETTINGS_DEFAULTS_V13.browser, profile: 'Default' } });
+  b = importBridge({ ...SETTINGS_DEFAULTS_V14, browser: { ...SETTINGS_DEFAULTS_V14.browser, profile: 'Default' } });
   Object.assign(b.answers, {
     'browser.import.list': () => ({ profiles: [{ ...RECORD, userDataDir: OTHER_FOLDER }], fileBroken: false, running: null }),
     'browser.import.remove': () => ({ removed: { tabs: 1, historyRows: 4, extensions: 3 } }),

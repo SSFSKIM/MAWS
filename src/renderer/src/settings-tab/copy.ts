@@ -9,7 +9,8 @@ export const SECTIONS = {
   voice: 'Voice', // E9
   appearance: 'Appearance',
   notifications: 'Notifications',
-  browser: 'Browser', // E4a: Settings › Browser (settings version 11), last in the index
+  browser: 'Browser', // E4a: Settings › Browser (settings version 11)
+  artifacts: 'Artifacts', // P3-D: Settings › Artifacts (settings version 14), last in the index
 } as const;
 
 export const INDEX = {
@@ -273,3 +274,20 @@ export const BROWSER = {
   // E4b end
 };
 // E4a end
+
+// P3-D start (2026-10-13): Settings › Artifacts (settings version 14; docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md
+// D9): the design-system defaults
+export const ARTIFACTS = {
+  defaultSystem: 'Default design system',
+  house: 'House system',
+  defaultSystemNote: 'Documents, decks and designs that name no system of their own, in no Space with a default, use it. The house system is MAWS.',
+  missing: 'A deleted system · the house system applies',
+  bySpace: 'By Space',
+  bySpaceNote: 'A Space’s default comes before yours.',
+  noSpaces: 'No Spaces yet. A Space can have its own default design system.',
+  useMine: 'Use my default',
+  spaceSystem: (space: string) => `Design system for ${space}`,
+  reading: 'Reading design systems…',
+  readFailed: (why: string) => `Could not read the design systems · ${why}`,
+} as const;
+// P3-D end
