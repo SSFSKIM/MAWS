@@ -4,12 +4,15 @@
 // is the window's, with no tab ids: the renderer knows the layers, main knows the placed views.
 //
 // The layers: the DOM's (`watchCoverLayers` against the panes that own their view), the floating Overview while it is
-// open, and the chrome's own holds (the address suggestions, which draw over the frozen page as an omnibox popup does).
+// open over a main area on screen (P3-G: a floating or maximized panel stands in main's place, main at 0 px, so the
+// Overview it holds draws nothing and the panel's page stays live; docking finds it open and covering again), and the
+// chrome's own holds (the address suggestions, which draw over the frozen page as an omnibox popup does).
 // The watch runs only while a pane is mounted; the last pane leaving lifts any cover it had asked for. Any change of the
 // notices store refreshes the watch on the next frame (after the toast host rendered it): the toast viewport unmounts
 // while toasts are held and remounts as a new element the DOM watch cannot see by itself.
+import { panelInMain } from '../../app/regions';
 import { ipc } from '../../ipc/client';
-import { useLayout } from '../../stores/layout';
+import { useLayout, type LayoutState } from '../../stores/layout';
 import { useNotices } from '../../stores/notices';
 import { watchCoverLayers, type CoverWatch, type PaneRect } from './cover';
 
@@ -22,12 +25,12 @@ let offLayout: (() => void) | null = null;
 let offNotices: (() => void) | null = null;
 let noticesFrame = 0;
 let domCovered = false;
-let overviewOpen = false;
+let overviewShown = false; // the Overview open over main on screen
 let told = false; // what main was last told
 let answered: Promise<void> = Promise.resolve(); // P3-G: main's answer to the last `covered: true`
 
 function sync(): void {
-  const covered = panes.size > 0 && (domCovered || overviewOpen || holds.size > 0);
+  const covered = panes.size > 0 && (domCovered || overviewShown || holds.size > 0);
   if (covered === told) return;
   told = covered;
   const answer = ipc.invoke('browser.view.cover', { covered }).then((result) => {
@@ -38,11 +41,14 @@ function sync(): void {
 
 const rects = () => [...panes].flatMap((rectOf) => rectOf() ?? []);
 
+const overviewShownIn = (state: LayoutState): boolean => state.overviewOpen && !panelInMain(state.regions);
+
 function start(): void {
-  overviewOpen = useLayout.getState().overviewOpen;
+  overviewShown = overviewShownIn(useLayout.getState());
   offLayout = useLayout.subscribe((state) => {
-    if (state.overviewOpen === overviewOpen) return;
-    overviewOpen = state.overviewOpen;
+    const shown = overviewShownIn(state);
+    if (shown === overviewShown) return;
+    overviewShown = shown;
     sync();
   });
   offNotices = useNotices.subscribe(() => {
@@ -72,7 +78,7 @@ function stop(): void {
   watch = null;
   unsubscribe();
   domCovered = false;
-  overviewOpen = false;
+  overviewShown = false;
   sync();
 }
 
@@ -116,7 +122,7 @@ export function resetCovering(): void {
   panes.clear();
   holds.clear();
   domCovered = false;
-  overviewOpen = false;
+  overviewShown = false;
   told = false;
   answered = Promise.resolve();
 }

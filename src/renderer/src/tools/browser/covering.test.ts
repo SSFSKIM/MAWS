@@ -5,6 +5,7 @@ import { act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { installFakeMain, ok } from '../../test-support/code';
+import { floatPanel } from '../../shell/floating';
 import { useLayout } from '../../stores/layout';
 import { useNotices } from '../../stores/notices';
 import { coverAcknowledged, coverPane, holdCover, resetCovering } from './covering';
@@ -37,6 +38,25 @@ describe('the window’s cover', () => {
     expect(sent()).toEqual([true, false]);
     one.release();
     two.release();
+  });
+
+  // P3-G (the whole-branch review): the Overview lives over the main area, so it covers only while main is on screen.
+  // Floating or maximizing the panel puts main at 0 px with the Overview still open; the panel's page stays live (the
+  // owner's ruling for a Browser tab beside the card) and docking finds the Overview as it was, covering again.
+  it('the open Overview stops covering while the panel stands in main (floating or maximized)', async () => {
+    const pane = coverPane(() => RECT);
+    useLayout.getState().setOverviewOpen(true);
+    floatPanel();
+    expect(useLayout.getState().overviewOpen).toBe(true);
+    expect(sent()).toEqual([true, false]);
+    useLayout.getState().setPanel({ floating: false });
+    expect(sent()).toEqual([true, false, true]);
+    useLayout.getState().setPanel({ maximized: true, collapsed: false });
+    expect(sent()).toEqual([true, false, true, false]);
+    useLayout.getState().setPanel({ collapsed: true }); // a collapsed panel leaves main on screen
+    expect(sent()).toEqual([true, false, true, false, true]);
+    await settle();
+    pane.release();
   });
 
   it('the chrome’s suggestions hold the cover until released', async () => {

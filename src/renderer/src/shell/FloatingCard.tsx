@@ -196,8 +196,10 @@ function Card({ appSessionId, bounds, column }: { appSessionId: AppSessionId; bo
         </IconButton>
       </div>
       {/* A pane-focus boundary as a main pane is (`data-pane`): a docked request that arrives while the card's composer
-          has the keyboard takes it (DockedCardFrame), and the transcript's pointer finds the card's own frame. */}
-      <div data-pane="card" className="min-h-0 flex-1">
+          has the keyboard takes it (DockedCardFrame), and the transcript's pointer finds the card's own frame. It scrolls
+          when the card is shorter than the pane's floor (a docked request and the composer at the minimum size): the
+          transcript shrinks to nothing and every control stays reachable, the header and the resize edges in place. */}
+      <div data-pane="card" className="min-h-0 flex-1 overflow-y-auto">
         <SessionPane appSessionId={appSessionId} paneIndex={paneIndex} />
       </div>
       {!column && (

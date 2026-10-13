@@ -1158,6 +1158,50 @@ test.describe('the floating session card (P3-G)', () => {
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
   });
+
+  // The whole-branch review: at its minimum size a docked request and the composer are taller than the card. The card's
+  // body scrolls (a person's wheel, not a programmatic scroll, which would also move the clipping frame), so every
+  // control of the request and the composer can be brought into the card's visible rect; the header stays in place.
+  test('at its minimum size the card’s body scrolls to a docked request’s controls and the composer', async () => {
+    await withScenario(async (maws, panel) => {
+      const { page, app } = maws;
+      const card = panel.getByRole('region', { name: 'Session card' });
+      const body = card.locator('[data-pane="card"]');
+      const request = card.getByRole('group', { name: 'Approval needed' });
+
+      await (await sidebarRow(page, SIDEBAR_DRAG)).click(); // its permission is pending in nine-sessions.json
+      await menu(app, 'panel.float');
+      await expect(request.getByTestId('request-input')).toHaveText('git log --oneline');
+      const handle = card.locator('[data-card-resize="top-right"]');
+      await dragBy(page, handle, -2000, 2000);
+      const frame = (await card.boundingBox())!;
+      expect([Math.round(frame.width), Math.round(frame.height)], 'the card at its minimum').toEqual([360, 240]);
+
+      const box = (await body.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, 2000);
+      // Each control's centre is inside the body's rect and is what a click there would reach.
+      const reachable = (selector: string) =>
+        card.evaluate((cardElement, selector) => {
+          const view = cardElement.querySelector('[data-pane="card"]')!.getBoundingClientRect();
+          return Array.from(cardElement.querySelectorAll<HTMLElement>(selector))
+            .filter((element) => element.getClientRects().length > 0)
+            .map((element) => {
+              const r = element.getBoundingClientRect();
+              const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+              const inside = x > view.left && x < view.right && y > view.top && y < view.bottom;
+              return `${element.getAttribute('aria-label') ?? element.textContent?.trim()}: ${inside && element.contains(document.elementFromPoint(x, y))}`;
+            });
+        }, selector);
+      await expect.poll(() => reachable('[data-docked-frame] button')).not.toContainEqual(expect.stringMatching(/: false$/));
+      expect(await reachable('[data-docked-frame] button'), 'the request has buttons').not.toEqual([]);
+      const composer = await card.locator('section[data-composer]').boundingBox();
+      expect(composer!.y + composer!.height, 'the composer’s bottom inside the card').toBeLessThanOrEqual(box.y + box.height + 1);
+      expect(await card.evaluate((element) => element.scrollTop), 'the card itself never scrolls').toBe(0);
+      await expect(card.getByRole('heading', { name: SIDEBAR_DRAG })).toBeInViewport();
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    });
+  });
 });
 
 // ---- P3-G: the panel header and the editor host contract (the P3-G execution document, M3; acceptance 9 and 10) ---------
