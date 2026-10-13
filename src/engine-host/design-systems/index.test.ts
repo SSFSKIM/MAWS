@@ -79,6 +79,8 @@ describe('seeding (D9; Decision Log 7)', () => {
       for (const [path, text] of Object.entries(source.files)) expect(files[path], path).toBe(path === 'tokens.tokens.json' ? serializeTokens(canonical.tokens!) : text);
       expect(Object.keys(files)).toEqual(expect.arrayContaining(['tokens.css', 'office-theme.json']));
     }
+    // a stylesheet's text is compared too (the node project loads the defaults' `?raw` CSS): Official's faces arrive
+    expect(filesOf(byKey('official'))['components/document.css']).toContain('src: url("assets/NotoSerifKR-Regular-full.woff2")');
     expect(store().listAssets(byKey('official')).map((a) => a.ref)).toEqual(['assets/face.woff2']);
     expect(store().listAssets(byKey(HOUSE_KEY))).toEqual([]);
     expect(logs).toEqual([expect.stringContaining('seeded the built-in design systems')]);

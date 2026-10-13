@@ -1,14 +1,13 @@
 // The design system's `claude` exporter in A's export registry (P3-D M7; D12, Decision Log 28): run through A's
 // `runExport` over a system's state and its assets as the export service hands them over, it writes one zip of Claude's
 // design-system files where the request says.
-import { readFileSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { validateClaudeTokens } from '@artifacts/design-system/claude-grammar';
 import { writeSystem } from '@artifacts/design-system/model';
-import { DEFAULT_SYSTEMS, type DefaultSystemSource } from '@artifacts/types/design_system/defaults';
+import { DEFAULT_SYSTEMS } from '@artifacts/types/design_system/defaults';
 import { newDoc, stateV2 } from '@artifacts/yjs';
 import { artifactExportName } from '@shared/maws/tools';
 
@@ -19,11 +18,7 @@ import { registerDesignSystemExporters } from './export';
 import { readZip } from './read-zip.test-support';
 
 const ID = '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b';
-// `official` as bundled; its document.css read from the file, since the test runner gives a stylesheet's `?raw` import as ''
-const OFFICIAL_CSS = 'components/document.css';
-const bundled = DEFAULT_SYSTEMS.find((system) => system.key === 'official')!;
-const officialCss = readFileSync(new URL(`../../artifacts/types/design_system/defaults/official/${OFFICIAL_CSS}`, import.meta.url), 'utf8');
-const official: DefaultSystemSource = { ...bundled, files: { ...bundled.files, [OFFICIAL_CSS]: officialCss } };
+const official = DEFAULT_SYSTEMS.find((system) => system.key === 'official')!;
 const bytes = (text: string) => new TextEncoder().encode(text);
 
 let root: string;
