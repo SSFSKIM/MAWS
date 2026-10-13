@@ -1,7 +1,7 @@
 // The X12 import walker (the P3-L document, M6a; Decision Log 4, 5, 22, 29, 30): the deliverables the owner's sessions
 // made before P3, read from a seeded `<userData>/deliverables` tree with X12's lenient reader and landed in a real store
 // in a temp directory through A's `importArtifact`, one call per record.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -184,6 +184,28 @@ describe('importDeliverables (M6a)', () => {
     expect(store.get(uuid(1))).toBeNull();
     expect(store.get(uuid(2))).toBeNull();
     expect(logged).toEqual([expect.stringContaining('v1.html'), expect.stringContaining('moved.pdf')]); // oldest record first
+  });
+
+  it('counts a file it cannot reach failed with the reason, not missing: behind a locked directory, or not a regular file (M6a fix wave 1)', async () => {
+    const sent = seedFile('app-1', uuid(1), { name: join('locked', 'notes.txt'), at: now - 3 * DAY });
+    seedHtml('app-1', uuid(2), { handle: 'page', title: 'Page', versions: [{ at: now - 2 * DAY, markup: '<p>v1</p>' }] });
+    seedFile('app-1', uuid(3), { name: 'folder', at: now - DAY, write: false });
+    mkdirSync(join(dir, 'work', 'folder'));
+    seedFile('app-1', uuid(4), { name: 'here.txt', at: now });
+    const locked = [join(dir, 'work', 'locked'), join(sessionDir('app-1'), uuid(2))];
+    for (const path of locked) chmodSync(path, 0);
+    try {
+      expect(() => statSync(sent.path), 'a real permission error').toThrow(expect.objectContaining({ code: 'EACCES' }));
+      expect(await run()).toEqual({ imported: 1, skipped: 0, missing: 0, failed: 3 });
+    } finally {
+      for (const path of locked) chmodSync(path, 0o700);
+    }
+    expect(logged).toEqual([
+      expect.stringMatching(new RegExp(`${uuid(1)}.*EACCES`)),
+      expect.stringMatching(new RegExp(`${uuid(2)}.*v1\\.html.*EACCES`)),
+      expect.stringMatching(new RegExp(`${uuid(3)}.*not a regular file`)),
+    ]);
+    for (const id of [uuid(1), uuid(2), uuid(3)]) expect(store.get(id)).toBeNull();
   });
 
   it('imports without its handle a page whose handle the session already holds in the store, and says so', async () => {

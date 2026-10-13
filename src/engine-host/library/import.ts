@@ -11,11 +11,12 @@
 //   session to link `edited`. No project (the host knows no session's project), no `caption`, no `sourceUrl`.
 // - A record whose id is already an artifact (A's mirror of a store write, an earlier run, a deleted one) is skipped
 //   before anything is read, so a rerun after a crash lands only what is left. A handle the session already holds in
-//   the store is dropped (A refuses it `handleTaken`) and the page imported without it. A record whose file is gone is
-//   counted `missing`, one that cannot be read or landed `failed`; each with a log line, none stopping the walk.
+//   the store is dropped (A refuses it `handleTaken`) and the page imported without it. A record whose file is gone
+//   (nothing at its path) is counted `missing`; one that cannot be read (a locked directory, not a regular file) or
+//   landed, `failed` with the reason; each with a log line, none stopping the walk.
 //
 // Not wired to run here: the cutover (M6b) runs it once at store open.
-import type { Dirent } from 'node:fs';
+import type { Dirent, Stats } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { Actor } from '@shared/artifacts/actor';
@@ -33,7 +34,8 @@ export interface DeliverablesImport {
 type Outcome = keyof DeliverablesImport;
 
 const reasonOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
-const isAbsent = (error: unknown) => ['ENOENT', 'ENOTDIR', 'EISDIR'].includes((error as NodeJS.ErrnoException).code ?? '');
+// Gone: nothing at the path. Any other error (a locked directory, an I/O fault) is a file that may still be there.
+const isAbsent = (error: unknown) => ['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '');
 
 // A record's import input, or why there is none: a file it names is gone (`missing`), or it cannot be read (`failed`).
 type Prepared = { input: ImportInput } | { outcome: 'missing' | 'failed'; why: string };
@@ -101,8 +103,14 @@ async function prepare(record: DeliverableRecord): Promise<Prepared> {
   };
   if (record.kind !== 'artifact') {
     // A delivered file stays where it is: its latest path, one version at the last version's time.
-    const found = await stat(record.path).catch(() => null);
-    if (!found?.isFile()) return { outcome: 'missing', why: `names a file that is gone (${record.path})` };
+    let found: Stats;
+    try {
+      found = await stat(record.path);
+    } catch (error) {
+      if (isAbsent(error)) return { outcome: 'missing', why: `names a file that is gone (${record.path})` };
+      return { outcome: 'failed', why: `could not reach ${record.path}: ${reasonOf(error)}` };
+    }
+    if (!found.isFile()) return { outcome: 'failed', why: `names ${record.path}, which is not a regular file` };
     return { input: { ...common, kind: 'file', versions: [{ at: ats.at(-1)!, actor, content: { path: record.path } }] } };
   }
   const read: ImportInput['versions'] = [];
