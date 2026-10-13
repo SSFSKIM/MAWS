@@ -6,7 +6,7 @@
 // `http:` or `mailto:`; anything else (`javascript:`, `file:`, relative) loses its address and keeps its text. A
 // GitHub-style task list (`li > input[type=checkbox]`) reads as a task list. Every block gets a fresh id: a pasted
 // or imported page's ids mean nothing here. Needs a DOM (`document`): the renderer, or happy-dom in tests.
-import { DOMParser as PMDOMParser, type Node as PMNode } from '@tiptap/pm/model';
+import { DOMParser as PMDOMParser, type Node as PMNode, type ParseRule, type TagParseRule } from '@tiptap/pm/model';
 import { BLOCK_TYPES, nanoid8, schemaFor } from '../schema';
 
 export type UploadAsset = (bytes: Uint8Array, meta: { name: string; mime: string }) => Promise<{ assetId: string; ref: string }>;
@@ -77,23 +77,30 @@ async function sanitize(root: DocumentFragment, uploadAsset: UploadAsset | undef
 // A MAWS export marks the region whose text's whitespace is content (`data-whitespace="preserve"`, export/html.ts);
 // anywhere else a page's whitespace is layout and is normalised. The whole fragment is parsed once; the marker only
 // changes how whitespace inside it is read: a textblock (paragraph, heading, code) inside a marked region keeps its
-// text exactly (ProseMirror's `preserveWhitespace: 'full'` on that block's rule), and the region itself reads as
-// `white-space: pre-wrap`, which ProseMirror honours for spaces in its subtree. So whitespace between blocks stays
-// layout even inside a region, and a marker on an inline element keeps its spaces while the paragraph around it is
-// parsed as usual (newlines there read as ProseMirror reads them under pre-wrap).
+// text exactly (a copy of its parse rule, scoped to the region by selector, with `preserveWhitespace: 'full'`), and
+// the region itself reads as `white-space: pre-wrap`, which ProseMirror honours for spaces in its subtree. So
+// whitespace between blocks stays layout even inside a region, and a marker on an inline element keeps its spaces
+// while the paragraph around it is parsed as usual (newlines there read as ProseMirror reads them under pre-wrap).
 const PRESERVE = '[data-whitespace="preserve"]';
-function parseKeepingMarkedWhitespace(content: DocumentFragment): PMNode {
+const isTagRule = (rule: ParseRule): rule is TagParseRule => typeof (rule as TagParseRule).tag === 'string';
+let regionParser: PMDOMParser | null = null;
+function parserKeepingMarkedWhitespace(): PMDOMParser {
+  if (regionParser) return regionParser;
   const schema = schemaFor();
-  const parser = PMDOMParser.fromSchema(schema);
-  for (const region of content.querySelectorAll<HTMLElement>(PRESERVE)) region.style.whiteSpace = 'pre-wrap';
-  return parser.parse(content, {
-    ruleFromNode: (dom) => {
-      if (!(dom instanceof Element) || dom.closest(PRESERVE) === null) return null;
-      // no tag rule of the schema has a `context` (html.dom.test.tsx pins it), so matching needs no parse context
-      const rule = parser.matchTag(dom, undefined as never);
-      return rule?.node && schema.nodes[rule.node]?.isTextblock ? { ...rule, preserveWhitespace: 'full' } : null;
-    },
+  const base = PMDOMParser.fromSchema(schema);
+  const scoped = base.rules.flatMap((rule): TagParseRule[] => {
+    if (!isTagRule(rule) || !rule.node || !schema.nodes[rule.node]?.isTextblock) return [];
+    const tags = rule.tag.split(',').map((tag) => tag.trim());
+    // just above the rule it copies, so a rule its original yields to still wins (a diagram's pre over code)
+    return [{ ...rule, tag: tags.flatMap((tag) => [`${PRESERVE} ${tag}`, `${tag}${PRESERVE}`]).join(', '), preserveWhitespace: 'full', priority: (rule.priority ?? 50) + 0.5 }];
   });
+  // the constructor keeps the given order; `fromSchema` had sorted by priority, so the copies are sorted in (stable)
+  const rules = [...scoped, ...base.rules].sort((a, b) => (b.priority ?? 50) - (a.priority ?? 50));
+  return (regionParser = new PMDOMParser(schema, rules));
+}
+function parseKeepingMarkedWhitespace(content: DocumentFragment): PMNode {
+  for (const region of content.querySelectorAll<HTMLElement>(PRESERVE)) region.style.whiteSpace = 'pre-wrap';
+  return parserKeepingMarkedWhitespace().parse(content);
 }
 
 const ID_TYPES = new Set<string>(BLOCK_TYPES);

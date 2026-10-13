@@ -2,7 +2,6 @@
 // schema, on a sanitised inert document (scripts, styles and handlers gone, addresses `https:` and `maws-artifact:`
 // only for what loads), in the renderer as paste is. Equivalent Markdown and HTML read to the same content, and the
 // HTML and Markdown exports of the every-kind fixture read back to it.
-import { DOMParser as PMDOMParser } from '@tiptap/pm/model';
 import { describe, expect, it } from 'vitest';
 import corpus from '../../../../test/fixtures/document/corpus.md?raw';
 import page from '../../../../test/fixtures/document/page.html?raw';
@@ -11,7 +10,6 @@ import { exportHtml } from '../export/html';
 import { exportMarkdown } from '../export/markdown';
 import { importHtml } from './html';
 import { importMarkdown } from './markdown';
-import { schemaFor } from '../schema';
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 
@@ -143,10 +141,6 @@ describe('importHtml', () => {
         ['heading', '  two'],
         ['bulletList', 'three\n'],
       ]);
-    });
-
-    it('matches tag rules without a parse context, which no tag rule of the schema asks for', () => {
-      expect(PMDOMParser.fromSchema(schemaFor()).rules.filter((rule) => 'tag' in rule && rule.context)).toEqual([]);
     });
 
     it('keeps the paragraph around an inline marker, and the marked spaces', async () => {
