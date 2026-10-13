@@ -150,6 +150,12 @@ function metaOf(node: Node, law: string): SystemMeta | null {
 
 // --- Reading ---------------------------------------------------------------------------------------------------------
 
+/** How the system came to exist, without reading the rest (the host's house-system lookup); null before it is written. */
+export function readOrigin(doc: Doc): SystemOrigin | null {
+  const meta = roots(doc).meta;
+  return meta.getAttr('formatVersion') === undefined ? null : ((meta.getAttr('origin') as SystemOrigin | undefined) ?? null);
+}
+
 export function readSystem(doc: Doc): SystemState {
   const r = roots(doc);
   const files: Record<string, string> = {};
