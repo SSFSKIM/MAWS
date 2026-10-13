@@ -188,6 +188,7 @@ describe('the preview', () => {
     expect(shown).not.toBeNull();
     expect(shown).not.toBe(live);
     expect(shown!.isEditable).toBe(false);
+    expect(shown!.storage.collaboration.history).not.toBeNull(); // in history from its creation
     expect(liveText(shown!)).not.toContain('Later.');
     expect(live.view.dom.closest('[hidden]')).not.toBeNull(); // the live page hidden, not unbound
     expect(shown!.can().undo()).toBe(false);
