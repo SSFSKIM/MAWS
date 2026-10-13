@@ -1,7 +1,7 @@
 // The tabs map and the document's own settings (D1, D2 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md; S3's
 // artifact model): tabs are created, renamed, reordered by a fractional `order`, deleted, and each body binds as a doc.
 import { describe, expect, it } from 'vitest';
-import { applyV2, newDoc, stateV2 } from '../yjs';
+import { applyV1, applyV2, diffV1, newDoc, stateV2, stateVector } from '../yjs';
 import { ynodeToPmnode } from '../yjs/prosemirror';
 import { dsOverrides, setDsOverrides } from './meta';
 import { schemaFor } from './schema';
@@ -63,6 +63,35 @@ describe('the tabs map', () => {
     applyV2(reloaded, stateV2(doc));
     expect(listTabs(reloaded).map((tab) => tab.title)).toEqual(['A', 'C']);
     expect(tabBody(reloaded, b)).toBeUndefined();
+  });
+
+  it('inserts into and reorders a run of equal order keys two replicas minted concurrently', () => {
+    const doc = newDoc();
+    const base = createDocument(doc, { title: 'Base', id: 'base' });
+    const other = newDoc();
+    applyV2(other, stateV2(doc));
+    addTab(doc, { title: 'A1', id: 'a1', after: base });
+    addTab(other, { title: 'B1', id: 'b1', after: base });
+    const exchange = () => {
+      const toOther = diffV1(doc, stateVector(other));
+      const toDoc = diffV1(other, stateVector(doc));
+      applyV1(other, toOther);
+      applyV1(doc, toDoc);
+    };
+    exchange();
+    expect(listTabs(doc).map((tab) => tab.id)).toEqual(['base', 'a1', 'b1']);
+    expect(listTabs(doc)[1].order).toBe(listTabs(doc)[2].order); // the run the regression is about
+
+    addTab(doc, { title: 'Between', id: 'mid', after: 'a1' });
+    expect(listTabs(doc).map((tab) => tab.id)).toEqual(['base', 'a1', 'mid', 'b1']);
+    moveTab(doc, base, { before: 'b1' });
+    expect(listTabs(doc).map((tab) => tab.id)).toEqual(['a1', 'mid', 'base', 'b1']);
+    moveTab(doc, 'b1', { after: 'a1' });
+    expect(listTabs(doc).map((tab) => tab.id)).toEqual(['a1', 'b1', 'mid', 'base']);
+    const orders = listTabs(doc).map((tab) => tab.order);
+    expect(new Set(orders).size).toBe(orders.length);
+    exchange();
+    expect(listTabs(other)).toEqual(listTabs(doc));
   });
 
   it('refuses to delete the last tab or to create a document twice', () => {

@@ -75,8 +75,15 @@ export function addTab(doc: Doc, { title, body, id, generateID = nanoid8, after 
   const at = after == null ? tabs.length - 1 : tabs.findIndex((tab) => tab.id === after);
   if (after != null && at < 0) throw new Error(`addTab: no tab ${after}`);
   const tabId = id ?? generateID();
-  const order = keyBetween(tabs[at]?.order ?? null, tabs[at + 1]?.order ?? null);
-  transact(doc, () => writeTab(doc, tabId, title, order, body ?? emptyBody(generateID)), origin);
+  transact(
+    doc,
+    () => {
+      const [order, rekeyed] = place(tabs, at + 1);
+      writeTab(doc, tabId, title, order, body ?? emptyBody(generateID));
+      rekey(doc, rekeyed);
+    },
+    origin,
+  );
   return tabId;
 }
 
@@ -94,8 +101,40 @@ export function moveTab(doc: Doc, tabId: string, to: { before: string } | { afte
   const anchor = 'before' in to ? to.before : to.after;
   const at = others.findIndex((other) => other.id === anchor);
   if (at < 0) throw new Error(`moveTab: no tab ${anchor}`);
-  const [lo, hi] = 'before' in to ? [others[at - 1], others[at]] : [others[at], others[at + 1]];
-  transact(doc, () => tab.setAttr('order', keyBetween(lo?.order ?? null, hi?.order ?? null)), origin);
+  transact(
+    doc,
+    () => {
+      const [order, rekeyed] = place(others, 'before' in to ? at : at + 1);
+      tab.setAttr('order', order);
+      rekey(doc, rekeyed);
+    },
+    origin,
+  );
+}
+
+/**
+ * The order key for a tab placed at `index` of `tabs` (in display order, the placed tab not among them), and the tabs
+ * after it that need new keys. Two replicas adding after the same tab mint the same key, and listTabs breaks the tie
+ * by id, so the neighbours can share a key; the run of tabs after the gap that shares the key before it is re-keyed
+ * with the placed tab, between the key before the gap and the first key above it, keeping the run's display order.
+ */
+function place(tabs: TabInfo[], index: number): [string, Array<{ id: string; order: string }>] {
+  const lo = tabs[index - 1]?.order ?? null;
+  let end = index;
+  while (lo != null && end < tabs.length && tabs[end].order <= lo) end++;
+  const hi = tabs[end]?.order ?? null;
+  const order = keyBetween(lo, hi);
+  const rekeyed: Array<{ id: string; order: string }> = [];
+  let previous = order;
+  for (const tab of tabs.slice(index, end)) {
+    previous = keyBetween(previous, hi);
+    rekeyed.push({ id: tab.id, order: previous });
+  }
+  return [order, rekeyed];
+}
+
+function rekey(doc: Doc, rekeyed: Array<{ id: string; order: string }>): void {
+  for (const { id, order } of rekeyed) tabNode(doc, id)?.setAttr('order', order);
 }
 
 /** Deletes a tab and its body. A document keeps at least one tab. */
