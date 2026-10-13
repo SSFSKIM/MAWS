@@ -219,7 +219,7 @@ Sent to the architect for the ledger before B or C code against it.
 
 **The host's chain.** The host resolves the chain for the agent from the settings main already pushes to it. If it has no route to read settings, that is a request to A, raised in M6. The chain is used:
 
-- when `artifact_create` makes a document, deck or design without a `designSystemId`, it sets the governing system and attaches that system's `DESIGN.md`. The guide is never generated (Decision Log 22, §4.3's "attached on create without asking");
+- when `artifact_create` makes a document, deck or design without a `designSystemId`, it resolves the governing system and attaches that system's `DESIGN.md`. It writes `designSystemId` only when the call names one, so an artifact that never chose a system keeps following its Space's or the owner's default as those change. The guide is never generated (Decision Log 22, §4.3's "attached on create without asking");
 - when `artifact_describe_type` is asked for a kind that uses one.
 
 **The house system.** It is the earliest-created live system whose `meta.origin.key` is `maws`.
