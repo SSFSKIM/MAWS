@@ -18,7 +18,6 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { MawsArtifactCapture } from '@shared/ipc/schema/maws';
 import { DeliverableRecordSchema } from '@shared/maws/deliverable';
 import { versionPath } from '@shared/maws/deliverable-files';
-import { TOOL_ERRORS } from '@shared/maws/tools';
 import type { JournalRow } from '@shared/wire/journal';
 import { liveSpec } from './support/live';
 import { LiveHost } from './support/live-host';
@@ -137,7 +136,7 @@ describe('the maws artifact tools, live (E2 M2)', () => {
       expect(nope, 'the model called artifact_update for "nope"').toBeDefined();
       const refused = ofKind(events(), 'tool.result').find((e) => e.toolUseId === nope!.toolUseId)!;
       expect(refused.isError).toBe(true);
-      expect(textOf(refused.content)).toContain(TOOL_ERRORS.noArtifact('artifact_update', 'nope'));
+      expect(textOf(refused.content)).toContain('artifact_update: no artifact "nope" in this session'); // E2's text (P3-A retired the tool: this live case re-records against artifact_publish)
 
       // the store on disk: one artifact record with two versions copied under it, `path` on v2
       const record = DeliverableRecordSchema.parse(JSON.parse(readFileSync(join(g.userData, 'deliverables', id, `${deliverableId}.json`), 'utf8')));

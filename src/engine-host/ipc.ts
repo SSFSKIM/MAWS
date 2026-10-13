@@ -73,6 +73,7 @@ import { LastListings, manifestsFor } from './plugins/listings';
 // P2-A start (2026-10-09; X17)
 import { ObservedFactsService } from './observed-facts';
 import { FileObservedFactsStore, type ObservedFactsStore } from './store/observed-facts-store';
+import type { ArtifactStore } from './documents/store'; // P3-A (M6)
 // P2-A end
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
@@ -159,6 +160,7 @@ export interface EngineIpcDeps {
   hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready
   observedStore?: ObservedFactsStore; // P2-A (X17): default the file beside each state file under userData
   afterShutdown?: () => void; // P3-A: runs at the end of engine.shutdown's body (closes the artifact store)
+  artifacts?: () => ArtifactStore | null; // P3-A (M6): the artifact store each session's tools write through
 }
 
 export interface EngineIpc {
@@ -256,6 +258,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     log,
     hasClient: deps.hasClient, // E10: each session's bridges fail fast with no client
     observedFacts: observed, // P2-A
+    artifacts: deps.artifacts, // P3-A (M6)
     wire: (session, plan, spec) => {
       specs.set(spec.appSessionId, spec);
       streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { SendFileResultSchema } from '@shared/maws/tools';
 import { MemoryDeliverableStore } from '../deliverables/store';
+import { jsonOf, openWorld, SELF, type World } from './artifact-world.fixture';
 import type { McpToolContext, McpToolResult } from './server';
 import { sendFileTool } from './send-file';
 
@@ -22,7 +23,32 @@ const text = (result: McpToolResult) => (result.content[0] as { text: string }).
 let n = 0;
 const tool = (store: MemoryDeliverableStore) => sendFileTool({ deliverables: store, now: () => new Date('2026-10-05T12:00:00.000Z'), newId: () => `00000000-0000-4000-8000-00000000000${++n}` });
 
-describe('send_file (G2, host half)', () => {
+// P3-A (M6): each file a `file` artifact in the store, its X12 record mirrored under the same id
+describe('send_file over the artifact store', () => {
+  let w: World;
+  beforeEach(() => {
+    w = openWorld();
+    writeFileSync(join(w.cwd, 'hello.txt'), 'HELLO_E1');
+  });
+  afterEach(() => w.close());
+
+  it('makes each file a file artifact linked created, mirrors its X12 record under the same id, and answers those ids', async () => {
+    const send = () => sendFileTool(w.deps()).call({ files: ['hello.txt', join(root, 'out', 'report.pdf')], caption: 'the greeting' }, w.ctx({ toolUseId: 'toolu_send' as ToolUseId }));
+    const answer = SendFileResultSchema.parse(jsonOf(await send()));
+    expect(answer.deliverables.map((d) => [d.path, d.name])).toEqual([[join(w.cwd, 'hello.txt'), 'hello.txt'], [join(root, 'out', 'report.pdf'), 'report.pdf']]);
+    for (const file of answer.deliverables) {
+      expect(w.store.get(file.id)).toMatchObject({ kind: 'file', title: file.name, linkedPath: file.path, createdBy: { kind: 'session', appSessionId: SELF } });
+      expect(w.store.links(file.id).map((l) => l.role)).toEqual(['created']);
+      expect(await w.deliverables.get(SELF, file.id)).toMatchObject({ id: file.id, kind: 'file', path: file.path, title: file.name, caption: 'the greeting', toolUseId: 'toolu_send' });
+    }
+    // one commit, idempotent: the replayed call answers the same ids and writes nothing again
+    expect(jsonOf(await send())).toEqual(answer);
+    expect(w.store.list({ kind: 'file' })).toHaveLength(2);
+    expect(w.written).toHaveLength(2);
+  });
+});
+
+describe('send_file without the artifact store (G2, host half)', () => {
   it('records each file in place and answers the deliverable ids', async () => {
     n = 0;
     const store = new MemoryDeliverableStore();

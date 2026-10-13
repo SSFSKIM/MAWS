@@ -2,7 +2,9 @@
 // moved out of session.ts in E11's debt wave W-A; E4c's browser bridge removed with the browser tools, P1 A-54): the
 // `maws` MCP server the engine handshakes over `mcp_message`, the bridges its tools ask the app through (`show_pane`'s
 // panes, `artifact_screenshot`'s capture), the asks waiting for the human and the blocking asks' attention items. The session owns
-// the process, the journal and the queue; the wiring asks it through `SessionMawsHost`.
+// the process, the journal and the queue; the wiring asks it through `SessionMawsHost`. P3-A (M6): the artifact tools
+// write through the host's artifact store; each turn's end writes the session's `turn` versions there, and the process's
+// end closes the session's agent replicas (their bases and presence with them).
 import type { AttentionItem } from '@shared/graph/attention';
 import type { RequestId, SessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
@@ -22,6 +24,8 @@ import { HostBridge } from './tool-server/bridge';
 import { PaneBridge, type PaneShowRequest } from './tool-server/panes';
 import { MawsToolServer, toolText } from './tool-server/server';
 import { mawsTools } from './tool-server/tools';
+import { ArtifactSession } from './tool-server/artifact-context'; // P3-A
+import type { ArtifactStore } from './documents/store'; // P3-A
 
 type AppSessionIdOf = LaunchSpec['appSessionId'];
 
@@ -41,6 +45,7 @@ export interface SessionMawsHost {
   deliverables?: (onWritten: OnDeliverableWritten) => DeliverableWriter;
   hasClient?: () => boolean;
   artifactScope?: readonly AppSessionIdOf[]; // P2-E1: EngineSessionOptions.artifactScope, handed to the artifact tools
+  artifacts?: () => ArtifactStore | null; // P3-A (M6): EngineSessionOptions.artifacts
   emit<K extends keyof MawsListeners>(name: K, payload: Parameters<MawsListeners[K]>[0]): void;
   respond(requestId: RequestId, response: unknown, opts?: WriteOptions): Promise<void>;
   cwd(): string; // the engine's working directory as the frames report it, else the launch's
@@ -80,6 +85,7 @@ export class SessionMaws {
         deliverables: this.deliverables, bridge: this.panes, capture: this.captures /* E2 */,
         asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
         artifactScope: host.artifactScope, // P2-E1
+        artifacts: host.artifacts, session: new ArtifactSession(), log: host.log, // P3-A (M6)
       }),
       respond: (requestId, response, writeOpts) => host.respond(requestId, response, writeOpts),
       cwd: () => host.cwd(),
@@ -175,6 +181,13 @@ export class SessionMaws {
     return 'delivered';
   }
 
+  // P3-A (M6; Decision Log 23d, 23f): the session's turn ended: one `turn` version per artifact it edited, its presence
+  // cleared. A failure is logged; the edits themselves are already durable.
+  turnEnded(): void {
+    const store = this.host.artifacts?.() ?? null;
+    store?.endTurn(this.host.appSessionId).catch((error: unknown) => this.host.log(`the turn's artifact versions were not written: ${messageOf(error)}`));
+  }
+
   // The process is gone. Answers the blocking asks still published, counted before the tool server aborts them (E1 M5
   // fix: attention lost like a pending AskUserQuestion, the architect's ruling 1).
   processExited(): number {
@@ -184,6 +197,7 @@ export class SessionMaws {
     this.panes.processExited();
     this.captures.processExited(); // E2
     for (const ask of this.askTable.cancelAll('exit')) this.askCancelled(ask, 'exit'); // E1 M2: the async asks, before the exit row
+    this.host.artifacts?.()?.service.closeSession(this.host.appSessionId); // P3-A: its agent replicas (Decision Log 9)
     return lostAsks;
   }
 
