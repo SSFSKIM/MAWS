@@ -192,7 +192,7 @@ interface Delta {
 // every deleted op is dropped here, so the delta's positions count live content only, as `applyDelta` does. Null when
 // nothing is left to change.
 function applicable(rendered: Delta): delta.DeltaBuilderAny | null {
-  const out = delta.create(rendered.name ?? undefined) as delta.DeltaBuilderAny;
+  const out = delta.create(rendered.name) as delta.DeltaBuilderAny;
   let changed = false;
   for (const op of rendered.attrs) {
     if (op.attribution?.delete !== undefined || delta.$deleteAttrOp.check(op)) continue; // deleted by id
@@ -216,7 +216,7 @@ function applicable(rendered: Delta): delta.DeltaBuilderAny | null {
     if (retained > 0) out.retain(retained);
     retained = 0;
     if (delta.$retainOp.check(op)) out.retain(op.retain!, op.format ?? undefined);
-    else if (delta.$modifyOp.check(op)) out.modify(inner ?? delta.create((op.value as Delta).name ?? undefined), op.format ?? undefined);
+    else if (delta.$modifyOp.check(op)) out.modify(inner ?? delta.create((op.value as Delta).name), op.format ?? undefined);
     else out.insert(op.insert as string, op.format ?? undefined);
     changed = true;
   }
