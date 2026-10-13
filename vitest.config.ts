@@ -95,7 +95,12 @@ export default defineConfig({
       // P3-A end
       // P3-B start: the document kind's suites that need a DOM (a real Tiptap editor: UniqueID through split and paste,
       // the editor, comments, history) run under happy-dom; its model, markdown and writer stay in `artifacts` (Node).
-      { resolve: { alias }, test: { name: 'artifacts-dom', environment: 'happy-dom', include: [ARTIFACTS_DOM_TESTS] } },
+      // M3: the editor's stylesheets and the app's tokens are read as text by the theme suite (vitest blanks `.css`
+      // imports, `?raw` included, outside `css.include`).
+      {
+        resolve: { alias },
+        test: { name: 'artifacts-dom', environment: 'happy-dom', include: [ARTIFACTS_DOM_TESTS], css: { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/] } },
+      },
       // P3-B end
       // C8a start: the panel host's suites again under the React Compiler, as electron-vite builds the app, so a render
       // that reads mutable module state (the instance map, a tool's state) without selecting it is caught in a test.
