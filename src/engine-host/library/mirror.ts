@@ -116,7 +116,7 @@ export class LibraryMirror {
     const delay = Math.max(0, Math.min(this.settleMs, since + this.maxWaitMs - now));
     const timer = setTimeout(() => {
       this.timers.delete(artifactId);
-      this.enqueue(() => this.syncArtifact(artifactId));
+      void this.enqueue(() => this.syncArtifact(artifactId));
     }, delay);
     (timer as { unref?: () => void }).unref?.();
     this.timers.set(artifactId, { timer, since });
