@@ -1,12 +1,14 @@
 // P3-D M6b: the Question sheet's design_system question (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D13,
-// Acceptance 14). Each live system is a row with its name, its five main swatches (drawn in the system's own scope, so
-// they follow its tokens) and its origin; "Build one with me" unless the question says `allowCreate: false`; Decide for
+// Acceptance 14). Each live system is a row with its name, its five main swatches (the system's resolved values, read
+// through the apply API's view, so they follow its tokens) and its origin; "Build one with me" unless the question says `allowCreate: false`; Decide for
 // me and Skip as for every modality; Submit answers `{designSystemId, name}` or `{create: true}`; the answered ask reads
 // back by the system's name.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DesignSystemHostContext } from '@artifacts/design-system/apply';
+import { tokenProperties } from '@artifacts/design-system/css';
 import { setToken, writeSystem, type SystemOrigin } from '@artifacts/design-system/model';
+import { parseTokens } from '@artifacts/design-system/tokens';
 import type { ArtifactHost, DocumentHandle } from '@artifacts/host';
 import { defaultSystem } from '@artifacts/types/design_system/defaults';
 import { newDoc, type Doc } from '@artifacts/yjs';
@@ -98,7 +100,6 @@ async function mountWith(questions: AskQuestion[]) {
 
 const section = (id: string) => document.querySelector<HTMLElement>(`[data-question-id="${id}"]`)!;
 const rowOf = (id: string) => section('s1').querySelector<HTMLElement>(`[data-design-system="${id}"]`)!;
-const scopeStyle = (scoped: Element) => [...document.head.querySelectorAll('style[data-ds-scope-style]')].find((style) => style.textContent!.includes(`[data-ds-scope="${scoped.getAttribute('data-ds-scope')}"]`))?.textContent ?? '';
 
 beforeEach(() => {
   resetAskSheets();
@@ -125,16 +126,18 @@ describe('the design_system question', () => {
 
     expect(within(rowOf(HOUSE)).getByText('Built in')).toBeTruthy();
     expect(within(rowOf(ACME)).getByText('Adopted from acme.com')).toBeTruthy();
-    // the swatches read the system's own --ds-* values inside its scope, so they are the system's colours
-    const strip = rowOf(HOUSE).querySelector('[data-ds-scope]')!;
-    expect([...strip.querySelectorAll('[data-swatch]')].map((swatch) => swatch.getAttribute('data-swatch'))).toEqual(SWATCHES);
-    expect((strip.querySelector('[data-swatch="--ds-color-accent"]') as HTMLElement).style.backgroundColor).toBe('var(--ds-color-accent)');
-    const accent = /--ds-color-accent: (#[0-9a-f]{6})/.exec(scopeStyle(strip))?.[1];
-    expect(accent).toMatch(/^#[0-9a-f]{6}$/);
+    // the swatches are the system's own values, as its tokens.css writes them; no scope (and so none of its faces)
+    const values = tokenProperties(parseTokens(JSON.parse(defaultSystem('maws')!.files['tokens.tokens.json']!)).tokens!, 'document');
+    const swatches = [...rowOf(HOUSE).querySelectorAll<HTMLElement>('[data-swatch]')];
+    expect(swatches.map((swatch) => [swatch.dataset.swatch, swatch.dataset.swatchValue])).toEqual(SWATCHES.map((name) => [name, values.get(name)]));
+    expect(swatches[4]!.style.backgroundColor).not.toBe('');
+    expect(new Set(swatches.map((swatch) => swatch.dataset.swatchValue)).size).toBeGreaterThan(1);
+    expect(rowOf(HOUSE).querySelector('[data-ds-scope]')).toBeNull();
+    expect(document.head.querySelectorAll('style[data-ds-scope-style]')).toHaveLength(0);
 
     // a system the owner recolours is redrawn in place
     act(() => setToken(docs[HOUSE]!, 'color.accent.$root', { $value: '#123456' }));
-    expect(scopeStyle(strip)).toContain('--ds-color-accent: #123456;');
+    expect(rowOf(HOUSE).querySelector<HTMLElement>('[data-swatch="--ds-color-accent"]')!.dataset.swatchValue).toBe('#123456');
 
     expect(within(section('s1')).getByRole('button', { name: 'Decide for me' })).toBeTruthy();
     expect(within(section('s1')).getByRole('button', { name: 'Skip' })).toBeTruthy();

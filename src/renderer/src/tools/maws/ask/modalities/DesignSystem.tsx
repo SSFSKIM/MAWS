@@ -1,11 +1,13 @@
 // P3-D: a design_system question (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D13): the owner's live
 // systems from the library (P3-L's index, read again at each committed change), sorted by name, as radios. Each row is the
-// system's name, its origin (`meta.origin`, read through the apply API's view) and its five main swatches. The swatches sit
-// in the system's own `DesignSystemScope` and paint `var(--ds-*)`, so they are the system's colours and follow an edit
-// in place, while the row around them is app chrome on the app's tokens (Decision Log 13). "Build one with me" closes
-// the list unless the question set `allowCreate: false`.
+// system's name, its origin and its five main swatches, both read through the apply API's view of the live system, so a
+// swatch is the system's resolved value and follows an edit in place. The swatches are data painted in the system's
+// colours; the row around them is app chrome on the app's tokens (Decision Log 13). They are not drawn in a
+// `DesignSystemScope`, which would also declare the system's faces: five colours need none of its fonts. "Build one with
+// me" closes the list unless the question set `allowCreate: false`.
 import { RadioGroup } from 'radix-ui';
-import { DesignSystemScope, useDesignSystem } from '@artifacts/design-system/apply';
+import { useDesignSystem } from '@artifacts/design-system/apply';
+import { tokenProperties } from '@artifacts/design-system/css';
 import type { LibraryRow } from '@shared/ipc/schema/library';
 import { useLibraryList } from '../../../../library/store';
 import { SHEET } from '../copy';
@@ -27,18 +29,18 @@ function Mark() {
 
 function SystemRow({ system }: { system: LibraryRow }) {
   const { view } = useDesignSystem({ id: system.id });
+  const values = view ? tokenProperties(view.tokens, 'document') : null;
   return (
     <RadioGroup.Item value={system.id} aria-label={system.title} data-design-system={system.id} className={OPTION_ROW}>
       <Mark />
       <span className="flex min-w-0 flex-1 flex-col">
         <OptionText label={system.title} description={SHEET.systemOrigin(view?.origin)} />
       </span>
-      <span aria-hidden className="mt-0.5 shrink-0">
-        <DesignSystemScope system={{ id: system.id }} medium="document" className="flex gap-0.5">
-          {SWATCHES.map((name) => (
-            <span key={name} data-swatch={name} className="block size-3.5 rounded-[calc(var(--radius-sm)/2)] border border-border" style={{ backgroundColor: `var(${name})` }} />
-          ))}
-        </DesignSystemScope>
+      <span aria-hidden className="mt-0.5 flex shrink-0 gap-0.5">
+        {SWATCHES.map((name) => {
+          const value = values?.get(name);
+          return <span key={name} data-swatch={name} data-swatch-value={value} className="block size-3.5 rounded-[calc(var(--radius-sm)/2)] border border-border" style={value === undefined ? undefined : { backgroundColor: value }} />;
+        })}
       </span>
     </RadioGroup.Item>
   );
