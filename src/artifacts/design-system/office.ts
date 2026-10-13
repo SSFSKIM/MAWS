@@ -5,8 +5,8 @@
 import { flatten, rgbToHex, type ColorValue, type Rgb } from './color';
 import { parseCssColor, parseFontStack } from './css-read';
 import { OFFICE_FACES, OFFICE_KEY, OFFICE_SLOTS, type OfficeSlot } from './extensions';
-import { resolveTokens, resolveValueAgainst } from './resolve';
-import { byIdentity, cssNamesOf } from './roles';
+import { resolveTokens, resolveValueAgainst, type ResolvedToken } from './resolve';
+import { byIdentity, cssNamesOf, tokenIdentity } from './roles';
 import type { TokenSet } from './tokens';
 import { aliasPath, isAlias, isPointer, pointerAsAlias } from './values';
 import type { TokenOverrides } from './view';
@@ -73,17 +73,19 @@ function referencedPath(raw: unknown): string | null {
 }
 
 /**
- * The override met first along a reference chain (M6 fix wave 1, I2): the token at `path` if its `--ds-*` name is
- * overridden, else the token its value refers to, and so on until a literal value. The tokens are validated free of
- * cycles; the bound only keeps a malformed set from looping.
+ * The override met first along a reference chain (M6 fix waves 1 and 2, I2): the token at `path` if its `--ds-*` name
+ * is overridden, else the token its value refers to, and so on until a literal value. The walk is over the resolved
+ * tokens, whose entries keep the value as written, so a token a group's `$extends` brings in is a step like any other;
+ * it goes to the chain's end whatever its length, and a path met twice ends it (resolution refuses cycles already).
  */
-function chainOverride<T>(tokens: TokenSet, path: string, type: 'color' | 'fontFamily', overrides: ReadonlyMap<string, T>): T | undefined {
-  let current: string | null = path;
-  for (let step = 0; current !== null && step < 64; step++) {
+function chainOverride<T>(resolved: ReadonlyMap<string, ResolvedToken>, path: string, type: 'color' | 'fontFamily', overrides: ReadonlyMap<string, T>): T | undefined {
+  const visited = new Set<string>();
+  for (let current: string | null = path; current !== null && !visited.has(tokenIdentity(current)); ) {
+    visited.add(tokenIdentity(current));
     const name = cssNamesOf(current, type)[0];
     const found = name === undefined ? undefined : overrides.get(name);
     if (found !== undefined) return found;
-    current = referencedPath(byIdentity(tokens.tokens, current)?.$value);
+    current = referencedPath(byIdentity(resolved, current)?.token.$value);
   }
   return undefined;
 }
@@ -102,7 +104,7 @@ export function officeTheme(tokens: TokenSet, overrides?: TokenOverrides): Offic
   const over = themeOverrides(overrides);
 
   const role = (path: string): ColorValue => {
-    const overridden = chainOverride(tokens, path, 'color', over.colors);
+    const overridden = chainOverride(resolved.tokens, path, 'color', over.colors);
     if (overridden) return overridden;
     const token = byIdentity(resolved.tokens, path);
     if (token?.type !== 'color') throw new Error(`officeTheme: the role ${path} does not resolve to a colour`);
@@ -126,7 +128,7 @@ export function officeTheme(tokens: TokenSet, overrides?: TokenOverrides): Offic
     const raw = extension.theme?.[name];
     if (raw === undefined) return role(DERIVED[name]);
     const referenced = referencedPath(raw);
-    const overridden = referenced === null ? undefined : chainOverride(tokens, referenced, 'color', over.colors);
+    const overridden = referenced === null ? undefined : chainOverride(resolved.tokens, referenced, 'color', over.colors);
     if (overridden) return overridden;
     const { value, problems } = resolveValueAgainst(resolved, 'color', raw, `${OFFICE_KEY}.theme.${name}`);
     if (!value) throw new Error(`officeTheme: ${problems.join('; ')}`);
@@ -141,7 +143,7 @@ export function officeTheme(tokens: TokenSet, overrides?: TokenOverrides): Offic
   const faces = (which: 'major' | 'minor', rolePath: string): OfficeFonts => {
     const given = extension.fonts?.[which] ?? {};
     let latin = given.latin;
-    const overridden = chainOverride(tokens, rolePath, 'fontFamily', over.fonts);
+    const overridden = chainOverride(resolved.tokens, rolePath, 'fontFamily', over.fonts);
     if (latin === undefined && overridden) latin = officeFace(overridden);
     if (latin === undefined) {
       const token = byIdentity(resolved.tokens, rolePath);

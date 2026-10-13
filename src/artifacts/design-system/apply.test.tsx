@@ -332,6 +332,18 @@ describe('resolveDsVars (the export helper)', () => {
     // a reference to a dropped override reads the system's value
     expect(resolveDsVars('p { color: var(--ds-x); }', tokens, 'document', { '--ds-x': 'var(--ds-color-accent)', '--ds-color-accent': 'var(--brand)' })).toBe('p { color: #c9663f; }');
   });
+
+  // M6 fix wave 2: the override walk has neither of the Office walk's former limits: a token a group's `$extends` brings
+  // in is a value like any other, and a chain of overrides is followed to its end, however long.
+  it('resolves an override through an inherited token, and a chain of overrides of any length', () => {
+    const file = structuredClone(complete) as Record<string, unknown>;
+    file.brand = { $type: 'color', link: { $value: '{color.accent.$root}' } };
+    file.adopted = { $extends: '{brand}' };
+    const withInherited = parseTokens(file).tokens!;
+    expect(resolveDsVars('p { color: var(--ds-x); }', withInherited, 'document', { '--ds-x': 'var(--ds-adopted-link)' })).toBe('p { color: #c9663f; }');
+    const chain = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`--ds-c${i}`, i === 199 ? 'var(--ds-color-text)' : `var(--ds-c${i + 1})`]));
+    expect(resolveDsVars('p { color: var(--ds-c0); }', tokens, 'document', chain)).toBe('p { color: #1f1e1b; }');
+  });
 });
 
 describe('lifetimes (fix wave 1)', () => {

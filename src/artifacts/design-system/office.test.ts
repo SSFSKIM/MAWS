@@ -4,7 +4,7 @@ import complete from './fixtures/complete.tokens.json';
 import { edited, type Edit } from './fixtures/edit';
 import lenient from './fixtures/lenient.tokens.json';
 import { OFFICE_SLOTS, officeTheme, officeThemeXml } from './office';
-import { parseTokens, type TokenSet } from './tokens';
+import { parseTokens, validateTokenFile, type TokenSet } from './tokens';
 
 const set = (input: unknown): TokenSet => {
   const result = parseTokens(input);
@@ -176,5 +176,39 @@ describe('overrides follow a reference chain into Office', () => {
     const theme = officeTheme(set(file), { '--ds-color-accent': '#123456', '--ds-font-brand': '"Source Serif 4", serif' });
     expect(theme.colors.accent2).toBe('123456'); // info, an alias of the accent
     expect(theme.fonts.major.latin).toBe('Source Serif 4');
+  });
+});
+
+// M6 fix wave 2, I2's residue (the re-review's probes): the chain is walked over the resolved tokens, so a token a
+// group's `$extends` brings in is a step like any other, and it is walked to its end, however long, guarded by the
+// paths already visited rather than a hop count.
+describe('override chains through inherited tokens and of any length', () => {
+  const checked = (file: unknown) => {
+    const result = validateTokenFile(file);
+    expect(result.problems).toEqual([]);
+    return result.tokens!;
+  };
+  const inherited = () => edited(complete, ['brand', { $type: 'color', link: { $value: '{color.accent.$root}' } }], ['adopted', { $extends: '{brand}' }]);
+  const long = (length: number) => {
+    const file = structuredClone(complete) as Record<string, unknown>;
+    for (let i = 0; i < length; i++) file[`chain${i}`] = { $type: 'color', next: { $value: i === length - 1 ? '{color.accent.$root}' : `{chain${i + 1}.next}` } };
+    return file;
+  };
+
+  it('a slot following an inherited alias follows the overridden accent', () => {
+    const file = edited(inherited(), ['$extensions/dev.maws.office/theme/accent1', '{adopted.link}']);
+    expect(officeTheme(checked(file), { '--ds-color-accent': '#123456' }).colors.accent1).toBe('123456');
+  });
+
+  it('a derived slot whose role aliases an inherited alias follows it too', () => {
+    const file = edited(withoutOffice(inherited()), ['color/status/info/$value', '{adopted.link}']);
+    expect(officeTheme(checked(file), { '--ds-color-accent': '#123456' }).colors.accent2).toBe('123456');
+  });
+
+  it('a valid chain longer than 64 follows the overridden accent, from a slot and from a role', () => {
+    const slot = edited(long(65), ['$extensions/dev.maws.office/theme/accent1', '{chain0.next}']);
+    expect(officeTheme(checked(slot), { '--ds-color-accent': '#123456' }).colors.accent1).toBe('123456');
+    const role = edited(withoutOffice(long(200)), ['color/status/info/$value', '{chain0.next}']);
+    expect(officeTheme(checked(role), { '--ds-color-accent': '#123456' }).colors.accent2).toBe('123456');
   });
 });
