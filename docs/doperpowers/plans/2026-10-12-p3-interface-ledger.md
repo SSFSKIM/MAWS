@@ -17,9 +17,10 @@ Purpose: P3-A, P3-L, P3-B, P3-C and P3-D each extend the artifact surface and th
 
 | Name | Owner | Consumers | State |
 |---|---|---|---|
+| Yjs v14 pinned: `@y/y` 14.0.0-rc.28, `@y/prosemirror` 2.0.0-15, one `@y/y` by pnpm override; the binding in `src/artifacts/yjs/` (one module); documents tagged with `bindingVersion` | A | B, C, D, E | fixed 2026-10-12 (S1) |
 | `src/engine-host/documents/` (the service), the port provider `src/artifacts/provider/port.ts` (y-protocols sync `0` and awareness `1` frames over `MessagePort`), `DocumentStorage` and `ArtifactHost` interfaces in `src/artifacts/host.ts` | A | B, C, D, E | reserved at approval |
 | The detached transport's binary channel (X13 amended): a length-prefixed frame kind `doc` beside the JSON lines | A (with S2) | main's host client | reserved at approval |
-| `Actor = {kind: 'human'} \| {kind: 'session', appSessionId}`; `ArtifactVersion {seq, at, actor, kind: 'auto' \| 'turn' \| 'named' \| 'restore' \| 'import', label?, note?, summary?, designSystemRef?, assetRefs}`; the `provenance` rows `(clientId, clockStart, clockEnd, actor, at)` (X29) | A | B, C, the history UI | reserved at approval |
+| `Actor = {kind: 'human'} \| {kind: 'session', appSessionId}`; `ArtifactVersion {seq, at, actor, kind: 'auto' \| 'turn' \| 'named' \| 'restore' \| 'import', label?, note?, summary?, designSystemRef?, assetRefs}`; provenance as Yjs v14's native attribution maps (encoded `ContentMap`s), persisted and merged by the host beside the update log, actor and time per id range surviving compaction (X29; Decision Log 25 supersedes the clock-range rows) | A | B, C, the history UI | amended 2026-10-12 (S1) |
 
 ## 3. X25 — the agent's tools (`src/shared/maws/tools.ts`)
 
@@ -60,4 +61,5 @@ Purpose: P3-A, P3-L, P3-B, P3-C and P3-D each extend the artifact surface and th
 ## 8. Record
 
 - 2026-10-12 18:06 PDT: opened at the owner's approval; every row reserved; X28's CSS names and the X32 shape fixed so B and G can code before D and the others land.
+- 2026-10-12 19:30 PDT: S1's verdict recorded: Yjs v14 pinned, provenance native, `bindingVersion` on documents.
 - 2026-10-12 18:40 PDT: G's residue recorded (X32's scope argument and hooks, the Mark-up captures, the chord, the `artifacts` tab kind); P3-H's and P3-0's findings files are `.txt` (the harness refuses report-shaped `.md` from subagents; the protocol-probe convention).
