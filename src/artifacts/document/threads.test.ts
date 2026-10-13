@@ -356,7 +356,7 @@ describe('the editor’s reads and the discard (M4)', () => {
     expect(seen).toBe(2);
   });
 
-  it('discards a thread with no messages and its marks in one update; one with messages stays', () => {
+  it('discards an open thread with no messages and its marks in one update; one with messages, or resolved, stays', () => {
     const { doc, tab, body } = seeded();
     addThread(doc, { threadId: 't4', tabId: tab, blockId: 'p3', quote: 'Third', anchor: anchorOfMark(body, 't3')!, by: owner, at: now() });
     blockY(body, 'p3').format(0, 5, { 'comment--t4stand1': { threadId: 't4' } }); // a stand-in key: the strip reads the mark's value
@@ -370,5 +370,8 @@ describe('the editor’s reads and the discard (M4)', () => {
     expect(covered(body)).toEqual({ t1: 'ships quarterly with design review', t2: 'design review notes', t3: 'keeps going' });
     expect(discardThread(doc, 't1')).toBe(false);
     expect(getThread(doc, 't1')).not.toBeNull();
+    addThread(doc, { threadId: 't5', tabId: tab, blockId: 'p3', quote: 'Third', anchor: anchorOfMark(body, 't3')!, by: owner, at: now() });
+    resolve(doc, 't5', owner, now());
+    expect(discardThread(doc, 't5'), 'resolved on purpose').toBe(false);
   });
 });

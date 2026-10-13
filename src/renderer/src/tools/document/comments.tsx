@@ -111,7 +111,8 @@ function DocumentCardHost({ binding, ...editor }: CommentOverlayProps & { bindin
       key: layoutKey,
       // the card's thread, wherever the editor now draws its passage (the anchor's locator is the quote)
       locate: async () => {
-        const threadId = threadOf(useCommentCard.getState().open?.hostId === hostId ? useCommentCard.getState().open : null);
+        const { open } = useCommentCard.getState();
+        const threadId = open?.hostId === hostId ? threadOf(open) : null;
         return threadId === null ? null : locate(threadId);
       },
       actions: (card) => {

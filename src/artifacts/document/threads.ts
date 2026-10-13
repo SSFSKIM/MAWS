@@ -413,11 +413,12 @@ export function stripMarklessComments(doc: Doc, origin?: unknown, blocks?: (tabI
 
 /**
  * Withdraws a comment nothing was said in yet (M4: its card dismissed unsent): the thread and every mark carrying it, in
- * one transaction, so no replica sees a mark without its thread. A thread with a message is never discarded (false).
+ * one transaction, so no replica sees a mark without its thread. A thread with a message, or one someone resolved, is
+ * never discarded (false).
  */
 export function discardThread(doc: Doc, threadId: string, origin?: unknown): boolean {
   const node = threadNode(doc, threadId);
-  if (!node || node.length > 0) return false;
+  if (!node || node.length > 0 || node.getAttr('status') !== 'open') return false;
   transact(
     doc,
     () => {
