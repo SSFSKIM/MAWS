@@ -3,13 +3,17 @@
 // route (main's channel, the sandboxed preload, the renderer's ArtifactHost), an edit in one reaches the other and the
 // writer's reaches both; a repeated op id is a no-op; versions list their actors; restore lands whole in both windows;
 // `artifacts.changed` arrives for each change; the store reopens after a relaunch on the same profile; and a SIGKILL of
-// the host while a renderer types loses no acknowledged edit, every replica re-opening by itself.
-import { mkdtempSync, rmSync } from 'node:fs';
+// the host while a renderer types loses no acknowledged edit, every replica re-opening by itself. M7: the scheme and the
+// export service (the last case).
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { documents, seamReady } from './support/documents';
 import { launchMaws, type MawsLaunch } from './support/launch';
+
+const require = createRequire(__filename);
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; issues?: unknown } };
 interface Changed {
@@ -171,4 +175,98 @@ test('a SIGKILL of the host while a window types loses no acknowledged edit, and
   // A fresh replica reads the same from the restarted host.
   const fresh = await seam.open(artifact.id);
   expect((await seam.json(fresh)).text).toBe(text);
+});
+
+// M7 (Decision Log 14, 35e, 35g; X31): the `maws-artifact:` scheme serves an html artifact's page, live and at its
+// revision, with the deliverable scheme's headers and sandboxing policy and the bridge script; the app page loads an
+// artifact's image and font through it (the app's CSP and the scheme's CORS answer); and the export service renders the
+// page to a PDF and to a PNG of the asked size in the capture partition's hidden window.
+interface Served {
+  status: number;
+  headers: Record<string, string>;
+  text: string;
+}
+async function served(app: ElectronApplication, url: string): Promise<Served> {
+  return app.evaluate(async ({ session }, target) => {
+    const response = await session.defaultSession.fetch(target);
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, name) => (headers[name] = value));
+    return { status: response.status, headers, text: await response.text() };
+  }, url);
+}
+// The width and height a PNG's IHDR chunk declares.
+const pngSize = (bytes: Buffer) => ({ width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) });
+const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==', 'base64');
+const PAGE = '<!doctype html><html><head><title>Report</title><style>@page { size: A5 } body { margin: 0 } .tall { height: 2000px; background: #2a6 }</style></head><body><h1>M7_EXPORT</h1><div class="tall"></div></body></html>';
+
+test('maws-artifact: serves an html page and its assets to the app, and the export service writes its PDF and PNG', async () => {
+  profile = mkdtempSync(join(tmpdir(), 'maws-e2e-artifacts-'));
+  launch = await launchMaws({ userData: profile });
+  const { app, page } = launch;
+  await seamReady(page);
+  await hostReady(page);
+
+  const created = await page.evaluate(
+    (html) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke('artifacts.create', { kind: 'html', title: 'Report', content: { bytes: new TextEncoder().encode(html), name: 'index.html' } }),
+    PAGE,
+  ) as Result<{ artifact: { id: string; revision: number } }>;
+  if (!created.ok) throw new Error(`artifacts.create failed: ${created.error.message}`);
+  const { artifact } = created.value;
+
+  // The page, live and at its revision: the deliverable scheme's headers and policy, the bridge script in its head.
+  const live = await served(app, `maws-artifact://${artifact.id}/live/index.html`);
+  const atRevision = await served(app, `maws-artifact://${artifact.id}/${artifact.revision}/index.html`);
+  for (const answer of [live, atRevision]) {
+    expect(answer.status).toBe(200);
+    expect(answer.headers).toMatchObject({ 'content-type': 'text/html', 'x-content-type-options': 'nosniff', 'cache-control': 'no-store', 'access-control-allow-origin': '*' });
+    expect(answer.headers['content-security-policy']).toMatch(/^sandbox allow-scripts; default-src 'none'/);
+    expect(answer.text).toContain('data-maws-bridge');
+    expect(answer.text).toContain('M7_EXPORT');
+  }
+  expect((await served(app, `maws-artifact://${artifact.id}/${artifact.revision + 1_000}/index.html`)).status).toBe(404);
+  expect((await served(app, `maws-artifact://${artifact.id}/live/%2e%2e/store.sqlite`)).status).toBe(404);
+
+  // The app page loads an artifact's image and font through the scheme (img-src and font-src admit it; a font is a CORS load).
+  const font = readFileSync(require.resolve('katex/dist/fonts/KaTeX_Main-Regular.woff2'));
+  const upload = (name: string, mime: string, bytes: Buffer) =>
+    page.evaluate(
+      ([id, n, m, b]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke('artifacts.uploadAsset', { artifactId: id, name: n, mime: m, bytes: new Uint8Array(b as number[]) }),
+      [artifact.id, name, mime, [...bytes]] as const,
+    ) as Promise<Result<{ ref: string }>>;
+  const image = await upload('pixel.png', 'image/png', PIXEL);
+  const face = await upload('face.woff2', 'font/woff2', font);
+  if (!image.ok || !face.ok) throw new Error('an asset upload failed');
+  const loaded = await page.evaluate(
+    async ([imageUrl, fontUrl]) => {
+      const img = new Image();
+      const imageLoaded = await new Promise<boolean>((resolve) => {
+        img.onload = () => resolve(img.naturalWidth === 1);
+        img.onerror = () => resolve(false);
+        img.src = imageUrl;
+      });
+      const fontLoaded = await new FontFace('M7Face', `url(${fontUrl})`).load().then(
+        () => true,
+        (error: unknown) => String(error),
+      );
+      return { imageLoaded, fontLoaded };
+    },
+    [`maws-artifact://${artifact.id}/live/${image.value.ref}`, `maws-artifact://${artifact.id}/live/${face.value.ref}`] as const,
+  );
+  expect(loaded).toEqual({ imageLoaded: true, fontLoaded: true });
+
+  // The library's Export: a PDF on the page's own page size, a PNG of the asked size, a whole-page PNG by default.
+  const pdf = await ok<{ path: string; revision: number }>(page, 'artifacts.export', { artifactId: artifact.id, format: 'pdf' });
+  expect(pdf).toEqual({ path: join(profile, 'artifacts', artifact.id, 'exports', `${artifact.revision}-pdf.pdf`), revision: artifact.revision });
+  expect(readFileSync(pdf.path).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  const sized = await ok<{ path: string }>(page, 'artifacts.export', { artifactId: artifact.id, format: 'png', width: 640, height: 480 });
+  expect(pngSize(readFileSync(sized.path))).toEqual({ width: 640, height: 480 });
+  const whole = await ok<{ path: string }>(page, 'artifacts.export', { artifactId: artifact.id, format: 'png' });
+  const wholeSize = pngSize(readFileSync(whole.path));
+  expect(wholeSize.width).toBe(1280);
+  expect(wholeSize.height).toBeGreaterThan(2000); // the page's whole height, not the window's first 800
+
+  // A kind no exporter serves yet is refused, naming it.
+  const { artifact: doc } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Notes' });
+  const refused = await invoke(page, 'artifacts.export', { artifactId: doc.id, format: 'pdf' });
+  expect(refused).toMatchObject({ ok: false, error: { code: 'invalid_input', issues: { reason: 'exportUnavailable', data: { kind: 'document', format: 'pdf' } } } });
 });
