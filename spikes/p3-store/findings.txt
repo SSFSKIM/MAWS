@@ -1390,7 +1390,15 @@ typing with 45 % deletions adds about 4.5 KB per 1,000 keystrokes; re-encoding t
   designSystemRef, assetRefs[]}`; `artifact_head {artifactId, seq, state}`; provenance row `{fromSeq, toSeq, fromAt, toAt,
   tier: 'update' | 'hour' | 'day', contentMap}`; the thinning policy and retention rule above.
 
-### Questions for the architect (S7a)
+### Questions for the architect (S7a) — answered 2026-10-12 (spec Decision Log 36; Decision Log 25 stands)
+The policy replaces full-state versions (binding on §4.2, §4.7 and X29 with the row shapes above); `revertUpdateFixed`
+replaces S3's revert for P3-A with the overwrite-twice reproductions as regression tests. (1) Yes. (2) Yes, turn
+versions kept. (3) Yes; B owns the threshold and re-applies marks on retained words. (4) Yes: in-memory merged
+provenance, hour rows after 1 h, the version pair held open while browsing; S7b measures the editor path. (5) Yes:
+`node:zlib` has zstd in the host's Node; A confirms inside Electron 44.4.5. (6) Deferred, recorded in the spec's §9.
+(7) Yes; the library shows each artifact's history size. (8) Accepted, thresholds raisable. (9) The upstream filing is
+with the owner, recommended. Pitfall 10 (the heavy deck's change count reading 0 after month 1) is an open item for
+P3-C. The questions as asked:
 1. Delta-encoded versions with a head checkpoint instead of full states? Recommended: yes (full states cost 19× the
    database, 178 against 9.2 MB, and 4.4 GB of writes per normal document per 6 months).
 2. Keep turn versions? Recommended: yes, as the spec says (+1.7 MB per normal document per 6 months for all 1,539).
