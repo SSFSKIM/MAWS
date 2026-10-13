@@ -125,6 +125,32 @@ describe('ArtifactStore: entities, spaces and links', () => {
     expect(store.listSpaces()).toEqual([space]);
   });
 
+  it('seeds a kind’s first content through its adapter’s initial hook in the create’s commit, announcing one created (Decision Log 44c)', async () => {
+    const seeded: { title: string }[] = [];
+    reopen([{ kind: 'document', initial: (doc, info) => (seeded.push(info), doc.get('root').insert(0, `# ${info.title}`)) }]);
+    const changes: ArtifactChanged[] = [];
+    store.onChange((change) => changes.push(change));
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, agent);
+    expect(seeded).toEqual([{ title: 'Plan' }]);
+    expect(rootText(doc.id)).toBe('# Plan');
+    expect(committed('SELECT actor FROM artifact_updates WHERE artifactId = ?', doc.id)).toEqual([{ actor: 'session:app-1' }]); // one row, the creator's
+    await new Promise((resolve) => setTimeout(resolve, 300)); // past the change feed's coalescing window
+    expect(changes.filter((c) => c.artifactId === doc.id).map((c) => c.change)).toEqual(['created']);
+    // a caller's own first content wins over the seed; a kind without the hook starts empty
+    const given = await store.create({ kind: 'document', title: 'Given', initial: (d) => d.get('root').insert(0, 'mine') }, human);
+    expect(rootText(given.id)).toBe('mine');
+    expect(seeded).toHaveLength(1);
+    const deck = await store.create({ kind: 'presentation', title: 'Deck' }, human);
+    expect(store.revision(deck.id)).toBe(0);
+  });
+
+  it('takes back a create whose seed throws: no entity, no row', async () => {
+    reopen([{ kind: 'document', initial: () => { throw new Error('the seed broke'); } }]);
+    await expect(store.create({ kind: 'document', title: 'Plan' }, human)).rejects.toThrow(/the seed broke/);
+    expect(store.list()).toEqual([]);
+    expect(committed('SELECT seq FROM artifact_updates')).toEqual([]);
+  });
+
   it('resolves a handle over the asking session’s lineage only, and refuses a handle the creating session already holds', async () => {
     const mine = await store.create({ kind: 'html', title: 'A', handle: 'report', content: { bytes: html('a') } }, agent);
     const theirs = await store.create({ kind: 'html', title: 'B', handle: 'report', content: { bytes: html('b') } }, other);
@@ -566,6 +592,38 @@ describe('ArtifactStore: versions (Decision Log 8)', () => {
     expect(await store.designSystemContextFor(doc.id)).toBe('guide of House style');
   });
 
+  it('asks a registered design-system chain which system governs: {id} pins and answers that system, {builtin} pins nothing (Decision Log 42)', async () => {
+    const house = await store.create({ kind: 'design_system', title: 'House' }, human);
+    const own = await store.create({ kind: 'design_system', title: 'Own' }, human);
+    await write(house.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# house'));
+    const doc = await store.create({ kind: 'document', title: 'Letter', designSystemId: own.id }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'a'));
+    store.registerDesignSystemContext(async (s) => `guide of ${s.title}`);
+    // before any registration A's chain answers: the artifact's own system
+    expect(await store.designSystemContextFor(doc.id)).toBe('guide of Own');
+
+    const asked: unknown[] = [];
+    let answer: { id: string } | { builtin: 'maws' } = { id: house.id };
+    store.registerDesignSystemChain({ governing: () => ({ id: 'never-used' }) });
+    store.registerDesignSystemChain({
+      governing: (target) => {
+        asked.push(target);
+        return answer;
+      },
+    }); // the last registration wins
+    await store.createVersion(doc.id, { kind: 'named', actor: human });
+    expect(store.listVersions(doc.id)[0].designSystemRef).toEqual({ id: house.id, versionSeq: store.revision(house.id) });
+    expect(asked[0]).toMatchObject({ id: doc.id, designSystemId: own.id, spaceId: null }); // handed the artifact's row
+    expect(await store.designSystemContextFor(doc.id)).toBe('guide of House');
+    expect(await store.designSystemContextFor({})).toBe('guide of House');
+
+    answer = { builtin: 'maws' };
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'b'));
+    await store.createVersion(doc.id, { kind: 'named', actor: human });
+    expect(store.listVersions(doc.id)[1].designSystemRef).toBeUndefined(); // the bundled floor renders: no pin
+    expect(await store.designSystemContextFor(doc.id)).toBeNull(); // nothing attached, no guide made up
+  });
+
   it('pins a design system never written by writing and keeping its empty state as a version at seq 0 (M3 review finding 2)', async () => {
     const system = await store.create({ kind: 'design_system', title: 'Empty style' }, human);
     const doc = await store.create({ kind: 'document', title: 'Letter', designSystemId: system.id }, human);
@@ -715,6 +773,21 @@ describe('ArtifactStore: restore (Decision Log 16)', () => {
     expect(live.get('threads').getAttr('t1')).toBe('a posted message');
     expect(live.get('meta').getAttr('restoredFrom')).toBe(at);
     expect(committed('SELECT threadId FROM artifact_threads WHERE artifactId = ?', doc.id)).toEqual([{ threadId: 't1' }]);
+  });
+});
+
+describe('ArtifactStore: the test writer on an html page (M7 fix wave 1)', () => {
+  it('writes a new page as a new revision, idempotent by op id, and takes no document op on a page nor a page op on a document', async () => {
+    const page = await store.create({ kind: 'html', title: 'Page', content: { bytes: html('one') } }, human);
+    const first = store.revision(page.id);
+    const written = await store.testWrite(page.id, 'p1', [{ op: 'page', text: '<p>two</p>' }], agent);
+    expect(written.revision).toBeGreaterThan(first);
+    expect(text(store.files.read(page.id, store.contentRef(page.id).ref))).toBe('<p>two</p>');
+    expect(text(store.files.read(page.id, store.contentRef(page.id, first).ref))).toContain('one');
+    expect(await store.testWrite(page.id, 'p1', [{ op: 'page', text: '<p>three</p>' }], agent)).toEqual(written);
+    await expect(store.testWrite(page.id, 'p2', [{ op: 'insertText', index: 0, text: 'x' }], agent)).rejects.toMatchObject({ code: 'invalid' });
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await expect(store.testWrite(doc.id, 'p3', [{ op: 'page', text: '<p/>' }], agent)).rejects.toMatchObject({ code: 'invalid' });
   });
 });
 

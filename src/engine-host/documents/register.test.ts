@@ -10,7 +10,7 @@ import { MessageChannel, type MessagePort } from 'node:worker_threads';
 import type { MessagePortMain } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PortProvider, type PortLike } from '@artifacts/provider/port';
-import { newDoc } from '@artifacts/yjs';
+import { applyV2, newDoc } from '@artifacts/yjs';
 import { HostCommandError, type DocPortHandler, type HostEmit, type HostOn } from '@shared/host/runtime';
 import { commands, type CommandName, type CommandOutput, type EventName } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
@@ -189,15 +189,32 @@ describe('the artifacts and spaces surface (M4)', () => {
     expect(documents!.store.defaults()).toEqual({ owner: system.id, spaces: {} });
     const page = (await call('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: new TextEncoder().encode('<p>v1</p>'), name: 'page.html' } })).artifact;
     const content = await call('artifacts.content', { artifactId: page.id });
-    expect(content).toMatchObject({ revision: page.revision, name: 'page.html', size: 9 });
+    expect(content).toMatchObject({ revision: page.revision, kind: 'html', name: 'page.html', size: 9 });
     const asset = await call('artifacts.uploadAsset', { artifactId: page.id, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array([1, 2, 3]) });
     expect(asset.ref).toBe('assets/logo.png');
-    expect(await call('artifacts.content', { artifactId: page.id, path: 'assets/logo.png' })).toMatchObject({ name: 'logo.png', size: 3 });
+    expect(await call('artifacts.content', { artifactId: page.id, path: 'assets/logo.png' })).toMatchObject({ kind: 'html', name: 'logo.png', size: 3 });
     expect(await refusal('artifacts.content', { artifactId: page.id, path: '../store.sqlite' })).toMatchObject({ issues: { reason: 'notFound' } });
+    // M7: an older revision by its exact revision; a revision that holds no content is not found
+    await documents!.store.writeContent(page.id, { bytes: new TextEncoder().encode('<p>v2 longer</p>') }, { kind: 'human' });
+    expect(await call('artifacts.content', { artifactId: page.id, revision: page.revision, path: 'page.html' })).toMatchObject({ revision: page.revision, size: 9 });
+    expect((await call('artifacts.content', { artifactId: page.id })).size).toBe(16);
+    expect(await refusal('artifacts.content', { artifactId: page.id, revision: page.revision + 1_000 })).toMatchObject({ issues: { reason: 'notFound' } });
+    // a document's asset (an image, a design system's face) answers with the document's kind
+    const doc = (await call('artifacts.create', { kind: 'document', title: 'Doc' })).artifact;
+    const image = await call('artifacts.uploadAsset', { artifactId: doc.id, name: 'chart.png', mime: 'image/png', bytes: new Uint8Array([4]) });
+    expect(await call('artifacts.content', { artifactId: doc.id, path: image.ref })).toMatchObject({ kind: 'document', name: 'chart.png', size: 1 });
+    // M7: a document's live state for an exporter; a byte kind has none
+    await documents!.service.writeAs(doc.id, { kind: 'human' }, (d) => d.get('root').insert(0, 'exported'));
+    const live = await call('artifacts.state', { artifactId: doc.id });
+    expect(live.revision).toBe(documents!.store.revision(doc.id));
+    const replica = newDoc();
+    applyV2(replica, live.bytes);
+    expect(replica.get('root').toString()).toBe('exported');
+    expect(await refusal('artifacts.state', { artifactId: page.id })).toMatchObject({ issues: { reason: 'invalid' } });
     const file = join(dir, 'report.txt');
     writeFileSync(file, 'report');
     const linked = (await call('artifacts.create', { kind: 'file', title: 'Report', content: { path: file } })).artifact;
-    expect((await call('artifacts.content', { artifactId: linked.id })).path).toBe(file);
+    expect(await call('artifacts.content', { artifactId: linked.id })).toMatchObject({ kind: 'file', path: file });
     expect(await call('artifacts.status', undefined)).toEqual({ status: 'ok', reason: null });
   });
 

@@ -7,7 +7,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeliverableConsoleSchema } from '@shared/ipc/schema/deliverables';
 import { deliverableUrl } from '@shared/maws/deliverable';
 import type { AppSessionId } from '@shared/graph/ids';
+import { ArtifactConsoleSchema } from '@shared/ipc/schema/artifacts';
+import { artifactUrl } from '@shared/artifacts/scheme';
 import {
+  artifactConsoleMessageOf,
   attributeConsole,
   consoleMessageOf,
   guardFrames,
@@ -19,6 +22,8 @@ import {
   CONSOLE_WINDOW_MS,
   guardPermissions,
   isDeliverablePermission,
+  restrictRequests,
+  shownArtifact,
   shouldBlockFrameNavigation,
   type FrameLike,
   shouldCancelDownload,
@@ -29,6 +34,8 @@ const A = 'App-A' as AppSessionId;
 const ID = '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';
 const FRAME = deliverableUrl(A, ID, 2);
 const APP = 'file:///Applications/MAWS.app/Contents/Resources/app/out/renderer/index.html';
+const ARTIFACT = '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d';
+const PAGE = artifactUrl(ARTIFACT, 'live', 'index.html'); // P3-A M7: the artifact store's frame
 
 let dir: string;
 let log: string;
@@ -144,6 +151,73 @@ describe('the app-wide policy’s exemption', () => {
   });
 });
 
+// P3-A M7 (Decision Log 35e): the artifact store's frames get every policy the deliverable ones do
+describe('the policies over a maws-artifact: frame', () => {
+  it('judges a maws-artifact: frame and what lies beneath it as a deliverable frame, and lets it reach either scheme', () => {
+    expect(beneathDeliverable(chain(APP, PAGE, 'about:blank'))).toBe(true);
+    expect(shouldCancelRequest({ url: 'https://example.com/x.png', beneath: beneathDeliverable(chain(APP, PAGE)) })).toBe(true);
+    expect(shouldCancelRequest({ url: 'https://example.com/', beneath: null, initiatorOrigin: `maws-artifact://${ARTIFACT}` })).toBe(true);
+    expect(shouldCancelRequest({ url: artifactUrl(ARTIFACT, 3, 'assets/a.png'), beneath: true })).toBe(false);
+    expect(shouldBlockFrameNavigation({ url: 'https://example.invalid/', frameBeneath: beneathDeliverable(chain(APP, PAGE)), initiatorBeneath: null })).toBe(true);
+    expect(shouldBlockFrameNavigation({ url: artifactUrl(ARTIFACT, 3, 'index.html'), frameBeneath: beneathDeliverable(chain(APP, PAGE)), initiatorBeneath: null })).toBe(false); // a revision switch
+    expect(shouldCancelDownload({ url: PAGE, urlChain: [PAGE] })).toBe(true);
+    expect(isDeliverablePermission([`maws-artifact://${ARTIFACT}`])).toBe(true);
+    expect(isCspExempt(PAGE)).toBe(true); // its answers carry their own policy
+  });
+
+  // fix wave 1 (Decision Log 44a): an artifact frame reaches its own artifact only; the app reaches every one
+  it('refuses a request from an artifact frame, or beneath one, for another artifact by its UUID, and lets the app’s own through', () => {
+    const OTHER = '9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f';
+    const fromFrame = (url: string, frame: FrameLike | null, initiatorOrigin = 'null') => shouldCancelRequest({ url, beneath: beneathDeliverable(frame), shown: shownArtifact(frame), initiatorOrigin });
+    expect(fromFrame(artifactUrl(OTHER, 'live', 'index.html'), chain(APP, PAGE))).toBe(true); // a sandboxed page's request
+    expect(fromFrame(artifactUrl(OTHER, 'live', 'assets/a.png'), chain(APP, PAGE, 'about:blank'))).toBe(true); // a frame beneath it
+    expect(fromFrame(artifactUrl(OTHER, 3, 'index.html'), chain(APP, PAGE), `maws-artifact://${ARTIFACT}`)).toBe(true); // an unsandboxed one's
+    expect(fromFrame(artifactUrl(OTHER, 'live', 'index.html'), chain(APP, FRAME))).toBe(true); // a deliverable frame reaches no artifact
+    expect(fromFrame(artifactUrl(ARTIFACT, 3, 'assets/a.png'), chain(APP, PAGE))).toBe(false); // its own artifact, any revision
+    expect(fromFrame(artifactUrl(OTHER, 'live', 'index.html'), chain(APP, PAGE), 'file://')).toBe(false); // the app points its frame elsewhere
+    expect(fromFrame(artifactUrl(OTHER, 'live', 'assets/a.png'), chain(APP), 'file://')).toBe(false); // the app page's own image
+    expect(shouldCancelRequest({ url: artifactUrl(OTHER, 'live', 'a.png'), beneath: null, shown: undefined, initiatorOrigin: 'null' })).toBe(false); // unreadable: the page's CSP holds
+  });
+
+  it('prevents an artifact frame’s navigation to another artifact, and lets the app navigate it anywhere', () => {
+    const OTHER = '9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f';
+    const decide = (url: string, frame: FrameLike, initiator: FrameLike | null) =>
+      shouldBlockFrameNavigation({ url, frameBeneath: beneathDeliverable(frame), initiatorBeneath: beneathDeliverable(initiator), initiatorShows: shownArtifact(initiator) });
+    expect(decide(artifactUrl(OTHER, 'live', 'index.html'), chain(APP, PAGE), chain(APP, PAGE))).toBe(true); // its own link
+    expect(decide(artifactUrl(ARTIFACT, 2, 'index.html'), chain(APP, PAGE), chain(APP, PAGE))).toBe(false); // a revision of its own
+    expect(decide(artifactUrl(OTHER, 'live', 'index.html'), chain(APP, PAGE), chain(APP))).toBe(false); // the app's switch
+  });
+
+  it('reads the artifact a frame shows from the nearest store frame at or above it', () => {
+    expect(shownArtifact(chain(APP, PAGE, 'about:blank'))).toBe(ARTIFACT);
+    expect(shownArtifact(chain(APP, FRAME))).toBeNull(); // a deliverable's
+    expect(shownArtifact(chain(APP, 'about:srcdoc'))).toBeUndefined(); // the app's own
+    expect(shownArtifact(null)).toBeUndefined();
+    expect(() => shownArtifact(disposed)).toThrow();
+  });
+
+  it('reads an artifact frame’s error and warning as artifacts.console, live or at a revision, cut to the schema’s bound', () => {
+    const at = { frame: { url: `${PAGE}#top` }, lineNumber: 4, sourceId: PAGE };
+    expect(artifactConsoleMessageOf({ ...at, level: 'error', message: 'boom' })).toEqual({ artifactId: ARTIFACT, revision: null, level: 'error', message: 'boom', line: 4, source: PAGE });
+    expect(artifactConsoleMessageOf({ ...at, frame: { url: artifactUrl(ARTIFACT, 12, 'index.html') }, level: 'warning', message: 'w' })).toMatchObject({ revision: 12, level: 'warning' });
+    expect(artifactConsoleMessageOf({ ...at, level: 'info', message: 'i' })).toBeNull();
+    expect(artifactConsoleMessageOf({ ...at, frame: { url: FRAME }, level: 'error', message: 'a deliverable’s' })).toBeNull();
+    expect(consoleMessageOf({ ...at, level: 'error', message: 'an artifact’s' })).toBeNull();
+    expect(ArtifactConsoleSchema.safeParse(artifactConsoleMessageOf({ ...at, level: 'error', message: 'x'.repeat(5000) })).success).toBe(true);
+  });
+
+  it('emits artifacts.console from the window’s webContents, bounded per artifact revision apart from the deliverables’', () => {
+    const contents = new EventEmitter();
+    const emit = vi.fn();
+    attributeConsole(contents as unknown as WebContents, emit, () => 0);
+    for (let k = 0; k < CONSOLE_BURST + 5; k++) contents.emit('console-message', { frame: { url: PAGE }, level: 'error', message: `m${k}`, lineNumber: 1, sourceId: PAGE });
+    contents.emit('console-message', { frame: { url: FRAME }, level: 'error', message: 'deliverable', lineNumber: 1, sourceId: FRAME });
+    expect(emit.mock.calls.filter(([name]) => name === 'artifacts.console')).toHaveLength(CONSOLE_BURST);
+    expect(emit).toHaveBeenCalledWith('artifacts.console', expect.objectContaining({ artifactId: ARTIFACT, message: 'm0' }));
+    expect(emit).toHaveBeenCalledWith('deliverables.console', expect.objectContaining({ deliverableId: ID, message: 'deliverable' }));
+  });
+});
+
 describe('console attribution', () => {
   it('reads a deliverable frame’s error and warning, and nothing else', () => {
     const at = { frame: { url: `${FRAME}#section` }, lineNumber: 7, sourceId: FRAME };
@@ -226,6 +300,20 @@ describe('the policies installed on a session and a window', () => {
     session.beforeRequest!({ url: 'https://example.com/', frame: chain(APP) }, ({ cancel }) => answers.push(cancel));
     session.beforeRequest!({ url: 'https://example.com/', get frame(): never { throw new Error('Render frame was disposed') } }, ({ cancel }) => answers.push(cancel));
     expect(answers).toEqual([true, true, false, false, false]);
+  });
+
+  // fix wave 1 (Decision Log 44b): a window with a filter of its own (the export's PDF printer) is judged by it alone
+  it('asks a webContents’ own filter first, and the frame policies for every other webContents', () => {
+    const session = new FakeSession();
+    installFramePolicies(session as unknown as Session, {});
+    const answers: boolean[] = [];
+    const remove = restrictRequests(41, (url) => !url.startsWith('data:'));
+    session.beforeRequest!({ url: 'https://example.com/a.png', webContentsId: 41, frame: chain(APP) }, ({ cancel }) => answers.push(cancel)); // the app would let it through
+    session.beforeRequest!({ url: 'data:image/png;base64,AA==', webContentsId: 41, frame: chain(APP) }, ({ cancel }) => answers.push(cancel));
+    session.beforeRequest!({ url: 'https://example.com/a.png', webContentsId: 7, frame: chain(APP) }, ({ cancel }) => answers.push(cancel));
+    remove();
+    session.beforeRequest!({ url: 'https://example.com/a.png', webContentsId: 41, frame: chain(APP) }, ({ cancel }) => answers.push(cancel));
+    expect(answers).toEqual([true, false, false, false]);
   });
 
   it('cancels a deliverable download and writes the seam line under MAWS_E2E', async () => {

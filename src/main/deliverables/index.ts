@@ -13,8 +13,6 @@ import { serveDeliverables } from './protocol';
 import { DeliverableReader } from './reader';
 import { registerDeliverablesHandlers } from './register';
 
-export { registerDeliverableScheme } from './protocol';
-
 export interface DeliverablesDeps {
   userData: string;
   hosts: Pick<HostSupervisor, 'onEvent' | 'dispatch'>;

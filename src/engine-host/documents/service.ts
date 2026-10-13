@@ -94,6 +94,8 @@ interface HostReplica {
   readonly key: string;
   readonly doc: Doc;
   readonly off: () => void;
+  reading: boolean; // inside `readAs`: an edit is refused, never relayed to the live doc
+  editedWhileReading: boolean;
 }
 
 type Writer = Connection | HostReplica;
@@ -340,6 +342,32 @@ export class DocumentService {
       return { revision: this.storage.revision(artifactId), state: stateV2(doc) };
     } finally {
       doc.destroy();
+    }
+  }
+
+  // A read on the host replica of `actor` (Decision Log 41b, P3-B's request): the replica `writeAs` writes through for
+  // that actor, so a read that pins a base or warms an index does so on the doc that will take the write. No frame, no
+  // row. The replica holds every row the live doc holds, committed or not, so a caller revealing what `fn` read wraps
+  // it in the store's `readCommitted` (Decision Log 33). `fn` must not edit: an edit is refused (a throw) and never
+  // reaches the live doc, and the replica it touched is dropped so the actor's next use starts from the live state.
+  readAs<T>(artifactId: string, actor: Actor, fn: (doc: Doc) => T): T {
+    if (this.closed) throw new Error('the document service is closed');
+    const hostDoc = this.open(artifactId);
+    this.scheduleFlush(); // the idle unload's clock, as `live` does
+    const replica = this.hostReplica(hostDoc, actor);
+    replica.reading = true;
+    replica.editedWhileReading = false;
+    try {
+      const result = fn(replica.doc);
+      if (replica.editedWhileReading) throw new Error(`readAs on ${artifactId} is read-only; write through writeAs`);
+      return result;
+    } finally {
+      replica.reading = false;
+      if (replica.editedWhileReading) {
+        replica.off();
+        replica.doc.destroy();
+        if (hostDoc.replicas.get(replica.key) === replica) hostDoc.replicas.delete(replica.key);
+      }
     }
   }
 
@@ -645,8 +673,12 @@ export class DocumentService {
       actor,
       key,
       doc,
+      reading: false,
+      editedWhileReading: false,
       off: onUpdate(doc, (update, origin) => {
-        if (origin !== MIRROR) applyV1(hostDoc.doc, update, replica);
+        if (origin === MIRROR) return;
+        if (replica.reading) replica.editedWhileReading = true;
+        else applyV1(hostDoc.doc, update, replica);
       }),
     };
     hostDoc.replicas.set(key, replica);

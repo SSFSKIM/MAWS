@@ -59,7 +59,7 @@ import * as ownerChannel from './schema/owner-channel'; // M4
 // P3-A start (M4)
 import * as artifacts from './schema/artifacts';
 import * as spaces from './schema/spaces';
-import { artifactRefusalOf } from './schema/artifacts';
+import { ARTIFACT_REFUSALS, artifactRefusalOf } from './schema/artifacts';
 // P3-A end
 import * as library from './schema/library'; // P3-L M1
 
@@ -912,9 +912,9 @@ describe('ipc schema validates both directions', () => {
   // E1 start: the maws tool server's commands and its pane request (P1 ledger §5)
   describe('E1 entries', () => {
     it('adds the maws namespace: three engine-host commands and the pane request, all bridged', () => {
-      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.download.recorded' /* E13 */]);
+      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.download.recorded' /* E13 */, 'maws.artifact.exported' /* P3-A M7 */]);
       for (const spec of Object.values(maws.commands)) expect(spec.owner).toBe('engine-host');
-      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */]);
+      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */, 'maws.artifact.export' /* P3-A M7 */]);
       expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
     });
 
@@ -1655,12 +1655,34 @@ describe('ipc schema validates both directions', () => {
 
     it('owns artifacts.* in the engine host but artifacts.open (main), keeps setDefaults and content main-only, and emits both events across the host wire', () => {
       const owners = Object.fromEntries(Object.entries({ ...artifacts.commands, ...spaces.commands }).map(([name, spec]) => [name, spec.owner]));
-      expect(Object.entries(owners).filter(([, owner]) => owner !== 'engine-host').map(([name]) => name)).toEqual(['artifacts.open']);
+      expect(Object.entries(owners).filter(([, owner]) => owner !== 'engine-host').map(([name]) => name)).toEqual(['artifacts.open', 'artifacts.export' /* M7 */]);
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['artifacts.setDefaults', 'artifacts.content']));
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.setDefaults');
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.content');
       expect(HOST_EVENTS).toEqual(expect.arrayContaining(['artifacts.changed', 'spaces.changed']));
       expect(Object.keys(spaces.commands)).toEqual(['spaces.list', 'spaces.create', 'spaces.update', 'spaces.delete']);
+    });
+
+    // P3-A M7: the export service (main's `artifacts.export`, the host's bridge `maws.artifact.export`/`exported`) and an
+    // artifact frame's console (main's `artifacts.console`, never across the host wire)
+    it('validates the library’s export, the host’s export request and main’s answer, and an artifact frame’s console message', () => {
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'pdf' }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'png', versionId: 3, width: 640, height: 480 }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'gif' }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'png', width: 100_000 }).ok).toBe(false);
+      expect(validateCommandOutput('artifacts.export', { path: '/u/artifacts/x/exports/4-pdf.pdf', revision: 4 }).ok).toBe(true);
+      const request = { appSessionId: 'a', requestId: 'r1', artifactId: id, kind: 'html', format: 'pdf', revision: 4, path: '/u/artifacts/x/exports/4-pdf.pdf' };
+      expect(validateEventPayload('maws.artifact.export', request).ok).toBe(true);
+      expect(validateEventPayload('maws.artifact.export', { ...request, path: 'relative.pdf' }).ok).toBe(false);
+      expect(HOST_EVENTS).toContain('maws.artifact.export');
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: false, unavailable: true, error: 'no exporter' } }).ok).toBe(true);
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, path: '/x' } }).ok).toBe(false); // no revision
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, revision: 8, path: '/u/x/exports/8-pdf.pdf', blockedRequests: 2 } }).ok).toBe(true);
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, revision: 8, path: 'relative.pdf' } }).ok).toBe(false);
+      expect(validateEventPayload('artifacts.console', { artifactId: id, revision: null, level: 'error', message: 'boom', line: 3, source: null }).ok).toBe(true);
+      expect(validateEventPayload('artifacts.console', { artifactId: id, revision: 4, level: 'info', message: 'x', line: null, source: null }).ok).toBe(false);
+      expect(HOST_EVENTS).not.toContain('artifacts.console');
+      expect(ARTIFACT_REFUSALS).toContain('exportUnavailable');
     });
 
     it('answers artifacts with their revision and the agent-suggestions flag, and refuses a row without either', () => {

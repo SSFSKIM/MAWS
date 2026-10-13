@@ -12,13 +12,16 @@ const directives = (script: string[], connect: string[]) => [
   ['default-src', "'self'"],
   ['script-src', "'self'", ...script],
   ['style-src', "'self'", "'unsafe-inline'"],
-  ['img-src', "'self'", 'data:', 'blob:'],
-  ['font-src', "'self'", 'data:'],
+  // P3-A M7 (Decision Log 35g): the artifact store's images and fonts (a document's images, a design system's bundled
+  // faces), here and in every srcdoc frame, which inherits this policy
+  ['img-src', "'self'", 'data:', 'blob:', 'maws-artifact:'],
+  ['font-src', "'self'", 'data:', 'maws-artifact:'],
   ['connect-src', "'self'", ...connect],
   // E2: the Deliverables viewer's frames and media load the store through the scheme ('self' keeps the request card's
-  // srcdoc frame, which inherits this policy); each answer of the scheme carries its own policy (deliverables/protocol.ts)
-  ['frame-src', "'self'", 'maws-deliverable:'],
-  ['media-src', "'self'", 'maws-deliverable:'],
+  // srcdoc frame, which inherits this policy); each answer of the scheme carries its own policy (deliverables/protocol.ts).
+  // P3-A M7: the artifact store's scheme serves the same frames (artifacts/protocol.ts)
+  ['frame-src', "'self'", 'maws-deliverable:', 'maws-artifact:'],
+  ['media-src', "'self'", 'maws-deliverable:', 'maws-artifact:'],
 ];
 
 const serialize = (list: string[][]) => list.map((d) => d.join(' ')).join('; ');

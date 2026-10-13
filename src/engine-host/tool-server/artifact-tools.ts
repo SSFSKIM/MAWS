@@ -74,12 +74,16 @@ export function artifactListTool(deps: ArtifactToolDeps): McpToolDefinition {
   );
 }
 
-export function artifactDescribeTypeTool(): McpToolDefinition {
+// The kind's guide and format reference; for a kind a design system styles, the guide of the system that would govern a
+// new artifact (the chain's answer for no system or Space of its own, Decision Log 42), when the store has one.
+export function artifactDescribeTypeTool(deps: Pick<ArtifactToolDeps, 'artifacts'> = {}): McpToolDefinition {
   return defineMawsTool('artifact_describe_type', async (args) => {
     const parsed = parseToolArguments('artifact_describe_type', args);
     if (!parsed.ok) return toolError(parsed.error);
     const { kind } = parsed.data;
-    const result: ArtifactDescribeTypeResult = { status: 'described', kind, ...KIND_GUIDES[kind] };
+    const store = deps.artifacts?.() ?? null;
+    const designSystem = store && DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor({}) : null;
+    const result: ArtifactDescribeTypeResult = { status: 'described', kind, ...KIND_GUIDES[kind], ...(designSystem !== null && { designSystem }) };
     return toolText(result);
   });
 }
@@ -141,8 +145,9 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
       }
 
       // The first answer's decorations, settled before the write so the recorded answer is the whole first answer: the
-      // kind's guide when this session has not had it, the governing design system's guide (Decision Log 22d; a new
-      // artifact has no system or Space of its own, so the owner's default governs)
+      // kind's guide when this session has not had it, the governing design system's guide as the registered chain names
+      // it (Decision Log 22d, 42; a new artifact has no system or Space of its own; `{builtin}` attaches nothing, and the
+      // artifact's `designSystemId` stays unset, so the chain keeps deciding by reference)
       const guide = deps.session.guided.has(kind) ? undefined : KIND_GUIDES[kind];
       const designSystem = DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor({}) : null;
       const files = isDocKind(kind) ? input.files : undefined;
