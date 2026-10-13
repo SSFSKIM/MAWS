@@ -2,7 +2,9 @@
    Every value is a design-system token, `--ds-*`, falling back to the app's token: until D's DesignSystemScope wraps
    the page, the fallbacks draw MAWS's own look and follow the app theme; once a system supplies every name, the app
    theme no longer reaches the page (one theme per system). Type roles read `--ds-type-<role>-{size,line,weight}`;
-   font families only through `--ds-font-*`. No literal colour here (theme.dom.test.tsx). The chrome around the page is
+   font families only through `--ds-font-*`. No literal colour here, and no app token read but as a fallback, whatever
+   the property (theme.dom.test.tsx). Spaces fall back along the design system's scale (1–8: 4, 8, 12, 16, 24, 32, 48,
+   64 px, so `--ds-space-n` falls back to `--space` times 1, 2, 3, 4, 6, 8, 12, 16). The chrome around the page is
    chrome.css's, in the app's own tokens. */
 
 .ds-doc {
@@ -16,14 +18,14 @@
 
 .ds-doc-page {
   box-sizing: border-box;
-  max-width: var(--measure-wide);
+  max-width: 8.5in; /* a US Letter page wide, the documents' default page (D12), not the transcript's measure */
   margin: 0 auto;
-  padding: var(--ds-space-6, calc(var(--space) * 8)) var(--ds-space-8, calc(var(--space) * 12));
+  padding: var(--ds-space-6, calc(var(--space) * 8)) var(--ds-space-7, calc(var(--space) * 12));
 }
 
 .ds-doc .doc-content {
   outline: none;
-  min-height: calc(var(--space) * 60);
+  min-height: calc(var(--ds-space-8, calc(var(--space) * 16)) * 4);
 }
 .ds-doc .doc-content > * + * {
   margin-top: var(--ds-space-3, calc(var(--space) * 3));
@@ -81,7 +83,7 @@
 }
 .ds-doc pre {
   font-family: var(--ds-font-mono, var(--font-mono));
-  font-size: var(--text-code);
+  font-size: var(--ds-type-caption-size, var(--text-code));
   background: var(--ds-color-bg-raised, var(--bg-raised));
   border: 1px solid var(--ds-color-border, var(--border));
   border-radius: var(--ds-radius-md, var(--radius));
@@ -97,7 +99,7 @@
 }
 .ds-doc ul,
 .ds-doc ol {
-  padding-left: var(--ds-space-6, calc(var(--space) * 6));
+  padding-left: var(--ds-space-5, calc(var(--space) * 6));
 }
 .ds-doc ul[data-type="taskList"] {
   list-style: none;
@@ -244,7 +246,7 @@
 .ds-doc .doc-atom-field input,
 .ds-doc .doc-atom-field textarea {
   font-family: var(--ds-font-mono, var(--font-mono));
-  font-size: var(--text-code);
+  font-size: var(--ds-type-caption-size, var(--text-code));
   color: var(--ds-color-text, var(--fg));
   background: var(--ds-color-bg-raised, var(--bg-raised));
   border: 1px solid var(--ds-color-border, var(--border-strong));
@@ -254,7 +256,7 @@
 .ds-doc .doc-atom-field textarea {
   width: 100%;
   box-sizing: border-box;
-  min-height: calc(var(--space) * 16);
+  min-height: var(--ds-space-8, calc(var(--space) * 16));
 }
 
 /* code highlighting: shiki's light colour inline, its dark one picked while the app is dark (the interim until D's

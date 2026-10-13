@@ -22,7 +22,6 @@ const DS_NAMES = new Set([
   ...['sm', 'md', 'lg', 'full'].map((n) => `--ds-radius-${n}`),
   ...['sm', 'md', 'lg'].map((n) => `--ds-shadow-${n}`),
 ]);
-const COLOUR_PROPERTIES = /^(?:color|background(?:-color)?|border(?:-(?:top|right|bottom|left))?(?:-color)?|outline(?:-color)?|box-shadow|fill|stroke|text-decoration(?:-color)?)$/;
 const LITERAL = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch)\(|(?<![\w-])(?:black|white|red|green|blue|gr[ae]y|yellow|orange|purple|pink|silver|navy|teal|maroon|olive|lime|aqua|fuchsia|gold|brown|cyan|magenta|violet|indigo|crimson|coral|salmon|tomato)(?![\w-])/i;
 
 const declarations = (css: string) =>
@@ -34,6 +33,25 @@ const declarations = (css: string) =>
       .map((d) => ({ selector: selector.trim(), property: d.slice(0, d.indexOf(':')).trim(), value: d.slice(d.indexOf(':') + 1).trim() })),
   );
 const appTokens = new Set([...tokensCss.matchAll(/(--[a-z0-9-]+)\s*:/g)].map(([, name]) => name));
+// The custom properties a value reads outside a `--ds-*` fallback: a `var(--ds-…, fallback)` is skipped whole, any
+// other `var()` is a read (and its own fallback is scanned in turn).
+function readsOutsideDsFallbacks(value: string): string[] {
+  const names: string[] = [];
+  for (let i = value.indexOf('var('); i >= 0; i = value.indexOf('var(', i)) {
+    const name = /^var\(\s*(--[\w-]+)/.exec(value.slice(i))![1];
+    if (!name.startsWith('--ds-')) {
+      names.push(name);
+      i += 4;
+      continue;
+    }
+    let depth = 0;
+    for (i += 3; i < value.length; i += 1) {
+      if (value[i] === '(') depth += 1;
+      else if (value[i] === ')' && --depth === 0) break;
+    }
+  }
+  return names;
+}
 
 describe('the stylesheets', () => {
   it('hold no literal colour', () => {
@@ -53,10 +71,10 @@ describe('the stylesheets', () => {
         expect(fallback, `${where}: ${name} has no fallback`).toBeTruthy();
         for (const [, token] of (fallback ?? '').matchAll(/var\((--[a-z0-9-]+)/g)) expect(appTokens, where).toContain(token);
       }
-      // a colour on the page is a design-system token's (the highlighter's dark colour aside, which is its output)
-      if (COLOUR_PROPERTIES.test(property) && value.includes('var(') && !value.includes('--shiki-dark')) {
-        for (const [, token] of value.replace(/var\(--ds-[a-z0-9-]+\s*,[^)]*\)\)?/g, '').matchAll(/var\((--[a-z0-9-]+)/g)) expect.fail(`${where}: reads ${token} outside a --ds-* fallback`);
-      }
+      // every value on the page, of any property (colour, font, size, line, spacing, radius, shadow), is a design-system
+      // token's: an app token is read only as a fallback (the highlighter's dark colour aside, which is its output)
+      const bare = readsOutsideDsFallbacks(value).filter((name) => name !== '--shiki-dark');
+      expect(bare, `${where}: reads ${bare.join(', ')} outside a --ds-* fallback`).toEqual([]);
     }
   });
 });
@@ -146,6 +164,21 @@ describe('the rendered page without a design system', () => {
     expect(getComputedStyle(page).color).toBe('#123456');
     expect(getComputedStyle(container.querySelector('.ds-doc h1')!).color).toBe('#123456');
     expect(getComputedStyle(container.querySelector('.ds-doc a')!).color).toBe('#654321');
+    scope.remove();
+  });
+
+  it('takes its code type from the design system too, the app’s code size only a fallback', async () => {
+    const container = await mountEveryKind();
+    const code = container.querySelector<HTMLElement>('.ds-doc pre')!;
+    const field = container.querySelector<HTMLElement>('.ds-doc .doc-atom-field input')!;
+    const appCode = getComputedStyle(document.body.appendChild(Object.assign(document.createElement('i'), { style: 'font-size: var(--text-code)' }))).fontSize;
+    expect(getComputedStyle(code).fontSize).toBe(appCode);
+    const scope = document.head.appendChild(document.createElement('style'));
+    scope.textContent = '.ds-doc { --ds-type-caption-size: 17px; --ds-font-mono: SystemMono; }';
+    for (const el of [code, field]) {
+      expect(getComputedStyle(el).fontSize).toBe('17px');
+      expect(getComputedStyle(el).fontFamily).toBe('SystemMono');
+    }
     scope.remove();
   });
 });
