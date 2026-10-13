@@ -716,3 +716,93 @@ describe('converged hierarchies: replicas that each wrote a valid file converge 
     ]);
   });
 });
+
+describe('the page’s token writes are canonical (Decision Log 19)', () => {
+  const canonical = (hex: string) => parseTokens({ c: { $type: 'color', $value: hex } }).tokens!.tokens.get('c')!.$value;
+
+  it('stores a lenient token in its canonical form, keeping the type it inherits implicit', () => {
+    const { human } = scene();
+    setToken(human, 'color.accent.$root', { $value: '#C93' });
+    expect(human.get('tokens').getAttr('color.accent.$root')).toEqual({ $value: canonical('#cc9933') });
+    setToken(human, 'space.3', { $value: 12 }); // a bare number for a px dimension
+    expect(human.get('tokens').getAttr('space.3')).toEqual({ $value: { value: 12, unit: 'px' } });
+    setToken(human, 'color.highlight', { $type: 'color', $value: '#ffee00' }); // a type of its own stays
+    expect(human.get('tokens').getAttr('color.highlight')).toEqual({ $type: 'color', $value: canonical('#ffee00') });
+    setToken(human, 'color.accent.text', { $value: '{color.bg.$root}' }); // a reference stays as written
+    expect(human.get('tokens').getAttr('color.accent.text')).toEqual({ $value: '{color.bg.$root}' });
+  });
+
+  it('after a lenient write, an agent publish merges cleanly: another token’s change lands, and so does a change of that token', () => {
+    const { human, agent } = scene();
+    setToken(human, 'color.accent.$root', { $value: '#c9663f' });
+    sync(human, agent);
+    const base = readFiles(agent);
+    const other = tokensWith(base['tokens.tokens.json']!, { 'color.border': color('#123456') });
+    expect(publishSystem(agent, base, { 'tokens.tokens.json': other }, false)).toEqual({ changed: ['tokens.tokens.json'], conflicts: [] });
+    const reread = readFiles(agent);
+    const same = tokensWith(reread['tokens.tokens.json']!, { 'color.accent.$root': color('#0055aa') });
+    expect(publishSystem(agent, reread, { 'tokens.tokens.json': same }, false)).toEqual({ changed: ['tokens.tokens.json'], conflicts: [] });
+    expect(readFiles(agent)['tokens.css']).toContain('--ds-color-accent: #0055aa');
+  });
+
+  it('refuses a token that does not parse, naming its path, and writes nothing', () => {
+    const { human } = scene();
+    const before = stateVector(human);
+    const refusal = (token: Token) => {
+      try {
+        setToken(human, 'color.accent.$root', token);
+      } catch (error) {
+        return error;
+      }
+      return null;
+    };
+    for (const token of [{ $value: 'not a colour' }, { $type: 'colour', $value: '#000000' }, { $value: '#000000', $extra: 1 }] as Token[]) {
+      const error = refusal(token);
+      expect(error).toBeInstanceOf(SystemFilesError);
+      expect((error as SystemFilesError).problems).toEqual([expect.objectContaining({ path: 'tokens.tokens.json', message: expect.stringContaining('color.accent.$root') })]);
+    }
+    expect(() => setToken(human, 'size.free', { $value: 3 })).toThrow(/size\.free: no \$type/); // nothing above it gives one
+    expect(stateVector(human)).toEqual(before);
+  });
+});
+
+describe('publish compares tokens by meaning, whatever form their type is written in (Decision Log 20)', () => {
+  it('a recolour from a read older than a typed group converging over the token merges', () => {
+    const { human, agent, base: older } = scene();
+    setToken(human, 'color.branch', { $value: color('#112233').$value }); // a colour by inheritance from `color`
+    sync(human, agent);
+    const base = readFiles(agent); // the agent reads the parent before the typed group arrives
+    // Another session, from a read that predates the parent, publishes a dimension group over it with a child.
+    const set = parseTokens(older['tokens.tokens.json']!).tokens!;
+    const typed = serializeTokens({
+      tokens: new Map(set.tokens).set('color.branch.gap', { $value: { value: 4, unit: 'px' } }),
+      groups: new Map(set.groups).set('color.branch', { $type: 'dimension' }),
+    });
+    expect(publishSystem(human, older, { 'tokens.tokens.json': typed }, false).conflicts).toEqual([]);
+    sync(human, agent);
+    const recolour = tokensWith(base['tokens.tokens.json']!, { 'color.branch': { $value: color('#445566').$value } });
+    expect(publishSystem(agent, base, { 'tokens.tokens.json': recolour }, false)).toEqual({ changed: ['tokens.tokens.json'], conflicts: [] });
+    const read = parseTokens(readFiles(agent)['tokens.tokens.json']!);
+    expect(read.problems).toEqual([]);
+    expect(read.tokens!.tokens.get('color.branch.$root')).toEqual({ $type: 'color', $value: color('#445566').$value });
+    expect(read.tokens!.tokens.get('color.branch.gap')).toEqual({ $value: { value: 4, unit: 'px' } });
+    expect(agent.get('tokens').getAttr('color.branch')).toEqual({ $value: color('#445566').$value }); // written as authored
+  });
+
+  it('an explicit type equal to the inherited one is no change, and a type changed live under the token still conflicts', () => {
+    const { human, agent, base } = scene();
+    const explicit = tokensWith(base['tokens.tokens.json']!, { 'color.border': { $type: 'color', ...parseTokens(base['tokens.tokens.json']!).tokens!.tokens.get('color.border')! } });
+    expect(publishSystem(agent, base, { 'tokens.tokens.json': explicit }, false)).toEqual({ changed: [], conflicts: [] });
+    // A number token whose group's type the human changes to fontWeight: same value, another meaning.
+    const set = parseTokens(base['tokens.tokens.json']!).tokens!;
+    const withScale = serializeTokens({ tokens: new Map(set.tokens).set('scale.x', { $value: 400 }), groups: new Map(set.groups).set('scale', { $type: 'number' }) });
+    expect(publishSystem(agent, base, { 'tokens.tokens.json': withScale }, false).conflicts).toEqual([]);
+    sync(human, agent);
+    const read = readFiles(agent);
+    const retyped = parseTokens(read['tokens.tokens.json']!).tokens!;
+    expect(publishSystem(human, read, { 'tokens.tokens.json': serializeTokens({ tokens: retyped.tokens, groups: new Map(retyped.groups).set('scale', { $type: 'fontWeight' }) }) }, false).conflicts).toEqual([]);
+    sync(human, agent);
+    const change = tokensWith(read['tokens.tokens.json']!, { 'scale.x': { $value: 500 } });
+    expect(publishSystem(agent, read, { 'tokens.tokens.json': change }, false).conflicts).toEqual([{ path: 'tokens.tokens.json', detail: expect.stringContaining('the token scale.x') }]);
+  });
+});

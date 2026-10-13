@@ -20,7 +20,7 @@ import { LAW_LIMIT_BYTES, parseLaw } from './law';
 import { officeTheme } from './office';
 import { comparePaths, splitPath, tokenIdentity } from './roles';
 import { inheritedType, parseTokens, serializeTokens, validateTokenFile, type GroupProps, type Token, type TokenSet } from './tokens';
-import { isAlias } from './values';
+import { isAlias, isPointer } from './values';
 
 import type { KindAdapter } from '../host';
 
@@ -305,13 +305,39 @@ export function writeSystem(doc: Doc, files: Readonly<Record<string, string>>, o
 }
 
 /**
- * The page's edit of one token: `token` as the canonical object (`$value` in its object form), or null to remove it.
- * One attribute, one transaction: the token's authorship stays per token. The token is its identity: `x` and `x.$root`
- * name the same one.
+ * `token` at `path` in its canonical form (D1: a hex string becomes the colour object, a bare number a px dimension),
+ * read as the token file would read it there: a token without a `$type` of its own takes the one the doc's groups give
+ * it and stays without one. Refuses a token that does not read, naming its path (Decision Log 19).
+ */
+function canonicalToken(groups: ReadonlyMap<string, GroupProps>, path: string, token: Token): Token {
+  const own = token.$type;
+  const inherited = own === undefined ? inheritedType(groups, path) : undefined;
+  const leaf: Record<string, unknown> = Object.fromEntries(Object.entries(token).filter(([, value]) => value !== undefined));
+  if (inherited !== undefined) leaf.$type = inherited;
+  const file = splitPath(path).reduceRight<Record<string, unknown>>((child, segment) => ({ [segment]: child }), leaf);
+  const read = parseTokens(file);
+  const out = read.tokens?.tokens.get(path);
+  if (read.problems.length || !out) {
+    const problems = read.problems.length ? read.problems : [{ path, message: 'not a token' }];
+    throw new SystemFilesError(problems.map((p) => ({ path: TOKENS_PATH, message: `${p.path || path}: ${p.message}` })));
+  }
+  if (inherited !== undefined) delete out.$type; // read with the type it inherits, kept without one of its own
+  return out;
+}
+
+const groupsOf = (entries: ReadonlyMap<string, Token | GroupProps>): Map<string, GroupProps> =>
+  new Map([...entries].filter(([key]) => key.endsWith(GROUP)).map(([key, props]) => [key.slice(0, -GROUP.length), props as GroupProps]));
+
+/**
+ * The page's edit of one token, or null to remove it. The token is written in its canonical form, whatever form it was
+ * given in (a hex string, a bare px number), and refused with `SystemFilesError` when it does not read (Decision Log
+ * 19), so the stored value is always the one the file view shows. One attribute, one transaction: the token's
+ * authorship stays per token. The token is its identity: `x` and `x.$root` name the same one.
  */
 export function setToken(doc: Doc, path: string, token: Token | null): void {
   if (path.endsWith(GROUP)) throw new SystemFilesError([{ path: TOKENS_PATH, message: `${path}: a token's name may not end with "${GROUP}"` }]);
   const node = roots(doc).tokens;
+  if (token) token = canonicalToken(groupsOf(storedEntries(node)), path, token);
   // One identity, one stored key: `x` replaces `x.$root` and the reverse (Decision Log 12).
   const others = [...node.attrKeys()].map(String).filter((key) => key !== path && !key.endsWith(GROUP) && identity(key) === identity(path));
   transact(doc, () => {
@@ -460,36 +486,39 @@ const same = (a: unknown, b: unknown) => (a === undefined || b === undefined ? a
 
 /**
  * A token file's merge units: a token by its identity, a group's own properties by `<path>/$group`. Each unit keeps its
- * value and the keys it is stored under; replicas that stored both `x` and `x.$root` with different values make the unit
- * ambiguous, which reads as changed from any base so a change by the agent to it conflicts.
+ * value as written (what a write stores) and the keys it is stored under; it is compared by meaning, a token with the
+ * `$type` it inherits written on it (Decision Log 20), so the reader's making an inherited type explicit on a token
+ * it moved beneath its group, which the base and the sent file do not, is no change. Replicas that stored both `x` and
+ * `x.$root` with different meanings make the unit ambiguous, which reads as changed from any base, so a change by the
+ * agent to it conflicts.
  */
 interface Unit {
   value: unknown;
+  compared: unknown;
   keys: string[];
 }
 const AMBIGUOUS = { $ambiguous: 'stored under two keys with different values' };
-function unitsOf(entries: Iterable<readonly [string, Token | GroupProps]>): Map<string, Unit> {
+
+/** A token as compared: with its effective `$type` explicit; an alias or a pointer keeps its own (its target's first). */
+function typed(path: string, token: Token, groups: ReadonlyMap<string, GroupProps>): Token {
+  if (token.$type !== undefined || isAlias(token.$value) || isPointer(token.$value)) return token;
+  const type = inheritedType(groups, path);
+  return type === undefined ? token : { $type: type, ...token };
+}
+
+function unitsOf(entries: ReadonlyMap<string, Token | GroupProps>): Map<string, Unit> {
+  const groups = groupsOf(entries);
   const units = new Map<string, Unit>();
   for (const [key, value] of entries) {
-    const id = key.endsWith(GROUP) ? key : identity(key);
+    const isGroup = key.endsWith(GROUP);
+    const id = isGroup ? key : identity(key);
+    const compared = isGroup ? value : typed(key, value as Token, groups);
     const unit = units.get(id);
-    if (!unit) units.set(id, { value, keys: [key] });
+    if (!unit) units.set(id, { value, compared, keys: [key] });
     else {
       unit.keys.push(key);
-      if (!same(unit.value, value)) unit.value = AMBIGUOUS;
+      if (!same(unit.compared, compared)) unit.compared = AMBIGUOUS;
     }
-  }
-  return units;
-}
-/**
- * The live doc's units: each unit's stored keys, and its value as the reader holds it, so a token the reader moved
- * beneath its group (its inherited `$type` written on it) compares equal to the file view the agent read.
- */
-function liveUnits(stored: ReadonlyMap<string, Token | GroupProps>): Map<string, Unit> {
-  const units = unitsOf(stored);
-  for (const [path, token] of tokenSetOfEntries(stored).tokens) {
-    const unit = units.get(identity(path));
-    if (unit && unit.value !== AMBIGUOUS) unit.value = token;
   }
   return units;
 }
@@ -547,12 +576,12 @@ export function publishSystem(live: Doc, base: Readonly<Record<string, string>>,
     }
   }
 
-  // The tokens, unit by unit: live from the stored attributes through the lossless reader (no unit hidden by a file
-  // round trip), base and sent from their files, a token keyed by its identity so `x` and `x.$root` are one unit
-  // (Decision Log 12).
+  // The tokens, unit by unit: live from the stored attributes (no unit hidden by a file round trip), base and sent from
+  // their files, a token keyed by its identity so `x` and `x.$root` are one unit (Decision Log 12) and compared with its
+  // effective type made explicit on every side (Decision Log 20).
   const tokenWrites = new Map<string, { key: string; value: Token | GroupProps } | null>();
   const stored = storedEntries(roots(live).tokens);
-  const theirs = liveUnits(stored);
+  const theirs = unitsOf(stored);
   let merged = state.tokens;
   if (sentTokens?.set) {
     const mine = unitsOf(entriesOf(sentTokens.set));
@@ -560,17 +589,17 @@ export function publishSystem(live: Doc, base: Readonly<Record<string, string>>,
     const ids = new Set([...mine.keys(), ...theirs.keys(), ...before.keys()]);
     const tokenConflicts: string[] = [];
     for (const id of ids) {
-      const sentValue = mine.get(id)?.value;
-      const liveValue = theirs.get(id)?.value;
-      const beforeValue = before.get(id)?.value;
+      const sentValue = mine.get(id)?.compared;
+      const liveValue = theirs.get(id)?.compared;
+      const beforeValue = before.get(id)?.compared;
       if (same(sentValue, liveValue)) continue;
       if (same(sentValue, beforeValue)) continue; // the agent left it as it read it, even under force
       if (!same(liveValue, beforeValue) && !force) {
         tokenConflicts.push(id);
         continue;
       }
-      // The agent's change; under force it wins a unit both sides changed.
-      tokenWrites.set(id, sentValue === undefined ? null : { key: mine.get(id)!.keys[0]!, value: sentValue as Token | GroupProps });
+      // The agent's change, written as the agent wrote it; under force it wins a unit both sides changed.
+      tokenWrites.set(id, sentValue === undefined ? null : { key: mine.get(id)!.keys[0]!, value: mine.get(id)!.value as Token | GroupProps });
     }
     // Named as the agent wrote it (`color.accent.$root`), else as it read it.
     const named = (id: string) => (id.endsWith(GROUP) ? id : (mine.get(id)?.keys[0] ?? before.get(id)?.keys[0] ?? id));
