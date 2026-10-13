@@ -27,6 +27,7 @@ import { openSupervisorLog } from './supervisor-log';
 import { openDocuments, type Documents } from './documents';
 import { registerArtifacts } from './documents/register'; // M4
 // P3-A end
+import { registerDocumentKind } from './documents/kinds/document'; // P3-B
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -63,6 +64,7 @@ const register: HostRegister = (on, emit, client) => {
   // on the way out (utility: main's quit; detached: the exit order and host.stopAll). M4: `artifacts.*`, `spaces.*` and
   // the document ports main posts on the parent port; a store that failed to open answers `unavailable`.
   documents = openDocuments(userData);
+  if (documents) registerDocumentKind(documents.store); // P3-B: the document kind's hooks on every document update
   const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env });
   // C3 start
   ipc = registerEngineIpc(on, emit, {
