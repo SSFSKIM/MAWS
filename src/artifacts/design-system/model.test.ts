@@ -605,6 +605,38 @@ describe('publish over a doc that holds no system yet: the agent’s create', ()
     expect(Object.keys(readFiles(doc)).some((path) => path.startsWith(CLAUDE_SOURCES))).toBe(true);
   });
 
+  // Review M7a I1: a removal the system cannot take is refused as it is over a live system, before anything is written
+  it.each([
+    ['tokens.css', 'generated'],
+    [`${CLAUDE_SOURCES}README.md`, 'read-only'],
+    ['assets/logo.png', 'an asset'],
+    ['notes.txt', 'not a design-system file'],
+    ['DESIGN.md', 'cannot be removed'],
+  ])('refuses %s sent as null, naming it, and writes nothing, with or without force', (path, words) => {
+    for (const force of [false, true]) {
+      const doc = newDoc();
+      const sent: Record<string, string | null> = { ...FILES, [path]: null };
+      let refused: unknown = null;
+      try {
+        publishSystem(doc, {}, sent, force);
+      } catch (error) {
+        refused = error;
+      }
+      expect(refused).toBeInstanceOf(SystemFilesError);
+      expect((refused as SystemFilesError).message).toContain(`${path}: `);
+      expect((refused as SystemFilesError).message).toContain(words);
+      const held = readSystem(doc);
+      expect([held.meta, held.tokens.tokens.size, held.law, held.files]).toEqual([null, 0, '', {}]);
+    }
+  });
+
+  it('takes a canon removal as nothing to remove', () => {
+    const doc = newDoc();
+    const result = publishSystem(doc, {}, { ...FILES, 'layouts/old.html': null }, false);
+    expect(result.changed).not.toContain('layouts/old.html');
+    expect(Object.keys(readFiles(doc))).not.toContain('layouts/old.html');
+  });
+
   it('refuses a system without its token file, naming it, and writes nothing', () => {
     const doc = newDoc();
     expect(() => publishSystem(doc, {}, { 'DESIGN.md': LAW }, false)).toThrow(SystemFilesError);

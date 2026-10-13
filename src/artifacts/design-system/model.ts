@@ -544,10 +544,14 @@ const ADOPTED_FROM = /\badopted from (.+?)(?:\.(?=\s|$)|[;\n]|$)/im; // to the s
 /**
  * The agent's create (M7's live run): a doc that holds no system takes the sent files whole through `writeSystem`, so it
  * gets the meta every reader needs (`formatVersion` and its origin), Claude's shape is imported, and the files are
- * checked as a create's are, a token file included. The origin is the adopt route when the law records what it was
+ * checked as a create's are, a token file included; a removal the system cannot take is refused before anything is
+ * written, as over a live system. The origin is the adopt route when the law records what it was
  * adopted from, else the derive route; Claude's shape makes it an import.
  */
 function createSystem(doc: Doc, sent: Readonly<Record<string, string | null>>, options: SystemWriteOptions): PublishResult {
+  // A removal is checked by the path rules a live publish applies; a permitted one (a canon file) has nothing to remove.
+  const refused = Object.entries(sent).flatMap(([path, text]) => (text === null ? [{ path, message: pathProblem(path, null) }] : [])).filter((p): p is FileProblem => p.message !== null);
+  if (refused.length) throw new SystemFilesError(refused);
   const files = Object.fromEntries(Object.entries(sent).filter((entry): entry is [string, string] => entry[1] !== null));
   const from = ADOPTED_FROM.exec(files[LAW_PATH] ?? '')?.[1]?.trim();
   writeSystem(doc, files, from ? { route: 'adopted', from, at: Date.now() } : { route: 'derived', at: Date.now() }, options);
