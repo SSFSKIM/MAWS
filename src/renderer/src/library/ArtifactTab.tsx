@@ -37,12 +37,20 @@ const viewed = new WeakSet<object>();
 
 export function ArtifactTab({ tab }: { tab: ArtifactTabRef }) {
   const scope = useMemo<EditorHostScope>(() => ({ surface: 'main', tabId: tab.id }), [tab.id]);
-  const read = useLibraryRow(tab.artifactId);
-  const host = useHostAnswer(tab.artifactId, read);
+  return <ArtifactView artifactId={tab.artifactId} scope={scope} />;
+}
+
+// One artifact shown in a tab's scope, by whichever surface holds it: an `artifact` main tab mounts the kind's `Main`,
+// the panel's Artifacts tool (its record view, M5) the kind's `Panel`. The surface gives the editor's state back when it
+// stops showing the artifact (a main tab when it leaves the main area, the panel at Back, a re-target and disposal).
+export function ArtifactView({ artifactId, scope }: { artifactId: string; scope: EditorHostScope }) {
+  const read = useLibraryRow(artifactId);
+  const host = useHostAnswer(artifactId, read);
   const indexless = read.value === null;
   const artifact = read.value ?? (indexless && host.answer?.status === 'present' ? host.answer.row : undefined);
   // What the tab showed until now, kept while the artifact cannot be confirmed (the host unreachable, or still asked).
-  const held = heldArtifactEditorState(scope);
+  const kept = heldArtifactEditorState(scope);
+  const held = kept?.artifactId === artifactId ? kept : null;
   const editor = useArtifactEditor(artifact?.kind ?? held?.kind ?? null);
   if (artifact && editor) return <MountedEditor artifactId={artifact.id} kind={artifact.kind} editor={editor} scope={scope} />;
   if (artifact) return <NoEditor artifact={artifact} scope={scope} />;
@@ -105,12 +113,12 @@ function MountedEditor({ artifactId, kind, editor, scope, children }: { artifact
     viewed.add(hold);
     void markArtifactViewed(hold.artifactId);
   }, [hold]);
-  const Main = editor.Main;
+  const Body = scope.surface === 'panel' ? editor.Panel : editor.Main;
   return (
-    <div data-artifact-tab={artifactId} className="flex h-full flex-col">
+    <div data-artifact-tab={scope.surface === 'main' ? artifactId : undefined} className="flex h-full flex-col">
       {children}
       <div className="relative min-h-0 flex-1">
-        <Main artifactId={artifactId} state={hold.state} scope={scope} onShown={onShown} />
+        <Body artifactId={artifactId} state={hold.state} scope={scope} onShown={onShown} />
       </div>
     </div>
   );

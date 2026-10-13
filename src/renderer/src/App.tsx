@@ -116,6 +116,7 @@ import { registerTranscriptActions as registerBrowserAgentTranscriptActions } fr
 // E4c end
 // P3-L start
 import { registerArtifactTabs } from './library/ArtifactTab';
+import { artifactsTool } from './tools/artifacts/ArtifactsTool';
 import { Library } from './library/Library';
 import { connectLibrary } from './library/store';
 // P3-L end
@@ -246,6 +247,7 @@ export function App() {
   // artifact row and a delivered file's name open the viewer through openDeliverable
   useEffect(() => {
     registerPanelTool(deliverablesTool);
+    registerPanelTool(artifactsTool); // P3-L (M5): the Artifacts tool, beside Deliverables until the cutover (M6)
     registerSlot('deliverableTab', DeliverableTab);
   }, []);
   useEffect(() => connectDeliverables(), []);
