@@ -1,0 +1,431 @@
+{
+  "nodes": {
+    "blockquote": {
+      "attrs": {
+        "id": null
+      },
+      "content": "block+",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "block",
+      "inline": false,
+      "atom": false
+    },
+    "blockquote--attributed": {
+      "attrs": {
+        "id": null,
+        "y-attributed": "(required)"
+      },
+      "content": "block*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "block",
+      "inline": false,
+      "atom": false
+    },
+    "bulletList": {
+      "attrs": {
+        "id": null
+      },
+      "content": "listItemGroup*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "block list",
+      "inline": false,
+      "atom": false
+    },
+    "callout": {
+      "attrs": {
+        "id": null,
+        "tone": "note"
+      },
+      "content": "block+",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "block",
+      "inline": false,
+      "atom": false
+    },
+    "callout--attributed": {
+      "attrs": {
+        "id": null,
+        "tone": "note",
+        "y-attributed": "(required)"
+      },
+      "content": "block*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "block",
+      "inline": false,
+      "atom": false
+    },
+    "chart": {
+      "attrs": {
+        "id": null,
+        "source": "",
+        "spec": null
+      },
+      "content": null,
+      "marks": null,
+      "group": "block",
+      "inline": false,
+      "atom": true
+    },
+    "codeBlock": {
+      "attrs": {
+        "id": null,
+        "language": null
+      },
+      "content": "text*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs comment",
+      "group": "block",
+      "inline": false,
+      "atom": false
+    },
+    "date": {
+      "attrs": {
+        "iso": null
+      },
+      "content": null,
+      "marks": null,
+      "group": "inline",
+      "inline": true,
+      "atom": true
+    },
+    "diagram": {
+      "attrs": {
+        "id": null,
+        "source": ""
+      },
+      "content": null,
+      "marks": null,
+      "group": "block",
+      "inline": false,
+      "atom": true
+    },
+    "doc": {
+      "attrs": {},
+      "content": "block+",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": null,
+      "inline": false,
+      "atom": false
+    },
+    "dropdown": {
+      "attrs": {
+        "options": [],
+        "value": null
+      },
+      "content": null,
+      "marks": null,
+      "group": "inline",
+      "inline": true,
+      "atom": true
+    },
+    "hardBreak": {
+      "attrs": {},
+      "content": null,
+      "marks": null,
+      "group": "inline",
+      "inline": true,
+      "atom": true
+    },
+    "heading": {
+      "attrs": {
+        "id": null,
+        "level": 1
+      },
+      "content": "inline*",
+      "marks": null,
+      "group": "block",
+      "inline": false,
+      "atom": false
+    },
+    "horizontalRule": {
+      "attrs": {
+        "id": null
+      },
+      "content": null,
+      "marks": null,
+      "group": "block",
+      "inline": false,
+      "atom": true
+    },
+    "image": {
+      "attrs": {
+        "alt": null,
+        "assetId": null,
+        "src": null
+      },
+      "content": null,
+      "marks": null,
+      "group": "inline",
+      "inline": true,
+      "atom": true
+    },
+    "listItem": {
+      "attrs": {
+        "id": null
+      },
+      "content": "paragraph block*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "listItemGroup",
+      "inline": false,
+      "atom": false
+    },
+    "listItem--attributed": {
+      "attrs": {
+        "id": null,
+        "y-attributed": "(required)"
+      },
+      "content": "block*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "listItemGroup",
+      "inline": false,
+      "atom": false
+    },
+    "math": {
+      "attrs": {
+        "latex": ""
+      },
+      "content": null,
+      "marks": null,
+      "group": "inline",
+      "inline": true,
+      "atom": true
+    },
+    "mathBlock": {
+      "attrs": {
+        "id": null,
+        "latex": ""
+      },
+      "content": null,
+      "marks": null,
+      "group": "block",
+      "inline": false,
+      "atom": true
+    },
+    "mention": {
+      "attrs": {
+        "kind": "person",
+        "label": "",
+        "ref": null
+      },
+      "content": null,
+      "marks": null,
+      "group": "inline",
+      "inline": true,
+      "atom": true
+    },
+    "orderedList": {
+      "attrs": {
+        "id": null,
+        "start": 1,
+        "type": null
+      },
+      "content": "listItemGroup*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "block list",
+      "inline": false,
+      "atom": false
+    },
+    "paragraph": {
+      "attrs": {
+        "id": null
+      },
+      "content": "inline*",
+      "marks": null,
+      "group": "block",
+      "inline": false,
+      "atom": false
+    },
+    "pending": {
+      "attrs": {
+        "id": null,
+        "intent": ""
+      },
+      "content": null,
+      "marks": null,
+      "group": "block",
+      "inline": false,
+      "atom": true
+    },
+    "table": {
+      "attrs": {
+        "id": null
+      },
+      "content": "tableRow*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "block",
+      "inline": false,
+      "atom": false
+    },
+    "tableCell": {
+      "attrs": {
+        "align": null,
+        "colspan": 1,
+        "colwidth": null,
+        "id": null,
+        "rowspan": 1
+      },
+      "content": "block*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": null,
+      "inline": false,
+      "atom": false
+    },
+    "tableHeader": {
+      "attrs": {
+        "align": null,
+        "colspan": 1,
+        "colwidth": null,
+        "id": null,
+        "rowspan": 1
+      },
+      "content": "block*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": null,
+      "inline": false,
+      "atom": false
+    },
+    "tableRow": {
+      "attrs": {
+        "id": null
+      },
+      "content": "(tableCell | tableHeader)*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": null,
+      "inline": false,
+      "atom": false
+    },
+    "taskItem": {
+      "attrs": {
+        "checked": false,
+        "id": null
+      },
+      "content": "paragraph block*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "taskItemGroup",
+      "inline": false,
+      "atom": false
+    },
+    "taskItem--attributed": {
+      "attrs": {
+        "checked": false,
+        "id": null,
+        "y-attributed": "(required)"
+      },
+      "content": "block*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "taskItemGroup",
+      "inline": false,
+      "atom": false
+    },
+    "taskList": {
+      "attrs": {
+        "id": null
+      },
+      "content": "taskItemGroup*",
+      "marks": "y-attributed-insert y-attributed-delete y-attributed-format y-attributed-attrs",
+      "group": "block list",
+      "inline": false,
+      "atom": false
+    },
+    "text": {
+      "attrs": {},
+      "content": null,
+      "marks": null,
+      "group": "inline",
+      "inline": true,
+      "atom": true
+    }
+  },
+  "marks": {
+    "bold": {
+      "attrs": {},
+      "excludes": null,
+      "inclusive": null,
+      "storageKey": "bold"
+    },
+    "code": {
+      "attrs": {},
+      "excludes": "_",
+      "inclusive": null,
+      "storageKey": "code"
+    },
+    "comment": {
+      "attrs": {
+        "threadId": null
+      },
+      "excludes": "",
+      "inclusive": false,
+      "storageKey": "comment--SAfMpw=="
+    },
+    "highlight": {
+      "attrs": {
+        "color": null
+      },
+      "excludes": null,
+      "inclusive": null,
+      "storageKey": "highlight"
+    },
+    "italic": {
+      "attrs": {},
+      "excludes": null,
+      "inclusive": null,
+      "storageKey": "italic"
+    },
+    "link": {
+      "attrs": {
+        "href": null,
+        "title": null
+      },
+      "excludes": null,
+      "inclusive": true,
+      "storageKey": "link"
+    },
+    "strike": {
+      "attrs": {},
+      "excludes": null,
+      "inclusive": null,
+      "storageKey": "strike"
+    },
+    "underline": {
+      "attrs": {},
+      "excludes": null,
+      "inclusive": null,
+      "storageKey": "underline"
+    },
+    "y-attributed-attrs": {
+      "attrs": {
+        "changes": null
+      },
+      "excludes": null,
+      "inclusive": false,
+      "storageKey": null
+    },
+    "y-attributed-delete": {
+      "attrs": {
+        "timestamp": null,
+        "userIds": null
+      },
+      "excludes": "",
+      "inclusive": false,
+      "storageKey": null
+    },
+    "y-attributed-format": {
+      "attrs": {
+        "timestamp": null,
+        "userIds": null,
+        "userIdsByAttr": null
+      },
+      "excludes": "",
+      "inclusive": false,
+      "storageKey": null
+    },
+    "y-attributed-insert": {
+      "attrs": {
+        "timestamp": null,
+        "userIds": null
+      },
+      "excludes": "",
+      "inclusive": false,
+      "storageKey": null
+    }
+  }
+}
