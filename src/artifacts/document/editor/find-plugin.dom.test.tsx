@@ -4,7 +4,7 @@ import { Editor, type JSONContent } from '@tiptap/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { coreExtensionOptions } from '../ids';
 import { extensions } from '../schema';
-import { Find, findState } from './find';
+import { Find, findState } from './find-plugin';
 import { doc, para } from './test-world';
 
 let editor: Editor | null = null;

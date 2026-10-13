@@ -1,0 +1,264 @@
+/* The document page's theme (D3 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md; the ledger's X28 names).
+   Every value is a design-system token, `--ds-*`, falling back to the app's token: until D's DesignSystemScope wraps
+   the page, the fallbacks draw MAWS's own look and follow the app theme; once a system supplies every name, the app
+   theme no longer reaches the page (one theme per system). Type roles read `--ds-type-<role>-{size,line,weight}`;
+   font families only through `--ds-font-*`. No literal colour here (theme.dom.test.tsx). The chrome around the page is
+   chrome.css's, in the app's own tokens. */
+
+.ds-doc {
+  background: var(--ds-color-bg, var(--bg));
+  color: var(--ds-color-text, var(--fg));
+  font-family: var(--ds-font-body, var(--font-prose));
+  font-size: var(--ds-type-body-size, var(--text-prose));
+  line-height: var(--ds-type-body-line, var(--lh-prose));
+  font-weight: var(--ds-type-body-weight, 400);
+}
+
+.ds-doc-page {
+  box-sizing: border-box;
+  max-width: var(--measure-wide);
+  margin: 0 auto;
+  padding: var(--ds-space-6, calc(var(--space) * 8)) var(--ds-space-8, calc(var(--space) * 12));
+}
+
+.ds-doc .doc-content {
+  outline: none;
+  min-height: calc(var(--space) * 60);
+}
+.ds-doc .doc-content > * + * {
+  margin-top: var(--ds-space-3, calc(var(--space) * 3));
+}
+
+/* ── headings and text roles ── */
+.ds-doc h1,
+.ds-doc h2,
+.ds-doc h3 {
+  font-family: var(--ds-font-display, var(--font-prose));
+  color: var(--ds-color-text, var(--fg));
+}
+.ds-doc h1 {
+  font-size: var(--ds-type-h1-size, calc(var(--text-prose) * 2));
+  line-height: var(--ds-type-h1-line, 1.25);
+  font-weight: var(--ds-type-h1-weight, 600);
+}
+.ds-doc h2 {
+  font-size: var(--ds-type-h2-size, calc(var(--text-prose) * 1.5));
+  line-height: var(--ds-type-h2-line, 1.3);
+  font-weight: var(--ds-type-h2-weight, 600);
+}
+.ds-doc h3 {
+  font-size: var(--ds-type-h3-size, calc(var(--text-prose) * 1.25));
+  line-height: var(--ds-type-h3-line, 1.35);
+  font-weight: var(--ds-type-h3-weight, 600);
+}
+.ds-doc a {
+  color: var(--ds-color-accent, var(--accent));
+  text-decoration: underline;
+}
+.ds-doc mark {
+  background: var(--ds-color-bg-raised, var(--bg-raised));
+  color: inherit;
+  box-shadow: inset 0 -0.4em 0 var(--ds-color-accent, var(--accent));
+}
+.ds-doc code {
+  font-family: var(--ds-font-mono, var(--font-mono));
+  font-size: 0.9em;
+  background: var(--ds-color-bg-raised, var(--bg-raised));
+  border: 1px solid var(--ds-color-border, var(--border));
+  border-radius: var(--ds-radius-sm, var(--radius-sm));
+  padding: 0 0.25em;
+}
+
+/* ── blocks ── */
+.ds-doc blockquote {
+  margin-left: 0;
+  padding-left: var(--ds-space-4, calc(var(--space) * 4));
+  border-left: 3px solid var(--ds-color-border, var(--border-strong));
+  color: var(--ds-color-text-muted, var(--fg-muted));
+  font-size: var(--ds-type-quote-size, inherit);
+  line-height: var(--ds-type-quote-line, inherit);
+  font-weight: var(--ds-type-quote-weight, inherit);
+}
+.ds-doc pre {
+  font-family: var(--ds-font-mono, var(--font-mono));
+  font-size: var(--text-code);
+  background: var(--ds-color-bg-raised, var(--bg-raised));
+  border: 1px solid var(--ds-color-border, var(--border));
+  border-radius: var(--ds-radius-md, var(--radius));
+  padding: var(--ds-space-3, calc(var(--space) * 3));
+  overflow-x: auto;
+  white-space: pre;
+}
+.ds-doc pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: inherit;
+}
+.ds-doc ul,
+.ds-doc ol {
+  padding-left: var(--ds-space-6, calc(var(--space) * 6));
+}
+.ds-doc ul[data-type="taskList"] {
+  list-style: none;
+  padding-left: var(--ds-space-1, var(--space));
+}
+.ds-doc ul[data-type="taskList"] li {
+  display: flex;
+  gap: var(--ds-space-2, calc(var(--space) * 2));
+  align-items: baseline;
+}
+.ds-doc ul[data-type="taskList"] li > div {
+  flex: 1;
+}
+.ds-doc hr {
+  border: 0;
+  border-top: 1px solid var(--ds-color-border, var(--border-strong));
+}
+.ds-doc table {
+  border-collapse: collapse;
+  width: 100%;
+  table-layout: fixed;
+}
+.ds-doc th,
+.ds-doc td {
+  border: 1px solid var(--ds-color-border, var(--border-strong));
+  padding: var(--ds-space-2, calc(var(--space) * 2));
+  vertical-align: top;
+  position: relative;
+}
+.ds-doc th {
+  background: var(--ds-color-bg-raised, var(--bg-raised));
+  font-weight: 600;
+  text-align: left;
+}
+.ds-doc .selectedCell {
+  background: var(--ds-color-bg-raised, var(--bg-raised));
+  outline: 2px solid var(--ds-color-accent, var(--accent));
+  outline-offset: -2px;
+}
+
+/* the callout's tone (data-callout-tone, the ledger's canon name): note, tip, warn, danger */
+.ds-doc .doc-callout {
+  display: flex;
+  flex-direction: column;
+  gap: var(--ds-space-1, var(--space));
+  background: var(--ds-color-bg-raised, var(--bg-raised));
+  border: 1px solid var(--ds-color-border, var(--border));
+  border-left: 4px solid var(--ds-color-status-info, var(--info));
+  border-radius: var(--ds-radius-md, var(--radius));
+  padding: var(--ds-space-3, calc(var(--space) * 3)) var(--ds-space-4, calc(var(--space) * 4));
+}
+.ds-doc .doc-callout[data-callout-tone="tip"] {
+  border-left-color: var(--ds-color-status-ok, var(--success));
+}
+.ds-doc .doc-callout[data-callout-tone="warn"] {
+  border-left-color: var(--ds-color-status-warn, var(--warning));
+}
+.ds-doc .doc-callout[data-callout-tone="danger"] {
+  border-left-color: var(--ds-color-status-error, var(--danger));
+}
+.ds-doc .doc-callout-tone {
+  font: inherit;
+  font-size: var(--ds-type-caption-size, var(--text-ui-sm));
+  color: var(--ds-color-text-muted, var(--fg-muted));
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+
+/* ── atoms: math, diagrams, images, chips, placeholders ── */
+.ds-doc .doc-atom.ProseMirror-selectednode,
+.ds-doc .ProseMirror-selectednode {
+  outline: 2px solid var(--ds-color-accent, var(--accent));
+  outline-offset: 1px;
+  border-radius: var(--ds-radius-sm, var(--radius-sm));
+}
+.ds-doc .doc-mathBlock,
+.ds-doc .doc-diagram {
+  display: block;
+  text-align: center;
+}
+.ds-doc .doc-diagram-source {
+  text-align: left;
+}
+.ds-doc .doc-diagram-error {
+  border-color: var(--ds-color-status-error, var(--danger));
+}
+.ds-doc .doc-diagram-drawing svg {
+  max-width: 100%;
+  height: auto;
+}
+.ds-doc .doc-atom-empty {
+  color: var(--ds-color-text-muted, var(--fg-muted));
+  font-style: italic;
+}
+.ds-doc .doc-image {
+  max-width: 100%;
+  vertical-align: bottom;
+}
+.ds-doc .doc-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.9em;
+  line-height: 1.4;
+  background: var(--ds-color-bg-raised, var(--bg-raised));
+  border: 1px solid var(--ds-color-border, var(--border));
+  border-radius: var(--ds-radius-full, 999px);
+  padding: 0 var(--ds-space-2, calc(var(--space) * 2));
+  color: var(--ds-color-text, var(--fg));
+}
+.ds-doc .doc-chip-select {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  padding: 0;
+}
+.ds-doc .doc-pending,
+.ds-doc .doc-chart {
+  display: flex;
+  gap: var(--ds-space-2, calc(var(--space) * 2));
+  align-items: baseline;
+  border: 1px dashed var(--ds-color-border, var(--border-strong));
+  border-radius: var(--ds-radius-md, var(--radius));
+  padding: var(--ds-space-3, calc(var(--space) * 3));
+  color: var(--ds-color-text-muted, var(--fg-muted));
+}
+.ds-doc .doc-placeholder-label {
+  font-size: var(--ds-type-caption-size, var(--text-ui-sm));
+  font-weight: var(--ds-type-caption-weight, 600);
+  text-transform: uppercase;
+}
+.ds-doc .doc-atom-field {
+  display: block;
+  margin-top: var(--ds-space-1, var(--space));
+}
+.ds-doc span.doc-atom-field {
+  display: inline-block;
+  margin: 0 0 0 var(--ds-space-1, var(--space));
+}
+.ds-doc .doc-atom-field[hidden] {
+  display: none;
+}
+.ds-doc .doc-atom-field input,
+.ds-doc .doc-atom-field textarea {
+  font-family: var(--ds-font-mono, var(--font-mono));
+  font-size: var(--text-code);
+  color: var(--ds-color-text, var(--fg));
+  background: var(--ds-color-bg-raised, var(--bg-raised));
+  border: 1px solid var(--ds-color-border, var(--border-strong));
+  border-radius: var(--ds-radius-sm, var(--radius-sm));
+  padding: var(--ds-space-1, var(--space)) var(--ds-space-2, calc(var(--space) * 2));
+}
+.ds-doc .doc-atom-field textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: calc(var(--space) * 16);
+}
+
+/* code highlighting: shiki's light colour inline, its dark one picked while the app is dark (the interim until D's
+   scope draws the system's own ground) */
+[data-theme="dark"] .ds-doc .doc-code-token {
+  color: var(--shiki-dark) !important;
+}

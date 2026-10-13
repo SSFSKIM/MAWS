@@ -41,6 +41,15 @@
   --color-info: var(--info);
   --color-diff-add-bg: var(--diff-add-bg);
   --color-diff-del-bg: var(--diff-del-bg);
+  /* P3-B: the author colours (bg-author-3, text-author-3, ...) */
+  --color-author-1: var(--author-1);
+  --color-author-2: var(--author-2);
+  --color-author-3: var(--author-3);
+  --color-author-4: var(--author-4);
+  --color-author-5: var(--author-5);
+  --color-author-6: var(--author-6);
+  --color-author-7: var(--author-7);
+  --color-author-8: var(--author-8);
 
   --font-ui: var(--font-ui);
   --font-prose: var(--font-prose);
