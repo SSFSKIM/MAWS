@@ -3,11 +3,15 @@
 // what `artifacts.create` and the writer made in the right date group with their kind counts; search finds a word in
 // a document's text and in an HTML page; Pin moves a row into Pinned; a Space made and an artifact moved into it shows
 // under By Space; Rename and Delete land after the host's event; and the library is right after the host process is
-// killed and restarted.
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+// killed and restarted (M7: with writes main's index had not followed when it died). M7's upgrade case: an index rewound
+// to version 8 beside a populated host store migrates to 9 at launch and the first connection's snapshot fills it.
+// `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { MIGRATIONS } from '../src/main/index/migrations';
 import { launchMaws, type MawsLaunch } from './support/launch';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
@@ -30,6 +34,44 @@ async function createHtml(page: Page, title: string, html: string): Promise<{ id
 
 async function hostState(page: Page): Promise<{ state: string; pid: number | null }> {
   return ok(page, 'engine.hostState');
+}
+
+async function libraryRevision(page: Page, artifactId: string): Promise<number | null> {
+  return (await ok<{ row: { revision: number } | null }>(page, 'library.get', { artifactId })).row?.revision ?? null;
+}
+
+// A session's stand-in typing into a document through the test writer, one acknowledged write after another, each a
+// fresh token at the start, until a write is refused (the host gone) or it is stopped.
+interface Burst {
+  acked: number;
+  lastToken: string | null;
+  refused: boolean; // it ended at a refusal, so no write of it reached a successor host
+}
+type BurstWindow = { __burst: Burst & { stop: boolean; done: Promise<void> }; maws: { invoke(name: string, input: unknown): Promise<{ ok: boolean }> } };
+async function startBurst(page: Page, artifactId: string, prefix: string): Promise<void> {
+  await page.evaluate(([id, p, agent]) => {
+    const w = window as unknown as BurstWindow;
+    const burst = { acked: 0, lastToken: null as string | null, refused: false, stop: false, done: Promise.resolve() };
+    burst.done = (async () => {
+      for (let n = 0; !burst.stop && n < 10_000; n++) {
+        const token = `${p}${String(n).padStart(4, '0')}`;
+        const answer = await w.maws.invoke('artifacts.testWrite', { artifactId: id, opId: token, appSessionId: agent, ops: [{ op: 'insertText', index: 0, text: `${token} ` }] });
+        if (!answer.ok) return void (burst.refused = true);
+        burst.acked = n + 1;
+        burst.lastToken = token;
+      }
+    })();
+    w.__burst = burst;
+  }, [artifactId, prefix, AGENT] as const);
+}
+const burstAcked = (page: Page) => page.evaluate(() => (window as unknown as BurstWindow).__burst.acked);
+async function stopBurst(page: Page): Promise<Burst> {
+  return page.evaluate(async () => {
+    const burst = (window as unknown as BurstWindow).__burst;
+    burst.stop = true;
+    await burst.done;
+    return { acked: burst.acked, lastToken: burst.lastToken, refused: burst.refused };
+  });
 }
 
 const AGENT = 'app-e2e-library-agent';
@@ -132,11 +174,32 @@ test('the library lists, finds, pins, files into a Space, renames and deletes, a
   expect(await ok(page, 'artifacts.get', { artifactId: budget.id })).toEqual({ artifact: null });
   await expect.poll(titles).toEqual(['Launch plan', 'Pricing, 2027']);
 
-  // the host killed: it restarts, main reconciles at the new connection, and the library is as it was and follows on
-  const { pid } = await hostState(page);
-  process.kill(pid!, 'SIGKILL');
-  await expect.poll(async () => (await hostState(page)).pid, { timeout: 30_000, message: 'the host restarts' }).not.toBe(pid);
-  await expect.poll(async () => (await hostState(page)).state, { timeout: 30_000 }).toBe('ready');
+  // the host killed while a session's stand-in types into the plan: the writes it committed last die with their change
+  // events (the store sends a document's at most every 250 ms), so main's index is behind the host's store when the
+  // host goes; the restarted host's connection reconciles it, the text included. A kill that happens to land with main
+  // caught up proves nothing about the reconciliation, so a second burst and kill follow it (three host exits within
+  // 60 s leave the host crashed for good).
+  let behind: { stale: number; host: number } | null = null;
+  for (let round = 0; round < 2 && behind === null; round++) {
+    const { pid } = await hostState(page);
+    await startBurst(page, plan.id, `kiwi${round}x`);
+    await expect.poll(() => burstAcked(page), { message: 'the stand-in is typing' }).toBeGreaterThanOrEqual(20);
+    process.kill(pid!, 'SIGKILL');
+    const stale = await libraryRevision(page, plan.id); // well before a successor (its restart waits 500 ms at least)
+    const burst = await stopBurst(page);
+    await expect.poll(async () => (await hostState(page)).pid, { timeout: 30_000, message: 'the host restarts' }).not.toBe(pid);
+    await expect.poll(async () => (await hostState(page)).state, { timeout: 30_000 }).toBe('ready');
+    const host = (await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId: plan.id })).artifact.revision;
+    await expect.poll(() => libraryRevision(page, plan.id), { timeout: 15_000, message: 'main’s index at the host’s revision' }).toBe(host);
+    await search.fill(burst.lastToken!);
+    await expect.poll(titles, { timeout: 15_000, message: 'the last acknowledged write is searchable' }).toEqual(['Launch plan']);
+    // proving only when no write reached the successor (each one after the kill was refused, so its event could not
+    // have carried the plan forward) and main was behind at the kill
+    if (burst.refused && stale !== null && stale < host) behind = { stale, host };
+    test.info().annotations.push({ type: 'host kill', description: `round ${round + 1}: ${burst.acked} writes acknowledged, ${burst.refused ? 'the next refused' : 'stopped'}; main's index at revision ${stale} at the kill, the host's at ${host}` });
+  }
+  expect(behind, 'a kill landed with main’s index behind the host’s store, and the reconciliation caught it up').not.toBeNull();
+  await search.fill('');
   await expect.poll(titles).toEqual(['Launch plan', 'Pricing, 2027']);
   await ok(page, 'artifacts.update', { artifactId: plan.id, title: 'Launch plan, final' });
   await expect(row('Launch plan, final')).toBeVisible({ timeout: 15_000 });
@@ -144,4 +207,95 @@ test('the library lists, finds, pins, files into a Space, renames and deletes, a
   await expect.poll(titles, { timeout: 15_000 }).toEqual(['Launch plan, final']);
 
   expect(launch.consoleErrors()).toEqual([]);
+});
+
+// The index's schema (every table, index and trigger, the FTS shadow tables included) and its version.
+function schemaOf(db: DatabaseSync): { version: unknown; objects: unknown[] } {
+  return {
+    version: (db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version,
+    objects: db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name").all(),
+  };
+}
+
+// An index at version 8 as an install before P3-L left it: the library's four tables dropped (migration 9 only adds
+// them) and the version set back, checked equal to the schema migrations 1 to 8 build.
+function rewindIndexTo8(path: string): void {
+  const db = new DatabaseSync(path);
+  try {
+    expect(schemaOf(db).version, 'the first launch left the index at 9').toBe(9);
+    db.exec('DROP TABLE library_text; DROP TABLE library_links; DROP TABLE library_artifacts; DROP TABLE library_spaces; PRAGMA user_version = 8;');
+    const template = new DatabaseSync(':memory:');
+    try {
+      for (const migration of MIGRATIONS.filter((m) => m.version <= 8)) template.exec(migration.sql);
+      template.exec('PRAGMA user_version = 8');
+      expect(schemaOf(db), 'the rewound index is a version-8 index').toEqual(schemaOf(template));
+    } finally {
+      template.close();
+    }
+  } finally {
+    db.close();
+  }
+}
+
+test('an index at version 8 beside a populated host store migrates to 9 at launch, and the first connection’s snapshot fills the library', async () => {
+  test.setTimeout(120_000);
+  scratch = mkdtempSync(join(tmpdir(), 'maws-e2e-library-upgrade-'));
+  const userData = join(scratch, 'ud');
+  mkdirSync(userData);
+  const filePath = join(scratch, 'ledger.csv');
+  writeFileSync(filePath, 'item,cost\nlantern,40\n');
+
+  // the first launch fills the host's store (the index it leaves is rewound below)
+  launch = await launchMaws({ userData });
+  let { page } = launch;
+  await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+  const harbour = await createHtml(page, 'Harbour page', '<html><body><p>The pelican pier opens at nine.</p></body></html>');
+  const { artifact: ledger } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'file', title: 'ledger.csv', content: { path: filePath } });
+  const { artifact: log } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Ship log' });
+  const { revision } = await ok<{ revision: number }>(page, 'artifacts.testWrite', {
+    artifactId: log.id, opId: 'upgrade-1', appSessionId: AGENT,
+    ops: [{ op: 'insertText', index: 0, text: 'A walrus boarded at the second buoy.' }],
+  });
+  await launch.cleanup();
+  launch = null;
+  rewindIndexTo8(join(userData, 'index.sqlite'));
+
+  // the upgrade: main migrates the index to 9, and the host's snapshot at the first connection is the whole library
+  launch = await launchMaws({ userData });
+  ({ page } = launch);
+  await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  const library = page.locator('[data-library]');
+  const titles = () => library.getByRole('article').evaluateAll((rows) => rows.map((r) => r.getAttribute('aria-label')));
+  await expect.poll(async () => (await titles()).sort(), { timeout: 15_000, message: 'the snapshot filled the library' }).toEqual(['Harbour page', 'Ship log', 'ledger.csv']);
+  expect(await libraryRevision(page, log.id), 'the log at the session’s write').toBe(revision);
+  // the session that wrote it is its last editor (the test writer links no session: a link comes from a session's own
+  // create or tool write, which no IPC stand-in can make)
+  expect((await ok<{ row: { lastEditor: unknown } }>(page, 'library.get', { artifactId: log.id })).row.lastEditor).toEqual({ kind: 'session', appSessionId: AGENT });
+  await expect(library.getByRole('article', { name: 'Ship log', exact: true })).toContainText('by Claude'); // the writer's session has no record here
+  await library.getByRole('button', { name: /Filter by type/ }).click();
+  const menu = page.getByRole('menu');
+  await expect(menu.getByRole('menuitemradio', { name: /^All types/ })).toHaveText('All types3');
+  await page.keyboard.press('Escape');
+  const search = library.getByRole('searchbox', { name: 'Search artifacts' });
+  await search.fill('walrus');
+  await expect.poll(titles, { timeout: 15_000, message: 'the document’s text is indexed after the upgrade' }).toEqual(['Ship log']);
+  await search.fill('pelican');
+  await expect.poll(titles, { timeout: 15_000 }).toEqual(['Harbour page']);
+  await search.fill('lantern');
+  await expect.poll(titles, { timeout: 15_000 }).toEqual(['ledger.csv']);
+  for (const id of [harbour.id, ledger.id, log.id]) {
+    expect(await libraryRevision(page, id), 'each row at the host’s revision').toBe((await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId: id })).artifact.revision);
+  }
+  expect(launch.consoleErrors()).toEqual([]);
+
+  await launch.cleanup();
+  launch = null;
+  const db = new DatabaseSync(join(userData, 'index.sqlite'), { readOnly: true });
+  try {
+    expect(schemaOf(db).version, 'the index is at 9 again').toBe(9);
+    expect((db.prepare('SELECT count(*) AS n FROM library_artifacts').get() as { n: number }).n).toBe(3);
+  } finally {
+    db.close();
+  }
 });
