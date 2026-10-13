@@ -6,10 +6,14 @@
 // Restore brings it back with the banner. The exporters run in main (through their e2e seam, until A's export service
 // registers them) and write `.md`, `.html`, `.docx` and a `.pdf` beginning `%PDF-` with one page per tab on Letter and
 // on A4; the header's Export menu reaches the host's export and says its answer in the header's action.
+// M9 (Acceptance 3 and 4): commented text copied through the Mac's pasteboard pastes without a second comment, a cut and
+// paste moves it, a real mouse drag keeps exactly one; A's restore brings back a deleted tab and the earlier text while
+// a reply posted after the version stays and a thread made after it shows orphaned.
 // Every launch's userData is its own directory under /tmp; windows are never shown (the e2e quiet mode).
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { withNativeClipboard } from './support/clipboard';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 
@@ -254,5 +258,293 @@ test('the exporters write Markdown, HTML, DOCX and a paged PDF in main; the Expo
   const big = readFileSync(bigPath);
   expect(big.subarray(0, 5).toString('latin1')).toBe('%PDF-');
   expect(pdfPages(big).pages).toBeGreaterThan(100);
+  expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// ---- M9: comments through the real pasteboard and a real drag, and restore with conversations ------------------------
+// (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, M9; Acceptance 3's clipboard and drag-move, Acceptance 4's
+// restore.) A comment is offered while the main area shows a session (its card's Side thread and Send to main go
+// there), so these cases open the document in the pinned Artifacts tool beside session A of the panel scenario. A new
+// thread whose card closes with nothing sent in it is withdrawn, so each comment is kept the owner's way that needs no
+// session to answer: Resolve on the card (kept on purpose), then Reopen from the Comments rail.
+
+// The document in the panel's Artifacts tool beside session A, typed into: one paragraph per line.
+async function openBesideSession(page: Page, title: string, lines: string[]): Promise<{ id: string; record: Locator; text: Locator }> {
+  await pinArtifactsTool(page); // the main area shows Harness A
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title });
+  const record = await openInPanel(page, artifact.id);
+  const text = record.locator('.ds-doc .ProseMirror');
+  await text.click();
+  for (const [k, line] of lines.entries()) {
+    if (k > 0) await page.keyboard.press('Enter');
+    await page.keyboard.type(line);
+  }
+  await expect(text.locator('p')).toHaveText(lines);
+  return { id: artifact.id, record, text };
+}
+
+// Selects `quote` inside the editor's paragraph `index` (a DOM selection the editor reads, as a person's drag would set).
+async function selectIn(text: Locator, index: number, quote: string): Promise<void> {
+  await text.evaluate(
+    (root, [at, q]) => {
+      const p = root.querySelectorAll('p')[at as number]!;
+      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+      const nodes: Text[] = [];
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text);
+      const whole = nodes.map((n) => n.data).join('');
+      const start = whole.indexOf(q as string);
+      if (start < 0) throw new Error(`no "${q}" in paragraph ${at}: "${whole}"`);
+      const point = (offset: number): [Text, number] => {
+        let left = offset;
+        for (const n of nodes) {
+          if (left <= n.data.length) return [n, left];
+          left -= n.data.length;
+        }
+        throw new Error('offset past the paragraph');
+      };
+      const range = document.createRange();
+      range.setStart(...point(start));
+      range.setEnd(...point(start + (q as string).length));
+      (root as HTMLElement).focus();
+      const selection = getSelection()!;
+      selection.removeAllRanges();
+      selection.addRange(range);
+    },
+    [index, quote] as const,
+  );
+  await expect.poll(() => text.evaluate(() => getSelection()?.toString() ?? '')).toBe(quote);
+}
+
+// The passage `quote` of paragraph `index` on screen: the left edge of its first character, the right edge of its last,
+// and the line's middle.
+const passageAt = (text: Locator, index: number, quote: string) =>
+  text.evaluate(
+    (root, [at, q]) => {
+      const p = root.querySelectorAll('p')[at as number]!;
+      const walker = document.createTreeWalker(p, NodeFilter.SHOW_TEXT);
+      const nodes: Text[] = [];
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text);
+      const start = nodes.map((n) => n.data).join('').indexOf(q as string);
+      const charRect = (offset: number): DOMRect => {
+        let left = offset;
+        for (const n of nodes) {
+          if (left < n.data.length) {
+            const range = document.createRange();
+            range.setStart(n, left);
+            range.setEnd(n, left + 1);
+            return range.getBoundingClientRect();
+          }
+          left -= n.data.length;
+        }
+        throw new Error('offset past the paragraph');
+      };
+      const first = charRect(start);
+      const last = charRect(start + (q as string).length - 1);
+      return { left: first.left, right: last.right, y: first.top + first.height / 2 };
+    },
+    [index, quote] as const,
+  );
+
+// The caret at the end of paragraph `index`.
+async function caretAtEndOf(page: Page, text: Locator, index: number): Promise<void> {
+  await text.locator('p').nth(index).click();
+  await page.keyboard.press('End');
+  await expect(text).toBeFocused();
+  await expect.poll(() => text.evaluate((root, at) => {
+    const selection = getSelection()!;
+    const p = root.querySelectorAll('p')[at]!;
+    return selection.isCollapsed && p.contains(selection.focusNode) && selection.focusOffset === (selection.focusNode?.textContent ?? '').length && p.textContent!.endsWith(selection.focusNode?.textContent ?? '');
+  }, index)).toBe(true);
+}
+
+// The window's Edit command on the OS pasteboard, as ⌘C, ⌘X and ⌘V run it: the app menu's Edit roles (src/main/menu.ts)
+// call these on the window's contents (a key event Playwright synthesizes reaches the page, never the menu).
+async function edit(command: 'copy' | 'cut' | 'paste'): Promise<void> {
+  await launch!.app.evaluate(({ BrowserWindow }, which) => {
+    const [win] = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed());
+    win!.webContents[which]();
+  }, command);
+}
+
+// Every thread id the editor's text carries, with the text each one marks (adjacent pieces joined).
+const markedText = (text: Locator) =>
+  text.evaluate((root) => {
+    const out: Record<string, string> = {};
+    root.querySelectorAll<HTMLElement>('[data-thread]').forEach((el) => {
+      out[el.dataset.thread!] = (out[el.dataset.thread!] ?? '') + el.textContent;
+    });
+    return out;
+  });
+
+// A comment on `quote` in paragraph `index`, kept: Comment opens the card on a new thread, Resolve keeps it, Reopen in
+// the rail opens it again. Returns its thread id, the rail left closed.
+async function commentOn(page: Page, record: Locator, text: Locator, index: number, quote: string): Promise<string> {
+  const before = new Set(Object.keys(await markedText(text)));
+  await selectIn(text, index, quote);
+  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Comment', exact: true }).click();
+  const card = page.locator('[data-comment-card]');
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');
+  await expect(card).toHaveAttribute('data-anchor-locator', quote);
+  let threadId = '';
+  await expect
+    .poll(async () => {
+      const ids = Object.entries(await markedText(text)).filter(([id, marked]) => !before.has(id) && marked === quote);
+      threadId = ids[0]?.[0] ?? '';
+      return ids.length;
+    }, { message: 'one new mark on the passage' })
+    .toBe(1);
+  await card.getByRole('button', { name: 'Resolve' }).click();
+  await expect(card).toHaveCount(0);
+  const comments = record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: /^Comments/ });
+  await comments.click();
+  const rail = record.getByRole('complementary', { name: 'Comments' });
+  await rail.locator(`article[data-thread="${threadId}"]`).getByRole('button', { name: 'Reopen' }).click();
+  await expect(text.locator(`.comment-${threadId}`)).toHaveText(quote);
+  await comments.click();
+  await expect(rail).toBeHidden();
+  return threadId;
+}
+
+// The Comments rail open, its thread articles (open, then resolved).
+async function railOf(record: Locator): Promise<Locator> {
+  const rail = record.getByRole('complementary', { name: 'Comments' });
+  if (!(await rail.isVisible())) await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: /^Comments/ }).click();
+  await expect(rail).toBeVisible();
+  return rail;
+}
+
+test('commented text through the Mac’s pasteboard: a copy pasted in the same document does not duplicate the comment, a cut and paste moves it', async () => {
+  test.setTimeout(150_000);
+  const page = await start();
+  const { record, text } = await openBesideSession(page, 'Pasteboard notes', ['The owner reviews the launch plan today.', 'A second paragraph waits here.']);
+  const QUOTE = 'launch plan';
+  const threadId = await commentOn(page, record, text, 0, QUOTE);
+  const app = launch!.app;
+
+  await withNativeClipboard(app, [QUOTE], async () => {
+    // a copy: the pasteboard's HTML carries the thread (the mark's data-thread), the paste is plain text
+    await selectIn(text, 0, QUOTE);
+    await edit('copy');
+    await expect.poll(() => app.evaluate(({ clipboard }) => clipboard.readText())).toBe(QUOTE);
+    const html = await app.evaluate(async ({ clipboard }) => {
+      for (const item of await clipboard.read()) if (item.types.includes('text/html')) return ((await item.getType('text/html')) as Blob).text();
+      return '';
+    });
+    expect(html, 'the pasteboard’s text/html carries the thread id').toContain(`data-thread="${threadId}"`);
+    await caretAtEndOf(page, text, 1);
+    await edit('paste');
+    await expect(text.locator('p').nth(1)).toHaveText(`A second paragraph waits here.${QUOTE}`);
+    expect(await markedText(text), 'the copy carries no second comment').toEqual({ [threadId]: QUOTE });
+    await expect(text.locator('p').nth(0).locator(`[data-thread="${threadId}"]`)).toHaveText(QUOTE);
+
+    // a cut and a paste: the comment moves with its text
+    await selectIn(text, 0, QUOTE);
+    await edit('cut');
+    await expect(text.locator('p').nth(0)).toHaveText('The owner reviews the  today.');
+    await caretAtEndOf(page, text, 1);
+    await page.keyboard.type(' Moved: ');
+    await edit('paste');
+    await expect(text.locator('p').nth(1)).toHaveText(`A second paragraph waits here.${QUOTE} Moved: ${QUOTE}`);
+  });
+  expect(await markedText(text), 'one comment, on the pasted text').toEqual({ [threadId]: QUOTE });
+  await expect(text.locator('p').nth(1).locator(`[data-thread="${threadId}"]`)).toHaveText(QUOTE);
+  await expect(text.locator('p').nth(0).locator('[data-thread]')).toHaveCount(0);
+  await expect(text.locator(`.comment-${threadId}`)).toHaveText(QUOTE); // drawn as an open thread's passage
+  const rail = await railOf(record);
+  await expect(rail.locator('article[data-thread]')).toHaveCount(1);
+  await expect(rail.locator(`article[data-thread="${threadId}"]`)).not.toHaveAttribute('data-orphan');
+  expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+test('a commented passage dragged with the mouse to another paragraph keeps exactly one comment, on the moved text', async () => {
+  test.setTimeout(150_000);
+  const page = await start();
+  const { record, text } = await openBesideSession(page, 'Drag notes', ['The river runs north past the mill.', 'The road ends at the bridge.']);
+  const QUOTE = 'river runs north';
+  const threadId = await commentOn(page, record, text, 0, QUOTE);
+
+  // a real drag: the passage selected with the mouse (pressed before its first character, released after its last), then
+  // pressed inside the selection and held, moved in steps to the second paragraph's end, released there
+  const passage = await passageAt(text, 0, QUOTE);
+  await page.mouse.move(passage.left + 1, passage.y);
+  await page.mouse.down();
+  await page.mouse.move(passage.right - 1, passage.y, { steps: 8 });
+  await page.mouse.up();
+  await expect.poll(() => text.evaluate(() => getSelection()?.toString() ?? '')).toBe(QUOTE);
+  const from = { x: (passage.left + passage.right) / 2, y: passage.y };
+  const to = await text.locator('p').nth(1).evaluate((p) => {
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    const r = range.getBoundingClientRect();
+    return { x: r.right - 1, y: r.top + r.height / 2 };
+  });
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.waitForTimeout(300); // held: on macOS Chromium starts a text drag only after 150 ms down (else it selects)
+  await page.mouse.move(from.x + 6, from.y + 2, { steps: 3 });
+  await page.mouse.move(to.x, to.y, { steps: 12 });
+  await page.mouse.up();
+
+  await expect(text.locator('p').nth(1)).toContainText(QUOTE);
+  await expect(text.locator('p').nth(0)).not.toContainText(QUOTE);
+  expect(await markedText(text), 'exactly one comment, on the moved text').toEqual({ [threadId]: QUOTE });
+  await expect(text.locator('p').nth(1).locator(`[data-thread="${threadId}"]`)).toHaveText(QUOTE);
+  await expect(text.locator(`.comment-${threadId}`)).toHaveText(QUOTE);
+  const rail = await railOf(record);
+  await expect(rail.locator('article[data-thread]')).toHaveCount(1);
+  await expect(rail.locator(`article[data-thread="${threadId}"]`)).not.toHaveAttribute('data-orphan');
+  expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+test('restore brings back a deleted tab and the earlier text while a later reply stays on its thread and a newer thread shows orphaned', async () => {
+  test.setTimeout(150_000);
+  const page = await start();
+  const { id, record, text } = await openBesideSession(page, 'Restore notes', ['The budget review is on Friday.']);
+  const older = await commentOn(page, record, text, 0, 'budget review');
+  // a second tab with its own text, in the version
+  await record.getByRole('button', { name: 'Add tab' }).click();
+  const tabs = record.getByRole('tablist', { name: 'Tabs' });
+  await expect(tabs.getByRole('tab')).toHaveText(['Restore notes', 'Tab 2']);
+  await expect(text).toHaveText('', { timeout: 10_000 });
+  await text.click();
+  await page.keyboard.type('Appendix figures for October.');
+  const panelHeader = page.locator('[data-region="panel"] [data-editor-header]');
+  await expect(panelHeader.locator('[data-header-saved]')).toHaveText('All changes saved', { timeout: 10_000 });
+  const { versionId } = await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId: id, label: 'Two tabs' });
+
+  // after the version: the second tab deleted, a reply on the older thread, new text with a thread of its own
+  await record.getByRole('button', { name: 'Tab options' }).click();
+  await record.getByRole('menuitem', { name: 'Delete' }).click();
+  await expect(tabs.getByRole('tab')).toHaveText(['Restore notes']);
+  await expect(text.locator('p')).toHaveText(['The budget review is on Friday.']);
+  let rail = await railOf(record);
+  const reply = rail.locator(`article[data-thread="${older}"]`).getByRole('textbox', { name: 'Reply' });
+  await reply.fill('Posted after the version.');
+  await reply.press('Enter');
+  await expect(rail.locator(`article[data-thread="${older}"]`).getByRole('listitem')).toHaveText(['YouPosted after the version.']);
+  await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: /^Comments/ }).click();
+  await caretAtEndOf(page, text, 0);
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('A later sentence for the board.');
+  const newer = await commentOn(page, record, text, 1, 'later sentence');
+  await expect(panelHeader.locator('[data-header-saved]')).toHaveText('All changes saved', { timeout: 10_000 });
+
+  // A's restore, artifact-wide
+  const restored = await ok<{ versionId: number }>(page, 'artifacts.restore', { artifactId: id, versionId });
+  await expect(tabs.getByRole('tab')).toHaveText(['Restore notes', 'Tab 2'], { timeout: 15_000 });
+  await expect(text.locator('p')).toHaveText(['The budget review is on Friday.'], { timeout: 15_000 });
+  expect(await markedText(text)).toEqual({ [older]: 'budget review' });
+  rail = await railOf(record);
+  const olderItem = rail.locator(`article[data-thread="${older}"]`);
+  await expect(olderItem.getByRole('listitem'), 'the reply posted after the version stays').toHaveText(['YouPosted after the version.']);
+  await expect(olderItem).not.toHaveAttribute('data-orphan');
+  const newerItem = rail.locator(`article[data-thread="${newer}"]`);
+  await expect(newerItem, 'the thread made after the version stays, its passage gone').toHaveAttribute('data-orphan', '');
+  await expect(newerItem).toContainText('The commented passage was removed.');
+  await tabs.getByRole('tab', { name: 'Tab 2' }).click();
+  await expect(text).toHaveText('Appendix figures for October.', { timeout: 10_000 });
+  const listed = await ok<{ versions: { id: number; kind: string; label?: string }[] }>(page, 'artifacts.versions', { artifactId: id });
+  expect(listed.versions).toContainEqual(expect.objectContaining({ id: restored.versionId, kind: 'restore', label: 'Restored from Two tabs' }));
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
