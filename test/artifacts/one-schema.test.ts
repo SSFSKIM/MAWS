@@ -1,7 +1,9 @@
 // Schema parity's lint half (D4 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): the document's schema is
 // built only in src/artifacts/document/schema.ts, proven by linting scratch sources at paths the repository's
-// eslint.config.js governs; the composer's own Tiptap schema stays outside the rule.
-import { resolve } from 'node:path';
+// eslint.config.js governs, and held on the production source by linting every file of src/ that could trip it; the
+// composer's own Tiptap schema stays outside the rule.
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import { ESLint } from 'eslint';
 import { beforeAll, describe, expect, it } from 'vitest';
 
@@ -44,5 +46,28 @@ describe('the one-schema rule', () => {
       'src/renderer/src/tools/document/__lint_fixture__.ts',
     );
     expect(fired.sort()).toEqual(['maws-schema/one-schema', 'no-restricted-syntax']);
+  });
+});
+
+// Every source file the rule could fire on (a call it matches is textually one of these), linted through the
+// repository config: production source holds the rule whatever `pnpm lint` is run on.
+const CANDIDATE = /\b(?:getSchema|(?:Mark|Node)\s*\.\s*create)\s*\(/;
+function candidates(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) return candidates(path);
+    return /\.tsx?$/.test(entry.name) && CANDIDATE.test(readFileSync(path, 'utf8')) ? [path] : [];
+  });
+}
+
+describe('the one-schema rule on src/', () => {
+  it('holds on every file of src/ (the schema module and the composer the only builders)', async () => {
+    const files = candidates(resolve(ROOT, 'src'));
+    expect(files.map((file) => relative(ROOT, file))).toContain('src/artifacts/document/schema.ts');
+    const results = await eslint.lintFiles(files);
+    const fired = results.flatMap((result) =>
+      result.messages.filter((message) => message.ruleId === 'maws-schema/one-schema').map((message) => `${relative(ROOT, result.filePath)}:${message.line}`),
+    );
+    expect(fired).toEqual([]);
   });
 });
