@@ -270,7 +270,10 @@ test.describe('the document editor', () => {
     const QUOTE = 'river runs north';
     await page.evaluate(([id, text]) => (window as unknown as HarnessWindow).__maws_document.selectText('a', id, text), ['para0002', QUOTE] as const);
     await toolbar(page, 'a').getByRole('button', { name: 'Comment', exact: true }).click();
-    const threadId = (await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads()))[0]!.id;
+    // the thread is read from the host's doc, which has it once replica A's update arrived over its port
+    const threads = () => page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads());
+    await expect.poll(async () => (await threads()).length, { message: 'the new thread at the host' }).toBe(1);
+    const threadId = (await threads())[0]!.id;
     const passage = content(page, 'b').locator(`.comment-${threadId}`);
     await expect(passage).toHaveText(QUOTE);
     await expect(content(page, 'b').locator('.comment-active')).toHaveCount(0);

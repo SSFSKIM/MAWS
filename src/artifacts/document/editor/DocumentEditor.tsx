@@ -459,7 +459,7 @@ function usePageGround(page: RefObject<HTMLElement | null>, tokens: CSSPropertie
     if (typeof MutationObserver === 'undefined') return;
     const observer = new MutationObserver(read);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    observer.observe(document.head, { childList: true, subtree: true, characterData: true });
+    observer.observe(document.head, { childList: true, subtree: true }); // a stylesheet added, removed or rewritten
     if (element.parentElement) observer.observe(element.parentElement, { attributes: true });
     return () => observer.disconnect();
   }, [page, tokens]);
