@@ -538,6 +538,22 @@ function describeUnit(id: string): string {
   return id.endsWith(GROUP) ? `the group ${id.slice(0, -GROUP.length)}'s properties` : `the token ${id}`;
 }
 
+// "adopted from <system>", which the kind's guide has the agent record in the law on the adopt route (D12).
+const ADOPTED_FROM = /\badopted from ([^\n.;:]+)/i;
+
+/**
+ * The agent's create (M7's live run): a doc that holds no system takes the sent files whole through `writeSystem`, so it
+ * gets the meta every reader needs (`formatVersion` and its origin), Claude's shape is imported, and the files are
+ * checked as a create's are, a token file included. The origin is the adopt route when the law records what it was
+ * adopted from, else the derive route; Claude's shape makes it an import.
+ */
+function createSystem(doc: Doc, sent: Readonly<Record<string, string | null>>, options: SystemWriteOptions): PublishResult {
+  const files = Object.fromEntries(Object.entries(sent).filter((entry): entry is [string, string] => entry[1] !== null));
+  const from = ADOPTED_FROM.exec(files[LAW_PATH] ?? '')?.[1]?.trim();
+  writeSystem(doc, files, from ? { route: 'adopted', from, at: Date.now() } : { route: 'derived', at: Date.now() }, options);
+  return { changed: Object.keys(files).sort(), conflicts: [] };
+}
+
 /**
  * Publishes the agent's files over the live doc (the kind's layers 2 and 3 of A's Decision Log 10). `base` is the file
  * view at the agent's last read, `sent` the files it sends (`null` removes a canon file).
@@ -550,8 +566,11 @@ function describeUnit(id: string): string {
  * file that cannot be held (a token where a group is) conflicts even under `force`: no winner makes it representable.
  * Files that cannot be held (a generated or read-only file, a path outside the system, an invalid token file, a limit)
  * throw `SystemFilesError` before anything is written, with or without `force`. One transaction writes everything.
+ * A doc that holds no system yet (the agent's `artifact_create` with files is A's create, whose `initial` is this
+ * publish over an empty doc) is written whole, as `writeSystem` writes a create: see `createSystem`.
  */
 export function publishSystem(live: Doc, base: Readonly<Record<string, string>>, sent: Readonly<Record<string, string | null>>, force: boolean, options: SystemWriteOptions = {}): PublishResult {
+  if (readSystem(live).meta === null) return createSystem(live, sent, options);
   const problems: FileProblem[] = [];
   for (const [path, text] of Object.entries(sent)) {
     const problem = pathProblem(path, text);

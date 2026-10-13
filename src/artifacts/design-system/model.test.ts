@@ -13,6 +13,7 @@ import {
   GENERATED_PATHS,
   publishSystem,
   readFiles,
+  readOrigin,
   readSystem,
   setFile,
   setLaw,
@@ -572,6 +573,38 @@ describe('publish: the agent’s change over the live doc (Acceptance 7, A’s l
     expect(designSystemAdapter.kind).toBe('design_system');
     const { agent } = scene();
     expect(designSystemAdapter.readFiles!(agent)).toEqual(readFiles(agent));
+  });
+});
+
+// M7's live run: the agent's `artifact_create {kind: 'design_system', files}` is A's create, whose `initial(doc)` is this
+// kind's publish over an empty doc with an empty base. A doc that holds no system yet is written whole, as a create.
+describe('publish over a doc that holds no system yet: the agent’s create', () => {
+  it('writes the whole system with its meta, so it reads, renders and mirrors as a system', () => {
+    const doc = newDoc();
+    const result = publishSystem(doc, {}, FILES, false);
+    expect(result.conflicts).toEqual([]);
+    expect(result.changed.sort()).toEqual(Object.keys(FILES).sort());
+    expect(readSystem(doc).meta).toMatchObject({ formatVersion: 1, name: 'Harbor', origin: { route: 'derived' } });
+    expect(readFiles(doc)).toMatchObject({ 'DESIGN.md': LAW, 'tokens.tokens.json': TOKENS, 'layouts/title.html': TITLE });
+  });
+
+  it('records the adopt route when the law says what the system was adopted from', () => {
+    const doc = newDoc();
+    publishSystem(doc, {}, { ...FILES, 'DESIGN.md': LAW.replace('Quiet print on warm paper.', 'Adopted from the Harbor site’s CSS variables. Quiet print on warm paper.') }, false);
+    expect(readOrigin(doc)).toMatchObject({ route: 'adopted', from: 'the Harbor site’s CSS variables' });
+  });
+
+  it('imports files in Claude’s shape, as a create does', () => {
+    const doc = newDoc();
+    publishSystem(doc, {}, TIDEWATER_FILES, false);
+    expect(readOrigin(doc)).toMatchObject({ route: 'imported' });
+    expect(Object.keys(readFiles(doc)).some((path) => path.startsWith(CLAUDE_SOURCES))).toBe(true);
+  });
+
+  it('refuses a system without its token file, naming it, and writes nothing', () => {
+    const doc = newDoc();
+    expect(() => publishSystem(doc, {}, { 'DESIGN.md': LAW }, false)).toThrow(SystemFilesError);
+    expect(readSystem(doc).meta).toBeNull();
   });
 });
 
