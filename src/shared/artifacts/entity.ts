@@ -34,6 +34,7 @@ export const ArtifactSchema = z.strictObject({
   pinned: z.boolean(),
   designSystemId: z.uuid().optional(),
   linkedPath: z.string().optional(),
+  agentEditsAsSuggestions: z.boolean(), // the agent's writes land as suggestions (P3-A Decision Log 23g, 31a)
 });
 export type Artifact = z.infer<typeof ArtifactSchema>;
 

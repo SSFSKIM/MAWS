@@ -1018,9 +1018,9 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await panel.getByRole('button', { name: 'Add a tool' }).click();
       // E6 (a C8a test amended by E6): Source control registers from App.tsx's E6 block; outside MENU_ORDER, it follows the
       // ranked tools. E7: Tasks registers with the agent tools from C8b's block, ahead of E6's and E3's blocks. E3: Side
-      // registers from App.tsx's E3 block; E2: Deliverables from E2's, after it; E4a: Browser from E4a's, after E2's (landing
-      // order; the Question sheet is menu: false)
-      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Tasks' /* E7 */, 'Source control', 'Side' /* E3 */, 'Deliverables' /* E2 */, 'Browser' /* E4a */]); // by MENU_ORDER (Tasks, Source control, Side, Deliverables and Browser, not in it, after in registration order); Log is menu: false
+      // registers from App.tsx's E3 block; E2: Deliverables from E2's, after it; P3-L: Artifacts right after Deliverables, in
+      // E2's block until the cutover; E4a: Browser from E4a's, after E2's (landing order; the Question sheet is menu: false)
+      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Tasks' /* E7 */, 'Source control', 'Side' /* E3 */, 'Deliverables' /* E2 */, 'Artifacts' /* P3-L */, 'Browser' /* E4a */]); // by MENU_ORDER (Tasks, Source control, Side, Deliverables, Artifacts and Browser, not in it, after in registration order); Log is menu: false
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });

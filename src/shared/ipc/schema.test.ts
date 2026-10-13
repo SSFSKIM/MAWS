@@ -56,9 +56,15 @@ import { DONE_REPORT, PROBE_EXTENSION } from '../../../test/support/import-repor
 import * as mods from './schema/mods';
 import * as ownerChannel from './schema/owner-channel'; // M4
 // P2-C end
+// P3-A start (M4)
+import * as artifacts from './schema/artifacts';
+import * as spaces from './schema/spaces';
+import { artifactRefusalOf } from './schema/artifacts';
+// P3-A end
+import * as library from './schema/library'; // P3-L M1
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -592,7 +598,7 @@ describe('ipc schema validates both directions', () => {
       // `browser` are the ones added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -1640,4 +1646,159 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // P2-C end
+
+  // P3-A start (M4): the artifact store's surface (docs/doperpowers/plans/2026-10-12-p3-a-store.md, M4)
+  describe('P3-A entries', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const human = { kind: 'human' };
+    const artifact = { id, kind: 'document', title: 'Plan', createdBy: human, createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 0 };
+
+    it('owns artifacts.* in the engine host but artifacts.open (main), keeps setDefaults and content main-only, and emits both events across the host wire', () => {
+      const owners = Object.fromEntries(Object.entries({ ...artifacts.commands, ...spaces.commands }).map(([name, spec]) => [name, spec.owner]));
+      expect(Object.entries(owners).filter(([, owner]) => owner !== 'engine-host').map(([name]) => name)).toEqual(['artifacts.open']);
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['artifacts.setDefaults', 'artifacts.content']));
+      expect([...NAMES.artifacts.commands]).not.toContain('artifacts.setDefaults');
+      expect([...NAMES.artifacts.commands]).not.toContain('artifacts.content');
+      expect(HOST_EVENTS).toEqual(expect.arrayContaining(['artifacts.changed', 'spaces.changed']));
+      expect(Object.keys(spaces.commands)).toEqual(['spaces.list', 'spaces.create', 'spaces.update', 'spaces.delete']);
+    });
+
+    it('answers artifacts with their revision and the agent-suggestions flag, and refuses a row without either', () => {
+      expect(validateCommandOutput('artifacts.get', { artifact }).ok).toBe(true);
+      expect(validateCommandOutput('artifacts.get', { artifact: null }).ok).toBe(true);
+      for (const key of ['revision', 'agentEditsAsSuggestions'] as const) {
+        const without: Record<string, unknown> = { ...artifact };
+        delete without[key];
+        expect(validateCommandOutput('artifacts.list', { artifacts: [without] }).ok, key).toBe(false);
+      }
+    });
+
+    it('takes a byte kind’s content as bytes or a path, never both shapes at once', () => {
+      expect(validateCommandInput('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: new Uint8Array([60]), name: 'index.html' } }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.create', { kind: 'file', title: 'Report', content: { path: '/tmp/report.pdf' } }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: [60] } }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: new Uint8Array([60]), path: '/tmp/x' } }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.create', { kind: 'document', title: '' }).ok).toBe(false);
+    });
+
+    it('names a version state by exactly one of its id and its seq', () => {
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id, versionId: 3 }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id, seq: 0 }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id, versionId: 3, seq: 4 }).ok).toBe(false);
+      expect(validateCommandOutput('artifacts.versionState', { bytes: new Uint8Array(4) }).ok).toBe(true);
+    });
+
+    it('caps an uploaded asset at 16 MiB and takes the test writer’s three operations only', () => {
+      expect(validateCommandInput('artifacts.uploadAsset', { artifactId: id, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array(16 * 1024 * 1024 + 1) }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.uploadAsset', { artifactId: id, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array(8) }).ok).toBe(true);
+      const ops = [{ op: 'setAttr', key: 'title', value: { nested: [1, 'two'] } }, { op: 'insertText', index: 0, text: 'hi', root: 'body' }, { op: 'deleteText', index: 0, length: 1 }];
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op-1', ops, appSessionId: 'sess-1' }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op-1', ops: [{ op: 'format', index: 0 }] }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op-1', ops: [] }).ok).toBe(false);
+    });
+
+    it('carries the change feed’s four artifact changes and three Space changes', () => {
+      for (const change of ['created', 'updated', 'deleted', 'linked']) expect(validateEventPayload('artifacts.changed', { artifactId: id, kind: 'html', revision: 3, change }).ok).toBe(true);
+      expect(validateEventPayload('artifacts.changed', { artifactId: id, kind: 'html', revision: 3, change: 'resync' }).ok).toBe(false);
+      for (const change of ['created', 'updated', 'deleted']) expect(validateEventPayload('spaces.changed', { spaceId: id, change }).ok).toBe(true);
+      expect(validateEventPayload('spaces.changed', { spaceId: id, change: 'linked' }).ok).toBe(false);
+    });
+
+    // P3-A M5: main's one hook for a reconcile read after events the renderer may have missed (Decision Log in M5)
+    it('announces a resync from main, outside the host wire, with nothing in it', () => {
+      expect(validateEventPayload('artifacts.resync', {}).ok).toBe(true);
+      expect(validateEventPayload('artifacts.resync', { artifactId: id }).ok).toBe(false);
+      expect([...NAMES.artifacts.events]).toContain('artifacts.resync');
+      expect(HOST_EVENTS).not.toContain('artifacts.resync');
+    });
+
+    // P3-A M5: a setAttr value is a JSON value, never `undefined`, so the detached JSON line cannot drop it
+    it('takes a JSON value for the test writer’s setAttr, and no undefined', () => {
+      for (const value of ['s', 1, true, null, [1, { a: 2 }], { nested: { deep: [null] } }]) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, JSON.stringify(value)).toBe(true);
+      }
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value: undefined }] }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k' }] }).ok).toBe(false);
+    });
+
+    // The value is checked all the way down: what JSON would drop or rewrite (undefined to null or nothing, NaN and
+    // Infinity to null) is refused at any depth, since the detached line would carry something else than was sent.
+    it('refuses a non-JSON value at any depth in a setAttr value', () => {
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      const nonJson: [string, unknown][] = [
+        ['undefined in an array', [undefined]],
+        ['undefined in a record', { nested: undefined }],
+        ['undefined at depth', { a: [{ b: [1, { c: undefined }] }] }],
+        ['a function', { f: () => 1 }],
+        ['a function at depth', [[{ f: () => 1 }]]],
+        ['NaN', [Number.NaN]],
+        ['Infinity at depth', { a: { b: [Number.POSITIVE_INFINITY] } }],
+        ['-Infinity', { a: Number.NEGATIVE_INFINITY }],
+        ['a bigint', [1n]],
+        ['a symbol', { s: Symbol('x') }],
+        ['a Date', { d: new Date(0) }],
+        ['a Map', { m: new Map() }],
+        ['a typed array', { b: new Uint8Array(2) }],
+        ['a sparse array', [1, , 3]], // eslint-disable-line no-sparse-arrays
+        ['a cycle', cyclic],
+      ];
+      for (const [label, value] of nonJson) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, label).toBe(false);
+      }
+      for (const value of [[], {}, [[], {}], { a: { b: [0, -0, 1.5, 'x', true, null] } }]) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, JSON.stringify(value)).toBe(true);
+      }
+    });
+
+    it('reads a store refusal back out of an IpcError, and nothing out of any other error', () => {
+      const refusal = { reason: 'designSystemInUse', data: { artifactIds: [id] } };
+      expect(artifactRefusalOf({ code: 'invalid_input', message: 'in use', issues: refusal })).toEqual(refusal);
+      expect(artifactRefusalOf({ code: 'timeout', message: 'slow' })).toBeNull();
+      expect(artifactRefusalOf({ code: 'invalid_input', message: 'bad', issues: [{ path: ['x'] }] })).toBeNull();
+    });
+  });
+  // P3-A end
+
+  // P3-L start (M1): the library's reads (docs/doperpowers/plans/2026-10-12-p3-l-library.md, Decision Log 2 and 9)
+  describe('P3-L entries', () => {
+    const id = '22222222-2222-4222-8222-222222222222';
+    const entry = { id, kind: 'html', title: 'Page', createdBy: { kind: 'human' }, createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 3, lastEditor: { kind: 'session', appSessionId: 'sess-1' }, lastEditedAt: 2 };
+    const row = { ...entry, sessions: [{ appSessionId: 'sess-1', title: 'Make a page', roles: ['created', 'edited'], lastAt: 2 }], space: { id, name: 'Work' }, snippet: 'the page' };
+    const counts = { document: 0, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 1, file: 0 };
+
+    it('owns the three reads in main and the three host reads in the engine host, main-only, and emits library.changed from main', () => {
+      const owners = Object.fromEntries(Object.entries(library.commands).map(([name, spec]) => [name, spec.owner]));
+      expect(owners).toEqual({ 'library.list': 'main', 'library.get': 'main', 'library.spaces': 'main', 'library.snapshot': 'engine-host', 'library.entry': 'engine-host', 'library.text': 'engine-host' });
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['library.snapshot', 'library.entry', 'library.text']));
+      expect([...NAMES.library.commands]).toEqual(['library.list', 'library.get', 'library.spaces']);
+      expect(HOST_EVENTS).not.toContain('library.changed');
+    });
+
+    it('answers rows with the entry, its sessions, Space, project and snippet, and every kind counted', () => {
+      expect(validateCommandOutput('library.list', { rows: [row], counts }).ok).toBe(true);
+      expect(validateCommandOutput('library.get', { row: null }).ok).toBe(true);
+      const missing: Record<string, number> = { ...counts };
+      delete missing.html;
+      expect(validateCommandOutput('library.list', { rows: [], counts: missing }).ok).toBe(false);
+      const noEditor: Record<string, unknown> = { ...entry };
+      delete noEditor.lastEditor;
+      expect(validateCommandOutput('library.snapshot', { artifacts: [noEditor], links: [], spaces: [] }).ok).toBe(false);
+      expect(validateCommandOutput('library.snapshot', { artifacts: [entry], links: [{ artifactId: id, appSessionId: 'sess-1', role: 'created', lastAt: 1 }], spaces: [] }).ok).toBe(true);
+      expect(validateCommandOutput('library.entry', { artifact: null, links: [] }).ok).toBe(true);
+      expect(validateCommandOutput('library.text', { revision: 3, text: 'hello' }).ok).toBe(true);
+    });
+
+    it('filters by a Space or by none, and caps the query', () => {
+      expect(validateCommandInput('library.list', { filter: { spaceId: null, lineage: true, appSessionId: 'sess-1', query: '회의' } }).ok).toBe(true);
+      expect(validateCommandInput('library.list', { filter: { spaceId: 'not-a-uuid' } }).ok).toBe(false);
+      expect(validateCommandInput('library.list', { filter: { projectId: 'project-1', spaceId: null } }).ok).toBe(true); // §4.1: filterable, never a Space
+      expect(validateCommandInput('library.list', { filter: { projectId: 42 } }).ok).toBe(false);
+      expect(validateCommandInput('library.list', { filter: { query: 'x'.repeat(1_001) } }).ok).toBe(false);
+      expect(validateCommandInput('library.list', { filter: { kind: 'slides' } }).ok).toBe(false);
+      expect(validateEventPayload('library.changed', { revision: 4 }).ok).toBe(true);
+    });
+  });
+  // P3-L end
 });

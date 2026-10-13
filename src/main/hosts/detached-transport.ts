@@ -25,6 +25,8 @@ import {
   splitLines,
   type ClientExit,
   type ClientHello,
+  type DocumentsClose,
+  type DocumentsOpen,
   type ServerRefuse,
   type ServerWelcome,
 } from '@shared/host/socket-protocol';
@@ -90,11 +92,15 @@ export interface DetachedTransportOptions {
   log?(line: string): void;
 }
 
-// A served connection as the host supervisor sees it: C1's envelope both ways.
+// A served connection as the host supervisor sees it: C1's envelope both ways. P3-A M5 (socket protocol 2): and the
+// document channels main relays (doc-relay.ts): their lines (`documents.open` and `documents.close` out,
+// `documents.closed` in among the messages) and their frames.
 export interface HostLink {
-  postMessage(message: HostMessage): void;
+  postMessage(message: HostMessage | DocumentsOpen | DocumentsClose): void;
   close(): void;
   onMessage(listener: (data: unknown) => void): void;
+  postDoc(channel: number, frame: Uint8Array): boolean; // P3-A M5
+  onDoc(listener: (channel: number, frame: Uint8Array) => void): void; // P3-A M5
 }
 
 export interface ExitInfo {
@@ -487,6 +493,8 @@ export function createDetachedTransport(options: DetachedTransportOptions, event
         postMessage: (message) => void port.postMessage(message),
         close: () => port.close(),
         onMessage: (listener) => void listeners.push(listener),
+        postDoc: (channel, frame) => port.postDoc(channel, frame), // P3-A M5
+        onDoc: (listener) => port.onDoc(listener), // P3-A M5
       },
       welcome,
     );

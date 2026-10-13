@@ -13,11 +13,20 @@
 //   (e) G3: the idle release (`idle`) and the supervisor's own idle exit, after a keep-quit and after a kill -9 of the app;
 //   (f) an update (another build id): the banner, Restart now, a new pid;
 //   (g) an incompatible update (another wire): the banner, launches refused, Restart now, a new pid;
-//   (h) G4: a restored terminal after a keep-quit says its shell closed; a new one does not.
+//   (h) G4: a restored terminal after a keep-quit says its shell closed; a new one does not;
+//   (i) P3-A M5: a document a session (the test writer standing in for an agent) edits while no window and no main
+//       exist; the next launch lists it at its new revision and opens it through main's relay over the socket's
+//       document channel, an edit syncing back; a kill -9 of the supervisor during a relayed edit loses nothing
+//       acknowledged once main has started a new one;
+//   (j) P3-L M7: the library after a detached edit: a kept session's stand-in edits one artifact, creates another and
+//       deletes a third while the app has quit; the next launch's library (main's derived index, reconciled by one
+//       host read at the connection) lists them at the host's revisions, the session their last editor and their new
+//       words searchable, and drops the deleted one.
 // The evidence (`relaunch.txt`, `crash.txt`, `idle.txt`, the screenshots in both themes) is written from what the cases
 // observe, under MAWS_E10_SHOTS=1 only (E11 W-E: a gate run leaves the committed evidence alone; the both-themes token
 // scans run either way). Run by `pnpm e2e:supervisor` (MAWS_SUPERVISOR_E2E=1), part of `pnpm verify`.
 import { type ChildProcess } from 'node:child_process';
+import { createConnection } from 'node:net'; // P3-A M5
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,8 +36,11 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostStatus } from '@shared/ipc/schema/host';
+import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol'; // P3-A M5
+import { wireFingerprint } from '@shared/ipc/wire-fingerprint'; // P3-A M5
 import { invoke, launchReady, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { menu, otherThemeColours } from './support/code-product';
+import { documents, seamReady } from './support/documents'; // P3-A M5
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, killScratchProcesses, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
@@ -868,6 +880,152 @@ test('(h) G4: after a keep-quit a restored terminal tab says its shell closed wi
     await expect(lost).toBeVisible();
     await lost.getByRole('button', { name: 'Dismiss' }).click();
     await expect(lost).toHaveCount(0);
+    expect(second.maws.consoleErrors()).toEqual([]);
+  });
+});
+
+// ---- P3-A M5: the detached document channel ------------------------------------------------------------------------
+
+// One request to the supervisor as a client of its own, while no app runs: the hello (the token from the profile, this
+// build's wire), the request, its answer, the close. It stands in for a session's tool call, which reaches the store
+// in the supervisor with no main at all.
+async function askWithNoApp(s: Scratch, name: string, input: unknown): Promise<unknown> {
+  const lock = s.lock()!;
+  const token = readFileSync(s.file('host.token'), 'utf8').trim();
+  const socket = createConnection(lock.socketPath);
+  try {
+    await new Promise<void>((resolve, reject) => socket.once('connect', resolve).once('error', reject));
+    const lines: { t: string; id?: string; ok?: boolean; value?: unknown; error?: unknown }[] = [];
+    let buffered = '';
+    socket.on('data', (chunk) => {
+      buffered += String(chunk);
+      for (let at = buffered.indexOf('\n'); at >= 0; at = buffered.indexOf('\n')) {
+        lines.push(JSON.parse(buffered.slice(0, at)));
+        buffered = buffered.slice(at + 1);
+      }
+    });
+    socket.write(`${JSON.stringify({ t: 'hello', protocol: SOCKET_PROTOCOL, token, buildId: 'e2e-session-stand-in', wire: wireFingerprint(), appPid: process.pid })}\n`);
+    await expect.poll(() => lines[0]?.t, { message: 'the supervisor welcomes a client with no app running' }).toBe('welcome');
+    socket.write(`${JSON.stringify({ t: 'req', id: 'm5', name, input })}\n`);
+    await expect.poll(() => lines.some((line) => line.t === 'res' && line.id === 'm5'), { message: `${name} is answered` }).toBe(true);
+    const answer = lines.find((line) => line.t === 'res' && line.id === 'm5')!;
+    if (!answer.ok) throw new Error(`${name} failed: ${JSON.stringify(answer.error)}`);
+    return answer.value;
+  } finally {
+    socket.end();
+  }
+}
+
+test('(i) P3-A M5: a document edited while no app runs reads at its new revision through main’s relay, syncs back, and survives a kill -9 of the supervisor mid-edit', async () => {
+  await withScratch('documents', async (s) => {
+    const first = await s.launch();
+    const pid = (await s.ready(first.page)).supervisor!.pid;
+    await seamReady(first.page);
+    const { artifact } = value(await invoke(first.page, 'artifacts.create', { kind: 'document', title: 'Kept document' }));
+    const one = documents(first.page);
+    const opened = await one.open(artifact.id); // through main's relay over the socket's document channel
+    await one.insertText(opened, 0, 'human;');
+    await expect.poll(async () => (await one.state(opened)).unsaved, { message: 'the relayed edit is acknowledged' }).toBe(0);
+
+    // Every window and main itself go; the supervisor serves on, and a session writes to the document.
+    await s.killApp(first);
+    expect(isAlive(pid), 'the supervisor outlives the app').toBe(true);
+    const written = (await askWithNoApp(s, 'artifacts.testWrite', { artifactId: artifact.id, opId: 'm5-absent', appSessionId: 'app-e2e-session', ops: [{ op: 'insertText', index: 0, text: 'agent;' }] })) as { revision: number };
+
+    // The next launch reaches the same supervisor: the list shows the new revision, a relayed replica the content.
+    const second = await s.launch();
+    expect((await s.ready(second.page)).supervisor!.pid, 'the same supervisor').toBe(pid);
+    const row = value(await invoke(second.page, 'artifacts.list', {})).artifacts.find((a) => a.id === artifact.id);
+    expect(row?.revision).toBe(written.revision);
+    await seamReady(second.page);
+    const two = documents(second.page);
+    const replica = await two.open(artifact.id);
+    expect((await two.json(replica)).text).toBe('agent;human;');
+    await two.insertText(replica, 'agent;human;'.length, 'back;');
+    await expect.poll(async () => (await two.state(replica)).unsaved, { message: 'the edit syncs back' }).toBe(0);
+    const reader = await two.open(artifact.id);
+    expect((await two.json(reader)).text).toBe('agent;human;back;');
+    await two.close(reader);
+
+    // A kill -9 of the supervisor while the window types through the relay: main starts a new one, and every edit the
+    // window was told is durable is there. The typer is closed at once, so nothing it re-sends could hide a loss.
+    const start = (await two.state(replica)).revision;
+    await two.startTyping(replica, 'k', 5);
+    await expect.poll(async () => (await two.state(replica)).revision, { message: 'the typing is being acknowledged' }).toBeGreaterThan(start + 20);
+    process.kill(pid, 'SIGKILL');
+    const { typed, acked } = await two.stopTyping(replica);
+    await two.close(replica);
+    expect(acked).toBeGreaterThan(0);
+    expect(typed).toBeGreaterThanOrEqual(acked);
+    const next = (await s.ready(second.page, (status) => status.supervisor!.pid !== pid)).supervisor!.pid;
+    expect(next).not.toBe(pid);
+    const after = await two.open(artifact.id);
+    const text = (await two.json(after)).text;
+    expect(text.startsWith('agent;human;back;')).toBe(true);
+    const lost = Array.from({ length: acked }, (_, i) => `k${i};`).filter((token) => !text.includes(token));
+    expect(lost, 'every acknowledged keystroke survived the kill').toEqual([]);
+    expect(second.maws.consoleErrors()).toEqual([]);
+  });
+});
+
+// ---- P3-L M7: the library after a detached edit ---------------------------------------------------------------------
+
+// Main's library row of an artifact (its derived index) and the host's own row, to compare revisions.
+const libraryRow = async (page: Page, artifactId: string) => value(await invoke(page, 'library.get', { artifactId })).row;
+const hostRow = async (page: Page, artifactId: string) => value(await invoke(page, 'artifacts.get', { artifactId })).artifact;
+const searched = async (page: Page, query: string) => value(await invoke(page, 'library.list', { filter: { query } })).rows.map((row) => row.title);
+
+test('(j) P3-L M7: the library is right after a detached edit: what a kept session wrote while the app had quit is listed and searchable at the next launch', async () => {
+  await withScratch('library', async (s) => {
+    // the first run: a session kept mid-turn, and the library indexing what the owner and that session made
+    const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
+    const pid = (await s.ready(first.page)).supervisor!.pid;
+    const id = await s.record(first.page);
+    await startTurn(first.page, s, id);
+    await untilRequested(first.page, id);
+    const { artifact: notes } = value(await invoke(first.page, 'artifacts.create', { kind: 'document', title: 'Field notes' }));
+    const { artifact: doomed } = value(await invoke(first.page, 'artifacts.create', { kind: 'document', title: 'Doomed draft' }));
+    value(await invoke(first.page, 'artifacts.testWrite', { artifactId: notes.id, opId: 'lib-before', appSessionId: id, ops: [{ op: 'insertText', index: 0, text: 'The heron counts start at dawn.' }] }));
+    await expect.poll(() => searched(first.page, 'heron'), { timeout: 15_000, message: 'the first run indexed the notes’ text' }).toEqual(['Field notes']);
+    const before = (await libraryRow(first.page, notes.id))!;
+    expect((await libraryRow(first.page, doomed.id))?.title).toBe('Doomed draft');
+    await s.quit(first);
+    expect(first.quitLines()).toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+    expect(isAlive(pid), 'the supervisor outlives the app').toBe(true);
+
+    // while no window and no main exist, the session's stand-in edits the notes, makes a report and deletes the draft
+    const edited = (await askWithNoApp(s, 'artifacts.testWrite', { artifactId: notes.id, opId: 'lib-away-1', appSessionId: id, ops: [{ op: 'insertText', index: 0, text: 'An okapi crossed the trail. ' }] })) as { revision: number };
+    expect(edited.revision).toBeGreaterThan(before.revision);
+    const { artifact: report } = (await askWithNoApp(s, 'artifacts.create', { kind: 'document', title: 'Away report' })) as { artifact: { id: string } };
+    const reported = (await askWithNoApp(s, 'artifacts.testWrite', { artifactId: report.id, opId: 'lib-away-2', appSessionId: id, ops: [{ op: 'insertText', index: 0, text: 'A narwhal tally, written while MAWS was closed.' }] })) as { revision: number };
+    await askWithNoApp(s, 'artifacts.delete', { artifactId: doomed.id });
+
+    // the next launch reaches the same supervisor; main's index, reconciled at the connection, holds the host's state
+    const second = await s.launch();
+    expect((await s.ready(second.page)).supervisor!.pid, 'the same supervisor').toBe(pid);
+    const { page } = second;
+    await expect.poll(async () => (await libraryRow(page, notes.id))?.revision, { timeout: 15_000, message: 'the notes at the revision written while away' }).toBe(edited.revision);
+    expect((await hostRow(page, notes.id))?.revision).toBe(edited.revision);
+    await expect.poll(async () => (await libraryRow(page, report.id))?.revision, { message: 'the report made while away' }).toBe(reported.revision);
+    expect(await libraryRow(page, doomed.id), 'the draft deleted while away is gone from the library').toBeNull();
+    // the session is each one's last editor (the test writer links no session: a link comes from a session's own create
+    // or tool write, which no IPC stand-in can make)
+    for (const artifactId of [notes.id, report.id]) expect((await libraryRow(page, artifactId))?.lastEditor).toEqual({ kind: 'session', appSessionId: id });
+
+    // the Artifacts tab shows it: the rows, the words written while away found, the deleted draft absent
+    await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+    const library = page.locator('[data-library]');
+    const titles = () => library.getByRole('article').evaluateAll((rows) => rows.map((r) => r.getAttribute('aria-label')));
+    await expect.poll(titles, { timeout: 15_000 }).toEqual(['Away report', 'Field notes']);
+    const search = library.getByRole('searchbox', { name: 'Search artifacts' });
+    await search.fill('okapi');
+    await expect.poll(titles, { timeout: 15_000, message: 'the words written while away are searchable' }).toEqual(['Field notes']);
+    await search.fill('narwhal');
+    await expect.poll(titles, { timeout: 15_000 }).toEqual(['Away report']);
+    await search.fill('heron');
+    await expect.poll(titles).toEqual(['Field notes']);
+    await search.fill('Doomed');
+    await expect(library.getByText('No artifacts match “Doomed”.')).toBeVisible();
     expect(second.maws.consoleErrors()).toEqual([]);
   });
 });

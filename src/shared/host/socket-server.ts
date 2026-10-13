@@ -9,14 +9,22 @@
 // (4) replacement: a connected client receives `refuse replaced` and is closed; (5) `welcome`, and the connection's
 // later lines are C1's envelope through a SocketPort (plus `exit`). A malformed line, an oversized one, an unknown `t`
 // or a schema failure closes the connection with a log line.
+//
+// P3-A M5 (socket protocol 2): a welcomed client also opens and closes document channels (`documents.open`,
+// `documents.close`) and sends their frames; each client has its own channel table (doc-channels.ts), whose ends reach
+// the runtime's document handler as a utility host's ports do, and which ends with the client (its close, or its
+// replacement).
 import { timingSafeEqual } from 'node:crypto';
 import type { Server, Socket } from 'node:net';
 import { HostReadySchema, HostRequestSchema } from '../ipc/host-protocol';
+import { HostDocChannels } from './doc-channels';
 import type { HostPort, HostRuntime } from './runtime';
 import { SocketPort } from './socket-port';
 import {
   ClientExitSchema,
   ClientHelloSchema,
+  DocumentsCloseSchema,
+  DocumentsOpenSchema,
   HelloPreambleSchema,
   LINE_CAP,
   splitLines,
@@ -46,6 +54,7 @@ export interface SocketServerOptions {
   log(line: string): void;
   helloTimeoutMs?: number;
   lineCap?: number;
+  docHighWater?: number; // P3-A M5: the document channels' reset mark (DOC_HIGH_WATER unless a test lowers it)
 }
 
 export interface SocketClients {
@@ -56,6 +65,7 @@ export interface SocketClients {
 interface Client {
   socket: Socket;
   port: SocketPort;
+  documents: HostDocChannels; // P3-A M5
 }
 
 export function serveSocketClients(server: Server, options: SocketServerOptions): SocketClients {
@@ -179,9 +189,14 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
         const line: ServerWelcome = { t: 'welcome', ...identity, liveSessions, rows };
         socket.write(`${JSON.stringify(line)}\n`);
         const port = new SocketPort(socket, splitter.rest(), { lineCap, log });
-        const client: Client = { socket, port };
+        const documents = new HostDocChannels(port, (message, end) => runtime.docPort(message, end), { highWater: options.docHighWater, log }); // P3-A M5
+        const client: Client = { socket, port, documents };
         current = client;
+        port.onDoc((channel, frame) => {
+          if (current === client) documents.deliver(channel, frame); // P3-A M5: a replaced client's frames are dropped
+        });
         port.onClose(() => {
+          documents.endAll(); // P3-A M5: a replaced client's channels end too
           if (current !== client) return;
           current = null;
           runtime.detach();
@@ -196,7 +211,8 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
     }
   }
 
-  // The runtime sees requests and ready lines only; `exit` is this layer's, and anything else closes the client.
+  // The runtime sees requests and ready lines only; `exit` and (P3-A M5) the document channels' lines are this layer's,
+  // and anything else closes the client.
   function envelopeOnly(port: SocketPort, client: Client): HostPort {
     return {
       postMessage: (message: unknown) => port.postMessage(message),
@@ -214,7 +230,13 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
             listener(event);
             return;
           }
-          log('closed the client: a line that is neither a request, ready nor exit');
+          // P3-A M5 start
+          const open = DocumentsOpenSchema.safeParse(event.data);
+          if (open.success) return client.documents.open(open.data);
+          const close = DocumentsCloseSchema.safeParse(event.data);
+          if (close.success) return client.documents.close(close.data.channel);
+          // P3-A M5 end
+          log('closed the client: a line that is neither a request, ready, exit nor a document channel’s');
           port.close();
         }),
     };

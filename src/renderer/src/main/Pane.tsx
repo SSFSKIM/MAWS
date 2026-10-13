@@ -11,6 +11,7 @@ import { createSession, focusedProject, NEW_CHAT, runAction, useActionEnabled, u
 import { useKeyChord } from '../keymap/useKeyChord';
 import { EditorHostScopeContext, useEditorHostRegistration, type EditorHostScope } from '../panel/editor-host'; // P3-G
 import { EditorHeader } from '../panel/PanelHeader'; // P3-G
+import { ArtifactTab } from '../library/ArtifactTab'; // P3-L
 import { SessionPane } from '../session/SessionPane';
 import { cardSession } from '../shell/floating'; // P3-G
 import { useLayout } from '../stores/layout';
@@ -111,6 +112,8 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
       return <SettingsTab section={tab.section} />;
     case 'artifacts': // P3-G (§D5)
       return <ArtifactsTab />;
+    case 'artifact': // P3-L: one artifact in its kind's editor
+      return <ArtifactTab tab={tab} />;
     case 'deliverable': // E2
       return <DeliverableTab tab={tab} />;
     case 'browser': // E4a

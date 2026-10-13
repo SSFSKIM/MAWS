@@ -37,7 +37,7 @@ export async function restoreArtifact(store: ArtifactStore, row: EntityRow, vers
     const before = newDoc();
     try {
       applyV2(before, old);
-      keep = adapter.revertScope(live, before)?.keep ?? null;
+      keep = adapter.revertScope(live, before, { artifactId: row.id })?.keep ?? null;
     } finally {
       before.destroy();
     }
@@ -45,7 +45,7 @@ export async function restoreArtifact(store: ArtifactStore, row: EntityRow, vers
   const update = revertUpdate(old, stateV2(live), keep);
   let restoreId = 0;
   const revision = await service.writeAs(row.id, actor, (doc) => applyV2(doc, update), {
-    afterWrite: adapter?.afterRestore ? (doc) => adapter.afterRestore!(doc, { versionId: version.id }) : undefined,
+    afterWrite: adapter?.afterRestore ? (doc) => adapter.afterRestore!(doc, { artifactId: row.id, versionId: version.id }) : undefined,
     inFrame: (reached) => {
       restoreId = store.versionInFrame(row, { kind: 'restore', actor: actorKey(actor), label }) ?? 0;
       inFrame?.({ revision: reached, versionId: restoreId });

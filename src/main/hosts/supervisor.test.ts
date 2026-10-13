@@ -54,8 +54,10 @@ const electron = vi.hoisted(() => {
     fire(event: string, ...args: unknown[]) {
       this.handlers.get(event)?.forEach((h) => h(...args));
     }
+    docs: { message: unknown; port: FakePort }[] = []; // P3-A M4: the document ports posted after the hello
     postMessage(message: unknown, transfer: FakePort[] = []) {
-      this.hello = { message, port: transfer[0] };
+      if ((message as { t?: string }).t === 'doc') this.docs.push({ message, port: transfer[0] });
+      else this.hello = { message, port: transfer[0] };
     }
     spawn(pid: number) {
       this.pid = pid;
@@ -803,3 +805,30 @@ describe('host supervisor', () => {
   });
   // C11 end
 });
+
+// P3-A M4 start: a document's port goes to a utility engine host on its parent port (docs/doperpowers/plans/
+// 2026-10-12-p3-a-store.md, Decision Log 13); nothing is posted to a host that is not running.
+describe('host supervisor: document ports (P3-A M4)', () => {
+  const doc = { t: 'doc', channel: 3, artifactId: '11111111-1111-4111-8111-111111111111', actor: { kind: 'human' } } as const;
+
+  it('posts the doc message with its port to the running engine host’s child, and refuses before the spawn and after an exit', async () => {
+    void supervisor.start();
+    const engine = latest('maws-engine-host');
+    const early = new electron.FakePort();
+    expect(supervisor.postDocPort(doc, early as never)).toBe(false); // forked, not yet spawned
+    serve(engine, (on) => on('engine.ping', async () => PING(1)));
+    serve(latest('maws-pty-host'), (on) => on('pty.ping', async () => PING(2)));
+    engine.spawn(1);
+    latest('maws-pty-host').spawn(2);
+    await flush();
+    const port = new electron.FakePort();
+    expect(supervisor.postDocPort(doc, port as never)).toBe(true);
+    expect(engine.docs).toEqual([{ message: doc, port }]);
+    expect(latest('maws-pty-host').docs).toEqual([]);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    engine.exit(1);
+    expect(supervisor.postDocPort(doc, new electron.FakePort() as never)).toBe(false); // restarting
+    expect(engine.docs).toHaveLength(1);
+  });
+});
+// P3-A M4 end

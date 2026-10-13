@@ -56,6 +56,11 @@ export class SqliteDocumentStorage implements DocumentStorage {
     return this.frame;
   }
 
+  // A batch is open: rows on this connection that are not yet durable (a read here sees them, Decision Log 26j, 33).
+  get batchOpen(): boolean {
+    return this.open;
+  }
+
   private sql(text: string): StatementSync {
     let statement = this.statements.get(text);
     if (!statement) this.statements.set(text, (statement = this.db.prepare(text)));
@@ -237,12 +242,15 @@ export class SqliteDocumentStorage implements DocumentStorage {
     this.sql('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value').run(key, value);
   }
 
-  // Maintenance (Decision Log 8): deletes the Y-kind log rows a head covers that are older than `keepMs`. Byte kinds'
-  // rows have no head and stay. Answers the number of rows deleted.
+  // Maintenance (Decision Log 8): deletes the Y-kind log rows a head covers that are older than `keepMs`, except each
+  // artifact's newest row, which names its last writer and time (`ArtifactStore.lastWrite`, Decision Log 37a). Byte
+  // kinds' rows have no head and stay. Answers the number of rows deleted.
   pruneLog(now: number, keepMs = LOG_KEEP_MS): number {
     return this.outsideBatch('log pruning', () =>
       Number(
-        this.sql('DELETE FROM artifact_updates WHERE at < ? AND bytes IS NOT NULL AND seq <= COALESCE((SELECT h.seq FROM artifact_head h WHERE h.artifactId = artifact_updates.artifactId), 0)').run(now - keepMs).changes,
+        this.sql(
+          'DELETE FROM artifact_updates WHERE at < ? AND bytes IS NOT NULL AND seq <= COALESCE((SELECT h.seq FROM artifact_head h WHERE h.artifactId = artifact_updates.artifactId), 0) AND seq < (SELECT MAX(u.seq) FROM artifact_updates u WHERE u.artifactId = artifact_updates.artifactId)',
+        ).run(now - keepMs).changes,
       ),
     );
   }

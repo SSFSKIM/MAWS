@@ -64,6 +64,21 @@ export interface CreateInput {
   content?: ByteContent;
 }
 
+// One X12 record as P3-L's cutover hands it to `importArtifact` (Decision Log 35f): `content` an html version's bytes and
+// name, or a file version's path in place.
+export interface ImportInput {
+  id: string;
+  kind: 'html' | 'file';
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  createdBy: Actor;
+  handle?: string;
+  projectId?: string;
+  versions: { at: number; actor: Actor; content: ByteContent }[];
+  links: { appSessionId: AppSessionId; role: ArtifactSessionLink['role']; lastAt: number }[];
+}
+
 export interface ArtifactUpdate {
   title?: string;
   spaceId?: string | null;
@@ -137,7 +152,8 @@ export class ArtifactStore {
   private readonly spaceListeners = new Set<(change: SpaceChanged) => void>();
   private readonly coalescing = new Map<string, { timer: ReturnType<typeof setTimeout>; pending: number | null }>();
   private readonly schedule = new Map<string, { idle?: ReturnType<typeof setTimeout>; every?: ReturnType<typeof setTimeout> }>();
-  // Per session, the artifacts it wrote this turn: its commits and its tool calls' results (the turn version).
+  // Per session, the artifacts it touched this turn: its committed document edits (a turn version needs one) and its
+  // mutating tool calls' results (the turn version's summary).
   private readonly turns = new Map<string, Map<string, { commits: number; results: unknown[] }>>();
   private designSystemContext: ((system: Artifact) => Promise<string | null>) | null = null;
   private readonly unsubscribe: (() => void)[] = [];
@@ -176,6 +192,44 @@ export class ArtifactStore {
   onSpaceChange(listener: (change: SpaceChanged) => void): () => void {
     this.spaceListeners.add(listener);
     return () => this.spaceListeners.delete(listener);
+  }
+
+  // A read whose answer reveals store state (an IPC answer, a tool's result), released only once it may be revealed
+  // (Decision Log 33): reads share the batch's connection (26j), so `read` runs now and its answer waits for the batch
+  // open at the time of the read to commit — at once when none is — and fails if that batch is lost, so no caller sees
+  // rows that may yet be taken back. A refusal `read` throws is store state too and waits the same way.
+  async readCommitted<T>(read: () => T): Promise<T> {
+    let answer: { value: T } | { error: unknown };
+    try {
+      answer = { value: read() };
+    } catch (error) {
+      answer = { error };
+    }
+    if (this.storage.batchOpen) await this.service.whenCommitted();
+    if ('error' in answer) throw answer.error;
+    return answer.value;
+  }
+
+  // A write whose refusal is store state too (Decision Log 33): the validation that refused it (a row gone, a design
+  // system still governing one) read the batch's connection, so it may have seen an open batch's rows. `run` starts
+  // now; a refusal it ends with (an `ArtifactStoreError`) waits for the batch open when its synchronous part returned
+  // — where the store's writes validate — and that batch's failure replaces it. Success answers at once: an answer that
+  // carries store state is re-read through `readCommitted`.
+  async writeCommitted<T>(run: () => Promise<T>): Promise<T> {
+    let running: Promise<T>;
+    try {
+      running = run();
+    } catch (error) {
+      running = Promise.reject(error);
+    }
+    const barrier = this.storage.batchOpen ? this.service.whenCommitted() : null;
+    barrier?.catch(() => {}); // awaited only for a refusal; a write that fails with its batch reports that itself
+    try {
+      return await running;
+    } catch (error) {
+      if (error instanceof ArtifactStoreError && barrier) await barrier;
+      throw error;
+    }
   }
 
   // ── artifacts ──
@@ -287,9 +341,9 @@ export class ArtifactStore {
   // the artifact has), under the same ids and names, so the copied content's references resolve. The copy's history
   // starts with an `import` version.
   //
-  // A Y kind's copy is two frames of one batch, so one commit: the entity row and the assets, then the state through
-  // the duplicator's host replica with its `import` version (the doc opens once its entity row is there, with its
-  // kind's adapter). If the second frame fails, the first still commits: an empty copy is left, as before.
+  // The copy is one savepoint (Decision Log 37c): the entity row, its link and its assets, then a Y kind's state through
+  // the duplicator's host replica (the doc takes its kind's adapter from the entity row written first) with its
+  // `import` version, or a byte kind's content write. A copy whose state fails to land leaves nothing, rows or files.
   async duplicate(artifactId: string, options: { versionId?: number; title?: string }, actor: Actor, inFrame?: InFrame<Artifact>): Promise<Artifact> {
     const source = this.requireLive(artifactId);
     const version = options.versionId === undefined ? undefined : this.requireVersion(artifactId, options.versionId);
@@ -298,34 +352,83 @@ export class ArtifactStore {
     const content = isDocKind(source.kind) ? null : this.byteContentOf(source, version ? (JSON.parse(version.content!) as ContentRef) : this.contentRef(artifactId).ref);
     const state = !isDocKind(source.kind) ? null : version ? this.versions.state(artifactId, version.id) : this.service.readState(artifactId).state;
     const assets = version ? (JSON.parse(version.assetRefs) as string[]) : this.assetIds(artifactId);
-    let entityWritten = false;
-    const entity = this.service.inBatch(() => {
+    const entity = () => {
       this.storage.actorInBatch(actor, at);
       this.storage.db
         .prepare('INSERT INTO artifacts (id, kind, title, spaceId, projectId, createdBy, createdAt, updatedAt, pinned, designSystemId, linkedPath, bindingVersion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)')
         .run(id, source.kind, options.title ?? `Copy of ${source.title}`, source.spaceId, source.projectId, actorKey(actor), at, at, source.designSystemId, source.linkedPath, isDocKind(source.kind) ? bindingVersion : null);
       if (actor.kind === 'session') this.linkInFrame(id, actor.appSessionId, 'created', at);
       this.copyAssetsInFrame(artifactId, id, assets);
-      if (content) {
-        this.writeBytesInFrame(this.entity(id)!, actor, content, { kind: 'import' });
-        inFrame?.(toArtifact(this.entity(id)!));
-      }
-      entityWritten = true;
-    });
-    if (state && entityWritten) {
-      const copy = this.entity(id)!;
-      const written = this.service.writeAs(id, actor, (doc) => applyV2(doc, state), {
-        inFrame: () => {
-          this.versionInFrame(copy, { kind: 'import', actor });
+    };
+    try {
+      if (state) {
+        await this.service.writeAs(id, actor, (doc) => applyV2(doc, state), {
+          prepare: entity,
+          inFrame: () => {
+            this.versionInFrame(this.entity(id)!, { kind: 'import', actor });
+            inFrame?.(toArtifact(this.entity(id)!));
+          },
+        });
+      } else {
+        await this.service.inBatch(() => {
+          entity();
+          this.writeBytesInFrame(this.entity(id)!, actor, content!, { kind: 'import' });
           inFrame?.(toArtifact(this.entity(id)!));
-        },
-      });
-      await Promise.all([entity, written]);
-    } else {
-      await entity;
+        });
+      }
+    } catch (error) {
+      if (!this.entity(id)) this.files.removeAll(id); // a fresh id: whatever its directory holds, no row names
+      throw error;
     }
     this.emit(id, 'created');
     return this.get(id)!;
+  }
+
+  // The import write of P3-L's cutover (Decision Log 35f, 37b): one X12 record as a byte-kind artifact under its own id,
+  // with its explicit times, creator, handle and project, its versions written in order as `import` versions at their
+  // own times by their own actors, and its session links with their roles and times; no X12 mirror (the records exist).
+  // Imported versions carry no design-system pin (Decision Log 38d). One savepoint: all of it commits or none (a version
+  // or a commit that fails takes the whole artifact back, its files with it). An id already present, deleted or not, is
+  // skipped whole (`imported: false`), so a rerun skips what landed.
+  async importArtifact(input: ImportInput): Promise<{ artifactId: string; imported: boolean }> {
+    const { id } = input;
+    if (!UUID.test(id)) throw new ArtifactStoreError('invalid', `an imported artifact's id must be a UUID, not ${JSON.stringify(id)}`);
+    if (input.kind !== 'html' && input.kind !== 'file') throw new ArtifactStoreError('invalid', `a ${String(input.kind)} artifact cannot be imported (html and file only)`);
+    if (input.versions.length === 0) throw new ArtifactStoreError('invalid', 'an imported artifact needs at least one version');
+    if (input.handle !== undefined && !ARTIFACT_ID.test(input.handle)) throw new ArtifactStoreError('invalid', `the handle ${JSON.stringify(input.handle)} is not a valid artifact handle`);
+    if (this.entity(id)) {
+      // Landed already, or landing in the open batch: the answer names that row, so it waits for the row's commit.
+      if (this.storage.batchOpen) await this.service.whenCommitted();
+      return { artifactId: id, imported: false };
+    }
+    const { handle } = input;
+    for (const link of input.links) {
+      if (handle !== undefined && link.role === 'created' && this.resolve(handle, [link.appSessionId])) {
+        throw new ArtifactStoreError('handleTaken', `session ${link.appSessionId} already has an artifact with the handle ${handle}`, { handle });
+      }
+    }
+    const latest = input.versions[input.versions.length - 1].content;
+    try {
+      await this.service.inBatch(() => {
+        this.storage.actorInBatch(input.createdBy, input.createdAt);
+        this.storage.db
+          .prepare('INSERT INTO artifacts (id, kind, title, handle, projectId, createdBy, createdAt, updatedAt, pinned, linkedPath) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)')
+          .run(id, input.kind, input.title, handle ?? null, input.projectId ?? null, actorKey(input.createdBy), input.createdAt, input.updatedAt, 'path' in latest ? latest.path : null);
+        for (const link of input.links) this.linkInFrame(id, link.appSessionId, link.role, link.lastAt);
+        const row = this.entity(id)!;
+        // no design-system pin: a historic version was not seen under today's system (Decision Log 38d)
+        for (const version of input.versions) this.writeBytesInFrame(row, version.actor, version.content, { kind: 'import', at: version.at, pin: false });
+        this.storage.db.prepare('UPDATE artifacts SET updatedAt = ? WHERE id = ?').run(input.updatedAt, id);
+      });
+    } catch (error) {
+      // The rows went back (the savepoint, or the whole batch when its commit failed); the files the versions placed go
+      // too, unless a retry of the same id has rows again by now (open or committed): a retry writes synchronously inside
+      // one frame and reuses the seqs taken back, so the directory then holds only what that retry placed.
+      if (!this.entity(id)) this.files.removeAll(id);
+      throw error;
+    }
+    this.emit(id, 'created');
+    return { artifactId: id, imported: true };
   }
 
   // Inside a savepoint: the assets `assetIds` of one artifact copied into another, rows and files, ids, names and
@@ -441,9 +544,10 @@ export class ArtifactStore {
     return row.kind === 'html' ? { bytes: this.files.read(row.id, ref), name: ref.name } : { path: ref.path };
   }
 
-  // Inside a savepoint: one byte-kind write (its log row, its file in place, its version).
-  private writeBytesInFrame(row: EntityRow, actor: Actor, content: ByteContent, version: { kind: VersionKind; label?: string }): { revision: number; versionId: number } {
-    const at = this.now();
+  // Inside a savepoint: one byte-kind write (its log row, its file in place, its version, pinned to the governing design
+  // system unless `pin` is false: an imported historic version).
+  private writeBytesInFrame(row: EntityRow, actor: Actor, content: ByteContent, version: { kind: VersionKind; label?: string; at?: number; pin?: boolean }): { revision: number; versionId: number } {
+    const at = version.at ?? this.now();
     let make: (seq: number) => ContentRef;
     let staged: string | null = null;
     if (row.kind === 'html') {
@@ -466,7 +570,7 @@ export class ArtifactStore {
       const seq = this.storage.appendContentInBatch({ artifactId: row.id, actor, at, content: (s) => JSON.stringify((ref = make(s))) });
       if (staged) this.files.place(row.id, staged, ref!.path);
       staged = null;
-      const versionId = this.versions.writeContent(row.id, seq, ref!, { kind: version.kind, actor: actorKey(actor), at, label: version.label, designSystemRef: this.pinInFrame(row), assetRefs: this.assetIds(row.id) });
+      const versionId = this.versions.writeContent(row.id, seq, ref!, { kind: version.kind, actor: actorKey(actor), at, label: version.label, designSystemRef: version.pin === false ? null : this.pinInFrame(row), assetRefs: this.assetIds(row.id) });
       this.storage.db.prepare('UPDATE artifacts SET updatedAt = ? WHERE id = ?').run(at, row.id);
       return { revision: seq, versionId };
     } finally {
@@ -486,7 +590,10 @@ export class ArtifactStore {
       const existing = this.storage.db.prepare('SELECT assetId, name FROM artifact_assets WHERE artifactId = ? AND sha256 = ?').get(artifactId, stage.sha256) as { assetId: string; name: string } | undefined;
       if (existing) {
         const same = { assetId: existing.assetId, ref: `assets/${existing.name}` };
-        if (inFrame) await this.service.inBatch(() => inFrame(same)); // nothing to write, yet the operation completes here
+        // Nothing to write, yet the answer names a row that may still sit in the open batch (a concurrent upload of the
+        // same bytes): it waits for that batch's commit, and fails with it. The seam still runs, in a frame of its own.
+        if (inFrame) await this.service.inBatch(() => inFrame(same));
+        else await this.service.whenCommitted();
         return same;
       }
       const taken = new Set((this.storage.db.prepare('SELECT name FROM artifact_assets WHERE artifactId = ?').all(artifactId) as { name: string }[]).map((row) => row.name));
@@ -541,6 +648,21 @@ export class ArtifactStore {
     });
     if (id !== null) this.emit(artifactId, 'updated');
     return id;
+  }
+
+  // The owner names an existing version, any kind (Decision Log 37d, 38c; §4.7: any automatic version is nameable): its
+  // label becomes this, its note this one when given (`null` clears it, omitted keeps it), its kind and the rest stay; a
+  // named `auto` version is never thinned.
+  async nameVersion(artifactId: string, versionId: number, name: { label: string; note?: string | null }, inFrame?: InFrame<ArtifactVersion>): Promise<ArtifactVersion> {
+    this.requireLive(artifactId);
+    this.requireVersion(artifactId, versionId);
+    if (name.label.trim() === '') throw new ArtifactStoreError('invalid', 'a version’s name cannot be empty');
+    await this.service.inBatch(() => {
+      this.versions.name(versionId, name.label, name.note);
+      inFrame?.(this.versions.version(artifactId, versionId)!);
+    });
+    this.emit(artifactId, 'updated');
+    return this.versions.version(artifactId, versionId)!;
   }
 
   // Inside a savepoint: a version of the artifact's current state (a byte kind's names its latest write).
@@ -634,8 +756,9 @@ export class ArtifactStore {
 
   // ── turns, idempotency and the test writer ──
 
-  // The session's turn ended (Decision Log 23f): one `turn` version per Y-kind artifact it wrote, summarised by the
-  // kind's `summarizeTurn` over its tool calls' results (else "N edits"); its presence is cleared (23d).
+  // The session's turn ended (Decision Log 23f, 26c): one `turn` version per Y-kind artifact the session committed an
+  // edit to in the turn (a read, or a write that changed no document, makes none), summarised by the kind's
+  // `summarizeTurn` over its mutating tool calls' results (else "N edits"); its presence is cleared (23d).
   async endTurn(appSessionId: AppSessionId): Promise<void> {
     this.service.clearPresence(appSessionId);
     const wrote = this.turns.get(appSessionId);
@@ -644,7 +767,7 @@ export class ArtifactStore {
     const actor: Actor = { kind: 'session', appSessionId };
     for (const [artifactId, { commits, results }] of wrote) {
       const row = this.entity(artifactId);
-      if (!row || row.deletedAt !== null || !isDocKind(row.kind)) continue;
+      if (commits === 0 || !row || row.deletedAt !== null || !isDocKind(row.kind)) continue;
       const count = results.length > 0 ? results.length : commits;
       const summary = this.service.adapterFor(row.kind)?.summarizeTurn?.(results) ?? `${count} edit${count === 1 ? '' : 's'}`;
       const id = await this.service.inBatch(() => this.versionInFrame(row, { kind: 'turn', actor, summary }));
@@ -654,13 +777,13 @@ export class ArtifactStore {
 
   // Runs `run` once per tool-use id (Decision Log 11, 26c; ops.ts). A mutating run records its op through `scope.record`
   // inside the savepoint of the write that commits it (a store operation's `inFrame` seam, or `writeAs`'s), and fails
-  // when it never does; a `readOnly` run's op row is written after it settles. `actor` (the calling session) files the
-  // result under its turn.
+  // when it never does; a `readOnly` run's op row is written after it settles. `actor` (the calling session) files a
+  // mutating run's result under its turn (what `summarizeTurn` reads); a read-only result never counts as an edit.
   async withOp<R>(opId: string | null | undefined, tool: string, artifactId: string | null, run: (scope: OpScope) => Promise<R>, options: { actor?: Actor; readOnly?: boolean } = {}): Promise<R> {
     if (!opId) this.log(`${tool} ran without a tool-use id: no replay guarantee`);
     const outcome = await this.ops.once(opId || null, tool, artifactId, run, options.readOnly ?? false);
     const { actor } = options;
-    if (outcome.fresh && artifactId && actor?.kind === 'session') this.turnEntry(actor.appSessionId, artifactId).results.push(outcome.result);
+    if (outcome.fresh && !options.readOnly && artifactId && actor?.kind === 'session') this.turnEntry(actor.appSessionId, artifactId).results.push(outcome.result);
     return outcome.result;
   }
 
@@ -724,6 +847,13 @@ export class ArtifactStore {
 
   entity(artifactId: string): EntityRow | undefined {
     return this.storage.db.prepare('SELECT * FROM artifacts WHERE id = ?').get(artifactId) as EntityRow | undefined;
+  }
+
+  // The actor and time of the artifact's last log row (Decision Log 35c), null when it has none. Log pruning keeps each
+  // artifact's newest row, so the answer survives maintenance.
+  lastWrite(artifactId: string): { actor: Actor; at: number } | null {
+    const row = this.storage.db.prepare('SELECT actor, at FROM artifact_updates WHERE artifactId = ? ORDER BY seq DESC LIMIT 1').get(artifactId) as { actor: string; at: number } | undefined;
+    return row ? { actor: actorFromKey(row.actor), at: row.at } : null;
   }
 
   // The actor key of the artifact's last log row (who an `auto` version is credited to), the human when none.
@@ -875,6 +1005,7 @@ function toArtifact(row: EntityRow): Artifact {
     pinned: row.pinned === 1,
     ...(row.designSystemId === null ? {} : { designSystemId: row.designSystemId }),
     ...(row.linkedPath === null ? {} : { linkedPath: row.linkedPath }),
+    agentEditsAsSuggestions: row.agentEditsAsSuggestions === 1,
   };
 }
 

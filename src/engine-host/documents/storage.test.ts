@@ -149,8 +149,15 @@ describe('SqliteDocumentStorage: the head and log pruning (Decision Log 8)', () 
     expect(storage.load('a1').updates.map((row) => row.seq)).toEqual([young, tail]);
     expect(storage.revision('a1')).toBe(tail);
     storage.writeHead('a1', tail, stateV2(doc));
-    expect(storage.pruneLog(now)).toBe(1); // only the 9-day-old row: the 6-day-old one is covered but young
-    expect(storage.revision('a1')).toBe(tail); // the head still names the last seq
+    // nothing: the 9-day-old row is the artifact's newest, kept (it names the last writer, Decision Log 37a), and the
+    // 6-day-old one is covered but young
+    expect(storage.pruneLog(now)).toBe(0);
+    const after = append(doc, () => doc.get('t').insert(0, 'after '), human, now - 8 * DAY);
+    storage.commit();
+    storage.writeHead('a1', after, stateV2(doc));
+    expect(storage.pruneLog(now)).toBe(1); // the 9-day-old row, no longer the newest; the 8-day-old newest stays
+    expect(storage.db.prepare("SELECT seq FROM artifact_updates WHERE artifactId = 'a1' ORDER BY seq").all()).toEqual([{ seq: young }, { seq: after }]);
+    expect(storage.revision('a1')).toBe(after); // the head still names the last seq
     storage.incrementalVacuum();
   });
 

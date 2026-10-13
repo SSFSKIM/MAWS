@@ -116,6 +116,12 @@ import { startBrowser, type Browser } from './browser';
 // E4b start
 import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './browser/import';
 // E4b end
+// P3-A start
+import { startArtifacts } from './artifacts';
+// P3-A end
+// P3-L start
+import { startLibrary } from './library';
+// P3-L end
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -557,6 +563,23 @@ void startWithProfileLock(app, () => {
     tracked(win); // C5: tracked placement
     return win; // C5: the notifier re-creates the window through here
   };
+  // P3-A M4: `artifacts.open` (a document's port to the asking window) and the design-system defaults' relay, before the
+  // first window loads
+  const artifacts = startArtifacts({
+    hosts,
+    register: registerMainHandler,
+    emit, // P3-A M5: artifacts.resync
+    settings: () => settings.state().settings,
+    onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
+    env: process.env,
+    openWindow,
+  });
+  shutdown.add('artifacts', artifacts.stop);
+  // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
+  // connection, an entry per change) and library.* answered from it, before the first window loads. Its stop runs in the
+  // same will-quit pass as the index's close, so no sync step runs between them, and after it applies nothing.
+  const library = startLibrary({ index, hosts, register: registerMainHandler, emit, e2e: process.env.MAWS_E2E === '1' });
+  shutdown.add('library', library.stop);
   openWindow();
 
   // E5 start: each window's unsaved editor files for the quit guard (E5 execution document, M5): the page pushes its
