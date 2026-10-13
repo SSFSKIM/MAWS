@@ -513,6 +513,16 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
 
     **`force` (the controller's decision, overriding the first build):** for this kind, `force` means "the agent wins where both sides changed the same unit, and everything else still merges". The units are a token, a law hunk and a canon file. It does not mean "write the sent file verbatim". A's Decision Log 10 says force skips layers 2 and 3 "for the files sent". This kind merges below the file, so that skip applies to the colliding units. Writing `tokens.tokens.json` verbatim would revert a human's concurrent recolour of a token the agent never touched, which no agent intends by retrying with `force`.
 13. 2026-10-13 (from B's M3, through the architect): B's editor puts `.ds-doc` on the page element only; its tabs, toolbar and find bar are app chrome on app tokens. `<DesignSystemScope>` therefore wraps a consumer's page element, not its whole editor. The system's ground, tokens and code-highlight colours apply inside the scope, and the chrome around it stays on the app's tokens. M4 keeps this boundary in the API's documentation and examples, and in its own page: the page's chrome is app tokens, and only its previews sit in scopes.
+14. 2026-10-13 (A's M4 at 1227152b on A's branch, under review; on the ledger). Names M6 codes against:
+    - `ArtifactRow` is `Artifact` plus the live `revision`, returned by list, get and every write.
+    - Refusals are `ArtifactRefusal {reason, data}`, read back by `artifactRefusalOf`.
+    - Main's `artifacts.setDefaults` push reads `settings.artifacts` only when it is present, so settings 14 lands without editing A's files.
+
+    Until A's M5, detached mode has two gaps:
+    - `artifacts.open` answers `host_unavailable`;
+    - the bytes of create, uploadAsset and versionState wait for M5's base64 codec.
+
+    So M6 and M7 e2e run in utility mode until then.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
