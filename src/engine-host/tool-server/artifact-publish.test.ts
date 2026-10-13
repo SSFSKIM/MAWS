@@ -83,6 +83,18 @@ describe('artifact_publish of an html page', () => {
     expect((await w.deliverables.get(SELF, created.artifactId))!.versions).toHaveLength(2);
   });
 
+  it('two overlapping calls with one tool-use id publish once, mirror one X12 version and answer alike', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' }, { toolUseId: 'toolu_c' as ToolUseId });
+    const args = { artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>v2</p>' } };
+    const tool = artifactPublishTool(w.deps());
+    const ctx = w.ctx({ toolUseId: 'toolu_twice' as ToolUseId });
+    const [first, second] = await Promise.all([tool.call(args, ctx), tool.call(args, { ...ctx, requestId: w.ctx().requestId })]);
+    expect(jsonOf(first)).toMatchObject({ version: 2, deliverableId: created.artifactId });
+    expect(second).toEqual(first);
+    expect((await w.deliverables.get(SELF, created.artifactId))!.versions.map((v) => v.toolUseId)).toEqual(['toolu_c', 'toolu_twice']);
+    expect(w.store.listVersions(created.artifactId)).toHaveLength(2);
+  });
+
   it('a side thread publishes its parent’s page after reading it: the parent’s record gains the version, nothing under the thread', async () => {
     const PARENT = 'app-parent' as AppSessionId;
     const THREAD = 'app-thread' as AppSessionId;

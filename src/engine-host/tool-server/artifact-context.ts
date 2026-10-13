@@ -34,6 +34,19 @@ export interface ByteBase {
 export class ArtifactSession {
   readonly byteBases = new Map<string, ByteBase>(); // by artifact id
   readonly guided = new Set<ArtifactKind>(); // the kinds whose guide this session was given (§4.3: once per session)
+  private readonly calls = new Map<string, Promise<McpToolResult>>(); // by op id: the writing calls still answering
+
+  // One response per tool-use id while a call is answering (Decision Log 11): an overlapping call with the same id waits
+  // for the first one's whole response (its write, its X12 mirror and its decorations) and answers it, never a bare
+  // recorded result while the first call is still mirroring. Once answered, a repeat is the op ledger's (`replayOf`).
+  joined(opId: string | null, answer: () => Promise<McpToolResult>): Promise<McpToolResult> {
+    if (opId === null) return answer();
+    const running = this.calls.get(opId);
+    if (running) return running;
+    const call = answer().finally(() => this.calls.delete(opId));
+    this.calls.set(opId, call);
+    return call;
+  }
 }
 
 export interface ArtifactToolDeps {
@@ -81,11 +94,12 @@ export async function resolveArtifact(tool: ArtifactToolName, deps: Pick<Artifac
   throw new ToolRefusal(TOOL_ERRORS.noArtifact(tool, ref));
 }
 
-// The nearest X12 page or file record the ref names in the lineage: by its id, or an artifact record by its name.
+// The nearest X12 record the ref names in the lineage: by its id (a page, a delivered file, or a screenshot E4c's
+// browser tool kept, which imports as a file), or an artifact record by its name.
 async function x12RecordOf(deliverables: DeliverableWriter, ref: string, lineage: readonly AppSessionId[]): Promise<DeliverableRecord | null> {
   for (const session of lineage) {
     const record = UUID.test(ref) ? await deliverables.get(session, ref).catch(() => null) : await deliverables.findArtifact(session, ref).catch(() => null);
-    if (record && (record.kind === 'artifact' || record.kind === 'file')) return record;
+    if (record) return record;
   }
   return null;
 }

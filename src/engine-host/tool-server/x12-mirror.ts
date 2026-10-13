@@ -3,7 +3,9 @@
 // `artifact_screenshot` and P2's comment card keep their behaviour. The store is authoritative: the mirror is written
 // after the store's commit, and a mirror that fails is logged and fails nothing. A record lives under the session that
 // created the artifact (P2-E1: a side thread's publish of its parent's page writes the parent's record), and each
-// version's copy is the store's own content file, copied as X12's `v<n>.html`.
+// version's copy is the store's own content file, copied as X12's `v<n>.html`. Every write runs in the record owner's
+// write chain and is deduplicated there (a record already written, a version a call already appended, by its tool-use
+// id), so two mirrors of one call racing (an overlapping retry) write it once.
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { DeliverableRecord } from '@shared/maws/deliverable';
 import type { DeliverableWriter } from '../deliverables/store';
@@ -20,7 +22,8 @@ export class X12Mirror {
 
   // A new `html` artifact: its record with version 1. Answers the version, or null when nothing was written.
   async page(artifact: { id: string; title: string; handle?: string }, owner: AppSessionId, content: { path: string; sourcePath?: string }, toolUseId: ToolUseId | null): Promise<number | null> {
-    return this.attempt(artifact.id, async () => {
+    return this.attempt(artifact.id, () => this.deps.deliverables.exclusive(owner, async () => {
+      if (await this.deps.deliverables.get(owner, artifact.id)) return 1;
       const at = this.at();
       const copy = await this.deps.deliverables.copyVersion(owner, artifact.id, 1, content.path);
       const used = toolUseId !== null ? { toolUseId } : {};
@@ -29,7 +32,7 @@ export class X12Mirror {
         versions: [{ path: copy.path, at, ...used, ...(content.sourcePath !== undefined && { sourcePath: content.sourcePath }) }], ...used, createdAt: at, updatedAt: at,
       });
       return 1;
-    });
+    }));
   }
 
   // An `html` artifact's next version, on its creator's record (none: nothing to mirror). Answers the version.
@@ -38,6 +41,8 @@ export class X12Mirror {
       this.deps.deliverables.exclusive(owner, async () => {
         const record = await this.deps.deliverables.get(owner, artifactId);
         if (record === null) return null;
+        const appended = toolUseId === null ? -1 : record.versions.findIndex((v) => v.toolUseId === toolUseId);
+        if (appended !== -1) return appended + 1; // this call's version, already appended by a mirror of it that ran first
         const version = record.versions.length + 1;
         const at = this.at();
         const copy = await this.deps.deliverables.copyVersion(owner, artifactId, version, contentPath);
@@ -51,14 +56,15 @@ export class X12Mirror {
   async files(artifacts: { id: string; path: string; title: string }[], owner: AppSessionId, caption: string | undefined, toolUseId: ToolUseId | null): Promise<void> {
     const createdAt = this.at();
     for (const artifact of artifacts) {
-      await this.attempt(artifact.id, async () => {
+      await this.attempt(artifact.id, () => this.deps.deliverables.exclusive(owner, async () => {
+        if (await this.deps.deliverables.get(owner, artifact.id)) return null;
         const record: DeliverableRecord = {
           id: artifact.id, appSessionId: owner, kind: 'file', path: artifact.path, title: artifact.title, ...(caption !== undefined && { caption }),
           versions: [{ path: artifact.path, at: createdAt }], ...(toolUseId !== null && { toolUseId }), createdAt,
         };
         await this.deps.deliverables.write(record);
         return null;
-      });
+      }));
     }
   }
 

@@ -87,7 +87,7 @@ export function artifactDescribeTypeTool(): McpToolDefinition {
 export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
   const mirror = new X12Mirror(deps);
   return defineMawsTool('artifact_create', (args, ctx) =>
-    answering('artifact_create', async () => {
+    deps.session.joined(opIdOf(ctx), () => answering('artifact_create', async () => {
       const parsed = parseToolArguments('artifact_create', args);
       if (!parsed.ok) return toolError(parsed.error);
       const input = parsed.data;
@@ -180,7 +180,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (page !== null) deps.session.byteBases.set(recorded.artifactId, { revision: recorded.revision, sha256: createHash('sha256').update(page.bytes).digest('hex') });
       if (fresh) await ensureMirrored(store, deps, mirror, recorded, ctx, page?.sourcePath);
       return toolText(recorded);
-    }),
+    })),
   );
 }
 

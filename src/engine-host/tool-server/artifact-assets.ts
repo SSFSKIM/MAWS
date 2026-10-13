@@ -9,7 +9,7 @@ import { defineMawsTool, toolError, toolText, type McpToolDefinition } from './s
 
 export function artifactUploadAssetTool(deps: ArtifactToolDeps): McpToolDefinition {
   return defineMawsTool('artifact_upload_asset', (args, ctx) =>
-    answering('artifact_upload_asset', async () => {
+    deps.session.joined(opIdOf(ctx), () => answering('artifact_upload_asset', async () => {
       const parsed = parseToolArguments('artifact_upload_asset', args);
       if (!parsed.ok) return toolError(parsed.error);
       const input = parsed.data;
@@ -39,7 +39,7 @@ export function artifactUploadAssetTool(deps: ArtifactToolDeps): McpToolDefiniti
         ),
       );
       return toolText(result);
-    }),
+    })),
   );
 }
 

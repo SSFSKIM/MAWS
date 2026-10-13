@@ -147,6 +147,37 @@ describe('artifact_create', () => {
     await pending;
   });
 
+  it('fails rather than answer a design-system context read from a batch that was then lost', async () => {
+    const system = await w.store.create({ kind: 'design_system', title: 'Brand' }, HUMAN);
+    await w.store.setDefaults({ owner: system.id, spaces: {} });
+    w.store.registerDesignSystemContext(async () => {
+      const pending = w.service.writeAs(system.id, HUMAN, (d) => d.get('law').setAttr('text', 'UNCOMMITTED LAW'));
+      pending.catch(() => {});
+      const text = String(w.service.live(system.id).get('law').getAttr('text'));
+      const commit = w.storage.commit.bind(w.storage);
+      w.storage.commit = () => {
+        throw new Error('provider batch lost');
+      };
+      w.service.commitNow();
+      w.storage.commit = commit;
+      await pending.catch(() => {});
+      return text;
+    });
+    const outcome = await create({ kind: 'presentation', title: 'Deck' }).catch((error: unknown) => error);
+    expect(JSON.stringify(outcome instanceof Error ? outcome.message : outcome)).not.toContain('UNCOMMITTED LAW');
+    expect(outcome instanceof Error || (outcome as { isError?: boolean }).isError).toBeTruthy();
+    expect(w.store.list({ kind: 'presentation' })).toEqual([]);
+  });
+
+  it('answers overlapping creates and deliveries with one tool-use id alike, with one X12 record each', async () => {
+    const tool = artifactCreateTool(w.deps());
+    const ctx = w.ctx({ toolUseId: 'toolu_both' as ToolUseId });
+    const [first, second] = await Promise.all([tool.call({ handle: 'dash', content: '<p/>', title: 'D' }, ctx), tool.call({ handle: 'dash', content: '<p/>', title: 'D' }, { ...ctx, requestId: w.ctx().requestId })]);
+    expect(second).toEqual(first);
+    expect(rows('SELECT id FROM artifacts')).toHaveLength(1);
+    expect(w.written).toEqual([[jsonOf(first).artifactId, 'created']]);
+  });
+
   it('attaches the governing design system’s guide to a document, presentation or design through D’s provider', async () => {
     const system = await w.store.create({ kind: 'design_system', title: 'Brand' }, HUMAN);
     await w.store.setDefaults({ owner: system.id, spaces: {} });

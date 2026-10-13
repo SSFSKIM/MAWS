@@ -30,7 +30,7 @@ const PAGE = 'index.html';
 export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
   const mirror = new X12Mirror(deps);
   return defineMawsTool(TOOL, (args, ctx) =>
-    answering(TOOL, async () => {
+    deps.session.joined(opIdOf(ctx), () => answering(TOOL, async () => {
       const parsed = parseToolArguments(TOOL, args);
       if (!parsed.ok) return toolError(parsed.error);
       const input = parsed.data;
@@ -48,7 +48,7 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (artifact.kind === 'document') throw refuse(TOOL, { reason: 'invalid', kind: 'document' }, 'a document is edited block by block, not published');
       const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx) : await mirrored(store, mirror, await publishPage(deps, store, artifact, input, ctx), input, ctx, true);
       return toolText(result);
-    }),
+    })),
   );
 }
 
