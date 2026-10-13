@@ -15,6 +15,7 @@ import {
   ArtifactPublishResultSchema,
   ArtifactReadInputSchema,
   artifactRefusalOf,
+  DOCUMENT_READ_FIELDS,
   ArtifactScreenshotInputSchema,
   ArtifactScreenshotResultSchema,
   AskInputSchema,
@@ -239,6 +240,26 @@ describe('X9 artifact tools (E2)', () => {
     expect(refused.ok === false && refused.error).toMatch(/^artifact_screenshot: invalid arguments: width: /);
     // the retired update's schemas stay for the journals written before
     expect(ArtifactUpdateInputSchema.parse({ id: 'dash', html_path: 'a.html' })).toEqual({ id: 'dash', html_path: 'a.html' });
+  });
+
+  // P3-B's wiring (ledger X25, the architect 2026-10-13): the document read fields and a document's markdown create
+  it('admits P3-B’s document read fields on artifact_read and advertises them in tools/list', () => {
+    const read = { artifact: 'notes', tab: 'Draft', from: 'b-12', count: 40, sinceRevision: 7 };
+    expect(parseToolArguments('artifact_read', read)).toEqual({ ok: true, data: read });
+    for (const bad of [{ count: 0 }, { count: 1001 }, { count: 1.5 }, { tab: '' }, { tab: 'x'.repeat(65) }, { from: '' }, { sinceRevision: -1 }]) {
+      expect(ArtifactReadInputSchema.safeParse({ artifact: 'notes', ...bad }).success, JSON.stringify(bad)).toBe(false);
+    }
+    expect(Object.keys(DOCUMENT_READ_FIELDS)).toEqual(['tab', 'from', 'count', 'sinceRevision']);
+    expect(mawsToolList().find((t) => t.name === 'artifact_read')!.inputSchema).toMatchObject({
+      properties: { tab: { type: 'string', minLength: 1, maxLength: 64 }, from: { type: 'string', minLength: 1, maxLength: 64 }, count: { type: 'integer', minimum: 1, maximum: 1000 }, sinceRevision: { type: 'integer', minimum: 0 } },
+    });
+    expect(MAWS_TOOLS.artifact_read.description).toContain('tab, from, count and sinceRevision');
+  });
+
+  it('admits a document created from markdown content, and no other Y kind’s content', () => {
+    expect(parseToolArguments('artifact_create', { kind: 'document', title: 'Notes', content: '# Notes' }).ok).toBe(true);
+    expect(ArtifactCreateInputSchema.safeParse({ kind: 'presentation', title: 'Deck', content: '# Deck' }).success).toBe(false);
+    expect(MAWS_TOOLS.artifact_create.description).toContain('a document starts empty or from markdown content');
   });
 
   it('parses the results and refuses a stray key; the delivery fields read alike from every answer that registered an X12 version', () => {

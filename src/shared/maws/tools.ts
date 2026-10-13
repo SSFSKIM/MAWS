@@ -132,7 +132,8 @@ const FilePathSchema = z.string().min(1).max(512);
 const FileTextSchema = z.string().max(ARTIFACT_MAX_BYTES); // characters; the store caps the bytes
 
 // P3-A (M6): `kind` defaults to `html`; an `html` page comes from `path` (an `.html` file) or `content` (its text), a
-// `file` artifact from `path` (in place), a Y kind from nothing or `files`. E2's `id` and `html_path` are accepted as
+// `file` artifact from `path` (in place), a `document` from nothing or markdown `content` (P3-B's create, ledger X25),
+// another Y kind from nothing or `files`. E2's `id` and `html_path` are accepted as
 // `handle` and `path`, so the call skills already make keeps working.
 export const ArtifactCreateInputSchema = z
   .strictObject({
@@ -153,7 +154,7 @@ export const ArtifactCreateInputSchema = z
     const path = input.path ?? input.html_path;
     if (kind === 'html' && (path === undefined) === (input.content === undefined)) issue('path', 'an html artifact takes path or content, one of them');
     if (kind === 'file' && path === undefined) issue('path', 'a file artifact takes the path of the file');
-    if (kind !== 'html' && input.content !== undefined) issue('content', `a ${kind} artifact takes no content`);
+    if (kind !== 'html' && kind !== 'document' && input.content !== undefined) issue('content', `a ${kind} artifact takes no content`);
     if (kind !== 'html' && kind !== 'file' && path !== undefined) issue('path', `a ${kind} artifact takes files, not a path`);
     if ((kind === 'html' || kind === 'file' || kind === 'document') && input.files !== undefined) issue('files', `a ${kind} artifact takes no files`);
   });
@@ -175,6 +176,15 @@ export const ArtifactScreenshotInputSchema = z.strictObject({
 export type ArtifactScreenshotInput = z.infer<typeof ArtifactScreenshotInputSchema>;
 // P3-A (M6) start
 export const ArtifactDescribeTypeInputSchema = z.strictObject({ kind: ArtifactKindSchema });
+// P3-B's document read fields (ledger X25, the architect 2026-10-13): a tab, a block id to start from, how many blocks,
+// and the changes since a revision. B's reader serves them for a document; A's generic reader ignores them. Defined here
+// until B's `document-tools.ts` lands, which re-points this export at its own at the re-merge.
+export const DOCUMENT_READ_FIELDS = {
+  tab: z.string().min(1).max(64).optional(),
+  from: z.string().min(1).max(64).optional(), // a block id
+  count: z.number().int().min(1).max(1000).optional(),
+  sinceRevision: z.number().int().min(0).optional(),
+};
 // `revision` reads a byte kind's content as of an earlier write; `version` a retained version, read-only; `paths` names
 // the files of a file kind to return (all by default).
 export const ArtifactReadInputSchema = z.strictObject({
@@ -182,6 +192,7 @@ export const ArtifactReadInputSchema = z.strictObject({
   revision: z.number().int().min(1).optional(),
   version: z.number().int().min(1).optional(),
   paths: z.array(FilePathSchema).min(1).max(200).optional(),
+  ...DOCUMENT_READ_FIELDS,
 });
 export type ArtifactReadInput = z.infer<typeof ArtifactReadInputSchema>;
 // `files` maps a path to its whole new text, `null` removing it (Decision Log 10); an `html` page is its one file
@@ -351,7 +362,7 @@ export const MAWS_TOOLS = {
   artifact_create: {
     title: 'Create artifact',
     description:
-      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; document, presentation, design, design_system and dashboard start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Returns the artifact's id and revision, and the first time this session creates a kind, that kind's guide and format reference.",
+      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content; presentation, design, design_system and dashboard start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Returns the artifact's id and revision, and the first time this session creates a kind, that kind's guide and format reference.",
     input: ArtifactCreateInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
@@ -381,7 +392,7 @@ export const MAWS_TOOLS = {
   artifact_read: {
     title: 'Read artifact',
     description:
-      "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure, a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it. Read before you publish: artifact_publish takes the revision this read returned.",
+      "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure, a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it; for a document, tab, from, count and sinceRevision read one tab, count blocks from a block id, or the changes since a revision (other kinds ignore them). Read before you publish: artifact_publish takes the revision this read returned.",
     input: ArtifactReadInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },

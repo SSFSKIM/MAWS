@@ -123,6 +123,10 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
         const source = resolve(ctx.cwd, path!);
         if (!(await stat(source).catch(() => null))?.isFile()) return toolError(TOOL_ERRORS.artifactNotAFile('artifact_create', source));
         content = { path: source };
+      } else if (kind === 'document' && input.content !== undefined) {
+        // a document's markdown content is P3-B's document create (ledger X25), served by B's wrapper; this build's
+        // generic create would lose it
+        return toolError(TOOL_ERRORS.refused('artifact_create', { reason: 'invalid', kind: 'document' }, "a document's markdown content is read by P3-B's document create, which this build does not have; create it empty"));
       } else if (input.files) {
         // a dry run on an empty doc: files the kind cannot hold are refused before the artifact exists
         withDoc(null, (scratch) => publisherOf(store, kind)(scratch, {}, input.files!, false));

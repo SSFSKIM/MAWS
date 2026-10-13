@@ -186,6 +186,12 @@ describe('artifact_create', () => {
     expect(jsonOf(await create({ content: '<p/>', title: 'Page' })).designSystem).toBeUndefined();
   });
 
+  it('refuses a document’s markdown content, which P3-B’s document create serves, writing nothing', async () => {
+    const result = await create({ kind: 'document', title: 'Notes', content: '# Notes' });
+    expect(artifactRefusalOf(textOf(result))).toMatchObject({ reason: 'invalid', kind: 'document' });
+    expect(rows('SELECT id FROM artifacts')).toEqual([]);
+  });
+
   it('answers unavailable when the store did not open', async () => {
     const result = await artifactCreateTool(w.deps({ artifacts: () => null })).call({ content: '<p/>', title: 'X' }, w.ctx());
     expect(artifactRefusalOf(textOf(result))).toEqual({ reason: 'unavailable' });
