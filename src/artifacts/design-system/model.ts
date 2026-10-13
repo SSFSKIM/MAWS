@@ -19,7 +19,8 @@ import { generateTokensCss } from './css';
 import { LAW_LIMIT_BYTES, parseLaw } from './law';
 import { officeTheme } from './office';
 import { comparePaths, splitPath, tokenIdentity } from './roles';
-import { parseTokens, serializeTokens, validateTokenFile, type GroupProps, type Token, type TokenSet } from './tokens';
+import { inheritedType, parseTokens, serializeTokens, validateTokenFile, type GroupProps, type Token, type TokenSet } from './tokens';
+import { isAlias } from './values';
 
 import type { KindAdapter } from '../host';
 
@@ -100,7 +101,9 @@ const storedEntries = (node: Node): Map<string, Token | GroupProps> => new Map([
  * Stored entries as one token file's set, without loss (Decision Log 12). Replicas may converge on states no single
  * write makes: a token at `x` beside tokens or groups beneath `x`, or both `x` and `x.$root`. Per identity one token is
  * read (the `$root` form when both are stored), and a token with anything beneath it is read as its group's `$root`,
- * which DTCG defines for exactly this; its CSS name is the same.
+ * which DTCG defines for exactly this; its CSS name is the same. A token so moved keeps the `$type` it had: when the
+ * group `x` would give it another one (its own `$type`, or one through `$extends`), the type it inherited is written on
+ * it, so its value still reads as what it is.
  */
 function tokenSetOfEntries(entries: Iterable<readonly [string, Token | GroupProps]>): TokenSet {
   const groups: [string, GroupProps][] = [];
@@ -117,7 +120,14 @@ function tokenSetOfEntries(entries: Iterable<readonly [string, Token | GroupProp
   };
   for (const id of byIdentity.keys()) hold(id, false);
   for (const [path] of groups) hold(path, true);
-  const tokens: [string, Token][] = [...byIdentity].map(([id, [key, token]]) => [holders.has(id) ? `${id}${ROOT}` : key, token]);
+  const groupMap = new Map(groups);
+  const rehomed = (id: string, token: Token): [string, Token] => {
+    const path = `${id}${ROOT}`;
+    if (token.$type !== undefined || isAlias(token.$value)) return [path, token]; // an alias takes its target's type first
+    const had = inheritedType(groupMap, id);
+    return [path, had !== undefined && had !== inheritedType(groupMap, path) ? { $type: had, ...token } : token];
+  };
+  const tokens: [string, Token][] = [...byIdentity].map(([id, [key, token]]) => (holders.has(id) && key !== `${id}${ROOT}` ? rehomed(id, token) : [key, token]));
   const byPath = <T>(list: [string, T][]) => new Map(list.sort(([a], [b]) => comparePaths(a, b)));
   return { tokens: byPath(tokens), groups: byPath(groups) };
 }
@@ -471,6 +481,18 @@ function unitsOf(entries: Iterable<readonly [string, Token | GroupProps]>): Map<
   }
   return units;
 }
+/**
+ * The live doc's units: each unit's stored keys, and its value as the reader holds it, so a token the reader moved
+ * beneath its group (its inherited `$type` written on it) compares equal to the file view the agent read.
+ */
+function liveUnits(stored: ReadonlyMap<string, Token | GroupProps>): Map<string, Unit> {
+  const units = unitsOf(stored);
+  for (const [path, token] of tokenSetOfEntries(stored).tokens) {
+    const unit = units.get(identity(path));
+    if (unit && unit.value !== AMBIGUOUS) unit.value = token;
+  }
+  return units;
+}
 const fileUnits = (text: string | undefined) => {
   const set = text === undefined ? null : parseTokens(text).tokens;
   return set ? unitsOf(entriesOf(set)) : new Map<string, Unit>();
@@ -525,11 +547,12 @@ export function publishSystem(live: Doc, base: Readonly<Record<string, string>>,
     }
   }
 
-  // The tokens, unit by unit: live from the stored attributes (no unit hidden by a file round trip), base and sent
-  // from their files, a token keyed by its identity so `x` and `x.$root` are one unit (Decision Log 12).
+  // The tokens, unit by unit: live from the stored attributes through the lossless reader (no unit hidden by a file
+  // round trip), base and sent from their files, a token keyed by its identity so `x` and `x.$root` are one unit
+  // (Decision Log 12).
   const tokenWrites = new Map<string, { key: string; value: Token | GroupProps } | null>();
   const stored = storedEntries(roots(live).tokens);
-  const theirs = unitsOf(stored);
+  const theirs = liveUnits(stored);
   let merged = state.tokens;
   if (sentTokens?.set) {
     const mine = unitsOf(entriesOf(sentTokens.set));

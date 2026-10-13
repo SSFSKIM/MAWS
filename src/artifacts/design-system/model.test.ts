@@ -574,3 +574,145 @@ describe('publish: the agent’s change over the live doc (Acceptance 7, A’s l
     expect(designSystemAdapter.readFiles!(agent)).toEqual(readFiles(agent));
   });
 });
+
+describe('converged hierarchies: replicas that each wrote a valid file converge on overlapping tokens (Decision Log 12)', () => {
+  /** Replicas `n` more beside the scene's, all in sync with it, each a separate Yjs client. */
+  function replicas(n: number, ...docs: Doc[]): Doc[] {
+    const out = Array.from({ length: n }, () => newDoc());
+    sync(...docs, ...out);
+    return out;
+  }
+  const tokensOf = (doc: Doc) => parseTokens(readFiles(doc)['tokens.tokens.json']!);
+
+  it('concurrent setters: the file view keeps the parent and the child on both replicas, and publish sees the parent', () => {
+    const { human, agent, base } = scene(); // the agent's base predates both edits
+    setToken(human, 'color.branch', color('#112233'));
+    setToken(agent, 'color.branch.light', color('#ddeeff'));
+    sync(human, agent);
+    for (const doc of [human, agent]) {
+      const read = tokensOf(doc);
+      expect(read.problems).toEqual([]);
+      expect(read.tokens!.tokens.get('color.branch.$root')).toEqual(color('#112233'));
+      expect(read.tokens!.tokens.get('color.branch.light')).toEqual(color('#ddeeff'));
+      expect(validateTokenFile(readFiles(doc)['tokens.tokens.json']).problems).toEqual([]);
+    }
+    // An agent that never saw the parent and creates it with another value conflicts on it.
+    const before = stateVector(agent);
+    const create = { 'tokens.tokens.json': tokensWith(base['tokens.tokens.json']!, { 'color.branch': color('#445566') }) };
+    expect(publishSystem(agent, base, create, false)).toEqual({ changed: [], conflicts: [{ path: 'tokens.tokens.json', detail: expect.stringContaining('the token color.branch changed') }] });
+    expect(stateVector(agent)).toEqual(before);
+    // An unrelated change from that stale base lands and keeps both.
+    const other = { 'tokens.tokens.json': tokensWith(base['tokens.tokens.json']!, { 'color.accent.$root': color('#cc3300') }) };
+    expect(publishSystem(agent, base, other, false)).toEqual({ changed: ['tokens.tokens.json'], conflicts: [] });
+    sync(human, agent);
+    expect(tokensOf(human).tokens!.tokens.get('color.branch.$root')).toEqual(color('#112233'));
+    expect(tokensOf(human).tokens!.tokens.get('color.branch.light')).toEqual(color('#ddeeff'));
+    // The agent's read of the converged file, sent back unchanged, is no change.
+    const reread = readFiles(agent);
+    expect(publishSystem(agent, reread, { 'tokens.tokens.json': reread['tokens.tokens.json']! }, false)).toEqual({ changed: [], conflicts: [] });
+  });
+
+  it('at depth: a token, a token two groups beneath it and one between, from three replicas, all read', () => {
+    const { human, agent, base } = scene();
+    const [third] = replicas(1, human, agent);
+    setToken(human, 'color.branch', color('#112233'));
+    setToken(agent, 'color.branch.tint.light', color('#ddeeff'));
+    setToken(third!, 'color.branch.tint', color('#778899'));
+    sync(human, agent, third!);
+    for (const doc of [human, agent, third!]) {
+      const read = tokensOf(doc);
+      expect(read.problems).toEqual([]);
+      expect(read.tokens!.tokens.get('color.branch.$root')).toEqual(color('#112233'));
+      expect(read.tokens!.tokens.get('color.branch.tint.$root')).toEqual(color('#778899'));
+      expect(read.tokens!.tokens.get('color.branch.tint.light')).toEqual(color('#ddeeff'));
+      const css = readFiles(doc)['tokens.css']!;
+      for (const line of ['--ds-color-branch: #112233', '--ds-color-branch-tint: #778899', '--ds-color-branch-tint-light: #ddeeff']) expect(css).toContain(line);
+    }
+    const sent = { 'tokens.tokens.json': tokensWith(base['tokens.tokens.json']!, { 'color.branch.tint': color('#000000') }) };
+    expect(publishSystem(agent, base, sent, false).conflicts).toEqual([{ path: 'tokens.tokens.json', detail: expect.stringContaining('color.branch.tint') }]);
+  });
+
+  it('a token where another replica made a group with its own properties: both read, the token as the group’s $root', () => {
+    const { human, agent, base } = scene();
+    setToken(human, 'color.branch', { $value: color('#112233').$value }); // its type inherited from `color`
+    const set = parseTokens(base['tokens.tokens.json']!).tokens!;
+    const sent = serializeTokens({
+      tokens: new Map(set.tokens).set('color.branch.light', { $value: color('#ddeeff').$value }),
+      groups: new Map(set.groups).set('color.branch', { $description: 'Branch tints' }),
+    });
+    expect(publishSystem(agent, base, { 'tokens.tokens.json': sent }, false).conflicts).toEqual([]);
+    sync(human, agent);
+    for (const doc of [human, agent]) {
+      const read = tokensOf(doc);
+      expect(read.problems).toEqual([]);
+      expect(read.tokens!.tokens.get('color.branch.$root')).toEqual({ $value: color('#112233').$value });
+      expect(read.tokens!.groups.get('color.branch')).toEqual({ $description: 'Branch tints' });
+      expect(read.tokens!.tokens.get('color.branch.light')).toEqual({ $value: color('#ddeeff').$value });
+    }
+  });
+
+  it('a token whose type a group made over it would change: the file view keeps the token’s value and type', () => {
+    const { human, agent, base } = scene();
+    setToken(human, 'color.branch', { $value: color('#112233').$value }); // a colour by inheritance from `color`
+    const set = parseTokens(base['tokens.tokens.json']!).tokens!;
+    const sent = serializeTokens({
+      tokens: new Map(set.tokens).set('color.branch.gap', { $value: { value: 4, unit: 'px' } }),
+      groups: new Map(set.groups).set('color.branch', { $type: 'dimension' }),
+    });
+    expect(publishSystem(agent, base, { 'tokens.tokens.json': sent }, false).conflicts).toEqual([]);
+    sync(human, agent);
+    for (const doc of [human, agent]) {
+      const read = tokensOf(doc);
+      expect(read.problems).toEqual([]);
+      expect(read.tokens!.tokens.get('color.branch.gap')).toEqual({ $value: { value: 4, unit: 'px' } });
+      expect(read.tokens!.tokens.get('color.branch.$root')).toEqual({ $type: 'color', $value: color('#112233').$value }); // the type it inherited, written on it
+      expect(read.tokens!.tokens.get('color.branch.gap')).toEqual({ $value: { value: 4, unit: 'px' } });
+      expect(readFiles(doc)['tokens.css']).toContain('--ds-color-branch: #112233');
+      expect(readFiles(doc)['tokens.css']).toContain('--ds-color-branch-gap: 4px');
+    }
+    // The agent's read, sent back, is no change; a change to that token from it lands with no conflict.
+    const reread = readFiles(agent);
+    expect(publishSystem(agent, reread, { 'tokens.tokens.json': reread['tokens.tokens.json']! }, false)).toEqual({ changed: [], conflicts: [] });
+    const recolour = tokensWith(reread['tokens.tokens.json']!, { 'color.branch.$root': color('#445566') });
+    expect(publishSystem(agent, reread, { 'tokens.tokens.json': recolour }, false)).toEqual({ changed: ['tokens.tokens.json'], conflicts: [] });
+    expect(tokensOf(agent).tokens!.tokens.get('color.branch.$root')).toEqual(color('#445566'));
+  });
+
+  it('a group with its own type published over a live token the agent never read: merged, the token keeping its type', () => {
+    const { human, agent, base } = scene();
+    setToken(human, 'color.branch', { $value: color('#112233').$value });
+    sync(human, agent);
+    const set = parseTokens(base['tokens.tokens.json']!).tokens!;
+    const sent = serializeTokens({
+      tokens: new Map(set.tokens).set('color.branch.gap', { $value: { value: 4, unit: 'px' } }),
+      groups: new Map(set.groups).set('color.branch', { $type: 'dimension' }),
+    });
+    expect(publishSystem(agent, base, { 'tokens.tokens.json': sent }, false)).toEqual({ changed: ['tokens.tokens.json'], conflicts: [] });
+    sync(human, agent);
+    const read = tokensOf(human);
+    expect(read.problems).toEqual([]);
+    expect(read.tokens!.tokens.get('color.branch.$root')).toEqual({ $type: 'color', $value: color('#112233').$value });
+    expect(validateTokenFile(readFiles(human)['tokens.tokens.json']).problems).toEqual([]);
+  });
+
+  it('`x` and `x.$root` both stored, with something beneath: one token read, and an agent change to it conflicts', () => {
+    const { human, agent, base } = scene();
+    setToken(human, 'color.branch.$root', color('#112233'));
+    setToken(agent, 'color.branch', color('#445566'));
+    const [third] = replicas(1, human, agent);
+    setToken(third!, 'color.branch.light', color('#ddeeff'));
+    sync(human, agent, third!);
+    for (const doc of [human, agent]) {
+      const read = tokensOf(doc);
+      expect(read.problems).toEqual([]);
+      expect(read.tokens!.tokens.get('color.branch.$root')).toEqual(color('#112233'));
+      expect(read.tokens!.tokens.get('color.branch.light')).toEqual(color('#ddeeff'));
+    }
+    const sent = { 'tokens.tokens.json': tokensWith(base['tokens.tokens.json']!, { 'color.branch': color('#000000') }) };
+    expect(publishSystem(agent, base, sent, false).conflicts).toEqual([{ path: 'tokens.tokens.json', detail: expect.stringContaining('color.branch') }]);
+    const reread = readFiles(agent);
+    expect(publishSystem(agent, reread, { 'tokens.tokens.json': tokensWith(reread['tokens.tokens.json']!, { 'color.branch.$root': color('#000000') }) }, false).conflicts).toEqual([
+      { path: 'tokens.tokens.json', detail: expect.stringContaining('color.branch') },
+    ]);
+  });
+});

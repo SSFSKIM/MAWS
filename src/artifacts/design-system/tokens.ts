@@ -74,6 +74,33 @@ function badName(name: string): string | null {
 }
 
 /**
+ * The `$type` a token at `path` inherits: that of the closest group above it with one. A group's type after extension
+ * (§6.7.3) is its own `$type`, else what the nearest extending group (itself or an ancestor) inherits at its place from
+ * the group it extends. resolve.ts's merged groups give the same answer.
+ */
+export function inheritedType(groups: ReadonlyMap<string, GroupProps>, path: string): TokenType | undefined {
+  const ownType = (group: string, seen: Set<string>): TokenType | undefined => {
+    if (seen.has(group)) return undefined; // a cycle; resolve.ts reports it
+    seen.add(group);
+    const own = groups.get(group)?.$type;
+    if (own) return own;
+    for (let at = group; ; at = parentPath(at)) {
+      const ref = groups.get(at)?.$extends;
+      if (ref) {
+        const rel = group.slice(at.length).replace(/^\./, '');
+        const counterpart = [aliasPath(ref), rel].filter(Boolean).join('.');
+        return groups.has(counterpart) ? ownType(counterpart, seen) : undefined;
+      }
+      if (at === '') return undefined;
+    }
+  };
+  for (let at = parentPath(path); ; at = parentPath(at)) {
+    const type = ownType(at, new Set());
+    if (type || at === '') return type;
+  }
+}
+
+/**
  * Reads a token file (JSON text or parsed JSON). `tokens` is null only when the input is not a JSON object; otherwise
  * it holds every token and group that read cleanly, and `problems` names the rest.
  */
@@ -224,31 +251,7 @@ export function parseTokens(input: unknown): { tokens: TokenSet | null; problems
   };
   readGroup('', root);
 
-  // A group's own type after extension (§6.7.3): its $type, else what the nearest extending group (itself or an
-  // ancestor) inherits at its place from the group it extends. resolve.ts's merged groups give the same answer.
-  const ownType = (path: string, seen: Set<string>): TokenType | undefined => {
-    if (seen.has(path)) return undefined; // a cycle; resolve.ts reports it
-    seen.add(path);
-    const own = groups.get(path)?.$type;
-    if (own) return own;
-    for (let at = path; ; at = parentPath(at)) {
-      const ref = groups.get(at)?.$extends;
-      if (ref) {
-        const rel = path.slice(at.length).replace(/^\./, '');
-        const counterpart = [aliasPath(ref), rel].filter(Boolean).join('.');
-        return groups.has(counterpart) ? ownType(counterpart, seen) : undefined;
-      }
-      if (at === '') return undefined;
-    }
-  };
-  // A token's inherited type: the closest group above it with one.
-  const groupType = (path: string): TokenType | undefined => {
-    for (let at = path; ; at = parentPath(at)) {
-      const type = ownType(at, new Set());
-      if (type || at === '') return type;
-    }
-  };
-  for (const [path, node] of pending) readToken(path, node, groupType(parentPath(path)));
+  for (const [path, node] of pending) readToken(path, node, inheritedType(groups, path));
   return { tokens: { tokens, groups }, problems };
 }
 
