@@ -64,6 +64,15 @@ describe('send_file over the artifact store: replays and failures', () => {
     expect(await sendFileTool(w.deps()).call({ files: ['one.txt'] }, ctx)).toEqual(first);
   });
 
+  it('answers two overlapping deliveries with one tool-use id alike, with one artifact and one X12 record per file', async () => {
+    const tool = sendFileTool(w.deps());
+    const ctx = w.ctx({ toolUseId: 'toolu_overlap' as ToolUseId });
+    const [first, second] = await Promise.all([tool.call({ files: ['one.txt'] }, ctx), tool.call({ files: ['one.txt'] }, { ...ctx, requestId: w.ctx().requestId })]);
+    expect(second).toEqual(first);
+    expect(w.store.list({ kind: 'file' })).toHaveLength(1);
+    expect(w.written).toHaveLength(1);
+  });
+
   it('a delivery whose second file fails leaves no artifact and no op, and its retry delivers each file once', async () => {
     const original = w.store.create.bind(w.store);
     const createAll = w.store.createAll?.bind(w.store);

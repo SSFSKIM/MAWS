@@ -30,7 +30,7 @@ const PAGE = 'index.html';
 export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
   const mirror = new X12Mirror(deps);
   return defineMawsTool(TOOL, (args, ctx) =>
-    answering(TOOL, async () => {
+    deps.session.joined(opIdOf(ctx), () => answering(TOOL, async () => {
       const parsed = parseToolArguments(TOOL, args);
       if (!parsed.ok) return toolError(parsed.error);
       const input = parsed.data;
@@ -48,7 +48,7 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (artifact.kind === 'document') throw refuse(TOOL, { reason: 'invalid', kind: 'document' }, 'a document is edited block by block, not published');
       const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx) : await mirrored(store, mirror, await publishPage(deps, store, artifact, input, ctx), input, ctx, true);
       return toolText(result);
-    }),
+    })),
   );
 }
 
@@ -116,10 +116,10 @@ async function mirrored(store: ArtifactStore, mirror: X12Mirror, recorded: Artif
   const owner = await creatorOf(store, recorded.artifactId);
   const artifact = await store.readCommitted(() => store.get(recorded.artifactId, { includeDeleted: true }));
   if (owner === null || !artifact) return recorded;
-  let version = await mirror.versionOf(artifact.id, owner, ctx.toolUseId); // a repeated call's, already written
+  let version = await mirror.versionOf(artifact.id, owner, ctx.appSessionId, ctx.toolUseId); // a repeated call's, already written
   if (version === null && fresh) {
     const { path } = await store.readCommitted(() => store.contentRef(artifact.id, recorded.revision));
-    version = await mirror.pageVersion(artifact.id, owner, artifact.title, path, ctx.toolUseId);
+    version = await mirror.pageVersion(artifact.id, owner, ctx.appSessionId, artifact.title, path, ctx.toolUseId);
   }
   if (version === null) return recorded;
   const text = input.files[Object.keys(input.files)[0]!] ?? '';

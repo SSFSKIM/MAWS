@@ -891,8 +891,10 @@ export class ArtifactStore {
 
   // The governing system's guide (M6's `artifact_create`), from D's provider; null without one. `target` is an artifact,
   // or where a new one will be placed (no system or Space of its own: the owner's default governs). The system is chosen
-  // behind the read barrier and the provider's answer is held the same way (Decision Log 33), so no answer reveals
-  // defaults or a system a batch may still take back.
+  // behind the read barrier, and so is the provider's answer (Decision Log 33): what the provider reads before its first
+  // suspension is held until the batch open at the end of that synchronous part commits, and a batch lost during it
+  // (opened and taken back before the provider suspended) fails the answer rather than reveal what it read. Reads a
+  // provider makes after a suspension are outside this boundary and need their own committed reads (`readCommitted`).
   async designSystemContextFor(target: string | { designSystemId?: string | null; spaceId?: string | null }): Promise<string | null> {
     const system = await this.readCommitted(() => {
       const placement = typeof target === 'string' ? this.entity(target) : { designSystemId: target.designSystemId ?? null, spaceId: target.spaceId ?? null };
@@ -900,8 +902,15 @@ export class ArtifactStore {
       return systemId ? this.get(systemId) : null;
     });
     if (!system || !this.designSystemContext) return null;
-    const context = await this.designSystemContext(system);
-    return this.readCommitted(() => context);
+    const lost = this.service.stats.lostBatches;
+    const answering = this.designSystemContext(system);
+    const barrier = this.storage.batchOpen ? this.service.whenCommitted() : null; // the batch its first reads saw
+    barrier?.catch(() => {}); // awaited below, after the provider's own answer
+    const lostMeanwhile = this.service.stats.lostBatches !== lost;
+    const context = await answering;
+    if (barrier) await barrier;
+    if (lostMeanwhile) throw new Error('a batch the design system’s context was read from was lost; ask again');
+    return context;
   }
 
   close(): void {

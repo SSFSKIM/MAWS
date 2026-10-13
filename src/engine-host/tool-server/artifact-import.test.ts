@@ -72,6 +72,14 @@ describe('a pre-P3 X12 record a tool names', () => {
     expect(jsonOf(await artifactReadTool(w.deps()).call({ artifact: 'dash' }, w.ctx()))).toMatchObject({ artifactId: mine.artifactId });
   });
 
+  it('imports a pre-P3 screenshot record named by its id as a file artifact', async () => {
+    const path = join(w.cwd, 'screenshot.png');
+    writeFileSync(path, Buffer.from([137, 80, 78, 71]));
+    await w.deliverables.write({ id: RECORD, appSessionId: SELF, kind: 'screenshot', path, title: 'Screenshot', versions: [{ path, at: '2026-10-01T00:00:00.000Z' }], createdAt: '2026-10-01T00:00:00.000Z' });
+    expect(jsonOf(await artifactReadTool(w.deps()).call({ artifact: RECORD }, w.ctx()))).toMatchObject({ artifactId: RECORD, kind: 'file', file: { path, size: 4, exists: true } });
+    expect(w.store.get(RECORD)).toMatchObject({ kind: 'file', title: 'Screenshot', linkedPath: path });
+  });
+
   it('keeps E2’s refusal of a create whose handle a record of the session or above it holds; a record outside the lineage is not found', async () => {
     await pre(SELF, ['<p>v1</p>']);
     expect(textOf(await artifactCreateTool(w.deps()).call({ handle: 'dash', content: '<p/>', title: 'Again' }, w.ctx()))).toBe(TOOL_ERRORS.artifactExists('dash'));

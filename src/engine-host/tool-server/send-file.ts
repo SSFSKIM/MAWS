@@ -12,7 +12,7 @@ import type { DeliverableRecord } from '@shared/maws/deliverable';
 import { parseToolArguments, TOOL_ERRORS, type SendFileResult } from '@shared/maws/tools';
 import type { DeliverableWriter } from '../deliverables/store';
 import type { ArtifactStore } from '../documents/store';
-import { actorOf, opIdOf } from './artifact-context';
+import { actorOf, ArtifactSession, opIdOf } from './artifact-context';
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
 import { X12Mirror } from './x12-mirror';
 
@@ -22,11 +22,13 @@ interface SendFileDeps {
   log?: (line: string) => void;
   now?: () => Date;
   newId?: () => string;
+  session?: ArtifactSession; // overlapping calls with one tool-use id answer one response
 }
 
 export function sendFileTool(deps: SendFileDeps): McpToolDefinition {
   const mirror = new X12Mirror(deps);
-  return defineMawsTool('send_file', async (args, ctx) => {
+  return defineMawsTool('send_file', (args, ctx) => (deps.session ?? SOLO).joined(opIdOf(ctx), () => deliver(args, ctx)));
+  async function deliver(args: unknown, ctx: McpToolContext): Promise<McpToolResult> {
     const parsed = parseToolArguments('send_file', args);
     if (!parsed.ok) return toolError(parsed.error);
     const { files, caption } = parsed.data; // `urgency` is the row's (its event carries it), not the record's
@@ -63,8 +65,10 @@ export function sendFileTool(deps: SendFileDeps): McpToolDefinition {
     );
     await mirrorMissing(deps, mirror, result, ctx, caption);
     return toolText(result);
-  });
+  }
 }
+
+const SOLO = new ArtifactSession(); // a send_file built without a session (tests): its calls join here
 
 // The delivered files' X12 records (Decision Log 4), each written unless it is there already.
 async function mirrorMissing(deps: SendFileDeps, mirror: X12Mirror, answer: SendFileResult, ctx: McpToolContext, caption: string | undefined): Promise<void> {

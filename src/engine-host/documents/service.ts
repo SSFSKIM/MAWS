@@ -147,6 +147,7 @@ export interface ServiceStats {
   commits: number;
   rejections: number;
   rejected: { reason: string; conn: number }[]; // the latest REJECTIONS_KEPT
+  lostBatches: number; // batches taken back whole (a failed commit, a savepoint that could not be undone)
 }
 
 export interface ServiceOptions {
@@ -165,7 +166,7 @@ const LOAD = Symbol('load'); // the origin of a load's applies, which are alread
 const MIRROR = Symbol('mirror'); // the origin of the live doc's updates applied to a host replica
 
 export class DocumentService {
-  readonly stats: ServiceStats = { framesIn: 0, contentFramesIn: 0, rowsAppended: 0, commits: 0, rejections: 0, rejected: [] };
+  readonly stats: ServiceStats = { framesIn: 0, contentFramesIn: 0, rowsAppended: 0, commits: 0, rejections: 0, rejected: [], lostBatches: 0 };
   private readonly docs = new Map<string, HostDoc>();
   private readonly adapters = new Map<ArtifactKind, KindAdapter>();
   private readonly outbox: { conn: Connection; frame: Uint8Array }[] = [];
@@ -792,6 +793,7 @@ export class DocumentService {
   // The open batch is lost (its commit failed, or SQLite rolled it back under a frame): the live docs may hold content
   // the store does not, so drop them all, unsent, and close their connections; the storage forgets the batch.
   private batchFailed(reason: string): void {
+    this.stats.lostBatches += 1;
     this.log(`${reason}; dropping the open docs`);
     try {
       this.storage.rollback();

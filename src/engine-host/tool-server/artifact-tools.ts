@@ -87,7 +87,7 @@ export function artifactDescribeTypeTool(): McpToolDefinition {
 export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
   const mirror = new X12Mirror(deps);
   return defineMawsTool('artifact_create', (args, ctx) =>
-    answering('artifact_create', async () => {
+    deps.session.joined(opIdOf(ctx), () => answering('artifact_create', async () => {
       const parsed = parseToolArguments('artifact_create', args);
       if (!parsed.ok) return toolError(parsed.error);
       const input = parsed.data;
@@ -123,6 +123,10 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
         const source = resolve(ctx.cwd, path!);
         if (!(await stat(source).catch(() => null))?.isFile()) return toolError(TOOL_ERRORS.artifactNotAFile('artifact_create', source));
         content = { path: source };
+      } else if (kind === 'document' && input.content !== undefined) {
+        // a document's markdown content is P3-B's document create (ledger X25), served by B's wrapper; this build's
+        // generic create would lose it
+        return toolError(TOOL_ERRORS.refused('artifact_create', { reason: 'invalid', kind: 'document' }, "a document's markdown content is read by P3-B's document create, which this build does not have; create it empty"));
       } else if (input.files) {
         // a dry run on an empty doc: files the kind cannot hold are refused before the artifact exists
         withDoc(null, (scratch) => publisherOf(store, kind)(scratch, {}, input.files!, false));
@@ -180,7 +184,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (page !== null) deps.session.byteBases.set(recorded.artifactId, { revision: recorded.revision, sha256: createHash('sha256').update(page.bytes).digest('hex') });
       if (fresh) await ensureMirrored(store, deps, mirror, recorded, ctx, page?.sourcePath);
       return toolText(recorded);
-    }),
+    })),
   );
 }
 
