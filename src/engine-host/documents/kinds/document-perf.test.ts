@@ -67,6 +67,31 @@ describe('the seam’s commands', () => {
     expect(released).toMatchObject({ ok: true });
   });
 
+  // M9's review: a call that blocks the loop at once (before any timer of the sampler fired) is still measured.
+  it('measures a call’s synchronous work from its first moment', async () => {
+    const blocking = { call: async () => {
+      const until = performance.now() + 80;
+      while (performance.now() < until); // the loop held 80 ms before the call's first await
+      return { content: [{ type: 'text' as const, text: '{"revision":1}' }] };
+    } };
+    const seam = new DocumentPerfSeam(world.store, { tools: () => ({ artifact_read: blocking, artifact_edit: blocking }) as never });
+    const answer = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_read', args: {} })) as CallAnswer;
+    expect(answer.loop.max).toBeGreaterThanOrEqual(70);
+    seam.close();
+  });
+
+  it('answers the loop’s longest gap over a run since its reset', async () => {
+    const seam = new DocumentPerfSeam(world.store);
+    await seam.run({ cmd: 'loop', reset: true });
+    await settle();
+    const until = performance.now() + 60;
+    while (performance.now() < until); // a block between two commands
+    await settle();
+    const answer = (await seam.run({ cmd: 'loop' })) as { ok: true; loop: { max: number } };
+    expect(answer.loop.max).toBeGreaterThanOrEqual(50);
+    seam.close();
+  });
+
   it('answers a refusal as the tool’s error text, not a seam failure', async () => {
     const id = await emptyDocument();
     const seam = new DocumentPerfSeam(world.store);

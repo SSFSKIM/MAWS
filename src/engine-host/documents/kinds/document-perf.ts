@@ -5,8 +5,8 @@
 // with that session as the context (the read warms the session's replica and records its view; a batch is planned and
 // written by the patch writer through A's `writeAs`, its op recorded, its presence published), so what is measured is
 // the path an agent's `artifact_edit` takes in the host, less the engine's wire. The host's own event-loop delay is
-// sampled around each call (a histogram of this seam's, reset before the call and read once the loop has turned after
-// it): the longest the call kept the loop. A's `artifacts.testLoopDelay` stays the run-wide measure.
+// sampled around each call (a histogram of this seam's, running all along, reset before the call and read once the loop
+// has turned after it): the longest the call kept the loop, its first synchronous stretch included. A's `artifacts.testLoopDelay` stays the run-wide measure.
 //
 // Commands arrive as JSON files in `<dir>/in` (written beside and renamed in, so a file is whole when seen) and run one
 // at a time in name order; each answer is written to `<dir>/out` under the command's name (again by rename). No IPC
@@ -17,9 +17,9 @@
 //                                                  stands for the revision the session last saw (its read or its batch)
 //   heap     {}                                    the heap after two collections
 //   release  {session}                             the session's replicas closed (its end)
+//   loop     {reset?}                              the loop's gaps since the last reset (a run-wide measure beside A's)
 import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, watch, writeFileSync, type FSWatcher } from 'node:fs';
 import { join } from 'node:path';
-import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { setFlagsFromString } from 'node:v8';
 import { runInNewContext } from 'node:vm';
 import { TABS } from '@artifacts/document/tabs';
@@ -31,13 +31,49 @@ import type { McpToolDefinition } from '../../tool-server/server';
 import type { ArtifactStore } from '../store';
 
 const HUMAN: Actor = { kind: 'human' };
-const LOOP_RESOLUTION_MS = 1;
+const LOOP_TICK_MS = 1;
+
+/**
+ * The host loop's occupancy, sampled by a 1 ms interval timer reading `performance.now()`: each gap between two ticks is
+ * how long the loop could not run a timer. M9's review found `monitorEventLoopDelay` missing a block that starts in the
+ * same pass of the loop as its own sampling timer (an 80 ms synchronous call read as 1.3 ms), so the gaps are measured
+ * here directly; a gap includes the tick itself (about 1 to 1.5 ms when idle).
+ */
+class LoopSampler {
+  private last = performance.now();
+  private gaps: number[] = [];
+  private readonly timer = setInterval(() => {
+    const now = performance.now();
+    this.gaps.push(now - this.last);
+    this.last = now;
+  }, LOOP_TICK_MS);
+
+  constructor() {
+    this.timer.unref();
+  }
+
+  reset(): void {
+    this.gaps = [];
+    this.last = performance.now();
+  }
+
+  stats(): LoopStats {
+    if (this.gaps.length === 0) return { max: 0, p99: 0, mean: 0 };
+    const sorted = [...this.gaps].sort((a, b) => a - b);
+    return { max: sorted[sorted.length - 1]!, p99: sorted[Math.min(sorted.length - 1, Math.ceil(0.99 * sorted.length) - 1)]!, mean: sorted.reduce((sum, gap) => sum + gap, 0) / sorted.length };
+  }
+
+  close(): void {
+    clearInterval(this.timer);
+  }
+}
 
 export type PerfCommand =
   | { cmd: 'seed'; artifactId: string; state: string }
   | { cmd: 'call'; session: string; tool: 'artifact_read' | 'artifact_edit'; args: Record<string, unknown> }
   | { cmd: 'heap' }
-  | { cmd: 'release'; session: string };
+  | { cmd: 'release'; session: string }
+  | { cmd: 'loop'; reset?: boolean };
 
 export interface LoopStats {
   max: number;
@@ -60,6 +96,7 @@ export type PerfAnswer =
   | { ok: true; revision: number }
   | CallAnswer
   | { ok: true; heapUsed: number; rss: number; collected: boolean }
+  | { ok: true; loop: LoopStats }
   | { ok: true };
 
 export const documentPerfSeamRequested = (env: Record<string, string | undefined>): boolean => env.MAWS_E2E === '1' && env.MAWS_DOCUMENT_PERF === '1';
@@ -74,10 +111,14 @@ const turned = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve
 
 export class DocumentPerfSeam {
   private readonly sessions = new Map<string, PerfSession>();
-  private readonly loop = monitorEventLoopDelay({ resolution: LOOP_RESOLUTION_MS });
+  private readonly loop = new LoopSampler();
+  private readonly runLoop = new LoopSampler(); // the `loop` command's, over a whole run
   private gc: (() => void) | null = null;
 
-  constructor(private readonly store: ArtifactStore) {}
+  constructor(
+    private readonly store: ArtifactStore,
+    private readonly options: { tools?: (deps: { artifacts: () => ArtifactStore; session: DocumentToolSession }) => PerfSession['tools'] } = {},
+  ) {}
 
   async run(command: PerfCommand): Promise<PerfAnswer> {
     try {
@@ -88,6 +129,11 @@ export class DocumentPerfSeam {
           return await this.call(command.session, command.tool, command.args);
         case 'heap':
           return this.heap();
+        case 'loop': {
+          const stats = this.runLoop.stats();
+          if (command.reset) this.runLoop.reset();
+          return { ok: true, loop: stats };
+        }
         case 'release':
           this.store.service.closeSession(command.session as AppSessionId);
           this.sessions.delete(command.session);
@@ -101,7 +147,8 @@ export class DocumentPerfSeam {
   }
 
   close(): void {
-    this.loop.disable();
+    this.loop.close();
+    this.runLoop.close();
   }
 
   // The tabs a document has (the host's first tab) removed and the seed's applied, in one write as the human.
@@ -118,7 +165,7 @@ export class DocumentPerfSeam {
     let session = this.sessions.get(name);
     if (!session) {
       const deps = { artifacts: () => this.store, session: new DocumentToolSession() };
-      session = { tools: { artifact_read: documentReadTool(deps), artifact_edit: artifactEditTool(deps) }, calls: 0, lastRevision: 0 };
+      session = { tools: this.options.tools?.(deps) ?? { artifact_read: documentReadTool(deps), artifact_edit: artifactEditTool(deps) }, calls: 0, lastRevision: 0 };
       this.sessions.set(name, session);
     }
     return session;
@@ -131,16 +178,15 @@ export class DocumentPerfSeam {
     const input = args.baseRevision === 'last' ? { ...args, baseRevision: session.lastRevision } : args;
     session.calls += 1;
     const ctx = { appSessionId: name as AppSessionId, cwd: '/', toolUseId: `toolu_perf_${name}_${session.calls}` as ToolUseId, requestId: `perf-${name}-${session.calls}` as RequestId, signal: new AbortController().signal };
-    await turned(0); // the command's own parsing is not the call's
+    // the sampler runs all along, so a call blocking the loop at once is caught by the gap it leaves; the gaps before
+    // the call, the command's own parsing among them, are dropped by the reset
+    await turned(LOOP_TICK_MS * 3);
     this.loop.reset();
-    this.loop.enable();
     const started = performance.now();
     const result = await definition.call(input, ctx);
     const wallMs = performance.now() - started;
-    await turned(LOOP_RESOLUTION_MS * 5); // a delay the call caused is sampled once the loop turns after it
-    this.loop.disable();
-    const ms = (ns: number) => ns / 1e6;
-    const loop = this.loop.count === 0 ? { max: 0, p99: 0, mean: 0 } : { max: ms(this.loop.max), p99: ms(this.loop.percentile(99)), mean: ms(this.loop.mean) };
+    await turned(LOOP_TICK_MS * 5); // the gap the call left closes once the loop turns after it
+    const loop = this.loop.stats();
     const text = result.content[0]?.type === 'text' ? result.content[0].text : '';
     const isError = result.isError === true;
     let parsed: unknown;
