@@ -77,9 +77,11 @@ describe('importHtml', () => {
 
   it('reads the Markdown and HTML exports of the every-kind fixture to the same content', async () => {
     const source = everyKindSource();
-    const fromHtml = await importHtml(await exportHtml(source, { tab: 'tab-2', images: 'reference' }));
-    const fromMarkdown = importMarkdown(exportMarkdown(source, { tab: 'tab-2' }));
-    expect(comparable(fromHtml)).toEqual(comparable(fromMarkdown));
-    expect(fromHtml.textContent).toContain('안녕하세요, 팀 여러분.');
+    for (const tab of ['tab-1', 'tab-2']) {
+      const fromHtml = await importHtml(await exportHtml(source, { tab, images: 'reference' }));
+      const fromMarkdown = importMarkdown(exportMarkdown(source, { tab }));
+      expect(comparable(fromHtml)).toEqual(comparable(fromMarkdown));
+    }
+    expect((await importHtml(await exportHtml(source, { tab: 'tab-2' }))).textContent).toContain('안녕하세요, 팀 여러분.');
   });
 });
