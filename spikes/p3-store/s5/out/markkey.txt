@@ -1,0 +1,8 @@
+same threadId, schema 1: comment--MFSnIQ==
+same threadId, orphan:true: comment--MFSnIA==
+same threadId, schema 2 (an added attribute with a default): comment--27x4kg==
+bind schema-2 editor to a schema-1 doc: 1 write(s) on bind; editor marks [{"threadId":"t1","orphan":false,"kind":"note"}]; Y keys after bind ["comment--27x4kg=="]
+an old-schema editor on the re-keyed doc: 1 write(s) on bind; Y keys ["comment--MFSnIQ=="] (two versions would re-key each other)
+type inside the old mark: 1 write(s); Y keys now []
+Y delta: [{"type":"insert","insert":"one "},{"type":"insert","insert":"tXwo","format":{"comment--27x4kg==":{"threadId":"t1","orphan":false,"kind":"note"}}},{"type":"insert","insert":" three"}]
+editor: 1 comment mark instance(s) across text nodes [["one ",0],["tXwo",1],[" three",0]]

@@ -1,0 +1,304 @@
+{
+  "checks": [
+    {
+      "name": "@y/prosemirror 2 reads the model's <doc> for <p> into a valid slide-text document",
+      "pass": true,
+      "detail": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "p",
+            "content": [
+              {
+                "type": "text",
+                "text": "Plain "
+              },
+              {
+                "type": "text",
+                "marks": [
+                  {
+                    "type": "b"
+                  }
+                ],
+                "text": "bold "
+              },
+              {
+                "type": "text",
+                "marks": [
+                  {
+                    "type": "b"
+                  },
+                  {
+                    "type": "i"
+                  }
+                ],
+                "text": "both"
+              },
+              {
+                "type": "text",
+                "text": " "
+              },
+              {
+                "type": "text",
+                "marks": [
+                  {
+                    "type": "a",
+                    "attrs": {
+                      "href": "https://x.dev"
+                    }
+                  }
+                ],
+                "text": "link"
+              },
+              {
+                "type": "br"
+              },
+              {
+                "type": "text",
+                "marks": [
+                  {
+                    "type": "span",
+                    "attrs": {
+                      "color": "#cc0000"
+                    }
+                  }
+                ],
+                "text": "red"
+              },
+              {
+                "type": "text",
+                "text": " "
+              },
+              {
+                "type": "text",
+                "marks": [
+                  {
+                    "type": "u"
+                  }
+                ],
+                "text": "u"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "… and what pmnodeToDelta writes, the model reads back identically (<p>)",
+      "pass": true,
+      "detail": [
+        {
+          "type": "p",
+          "inline": [
+            {
+              "text": "Plain ",
+              "marks": {}
+            },
+            {
+              "text": "bold ",
+              "marks": {
+                "b": {}
+              }
+            },
+            {
+              "text": "both",
+              "marks": {
+                "b": {},
+                "i": {}
+              }
+            },
+            {
+              "text": " ",
+              "marks": {}
+            },
+            {
+              "text": "link",
+              "marks": {
+                "a": {
+                  "href": "https://x.dev"
+                }
+              }
+            },
+            {
+              "br": true
+            },
+            {
+              "text": "red",
+              "marks": {
+                "span": {
+                  "color": "#cc0000"
+                }
+              }
+            },
+            {
+              "text": " ",
+              "marks": {}
+            },
+            {
+              "text": "u",
+              "marks": {
+                "u": {}
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "@y/prosemirror 2 reads the model's <doc> for <ul> into a valid slide-text document",
+      "pass": true,
+      "detail": {
+        "type": "doc",
+        "content": [
+          {
+            "type": "li",
+            "content": [
+              {
+                "type": "text",
+                "text": "one"
+              }
+            ]
+          },
+          {
+            "type": "li",
+            "content": [
+              {
+                "type": "text",
+                "marks": [
+                  {
+                    "type": "b"
+                  }
+                ],
+                "text": "two"
+              },
+              {
+                "type": "text",
+                "text": " three"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "… and what pmnodeToDelta writes, the model reads back identically (<ul>)",
+      "pass": true,
+      "detail": [
+        {
+          "type": "li",
+          "inline": [
+            {
+              "text": "one",
+              "marks": {}
+            }
+          ]
+        },
+        {
+          "type": "li",
+          "inline": [
+            {
+              "text": "two",
+              "marks": {
+                "b": {}
+              }
+            },
+            {
+              "text": " three",
+              "marks": {}
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "the bound editor holds exactly the document @y/prosemirror reads from the model",
+      "pass": true,
+      "detail": "<p>Plain <b>bold <i>both</i></b> <a href=\"https://x.dev\">link</a><br><span style=\"color: #cc0000;\">red</span> <u>u</u></p>"
+    },
+    {
+      "name": "binding wrote nothing to the model on bind (no normalization update)",
+      "pass": true,
+      "detail": 0
+    },
+    {
+      "name": "a Tiptap edit on replica B reaches replica A through the model's reader",
+      "pass": true,
+      "detail": {
+        "text": "Very Plain ",
+        "marks": {}
+      }
+    },
+    {
+      "name": "… with the marks and the <br> intact",
+      "pass": true,
+      "detail": [
+        {
+          "type": "p",
+          "inline": [
+            {
+              "text": "Very Plain ",
+              "marks": {}
+            },
+            {
+              "text": "bold ",
+              "marks": {
+                "b": {}
+              }
+            },
+            {
+              "text": "both",
+              "marks": {
+                "b": {},
+                "i": {}
+              }
+            },
+            {
+              "text": " ",
+              "marks": {}
+            },
+            {
+              "text": "link",
+              "marks": {
+                "a": {
+                  "href": "https://x.dev"
+                }
+              }
+            },
+            {
+              "br": true
+            },
+            {
+              "text": "red",
+              "marks": {
+                "span": {
+                  "color": "#cc0000"
+                }
+              }
+            },
+            {
+              "text": " ",
+              "marks": {}
+            },
+            {
+              "text": "u",
+              "marks": {
+                "u": {}
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "a model patch on A (agent publish) reaches B's editor",
+      "pass": true,
+      "detail": "<p>Very Plain <b>bold</b></p>"
+    },
+    {
+      "name": "the binding stored marks under their plain names (no name--<hash> keys, no y-attributed-*)",
+      "pass": true,
+      "detail": "{\"type\":\"delta\",\"name\":\"p\",\"children\":[{\"type\":\"insert\",\"insert\":\"Very Plain \"},{\"type\":\"insert\",\"insert\":\"bold\",\"format\":{\"b\":{}}}]}"
+    }
+  ],
+  "numbers": {}
+}

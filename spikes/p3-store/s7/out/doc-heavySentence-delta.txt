@@ -1,0 +1,8 @@
+# S7a doc-heavySentence-delta started 2026-10-13T03:18:49.682Z load 13.5 13.0 14.9 node v22.23.2
+month 1: {"live":1095090,"file":12877824,"versions":152,"log":{"rows":50429,"bytes":1715757},"prov":{"rows":10286,"bytes":885575},"load":69.1,"preview":811.1,"restore":169,"se":"8/8"}
+month 2: {"live":1396614,"file":21458944,"versions":178,"log":{"rows":50427,"bytes":1556925},"prov":{"rows":10314,"bytes":1334301},"load":89.3,"preview":982.5,"restore":352.1}
+month 3: {"live":1426478,"file":26546176,"versions":122,"log":{"rows":50428,"bytes":1627314},"prov":{"rows":246,"bytes":1288835},"load":92.5,"preview":875.2,"restore":221.8,"se":"9/9"}
+month 4: {"live":1456402,"file":36102144,"versions":205,"log":{"rows":50425,"bytes":1869686},"prov":{"rows":10366,"bytes":2205877},"load":106.2,"preview":1710.4,"restore":304.3}
+month 5: {"live":1406092,"file":43978752,"versions":229,"log":{"rows":50437,"bytes":1962604},"prov":{"rows":10387,"bytes":2645803},"load":111.3,"preview":1549.9,"restore":1198.1}
+month 6: {"live":1488474,"file":51773440,"versions":246,"log":{"rows":50410,"bytes":1919798},"prov":{"rows":10389,"bytes":3056796},"load":154.7,"preview":1656.7,"restore":651.6,"se":"8/8"}
+done in 315s; updates 1321122; counts {"keystrokes":1310000,"turns":5240,"batches":0,"comments":524,"named":79,"images":81,"restores":13}; maintenance {"median":141.9,"max":625.2,"steps":{"thin":484.9,"compactLog":15.1,"bucketProvenance":305.2,"gcRefs":11.7,"checkpoint":200.1}}

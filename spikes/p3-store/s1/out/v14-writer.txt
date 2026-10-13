@@ -1,0 +1,48 @@
+PASS no DOM in this process
+PASS markdown → PM → markdown identical up to table padding
+PASS canonical markdown is a fixed point
+PASS PM → Y → PM equal (pmnodeToDelta / ynodeToPmnode)
+PASS Y → markdown byte-identical to the canonical markdown
+top-level blocks: heading#b1 paragraph#b2 heading#b3 bulletList#b4 orderedList#b9 blockquote#be codeBlock#bg table#bh horizontalRule#bx paragraph#by
+PASS every block carries an id (tables to cell paragraphs)
+
+host after the agent's edits, as markdown:
+# Plan
+
+Opening paragraph with **bold**, *italic*, `code` and a [link](https://example.com).
+
+## Risks
+
+A new paragraph after **Risks**.
+
+- inserted item
+
+- first item
+- second item with **bold**
+
+1. one
+2. two
+
+> a quote
+
+```ts
+const x = 1
+```
+
+
+| Name  | Value |
+| ----- | ----- |
+| alpha | 1     |
+| beta  | 2     |
+
+
+---
+
+### Closing paragraph. It now has three short sentences.
+PASS multi-hunk text edit applied
+PASS word edit beside marks keeps the marks
+PASS section inserted after the heading
+PASS type change keeps the block id
+intro block as a v14 delta (the XmlText delta API is gone; text is inline in the YNode): {"type":"delta","name":"paragraph","attrs":{"id":{"type":"insert","value":"b2"}},"children":[{"type":"insert","insert":"Opening paragraph with "},{"type":"insert","insert":"bold","format":{"bold":{}}},{"type":"insert","insert":", "},{"type":"insert","insert":"italic","format":{"italic":{}}},{"type":"insert","insert":", "},{"type":"insert","insert":"code","format":{"code":{}}},{"type":"insert","ins
+
+10/10 checks passed; agent update sizes (V2 bytes): 82, 235, 157; round trip 39 ms

@@ -1,0 +1,67 @@
+| run | m | live V2 KB (fresh import) | size | db file MB | of it versions / head / provenance / log MB | versions kept | assets MB | load ms | preview ms | restore ms | Show editors |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| doc-normal-delta | 1 | 1017 (855) | 116k words | 3.37 | 1.28 / 1.00 / 0.42 / 0.64 | 82 | 7.90 | 72.2 | 558.2 | 380 | 8/8 |
+| doc-normal-delta | 2 | 1192 (904) | 124k words | 5.29 | 2.86 / 1.18 / 0.56 / 0.66 | 94 | 8.44 | 106.7 | 671 | 519.3 |  |
+| doc-normal-delta | 3 | 1264 (904) | 126k words | 5.55 | 3.21 / 1.24 / 0.41 / 0.66 | 86 | 9.10 | 92.5 | 820.6 | 485 | 11/11 |
+| doc-normal-delta | 4 | 1395 (942) | 133k words | 6.57 | 3.69 / 1.36 / 0.82 / 0.64 | 112 | 9.10 | 134.3 | 1219.7 | 893 |  |
+| doc-normal-delta | 5 | 1501 (977) | 139k words | 8.73 | 5.53 / 1.48 / 0.98 / 0.68 | 120 | 9.80 | 137.1 | 1030 | 573.6 |  |
+| doc-normal-delta | 6 | 1508 (960) | 136k words | 9.20 | 5.89 / 1.47 / 1.11 / 0.67 | 129 | 10.82 | 132.6 | 1078 | 779.1 (=v) | 9/9 |
+| doc-heavy-delta | 1 | 2635 (946) | 135k words | 19.63 | 10.82 / 2.55 / 2.45 / 3.76 | 156 | 9.00 | 412.5 | 3242.3 | 1365.3 | 9/9 |
+| doc-heavy-delta | 2 | 3058 (910) | 132k words | 31.63 | 21.04 / 3.01 / 4.04 / 3.46 | 170 | 11.70 | 598.6 | 4291.7 | 1010.3 |  |
+| doc-heavy-delta | 3 | 3106 (874) | 127k words | 39.23 | 28.00 / 3.05 / 4.59 / 3.50 | 121 | 13.91 | 533.5 | 5459.6 | 1348 | 9/9 |
+| doc-heavy-delta | 4 | 3591 (994) | 141k words | 53.49 | 38.96 / 3.55 / 7.02 / 3.83 | 209 | 17.31 | 643.5 | 6228.4 | 2357.5 |  |
+| doc-heavy-delta | 5 | 3514 (960) | 132k words | 66.20 | 49.61 / 3.42 / 8.53 / 4.48 | 228 | 20.09 | 688.3 | 5473.4 | 4337.5 |  |
+| doc-heavy-delta | 6 | 3924 (1042) | 144k words | 75.46 | 57.64 / 3.86 / 9.88 / 3.89 | 252 | 22.53 | 796.4 | 6839.7 | 3721.4 (=v) | 7/7 |
+| doc-heavySentence-delta | 1 | 1069 (802) | 114k words | 12.28 | 6.81 / 1.05 / 1.48 / 2.89 | 152 | 10.22 | 69.1 | 811.1 | 169 | 8/8 |
+| doc-heavySentence-delta | 2 | 1364 (954) | 138k words | 20.46 | 14.39 / 1.34 / 1.93 / 2.74 | 178 | 13.32 | 89.3 | 982.5 | 352.1 |  |
+| doc-heavySentence-delta | 3 | 1393 (927) | 132k words | 25.32 | 19.65 / 1.37 / 1.43 / 2.79 | 122 | 16.11 | 92.5 | 875.2 | 221.8 | 9/9 |
+| doc-heavySentence-delta | 4 | 1422 (875) | 123k words | 34.43 | 27.11 / 1.39 / 2.80 / 3.04 | 205 | 20.68 | 106.2 | 1710.4 | 304.3 |  |
+| doc-heavySentence-delta | 5 | 1373 (781) | 110k words | 41.94 | 34.08 / 1.35 / 3.24 / 3.14 | 229 | 23.08 | 111.3 | 1549.9 | 1198.1 |  |
+| doc-heavySentence-delta | 6 | 1454 (798) | 112k words | 49.38 | 41.14 / 1.42 / 3.60 / 3.08 | 246 | 25.38 | 154.7 | 1656.7 | 651.6 (=v) | 8/8 |
+| doc-normal-full | 1 | 1017 (855) | 116k words | 79.05 | 77.86 / 0.00 / 0.42 / 0.64 | 82 | 7.90 | 47.1 | 414.8 | 317.3 | 8/8 |
+| doc-normal-full | 2 | 1192 (904) | 124k words | 106.02 | 104.64 / 0.00 / 0.56 / 0.66 | 94 | 8.44 | 84.9 | 1060.4 | 337.4 |  |
+| doc-normal-full | 3 | 1264 (904) | 126k words | 102.61 | 101.39 / 0.00 / 0.41 / 0.66 | 86 | 9.10 | 86.7 | 899.2 | 468.1 | 11/11 |
+| doc-normal-full | 4 | 1395 (942) | 133k words | 144.04 | 142.36 / 0.00 / 0.82 / 0.64 | 112 | 9.10 | 93.8 | 865 | 451.7 |  |
+| doc-normal-full | 5 | 1501 (977) | 139k words | 164.36 | 162.45 / 0.00 / 0.98 / 0.68 | 120 | 9.80 | 105.3 | 840 | 401.8 |  |
+| doc-normal-full | 6 | 1508 (960) | 136k words | 177.50 | 175.45 / 0.00 / 1.11 / 0.67 | 129 | 10.82 | 109 | 889.5 | 365.2 (=v) | 9/9 |
+| doc-normal-delta-turnskept | 1 | 1017 (855) | 116k words | 3.58 | 1.49 / 1.00 / 0.42 / 0.64 | 319 | 7.90 | 66.7 | 458.5 | 303.2 |  |
+| doc-normal-delta-turnskept | 2 | 1192 (904) | 124k words | 5.79 | 3.36 / 1.18 / 0.56 / 0.66 | 605 | 8.64 | 82.2 | 597.8 | 385.7 |  |
+| doc-normal-delta-turnskept | 3 | 1264 (904) | 126k words | 6.35 | 4.01 / 1.24 / 0.41 / 0.66 | 842 | 9.29 | 91.8 | 689.5 | 364.9 |  |
+| doc-normal-delta-turnskept | 4 | 1395 (942) | 133k words | 7.66 | 4.79 / 1.36 / 0.82 / 0.64 | 1127 | 9.29 | 117.1 | 969.9 | 863.5 |  |
+| doc-normal-delta-turnskept | 5 | 1501 (977) | 139k words | 10.14 | 6.94 / 1.48 / 0.98 / 0.68 | 1396 | 9.99 | 135.5 | 976.1 | 872.7 |  |
+| doc-normal-delta-turnskept | 6 | 1508 (960) | 136k words | 10.91 | 7.59 / 1.47 / 1.11 / 0.67 | 1647 | 11.02 | 132.5 | 1141 | 763.1 (=v) |  |
+| deck-normal-delta | 1 | 245 (225) | 97 slides | 0.85 | 0.37 / 0.24 / 0.09 / 0.12 | 64 | 4.65 | 27.9 | 91.4 | 45.3 | 11/11 |
+| deck-normal-delta | 2 | 243 (208) | 92 slides | 1.25 | 0.72 / 0.23 / 0.14 / 0.13 | 77 | 4.59 | 28 | 101 | 59.8 |  |
+| deck-normal-delta | 3 | 232 (189) | 79 slides | 1.29 | 0.79 / 0.23 / 0.13 / 0.12 | 68 | 5.35 | 33.4 | 111.7 | 63.8 | 11/11 |
+| deck-normal-delta | 4 | 243 (190) | 80 slides | 1.49 | 0.88 / 0.25 / 0.22 / 0.11 | 89 | 6.65 | 36.9 | 160.3 | 97.5 |  |
+| deck-normal-delta | 5 | 267 (203) | 85 slides | 1.91 | 1.22 / 0.26 / 0.27 / 0.12 | 107 | 7.74 | 42.8 | 237.2 | 105.1 |  |
+| deck-normal-delta | 6 | 297 (224) | 91 slides | 2.10 | 1.32 / 0.29 / 0.30 / 0.13 | 114 | 8.18 | 40.9 | 188.1 | 103.2 (=v) | 11/11 |
+| deck-heavy-delta | 1 | 223 (171) | 79 slides | 2.81 | 1.61 / 0.22 / 0.35 / 0.60 | 148 | 8.91 | 34.4 | 234.1 | 66.6 | 11/11 |
+| deck-heavy-delta | 2 | 252 (186) | 79 slides | 4.27 | 2.88 / 0.25 / 0.55 / 0.55 | 152 | 13.49 | 32.2 | 219.8 | 66.3 |  |
+| deck-heavy-delta | 3 | 261 (189) | 82 slides | 5.16 | 3.80 / 0.27 / 0.53 / 0.51 | 120 | 18.57 | 33.9 | 251.2 | 75.1 | 6/6 |
+| deck-heavy-delta | 4 | 324 (234) | 94 slides | 7.15 | 5.30 / 0.32 / 0.88 / 0.59 | 201 | 25.34 | 33.8 | 339.4 | 99.2 |  |
+| deck-heavy-delta | 5 | 355 (245) | 102 slides | 8.93 | 6.87 / 0.34 / 1.05 / 0.59 | 214 | 30.07 | 60.8 | 413.8 | 159.4 |  |
+| deck-heavy-delta | 6 | 330 (204) | 88 slides | 10.27 | 8.07 / 0.32 / 1.20 / 0.59 | 232 | 35.07 | 39.5 | 422 | 140.9 (=v) | 6/6 |
+| deck-normal-full | 1 | 245 (225) | 97 slides | 14.82 | 14.56 / 0.00 / 0.09 / 0.12 | 64 | 4.65 | 24.4 | 110.7 | 45.6 | 11/11 |
+| deck-normal-full | 2 | 243 (208) | 92 slides | 18.05 | 17.73 / 0.00 / 0.14 / 0.13 | 77 | 4.59 | 28.7 | 169.3 | 108.8 |  |
+| deck-normal-full | 3 | 232 (189) | 79 slides | 15.77 | 15.47 / 0.00 / 0.13 / 0.12 | 68 | 5.35 | 29.2 | 116.2 | 65.2 | 11/11 |
+| deck-normal-full | 4 | 243 (190) | 80 slides | 21.64 | 21.25 / 0.00 / 0.22 / 0.11 | 89 | 6.65 | 27.7 | 139.8 | 76.3 |  |
+| deck-normal-full | 5 | 267 (203) | 85 slides | 26.92 | 26.45 / 0.00 / 0.27 / 0.12 | 107 | 7.74 | 67.8 | 165 | 87.9 |  |
+| deck-normal-full | 6 | 297 (224) | 91 slides | 30.91 | 30.38 / 0.00 / 0.30 / 0.13 | 114 | 8.18 | 43.1 | 166.4 | 96.2 (=v) | 11/11 |
+
+bench (6-month stores, medians; p90 in brackets)
+| store | load ms | preview ms (state / attributions / openDiff / render) | restore ms | Show editors: merge all provenance + per selection ms | load avg at start |
+|---|---|---|---|---|---|
+| doc-normal-delta | 177 [244.8] | 1127.7 [1644.7] (60.7 / 105.8 / 512.3 / 412.6) | 737.2 [960.8] | 210.3 + 20.6 | 16.7 14.2 14.8 |
+| doc-heavy-delta | 606.7 [693.8] | 9680.8 [10370.5] (337.8 / 1057.4 / 2504.1 / 3003.6) | 3242 [4111.8] | 3404.7 + 47.5 | 20.7 15.9 15.4 |
+| doc-heavySentence-delta | 133.7 [201.5] | 1604.8 [1895.1] (64.8 / 708.8 / 425.6 / 270.8) | 416.4 [566.1] | 1022.9 + 12.1 | 17.3 15.0 15.0 |
+| deck-normal-delta | 50.9 [107.9] | 187.4 [224.4] (23.7 / 25.9 / — / —) | 113.4 [123.5] | 44.5 | 18.3 15.0 15.1 |
+| deck-heavy-delta | 40.8 [102.3] | 353.1 [415.2] (24.4 / 121.6 / — / —) | 120.7 [168.9] | 230.2 | 18.9 15.2 15.1 |
+doc-normal-delta: maintenance median 40.8 ms, max 259.1 ms, step max {"thin":215.8,"compactLog":6.9,"bucketProvenance":56.2,"gcRefs":3.2,"checkpoint":16}; updates 395571; versions written 3564 (5.98 MB), head rewrites 309 (380.70 MB); sim 113s
+doc-heavy-delta: maintenance median 175 ms, max 1435.8 ms, step max {"thin":1270.7,"compactLog":33.5,"bucketProvenance":283.7,"gcRefs":2.3,"checkpoint":122.4}; updates 1321185; versions written 10202 (61.62 MB), head rewrites 1021 (3015.86 MB); sim 787s
+doc-heavySentence-delta: maintenance median 141.9 ms, max 625.2 ms, step max {"thin":484.9,"compactLog":15.1,"bucketProvenance":305.2,"gcRefs":11.7,"checkpoint":200.1}; updates 1321122; versions written 10232 (45.18 MB), head rewrites 1018 (1292.38 MB); sim 315s
+doc-normal-full: maintenance median 147 ms, max 400.5 ms, step max {"thin":18.8,"compactLog":8.3,"bucketProvenance":66,"gcRefs":1,"checkpoint":338.5}; updates 395571; versions written 3564 (4386.52 MB), head rewrites 0 (0.00 MB); sim 174s
+doc-normal-delta-turnskept: maintenance median 42.2 ms, max 83.4 ms, step max {"thin":10.3,"compactLog":7.8,"bucketProvenance":62.4,"gcRefs":6.5,"checkpoint":22}; updates 395571; versions written 3564 (5.98 MB), head rewrites 309 (380.70 MB); sim 101s
+deck-normal-delta: maintenance median 9.1 ms, max 63.2 ms, step max {"thin":54,"compactLog":1.8,"bucketProvenance":16.4,"gcRefs":0.6,"checkpoint":2.9}; updates 40957; versions written 2382 (1.32 MB), head rewrites 40 (9.60 MB); sim 43s
+deck-heavy-delta: maintenance median 33 ms, max 934.7 ms, step max {"thin":870.7,"compactLog":4.8,"bucketProvenance":52.4,"gcRefs":6.6,"checkpoint":11.7}; updates 157987; versions written 8572 (8.88 MB), head rewrites 153 (42.53 MB); sim 190s
+deck-normal-full: maintenance median 23.4 ms, max 114.9 ms, step max {"thin":12.5,"compactLog":8.5,"bucketProvenance":19.5,"gcRefs":2.4,"checkpoint":93.6}; updates 40957; versions written 2382 (571.66 MB), head rewrites 0 (0.00 MB); sim 60s

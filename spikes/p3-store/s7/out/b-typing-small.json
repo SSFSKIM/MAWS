@@ -1,0 +1,607 @@
+{
+  "electron": "44.4.5",
+  "loads": [
+    {
+      "at": "start",
+      "load": [
+        15.73,
+        15.89,
+        15.56
+      ]
+    },
+    {
+      "at": "typing quiet start",
+      "load": [
+        15.73,
+        15.89,
+        15.56
+      ]
+    },
+    {
+      "at": "typing quiet end",
+      "load": [
+        14.39,
+        15.6,
+        15.47
+      ]
+    },
+    {
+      "at": "typing agents start",
+      "load": [
+        13.56,
+        15.41,
+        15.4
+      ]
+    },
+    {
+      "at": "typing agents end",
+      "load": [
+        13.05,
+        15,
+        15.25
+      ]
+    }
+  ],
+  "doc": "seed-200p (160 sections)",
+  "pace": [
+    60,
+    180
+  ],
+  "mount": {
+    "A": {
+      "tMain": 1791862202095.5103,
+      "tPort": 1791862202096.1,
+      "tSynced": 1791862202131,
+      "step2ApplyMs": 13.899999856948853,
+      "step2Bytes": 134445,
+      "tEditorStart": 1791862202131.7,
+      "tEditorCreated": 1791862202153.3,
+      "tBound": 1791862202204.2,
+      "tPaint": 1791862202204.4,
+      "tPost": 1791862202223.4,
+      "childCount": 144,
+      "openToSyncedMs": 35.48974609375,
+      "syncedToBoundMs": 73.199951171875,
+      "openToPaintMs": 108.8896484375,
+      "openToPostPaintMs": 127.8896484375,
+      "editorConstructMs": 21.60009765625,
+      "bindMs": 50.89990234375,
+      "domNodes": 568,
+      "hostLoadMs": 14.302624999999978,
+      "attachMs": 14.802374999999984
+    },
+    "B": {
+      "tMain": 1791862202223.8042,
+      "tPort": 1791862202224.3,
+      "tSynced": 1791862202240.3,
+      "step2ApplyMs": 12.700000047683716,
+      "step2Bytes": 134445,
+      "tEditorStart": 1791862202241.2,
+      "tEditorCreated": 1791862202262.1,
+      "tBound": 1791862202312.5,
+      "tPaint": 1791862202312.6,
+      "tPost": 1791862202330.1,
+      "childCount": 144,
+      "openToSyncedMs": 16.495849609375,
+      "syncedToBoundMs": 72.199951171875,
+      "openToPaintMs": 88.7958984375,
+      "openToPostPaintMs": 106.2958984375,
+      "editorConstructMs": 20.900146484375,
+      "bindMs": 50.39990234375,
+      "domNodes": 568,
+      "hostLoadMs": 14.302624999999978,
+      "attachMs": 0.1160419999999931
+    }
+  },
+  "runs": {
+    "quiet": {
+      "load": [
+        [
+          15.73,
+          15.89,
+          15.56
+        ],
+        [
+          14.39,
+          15.6,
+          15.47
+        ]
+      ],
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 11,
+        "max": 28.7,
+        "n": 5745
+      },
+      "A": {
+        "keystrokes": 300,
+        "inputToTxMs": {
+          "n": 300,
+          "p50": 2,
+          "p95": 2.5,
+          "p99": 4.8,
+          "max": 6.9
+        },
+        "inputToFrameMs": {
+          "n": 300,
+          "p50": 2.1,
+          "p95": 2.6,
+          "p99": 5.4,
+          "max": 8.5
+        },
+        "inputToPostPaintMs": {
+          "n": 300,
+          "p50": 2.8,
+          "p95": 3.4,
+          "p99": 6.2,
+          "max": 9.3
+        },
+        "inputToAckMs": {
+          "n": 300,
+          "p50": 7,
+          "p95": 8.9,
+          "p99": 11.8,
+          "max": 14.6
+        },
+        "inputEventToFrameMs": {
+          "n": 300,
+          "p50": 1.5,
+          "p95": 1.9,
+          "p99": 4.9,
+          "max": 6.8
+        },
+        "inputEventToPostPaintMs": {
+          "n": 300,
+          "p50": 2.2,
+          "p95": 2.8,
+          "p99": 5.7,
+          "max": 7.6
+        },
+        "noTransaction": 0,
+        "over16msToFrame": 0,
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": 0
+        },
+        "eventTiming": {
+          "keydown": {
+            "reported": 300,
+            "durationMs": {
+              "n": 300,
+              "p50": 16,
+              "p95": 24,
+              "p99": 32,
+              "max": 32
+            },
+            "inputDelayMs": {
+              "n": 300,
+              "p50": 0.2,
+              "p95": 0.3,
+              "p99": 0.4,
+              "max": 0.9
+            }
+          },
+          "input": {
+            "reported": 300,
+            "durationMs": {
+              "n": 300,
+              "p50": 16,
+              "p95": 24,
+              "p99": 32,
+              "max": 32
+            },
+            "inputDelayMs": {
+              "n": 300,
+              "p50": 0.2,
+              "p95": 0.3,
+              "p99": 0.5,
+              "max": 0.6
+            }
+          },
+          "compositionupdate": {
+            "reported": 0,
+            "durationMs": {
+              "n": 0
+            },
+            "inputDelayMs": {
+              "n": 0
+            }
+          }
+        },
+        "remoteFrames": {
+          "n": 2,
+          "handleMs": {
+            "n": 2,
+            "p50": 0.1,
+            "p95": 0.1,
+            "p99": 0.1,
+            "max": 0.1
+          },
+          "bytes": {
+            "n": 2,
+            "p50": 60,
+            "p95": 60,
+            "p99": 60,
+            "max": 60
+          }
+        },
+        "holds": {
+          "n": 0,
+          "heldMs": {
+            "n": 0
+          },
+          "framesHeld": {
+            "n": 0
+          },
+          "bytesHeld": {
+            "n": 0
+          },
+          "maxQueued": 0,
+          "capFired": 0,
+          "compositionEndToDrainedMs": {
+            "n": 0
+          },
+          "drainApplyMs": {
+            "n": 0
+          }
+        }
+      },
+      "B": {
+        "inputToAppliedInBMs": {
+          "n": 300,
+          "p50": 7.8,
+          "p95": 9.9,
+          "max": 16.9
+        },
+        "inputToFrameInBMs": {
+          "n": 300,
+          "p50": 7.9,
+          "p95": 10,
+          "max": 17
+        },
+        "remoteFrames": {
+          "n": 600,
+          "handleMs": {
+            "n": 600,
+            "p50": 0.6,
+            "p95": 0.9,
+            "p99": 1.3,
+            "max": 2.3
+          },
+          "bytes": {
+            "n": 600,
+            "p50": 326,
+            "p95": 331,
+            "p99": 331,
+            "max": 331
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": 0
+        }
+      },
+      "agents": null,
+      "writerErrors": [],
+      "writerErrorCount": 0
+    },
+    "agents": {
+      "load": [
+        [
+          13.56,
+          15.41,
+          15.4
+        ],
+        [
+          13.05,
+          15,
+          15.25
+        ]
+      ],
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 10.9,
+        "max": 18.4,
+        "n": 5765
+      },
+      "A": {
+        "keystrokes": 300,
+        "inputToTxMs": {
+          "n": 300,
+          "p50": 2.2,
+          "p95": 3.9,
+          "p99": 5,
+          "max": 5.1
+        },
+        "inputToFrameMs": {
+          "n": 300,
+          "p50": 2.3,
+          "p95": 4.8,
+          "p99": 5.3,
+          "max": 8.2
+        },
+        "inputToPostPaintMs": {
+          "n": 300,
+          "p50": 3.1,
+          "p95": 5.7,
+          "p99": 6.7,
+          "max": 8.9
+        },
+        "inputToAckMs": {
+          "n": 300,
+          "p50": 7.2,
+          "p95": 10.6,
+          "p99": 11.7,
+          "max": 12.6
+        },
+        "inputEventToFrameMs": {
+          "n": 300,
+          "p50": 1.7,
+          "p95": 3.6,
+          "p99": 4.3,
+          "max": 7.5
+        },
+        "inputEventToPostPaintMs": {
+          "n": 300,
+          "p50": 2.4,
+          "p95": 4.5,
+          "p99": 5.5,
+          "max": 8.2
+        },
+        "noTransaction": 0,
+        "over16msToFrame": 0,
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": 0
+        },
+        "eventTiming": {
+          "keydown": {
+            "reported": 300,
+            "durationMs": {
+              "n": 300,
+              "p50": 16,
+              "p95": 24,
+              "p99": 32,
+              "max": 32
+            },
+            "inputDelayMs": {
+              "n": 300,
+              "p50": 0.2,
+              "p95": 0.3,
+              "p99": 0.5,
+              "max": 2.1
+            }
+          },
+          "input": {
+            "reported": 300,
+            "durationMs": {
+              "n": 300,
+              "p50": 16,
+              "p95": 24,
+              "p99": 32,
+              "max": 32
+            },
+            "inputDelayMs": {
+              "n": 300,
+              "p50": 0.3,
+              "p95": 0.5,
+              "p99": 0.7,
+              "max": 1
+            }
+          },
+          "compositionupdate": {
+            "reported": 0,
+            "durationMs": {
+              "n": 0
+            },
+            "inputDelayMs": {
+              "n": 0
+            }
+          }
+        },
+        "remoteFrames": {
+          "n": 122,
+          "handleMs": {
+            "n": 122,
+            "p50": 0.9,
+            "p95": 1.7,
+            "p99": 2.1,
+            "max": 2.1
+          },
+          "bytes": {
+            "n": 122,
+            "p50": 140,
+            "p95": 1492,
+            "p99": 1839,
+            "max": 2327
+          }
+        },
+        "holds": {
+          "n": 0,
+          "heldMs": {
+            "n": 0
+          },
+          "framesHeld": {
+            "n": 0
+          },
+          "bytesHeld": {
+            "n": 0
+          },
+          "maxQueued": 0,
+          "capFired": 0,
+          "compositionEndToDrainedMs": {
+            "n": 0
+          },
+          "drainApplyMs": {
+            "n": 0
+          }
+        }
+      },
+      "B": {
+        "inputToAppliedInBMs": {
+          "n": 300,
+          "p50": 8.1,
+          "p95": 11.5,
+          "max": 13.4
+        },
+        "inputToFrameInBMs": {
+          "n": 300,
+          "p50": 8.1,
+          "p95": 11.7,
+          "max": 18.3
+        },
+        "remoteFrames": {
+          "n": 720,
+          "handleMs": {
+            "n": 720,
+            "p50": 0.7,
+            "p95": 1.4,
+            "p99": 1.9,
+            "max": 4.5
+          },
+          "bytes": {
+            "n": 720,
+            "p50": 140,
+            "p95": 931,
+            "p99": 1488,
+            "max": 2327
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": 0
+        }
+      },
+      "agents": {
+        "a1": {
+          "writer": null,
+          "writerStats": null,
+          "batches": 33,
+          "ops": {
+            "replace_block": 40,
+            "replace_text": 40,
+            "insert": 25,
+            "set_cell": 19,
+            "delete": 13
+          },
+          "applyMs": {
+            "p50": 0.62,
+            "p95": 0.91,
+            "max": 2.08
+          },
+          "batchToAckMs": {
+            "p50": 5.24,
+            "p95": 9.14,
+            "max": 11.63
+          },
+          "bytes": {
+            "p50": 992,
+            "max": 2323
+          }
+        },
+        "a2": {
+          "writer": null,
+          "writerStats": null,
+          "batches": 32,
+          "ops": {
+            "replace_text": 48,
+            "insert": 29,
+            "replace_block": 35,
+            "set_cell": 10,
+            "delete": 13
+          },
+          "applyMs": {
+            "p50": 0.66,
+            "p95": 0.98,
+            "max": 5.6
+          },
+          "batchToAckMs": {
+            "p50": 5.51,
+            "p95": 9.02,
+            "max": 9.86
+          },
+          "bytes": {
+            "p50": 978,
+            "max": 1833
+          }
+        }
+      },
+      "writerErrors": [],
+      "writerErrorCount": 0
+    }
+  },
+  "converged": true,
+  "pageErrors": [],
+  "metrics": {
+    "host": {
+      "workingSetMB": 99.9,
+      "privateMB": null
+    },
+    "renderers": {
+      "A": {
+        "workingSetMB": 170.3,
+        "privateMB": null
+      },
+      "B": {
+        "workingSetMB": 151.8,
+        "privateMB": null
+      }
+    },
+    "browser": [
+      {
+        "workingSetMB": 143.2
+      }
+    ],
+    "gpu": [
+      {
+        "workingSetMB": 69
+      }
+    ]
+  },
+  "hostStats": {
+    "pid": 1317,
+    "fullfsync": true,
+    "mem": {
+      "heapUsedMB": 24,
+      "heapTotalMB": 30,
+      "externalMB": 21.8,
+      "arrayBuffersMB": 0,
+      "rssMB": 104.8
+    },
+    "store": {
+      "db": 315392,
+      "wal": 4132392
+    },
+    "rows": [
+      {
+        "t": "updates",
+        "n": 665
+      },
+      {
+        "t": "attributions",
+        "n": 665
+      },
+      {
+        "t": "versions",
+        "n": 1
+      }
+    ],
+    "revision": 665,
+    "loadMs": 14.302624999999978,
+    "loaded": true,
+    "service": {
+      "framesIn": 1351,
+      "contentFramesIn": 669,
+      "rowsAppended": 665,
+      "commits": 1186,
+      "rejected": 0,
+      "rejectedReasons": []
+    },
+    "collected": [],
+    "gcExposed": false
+  }
+}

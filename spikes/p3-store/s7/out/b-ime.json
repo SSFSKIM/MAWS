@@ -1,0 +1,2186 @@
+{
+  "electron": "44.4.5",
+  "loads": [
+    {
+      "at": "start",
+      "load": [
+        11.91,
+        13.76,
+        14.69
+      ]
+    },
+    {
+      "at": "ime agents elsewhere 0",
+      "load": [
+        11.91,
+        13.76,
+        14.69
+      ]
+    },
+    {
+      "at": "ime agents elsewhere 1",
+      "load": [
+        11.84,
+        13.72,
+        14.67
+      ]
+    },
+    {
+      "at": "ime agents elsewhere 2",
+      "load": [
+        12.09,
+        13.74,
+        14.67
+      ]
+    },
+    {
+      "at": "ime agents also edit the same block 0",
+      "load": [
+        12.33,
+        13.73,
+        14.66
+      ]
+    },
+    {
+      "at": "ime agents also edit the same block 1",
+      "load": [
+        13.98,
+        14.05,
+        14.76
+      ]
+    },
+    {
+      "at": "ime agents also edit the same block 2",
+      "load": [
+        13.83,
+        14.02,
+        14.75
+      ]
+    },
+    {
+      "at": "ime agents also edit the same block, remote frames held while composing 0",
+      "load": [
+        15.76,
+        14.41,
+        14.88
+      ]
+    },
+    {
+      "at": "ime agents also edit the same block, remote frames held while composing 1",
+      "load": [
+        15.7,
+        14.42,
+        14.88
+      ]
+    },
+    {
+      "at": "ime agents also edit the same block, remote frames held while composing 2",
+      "load": [
+        15.48,
+        14.4,
+        14.87
+      ]
+    },
+    {
+      "at": "ime agents also edit the same block, held, flushed as one merged update 0",
+      "load": [
+        14.8,
+        14.28,
+        14.83
+      ]
+    },
+    {
+      "at": "ime agents also edit the same block, held, flushed as one merged update 1",
+      "load": [
+        14.34,
+        14.19,
+        14.79
+      ]
+    },
+    {
+      "at": "ime agents also edit the same block, held, flushed as one merged update 2",
+      "load": [
+        14.47,
+        14.22,
+        14.8
+      ]
+    }
+  ],
+  "typed": " 안녕하세요 한글 입력 테스트입니다",
+  "results": [
+    {
+      "variant": "agents elsewhere",
+      "rep": 0,
+      "load": [
+        11.91,
+        13.76,
+        14.69
+      ],
+      "ok": true,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다",
+      "expected": "안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 5.9,
+        "p95": 13,
+        "p99": 14.5,
+        "max": 14.5
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 11,
+        "p95": 18.6,
+        "p99": 19,
+        "max": 19
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 9.7,
+        "p95": 18.9,
+        "p99": 24.2,
+        "max": 24.2
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 14.9,
+        "p95": 23.1,
+        "p99": 28.7,
+        "max": 28.7
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 9.6,
+        "p95": 17.5,
+        "p99": 18.8,
+        "max": 18.8
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 15.1,
+        "p95": 30.5,
+        "p99": 33.6,
+        "max": 33.6
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 12.1,
+        "max": 19.1,
+        "n": 635
+      },
+      "longTasks": {
+        "n": 0,
+        "totalMs": 0,
+        "max": 0
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 8,
+          "durationMs": {
+            "n": 8,
+            "p50": 24,
+            "p95": 40,
+            "p99": 40,
+            "max": 40
+          },
+          "inputDelayMs": {
+            "n": 8,
+            "p50": 1,
+            "p95": 4.8,
+            "p99": 4.8,
+            "max": 4.8
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 2.1,
+            "p95": 4.5,
+            "p99": 5.7,
+            "max": 5.7
+          }
+        },
+        "compositionupdate": {
+          "reported": 52,
+          "durationMs": {
+            "n": 52,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 52,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 58,
+        "handleMs": {
+          "n": 58,
+          "p50": 3.4,
+          "p95": 9,
+          "p99": 10.1,
+          "max": 10.1
+        },
+        "bytes": {
+          "n": 58,
+          "p50": 517,
+          "p95": 1810,
+          "p99": 2344,
+          "max": 2344
+        }
+      },
+      "holds": {
+        "n": 0,
+        "heldMs": {
+          "n": 0
+        },
+        "framesHeld": {
+          "n": 0
+        },
+        "bytesHeld": {
+          "n": 0
+        },
+        "maxQueued": 0,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 0
+        },
+        "drainApplyMs": {
+          "n": 0
+        }
+      }
+    },
+    {
+      "variant": "agents elsewhere",
+      "rep": 1,
+      "load": [
+        11.84,
+        13.72,
+        14.67
+      ],
+      "ok": true,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "expected": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 5.7,
+        "p95": 11,
+        "p99": 11.8,
+        "max": 11.8
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 10.6,
+        "p95": 18.4,
+        "p99": 23.1,
+        "max": 23.1
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 9.7,
+        "p95": 14.2,
+        "p99": 16.6,
+        "max": 16.6
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 14.4,
+        "p95": 22.1,
+        "p99": 26.6,
+        "max": 26.6
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 9.4,
+        "p95": 14,
+        "p99": 16.3,
+        "max": 16.3
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 15.4,
+        "p95": 31.2,
+        "p99": 41.4,
+        "max": 41.4
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 11.6,
+        "max": 18.3,
+        "n": 660
+      },
+      "longTasks": {
+        "n": 0,
+        "totalMs": 0,
+        "max": 0
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 5,
+          "durationMs": {
+            "n": 5,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 5,
+            "p50": 0.7,
+            "p95": 0.9,
+            "p99": 0.9,
+            "max": 0.9
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 24,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 2.2,
+            "p95": 4.6,
+            "p99": 4.8,
+            "max": 4.8
+          }
+        },
+        "compositionupdate": {
+          "reported": 52,
+          "durationMs": {
+            "n": 52,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 52,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0.1,
+            "max": 0.1
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 59,
+        "handleMs": {
+          "n": 59,
+          "p50": 3.4,
+          "p95": 10,
+          "p99": 10.4,
+          "max": 10.4
+        },
+        "bytes": {
+          "n": 59,
+          "p50": 148,
+          "p95": 1517,
+          "p99": 1851,
+          "max": 1851
+        }
+      },
+      "holds": {
+        "n": 0,
+        "heldMs": {
+          "n": 0
+        },
+        "framesHeld": {
+          "n": 0
+        },
+        "bytesHeld": {
+          "n": 0
+        },
+        "maxQueued": 0,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 0
+        },
+        "drainApplyMs": {
+          "n": 0
+        }
+      }
+    },
+    {
+      "variant": "agents elsewhere",
+      "rep": 2,
+      "load": [
+        12.09,
+        13.74,
+        14.67
+      ],
+      "ok": true,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "expected": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 6,
+        "p95": 12,
+        "p99": 26.8,
+        "max": 26.8
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 11.3,
+        "p95": 29.2,
+        "p99": 37.6,
+        "max": 37.6
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 10.1,
+        "p95": 15.2,
+        "p99": 38.8,
+        "max": 38.8
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 15.8,
+        "p95": 33.5,
+        "p99": 47.6,
+        "max": 47.6
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 9.9,
+        "p95": 14.9,
+        "p99": 22.6,
+        "max": 22.6
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 16.8,
+        "p95": 34,
+        "p99": 47.6,
+        "max": 47.6
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 12.4,
+        "max": 20,
+        "n": 650
+      },
+      "longTasks": {
+        "n": 0,
+        "totalMs": 0,
+        "max": 0
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 6,
+          "durationMs": {
+            "n": 6,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 6,
+            "p50": 1.1,
+            "p95": 6.7,
+            "p99": 6.7,
+            "max": 6.7
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 32,
+            "p99": 48,
+            "max": 48
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 2.2,
+            "p95": 5.1,
+            "p99": 5.6,
+            "max": 5.6
+          }
+        },
+        "compositionupdate": {
+          "reported": 52,
+          "durationMs": {
+            "n": 52,
+            "p50": 24,
+            "p95": 32,
+            "p99": 56,
+            "max": 56
+          },
+          "inputDelayMs": {
+            "n": 52,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0.1,
+            "max": 0.1
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 58,
+        "handleMs": {
+          "n": 58,
+          "p50": 5.8,
+          "p95": 10.4,
+          "p99": 10.8,
+          "max": 10.8
+        },
+        "bytes": {
+          "n": 58,
+          "p50": 152,
+          "p95": 1924,
+          "p99": 2375,
+          "max": 2375
+        }
+      },
+      "holds": {
+        "n": 0,
+        "heldMs": {
+          "n": 0
+        },
+        "framesHeld": {
+          "n": 0
+        },
+        "bytesHeld": {
+          "n": 0
+        },
+        "maxQueued": 0,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 0
+        },
+        "drainApplyMs": {
+          "n": 0
+        }
+      }
+    },
+    {
+      "variant": "agents also edit the same block",
+      "rep": 0,
+      "load": [
+        12.33,
+        13.73,
+        14.66
+      ],
+      "ok": false,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다",
+      "expected": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 5.8,
+        "p95": 10.9,
+        "p99": 12.8,
+        "max": 12.8
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 11.1,
+        "p95": 19.4,
+        "p99": 22.6,
+        "max": 22.6
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 10.1,
+        "p95": 23.1,
+        "p99": 23.9,
+        "max": 23.9
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 15.9,
+        "p95": 28.3,
+        "p99": 41.4,
+        "max": 41.4
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 10,
+        "p95": 22.6,
+        "p99": 23.3,
+        "max": 23.3
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 16,
+        "p95": 32.6,
+        "p99": 41.6,
+        "max": 41.6
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 14.1,
+        "max": 18.8,
+        "n": 642
+      },
+      "longTasks": {
+        "n": 0,
+        "totalMs": 0,
+        "max": 0
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 9,
+          "durationMs": {
+            "n": 9,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 9,
+            "p50": 4.2,
+            "p95": 7.5,
+            "p99": 7.5,
+            "max": 7.5
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 24,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 2.1,
+            "p95": 4.3,
+            "p99": 6.1,
+            "max": 6.1
+          }
+        },
+        "compositionupdate": {
+          "reported": 45,
+          "durationMs": {
+            "n": 45,
+            "p50": 24,
+            "p95": 24,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 45,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 63,
+        "handleMs": {
+          "n": 63,
+          "p50": 1.8,
+          "p95": 12.6,
+          "p99": 13,
+          "max": 13
+        },
+        "bytes": {
+          "n": 63,
+          "p50": 158,
+          "p95": 1438,
+          "p99": 2500,
+          "max": 2500
+        }
+      },
+      "holds": {
+        "n": 0,
+        "heldMs": {
+          "n": 0
+        },
+        "framesHeld": {
+          "n": 0
+        },
+        "bytesHeld": {
+          "n": 0
+        },
+        "maxQueued": 0,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 0
+        },
+        "drainApplyMs": {
+          "n": 0
+        }
+      }
+    },
+    {
+      "variant": "agents also edit the same block",
+      "rep": 1,
+      "load": [
+        13.98,
+        14.05,
+        14.76
+      ],
+      "ok": false,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다",
+      "expected": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 6,
+        "p95": 12.1,
+        "p99": 16.5,
+        "max": 16.5
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 10.9,
+        "p95": 20.7,
+        "p99": 28.7,
+        "max": 28.7
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 10.1,
+        "p95": 20.6,
+        "p99": 33,
+        "max": 33
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 16,
+        "p95": 25.6,
+        "p99": 38.2,
+        "max": 38.2
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 9.9,
+        "p95": 20,
+        "p99": 24.3,
+        "max": 24.3
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 16,
+        "p95": 25.8,
+        "p99": 38.1,
+        "max": 38.1
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 13.7,
+        "max": 19.8,
+        "n": 644
+      },
+      "longTasks": {
+        "n": 0,
+        "totalMs": 0,
+        "max": 0
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 7,
+          "durationMs": {
+            "n": 7,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 7,
+            "p50": 2.3,
+            "p95": 6.5,
+            "p99": 6.5,
+            "max": 6.5
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 2.1,
+            "p95": 4.6,
+            "p99": 5.2,
+            "max": 5.2
+          }
+        },
+        "compositionupdate": {
+          "reported": 44,
+          "durationMs": {
+            "n": 44,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 44,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0.1,
+            "max": 0.1
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 60,
+        "handleMs": {
+          "n": 60,
+          "p50": 7.2,
+          "p95": 13.5,
+          "p99": 18.7,
+          "max": 18.7
+        },
+        "bytes": {
+          "n": 60,
+          "p50": 154,
+          "p95": 1763,
+          "p99": 2417,
+          "max": 2417
+        }
+      },
+      "holds": {
+        "n": 0,
+        "heldMs": {
+          "n": 0
+        },
+        "framesHeld": {
+          "n": 0
+        },
+        "bytesHeld": {
+          "n": 0
+        },
+        "maxQueued": 0,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 0
+        },
+        "drainApplyMs": {
+          "n": 0
+        }
+      }
+    },
+    {
+      "variant": "agents also edit the same block",
+      "rep": 2,
+      "load": [
+        13.83,
+        14.02,
+        14.75
+      ],
+      "ok": false,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다",
+      "expected": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 6.1,
+        "p95": 12.7,
+        "p99": 23,
+        "max": 23
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 12.1,
+        "p95": 22.8,
+        "p99": 32.3,
+        "max": 32.3
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 10.4,
+        "p95": 18.3,
+        "p99": 25.9,
+        "max": 25.9
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 17,
+        "p95": 26.7,
+        "p99": 36.5,
+        "max": 36.5
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 10.3,
+        "p95": 15.4,
+        "p99": 20.8,
+        "max": 20.8
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 17,
+        "p95": 26.8,
+        "p99": 37.3,
+        "max": 37.3
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 15.4,
+        "max": 23.3,
+        "n": 646
+      },
+      "longTasks": {
+        "n": 0,
+        "totalMs": 0,
+        "max": 0
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 6,
+          "durationMs": {
+            "n": 6,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 6,
+            "p50": 2,
+            "p95": 7.8,
+            "p99": 7.8,
+            "max": 7.8
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 32,
+            "p99": 40,
+            "max": 40
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 1.6,
+            "p95": 5.4,
+            "p99": 5.9,
+            "max": 5.9
+          }
+        },
+        "compositionupdate": {
+          "reported": 45,
+          "durationMs": {
+            "n": 45,
+            "p50": 24,
+            "p95": 32,
+            "p99": 40,
+            "max": 40
+          },
+          "inputDelayMs": {
+            "n": 45,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0.1,
+            "max": 0.1
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 58,
+        "handleMs": {
+          "n": 58,
+          "p50": 7,
+          "p95": 13.4,
+          "p99": 14.1,
+          "max": 14.1
+        },
+        "bytes": {
+          "n": 58,
+          "p50": 155,
+          "p95": 1752,
+          "p99": 1963,
+          "max": 1963
+        }
+      },
+      "holds": {
+        "n": 0,
+        "heldMs": {
+          "n": 0
+        },
+        "framesHeld": {
+          "n": 0
+        },
+        "bytesHeld": {
+          "n": 0
+        },
+        "maxQueued": 0,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 0
+        },
+        "drainApplyMs": {
+          "n": 0
+        }
+      }
+    },
+    {
+      "variant": "agents also edit the same block, remote frames held while composing",
+      "rep": 0,
+      "load": [
+        15.76,
+        14.41,
+        14.88
+      ],
+      "ok": true,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다",
+      "expected": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 6.2,
+        "p95": 12.5,
+        "p99": 13.2,
+        "max": 13.2
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 12,
+        "p95": 49.4,
+        "p99": 105.9,
+        "max": 105.9
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 10.6,
+        "p95": 15.6,
+        "p99": 19.7,
+        "max": 19.7
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 16.3,
+        "p95": 52.5,
+        "p99": 109.1,
+        "max": 109.1
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 10.4,
+        "p95": 15.5,
+        "p99": 19.1,
+        "max": 19.1
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 16.8,
+        "p95": 68.1,
+        "p99": 109.2,
+        "max": 109.2
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 13.8,
+        "max": 16.3,
+        "n": 664
+      },
+      "longTasks": {
+        "n": 3,
+        "totalMs": 225,
+        "max": 88
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 4,
+          "durationMs": {
+            "n": 4,
+            "p50": 32,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 4,
+            "p50": 1,
+            "p95": 1.1,
+            "p99": 1.1,
+            "max": 1.1
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 2.3,
+            "p95": 5.3,
+            "p99": 5.5,
+            "max": 5.5
+          }
+        },
+        "compositionupdate": {
+          "reported": 52,
+          "durationMs": {
+            "n": 52,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 52,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0.1,
+            "max": 0.1
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 63,
+        "handleMs": {
+          "n": 63,
+          "p50": 1.2,
+          "p95": 13,
+          "p99": 13.7,
+          "max": 13.7
+        },
+        "bytes": {
+          "n": 63,
+          "p50": 152,
+          "p95": 1552,
+          "p99": 2423,
+          "max": 2423
+        }
+      },
+      "holds": {
+        "n": 4,
+        "heldMs": {
+          "n": 4,
+          "p50": 1212.2,
+          "p95": 1294,
+          "p99": 1294,
+          "max": 1294
+        },
+        "framesHeld": {
+          "n": 4,
+          "p50": 8,
+          "p95": 9,
+          "p99": 9,
+          "max": 9
+        },
+        "bytesHeld": {
+          "n": 4,
+          "p50": 5894,
+          "p95": 10591,
+          "p99": 10591,
+          "max": 10591
+        },
+        "maxQueued": 9,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 4,
+          "p50": 83.9,
+          "p95": 100.5,
+          "p99": 100.5,
+          "max": 100.5
+        },
+        "drainApplyMs": {
+          "n": 4,
+          "p50": 82.7,
+          "p95": 88.9,
+          "p99": 88.9,
+          "max": 88.9
+        }
+      }
+    },
+    {
+      "variant": "agents also edit the same block, remote frames held while composing",
+      "rep": 1,
+      "load": [
+        15.7,
+        14.42,
+        14.88
+      ],
+      "ok": true,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "expected": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 6.2,
+        "p95": 12.1,
+        "p99": 13.5,
+        "max": 13.5
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 11.9,
+        "p95": 48.8,
+        "p99": 115.3,
+        "max": 115.3
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 10.5,
+        "p95": 15.7,
+        "p99": 19.1,
+        "max": 19.1
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 17,
+        "p95": 51.6,
+        "p99": 118.5,
+        "max": 118.5
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 10.4,
+        "p95": 14.7,
+        "p99": 18.5,
+        "max": 18.5
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 17.2,
+        "p95": 51.7,
+        "p99": 118.6,
+        "max": 118.6
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 13.4,
+        "max": 17.4,
+        "n": 651
+      },
+      "longTasks": {
+        "n": 3,
+        "totalMs": 219,
+        "max": 87
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 5,
+          "durationMs": {
+            "n": 5,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 5,
+            "p50": 0.9,
+            "p95": 1.1,
+            "p99": 1.1,
+            "max": 1.1
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 2.3,
+            "p95": 5.5,
+            "p99": 5.7,
+            "max": 5.7
+          }
+        },
+        "compositionupdate": {
+          "reported": 52,
+          "durationMs": {
+            "n": 52,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 52,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0,
+            "max": 0
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 56,
+        "handleMs": {
+          "n": 56,
+          "p50": 6.4,
+          "p95": 13.1,
+          "p99": 13.2,
+          "max": 13.2
+        },
+        "bytes": {
+          "n": 56,
+          "p50": 195,
+          "p95": 1456,
+          "p99": 2398,
+          "max": 2398
+        }
+      },
+      "holds": {
+        "n": 4,
+        "heldMs": {
+          "n": 4,
+          "p50": 1094.1,
+          "p95": 1159.3,
+          "p99": 1159.3,
+          "max": 1159.3
+        },
+        "framesHeld": {
+          "n": 4,
+          "p50": 7,
+          "p95": 8,
+          "p99": 8,
+          "max": 8
+        },
+        "bytesHeld": {
+          "n": 4,
+          "p50": 6838,
+          "p95": 7538,
+          "p99": 7538,
+          "max": 7538
+        },
+        "maxQueued": 8,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 4,
+          "p50": 83.8,
+          "p95": 100.1,
+          "p99": 100.1,
+          "max": 100.1
+        },
+        "drainApplyMs": {
+          "n": 4,
+          "p50": 82.5,
+          "p95": 87.5,
+          "p99": 87.5,
+          "max": 87.5
+        }
+      }
+    },
+    {
+      "variant": "agents also edit the same block, remote frames held while composing",
+      "rep": 2,
+      "load": [
+        15.48,
+        14.4,
+        14.87
+      ],
+      "ok": true,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "expected": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 6.1,
+        "p95": 12.4,
+        "p99": 13.3,
+        "max": 13.3
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 11.6,
+        "p95": 52.1,
+        "p99": 96.1,
+        "max": 96.1
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 10.4,
+        "p95": 16,
+        "p99": 25.9,
+        "max": 25.9
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 16.2,
+        "p95": 54.7,
+        "p99": 98.9,
+        "max": 98.9
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 10.3,
+        "p95": 15.8,
+        "p99": 25.5,
+        "max": 25.5
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 16.2,
+        "p95": 54.7,
+        "p99": 99,
+        "max": 99
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 13.4,
+        "max": 15.2,
+        "n": 657
+      },
+      "longTasks": {
+        "n": 2,
+        "totalMs": 166,
+        "max": 87
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 6,
+          "durationMs": {
+            "n": 6,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 6,
+            "p50": 1.1,
+            "p95": 9.3,
+            "p99": 9.3,
+            "max": 9.3
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 24,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 2.2,
+            "p95": 5.2,
+            "p99": 5.3,
+            "max": 5.3
+          }
+        },
+        "compositionupdate": {
+          "reported": 52,
+          "durationMs": {
+            "n": 52,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 52,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0.1,
+            "max": 0.1
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 58,
+        "handleMs": {
+          "n": 58,
+          "p50": 6.2,
+          "p95": 13.1,
+          "p99": 13.7,
+          "max": 13.7
+        },
+        "bytes": {
+          "n": 58,
+          "p50": 189,
+          "p95": 1892,
+          "p99": 2566,
+          "max": 2566
+        }
+      },
+      "holds": {
+        "n": 4,
+        "heldMs": {
+          "n": 4,
+          "p50": 1228.2,
+          "p95": 1244.8,
+          "p99": 1244.8,
+          "max": 1244.8
+        },
+        "framesHeld": {
+          "n": 4,
+          "p50": 8,
+          "p95": 8,
+          "p99": 8,
+          "max": 8
+        },
+        "bytesHeld": {
+          "n": 4,
+          "p50": 6898,
+          "p95": 9502,
+          "p99": 9502,
+          "max": 9502
+        },
+        "maxQueued": 8,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 4,
+          "p50": 88.5,
+          "p95": 90.1,
+          "p99": 90.1,
+          "max": 90.1
+        },
+        "drainApplyMs": {
+          "n": 4,
+          "p50": 79,
+          "p95": 87.3,
+          "p99": 87.3,
+          "max": 87.3
+        }
+      }
+    },
+    {
+      "variant": "agents also edit the same block, held, flushed as one merged update",
+      "rep": 0,
+      "load": [
+        14.8,
+        14.28,
+        14.83
+      ],
+      "ok": true,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "expected": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 6.6,
+        "p95": 11.8,
+        "p99": 12.8,
+        "max": 12.8
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 12.2,
+        "p95": 30.5,
+        "p99": 44.4,
+        "max": 44.4
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 10.7,
+        "p95": 14.3,
+        "p99": 15.4,
+        "max": 15.4
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 16.4,
+        "p95": 33.3,
+        "p99": 47.9,
+        "max": 47.9
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 10.6,
+        "p95": 14.1,
+        "p99": 15.2,
+        "max": 15.2
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 16.7,
+        "p95": 33.3,
+        "p99": 51.3,
+        "max": 51.3
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 13.1,
+        "max": 15.3,
+        "n": 659
+      },
+      "longTasks": {
+        "n": 0,
+        "totalMs": 0,
+        "max": 0
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 4,
+          "durationMs": {
+            "n": 4,
+            "p50": 32,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 4,
+            "p50": 0.9,
+            "p95": 1.3,
+            "p99": 1.3,
+            "max": 1.3
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 2.3,
+            "p95": 5.1,
+            "p99": 5.4,
+            "max": 5.4
+          }
+        },
+        "compositionupdate": {
+          "reported": 52,
+          "durationMs": {
+            "n": 52,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 52,
+            "p50": 0,
+            "p95": 0.1,
+            "p99": 0.1,
+            "max": 0.1
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 42,
+        "handleMs": {
+          "n": 42,
+          "p50": 0.5,
+          "p95": 15.4,
+          "p99": 24.4,
+          "max": 24.4
+        },
+        "bytes": {
+          "n": 42,
+          "p50": 145,
+          "p95": 3751,
+          "p99": 8929,
+          "max": 8929
+        }
+      },
+      "holds": {
+        "n": 4,
+        "heldMs": {
+          "n": 4,
+          "p50": 1028.7,
+          "p95": 1240.1,
+          "p99": 1240.1,
+          "max": 1240.1
+        },
+        "framesHeld": {
+          "n": 4,
+          "p50": 7,
+          "p95": 8,
+          "p99": 8,
+          "max": 8
+        },
+        "bytesHeld": {
+          "n": 4,
+          "p50": 7582,
+          "p95": 9263,
+          "p99": 9263,
+          "max": 9263
+        },
+        "maxQueued": 8,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 4,
+          "p50": 24.6,
+          "p95": 37.9,
+          "p99": 37.9,
+          "max": 37.9
+        },
+        "drainApplyMs": {
+          "n": 4,
+          "p50": 18.8,
+          "p95": 24.4,
+          "p99": 24.4,
+          "max": 24.4
+        }
+      }
+    },
+    {
+      "variant": "agents also edit the same block, held, flushed as one merged update",
+      "rep": 1,
+      "load": [
+        14.34,
+        14.19,
+        14.79
+      ],
+      "ok": true,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "expected": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 7,
+        "p95": 13.1,
+        "p99": 13.5,
+        "max": 13.5
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 12.8,
+        "p95": 36,
+        "p99": 41.9,
+        "max": 41.9
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 11.5,
+        "p95": 16.1,
+        "p99": 16.2,
+        "max": 16.2
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 17.5,
+        "p95": 38.9,
+        "p99": 44.8,
+        "max": 44.8
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 11.3,
+        "p95": 15.9,
+        "p99": 16,
+        "max": 16
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 17.8,
+        "p95": 39,
+        "p99": 44.8,
+        "max": 44.8
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 14.5,
+        "max": 20.2,
+        "n": 653
+      },
+      "longTasks": {
+        "n": 0,
+        "totalMs": 0,
+        "max": 0
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 4,
+          "durationMs": {
+            "n": 4,
+            "p50": 32,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 4,
+            "p50": 1.1,
+            "p95": 1.1,
+            "p99": 1.1,
+            "max": 1.1
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 2.4,
+            "p95": 5.7,
+            "p99": 6,
+            "max": 6
+          }
+        },
+        "compositionupdate": {
+          "reported": 52,
+          "durationMs": {
+            "n": 52,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 52,
+            "p50": 0,
+            "p95": 0.1,
+            "p99": 0.1,
+            "max": 0.1
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 36,
+        "handleMs": {
+          "n": 36,
+          "p50": 0.5,
+          "p95": 23.4,
+          "p99": 24.5,
+          "max": 24.5
+        },
+        "bytes": {
+          "n": 36,
+          "p50": 144,
+          "p95": 8509,
+          "p99": 9975,
+          "max": 9975
+        }
+      },
+      "holds": {
+        "n": 4,
+        "heldMs": {
+          "n": 4,
+          "p50": 1107.9,
+          "p95": 1267.7,
+          "p99": 1267.7,
+          "max": 1267.7
+        },
+        "framesHeld": {
+          "n": 4,
+          "p50": 9,
+          "p95": 9,
+          "p99": 9,
+          "max": 9
+        },
+        "bytesHeld": {
+          "n": 4,
+          "p50": 8870,
+          "p95": 10323,
+          "p99": 10323,
+          "max": 10323
+        },
+        "maxQueued": 9,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 4,
+          "p50": 30.9,
+          "p95": 35.7,
+          "p99": 35.7,
+          "max": 35.7
+        },
+        "drainApplyMs": {
+          "n": 4,
+          "p50": 23.4,
+          "p95": 24.5,
+          "p99": 24.5,
+          "max": 24.5
+        }
+      }
+    },
+    {
+      "variant": "agents also edit the same block, held, flushed as one merged update",
+      "rep": 2,
+      "load": [
+        14.47,
+        14.22,
+        14.8
+      ],
+      "ok": true,
+      "typedExactly": true,
+      "hangulInBlock": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "expected": "안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다아안안녀녕ㅎ핫하셍세요요ㅎ하한ㄱ그글이입려력ㅌ테슽스틍트입ㄴ니닏니다아안ㄴ녀녕ㅎ하하셍세요요ㅎ하한그글글ㅇ입ㄹ려력테텟테슽스트틍트입입니다다ㅇ아안안ㄴ녕ㅎ하하세셍세요ㅎ한그글ㅇ입입려력력테텟테스트트이입ㄴ닏니다다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다안녕하세요한글입력테스트입니다",
+      "sameInB": true,
+      "keystrokes": 41,
+      "inputEventToFrameMs": {
+        "n": 41,
+        "p50": 7,
+        "p95": 12.3,
+        "p99": 12.9,
+        "max": 12.9
+      },
+      "inputEventToPostPaintMs": {
+        "n": 41,
+        "p50": 12.6,
+        "p95": 36.2,
+        "p99": 46.8,
+        "max": 46.8
+      },
+      "inputToFrameMs": {
+        "n": 41,
+        "p50": 11.3,
+        "p95": 15.3,
+        "p99": 28.5,
+        "max": 28.5
+      },
+      "inputToPostPaintMs": {
+        "n": 41,
+        "p50": 17.1,
+        "p95": 39.3,
+        "p99": 49.9,
+        "max": 49.9
+      },
+      "inputToTxMs": {
+        "n": 41,
+        "p50": 11.2,
+        "p95": 15.1,
+        "p99": 27.9,
+        "max": 27.9
+      },
+      "inputToAckMs": {
+        "n": 41,
+        "p50": 17.2,
+        "p95": 39.4,
+        "p99": 70.2,
+        "max": 70.2
+      },
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 12.9,
+        "max": 15.8,
+        "n": 672
+      },
+      "longTasks": {
+        "n": 0,
+        "totalMs": 0,
+        "max": 0
+      },
+      "eventTiming": {
+        "keydown": {
+          "reported": 5,
+          "durationMs": {
+            "n": 5,
+            "p50": 32,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 5,
+            "p50": 1.1,
+            "p95": 10.4,
+            "p99": 10.4,
+            "max": 10.4
+          }
+        },
+        "input": {
+          "reported": 56,
+          "durationMs": {
+            "n": 56,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 56,
+            "p50": 2.4,
+            "p95": 5.1,
+            "p99": 6.1,
+            "max": 6.1
+          }
+        },
+        "compositionupdate": {
+          "reported": 52,
+          "durationMs": {
+            "n": 52,
+            "p50": 24,
+            "p95": 32,
+            "p99": 32,
+            "max": 32
+          },
+          "inputDelayMs": {
+            "n": 52,
+            "p50": 0,
+            "p95": 0,
+            "p99": 0.1,
+            "max": 0.1
+          }
+        }
+      },
+      "remoteFrames": {
+        "n": 37,
+        "handleMs": {
+          "n": 37,
+          "p50": 0.5,
+          "p95": 23.1,
+          "p99": 23.7,
+          "max": 23.7
+        },
+        "bytes": {
+          "n": 37,
+          "p50": 151,
+          "p95": 8579,
+          "p99": 10011,
+          "max": 10011
+        }
+      },
+      "holds": {
+        "n": 4,
+        "heldMs": {
+          "n": 4,
+          "p50": 1181.2,
+          "p95": 1271.9,
+          "p99": 1271.9,
+          "max": 1271.9
+        },
+        "framesHeld": {
+          "n": 4,
+          "p50": 8,
+          "p95": 8,
+          "p99": 8,
+          "max": 8
+        },
+        "bytesHeld": {
+          "n": 4,
+          "p50": 8963,
+          "p95": 10341,
+          "p99": 10341,
+          "max": 10341
+        },
+        "maxQueued": 8,
+        "capFired": 0,
+        "compositionEndToDrainedMs": {
+          "n": 4,
+          "p50": 31.1,
+          "p95": 36.3,
+          "p99": 36.3,
+          "max": 36.3
+        },
+        "drainApplyMs": {
+          "n": 4,
+          "p50": 23.1,
+          "p95": 23.7,
+          "p99": 23.7,
+          "max": 23.7
+        }
+      }
+    }
+  ],
+  "agents": {
+    "a1": {
+      "writer": null,
+      "writerStats": null,
+      "batches": 207,
+      "ops": {
+        "replace_block": 262,
+        "replace_text": 332,
+        "insert": 174,
+        "set_cell": 97,
+        "delete": 94,
+        "replace_text(target)": 129
+      },
+      "applyMs": {
+        "p50": 5.34,
+        "p95": 6.31,
+        "max": 10.97
+      },
+      "batchToAckMs": {
+        "p50": 5.41,
+        "p95": 10.53,
+        "max": 16.09
+      },
+      "bytes": {
+        "p50": 1062,
+        "max": 2562
+      }
+    },
+    "a2": {
+      "writer": null,
+      "writerStats": null,
+      "batches": 213,
+      "ops": {
+        "replace_text": 363,
+        "insert": 184,
+        "replace_block": 235,
+        "set_cell": 91,
+        "delete": 99,
+        "replace_text(target)": 135
+      },
+      "applyMs": {
+        "p50": 4.56,
+        "p95": 5.76,
+        "max": 9.19
+      },
+      "batchToAckMs": {
+        "p50": 5.58,
+        "p95": 9.42,
+        "max": 24.67
+      },
+      "bytes": {
+        "p50": 1015,
+        "max": 2501
+      }
+    }
+  },
+  "converged": true,
+  "pageErrors": []
+}

@@ -1,0 +1,10 @@
+[binding] seam loaded: v13 yjs 13.6.33
+PASS  y-prosemirror reads the model's fragment for <p> into a valid slide-text document  {"type":"doc","content":[{"type":"p","content":[{"type":"text","text":"Plain "},{"type":"text","marks":[{"type":"b"}],"text":"bold "},{"type":"text","marks":[{"type":"b"},{"type":"i"}],"text":"both"},{"type":"text","text":" "},{"type":"text","marks":[{"type":"a","attrs":{"href":"https://x.dev"}}],"text":"link"},{"type":"br"},{"type":"text","marks":[{"type":"span","attrs":{"color":"#cc0000"}}],"text":"red"},{"type":"text","text":" "},{"type":"text","marks":[{"type":"u"}],"text":"u"}]}]}
+PASS  … and what y-prosemirror writes, the model reads back identically (<p>)  [{"type":"p","inline":[{"text":"Plain ","marks":{}},{"text":"bold ","marks":{"b":{}}},{"text":"both","marks":{"b":{},"i":{}}},{"text":" ","marks":{}},{"text":"link","marks":{"a":{"href":"https://x.dev"}}},{"br":true},{"text":"red","marks":{"span":{"color":"#cc0000"}}},{"text":" ","marks":{}},{"text":"u","marks":{"u":{}}}]}]
+PASS  y-prosemirror reads the model's fragment for <ul> into a valid slide-text document  {"type":"doc","content":[{"type":"li","content":[{"type":"text","text":"one"}]},{"type":"li","content":[{"type":"text","marks":[{"type":"b"}],"text":"two"},{"type":"text","text":" three"}]}]}
+PASS  … and what y-prosemirror writes, the model reads back identically (<ul>)  [{"type":"li","inline":[{"text":"one","marks":{}}]},{"type":"li","inline":[{"text":"two","marks":{"b":{}}},{"text":" three","marks":{}}]}]
+PASS  a ProseMirror edit through ySyncPlugin on replica B reaches replica A through the model's reader  {"text":"Very Plain ","marks":{}}
+PASS  the binding kept the marks and the <br> (the readers agree on the shape)  [{"type":"p","inline":[{"text":"Very Plain ","marks":{}},{"text":"bold ","marks":{"b":{}}},{"text":"both","marks":{"b":{},"i":{}}},{"text":" ","marks":{}},{"text":"link","marks":{"a":{"href":"https://x.dev"}}},{"br":true},{"text":"red","marks":{"span":{"color":"#cc0000"}}},{"text":" ","marks":{}},{"text":"u","marks":{"u":{}}}]}]
+PASS  the binding wrote no ychange or foreign attributes the model would drop
+
+7/7 checks passed

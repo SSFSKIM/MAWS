@@ -1,0 +1,96 @@
+{
+  "scenario": "detached-connect",
+  "mainAbsent": {
+    "exitedAt": 1791857505744,
+    "connectedAt": 1791857508966,
+    "absentMs": 3222
+  },
+  "actorsAtConnect": [
+    {
+      "actor": "session:sess-detached",
+      "rows": 22,
+      "firstAt": 1791857505815,
+      "lastAt": 1791857508855
+    }
+  ],
+  "agentRowsWrittenWhileMainAbsent": [
+    {
+      "rows": 22,
+      "firstAt": 1791857505815,
+      "lastAt": 1791857508855,
+      "firstAfterMainExit": true,
+      "lastBeforeConnect": true
+    }
+  ],
+  "caughtUp": {
+    "openToSyncedMs": 69
+  },
+  "whoWroteDETACHED0": {
+    "found": true,
+    "client": 6426948251963364,
+    "clock": 3,
+    "inserted": {
+      "actor": "session:sess-detached",
+      "at": 1791857505816
+    }
+  },
+  "whoWroteMAINBACK": {
+    "found": true,
+    "client": 7711019176662820,
+    "clock": 11,
+    "inserted": {
+      "actor": "human",
+      "at": 1791857513536
+    }
+  },
+  "actorsAtEnd": [
+    {
+      "actor": "human",
+      "rows": 152,
+      "firstAt": 1791857513479,
+      "lastAt": 1791857525838
+    },
+    {
+      "actor": "session:sess-detached",
+      "rows": 121,
+      "firstAt": 1791857505815,
+      "lastAt": 1791857523899
+    }
+  ],
+  "provenanceAtEnd": [
+    {
+      "actor": "session:sess-detached",
+      "op": "insert",
+      "ranges": 121,
+      "clocks": 6251
+    },
+    {
+      "actor": "human",
+      "op": "insert",
+      "ranges": 151,
+      "clocks": 160
+    }
+  ],
+  "latencyOverSocket": {
+    "keystrokes": 150,
+    "ackMs": {
+      "n": 150,
+      "p50": 1.1,
+      "p95": 3.5,
+      "max": 11.6
+    },
+    "visibleInBMs": {
+      "n": 150,
+      "p50": 1.2,
+      "p95": 3.4,
+      "max": 11.6
+    },
+    "unacked": 0
+  },
+  "converged": true,
+  "rendererDocLength": {
+    "atSync": 807837,
+    "atEnd": 813083
+  },
+  "agentRowsAfterConnect": true
+}

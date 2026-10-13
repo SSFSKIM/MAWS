@@ -1,0 +1,468 @@
+{
+  "electron": "44.4.5",
+  "loads": [
+    {
+      "at": "start",
+      "load": [
+        15.42,
+        17.91,
+        21.6
+      ]
+    },
+    {
+      "at": "typing writer-touched start",
+      "load": [
+        15.07,
+        17.79,
+        21.54
+      ]
+    },
+    {
+      "at": "typing writer-touched end",
+      "load": [
+        12.77,
+        16.93,
+        21.07
+      ]
+    }
+  ],
+  "doc": "seed-200p (160 sections)",
+  "pace": [
+    60,
+    180
+  ],
+  "mount": {
+    "A": {
+      "tMain": 1791863852230.4705,
+      "tPort": 1791863852233,
+      "tSynced": 1791863852344.4,
+      "step2ApplyMs": 50.59999990463257,
+      "step2Bytes": 1364534,
+      "tEditorStart": 1791863852345.2998,
+      "tEditorCreated": 1791863852366.7998,
+      "tBound": 1791863852606.0999,
+      "tPaint": 1791863852606.0999,
+      "tPost": 1791863852716.5999,
+      "childCount": 1454,
+      "openToSyncedMs": 113.929443359375,
+      "syncedToBoundMs": 261.699951171875,
+      "openToPaintMs": 375.62939453125,
+      "openToPostPaintMs": 486.12939453125,
+      "editorConstructMs": 21.5,
+      "bindMs": 239.300048828125,
+      "domNodes": 5781,
+      "hostLoadMs": 43.35075000000006,
+      "attachMs": 43.80925000000002
+    },
+    "B": {
+      "tMain": 1791863852717.3606,
+      "tPort": 1791863852718.1,
+      "tSynced": 1791863852777.9,
+      "step2ApplyMs": 50.299999952316284,
+      "step2Bytes": 1364534,
+      "tEditorStart": 1791863852778.6,
+      "tEditorCreated": 1791863852797.9,
+      "tBound": 1791863853034.1,
+      "tPaint": 1791863853034.2,
+      "tPost": 1791863853145.5,
+      "childCount": 1454,
+      "openToSyncedMs": 60.539306640625,
+      "syncedToBoundMs": 256.2001953125,
+      "openToPaintMs": 316.83935546875,
+      "openToPostPaintMs": 428.139404296875,
+      "editorConstructMs": 19.2998046875,
+      "bindMs": 236.2001953125,
+      "domNodes": 5781,
+      "hostLoadMs": 43.35075000000006,
+      "attachMs": 0.1207920000000513
+    }
+  },
+  "runs": {
+    "writer-touched": {
+      "load": [
+        [
+          15.07,
+          17.79,
+          21.54
+        ],
+        [
+          12.77,
+          16.93,
+          21.07
+        ]
+      ],
+      "hostLoopDelayMs": {
+        "p50": 6.3,
+        "p99": 38,
+        "max": 126,
+        "n": 5532
+      },
+      "A": {
+        "keystrokes": 300,
+        "inputToTxMs": {
+          "n": 300,
+          "p50": 7.1,
+          "p95": 8.4,
+          "p99": 10.8,
+          "max": 16.6
+        },
+        "inputToFrameMs": {
+          "n": 300,
+          "p50": 7.2,
+          "p95": 8.5,
+          "p99": 11,
+          "max": 17
+        },
+        "inputToPostPaintMs": {
+          "n": 300,
+          "p50": 9.2,
+          "p95": 11.1,
+          "p99": 14.6,
+          "max": 23.4
+        },
+        "inputToAckMs": {
+          "n": 300,
+          "p50": 10.9,
+          "p95": 46.8,
+          "p99": 89.9,
+          "max": 92.4
+        },
+        "inputEventToFrameMs": {
+          "n": 300,
+          "p50": 5.5,
+          "p95": 6.3,
+          "p99": 8.1,
+          "max": 10.8
+        },
+        "inputEventToPostPaintMs": {
+          "n": 300,
+          "p50": 7.5,
+          "p95": 8.9,
+          "p99": 11.4,
+          "max": 21.9
+        },
+        "noTransaction": 0,
+        "over16msToFrame": 1,
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": 0
+        },
+        "eventTiming": {
+          "keydown": {
+            "reported": 300,
+            "durationMs": {
+              "n": 300,
+              "p50": 24,
+              "p95": 32,
+              "p99": 32,
+              "max": 32
+            },
+            "inputDelayMs": {
+              "n": 300,
+              "p50": 0.1,
+              "p95": 0.3,
+              "p99": 2.9,
+              "max": 4.8
+            }
+          },
+          "input": {
+            "reported": 300,
+            "durationMs": {
+              "n": 300,
+              "p50": 24,
+              "p95": 24,
+              "p99": 24,
+              "max": 32
+            },
+            "inputDelayMs": {
+              "n": 300,
+              "p50": 2.3,
+              "p95": 2.7,
+              "p99": 3.3,
+              "max": 3.4
+            }
+          },
+          "compositionupdate": {
+            "reported": 0,
+            "durationMs": {
+              "n": 0
+            },
+            "inputDelayMs": {
+              "n": 0
+            }
+          }
+        },
+        "remoteFrames": {
+          "n": 124,
+          "handleMs": {
+            "n": 124,
+            "p50": 0.6,
+            "p95": 7.4,
+            "p99": 8.2,
+            "max": 8.3
+          },
+          "bytes": {
+            "n": 124,
+            "p50": 92,
+            "p95": 1169,
+            "p99": 1205,
+            "max": 1206
+          }
+        },
+        "holds": {
+          "n": 0,
+          "heldMs": {
+            "n": 0
+          },
+          "framesHeld": {
+            "n": 0
+          },
+          "bytesHeld": {
+            "n": 0
+          },
+          "maxQueued": 0,
+          "capFired": 0,
+          "compositionEndToDrainedMs": {
+            "n": 0
+          },
+          "drainApplyMs": {
+            "n": 0
+          }
+        }
+      },
+      "B": {
+        "inputToAppliedInBMs": {
+          "n": 300,
+          "p50": 14.7,
+          "p95": 38.9,
+          "max": 81.4
+        },
+        "inputToFrameInBMs": {
+          "n": 300,
+          "p50": 14.8,
+          "p95": 39,
+          "max": 81.4
+        },
+        "remoteFrames": {
+          "n": 722,
+          "handleMs": {
+            "n": 722,
+            "p50": 2.1,
+            "p95": 5.1,
+            "p99": 7.3,
+            "max": 8.2
+          },
+          "bytes": {
+            "n": 722,
+            "p50": 92,
+            "p95": 333,
+            "p99": 1158,
+            "max": 1206
+          }
+        },
+        "longTasks": {
+          "n": 0,
+          "totalMs": 0,
+          "max": 0
+        }
+      },
+      "agents": {
+        "a1": {
+          "writer": "touched",
+          "writerStats": {
+            "size1": {
+              "n": 16,
+              "applyMs": {
+                "p50": 34.99,
+                "p95": 51.33,
+                "max": 51.33
+              },
+              "cloneMs": {
+                "p50": 24.21,
+                "max": 29.35
+              },
+              "validateMs": {
+                "p50": 3.6,
+                "p95": 9.89,
+                "max": 9.89
+              }
+            },
+            "size5": {
+              "n": 16,
+              "applyMs": {
+                "p50": 86.61,
+                "p95": 118.5,
+                "max": 118.5
+              },
+              "cloneMs": {
+                "p50": 24.91,
+                "max": 26.64
+              },
+              "validateMs": {
+                "p50": 26.27,
+                "p95": 42.17,
+                "max": 42.17
+              }
+            }
+          },
+          "batches": 32,
+          "ops": {
+            "replace_text": 48,
+            "replace_block": 16,
+            "insert": 10,
+            "set_cell": 16,
+            "delete": 6
+          },
+          "applyMs": {
+            "p50": 74.73,
+            "p95": 96.49,
+            "max": 118.5
+          },
+          "batchToAckMs": {
+            "p50": 5.8,
+            "p95": 42.52,
+            "max": 75.59
+          },
+          "bytes": {
+            "p50": 822,
+            "max": 1202
+          }
+        },
+        "a2": {
+          "writer": "touched",
+          "writerStats": {
+            "size1": {
+              "n": 17,
+              "applyMs": {
+                "p50": 39.26,
+                "p95": 55.39,
+                "max": 55.39
+              },
+              "cloneMs": {
+                "p50": 24.59,
+                "max": 27.59
+              },
+              "validateMs": {
+                "p50": 5.78,
+                "p95": 16.67,
+                "max": 16.67
+              }
+            },
+            "size5": {
+              "n": 16,
+              "applyMs": {
+                "p50": 82.04,
+                "p95": 97.65,
+                "max": 97.65
+              },
+              "cloneMs": {
+                "p50": 22.93,
+                "max": 25.62
+              },
+              "validateMs": {
+                "p50": 25.94,
+                "p95": 32.55,
+                "max": 32.55
+              }
+            }
+          },
+          "batches": 33,
+          "ops": {
+            "replace_text": 49,
+            "replace_block": 16,
+            "insert": 10,
+            "set_cell": 16,
+            "delete": 6
+          },
+          "applyMs": {
+            "p50": 55.39,
+            "p95": 94.1,
+            "max": 97.65
+          },
+          "batchToAckMs": {
+            "p50": 5.91,
+            "p95": 11.52,
+            "max": 95.27
+          },
+          "bytes": {
+            "p50": 71,
+            "max": 1180
+          }
+        }
+      },
+      "writerErrors": [],
+      "writerErrorCount": 0
+    }
+  },
+  "converged": true,
+  "pageErrors": [],
+  "metrics": {
+    "host": {
+      "workingSetMB": 301.7,
+      "privateMB": null
+    },
+    "renderers": {
+      "A": {
+        "workingSetMB": 273.3,
+        "privateMB": null
+      },
+      "B": {
+        "workingSetMB": 275,
+        "privateMB": null
+      }
+    },
+    "browser": [
+      {
+        "workingSetMB": 155.5
+      }
+    ],
+    "gpu": [
+      {
+        "workingSetMB": 72.6
+      }
+    ]
+  },
+  "hostStats": {
+    "pid": 99152,
+    "fullfsync": true,
+    "mem": {
+      "heapUsedMB": 133.4,
+      "heapTotalMB": 192.2,
+      "externalMB": 22.7,
+      "arrayBuffersMB": 0,
+      "rssMB": 316.4
+    },
+    "store": {
+      "db": 1208320,
+      "wal": 4124152
+    },
+    "rows": [
+      {
+        "t": "updates",
+        "n": 365
+      },
+      {
+        "t": "attributions",
+        "n": 365
+      },
+      {
+        "t": "versions",
+        "n": 1
+      }
+    ],
+    "revision": 365,
+    "loadMs": 43.35075000000006,
+    "loaded": true,
+    "service": {
+      "framesIn": 749,
+      "contentFramesIn": 369,
+      "rowsAppended": 365,
+      "commits": 643,
+      "rejected": 0,
+      "rejectedReasons": []
+    },
+    "collected": [],
+    "gcExposed": false
+  }
+}

@@ -1,0 +1,65 @@
+page v13, composition hold (provider holds, binding drives, 5 s cap): true, caret follows id: false
+FAIL [replace_text earlier in the same paragraph] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=261 cap=0
+   ✗ composed Korean exactly as typed (p3 text): "A simple paragraph the human types into. Words to keep. 안녕하세 한글 입력요"
+PASS [replace_text earlier in the same paragraph] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=1 flushes=1 framesHeld=1 maxHeldMs=30 cap=0
+FAIL [replace_text earlier in the same paragraph] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=282 cap=0
+   ✗ composed Korean exactly as typed (p3 text): "A simple paragraph the human types into. Words to keep. 안녕하세요 글 입력한"
+PASS [replace_text earlier in the same paragraph] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=2 flushes=1 framesHeld=1 maxHeldMs=25 cap=0
+FAIL [replace_text earlier in the same paragraph] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=263 cap=0
+   ✗ composed Korean exactly as typed (p3 text): "A simple paragraph the human types into. Words to keep. 안녕하요 한글 입력세"
+PASS [replace_text earlier in the same paragraph] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=1 flushes=1 framesHeld=1 maxHeldMs=36 cap=0
+PASS [replace_block of the next block] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=259 cap=0
+PASS [replace_block of the next block] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=1 flushes=1 framesHeld=1 maxHeldMs=39 cap=0
+PASS [replace_block of the next block] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=280 cap=0
+PASS [replace_block of the next block] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=2 flushes=0 framesHeld=0 maxHeldMs=19 cap=0
+PASS [replace_block of the next block] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=260 cap=0
+PASS [replace_block of the next block] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=2 flushes=0 framesHeld=0 maxHeldMs=14 cap=0
+PASS [insert before the block] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=260 cap=0
+PASS [insert before the block] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=1 flushes=1 framesHeld=1 maxHeldMs=36 cap=0
+PASS [insert before the block] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=279 cap=0
+PASS [insert before the block] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=1 flushes=1 framesHeld=1 maxHeldMs=27 cap=0
+PASS [insert before the block] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=270 cap=0
+PASS [insert before the block] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=3 flushes=1 framesHeld=1 maxHeldMs=30 cap=0
+PASS [move of the block being composed in (live caret from awareness)] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=260 cap=0
+PASS [move of the block being composed in (live caret from awareness)] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=1 flushes=1 framesHeld=1 maxHeldMs=32 cap=0
+PASS [move of the block being composed in (live caret from awareness)] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=289 cap=0
+PASS [move of the block being composed in (live caret from awareness)] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=2 flushes=1 framesHeld=1 maxHeldMs=18 cap=0
+PASS [move of the block being composed in (live caret from awareness)] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=264 cap=0
+PASS [move of the block being composed in (live caret from awareness)] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=1 flushes=1 framesHeld=1 maxHeldMs=34 cap=0
+PASS [move of the block being composed in (no awareness: p3 re-inserted)] fire=at-start pace=40ms settle=20ms live=[] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=265 cap=0
+FAIL [move of the block being composed in (no awareness: p3 re-inserted)] fire=at-start pace=0ms settle=0ms live=[] composingAtOp=true holds=1 flushes=0 framesHeld=0 maxHeldMs=34 cap=0
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하"
+FAIL [move of the block being composed in (no awareness: p3 re-inserted)] fire=mid pace=40ms settle=20ms live=[] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=281 cap=0
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하세요 ㅎ글 입력"
+FAIL [move of the block being composed in (no awareness: p3 re-inserted)] fire=mid pace=0ms settle=0ms live=[] composingAtOp=true holds=2 flushes=1 framesHeld=1 maxHeldMs=33 cap=0
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하세"
+FAIL [move of the block being composed in (no awareness: p3 re-inserted)] fire=before-end pace=40ms settle=20ms live=[] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=260 cap=0
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하셍요 한글 입력"
+FAIL [move of the block being composed in (no awareness: p3 re-inserted)] fire=before-end pace=0ms settle=0ms live=[] composingAtOp=true holds=2 flushes=1 framesHeld=1 maxHeldMs=18 cap=0
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하세글 입력"
+PASS [control: no agent op] fire=at-start pace=40ms settle=20ms live=undefined composingAtOp=undefined holds=9 flushes=0 framesHeld=0 maxHeldMs=257 cap=0
+PASS [control: no agent op] fire=at-start pace=0ms settle=0ms live=undefined composingAtOp=undefined holds=2 flushes=0 framesHeld=0 maxHeldMs=14 cap=0
+PASS [control: no agent op] fire=mid pace=40ms settle=20ms live=undefined composingAtOp=undefined holds=9 flushes=0 framesHeld=0 maxHeldMs=271 cap=0
+PASS [control: no agent op] fire=mid pace=0ms settle=0ms live=undefined composingAtOp=undefined holds=1 flushes=0 framesHeld=0 maxHeldMs=28 cap=0
+PASS [control: no agent op] fire=before-end pace=40ms settle=20ms live=undefined composingAtOp=undefined holds=9 flushes=0 framesHeld=0 maxHeldMs=268 cap=0
+PASS [control: no agent op] fire=before-end pace=0ms settle=0ms live=undefined composingAtOp=undefined holds=1 flushes=0 framesHeld=0 maxHeldMs=26 cap=0
+PASS [control: no agent op, Backspace inside a composition] fire=at-start pace=40ms settle=20ms live=undefined composingAtOp=undefined holds=9 flushes=0 framesHeld=0 maxHeldMs=427 cap=0
+PASS [control: no agent op, Backspace inside a composition] fire=at-start pace=0ms settle=0ms live=undefined composingAtOp=undefined holds=2 flushes=0 framesHeld=0 maxHeldMs=25 cap=0
+PASS [control: no agent op, Backspace inside a composition] fire=mid pace=40ms settle=20ms live=undefined composingAtOp=undefined holds=9 flushes=0 framesHeld=0 maxHeldMs=428 cap=0
+PASS [control: no agent op, Backspace inside a composition] fire=mid pace=0ms settle=0ms live=undefined composingAtOp=undefined holds=1 flushes=0 framesHeld=0 maxHeldMs=36 cap=0
+PASS [control: no agent op, Backspace inside a composition] fire=before-end pace=40ms settle=20ms live=undefined composingAtOp=undefined holds=9 flushes=0 framesHeld=0 maxHeldMs=429 cap=0
+PASS [control: no agent op, Backspace inside a composition] fire=before-end pace=0ms settle=0ms live=undefined composingAtOp=undefined holds=1 flushes=0 framesHeld=0 maxHeldMs=30 cap=0
+PASS [replace_text just before the caret in the same paragraph] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=260 cap=0
+PASS [replace_text just before the caret in the same paragraph] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=2 flushes=1 framesHeld=1 maxHeldMs=19 cap=0
+PASS [replace_text just before the caret in the same paragraph] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=279 cap=0
+PASS [replace_text just before the caret in the same paragraph] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=3 flushes=1 framesHeld=1 maxHeldMs=10 cap=0
+PASS [replace_text just before the caret in the same paragraph] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=269 cap=0
+PASS [replace_text just before the caret in the same paragraph] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=1 flushes=1 framesHeld=1 maxHeldMs=31 cap=0
+PASS [replace_text in the same paragraph, Backspace inside a composition] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=426 cap=0
+PASS [replace_text in the same paragraph, Backspace inside a composition] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=3 flushes=0 framesHeld=0 maxHeldMs=17 cap=0
+PASS [replace_text in the same paragraph, Backspace inside a composition] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=432 cap=0
+PASS [replace_text in the same paragraph, Backspace inside a composition] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=1 flushes=1 framesHeld=1 maxHeldMs=39 cap=0
+PASS [replace_text in the same paragraph, Backspace inside a composition] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=427 cap=0
+PASS [replace_text in the same paragraph, Backspace inside a composition] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true holds=3 flushes=0 framesHeld=0 maxHeldMs=18 cap=0
+
+46/54 runs passed

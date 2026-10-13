@@ -1,0 +1,615 @@
+[
+  {
+    "id": "#82 deleted heading keeps level and id",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "del@heading#hX"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "heading",
+        "attrs": {
+          "id": "hX",
+          "level": 3
+        }
+      }
+    ]
+  },
+  {
+    "id": "#82 deleted callout keeps tone",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "del@callout--attributed#co"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "callout--attributed",
+        "attrs": {
+          "id": "co",
+          "tone": "warn"
+        }
+      }
+    ]
+  },
+  {
+    "id": "#82 deleted image keeps src and alt",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "del@image#?"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "image",
+        "attrs": {
+          "src": "asset://one.png",
+          "alt": "one",
+          "assetId": "one"
+        }
+      }
+    ]
+  },
+  {
+    "id": "#82 deleted checked task item keeps checked",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "del@taskItem--attributed#ti1"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "taskItem--attributed",
+        "attrs": {
+          "id": "ti1",
+          "checked": true
+        }
+      }
+    ]
+  },
+  {
+    "id": "#82/#189 deleted code block keeps language and text",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "del@codeBlock#cb"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "codeBlock",
+        "attrs": {
+          "id": "cb",
+          "language": "py"
+        }
+      }
+    ]
+  },
+  {
+    "id": "#128 no attributions at all (null) renders",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "ins@paragraph#p2"
+    ],
+    "fmtByAttr": [],
+    "deleted": []
+  },
+  {
+    "id": "#177 task item checked toggle shows",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "attrs(checked)@taskItem#ti2"
+    ],
+    "fmtByAttr": [],
+    "deleted": []
+  },
+  {
+    "id": "#189 inserted code block renders with its text",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "ins@codeBlock#cb2",
+      "attrs(id)@codeBlock#cb2",
+      "attrs(language)@codeBlock#cb2"
+    ],
+    "fmtByAttr": [],
+    "deleted": []
+  },
+  {
+    "id": "code block: text edit and language change",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 2,
+    "kinds": [
+      "attrs(language)@codeBlock#cb",
+      "ins@codeBlock#cb"
+    ],
+    "fmtByAttr": [],
+    "deleted": []
+  },
+  {
+    "id": "callout tone change",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "attrs(tone)@callout#co"
+    ],
+    "fmtByAttr": [],
+    "deleted": []
+  },
+  {
+    "id": "image src and alt change",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "attrs(src)@image#?",
+      "attrs(alt)@image#?"
+    ],
+    "fmtByAttr": [],
+    "deleted": []
+  },
+  {
+    "id": "image inserted inline",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "ins@image#?",
+      "attrs(src)@image#?",
+      "attrs(alt)@image#?",
+      "attrs(assetId)@image#?"
+    ],
+    "fmtByAttr": [],
+    "deleted": []
+  },
+  {
+    "id": "heading level change",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "attrs(level)@heading#hX"
+    ],
+    "fmtByAttr": [],
+    "deleted": []
+  },
+  {
+    "id": "heading → paragraph (type change)",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "del@heading#hX",
+      "ins@paragraph#hX",
+      "attrs(id)@paragraph#hX"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "heading",
+        "attrs": {
+          "id": "hX",
+          "level": 3
+        }
+      }
+    ]
+  },
+  {
+    "id": "table: add a row",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "ins@tableRow#yioqb0g6",
+      "attrs(id)@tableRow#yioqb0g6",
+      "ins@tableCell#dw32tj05",
+      "attrs(id)@tableCell#dw32tj05",
+      "attrs(colspan)@tableCell#dw32tj05",
+      "attrs(rowspan)@tableCell#dw32tj05",
+      "attrs(colwidth)@tableCell#dw32tj05",
+      "attrs(align)@tableCell#dw32tj05"
+    ],
+    "fmtByAttr": [],
+    "deleted": []
+  },
+  {
+    "id": "table: delete a row",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "del@tableRow#r1"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "tableRow",
+        "attrs": {
+          "id": "r1"
+        }
+      }
+    ]
+  },
+  {
+    "id": "table: add a column",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 3,
+    "kinds": [
+      "ins@tableHeader#7m1yzhtp",
+      "attrs(id)@tableHeader#7m1yzhtp",
+      "attrs(colspan)@tableHeader#7m1yzhtp",
+      "attrs(rowspan)@tableHeader#7m1yzhtp",
+      "attrs(colwidth)@tableHeader#7m1yzhtp",
+      "attrs(align)@tableHeader#7m1yzhtp",
+      "ins@tableCell#3f1pcjgf",
+      "attrs(id)@tableCell#3f1pcjgf"
+    ],
+    "fmtByAttr": [],
+    "deleted": []
+  },
+  {
+    "id": "table: delete a column",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 3,
+    "kinds": [
+      "del@tableHeader#r0b",
+      "del@tableCell#r1b",
+      "del@tableCell#r2b"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "tableHeader",
+        "attrs": {
+          "id": "r0b",
+          "colspan": 1,
+          "rowspan": 1,
+          "colwidth": null,
+          "align": null
+        }
+      },
+      {
+        "type": "tableCell",
+        "attrs": {
+          "id": "r1b",
+          "colspan": 1,
+          "rowspan": 1,
+          "colwidth": null,
+          "align": null
+        }
+      },
+      {
+        "type": "tableCell",
+        "attrs": {
+          "id": "r2b",
+          "colspan": 1,
+          "rowspan": 1,
+          "colwidth": null,
+          "align": null
+        }
+      }
+    ]
+  },
+  {
+    "id": "table: bold, link and comment marks inside cells",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 3,
+    "kinds": [
+      "fmt@paragraph#r1ap",
+      "fmt@paragraph#r1bp",
+      "fmt@paragraph#r2ap"
+    ],
+    "fmtByAttr": [
+      "bold",
+      "link",
+      "comment--Mone5A=="
+    ],
+    "deleted": []
+  },
+  {
+    "id": "link href change (a mark attribute)",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "fmt@paragraph#p1"
+    ],
+    "fmtByAttr": [
+      "link"
+    ],
+    "deleted": []
+  },
+  {
+    "id": "nested list: indent (sink)",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 2,
+    "kinds": [
+      "ins@listItem#li4",
+      "attrs(id)@listItem#li4",
+      "ins@paragraph#li4p",
+      "attrs(id)@paragraph#li4p",
+      "del@listItem--attributed#li4"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "listItem--attributed",
+        "attrs": {
+          "id": "li4"
+        }
+      }
+    ]
+  },
+  {
+    "id": "nested list: outdent (lift)",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 2,
+    "kinds": [
+      "del@bulletList#ul2",
+      "ins@listItem#li3",
+      "attrs(id)@listItem#li3",
+      "ins@paragraph#li3p",
+      "attrs(id)@paragraph#li3p"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "bulletList",
+        "attrs": {
+          "id": "ul2"
+        }
+      }
+    ]
+  },
+  {
+    "id": "list type toggle bullet → ordered",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "del@bulletList#ul",
+      "ins@orderedList#ytrpgku4",
+      "attrs(id)@orderedList#ytrpgku4",
+      "attrs(start)@orderedList#ytrpgku4",
+      "attrs(type)@orderedList#ytrpgku4",
+      "ins@listItem#li1",
+      "attrs(id)@listItem#li1",
+      "ins@paragraph#li1p"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "bulletList",
+        "attrs": {
+          "id": "ul"
+        }
+      }
+    ]
+  },
+  {
+    "id": "deleted list item with a nested list (listItem--attributed)",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "del@listItem--attributed#li2"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "listItem--attributed",
+        "attrs": {
+          "id": "li2"
+        }
+      }
+    ]
+  },
+  {
+    "id": "deleted blockquote (blockquote--attributed)",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "del@blockquote--attributed#q"
+    ],
+    "fmtByAttr": [],
+    "deleted": [
+      {
+        "type": "blockquote--attributed",
+        "attrs": {
+          "id": "q"
+        }
+      }
+    ]
+  },
+  {
+    "id": "agent replaces a callout's paragraph text (container kept)",
+    "pass": true,
+    "want": true,
+    "check": "valid",
+    "viewErr": null,
+    "viewCheck": "valid",
+    "sameAsHeadless": true,
+    "liveUnchanged": true,
+    "versionDocUnchanged": true,
+    "nChanges": 1,
+    "kinds": [
+      "del@paragraph#cop",
+      "ins@paragraph#cop"
+    ],
+    "fmtByAttr": [],
+    "deleted": []
+  }
+]

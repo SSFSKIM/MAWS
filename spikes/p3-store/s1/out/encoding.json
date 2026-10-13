@@ -1,0 +1,69 @@
+{
+  "oneWay": {
+    "v14ReadsV13V2": true,
+    "v14ReadsV13V1": true,
+    "v14BindWritesOnV13Doc": 1,
+    "v14EditorShowsV13": true,
+    "v13DecodesV14Bytes": "no throw",
+    "v13HeadlessRender": "throws: Cannot read properties of undefined (reading 'right')",
+    "v13SeesV14Text": false,
+    "v13BindingOnV14Doc": {
+      "bindErr": "Cannot read properties of undefined (reading 'right')",
+      "consoleErrors": [],
+      "updatesWrittenByStaleClient": 0
+    },
+    "staleClientDeletedContent": false,
+    "sizes": {
+      "v13StateV2": 780,
+      "afterV14EditsV2": 968,
+      "afterV14EditsV1": 1458
+    }
+  },
+  "sizes": {
+    "v13": {
+      "gcOn": {
+        "visibleChars": 11699,
+        "stateV2": 94750,
+        "stateV1": 223849,
+        "logV2": 557972,
+        "updates": 19811,
+        "replayMs": 250,
+        "loadMs": 34.1
+      },
+      "gcOff": {
+        "visibleChars": 11699,
+        "stateV2": 92679,
+        "stateV1": 229896,
+        "logV2": 557972,
+        "updates": 19811,
+        "replayMs": 249,
+        "loadMs": 19.1
+      }
+    },
+    "v14": {
+      "gcOn": {
+        "visibleChars": 11699,
+        "stateV2": 98147,
+        "stateV1": 300613,
+        "logV2": 622550,
+        "updates": 19820,
+        "replayMs": 557,
+        "loadMs": 30.9
+      },
+      "gcOff": {
+        "visibleChars": 11699,
+        "stateV2": 97068,
+        "stateV1": 308565,
+        "logV2": 622550,
+        "updates": 19820,
+        "replayMs": 538,
+        "loadMs": 16.3
+      }
+    },
+    "v13HistoryLoadedInV14": {
+      "sameText": true,
+      "v13Bytes": 94750,
+      "v14ReencodedBytes": 94750
+    }
+  }
+}

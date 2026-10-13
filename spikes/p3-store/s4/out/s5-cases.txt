@@ -1,0 +1,8 @@
+PASS seed covers as S5's base — {"t1":"ships quarterly with design review","t2":"design review notes"}
+PASS agent rewords t2 in place — {"t1":"ships quarterly with ","t2":"a short summary"} orphaned []
+PASS …without the whitespace merge (contrast) [merge off] — {"t1":"ships quarterly with a short","t2":"a short summary"} orphaned []
+PASS agent deletes t2's words — {"t1":"ships quarterly"} orphaned ["t2"]
+PASS agent rewrites the whole sentence — {} orphaned ["t1","t2"]
+PASS …without the whitespace merge (contrast) [merge off] — {"t1":" is monthly","t2":"is monthly now"} orphaned []
+
+6/6 checks passed

@@ -1,0 +1,378 @@
+{
+  "doc": {
+    "sections": 100,
+    "topLevelBlocks": 1202,
+    "blockIds": 4609,
+    "chars": 91048,
+    "liveStateBytes": 287039
+  },
+  "versions": {
+    "V0": {
+      "seq": 1,
+      "at": "09:00:01",
+      "actor": "import",
+      "kind": "import",
+      "bytes": 286181
+    },
+    "V1": {
+      "seq": 44,
+      "at": "09:00:44",
+      "actor": "human",
+      "kind": "auto",
+      "bytes": 286294
+    },
+    "V2": {
+      "seq": 48,
+      "at": "09:00:48",
+      "actor": "agent:session-1",
+      "kind": "turn",
+      "bytes": 286525
+    },
+    "V3": {
+      "seq": 53,
+      "at": "09:00:53",
+      "actor": "human",
+      "kind": "auto",
+      "bytes": 286602
+    },
+    "V4": {
+      "seq": 57,
+      "at": "09:00:57",
+      "actor": "agent:session-2",
+      "kind": "turn",
+      "bytes": 286942
+    },
+    "V5": {
+      "seq": 64,
+      "at": "09:01:04",
+      "actor": "human",
+      "kind": "auto",
+      "bytes": 286959
+    }
+  },
+  "compaction": {
+    "logRowsBefore": 53,
+    "folded": {
+      "rows": 53,
+      "bytes": 288066,
+      "baseBytes": 286602
+    },
+    "logRowsAfter": 16,
+    "provenanceRows": 27,
+    "bucketedRows": 43,
+    "provenanceBytes": 2486,
+    "hubLogRows": 69
+  },
+  "diffV0V5": {
+    "msHeadlessRender": 106.2,
+    "check": "valid",
+    "score": [
+      {
+        "id": "h-type-s0p2",
+        "ok": true,
+        "got": "ins by human at 09:00:21"
+      },
+      {
+        "id": "h-newpara",
+        "ok": true,
+        "got": "ins by human at 09:00:22"
+      },
+      {
+        "id": "a1-rewrite-ins",
+        "ok": true,
+        "got": "ins by agent:session-1 at 09:00:45"
+      },
+      {
+        "id": "a1-rewrite-del",
+        "ok": true,
+        "got": "del by agent:session-1 at 09:00:45"
+      },
+      {
+        "id": "a1-section",
+        "ok": true,
+        "got": "ins by agent:session-1 at 09:00:46"
+      },
+      {
+        "id": "a1-cell",
+        "ok": true,
+        "got": "ins by agent:session-1 at 09:00:47"
+      },
+      {
+        "id": "a1-code",
+        "ok": true,
+        "got": "ins by agent:session-1 at 09:00:48"
+      },
+      {
+        "id": "h-level",
+        "ok": true,
+        "got": "attrs(level) by human at 09:00:49"
+      },
+      {
+        "id": "h-check",
+        "ok": true,
+        "got": "attrs(checked) by human at 09:00:50"
+      },
+      {
+        "id": "h-tone",
+        "ok": true,
+        "got": "attrs(tone) by human at 09:00:51"
+      },
+      {
+        "id": "h-img-alt",
+        "ok": true,
+        "got": "attrs(alt) by human at 09:00:52"
+      },
+      {
+        "id": "h-bold",
+        "ok": true,
+        "got": "fmt by human at 09:00:53"
+      },
+      {
+        "id": "a2-row",
+        "ok": true,
+        "got": "ins by agent:session-2 at 09:00:54"
+      },
+      {
+        "id": "a2-lang",
+        "ok": true,
+        "got": "attrs(language) by agent:session-2 at 09:00:55"
+      },
+      {
+        "id": "a2-code-ins",
+        "ok": true,
+        "got": "ins by agent:session-2 at 09:00:55"
+      },
+      {
+        "id": "a2-code-del",
+        "ok": true,
+        "got": "del by agent:session-2 at 09:00:55"
+      },
+      {
+        "id": "a2-delpara",
+        "ok": true,
+        "got": "del by agent:session-2 at 09:00:56"
+      },
+      {
+        "id": "h-type-s13p2",
+        "ok": true,
+        "got": "ins by human at 09:01:03"
+      },
+      {
+        "id": "h-del-s0p2",
+        "ok": true,
+        "got": "del by human at 09:01:04"
+      }
+    ],
+    "passed": "19/19",
+    "nChanges": 17,
+    "navOk": true,
+    "runs": 102
+  },
+  "provenanceQuantized": {
+    "exact": {
+      "mergedBytes": 1257,
+      "runs": 102
+    },
+    "tenSeconds": {
+      "mergedBytes": 387,
+      "runs": 62
+    },
+    "minute": {
+      "mergedBytes": 302,
+      "runs": 58
+    }
+  },
+  "afterCompaction": {
+    "spansIdentical": {
+      "v0v3": true,
+      "v1v3": true
+    },
+    "v0v3Spans": 61,
+    "v1v3Spans": 17,
+    "v2v4Authors": [
+      "agent:session-2",
+      "human"
+    ]
+  },
+  "showEditors": {
+    "ok": true,
+    "rows": [
+      {
+        "id": "s0p2",
+        "editors": [
+          {
+            "who": "human",
+            "at": "09:00:21",
+            "kinds": [
+              "ins"
+            ]
+          },
+          {
+            "who": "import",
+            "at": "09:00:01",
+            "kinds": [
+              "ins"
+            ]
+          }
+        ],
+        "matchesFullLog": true
+      },
+      {
+        "id": "s2p2",
+        "editors": [
+          {
+            "who": "agent:session-1",
+            "at": "09:00:45",
+            "kinds": [
+              "del",
+              "ins"
+            ]
+          },
+          {
+            "who": "import",
+            "at": "09:00:01",
+            "kinds": [
+              "ins"
+            ]
+          }
+        ],
+        "matchesFullLog": true
+      },
+      {
+        "id": "s4r1c1p",
+        "editors": [
+          {
+            "who": "agent:session-1",
+            "at": "09:00:47",
+            "kinds": [
+              "ins"
+            ]
+          }
+        ],
+        "matchesFullLog": true
+      },
+      {
+        "id": "s6h",
+        "editors": [
+          {
+            "who": "human",
+            "at": "09:00:49",
+            "kinds": [
+              "attrs:level"
+            ]
+          },
+          {
+            "who": "import",
+            "at": "09:00:01",
+            "kinds": [
+              "ins"
+            ]
+          }
+        ],
+        "matchesFullLog": true
+      },
+      {
+        "id": "s10c",
+        "editors": [
+          {
+            "who": "agent:session-2",
+            "at": "09:00:55",
+            "kinds": [
+              "attrs:language",
+              "ins"
+            ]
+          },
+          {
+            "who": "import",
+            "at": "09:00:01",
+            "kinds": [
+              "ins"
+            ]
+          }
+        ],
+        "matchesFullLog": true
+      },
+      {
+        "id": "s12p2",
+        "editors": [
+          {
+            "who": "agent:session-2",
+            "at": "09:00:57",
+            "kinds": [
+              "fmt"
+            ]
+          },
+          {
+            "who": "import",
+            "at": "09:00:01",
+            "kinds": [
+              "ins"
+            ]
+          }
+        ],
+        "matchesFullLog": true
+      },
+      {
+        "id": "s9p2",
+        "editors": [
+          {
+            "who": "human",
+            "at": "09:00:53",
+            "kinds": [
+              "fmt"
+            ]
+          },
+          {
+            "who": "import",
+            "at": "09:00:01",
+            "kinds": [
+              "ins"
+            ]
+          }
+        ],
+        "matchesFullLog": true
+      }
+    ]
+  },
+  "preview": {
+    "msShowVersionMedian": 124.2,
+    "msLeaveMedian": 86.5,
+    "msShow": [
+      143.5,
+      119.8,
+      136.2,
+      114.6,
+      124.2
+    ],
+    "nChangesView": 17,
+    "nChangesHeadless": 17,
+    "viewCheck": "valid",
+    "editable": false,
+    "domMarks": {
+      "ins": 64,
+      "del": 5,
+      "fmt": 2,
+      "attr": 13
+    },
+    "navVisited": true,
+    "undoCommandReturned": false,
+    "undoStackUnchanged": true,
+    "liveUnchangedByUndoAndTyping": true,
+    "insertCommandReturned": true,
+    "versionDocsUnchanged": true,
+    "exitLiveByteUnchanged": true,
+    "exitHostByteUnchanged": true,
+    "exitShowsLive": true
+  },
+  "liveDuringHistory": {
+    "previewHasAgentEdit": false,
+    "exitShowsAgentEdit": true,
+    "typingReachesHost": true,
+    "undoWorksAfterExit": true
+  },
+  "controlUnguarded": {
+    "undoReturned": true,
+    "liveChangedWhileInHistory": true,
+    "typedTextLostOnHost": true
+  }
+}

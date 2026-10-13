@@ -1,0 +1,177 @@
+65.7 keydown key=" " keyCode=32 isComposing=false
+66.1 beforeinput inputType=insertText data=" " isComposing=false
+66.5 input inputType=insertText data=" " isComposing=false
+74.3 keyup key=" " keyCode=32 isComposing=false
+116.2 keydown key="ㅇ" keyCode=229 isComposing=false
+159.2 compositionstart data=""
+159.5 compositionupdate data="ㅇ"
+159.5 beforeinput inputType=insertCompositionText data="ㅇ" isComposing=true
+160 input inputType=insertCompositionText data="ㅇ" isComposing=true
+162.8 keyup key="ㅇ" keyCode=68 isComposing=true
+206.2 keydown key="ㅏ" keyCode=229 isComposing=true
+248.1 compositionupdate data="아"
+248.2 beforeinput inputType=insertCompositionText data="아" isComposing=true
+248.5 input inputType=insertCompositionText data="아" isComposing=true
+251.1 keyup key="ㅏ" keyCode=75 isComposing=true
+293.7 keydown key="ㄴ" keyCode=229 isComposing=true
+335.5 compositionupdate data="안"
+335.7 beforeinput inputType=insertCompositionText data="안" isComposing=true
+335.9 input inputType=insertCompositionText data="안" isComposing=true
+337.7 keyup key="ㄴ" keyCode=83 isComposing=true
+380.2 keydown key="ㄴ" keyCode=229 isComposing=true
+422 compositionupdate data="안"
+422 beforeinput inputType=insertCompositionText data="안" isComposing=true
+422.2 input inputType=insertCompositionText data="안" isComposing=true
+422.2 compositionend data="안"
+464.8 compositionstart data=""
+464.9 compositionupdate data="ㄴ"
+464.9 beforeinput inputType=insertCompositionText data="ㄴ" isComposing=true
+465.4 input inputType=insertCompositionText data="ㄴ" isComposing=true
+467.1 keyup key="ㄴ" keyCode=83 isComposing=true
+509.8 keydown key="ㅕ" keyCode=229 isComposing=true
+552.6 compositionupdate data="녀"
+552.6 beforeinput inputType=insertCompositionText data="녀" isComposing=true
+552.9 input inputType=insertCompositionText data="녀" isComposing=true
+554.4 keyup key="ㅕ" keyCode=85 isComposing=true
+597.1 keydown key="ㅇ" keyCode=229 isComposing=true
+638.9 compositionupdate data="녕"
+639 beforeinput inputType=insertCompositionText data="녕" isComposing=true
+639.2 input inputType=insertCompositionText data="녕" isComposing=true
+640.7 keyup key="ㅇ" keyCode=68 isComposing=true
+683.4 keydown key="ㅎ" keyCode=229 isComposing=true
+726.1 compositionupdate data="녕"
+726.1 beforeinput inputType=insertCompositionText data="녕" isComposing=true
+726.2 input inputType=insertCompositionText data="녕" isComposing=true
+726.2 compositionend data="녕"
+767.9 compositionstart data=""
+768 compositionupdate data="ㅎ"
+768 beforeinput inputType=insertCompositionText data="ㅎ" isComposing=true
+768.4 input inputType=insertCompositionText data="ㅎ" isComposing=true
+769.9 keyup key="ㅎ" keyCode=71 isComposing=true
+810.7 keydown key="ㅏ" keyCode=229 isComposing=true
+852 compositionupdate data="하"
+852.1 beforeinput inputType=insertCompositionText data="하" isComposing=true
+852.3 input inputType=insertCompositionText data="하" isComposing=true
+854.6 keyup key="ㅏ" keyCode=75 isComposing=true
+898.4 keydown key="ㅅ" keyCode=229 isComposing=true
+940.4 compositionupdate data="핫"
+940.5 beforeinput inputType=insertCompositionText data="핫" isComposing=true
+940.7 input inputType=insertCompositionText data="핫" isComposing=true
+942.7 keyup key="ㅅ" keyCode=84 isComposing=true
+985.8 keydown key="ㅔ" keyCode=229 isComposing=true
+1028.5 compositionupdate data="하"
+1028.5 beforeinput inputType=insertCompositionText data="하" isComposing=true
+1028.7 input inputType=insertCompositionText data="하" isComposing=true
+1030 compositionend data="하"
+1072.8 compositionstart data=""
+1072.9 compositionupdate data="세"
+1072.9 beforeinput inputType=insertCompositionText data="세" isComposing=true
+1073.1 input inputType=insertCompositionText data="세" isComposing=true
+1074.5 keyup key="ㅔ" keyCode=80 isComposing=true
+1117.5 keydown key="ㅇ" keyCode=229 isComposing=true
+1159.8 compositionupdate data="셍"
+1159.8 beforeinput inputType=insertCompositionText data="셍" isComposing=true
+1160.1 input inputType=insertCompositionText data="셍" isComposing=true
+1161.9 keyup key="ㅇ" keyCode=68 isComposing=true
+1203.3 keydown key="ㅛ" keyCode=229 isComposing=true
+1243.1 compositionupdate data="세"
+1243.1 beforeinput inputType=insertCompositionText data="세" isComposing=true
+1243.4 input inputType=insertCompositionText data="세" isComposing=true
+1244.5 compositionend data="세"
+1287.1 compositionstart data=""
+1287.1 compositionupdate data="요"
+1287.1 beforeinput inputType=insertCompositionText data="요" isComposing=true
+1287.5 input inputType=insertCompositionText data="요" isComposing=true
+1289 keyup key="ㅛ" keyCode=89 isComposing=true
+1362.1 compositionupdate data="요"
+1362.2 beforeinput inputType=insertCompositionText data="요" isComposing=true
+1362.3 input inputType=insertCompositionText data="요" isComposing=true
+1362.3 compositionend data="요"
+1404.8 keydown key=" " keyCode=32 isComposing=false
+1405 beforeinput inputType=insertText data=" " isComposing=false
+1405.3 input inputType=insertText data=" " isComposing=false
+1407.1 keyup key=" " keyCode=32 isComposing=false
+1449 keydown key="ㅎ" keyCode=229 isComposing=false
+1491.8 compositionstart data=""
+1491.8 compositionupdate data="ㅎ"
+1491.8 beforeinput inputType=insertCompositionText data="ㅎ" isComposing=true
+1492 input inputType=insertCompositionText data="ㅎ" isComposing=true
+1493.6 keyup key="ㅎ" keyCode=71 isComposing=true
+1535.2 keydown key="ㅏ" keyCode=229 isComposing=true
+1578 compositionupdate data="하"
+1578 beforeinput inputType=insertCompositionText data="하" isComposing=true
+1578.2 input inputType=insertCompositionText data="하" isComposing=true
+1579.9 keyup key="ㅏ" keyCode=75 isComposing=true
+1623 keydown key="ㄴ" keyCode=229 isComposing=true
+1665.7 compositionupdate data="한"
+1665.7 beforeinput inputType=insertCompositionText data="한" isComposing=true
+1666 input inputType=insertCompositionText data="한" isComposing=true
+1667.6 keyup key="ㄴ" keyCode=83 isComposing=true
+1710.2 keydown key="ㄱ" keyCode=229 isComposing=true
+1752.9 compositionupdate data="한"
+1752.9 beforeinput inputType=insertCompositionText data="한" isComposing=true
+1753 input inputType=insertCompositionText data="한" isComposing=true
+1753 compositionend data="한"
+1793.7 compositionstart data=""
+1793.7 compositionupdate data="ㄱ"
+1793.7 beforeinput inputType=insertCompositionText data="ㄱ" isComposing=true
+1794 input inputType=insertCompositionText data="ㄱ" isComposing=true
+1795.6 keyup key="ㄱ" keyCode=82 isComposing=true
+1838.1 keydown key="ㅡ" keyCode=229 isComposing=true
+1880.8 compositionupdate data="그"
+1880.9 beforeinput inputType=insertCompositionText data="그" isComposing=true
+1881 input inputType=insertCompositionText data="그" isComposing=true
+1882.7 keyup key="ㅡ" keyCode=77 isComposing=true
+1925.3 keydown key="ㄹ" keyCode=229 isComposing=true
+1966.5 compositionupdate data="글"
+1966.5 beforeinput inputType=insertCompositionText data="글" isComposing=true
+1966.8 input inputType=insertCompositionText data="글" isComposing=true
+1968.3 keyup key="ㄹ" keyCode=70 isComposing=true
+2009.3 compositionupdate data="글"
+2009.3 beforeinput inputType=insertCompositionText data="글" isComposing=true
+2009.5 input inputType=insertCompositionText data="글" isComposing=true
+2009.5 compositionend data="글"
+2051 keydown key=" " keyCode=32 isComposing=false
+2051.1 beforeinput inputType=insertText data=" " isComposing=false
+2051.4 input inputType=insertText data=" " isComposing=false
+2053 keyup key=" " keyCode=32 isComposing=false
+2095.5 keydown key="ㅇ" keyCode=229 isComposing=false
+2138.2 compositionstart data=""
+2138.3 compositionupdate data="ㅇ"
+2138.3 beforeinput inputType=insertCompositionText data="ㅇ" isComposing=true
+2138.5 input inputType=insertCompositionText data="ㅇ" isComposing=true
+2140.1 keyup key="ㅇ" keyCode=68 isComposing=true
+2182.6 keydown key="ㅣ" keyCode=229 isComposing=true
+2225.2 compositionupdate data="이"
+2225.3 beforeinput inputType=insertCompositionText data="이" isComposing=true
+2225.6 input inputType=insertCompositionText data="이" isComposing=true
+2227 keyup key="ㅣ" keyCode=76 isComposing=true
+2269.6 keydown key="ㅂ" keyCode=229 isComposing=true
+2311.9 compositionupdate data="입"
+2311.9 beforeinput inputType=insertCompositionText data="입" isComposing=true
+2312.2 input inputType=insertCompositionText data="입" isComposing=true
+2313.6 keyup key="ㅂ" keyCode=81 isComposing=true
+2356.1 keydown key="ㄹ" keyCode=229 isComposing=true
+2398.8 compositionupdate data="입"
+2398.8 beforeinput inputType=insertCompositionText data="입" isComposing=true
+2398.9 input inputType=insertCompositionText data="입" isComposing=true
+2398.9 compositionend data="입"
+2441.5 compositionstart data=""
+2441.6 compositionupdate data="ㄹ"
+2441.6 beforeinput inputType=insertCompositionText data="ㄹ" isComposing=true
+2441.8 input inputType=insertCompositionText data="ㄹ" isComposing=true
+2443.2 keyup key="ㄹ" keyCode=70 isComposing=true
+2485.4 keydown key="ㅕ" keyCode=229 isComposing=true
+2528.1 compositionupdate data="려"
+2528.1 beforeinput inputType=insertCompositionText data="려" isComposing=true
+2528.4 input inputType=insertCompositionText data="려" isComposing=true
+2530.1 keyup key="ㅕ" keyCode=85 isComposing=true
+2572.5 keydown key="ㄱ" keyCode=229 isComposing=true
+2615.3 compositionupdate data="력"
+2615.3 beforeinput inputType=insertCompositionText data="력" isComposing=true
+2615.6 input inputType=insertCompositionText data="력" isComposing=true
+2617 keyup key="ㄱ" keyCode=82 isComposing=true
+2659.6 compositionupdate data="력"
+2659.6 beforeinput inputType=insertCompositionText data="력" isComposing=true
+2659.8 input inputType=insertCompositionText data="력" isComposing=true
+2659.8 compositionend data="력"

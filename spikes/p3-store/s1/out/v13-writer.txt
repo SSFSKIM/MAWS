@@ -1,0 +1,9 @@
+PASS no DOM in this process
+PASS PM → Y → PM equal
+PASS Y → markdown byte-identical to the canonical markdown
+PASS multi-hunk text edit applied
+PASS word edit beside marks keeps the marks
+PASS section inserted after the heading
+PASS type change keeps the block id
+
+7/7 checks passed; agent update sizes (V2 bytes): 73, 225, 149; round trip 25 ms

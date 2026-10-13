@@ -1,0 +1,213 @@
+{
+  "results": [
+    {
+      "name": "A: without forwarding the in-flight keystrokes are lost (shown)",
+      "ok": true,
+      "detail": "\"A plain paragraph the human types into. Words to keep. ㅎ\""
+    },
+    {
+      "name": "A: move under in-flight typing, with forwarding: the human's keystrokes land in the moved block",
+      "ok": true,
+      "detail": "\"A plain paragraph the human types into. Words to keep. 한글\""
+    },
+    {
+      "name": "A: …converged, ids unique, p3 after c1",
+      "ok": true,
+      "detail": "h1 p1 p2 l1 tb1 c1 p3 p4"
+    },
+    {
+      "name": "B: concurrent moves of one block duplicate it (two p3 with the same id)",
+      "ok": true,
+      "detail": "p3"
+    },
+    {
+      "name": "B: repair keeps the later insertion (a2: after h1) and tombstones the other",
+      "ok": true,
+      "detail": "h1 p3 p1 p2 l1 tb1 c1 p4"
+    },
+    {
+      "name": "B: without carrying the loser's edits, the human's edit in the tombstoned copy is lost (shown)",
+      "ok": true,
+      "detail": "\"A plain paragraph the human types into. Words to keep.\""
+    },
+    {
+      "name": "B: with the carry rule the human's edit made in the losing copy survives in the kept one",
+      "ok": true,
+      "detail": "\"Edited: A plain paragraph the human types into. Words to keep.\""
+    },
+    {
+      "name": "B: marks intact in the kept copy",
+      "ok": true,
+      "detail": "Edited: A plain paragraph the human types into. |Words[c:t4]| to keep."
+    },
+    {
+      "name": "B: no duplicate ids after repair",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "C: an edit into the original after two concurrent moves is forwarded into the kept copy, once",
+      "ok": true,
+      "detail": "\"A very plain paragraph the human types into. Words to keep.\" h1 p3 p1 p2 l1 tb1 c1 p4"
+    },
+    {
+      "name": "D: concurrent splits that carry the id duplicate it",
+      "ok": true,
+      "detail": "p4"
+    },
+    {
+      "name": "D: repair re-ids the later ones, no text deleted",
+      "ok": true,
+      "detail": "repair: ^p4 duplicated (paragraph) → the later one re-id'd ^qi580d55 | repair: ^p4 duplicated (paragraph) → the later one re-id'd ^iibvpbhc"
+    }
+  ],
+  "report": {
+    "A.forward=false": {
+      "res": {
+        "ok": true,
+        "revision": 3,
+        "lines": [
+          "moved ^p3 after ^c1"
+        ],
+        "newIds": [],
+        "orphaned": [],
+        "ms": 6.446499999999958,
+        "updateBytes": 226
+      },
+      "p3": "A plain paragraph the human types into. Words to keep. ㅎ",
+      "order": [
+        "h1",
+        "p1",
+        "p2",
+        "l1",
+        "tb1",
+        "c1",
+        "p3",
+        "p4"
+      ],
+      "log": []
+    },
+    "A.forward=true": {
+      "res": {
+        "ok": true,
+        "revision": 3,
+        "lines": [
+          "moved ^p3 after ^c1"
+        ],
+        "newIds": [],
+        "orphaned": [],
+        "ms": 3.2391660000000115,
+        "updateBytes": 225
+      },
+      "p3": "A plain paragraph the human types into. Words to keep. 한글",
+      "order": [
+        "h1",
+        "p1",
+        "p2",
+        "l1",
+        "tb1",
+        "c1",
+        "p3",
+        "p4"
+      ],
+      "log": [
+        "forward: \"하\" from human into ^p3",
+        "forward: a deletion from human in ^p3",
+        "forward: \"한\" from human into ^p3",
+        "forward: a deletion from human in ^p3",
+        "forward: \"글\" from human into ^p3"
+      ]
+    },
+    "B.forward=false": {
+      "r1": {
+        "ok": true,
+        "revision": 2,
+        "lines": [
+          "moved ^p3 after ^c1"
+        ],
+        "newIds": [],
+        "orphaned": [],
+        "ms": 8.149916000000019,
+        "updateBytes": 211
+      },
+      "beforeH": 2,
+      "dupBefore": [
+        "p3"
+      ],
+      "mdBefore": "## Section 1 plan ^h1\n\nA plain paragraph the human types into. Words to keep. ^p3\n\nThe quick brown fox jumps over the **lazy** [dog](https://example.com). It has two sentences. ^p1\n\nThe review is scheduled for Friday and the owner signs off after it. ^p2\n\n- first item\n- second item with **bold**\n^l1\n\n| Name  | Value |\n| ----- | ----- |\n| alpha | 1     |\n| beta  | 2     |\n^tb1\n\n```ts\nconst x = 1\n```\n^c1\n\nEdited: A plain paragraph the human types into. Words to keep. ^p3\n\nClosing paragraph of this section, with enough words to look like prose that a person wrote. ^p4\n",
+      "after": [
+        "h1",
+        "p3",
+        "p1",
+        "p2",
+        "l1",
+        "tb1",
+        "c1",
+        "p4"
+      ],
+      "p3": "A plain paragraph the human types into. Words to keep.",
+      "log": [
+        "repair: ^p3 duplicated by concurrent moves → kept the later copy (seq 4), tombstoned the copy of seq 2"
+      ]
+    },
+    "B.forward=true": {
+      "r1": {
+        "ok": true,
+        "revision": 2,
+        "lines": [
+          "moved ^p3 after ^c1"
+        ],
+        "newIds": [],
+        "orphaned": [],
+        "ms": 2.4854159999999865,
+        "updateBytes": 211
+      },
+      "beforeH": 2,
+      "dupBefore": [
+        "p3"
+      ],
+      "mdBefore": "## Section 1 plan ^h1\n\nA plain paragraph the human types into. Words to keep. ^p3\n\nThe quick brown fox jumps over the **lazy** [dog](https://example.com). It has two sentences. ^p1\n\nThe review is scheduled for Friday and the owner signs off after it. ^p2\n\n- first item\n- second item with **bold**\n^l1\n\n| Name  | Value |\n| ----- | ----- |\n| alpha | 1     |\n| beta  | 2     |\n^tb1\n\n```ts\nconst x = 1\n```\n^c1\n\nEdited: A plain paragraph the human types into. Words to keep. ^p3\n\nClosing paragraph of this section, with enough words to look like prose that a person wrote. ^p4\n",
+      "after": [
+        "h1",
+        "p3",
+        "p1",
+        "p2",
+        "l1",
+        "tb1",
+        "c1",
+        "p4"
+      ],
+      "p3": "Edited: A plain paragraph the human types into. Words to keep.",
+      "log": [
+        "repair: ^p3 duplicated by concurrent moves → kept the later copy (seq 4), tombstoned the copy of seq 2, carried 1 edit(s) into the kept copy"
+      ]
+    },
+    "C": {
+      "p3": "A very plain paragraph the human types into. Words to keep.",
+      "order": [
+        "h1",
+        "p3",
+        "p1",
+        "p2",
+        "l1",
+        "tb1",
+        "c1",
+        "p4"
+      ],
+      "log": [
+        "forward: \"very \" from human into ^p3",
+        "repair: ^p3 duplicated by concurrent moves → kept the later copy (seq 3), tombstoned the copy of seq 2"
+      ]
+    },
+    "D": {
+      "before": [
+        "p4"
+      ],
+      "lines": [
+        "repair: ^p4 duplicated (paragraph) → the later one re-id'd ^qi580d55",
+        "repair: ^p4 duplicated (paragraph) → the later one re-id'd ^iibvpbhc"
+      ],
+      "md": "## Section 1 plan ^h1\n\nThe quick brown fox jumps over the **lazy** [dog](https://example.com). It has two sentences. ^p1\n\nThe review is scheduled for Friday and the owner signs off after it. ^p2\n\nA plain paragraph the human types into. Words to keep. ^p3\n\n- first item\n- second item with **bold**\n^l1\n\n| Name  | Value |\n| ----- | ----- |\n| alpha | 1     |\n| beta  | 2     |\n^tb1\n\n```ts\nconst x = 1\n```\n^c1\n\nClosing ^p4\n\nparagraph of this section, with enough words to look like prose that a person wrote. ^qi580d55\n\nthis section, with enough words to look like prose that a person wrote. ^iibvpbhc\n"
+    }
+  }
+}

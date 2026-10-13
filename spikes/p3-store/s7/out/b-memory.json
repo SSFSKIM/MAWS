@@ -1,0 +1,414 @@
+{
+  "electron": "44.4.5",
+  "loads": [
+    {
+      "at": "start",
+      "load": [
+        16.08,
+        15.57,
+        15.45
+      ]
+    },
+    {
+      "at": "host idle, no doc",
+      "load": [
+        15.28,
+        15.41,
+        15.39
+      ]
+    },
+    {
+      "at": "host, doc loaded, no replica",
+      "load": [
+        15.28,
+        15.41,
+        15.39
+      ]
+    },
+    {
+      "at": "A and B open",
+      "load": [
+        15.65,
+        15.48,
+        15.42
+      ]
+    },
+    {
+      "at": "A and B open, two agents live, after typing",
+      "load": [
+        12.41,
+        14.63,
+        15.11
+      ]
+    },
+    {
+      "at": "B closed",
+      "load": [
+        12.14,
+        14.54,
+        15.07
+      ]
+    },
+    {
+      "at": "A closed too (agents still attached)",
+      "load": [
+        12.14,
+        14.54,
+        15.07
+      ]
+    },
+    {
+      "at": "agents closed (no connection; S2 service keeps the doc)",
+      "load": [
+        12.14,
+        14.54,
+        15.07
+      ]
+    },
+    {
+      "at": "doc unloaded by hand",
+      "load": [
+        11.64,
+        14.4,
+        15.02
+      ]
+    }
+  ],
+  "stages": {
+    "host idle, no doc": {
+      "load": [
+        15.28,
+        15.41,
+        15.39
+      ],
+      "host": {
+        "heapUsedMB": 12.6,
+        "heapTotalMB": 18.2,
+        "externalMB": 20.1,
+        "arrayBuffersMB": 0,
+        "rssMB": 129.4
+      },
+      "hostLoaded": false,
+      "collectedByGC": [],
+      "metrics": {
+        "host": {
+          "workingSetMB": 123.5,
+          "privateMB": null
+        },
+        "renderers": {},
+        "browser": [
+          {
+            "workingSetMB": 113.5
+          }
+        ],
+        "gpu": [
+          {
+            "workingSetMB": 56.8
+          }
+        ]
+      },
+      "rendererHeap": {}
+    },
+    "host, doc loaded, no replica": {
+      "load": [
+        15.28,
+        15.41,
+        15.39
+      ],
+      "host": {
+        "heapUsedMB": 21.1,
+        "heapTotalMB": 40,
+        "externalMB": 20.1,
+        "arrayBuffersMB": 0,
+        "rssMB": 160.2
+      },
+      "hostLoaded": true,
+      "collectedByGC": [],
+      "metrics": {
+        "host": {
+          "workingSetMB": 152.8,
+          "privateMB": null
+        },
+        "renderers": {},
+        "browser": [
+          {
+            "workingSetMB": 113.6
+          }
+        ],
+        "gpu": [
+          {
+            "workingSetMB": 56.8
+          }
+        ]
+      },
+      "rendererHeap": {}
+    },
+    "A and B open": {
+      "load": [
+        15.65,
+        15.48,
+        15.42
+      ],
+      "host": {
+        "heapUsedMB": 21.2,
+        "heapTotalMB": 40.6,
+        "externalMB": 20.1,
+        "arrayBuffersMB": 0,
+        "rssMB": 125.5
+      },
+      "hostLoaded": true,
+      "collectedByGC": [],
+      "metrics": {
+        "host": {
+          "workingSetMB": 119.7,
+          "privateMB": null
+        },
+        "renderers": {
+          "A": {
+            "workingSetMB": 224.9,
+            "privateMB": null
+          },
+          "B": {
+            "workingSetMB": 250.5,
+            "privateMB": null
+          }
+        },
+        "browser": [
+          {
+            "workingSetMB": 139
+          }
+        ],
+        "gpu": [
+          {
+            "workingSetMB": 68.5
+          }
+        ]
+      },
+      "rendererHeap": {
+        "A": {
+          "usedJSHeapMB": 37,
+          "totalJSHeapMB": 91.3,
+          "domNodes": 5781
+        },
+        "B": {
+          "usedJSHeapMB": 44.9,
+          "totalJSHeapMB": 100.2,
+          "domNodes": 5781
+        }
+      }
+    },
+    "A and B open, two agents live, after typing": {
+      "load": [
+        12.41,
+        14.63,
+        15.11
+      ],
+      "host": {
+        "heapUsedMB": 39.7,
+        "heapTotalMB": 51,
+        "externalMB": 21.6,
+        "arrayBuffersMB": 0,
+        "rssMB": 129.1
+      },
+      "hostLoaded": true,
+      "collectedByGC": [],
+      "metrics": {
+        "host": {
+          "workingSetMB": 123.2,
+          "privateMB": null
+        },
+        "renderers": {
+          "A": {
+            "workingSetMB": 211.7,
+            "privateMB": null
+          },
+          "B": {
+            "workingSetMB": 200.4,
+            "privateMB": null
+          }
+        },
+        "browser": [
+          {
+            "workingSetMB": 141.1
+          }
+        ],
+        "gpu": [
+          {
+            "workingSetMB": 68.5
+          }
+        ]
+      },
+      "rendererHeap": {
+        "A": {
+          "usedJSHeapMB": 41,
+          "totalJSHeapMB": 47,
+          "domNodes": 5793
+        },
+        "B": {
+          "usedJSHeapMB": 42.1,
+          "totalJSHeapMB": 51.4,
+          "domNodes": 5797
+        }
+      }
+    },
+    "B closed": {
+      "load": [
+        12.14,
+        14.54,
+        15.07
+      ],
+      "host": {
+        "heapUsedMB": 39.7,
+        "heapTotalMB": 51,
+        "externalMB": 21.6,
+        "arrayBuffersMB": 0,
+        "rssMB": 131
+      },
+      "hostLoaded": true,
+      "collectedByGC": [],
+      "metrics": {
+        "host": {
+          "workingSetMB": 124.9,
+          "privateMB": null
+        },
+        "renderers": {
+          "A": {
+            "workingSetMB": 211.6,
+            "privateMB": null
+          }
+        },
+        "browser": [
+          {
+            "workingSetMB": 147.8
+          }
+        ],
+        "gpu": [
+          {
+            "workingSetMB": 68.7
+          }
+        ]
+      },
+      "rendererHeap": {
+        "A": {
+          "usedJSHeapMB": 41.2,
+          "totalJSHeapMB": 47,
+          "domNodes": 5793
+        }
+      }
+    },
+    "A closed too (agents still attached)": {
+      "load": [
+        12.14,
+        14.54,
+        15.07
+      ],
+      "host": {
+        "heapUsedMB": 39.7,
+        "heapTotalMB": 42.9,
+        "externalMB": 21.6,
+        "arrayBuffersMB": 0,
+        "rssMB": 131
+      },
+      "hostLoaded": true,
+      "collectedByGC": [],
+      "metrics": {
+        "host": {
+          "workingSetMB": 124.9,
+          "privateMB": null
+        },
+        "renderers": {},
+        "browser": [
+          {
+            "workingSetMB": 146.8
+          }
+        ],
+        "gpu": [
+          {
+            "workingSetMB": 68
+          }
+        ]
+      },
+      "rendererHeap": {}
+    },
+    "agents closed (no connection; S2 service keeps the doc)": {
+      "load": [
+        12.14,
+        14.54,
+        15.07
+      ],
+      "host": {
+        "heapUsedMB": 39.7,
+        "heapTotalMB": 42.9,
+        "externalMB": 21.6,
+        "arrayBuffersMB": 0,
+        "rssMB": 131.2
+      },
+      "hostLoaded": true,
+      "collectedByGC": [],
+      "metrics": {
+        "host": {
+          "workingSetMB": 125.1,
+          "privateMB": null
+        },
+        "renderers": {},
+        "browser": [
+          {
+            "workingSetMB": 146.9
+          }
+        ],
+        "gpu": [
+          {
+            "workingSetMB": 68
+          }
+        ]
+      },
+      "rendererHeap": {}
+    },
+    "doc unloaded by hand": {
+      "load": [
+        11.64,
+        14.4,
+        15.02
+      ],
+      "host": {
+        "heapUsedMB": 31.3,
+        "heapTotalMB": 35.3,
+        "externalMB": 21.6,
+        "arrayBuffersMB": 0,
+        "rssMB": 130.8
+      },
+      "hostLoaded": false,
+      "collectedByGC": [
+        "host doc"
+      ],
+      "metrics": {
+        "host": {
+          "workingSetMB": 124.7,
+          "privateMB": null
+        },
+        "renderers": {},
+        "browser": [
+          {
+            "workingSetMB": 146.9
+          }
+        ],
+        "gpu": [
+          {
+            "workingSetMB": 68
+          }
+        ]
+      },
+      "rendererHeap": {}
+    }
+  },
+  "unload": {
+    "before": {
+      "heapUsedMB": 39.7,
+      "heapTotalMB": 42.9,
+      "externalMB": 21.6,
+      "arrayBuffersMB": 0,
+      "rssMB": 131.2
+    },
+    "connsAtUnload": 0
+  }
+}

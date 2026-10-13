@@ -1,0 +1,158 @@
+{
+  "scenario": "kill",
+  "timeline": {
+    "killAtMs": 2502,
+    "exitSeenMs": 2510,
+    "restartedMs": 4090,
+    "reconnectedMs": 4235,
+    "exitCode": 9
+  },
+  "reopened": [
+    {
+      "loadMs": 40.12433299999999,
+      "syncedMs": 49
+    },
+    {
+      "loadMs": 40.12433299999999,
+      "syncedMs": 58
+    }
+  ],
+  "A": {
+    "clientId": 3880032497,
+    "keystrokes": 266,
+    "ackedBeforeKill": 94,
+    "ackedBeforeKillLost": 0,
+    "typedBeforeKillUnacked": 0,
+    "unackedButDurableAtKill": 0,
+    "typedWhileDown": 66,
+    "inStoreAtEnd": 266,
+    "lostAtEnd": 0,
+    "neverAcked": 0
+  },
+  "B": {
+    "clientId": 71341671,
+    "keystrokes": 170,
+    "ackedBeforeKill": 61,
+    "ackedBeforeKillLost": 0,
+    "typedBeforeKillUnacked": 0,
+    "unackedButDurableAtKill": 0,
+    "typedWhileDown": 43,
+    "inStoreAtEnd": 170,
+    "lostAtEnd": 0,
+    "neverAcked": 0
+  },
+  "converged": {
+    "AeqB": true,
+    "AeqHost": true,
+    "storeEqHost": true,
+    "svEqual": true
+  },
+  "rendererPhases": {
+    "A": [
+      {
+        "phase": "handshake",
+        "synced": false,
+        "unsaved": 0,
+        "t": -171
+      },
+      {
+        "phase": "live",
+        "synced": false,
+        "unsaved": 0,
+        "t": -125
+      },
+      {
+        "phase": "live",
+        "synced": true,
+        "unsaved": 0,
+        "t": -61
+      },
+      {
+        "phase": "off",
+        "synced": false,
+        "unsaved": 0,
+        "t": 2503
+      },
+      {
+        "phase": "handshake",
+        "synced": false,
+        "unsaved": 64,
+        "t": 4177
+      },
+      {
+        "phase": "live",
+        "synced": false,
+        "unsaved": 65,
+        "t": 4220
+      },
+      {
+        "phase": "live",
+        "synced": true,
+        "unsaved": 66,
+        "t": 4225
+      }
+    ],
+    "B": [
+      {
+        "phase": "handshake",
+        "synced": false,
+        "unsaved": 0,
+        "t": -60
+      },
+      {
+        "phase": "live",
+        "synced": false,
+        "unsaved": 0,
+        "t": -60
+      },
+      {
+        "phase": "live",
+        "synced": true,
+        "unsaved": 0,
+        "t": 0
+      },
+      {
+        "phase": "off",
+        "synced": false,
+        "unsaved": 0,
+        "t": 2503
+      },
+      {
+        "phase": "handshake",
+        "synced": false,
+        "unsaved": 42,
+        "t": 4177
+      },
+      {
+        "phase": "live",
+        "synced": false,
+        "unsaved": 43,
+        "t": 4226
+      },
+      {
+        "phase": "live",
+        "synced": true,
+        "unsaved": 43,
+        "t": 4235
+      }
+    ]
+  },
+  "hostAfter": {
+    "rows": [
+      {
+        "t": "updates",
+        "n": 334
+      },
+      {
+        "t": "provenance",
+        "n": 334
+      },
+      {
+        "t": "versions",
+        "n": 1
+      }
+    ],
+    "rejected": 0,
+    "log": []
+  }
+}

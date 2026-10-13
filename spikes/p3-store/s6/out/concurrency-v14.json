@@ -1,0 +1,164 @@
+{
+  "checks": [
+    {
+      "name": "concurrent move (both set left/top): converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "concurrent move (both set left/top): outcome",
+      "pass": true,
+      "detail": {
+        "B whole": 99,
+        "A whole": 101
+      }
+    },
+    {
+      "name": "concurrent move, left and top in separate transactions: converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "concurrent move, left and top in separate transactions: outcome",
+      "pass": true,
+      "detail": {
+        "B whole": 104,
+        "A whole": 96
+      }
+    },
+    {
+      "name": "concurrent move + restyle of one element: converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "concurrent move + restyle of one element: outcome",
+      "pass": true,
+      "detail": {
+        "both": 200
+      }
+    },
+    {
+      "name": "concurrent z-order (A: e1 to front, B: e2 to front): converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "concurrent z-order (A: e1 to front, B: e2 to front): outcome",
+      "pass": true,
+      "detail": {
+        "order bg,title,g1,g2,e2,e1|keys distinct true": 200
+      }
+    },
+    {
+      "name": "concurrent z-order, same key minted (A: e1 to front, B: g1 to front): converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "concurrent z-order, same key minted (A: e1 to front, B: g1 to front): outcome",
+      "pass": true,
+      "detail": {
+        "same key|order bg,title,g2,e2,e1,g1|repair writes 1+1, identical true|after repair same order|keys distinct true": 200
+      }
+    },
+    {
+      "name": "send-to-back vs a concurrent new first flow child: converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "send-to-back vs a concurrent new first flow child: outcome",
+      "pass": true,
+      "detail": {
+        "backdrop under the flow layer": 200
+      }
+    },
+    {
+      "name": "concurrent re-order of the same slide (A: s3 first, B: s3 after s4): converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "concurrent re-order of the same slide (A: s3 first, B: s3 after s4): outcome",
+      "pass": true,
+      "detail": {
+        "no duplicate s1,s2,s4,s3": 110,
+        "no duplicate s3,s1,s2,s4": 90
+      }
+    },
+    {
+      "name": "two slides moved to the same gap (A: s3 after s1, B: s4 after s1): same key minted: converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "two slides moved to the same gap (A: s3 after s1, B: s4 after s1): same key minted: outcome",
+      "pass": true,
+      "detail": {
+        "same key|s1,s3,s4,s2|repair 1|order kept|distinct after true": 200
+      }
+    },
+    {
+      "name": "concurrent delete of an element vs an edit to it: converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "concurrent delete of an element vs an edit to it: outcome",
+      "pass": true,
+      "detail": {
+        "deleted anchor orphaned": 200
+      }
+    },
+    {
+      "name": "move into a group vs deletion of the element: converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "move into a group vs deletion of the element: outcome",
+      "pass": true,
+      "detail": {
+        "deleted g1 intact": 200
+      }
+    },
+    {
+      "name": "move into a group vs deletion of the group: converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "move into a group vs deletion of the group: outcome",
+      "pass": true,
+      "detail": {
+        "stored parent g1|shown at section true|repair 1|after section": 200
+      }
+    },
+    {
+      "name": "concurrent cycle (A: g1 into g2, B: g2 into g1): converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "concurrent cycle (A: g1 into g2, B: g2 into g1): outcome",
+      "pass": true,
+      "detail": {
+        "both rendered true|g1 at section true|repair 1|g2 in g1 true": 200
+      }
+    },
+    {
+      "name": "agent publish (text + colour) vs human move of the same element: converged in 200/200",
+      "pass": true
+    },
+    {
+      "name": "agent publish (text + colour) vs human move of the same element: outcome",
+      "pass": true,
+      "detail": {
+        "merged": 200
+      }
+    },
+    {
+      "name": "contrast: the same re-order as child delete+insert duplicates the slide (200/200)",
+      "pass": true
+    },
+    {
+      "name": "object anchor {slideId, elementId} resolves to the same element after move + z-order + slide re-order + regroup + republish",
+      "pass": true,
+      "detail": {
+        "live": true,
+        "tag": "p",
+        "parent": "g2"
+      }
+    }
+  ],
+  "numbers": {}
+}

@@ -1,0 +1,23 @@
+{
+  "name": "maws-spike-p3-s6",
+  "private": true,
+  "type": "module",
+  "description": "P3-0 spike S6 (docs/doperpowers/plans/2026-10-12-p3-co-work.md, child P3-0, parent pin blob 8474a047 at c73ba534): the slide model on Yjs v14, S1's exact pins. yjs 13, parse5, fractional-indexing, happy-dom and fast-diff resolve from the shared package one level up. Throwaway; installed on its own (pnpm --ignore-workspace).",
+  "dependencies": {
+    "@y/y": "14.0.0-rc.28",
+    "@y/prosemirror": "2.0.0-15",
+    "@y/protocols": "1.0.6-rc.1",
+    "lib0": "1.0.0-rc.36",
+    "@tiptap/core": "3.31.3",
+    "@tiptap/pm": "3.31.3",
+    "prosemirror-model": "1.25.12",
+    "prosemirror-state": "1.4.4",
+    "prosemirror-view": "1.42.6",
+    "prosemirror-transform": "1.12.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "@y/y": "14.0.0-rc.28"
+    }
+  }
+}

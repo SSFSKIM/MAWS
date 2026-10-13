@@ -1,0 +1,1 @@
+attrs mark in schema=true: editor ids/level [["p1-new",null],["h1",3]]; warnings ["[y/prosemirror] a view-side change removed the render-only attribution format \"y-attribute"]; editor wrote back 0 update(s)

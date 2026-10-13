@@ -1,0 +1,313 @@
+{
+  "checks": [
+    {
+      "name": "skill-plan: serialize(parse(x)) is a fixed point after one pass",
+      "pass": true
+    },
+    {
+      "name": "skill-plan: the DOM adapter (renderer path) gives the same canonical file as parse5",
+      "pass": true
+    },
+    {
+      "name": "skill-plan: IR → Y.Doc → IR → file equals the canonical file",
+      "pass": true
+    },
+    {
+      "name": "skill-plan: diagnostics are only warnings and notes (not held)",
+      "pass": true,
+      "detail": 0
+    },
+    {
+      "name": "layout-kpis: serialize(parse(x)) is a fixed point after one pass",
+      "pass": true
+    },
+    {
+      "name": "layout-kpis: the DOM adapter (renderer path) gives the same canonical file as parse5",
+      "pass": true
+    },
+    {
+      "name": "layout-kpis: IR → Y.Doc → IR → file equals the canonical file",
+      "pass": true
+    },
+    {
+      "name": "layout-kpis: diagnostics are only warnings and notes (not held)",
+      "pass": true,
+      "detail": 1
+    },
+    {
+      "name": "diagrams-connectors: serialize(parse(x)) is a fixed point after one pass",
+      "pass": true
+    },
+    {
+      "name": "diagrams-connectors: the DOM adapter (renderer path) gives the same canonical file as parse5",
+      "pass": true
+    },
+    {
+      "name": "diagrams-connectors: IR → Y.Doc → IR → file equals the canonical file",
+      "pass": true
+    },
+    {
+      "name": "diagrams-connectors: diagnostics are only warnings and notes (not held)",
+      "pass": true,
+      "detail": 0
+    },
+    {
+      "name": "recipes-label: serialize(parse(x)) is a fixed point after one pass",
+      "pass": true
+    },
+    {
+      "name": "recipes-label: the DOM adapter (renderer path) gives the same canonical file as parse5",
+      "pass": true
+    },
+    {
+      "name": "recipes-label: IR → Y.Doc → IR → file equals the canonical file",
+      "pass": true
+    },
+    {
+      "name": "recipes-label: diagnostics are only warnings and notes (not held)",
+      "pass": true,
+      "detail": 0
+    },
+    {
+      "name": "messy: serialize(parse(x)) is a fixed point after one pass",
+      "pass": true
+    },
+    {
+      "name": "messy: the DOM adapter (renderer path) gives the same canonical file as parse5",
+      "pass": true
+    },
+    {
+      "name": "messy: IR → Y.Doc → IR → file equals the canonical file",
+      "pass": true
+    },
+    {
+      "name": "messy: diagnostics are only warnings and notes (not held)",
+      "pass": true,
+      "detail": 21
+    },
+    {
+      "name": "skill-plan: \"attribute order reversed\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "skill-plan: \"declaration order reversed\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "skill-plan: \"whitespace and case\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "skill-plan: \"bare numbers for px\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "skill-plan: \"rgb() for hex\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "skill-plan: \"entities\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "layout-kpis: \"attribute order reversed\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "layout-kpis: \"declaration order reversed\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "layout-kpis: \"whitespace and case\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "layout-kpis: \"bare numbers for px\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "layout-kpis: \"rgb() for hex\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "layout-kpis: \"entities\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "recipes-label: \"attribute order reversed\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "recipes-label: \"declaration order reversed\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "recipes-label: \"whitespace and case\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "recipes-label: \"bare numbers for px\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "recipes-label: \"rgb() for hex\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "recipes-label: \"entities\" canonicalizes to the same file",
+      "pass": true
+    },
+    {
+      "name": "var(--ds-*): kept through parse/serialize, fixed point",
+      "pass": true,
+      "detail": [
+        "var(--ds-font-body)",
+        "var(--ds-color-bg)",
+        "var(--ds-space-4)",
+        "var(--ds-space-6)",
+        "var(--ds-type-h2-size)",
+        "var(--ds-color-accent, #cc0000)",
+        "var(--ds-space-3)",
+        "var(--ds-color-border)"
+      ]
+    },
+    {
+      "name": "var() outside --ds-* dropped with a warning",
+      "pass": true
+    },
+    {
+      "name": "the Claude-compatible export resolves tokens to literals (fallback when unresolved)",
+      "pass": true,
+      "detail": [
+        "style=\"background:#fbfbf8\"",
+        "style=\"color:#2b7a78\""
+      ]
+    },
+    {
+      "name": "held: two sections",
+      "pass": true,
+      "detail": [
+        "a slide file holds exactly one <section> and nothing else"
+      ]
+    },
+    {
+      "name": "held: unknown tag",
+      "pass": true,
+      "detail": [
+        "unknown or misplaced tag <iframe>"
+      ]
+    },
+    {
+      "name": "held: text directly in a div",
+      "pass": true,
+      "detail": [
+        "text \"loose text\" directly inside <div>"
+      ]
+    },
+    {
+      "name": "held: aside not last",
+      "pass": true,
+      "detail": [
+        "<aside> (the notes) is not the section's last child"
+      ]
+    },
+    {
+      "name": "held: nested list",
+      "pass": true,
+      "detail": [
+        "nested list inside <ul>"
+      ]
+    },
+    {
+      "name": "held: embed inside a div",
+      "pass": true,
+      "detail": [
+        "<x-embed> is not a direct child of the section"
+      ]
+    },
+    {
+      "name": "held: svg with script",
+      "pass": true,
+      "detail": [
+        "an <svg> with script, an event handler, foreignObject or an external URL"
+      ]
+    },
+    {
+      "name": "held: colspan",
+      "pass": true,
+      "detail": [
+        "colspan on a table cell"
+      ]
+    },
+    {
+      "name": "held: 16 nested divs",
+      "pass": true,
+      "detail": [
+        "more than 15 nested <div>s"
+      ]
+    },
+    {
+      "name": "held: 201 elements",
+      "pass": true,
+      "detail": [
+        "201 elements (over 200)"
+      ]
+    },
+    {
+      "name": "held: bad section id",
+      "pass": true,
+      "detail": [
+        "section id \"a b\" is not [A-Za-z0-9_-]{1,64}"
+      ]
+    },
+    {
+      "name": "held: unknown inline tag",
+      "pass": true,
+      "detail": [
+        "<code> inside the text of <p>"
+      ]
+    },
+    {
+      "name": "held: section id differs from the file name",
+      "pass": true
+    },
+    {
+      "name": "unknown properties and attributes are dropped with diagnostics, the slide loads",
+      "pass": true,
+      "detail": [
+        "warning: unsupported attribute onclick dropped",
+        "warning: unsupported property float dropped",
+        "warning: unsupported property z-index dropped",
+        "warning: unsupported attribute title dropped",
+        "note: data-foo ignored"
+      ]
+    },
+    {
+      "name": "minted ids: e<n>-<hash>, authored ids kept, same seed → same ids (idempotent replay)",
+      "pass": true,
+      "detail": [
+        "e1-rqlc",
+        "keep",
+        "e2-rqlc"
+      ]
+    },
+    {
+      "name": "minted ids: a different seed (a later publish) mints different ids",
+      "pass": true,
+      "detail": [
+        "e1-rqlc",
+        "e1-lrzx"
+      ]
+    },
+    {
+      "name": "minted ids never reuse an id the live slide holds",
+      "pass": true,
+      "detail": [
+        "e2-rqlc",
+        "keep",
+        "e3-rqlc"
+      ]
+    }
+  ],
+  "numbers": {}
+}

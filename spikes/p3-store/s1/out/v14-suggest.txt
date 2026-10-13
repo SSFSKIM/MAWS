@@ -1,0 +1,24 @@
+PASS agent edit stays out of base
+suggestions on screen: ["delete:agent:session-1:\"the middle of\"","insert:agent:session-1:\"a part of\"","insert:agent:session-1:\"Agent proposed paragraph.\"","insert:agent:session-1:\" Agent closing remark.\""]
+PASS suggestions render with the suggester's identity — 4 marked runs
+PASS deleted text shown struck (still on screen)
+PASS owner typing in view mode goes to base, unattributed
+PASS accept hunk 1 command
+PASS reject hunk 2 command
+PASS accept hunk 3, text-only range: command returns true
+FAIL accept hunk 3, text-only range: lands in base — pending structs {"hBase":true,"base":false}
+[y/prosemirror] a view-side change removed the render-only attribution format "y-attributed-attrs"; it was swallowed - Yjs and its renderer own the attributions, so it is not written back, and it is not re-asserted on the view either (a mark the schema cannot hold would loop forever). This view may render stale attribution for that range until a Y change re-renders it. If the bind-time warning about node types that do not allow attribution marks also fired, whitelist "y-attributed-attrs" on the node type it named; otherwise check what is editing the attribution projection.
+PASS accept hunk 3, block range: command returns true
+PASS accept hunk 3, block range: pending structs cleared — {"hBase":false,"base":false}
+base after review: <heading id="h1" level=2>Draft</heading><paragraph id="p1">The owner types quickly here.</paragraph><paragraph id="p2">Agent will rewrite a part of this paragraph.</paragraph><paragraph id="pA">Agent proposed paragraph.</paragraph><paragraph id="p3">Closing line.</paragraph>
+PASS base: hunk 1 accepted
+PASS base: hunk 2 rejected
+PASS base: hunk 3 accepted with its id
+PASS no suggestions left on screen — []
+PASS suggestion doc converged to base content
+PASS accepted content keeps the agent replica's clientID (provenance can credit the suggester) — pA client 3311371007088857 vs agent 3311371007088857; base log credits ["human","human"]
+PASS a live second proposal renders while open, attributed — ["insert:agent:session-2:Note: "]
+PASS reject-all clears it and base never saw it
+PASS screen back to base after reject-all — "Draft\n\nThe owner types quickly here.\n\nAgent will rewrite a part of this paragraph.\n\nAgent proposed paragraph.\n\nClosing line."
+
+18/19 checks passed

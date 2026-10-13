@@ -1,0 +1,31 @@
+PASS bind: A renders host content — "Plan\nFirst paragraph here.\nSecond paragraph, split me here please.\nThird paragraph."
+PASS bind: ids rendered from Y — ["h1","p1","p2","p3"]
+PASS type: B sees A's keystrokes
+PASS type: host has it
+PASS split: two paragraphs on B — "Plan\nFirst paragraph typed here.\nSecond paragraph, \nsplit me here please.\nThird paragraph."
+PASS split: original id kept on first half, new id on second, no duplicates — ["h1","p1","p2","8tf6mgod","p3"]
+PASS split: host ids equal editor ids — ["h1","p1","p2","8tf6mgod","p3"]
+PASS paste: event handled by ProseMirror
+PASS paste: pasted text synced — "Plan\nFirst paragraph typed here.\nSecond paragraph, \nsplit me here please.\nThird paragraph.\nPasted copy of p1\nSecond pasted"
+PASS paste: pasted blocks get fresh ids (no duplicate p1, "zz" stripped) — ["h1","p1","p2","8tf6mgod","p3","f3cweix2","j19zen2h"]
+PASS undo setup: both edits on both
+PASS undo: A's undo removes only A's edit — "Plan by B\nFirst paragraph typed here.\nSecond paragraph, \nsplit me here please.\nThird paragraph.\nPasted copy of p1\nSecond pasted"
+PASS redo: A's redo restores it
+PASS undo all of A: B's edit survives, A's typing/split/paste gone — "Plan by B\nFirst paragraph here.\nSecond paragraph, split me here please.\nThird paragraph." (A stack was 2)
+PASS undo all of A: ids back to the originals — ["h1","p1","p2","p3"]
+PASS cursor: A publishes a cursor when focused (default policy uses view.hasFocus()) — {"anchor":{"type":{"client":4194112649883155,"clock":7},"tname":null,"item":{"cl
+PASS cursor: B renders A's caret widget with A's name — 1 widget(s): ⁠Owner⁠
+PASS cursor: B renders A's selection highlight — 1 span(s): First
+PASS cursor: A renders the agent replica's caret (relative position from a Node replica) — ⁠Claude (session 1)⁠
+PASS awareness: the agent's "blocks it is editing" field reaches A
+PASS UniqueID (filtered): no editor writes ids for a remote block — ["agent:session-1"]
+[y/prosemirror] a view-side change removed the render-only attribution format "y-attributed-attrs"; it was swallowed - Yjs and its renderer own the attributions, so it is not written back, and it is not re-asserted on the view either (a mark the schema cannot hold would loop forever). This view may render stale attribution for that range until a Y change re-renders it. If the bind-time warning about node types that do not allow attribution marks also fired, whitelist "y-attributed-attrs" on the node type it named; otherwise check what is editing the attribution projection.
+[y/prosemirror] a view-side change removed the render-only attribution format "y-attributed-attrs"; it was swallowed - Yjs and its renderer own the attributions, so it is not written back, and it is not re-asserted on the view either (a mark the schema cannot hold would loop forever). This view may render stale attribution for that range until a Y change re-renders it. If the bind-time warning about node types that do not allow attribution marks also fired, whitelist "y-attributed-attrs" on the node type it named; otherwise check what is editing the attribution projection.
+PASS host repair: the missing id filled once, both editors show it — fixed=1 ["h1","p1","p2","8tf6mgod","p3","f3cweix2","j19zen2h","r1"]
+PASS UniqueID (stock, unfiltered) control: the unfiltered editor writes an id into the remote block — ["agent:session-1","human-unfiltered"]
+PASS concurrent split: replicas converge — "Plan by B\nFirst paragraph \ntyped here.\nhere.\nSecond paragraph, \nsplit me here please.\n\n\nA-was-here Third paragraph.\nPasted copy of p1\nSecond pasted\nAgent block without id\nSecond id-less agent block"
+  ids after concurrent offline split (host): ["h1","p1","7tke1nrm","xl7cxev9","p2","8tf6mgod","7nox73ao","c2d8fdaf","p3","f3cweix2","j19zen2h","r1","e1kbxmhw"] duplicates: []
+PASS concurrent split: host repair leaves unique ids on every replica — fixed=0 ["h1","p1","7tke1nrm","xl7cxev9","p2","8tf6mgod","7nox73ao","c2d8fdaf","p3","f3cweix2","j19zen2h","r1","e1kbxmhw"]
+PASS final: host, A, B identical
+
+26/26 checks passed; host log 19 updates by ["import","human","human-tab","agent:session-1","host-repair","human-unfiltered"]

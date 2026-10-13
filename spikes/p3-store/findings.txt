@@ -1,0 +1,1602 @@
+# P3-0 — The store spikes: findings
+
+Parent: docs/doperpowers/plans/2026-10-12-p3-co-work.md, child P3-0 (§5, §4.12), parent pin blob 8474a047 of that file at
+commit c73ba534. A spike: findings, never a merge. The spikes are research/p3-yjs-store.md §8 as amended by the spec's
+§4.12 and §4.2 to §4.5. The code here is throwaway; the parts marked "copy" are meant for P3-A, P3-B and P3-C.
+(Written as .txt, the protocol-probe convention: the harness refuses a subagent's .md write; the coordinator's ruling
+of 2026-10-12.)
+
+Status: complete 2026-10-12. Every spike's verdict is in and each was accepted by the architect (spec Decision Log 25
+to 36, and the S7b entry that follows this hand-back); every question is marked answered under its spike except
+S7b's, which went to the architect with this file's last commit.
+
+## Verdicts
+
+| Spike | Verdict | Decision Log |
+|---|---|---|
+| S1 | v14 (`@y/y` 14.0.0-rc.28 + `@y/prosemirror` 2.0.0-15, exact pins): every functional gate passes; API churn in `@y/prosemirror` is the one open risk, contained in one module | 25 |
+| S2 | The topology holds on v14 in real Electron: utility-process host with its own fullfsync SQLite store, one port per document, ack and commit-before-reveal, 0 acknowledged edits lost to a SIGKILL, a detached host serving over a binary channel beside E10's JSON lines; ContentMap provenance through compaction | 26, 30 |
+| S6 | The Y.Map (v14 Y.Node) slide model is proven: canonical dialect round trip at a fixed point, base-relative diff-apply in one transaction, every concurrency case converged in 200/200 trials; two paint keys | 26, 28 |
+| S3 | History on the real editor passes on v14 (DiffRenderer from ContentMap provenance through compaction, N changes, Show editors, undo guards); restore is one kind-agnostic revert-since-version | 29 |
+| S5 | Comment marks hold on v14 through every ordinary edit, restart and restore; the mark frozen at `{threadId}`, resolve in the threads map, orphaned derived, the anchor refreshed by the host | 31, 32 |
+| S4 | The patch writer works on v14 with an atomic batch; Korean IME survives agent edits with four additions (the composition hold, the span move, caret follows id, host forwarding): 68/68 | 33, 34 |
+| S7a | The spec's full-state versions fail the storage bounds (178 MB per document per 6 months); the proposed delta policy passes the normal profile except a marginal history preview; a v14-only revert gap and its 3-line fix | 36 |
+| S7b | Pass against the proposed bounds in Electron once four fixes apply (the hold, its merged flush, touched-parent validation, awareness destroyed on close with an idle unload); the writer's host-loop max (126–148 ms) is the one bound still open; B and C may start | 35; S7b's own pending |
+
+## How to run
+
+The spikes have their own package, installed apart from the root:
+`pnpm -C spikes/p3-store install --ignore-workspace`; S1's v14 stack is its own package:
+`pnpm -C spikes/p3-store/s1/v14 install --ignore-workspace`. A worktree without `node_modules` symlinks the main
+checkout's (Electron 44.4.5 and esbuild come from there). Heavy runs go through `/tmp/maws-review/waitload20.sh` and
+`/tmp/maws-review/with-slot.sh`. Every command below runs from the repository root. Run outputs are under each spike's
+`out/` (ignored by `.gitignore:3`; committed with `git add -f`).
+
+## Method
+
+Each spike was run by one worker under the P3-0 executor, who folds its section in here and re-runs the headline
+commands (noted "re-run by the executor"). "Verified" means run in this spike; "source" means code or docs read, not run.
+
+## S1 — Yjs v13 or v14
+
+**Verdict: v14 (`@y/y` 14.0.0-rc.28 with `@y/prosemirror` 2.0.0-15, pinned exactly).** Every functional gate passes;
+the data gate passes (no loss, no corrupt encoding, v14 reads v13 bytes); API stability does not: `@y/prosemirror`'s JS
+API broke twice in September 2026 and is still moving. Judged non-blocking because the API MAWS touches sits in one
+module and the persisted bytes are Yjs's binary format. Confidence: high on function, moderate on maturity.
+
+Method: Node 22 with happy-dom, real Tiptap 3.31.3 editors, replicas wired through y-protocols sync and awareness frames
+via a host hub that logs every update as `{seq, actor, at, bytes}` (the `artifact_updates` shape). No Electron run
+(the DOM input path and IME are S4's).
+
+### 1. Binding in Tiptap 3.31.3 (two editor replicas and an agent replica)
+- v14 26/26 checks, v13 25/25 on the same checks (verified: `node spikes/p3-store/s1/v14/s1-binding.mjs`,
+  `node spikes/p3-store/s1/v13/s1-binding.mjs`; `s1/out/v14-binding.txt`, `v13-binding.txt`): typing and splits sync;
+  paste gets fresh ids and strips foreign ones; `Y.UndoManager` scoped to the binding (A's undo removes only A's edit;
+  undo-all restores the original ids; redo); remote carets; the agent replica's caret from a Node-side relative position
+  renders; an `editing: {blocks}` awareness field reaches the editors.
+- The v14 custom extension is 54 code lines (`s1/v14/collab.mjs`, `YCollaboration`: `syncPlugin`, `yCursorPlugin`,
+  `yUndoPlugin`, undo and redo commands and keys, binding in a microtask). Schema hardening is 75 more lines
+  (`s1/v14/schema.mjs`, adapted from upstream's MIT `yhub-tiptap-demo/src/schema.js`): the four `y-attributed-*` marks,
+  marks allowed on containers, codeBlock admitting them, the `--attributed` variants, guards on TrailingNode, Link and
+  tables. No Tiptap fork.
+- v14 merges one concurrent case better (verified): both replicas offline press Enter at the start of the same
+  paragraph; v13 duplicates the paragraph and its id, v14 gives two empty paragraphs. A concurrent mid-paragraph split at
+  different offsets duplicates the tail on both (a split is "delete tail + insert node").
+
+### 2. UniqueID
+- Ids survive split (the first half keeps the id), paste (fresh ids) and undo on both versions (verified).
+- Pitfall (verified): UniqueID skips only transactions with v13's `y-sync$` meta; v14's binding marks remote changes
+  `y-sync-transaction`, so stock UniqueID on v14 writes ids into remote blocks from every peer. Fix without a fork:
+  `UniqueID.configure({filterTransaction: tr => !isBindingTransaction(tr)})` (`s1/v14/collab.mjs`), and name the extension
+  `collaboration` so UniqueID takes its collaborative path. Tiptap core's `Delete` extension also filters only `y-sync$`
+  (source: `@tiptap/core` dist line 5572): set `coreExtensionOptions.delete.filterTransaction` the same way.
+- The host's id repair stays required on both versions (writers that omit ids, concurrent splits; verified on v13's
+  concurrent-Enter duplicate).
+
+### 3. History from two stored full V2 states, attributed from the per-update log
+Fixture: human and agent edits in one paragraph, a heading level change, a bold format change, a code block's text and
+`language`, a table cell, a new paragraph, deletions.
+
+| | Expectations met | Code block | Attribute change | Format change | Times |
+|---|---|---|---|---|---|
+| v14 `DiffRenderer(prevDoc, nextDoc, {attributions})`, headless and in a read-only editor | 13/13 | yes | yes (`y-attributed-attrs` names `level`, `language`, author, time) | yes (`y-attributed-format`) | yes (`insertAt`/`deleteAt` from the log) |
+| v13 state-pair snapshot, PUD-shaped adapter, stock StarterKit | 8/13 | the whole block disappears (#189) | invisible (#177/#82) | invisible | no |
+| v13 with codeBlock `marks: 'ychange'` | 10/13 | yes (#189 is a schema fix) | invisible | invisible | no |
+
+- Verified: `node spikes/p3-store/s1/v14/s1-history.mjs` and `node spikes/p3-store/s1/v13/s1-history.mjs`
+  (`s1/out/v14-history.*`, `v13-history.*`); the v14 and v13 runs re-run by the executor with the same spans.
+- v14 attributions per update: `Y.createContentIdsFromUpdateV2(update)` → `Y.createContentMapFromContentIds(ids,
+  [insert actor, insertAt], [delete actor, deleteAt])`, merged with `Y.mergeContentMaps`.
+- `doc.check()` valid; rendering leaves both version docs byte-unchanged; history is left by
+  `configureYProsemirror({ytype: live, renderer: null})` and typing afterwards reaches the live doc. Headless render
+  5 ms; versions 793 B and 1,032 B; the window's ContentMap encodes to 313 B.
+- Of the five frozen v13 bugs v14 fixes #177/#82 and #189 (verified); #128 (null PUD) cannot occur (no PUD; source);
+  #72 is a restore question (S3).
+
+### 4. Suggestion mode for an agent edit (v14)
+- 18/19 checks (verified: `node spikes/p3-store/s1/v14/s1-suggest.mjs`; re-run by the executor, 18/19).
+- Topology: the host keeps the base doc and a suggestion doc (`gc:false, isSuggestionDoc:true`); the agent edits its
+  own replica of the suggestion doc; the human's editor shows `DiffRenderer(baseReplica, suggestionReplica,
+  {attributions})` in view mode. Four hunks render attributed to the agent, deletions struck; the owner's typing goes
+  to base; per-hunk accept and reject land in base and the suggestion doc converges; a second live proposal renders;
+  reject-all clears it.
+- The one failure: accepting a text-only range inside an inserted paragraph returns true but leaves pending structs in
+  the reviewer's base replica; accepting by the node range (`from-1 … to+1`) works. Accept buttons pass block ranges.
+- Accepted content keeps the agent's clientID, but the base log credits the accepting port: provenance must map a
+  suggestion doc's clientIDs to the suggester.
+- v13 equivalent (estimate, not built): a fork doc per proposal, a structural diff into a custom overlay, per-hunk Y
+  ops onto base; a home-grown DiffRenderer of about 1.5k to 3k lines, fragile on tables and attributes.
+
+### 5. The Node writer (no DOM)
+- v14 10/10, v13 7/7 (verified: `node spikes/p3-store/s1/v14/s1-writer.mjs`, `s1/v13/s1-writer.mjs`): markdown → PM
+  (`@tiptap/markdown`) → Y → PM → markdown byte-identical to the canonical markdown, ids on every block including table
+  cell paragraphs; `@tiptap/markdown` pads GFM tables, so the fixed point is `serialize(parse(x))`.
+- Agent edits as Y ops from its replica: a multi-hunk text edit, a word edit beside bold, italic, code and link keeping
+  the marks, a section inserted after a heading, a type change keeping the id. Update sizes 82, 235, 157 B (v13 73, 225,
+  149).
+- The v14 replacements (verified):
+
+| v13 | v14 |
+|---|---|
+| `prosemirrorToYXmlFragment` | `ynode.applyDelta(pmnodeToDelta(pmNode))`; a block: `parent.insert(i, [pmnodeToDelta(blockNode)])` |
+| `yXmlFragmentToProseMirrorRootNode` | `ynodeToPmnode(ynode, schema, {renderer?})` (with a renderer, a headless diff for the agent) |
+| `Y.XmlText` delta API | gone: text is inline in the unified `Y.Node`: `insert(i, text, format?)`, `delete(i, n)`, `format(i, n, {bold: {}})`, `setAttr`/`getAttr`, `toDelta()` |
+| change an element's type | a node's `name` is immutable: delete and re-insert under the same id |
+
+### 6. Encoding and storage
+- The one-way rule, run (verified: `node spikes/p3-store/s1/v14/s1-encoding.mjs`, `s1/out/encoding.json`): v14 reads v13
+  V1 and V2 bytes and renders identical PM JSON; a v14 editor bound to a v13 doc writes one normalization update (as
+  CAVEATS says); v13 decodes v14 bytes without throwing but `yXmlFragmentToProseMirrorRootNode` and a v13 Tiptap binding
+  throw (`TypeError … 'right'` in y-tiptap `createChildren`); the stale client writes nothing. Loud, not silent deletion.
+- The same 20k-op keystroke history, V2 state:
+
+| | gc on | gc off | V1 state | Update log | Replay 20k ops | Load |
+|---|---|---|---|---|---|---|
+| v13 | 94.7 KB | 92.7 KB | 224 KB | 558 KB | 250 ms | ~34 ms |
+| v14 | 98.1 KB (+3.6 %) | 97.1 KB | 301 KB (+34 %) | 623 KB (+12 %) | 557 ms | ~31 ms |
+
+- Keystroke cost, 500 blocks in happy-dom (`s1/v14/s1-perf.mjs`, `s1/out/perf.json`): v13 p50 0.42 / p95 0.94 ms; v14
+  p50 0.89 / p95 1.73 ms. A remote edit applied into the editor: v13 1.56 ms, v14 0.85 ms. Bundle, Tiptap external
+  (`s1/out/bundle-size.txt`): v13 41 KB gzip, v14 63 KB gzip.
+
+### 7. Maturity (registry and GitHub, read 2026-10-12)
+- `@y/y`: 14.0.0-16 (2025-12-10) → rc.0 (2026-02-25) → rc.28 (2026-09-29), about 28 rcs in 7 months, weekly March to
+  July, a gap rc.24 (07-15) to rc.25 (09-03). npm `latest` still points at rc.7; `beta` is rc.28. No stated 14.0.0
+  date. MIT.
+- `@y/prosemirror`: 2.0.0-4 (06-03) → -15 (10-11), 11 releases in 4 months. Breaking: -9 (09-07) the
+  AttributionManager→Renderer rename with `@y/y` rc.19 and a new positions API; -12 (09-21) `pmToFragment`/`fragmentToPm`
+  replaced by `ynodeToPmnode`/`pmnodeToDelta`; -15 how implied format attribution renders. 12 open issues, among them
+  #234 (V2 release checklist), #235 (open questions: undo while paused, cursors in suggestion mode), #261 (migration
+  guide), #245 (suggestion misattribution), #263, #272 (RangeError on a remote update), #205. MIT.
+- yjs's open 2026 issues are mostly UndoManager correctness (#811, #806, #809, #794) and affect v13 and v14 alike.
+- Who ships v14: BlockNote 0.55.0 (2026-09-22) on Tiptap 3.31.3 lists `@y/y ^14.0.0-rc.23` and `@y/prosemirror
+  ^2.0.0-6` as optional peers with a `@blocknote/core/y` entry (registry; source not read). Tiptap's Collaboration still
+  pins yjs ^13.
+
+### Verdict reasoning
+Gates: binding, UniqueID, undo and cursors pass; DiffRenderer with log-built attributions passes 13/13 where v13 does
+8 to 10; suggestion mode passes with one range pitfall; the Node writer passes; data passes; API stability fails
+literally. v14 still, because (1) the one-way risk is about data and the data passes; (2) the API MAWS touches is small
+(`syncPlugin`, `configureYProsemirror`, `DiffRenderer`, the ContentMap helpers, `pmnodeToDelta`/`ynodeToPmnode`, the
+mark names) and fits one module, so a re-pin edits that module, not documents; (3) a shipped editor runs this stack on
+the same Tiptap; (4) v13's gaps land on §2 item 4, the differentiator (attribute and format changes invisible, no
+times, a home-built suggestion engine). What would flip it: the architect reading "an API expected to break" as
+blocking; a v14-only failure in S3, S4 or S7 (IME under `y-sync-transaction`, large-document first sync); a wish for zero
+dependency churn before P4.
+
+Executor's note on the residual risk: the binary encoding is stable, but how `@y/prosemirror` maps ProseMirror into
+`Y.Node`s (mark storage keys such as `name--<hash>` for overlapping marks, the attributed variants) is binding-level
+and could change between prereleases; that would be a content normalization of stored documents, not an unreadable
+store. P3-A should keep S1's suite as the re-pin gate and store a binding-version tag per document.
+
+### Pitfalls (verified unless marked)
+1. UniqueID on v14 needs `filterTransaction`; filter core `Delete` too (source).
+2. Undo and redo commands set `tr.setMeta('preventDispatch', true)`, else "Applying a mismatched transaction".
+3. Bind after the EditorView constructor returns (a microtask): Tiptap's dispatch needs `editor.view`.
+4. A mark's `excludes` changes its Y storage key (`Code.extend({excludes})` stored `code--<hash>`); overlapping marks
+   (the `comment` mark) are stored as `name--<contenthash>` (source: CAVEATS). Writers produce marks through
+   `pmnodeToDelta` with the editor's exact schema: schema parity is also key parity.
+5. The `--attributed` variants carry every canonical attribute including the id; add them to UniqueID's `types`.
+6. Without a renderer, a remote node-attribute change logs a one-time `y-attributed-attrs … swallowed` warning; content
+   unaffected (`s1/v14/probe-attrs-warning.mjs`).
+7. Partial accept inside an inserted block leaves pending structs; accept by block range.
+8. An accepted suggestion is credited in the log to the accepting port; credit the suggester by clientID.
+9. `@y/prosemirror` declares `@y/y` a dependency, not a peer: dedupe to one copy (the guard is `__ $YJS14$ __`), pin
+   exact, install by version (the `latest` tags are stale).
+10. A v13 client must never open a P3 document (it throws).
+11. Concurrent mid-paragraph splits duplicate the tail on both versions.
+12. Upstream docs lag: `@y/y`'s README still documents v13 types.
+13. Awareness timers keep a Node process alive; scripts exit explicitly.
+
+### Copy
+- P3-A: `s1/lib/link.mjs` (the hub logging `{seq, actor, at, bytes}` per port); the attribution build in
+  `s1/v14/s1-history.mjs`; provenance persisted as encoded `Y.ContentMap`s (`Y.encodeContentMap`/`decodeContentMap`:
+  (client, clock range) → insert or delete actor and time; 313 B for the window above); the suggestion-doc topology and
+  its clientID crediting (`s1/v14/s1-suggest.mjs`).
+- P3-B: `s1/v14/collab.mjs`, `s1/v14/schema.mjs`, the headless diff via `ynodeToPmnode(…, {renderer})`, the writer mapping
+  in `s1/v14/s1-writer.mjs`.
+
+### Not tested in S1
+IME and the real DOM input path (S4); clipboard and drag; Electron; large-document first sync and scale (S7);
+artifact-wide restore (S3); comment marks through edits (S5); `SnapshotRenderer` (not needed for state-pair history);
+whether 2.0.0 final needs a normalization pass over 2.0.0-15 documents.
+
+### The architect's ruling (2026-10-12)
+(1) v14 accepted: `@y/y` 14.0.0-rc.28 and `@y/prosemirror` 2.0.0-15 pinned exactly, one `@y/y` forced by a pnpm
+override, the v14 binding code isolated in one module, S1's suite the gate for any re-pin, every document tagged with its
+binding version; the verdict returns to v13 only if S3, S4 or S7 finds a v14-only failure. (2) Provenance is v14's
+native attribution (encoded ContentMaps) persisted and merged by the host beside the update log, provided actor and time
+per id range survive compaction and thinning; X24 and X29 amended to that shape by the architect. (3) Suggestions are
+opt-in: direct edits stay the default; `mode: 'suggest'` on a write, and an artifact setting "agent edits as
+suggestions" (put to the owner). Pitfalls 1 and 8 go into P3-A's brief.
+
+### Questions for the architect (S1, answered above)
+1. Accept v14 with exact pins (a pnpm override forcing one `@y/y`), an upgrade being a deliberate re-pin with S1's suite
+   re-run? Recommended: yes.
+2. Provenance as ContentMaps rather than custom `(clientID, clock range)` rows? Recommended: yes; X24/X29's `provenance`
+   row shape becomes `(docId, seq, at, actor, contentMap bytes)` or a merged map per bucket.
+3. Suggestion docs: every agent edit a suggestion, or opt-in? Recommended: opt-in ("propose"), direct edits stay the
+   default as §2 item 2 assumes; a product call for the owner (a suggestion doc is gc-off and grows).
+4. Vendor `@y/prosemirror` at a pinned commit? Recommended only if upstream has not fixed the partial-accept gap before
+   P3-B lands.
+
+## S2 — The host document service, the port and the detached channel
+
+**Verdict: the topology holds on Yjs v14** (`@y/y` 14.0.0-rc.28, `@y/protocols` 1.0.6-rc.1, lib0 1.0.0-rc.36, exact pins,
+one copy each in every bundle, verified), in real Electron 44.4.5, v13 kept for comparison: a utility-process host owning
+a `node:sqlite` store serves two hidden renderer replicas over one `MessageChannelMain` per document plus an in-process
+agent replica; acknowledged edits survive a SIGKILL; a detached host keeps taking an agent's edits with main gone and a
+later main relays a renderer over a binary channel on the same socket. Nothing failed on v14 alone. The §4.2 changes
+below were accepted by the architect (spec Decision Log 26; ledger X13, X24).
+
+§4.2 changes:
+1. An `ack` frame (MAWS type 100, `[durableFrames, revision]`) and commit-before-reveal: no frame revealing an update
+   leaves the host before its row commits; commits are grouped per event-loop turn.
+2. `PRAGMA fullfsync=ON`: on macOS `synchronous=FULL` alone does not flush the drive cache (SQLite docs, source).
+3. Untrusted updates are pre-checked (gaps, missing origins or parents, unknown deletes refused); a doc left with pending
+   state or a skip hole is evicted and reloaded.
+4. Provider handshake: after connecting, a replica sends only step 1 and awareness until it has answered the host's
+   step 1 (else its own edits arrive as a gap).
+5. Provenance is v14's native attribution, stored as encoded ContentMaps beside the log (shape below).
+6. Log rows in V1 (the wire format), versions as V2 states; the live revision is the global log `seq` (rising, sparse per
+   document, never reused after compaction).
+
+Reproduce (from the repository root; `<Electron>` = `node_modules/electron/dist/Electron.app/Contents/MacOS/Electron`;
+every Electron run through waitload20 and with-slot): build v14 `S2_YJS=14 node spikes/p3-store/electron/build.mjs`
+(to `/tmp/p3-s2/build/electron-v14`; one harness source with the `s2/src` modules redirected to their `s2/v14`
+siblings), v13 `node spikes/p3-store/electron/build.mjs`; seeds: bundle `s2/check/seed-v14.ts` (v13: `seed.ts`) with
+esbuild and run it with `ELECTRON_RUN_AS_NODE=1` for 1 MB and 5 MB; scenarios `S2_OUT_DIR=spikes/p3-store/s2/out
+S2_BASE=/tmp/p3-s2/<run> <Electron> /tmp/p3-s2/build/electron-v14/main.cjs --scenario=sync|latency|kill|fuzz`
+(`S2_FULLFSYNC=1`, `S2_KILL_FLOOD=1`); detached `S2_BUILD=/tmp/p3-s2/build/electron-v14
+S2_AGENT=ddoc:sess-detached:120:150 zsh spikes/p3-store/electron/run-detached.sh`; Node checks: bundle
+`s2/check/{service-check-v14,socket-check-v14,v14-probe,v14-gap-probe,v14-attr-bench}.ts` and run each under
+`ELECTRON_RUN_AS_NODE=1`. Outputs in `s2/out/` (`-v14` suffix; v13 files unsuffixed). Executor re-check: `kill-v14.json`
+(0 acked lost, all in store, converged) and `v14-gap-probe.txt` read back, figures as below.
+
+### 1. The document service (verified)
+`DocumentService` (`s2/v14/host/document-service.ts`) over `SqliteDocumentStorage` (`s2/v14/host/storage.ts`): WAL,
+`synchronous=FULL`, fullfsync switchable; tables `updates (seq, docId, actor, at, bytes)`, `versions` (V2, gc on),
+`attributions` and `actors`. `integrated()` appends the row and its attribution into a lazily opened batch; broadcasts,
+step-2 replies and acks wait in the outbox until `flush()` commits; `commitFailed()` drops the live docs and closes their
+connections, so no replica learns of content the store lacks. A restart from the store equals the live doc.
+
+### 2. What v14 changes for the host (verified, `out/v14-probe.json`, `out/v14-gap-probe.txt`)
+- A same-client gap is no longer parked (v13) but integrated behind a `Skip` placeholder (`store.skips`): the content is
+  visible, the `update` event carries it, the state vector stops at the hole, and a newcomer's step 2 copies the hole.
+  Unchecked, the host would log and broadcast a document with a hole.
+- A missing origin or parent and unknown deletes are still parked silently (`pendingStructs`/`pendingDs`, no `update`
+  event), and `encodeStateAsUpdate` appends the parked bytes to every step 2, so each newcomer inherits them.
+- `checkV1` (`s2/v14/yjs.ts`) mirrors v14's `getMissing`, treating ids inside a skip as missing, and refuses gaps;
+  `hasPending` (pending structs, pending deletes, non-empty skips) makes the service evict. Of 2,000 mutated valid updates
+  applied unchecked, 1,482 threw, 374 left parked state or a hole, 144 applied cleanly; `checkV1` refused every non-clean
+  one (`checkPassedButParked` 0).
+- Client ids are 53-bit, not u32 (SQLite INTEGER and varuints hold them; nothing may pack one into 32 bits). One node type
+  (`Y.Node`) holds text and children together. The provider changed only in its imports (`@y/y`,
+  `@y/protocols/awareness`); the service only in its seam and the attribution write.
+
+### 3. Provenance as ContentMaps (verified)
+Write: per integrated update, `attributionOf` (`s2/v14/yjs.ts`) → `Y.createContentIdsFromUpdate(v1)` →
+`Y.createContentMapFromContentIds(ids, [insert = actor, insertAt = at], [delete = actor, deleteAt = at])`, encoded and
+stored as one `update` row in `attributions` in the same commit as its log row. Compaction (`compact`): one transaction
+inserts the version, deletes the folded update rows and merges their attribution rows (`Y.mergeContentMaps`) into one
+`merged` row with exact times. Thinning (`thin`): `bucketAttribution` floors times to the minute so a run of one actor's
+keystrokes coalesces into one range. Read: every row of a doc merged into one ContentMap, cached until the next append
+(what DiffRenderer and AttributionsRenderer take).
+
+| Test | Before | After |
+|---|---|---|
+| Node check (`out/service-check-v14.json`), who wrote it | agent text `session:s1`, human text `human`, a deletion `human` | unchanged after compaction (103 rows folded to 0) and restart |
+| Node check, thinning to the minute | 379 B, 20 human insert ranges | 139 B, 2 ranges, answers unchanged |
+| Electron (`out/latency-fullfsync-v14.json`, 906 keystroke rows) | 46,083 B of update rows | compaction 9,733 B; thinning 51 B (1 range); "who wrote" still `human` |
+| Bench (`out/v14-attr-bench.json`, 2,040 updates) | 15 µs and 53 B per update | merge 24.7 ms → 33 KB; minute buckets 7.9 ms → 479 B |
+
+Proposed persisted shape: `artifact_attributions {artifactId, fromSeq, toSeq, kind: update | merged, bucketMs, bytes}`:
+one `update` row per log row in the same commit; compaction merges the folded seq range into one `merged` row
+(compacting at version boundaries makes each merged row exactly one version's changes, so "which version or turn"
+stays answerable); thinning re-buckets merged rows and may merge adjacent ones; rows are never deleted while a retained
+version needs them. Reconciled with S3's ruling (Decision Log 29, 30): times are floored to the minute at write, so
+`bucketMs` is 60,000 from the first row and thinning only merges adjacent rows (the spike's minute re-bucketing at
+thinning becomes a no-op).
+
+### 4. The port provider and the acknowledgement (verified; unchanged from v13 but for imports)
+`s2/v14/provider/port.ts` (`PortProvider`) has no Electron, Node or window import; it takes any `PortLike`
+(`postMessage`, `addEventListener('message'|'close')`, `start`, `close`) and ran on a DOM `MessagePort` in sandboxed,
+context-isolated renderers (handed over by the preload with `window.postMessage(…, [port])`) and on a Node
+`MessagePort` for the agent. Frames (`s2/src/frames.ts`, Yjs-free): y-protocols `0` sync and `1` awareness, MAWS `100`
+ack; exact-size `Uint8Array`s. The host counts content frames per connection and after the commit sends one ack per
+connection per flush ("your first N content frames are durable; the doc is at revision R"); the provider drops acked
+local updates; updates made while not live are "carried" and go out inside the step 2 answering the host's step 1
+(computed from the host's state vector: exactly what the host lacks); `state = {phase: off | handshake | live, synced,
+unsaved, revision}` maps onto X32's `saved | saving | unsaved | reconnecting`. Node check: 20 offline edits and 5 typed
+during the handshake reached the host with 0 rejections. Replicas: two hidden windows (`show:false`,
+`backgroundThrottling:false`) and one `AgentReplica` (`s2/v14/host/agent-replica.ts`: a Node `MessageChannel` plus the
+same provider, actor `{kind: 'session', appSessionId}`; `whenSaved()` resolves on the ack, which a tool call waits for);
+rows carry the right actor; awareness crosses and is removed on close.
+
+### 5. Numbers, v14 against v13 (verified)
+First sync (cold: open → renderer synced with the host loading from SQLite; 3 trials; `out/sync*.json`; seeds of the
+same algorithm, V2 states 1.00 and 5.01 MB):
+
+| | v13 | v14 |
+|---|---|---|
+| 1 MB: cold / host load / warm | 95–135 / 44–68 / 46–58 ms | 119–159 / 48–90 / 47–68 ms |
+| 1 MB: host heap / RSS | 25–28 / 135–139 MB | 18–25 / 139–144 MB |
+| 5 MB: cold / host load / warm | 390–424 / 167–190 / 222–230 ms | 444–487 / 209–222 / 224–261 ms |
+| 5 MB: host heap / RSS | 80 / 289–295 MB | 60–62 / 250–268 MB |
+| The doc on the wire (V1), 1 MB / 5 MB | 1.35 / 6.7 MB | 1.45 / 7.26 MB |
+
+Keystroke to durable ack on the 1 MB doc, 300 keystrokes per run, p50 / p95 / max ms ("visible in B" within about 2 ms
+of the ack in every run):
+
+| Run | v13 | v14 |
+|---|---|---|
+| fsync, human pace (60–180 ms) | 1.2 / 2.7 / 5.3 | 0.9 / 2.2 / 13.8 |
+| fsync, every 10 ms | 0.5 / 1.4 / 4.1 | 0.8 / 1.8 / 7.6 |
+| fsync, flood of 300 in one task | 5.9 / 7.9 / 8.1 | 6.7 / 10.6 / 11.2 |
+| fullfsync, human pace* | 5.6 / 8.5 / 23.4 | 5.6 / 7.7 / 15.4 |
+| fullfsync, every 10 ms* | 6.3 / 9.2 / 16.6 | 5.0 / 6.7 / 10.9 |
+| fullfsync, flood* | 15.6 / 18.6 / 20.1 | 20.3 / 23.1 / 23.3 |
+| Commit per batch, fullfsync* | 5.2 / 7.1 / 18.8 | 4.7 / 6.3 / 13.1 |
+| Over the detached socket through main's relay | 1.1 / 2.9 / 17.5 | 1.1 / 3.5 / 11.6 |
+
+\* Back-to-back reruns under the same load (`out/latency-fullfsync-rerun*.json`); the first v14 fullfsync run read
+7.0 / 17.9 / 48.9 under a load average of 39 from other agents (disk contention, not v14). Attribution costs 15 µs per
+update. Compaction of 906 rows: v13 17 ms, v14 25 to 34 ms; reload afterwards about 28 ms (v13) and 70 to 75 ms (v14).
+
+### 6. Failure (verified)
+Host SIGKILLed at 2.5 s of 7 s of typing on two replicas, re-forked 1.5 s later, new ports sent (`main.ts` `scenarioKill`;
+`out/kill*.json`):
+
+| Run | Replica | Keystrokes | Acked before kill / lost | Typed while down | In store at end / lost |
+|---|---|---|---|---|---|
+| v13 | A | 266 | 94 / 0 | 66 | 266 / 0 |
+| v13 | B | 170 | 61 / 0 | 43 | 170 / 0 |
+| v14 | A | 263 | 96 / 0 | 65 | 263 / 0 |
+| v14 | B | 167 | 60 / 0 | 42 | 167 / 0 |
+
+All converged with equal state vectors; the renderer's port fired `close` at the kill (+0 to 1 ms), so the provider shows
+"reconnecting" by itself; reopened ports re-synced in about 50 ms. A 300-keystroke flood in flight at the kill with
+fullfsync: v13 9 acked (0 lost), 291 in flight of which 17 durable but unacked, all 300 in store at the end; v14 11
+acked (0 lost), 289 in flight, all 300 in store; both converged. Crash durability only; power loss not tested.
+Malformed frames: in Electron 120 renderer ports sending garbage, 120 of 120 rejected on both, host alive, converged
+(`out/fuzz*.json`); in Node 500 mutated updates, v13 accepted 28 to 30 and v14 32, all well-formed (applied as different
+valid text); the v14 gap-behind-a-skip is refused; neither generation was left with pending state, a hole or an
+eviction. Main absent (`out/detached-*-v14.json`; v13 `out/detached-*.json` and a 69.8 s run `detached-*-run1.json`): the
+host spawned as E10 does (Electron as Node, `detached:true`, own socket and token under `/tmp`), main exits, the agent
+writes 22 rows in 3.2 s, the agent keeps writing live after a new main connects, the renderer syncs over the relay in
+69 ms, `who` answers `session:sess-detached` and `human` correctly, 121 agent and 152 human rows, converged.
+
+### 7. The detached binary channel (verified as far as §6 needs; v13 and v14)
+Framing (`s2/src/socket/framing.ts`, `encodeDocFrame`, `splitRecords`): from socket protocol 2, after the JSON-line
+hello and welcome, a JSON line (starts `{`, ends 0x0A; `JSON.stringify` escapes control characters, so a line never
+holds 0x00) or a doc frame `0x00 | u32 BE length | u32 BE channel | payload` (one y-protocols frame), told apart by the
+first byte; a protocol-1 peer is refused before it sees a frame. `out/socket-check*.json`: 2,000 interleaved records
+including 0x00/0x0A-filled payloads and a 7 MB frame, fed in random 1 B to 64 KB slices, all back in order at exact size
+(4 ms). Multiplexing (`s2/src/socket/doc-channels.ts`): main allocates the channel and sends `documents.open {docId,
+channel, actor}` (frames may follow at once), `documents.close {channel}`, the event `documents.closed {channel,
+reason}`; unknown channels dropped; main names the actor; `HostDocChannels` turns a channel into a `HostPort` and
+`MainDocRelay` moves bytes unparsed. Backpressure: past `DOC_HIGH_WATER` (8 MB queued) the host resets the channel
+(`reason: reset`) and the provider re-syncs on a new port (verified in Node: one reset after 257 frames to a stalled
+reader; main's reopen after a reset not run in Electron). One socket, not two: one token, one replacement rule, E11's
+draining close, ordering between `documents.open` and its frames; head-of-line blocking of JSON lines behind a large
+step 2 is bounded by the reset.
+X13 amendment (accepted, ledger X13): socket protocol 2 carries JSON lines exactly as protocol 1 plus doc frames
+`0x00 | u32 BE length | u32 BE channel | payload` (payload ≤ 64 MB, one X24 frame); hello, welcome, refuse and exit stay
+JSON lines under the stable-fields promise and an old supervisor is refused on `protocol` and replaced through refuse →
+exit; `SocketPort` gains `postFrame(channel, bytes)` and `onFrame`; `splitLines` becomes a record splitter keeping
+`stop`/`rest()`; `documents.open`/`documents.close` requests and `documents.closed {channel, reason: host | reset}` in
+X24's namespace; main allocates channels, names the actor, relays bytes unparsed at exact size; the host resets past
+`DOC_HIGH_WATER`; a `channel` is u32 and a Yjs clientId never travels in a frame header; in utility mode the ports go to
+the host as transfers on C1's host `MessagePort`, no channels.
+
+### Pitfalls
+- Yjs (both versions) accepts bad updates silently: v13 parks gaps, v14 integrates them behind a skip hole; both park
+  missing origins and parents and unknown deletes and re-send them in every step 2. The pre-check and the eviction net
+  are required.
+- The provider can create its own gap if it sends edits before answering the host's step 1.
+- macOS durability needs fullfsync (the app's index uses `NORMAL`; the store must not).
+- Yjs emits `update` before `updateV2` in the same cleanup: do not pair the listeners (source); log V1.
+- A `Buffer.subarray` from a socket ships its whole pool over structured clone: copy to exact size; an `ArrayBuffer` from a
+  renderer arrives as a non-`Uint8Array` and is rejected (both verified).
+- Hidden windows need `backgroundThrottling:false` (source). Every editor open mints a new clientID (source).
+- v14 clientIds are 53-bit.
+
+### Copy (P3-A, v14)
+`s2/v14/yjs.ts` → `src/engine-host/documents/yjs.ts` (the seam: pre-check, safety net, attribution helpers);
+`s2/v14/provider/port.ts` → `src/artifacts/provider/port.ts` (X32 state mapping; destroy awareness only if it created
+it); `s2/src/frames.ts` → `src/artifacts/provider/frames.ts`; `s2/v14/host/storage.ts` → `src/engine-host/documents/
+storage.ts` with `DocumentStorage` in `src/artifacts/host.ts` (`artifact_*` table names, a schema version per X15, X29's
+version row, fullfsync on, `<userData>/artifacts/store.sqlite`, §4.3's idempotency table, no harness reads, the
+attribution cache cleared on rollback); `s2/v14/host/document-service.ts`, `s2/v14/host/agent-replica.ts` and
+`s2/src/host/ports.ts` → `src/engine-host/documents/` (emit `artifact.changed` after commit, the auto-version policy,
+the id-repair hook, restore per S3, idle unload, clientID bound to its actor at first sight; tool calls answer after
+`whenSaved()`); `s2/src/socket/framing.ts` into `src/shared/host/socket-protocol.ts`/`socket-port.ts`
+(`SOCKET_PROTOCOL = 2`); `doc-channels.ts` (takes any `{attach}`) split between the host's detached path and
+`src/main/hosts/`. The harness (`spikes/p3-store/electron/*`) is not for copying.
+
+### Questions (S2; the architect's answers of 2026-10-12, Decision Log 26 and 30, in brackets)
+1. V1 on the wire (1.45× V2 on v14, 1.34× on v13) until S7 says otherwise [accepted]. 2. fullfsync on [accepted].
+3. Provenance granularity: resolved by ContentMaps with minute thinning; per-update rows until a version boundary, then
+merged [S3's ruling floors to the minute at write]. 4. clientId bound to its actor at first sight [accepted]. 5. One
+reopen path in main for restart, reset, eviction and socket end [accepted]. 6. First sync on v14 is about 10 to 20 %
+slower cold (5 MB: 444–487 ms against 390–424) with a lower host heap: S7 rechecks at scale [open until S7b answers].
+Not tested: power loss; a detached-mode kill and reopen; E10's real `SocketPort`; the Tiptap binding over the port (S7b).
+
+## S6 — The slide model
+
+**Verdict: proven on Yjs v14 (S1's exact pins), v13 kept for comparison; nothing fails on v14 alone.** Every check passes
+on both versions, the concurrency results are identical over 200 trials per scenario, and v14 improves two things: line
+breaks merge at character level, and v14's native attributions carry per-element provenance for deck history. The
+amendments to §4.5 (A1 to A7 below) were accepted by the architect (spec Decision Log 26, ledger X27) except A7, new
+with the v14 port.
+
+Run: v14 (default) `node spikes/p3-store/s6/exp/<x>.ts` (Node 22.23 strips types), outputs `s6/out/<x>-v14.*`; v13
+`node --import ./spikes/p3-store/s6/exp/use-v13.mjs spikes/p3-store/s6/exp/<x>.ts` (a resolve hook swaps `src/ydoc.ts`
+for `src/ydoc-v13.ts`; each report prints the seam it loaded), outputs `s6/out/<x>.*`; the bench under with-slot;
+typecheck `node_modules/.bin/tsc -p spikes/p3-store/s6/tsconfig.json` clean. `s6/package.json` pins the v14 stack exactly
+with a pnpm override forcing one `@y/y`.
+
+| Experiment | v14 | v13 |
+|---|---|---|
+| roundtrip | 58/58 | 58/58 |
+| publish | 19/19 | 19/19 |
+| concurrency (200 trials per scenario) | 28/28 | 28/28 |
+| canvas | 18/18 | 18/18 |
+| binding | 10/10 (`binding-v14.ts`) | 7/7 (`binding.ts`) |
+| provenance | 7/7 (`provenance-v14.ts`) | — |
+| bench | 2/2 | 2/2 |
+
+Executor re-runs: v13 roundtrip 58/58, publish 18/18 and concurrency 28/28 before the port; v14 concurrency 28/28,
+provenance 7/7 and binding 10/10 after it.
+
+### 1. The model (verified)
+On v14 the model is built of `Y.Node`s (one type: a name, attributes that are values or nested nodes, children that are
+text with formats and nodes in one sequence; `src/ydoc.ts`, header comment):
+- `deck`: a root node whose attributes are deck.json's keys except `order`; `sections` and `faces` nested nodes
+  (key → JSON) so concurrent edits to different entries merge; unknown keys kept.
+- `slides`: a root node, attribute id → `<slide>` with `order`, `style:*`, `attr:*` (`attr:data-transition`,
+  `attr:hidden`), `held?: {source, reasons}` as attributes, `notes` a `<notes>` text node, `elements` an `<elements>`
+  node, attribute id → `<el>`.
+- `<el>`: `tag`, `parent` (an element id or `''` for the section), `order` (flow children) or `z` (pinned children), one
+  key per `style:*` property and `attr:*` attribute, `raw?` (svg and x-embed inner markup, opaque), `text?`: a `<doc>`
+  node of `p` or `li` blocks holding text with marks as formats (`{b:{}}`, `{a:{href}}`, `{span:{color}}`) and `br`
+  nodes inline — `@y/prosemirror` 2's node shape. h1 to h3, p, th, td hold one `p` block; ul and ol one `li` per item.
+- v13 is the same model on Y.Map, Y.Text and Y.XmlFragment (`src/ydoc-v13.ts`); every other module (`model.ts`,
+  `publish.ts`, `canvas.ts`, `order.ts`, the parser, the serializer, `repair()`) talks only to the seam's API.
+
+Nesting: a `parent` key per element plus a key among its siblings, all in one flat map; re-parenting is one key, so it
+never duplicates (the XmlFragment-style child delete-plus-insert re-order duplicated in 200 of 200 trials on both
+versions: `exp/concurrency.ts`, "contrast"; v14 has no move operation either). Read rules (`resolveParents`,
+`src/model.ts`): a missing or non-container parent resolves to the section; a cycle sends its smallest id to the section;
+the host writes the resolutions with `repair()`.
+
+Paint order needs two keys: the dialect paints all flow content as one layer where the first flow child sits, so flow
+children carry `order` (layout order) and pinned children carry `z` compared against the fixed key `FLOW_LAYER = 'a0'`
+(below: under the flow content; above: over; no element holds `'a0'`; `src/order.ts`). The canonical file writes
+[pinned under] [flow] [pinned over] (`partition`, `src/serialize.ts`). A backdrop sent to the back stays under while
+another replica inserts a new first flow child, 200 of 200 on both versions.
+
+Object anchors `{slideId, elementId}` resolve by id alone (`resolveAnchor`): stable through a move, a z change, a slide
+re-order, a regroup and a republish combined; orphaned after a delete; live again after a re-add with the same id.
+
+### 2. The canonical parser and serializer (verified; independent of the Yjs version)
+One loader, `loadSlide` (`src/parse.ts`), over a small `RawNode` interface with two adapters, parse5 for the host
+(`src/parse5-adapter.ts`) and a `<template>` in fragment context for the renderer (`src/dom-adapter.ts`); both give
+byte-identical canonical files on every corpus slide. `serializeSlide` (`src/serialize.ts`); `parseStyle` and
+`serializeStyle` (`src/css.ts`) adopt Claude's table property for property.
+- Fixed point: `serialize(parse(x))` after one pass on four of Claude's examples (SKILL.md's plan slide, layout.md's kpis
+  slide, diagrams.md's connectors with the arc svg, the recipes' rotated label; excerpts in `s6/fixtures/
+  claude-examples.ts`) and on a deliberately messy slide; IR → Y → IR → file gives identical bytes.
+- Equality by meaning: six variants of each example (reversed attribute and declaration order, whitespace and case,
+  bare numbers for px, `rgb()` for hex, entities) canonicalize to the same bytes.
+- Ids: minted `e<n>-<hash(section id, publish seed)>`, deterministic per seed (an idempotent replay mints the same ids),
+  never an id the live slide holds, always written into the file.
+- Held with reasons, never trimmed: two sections, an unknown tag, text directly in a div, `aside` not last, a nested
+  list, an `x-embed` inside a div, an svg with script, `colspan`, 16 nested divs, 201 elements, a bad section id, an
+  unknown inline tag, a section id differing from the file name. Unknown properties and attributes are dropped with a
+  warning; `class` and `data-*` get a note.
+- Normalization: attributes `id` first, the rest alphabetical, `style` last, `hidden` bare; style in Claude's table
+  order as `prop:value; …`, names lowercased, `!important` stripped, the cascade inside one attribute applied (a later
+  duplicate wins, a shorthand resets earlier longhands); `padding-*` → `padding` and `border-*-radius` →
+  `border-radius` in the shortest 1 to 4 value form, `background-color` → `background`, `font` → longhands; no-ops
+  (`margin:0`, `box-sizing:border-box`, `grid-template:none`, `position:static`) dropped with a note, other margins with a
+  warning; bare numbers become px only where the grammar says LEN, pt → px ×2, shortest numbers; keywords lowercased,
+  `bold`/`normal` → `700`/`400`; colours lowercase 6/8-digit hex, opaque integer `rgb()` → hex, normalized `rgba()` and
+  `hsl[a]()`, `currentcolor` dropped with a warning; borders `W style color` with Claude's defaults explicit; generic
+  font families lowercased, quotes only where needed; HTML whitespace collapsing, minimal escaping (U+00A0 as `&#160;`),
+  marks nested a > span > b > i > u, `strong`/`em` → `b`/`i`, a span with weight ≥ 600, italic or underline → `b`/`i`/`u`;
+  comments dropped, `tbody`/`thead`/`tfoot` unwrapped, one element per line with 2-space indents.
+- Kept verbatim: svg and x-embed inner markup (after one parse5 pass), svg root attributes, href, src, alt, notes
+  (trimmed), and flex, transform, filter, background and grid values beyond token normalization.
+- `var(--ds-*)` (Decision Log 12) survives the round trip, fallback included; any other `var()` is dropped with a
+  warning; `serializeSlide(ir, {resolveVar})` resolves tokens to literals for the mirror and the Claude-compatible export.
+
+### 3. Diff-apply of a published file as one transaction (verified, 19/19 both versions)
+`publish`, `diffSlide`, `diffDeck` (`src/publish.ts`); topology: host H, a live human replica U, the agent's replica A
+brought up to H only when the agent reads.
+
+| Case | Result |
+|---|---|
+| No-op republish, or one equal by meaning | 0 writes, no update |
+| One property changed | 1 write; 21 B V1 / 33 B V2 (both versions) |
+| The human recolours after the agent's read; the agent republishes the element moved with its stale colour | only the 2 moved properties land; the human's colour stays |
+| Contrast: the same file diffed against the live doc | writes the stale colour over the human's |
+| Element removed / re-added with the same id | id gone, anchor orphaned / the same element, anchor live |
+| Agent word change plus bold while the human types in the same box | character-level merge; 42 B V1 / 44 B V2 |
+| Agent adds a `<br>` while the human types elsewhere in the box | v14: both survive (a `br` sits in the block's sequence); v13: the block is replaced and the human's text lost |
+| Flow re-order of two siblings; pinned under → over | 1 key each (the longest in-order run keeps its keys) |
+| Structurally invalid file | held with reasons, last good model kept, a read returns the held source, a valid republish clears it |
+| One invalid path in a multi-file map | the whole publish refused, nothing written |
+| deck.json re-order / removal | 1 slide key; unknown keys kept; a removal (`null` plus order) one update |
+
+### 4. Concurrency on two replicas (verified, 200 trials each, random client ids; identical on both versions)
+- Concurrent move (left plus top): always one replica's whole position, never mixed (v14 A 102 / B 98; v13 A 89 / B 111),
+  in one transaction or two.
+- Move plus restyle of one element: both land.
+- Z-order: different maxima deterministic; the same maximum mints the same key, broken by id, and both replicas'
+  `repair()` writes identical values.
+- One slide re-ordered two ways: one wins, no duplicate. Two slides into the same gap: the same key, `s1,s3,s4,s2` by id,
+  one repair write separates them.
+- Delete versus edit: the delete wins silently, the anchor orphans. Move into a group versus the element's deletion:
+  deleted, group intact. Move into a group versus the group's deletion: the orphan shows at the section, one repair.
+  A cycle: the smallest id to the section, one repair. Agent publish versus a human move of the same element: merged.
+
+### 5. A minimal canvas (verified in happy-dom; not in Chromium)
+`SlideCanvas` (`src/canvas.ts`) renders from the model and patches the DOM from the seam's change records (v14 from
+`deltaDeep`), never importing Yjs; after every step the second replica's patched DOM equals a fresh render: a 3-move drag
+(`attachDrag`, one transaction per move) is 6 style writes on one node; bring to front or send to back moves 1 node (plus
+`data-layer="under"`); a text edit re-renders 1 box; an agent publish adding, restyling and removing one element each is
+1 create, 1 style write, 1 remove, 1 placement (keyed placement: the longest in-order run stays). Under-layer rendering
+isolates the section and gives its under pinned children `z-index:-1`, because plain CSS paints positioned elements over
+all flow content (CSS 2.1 Appendix E; source, not checked in a real paint — P3-C's export window needs the same rule and
+a pixel check).
+The Tiptap binding on v14 (`exp/binding-v14.ts`, 10/10, `@y/prosemirror` 2.0.0-15 with a slide-text schema no wider than
+Claude's inline set): `ynodeToPmnode` reads the model's `<doc>` for `p` and `ul`; what `pmnodeToDelta` writes the model
+reads back identically; a live Tiptap 3.31.3 editor bound through S1's `YCollaboration` (copied into
+`exp/collab-v14.mjs`) holds the model's document, writes no normalization update on bind, its typing reaches the other
+replica with marks and `<br>`, a model patch reaches the editor, and marks are stored under plain names.
+
+### 6. Numbers (verified; 100 slides, 120,583 B of source, 1,273 elements; medians of 7 under the slot)
+
+| Measure | v14 | v13 |
+|---|---|---|
+| Parse 100 files | 13–14 ms | 14 ms |
+| Serialize 100 slides | 2.5–3.0 ms | 2.5–2.6 ms |
+| Import the whole deck (one transaction) | 59–73 ms | 39–41 ms |
+| V2 state / V1 state | 212,510 B (1.76× source) / 272,546 B | 208,396 B / 269,276 B |
+| Apply V2 into a fresh replica (first sync) | 12–20 ms | 7–7.4 ms |
+| Encode V2 | 2.7–3.5 ms | 2.5–3.5 ms |
+| Read the deck back to files | 10–16 ms | 7–8 ms |
+| No-op republish of 101 files | 26–34 ms | 23–24 ms |
+| One-slide, one-property publish | 0.45–0.64 ms | 0.46–0.53 ms |
+| Update: a move / a character / a one-property publish | 35/43, 16/26, 21/33 B (V1/V2) | identical |
+
+Whole-deck operations are about 1.5 to 1.8× slower on v14 but under 75 ms at 100 slides (S1's replay finding again);
+update bytes are equal. S7 watches first sync at scale.
+
+### Per-element provenance from v14 attributions (verified, `exp/provenance-v14.ts`, 7/7)
+Two stored V2 states of a gc-on host doc with a logged window of three updates (a human move, an agent publish with a
+restyle, an inserted word and a new element, a human deletion), attributions built with S1's recipe, then
+`createDiffRenderer(prev, next, {attributions})` and `slides.toDeltaDeep({renderer})`: `foot`'s left and bottom
+attributed to the human at 19:02, `title`'s font-size to session B at 19:03, the run "clear " in `card`'s text to session
+B, the new element and every key in it to session B, the deleted `pic` returned as content attributed
+`delete = human, 19:04`; the attributed set exactly `card, foot, note, pic, title`. 4.2 ms; the window's ContentMap is
+160 B. That is what §4.5's per-slide history needs (changed elements outlined in the author's colour, deleted ones
+ghosted). The renderer gives new values only; "was 128px" needs the previous doc. Not tested: attributions across
+compaction and thinning (S3, S7).
+
+### Pitfalls
+v14-specific: `Y.Node.toString()` returns markup, read plain text from the delta; `observeDeep` delivers one event per
+transaction on the observed node with empty `keysChanged`, so change records come from `ev.deltaDeep`; with a renderer,
+`toDeltaDeep` returns the whole document with attributions on changed leaves and deletions as content attributed
+`delete` (walk attributions, not op types); S1's `collab.mjs` cannot be imported across packages (it loads that package's
+`@y/y` and trips the duplicate guard): P3's binding module lives in `src/` with one `@y/y`; two prosemirror-model copies in
+one process break the binding: one prosemirror copy shared by Tiptap and the binding; inserts pass every mark key
+explicitly (`null` for absent) so nothing inherits from the left.
+Both versions: diff a publish against the agent's base, never the live doc; equal fractional keys are the common case
+for "to front" and "after X" (`generateKeyBetween` is deterministic), handled by the id tie-break and the deterministic
+repair; delete beats a concurrent edit silently, so the publish protocol names that conflict; Claude's connector example
+uses `border-width` and `border-style`, missing from its table (added); the canvas drags left/top-pinned elements only
+(right/bottom pins need converting); the `font` shorthand expands only the parts given; Claude's minted ids are computed
+from position and shift on insertion, which is why MAWS writes every id and seeds minting per publish (re-minting a
+deleted id would re-attach an orphaned comment to a new element); parse5 reports parse errors and `DOMParser` none, so
+hold decisions come from tree checks only.
+
+### Copy (P3-C)
+- `src/ydoc.ts`: the v14 seam (294 lines). `src/ydoc-v13.ts`: reference, drop with v13.
+- `src/ir.ts`, `src/parse5-adapter.ts`, `src/dom-adapter.ts`, `src/serialize.ts`, `src/order.ts` as is (optionally
+  jittered keys); `src/css.ts` adding the applies-to column, value ranges (font-size 8 to 400, gap 0 to 512, padding ≤ 256
+  …), the full gradient, transform and filter grammars, grid tracks ≤ 24, a PPTX warning for named colours, `--ds-*`
+  names checked against X28; `src/parse.ts` adding the `data-build-*` grammar, at most 24 pinned children per host,
+  x-connector coordinate rules, MAWS's asset `src` form, tool-shaped diagnostics; `src/model.ts` with `repair()` host-only
+  after each applied update; `src/publish.ts` as the write half, wrapped in the protocol (baseRevision, the layers,
+  idempotency) with conflict naming.
+- `src/canvas.ts`: reference (change record → per-key DOM patch, keyed placement, the under-layer rule, `CANVAS_CSS`;
+  x-embed as a sandboxed `srcdoc` iframe).
+- `exp/binding-v14.ts`: the slide-text schema as Tiptap extensions. `exp/provenance-v14.ts`: the attributed-delta walker
+  for per-slide history.
+
+### §4.5 amendments
+A1 paint order: `order` for flow children, `z` for pinned children against the flow-layer key, the canonical [under]
+[flow] [over] interleave (normalization moves pinned elements written after the first flow child to after all flow
+content; paint and layout unchanged). A2 nesting: `parent` with the orphan and cycle read rules; the host writes repairs
+and separates equal sibling keys; ties by id until then. A3 minted ids: `e<n>-<hash>` over the section id and the
+publish's tool-use id, skipping live ids, always written. A4 the publish base: diffed against the agent's base (the
+agent's replica syncs from the host only at a read; touches §4.2 and X24). A5: `raw` for svg and x-embed; `held` on the
+slide (a held slide keeps its last good model; a read returns the held source). A6: connector `border-width` and
+`border-style`. **A7 (new with the v14 port):** each text element's text is a `<doc>` node in `@y/prosemirror` 2's shape
+(`p`/`li` blocks, `br` inline), so line-break edits merge at character level; per-slide history reads element-level
+provenance from v14 attributions.
+
+### Questions (S6; the architect's answers of 2026-10-12 in brackets)
+1. Tables: row ids, positional cells [accepted]. 2. Refusals at property level, naming element and property [accepted].
+3. Unknown inline tags hold the slide [accepted]. 4. Repairs by the host only [accepted]. 5. A7 above [accepted 2026-10-12, spec
+Decision Log 28; the two single-copy constraints on the ledger's X24 row: A owns the pnpm overrides for `@y/y` and
+prosemirror-model 1.25.12 with a check that one copy of each resolves; B and C import the binding only from
+`src/artifacts/yjs/`].
+
+## S3 — History on the real editor and artifact-wide restore
+
+**Verdict: passes on v14.** Two stored full V2 states render through `DiffRenderer` in the live Tiptap 3.31.3 editor
+with authors and times from provenance that stay right after a log compaction; "N changes" with ↑ ↓ and "Show editors"
+work; leaving history leaves the live doc byte-unchanged; restore is one kind-agnostic host operation (revert since the
+version, `Y.undoContentIds`) that brings back tabs, threads, deck and slides and merges with a concurrent edit. Three
+gaps upstream does not handle are fixed here: undo in history, commands run on the read-only preview, undo after a
+restore. Nothing v14-specific failed.
+
+Method: Node 22, happy-dom, real Tiptap 3.31.3 on S1's exact v14 pins (`s3/package.json`, plus `@tiptap/extension-list`
+for task lists); replicas through S1's logging hub; host doc gc on. Schema (`s3/lib/schema.mjs`): S1's hardened schema
+extended to §4.4's shape (headings 1 to 3, bullet, ordered and nested lists, task list, quote, code block, table with row
+and cell ids, a `callout {tone}` container, an inline `image {src, alt, assetId}`, bold, italic, link, code,
+`comment {threadId, orphan}` overlapping and non-inclusive); UniqueID with S1's v14 filter; the document in a `tabs` map
+(tab → `{title, order, body}`) beside a `threads` map. No Chromium run: every time below is happy-dom.
+Run (install `pnpm -C spikes/p3-store/s3 install --ignore-workspace`): `node spikes/p3-store/s3/s3-history.mjs [100]`,
+`node spikes/p3-store/s3/s3-restore.mjs [100]`, `node spikes/p3-store/s3/s3-bugs.mjs`, `node spikes/p3-store/s3/
+probe-diff.mjs`; outputs `s3/out/{history,restore,bugs}.*`, `history-100.*`, `restore-100.*`. Executor re-runs:
+history (17 changes, every guard as below), restore 30/30 and 13/13, bugs 26/26.
+
+### 1. Versions and the preview (verified, `s3-history.mjs`)
+A 25-section document (302 top-level blocks, 1,159 block ids, 23k characters, 72.9 KB live state) through five phases
+captured as versions V0 to V5 (full V2 states of 72.0 to 72.8 KB, `createStore().version`, `s3/lib/provenance.mjs`): the
+human typing keystroke by keystroke and splitting; agent session 1 on its replica rewriting a word, inserting a section
+after a heading, setting a cell, editing a code block; the human changing a heading level, a task's `checked`, a
+callout's tone, an image's `alt`, bolding; agent session 2 adding a table row, changing a code block's `language` and
+text, deleting a paragraph, adding a comment mark; the human typing and deleting imported words.
+- Compaction folds the log up to V3 (53 rows, 73.9 KB → one 72.4 KB base state, rows dropped); provenance is kept as one
+  encoded `Y.ContentMap` per update written at landing (27 rows, 2.5 KB), the 43 oldest bucketed into one merged map
+  (`store.compact`, `store.bucket`).
+- The diff V0→V5 from provenance alone, after compaction (`openDiff`, `renderDiff`, `s3/lib/history.mjs`): 19/19
+  expectations (kind, author, a time inside the right phase), covering edits older than the compaction, attribute
+  changes (`level`, `checked`, `tone`, `alt`, `language`), a format change, code blocks, cells, a new row, a deleted
+  paragraph; `doc.check()` valid; V0→V3 and V1→V3 from provenance after compaction identical span for span to S1's
+  log-window build before it; an arbitrary pair (V2→V4) works.
+- "N changes" (`changeList`): runs that overlap or touch merge into one change (a replace counts once; a new block with
+  its text once): 17 changes from 102 attributed runs, the same headless and in the editor; ↓ ↑ visit all 17 and wrap
+  (`nextChange`, `prevChange`).
+- "Show editors" after compaction (`showEditors`: a PM selection → Y items through block ids → provenance): 7/7 equal the
+  full-log truth (e.g. `s10c → agent:session-2@09:00:55[attrs:language,ins], import@09:00:01`).
+
+| happy-dom | 25 sections (302 blocks, 23k chars) | 100 sections (1,202 blocks, 91k chars, 287 KB) |
+|---|---|---|
+| Headless `ynodeToPmnode` with `DiffRenderer` | 30–32 ms | 106 ms |
+| Editor `showVersion`, median of 5 | 33–41 ms | 124 ms |
+| `leaveHistory` | 19–22 ms | 87 ms |
+
+Linear in size; S7 re-measures in Chromium. Provenance size (times per update, so typing makes one run per keystroke):
+merged over the whole log 1,257 B with exact times (102 rendered runs), 387 B floored to 10 s (62), 302 B floored to the
+minute (58).
+
+### 2. Leaving history and undo (verified)
+The live editor enters with `configureYProsemirror({ytype: versionFragment, renderer})` and leaves with `{ytype: live,
+renderer: null}` (`showVersion`, `leaveHistory`, `s3/lib/collab.mjs`); after leaving, replica and host bytes equal those
+before entering. Undo is blocked in history: `editor.commands.undo()` false, Mod-Z inert, the stack and the live bytes
+unchanged. Control with S1's unguarded commands: undo in history returns true, edits the live doc behind the preview and
+the user's typed text disappears on the host — upstream has no guard. Commands such as `insertContent` still run on a
+non-editable view and would write into the throwaway version doc; a `filterTransaction` refusing local doc changes in
+history fixes it (version docs byte-unchanged), though the command still returns true. An agent edit arriving during a
+preview is not shown in it, appears on leaving, and undo works again after.
+
+### 3. Artifact-wide restore (verified, `s3-restore.mjs`)
+After V0: in the document, typing, a deleted paragraph, a heading level, a format, a task, a tone, a new thread th3 (mark
+and map entry), an agent rewrite, an inserted paragraph, a cell, a code block, a block moved (delete and re-insert with
+the same id), paragraph s20p2 replaced by nB; tab t2 renamed "Appendix B" and edited, a new tab t3, th2 resolved, the
+human typing inside th1's marked text; in a stand-in deck (`deck` map, `slides` map id → slide with fractional order,
+`style:*`, notes text, `elements` map id → `{tag, z, style:*, text}`), slide s3 deleted, s13 added, an element moved, the
+deck retitled, a slide re-ordered, notes and element text edited, an element deleted, a thread resolved. The host
+computes one update R from (V0's state, the live state) and applies it with origin `{actor: 'human:restore'}` while
+agent 2's replica edits concurrently in content the restore keeps, in content it removes, and inside rewritten text.
+
+| | (a) revert: `revertUpdate` | (b) structural diff, children paired by name | (b′) paired by name and `id` |
+|---|---|---|---|
+| Document checks | 30/30 | 28/30 | 30/30 |
+| Deck checks | 13/13 | 13/13 | 13/13 |
+| Concurrent edit into a replaced block | dropped (the CRDT rule) | grafted into the restored s20p2 | dropped |
+| Update size (25 and 100 sections, same edits) | 1.14 KB | 1.12 KB | 1.16 KB |
+| Compute, 25 / 100 sections | 7–23 / 23–72 ms | 43 / 119 ms | 32 / 135–297 ms |
+| Deck compute | 0.7 ms | 3 ms | 3 ms |
+| Needs | the version state and the live state only | a v14 workaround (pitfall 5) | that, plus an id on every node |
+
+Applying R at the host takes 0.3 ms for all three. **(a) chosen**: correct on every check, fastest, kind-agnostic (one
+operation for documents and decks), CRDT-exact, needs only states (so it works across compaction by construction). How:
+a scratch gc-off doc gets the old state then the live state; the changes since are `excludeContentIds(ids(scratch),
+ids(old))`; `Y.undoContentIds(scratch, since)` deletes what was inserted since and re-inserts what was deleted since, and
+the update it emits is shipped (about 15 lines; the primitive `DiffRenderer.rejectChanges` uses; `s3/lib/restore.mjs`).
+What (a) brings back: the prose fragment equal to V0 block for block apart from the concurrent edits; block ids in V0
+order without duplicates, the moved block in place, th1's mark span exactly its words; code text and language, the cell,
+heading level, task, tone, bold; t2's title "Appendix" and body equal to V0, t3 gone; th2 unresolved, th3 and its mark
+gone, the threads map equal to V0; slide s3 back with its 5 elements, notes and text, s13 gone, the moved element back,
+title, order, notes, text and the deleted element restored; concurrent edits in kept content survive (an append, an
+insert inside rewritten text, an element move, a notes edit), the edit into removed content is dropped; three replicas
+converge; the human's editor shows the restored doc, `check()` valid. Attribution after restore: every change credited to
+`human:restore` or the concurrent agent; an untouched paragraph still shows `import` only; restored text (new ids) shows
+the restorer. Never destroys: restoring the version taken just before the restore gives the pre-restore state back.
+**Undo after a restore is a real hazard** (verified): with the human's undo stack kept, the first ⌘Z skips 24 no-op items
+then redoes the human's earlier deletion of s2p4, which the restore already brought back — paragraph s2p4 twice. Clearing
+every bound editor's UndoManager when a restore lands fixes it.
+
+### 4. The five frozen 1.x bugs on v14 (verified, `s3-bugs.mjs`, 26/26, headless and in a read-only editor with identical JSON)
+#82 (deleted nodes lose attrs) fixed: a heading's level and id, a callout's tone, an image's src and alt, a task's checked,
+a code block's language and text survive deletion. #128 (null PUD) gone: `attributions: null` renders. #177 (checked
+invisible) fixed: `attrs(checked)`. #189 (code blocks) fixed. #72 (restore) not applicable (no restore meta; the remaining
+hazard is the undo duplicate above). Also passing: code text plus language, tone, image src and alt, an inline image
+inserted, heading level; tables (add or delete a row or column; bold, link and comment marks in cells; a link's href);
+lists (indent, outdent, bullet → ordered); deleted containers through the `--attributed` variants (list item with a
+nested list, blockquote, task item, callout); an agent edit inside a callout. Needing UI care: type changes, indent,
+outdent and list toggles render as delete plus insert of the whole block; a new node also carries `y-attributed-attrs`
+for each of its attributes (folded into the insertion by `changeList`); a comment mark shows as a format change keyed
+`comment--<hash>`; adding a column counts one change per cell.
+
+### Pitfalls (verified unless marked)
+1. S1's undo and redo commands undo into the live doc while history is shown: refuse them when the binding is not on the
+   live ytype or a renderer is set.
+2. Commands still run on a read-only view and write into the throwaway version doc: a `filterTransaction` refusing local
+   doc changes in history.
+3. Commands calling `configureYProsemirror` need `tr.setMeta('preventDispatch', true)` (S1's pitfall 2 again).
+4. Undo after a restore resurrects content the restore brought back: clear every bound editor's UndoManager when a
+   restore lands (likewise for any revert made on another replica; source: `rejectChanges` uses the same redo).
+5. v14 rough edge: `applyDelta` with a `setAttr` whose value is a delta holding nested `setAttr` deltas throws
+   "Unexpected content type" (`Y.Node.from` converts one level; `probe-diff.mjs`); convert deeply (`materialize`,
+   `s3/lib/restore.mjs`). Matters to any deck writer.
+6. `lib0/delta.diff` pairs children by name, grafting a concurrent edit into a replaced block: pair by id, or use (a).
+7. Node writers produce mark keys through `pmnodeToDelta` with the editor's schema (a hand-written `comment--th3` was
+   dropped, "schema declares no mark").
+8. Per-keystroke times fragment runs (102 for 17 changes): merge touching runs; quantizing times shrinks provenance
+   about 4×.
+9. Each restore writes as a fresh scratch clientID (the state vector grows one client per restore; provenance credits the
+   actor).
+10. A concurrent agent write into content the restore removes is dropped silently (the CRDT rule).
+11. Restored content gets new ids, so "Show editors" credits the restorer.
+
+### Copy
+P3-A: `s3/lib/restore.mjs` `revertUpdate` (the restore: the host applies it with origin `{actor}`, takes an auto version
+before and a `restore` version after, and signals `restored` to replicas); `s3/lib/provenance.mjs` (`contentMapOf`,
+`createStore`: land, compact, bucket, attributions); `showEditors` in `s3/lib/history.mjs` if the host answers it.
+P3-B: `s3/lib/collab.mjs` (history mode, the undo guard, the read-only filter, the UndoManager clear on restore);
+`s3/lib/history.mjs` (`openDiff`, `renderDiff`, `attributedRuns`, `changeList`, `nextChange`, `prevChange`);
+`s3/lib/schema.mjs`'s additions (the comment mark, callout, image, task list, the `taskItem` and `callout` `--attributed`
+variants beside S1's blockquote and listItem).
+
+### §4.2 and §4.7 amendments proposed
+1. §4.2 history renderer: "History renders with v14's `DiffRenderer(prevDoc, nextDoc, {attributions})` over two
+   throwaway gc-off docs loaded from version states; the editor enters with `configureYProsemirror({ytype: version
+   fragment, renderer})` and leaves with `{ytype: live, renderer: null}`; the live doc is never written" (replacing
+   state-pair mode and `unrenderSnapshot()`).
+2. §4.2 schema marks: "the four `y-attributed-*` marks (insert, delete, format, attrs) allowed on every node type, and
+   `--attributed` variants of the strict containers (blockquote, listItem, taskItem, callout), in every schema from day
+   one" (replacing "the `ychange` mark and the block attribute").
+3. §4.2 provenance: one encoded `Y.ContentMap` per update, never folded; bucketing merges maps (`Y.mergeContentMaps`);
+   times floored to the minute at write (the display granularity; about 4× smaller).
+4. §4.2 restore: "one kind-agnostic host operation that reverts the changes since the version (`Y.undoContentIds` on a
+   scratch gc-off doc holding version ⊕ live), shipped as one update of the restorer; per-kind adapters handle only the
+   after-effects (mirror threads to `artifact_threads`, recompute orphans, run the id repair); on landing every bound
+   editor clears its UndoManager" (replacing "a host operation per kind that diff-applies": a name-paired structural
+   diff is wrong under concurrency).
+5. §4.2 undo: both guards (undo and redo refuse when the binding is not live; a transaction filter refuses local doc
+   changes in history).
+6. §4.7: "N changes" counts touching runs merged; comment marks are excluded from changes (filter `comment` keys out of
+   `y-attributed-format`; not tested beyond seeing the key); attribute marks on new nodes are not shown as attribute
+   changes; same-id type changes may later be drawn as "type changed".
+
+### Questions for the architect (S3) — answered 2026-10-12 (spec Decision Log 29; ledger X24, X26)
+All six amendments accepted. (1) Yes: revert-since-version is the one restore operation, host-side, one update credited
+to the restorer, an auto version before and a restore version after, every bound editor clearing its UndoManager on
+landing. (2) Not now: credit the restorer. (3) Yes: the host rejects that session's next batch whose targets vanished,
+naming the blocks "removed by restore"; the agent re-reads. (4) Yes: an auto version when the owner views an artifact
+whose live revision moved since its last version, thinned like any auto version. (5) Yes: floor to the minute at write.
+Pitfall 9 (one scratch clientID per restore) accepted as is. The questions as asked:
+1. Adopt (a) revert-since-version as the one restore operation? Recommended: yes.
+2. Restore lineage (new id range → original range) so "Show editors" says "restored by X, originally by Y"? Recommended:
+   not now; credit the restorer as §4.7 and Google Docs do.
+3. A concurrent agent write into restored-away content is lost silently. Recommended: the host answers that session's
+   next batch whose targets vanished with a rejection naming the blocks "removed by restore" (the batch already validates
+   targets against `baseRevision`).
+4. "See N new changes" needs a state at the owner's last view, and compaction prevents rebuilding an arbitrary seq.
+   Recommended: write an `auto` version when the owner views the artifact and it changed since the last version.
+5. Floor provenance times to the minute at write rather than after 30 days? Recommended: yes.
+Not tested in S3: Chromium timing and IME (S4, S7); the version's pinned design system and assets in the preview; Make a
+copy; restore of a version older than a compaction (needs only states; source).
+
+## S5 — Comment marks through every ordinary edit
+
+**Verdict: §4.4's comment design holds on Yjs v14; nothing failed on v14 alone.** The pin survives every ordinary edit
+on both replicas and undo restores it every time. Five parts of §4.4 are wrong or underspecified, each with a tested fix:
+drop the mark's `orphan` attribute; resolve is a threads-map write, never a mark write; orphaned is derived, never
+stored; the stored relative-position pair drifts and needs a refresh; restore takes conversations back unless told not
+to. Confidence high on what ran, moderate on the clipboard (a synthetic DataTransfer, not the OS clipboard).
+
+Method: Node 22, happy-dom, real Tiptap 3.31.3 editors on S1's exact v14 pins: replica A (the panel), replica B (the main
+tab) and an agent replica synced to a host doc through y-protocols frames by S1's logging hub; S1's `collab.mjs` and
+`schema.mjs` copied into `s5/lib/` with provenance headers; one `@y/y` and one prosemirror-model verified in
+`s5/node_modules/.pnpm`. No Electron run. Install `pnpm -C spikes/p3-store/s5 install --ignore-workspace`; run
+`node spikes/p3-store/s5/s5-pins.mjs` (211/211), `s5-concurrency.mjs` (14/14), `s5-read.mjs` (10/10),
+`probe-markkey.mjs`, `probe-scale.mjs`; outputs `s5/out/`. Executor re-runs: pins 211/211, read 10/10.
+
+### 1. The mark and the threads map (verified)
+The mark `comment` (`s5/lib/comments.mjs` `Comment`): `excludes: ''`, `inclusive: false`, rendered `span[data-thread]`;
+two overlapping comments are stored under two hashed keys (`comment--MFSnIQ==`, `comment--x9eWww==`) and a peer renders
+them nested. The threads map: `doc.get('threads')`, a v14 `Y.Node` used as a map, threadId → `Y.Node('thread')` with
+attributes `status`, `quote`, `anchor {start, end, block}` (relative positions as JSON), `blockId`, `createdBy`,
+`createdAt`, `resolvedBy`, `resolvedAt`, and the messages as the node's children (`addThread`, `reply`, `resolve`,
+`reopen`). Create (`commentSelection`) is two updates: the mark (about 101 B V2, `addToHistory: false`) then the thread
+record (423 to 449 B); use raw `tr.addMark`, not Tiptap's `setMark`, which copies an overlapping comment's attributes into
+the new one (source).
+Resolve flags the thread in the map and never touches the text: one 100 B update; the display plugin `CommentDisplay`
+decorates open threads only and redraws on threads-map changes. Verified: after a resolve on B, A stops highlighting while
+the mark stays; the agent lists the thread resolved; Ctrl+Z does not reopen it; a reopen from the agent re-highlights
+the passage including words typed while resolved. Not removing the mark because a reopen could not put it back on edited
+text; not BlockNote's flag on the mark (tested as contrast) because it rewrites the passage's formatting under a new
+hashed key (129 B), puts every resolve and reopen into the text's history as a format change, and makes the mark's
+attributes mutable, which the key scheme punishes (pitfall 1). A resolved thread whose text is deleted is listed
+resolved, not orphaned; reopened, it shows orphaned.
+
+### 2. The pin through every ordinary edit (verified, `s5-pins.mjs` `scenario()`)
+Each row from a fresh world: t1 = "ships quarterly with design review" and t2 = "design review notes" overlapping on p1,
+t3 on p2. Checked per row: A, B, host and agent docs identical; covered text equal on A and B; thread states; exactly 3
+thread records; undo of the whole edit restores text, marks and derived states on both replicas (A's undo for human
+edits, a `Y.UndoManager` with origin `'agent'` on the agent replica for agent edits; comment creation is outside the
+history). "Stored pair": where t1's stored relative-position pair resolves after the edit, before the host refresh
+(`""` collapsed, `∅` no longer resolves).
+
+| Edit | t1 / t2 after (both replicas) | Threads | Update V2 B | Stored pair | Undo |
+|---|---|---|---|---|---|
+| type before the passage or at its start | unchanged | open | 41 / 47 | ok | restored |
+| type inside | ships very quarterly … / unchanged | open | 41 | ok | restored |
+| type right after t1 (inside t2), right after t2 | t1 not extended; t2 grows only inside it | open | 38 | ok | restored |
+| delete a word inside | ships with design review | open | 24 | ok | restored |
+| Enter in the middle of the passage | `ships quarterly ` and `with design review`, both marked | open | 420 | shrinks | restored |
+| Enter before the passage (mid-paragraph) | unchanged, moves to the new block | open | 438 | `""` | restored |
+| Enter at the paragraph's start | unchanged | open | 73 | ok | restored |
+| Backspace joining p2 into p1, or p1 into the heading | unchanged | open | 177 / 416 | moved text's pair collapses | restored |
+| type change → heading, bullet item, quote | unchanged, same id | open | 453 / 495 / 475 | `""` | restored |
+| type change → code block | — / — | t1, t2 orphaned | 185 | `""` | restored |
+| cut the passage, paste into p3 | moved to p3, one range each | open (orphaned between) | 37+350 | `""` | restored |
+| cut "quarterly " (part of t1), paste | stays in p1; pasted word unmarked (t1 still live) | open | 24+45 | ok | restored |
+| copy and paste | p1 unchanged; the copy plain | open | 75 | ok | restored |
+| cut, paste, paste again | the second paste plain | open | 37+350+75 | `""` | restored |
+| paste a foreign `span[data-thread]` | stripped | open | 57 | ok | restored |
+| contrast, no paste dedupe: copy and paste | both copies marked (duplicate) | open | 348 | — | restored |
+| delete the passage / the whole paragraph | — / — | orphaned | 37 / 37 | `""` | restored, un-orphaned |
+| agent: one word inside (quarterly → monthly) | ships monthly with design review | open | 55 | ok | restored |
+| agent: rewords t2 in place (→ "a short summary") | `ships quarterly with ` / `a short summary` | open | 183 | ok | restored |
+| … strict rule (inherit only strictly inside) | `ships quarterly with ` / — | t2 orphaned | 81 | ok | restored |
+| … contrast, hunks not merged across spaces | `ships quarterly with a short` / `a short summary` | open | 104 | — | restored |
+| agent: deletes t2's words | ships quarterly / — | t2 orphaned | 35 | ok | restored |
+| agent: rewrites the whole sentence | — / — | both orphaned | 91 | `""` | restored |
+| … contrast, hunks not merged across spaces | ` is monthly` / `is monthly now` (stray) | open (wrong) | 125 | — | restored |
+| agent: type change → heading, marks carried | unchanged | open | 453 | `∅` | restored |
+
+Restart (verified): the host state re-encoded as V2 into a new host and two new editors brings back marks, statuses and
+highlights (a resolved thread stays unhighlighted); the stored pair still resolves; binding writes nothing.
+Restore (verified, state level, S3's `revertUpdate` in `s5/lib/restore.mjs`): from t1 resolved with an agent reply, t2
+orphaned by the agent and a new t4, restoring v1 brings back v1's text and marks on both editors, un-orphans t2, reopens
+t1, removes t4's record and mark, and **also removes the reply posted after v1** (one 253 B update, 1 to 3 ms). The
+variant `restoreKeepingConversation` (verified, one 715 B update) restores text, marks and statuses, keeps t1's reply and
+keeps t4 as an orphan.
+The agent rewrite (`s5/lib/rewrite.mjs` `rewriteBlock`, a word diff of Y operations on the agent replica): unchanged
+words keep every format; deleted words lose theirs; inserted words carry a comment when it covers both neighbours or
+covered every word the hunk replaces; other format keys passed as explicit nulls. Agent type change (`retypeBlock`):
+delete and re-insert the block under the same id with its content and marks.
+
+### 3. Orphan display (verified; `locate`, `refreshAnchors` in `s5/lib/comments.mjs`)
+The thread keeps the stored quote, author, time and messages; orphaned is derived: open and no live text carries the mark
+(`threadStates`, `liveIdsY`). `locate`: a passage deleted in place gives the gap where it was (`The plan ‸. Owners`); a
+deleted block gives, from the block's own relative position in the root, the nearest surviving block (`block-gap`, h1);
+Enter before the passage then a delete gives, without a refresh, the split point at the end of the adjacent block, and
+after the host's `refreshAnchors`, index 0 of the passage's own new block. The pair drifts (the binding re-creates text
+on a split tail, a join, a type change and a cut and paste: 10 of the 30 rows collapsed it); `refreshAnchors` rewrites a
+drifted pair from the live mark (271 to 511 B, only when the pair no longer brackets the mark), after which every row's
+pair brackets its mark. Un-orphaning needs no thread write: undo (also after another replica typed in between), restore,
+pasting a cut back. Scale (`probe-scale.mjs`, 4,000 paragraphs, 300 threads, 1.2 MB V2): `liveRanges` over the PM doc
+(the display plugin, per change) 0.7 ms; `liveIdsY` over Y (the host's orphan derivation, per update) 4.1 ms;
+`markExtentY` per thread 3.7 ms, so a refresh computes all extents in one walk.
+
+### 4. Concurrency (verified, `s5-concurrency.mjs`; offline ports, then reconnect with the handshake)
+The human comments while the agent rewrites the passage: an agent word change inside lands inside both comments; an
+agent rewrite or deletion of the whole sentence leaves both new threads converged orphaned with their quotes (the owner's
+just-made comment becomes an orphan at once; the UI should say why). Edge ordering (40 trials, random client ids): an
+agent replacement of the new comment's first word lands inside 40/40; of its last word inside or outside by client-id
+order (16/24 in one run, 20/20 in a rerun), converged either way. Two replicas commenting on overlapping passages: both
+marks and threads everywhere; on the identical passage: two threads, two distinct keys. Resolve while another replica
+replies: with the nested thread node both land (contrast: a thread stored as one JSON value lost a write). Concurrent
+resolve and reopen: one status wins everywhere. A deletes the passage while B resolves: resolved, not orphaned. Map
+resolve while another replica types inside: nothing highlighted, the mark covers the typed word. Randomized, 200/200
+trials converge (21 s): 1 to 3 random offline operations on A and on B (type, delete, Enter, comment, resolve or reopen,
+reply, retype) and 1 to 2 agent word rewrites, then sync; invariants: PM docs and threads maps equal on host, A, B and
+agent; derived states equal; covered text equal on A and B; every live mark has a thread; no mark carries a flag; 324
+thread outcomes, 36 orphaned.
+
+### 5. The agent's read format (verified, `s5-read.mjs`, `s5/lib/read.mjs`)
+GFM with `^id` block markers plus comment milestones: `<c:ID>` where an open thread's text starts and `</c:ID>` where it
+ends (each closing tag names its thread, so overlaps need no nesting); resolved threads unmarked; a footer lists open
+threads and orphans with their quote and nearest block. `@tiptap/markdown` cannot serialize overlapping same-type marks
+(`renderNodesWithMarkBoundaries` keys active marks by type; source, dist line 1099), so the milestones go in as sentinel
+characters before serializing and are replaced after. Worked example:
+
+    The plan <c:t1>ships **quarterly** with <c:t2>design review</c:t1> notes</c:t2>. Owners track the budget. ^p1
+
+    ---
+    Comments: 3 open (1 orphaned), 1 resolved (not shown; artifact_comments {status: "all"})
+    - c:t1 on ^p1 "ships quarterly with design review" — owner: Should this be monthly?
+    - c:t2 on ^p1 "design review notes" — owner: Which notes? Link them.
+    - c:t4 orphaned (its text was deleted; was "Third", near ^p3) — owner: Rename this.
+
+Tools: `artifact_comments {status: open | resolved | all}` → `[{threadId, status, orphan, quote, block | near, createdBy,
+createdAt, resolvedBy?, messages[]}]`; `artifact_reply {threadId, body}`; `artifact_resolve {threadId, reopen?}`;
+`artifact_edit {ops: [replace_text {block: 'p1', old: '<c:t1>ships quarterly', new: 'ships monthly'}], answering: 't1'}`
+(the host strips markers from `old` and `new` before matching). Run: t1 stays on "ships monthly with design review" on
+both editors, the reply appears in the thread, `artifact_resolve t1` removes the highlight and t1 is listed resolved, the
+next read shows only `<c:t2>`; each agent write 72 to 160 B. Markdown emphasis inside `old` (`**monthly**`) does not match
+plain text: S4's matching rule settles it.
+
+### Pitfalls
+1. The mark's attributes are its storage key: `comment--<hash(mark.toJSON())>` covers every attribute and its default
+   (verified, `probe-markkey.mjs`): `orphan: true` gives a different key; a schema adding one attribute makes a newer
+   editor re-key every comment on bind (a normalization write per document, attributed to whoever opens it) and an
+   older client re-keys it back (two schema versions ping-pong). Freeze the mark at `{threadId}`. Not v14-only: v13's
+   y-prosemirror uses the same scheme with a sha256 hash (source, `sync-plugin.js:1126`); the keys differ between them.
+2. The relative-position pair drifts (table above).
+3. A token word diff matches the spaces of a rewritten sentence, leaving comments on stray new words (contrast rows):
+   merge hunks separated only by whitespace (`wordHunks`). S4's `diffCells` uses the same tokenizer.
+4. Overlapping inline decorations merge into one span (classes concatenate, other attributes overwrite): the thread id
+   goes in a class.
+5. The code block admits only the attribution marks in S1's schema, so retyping to code orphans comments: allow
+   `comment` on `codeBlock`.
+6. A drag-move runs `transformPasted` before deleting the source, so the dedupe strips a dragged comment unless guarded
+   (`view.dragging.move`; source only, happy-dom has no coordinates).
+7. Creation is two updates (mark, then thread): a peer can see the mark first (display ignores marks without a thread);
+   a crash between them leaves an invisible mark. Write the thread first, or the host strips marks without a thread.
+8. **pnpm 11 ignores `pnpm.overrides` in a package.json** (verified, install warning): the "override forcing one `@y/y`"
+   in S1, S4 and S6's packages is a no-op there; exact pins are what deduplicated them. Overrides belong in the workspace
+   settings (the root `pnpm-workspace.yaml` already carries `overrides:`).
+9. The OS clipboard round trip of `data-thread` is not run (Chromium keeps `data-*` in text/html, as ProseMirror's
+   `data-pm-slice` relies on; source).
+
+### Copy (P3-B)
+`s5/lib/comments.mjs` (the mark, the threads model, derived states, `CommentDisplay`, `CommentPaste` with Outline's rule,
+`locate`, `refreshAnchors`); `s5/lib/read.mjs` (the milestones and the three tools' shapes); `s5/lib/rewrite.mjs`'s
+mark-inheritance rule and whitespace merge, folded into S4's writer (not a second writer); `s5/lib/restore.mjs`
+`restoreKeepingConversation`; `s5/lib/world.mjs` and `s5-pins.mjs` as the regression suite.
+
+### §4.4 amendments proposed
+A1. The mark is `comment {threadId}`, attribute set frozen; orphaned is derived (open and no live text), never stored on
+the mark or in the map; `artifact_threads` computes it. A2. A thread is a nested node (`status`, `quote`, `anchor`,
+`blockId`, `tabId`, author and times) with messages as a sequence, never one JSON value; `tabId` is missing from §4.4
+(threads are document-wide, tabs are fragments). A3. Resolve and reopen write the map only; creation, resolve and reply
+are outside Ctrl+Z; text-edit undo restores marks. A4. Paste: keep a pasted comment mark only if its thread is in this
+document and no live text carries it; a drag-move counts the source as gone. A5. Patch writer: the inheritance rule
+above, hunks merged across whitespace, a comment orphaned only when all its words go (reconcile with S4's
+`mergeFormats`). A6. The relative-position pair refreshed by the host at its post-update hook (or idle checkpoints) from
+the live mark, or replaced by a lookup in the latest retained version where the mark was live. A7. Restore keeps
+conversations (question 1).
+
+### Questions for the architect (S5) — answered 2026-10-12 (spec Decision Log 31)
+A1 to A6 accepted into §4.4; A7 (restore keeps conversations) confirmed by the owner (Decision Log 32): restore
+reverts text, marks and thread statuses and keeps the conversations posted since; orphaned threads show as such. Q1:
+answered, as A7. Q2: keep the pin on the new words, `answering` posting the edit.
+Q3: host refresh. Q4: ignore markers in `new` for now. Pitfall 8 (pnpm overrides belong in `pnpm-workspace.yaml`)
+recorded and sent to P3-A. S4 reconciles A5 with its own mark rule. The questions as asked:
+1. Restore and threads: S3's revert takes back replies and threads posted since the version. Recommended: restore
+   reverts text, marks and statuses but never conversations (`restoreKeepingConversation`, one update); needs the
+   owner's nod because §2 item 4 says threads are restored.
+2. The agent replaces exactly the commented words: keep the pin on the new words (as run) or orphan the thread (the
+   strict rule)? Recommended: keep (§2 item 3, "the pin survives the agent's rewrite"), with `answering` posting the edit
+   into the thread.
+3. Anchor drift: host refresh (tested, about 500 B per structural edit) or a version lookup at display time (no writes,
+   not tested)? Recommended: the refresh at the host's per-update hook beside the id repair, all extents in one walk.
+4. Markers in the agent's `new` text: ignored (as run) or honoured as "keep this comment on these words"? Recommended:
+   ignored for now.
+
+## S4 — The patch writer against human typing and Korean IME
+
+**Verdict: the patch writer works on v14 as §4.4 describes, and Korean composition survives the agent's edits only with
+four additions:** (1) the composition hold, the provider holding and the binding driving it (Decision Log 33's split);
+(2) a move rule that never re-inserts the block holding a live caret; (3) the caret following its block's id; (4) the
+host forwarding edits that land in re-inserted blocks. With them, Korean typing with the agent's ops arriving
+mid-composition passes 68/68 runs in hidden Electron; without the hold v14 passes 36/54. v13 fails the same way (32/54
+without the hold) and is worse with it (46/54, including a v13-only failure that reorders syllables), so the failure is
+not v14's and S1's v14 verdict is strengthened.
+
+Everything is reproduced by `zsh spikes/p3-store/s4/run-all.sh` (Node tests, the build, the gated benchmark and five
+gated Electron runs; outputs `s4/out/`; the four large IME trace JSONs gzipped by the executor, their `.txt` summaries
+plain). Dependencies: S1's exact pins in `s4/package.json`. Executor re-runs: `node spikes/p3-store/s4/test/writer.ts`
+41/41, `test/moves.ts` 12/12; `s4/out/ime.txt` read back, 68/68 including the forced-cap run. Paths below are under
+`spikes/p3-store/s4/`.
+
+### 1. The patch writer and the atomic batch (verified, `test/writer.ts`, 41/41)
+Code: `src/patch-writer.ts` (`PatchWriter.apply`, `run`, `replaceText`, `patchNode`, `patchInline`, `patchChildren`,
+`retype`, `move`, `reinsert`, `strict`), the word diff `src/inline-diff.ts` `diffCells`, markdown with `^id` markers
+`src/markdown.ts` `DocMarkdown`, the host `src/host.ts` `DocHost.edit`.
+- `replace_text`: an exact, unique string edit to the block's markdown, then a patch of the block; not unique →
+  `not_unique` with candidate blocks and match counts; not found → `not_found` listing blocks sharing its words; `all`
+  works and keeps list item ids.
+- `replace_block`, same type: attributes set one by one (a heading level change is one `setAttr`, 48 B), text changed as
+  one lib0 delta of retain/delete/insert with explicit formats; containers (lists, tables, quotes) align children by type
+  and text and patch recursively, so ids survive.
+- Type change (paragraph → heading, list item, code block): re-inserted under the old id (a v14 node's name is
+  immutable), the text diffed against the old text, and marks the agent's markdown cannot express re-mapped onto it; a
+  comment the new type does not allow (code block) is reported orphaned.
+- `insert` after or before mints ids for every block written, nested ones included; `delete` reports orphaned threads;
+  `move` re-inserts with id and marks and returns a `carry` (old item ids → new); `set_cell` patches the cell's children
+  keeping the cell's and its paragraph's ids.
+- The batch: all or none (Yjs cannot roll a transaction back, so the batch is dry-run on a throwaway clone with a fresh
+  clientID, then run for real in one transaction: one update, one revision; a failing op returns its index and the
+  replica's state vector is unchanged); strict validation (`strict()` uses `createChecked` at every level and compares
+  inline counts, because `ynodeToPmnode(…).check()` silently accepted a list item replaced by a heading); a conflict
+  rejects the batch naming the block, the revision that changed it and its current text; human typing elsewhere never
+  conflicts; a repeated tool-use id replays the stored result, writes nothing, keeps the revision; the result carries the
+  new revision, one line per op, new ids and orphaned threads.
+
+### 2. Against a human in the same block, in real Chromium (verified)
+Setup: the app's Electron 44.4.5, one hidden window (`show:false`, userData under `/tmp/p3-s4/electron`, dock hidden), a
+real Tiptap 3.31.3 editor on S1's `collab.mjs` (unchanged) and S4's schema, the editor replica linked to the host doc over
+a real `MessageChannel` carrying y-protocols sync, awareness and acks (`src/port-link.ts`); the host and the agent replica
+(`DocHost`) in the page.
+The IME drive (`electron/main.ts` `doStep`, `electron/hangul.ts` `keystrokes`): CDP `Input.dispatchKeyEvent` rawKeyDown
+keyCode 229 with the jamo as `key` before each step and keyUp after; `Input.imeSetComposition({text, selectionStart,
+selectionEnd})` per step; `Input.insertText(syllable)` to commit (it yields the capture's exact shape: a repeated
+compositionupdate with the same data, insertCompositionText, compositionend, the next compositionstart); spaces a plain
+keyDown with text. Typed: " 안녕하세요 한글 입력" (jamo through syllables, commit-and-restart, the final consonant
+migrating, 핫+ㅔ → 하 + 세); a variant with Backspace inside a composition. Op timing: at compositionstart, between
+updates, right before the commit; at 40 ms pace with 20 ms settle and at 0 ms (the capture's 0.3 ms restart). Ops:
+`replace_text` earlier in the paragraph (another text node) and just before the caret (the same text node),
+`replace_block` of the next block, `insert` before the block, `move` of the composing block (with awareness and blind),
+awareness only (the agent's caret and `editing: {blocks}` moving inside the composing paragraph at every step), a forced
+5.6 s stall. Checks per run: composed text exact; DOM text = editor state = Y; editor, host and agent converge; no
+duplicate ids; one compositionend per commit with the same data; no page errors; the hold's frame accounting.
+
+| Run | Result | Output |
+|---|---|---|
+| v14: the split hold (provider holds, binding drives, 5 s cap) + span move + caret follows id + host forwarding | **68/68** | `out/ime.txt` |
+| v14, no hold | 36/54 | `out/ime-nohold.txt` |
+| v14, hold but no caret-follows-id, the re-insert move | 3/6 | `out/ime-nofollow.txt` |
+| v13 (yjs 13 + y-tiptap 3.0.9), no hold | 32/54 | `out/ime-v13-nohold.txt` |
+| v13, the same hold | 46/54 | `out/ime-v13.txt` |
+
+Failure modes and causes:
+1. Doubled or lost jamo when a remote change touches the composing text node (both versions): "안녕하셍세요", "세요요",
+   "ㅎ한글", "입입력". The browser ends the composition early (the next `insertText` arrives with `isComposing=false` and
+   no compositionend), so the syllable in progress stays committed and is typed again. An edit in a different text node
+   of the same paragraph is harmless (6/6 without the hold).
+2. A move of other blocks around the composing block breaks the composition though Y never touches it (both versions):
+   ProseMirror's view diff (`ViewTreeUpdater.findNodeMatch`) matches the moved siblings by content and destroys and
+   rebuilds the composing block's DOM.
+3. A re-insert of the composing block sends the following keystrokes into the neighbouring block (ProseMirror maps a caret
+   in a deleted node to the deletion point: text landed in a list's first item or a table's first cell); keystrokes in
+   flight land in the tombstone and vanish at the host.
+4. v13 only, with the hold: a held update applied between syllables moves the just-committed syllable to the end of the
+   paragraph ("안녕하세 한글 입력요", 3 of 6 runs at 40 ms in the "earlier in the paragraph" case). Source: y-tiptap
+   rebuilds the whole document and restores the selection from relative positions (`y-tiptap.js` 753–805); v14 maps
+   deltas to steps.
+5. Harness flake, fixed: the first key right after focus was occasionally dropped; a 60 ms wait fixed it.
+
+The fixes: the provider holds (`src/port-link.ts` `linkOverPort`, replica end, `hold`/`release`): while held it buffers
+inbound sync frames (type 0) in arrival order and never drops one; awareness (1) and ack (100) frames pass; a cap timer
+releases after 5,000 ms. The binding drives (`src/composition-hold.ts` `CompositionHold`): hold on compositionstart,
+release once `view.composing` is false (checked after compositionend, after non-composing input and on view update). The
+span move (`PatchWriter.move`): if awareness shows a human caret in the block, the blocks it jumps over are re-inserted
+instead (the same order); carets on both sides → rejected with "retry"; live blocks from `src/host.ts` `liveBlocks`.
+Caret follows id (`src/caret-follows-id.ts` `CaretFollowsId`). Edit forwarding at the host (`DocHost.receive`,
+`forward`).
+The hold, over the 68 v14 runs: 226 sync frames arrived and 226 were applied, 0 out of order, none left buffered, 54
+held; 1,305 acks and 834 awareness frames arrived during holds; 288 agent awareness pings landed while composing and
+held, the agent's caret rendered in the composing paragraph, and no composition ended early (12 runs). The longest hold
+was 447 ms; **the cap never fired** outside the forced runs. Forced cap: a composition held open 5.6 s released at
+5,001 to 5,002 ms mid-composition; the buffered same-node edit applied under the open composition and reproduced failure
+1 once ("…안녕하세요 ㅎ한글 입력"); other syllables, convergence and ids intact. An earlier variant with the hold inside
+the binding alone gave 53/54 (the one failure the harness flake; `out/ime-binding-predicate-hold.txt`).
+
+### 3. Marks (verified, `test/writer.ts` marks section and `test/s5-cases.ts` 6/6)
+Overlapping comments t1 "quick brown" and t2 "brown fox" with bold "lazy" and a link "dog" keep their marks on unchanged
+words after a rewrite; the agent's markdown governs its own marks (removing `**` or `[]` unbolds or unlinks) while
+comments stay; a word replaced inside overlapping comments stays covered by both; in-place rewording keeps the comment
+("scheduled for Friday" → "planned for Monday" stays on t3); deleting all of a comment's words orphans it (reported,
+derived, the stored quote kept); marks survive a type change and a move in one batch. **Reconciled with S5's rule (A5,
+Decision Log 31), which S4's writer now implements:** hunks separated only by whitespace merge; a comment is inherited
+when it covers both neighbours or covered every replaced word; explicit nulls on insert; the mark is `comment {threadId}`
+only (`src/schema.ts` `Comment`); the writer never writes the threads map. S5's five agent cases including both no-merge
+contrasts reproduce S5's covers exactly. S5's rule wins because S4's earlier one orphaned an in-place rewording whose
+neighbours lacked the comment (against §2 item 3) and could extend a comment over words that replaced uncommented text.
+Kept as a superset: on unchanged words the marks markdown can express (bold, italic, strike, underline `++x++`, code,
+link; found by probing serialize → parse against the schema) follow the agent's markdown; every other mark is kept.
+
+### 4. Concurrent moves and the id repair (verified, `test/moves.ts`, 12/12; `DocHost.repair`, `carryCopyEdits`, `receive`/`forward`)
+In-flight keystrokes during a move are lost without forwarding ("…keep. ㅎ" for "…keep. 한글") and land in the moved
+block with it: the human's edits integrate into the tombstoned block and are garbage-collected on arrival, and the host's
+own log holds them only as GC structs, so the host reads the incoming update's bytes before applying them; deletions are
+forwarded only from incremental updates (a sync step 2 restates the whole delete set, including the move's own deletion
+of the old copy). Two replicas moving the same block concurrently produce a duplicate ^p3; the repair keeps the later
+insertion (by host arrival) and tombstones the other; without the carry rule the human's edit in the losing copy is lost,
+with it the edit survives in the kept copy, marks intact, ids unique. An edit into the original after both moves is
+forwarded into the kept copy exactly once. Concurrent splits carrying the id (^p4 three times): the earliest keeps the
+id and the later ones are re-id'd, never deleting text (the tail text is duplicated, S1's pitfall 11). Caveat: the host
+flushes in-process agent replicas before every batch, so two agents' moves serialize; P3's realistic sources are a human
+drag racing an agent move, or two windows; P4's are remote writers.
+
+### 5. Numbers (verified, `test/numbers.ts` gated, 40 runs per kind; 320 blocks, 14,271 characters, V2 state 84,913 B)
+
+| Op | `edit` p50 / p95 ms | Update V2 B |
+|---|---|---|
+| replace_text | 27.5 / 45.1 | 64 |
+| replace_block, same type, 2 hunks | 27.8 / 52.1 | 70 |
+| replace_block, type change | 27.4 / 36.5 | 195 |
+| insert (2 blocks) | 28.0 / 34.9 | 265 |
+| delete | 28.3 / 49.3 | 25 |
+| move | 30.6 / 42.3 | 220 |
+| set_cell | 29.8 / 44.0 | 52 |
+| a batch of 5 | 45.6 / 77.8 | 359 |
+
+Where the time goes (`probe/cost.ts`): strict whole-document validation 10.9 ms, run twice (dry run and real); the
+dry-run clone 5 ms; validating only touched parents would make a batch cost proportional to its change. Attribution after
+a word-level batch: the agent's ContentMap from the batch's update alone, rendered through v14's DiffRenderer, covers only
+the changed words (+leaps −jumps, +Monday −Friday, +before −after, +42 −2: 19 characters inserted, 17 deleted; 120 B).
+A type change or a move covers the whole block in the raw map (92 and 54 characters); after applying the writer's carry,
+0 characters remain the agent's.
+
+### Pitfalls
+- `ynodeToPmnode(…).check()` drops what the schema refuses instead of throwing: validate strictly.
+- v14 `insert`/`applyDelta` is explicit (every active key not given becomes null); still pass explicit nulls (A5).
+- Applying an update containing your own clientID changes your clientID (`Transaction.js:310`): never reuse the replica's
+  clientID for the dry-run clone.
+- Edits into a tombstoned parent are garbage-collected on arrival; forwarding must read the incoming bytes.
+- A sync step 2 carries the sender's whole delete set.
+- ProseMirror's view diff may rebuild a block Y left untouched; ProseMirror maps a caret out of a deleted block into the
+  next one.
+- A type change or move is invisible in a carry-corrected diff (the text carried, the node new): history needs the
+  carry's kind to mark retyped and moved blocks (a note for S3's renderer and P3-B).
+
+### Copy
+P3-B: `src/patch-writer.ts`, `src/inline-diff.ts`, `src/markdown.ts`; `src/composition-hold.ts` (the binding half of the
+hold); `src/caret-follows-id.ts`; `src/schema.ts` (the frozen comment mark, `attributedNodes`). P3-A: the provider half of
+the hold in `src/port-link.ts` (`hold`, `release`, the cap, awareness and ack pass-through), to fold into S2's provider;
+`src/host.ts` (`changedAt`/`structAt` target index, `edit` with validation, idempotency and carries, `receive`/`forward`,
+`repair`/`carryCopyEdits`); `src/hub.ts` (S1's hub with the receive hook).
+
+### §4.4 amendments proposed
+1. `replace_text` validates by its quote (exact and unique in the current text), not by its block's revision: under §4.4
+   as written, human typing elsewhere in the paragraph rejected an intact quote (verified both ways).
+2. `set_cell` also validates the table's row structure ((row, col) addressing goes wrong when rows are added; verified);
+   `insert` and `move` anchors need only exist.
+3. Move rule: never re-insert a block holding a live human caret; re-insert the span it jumps over, or reject if carets
+   are on both sides.
+4. Edit forwarding at the host: edits landing in a block re-inserted by a move or type change are replayed onto the live
+   copy; the host reads each incoming update before applying it and forwards deletions only from incremental updates.
+5. Concurrent-move duplicates: keep the later insertion, after carrying the loser's post-creation edits into it; other
+   duplicates: the earliest keeps the id, the rest are re-id'd, never deleted.
+6. Atomicity: dry-run on a clone, then apply; validate strictly against the renderer's schema.
+7. Provenance applies the writer's carries (re-inserted characters keep their author); history marks retyped and moved
+   blocks.
+8. §8 "Human and agent in one block" gains the composition hold (provider holds, binding drives, 5 s cap; Decision Log
+   33) and caret-follows-id as binding requirements for P3-B.
+
+### Questions for the architect (S4) — answered 2026-10-12 (spec Decision Log 34; ledger X24, X25, X26)
+All amendments folded into §4.4 and §8. (1) The 5 s cap stays and flushes when it fires, no deferral to the next
+compositionend (a deferral would leave a stuck composition unbounded); every firing is logged. (2) The whole-frame hold
+is accepted for P3; narrowing to frames touching the composing block is deferred to P4. (3) Yes: the host detects a move
+per update (a delete and an insert of the same id), so keep-later applies to a human drag racing a move. (4) B validates
+only touched parents, advisory until S7b's 200-page numbers. The questions as asked:
+1. The 5 s cap reproduces doubled jamo once when it fires. Recommended: keep 5 s (never fired in normal typing; longest
+   hold 447 ms); consider having the binding defer the flush to the next compositionend instead of flushing under an
+   open composition, and log cap firings.
+2. The hold delays all remote frames, including edits to other blocks, until a gap between syllables (up to about
+   450 ms). Recommended: accept for P3; P4 could hold only frames touching the composing block.
+3. Human drags carry ids but no writer carry, so the host cannot tell them from a split duplicate. Recommended: detect
+   moves structurally per update (an update deleting and inserting a node with the same id is a move), so keep-later
+   applies to drag-versus-move.
+4. Whole-document validation twice per batch costs about 22 ms at 320 blocks. Recommended: P3-B validates touched
+   parents only; S7 measures at 200 pages.
+
+## S7a — The storage soak
+
+**Verdict: FAIL against the proposed bounds for the spec as written; PASS for the normal profile under the policy
+proposed here, with one marginal exception.** Every version as a full V2 state costs 178 MB for one ordinary 200-page
+document after 6 months (31 MB for a deck), and S3's restore silently drops any map attribute changed twice since the
+version. Under the proposed policy (delta-encoded versions, a load checkpoint, the thinning below, the fixed restore) the
+normal document and both decks meet every bound except the document's history preview (1.08 to 1.30 s against 1 s, on a
+document grown to 136k words). The heavy document fails the time bounds because word-level rewriting leaves tombstones;
+a writer replacing whole sentences cures most of that, but its preview still takes 1.6 s.
+**v14-only: yes, one.** `Y.undoContentIds`, the v14 primitive under S3's restore, cannot restore a map attribute
+overwritten two or more times since the version; a 3-line workaround on the public API (`revertUpdateFixed`) is exact
+at every age tested. Not a reason to return to v13, which has no artifact-wide revert primitive at all (question 9).
+Executor re-runs: `node spikes/p3-store/s7/soak/doc/probe-revert-attr.mjs` (S3's revert: a heading level changed twice
+comes back 1, want 2; fixed: 2) and `node spikes/p3-store/s7/soak/deck/probe-revert-map.mjs` (S3's revert throws or drops
+`left`; fixed: exact).
+
+Method: Node 22.23, `@y/y` 14.0.0-rc.28 and `@y/prosemirror` 2.0.0-15, one copy each; a real `node:sqlite` store (WAL,
+`synchronous=FULL`, `auto_vacuum=INCREMENTAL`) in S2's layout with ContentMap provenance under `/tmp/p3-s7a/`; one gc-on
+host Y.Doc; every edit its own transaction under its writer's clientID (a new human client per session, one per agent
+session, a scratch client per restore); replicas and sync not simulated (S2 proved them; storage depends only on the
+updates); rows committed every 2,000 rows or at each version (bytes identical to per-update commits; fsync count not
+representative). Times are headless Node under a load average of 9 to 20 on 10 cores (no quiet window was found):
+pessimistic.
+
+### The simulated use
+183 days from Monday 2026-04-06, 5 working days a week, maintenance nightly at 03:00, measurements at each 30.5-day
+boundary after maintenance; only time is compressed (every keystroke and pointer move is its own update). Run times:
+normal document 113 s, heavy 787 s, heavy with the sentence writer 315 s, decks 43 to 190 s.
+- Document, normal: starts at 310 sections, about 101k words (headings, lists, tables, code, callouts, task lists, quotes,
+  inline images, 51 comment marks with threads) built through the S1/S3 writer into S3's schema. Human: 2 sessions a day
+  of 1,500 keystrokes in bursts of 60 to 250 keys at 120 to 320 ms per key (7 % backspace, 0.4 % Enter, 0.3 % word
+  deletions, 0.2 % bolding; 30 % of pauses ≥ 2.5 min). Agent: 12 turns a day, each 1 to 2 `artifact_edit` batches of 1
+  to 4 ops (replace_text of 40 % of an 8 to 20 word span 42 %, paragraph rewrite at 70 % 15 %, set_cell 10 %, insert
+  section 7 %, delete section 7 %, insert paragraph 6 %, resolve 5.5 %, move 4 %, add row 3 %). Also a comment and 0.8
+  resolutions a day, an image a week (50 to 500 KB), a named version every Friday, a restore of a 1 to 2-day-old version
+  monthly, a design-system revision every 3 weeks, 3 agent sessions a day. Totals: 393k keystrokes, 1,572 turns, 395,571
+  updates; the document grew to 136k words (about 270 pages).
+- Document, heavy: 4 sessions of 2,500 keystrokes a day; 40 turns a day of 1 to 3 batches × 1 to 6 ops, 12 % of ops
+  rewriting a whole section at 80 %; 8 agent sessions a day; 4 comments a day; named versions Monday, Wednesday, Friday;
+  a restore every 2 weeks. Totals 1.31M keystrokes, 5,240 turns, 1.32M updates. `heavySentence`: the same with a writer
+  that replaces a sentence as one run once at least half of its words change.
+- Deck, normal: 100 slides of S6's seven bench shapes imported in one `publish`; the human 1 session a day (12 drags of
+  15 to 30 pointer-move transactions, 15 restyles, about 250 keystrokes in text boxes through `patchText`, 2 z-order
+  changes, 1 slide re-order, 0.4 slide adds and 0.5 deletes); the agent 8 turns a day, each 1 to 2 publishes of 1 to 4
+  slides (6 % add a slide, 7 % delete one). Heavy: 3 sessions, about 3× the operations, 30 turns a day, 1 to 6 slides per
+  publish.
+
+### The policy proposed for the spec
+§4.7's triggers stand (2 min human idle, every 10 min of activity, each turn's end, before restore or import).
+1. Version encoding: a version row is a V2 delta from the previous retained row (the structs since that row's state
+   vector, intersected with the deletions since: `Y.intersectUpdateWithContentIdsV2`); a keyframe (full V2 state) when
+   the deltas since the last keyframe would exceed the state's size; one `head` checkpoint per artifact (full V2) rewritten
+   when the log tail behind it reaches 1,000 rows or 256 KB; load = head + tail; version and head blobs zstd-compressed
+   (measured offline, not in the soak: 2.5× on version chains, 2.7× on heads; 7 ms to compress, 2 ms to decompress a
+   1.5 MB state).
+2. Thinning, `auto` rows only: all for 24 h, the newest per hour to 7 days, per day to 30 days, per ISO week after;
+   `turn`, `named`, `restore`, `import` kept, with the newest row and pinned rows (the owner's last-seen version, a version
+   open in a preview); a dropped delta folds into the next retained row with `mergeUpdatesV2` (re-deriving gc'd deltas
+   saves only 4 %, `probe-recode.mjs`).
+3. Log compaction: an update row is deleted once the head covers it and it is older than 7 days.
+4. Provenance: one ContentMap per update, time floored to the minute at write; rows older than 24 h merged per hour, hour
+   rows older than 30 days per day (lossless at minute granularity); "Show editors" reads a merged map the host keeps per
+   open artifact, updated as each update lands (recommended, not measured; question 4).
+5. Assets and design-system states kept while the live artifact or a retained version references them; collected nightly.
+6. Nightly maintenance per artifact: thin, compact the log, bucket provenance, collect references, `PRAGMA
+   incremental_vacuum`, `wal_checkpoint(TRUNCATE)`.
+7. Restore: S3's revert with the fixed stack item (`s7/soak/revert.mjs` `revertUpdateFixed`).
+8. Writer (§4.4): an agent edit changing at least half the words of a sentence writes the sentence as one delete plus one
+   insert with marks re-applied.
+Comparison: Google Docs keeps every revision of a Docs-editor file (the Drive API cannot delete them; listings of
+frequently edited files omit older ones; Drive API "Manage revisions", read 2026-10-13); Notion versions every 10 minutes
+of activity and 2 minutes after the last edit, deleting after 7, 30 or 90 days by plan (`research/p3-editors-export-
+history.md` §4). This policy keeps everything with a restore value forever and thins only automatic snapshots: close to
+Google's behaviour at about 9 MB per normal document per 6 months.
+
+### Bounds and results at 6 months (time cells "in the soak / bench", bench = median of 5 to 9 runs on the finished store)
+
+| Bound | Proposed | Reason | Doc normal | Doc heavy, word writer | Doc heavy, sentence writer | Deck normal | Deck heavy |
+|---|---|---|---|---|---|---|---|
+| Retained database per artifact (assets apart) | doc ≤ 25 MB normal / ≤ 100 MB heavy; deck ≤ 10 / ≤ 40 MB | userData is on the system SSD and in Time Machine; a year of ~20 active artifacts plus hundreds of small ones under ~1 GB | 9.20 pass (full states: 177.5, fail) | 75.5 pass | 49.4 pass | 2.10 pass (full states: 30.9, fail) | 10.27 pass |
+| Load: head + log tail applied | ≤ 200 ms p50 | the host's share of a 1 s open; first sync and render are S7b's | 133 / 177 pass | 796 / 607 fail | 155 / 134 pass | 41 / 51 pass | 40 / 41 pass |
+| History preview, headless: a 3-month-old version against today (state, attributions, two gc-off docs, DiffRenderer, change list) | ≤ 1,000 ms p50 | a version click shows the preview within a second (the editor's render adds about 1.2×, S3) | 1,078 / 1,128 fail (marginal) | 6,840 / 9,681 fail | 1,657 / 1,605 fail | 188 / 187 pass | 422 / 353 pass |
+| Restore of a 3-month-old version, host compute | ≤ 1,000 ms p50 and exact | the single-threaded host stalls every open document's sync meanwhile | 779 / 737, exact, pass | 3,721 / 3,242 fail, exact | 652 / 416, exact, pass | 103 / 113, exact, pass | 141 / 121, exact, pass |
+| Nightly maintenance (worst of 183 nights) | total ≤ 1 s, one step ≤ 500 ms | the detached host serves agent writes at any hour | 259 (thinning 216) pass | 1,436 (thinning 1,271) fail | 625 (thinning 485) pass | 63 pass | 935, one night's thinning 871 ms: fail on the step (median night 33 ms) |
+| "Show editors" vs recorded truth (who, time to the minute) at months 1, 3, 6 in four age groups | 100 %; ≤ 100 ms per selection on a merged map; cold merge ≤ 300 ms | a right-click menu | 28/28; merge 210 ms + 21 ms per selection, pass | 25/25; cold merge 3,405 ms fail | 25/25; cold merge 1,023 ms fail | 33/33; merge 45 ms, pass | 23/23; merge 230 ms, pass |
+| Tombstone overhead: live V2 ÷ a fresh import of the same content | ≤ 2× | else load, preview and restore scale with history, not content | 1.57 pass | 3.77 fail | 1.82 pass | 1.33 pass | 1.62 pass |
+
+Every sampled reconstructed version, in every run and month, matched the content hash recorded on the day it was taken
+(7/7 at month 6); restore equality checked at month 6 against the version's body and threads (decks: files and threads).
+
+### Measurements: code paths and commands (from the repository root)
+Install `pnpm_config_verify_deps_before_run=false pnpm -C spikes/p3-store/s7 install --ignore-workspace`; refresh the
+copied sources `node spikes/p3-store/s7/soak/copy-sources.mjs`; all soaks `/tmp/maws-review/waitload20.sh &&
+/tmp/maws-review/with-slot.sh node spikes/p3-store/s7/soak/run-all.mjs` (then `… run-all.mjs second`); one soak
+`node spikes/p3-store/s7/soak/soak.mjs --kind doc|deck --profile normal|heavy|heavySentence --encoding delta|full
+[--suffix x --policy '{…}']`.
+- Retained bytes by table, db file and WAL after checkpoint and incremental vacuum, by page through `dbstat`:
+  `Store.sizes` (`s7/soak/store.mjs`); month tables `node spikes/p3-store/s7/soak/summary.mjs`, `table.mjs <tag>`.
+- Live state, re-encoding through a fresh doc, a fresh import of the same content, struct count: `measure` in
+  `s7/soak/doc/sim.mjs` and `s7/soak/deck/sim.ts`.
+- Load: `Store.load` (median of 5 in the soak; 7 to 9 in `node spikes/p3-store/s7/soak/bench.mjs <tag> [runs]`).
+- History preview: `Store.stateAt` (keyframe merged with its deltas), `Store.attributions(fromSeq)`, then S3's `openDiff`,
+  `renderDiff`, `changeList` (copied to `s7/soak/doc/history.mjs`); decks `createDiffRenderer` then
+  `slides.toDeltaDeep({renderer})`.
+- Restore: `revertUpdateFixed` (`s7/soak/revert.mjs`); exactness by age for S3's revert, the fixed one and S3's id-paired
+  structural diff: `node spikes/p3-store/s7/soak/doc/probe-restore.mjs doc-normal-delta|doc-heavy-delta`,
+  `node spikes/p3-store/s7/soak/deck/probe-restore.ts deck-normal-delta|deck-heavy-delta`; minimal reproductions
+  `deck/probe-revert-map.mjs`, `doc/probe-revert-attr.mjs`.
+- "Show editors": `checkShowEditors` (`doc/sim.mjs`, S3's `showEditors` copied and extended to return the raw time); decks
+  `editorsOf` (`deck/sim.ts`); the truth `Store.truthFor`, a separate never-thinned database of exact per-update maps.
+- Maintenance: `Store.maintain` (`thin`, `compactLog`, `bucketProvenance`, `gcRefs`, `checkpoint`), timed nightly.
+- Delta reconstruction: `node spikes/p3-store/s7/soak/doc/probe-versions.mjs` (the newest version from keyframe plus
+  deltas equals head plus tail, merged or applied one by one).
+- Tombstones `node spikes/p3-store/s7/soak/doc/tombstones.mjs 1000`; chain re-coding and zstd
+  `node spikes/p3-store/s7/soak/probe-recode.mjs doc-heavy-delta`.
+
+### Month by month (`s7/out/summary.txt`; months 2, 4 and 5 there)
+
+| run | m | live V2 KB (fresh import) | size | db MB | versions / head / provenance / log MB | versions kept | assets MB | load ms | preview ms | restore ms | Show editors |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| doc normal | 1 | 1017 (855) | 116k words | 3.37 | 1.28 / 1.00 / 0.42 / 0.64 | 82 | 7.90 | 72 | 558 | 380 | 8/8 |
+| doc normal | 3 | 1264 (904) | 126k | 5.55 | 3.21 / 1.24 / 0.41 / 0.66 | 86 | 9.10 | 93 | 821 | 485 | 11/11 |
+| doc normal | 6 | 1508 (960) | 136k | 9.20 | 5.89 / 1.47 / 1.11 / 0.67 | 129 | 10.82 | 133 | 1078 | 779 | 9/9 |
+| doc heavy | 1 | 2635 (946) | 135k | 19.63 | 10.82 / 2.55 / 2.45 / 3.76 | 156 | 9.00 | 413 | 3242 | 1365 | 9/9 |
+| doc heavy | 3 | 3106 (874) | 127k | 39.23 | 28.00 / 3.05 / 4.59 / 3.50 | 121 | 13.91 | 534 | 5460 | 1348 | 9/9 |
+| doc heavy | 6 | 3924 (1042) | 144k | 75.46 | 57.64 / 3.86 / 9.88 / 3.89 | 252 | 22.53 | 796 | 6840 | 3721 | 7/7 |
+| doc heavy, sentence writer | 1 | 1069 (802) | 114k | 12.28 | 6.81 / 1.05 / 1.48 / 2.89 | 152 | 10.22 | 69 | 811 | 169 | 8/8 |
+| doc heavy, sentence writer | 3 | 1393 (927) | 132k | 25.32 | 19.65 / 1.37 / 1.43 / 2.79 | 122 | 16.11 | 93 | 875 | 222 | 9/9 |
+| doc heavy, sentence writer | 6 | 1454 (798) | 112k | 49.38 | 41.14 / 1.42 / 3.60 / 3.08 | 246 | 25.38 | 155 | 1657 | 652 | 8/8 |
+| doc normal, full states (spec as written) | 1 / 3 / 6 | as doc normal | | 79.05 / 102.61 / 177.50 | 175.45 MB of versions at month 6 | 82 / 86 / 129 | | 47 / 87 / 109 | 415 / 899 / 890 | 317 / 468 / 365 | |
+| doc normal, turn versions kept | 6 | 1508 (960) | 136k | 10.91 | 7.59 / 1.47 / 1.11 / 0.67 | 1647 | 11.02 | 133 | 1141 | 763 | |
+| deck normal | 1 | 245 (225) | 97 slides | 0.85 | 0.37 / 0.24 / 0.09 / 0.12 | 64 | 4.65 | 28 | 91 | 45 | 11/11 |
+| deck normal | 3 | 232 (189) | 79 | 1.29 | 0.79 / 0.23 / 0.13 / 0.12 | 68 | 5.35 | 33 | 112 | 64 | 11/11 |
+| deck normal | 6 | 297 (224) | 91 | 2.10 | 1.32 / 0.29 / 0.30 / 0.13 | 114 | 8.18 | 41 | 188 | 103 | 11/11 |
+| deck heavy | 1 | 223 (171) | 79 | 2.81 | 1.61 / 0.22 / 0.35 / 0.60 | 148 | 8.91 | 34 | 234 | 67 | 11/11 |
+| deck heavy | 3 | 261 (189) | 82 | 5.16 | 3.80 / 0.27 / 0.53 / 0.51 | 120 | 18.57 | 34 | 251 | 75 | 6/6 |
+| deck heavy | 6 | 330 (204) | 88 | 10.27 | 8.07 / 0.32 / 1.20 / 0.59 | 232 | 35.07 | 40 | 422 | 141 | 6/6 |
+| deck normal, full states | 6 | 297 (224) | 91 | 30.91 | 30.38 MB of versions | 114 | 8.18 | 43 | 166 | 96 | 11/11 |
+
+Per-update cost in the normal document: 23 µs to land, 8.8 ms per delta version. Write volume over 6 months: full states
+4.39 GB per normal document (572 MB per normal deck); delta mode about 6 MB of version rows, the head rewrites its main
+write cost (381 MB normal; 3.0 GB heavy with the word writer, 1.3 GB with the sentence writer).
+Tombstones (`s7/out/tombstones.txt`): with gc on, a word-level rewrite of a 7-paragraph section (80 % of words replaced)
+adds about 2.5 KB and 194 deleted structs to the live state every pass, linear and unbounded (1,000 passes add 2.5 MB to
+a 0.78 MB document); the same rewrites as whole-paragraph replacements add 31 B per pass (about 80× less); random-position
+typing with 45 % deletions adds about 4.5 KB per 1,000 keystrokes; re-encoding through a fresh doc never shrinks anything.
+
+### Pitfalls (verified)
+1. **The v14 restore gap.** `Y.undoContentIds` builds its stack item as inserts minus deletes and deletes minus inserts;
+   an item both inserted and deleted since the version (an intermediate value of an attribute overwritten twice or more)
+   lands in neither; `redoItem`'s map branch (`UndoManager.js`) meets it on the key's overwrite chain, reads it as a
+   concurrent remote change and gives up, so the key ends up deleted. Decks: S3's revert left 9 of 83 files wrong for a
+   1-day-old version and 49 for a 30-day-old one (heavy deck up to 58 of 94). Documents: a heading level changed twice
+   comes back as the default; likewise a task's checked, a callout's tone, a code block's language. Fix: push the stack
+   item directly with every item inserted since and only (deletes minus inserts) to redo (`revert.mjs`); exact at every
+   age on all four stores. The upstream function is marked `@experimental`.
+2. S3's `revertUpdate` returns 13 zero bytes when nothing changed, not a decodable V2 update (`applyUpdateV2` throws
+   "Unexpected end of array"): return `encodeStateAsUpdateV2(new Y.Doc())`.
+3. `YNode.toDelta()` returns the live doc's own child YNodes; applying that delta to another doc re-parents them and the
+   live doc's next write to them throws in `tryGcDeleteSet`. Copy values, or `toDeltaDeep` plus S3's `materialize`.
+4. A doc loaded from a state may list a node's attributes in another order: compare canonically (sorted keys).
+5. `encodeStateAsUpdateV2(doc, sv)` writes the doc's entire delete set every time: filter a delta with the deletions since.
+6. pnpm 11.23 ignores `pnpm.overrides` in `package.json` (S5's pitfall 8, again).
+7. Word-level hunks leave one tombstone per replaced word forever.
+8. Provenance merge cost scales with row count (3.2k rows 105 ms; 10.4k rows 646 to 709 ms in the heavy preview; a full
+   merge 3.4 s on the heavy store).
+9. In heavy use retained asset bytes outweigh the database (heavy deck: 35 MB of assets against a 10 MB database).
+10. Unexplained: in the heavy deck the preview's per-element count reads 0 after month 1, while slide counts and
+    per-element "Show editors" are right. Not investigated.
+
+### Amendments proposed
+- §4.2: versions as zstd-compressed V2 deltas from the previous retained row (keyframes when the deltas since the last
+  keyframe exceed the state's size); one head checkpoint per artifact rewritten when the log tail reaches 1,000 rows or
+  256 KB; load = head + tail; update rows deleted once the head covers them and they are older than 7 days. Provenance:
+  one ContentMap per update, times floored to the minute, merged per hour after 24 h and per day after 30 days
+  (lossless), one merged map kept in memory per open artifact. Restore: S3's revert with the stack item built directly;
+  the regression test is the overwrite-twice case on a deck element and a heading level. The nightly maintenance pass
+  (thin, compact, bucket, collect references, incremental vacuum, WAL checkpoint); the database created with
+  `auto_vacuum=INCREMENTAL`.
+- §4.7: only `auto` rows thin (all for 24 h, newest per hour to 7 days, per day to 30 days, per ISO week after); `turn`,
+  `named`, `restore`, `import`, the newest and pinned rows kept; an owner action "Delete versions older than…" (Google's
+  "Delete this and older versions") as the escape valve.
+- §4.4: an agent edit changing at least half the words of a sentence writes the sentence as one replacement with marks
+  re-applied.
+- X29: version row `{seq, at, actor, kind, label?, note?, summary?, enc: 'full' | 'delta', bytes (zstd V2),
+  designSystemRef, assetRefs[]}`; `artifact_head {artifactId, seq, state}`; provenance row `{fromSeq, toSeq, fromAt, toAt,
+  tier: 'update' | 'hour' | 'day', contentMap}`; the thinning policy and retention rule above.
+
+### Questions for the architect (S7a) — answered 2026-10-12 (spec Decision Log 36; Decision Log 25 stands)
+The policy replaces full-state versions (binding on §4.2, §4.7 and X29 with the row shapes above); `revertUpdateFixed`
+replaces S3's revert for P3-A with the overwrite-twice reproductions as regression tests. (1) Yes. (2) Yes, turn
+versions kept. (3) Yes; B owns the threshold and re-applies marks on retained words. (4) Yes: in-memory merged
+provenance, hour rows after 1 h, the version pair held open while browsing; S7b measures the editor path. (5) Yes:
+`node:zlib` has zstd in the host's Node; A confirms inside Electron 44.4.5. (6) Deferred, recorded in the spec's §9.
+(7) Yes; the library shows each artifact's history size. (8) Accepted, thresholds raisable. (9) The upstream filing is
+with the owner, recommended. Pitfall 10 (the heavy deck's change count reading 0 after month 1) is an open item for
+P3-C. The questions as asked:
+1. Delta-encoded versions with a head checkpoint instead of full states? Recommended: yes (full states cost 19× the
+   database, 178 against 9.2 MB, and 4.4 GB of writes per normal document per 6 months).
+2. Keep turn versions? Recommended: yes, as the spec says (+1.7 MB per normal document per 6 months for all 1,539).
+3. The sentence-replacement writer rule into §4.4? Recommended: yes, for agent rewrites at ≥ 50 % (coarser attribution:
+   a rewritten sentence is credited and diffed whole; without it a heavy document's live state grows about 0.4 MB a
+   month without bound); B owns the threshold.
+4. The previews still exceed 1 s (mostly attributions, `openDiff` and render). Recommended: keep the merged provenance in
+   memory, updated as each update lands (about 0.1 to 0.7 s off); merge per-update rows into hour rows after 1 h rather
+   than 24 h; keep the version doc pair open while the owner browses the list; S7b re-measures the editor path.
+5. zstd? Recommended: yes (2.5 to 2.7× for 2 ms of decompression); P3-A confirms zstd in Electron 44's Node.
+6. Heavy-use keyframes (31 of 57 MB in the heavy document): defer (about 23 MB with zstd, under the bound; thinning old
+   keyframes to one a month is the next lever).
+7. Asset retention in heavy decks: keep the reference rule, show each artifact's history size in the library, and offer
+   the owner's delete action.
+8. Head rewrite writes (1.3 to 3 GB per heavy document per 6 months): acceptable; raise the thresholds if SSD wear
+   matters.
+9. Does the restore gap send S1's ruling back to v13? No: the failing primitive is a v14-only API, but the fix is 3 lines
+   on the public API, v13 has no artifact-wide revert at all, and S3's id-paired structural diff was also exact on every
+   store here (0.2 to 3.6 s) as a fallback. P3-A copies `revertUpdateFixed` and the reproductions; filing upstream is
+   outward-facing and the architect's call (recommended).
+Not tested in S7a: Electron rendering, IME, replicas, first sync, memory (S7b); per-update fsync cost; zstd inside the
+store; maintenance alongside live writes; the document soak never changes a block attribute twice (its restore exactness
+does not exercise the gap; `probe-revert-attr.mjs` does); the heavy word-writer soak ran before the restore fix (its
+in-sim restores used S3's revert; its month-6 check and age sweep are exact).
+
+## S7b — The scale gate in Electron
+
+**Verdict: pass against the proposed bounds once four fixes found here apply; B and C may start with them binding in
+their briefs.** Three are already ruled (Decision Log 35: the composition hold, its merged flush, touched-parent
+validation); the fourth is new: an agent replica's awareness is destroyed when its replica closes, and the host unloads
+idle documents. One bound stays open: the host event-loop **max** while S4's patch writer runs (126 to 148 ms on 5-op
+batches with touched-parent validation; its p99 38 to 40 ms meets Decision Log 35's ≤ 50 ms condition, so the
+worker_thread writer stays deferred). Nothing failed on v14 alone; the one correctness failure (Korean composition
+corrupted by an agent edit into the composing block) is the one S4 found on v13 too.
+
+Method: real Electron 44.4.5 on S1's exact v14 pins, one `@y/y`, lib0 and prosemirror-model per bundle (checked from
+esbuild's metafiles). Host: a utility process running S2's v14 `DocumentService`, its SQLite storage with fullfsync on,
+and `AgentReplica`, imported in place. Editor windows hidden (`show:false`, `paintWhenInitiallyHidden`,
+`backgroundThrottling:false`; they render at 120 fps and report visible), each a real Tiptap 3.31.3 editor through S3's
+`YCollaboration` (history mode and undo guards) and S3's schema on S2's `PortProvider` over a `MessageChannelMain`. Window
+A driven through CDP. Agents: two `AgentReplica`s, each sending one batch (one transaction) every 0.8 to 1.6 s of 3 to 6
+ops (word replacements, paragraph rewrites, inserts after headings, cells, deletes), away from the five sections around
+the human's caret except in the same-block IME runs; with `S7_AGENT_WRITER` they use a copy of S4's patch writer.
+Timing points: keystroke start = the input event's `timeStamp`; "frame" = the `requestAnimationFrame` after the
+ProseMirror transaction; "post-paint" = the task after it; "presented" = Event Timing duration (8 ms steps); "ack" = the
+provider's durable count reaching the keystroke's update; "B" = window B's frame after A's clock arrives; host loop =
+`monitorEventLoopDelay` at 5 ms (what engine supervision on the same loop would wait behind).
+The 200-page document: built in Node, 160 sections through `pmnodeToDelta` with the editor's schema, then roughened (two
+writer clients for the sections; a third typing 42,000 one-character transactions, 412 word deletions, 282 bold
+formats): 104,055 words, 741k characters, 1,454 top-level blocks, 2,503 text blocks (headings, paragraphs with bold,
+italic, links and a comment mark every third section, lists, tables, code, quotes, task lists, callouts); V2 1.05 MB, V1
+1.36 MB, 28,676 structs, 5,781 DOM nodes. The baseline: 16 sections, 10,383 words, 144 blocks, V2 104 KB.
+
+### Bounds and results (steady state unless marked; load = 1-minute average at measurement time)
+
+| # | Measure (200 pages, 2 windows, 2 agents) | Proposed bound | Why | Result | Load |
+|---|---|---|---|---|---|
+| 1 | Keystroke → frame in A | p95 ≤ 16 ms, max ≤ 50 ms | one 60 Hz frame; 50 ms is the long-task limit a typist feels | no agents 7.7 / 10.6 / 20.1 ms (p50 / p95 / max); agents 7.8 / 10.6 / 29.5. Pass (an earlier run at load 39: p95 13.1, max 42) | 13–16 |
+| 2 | Keystroke → presented (Event Timing) | p95 ≤ 50 ms | where typing lag becomes noticeable | 24 / 32 ms, max 72 with agents (20-page floor 16 / 24). Pass | 13–16 |
+| 3 | Keystroke → durable ack | p95 ≤ 100 ms | X32's saved state must not flicker; a tool call waits on the ack | 11.7 / 16.6 / 58.4 ms. Pass | 13–16 |
+| 4 | Keystroke painted in window B | p95 ≤ 100 ms | 0.1 s reads as instant | 16.4 / 21.6 / 48.8 ms. Pass | 13–16 |
+| 5 | Host event-loop delay, documents live | p99 ≤ 50 ms, max ≤ 100 ms | the engine supervisor shares the loop | S7b's agents: p99 12.9, max 65. Pass. S4's writer, whole-document validation: p99 125, max 212. Fail. Touched-parent validation, three runs: p99 40.3 / 40.1 / 38.0 (pass), max 145 / 148 / 126 (fail) | 12–34 |
+| 6 | First sync to interactive (open → editor painted with content) | 200 pages ≤ 1,000 ms; 20 pages ≤ 200 ms | Nielsen's 1 s for the extreme case; ~0.2 s for an ordinary panel open | 200 pages cold 495–502 ms, warm 463–472; 20 pages cold 124–137, warm 105–108. Pass | 11.9–16 |
+| 7 | History preview | enter ≤ 1,000 ms; leave ≤ 500 ms | a view switch (RAIL's transition budget) | enter 327–468 ms including the fetch; leave 180–204. Pass | 11.7 |
+| 8 | Memory | host +≤ 100 MB per open 200-page doc with two agents; renderer ≤ 500 MB; after close and unload, host heap within 5 MB of idle | the owner's 32 GB machine runs many sessions 24/7 | host heap 12.6 idle → 39.7 MB (pass); renderers 200–278 MB (pass), 484–497 just after three previews (pass, at the edge); after close as built: fail (39.7 MB, nothing collected); with awareness destroyed and an unload: 15.0 MB (pass) | 11.6–16 |
+| 9 | Deck: 100 slides plus 100 live thumbnails | open ≤ 1,000 ms; drag move → frame p95 ≤ 16 ms; renderer ≤ 500 MB | the documents' budgets | open cold 116 ms, warm 83; drag 0.7 / 8.9 / 10.6 ms; 157 MB. Pass | 11.7 |
+| 10 | IME under load | exact 100 %; input → frame p95 ≤ 16 ms; flush no long task (≤ 50 ms); the 5 s cap never fires | exactness is correctness | exact: agents elsewhere 3/3; same block without the hold 0/3; with the hold 3/3; hold plus merged flush 3/3; frame p95 11–13 ms; per-frame flush 79–89 ms (fail), merged flush 19–24 ms (pass); cap fired 0 of 24 holds | 11.8–15.8 |
+| 11 | Host SIGKILL under load | acked lost = 0; re-fork → all replicas live ≤ 1,000 ms | S2's accounting; "reconnecting" brief | 0 lost; 441 ms. Pass | 8.95 |
+
+Re-measurements within 20 % of a budget (the machine never fell below 12): bound 1's run at load 39 (p95 13.1) re-run at
+13–16 (10.6); bound 5 with touched validation three runs at loads 12–15, 19–34 and 13–15 (p99 40.3 / 40.1 / 38.0, stable,
+so structural, not contention); bound 8's post-history renderer twice (496, 484 MB); bound 10's frame p95 11–13 ms across
+27 reps at loads up to 50. Executor re-check: `s7/out/b-kill.json` (0 acked lost, host loop p99 57.3 ms after the
+restart, store reload 54 ms) and `b-typing-writer-touched-quiet.json` (host loop p99 38 ms) read back.
+
+### Measurements (from the repository root)
+Install `pnpm -C spikes/p3-store/s7/electron install --ignore-workspace`; build `node spikes/p3-store/s7/electron/
+build.mjs` (to `/tmp/p3-s7b/build`); seeds `ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/Electron.app/Contents/MacOS/
+Electron /tmp/p3-s7b/build/seed.cjs /tmp/p3-s7b 160` and `… /tmp/p3-s7b/small 16`; one scenario `zsh spikes/p3-store/s7/
+electron/run.sh <scenario> [tag]` (through waitload20 and with-slot; writes `s7/out/b-<scenario>[-tag].json` with the
+load averages inside). Variants: the 20-page document `S7_SEED=/tmp/p3-s7b/small/seed-200p.v2 S7_SECTION=8`; patch-writer
+agents `S7_RUNS=writer-document,writer-touched` (typing) and `S7_AGENT_WRITER=touched` (ime); awareness destroyed on close
+`S7_DESTROY_AWARENESS=1` (memory).
+1. Typing (`typing`, `typing small`; 300 keystrokes at 60–180 ms through `Input.dispatchKeyEvent`, caret in s80p2, with no
+   agent and with two): A's per-keystroke cost at 200 pages is about 5 ms above the 20-page baseline (frame p95 10.6
+   against 2.6–4.8 ms), linear in size; applying an agent batch into A p95 7.9 ms, max 9.4; window B spends 3.4 ms p50
+   (5.3 p95) per incoming frame at 200 pages (0.6 at 20), half of those frames A's cursor awareness (one per keystroke,
+   about 330 B, rebuilding y-prosemirror's cursor decorations).
+2. First sync (`firstsync`; a version plus 67 agent rows; three cold trials on a fresh host and three warm): cold open →
+   synced 116–118 ms (host load 48, a 1.39 MB step 2 applied in 53–54); the binding render (`ynodeToPmnode` plus the
+   ProseMirror DOM) 242–250 ms; Chromium's style, layout and paint about 115 ms more; warm synced in 65–71 ms. The store
+   and wire are under a quarter of the cost; the editor's full render is the rest.
+3. History (`history`; an auto version via S2's compaction after 60 keystrokes, then 150 keystrokes and about 70 agent
+   batches over 40 s; three previews): attribution build — the host merges provenance from its rows in 3.2–6.5 ms
+   (8.4 KB), the renderer decodes it in 0.8–1.7 ms, the host's live V2 encode 6.5–16.7 ms; doc-pair open (`openDiff`, two
+   gc-off docs) 46–100 ms; editor path — `showVersion` renders in 226–285 ms, enter → post-paint 314–437 ms, `changeList`
+   1.5–2 ms for 200 changes, leave → post-paint 180–204 ms; total with the fetch 327–468 ms against 1 s, the merge assumed
+   in memory. The history is short: per top-level block (1,498), render about 0.15–0.19 ms and doc-pair open about
+   0.03–0.07 ms; S7a's 1.08–1.30 s headless figure for a three-month history is dominated by attributions, which this run
+   does not stress; Chromium adds about 250 ms of render at 200 pages on top of that build.
+4. Memory (`memory`, as built and with `S7_DESTROY_AWARENESS=1`): host heap 12.6 MB idle → 21.1 loaded → 21.2 with A and B
+   → 39.7 with two agent replicas after typing. As built, closing everything retains 39.7 MB: the agent replicas are never
+   collected because the provider's `destroy()` leaves the Awareness it created running, and its check interval keeps
+   the doc alive; S2's service has no unload (dropping the doc by hand collects it: 31.3 MB). With awareness destroyed:
+   agents collected (23.5 MB), then unload brings the heap to 15.0 MB (idle + 2.4), collection verified with a
+   FinalizationRegistry under forced GC. RSS is not returned to the OS (129 → 147 MB). Renderers at 200 pages 200–278 MB
+   working set, 37–45 MB JS heap; at 20 pages 150–170 MB.
+5. Deck (`deck`; S6's 100-slide bench deck imported through `publish` on an agent replica in 84–104 ms, saved in
+   301–341 ms; S6's `SlideCanvas` at half scale with S6's drag plus 100 thumbnail canvases): open cold 116 ms (host load
+   18), warm 83–84; drag: 200 CDP mouse moves while an agent republished, ack p95 13.7 ms, host loop max 13.7 ms, 1,908 DOM
+   nodes, converged.
+6. IME (`ime`; S4's 2-set step model and drive copied: rawKeyDown 229, `imeSetComposition`, keyUp, `insertText` commit;
+   " 안녕하세요 한글 입력 테스트입니다", 41 jamo keystrokes per rep, 3 reps per variant; agents at a stress pace of
+   150–400 ms per batch, one op into the composing block per batch in the same-block variants): without the hold the
+   doubled jamo appears in every same-block rep ("한한ㄱ글글이입입ㄹ력"); the hold (Decision Log 33's shape) spans a
+   whole word, because commit-and-restart keeps composing true: 1.03–1.29 s, buffering 7–9 frames (5.9–10.6 KB); flushed
+   frame by frame, 79–89 ms long tasks and post-paint p99 96–115 ms; flushed as one `Y.mergeUpdates` update, 19–24 ms,
+   compositionend → caught up 25–38 ms, no long task; composition input → frame p95 11–13 ms (14–23 from the keydown,
+   since CDP sends the composition as a second command). With touched-writer agents at the same stress pace: the same
+   exactness pattern, merged flush 13–17 ms, host loop p99 110–140 ms (the stress pace times the writer's cost; load rose
+   from 12 to 50).
+7. Host restart (`kill`; A types for 12 s, SIGKILL at 5 s, re-fork after 1 s, both windows' ports and both agents
+   reopened): 119 keystrokes, 49 acked before the kill and 0 lost, 15 typed while down, 119 in the store at the end;
+   agents 10 acked batches, 0 lost; fork → started 162 ms, store reload 54 ms, fork → all live 441 ms, kill → all live
+   1,455 ms (with the 1 s respawn delay); host loop max 57 ms right after; converged.
+8. V1 against V2: host encode 1.39 MB V1 against 1.08 MB V2 (1.29×), 8.3 against 9.0 ms; renderer apply 28–39 ms V1
+   against 21–39 ms V2 (at most about 10 ms of a 500 ms open); deck 362 against 213 KB (1.70×), step 2 applies in about
+   25 ms. Not a first-sync cost worth a V2 sync message (S2's question 6 answered: v14's slower cold sync is inside
+   bound 6 at 200 pages).
+9. S4's patch writer at scale (`typing` with `S7_RUNS`; S4's writer copied with a `validate` option and a nested-root
+   option; agents alternate one replace_text with a 5-op batch):
+
+| | Whole-document validation (load 19–20) | Touched parents only (three runs, load 12–34) |
+|---|---|---|
+| replace_text apply, p50 / p95 | 126–134 / 180–206 ms | 39–52 / 51–98 ms |
+| batch of 5, p50 / p95 | 149–164 / 166–177 ms | 83–95 / 112–155 ms |
+| validation p50 | 77–90 ms | 4–8 (single op) / 24–31 ms (batch) |
+| clone dry-run p50 | 27–36 ms (max 88) | same |
+| A frame p95 | 13.6 ms | 8.5–11.9 ms |
+| ack p95 | 142 ms | 47–79 ms |
+| B p95 | 131 ms | 39–63 ms |
+
+Typing in A is untouched; the cost lands on the host's loop, and so on acks, on B and on engine supervision; the host
+heap reached 127–172 MB (clone garbage), RSS 255–319 MB.
+
+### Pitfalls
+1. S2's provider leaks every replica's doc: `destroy()` does not destroy the Awareness it created and its interval
+   retains the Y.Doc (about 8–9 MB per agent replica at 200 pages).
+2. S2's service never unloads a doc; once dropped, it is collectable.
+3. Remote edits into the composing block break Korean composition (edits elsewhere in the 200-page document do not); a
+   hold spans a word (about 1–1.3 s); a frame-by-frame flush is a long task, the merged flush is not.
+4. Cursor awareness costs the other window per keystroke in proportion to document size (about 3.4 ms per frame at
+   200 pages).
+5. History preview roughly doubles the renderer working set (about 480–500 MB) until GC.
+6. S4's writer works in proportion to the whole document on every batch: the clone dry-run, two runs, strict
+   whole-document validation, `find` walking the tree per op, replace_text without `block` serializing every top-level
+   block.
+7. Harness and app: reading `win.webContents` of a destroyed window inside an `ipcMain` listener throws and starves later
+   listeners (compare `event.sender.id`); `--expose-gc` in `utilityProcess.fork`'s `execArgv` does not reach V8 (use
+   `v8.setFlagsFromString`); `performance.memory` needs `--enable-precise-memory-info`; Event Timing in hidden windows
+   includes compositor presentation (a 16–24 ms floor).
+
+### Amendments proposed
+- §4.2 / X24 (binding): the provider destroys the Awareness it created; the host unloads a document a grace period after
+  its last connection closes; A's tests check the heap returns within 5 MB of its pre-open value.
+- §4.2 (Decision Log 35, numbers attached): the composition hold buffers sync frames and flushes them as one merged update.
+- §4.4: "an agent batch occupies the host loop ≤ 50 ms at 200 pages" becomes P3-B's acceptance check; the route: drop the
+  whole-document clone (dry-run against the touched blocks' ProseMirror nodes), an id → node index, replace_text scoped
+  by block; a worker_thread only if still over.
+- X24 (advisory): throttle cursor awareness to about 50 ms.
+- §4.12: S7's bounds tables (S7a's and this one) as the scale gate, re-run in P3-F's scale review.
+- §8: the scale risk mitigated, the writer's host-loop max the residual.
+
+### Questions for the architect (S7b)
+1. Adopt the bounds above as the B and C gate and as P3-F's re-run? Recommended: yes.
+2. The host-loop max over 100 ms with touched-parent validation (126–148 ms on 5-op batches): make removing the clone
+   binding now, or advisory? Recommended: binding for P3-B as the 50 ms-per-batch check, the worker deferred.
+3. 0.5 s to open a 200-page document is mostly the editor's full render: accept, or require progressive rendering?
+   Recommended: accept; show the panel shell at once with a loading state past 100 ms.
+4. A V2 sync message? Recommended: no.
+5. The idle unload's grace period? Recommended: 60 s after the last connection, never while an agent session is linked
+   and live.
+Not tested in S7b: v13 in Electron; a long (months) history in the editor path (S7a covers it headless); power loss.
+
+## P3-0 closing record (2026-10-12)
+
+Delegation: each spike was run by one worker (opus) under the P3-0 executor, who briefed it, relayed the architect's
+rulings mid-run, re-ran each spike's headline commands, committed its code and outputs, and folded its section in here.
+S2 and S6 ran first on v13 and were ported to v14 after S1's ruling; S3, S4, S5 and S7 ran on v14 from the start.
+Environment: `/tmp/maws-review/waitload20.sh` and `with-slot.sh` had been purged by `/tmp`'s three-day rule and were
+recreated by the executor (the coordinator later patched `with-slot.sh` to 2 slots and `MAWS_E2E_QUIET=1`); the brief's
+IME capture path named `p3-finish` for `p2-finish`. The machine's load average stayed between 9 and 50 throughout; the
+timing spikes record it beside every number.
+Open items left to the children: the writer's host-loop max (S7b question 2, P3-B); S7b's other questions; the heavy deck
+preview's per-element change count reading 0 after month 1 (S7a pitfall 10, P3-C); zstd inside Electron 44.4.5 (P3-A);
+the upstream filing of the `Y.undoContentIds` gap (the owner); power loss, E10's real `SocketPort`, a detached-mode kill
+and main's reopen after a reset (P3-A); the OS clipboard round trip of comment marks and the drag-move guard (P3-B); the
+under-layer paint rule in a real paint (P3-C).

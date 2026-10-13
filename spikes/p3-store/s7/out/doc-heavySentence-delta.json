@@ -1,0 +1,1295 @@
+{
+ "tag": "doc-heavySentence-delta",
+ "profile": "heavySentence",
+ "encoding": "delta",
+ "policy": {
+  "encoding": "delta",
+  "provGrain": 60000,
+  "provHourAfter": 86400000,
+  "provDayAfter": 2592000000,
+  "provDayGrain": 60000,
+  "logKeep": 604800000,
+  "thin": [
+   [
+    86400000,
+    0
+   ],
+   [
+    604800000,
+    3600000
+   ],
+   [
+    2592000000,
+    86400000
+   ],
+   [
+    null,
+    604800000
+   ]
+  ],
+  "thinKinds": [
+   "auto",
+   "turn"
+  ],
+  "headTailRows": 1000,
+  "headTailBytes": 262144,
+  "keyframeRatio": 1
+ },
+ "initial": {
+  "chars": 487005,
+  "words": 101214,
+  "blocks": 6149
+ },
+ "counts": {
+  "keystrokes": 1310000,
+  "turns": 5240,
+  "batches": 0,
+  "comments": 524,
+  "named": 79,
+  "images": 81,
+  "restores": 13
+ },
+ "restores": [
+  {
+   "at": "2026-04-15 15:00",
+   "from": "2026-04-14 14:55",
+   "ms": 152.5,
+   "bytes": 142550
+  },
+  {
+   "at": "2026-04-29 15:00",
+   "from": "2026-04-28 14:55",
+   "ms": 234.8,
+   "bytes": 139233
+  },
+  {
+   "at": "2026-05-13 15:00",
+   "from": "2026-05-12 14:59",
+   "ms": 392.1,
+   "bytes": 138459
+  },
+  {
+   "at": "2026-05-27 15:00",
+   "from": "2026-05-25 14:48",
+   "ms": 280.7,
+   "bytes": 237222
+  },
+  {
+   "at": "2026-06-10 15:00",
+   "from": "2026-06-09 14:54",
+   "ms": 237.5,
+   "bytes": 141682
+  },
+  {
+   "at": "2026-06-24 15:13",
+   "from": "2026-06-23 15:11",
+   "ms": 277.2,
+   "bytes": 129384
+  },
+  {
+   "at": "2026-07-08 15:00",
+   "from": "2026-07-07 14:59",
+   "ms": 362.9,
+   "bytes": 136200
+  },
+  {
+   "at": "2026-07-22 15:00",
+   "from": "2026-07-21 14:57",
+   "ms": 297.5,
+   "bytes": 125142
+  },
+  {
+   "at": "2026-08-05 15:00",
+   "from": "2026-08-03 14:53",
+   "ms": 248.2,
+   "bytes": 240594
+  },
+  {
+   "at": "2026-08-19 15:00",
+   "from": "2026-08-18 14:59",
+   "ms": 342.8,
+   "bytes": 127123
+  },
+  {
+   "at": "2026-09-02 15:22",
+   "from": "2026-08-31 14:51",
+   "ms": 444.2,
+   "bytes": 277733
+  },
+  {
+   "at": "2026-09-16 15:30",
+   "from": "2026-09-14 14:57",
+   "ms": 681.8,
+   "bytes": 287695
+  },
+  {
+   "at": "2026-09-30 15:08",
+   "from": "2026-09-28 14:51",
+   "ms": 407.9,
+   "bytes": 234283
+  }
+ ],
+ "updates": 1321122,
+ "clients": 2309,
+ "counters": {
+  "versionMs": 109239.0114800008,
+  "versions": 10232,
+  "headWrites": 1018,
+  "headBytesWritten": 1355158354,
+  "versionBytesWritten": 47376366,
+  "landMs": 34897.41562198964,
+  "lands": 1321122,
+  "keyframes": 19
+ },
+ "simSeconds": 315,
+ "months": [
+  {
+   "month": 1,
+   "at": "2026-05-06 03:00",
+   "seq": 221858,
+   "live": {
+    "v2": 1095090,
+    "v1": 1323611,
+    "reencoded": 1095090,
+    "freshImport": 821702,
+    "structs": 65817,
+    "clients": 388
+   },
+   "text": {
+    "chars": 543104,
+    "words": 113937,
+    "blocks": 6611
+   },
+   "sizes": {
+    "tables": {
+     "log": {
+      "rows": 50429,
+      "bytes": 1715757
+     },
+     "versions": {
+      "rows": 152,
+      "bytes": 6968548
+     },
+     "head": {
+      "rows": 1,
+      "bytes": 1102322
+     },
+     "provenance": {
+      "rows": 10286,
+      "bytes": 885575
+     },
+     "assets": {
+      "rows": 41,
+      "bytes": 10718470
+     },
+     "ds": {
+      "rows": 3,
+      "bytes": 120000
+     }
+    },
+    "pages": {
+     "actors": 4096,
+     "assets": 4096,
+     "ds_states": 4096,
+     "head": 1105920,
+     "provenance": 1409024,
+     "provenance_to": 147456,
+     "sqlite_autoindex_actors_1": 4096,
+     "sqlite_autoindex_assets_1": 4096,
+     "sqlite_autoindex_ds_states_1": 4096,
+     "sqlite_schema": 4096,
+     "updates": 3031040,
+     "versions": 7139328
+    },
+    "kinds": {
+     "auto": 49,
+     "import": 1,
+     "named": 13,
+     "restore": 2,
+     "turn": 87
+    },
+    "encs": {
+     "delta": {
+      "n": 148,
+      "bytes": 3249090
+     },
+     "full": {
+      "n": 4,
+      "bytes": 3719458
+     }
+    },
+    "tiers": {
+     "hour": {
+      "n": 210,
+      "bytes": 414938
+     },
+     "update": {
+      "n": 10076,
+      "bytes": 470637
+     }
+    },
+    "file": 12877824,
+    "wal": 0,
+    "freelistPages": 0
+   },
+   "load": {
+    "ms": 69.1,
+    "tailRows": 477
+   },
+   "preview": {
+    "versionAt": "2026-04-06 08:00",
+    "kind": "import",
+    "enc": "full",
+    "chain": 0,
+    "provenanceRows": 10285,
+    "changes": 752,
+    "ms": {
+     "state": 0.3,
+     "encodeLive": 24.2,
+     "attributions": 219.2,
+     "openDiff": 145.2,
+     "render": 398.9,
+     "changeList": 23.3,
+     "total": 811.1
+    }
+   },
+   "restore": {
+    "ms": 169,
+    "bytes": 756524
+   },
+   "versionCheck": "8/8",
+   "versions": {
+    "count": 152,
+    "byKind": {
+     "auto": 49,
+     "import": 1,
+     "named": 13,
+     "restore": 2,
+     "turn": 87
+    }
+   },
+   "showEditors": {
+    "summary": "8/8",
+    "mergeAllMs": 324.9,
+    "truthScanMs": 1242,
+    "rows": [
+     {
+      "block": "a4h",
+      "group": "month-1",
+      "ok": true,
+      "ms": 18,
+      "stored": [
+       "human:restore@2026-04-29 15:00[attrs:level,ins]"
+      ],
+      "truth": [
+       "human:restore@2026-04-29T15:00:00"
+      ]
+     },
+     {
+      "block": "q13u",
+      "group": "month-1",
+      "ok": true,
+      "ms": 13.3,
+      "stored": [
+       "session:d29-5@2026-05-05 18:55[ins]"
+      ],
+      "truth": [
+       "session:d29-5@2026-05-05T18:55:26"
+      ]
+     },
+     {
+      "block": "myzimg",
+      "group": "never edited",
+      "ok": true,
+      "ms": 12.8,
+      "stored": [
+       "human@2026-05-01 11:00[ins]"
+      ],
+      "truth": [
+       "human@2026-05-01T11:00:00"
+      ]
+     },
+     {
+      "block": "s171p5",
+      "group": "never edited",
+      "ok": true,
+      "ms": 12,
+      "stored": [
+       "import@2026-04-06 08:00[ins]"
+      ],
+      "truth": [
+       "import@2026-04-06T08:00:00"
+      ]
+     },
+     {
+      "block": "s176p1",
+      "group": "month-1",
+      "ok": true,
+      "ms": 12.9,
+      "stored": [
+       "session:d17-7@2026-04-23 10:47[ins]",
+       "human@2026-05-04 09:38[del,ins]"
+      ],
+      "truth": [
+       "session:d17-7@2026-04-23T10:47:42",
+       "human@2026-05-04T09:38:40"
+      ]
+     },
+     {
+      "block": "s278p1",
+      "group": "month-1",
+      "ok": true,
+      "ms": 13.2,
+      "stored": [
+       "session:d15-3@2026-04-21 12:08[ins]"
+      ],
+      "truth": [
+       "session:d15-3@2026-04-21T12:08:01"
+      ]
+     },
+     {
+      "block": "s278p5",
+      "group": "month-1",
+      "ok": true,
+      "ms": 12.1,
+      "stored": [
+       "session:d3-0@2026-04-09 11:51[ins]"
+      ],
+      "truth": [
+       "session:d3-0@2026-04-09T11:51:17"
+      ]
+     },
+     {
+      "block": "s286p1",
+      "group": "month-1",
+      "ok": true,
+      "ms": 13.1,
+      "stored": [
+       "session:d25-6@2026-05-01 10:45[ins]"
+      ],
+      "truth": [
+       "session:d25-6@2026-05-01T10:45:46"
+      ]
+     }
+    ]
+   },
+   "measureMs": 5749
+  },
+  {
+   "month": 2,
+   "at": "2026-06-06 03:00",
+   "seq": 453828,
+   "live": {
+    "v2": 1396614,
+    "v1": 1681098,
+    "reencoded": 1396614,
+    "freshImport": 977388,
+    "structs": 91072,
+    "clients": 794
+   },
+   "text": {
+    "chars": 657076,
+    "words": 137676,
+    "blocks": 7540
+   },
+   "sizes": {
+    "tables": {
+     "log": {
+      "rows": 50427,
+      "bytes": 1556925
+     },
+     "versions": {
+      "rows": 178,
+      "bytes": 14877168
+     },
+     "head": {
+      "rows": 1,
+      "bytes": 1398661
+     },
+     "provenance": {
+      "rows": 10314,
+      "bytes": 1334301
+     },
+     "assets": {
+      "rows": 51,
+      "bytes": 13963967
+     },
+     "ds": {
+      "rows": 5,
+      "bytes": 200000
+     }
+    },
+    "pages": {
+     "actors": 12288,
+     "assets": 4096,
+     "ds_states": 4096,
+     "head": 1400832,
+     "provenance": 1880064,
+     "provenance_to": 143360,
+     "sqlite_autoindex_actors_1": 12288,
+     "sqlite_autoindex_assets_1": 4096,
+     "sqlite_autoindex_ds_states_1": 4096,
+     "sqlite_schema": 4096,
+     "updates": 2875392,
+     "versions": 15085568
+    },
+    "kinds": {
+     "auto": 54,
+     "import": 1,
+     "named": 27,
+     "restore": 4,
+     "turn": 92
+    },
+    "encs": {
+     "delta": {
+      "n": 170,
+      "bytes": 5990769
+     },
+     "full": {
+      "n": 8,
+      "bytes": 8886399
+     }
+    },
+    "tiers": {
+     "day": {
+      "n": 23,
+      "bytes": 418495
+     },
+     "hour": {
+      "n": 211,
+      "bytes": 443876
+     },
+     "update": {
+      "n": 10080,
+      "bytes": 471930
+     }
+    },
+    "file": 21458944,
+    "wal": 0,
+    "freelistPages": 0
+   },
+   "load": {
+    "ms": 89.3,
+    "tailRows": 233
+   },
+   "preview": {
+    "versionAt": "2026-04-06 08:00",
+    "kind": "import",
+    "enc": "full",
+    "chain": 0,
+    "provenanceRows": 10314,
+    "changes": 272,
+    "ms": {
+     "state": 0.3,
+     "encodeLive": 37.6,
+     "attributions": 389.7,
+     "openDiff": 215.7,
+     "render": 312.2,
+     "changeList": 27,
+     "total": 982.5
+    }
+   },
+   "restore": {
+    "ms": 352.1,
+    "bytes": 818572
+   },
+   "versionCheck": "7/7",
+   "versions": {
+    "count": 178,
+    "byKind": {
+     "auto": 54,
+     "import": 1,
+     "named": 27,
+     "restore": 4,
+     "turn": 92
+    }
+   },
+   "measureMs": 5137
+  },
+  {
+   "month": 3,
+   "at": "2026-07-06 03:00",
+   "seq": 655569,
+   "live": {
+    "v2": 1426478,
+    "v1": 1691609,
+    "reencoded": 1426478,
+    "freshImport": 949597,
+    "structs": 99187,
+    "clients": 1150
+   },
+   "text": {
+    "chars": 632124,
+    "words": 132422,
+    "blocks": 7328
+   },
+   "sizes": {
+    "tables": {
+     "log": {
+      "rows": 50428,
+      "bytes": 1627314
+     },
+     "versions": {
+      "rows": 122,
+      "bytes": 20441733
+     },
+     "head": {
+      "rows": 1,
+      "bytes": 1431009
+     },
+     "provenance": {
+      "rows": 246,
+      "bytes": 1288835
+     },
+     "assets": {
+      "rows": 61,
+      "bytes": 16896919
+     },
+     "ds": {
+      "rows": 7,
+      "bytes": 280000
+     }
+    },
+    "pages": {
+     "actors": 16384,
+     "assets": 4096,
+     "ds_states": 4096,
+     "head": 1433600,
+     "provenance": 1490944,
+     "provenance_to": 4096,
+     "sqlite_autoindex_actors_1": 16384,
+     "sqlite_autoindex_assets_1": 4096,
+     "sqlite_autoindex_ds_states_1": 4096,
+     "sqlite_schema": 4096,
+     "updates": 2928640,
+     "versions": 20602880
+    },
+    "kinds": {
+     "auto": 16,
+     "import": 1,
+     "named": 39,
+     "restore": 6,
+     "turn": 60
+    },
+    "encs": {
+     "delta": {
+      "n": 112,
+      "bytes": 8672575
+     },
+     "full": {
+      "n": 10,
+      "bytes": 11769158
+     }
+    },
+    "tiers": {
+     "day": {
+      "n": 45,
+      "bytes": 845671
+     },
+     "hour": {
+      "n": 201,
+      "bytes": 443164
+     }
+    },
+    "file": 26546176,
+    "wal": 0,
+    "freelistPages": 0
+   },
+   "load": {
+    "ms": 92.5,
+    "tailRows": 357
+   },
+   "preview": {
+    "versionAt": "2026-04-06 17:30",
+    "kind": "named",
+    "enc": "delta",
+    "chain": 1,
+    "provenanceRows": 246,
+    "changes": 117,
+    "ms": {
+     "state": 14.4,
+     "encodeLive": 35.3,
+     "attributions": 154.5,
+     "openDiff": 324.9,
+     "render": 326.1,
+     "changeList": 20,
+     "total": 875.2
+    }
+   },
+   "restore": {
+    "ms": 221.8,
+    "bytes": 829206
+   },
+   "versionCheck": "8/8",
+   "versions": {
+    "count": 122,
+    "byKind": {
+     "auto": 16,
+     "import": 1,
+     "named": 39,
+     "restore": 6,
+     "turn": 60
+    }
+   },
+   "showEditors": {
+    "summary": "9/9",
+    "mergeAllMs": 294.6,
+    "truthScanMs": 3917,
+    "rows": [
+     {
+      "block": "m2jgimg",
+      "group": "never edited",
+      "ok": true,
+      "ms": 22.1,
+      "stored": [
+       "human@2026-06-15 11:00[ins]"
+      ],
+      "truth": [
+       "human@2026-06-15T11:00:00"
+      ]
+     },
+     {
+      "block": "q3a1",
+      "group": "last week",
+      "ok": true,
+      "ms": 17.4,
+      "stored": [
+       "session:d88-4@2026-07-03 18:57[ins]"
+      ],
+      "truth": [
+       "session:d88-4@2026-07-03T18:57:53"
+      ]
+     },
+     {
+      "block": "m38kimg",
+      "group": "never edited",
+      "ok": true,
+      "ms": 18.8,
+      "stored": [
+       "human@2026-07-03 11:00[ins]"
+      ],
+      "truth": [
+       "human@2026-07-03T11:00:00"
+      ]
+     },
+     {
+      "block": "a8gh",
+      "group": "month-1",
+      "ok": true,
+      "ms": 17.7,
+      "stored": [
+       "session:d4-0@2026-04-10 13:29[attrs:level,ins]"
+      ],
+      "truth": [
+       "session:d4-0@2026-04-10T13:29:36"
+      ]
+     },
+     {
+      "block": "a8gp1",
+      "group": "agent 2-8 weeks",
+      "ok": true,
+      "ms": 16.9,
+      "stored": [
+       "session:d52-0@2026-05-28 16:18[ins]"
+      ],
+      "truth": [
+       "session:d52-0@2026-05-28T16:18:07"
+      ]
+     },
+     {
+      "block": "a3a0p5",
+      "group": "last week",
+      "ok": true,
+      "ms": 19.1,
+      "stored": [
+       "session:d88-1@2026-07-03 18:34[ins]"
+      ],
+      "truth": [
+       "session:d88-1@2026-07-03T18:34:31"
+      ]
+     },
+     {
+      "block": "a2kh",
+      "group": "month-1",
+      "ok": true,
+      "ms": 17.1,
+      "stored": [
+       "session:d1-5@2026-04-07 11:49[attrs:level,ins]"
+      ],
+      "truth": [
+       "session:d1-5@2026-04-07T11:49:36"
+      ]
+     },
+     {
+      "block": "s262p4",
+      "group": "agent 2-8 weeks",
+      "ok": true,
+      "ms": 16.8,
+      "stored": [
+       "session:d60-1@2026-06-05 12:16[ins]"
+      ],
+      "truth": [
+       "session:d60-1@2026-06-05T12:16:19"
+      ]
+     },
+     {
+      "block": "s290p3",
+      "group": "agent 2-8 weeks",
+      "ok": true,
+      "ms": 17,
+      "stored": [
+       "session:d73-3@2026-06-18 12:52[del,ins]",
+       "session:d73-5@2026-06-18 10:58[ins]"
+      ],
+      "truth": [
+       "session:d73-3@2026-06-18T12:52:28",
+       "session:d73-5@2026-06-18T10:58:38"
+      ]
+     }
+    ]
+   },
+   "measureMs": 9224
+  },
+  {
+   "month": 4,
+   "at": "2026-08-06 03:00",
+   "seq": 887497,
+   "live": {
+    "v2": 1456402,
+    "v1": 1738210,
+    "reencoded": 1456402,
+    "freshImport": 895691,
+    "structs": 109343,
+    "clients": 1558
+   },
+   "text": {
+    "chars": 587203,
+    "words": 123178,
+    "blocks": 6962
+   },
+   "sizes": {
+    "tables": {
+     "log": {
+      "rows": 50425,
+      "bytes": 1869686
+     },
+     "versions": {
+      "rows": 205,
+      "bytes": 28164665
+     },
+     "head": {
+      "rows": 1,
+      "bytes": 1452505
+     },
+     "provenance": {
+      "rows": 10366,
+      "bytes": 2205877
+     },
+     "assets": {
+      "rows": 79,
+      "bytes": 21683225
+     },
+     "ds": {
+      "rows": 9,
+      "bytes": 360000
+     }
+    },
+    "pages": {
+     "actors": 20480,
+     "assets": 4096,
+     "ds_states": 4096,
+     "head": 1454080,
+     "provenance": 2785280,
+     "provenance_to": 147456,
+     "sqlite_autoindex_actors_1": 24576,
+     "sqlite_autoindex_assets_1": 4096,
+     "sqlite_autoindex_ds_states_1": 4096,
+     "sqlite_schema": 4096,
+     "updates": 3182592,
+     "versions": 28422144
+    },
+    "kinds": {
+     "auto": 41,
+     "import": 1,
+     "named": 53,
+     "restore": 9,
+     "turn": 101
+    },
+    "encs": {
+     "delta": {
+      "n": 192,
+      "bytes": 12162212
+     },
+     "full": {
+      "n": 13,
+      "bytes": 16002453
+     }
+    },
+    "tiers": {
+     "day": {
+      "n": 66,
+      "bytes": 1272789
+     },
+     "hour": {
+      "n": 211,
+      "bytes": 456397
+     },
+     "update": {
+      "n": 10089,
+      "bytes": 476691
+     }
+    },
+    "file": 36102144,
+    "wal": 0,
+    "freelistPages": 0
+   },
+   "load": {
+    "ms": 106.2,
+    "tailRows": 170
+   },
+   "preview": {
+    "versionAt": "2026-05-06 17:32",
+    "kind": "named",
+    "enc": "full",
+    "chain": 0,
+    "provenanceRows": 10344,
+    "changes": 117,
+    "ms": {
+     "state": 0.4,
+     "encodeLive": 47.7,
+     "attributions": 504.5,
+     "openDiff": 467.5,
+     "render": 671.3,
+     "changeList": 19,
+     "total": 1710.4
+    }
+   },
+   "restore": {
+    "ms": 304.3,
+    "bytes": 923680
+   },
+   "versionCheck": "6/6",
+   "versions": {
+    "count": 205,
+    "byKind": {
+     "auto": 41,
+     "import": 1,
+     "named": 53,
+     "restore": 9,
+     "turn": 101
+    }
+   },
+   "measureMs": 4966
+  },
+  {
+   "month": 5,
+   "at": "2026-09-05 03:00",
+   "seq": 1109361,
+   "live": {
+    "v2": 1406092,
+    "v1": 1654773,
+    "reencoded": 1406092,
+    "freshImport": 799982,
+    "structs": 109591,
+    "clients": 1945
+   },
+   "text": {
+    "chars": 523347,
+    "words": 109741,
+    "blocks": 6014
+   },
+   "sizes": {
+    "tables": {
+     "log": {
+      "rows": 50437,
+      "bytes": 1962604
+     },
+     "versions": {
+      "rows": 229,
+      "bytes": 35457516
+     },
+     "head": {
+      "rows": 1,
+      "bytes": 1412416
+     },
+     "provenance": {
+      "rows": 10387,
+      "bytes": 2645803
+     },
+     "assets": {
+      "rows": 89,
+      "bytes": 24200366
+     },
+     "ds": {
+      "rows": 11,
+      "bytes": 440000
+     }
+    },
+    "pages": {
+     "actors": 24576,
+     "assets": 4096,
+     "ds_states": 4096,
+     "head": 1417216,
+     "provenance": 3248128,
+     "provenance_to": 151552,
+     "sqlite_autoindex_actors_1": 32768,
+     "sqlite_autoindex_assets_1": 4096,
+     "sqlite_autoindex_ds_states_1": 4096,
+     "sqlite_schema": 4096,
+     "updates": 3293184,
+     "versions": 35733504
+    },
+    "kinds": {
+     "auto": 50,
+     "import": 1,
+     "named": 66,
+     "restore": 11,
+     "turn": 101
+    },
+    "encs": {
+     "delta": {
+      "n": 213,
+      "bytes": 15151389
+     },
+     "full": {
+      "n": 16,
+      "bytes": 20306127
+     }
+    },
+    "tiers": {
+     "day": {
+      "n": 88,
+      "bytes": 1715236
+     },
+     "hour": {
+      "n": 210,
+      "bytes": 459784
+     },
+     "update": {
+      "n": 10089,
+      "bytes": 470783
+     }
+    },
+    "file": 43978752,
+    "wal": 0,
+    "freelistPages": 0
+   },
+   "load": {
+    "ms": 111.3,
+    "tailRows": 19
+   },
+   "preview": {
+    "versionAt": "2026-06-05 18:57",
+    "kind": "turn",
+    "enc": "delta",
+    "chain": 1,
+    "provenanceRows": 10342,
+    "changes": 47,
+    "ms": {
+     "state": 46.9,
+     "encodeLive": 42.4,
+     "attributions": 575.1,
+     "openDiff": 392.1,
+     "render": 475.3,
+     "changeList": 18.1,
+     "total": 1549.9
+    }
+   },
+   "restore": {
+    "ms": 1198.1,
+    "bytes": 1061454
+   },
+   "versionCheck": "7/7",
+   "versions": {
+    "count": 229,
+    "byKind": {
+     "auto": 50,
+     "import": 1,
+     "named": 66,
+     "restore": 11,
+     "turn": 101
+    }
+   },
+   "measureMs": 7357
+  },
+  {
+   "month": 6,
+   "at": "2026-10-06 03:00",
+   "seq": 1321122,
+   "live": {
+    "v2": 1488474,
+    "v1": 1739641,
+    "reencoded": 1488474,
+    "freshImport": 817568,
+    "structs": 119685,
+    "clients": 2309
+   },
+   "text": {
+    "chars": 533740,
+    "words": 112118,
+    "blocks": 6047
+   },
+   "sizes": {
+    "tables": {
+     "log": {
+      "rows": 50410,
+      "bytes": 1919798
+     },
+     "versions": {
+      "rows": 246,
+      "bytes": 42858751
+     },
+     "head": {
+      "rows": 1,
+      "bytes": 1483421
+     },
+     "provenance": {
+      "rows": 10389,
+      "bytes": 3056796
+     },
+     "assets": {
+      "rows": 96,
+      "bytes": 26610353
+     },
+     "ds": {
+      "rows": 14,
+      "bytes": 560000
+     }
+    },
+    "pages": {
+     "actors": 28672,
+     "assets": 4096,
+     "ds_states": 4096,
+     "head": 1486848,
+     "provenance": 3624960,
+     "provenance_to": 147456,
+     "sqlite_autoindex_actors_1": 36864,
+     "sqlite_autoindex_assets_1": 4096,
+     "sqlite_autoindex_ds_states_1": 4096,
+     "sqlite_schema": 4096,
+     "updates": 3227648,
+     "versions": 43134976
+    },
+    "kinds": {
+     "auto": 47,
+     "import": 1,
+     "named": 79,
+     "restore": 13,
+     "turn": 106
+    },
+    "encs": {
+     "delta": {
+      "n": 227,
+      "bytes": 18185222
+     },
+     "full": {
+      "n": 19,
+      "bytes": 24673529
+     }
+    },
+    "tiers": {
+     "day": {
+      "n": 110,
+      "bytes": 2154647
+     },
+     "hour": {
+      "n": 202,
+      "bytes": 432670
+     },
+     "update": {
+      "n": 10077,
+      "bytes": 469479
+     }
+    },
+    "file": 51773440,
+    "wal": 0,
+    "freelistPages": 0
+   },
+   "load": {
+    "ms": 154.7,
+    "tailRows": 466
+   },
+   "preview": {
+    "versionAt": "2026-07-06 17:06",
+    "kind": "named",
+    "enc": "delta",
+    "chain": 4,
+    "provenanceRows": 10324,
+    "changes": 65,
+    "ms": {
+     "state": 82.5,
+     "encodeLive": 120.9,
+     "attributions": 646,
+     "openDiff": 462.6,
+     "render": 330.5,
+     "changeList": 14.2,
+     "total": 1656.7
+    }
+   },
+   "restore": {
+    "ms": 651.6,
+    "bytes": 1035065,
+    "equalsVersion": true
+   },
+   "versionCheck": "7/7",
+   "versions": {
+    "count": 246,
+    "byKind": {
+     "auto": 47,
+     "import": 1,
+     "named": 79,
+     "restore": 13,
+     "turn": 106
+    }
+   },
+   "showEditors": {
+    "summary": "8/8",
+    "mergeAllMs": 1055.8,
+    "truthScanMs": 8517,
+    "rows": [
+     {
+      "block": "q6ig",
+      "group": "last week",
+      "ok": true,
+      "ms": 17.9,
+      "stored": [
+       "session:d182-7@2026-10-05 18:23[ins]"
+      ],
+      "truth": [
+       "session:d182-7@2026-10-05T18:23:53"
+      ]
+     },
+     {
+      "block": "a1iyp1",
+      "group": "agent 2-8 weeks",
+      "ok": true,
+      "ms": 16.4,
+      "stored": [
+       "human:restore@2026-09-16 15:30[ins]"
+      ],
+      "truth": [
+       "human:restore@2026-09-16T15:30:48"
+      ]
+     },
+     {
+      "block": "m6dmimg",
+      "group": "never edited",
+      "ok": true,
+      "ms": 15.4,
+      "stored": [
+       "human@2026-10-01 11:00[ins]"
+      ],
+      "truth": [
+       "human@2026-10-01T11:00:00"
+      ]
+     },
+     {
+      "block": "a6iep5",
+      "group": "last week",
+      "ok": true,
+      "ms": 16.9,
+      "stored": [
+       "session:d182-7@2026-10-05 18:14[fmt,ins]"
+      ],
+      "truth": [
+       "session:d182-7@2026-10-05T18:14:12"
+      ]
+     },
+     {
+      "block": "q6if",
+      "group": "last week",
+      "ok": true,
+      "ms": 17,
+      "stored": [
+       "session:d182-7@2026-10-05 18:23[ins]"
+      ],
+      "truth": [
+       "session:d182-7@2026-10-05T18:23:53"
+      ]
+     },
+     {
+      "block": "a3o4p1",
+      "group": "agent 2-8 weeks",
+      "ok": true,
+      "ms": 14,
+      "stored": [
+       "human:restore@2026-09-16 15:30[ins]"
+      ],
+      "truth": [
+       "human:restore@2026-09-16T15:30:48"
+      ]
+     },
+     {
+      "block": "a3o4p5",
+      "group": "agent 2-8 weeks",
+      "ok": true,
+      "ms": 15.1,
+      "stored": [
+       "human:restore@2026-09-16 15:30[ins]"
+      ],
+      "truth": [
+       "human:restore@2026-09-16T15:30:48"
+      ]
+     },
+     {
+      "block": "m61bimg",
+      "group": "never edited",
+      "ok": true,
+      "ms": 15.5,
+      "stored": [
+       "human@2026-09-22 11:00[ins]"
+      ],
+      "truth": [
+       "human@2026-09-22T11:00:00"
+      ]
+     }
+    ]
+   },
+   "measureMs": 16826
+  }
+ ],
+ "maintenance": {
+  "runs": 183,
+  "medianMs": 141.9,
+  "maxMs": 625.2,
+  "stepMaxMs": {
+   "thin": 484.9,
+   "compactLog": 15.1,
+   "bucketProvenance": 305.2,
+   "gcRefs": 11.7,
+   "checkpoint": 200.1
+  },
+  "worst": {
+   "day": 159,
+   "ms": 625.2,
+   "steps": {
+    "thin": {
+     "ms": 369.9,
+     "dropped": 80,
+     "rebased": 13
+    },
+    "compactLog": {
+     "ms": 5.2,
+     "deleted": 10089
+    },
+    "bucketProvenance": {
+     "ms": 191.9,
+     "merged": 10088,
+     "written": 11
+    },
+    "gcRefs": {
+     "ms": 1.4,
+     "dropped": 0
+    },
+    "checkpoint": {
+     "ms": 56.8
+    }
+   }
+  }
+ },
+ "loadavgEnd": [
+  15.1748046875,
+  13.82177734375,
+  14.6630859375
+ ]
+}

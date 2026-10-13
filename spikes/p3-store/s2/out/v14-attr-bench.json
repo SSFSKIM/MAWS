@@ -1,0 +1,20 @@
+{
+  "updates": 2040,
+  "perUpdate": {
+    "us": 15.3,
+    "avgBytes": 53
+  },
+  "merged": {
+    "ms": 24.7,
+    "bytes": 33078
+  },
+  "thinnedToMinute": {
+    "ms": 7.9,
+    "bytes": 479,
+    "sample": {
+      "actor": "human",
+      "at": 1791795600000
+    }
+  },
+  "v13RangeRowsEstimate": "about 58 B per keystroke row (s2/out/latency-fullfsync.json: 52,548 B for 906 rows)"
+}

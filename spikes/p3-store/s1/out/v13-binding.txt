@@ -1,0 +1,28 @@
+PASS bind: A renders host content — "Plan\nFirst paragraph here.\nSecond paragraph, split me here please.\nThird paragraph."
+PASS bind: ids rendered from Y — ["h1","p1","p2","p3"]
+PASS type: B sees A's keystrokes
+PASS type: host has it
+PASS split: two paragraphs on B — "Plan\nFirst paragraph typed here.\nSecond paragraph, \nsplit me here please.\nThird paragraph."
+PASS split: original id kept on first half, new id on second, no duplicates — ["h1","p1","p2","u1eruv","p3"]
+PASS split: host ids equal editor ids — ["h1","p1","p2","u1eruv","p3"]
+PASS paste: event handled by ProseMirror
+PASS paste: pasted text synced — "Plan\nFirst paragraph typed here.\nSecond paragraph, \nsplit me here please.\nThird paragraph.\nPasted copy of p1\nSecond pasted"
+PASS paste: pasted blocks get fresh ids (no duplicate p1, "zz" stripped) — ["h1","p1","p2","u1eruv","p3","u2ng9a","u3imsg"]
+PASS undo setup: both edits on both
+PASS undo: A's undo removes only A's edit — "Plan by B\nFirst paragraph typed here.\nSecond paragraph, \nsplit me here please.\nThird paragraph.\nPasted copy of p1\nSecond pasted"
+PASS redo: A's redo restores it
+PASS undo all of A: B's edit survives, A's typing/split/paste gone — "Plan by B\nFirst paragraph here.\nSecond paragraph, split me here please.\nThird paragraph." (A stack was 2)
+PASS undo all of A: ids back to the originals — ["h1","p1","p2","p3"]
+PASS cursor: A publishes a cursor when focused
+PASS cursor: B renders A's caret widget with A's name — 1 widget(s): Owner
+PASS cursor: B renders A's selection highlight — 1 span(s): First
+PASS cursor: A renders the agent replica's caret (relative position from a Node replica) — Claude (session 1)
+PASS awareness: the agent's "blocks it is editing" field reaches A
+PASS UniqueID (stock): no editor writes ids for a remote block (it skips y-sync$ transactions) — ["agent:session-1"]
+PASS host repair: the missing id filled once, both editors show it — fixed=1 ["h1","p1","p2","u1eruv","p3","u2ng9a","u3imsg","r1"]
+PASS concurrent split: replicas converge — "Plan by B\nFirst paragraph \ntyped here.\nhere.\nSecond paragraph, \nsplit me here please.\n\nA-was-here Third paragraph.\nA-was-here Third paragraph.\nPasted copy of p1\nSecond pasted\nAgent block without id"
+  ids after concurrent offline split (host): ["h1","p1","u6mjka","u7d5nq","p2","u1eruv","u5ia3b","p3","p3","u2ng9a","u3imsg","r1"] duplicates: ["p3"]
+PASS concurrent split: host repair leaves unique ids on every replica — fixed=1 ["h1","p1","u6mjka","u7d5nq","p2","u1eruv","u5ia3b","p3","r2","u2ng9a","u3imsg","r1"]
+PASS final: host, A, B identical
+
+25/25 checks passed; host log 18 updates by ["import","human","human-tab","agent:session-1","host-repair"]

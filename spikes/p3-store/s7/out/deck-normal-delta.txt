@@ -1,0 +1,8 @@
+# S7a deck-normal-delta started 2026-10-13T03:14:55.719Z load 11.5 12.7 15.5 node v22.23.2
+month 1: {"slides":97,"live":251070,"file":892928,"versions":64,"log":{"rows":1541,"bytes":79193},"prov":{"rows":420,"bytes":58711},"load":27.9,"preview":91.4,"restore":45.3,"vc":"8/8","se":"11/11"}
+month 2: {"slides":92,"live":249318,"file":1310720,"versions":77,"log":{"rows":1531,"bytes":85181},"prov":{"rows":462,"bytes":94682},"load":28,"preview":101,"restore":59.8,"vc":"7/7"}
+month 3: {"slides":79,"live":237692,"file":1355776,"versions":68,"log":{"rows":1587,"bytes":72148},"prov":{"rows":171,"bytes":99066},"load":33.4,"preview":111.7,"restore":63.8,"vc":"8/8","se":"11/11"}
+month 4: {"slides":80,"live":249323,"file":1564672,"versions":89,"log":{"rows":1514,"bytes":71799},"prov":{"rows":498,"bytes":158584},"load":36.9,"preview":160.3,"restore":97.5,"vc":"6/6"}
+month 5: {"slides":85,"live":273452,"file":2002944,"versions":107,"log":{"rows":1548,"bytes":74047},"prov":{"rows":544,"bytes":193885},"load":42.8,"preview":237.2,"restore":105.1,"vc":"7/7"}
+month 6: {"slides":91,"live":304054,"file":2203648,"versions":114,"log":{"rows":1611,"bytes":85575},"prov":{"rows":553,"bytes":225943},"load":40.9,"preview":188.1,"restore":103.2,"vc":"7/7","se":"11/11"}
+done in 43s; updates 40957; counts {"turns":1048,"sessions":131,"comments":71,"named":26,"restores":4}; maintenance {"median":9.1,"max":63.2,"steps":{"thin":54,"compactLog":1.8,"bucketProvenance":16.4,"gcRefs":0.6,"checkpoint":2.9}}

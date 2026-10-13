@@ -1,0 +1,8 @@
+# S7a doc-normal-full started 2026-10-13T03:05:25.716Z load 10.2 12.1 17.5 node v22.23.2
+month 1: {"live":1040979,"file":82890752,"versions":82,"log":{"rows":15090,"bytes":312507},"prov":{"rows":3196,"bytes":248882},"load":47.1,"preview":414.8,"restore":317.3,"se":"8/8"}
+month 2: {"live":1220756,"file":111169536,"versions":94,"log":{"rows":15100,"bytes":332199},"prov":{"rows":3227,"bytes":374381},"load":84.9,"preview":1060.4,"restore":337.4}
+month 3: {"live":1294214,"file":107597824,"versions":86,"log":{"rows":15093,"bytes":331385},"prov":{"rows":219,"bytes":356523},"load":86.7,"preview":899.2,"restore":468.1,"se":"11/11"}
+month 4: {"live":1428046,"file":151040000,"versions":112,"log":{"rows":15090,"bytes":320299},"prov":{"rows":3260,"bytes":624324},"load":93.8,"preview":865,"restore":451.7}
+month 5: {"live":1537486,"file":172347392,"versions":120,"log":{"rows":15096,"bytes":346252},"prov":{"rows":3282,"bytes":768384},"load":105.3,"preview":840,"restore":401.8}
+month 6: {"live":1544534,"file":186118144,"versions":129,"log":{"rows":15093,"bytes":338227},"prov":{"rows":3290,"bytes":900777},"load":109,"preview":889.5,"restore":365.2,"se":"9/9"}
+done in 174s; updates 395571; counts {"keystrokes":393000,"turns":1572,"batches":0,"comments":131,"named":26,"images":20,"restores":4}; maintenance {"median":147,"max":400.5,"steps":{"thin":18.8,"compactLog":8.3,"bucketProvenance":66,"gcRefs":1,"checkpoint":338.5}}

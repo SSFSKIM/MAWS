@@ -1,0 +1,113 @@
+{
+  "results": [
+    {
+      "name": "seed covers as S5's base",
+      "ok": true,
+      "detail": "{\"t1\":\"ships quarterly with design review\",\"t2\":\"design review notes\"}"
+    },
+    {
+      "name": "agent rewords t2 in place",
+      "ok": true,
+      "detail": "{\"t1\":\"ships quarterly with \",\"t2\":\"a short summary\"} orphaned []"
+    },
+    {
+      "name": "…without the whitespace merge (contrast) [merge off]",
+      "ok": true,
+      "detail": "{\"t1\":\"ships quarterly with a short\",\"t2\":\"a short summary\"} orphaned []"
+    },
+    {
+      "name": "agent deletes t2's words",
+      "ok": true,
+      "detail": "{\"t1\":\"ships quarterly\"} orphaned [\"t2\"]"
+    },
+    {
+      "name": "agent rewrites the whole sentence",
+      "ok": true,
+      "detail": "{} orphaned [\"t1\",\"t2\"]"
+    },
+    {
+      "name": "…without the whitespace merge (contrast) [merge off]",
+      "ok": true,
+      "detail": "{\"t1\":\" is monthly\",\"t2\":\"is monthly now\"} orphaned []"
+    }
+  ],
+  "cases": [
+    {
+      "name": "agent rewords t2 in place",
+      "merge": true,
+      "text": "The plan ships quarterly with a short summary. Owners track the budget.",
+      "got": {
+        "t1": "ships quarterly with ",
+        "t2": "a short summary"
+      },
+      "orphaned": [],
+      "want": {
+        "t1": "ships quarterly with ",
+        "t2": "a short summary"
+      },
+      "wantOrphans": []
+    },
+    {
+      "name": "…without the whitespace merge (contrast)",
+      "merge": false,
+      "text": "The plan ships quarterly with a short summary. Owners track the budget.",
+      "got": {
+        "t1": "ships quarterly with a short",
+        "t2": "a short summary"
+      },
+      "orphaned": [],
+      "want": {
+        "t1": "ships quarterly with a short",
+        "t2": "a short summary"
+      },
+      "wantOrphans": []
+    },
+    {
+      "name": "agent deletes t2's words",
+      "merge": true,
+      "text": "The plan ships quarterly. Owners track the budget.",
+      "got": {
+        "t1": "ships quarterly"
+      },
+      "orphaned": [
+        "t2"
+      ],
+      "want": {
+        "t1": "ships quarterly"
+      },
+      "wantOrphans": [
+        "t2"
+      ]
+    },
+    {
+      "name": "agent rewrites the whole sentence",
+      "merge": true,
+      "text": "Shipping is monthly now. Owners track the budget.",
+      "got": {},
+      "orphaned": [
+        "t1",
+        "t2"
+      ],
+      "want": {},
+      "wantOrphans": [
+        "t1",
+        "t2"
+      ]
+    },
+    {
+      "name": "…without the whitespace merge (contrast)",
+      "merge": false,
+      "text": "Shipping is monthly now. Owners track the budget.",
+      "got": {
+        "t1": " is monthly",
+        "t2": "is monthly now"
+      },
+      "orphaned": [],
+      "want": {
+        "t1": " is monthly",
+        "t2": "is monthly now"
+      },
+      "wantOrphans": []
+    }
+  ]
+}

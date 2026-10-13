@@ -1,0 +1,84 @@
+page v14, composition hold (provider holds, binding drives, 5 s cap): false, caret follows id: true
+PASS [replace_text earlier in the same paragraph] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true
+PASS [replace_text earlier in the same paragraph] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true
+PASS [replace_text earlier in the same paragraph] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true
+PASS [replace_text earlier in the same paragraph] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true
+PASS [replace_text earlier in the same paragraph] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true
+PASS [replace_text earlier in the same paragraph] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true
+PASS [replace_block of the next block] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true
+PASS [replace_block of the next block] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true
+PASS [replace_block of the next block] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true
+PASS [replace_block of the next block] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true
+PASS [replace_block of the next block] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true
+PASS [replace_block of the next block] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true
+PASS [insert before the block] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true
+PASS [insert before the block] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true
+PASS [insert before the block] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true
+PASS [insert before the block] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true
+PASS [insert before the block] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true
+PASS [insert before the block] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true
+FAIL [move of the block being composed in (live caret from awareness)] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하세요요 한글 입력"
+   ✗ one compositionend per commit, same data: 8/9 ["안","녕","하","세","한","글","입","력"]
+PASS [move of the block being composed in (live caret from awareness)] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true
+FAIL [move of the block being composed in (live caret from awareness)] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하세요 ㅎ한글 입력"
+PASS [move of the block being composed in (live caret from awareness)] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true
+FAIL [move of the block being composed in (live caret from awareness)] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하셍세요 한글 입력"
+   ✗ one compositionend per commit, same data: 8/9 ["안","녕","하","요","한","글","입","력"]
+FAIL [move of the block being composed in (live caret from awareness)] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하세요 한그글 입력"
+FAIL [move of the block being composed in (no awareness: p3 re-inserted)] fire=at-start pace=40ms settle=20ms live=[] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하세요요 한글 입력"
+   ✗ one compositionend per commit, same data: 8/9 ["안","녕","하","세","한","글","입","력"]
+PASS [move of the block being composed in (no awareness: p3 re-inserted)] fire=at-start pace=0ms settle=0ms live=[] composingAtOp=true
+FAIL [move of the block being composed in (no awareness: p3 re-inserted)] fire=mid pace=40ms settle=20ms live=[] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하세요 ㅎ한글 입력"
+PASS [move of the block being composed in (no awareness: p3 re-inserted)] fire=mid pace=0ms settle=0ms live=[] composingAtOp=true
+FAIL [move of the block being composed in (no awareness: p3 re-inserted)] fire=before-end pace=40ms settle=20ms live=[] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하셍세요 한글 입력"
+   ✗ one compositionend per commit, same data: 8/9 ["안","녕","하","요","한","글","입","력"]
+PASS [move of the block being composed in (no awareness: p3 re-inserted)] fire=before-end pace=0ms settle=0ms live=[] composingAtOp=true
+PASS [control: no agent op] fire=at-start pace=40ms settle=20ms live=undefined composingAtOp=undefined
+PASS [control: no agent op] fire=at-start pace=0ms settle=0ms live=undefined composingAtOp=undefined
+PASS [control: no agent op] fire=mid pace=40ms settle=20ms live=undefined composingAtOp=undefined
+PASS [control: no agent op] fire=mid pace=0ms settle=0ms live=undefined composingAtOp=undefined
+PASS [control: no agent op] fire=before-end pace=40ms settle=20ms live=undefined composingAtOp=undefined
+PASS [control: no agent op] fire=before-end pace=0ms settle=0ms live=undefined composingAtOp=undefined
+PASS [control: no agent op, Backspace inside a composition] fire=at-start pace=40ms settle=20ms live=undefined composingAtOp=undefined
+PASS [control: no agent op, Backspace inside a composition] fire=at-start pace=0ms settle=0ms live=undefined composingAtOp=undefined
+PASS [control: no agent op, Backspace inside a composition] fire=mid pace=40ms settle=20ms live=undefined composingAtOp=undefined
+PASS [control: no agent op, Backspace inside a composition] fire=mid pace=0ms settle=0ms live=undefined composingAtOp=undefined
+PASS [control: no agent op, Backspace inside a composition] fire=before-end pace=40ms settle=20ms live=undefined composingAtOp=undefined
+PASS [control: no agent op, Backspace inside a composition] fire=before-end pace=0ms settle=0ms live=undefined composingAtOp=undefined
+FAIL [replace_text just before the caret in the same paragraph] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words we keep. 안녕하세요요 한글 입력"
+   ✗ one compositionend per commit, same data: 8/9 ["안","녕","하","세","한","글","입","력"]
+FAIL [replace_text just before the caret in the same paragraph] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words we keep. 안녕하세요 한글 입려력"
+FAIL [replace_text just before the caret in the same paragraph] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words we keep. 안녕하세요 ㅎ한글 입력"
+FAIL [replace_text just before the caret in the same paragraph] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words we keep. 안녕하세요 한글 입려력"
+FAIL [replace_text just before the caret in the same paragraph] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words we keep. 안녕하셍세요 한글 입력"
+   ✗ one compositionend per commit, same data: 8/9 ["안","녕","하","요","한","글","입","력"]
+FAIL [replace_text just before the caret in the same paragraph] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words we keep. 안녕하셍세요 한글 입력"
+   ✗ one compositionend per commit, same data: 8/9 ["안","녕","하","요","한","글","입","력"]
+FAIL [replace_text in the same paragraph, Backspace inside a composition] fire=at-start pace=40ms settle=20ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words we keep. 안녕하세요요 한글 입력"
+   ✗ one compositionend per commit, same data: 8/9 ["안","녕","하","세","한","글","입","력"]
+FAIL [replace_text in the same paragraph, Backspace inside a composition] fire=at-start pace=0ms settle=0ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words we keep. 안녕하세요 한글 입려력"
+FAIL [replace_text in the same paragraph, Backspace inside a composition] fire=mid pace=40ms settle=20ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words we keep. 안녕하세요 ㅎ한글 입력"
+FAIL [replace_text in the same paragraph, Backspace inside a composition] fire=mid pace=0ms settle=0ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words we keep. 안녕하세요 ㅎ한글 입력"
+FAIL [replace_text in the same paragraph, Backspace inside a composition] fire=before-end pace=40ms settle=20ms live=["p3"] composingAtOp=true
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words we keep. 안녕하셍세요 한글 입력"
+   ✗ one compositionend per commit, same data: 8/9 ["안","녕","하","요","한","글","입","력"]
+PASS [replace_text in the same paragraph, Backspace inside a composition] fire=before-end pace=0ms settle=0ms live=["p3"] composingAtOp=true
+
+36/54 runs passed

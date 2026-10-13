@@ -1,0 +1,31 @@
+[concurrency] seam loaded: v13 yjs 13.6.33
+PASS  concurrent move (both set left/top): converged in 200/200
+PASS  concurrent move (both set left/top): outcome  {"A whole":117,"B whole":83}
+PASS  concurrent move, left and top in separate transactions: converged in 200/200
+PASS  concurrent move, left and top in separate transactions: outcome  {"A whole":100,"B whole":100}
+PASS  concurrent move + restyle of one element: converged in 200/200
+PASS  concurrent move + restyle of one element: outcome  {"both":200}
+PASS  concurrent z-order (A: e1 to front, B: e2 to front): converged in 200/200
+PASS  concurrent z-order (A: e1 to front, B: e2 to front): outcome  {"order bg,title,g1,g2,e2,e1|keys distinct true":200}
+PASS  concurrent z-order, same key minted (A: e1 to front, B: g1 to front): converged in 200/200
+PASS  concurrent z-order, same key minted (A: e1 to front, B: g1 to front): outcome  {"same key|order bg,title,g2,e2,e1,g1|repair writes 1+1, identical true|after repair same order|keys distinct true":200}
+PASS  send-to-back vs a concurrent new first flow child: converged in 200/200
+PASS  send-to-back vs a concurrent new first flow child: outcome  {"backdrop under the flow layer":200}
+PASS  concurrent re-order of the same slide (A: s3 first, B: s3 after s4): converged in 200/200
+PASS  concurrent re-order of the same slide (A: s3 first, B: s3 after s4): outcome  {"no duplicate s1,s2,s4,s3":102,"no duplicate s3,s1,s2,s4":98}
+PASS  two slides moved to the same gap (A: s3 after s1, B: s4 after s1): same key minted: converged in 200/200
+PASS  two slides moved to the same gap (A: s3 after s1, B: s4 after s1): same key minted: outcome  {"same key|s1,s3,s4,s2|repair 1|order kept|distinct after true":200}
+PASS  concurrent delete of an element vs an edit to it: converged in 200/200
+PASS  concurrent delete of an element vs an edit to it: outcome  {"deleted anchor orphaned":200}
+PASS  move into a group vs deletion of the element: converged in 200/200
+PASS  move into a group vs deletion of the element: outcome  {"deleted g1 intact":200}
+PASS  move into a group vs deletion of the group: converged in 200/200
+PASS  move into a group vs deletion of the group: outcome  {"stored parent g1|shown at section true|repair 1|after section":200}
+PASS  concurrent cycle (A: g1 into g2, B: g2 into g1): converged in 200/200
+PASS  concurrent cycle (A: g1 into g2, B: g2 into g1): outcome  {"both rendered true|g1 at section true|repair 1|g2 in g1 true":200}
+PASS  agent publish (text + colour) vs human move of the same element: converged in 200/200
+PASS  agent publish (text + colour) vs human move of the same element: outcome  {"merged":200}
+PASS  contrast: the same re-order as child delete+insert duplicates the slide (200/200)
+PASS  object anchor {slideId, elementId} resolves to the same element after move + z-order + slide re-order + regroup + republish  {"live":true,"tag":"p","parent":"g2"}
+
+28/28 checks passed

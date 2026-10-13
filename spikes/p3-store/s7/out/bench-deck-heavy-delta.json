@@ -1,0 +1,45 @@
+{
+ "tag": "deck-heavy-delta",
+ "loadavgStart": [
+  18.91015625,
+  15.17529296875,
+  15.11767578125
+ ],
+ "runs": 9,
+ "load": {
+  "ms": 40.8,
+  "p90": 102.3,
+  "tailRows": 91
+ },
+ "versions": 232,
+ "target": {
+  "at": "2026-07-06T17:18:23.230Z",
+  "kind": "named",
+  "enc": "delta"
+ },
+ "provenanceRowsInWindow": 1406,
+ "preview": {
+  "totalMs": 353.1,
+  "p90": 415.2,
+  "slidesInDelta": 149,
+  "steps": {
+   "state": 24.4,
+   "encodeLive": 7.5,
+   "attributions": 121.6
+  }
+ },
+ "showEditors": {
+  "mergeAllProvenanceMs": 230.2
+ },
+ "restore": {
+  "ms": 120.7,
+  "p90": 168.9,
+  "bytes": 206877
+ },
+ "versionList": 0.2,
+ "loadavgEnd": [
+  17.3056640625,
+  14.955078125,
+  15.0400390625
+ ]
+}

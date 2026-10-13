@@ -1,0 +1,16 @@
+1 overwrite [S3 revert]                                  {"left":"v0","top":"t0"}
+1 overwrite [fixed]                                      {"left":"v0","top":"t0"}
+2 overwrites, one client [S3 revert]                     {"top":"t0"}
+2 overwrites, one client [fixed]                         {"left":"v0","top":"t0"}
+20 overwrites, one client (a drag) [S3 revert]           {"top":"t0"}
+20 overwrites, one client (a drag) [fixed]               {"left":"v0","top":"t0"}
+20 overwrites, one client, gc off [S3 revert]            {"top":"t0"}
+20 overwrites, one client, gc off [fixed]                {"left":"v0","top":"t0"}
+5 overwrites, 3 clients [S3 revert]                      {"top":"t0"}
+5 overwrites, 3 clients [fixed]                          {"left":"v0","top":"t0"}
+3 overwrites then key deleted [S3 revert]                throws: Unexpected end of array
+3 overwrites then key deleted [fixed]                    {"left":"v0","top":"t0"}
+3 overwrites then node deleted [S3 revert]               {"left":"v0","top":"t0"}
+3 overwrites then node deleted [fixed]                   {"left":"v0","top":"t0"}
+after an earlier restore, 3 overwrites [S3 revert]       {"top":"t0"}
+after an earlier restore, 3 overwrites [fixed]           {"left":"v0","top":"t0"}

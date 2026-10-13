@@ -1,0 +1,116 @@
+{
+  "results": [
+    {
+      "name": "agent edit stays out of base",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "suggestions render with the suggester's identity",
+      "ok": true,
+      "detail": "4 marked runs"
+    },
+    {
+      "name": "deleted text shown struck (still on screen)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "owner typing in view mode goes to base, unattributed",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "accept hunk 1 command",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "reject hunk 2 command",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "accept hunk 3, text-only range: command returns true",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "accept hunk 3, text-only range: lands in base",
+      "ok": false,
+      "detail": "pending structs {\"hBase\":true,\"base\":false}"
+    },
+    {
+      "name": "accept hunk 3, block range: command returns true",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "accept hunk 3, block range: pending structs cleared",
+      "ok": true,
+      "detail": "{\"hBase\":false,\"base\":false}"
+    },
+    {
+      "name": "base: hunk 1 accepted",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "base: hunk 2 rejected",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "base: hunk 3 accepted with its id",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "no suggestions left on screen",
+      "ok": true,
+      "detail": "[]"
+    },
+    {
+      "name": "suggestion doc converged to base content",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "accepted content keeps the agent replica's clientID (provenance can credit the suggester)",
+      "ok": true,
+      "detail": "pA client 776707804151026 vs agent 776707804151026; base log credits [\"human\",\"human\"]"
+    },
+    {
+      "name": "a live second proposal renders while open, attributed",
+      "ok": true,
+      "detail": "[\"insert:agent:session-2:Note: \"]"
+    },
+    {
+      "name": "reject-all clears it and base never saw it",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "screen back to base after reject-all",
+      "ok": true,
+      "detail": "\"Draft\\n\\nThe owner types quickly here.\\n\\nAgent will rewrite a part of this paragraph.\\n\\nAgent proposed paragraph.\\n\\nClosing line.\""
+    }
+  ],
+  "base": "<heading id=\"h1\" level=2>Draft</heading><paragraph id=\"p1\">The owner types quickly here.</paragraph><paragraph id=\"p2\">Agent will rewrite a part of this paragraph.</paragraph><paragraph id=\"pA\">Agent proposed paragraph.</paragraph><paragraph id=\"p3\">Closing line.</paragraph>",
+  "suggLog": [
+    "host",
+    "agent:session-1",
+    "host",
+    "host",
+    "agent:session-1",
+    "host"
+  ],
+  "baseLog": [
+    "import",
+    "human",
+    "human",
+    "human",
+    "human",
+    "human"
+  ]
+}

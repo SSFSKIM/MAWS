@@ -1,0 +1,12 @@
+page v14, composition hold (provider holds, binding drives, 5 s cap): true, caret follows id: false
+FAIL [move of the block being composed in (no awareness: p3 re-inserted)] fire=at-start pace=40ms settle=20ms live=[] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=265 cap=0
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하세요"
+PASS [move of the block being composed in (no awareness: p3 re-inserted)] fire=at-start pace=0ms settle=0ms live=[] composingAtOp=true holds=1 flushes=1 framesHeld=1 maxHeldMs=59 cap=0
+FAIL [move of the block being composed in (no awareness: p3 re-inserted)] fire=mid pace=40ms settle=20ms live=[] composingAtOp=true holds=9 flushes=1 framesHeld=3 maxHeldMs=284 cap=0
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하세요 한"
+PASS [move of the block being composed in (no awareness: p3 re-inserted)] fire=mid pace=0ms settle=0ms live=[] composingAtOp=true holds=1 flushes=1 framesHeld=1 maxHeldMs=51 cap=0
+FAIL [move of the block being composed in (no awareness: p3 re-inserted)] fire=before-end pace=40ms settle=20ms live=[] composingAtOp=true holds=9 flushes=1 framesHeld=1 maxHeldMs=260 cap=0
+   ✗ composed Korean exactly as typed (p3 text): "A plain paragraph the human types into. Words to keep. 안녕하세"
+PASS [move of the block being composed in (no awareness: p3 re-inserted)] fire=before-end pace=0ms settle=0ms live=[] composingAtOp=true holds=1 flushes=1 framesHeld=5 maxHeldMs=65 cap=0
+
+3/6 runs passed

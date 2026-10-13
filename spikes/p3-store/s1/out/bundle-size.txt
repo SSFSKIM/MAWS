@@ -1,0 +1,3 @@
+esbuild 0.28.2 --bundle --minify --format=esm, Tiptap/ProseMirror external, 2026-10-12
+v13 (yjs 13.6.33 + @tiptap/y-tiptap 3.0.9 + y-protocols + Collaboration + CollaborationCaret): 132155 B min, 42031 B gzip -9
+v14 (@y/y 14.0.0-rc.28 + @y/prosemirror 2.0.0-15 + @y/protocols 1.0.6-rc.1 + s1/v14/collab.mjs): 206299 B min, 64571 B gzip -9

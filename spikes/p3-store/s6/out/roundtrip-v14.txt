@@ -1,0 +1,110 @@
+[roundtrip-v14] seam loaded: v14 @y/y 14.0.0-rc.28
+PASS  skill-plan: serialize(parse(x)) is a fixed point after one pass
+PASS  skill-plan: the DOM adapter (renderer path) gives the same canonical file as parse5
+PASS  skill-plan: IR → Y.Doc → IR → file equals the canonical file
+PASS  skill-plan: diagnostics are only warnings and notes (not held)  0
+PASS  layout-kpis: serialize(parse(x)) is a fixed point after one pass
+PASS  layout-kpis: the DOM adapter (renderer path) gives the same canonical file as parse5
+PASS  layout-kpis: IR → Y.Doc → IR → file equals the canonical file
+PASS  layout-kpis: diagnostics are only warnings and notes (not held)  1
+PASS  diagrams-connectors: serialize(parse(x)) is a fixed point after one pass
+PASS  diagrams-connectors: the DOM adapter (renderer path) gives the same canonical file as parse5
+PASS  diagrams-connectors: IR → Y.Doc → IR → file equals the canonical file
+PASS  diagrams-connectors: diagnostics are only warnings and notes (not held)  0
+PASS  recipes-label: serialize(parse(x)) is a fixed point after one pass
+PASS  recipes-label: the DOM adapter (renderer path) gives the same canonical file as parse5
+PASS  recipes-label: IR → Y.Doc → IR → file equals the canonical file
+PASS  recipes-label: diagnostics are only warnings and notes (not held)  0
+PASS  messy: serialize(parse(x)) is a fixed point after one pass
+PASS  messy: the DOM adapter (renderer path) gives the same canonical file as parse5
+PASS  messy: IR → Y.Doc → IR → file equals the canonical file
+PASS  messy: diagnostics are only warnings and notes (not held)  21
+PASS  skill-plan: "attribute order reversed" canonicalizes to the same file
+PASS  skill-plan: "declaration order reversed" canonicalizes to the same file
+PASS  skill-plan: "whitespace and case" canonicalizes to the same file
+PASS  skill-plan: "bare numbers for px" canonicalizes to the same file
+PASS  skill-plan: "rgb() for hex" canonicalizes to the same file
+PASS  skill-plan: "entities" canonicalizes to the same file
+PASS  layout-kpis: "attribute order reversed" canonicalizes to the same file
+PASS  layout-kpis: "declaration order reversed" canonicalizes to the same file
+PASS  layout-kpis: "whitespace and case" canonicalizes to the same file
+PASS  layout-kpis: "bare numbers for px" canonicalizes to the same file
+PASS  layout-kpis: "rgb() for hex" canonicalizes to the same file
+PASS  layout-kpis: "entities" canonicalizes to the same file
+PASS  recipes-label: "attribute order reversed" canonicalizes to the same file
+PASS  recipes-label: "declaration order reversed" canonicalizes to the same file
+PASS  recipes-label: "whitespace and case" canonicalizes to the same file
+PASS  recipes-label: "bare numbers for px" canonicalizes to the same file
+PASS  recipes-label: "rgb() for hex" canonicalizes to the same file
+PASS  recipes-label: "entities" canonicalizes to the same file
+
+messy canonical form:
+<section id="messy" data-transition="fade" hidden style="display:flex; flex-direction:column; padding:128px; background:#ffffff">
+  <p id="e1-uvr8" style="position:absolute; left:64px; top:40px; font-size:48px; color:#ff0000">Behind &amp; under</p>
+  <h1 id="e2-uvr8" style="font-family:Inter, Arial, sans-serif; font-size:96px; font-weight:700; font-style:italic; line-height:1.1; letter-spacing:-0.02em; color:#0f2a3d">Hello <b>bold</b> and <i>it</i><span style="color:hsl(210, 50%, 40%)">blue</span> insecure <a href="https://example.com/a?b=1&amp;c=2"><b>link</b></a>&#160;x &lt; y</h1>
+  <div id="e3-uvr8" style="display:grid; gap:8px; grid-template-columns:repeat(2, 1fr); border:2px solid black; border-top:none; border-radius:8px 0px 0px">
+    <p id="e4-uvr8" style="font-weight:700; box-shadow:0px 4px 24px rgba(0, 0, 0, 0.06); opacity:0.5">a<br>b<br>c</p>
+    <ul id="e5-uvr8" style="font-size:28px">
+      <li>one</li>
+      <li><b>two</b> <i>three</i></li>
+    </ul>
+  </div>
+  <img id="e6-uvr8" alt="chart &quot;q3&quot;" style="width:480px; height:360px; transform:translate(10px, -50%) rotate(5deg) scale(1); object-fit:cover">
+  <p id="e8-uvr8" style="gap:var(--ds-space-2); padding:var(--ds-space-4) 8px; font-family:var(--ds-font-body)">Tokens</p>
+  <table id="e9-uvr8" style="font-size:24px">
+    <tr id="e10-uvr8" style="background:#eeeeee">
+      <th id="e11-uvr8" style="width:30%">A</th>
+      <th id="e12-uvr8">B</th>
+    </tr>
+    <tr id="e13-uvr8">
+      <td id="e14-uvr8">1</td>
+      <td id="e15-uvr8">2</td>
+    </tr>
+  </table>
+  <x-icon id="e7-uvr8" name="Lightbulb" style="position:absolute; top:64px; right:64px; width:48px; height:48px; color:var(--ds-color-accent)"></x-icon>
+  <aside>Speaker notes &lt;here&gt; &amp; more.</aside>
+</section>
+
+  note: section#messy: data-transition="FADE" normalized to "fade"
+  note: section#messy: class ignored
+  note: section#messy: data-section ignored
+  note: section#messy: padding-top folded into padding
+  note: section#messy: background-color folded into background
+  note: section#messy: margin:0 dropped (a no-op)
+  note: section#messy: box-sizing:border-box dropped (a no-op)
+  note: section#messy: comment dropped
+  warning: <p>: unsupported property z-index dropped
+  note: <p>: data-x ignored
+  note: <h1>: font shorthand expanded into longhands
+  note: <h1>: <strong> became <b>
+  note: <h1>: <em> became <i>
+  warning: <h1>: span font-size dropped (spans carry colour only)
+  warning: <h1>: link "http://example.com" dropped (https links only); its text kept
+  note: <div>: border-top-left-radius folded into border-radius
+  warning: <ul>: <li> attributes dropped (plain items only)
+  warning: <img>: src "https://cdn.example.com/x.png" is not an asset path; the image becomes a placeholder
+  note: <x-icon>: name="lightbulb" normalized to "Lightbulb"
+  warning: <p>: color:var(--other-token) dropped (outside the grammar)
+  note: table: <tbody> unwrapped
+PASS  var(--ds-*): kept through parse/serialize, fixed point  ["var(--ds-font-body)","var(--ds-color-bg)","var(--ds-space-4)","var(--ds-space-6)","var(--ds-type-h2-size)","var(--ds-color-accent, #cc0000)","var(--ds-space-3)","var(--ds-color-border)"]
+PASS  var() outside --ds-* dropped with a warning
+PASS  the Claude-compatible export resolves tokens to literals (fallback when unresolved)  ["style=\"background:#fbfbf8\"","style=\"color:#2b7a78\""]
+PASS  held: two sections  ["a slide file holds exactly one <section> and nothing else"]
+PASS  held: unknown tag  ["unknown or misplaced tag <iframe>"]
+PASS  held: text directly in a div  ["text \"loose text\" directly inside <div>"]
+PASS  held: aside not last  ["<aside> (the notes) is not the section's last child"]
+PASS  held: nested list  ["nested list inside <ul>"]
+PASS  held: embed inside a div  ["<x-embed> is not a direct child of the section"]
+PASS  held: svg with script  ["an <svg> with script, an event handler, foreignObject or an external URL"]
+PASS  held: colspan  ["colspan on a table cell"]
+PASS  held: 16 nested divs  ["more than 15 nested <div>s"]
+PASS  held: 201 elements  ["201 elements (over 200)"]
+PASS  held: bad section id  ["section id \"a b\" is not [A-Za-z0-9_-]{1,64}"]
+PASS  held: unknown inline tag  ["<code> inside the text of <p>"]
+PASS  held: section id differs from the file name
+PASS  unknown properties and attributes are dropped with diagnostics, the slide loads  ["warning: unsupported attribute onclick dropped","warning: unsupported property float dropped","warning: unsupported property z-index dropped","warning: unsupported attribute title dropped","note: data-foo ignored"]
+PASS  minted ids: e<n>-<hash>, authored ids kept, same seed → same ids (idempotent replay)  ["e1-rqlc","keep","e2-rqlc"]
+PASS  minted ids: a different seed (a later publish) mints different ids  ["e1-rqlc","e1-lrzx"]
+PASS  minted ids never reuse an id the live slide holds  ["e2-rqlc","keep","e3-rqlc"]
+
+58/58 checks passed

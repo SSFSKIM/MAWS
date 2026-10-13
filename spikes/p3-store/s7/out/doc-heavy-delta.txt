@@ -1,0 +1,8 @@
+# S7a doc-heavy-delta started 2026-10-13T02:52:18.277Z load 11.6 18.1 26.5 node v22.23.2
+month 1: {"live":2698393,"file":20586496,"versions":156,"log":{"rows":50411,"bytes":2618477},"prov":{"rows":10300,"bytes":1854516},"load":412.5,"preview":3242.3,"restore":1365.3,"se":"9/9"}
+month 2: {"live":3131109,"file":33169408,"versions":170,"log":{"rows":50442,"bytes":2280927},"prov":{"rows":10320,"bytes":3525932},"load":598.6,"preview":4291.7,"restore":1010.3}
+month 3: {"live":3180522,"file":41140224,"versions":121,"log":{"rows":50425,"bytes":2318011},"prov":{"rows":244,"bytes":4573335},"load":533.5,"preview":5459.6,"restore":1348,"se":"9/9"}
+month 4: {"live":3677365,"file":56090624,"versions":209,"log":{"rows":50407,"bytes":2703148},"prov":{"rows":10359,"bytes":6616466},"load":643.5,"preview":6228.4,"restore":2357.5}
+month 5: {"live":3597832,"file":69414912,"versions":228,"log":{"rows":50431,"bytes":3363768},"prov":{"rows":10392,"bytes":8167122},"load":688.3,"preview":5473.4,"restore":4337.5}
+month 6: {"live":4017714,"file":79122432,"versions":252,"log":{"rows":50450,"bytes":2743925},"prov":{"rows":10403,"bytes":9580747},"load":796.4,"preview":6839.7,"restore":3721.4,"se":"7/7"}
+done in 787s; updates 1321185; counts {"keystrokes":1310000,"turns":5240,"batches":0,"comments":524,"named":79,"images":81,"restores":13}; maintenance {"median":175,"max":1435.8,"steps":{"thin":1270.7,"compactLog":33.5,"bucketProvenance":283.7,"gcRefs":2.3,"checkpoint":122.4}}

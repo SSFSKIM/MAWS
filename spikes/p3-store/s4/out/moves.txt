@@ -1,0 +1,14 @@
+PASS A: without forwarding the in-flight keystrokes are lost (shown) — "A plain paragraph the human types into. Words to keep. ㅎ"
+PASS A: move under in-flight typing, with forwarding: the human's keystrokes land in the moved block — "A plain paragraph the human types into. Words to keep. 한글"
+PASS A: …converged, ids unique, p3 after c1 — h1 p1 p2 l1 tb1 c1 p3 p4
+PASS B: concurrent moves of one block duplicate it (two p3 with the same id) — p3
+PASS B: repair keeps the later insertion (a2: after h1) and tombstones the other — h1 p3 p1 p2 l1 tb1 c1 p4
+PASS B: without carrying the loser's edits, the human's edit in the tombstoned copy is lost (shown) — "A plain paragraph the human types into. Words to keep."
+PASS B: with the carry rule the human's edit made in the losing copy survives in the kept one — "Edited: A plain paragraph the human types into. Words to keep."
+PASS B: marks intact in the kept copy — Edited: A plain paragraph the human types into. |Words[c:t4]| to keep.
+PASS B: no duplicate ids after repair
+PASS C: an edit into the original after two concurrent moves is forwarded into the kept copy, once — "A very plain paragraph the human types into. Words to keep." h1 p3 p1 p2 l1 tb1 c1 p4
+PASS D: concurrent splits that carry the id duplicate it — p4
+PASS D: repair re-ids the later ones, no text deleted — repair: ^p4 duplicated (paragraph) → the later one re-id'd ^xdqoru39 | repair: ^p4 duplicated (paragraph) → the later one re-id'd ^0brrnp2e
+
+12/12 checks passed

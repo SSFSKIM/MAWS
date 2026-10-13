@@ -1,0 +1,66 @@
+{
+  "checks": [
+    {
+      "name": "the human's move: foot.style:left and style:bottom attributed to the human with a time",
+      "pass": true,
+      "detail": [
+        "foot.style:left = \"200px\"  [insert=human insertAt=19:02]",
+        "foot.style:bottom = \"80px\"  [insert=human insertAt=19:02]"
+      ]
+    },
+    {
+      "name": "the agent's restyle: title.style:font-size attributed to session:B",
+      "pass": true,
+      "detail": [
+        "title.style:font-size = \"80px\"  [insert=session:B insertAt=19:03]"
+      ]
+    },
+    {
+      "name": "the agent's text edit in card: attributed inside the text delta",
+      "pass": true,
+      "detail": [
+        "card.text#text \"clear \"  [insert=session:B insertAt=19:03]"
+      ]
+    },
+    {
+      "name": "the agent's new element note: an insert attributed to session:B",
+      "pass": true,
+      "detail": [
+        "note = <node>  [insert=session:B insertAt=19:03]",
+        "note.tag = \"p\"  [insert=session:B insertAt=19:03]",
+        "note.parent = \"\"  [insert=session:B insertAt=19:03]",
+        "note.style:position = \"absolute\"  [insert=session:B insertAt=19:03]",
+        "note.style:right = \"128px\"  [insert=session:B insertAt=19:03]",
+        "note.style:top = \"64px\"  [insert=session:B insertAt=19:03]",
+        "note.style:font-size = \"24px\"  [insert=session:B insertAt=19:03]",
+        "note.text = <node>  [insert=session:B insertAt=19:03]",
+        "note.text#text \"<node>\"  [insert=session:B insertAt=19:03]",
+        "note.text#text \"Draft\"  [insert=session:B insertAt=19:03]",
+        "note.z = \"a2\"  [insert=session:B insertAt=19:03]"
+      ]
+    },
+    {
+      "name": "the human's deletion of pic: a delete attributed to the human",
+      "pass": true,
+      "detail": [
+        "pic = <node>  [delete=human deleteAt=19:04]"
+      ]
+    },
+    {
+      "name": "untouched elements and the slide's own keys carry no attribution",
+      "pass": true,
+      "detail": []
+    },
+    {
+      "name": "the attributed elements are exactly the ones the window changed (per-element provenance, no noise)",
+      "pass": true,
+      "detail": "card,foot,note,pic,title"
+    }
+  ],
+  "numbers": {
+    "attributed deck diff: ms, encoded ContentMap bytes": {
+      "ms": 4.1,
+      "contentMapBytes": 160
+    }
+  }
+}

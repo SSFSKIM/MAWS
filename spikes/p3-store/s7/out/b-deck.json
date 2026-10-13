@@ -1,0 +1,220 @@
+{
+  "electron": "44.4.5",
+  "loads": [
+    {
+      "at": "start",
+      "load": [
+        11.73,
+        13.76,
+        14.7
+      ]
+    },
+    {
+      "at": "deck open 0",
+      "load": [
+        11.73,
+        13.76,
+        14.7
+      ]
+    },
+    {
+      "at": "deck open 1",
+      "load": [
+        11.73,
+        13.76,
+        14.7
+      ]
+    },
+    {
+      "at": "deck open 2",
+      "load": [
+        11.73,
+        13.76,
+        14.7
+      ]
+    },
+    {
+      "at": "deck drag",
+      "load": [
+        11.73,
+        13.76,
+        14.7
+      ]
+    }
+  ],
+  "imported": {
+    "publishMs": 84.3,
+    "savedMs": 301.4,
+    "writes": 106,
+    "v2Bytes": 212517,
+    "v1Bytes": 362160
+  },
+  "trials": [
+    {
+      "trial": 0,
+      "cold": true,
+      "load": [
+        11.73,
+        13.76,
+        14.7
+      ],
+      "hostLoadMs": 18.13045900000003,
+      "slides": 100,
+      "openToSyncedMs": 50.052001953125,
+      "step2Bytes": 362165,
+      "step2ApplyMs": 25.5,
+      "stageRenderMs": 7.39990234375,
+      "openToStagePaintMs": 69.4521484375,
+      "filmstripRenderMs": 25.599853515625,
+      "openToAllPaintMs": 116.052001953125,
+      "domNodes": 1908
+    },
+    {
+      "trial": 1,
+      "cold": false,
+      "load": [
+        11.73,
+        13.76,
+        14.7
+      ],
+      "hostLoadMs": 18.13045900000003,
+      "slides": 100,
+      "openToSyncedMs": 29.171142578125,
+      "step2Bytes": 362165,
+      "step2ApplyMs": 24.600000143051147,
+      "stageRenderMs": 3.300048828125,
+      "openToStagePaintMs": 42.97119140625,
+      "filmstripRenderMs": 24.7998046875,
+      "openToAllPaintMs": 83.77099609375,
+      "domNodes": 1908
+    },
+    {
+      "trial": 2,
+      "cold": false,
+      "load": [
+        11.73,
+        13.76,
+        14.7
+      ],
+      "hostLoadMs": 18.13045900000003,
+      "slides": 100,
+      "openToSyncedMs": 29.931884765625,
+      "step2Bytes": 362165,
+      "step2ApplyMs": 26.200000047683716,
+      "stageRenderMs": 3.699951171875,
+      "openToStagePaintMs": 44.231689453125,
+      "filmstripRenderMs": 23.5,
+      "openToAllPaintMs": 83.03173828125,
+      "domNodes": 1908
+    }
+  ],
+  "drag": {
+    "load": [
+      11.73,
+      13.76,
+      14.7
+    ],
+    "moves": 200,
+    "withTransaction": 200,
+    "inputToTxMs": {
+      "n": 200,
+      "p50": 0.5,
+      "p95": 8.6,
+      "max": 10.3
+    },
+    "inputToFrameMs": {
+      "n": 200,
+      "p50": 0.7,
+      "p95": 8.9,
+      "max": 10.6
+    },
+    "inputToPostPaintMs": {
+      "n": 200,
+      "p50": 1.2,
+      "p95": 9.3,
+      "max": 10.9
+    },
+    "inputToAckMs": {
+      "n": 200,
+      "p50": 5.3,
+      "p95": 13.7,
+      "max": 17.5
+    },
+    "longTasks": {
+      "n": 0,
+      "max": 0
+    },
+    "remoteFrames": {
+      "n": 5,
+      "handleMs": {
+        "n": 5,
+        "p50": 0.8,
+        "p95": 1,
+        "max": 1
+      }
+    },
+    "stageWrites": {
+      "style": 400,
+      "attr": 0,
+      "place": 26,
+      "text": 0,
+      "create": 26,
+      "remove": 0
+    },
+    "hostLoopDelayMs": {
+      "p50": 6.3,
+      "p99": 11.1,
+      "max": 13.7,
+      "n": 617
+    }
+  },
+  "agent": {
+    "publishes": 6,
+    "publishMs": {
+      "p50": 1.24,
+      "max": 7.27
+    },
+    "saveMs": {
+      "p50": 5.19,
+      "max": 8.83
+    }
+  },
+  "memory": {
+    "renderer": {
+      "usedJSHeapMB": 14.2,
+      "totalJSHeapMB": 22.3,
+      "domNodes": 1908
+    },
+    "metrics": {
+      "host": {
+        "workingSetMB": 165.4,
+        "privateMB": null
+      },
+      "renderers": {
+        "deck2": {
+          "workingSetMB": 156.8,
+          "privateMB": null
+        }
+      },
+      "browser": [
+        {
+          "workingSetMB": 158.8
+        }
+      ],
+      "gpu": [
+        {
+          "workingSetMB": 93.2
+        }
+      ]
+    },
+    "host": {
+      "heapUsedMB": 22.5,
+      "heapTotalMB": 41.5,
+      "externalMB": 21.6,
+      "arrayBuffersMB": 0,
+      "rssMB": 173.5
+    }
+  },
+  "converged": true,
+  "pageErrors": []
+}

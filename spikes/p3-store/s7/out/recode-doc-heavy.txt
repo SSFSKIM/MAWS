@@ -1,0 +1,1 @@
+{"tag":"doc-heavy-delta","rows":252,"storedMB":57.34,"keyframesMB":31.32,"regcDeltasKeepKeyframesMB":55.02,"regcOneKeyframeMB":28.29,"zstdStoredMB":22.61,"liveStateMB":3.83,"ms":29817}
