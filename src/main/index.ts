@@ -206,7 +206,7 @@ void startWithProfileLock(app, () => {
   // E2 start: the deliverable store's read side (E2 execution document, Design §2, §3, §7): main's reader over the files
   // the engine host writes, the maws-deliverable: scheme and the frame policies on the window's session and the capture
   // partition, deliverables.* and the capture service; the files service below admits delivered paths through the reader.
-  const deliverables = startDeliverables({ userData: app.getPath('userData'), hosts, register: registerMainHandler, env: process.env });
+  const deliverables = startDeliverables({ userData: app.getPath('userData'), hosts, register: registerMainHandler, env: process.env, appUrl });
   shutdown.add('deliverables', deliverables.stop);
   // E2 end
 
