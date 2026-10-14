@@ -162,15 +162,23 @@ export class DocIndex {
 
   /**
    * The block's text strings joined as Yjs holds them, read without a ProseMirror conversion (M9: the first unscoped quote
-   * after a read, on a replica whose blocks were never converted, otherwise converted every block of the tab). For a
-   * prefilter only: the strings of nested blocks run together and attribute text is absent, so a word found here may
-   * not be in the block's text, and a quote naming an attribute is searched without it (`text` is the exact one).
+   * after a read, on a replica whose blocks were never converted, otherwise converted every block of the tab), with every
+   * node's type name and attribute values (but its id) beside them: whatever of the block the markdown can spell from
+   * its nodes (a pending block's intent, a diagram's source and fence, a formula, a chart's spec, an image's alt, a
+   * chip's label, a list's start), so a quote's words found in the markdown are found here too (fix wave 2: the
+   * prefilter must keep every block whose markdown could hold the quote). A prefilter only: strings run together, so a
+   * word found here may not be in the block (`text` is the exact one).
    */
   rawText(top: TopBlock): string {
     this.refresh();
     if (top.rawTextCache === null) {
       const parts: string[] = [];
       const walk = (node: Node): void => {
+        parts.push(' ', node.name);
+        for (const [key, value] of node.attrEntries()) {
+          if (String(key) === 'id' || value === null || value === undefined || value instanceof YNode) continue;
+          parts.push(' ', typeof value === 'string' ? value : typeof value === 'object' ? JSON.stringify(value) : String(value), ' ');
+        }
         for (const part of node.toArray()) {
           if (typeof part === 'string') parts.push(part);
           else if (part instanceof YNode) walk(part);

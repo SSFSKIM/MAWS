@@ -100,6 +100,29 @@ describe('the ops (S4 1)', () => {
     expect(ran.sort()).toEqual(['delete', 'insert', 'replace_block', 'replace_text', 'set_cell']);
   });
 
+  // M9 fix wave 2: the prefilter never drops a block whose markdown holds the quote through an attribute (a pending
+  // block's intent here), so uniqueness and `all` count every occurrence the markdown has.
+  it('replace_text counts a quote in attribute-backed content beside one in text: not unique, and both with all', () => {
+    const seed = () => seedDoc({ type: 'doc', content: [
+      { type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'The alphazed plan.' }] },
+      { type: 'pending', attrs: { id: 'pe1', intent: 'alphazed' } },
+    ] }, {});
+    const r = refusal(() => applyEdit(seed(), [{ op: 'replace_text', old: 'alphazed', new: 'betazed' }]));
+    expect(r.reason).toBe('notUnique');
+    const doc = seed();
+    const res = applyEdit(doc, [{ op: 'replace_text', old: 'alphazed', new: 'betazed', all: true }]);
+    expect(res.results[0].line).toBe('replaced 2 occurrence(s) in ^p1, ^pe1');
+  });
+
+  it('replace_text finds a quote in a diagram’s source and one the markdown numbers (a list item’s marker)', () => {
+    const doc = seedDoc({ type: 'doc', content: [
+      { type: 'diagram', attrs: { id: 'd1', source: 'graph TD; Gammaray-->Delta' } },
+      { type: 'orderedList', attrs: { id: 'ol1', start: 1 }, content: ['first item', 'second item'].map((text, k) => ({ type: 'listItem', attrs: { id: `oli${k}` }, content: [{ type: 'paragraph', attrs: { id: `olp${k}` }, content: [{ type: 'text', text }] }] })) },
+    ] }, {});
+    expect(applyEdit(doc, [{ op: 'replace_text', old: 'Gammaray', new: 'Epsilon' }]).results[0].line).toBe('replaced 1 occurrence(s) in ^d1');
+    expect(applyEdit(doc, [{ op: 'replace_text', old: '2. second item', new: '2. second entry' }]).results[0].line).toBe('replaced 1 occurrence(s) in ^ol1');
+  });
+
   it('replace_text not unique: refused, listing the candidate blocks and their match counts', () => {
     const doc = seedDoc();
     const r = refusal(() => applyEdit(doc, [{ op: 'replace_text', old: 'The ', new: 'A ' }]));

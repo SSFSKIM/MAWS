@@ -680,8 +680,10 @@ class Planner {
       return top ? this.index.text(top) : this.current(key)!.textBetween(0, this.current(key)!.content.size, '\n');
     };
     // the needle prefilter reads the blocks' Yjs text (no conversion), then each candidate's own text
-    // (every word of the quote in it: the strings a block's Yjs nodes hold, so no candidate is converted to be ruled out)
-    const runs = runsOf(quote);
+    // (every word of the quote in it: the strings and attribute values a block's Yjs nodes hold, so no candidate is
+    // converted to be ruled out; a run the markdown may generate rather than hold — a list's item numbers, a task's x —
+    // does not filter: digits and single characters are left out)
+    const runs = runsOf(quote).filter((run) => run.length > 1 && !/^\p{N}+$/u.test(run));
     const holds = (key: string, needle: string): boolean => {
       const top = !this.tops.has(key) ? this.byKey.get(key) : undefined;
       if (!top) return textOf(key).includes(needle);
