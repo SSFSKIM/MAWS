@@ -43,7 +43,7 @@ What does not change: the engine and the wire (D-1); the app's own theme (`src/r
     - Re-review approved. Named-entity decoding is deferred to A's asset-listing request (Decision Log 30).
     - Gates at 49ff2c43: typecheck and lint clean; full unit suite 12900 passed, 1 skipped, and 1 failed (the known `live-budget` timeout flake at load 56, which passes alone); e2e design-systems 5/5, settings 10/10, panel 26/26, library 2/2, artifacts 4/4, tools 8/8.
     - Gates at 65f7647c: the design-system, main and engine-host design-system tests 260/260 and 276/276; typecheck and lint clean; `e2e:design-systems` 5/5.
-- [ ] Whole-branch review, its fix wave, Outcomes, hand-back.
+- [x] (2026-10-13 PDT) Whole-branch review: two `reviewer-high` reviews by area at ba7c2aa2, eight findings, and fix wave 15152e2a..e81614c4 (Decision Log 31). Both re-reviews were clean. Then master and L's 3e99c066 were merged (47573bcf), the final gates run, Outcomes written, and the hand-back made.
 
 ## Terms
 
@@ -649,8 +649,50 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
     - **Font overrides keep the alias.** An override of a font-family name keeps the private face alias.
     - **Page-size names in canon.** `document.css` may use the generated page-size names.
     - **The Check section** also lists `validateCanon`'s file problems, which delivers entry 26's promise that the page checks canon structure.
+32. 2026-10-13 (the architect's ruling at landing). L's M5b label map `VIEWERS_COPY.exportFormats` (`src/renderer/src/tools/artifacts/viewers/copy.ts`) gains `claude: 'For Claude (zip)'`. The entry is edited in place on L's line and marked P3-D, in the form of entries 27 and 30. After the merge of L's 3e99c066, D's `'claude'` format had widened `ArtifactExportFormat` past that map's keys, and typecheck failed. L does not add its own entry at its M6b.
+    - **The final gates at 47573bcf, plus this line:**
+      - typecheck and lint are clean;
+      - the full unit suite passes 12959. Its only failures are the two `pause-take-over.pty` cases, P2's known PTY timing flake, which pass 6/6 alone;
+      - the renderer's viewers and library pass 127/127;
+      - the e2e groups pass: design-systems 5/5, settings 10/10, panel 26/26, library 4/4, artifacts 4/4, tools 8/8.
+    - **Lineage.** Through the spec's Decision Log 49, §4.3, §4.6, §4.10 and §5 P3-D are unchanged since the pin (dda3d0b4 → fc1d12d5). Entries 39, 42, 43, 44 and 47 are this child's rulings, all folded here. The pin holds.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
 
-Pending.
+**What landed (2026-10-13).** The branch has seven milestones, M1 to M7, with M6b and M7's two parts:
+- the DTCG token core, with `tokens.css` and the Office theme;
+- the law, the canon validator, the hard-don'ts check and the Claude converter;
+- the format-1 Y.Doc model with its unit-level publish merge;
+- the apply-and-restyle API with shared, refcounted scope styles and private face aliases;
+- the Design System page, registered in L's editor registry and carrying its X32 header, Mark-up and close guard;
+- the host module, which:
+  - registers the adapter;
+  - seeds the defaults resumably, one transaction per default;
+  - serves the create context;
+  - registers the D9 chain in A's store;
+- settings 14 and Settings › Artifacts;
+- the `design_system` ask modality;
+- the Claude export through A's exporter registry;
+- the three defaults, the guide and the format reference;
+- `e2e:design-systems`, plus a live run on the installed engine.
+
+A machine-made system, the agent's "Harbor Tutoring Design System" from a CSS-variables project, validated and opened on the page.
+
+**Acceptance against this document's list.**
+- Lines 1 to 8: unit tests.
+- Lines 9 to 14: e2e and unit tests. Line 9 is as amended by Decision Log 22. Line 12 includes the house link and a deleted default's fall-through through A's chain. Line 13 runs through A's store.
+- Line 15: the live run.
+- Line 16: the gates.
+
+**Listed for P3-F, not faked here:**
+- the document restyle e2e on B's editor, and the deck restyle on C's (a fixture stands in for both);
+- an asset pinned after a system's deletion, once A's M9 keeps a deleted system's assets reachable;
+- the law edited in B's document editor (format 2, Decision Log 3);
+- the deck check against a system's hard don'ts, once C registers its element stream.
+
+**Retrospective.**
+- The milestone reviews caught real defects in every milestone, and most were cross-replica or cross-lifetime cases. A token and a descendant created on two replicas, an inherited `$type` lost on rehome, a shared style owned by the first replica, unacknowledged edits dropped on close: none of these shows on one replica in one tab. Writing the second replica or the second showing into the first test of each milestone would have saved most fix waves.
+- Splitting the whole-branch review by area (portable core, integration) against a synthetic base tree (master plus A plus L) kept the siblings' code out of the package. It found eight cross-milestone defects that the per-milestone reviews had missed.
+- One review round measured stale code (M3's second re-review). After that, every reviewer brief named the checkout head and required line numbers quoted from it.
+- The defaults turned out to matter less than the machinery (Decision Log 44). They are data, so a fourth default is a directory and one line.

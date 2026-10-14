@@ -24,7 +24,7 @@ export const VIEWERS_COPY = {
   // a File artifact no session links: its code body has no session to read it under
   noSession: (name: string) => `${name} opens outside MAWS: no session made or touched it.`,
   // the Export menu (the header's, the library row's)
-  exportFormats: { pdf: 'PDF', png: 'PNG', docx: 'Word document', pptx: 'PowerPoint', md: 'Markdown', html: 'HTML' },
+  exportFormats: { pdf: 'PDF', png: 'PNG', docx: 'Word document', pptx: 'PowerPoint', md: 'Markdown', html: 'HTML', claude: 'For Claude (zip)' /* P3-D: a design system in Claude's shape */ },
   saveCopy: 'Save a copy…',
   exporting: (title: string, format: string) => `Exporting ${title} as ${format}…`,
   saved: (path: string) => `Saved to ${path}`,
