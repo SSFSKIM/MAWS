@@ -410,14 +410,16 @@ export function askStateCopy(row: { state: keyof typeof ASK.state | 'error'; err
 }
 
 // One answer as the answered capsule's line reads it: the labels (and what was typed under Other), the text, the paths,
-// `<name> (<directory>)` for a repository, or the two non-answers.
+// `<name> (<directory>)` for a repository, or the two non-answers; then the user's note (P2-C3), whatever the status.
 export function askAnswerCopy(answer: AskAnswer | undefined): string {
   if (answer === undefined) return ASK.notAnswered;
-  if (answer.status === 'skipped') return QUESTION.skipped;
-  if (answer.status === 'decide_for_me') return ASK.decideForMe;
+  const note = answer.note !== undefined ? `Note: ${answer.note}` : '';
+  const join = (...parts: string[]) => parts.filter((part) => part !== '').join(' · ');
+  if (answer.status === 'skipped') return join(QUESTION.skipped, note);
+  if (answer.status === 'decide_for_me') return join(ASK.decideForMe, note);
   const values = answer.value === undefined ? [] : Array.isArray(answer.value) ? answer.value : [answer.value];
   const value = answer.name !== undefined ? `${answer.name} (${values.join(', ')})` : values.join(', ');
-  return [value, answer.otherText !== undefined ? `Other: ${answer.otherText}` : ''].filter((part) => part !== '').join(' · ');
+  return join(value, answer.otherText !== undefined ? `Other: ${answer.otherText}` : '', note);
 }
 
 const deliveredSubject = (files: readonly { name: string }[]) => (files.length === 1 ? files[0]!.name : plural(files.length, 'file'));
