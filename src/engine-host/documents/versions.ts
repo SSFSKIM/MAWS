@@ -207,6 +207,11 @@ export class VersionStore {
     }));
   }
 
+  // Whether any retained version (of any artifact) pins `systemId` (Decision Log 46: a deleted system stays readable).
+  pinsSystem(systemId: string): boolean {
+    return this.db.prepare("SELECT 1 FROM artifact_versions WHERE designSystemRef IS NOT NULL AND json_extract(designSystemRef, '$.id') = ? LIMIT 1").get(systemId) !== undefined;
+  }
+
   // The rows thinning drops for one artifact at `now` (unnamed autos only; never the newest or a pinned one).
   thinnable(artifactId: string, now: number, pinned: Set<string>): number[] {
     const rows = this.db.prepare('SELECT id, seq, at, kind, label FROM artifact_versions WHERE artifactId = ? ORDER BY id').all(artifactId) as { id: number; seq: number; at: number; kind: VersionKind; label: string | null }[];

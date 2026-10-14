@@ -2,7 +2,7 @@
 // M4): every host-owned command has a handler and one deadline shape, the store's refusals reach the caller typed, the
 // test-only commands answer only under MAWS_E2E=1, the change feed is emitted, and a document port main posts is
 // attached for a document kind and closed for anything else.
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -448,5 +448,35 @@ describe('the export service’s asset listing (Decision Log 45e)', () => {
     await call('artifacts.uploadAsset', { artifactId: artifact.id, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array([1, 2, 3]) });
     expect(await call('artifacts.assets', { artifactId: artifact.id })).toEqual({ assets: [{ ref: 'assets/logo.png', name: 'logo.png', mime: 'image/png', size: 3 }] });
     expect(await refusal('artifacts.assets', { artifactId: '55555555-5555-4555-8555-555555555555' })).toMatchObject({ issues: { reason: 'notFound' } });
+  });
+});
+
+describe('a deleted design system’s files while a version pins it (Decision Log 46)', () => {
+  it('serves its assets at a named revision while any retained version pins it, never live, and refuses them once nothing pins it', async () => {
+    const system = (await call('artifacts.create', { kind: 'design_system', title: 'House' })).artifact;
+    const face = await call('artifacts.uploadAsset', { artifactId: system.id, name: 'face.woff2', mime: 'font/woff2', bytes: new Uint8Array([1, 2, 3]) });
+    const doc = (await call('artifacts.create', { kind: 'document', title: 'Letter', designSystemId: system.id })).artifact;
+    await call('artifacts.saveVersion', { artifactId: doc.id, label: 'Sent' });
+    const pin = (await call('artifacts.versions', { artifactId: doc.id })).versions.map((v: { designSystemRef?: { id: string; versionSeq: number } }) => v.designSystemRef).find(Boolean)!;
+    expect(pin.id).toBe(system.id);
+    await call('artifacts.update', { artifactId: doc.id, designSystemId: null });
+    await call('artifacts.delete', { artifactId: system.id });
+
+    // the retained version still renders with the faces it was pinned to: the pinned revision reaches the asset
+    const served = await call('artifacts.content', { artifactId: system.id, revision: pin.versionSeq, path: face.ref });
+    expect(served).toMatchObject({ kind: 'design_system', name: 'face.woff2', size: 3 });
+    expect(existsSync(served.path)).toBe(true);
+    // its live state is gone with the delete
+    expect(await refusal('artifacts.content', { artifactId: system.id, path: face.ref })).toMatchObject({ issues: { reason: 'notFound' } });
+
+    // once no retained version pins it, a named revision is refused too
+    expect((await call('artifacts.pruneVersions', { artifactId: doc.id, olderThan: Date.now() + 60_000 })).removed).toBeGreaterThan(0);
+    expect(await refusal('artifacts.content', { artifactId: system.id, revision: pin.versionSeq, path: face.ref })).toMatchObject({ issues: { reason: 'notFound' } });
+  });
+
+  it('serves nothing of a deleted artifact no version pins, at any revision', async () => {
+    const page = (await call('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: new TextEncoder().encode('<p>v1</p>'), name: 'page.html' } })).artifact;
+    await call('artifacts.delete', { artifactId: page.id });
+    expect(await refusal('artifacts.content', { artifactId: page.id, revision: page.revision, path: 'page.html' })).toMatchObject({ issues: { reason: 'notFound' } });
   });
 });
