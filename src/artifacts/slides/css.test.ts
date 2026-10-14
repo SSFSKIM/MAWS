@@ -111,6 +111,11 @@ describe('values: each property’s line, with its ranges', () => {
       ['flex', '1 240', '1 240'], // grow and shrink, as CSS reads two numbers
       ['flex', '2 240px', '2 240px'],
       ['flex', '1 1 0', '1 1 0px'],
+      ['flex', '1 var(--ds-shrink, 1) 240', '1 var(--ds-shrink, 1) 240px'], // fix wave 2: a factor's fallback stays a number
+      ['flex', '1 1e2 240px', '1 100 240px'],
+      ['flex', '1 var(--ds-shrink) var(--ds-basis, 240)', '1 var(--ds-shrink) var(--ds-basis, 240px)'],
+      ['flex', 'var(--ds-grow, 2) 240px', 'var(--ds-grow, 2) 240px'],
+      ['flex', 'var(--ds-grow, 2) 3', 'var(--ds-grow, 2) 3'],
       ['grid-template-columns', '240 1fr', '240px 1fr'],
       ['grid-template-columns', 'repeat(3, 240) auto', 'repeat(3, 240px) auto'],
       ['grid-template-rows', 'repeat(2, 1fr 96)', 'repeat(2, 1fr 96px)'],

@@ -530,10 +530,24 @@ class Loader {
 const LOCAL_REF = /^\s*#[^\s#'"()]+\s*$/;
 const REF_ATTRS = new Set(['href', 'xlink:href', 'src']);
 const SCRIPT_URL = /^\s*javascript\s*:/i;
+const ANIMATION_VALUES = new Set(['to', 'from', 'by', 'values']);
 
-/** `url(…)` and `@import` in CSS text: a reason when anything but a local `url(#id)` is referenced. */
-function cssRefProblem(css: string): string | null {
+/** CSS text as the CSS tokenizer reads it: escapes decoded (`u\72l(` is `url(`), comments removed. */
+function cssDecoded(css: string): string {
+  return css
+    .replace(/\\(?:([0-9a-f]{1,6})[ \t\n\r\f]?|([^\n\r\f0-9a-f]))/gi, (_, hex: string | undefined, ch: string | undefined) => {
+      if (hex === undefined) return ch!;
+      const cp = parseInt(hex, 16);
+      return cp === 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) ? '�' : String.fromCodePoint(cp);
+    })
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+}
+
+/** References in CSS text (`url()`, `@import`, an image function): a reason when anything but a local `url(#id)` is. */
+function cssRefProblem(raw: string): string | null {
+  const css = cssDecoded(raw);
   if (/@import/i.test(css)) return 'an <svg> style with @import';
+  if (/(?:^|[^\w-])(?:-webkit-)?(?:image-set|image|src)\(/i.test(css)) return 'an <svg> style with an image function (only a local url(#id))';
   for (const m of css.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)) {
     if (!LOCAL_REF.test(m[2]!)) return `an <svg> referencing url(${m[2]!.slice(0, 40)}) (only a local #id)`;
   }
@@ -543,7 +557,8 @@ function cssRefProblem(css: string): string | null {
 /**
  * Claude's svg rules (format.md, "Graphics"): one opaque graphic whose root and every descendant hold no `<script>` or
  * `<foreignObject>`, no `on*` handler, no script URL, and no reference (an `href`, a `src`, a CSS `url()` in an attribute,
- * a `style` or a `<style>`) but a local `#id`. The reason, or null when it passes.
+ * a `style` or a `<style>`, read with CSS escapes decoded; an animated `href`'s values) but a local `#id`. The reason, or
+ * null when it passes.
  */
 export function svgProblem(root: RawElement): string | null {
   const walk = (n: RawElement): string | null => {
@@ -554,9 +569,17 @@ export function svgProblem(root: RawElement): string | null {
       if (attr.startsWith('on')) return `an <svg> with an event handler (${name})`;
       if (SCRIPT_URL.test(value)) return `an <svg> with a script URL (${name})`;
       if (REF_ATTRS.has(attr) && !LOCAL_REF.test(value)) return `an <svg> referencing "${value.slice(0, 40)}" (only a local #id)`;
-      if ((tag === 'animate' || tag === 'set') && attr === 'attributename' && /^(xlink:)?href$/i.test(value.trim())) return 'an <svg> animating a reference';
       const css = cssRefProblem(value);
       if (css !== null) return css;
+    }
+    // an animation of a reference animates to references: its values follow the same local-only rule
+    const animated = n.attrs.find(([name]) => name.toLowerCase() === 'attributename')?.[1].trim();
+    if (animated !== undefined && /^(xlink:)?href$/i.test(animated)) {
+      for (const [name, value] of n.attrs) {
+        if (!ANIMATION_VALUES.has(name.toLowerCase())) continue;
+        const bad = value.split(';').map((v) => v.trim()).find((v) => v !== '' && !LOCAL_REF.test(v));
+        if (bad !== undefined) return `an <svg> animating ${animated} to "${bad.slice(0, 40)}" (only a local #id)`;
+      }
     }
     if (tag === 'style') {
       const css = cssRefProblem(n.children.map((c) => (c.kind === 'text' ? c.value : '')).join(''));

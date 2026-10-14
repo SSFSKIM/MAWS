@@ -142,13 +142,18 @@ describe('held slides: a structural failure holds the slide with its reason, nev
       'url() in a <style>': [svg('<style>.a{fill:url(https://x.test/a)}</style>'), /referencing url\(https/],
       '@import': [svg('<style>@import "x.css";</style>'), /@import/],
       'a script URL': [svg('<a href="javascript:alert(1)"><path d="M0 0"/></a>'), /script URL \(href\)/],
-      'animated reference': [svg('<a href="#x"><set attributeName="href" to="#y"/></a>'), /animating a reference/],
+      'animated to another file': [svg('<a href="#x"><set attributeName="href" to="other.svg#y"/></a>'), /animating href to "other\.svg#y"/],
+      'animated through values': [svg('<use href="#a"><animate attributeName="xlink:href" values="#a; https://x.test/b" dur="2s"/></use>'), /animating xlink:href to "https:\/\/x\.test\/b"/],
+      'an escaped url()': [svg('<path style="fill:u\\72l(https://x.test/a)" d="M0 0"/>'), /referencing url\(https:\/\/x\.test\/a\)/],
+      'an escaped url() in a <style>': [svg('<style>.a{fill:\\75 rl(https://x.test/a)}</style>'), /referencing url\(https/],
+      'an escaped @import': [svg('<style>@\\69mport "x.css";</style>'), /@import/],
+      'an image function': [svg('<style>.a{fill:image-set("x.png" 1x)}</style>'), /image function/],
       'nested handler': [svg('<g><g><circle onclick="x()" r="1"/></g></g>'), /event handler \(onclick\)/],
       foreignObject: [svg('<foreignObject><p>x</p></foreignObject>'), /holding <foreignobject>/i],
       script: [svg('<script>alert(1)</script>'), /holding <script>/],
     };
     for (const [name, [html, reason]] of Object.entries(held)) expect(reasons(html), name).toMatch(reason);
-    const fine = svg('<defs><linearGradient id="g"><stop offset="0" stop-color="#000"/></linearGradient><marker id="h"><path d="M0 0"/></marker></defs><style>.a{fill:url(#g)}</style><use href="#h" xlink:href="#h"/><path class="a" fill="url(#g)" marker-end="url( \'#h\' )" d="M0 0"/>', ' aria-label="A chart"');
+    const fine = svg('<defs><linearGradient id="g"><stop offset="0" stop-color="#000"/></linearGradient><marker id="h"><path d="M0 0"/></marker></defs><style>.a{fill:url(#g)}</style><use href="#h" xlink:href="#h"><set attributeName="href" to="#g" begin="1s"/><animate attributeName="xlink:href" values="#g; #h" dur="2s"/></use><path class="a" fill="u\\72l(#g)" marker-end="url( \'#h\' )" d="M0 0"/>', ' aria-label="A chart"');
     expect(reasons(fine)).toBeNull();
     expect(load(fine).slide.children[0]!.attrs).toEqual({ 'aria-label': 'A chart', width: '10', height: '10' });
   });
@@ -179,6 +184,16 @@ describe('held slides: a structural failure holds the slide with its reason, nev
     // inside an x-embed (a whole small page) and an svg (its own title and style) the same tags are theirs
     const embed = '<x-embed style="position:absolute; left:0px; top:0px; width:400px; height:300px"><!DOCTYPE html><html><head><title>t</title><style>b{}</style><script>if (1 < 2) {}</script></head><body><p>live</p></body></html></x-embed>';
     expect(reasons(`<section id="a">${embed}<svg><title>Chart</title><style>.a{fill:#000}</style><path class="a" d="M0 0"/></svg></section>`)).toBeNull();
+  });
+
+  it('reads an embed’s script as the tree builder does, so tags in its strings neither open nor close it (fix wave 2)', () => {
+    const at = 'style="position:absolute; left:0px; top:0px; width:400px; height:300px"';
+    // a "<x-embed>" string in the script does not open a second embed, so the body written after the real close counts
+    expect(reasons(`<section id="a"><x-embed ${at}><script>var s = "<x-embed>";</script></x-embed><body><p>x</p></body></section>`)).toMatch(/^a slide file holds no <body>/);
+    // a "</x-embed><body>" string in the script neither closes the embed nor writes a body
+    expect(reasons(`<section id="a"><x-embed ${at}><script>var s = "</x-embed><body>";</script><p>live</p></x-embed></section>`)).toBeNull();
+    // an svg's own title, and a closing body tag outside it
+    expect(reasons('<section id="a"><svg><title>t</title></svg></section></body>')).toMatch(/^a slide file holds no <body>/);
   });
 
   it('holds a connector given some coordinates but not all, or one that is not a number', () => {

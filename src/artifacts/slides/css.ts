@@ -905,10 +905,16 @@ function normalize(spec: Prop, ts: Tok[], v: string): string | null {
   }
 }
 
-/** `flex`: the leading bare numbers are the grow and shrink factors; what follows is the basis, a length. */
+/**
+ * `flex`: grow, then shrink, then the basis, each position read as isFlex reads it (a token by its fallback): a factor
+ * stays a number (its fallback too), the basis is a length.
+ */
 function normFlex(ts: Tok[]): string {
-  const factors = ts[1] !== undefined && /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(ts[1].t === 'word' ? ts[1].v : '') ? 2 : 1;
-  return ts.map((t, i) => (i < factors ? serTok(t, false) : t.t === 'word' ? (normLen([t]) ?? serTok(t, false)) : serTok(t, true))).join(' ');
+  const isFactor = (t: Tok, i: number) => {
+    const expanded = expandVars([t]);
+    return i === 0 || (i === 1 && expanded.length === 1 && isBare(expanded[0], 0));
+  };
+  return ts.map((t, i) => (isFactor(t, i) ? serTok(t, false) : t.t === 'word' ? (normLen([t]) ?? serTok(t, false)) : serTok(t, true))).join(' ');
 }
 
 /** A track list: a bare length is px, `fr` and `auto` stay, a `repeat()` keeps its count and normalizes its tracks. */

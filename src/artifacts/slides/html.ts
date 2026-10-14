@@ -2,7 +2,7 @@
 // `spikes/p3-store/s6/src/parse5-adapter.ts`. The dialect's one HTML front end: parse5's spec-conformant fragment
 // parsing, the same in the engine host and the renderer, so a slide never loads differently in the two processes
 // (S6 kept a DOM adapter beside it only to prove either works). The loader (parse.ts) reads the `RawNode` tree.
-import { parseFragment, serialize, Tokenizer, type DefaultTreeAdapterMap } from 'parse5';
+import { parseFragment, Parser, serialize, type DefaultTreeAdapterMap, type Token } from 'parse5';
 
 export type RawNode =
   | { kind: 'element'; tag: string; attrs: [string, string][]; children: RawNode[]; inner: () => string }
@@ -28,41 +28,42 @@ function convert(n: P5Node): RawNode {
 
 /** Document markup a slide file never holds (parent §4.5); parse5's fragment parse would drop html, head and body silently. */
 const OUTER_TAGS = new Set(['html', 'head', 'body', 'title', 'link', 'style', 'script', 'meta']);
-const noop = () => {};
+type TagToken = Token.TagToken;
 
 /**
- * The document markup a slide file carries outside an `<svg>` (whose own `<title>` and `<style>` are its business) and
- * an `<x-embed>` (a whole small page): read from parse5's tokenizer, before the tree builder repairs it away.
+ * The tree builder, watched: parse5's own full-document parser (its raw-text states, foreign content and implied
+ * elements decide what is markup), noting each document tag the source writes while no `<x-embed>` (a whole small
+ * page) or `<svg>` (whose own `<title>` and `<style>` are its business) is open. The html, head and body the builder
+ * implies are never tokens, so only written ones count. `Parser` is parse5's (exported, marked internal), pinned exactly.
  */
+class OuterMarkupParser extends Parser<DefaultTreeAdapterMap> {
+  readonly found = new Set<string>();
+  private outside(): boolean {
+    // the stack's live part ends at stackTop: parse5 does not truncate `items` when it pops
+    return !this.openElements.items.slice(0, this.openElements.stackTop + 1).some((el) => {
+      const tag = (el as { tagName?: string }).tagName;
+      return tag === 'x-embed' || tag === 'svg';
+    });
+  }
+  override onStartTag(token: TagToken): void {
+    if (OUTER_TAGS.has(token.tagName) && this.outside()) this.found.add(`<${token.tagName}>`);
+    super.onStartTag(token);
+  }
+  override onEndTag(token: TagToken): void {
+    if (OUTER_TAGS.has(token.tagName) && this.outside()) this.found.add(`<${token.tagName}>`);
+    super.onEndTag(token);
+  }
+  override onDoctype(token: Token.DoctypeToken): void {
+    if (this.outside()) this.found.add('<!DOCTYPE>');
+    super.onDoctype(token);
+  }
+}
+
+/** The document markup a slide file writes outside an `<svg>` and an `<x-embed>`, before the tree builder repairs it away. */
 export function outerMarkup(html: string): string[] {
-  const found = new Set<string>();
-  let svg = 0;
-  let embed = 0;
-  const tokenizer = new Tokenizer(
-    { sourceCodeLocationInfo: false },
-    {
-      onStartTag: (t) => {
-        if (t.tagName === 'x-embed' && !t.selfClosing) embed++;
-        else if (embed === 0 && t.tagName === 'svg' && !t.selfClosing) svg++;
-        else if (embed === 0 && svg === 0 && OUTER_TAGS.has(t.tagName)) found.add(`<${t.tagName}>`);
-      },
-      onEndTag: (t) => {
-        if (t.tagName === 'x-embed') embed = Math.max(0, embed - 1);
-        else if (embed === 0 && t.tagName === 'svg') svg = Math.max(0, svg - 1);
-        else if (embed === 0 && svg === 0 && OUTER_TAGS.has(t.tagName)) found.add(`<${t.tagName}>`);
-      },
-      onDoctype: () => {
-        if (embed === 0 && svg === 0) found.add('<!DOCTYPE>');
-      },
-      onComment: noop,
-      onEof: noop,
-      onCharacter: noop,
-      onNullCharacter: noop,
-      onWhitespaceCharacter: noop,
-    },
-  );
-  tokenizer.write(html, true);
-  return [...found];
+  const parser = new OuterMarkupParser();
+  parser.tokenizer.write(html, true);
+  return [...parser.found];
 }
 
 /** A slide file's markup as a node tree, parsed in fragment context. */
