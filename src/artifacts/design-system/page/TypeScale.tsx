@@ -9,7 +9,7 @@ import { byIdentity, TYPE_ROLES } from '../roles';
 import type { TokenSet } from '../tokens';
 import { isAlias, type DimensionValue } from '../values';
 import type { DesignSystemView } from '../view';
-import { dimensionOf, dimensionText, numberOf, writeToken, writtenToken } from './edit';
+import { dimensionOf, dimensionText, editToken, numberOf } from './edit';
 import { CommitField } from './fields';
 import { PreviewScope } from './PreviewScope';
 
@@ -28,32 +28,30 @@ export function TypeScale(props: { doc: Doc; tokens: TokenSet; resolved: Resolve
   );
 
   // The composite's own fields as written; a field changed is written as a literal.
-  const writeField = (path: string, field: 'fontSize' | 'lineHeight' | 'fontWeight', value: DimensionValue | number): string | null => {
-    const written = writtenToken(tokens, path);
-    if (!written || typeof written.token.$value !== 'object' || written.token.$value === null) return `${path} cannot be edited here`;
-    return writeToken(doc, written.path, { ...written.token, $value: { ...(written.token.$value as Record<string, unknown>), [field]: value } });
+  const writeField = (shown: Typography, field: 'fontSize' | 'lineHeight' | 'fontWeight', value: DimensionValue | number): string | null => {
+    if (typeof shown.token.$value !== 'object' || shown.token.$value === null) return `${shown.path} cannot be edited here`;
+    return editToken(doc, tokens, shown, (token) => ({ ...token, $value: { ...(token.$value as Record<string, unknown>), [field]: value } }));
   };
-  const writeDeck = (path: string, field: 'fontSize' | 'lineHeight', value: DimensionValue | number): string | null => {
-    const written = writtenToken(tokens, path);
-    if (!written) return `${path} is not in the token file`;
-    const extensions = written.token.$extensions ?? {};
-    const deck = { ...((extensions[DECK_KEY] as DeckScale | undefined) ?? {}), [field]: value };
-    return writeToken(doc, written.path, { ...written.token, $extensions: { ...extensions, [DECK_KEY]: deck } });
-  };
-  const size = (path: string, deck: boolean) => (text: string) => {
+  const writeDeck = (shown: Typography, field: 'fontSize' | 'lineHeight', value: DimensionValue | number): string | null =>
+    editToken(doc, tokens, shown, (token) => {
+      const extensions = token.$extensions ?? {};
+      const deck = { ...((extensions[DECK_KEY] as DeckScale | undefined) ?? {}), [field]: value };
+      return { ...token, $extensions: { ...extensions, [DECK_KEY]: deck } };
+    });
+  const size = (shown: Typography, deck: boolean) => (text: string) => {
     const value = dimensionOf(text);
     if (!value || value.value <= 0) return `“${text}” is not a size (16px, 1rem)`;
-    return deck ? writeDeck(path, 'fontSize', value) : writeField(path, 'fontSize', value);
+    return deck ? writeDeck(shown, 'fontSize', value) : writeField(shown, 'fontSize', value);
   };
-  const line = (path: string, deck: boolean) => (text: string) => {
+  const line = (shown: Typography, deck: boolean) => (text: string) => {
     const value = numberOf(text);
     if (value === null || value <= 0) return `“${text}” is not a line height (1.5)`;
-    return deck ? writeDeck(path, 'lineHeight', value) : writeField(path, 'lineHeight', value);
+    return deck ? writeDeck(shown, 'lineHeight', value) : writeField(shown, 'lineHeight', value);
   };
-  const weight = (path: string) => (text: string) => {
+  const weight = (shown: Typography) => (text: string) => {
     const value = numberOf(text);
     if (value === null || value < 1 || value > 1000) return `“${text}” is not a weight from 1 to 1000`;
-    return writeField(path, 'fontWeight', value);
+    return writeField(shown, 'fontWeight', value);
   };
 
   return (
@@ -67,7 +65,6 @@ export function TypeScale(props: { doc: Doc; tokens: TokenSet; resolved: Resolve
         <span>Deck (shown at half size)</span>
       </div>
       {roles.map(({ role, token }) => {
-        const path = token.path;
         const aliased = isAlias(token.token.$value);
         const deck = token.token.$extensions?.[DECK_KEY] as DeckScale | undefined;
         const deckSize = deck?.fontSize && typeof deck.fontSize === 'object' ? dimensionText(deck.fontSize as DimensionValue) : '';
@@ -84,9 +81,9 @@ export function TypeScale(props: { doc: Doc; tokens: TokenSet; resolved: Resolve
                 <p className={`ds-type-${role}`}>{SAMPLE}</p>
               </PreviewScope>
               <div className="dsp-type-fields">
-                <CommitField label={`${role} size`} value={dimensionText(token.value.fontSize)} disabled={locked} width="7ch" commit={size(path, false)} />
-                <CommitField label={`${role} line`} value={String(token.value.lineHeight)} disabled={locked} width="5ch" commit={line(path, false)} />
-                <CommitField label={`${role} weight`} value={String(token.value.fontWeight)} disabled={locked} width="5ch" commit={weight(path)} />
+                <CommitField label={`${role} size`} value={dimensionText(token.value.fontSize)} disabled={locked} width="7ch" commit={size(token, false)} />
+                <CommitField label={`${role} line`} value={String(token.value.lineHeight)} disabled={locked} width="5ch" commit={line(token, false)} />
+                <CommitField label={`${role} weight`} value={String(token.value.fontWeight)} disabled={locked} width="5ch" commit={weight(token)} />
               </div>
             </div>
             <div className="dsp-type-cell">
@@ -94,8 +91,8 @@ export function TypeScale(props: { doc: Doc; tokens: TokenSet; resolved: Resolve
                 <p className={`ds-type-${role}`}>{SAMPLE}</p>
               </PreviewScope>
               <div className="dsp-type-fields">
-                <CommitField label={`${role} deck size`} value={deckSize} disabled={readOnly} width="7ch" commit={size(path, true)} />
-                <CommitField label={`${role} deck line`} value={deckLine} disabled={readOnly} width="5ch" commit={line(path, true)} />
+                <CommitField label={`${role} deck size`} value={deckSize} disabled={readOnly} width="7ch" commit={size(token, true)} />
+                <CommitField label={`${role} deck line`} value={deckLine} disabled={readOnly} width="5ch" commit={line(token, true)} />
               </div>
             </div>
           </div>

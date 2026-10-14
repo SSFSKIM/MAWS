@@ -7,7 +7,7 @@ import { byIdentity, cssNamesOf } from '../roles';
 import type { TokenSet } from '../tokens';
 import { isAlias } from '../values';
 import type { DesignSystemView } from '../view';
-import { dimensionOf, dimensionText, writeToken, writtenToken } from './edit';
+import { dimensionOf, dimensionText, editToken } from './edit';
 import { CommitField } from './fields';
 import { PreviewScope } from './PreviewScope';
 
@@ -18,16 +18,14 @@ const SHADOWS = ['sm', 'md', 'lg'].map((s) => `shadow.${s}`);
 export function Measures(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedTokens; view: DesignSystemView; artifactId: string; readOnly: boolean }) {
   const { doc, tokens, resolved, view, artifactId, readOnly } = props;
   const at = (path: string) => byIdentity(resolved.tokens, path);
-  const writeDimension = (path: string) => (text: string) => {
+  const writeDimension = (shown: ResolvedToken) => (text: string) => {
     const value = dimensionOf(text);
     if (!value || value.value < 0) return `“${text}” is not a size (8px, 0.5rem)`;
-    const written = writtenToken(tokens, path);
-    if (!written) return `${path} is not in the token file`;
-    return writeToken(doc, written.path, { ...written.token, $value: value });
+    return editToken(doc, tokens, shown, (token) => ({ ...token, $value: value }));
   };
   const field = (token: Extract<ResolvedToken, { type: 'dimension' }>) => (
     <>
-      <CommitField label={`${token.path} value`} value={dimensionText(token.value)} disabled={readOnly} width="7ch" commit={writeDimension(token.path)} />
+      <CommitField label={`${token.path} value`} value={dimensionText(token.value)} disabled={readOnly} width="7ch" commit={writeDimension(token)} />
       {isAlias(token.token.$value) ? <span className="dsp-alias">= {token.token.$value}</span> : null}
     </>
   );

@@ -5,8 +5,10 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { applyV1, diffV1, newDoc, stateVector, type Doc } from '../../yjs';
+import { validateCanon, type HtmlParser } from '../canon';
 import complete from '../fixtures/complete.tokens.json';
 import { readSystem, setToken, writeSystem } from '../model';
+import { byIdentity } from '../roles';
 import { parseTokens, serializeTokens } from '../tokens';
 import { DesignSystemPage } from './DesignSystemPage';
 import { CommitField } from './fields';
@@ -249,5 +251,69 @@ describe('a system with no law (D12: a Claude import)', () => {
     view.unmount();
     render(<DesignSystemPage artifactId="ds1" handle={{ doc: systemDoc() }} host={host} askAdopt={{ onAsk: () => {}, unavailable: null }} />);
     expect(screen.queryByRole('button', { name: 'Ask the agent to adopt it' })).toBeNull();
+  });
+});
+
+describe('whole-branch review: edits of what the page shows', () => {
+  function docWith(files: Record<string, string>): Doc {
+    const doc = newDoc();
+    writeSystem(doc, { ...FILES, ...files }, { route: 'derived', at: AT }, { name: 'Harbor' });
+    return doc;
+  }
+  const raw = () => structuredClone(complete) as Record<string, Record<string, unknown>>;
+  const held = (doc: Doc, path: string) => byIdentity(readSystem(doc).tokens.tokens, path);
+
+  it('C3: an inherited role is written as a local token of its effective type, and the group it extends keeps its value', () => {
+    const file = raw();
+    file.palette = file.color!;
+    file.color = { $extends: '{palette}' };
+    file.typeBase = file.type!;
+    file.type = { $extends: '{typeBase}' };
+    const doc = docWith({ 'tokens.tokens.json': JSON.stringify(file) });
+    render(<DesignSystemPage artifactId="ds1" handle={{ doc }} host={host} />);
+    edit('--ds-color-accent hex', '#123456');
+    edit('h1 size', '30px');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(held(doc, 'color.accent')).toMatchObject({ $type: 'color', $value: { hex: '#123456' } });
+    expect(held(doc, 'palette.accent')!.$value).toMatchObject({ hex: '#c9663f' });
+    expect(held(doc, 'type.h1')).toMatchObject({ $type: 'typography', $value: { fontFamily: '{font.display}', fontSize: { value: 30, unit: 'px' }, lineHeight: 1.2 } });
+    expect(scopeStyles()).toContain('--ds-color-accent: #123456');
+    expect(scopeStyles()).toContain('--ds-type-h1-size: 30px');
+  });
+
+  it('C4: a literal replacing an alias that took its type from its target keeps that type', () => {
+    const file = raw();
+    for (const group of [file.color!, file.space!]) {
+      const type = group.$type;
+      delete group.$type;
+      const typeAll = (node: Record<string, unknown>) => {
+        if ('$value' in node) node.$type = type;
+        else for (const [key, child] of Object.entries(node)) if ((key === '$root' || !key.startsWith('$')) && child && typeof child === 'object') typeAll(child as Record<string, unknown>);
+      };
+      typeAll(group);
+    }
+    file.color!.accent = { ...(file.color!.accent as object), text: { $value: '{color.bg.raised}' } };
+    file.space!['3'] = { $value: '{space.2}' };
+    const doc = docWith({ 'tokens.tokens.json': JSON.stringify(file) });
+    render(<DesignSystemPage artifactId="ds1" handle={{ doc }} host={host} />);
+    edit('--ds-color-accent-text hex', '#112233');
+    edit('space.3 value', '14px');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(held(doc, 'color.accent.text')).toMatchObject({ $type: 'color', $value: { hex: '#112233' } });
+    expect(held(doc, 'space.3')).toEqual({ $type: 'dimension', $value: { value: 14, unit: 'px' } });
+  });
+
+  it('C6: the check lists the canon’s file problems beside the law’s results', () => {
+    const broken = '<section id="one"></section><section id="two"></section>';
+    const clean = '<div><span style="color:var(--ds-color-accent-text)">Due Friday</span></div>';
+    const doc = docWith({ 'layouts/broken.html': broken, 'components/chip.html': clean }); // stored as a host without a parser does
+    const view = render(<DesignSystemPage artifactId="ds1" handle={{ doc }} host={host} />);
+    const check = view.container.querySelector('[data-ds-section="check"]') as HTMLElement;
+    const problems = validateCanon(readSystem(doc).files, new DOMParser() as unknown as HtmlParser, readSystem(doc).tokens);
+    expect(problems.length).toBeGreaterThan(0);
+    const listed = [...check.querySelectorAll('[aria-label="File problems"] li')].map((li) => li.textContent);
+    expect(listed).toEqual(problems.map((p) => `${p.path} ${p.message}`));
+    expect(check.textContent).not.toContain('keeps every checked rule');
+    expect(check.querySelector('.dsp-summary')!.textContent).toContain(`${problems.length} file ${problems.length === 1 ? 'problem' : 'problems'}`);
   });
 });

@@ -7,7 +7,7 @@ import { byIdentity, cssNamesOf, ROLES, tokenIdentity } from '../roles';
 import type { TokenSet } from '../tokens';
 import { isAlias } from '../values';
 import type { DesignSystemView } from '../view';
-import { writeToken, writtenToken } from './edit';
+import { editToken } from './edit';
 import { CommitField } from './fields';
 import { PreviewScope } from './PreviewScope';
 
@@ -31,16 +31,12 @@ function colorTokens(resolved: ResolvedTokens): Extract<ResolvedToken, { type: '
 
 export function Palette(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedTokens; view: DesignSystemView; artifactId: string; readOnly: boolean }) {
   const { doc, tokens, resolved, view, artifactId, readOnly } = props;
-  const write = (path: string, next: ColorValue): string | null => {
-    const written = writtenToken(tokens, path);
-    if (!written) return `${path} is not in the token file`;
-    return writeToken(doc, written.path, { ...written.token, $value: next });
-  };
-  const fromHex = (path: string, text: string, keepAlpha: number | undefined): string | null => {
+  const fromHex = (shown: Extract<ResolvedToken, { type: 'color' }>, text: string): string | null => {
     const next = colorFromHex(text.startsWith('#') ? text : `#${text}`);
     if (!next) return `“${text}” is not a hex colour (#rrggbb)`;
+    const keepAlpha = shown.value.alpha;
     if (next.alpha === undefined && keepAlpha !== undefined && keepAlpha < 1) next.alpha = keepAlpha;
-    return write(path, next);
+    return editToken(doc, tokens, shown, (token) => ({ ...token, $value: next }));
   };
   const at = (path: string) => byIdentity(resolved.tokens, path);
   return (
@@ -60,13 +56,13 @@ export function Palette(props: { doc: Doc; tokens: TokenSet; resolved: ResolvedT
                 <code className="dsp-name">{name}</code>
                 {isAlias(raw) ? <span className="dsp-alias">= {raw}</span> : null}
                 <span className="dsp-swatch-edit">
-                  <CommitField label={`${name} hex`} value={hex} disabled={readOnly} width="9ch" commit={(text) => fromHex(token.path, text, token.value.alpha)} />
+                  <CommitField label={`${name} hex`} value={hex} disabled={readOnly} width="9ch" commit={(text) => fromHex(token, text)} />
                   <input
                     type="color"
                     aria-label={`${name} colour`}
                     value={hex.slice(0, 7)}
                     disabled={readOnly}
-                    onChange={(event) => fromHex(token.path, event.target.value, token.value.alpha)}
+                    onChange={(event) => fromHex(token, event.target.value)}
                   />
                 </span>
               </div>
