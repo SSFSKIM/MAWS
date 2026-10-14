@@ -302,7 +302,7 @@ async function initTools(id: string, launchId: string): Promise<string[]> {
     .toBe(true);
   return tools!;
 }
-const asksOf = (tools: string[]) => tools.filter((tool) => /ask/i.test(tool));
+const asksOf = (tools: string[]) => tools.filter((tool) => tool === 'AskUserQuestion' || tool.endsWith('__ask') || tool.endsWith('__AskUserQuestion')); // the asks, not Task
 // P2-C2: the prompts that carried an ask's answer to the engine (the host names the ask in its words)
 function askWrites(id: string, askId: string): { uuid: string; text: string; at: string }[] {
   return journal(id)
