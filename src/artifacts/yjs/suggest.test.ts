@@ -4,6 +4,7 @@
 import * as Y from '@y/y';
 import { describe, expect, it } from 'vitest';
 import { checkUpdate, hasPending } from './check';
+import { insertedBy } from './attribution';
 import { clientAbove, planAccept, planReject, SuggestionError, type SuggestionPlan, type SuggestionRange } from './suggest';
 
 const para = (type: string, attrs: Record<string, unknown>, text: string, format?: Record<string, unknown>) => {
@@ -211,5 +212,106 @@ describe('suggestions: fix wave 1', () => {
     expect(byId(w.main.get('default'), 'p3').toDelta().toJSON()).toMatchObject({ children: [{ insert: 'Closing', format: { bold: true } }, { insert: ' line.' }] });
     expect(pairs.complete).toBe(true);
     expect(pairs.from.filter(([client]) => client === w.agent.clientID)).toHaveLength(2); // both markers carried
+  });
+});
+
+// Fix wave 3: a main doc of paragraphs, its suggestion doc, and proposers each writing under clientIDs of their own;
+// the attributions name each write's actor, as the host's provenance does.
+function textWorld(paragraphs: Record<string, [string, Record<string, unknown>?][]>) {
+  const main = new Y.Doc({ gc: true });
+  main.transact(() =>
+    main.get('default').insert(
+      0,
+      Object.entries(paragraphs).map(([id, runs]) => {
+        const node = para('paragraph', { id }, '');
+        let at = 0;
+        for (const [text, format] of runs) {
+          node.insert(at, text, format);
+          at += text.length;
+        }
+        return node;
+      }),
+    ),
+  );
+  const suggestion = new Y.Doc({ gc: false, isSuggestionDoc: true });
+  Y.applyUpdate(suggestion, Y.encodeStateAsUpdate(main));
+  main.on('update', (u: Uint8Array) => Y.applyUpdate(suggestion, u));
+  const maps: Y.ContentMap[] = [];
+  const propose = (actor: string, client: number, edit: (root: Y.Node) => void) => {
+    const replica = new Y.Doc({ gc: false, isSuggestionDoc: true });
+    Y.applyUpdate(replica, Y.encodeStateAsUpdate(suggestion));
+    replica.clientID = client;
+    replica.on('update', (u: Uint8Array) => {
+      maps.push(Y.createContentMapFromContentIds(Y.createContentIdsFromUpdate(u), [Y.createContentAttribute('insert', actor), Y.createContentAttribute('insertAt', client)], [Y.createContentAttribute('delete', actor), Y.createContentAttribute('deleteAt', client)]));
+      Y.applyUpdate(suggestion, u);
+    });
+    replica.transact(() => edit(replica.get('default')));
+    replica.destroy();
+  };
+  const accept = (ranges: SuggestionRange[]) => {
+    const plan = planAccept(main, suggestion, Y.mergeContentMaps(maps), ranges);
+    const replica = new Y.Doc();
+    Y.applyUpdateV2(replica, Y.encodeStateAsUpdateV2(main));
+    replica.clientID = clientAbove([main, suggestion]);
+    let update: Uint8Array | null = null;
+    replica.on('update', (u: Uint8Array) => (update = u));
+    replica.transact(() => plan.edit!(replica));
+    expect(checkUpdate(main, update!)).toBeNull();
+    Y.applyUpdate(main, update!);
+    const pairs = plan.pairs(replica);
+    if (plan.remove) Y.applyUpdate(suggestion, plan.remove);
+    for (const doc of [main, suggestion]) expect(hasPending(doc)).toBe(false);
+    return { pairs: pairs!, attributions: Y.mergeContentMaps(maps), copyClient: replica.clientID };
+  };
+  const text = (doc: Y.Doc, id: string) => byId(doc.get('default'), id);
+  const ends = (node: Y.Node) => {
+    let last: Y.Item | null = node._start;
+    while (last?.right) last = last.right as Y.Item;
+    return { start: idOf(node._start), end: idOf(last) };
+  };
+  return { main, suggestion, propose, accept, text, ends };
+}
+
+describe('suggestions: fix wave 3', () => {
+  it('keeps a person’s unchanged formatting inside an accepted range (the copy reads as the suggestion did before the accept)', () => {
+    const w = textWorld({ p1: [['a'], ['b', { bold: true }], ['c']] });
+    w.propose('session:a', 100, (root) => {
+      const p1 = byId(root, 'p1');
+      p1.format(0, 1, { bold: true });
+      p1.format(2, 1, { bold: true });
+    });
+    w.propose('session:b', 200, (root) => byId(root, 'p1').insert(3, 'd'));
+    const proposed = w.text(w.suggestion, 'p1').toDelta().toJSON(); // captured before the accept: what the owner saw
+    expect(proposed).toMatchObject({ children: [{ insert: 'abc', format: { bold: true } }, { insert: 'd' }] });
+    w.accept([w.ends(w.text(w.suggestion, 'p1'))]);
+    expect(w.text(w.main, 'p1').toDelta().toJSON()).toEqual(proposed);
+  });
+
+  it('credits copied formatting to the one actor who proposed it, whichever of its replicas wrote each marker', () => {
+    // each bold proposal extends a run the person made, so the copy places its markers differently (the fallback)
+    const w = textWorld({ p1: [['a', { bold: true }], ['bc']], p2: [['x', { bold: true }], ['yz']] });
+    w.propose('session:a', 100, (root) => byId(root, 'p1').format(1, 1, { bold: true })); // A's host replica
+    w.propose('session:a', 150, (root) => byId(root, 'p2').format(1, 1, { bold: true })); // A's agent replica
+    w.propose('session:b', 200, (root) => byId(root, 'p1').insert(3, '!'));
+    const { pairs, attributions, copyClient } = w.accept([w.ends(w.text(w.suggestion, 'p1')), w.ends(w.text(w.suggestion, 'p2'))]);
+    expect(w.text(w.main, 'p1').toDelta().toJSON()).toEqual(w.text(w.suggestion, 'p1').toDelta().toJSON());
+    const markerCopies = pairs.to.filter(([client, clock]) => {
+      const item = w.main.store.getItem(Y.createID(client, clock));
+      return item instanceof Y.Item && item.content instanceof Y.ContentFormat;
+    });
+    expect(markerCopies.length).toBeGreaterThan(0);
+    for (const [i, to] of pairs.to.entries()) {
+      if (!markerCopies.includes(to)) continue;
+      const [client, clock] = pairs.from[i];
+      expect(insertedBy(attributions, { client, clock })?.actor).toBe('session:a');
+    }
+    // every copied marker is paired: none falls to the copy's binding
+    const copied: [number, number][] = [];
+    for (const id of ['p1', 'p2']) {
+      for (let item: Y.Item | null = w.text(w.main, id)._start; item; item = item.right as Y.Item | null) {
+        if (!item.deleted && item.content instanceof Y.ContentFormat && item.id.client === copyClient) copied.push([item.id.client, item.id.clock]);
+      }
+    }
+    for (const marker of copied) expect(markerCopies).toContainEqual(marker);
   });
 });

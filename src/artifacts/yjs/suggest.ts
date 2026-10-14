@@ -14,7 +14,7 @@
 import * as delta from 'lib0/delta';
 import * as encoding from 'lib0/encoding';
 import * as Y from '@y/y';
-import type { ContentIds, ContentMap, ItemId } from './attribution';
+import { insertedBy, type ContentIds, type ContentMap, type ItemId } from './attribution';
 import type { Doc } from './doc';
 
 export interface SuggestionRange {
@@ -73,13 +73,16 @@ export function planAccept(main: Doc, suggestion: Doc, attributions: ContentMap,
     if (prev.store.pendingStructs !== null || prev.store.pendingDs !== null) {
       throw new SuggestionError('a range leaves part of an inserted block without the block: pass the block’s own range', { reason: 'partialBlock' });
     }
+    // What the main doc loses (content of its own a proposal deleted, formatting markers among it) is applied by id,
+    // before the delta; the delta is taken against the base with those deletions made, so content whose formatting
+    // came from a deleted marker (a run the proposal re-cut around it) is formatted as the accepted state has it.
+    const gone = Y.intersectSets(Y.diffIdSet(Y.createDeleteSetFromStructStore(prev.store), Y.createDeleteSetFromStructStore(base.store)), Y.createInsertSetFromStructStore(base.store, false));
+    const deletions = gone.isEmpty() ? null : deletionsOf(gone);
+    if (deletions) Y.applyUpdate(base, deletions);
     const roots = [...(Y.diffDocsToDelta(base, prev) as unknown as Delta).attrs].flatMap((op): [string, delta.DeltaBuilderAny][] => {
       const change = delta.$modifyAttrOp.check(op) ? applicable(op.value as Delta) : null;
       return change ? [[String(op.key), change]] : [];
     });
-    // What the main doc loses (content of its own a proposal deleted) is applied by id, before the delta.
-    const gone = Y.intersectSets(Y.diffIdSet(Y.createDeleteSetFromStructStore(prev.store), Y.createDeleteSetFromStructStore(base.store)), Y.createInsertSetFromStructStore(base.store, false));
-    const deletions = gone.isEmpty() ? null : deletionsOf(gone);
     // The originals taken (proposals, and proposals already withdrawn that came along), deleted in the suggestion doc.
     const taken = Y.diffIdSet(accepted?.inserts ?? Y.createIdSet(), Y.createInsertSetFromStructStore(main.store, false));
     const acceptedState = Y.encodeStateAsUpdateV2(prev);
@@ -96,7 +99,7 @@ export function planAccept(main: Doc, suggestion: Doc, attributions: ContentMap,
       suggesters: [...taken.clients.keys()],
       // The accepted state (the main doc with the originals) against the copy: equal unit by unit, ids differing where
       // copied.
-      pairs: (result) => paired(acceptedState, result, taken),
+      pairs: (result) => paired(acceptedState, result, { proposals: taken, attributions }),
     };
   } finally {
     base.destroy();
@@ -185,11 +188,17 @@ function onOneChain(doc: Y.Doc, range: SuggestionRange): boolean {
   return false;
 }
 
-// `proposals`: the ids a formatting marker of the copy may be credited from when it cannot be paired in place.
-function paired(state: Uint8Array, result: Doc, proposals?: Y.IdSet): Pairs | null {
+// `sources`: the proposals a formatting marker of the copy may be credited from when it cannot be paired in place, and
+// the attributions naming their actors.
+interface Sources {
+  proposals: Y.IdSet;
+  attributions: ContentMap;
+}
+
+function paired(state: Uint8Array, result: Doc, sources?: Sources): Pairs | null {
   const reference = scratch(state);
   try {
-    return pairUnits(reference, result, proposals);
+    return pairUnits(reference, result, sources);
   } finally {
     reference.destroy();
   }
@@ -310,21 +319,23 @@ function unitsOf(doc: Y.Doc, names: string[]): { out: Unit[]; formats: Unit[] } 
   return { out, formats };
 }
 
-function pairUnits(reference: Y.Doc, result: Y.Doc, proposals?: Y.IdSet): Pairs | null {
+function pairUnits(reference: Y.Doc, result: Y.Doc, sources?: Sources): Pairs | null {
   const names = [...new Set([...reference.share.keys(), ...result.share.keys()])].sort();
   const a = unitsOf(reference, names);
   const b = unitsOf(result, names);
   const content = pairLists(a.out, b.out);
   if (!content) return null;
-  const formats = pairLists(a.formats, b.formats) ?? (proposals ? bySource(a.formats, b.formats, proposals) : null);
+  const formats = pairLists(a.formats, b.formats) ?? (sources ? bySource(a.formats, b.formats, sources) : null);
   if (!formats) return { ...content, complete: false };
   return { from: [...content.from, ...formats.from], to: [...content.to, ...formats.to], complete: formats.complete ?? true };
 }
 
 // The copy's own formatting markers (those the reference does not hold) when the copy placed them differently: each
-// pairs with a proposal's marker of the same format (key and value, else key), provided every such proposal marker is
-// under one clientID, so its author is the one who set that format. A marker with no such source stays unpaired.
-function bySource(a: Unit[], b: Unit[], proposals: Y.IdSet): { from: [number, number][]; to: [number, number][]; complete: boolean } {
+// pairs with a proposal's marker of the same format (key and value, else key), provided every such proposal marker was
+// written by one actor (whichever of its replicas wrote it), so its author is the one who set that format. A marker
+// with no such source stays unpaired.
+function bySource(a: Unit[], b: Unit[], { proposals, attributions }: Sources): { from: [number, number][]; to: [number, number][]; complete: boolean } {
+  const actorOf = ([client, clock]: [number, number]) => insertedBy(attributions, { client, clock })?.actor ?? `client:${client}`;
   const idKey = ([client, clock]: [number, number]) => `${client}:${clock}`;
   const inReference = new Set(a.map((u) => idKey(u.id)));
   const sources = a.filter((u) => proposals.has(u.id[0], u.id[1]));
@@ -335,7 +346,7 @@ function bySource(a: Unit[], b: Unit[], proposals: Y.IdSet): { from: [number, nu
   for (const copy of b.filter((u) => !inReference.has(idKey(u.id)))) {
     let candidates = sources.filter((u) => u.kind === copy.kind);
     if (candidates.length === 0) candidates = sources.filter((u) => formatKey(u.kind) === formatKey(copy.kind));
-    if (candidates.length > 0 && candidates.every((u) => u.id[0] === candidates[0].id[0])) {
+    if (candidates.length > 0 && candidates.every((u) => actorOf(u.id) === actorOf(candidates[0].id))) {
       from.push(candidates[0].id);
       to.push(copy.id);
     } else {

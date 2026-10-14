@@ -742,7 +742,8 @@ export class DocumentService {
     }
     // The proposers whose content an accept copies. A copy pairs unit by unit with the proposals it copies, and each
     // unit's author and time are carried from its own; a formatting marker the copy placed differently pairs with the
-    // marker of the proposer who set that format when only one did. A marker left unpaired keeps the copy's binding:
+    // marker of the actor who set that format when only one did (whichever of its replicas wrote it). A marker left
+    // unpaired (several actors set that format in the range) keeps the copy's binding:
     // the first proposer, at the accept time (logged; parent tracker).
     const suggesters = [...new Map(plan.suggesters.flatMap((client) => {
       const bound = this.storage.clientActor(suggestion.id, client);
@@ -762,7 +763,7 @@ export class DocumentService {
             });
         });
         const carried = pairs as ReturnType<SuggestionPlan['pairs']>;
-        if (carried && !carried.complete && suggesters.length > 1) this.log(`accept on ${artifactId}: a formatting marker of the copy matches several proposers' and is credited to ${actorKey(suggesters[0])} at the accept time`);
+        if (carried && !carried.complete && suggesters.length > 1) this.log(`accept on ${artifactId}: a formatting marker of the copy matches several actors' proposals and is credited to ${actorKey(suggesters[0])} at the accept time`);
         if (!carried) this.log(`${what} on ${artifactId}: the copy could not be paired with its originals; its provenance is the ${what === 'accept' ? 'suggester’s at the accept time' : 'rejector’s'}`);
         const prior = what === 'accept' ? this.provenance(suggestion.id) : this.provenance(main.id);
         this.afterUpdate(main, adapter, actor, applied, carried && carried.from.length > 0 ? { carries: [{ kind: what, from: carried.from, to: carried.to }], prior } : undefined);
