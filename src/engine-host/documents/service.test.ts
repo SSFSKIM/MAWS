@@ -784,6 +784,62 @@ describe('DocumentService: accepting and rejecting suggestions (M8; Decision Log
   });
 });
 
+describe('DocumentService: suggestions, fix wave 1', () => {
+  const sessionA: Actor = { kind: 'session', appSessionId: sid('app-a') };
+  const sessionB: Actor = { kind: 'session', appSessionId: sid('app-b') };
+  const text = (key: string) => service.live(key).get('t');
+  // The ids of the formatting markers of a text, in order.
+  const markers = (key: string) => {
+    const out: { client: number; clock: number }[] = [];
+    for (let item = text(key)._start; item; item = item.right as typeof item) {
+      if (!item.deleted && (item.content as { key?: unknown }).key !== undefined) out.push({ client: item.id.client, clock: item.id.clock });
+    }
+    return out;
+  };
+
+  it('credits a mixed-author range’s format change to its proposer and its inserted text to its own, each at its proposal’s time', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'x z'));
+    const key = service.suggestionDoc('a1');
+    const boldAt = now;
+    await service.writeAs(key, sessionA, (doc) => doc.get('t').format(0, 1, { bold: true })); // A: bold on the existing "x"
+    now += 2 * MIN;
+    const typedAt = now;
+    await service.writeAs(key, sessionB, (doc) => doc.get('t').insert(1, 'y')); // B: a character beside it
+    now += 5 * MIN;
+    const [open] = markers(key);
+    await service.acceptSuggestion('a1', [{ start: open, end: idAt(text(key), 1)! }], human);
+    expect(text('a1').toDelta().toJSON()).toEqual(text(key).toDelta().toJSON());
+    expect(text('a1').toString()).toContain('y');
+    const provenance = service.provenance('a1');
+    const copied = markers('a1');
+    expect(copied.length).toBeGreaterThan(0);
+    for (const marker of copied) {
+      expect(insertedBy(provenance, marker)).toEqual({ actor: 'session:app-a', at: boldAt });
+      expect(carriedBy(provenance, marker)).toBe('accept');
+    }
+    expect(insertedBy(provenance, idAt(text('a1'), 1)!)).toEqual({ actor: 'session:app-b', at: typedAt });
+  });
+
+  it('refuses, writing nothing, a mixed-author range whose copy cannot be paired with every proposal (no change credited to another proposer)', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => {
+      doc.get('t').insert(0, 'ab');
+      doc.get('t').format(0, 1, { bold: true }); // "a" bold already: the copy of a bold "b" merges into its run
+    });
+    const key = service.suggestionDoc('a1');
+    await service.writeAs(key, sessionA, (doc) => doc.get('t').format(1, 1, { bold: true }));
+    await service.writeAs(key, sessionB, (doc) => doc.get('t').insert(2, 'c'));
+    const rows = rowCount();
+    const [first] = markers(key);
+    const outcome = await service.acceptSuggestion('a1', [{ start: first, end: idAt(text(key), 2)! }], human).catch((error: unknown) => error);
+    expect(outcome).toBeInstanceOf(SuggestionError);
+    expect((outcome as SuggestionError).data).toMatchObject({ reason: 'mixedAuthors' });
+    expect(rowCount()).toBe(rows);
+    expect(text('a1').toString()).toBe('ab');
+  });
+});
+
 describe('DocumentService: the idle unload (Decision Log 29b)', () => {
   beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }));
   afterEach(() => vi.useRealTimers());

@@ -60,6 +60,7 @@ import {
   clientAbove,
   planAccept,
   planReject,
+  SuggestionError,
   type Carry,
   type ContentMap,
   type SuggestionPlan,
@@ -740,13 +741,23 @@ export class DocumentService {
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : new Error(String(error)));
     }
+    // The proposers whose content an accept copies. A copy pairs unit by unit with the proposals it copies, and each
+    // unit's author is carried from its own; where the pairing is incomplete the unit keeps the copy's binding, which is
+    // right only when one proposer is involved, so a range mixing proposers that cannot be fully paired is refused.
+    const suggesters = [...new Map(plan.suggesters.flatMap((client) => {
+      const bound = this.storage.clientActor(suggestion.id, client);
+      return bound ? [[actorKey(bound), bound] as const] : [];
+    })).values()];
+    if (what === 'accept' && suggesters.length > 1 && !plan.paired) {
+      return Promise.reject(new SuggestionError('the range mixes proposals of several authors whose changes cannot all be told apart in the copy: accept each one’s on its own', { reason: 'mixedAuthors' }));
+    }
     const suggestionDirty = this.dirty.get(suggestion.id);
     const failed = this.inFrame(main, () => {
       if (plan.edit) {
         const adapter = this.adapterOf(main);
         let pairs: ReturnType<SuggestionPlan['pairs']> = null;
         const applied = this.applyOwn(main, () => {
-          if (what === 'accept') pairs = this.writeCopy(main, suggestion, actor, plan);
+          if (what === 'accept') pairs = this.writeCopy(main, suggestion, actor, plan, suggesters);
           else
             this.writeThrough(main, actor, (doc) => {
               plan.edit!(doc);
@@ -775,12 +786,9 @@ export class DocumentService {
   // An accepted suggestion's copy (Decision Log 45): written by a one-off replica of the main doc whose clientID is
   // above every clientID either doc holds (so a copied attribute stays its key's value in the suggestion doc once its
   // original is deleted) and is bound to the suggester; the row is `actor`'s. Answers the copy's pairs with the
-  // originals. A range holding several suggesters' proposals binds the clientID to the first; the carry credits each.
-  private writeCopy(main: HostDoc, suggestion: HostDoc, actor: Actor, plan: SuggestionPlan): ReturnType<SuggestionPlan['pairs']> {
-    const suggesters = [...new Map(plan.suggesters.flatMap((client) => {
-      const bound = this.storage.clientActor(suggestion.id, client);
-      return bound ? [[actorKey(bound), bound] as const] : [];
-    })).values()];
+  // originals. A range holding several suggesters' proposals binds the clientID to the first and needs a complete
+  // pairing, so the carry credits every unit to its own proposer; without one the write throws and nothing lands.
+  private writeCopy(main: HostDoc, suggestion: HostDoc, actor: Actor, plan: SuggestionPlan, suggesters: Actor[]): ReturnType<SuggestionPlan['pairs']> {
     const doc = newDoc();
     applyV1(doc, diffV1(main.doc), MIRROR);
     adoptClientId(doc, clientAbove([main.doc, suggestion.doc]));
@@ -800,7 +808,9 @@ export class DocumentService {
     try {
       transact(doc, () => plan.edit!(doc), writer);
       if (hasPending(main.doc)) throw new Error('an accepted suggestion’s copy left state pending');
-      return plan.pairs(doc);
+      const pairs = plan.pairs(doc);
+      if (suggesters.length > 1 && !pairs?.complete) throw new Error('an accepted copy of several authors’ proposals could not be paired with them all');
+      return pairs;
     } finally {
       main.credit = null;
       writer.off();

@@ -18,7 +18,7 @@ const block = (node: Y.Node): SuggestionRange => ({ start: idOf(node._item), end
 
 // A main doc, its suggestion doc kept in step, an agent's replica of the suggestion doc, and a second replica of the main
 // doc standing for an editor; `land` does what the host does with a plan.
-function world() {
+function world({ agentClient }: { agentClient?: number } = {}) {
   const main = new Y.Doc({ gc: true });
   main.transact(() => {
     main.get('default').insert(0, [
@@ -39,6 +39,7 @@ function world() {
   });
   const agent = new Y.Doc({ gc: false, isSuggestionDoc: true });
   Y.applyUpdate(agent, Y.encodeStateAsUpdate(suggestion));
+  if (agentClient !== undefined) agent.clientID = agentClient; // after the load: v14 keeps a clientID no update carries
   const proposals: Uint8Array[] = [];
   agent.on('update', (u: Uint8Array) => {
     proposals.push(u);
@@ -164,5 +165,52 @@ describe('rejecting suggestions (Decision Log 45)', () => {
     expect(json(w.suggestion)).toBe(before); // nothing left proposed
     expect(pairs!.from).toContainEqual([originalId.client, originalId.clock]); // the restored text pairs with its original
     expect(pairs!.from).toHaveLength('owner '.length);
+  });
+});
+
+describe('suggestions: fix wave 1', () => {
+  // A proposer clientID above any random one, so a restored value is always the lower concurrent write (finding 1).
+  const HIGH = Number.MAX_SAFE_INTEGER - 1_000;
+
+  it('rejecting an attribute replacement leaves the restored value in both docs (a file and a block attribute)', () => {
+    for (const which of ['file', 'block'] as const) {
+      const w = world({ agentClient: HIGH });
+      w.agent.transact(() => {
+        if (which === 'file') w.agent.get('files').setAttr('a.txt', 'A2');
+        else byId(w.agent.get('default'), 'h1').setAttr('level', 3);
+      });
+      const item = which === 'file' ? w.suggestion.get('files')._map.get('a.txt')! : byId(w.suggestion.get('default'), 'h1')._map.get('level')!;
+      w.land(planReject(w.main, w.suggestion, w.attributions(), [{ start: idOf(item), end: idOf(item) }]));
+      const value = (doc: Y.Doc) => (which === 'file' ? doc.get('files').getAttr('a.txt') : byId(doc.get('default'), 'h1').getAttr('level'));
+      expect(value(w.main)).toBe(which === 'file' ? 'A1' : 2);
+      expect(value(w.suggestion)).toBe(which === 'file' ? 'A1' : 2);
+    }
+  });
+
+  it('refuses a range whose end is not on its start’s item chain', () => {
+    const w = world();
+    const root = w.agent.get('default');
+    w.agent.transact(() => {
+      byId(root, 'p1').insert(0, 'One ');
+      byId(root, 'p2').insert(0, 'Two ');
+    });
+    const start = Y.createRelativePositionFromTypeIndex(byId(w.suggestion.get('default'), 'p1'), 0).item!;
+    const end = Y.createRelativePositionFromTypeIndex(byId(w.suggestion.get('default'), 'p2'), 0).item!;
+    expect(() => planAccept(w.main, w.suggestion, w.attributions(), [{ start, end }])).toThrow(SuggestionError);
+    expect(() => planReject(w.main, w.suggestion, w.attributions(), [{ start: end, end: start }])).toThrow(SuggestionError);
+    expect(json(w.main)).not.toContain('One ');
+  });
+
+  it('pairs a proposed format change with its copy, so its author can be carried', () => {
+    const w = world();
+    w.agent.transact(() => byId(w.agent.get('default'), 'p3').format(0, 7, { bold: true })); // "Closing" made bold
+    const p3 = byId(w.suggestion.get('default'), 'p3');
+    const marker = p3._start!; // the proposal's opening format marker
+    const plan = planAccept(w.main, w.suggestion, w.attributions(), [{ start: idOf(marker), end: idOf(marker) }]);
+    expect(plan.paired).toBe(true);
+    const pairs = w.land(plan)!;
+    expect(byId(w.main.get('default'), 'p3').toDelta().toJSON()).toMatchObject({ children: [{ insert: 'Closing', format: { bold: true } }, { insert: ' line.' }] });
+    expect(pairs.complete).toBe(true);
+    expect(pairs.from.filter(([client]) => client === w.agent.clientID)).toHaveLength(2); // both markers carried
   });
 });

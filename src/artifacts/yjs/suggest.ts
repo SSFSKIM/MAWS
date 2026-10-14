@@ -32,8 +32,18 @@ export interface SuggestionPlan {
   readonly suggesters: number[];
   // After `edit` ran on `result` (the replica, now holding the copy): the [from, to] pairs of each copied unit, from the
   // id it had (the original proposal, or for a rejected deletion the main doc's deleted content) to its copy's id, for
-  // the provenance carry; null when the two docs cannot be paired unit by unit.
-  pairs(result: Doc): { from: [number, number][]; to: [number, number][] } | null;
+  // the provenance carry; null when the two docs' content cannot be paired unit by unit. `complete` is false when the
+  // formatting markers could not be paired too (a copy may place them differently), so some of the copy is uncarried.
+  pairs(result: Doc): Pairs | null;
+  // Whether a dry run of `edit` paired every unit of the copy, formatting included: when not, part of the copy would be
+  // credited to its clientID's binding alone, which is only right when the range holds one suggester's proposals.
+  readonly paired: boolean;
+}
+
+export interface Pairs {
+  from: [number, number][];
+  to: [number, number][];
+  complete: boolean;
 }
 
 export class SuggestionError extends Error {
@@ -74,14 +84,16 @@ export function planAccept(main: Doc, suggestion: Doc, attributions: ContentMap,
     // The originals taken (proposals, and proposals already withdrawn that came along), deleted in the suggestion doc.
     const taken = Y.diffIdSet(accepted?.inserts ?? Y.createIdSet(), Y.createInsertSetFromStructStore(main.store, false));
     const acceptedState = Y.encodeStateAsUpdateV2(prev);
+    const edit =
+      roots.length === 0 && !deletions
+        ? null
+        : (doc: Doc) => {
+            if (deletions) Y.applyUpdate(doc, deletions);
+            for (const [name, change] of roots) doc.get(name).applyDelta(change);
+          };
     return {
-      edit:
-        roots.length === 0 && !deletions
-          ? null
-          : (doc) => {
-              if (deletions) Y.applyUpdate(doc, deletions);
-              for (const [name, change] of roots) doc.get(name).applyDelta(change);
-            },
+      edit,
+      paired: edit === null || dryRun(main, suggestion, edit, acceptedState)?.complete === true,
       remove: taken.isEmpty() ? null : deletionsOf(taken),
       suggesters: [...taken.clients.keys()],
       // The accepted state (the main doc with the originals) against the copy: equal unit by unit, ids differing where
@@ -113,6 +125,9 @@ export function planReject(main: Doc, suggestion: Doc, attributions: ContentMap,
   let copy: Uint8Array | null = null;
   if (!restore.isEmpty()) {
     const redo = scratch(mainState);
+    // Above every clientID either doc holds: a restored attribute is concurrent with the proposal that replaced it, and
+    // v14 keeps the higher clientID's on the right, so the restored value stays once the proposal is removed.
+    redo.clientID = clientAbove([main, suggestion]);
     try {
       redo.on('update', (u: Uint8Array) => {
         copy = copy ? Y.mergeUpdates([copy as Uint8Array<ArrayBuffer>, u as Uint8Array<ArrayBuffer>]) : u;
@@ -131,6 +146,7 @@ export function planReject(main: Doc, suggestion: Doc, attributions: ContentMap,
     edit: update ? (doc) => Y.applyUpdate(doc, update) : null,
     remove: proposed.isEmpty() ? null : deletionsOf(proposed),
     suggesters: [],
+    paired: true, // the rejector writes the copy: nothing is credited to another proposer
     // The main doc before (the deleted content still there) against the copy.
     pairs: (result) => paired(mainState, result),
   };
@@ -150,6 +166,7 @@ function collect(prev: Y.Doc, suggestion: Doc, attributions: ContentMap, ranges:
       for (const id of [range.start, range.end]) {
         if (id.clock >= next.store.getClock(id.client)) throw new SuggestionError(`no content at ${id.client}:${id.clock} in the suggestions`, { range });
       }
+      if (!onOneChain(next, range)) throw new SuggestionError('a range’s end is not on its start’s item chain (one parent, start before end)', { range, reason: 'range' });
       renderer.acceptChanges(Y.createID(range.start.client, range.start.clock), Y.createID(range.end.client, range.end.clock));
     }
   } finally {
@@ -160,7 +177,32 @@ function collect(prev: Y.Doc, suggestion: Doc, attributions: ContentMap, ranges:
   return taken ? Y.createContentIdsFromUpdate(taken) : null;
 }
 
-function paired(state: Uint8Array, result: Doc): { from: [number, number][]; to: [number, number][] } | null {
+// Whether `range.end` lies on `range.start`'s item chain at or after it: the same parent (and the same attribute key),
+// reachable by walking right, as v14's accept walks.
+function onOneChain(doc: Y.Doc, range: SuggestionRange): boolean {
+  const start = doc.store.getItem(Y.createID(range.start.client, range.start.clock));
+  const end = doc.store.getItem(Y.createID(range.end.client, range.end.clock));
+  if (!(start instanceof Y.Item) || !(end instanceof Y.Item)) return false;
+  if (start.parent !== end.parent || start.parentSub !== end.parentSub) return false;
+  for (let item: Y.Item | null = start; item !== null; item = item.right as Y.Item | null) if (item === end) return true;
+  return false;
+}
+
+// The edit run on a scratch copy of the main doc, under a clientID above both docs (as the host writes it), paired
+// against the accepted state.
+function dryRun(main: Doc, suggestion: Doc, edit: (doc: Doc) => void, acceptedState: Uint8Array): Pairs | null {
+  const doc = new Y.Doc();
+  try {
+    Y.applyUpdateV2(doc, Y.encodeStateAsUpdateV2(main));
+    doc.clientID = clientAbove([main, suggestion]);
+    doc.transact(() => edit(doc));
+    return paired(acceptedState, doc);
+  } finally {
+    doc.destroy();
+  }
+}
+
+function paired(state: Uint8Array, result: Doc): Pairs | null {
   const reference = scratch(state);
   try {
     return pairUnits(reference, result);
@@ -248,9 +290,11 @@ export function clientAbove(docs: Doc[]): number {
 type Unit = { kind: string; id: [number, number] };
 
 // Every content unit of every root type in document order (attributes by key, then children; a string's characters
-// one by one; formatting markers left out, since a copy may place them differently), each with its id.
-function unitsOf(doc: Y.Doc, names: string[]): Unit[] {
+// one by one), each with its id; the formatting markers in a list of their own, since a copy may place them
+// differently while its content is the same.
+function unitsOf(doc: Y.Doc, names: string[]): { out: Unit[]; formats: Unit[] } {
   const out: Unit[] = [];
+  const formats: Unit[] = [];
   const walk = (node: Y.Node) => {
     for (const key of [...node._map.keys()].sort()) {
       const item = node._map.get(key)!;
@@ -259,8 +303,12 @@ function unitsOf(doc: Y.Doc, names: string[]): Unit[] {
       if (item.content instanceof Y.ContentType) walk(item.content.type as Y.Node);
     }
     for (let item: Y.Item | null = node._start; item !== null; item = item.right as Y.Item | null) {
-      if (item.deleted || item.content instanceof Y.ContentFormat) continue;
+      if (item.deleted) continue;
       const content = item.content;
+      if (content instanceof Y.ContentFormat) {
+        formats.push({ kind: `${content.key}=${JSON.stringify(content.value)}`, id: [item.id.client, item.id.clock] });
+        continue;
+      }
       if (content instanceof Y.ContentType) {
         out.push({ kind: `<${(content.type as Y.Node).name ?? ''}`, id: [item.id.client, item.id.clock] });
         walk(content.type as Y.Node);
@@ -275,13 +323,21 @@ function unitsOf(doc: Y.Doc, names: string[]): Unit[] {
     const root = doc.share.get(name);
     if (root) walk(root as Y.Node);
   }
-  return out;
+  return { out, formats };
 }
 
-function pairUnits(reference: Y.Doc, result: Y.Doc): { from: [number, number][]; to: [number, number][] } | null {
+function pairUnits(reference: Y.Doc, result: Y.Doc): Pairs | null {
   const names = [...new Set([...reference.share.keys(), ...result.share.keys()])].sort();
   const a = unitsOf(reference, names);
   const b = unitsOf(result, names);
+  const content = pairLists(a.out, b.out);
+  if (!content) return null;
+  const formats = pairLists(a.formats, b.formats);
+  if (!formats) return { ...content, complete: false };
+  return { from: [...content.from, ...formats.from], to: [...content.to, ...formats.to], complete: true };
+}
+
+function pairLists(a: Unit[], b: Unit[]): { from: [number, number][]; to: [number, number][] } | null {
   if (a.length !== b.length) return null;
   const from: [number, number][] = [];
   const to: [number, number][] = [];
