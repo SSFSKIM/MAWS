@@ -3,6 +3,7 @@
 // a deletion. The host's tool-use idempotency is A's `withOp` (M7's tool), not the writer's, so its check moves there.
 // Where the schema module differs from S4's, the expectation follows the schema: `comment` is allowed on a code block
 // (D2, parent Decision Log 31), so retyping a commented passage to code keeps its comment.
+import type { JSONContent } from '@tiptap/core';
 import { describe, expect, it, vi } from 'vitest';
 import { contentIdsOf, idAt, onUpdate, stateVector, transact, type Node } from '../yjs';
 import { DocIndex } from './block-index';
@@ -71,16 +72,18 @@ describe('the ops (S4 1)', () => {
   });
 
   // M9's review (the first batch after a read): an unscoped quote converts to ProseMirror only the blocks whose text holds
-  // it, never every block of the tab (a cold replica paid tens of milliseconds for that at 200 pages).
-  it('replace_text unscoped converts only the blocks whose text holds the quote', () => {
+  // it, never every block of the tab (a cold replica paid tens of milliseconds for that at 200 pages); since the M9
+  // addendum, blocks that are not plain prose (links, comments, tables here) are always checked on their markdown.
+  it('replace_text unscoped converts only the blocks whose text holds the quote, and those not plain prose', () => {
     const doc = seedDoc();
-    DocIndex.of(doc).warm(); // every block's text known, none converted by it
+    const index = DocIndex.of(doc);
+    index.warm(); // every block's text known, none converted by it
     const pm = vi.spyOn(DocIndex.prototype, 'pm');
     applyEdit(doc, [{ op: 'replace_text', old: 'scheduled for Friday', new: 'moved to Monday' }]);
-    const converted = new Set(pm.mock.calls.map(([top]) => top));
+    const converted = [...new Set(pm.mock.calls.map(([top]) => top))];
     pm.mockRestore();
     expect(textOf(doc, 'p2')).toContain('moved to Monday');
-    expect(converted.size, 'top-level blocks converted').toBeLessThanOrEqual(1);
+    expect(converted.filter((top) => top.id !== 'p2' && index.plainProse(top)).map((top) => top.id), 'plain prose converted').toEqual([]);
   });
 
   it('insert checks the tab’s shape without converting its untouched blocks', () => {
@@ -112,6 +115,63 @@ describe('the ops (S4 1)', () => {
     const doc = seed();
     const res = applyEdit(doc, [{ op: 'replace_text', old: 'alphazed', new: 'betazed', all: true }]);
     expect(res.results[0].line).toBe('replaced 2 occurrence(s) in ^p1, ^pe1');
+  });
+
+  // M9 addendum (wave 2's re-review): the raw text filters only plain prose; every other block is checked on its
+  // markdown, whose generated text (entities, chip and attribute names, a mark's address) the raw text lacks.
+  describe('the prefilter keeps every block whose markdown could hold the quote', () => {
+    const para = (id: string, content: JSONContent[]): JSONContent => ({ type: 'paragraph', attrs: { id }, content });
+    const text = (value: string, marks?: JSONContent['marks']): JSONContent => ({ type: 'text', text: value, ...(marks && { marks }) });
+    const cases: Array<{ name: string; blocks: JSONContent[]; quote: string; twice: string }> = [
+      {
+        name: 'an entity in an image’s alt',
+        blocks: [para('p1', [text('amp;Beta')]), para('p2', [text('See '), { type: 'image', attrs: { src: 'https://x.org/a.png', alt: 'A&Beta', assetId: null } }])],
+        quote: 'amp;Beta',
+        twice: '^p1, ^p2',
+      },
+      {
+        name: 'a chip’s generated names',
+        blocks: [para('p1', [text('the kind iso note')]), para('p2', [text('Due '), { type: 'date', attrs: { iso: '2026-10-12' } }])],
+        quote: 'kind',
+        twice: '^p1, ^p2',
+      },
+      {
+        name: 'a chart’s spec-json',
+        blocks: [para('p1', [text('a spec-json mention')]), { type: 'chart', attrs: { id: 'ch1', source: 'x,y\n1,2', spec: { mark: 'bar' } } }],
+        quote: 'spec-json',
+        twice: '^p1, ^ch1',
+      },
+      {
+        name: 'a link’s address',
+        blocks: [para('p1', [text('Visit example.com today.')]), para('p2', [text('Read more', [{ type: 'link', attrs: { href: 'https://example.com', title: null } }])])],
+        quote: 'example.com',
+        twice: '^p1, ^p2',
+      },
+    ];
+    for (const { name, blocks, quote, twice } of cases) {
+      it(`${name}: an unscoped quote is not unique, and all replaces both`, () => {
+        const seed = () => seedDoc({ type: 'doc', content: blocks }, {});
+        expect(refusal(() => applyEdit(seed(), [{ op: 'replace_text', old: quote, new: 'zeta' }])).reason).toBe('notUnique');
+        expect(applyEdit(seed(), [{ op: 'replace_text', old: quote, new: 'zeta', all: true }]).results[0].line).toBe(`replaced 2 occurrence(s) in ${twice}`);
+      });
+    }
+
+    it('a plain-prose document still converts only the block holding the quote', () => {
+      const prose = (k: number): JSONContent[] => [
+        { type: 'heading', attrs: { id: `h${k}`, level: 2 }, content: [text(`Section ${k} heading`)] },
+        para(`p${k}`, [text(`Plain words of part ${k}, with `), text('bold', [{ type: 'bold' }]), text(' and '), text('code', [{ type: 'code' }]), text(` (and parentheses) #${k}.`)]),
+        { type: 'bulletList', attrs: { id: `l${k}` }, content: [{ type: 'listItem', attrs: { id: `li${k}` }, content: [para(`lp${k}`, [text(`an item of part ${k}`)])] }] },
+        { type: 'orderedList', attrs: { id: `o${k}`, start: 1, type: null }, content: [{ type: 'listItem', attrs: { id: `oi${k}` }, content: [para(`op${k}`, [text(`a step of part ${k}`)])] }] },
+      ];
+      const doc = seedDoc({ type: 'doc', content: [0, 1, 2, 3].flatMap(prose).concat([para('target', [text('the needle sentence')])]) }, {});
+      DocIndex.of(doc).warm();
+      const pm = vi.spyOn(DocIndex.prototype, 'pm');
+      applyEdit(doc, [{ op: 'replace_text', old: 'needle sentence', new: 'thread sentence' }]);
+      const converted = new Set(pm.mock.calls.map(([top]) => top));
+      pm.mockRestore();
+      expect(textOf(doc, 'target')).toBe('the thread sentence');
+      expect(converted.size, 'top-level blocks converted').toBeLessThanOrEqual(1);
+    });
   });
 
   it('replace_text finds a quote in a diagram’s source and one the markdown numbers (a list item’s marker)', () => {

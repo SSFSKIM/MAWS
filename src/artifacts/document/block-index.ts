@@ -9,11 +9,23 @@
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { Doc, Node } from '../yjs';
 import { YNode } from '../yjs/document';
-import { ynodeToPmnode } from '../yjs/prosemirror';
+import { yattr2markname, ynodeToPmnode } from '../yjs/prosemirror';
 import { docMarkdown } from './markdown';
 import { schemaFor } from './schema';
 import { TABS } from './tabs';
 import { isCommentKey } from './threads';
+
+// Plain prose (see `DocIndex.plainProse`): the nodes, attributes and marks whose markdown spells no word of its own.
+const PROSE_NODES = new Set(['paragraph', 'heading', 'blockquote', 'bulletList', 'orderedList', 'listItem', 'taskList', 'taskItem', 'hardBreak', 'horizontalRule', 'codeBlock']);
+const PROSE_ATTRS: Record<string, (node: string, value: unknown) => boolean> = {
+  id: () => true,
+  level: () => true,
+  start: () => true,
+  checked: () => true,
+  type: (node, value) => node === 'orderedList' && value === '1', // `a.` and `iv.` spell letters
+  language: (_, value) => value === '', // `` ```ts `` spells one
+};
+const PROSE_MARKS = new Set(['bold', 'italic', 'underline', 'strike', 'code', 'highlight']); // a highlight's colour: `<mark color>`
 
 /** A top-level block of a tab body, with what the index caches about it. */
 export class TopBlock {
@@ -23,6 +35,7 @@ export class TopBlock {
   mdCache: string | null = null;
   textCache: string | null = null;
   rawTextCache: string | null = null;
+  plainCache: boolean | null = null;
   threadsCache: ReadonlySet<string> | null = null;
 
   constructor(
@@ -191,6 +204,43 @@ export class DocIndex {
   }
 
   /**
+   * Whether the block is plain prose (M9 addendum, wave 2's re-review): its markdown is its text plus syntax that spells
+   * no word of its own (a heading's hashes, a list's bullets and numbers, a task's box, emphasis and code delimiters,
+   * backslash escapes, `&#160;`-style numeric entities), so every word the markdown holds is in `rawText`. Textblocks and
+   * their containers whose inline content is text and hard breaks, with attribute-free marks, no lettered or roman list
+   * numbering, no code language, and no `&`, `<` or `>` (written `&amp;`, `&lt;`, `&gt;`). Anything else (links,
+   * comment milestones, a highlight's colour, inline atoms, the dialect's fenced and attributed blocks) may spell words
+   * the raw text lacks, so only plain prose may be ruled out by it; everything else is checked on its markdown.
+   */
+  plainProse(top: TopBlock): boolean {
+    this.refresh();
+    if (top.plainCache === null) {
+      const walk = (node: Node): boolean => {
+        if (!PROSE_NODES.has(node.name)) return false;
+        for (const [key, value] of node.attrEntries()) {
+          if (value === null || value === undefined) continue;
+          const allowed = PROSE_ATTRS[String(key)];
+          if (!allowed || !allowed(node.name, value)) return false;
+        }
+        for (const op of (node.toDelta() as unknown as { children: Iterable<{ insert?: unknown; format?: Record<string, unknown> | null }> }).children) {
+          if (typeof op.insert === 'string') {
+            if (/[&<>]/.test(op.insert)) return false;
+            for (const [key, value] of Object.entries(op.format ?? {})) {
+              const mark = yattr2markname(key);
+              if (!PROSE_MARKS.has(mark) || (mark === 'highlight' && (value as { color?: unknown } | null)?.color != null)) return false;
+            }
+          } else if (Array.isArray(op.insert)) {
+            for (const child of op.insert) if (!(child instanceof YNode) || !walk(child)) return false;
+          } else if (op.insert !== undefined) return false;
+        }
+        return true;
+      };
+      top.plainCache = walk(top.node);
+    }
+    return top.plainCache;
+  }
+
+  /**
    * Builds what the writer's first batch reads of every top-level block, in every tab (its ProseMirror node and its
    * search text), until `stop()` answers true; true once every block is warm. Called in slices after a read, so the
    * read pays the cold cost once without holding the host's loop (Decision Log 20); a block a later transaction
@@ -198,8 +248,10 @@ export class DocIndex {
    */
   warm(stop: () => boolean = () => false): boolean {
     this.refresh();
-    // first every block's Yjs text (cheap: what an unscoped quote's prefilter reads), then the converted text
-    for (const pass of [(top: TopBlock) => top.rawTextCache === null && this.rawText(top), (top: TopBlock) => top.textCache === null && this.text(top)]) {
+    // first every block's Yjs text and whether it is plain prose (cheap: what an unscoped quote's prefilter reads), then
+    // the converted text
+    const prefilter = (top: TopBlock) => (top.rawTextCache === null && this.rawText(top), top.plainCache === null && this.plainProse(top));
+    for (const pass of [prefilter, (top: TopBlock) => top.textCache === null && this.text(top)]) {
       for (const tab of this.tabs) {
         for (const top of tab.tops ?? []) {
           if (stop()) return false;
@@ -370,6 +422,7 @@ export class DocIndex {
     top.mdCache = null;
     top.textCache = null;
     top.rawTextCache = null;
+    top.plainCache = null;
     top.threadsCache = null;
   }
 

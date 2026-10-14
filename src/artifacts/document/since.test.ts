@@ -108,11 +108,11 @@ describe('the read through the block index (Decision Log 20)', () => {
     expect(index.warm(() => ++slice > 3)).toBe(false);
     const tops = () => index.tabIds().flatMap((id) => index.tops(id));
     const warmed = () => tops().filter((top) => top.textCache !== null).length;
-    // M9: every block's Yjs text first (the unscoped quote's prefilter), then the converted text
-    expect(tops().filter((top) => top.rawTextCache !== null).length).toBe(3);
+    // M9: every block's Yjs text and plain-prose test first (the unscoped quote's prefilter), then the converted text
+    expect(tops().filter((top) => top.rawTextCache !== null && top.plainCache !== null).length).toBe(3);
     expect(warmed()).toBe(0);
     expect(index.warm()).toBe(true);
-    expect(tops().every((top) => top.rawTextCache !== null)).toBe(true);
+    expect(tops().every((top) => top.rawTextCache !== null && top.plainCache !== null)).toBe(true);
     expect(warmed()).toBe(8);
     expect(index.tops(other)[0].textCache).toBe('Other tab.');
   });
