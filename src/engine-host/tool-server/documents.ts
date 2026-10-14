@@ -17,7 +17,8 @@
 //
 // Suggestions (D14; parent Decision Log 27): `mode: 'suggest'`, or a plain batch on an artifact whose owner set
 // `agentEditsAsSuggestions`, lands on the artifact's suggestion doc through A's suggestion service (A's M8).
-// The owner's setting is never bypassed by a direct write.
+// The owner's setting is never bypassed by a direct write. A suggested batch takes no `answering` (refused, see
+// SUGGESTED_ANSWER).
 //
 // `mawsTools` lists the four tools after A's and wraps A's `artifact_read` and `artifact_create` with
 // `documentReadTool`/`documentCreateTool`, which answer a document and hand every other kind to A's tool.
@@ -237,6 +238,13 @@ function checkProposalTargets(base: Doc, proposal: Doc, ops: readonly Op[]): voi
   if (stale.size) throw new EditError({ reason: 'staleTargets', blocks: [...stale].map(([id, text]) => ({ id, text })) }, 'the proposal targets changed since the base read; use the shown text or quote with replace_text');
 }
 
+// A suggested batch's answer belongs in the main document's thread as the session's message (D14), but A's service
+// writes one document per savepoint (its frames do not nest), so the proposal and that reply cannot be all-or-none: a
+// throw in the second write would leave the first standing without its op row. Refused before anything is written
+// until A's service can write both in one savepoint (M9 addendum fix wave).
+const SUGGESTED_ANSWER =
+  "answering is not available on a suggested batch: the proposal and its reply in the main document's thread cannot land as one write; send the batch without answering, then reply with artifact_reply";
+
 export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
   const TOOL = 'artifact_edit';
   const now = deps.now ?? Date.now;
@@ -263,6 +271,7 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
             const artifact = await liveDocumentIn(TOOL, store, target, input.artifact);
             const id = artifact.id;
             const suggesting = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
+            if (suggesting && input.answering !== undefined) return refusedAfterCommit(store, refuse(TOOL, { reason: 'invalid', message: SUGGESTED_ANSWER }, SUGGESTED_ANSWER));
             const writeId = suggesting ? store.service.suggestionDoc(id) : id;
             const live = store.revision(id);
             if (input.baseRevision > live) return refusedAfterCommit(store, refuse(TOOL, { reason: 'invalid', liveRevision: live }, `baseRevision ${input.baseRevision} is newer than the live revision ${live}`));

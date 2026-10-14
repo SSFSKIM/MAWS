@@ -406,6 +406,25 @@ describe('suggestions (D14)', () => {
     expect(textOf(proposal(id), 'p1')).toBe('First proposal.');
   });
 
+  // M9 addendum fix wave: the answer belongs in the main document's thread, but A's API writes one document per
+  // savepoint (frames do not nest), so the proposal and a main-thread reply cannot be all-or-none: a suggested batch
+  // with `answering` is refused before anything is written, never answered into the suggestion doc's copy.
+  it.each(['mode', 'setting'] as const)('%s: a suggested batch with answering is refused invalid, both documents and the main thread unchanged', async (route) => {
+    const { id, revision } = await readSeed();
+    if (route === 'setting') await world.store.update(id, { agentEditsAsSuggestions: true });
+    const main = stateV2(live(id));
+    const suggestions = stateV2(proposal(id));
+    const messages = getThread(live(id), 't3')!.messages.length;
+    const answer = await edit({ artifact: id, baseRevision: revision, ...(route === 'mode' && { mode: 'suggest' }), answering: 't3', ops: [{ op: 'replace_text', block: 'p2', old: 'scheduled for Friday', new: 'scheduled for Monday' }] });
+    expect(refusalOf(answer)).toMatchObject({ reason: 'invalid', message: expect.stringContaining('artifact_reply') });
+    expect(stateV2(live(id))).toEqual(main);
+    expect(stateV2(proposal(id))).toEqual(suggestions);
+    expect(getThread(live(id), 't3')!.messages).toHaveLength(messages);
+    // the same batch without answering lands as a proposal, and the reply goes to the main thread on its own
+    json(await edit({ artifact: id, baseRevision: revision, ...(route === 'mode' && { mode: 'suggest' }), ops: [{ op: 'replace_text', block: 'p2', old: 'scheduled for Friday', new: 'scheduled for Monday' }] }));
+    expect(textOf(proposal(id), 'p2')).toContain('scheduled for Monday');
+  });
+
   it('a suggested retype carries existing authorship through the document adapter', async () => {
     const { id, revision } = await readSeed();
     json(await edit({ artifact: id, baseRevision: revision, mode: 'suggest', ops: [{ op: 'replace_block', id: 'p1', markdown: '## The quick brown fox jumps over the **lazy** [dog](https://example.com). It has two sentences.' }] }));
