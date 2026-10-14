@@ -31,6 +31,34 @@ export interface Holdable {
   holdRemote(on: boolean): void;
 }
 
+/**
+ * The live editor's hold set on its replica and on every replica fed the same host updates beside it (the suggestion
+ * replica, D14), so none of them runs ahead of the held one: the suggestion review compares the two, and a remote write
+ * the base holds back would read as a proposal over it (M9 addendum fix wave: the scale gate's Korean case). The base
+ * is held first and released first, so a companion's buffered frames land on a base that already has them.
+ */
+export class JointHold implements Holdable {
+  private held = false;
+  private readonly companions = new Set<Holdable>();
+
+  constructor(private readonly base: Holdable) {}
+
+  holdRemote(on: boolean): void {
+    this.held = on;
+    this.base.holdRemote(on);
+    for (const companion of this.companions) companion.holdRemote(on);
+  }
+
+  /** Holds `companion` with the base from now on (at once, if a hold stands); returns its release. */
+  join(companion: Holdable): () => void {
+    this.companions.add(companion);
+    if (this.held) companion.holdRemote(true);
+    return () => {
+      if (this.companions.delete(companion) && this.held) companion.holdRemote(false);
+    };
+  }
+}
+
 /** A version's view: its fragment and the renderer that draws it (a DiffRenderer, or null for the plain state). */
 export interface VersionView {
   ytype: YType;

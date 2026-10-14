@@ -1,15 +1,19 @@
+import type { Editor } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, newSuggestionDoc, planAccept, planReject, stateV2, transact, type Doc, type SuggestionRange } from '../../yjs';
 import { applyEdit } from '../patch-writer';
 import { nodeOf, pmOf } from '../writer.fixture';
-import { memoryEditorHost } from './memory-host';
+import { DocumentEditor } from './DocumentEditor';
+import type { DocumentHandle } from './host-types';
+import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import { Suggestions, type SuggestionHost } from './Suggestions';
-import { World, doc, para, ticks, until } from './test-world';
+import { World, doc, endOf, para, ticks, until } from './test-world';
 
 let world: World | null = null;
 let proposal: Doc | null = null;
-afterEach(() => { cleanup(); proposal?.destroy(); world?.destroy(); proposal = null; world = null; });
+const closing: Array<() => void> = [];
+afterEach(() => { cleanup(); for (const close of closing.splice(0)) close(); proposal?.destroy(); world?.destroy(); proposal = null; world = null; });
 
 const owner = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
 
@@ -127,5 +131,55 @@ describe('document suggestion review', () => {
     const { mounted, close } = await mount();
     mounted.unmount();
     expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+// M9 addendum fix wave (the scale gate's Korean case): the live editor's composition hold buffers remote updates on the
+// base replica; the suggestion replica, fed the same main updates by the host, must hold with it, or the agent's held
+// writes read as proposals over the lagging base, the review replaces the live editor mid-composition and the
+// composed text lands at the block's start.
+describe('the composition hold and the suggestion replica', () => {
+  it('a remote write held from the live editor during a composition is no proposal: no review, the live editor stays', async () => {
+    world = new World(doc(para('p1', 'Mine.'), para('p2', 'Theirs.')));
+    const handle = openMemoryHandle(world.host, { log: () => {} });
+    closing.push(() => handle.close());
+    await whenSynced(handle);
+    // the host's suggestion doc: the main doc's state, then every main update flowing in (A's `inStep`)
+    const suggestionHost = new MemoryDocumentHost();
+    closing.push(() => suggestionHost.destroy());
+    applyV2(suggestionHost.doc, stateV2(world.host.doc));
+    closing.push(world.host.onLanded(({ update }) => applyV1(suggestionHost.doc, update)));
+    let replica: DocumentHandle | null = null;
+    const host: SuggestionHost = {
+      open: vi.fn(async () => {
+        const opened = openMemoryHandle(suggestionHost, { log: () => {} });
+        await whenSynced(opened);
+        replica = opened;
+        return opened;
+      }),
+      attributions: vi.fn(async () => encodeMap(mergeMaps([]))),
+      acceptSuggestion: vi.fn(async () => ({ revision: 2 })),
+      rejectSuggestion: vi.fn(async () => ({ revision: 2 })),
+    };
+    const previewing: boolean[] = [];
+    let live: Editor | null = null;
+    render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} suggestions={host} onPreviewChange={(on) => previewing.push(on)} onEditor={(editor) => (live = editor)} />);
+    await until(() => live !== null && live.getText().length > 0 && vi.mocked(host.attributions).mock.calls.length > 0, 'the live editor and the first review check');
+    await act(async () => { await ticks(5); });
+    const editor = live as unknown as Editor;
+    const p2 = (d: Doc) => pmOf(d, 'p2').textContent;
+    act(() => { editor.commands.setTextSelection(endOf(editor, 'p1')); });
+    act(() => { editor.view.dom.dispatchEvent(new Event('compositionstart', { bubbles: true })); });
+    world.host.write((d) => void applyEdit(d, [{ op: 'replace_text', block: 'p2', old: 'Theirs.', new: 'Theirs, edited.' }]), { kind: 'session', appSessionId: 'agent' } as never);
+    await until(() => p2(suggestionHost.doc) === 'Theirs, edited.', 'the write in the suggestion doc');
+    await act(async () => { await ticks(20); });
+    expect(p2(handle.doc), 'the base holds the write').toBe('Theirs.');
+    expect(screen.queryByLabelText('Suggestion review')).toBeNull();
+    expect(previewing).not.toContain(true);
+    act(() => { editor.view.dom.dispatchEvent(new Event('compositionend', { bubbles: true })); });
+    await until(() => p2(handle.doc) === 'Theirs, edited.' && replica !== null && p2((replica as DocumentHandle).doc) === 'Theirs, edited.', 'both replicas after the hold');
+    await act(async () => { await ticks(20); });
+    expect(screen.queryByLabelText('Suggestion review')).toBeNull();
+    expect(previewing).not.toContain(true);
   });
 });

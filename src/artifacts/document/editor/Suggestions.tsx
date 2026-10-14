@@ -4,6 +4,7 @@ import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import type { ArtifactHost, DocumentHandle } from '../../host';
+import type { JointHold } from '../collab';
 import { decodeMap, type Doc, type SuggestionRange } from '../../yjs';
 import { ContentType, Item, createDiffRenderer, proposesOver, type DiffRenderer, type Transaction } from '../../yjs/document';
 import { resolvedPositionsToRelativePositions } from '../../yjs/prosemirror';
@@ -18,6 +19,8 @@ export interface SuggestionsProps {
   artifactId: string;
   tabId: string;
   base: DocumentHandle;
+  /** The live editor's composition hold, which the suggestion replica joins so it never runs ahead of the base. */
+  hold?: JointHold;
   host: SuggestionHost;
   editorHost: EditorHost;
   onPending(pending: boolean): void;
@@ -69,7 +72,7 @@ function suggestedBlocks(editor: Editor, doc: Doc): BlockSuggestion[] {
   return [...blocks.values()];
 }
 
-export function Suggestions({ artifactId, tabId, base, host, editorHost, onPending, pageScope }: SuggestionsProps) {
+export function Suggestions({ artifactId, tabId, base, hold, host, editorHost, onPending, pageScope }: SuggestionsProps) {
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
@@ -77,6 +80,7 @@ export function Suggestions({ artifactId, tabId, base, host, editorHost, onPendi
     let closed = false;
     let serial = 0;
     let handle: DocumentHandle | null = null;
+    let leaveHold: (() => void) | null = null;
     let current: DiffRenderer | null = null;
     const renderers = new Set<DiffRenderer>();
     // Whether the last full refresh found proposals to review (true until the first has run). With none, ordinary
@@ -119,12 +123,14 @@ export function Suggestions({ artifactId, tabId, base, host, editorHost, onPendi
     void host.open(artifactId, { doc: 'suggestions' }).then((opened) => {
       if (closed) return opened.close();
       handle = opened;
+      leaveHold = hold?.join(opened) ?? null;
       opened.doc.on('update', onProposal);
       base.doc.on('update', onBase);
       void refresh();
     }).catch((cause: unknown) => { if (!closed) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => {
       closed = true;
+      leaveHold?.();
       handle?.doc.off('update', onProposal);
       base.doc.off('update', onBase);
       for (const renderer of renderers) renderer.destroy();
@@ -132,7 +138,7 @@ export function Suggestions({ artifactId, tabId, base, host, editorHost, onPendi
       handle?.close();
       onPending(false);
     };
-  }, [artifactId, tabId, base, host, onPending, retry]);
+  }, [artifactId, tabId, base, hold, host, onPending, retry]);
   return <>
     {error && <div className="doc-banner" role="alert">Suggestions could not be loaded: {error}<button type="button" className="doc-tool" onClick={() => setRetry((n) => n + 1)}>Retry</button></div>}
     {view && <Review key={`${artifactId}:${tabId}:${view.serial}`} view={view} artifactId={artifactId} tabId={tabId} host={host} editorHost={editorHost} pageScope={pageScope} />}

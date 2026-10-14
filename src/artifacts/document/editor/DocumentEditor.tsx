@@ -24,7 +24,7 @@ import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import 'katex/dist/katex.min.css';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import type { VersionView } from '../collab';
+import { JointHold, type VersionView } from '../collab';
 import { isDarkGround } from '../export/highlight';
 import { isBindingTransaction, type Carry } from '../../yjs';
 import { ySyncPluginKey } from '../../yjs/prosemirror';
@@ -107,6 +107,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const rail = held ? (props.rail ?? null) : ownRail;
   const [saving, setSaving] = useState(false);
   const [pendingSuggestions, setPendingSuggestions] = useState(false);
+  const hold = useMemo(() => new JointHold(props.handle), [props.handle]); // the live editor's, the suggestion replica's too
   const [showing, setShowing] = useState<Showing | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const active = tabs.find((tab) => tab.id === selected) ?? tabs[0] ?? null;
@@ -157,7 +158,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
       <div className="doc-editor-body">
         {active && props.suggestions && (
           <div className="doc-tab-editor" style={{ display: preview ? 'none' : pendingSuggestions ? undefined : 'contents' }}>
-            <Suggestions artifactId={props.artifactId} tabId={active.id} base={props.handle} host={props.suggestions} editorHost={props.host} onPending={setPendingSuggestions} pageScope={props.pageScope} />
+            <Suggestions artifactId={props.artifactId} tabId={active.id} base={props.handle} hold={hold} host={props.suggestions} editorHost={props.host} onPending={setPendingSuggestions} pageScope={props.pageScope} />
           </div>
         )}
         <div className="doc-tab-editor" style={{ display: pendingSuggestions && !preview ? 'none' : undefined }}>
@@ -176,6 +177,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
               onPassageClick={() => !preview && openRail('comments')}
               historyController={history}
               historySnapshot={snapshot}
+              hold={hold}
             />
           ) : (
             <div className="doc-editor-loading" role="status">
@@ -213,6 +215,8 @@ interface TabEditorProps extends DocumentEditorProps {
   openRail(rail: Rail): void;
   historyController: HistoryController | null;
   historySnapshot: HistorySnapshot | null;
+  /** The composition hold: the base replica's, and the suggestion replica's beside it. */
+  hold: JointHold;
   showing: Showing | null;
   onShown(): void;
   /** The editor's active thread, as it changes (the rail selects it). */
@@ -221,7 +225,7 @@ interface TabEditorProps extends DocumentEditorProps {
   onPassageClick(): void;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
@@ -240,7 +244,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           ytype: tabBody(handle.doc, tabId) ?? null,
           awareness: handle.awareness,
           user: { name: host.identity().name, color: cssColor(host.identity().color) },
-          hold: handle,
+          hold,
           onRestored: (listener) => handle.onRestored(listener),
         },
         comments: { doc: handle.doc, tabId, onComment: () => commentRef.current(), onActivate: () => latest.current.onPassageClick() },
@@ -249,7 +253,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
       editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'live' } },
       shouldRerenderOnTransaction: false,
     },
-    [tabId, handle, host, artifactId],
+    [tabId, handle, host, artifactId, hold],
   );
   // the preview's own editor while a version shows (null until it exists); the live one is never put on a version
   const [previewEditor, setPreviewEditor] = useState<Editor | null>(null);
