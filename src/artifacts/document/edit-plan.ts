@@ -682,18 +682,19 @@ class Planner {
     // the needle prefilter reads the blocks' Yjs text (no conversion), then each candidate's own text. Only plain prose
     // is ruled out by its raw text (every word of the quote must be in it; a run the markdown generates rather than
     // holds — a list's item numbers, a task's x — does not filter: digits and single characters are left out); any
-    // other block stays a candidate, since its markdown may spell words its nodes do not hold (M9 addendum)
+    // other block stays a candidate, since its markdown may spell words its nodes do not hold (M9 addendum), and so does
+    // a block an earlier op of this batch created or changed: its node is in hand and its plain text lacks the same
+    // serialised content (an intent, a link's address), so it is checked on its markdown (M9 addendum fix wave)
     const runs = runsOf(quote).filter((run) => run.length > 1 && !/^\p{N}+$/u.test(run));
-    const holds = (key: string, needle: string): boolean => {
+    const holds = (key: string): boolean => {
       const top = !this.tops.has(key) ? this.byKey.get(key) : undefined;
-      if (!top) return textOf(key).includes(needle);
-      if (!this.index.plainProse(top)) return true;
+      if (!top || !this.index.plainProse(top)) return true;
       const raw = this.index.rawText(top);
       return runs.every((run) => raw.includes(run));
     };
     const search = (needle: string | null) =>
       live
-        .filter(({ key }) => !needle || holds(key, needle))
+        .filter(({ key }) => !needle || holds(key))
         .map(({ key, tabId }) => {
           const markdown = markdownOf(key);
           return { key, tabId, markdown, n: occurrences(markdown, quote) };

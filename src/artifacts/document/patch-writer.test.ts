@@ -118,6 +118,32 @@ describe('the ops (S4 1)', () => {
     expect(res.results[0].line).toBe('replaced 2 occurrence(s) in ^p1, ^pe1');
   });
 
+  // M9 addendum fix wave: a block an earlier op of the same batch created or changed is searched on its markdown too
+  // (its plain text lacks a pending block's intent, a link's address), so the batch's own blocks count toward
+  // uniqueness and `all`, and the refusal leaves the document untouched.
+  describe('the prefilter keeps the batch’s own blocks', () => {
+    const seed = () => seedDoc({ type: 'doc', content: [
+      { type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'The alphazed plan.' }] },
+      { type: 'paragraph', attrs: { id: 'p2' }, content: [{ type: 'text', text: 'Another paragraph.' }] },
+    ] }, {});
+    const earlier: Array<{ name: string; op: Op; twice: RegExp }> = [
+      { name: 'a pending block inserted', op: { op: 'insert', after: 'p1', markdown: ':::pending {intent="alphazed"} :::' }, twice: /^replaced 2 occurrence\(s\) in \^p1, \^pd\d+$/ },
+      { name: 'a block rewritten with a link', op: { op: 'replace_block', id: 'p2', markdown: 'See [the site](https://alphazed.org).' }, twice: /^replaced 2 occurrence\(s\) in \^p1, \^p2$/ },
+    ];
+    for (const { name, op, twice } of earlier) {
+      it(`${name}, then an unscoped quote it holds: not unique and nothing written, both with all`, () => {
+        const doc = seed();
+        const snapshot = () => JSON.stringify(order(doc).map((id) => pmOf(doc, id).toJSON()));
+        const before = snapshot();
+        const r = refusal(() => applyEdit(doc, [op, { op: 'replace_text', old: 'alphazed', new: 'betazed' }], { generateID: sequence('pd') }));
+        expect(r.reason).toBe('notUnique');
+        expect(snapshot()).toBe(before);
+        const res = applyEdit(seed(), [op, { op: 'replace_text', old: 'alphazed', new: 'betazed', all: true }], { generateID: sequence('pd') });
+        expect(res.results[1].line).toMatch(twice);
+      });
+    }
+  });
+
   // M9 addendum (wave 2's re-review): the raw text filters only plain prose; every other block is checked on its
   // markdown, whose generated text (entities, chip and attribute names, a mark's address) the raw text lacks.
   describe('the prefilter keeps every block whose markdown could hold the quote', () => {
