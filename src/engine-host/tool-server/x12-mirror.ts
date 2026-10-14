@@ -38,14 +38,27 @@ export class X12Mirror {
   }
 
   // An `html` artifact's next version, on its creator's record (none: nothing to mirror), written by `writer`'s call
-  // `toolUseId`. Answers the version.
-  async pageVersion(artifactId: string, owner: AppSessionId, writer: AppSessionId, title: string, contentPath: string, toolUseId: ToolUseId | null): Promise<number | null> {
+  // `toolUseId`. Answers the version. `follows`, asked inside the record's write chain, says whether this version comes
+  // after every version the record holds (the store's order); when it does not, nothing is appended (null).
+  async pageVersion(
+    artifactId: string,
+    owner: AppSessionId,
+    writer: AppSessionId,
+    title: string,
+    contentPath: string,
+    toolUseId: ToolUseId | null,
+    follows?: (record: DeliverableRecord) => Promise<boolean>,
+  ): Promise<number | null> {
     return this.attempt(artifactId, () =>
       this.deps.deliverables.exclusive(owner, async () => {
         const record = await this.deps.deliverables.get(owner, artifactId);
         if (record === null) return null;
         const appended = callIndex(record, writer, toolUseId);
         if (appended !== -1) return appended + 1; // this call's version, already appended by a mirror of it that ran first
+        if (follows && !(await follows(record))) {
+          this.deps.log?.(`the X12 record of artifact ${artifactId} already holds a later version; ${writer}'s call ${toolUseId ?? '(no id)'} is not appended behind it`);
+          return null;
+        }
         const version = record.versions.length + 1;
         const at = this.at();
         const copy = await this.deps.deliverables.copyVersion(owner, artifactId, version, contentPath);

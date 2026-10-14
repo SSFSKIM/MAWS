@@ -65,7 +65,8 @@ export function actorFromKey(key: string): Actor {
 }
 
 export class VersionStore {
-  // The last written version's state per artifact, so the next delta needs no reconstruction.
+  // The last written version's state per artifact, so the next delta needs no reconstruction; held only while the
+  // artifact's doc is loaded (the store forgets it at the service's unload, at delete, and for a doc not loaded).
   private readonly last = new Map<string, { id: number; seq: number; state: Uint8Array }>();
 
   constructor(private readonly db: DatabaseSync) {}
@@ -276,7 +277,7 @@ export class VersionStore {
     return rows.filter((row) => !pinned.has(`${artifactId}\u0000${row.seq}`) && !(byteKind && row.id === newest)).map((row) => row.id);
   }
 
-  // Forgets cached states (a transaction that wrote versions was taken back).
+  // Forgets cached states: an artifact's when its doc leaves memory or the artifact is deleted (the store's calls), all.
   forget(artifactId?: string): void {
     if (artifactId === undefined) this.last.clear();
     else this.last.delete(artifactId);

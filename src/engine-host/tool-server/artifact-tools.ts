@@ -29,6 +29,7 @@ import {
   answering,
   editorOf,
   filesOf,
+  importLineage,
   lineageOf,
   opIdOf,
   publisherOf,
@@ -58,6 +59,7 @@ export function artifactListTool(deps: ArtifactToolDeps): McpToolDefinition {
       const { kind, spaceId, query, scope } = parsed.data;
       const store = storeOf('artifact_list', deps);
       const lineage = lineageOf(ctx, deps);
+      await importLineage(deps, store, lineage); // pre-P3 records in scope are listed like the rest (Decision Log 40a)
       const artifacts = await store.readCommitted(() => {
         const filter = { kind, spaceId, query };
         const found = scope === 'all' ? store.list(filter) : dedupe(lineage.flatMap((appSessionId) => store.list({ ...filter, appSessionId })));
@@ -126,7 +128,9 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
       } else if (kind === 'file') {
         const source = resolve(ctx.cwd, path!);
         if (!(await stat(source).catch(() => null))?.isFile()) return toolError(TOOL_ERRORS.artifactNotAFile('artifact_create', source));
-        content = { path: source };
+        const described = await store.files.describeStreamed(source).catch(() => null); // hashed off the commit path
+        if (!described) return toolError(TOOL_ERRORS.artifactNotAFile('artifact_create', source));
+        content = { path: source, digest: { sha256: described.sha256, size: described.size } };
       } else if (kind === 'document' && input.content !== undefined) {
         // a document's markdown content is P3-B's document create (ledger X25), served by B's wrapper; this build's
         // generic create would lose it
@@ -256,7 +260,9 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
       } else {
         result = { ...read.head, file: { name: read.ref.name, path: read.path, size: read.ref.size, sha256: read.ref.sha256, ...(await textOf(read.path)) } };
       }
-      await store.writeCommitted(() => store.link(artifactId, ctx.appSessionId, 'viewed'));
+      // the session's `viewed` link is bookkeeping: a store a newer MAWS wrote is read-only (Decision Log 12, 24e) and
+      // still answers reads
+      if (!store.storage.readOnly) await store.writeCommitted(() => store.link(artifactId, ctx.appSessionId, 'viewed'));
       return toolText(result);
     }),
   );

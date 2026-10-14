@@ -11,6 +11,7 @@ import { afterEach, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DocumentService } from './service';
 import { SqliteDocumentStorage } from './storage';
+import { ArtifactStore } from './store';
 
 setFlagsFromString('--expose-gc');
 const gc = runInNewContext('gc') as () => void;
@@ -22,7 +23,9 @@ const sid = (id: string) => id as AppSessionId;
 let dir: string;
 let storage: SqliteDocumentStorage | undefined;
 let service: DocumentService | undefined;
+let store: ArtifactStore | undefined;
 afterEach(() => {
+  store?.close();
   service?.close();
   storage?.close();
   rmSync(dir, { recursive: true, force: true });
@@ -74,5 +77,32 @@ it('returns the heap within 5 MB of its pre-open value once a closed document’
   expect(loaded - before).toBeGreaterThan(20 * MB); // big enough that one retained copy would fail the bound
   await until(() => service!.loaded('a1') === null);
   const after = await heapUsed();
+  expect(after - before).toBeLessThan(5 * MB);
+}, 60_000);
+
+// The store's version writer keeps the last version's whole state per artifact (the next delta's base); it goes when
+// the document unloads, so a closed document's history costs the host nothing either. Its state is a typed array (outside
+// V8's heap), so the bound counts array buffers too.
+it('drops a document’s cached version state when the document unloads', async () => {
+  dir = mkdtempSync(join(tmpdir(), 'maws-heap-'));
+  storage = SqliteDocumentStorage.open(join(dir, 'store.sqlite'), { log: () => {} });
+  service = new DocumentService(storage, { log: () => {}, idleUnloadMs: GRACE_MS, kindOf: (id) => storage!.kindOf(id) });
+  store = new ArtifactStore(service, storage, { root: dir, log: () => {} });
+  const memory = async () => {
+    await heapUsed();
+    const { heapUsed: heap, arrayBuffers } = process.memoryUsage();
+    return heap + arrayBuffers;
+  };
+  const versioned = async (size: number) => {
+    const { id } = await store!.create({ kind: 'document', title: 'Notes' }, { kind: 'human' });
+    await service!.writeAs(id, { kind: 'human' }, (doc) => doc.get('root').insert(0, 'x'.repeat(size)));
+    expect(await store!.createVersion(id, { kind: 'named', actor: { kind: 'human' }, label: 'v1' })).not.toBeNull();
+    await until(() => service!.loaded(id) === null);
+    return id;
+  };
+  await versioned(100); // the same paths once, so one-time costs are not counted against the document
+  const before = await memory();
+  await versioned(16 * MB);
+  const after = await memory();
   expect(after - before).toBeLessThan(5 * MB);
 }, 60_000);

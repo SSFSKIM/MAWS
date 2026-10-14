@@ -1228,6 +1228,26 @@ describe('ArtifactStore: change events reveal only committed revisions (the whol
   });
 });
 
+describe('ArtifactStore: a store a newer MAWS wrote (read-only; Decision Log 12, 24e)', () => {
+  it('takes the owner’s viewing as a read, recording nothing, and still refuses every content write', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'a'));
+    store.close();
+    service.close();
+    storage.close();
+    const newer = new DatabaseSync(join(dir, 'store.sqlite'));
+    newer.exec('PRAGMA user_version = 99');
+    newer.close();
+    make();
+    expect(storage.readOnly).toBe(true);
+    await expect(store.markViewed(doc.id)).resolves.toBeUndefined();
+    expect(store.get(doc.id)!.lastViewedAt).toBeNull();
+    expect(store.listVersions(doc.id)).toEqual([]);
+    await expect(store.update(doc.id, { title: 'Plan B' })).rejects.toThrow(/newer app/);
+    await expect(write(doc.id, human, (d) => d.get('root').insert(0, 'b'))).rejects.toThrow(/newer app/);
+  });
+});
+
 describe('ArtifactStore: refusals', () => {
   it('refuses wrong content per kind and unknown targets with typed errors', async () => {
     await expect(store.create({ kind: 'html', title: 'x' }, human)).rejects.toBeInstanceOf(ArtifactStoreError);

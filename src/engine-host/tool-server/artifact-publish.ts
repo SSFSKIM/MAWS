@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { isDocKind, type Artifact } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { DeliverableRecord } from '@shared/maws/deliverable';
 import { parseToolArguments, type ArtifactPublishInput, type ArtifactPublishResult } from '@shared/maws/tools';
 import { stateV2 } from '@artifacts/yjs';
 import type { ArtifactStore } from '../documents/store';
@@ -45,7 +46,7 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
       const replayed = await store.replayOf(opIdOf(ctx));
       if (replayed.found) {
         const recorded = replayed.result as ArtifactPublishResult;
-        return toolText(recorded.kind === 'html' ? await mirrored(store, mirror, recorded, input, ctx, false) : recorded);
+        return toolText(recorded.kind === 'html' ? await mirrored(store, mirror, recorded, input, ctx) : recorded);
       }
       const artifactId = await resolveArtifact(TOOL, deps, store, input.artifact, lineageOf(ctx, deps));
       const artifact = await store.readCommitted(() => store.get(artifactId));
@@ -57,7 +58,7 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
         const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;
         throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}, and an html page takes none; nothing was written`);
       }
-      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx, suggest) : await mirrored(store, mirror, await publishPage(deps, store, artifact, input, ctx), input, ctx, true);
+      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx, suggest) : await mirrored(store, mirror, await publishPage(deps, store, artifact, input, ctx), input, ctx);
       return toolText(result);
     })),
   );
@@ -119,22 +120,36 @@ async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifac
   return recorded;
 }
 
-// An html publish's answer with its X12 mirror's new version (Decision Log 4): written now after a fresh publish, found
-// by the call's tool-use id for a repeated one; nothing to add for a publish that changed nothing or a page without a
-// record.
-async function mirrored(store: ArtifactStore, mirror: X12Mirror, recorded: ArtifactPublishResult, input: ArtifactPublishInput, ctx: McpToolContext, fresh: boolean): Promise<ArtifactPublishResult> {
+// An html publish's answer with its X12 mirror's new version (Decision Log 4): the version this call appended (found by
+// its tool-use id: a repeated call's, or an overlapping one's), else appended now from the content the store recorded
+// at the call's revision, so a repeated call repairs a mirror that failed or never ran after the commit (Decision Log
+// 39g) without writing the store again. A version is only appended in the store's order: behind a later publish
+// already on the record it is not (the record's versions are numbered, so it cannot go in between). Nothing to add for
+// a publish that changed nothing, a page without a record, or content gone from the store.
+async function mirrored(store: ArtifactStore, mirror: X12Mirror, recorded: ArtifactPublishResult, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
   if (recorded.changed.length === 0) return recorded;
   const owner = await creatorOf(store, recorded.artifactId);
   const artifact = await store.readCommitted(() => store.get(recorded.artifactId, { includeDeleted: true }));
   if (owner === null || !artifact) return recorded;
-  let version = await mirror.versionOf(artifact.id, owner, ctx.appSessionId, ctx.toolUseId); // a repeated call's, already written
-  if (version === null && fresh) {
-    const { path } = await store.readCommitted(() => store.contentRef(artifact.id, recorded.revision));
-    version = await mirror.pageVersion(artifact.id, owner, ctx.appSessionId, artifact.title, path, ctx.toolUseId);
+  let version = await mirror.versionOf(artifact.id, owner, ctx.appSessionId, ctx.toolUseId);
+  if (version === null) {
+    const path = await store.readCommitted(() => store.contentRef(artifact.id, recorded.revision).path).catch(() => null);
+    if (path !== null) version = await mirror.pageVersion(artifact.id, owner, ctx.appSessionId, artifact.title, path, ctx.toolUseId, (record) => follows(store, record, recorded.revision));
   }
   if (version === null) return recorded;
   const text = input.files[Object.keys(input.files)[0]!] ?? '';
   return { ...recorded, id: artifact.handle ?? artifact.id, deliverableId: artifact.id, version, externalReferences: externalReferenceCount(text), ...(owner !== ctx.appSessionId && { ownerAppSessionId: owner }) };
+}
+
+// Whether a version written at `revision` comes after the record's last version: that version's call (its session and
+// tool-use id, the op key) answered an earlier revision, or names no call the store recorded (an E2 version, from
+// before the store).
+async function follows(store: ArtifactStore, record: DeliverableRecord, revision: number): Promise<boolean> {
+  const last = record.versions.at(-1);
+  if (!last?.toolUseId) return true;
+  const prior = await store.replayOf(`${last.appSessionId ?? record.appSessionId}/${last.toolUseId}`);
+  const at = prior.found ? (prior.result as { revision?: unknown } | null)?.revision : undefined;
+  return typeof at !== 'number' || at < revision;
 }
 
 async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext, suggest: boolean): Promise<ArtifactPublishResult> {

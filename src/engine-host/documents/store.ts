@@ -9,7 +9,7 @@
 // announced before the commit (Decision Log 26).
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
+import { basename, isAbsolute } from 'node:path';
 import type { KindAdapter } from '@artifacts/host';
 import { applyV2, bindingVersion, decodeMap, encodeMap, mergeMaps, type Doc } from '@artifacts/yjs';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
@@ -51,8 +51,9 @@ export interface ListFilter {
   query?: string; // a title substring (`artifacts.search` until P3-L's index)
 }
 
-// A byte kind's content: `html` takes bytes (and a file name, `index.html` by default), `file` a path in place.
-export type ByteContent = { bytes: Uint8Array; name?: string } | { path: string };
+// A byte kind's content: `html` takes bytes (and a file name, `index.html` by default), `file` a path in place, with its
+// `digest` when the caller hashed it beforehand (`files.describeStreamed`, off the commit path), else hashed at the write.
+export type ByteContent = { bytes: Uint8Array; name?: string } | { path: string; digest?: { sha256: string; size: number } };
 
 export interface CreateInput {
   kind: ArtifactKind;
@@ -193,6 +194,8 @@ export class ArtifactStore {
     this.maintenance = new Maintenance(this, { now: this.now, log: this.log });
     this.unsubscribe.push(service.onCommitted((change) => this.committed(change)));
     this.unsubscribe.push(service.onBeforeCommit((ids) => this.stamp(ids)));
+    // the last version's state is kept only while its doc is loaded (versionInFrame): it goes when the doc does
+    this.unsubscribe.push(service.onUnload((artifactId) => this.versions.forget(artifactId)));
   }
 
   registerAdapter(adapter: KindAdapter): void {
@@ -402,6 +405,7 @@ export class ArtifactStore {
       this.storage.db.prepare('UPDATE artifacts SET deletedAt = ?, updatedAt = ? WHERE id = ?').run(at, at, artifactId);
       inFrame?.();
     });
+    this.versions.forget(artifactId); // a deleted artifact writes no more versions
     this.emit(artifactId, 'deleted');
   }
 
@@ -632,8 +636,8 @@ export class ArtifactStore {
       if (!('path' in content) || !isAbsolute(content.path) || !existsSync(content.path) || !statSync(content.path).isFile()) {
         throw new ArtifactStoreError('invalid', `a file artifact’s content is an existing file’s absolute path`);
       }
-      const described = this.files.describe(content.path);
-      make = () => ({ ...described, path: content.path });
+      const described = content.digest ? { name: basename(content.path), ...content.digest } : this.files.describe(content.path);
+      make = () => ({ name: described.name, sha256: described.sha256, size: described.size, path: content.path });
     }
     try {
       let ref: ContentRef | null = null;
@@ -751,6 +755,10 @@ export class ArtifactStore {
     const { revision, state } = this.service.readState(row.id);
     const actor = typeof meta.actor === 'string' ? meta.actor : actorKey(meta.actor);
     const id = this.versions.writeState(row.id, revision, state, { ...meta, actor, at, designSystemRef: this.pinInFrame(row), assetRefs: this.assetIds(row.id) }, options);
+    // The state kept for the next delta lives as long as the doc stays loaded (the service's unload forgets it); a doc
+    // read from the store without loading (a scheduled auto version after the idle unload, a design system's pin)
+    // keeps none.
+    if (!this.service.loaded(row.id)) this.versions.forget(row.id);
     if (id !== null) {
       this.storage.db.prepare('UPDATE artifacts SET updatedAt = MAX(updatedAt, ?) WHERE id = ?').run(at, row.id);
       this.service.requestHead(row.id);
@@ -792,9 +800,11 @@ export class ArtifactStore {
   }
 
   // The owner looked at the artifact (Decision Log 16): an `auto` version first when the doc moved since its last
-  // version, so "See N new changes" has a state to diff from, then `lastViewedAt`.
+  // version, so "See N new changes" has a state to diff from, then `lastViewedAt`. Bookkeeping of a read: a store a newer
+  // MAWS wrote (read-only, Decision Log 12, 24e) records nothing and the view goes on.
   async markViewed(artifactId: string): Promise<void> {
     const row = this.requireLive(artifactId);
+    if (this.storage.readOnly) return;
     await this.service.inBatch(() => {
       if (isDocKind(row.kind)) this.versionInFrame(row, { kind: 'auto', actor: this.lastWriter(artifactId) });
       this.storage.db.prepare('UPDATE artifacts SET lastViewedAt = ? WHERE id = ?').run(this.now(), artifactId);

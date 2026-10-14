@@ -5,7 +5,7 @@
 // partial file (a crash leaves at most an orphan file no row names). A `file` artifact's content stays where it is
 // (send_file's rule): only its name, size and hash are recorded.
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 
 export interface ContentRef {
@@ -96,7 +96,21 @@ export class ArtifactFiles {
     rmSync(this.dirOf(artifactId), { recursive: true, force: true });
   }
 
-  // A `file` artifact's referenced file, described in place (hashed in chunks: it may be large).
+  // A `file` artifact's referenced file described in place, streamed: each chunk is read asynchronously, so a large file
+  // hashes without holding the event loop. Run before a write's synchronous commit path, which takes the digest
+  // (`ByteContent`'s `digest`); size and hash are of the same bytes read.
+  async describeStreamed(path: string): Promise<{ name: string; sha256: string; size: number }> {
+    const hash = createHash('sha256');
+    let size = 0;
+    for await (const chunk of createReadStream(path, { highWaterMark: 1024 * 1024 }) as AsyncIterable<Buffer>) {
+      hash.update(chunk);
+      size += chunk.length;
+    }
+    return { name: basename(path), sha256: hash.digest('hex'), size };
+  }
+
+  // A `file` artifact's referenced file, described in place synchronously (hashed in chunks: it may be large), for a
+  // write given no digest.
   describe(path: string): { name: string; sha256: string; size: number } {
     const size = statSync(path).size;
     const hash = createHash('sha256');

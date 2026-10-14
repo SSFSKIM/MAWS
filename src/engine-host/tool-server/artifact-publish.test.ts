@@ -22,6 +22,11 @@ const publish = (args: Record<string, unknown>, over: Ctx = {}, deps: Parameters
 const liveFiles = (id: string): Record<string, string> => Object.fromEntries([...w.store.service.live(id).get('files').attrEntries()].map(([k, v]) => [String(k), v as string]));
 const human = (id: string, edit: (files: ReturnType<ReturnType<World['service']['live']>['get']>) => void) => w.service.writeAs(id, HUMAN, (doc) => edit(doc.get('files')));
 const page = (id: string) => Buffer.from(w.store.files.read(id, w.store.contentRef(id).ref)).toString('utf8');
+// The world's X12 store with every version copy failing (a full disk while mirroring).
+const copyFails = (): World['deliverables'] =>
+  Object.assign(Object.create(w.deliverables) as World['deliverables'], {
+    copyVersion: () => Promise.reject(new Error('disk full')),
+  });
 
 describe('artifact_publish of an html page', () => {
   it('writes the page as a new version from the revision its create returned, and the creator’s X12 record gains it', async () => {
@@ -81,6 +86,34 @@ describe('artifact_publish of an html page', () => {
     expect(again).toEqual(first);
     expect(w.store.listVersions(created.artifactId)).toHaveLength(2);
     expect((await w.deliverables.get(SELF, created.artifactId))!.versions).toHaveLength(2);
+  });
+
+  it('a replay recovers the X12 version a committed publish failed to mirror, from its recorded revision, writing nothing to the store', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' }, { toolUseId: 'toolu_c' as ToolUseId });
+    const args = { artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>v2</p>' } };
+    const first = jsonOf(await publish(args, { toolUseId: 'toolu_lost' as ToolUseId }, { deliverables: copyFails() }));
+    expect(first).not.toHaveProperty('version'); // committed in the store, its mirror failed
+    expect((await w.deliverables.get(SELF, created.artifactId))!.versions).toHaveLength(1);
+    const versions = w.store.listVersions(created.artifactId).length;
+    const again = jsonOf(await publish(args, { toolUseId: 'toolu_lost' as ToolUseId }));
+    expect(again).toMatchObject({ revision: first.revision, version: 2, deliverableId: created.artifactId });
+    const record = (await w.deliverables.get(SELF, created.artifactId))!;
+    expect(record.versions.map((v) => [readFileSync(v.path, 'utf8'), v.toolUseId])).toEqual([['<p>v1</p>', 'toolu_c'], ['<p>v2</p>', 'toolu_lost']]);
+    expect(w.store.listVersions(created.artifactId)).toHaveLength(versions);
+    expect(jsonOf(await publish(args, { toolUseId: 'toolu_lost' as ToolUseId }))).toEqual(again); // and once only
+  });
+
+  it('a replay never appends its version behind a later publish already mirrored, keeping the record in the store’s order', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' }, { toolUseId: 'toolu_c' as ToolUseId });
+    const lostArgs = { artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>v2</p>' } };
+    const lost = jsonOf<{ revision: number }>(await publish(lostArgs, { toolUseId: 'toolu_lost' as ToolUseId }, { deliverables: copyFails() }));
+    expect(jsonOf(await publish({ artifact: 'dash', baseRevision: lost.revision, files: { 'index.html': '<p>v3</p>' } }, { toolUseId: 'toolu_later' as ToolUseId }))).toMatchObject({ version: 2 });
+    const again = jsonOf(await publish(lostArgs, { toolUseId: 'toolu_lost' as ToolUseId }));
+    expect(again).toMatchObject({ revision: lost.revision });
+    expect(again).not.toHaveProperty('version');
+    const record = (await w.deliverables.get(SELF, created.artifactId))!;
+    expect(record.versions.map((v) => readFileSync(v.path, 'utf8'))).toEqual(['<p>v1</p>', '<p>v3</p>']);
+    expect(readFileSync(record.path, 'utf8')).toBe('<p>v3</p>');
   });
 
   it('two overlapping calls with one tool-use id publish once, mirror one X12 version and answer alike', async () => {

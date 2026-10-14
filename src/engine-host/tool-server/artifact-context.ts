@@ -34,6 +34,7 @@ export interface ByteBase {
 export class ArtifactSession {
   readonly byteBases = new Map<string, ByteBase>(); // by artifact id
   readonly guided = new Set<ArtifactKind>(); // the kinds whose guide this session was given (§4.3: once per session)
+  readonly unimportable = new Set<string>(); // X12 record ids a listing failed to import: not tried again by this session
   private readonly calls = new Map<string, Promise<McpToolResult>>(); // by op id: the writing calls still answering
 
   // One response per tool-use id while a call is answering (Decision Log 11): an overlapping call with the same id waits
@@ -82,16 +83,33 @@ export function storeOf(tool: ArtifactToolName, deps: Pick<ArtifactToolDeps, 'ar
 
 // The artifact a ref names (its id, or a handle in the lineage), answered once the batch it was read in committed. A
 // ref the store lacks but an X12 record in the lineage answers to (a page or file delivered before the store) is
-// imported first (Decision Log 40a), then named.
+// imported first (Decision Log 40a), then named; a read-only store (a newer MAWS wrote it) imports nothing.
 export async function resolveArtifact(tool: ArtifactToolName, deps: Pick<ArtifactToolDeps, 'deliverables' | 'log'>, store: ArtifactStore, ref: string, lineage: readonly AppSessionId[]): Promise<string> {
   const found = await store.readCommitted(() => store.resolve(ref, lineage));
   if (found !== null) return found;
-  const record = await x12RecordOf(deps.deliverables, ref, lineage);
+  const record = store.storage.readOnly ? null : await x12RecordOf(deps.deliverables, ref, lineage);
   if (record && (await importRecord(deps, store, record))) {
     const imported = await store.readCommitted(() => store.resolve(ref, lineage) ?? store.resolve(record.id));
     if (imported !== null) return imported;
   }
   throw new ToolRefusal(TOOL_ERRORS.noArtifact(tool, ref));
+}
+
+// Before a listing (Decision Log 40a): every X12 record of the lineage's sessions the store lacks is imported as a
+// tool naming it would import it, so a pre-P3 page or file is listed before anything names it. Bounded by the lineage
+// (X9) and idempotent (an id the store holds, deleted or not, is skipped; `importArtifact` skips one landed meanwhile); a
+// record that cannot be imported is logged once and not tried again by this session. A read-only store imports nothing.
+export async function importLineage(deps: Pick<ArtifactToolDeps, 'deliverables' | 'log' | 'session'>, store: ArtifactStore, lineage: readonly AppSessionId[]): Promise<void> {
+  if (store.storage.readOnly) return;
+  for (const session of lineage) {
+    const records = await deps.deliverables.list(session).catch(() => []);
+    const ids = records.map((record) => record.id);
+    const held = new Set(await store.readCommitted(() => ids.filter((id) => store.entity(id) !== undefined)));
+    for (const record of records) {
+      if (held.has(record.id) || deps.session.unimportable.has(record.id)) continue;
+      if (!(await importRecord(deps, store, record))) deps.session.unimportable.add(record.id);
+    }
+  }
 }
 
 // The nearest X12 record the ref names in the lineage: by its id (a page, a delivered file, or a screenshot E4c's
@@ -118,7 +136,10 @@ async function importRecord(deps: Pick<ArtifactToolDeps, 'log'>, store: Artifact
       record.versions.map(async (version) => ({
         at: Date.parse(version.at),
         actor,
-        content: kind === 'html' ? { bytes: await readFile(version.path), name: version.sourcePath ? basename(version.sourcePath) : 'index.html' } : { path: version.path },
+        content:
+          kind === 'html'
+            ? { bytes: await readFile(version.path), name: version.sourcePath ? basename(version.sourcePath) : 'index.html' }
+            : { path: version.path, digest: await digestOf(store, version.path) },
       })),
     );
     const input: ImportInput = {
@@ -137,6 +158,12 @@ async function importRecord(deps: Pick<ArtifactToolDeps, 'log'>, store: Artifact
     deps.log?.(`the X12 record ${record.id} of ${record.appSessionId} was not imported: ${messageOf(error)}`);
     return false;
   }
+}
+
+// A file version's digest, hashed off the import's commit path; none for a file gone (the import then refuses it).
+async function digestOf(store: ArtifactStore, path: string): Promise<{ sha256: string; size: number } | undefined> {
+  const described = await store.files.describeStreamed(path).catch(() => null);
+  return described ? { sha256: described.sha256, size: described.size } : undefined;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
