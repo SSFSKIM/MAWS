@@ -7,9 +7,9 @@
 // protocol's `ready` line after the host's resync (if one is registered), and hold requests made while the host is
 // starting or restarting until it is ready.
 import { createInterface } from 'node:readline';
-import { app, MessageChannelMain, utilityProcess, type UtilityProcess } from 'electron';
+import { app, MessageChannelMain, utilityProcess, type MessagePortMain, type UtilityProcess } from 'electron';
 import { ipcError } from '@shared/ipc/errors';
-import { HostToMainSchema, type HostMessage, type HostResponse } from '@shared/ipc/host-protocol';
+import { HostToMainSchema, type HostDoc, type HostMessage, type HostResponse } from '@shared/ipc/host-protocol';
 import type { CommandName, CommandResult, EventName, EventPayload, HostState, PtyId } from '@shared/ipc/schema';
 import type { HostStatus } from '@shared/ipc/schema/host'; // E10
 import { isEventName, validateCommandOutput } from '@shared/ipc/validate';
@@ -17,6 +17,8 @@ import type { HostDispatch, HostOwner } from '../ipc/router';
 // E10 start
 import { createDetachedTransport, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HostLink } from './detached-transport';
 // E10 end
+import { DocumentsClosedSchema } from '@shared/host/socket-protocol'; // P3-A M5
+import { MainDocRelay } from './doc-relay'; // P3-A M5
 
 export interface HostSpec {
   modulePath: string; // the bundled entry, from electron-vite's `?modulePath` import
@@ -88,6 +90,14 @@ export interface HostSupervisor {
   // Utility: engine.shutdown, as before.
   stopAllForQuit(graceMs: number): Promise<void>;
   // E10 end
+  // P3-A M4 (its Decision Log 13): hands one end of a document's channel to the engine host on its parent port, when it
+  // runs as a utility process and is ready; false (nothing posted, the caller still holds the port) otherwise.
+  // P3-A M5: a detached host's end is kept by main and relayed over a channel of the supervisor's socket (doc-relay.ts),
+  // under `owner` (the asking window's webContents id), while a connection is served and ready.
+  postDocPort(message: HostDoc, port: MessagePortMain, owner?: number): boolean;
+  // P3-A M5: the window closed or reloaded: the channels main relays for it end (a utility host's ports, entangled with
+  // the window's directly, end by themselves).
+  closeDocPorts(owner: number): void;
 }
 
 export const REQUEST_TIMEOUT_MS = 10_000;
@@ -142,6 +152,7 @@ interface Host {
   quitting: boolean; // stopAllForQuit was asked: nothing restarts, nothing more is held
   utilityRestart: Promise<CommandResult<'host.restart'>> | null; // a utility restart under way, until it forks the successor
   // E10 end
+  relay: MainDocRelay | null; // P3-A M5: a detached host's document channels
 }
 
 export function createHostSupervisor({ hosts: specs, emit, detached, restartBackoffMs = RESTART_BACKOFF_MS }: HostSupervisorOptions): HostSupervisor {
@@ -170,11 +181,13 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       lastExit: null,
       quitting: false,
       utilityRestart: null,
+      relay: null, // P3-A M5
     };
     // E10: a detached host's transport, reporting into the same state, ladder and requests as a utility host's
     if (host.spec.transport === 'detached') {
       const options = { userData: () => app.getPath('userData'), packaged: () => app.isPackaged, ...detached, modulePath: host.spec.modulePath };
       host.transport = createDetachedTransport(options, detachedEvents(host));
+      host.relay = new MainDocRelay(); // P3-A M5
     }
     hosts[owner] = host;
   }
@@ -296,6 +309,7 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
 
   // Fails the requests the host was sent; E10: the ones still held wait for the next connect.
   function detach(host: Host, reason: string): void {
+    host.relay?.disconnect(); // P3-A M5: every relayed window port ends with the connection
     host.child = null;
     host.port?.close();
     host.port = null;
@@ -384,7 +398,14 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       connected(link: HostLink, welcome) {
         if (stopped) return link.close();
         host.port = link;
-        link.onMessage((data) => receive(host, data));
+        // P3-A M5: the document channels' frames and the host's `documents.closed` go to the relay, not the envelope
+        host.relay?.connect(link);
+        link.onDoc((channel, frame) => host.relay?.deliver(channel, frame));
+        link.onMessage((data) => {
+          const closed = DocumentsClosedSchema.safeParse(data);
+          if (closed.success) host.relay?.closed(closed.data.channel);
+          else receive(host, data);
+        });
         transition(host, { state: 'ready', pid: welcome.pid, restarts: host.state.restarts });
         sendHeld(host);
         host.settleFirstLaunch();
@@ -653,6 +674,20 @@ export function createHostSupervisor({ hosts: specs, emit, detached, restartBack
       if (!result.ok && result.error.code !== 'host_unavailable') console.warn('[hosts] host.stopAll for the quit failed', result.error);
     },
     // E10 end
+    // P3-A M4 start
+    postDocPort(message, port, owner) {
+      const host = hosts['engine-host'];
+      if (stopped || host.state.state !== 'ready') return false;
+      // P3-A M5: detached, main keeps the host's end and relays it
+      if (host.transport) return host.port !== null && (host.relay?.open(message, port, owner ?? null) ?? false);
+      if (!host.child) return false;
+      host.child.postMessage(message satisfies HostMessage, [port]);
+      return true;
+    },
+    closeDocPorts(owner) {
+      hosts['engine-host']?.relay?.closeOwner(owner); // P3-A M5
+    },
+    // P3-A M4 end
   };
 }
 

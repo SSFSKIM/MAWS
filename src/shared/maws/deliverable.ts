@@ -25,6 +25,9 @@ export const DeliverableRecordSchema = z.strictObject({
       at: z.string(),
       toolUseId: ToolUseIdSchema.optional(), // E2: the call that added this version
       sourcePath: z.string().optional(), // E2: the path the agent named; `path` is the copy
+      // P3-A (M6): the session whose call added this version, when another than the record's (a side thread's publish
+      // of its parent's page): with `toolUseId` it names the call, since a raw tool-use id may recur across sessions
+      appSessionId: AppSessionIdSchema.optional(),
     }),
   ),
   toolUseId: ToolUseIdSchema.optional(), // the call that delivered it (`_meta["claudecode/toolUseId"]`)

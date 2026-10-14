@@ -171,8 +171,9 @@ export class SideJournal {
   // engine host itself: the assistant's `tool_use` of `mcp__maws__<name>` (seq 357), the engine's `can_use_tool` (seq
   // 359) and the host's `allow` (seq 363), the engine's `mcp_message` `tools/call` (seq 366) and the host's answer the
   // replay holds at (seq 367; matched by its request id only, so what the host answers is its own), then the engine's
-  // `tool_result` carrying `answer` as the tool's JSON text (seq 369). Answers the tool use id.
-  mawsToolCall(name: string, input: Record<string, unknown>, answer: Record<string, unknown>): string {
+  // `tool_result` carrying `answer` as the tool's JSON text (seq 369). Answers the tool use id. P3-A (M6): `asked: false`
+  // leaves out the permission round (the engine runs a tool a rule allows without asking).
+  mawsToolCall(name: string, input: Record<string, unknown>, answer: Record<string, unknown>, options: { asked?: boolean } = {}): string {
     const toolUseId = `toolu_e1${this.sessionId.at(-1)}${String(this.minted + 1).padStart(6, '0')}`;
     const swap = { [RECORDED.maws.session]: this.sessionId, [RECORDED.maws.toolUse]: toolUseId, [RECORDED.maws.permission]: this.uuid(), [RECORDED.maws.call]: this.uuid() };
     const tool = `mcp__maws__${name}`;
@@ -180,10 +181,12 @@ export class SideJournal {
     const labelled = name === 'artifact_update';
     const { tool_use_meta: meta, ...assistant } = swapped(frameOf(MAWS_ARTIFACTS, 357), swap) as Frame & { message: Frame & { content: Frame[] } };
     this.push('in', { ...assistant, ...(labelled && { tool_use_meta: meta }), uuid: this.uuid(), message: { ...assistant.message, content: [{ ...assistant.message.content[0]!, name: tool, input }] } });
-    const ask = swapped(frameOf(MAWS_ARTIFACTS, 359), swap) as Frame & { request: Frame };
-    const { display_name: displayName, ...request } = ask.request;
-    this.push('in', { ...ask, request: { ...request, ...(labelled && { display_name: displayName }), tool_name: tool, input, permission_suggestions: [{ type: 'addRules', rules: [{ toolName: tool }], behavior: 'allow', destination: 'localSettings' }] } });
-    this.push('out', swapped(frameOf(MAWS_ARTIFACTS, 363), swap));
+    if (options.asked ?? true) {
+      const ask = swapped(frameOf(MAWS_ARTIFACTS, 359), swap) as Frame & { request: Frame };
+      const { display_name: displayName, ...request } = ask.request;
+      this.push('in', { ...ask, request: { ...request, ...(labelled && { display_name: displayName }), tool_name: tool, input, permission_suggestions: [{ type: 'addRules', rules: [{ toolName: tool }], behavior: 'allow', destination: 'localSettings' }] } });
+      this.push('out', swapped(frameOf(MAWS_ARTIFACTS, 363), swap));
+    }
     const call = swapped(frameOf(MAWS_ARTIFACTS, 366), swap) as Frame & { request: Frame & { message: Frame & { params: Frame } } };
     this.push('in', { ...call, request: { ...call.request, message: { ...call.request.message, params: { ...call.request.message.params, name, arguments: input } } } });
     this.push('out', swapped(frameOf(MAWS_ARTIFACTS, 367), swap));

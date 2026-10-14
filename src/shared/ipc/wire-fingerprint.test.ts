@@ -33,7 +33,10 @@ describe('HOST_EVENTS', () => {
         'deliverables.changed',
         'maws.pane.show',
         'maws.artifact.capture',
+        'maws.artifact.export', // P3-A M7
         'host.supervisorStatus', // E10 M2
+        'artifacts.changed', // P3-A M4
+        'spaces.changed', // P3-A M4
         // E4c's `maws.browser.request` and `maws.browser.cancel` left with the browser tools (P1 A-54)
       ].sort(),
     );

@@ -12,6 +12,7 @@
     "src/engine-host/**/*",
     "src/pty-host/**/*",
     "src/shared/**/*",
+    "src/artifacts/**/*", // P3-A: the portable artifact layer, typechecked as the host will import it
     "test/**/*",
     // C8a start: test/support/panel-child-fixture.ts measures its fixture through C6's pure model (createState,
     // applyEvents, rowsOf) and journalToEvents; vitest's typecheck runs this project composite, which refuses a file
@@ -45,6 +46,7 @@
     // formats (D2 widened), and the agent models' tests read the system locale's relative times; listed for the same
     // reason as C8a's
     "src/renderer/src/app/date-format.ts",
-    "src/renderer/src/test-support/relative-time.ts"
+    "src/renderer/src/test-support/relative-time.ts",
+    "src/renderer/src/artifacts/host.ts" // P3-A M5: the detached-channel test drives the real ArtifactHost under Node
   ]
 }

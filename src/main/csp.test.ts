@@ -12,7 +12,7 @@ const directives = (csp: string) =>
 describe('content security policy', () => {
   it('is exactly the production policy without a dev server', () => {
     expect(PRODUCTION_CSP).toBe(
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' maws-deliverable:; media-src 'self' maws-deliverable:",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: maws-artifact:; font-src 'self' data: maws-artifact:; connect-src 'self'; frame-src 'self' maws-deliverable: maws-artifact:; media-src 'self' maws-deliverable: maws-artifact:",
     );
     expect(buildCsp(null)).toBe(PRODUCTION_CSP);
   });
@@ -20,7 +20,7 @@ describe('content security policy', () => {
   it('adds the nonce to script-src only, and the HMR socket to connect-src, in development', () => {
     const csp = buildCsp({ nonce: 'N', devServerUrl: 'http://localhost:5173' });
     expect(csp).toBe(
-      "default-src 'self'; script-src 'self' 'nonce-N'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws://localhost:5173; frame-src 'self' maws-deliverable:; media-src 'self' maws-deliverable:",
+      "default-src 'self'; script-src 'self' 'nonce-N'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: maws-artifact:; font-src 'self' data: maws-artifact:; connect-src 'self' ws://localhost:5173; frame-src 'self' maws-deliverable: maws-artifact:; media-src 'self' maws-deliverable: maws-artifact:",
     );
     const withNonce = Object.entries(directives(csp))
       .filter(([, sources]) => sources.some((s) => s.includes('nonce-')))
@@ -32,11 +32,24 @@ describe('content security policy', () => {
   // keeps the request card's srcdoc frame, which inherits the document's policy
   it('admits the maws-deliverable: scheme to frames and media, and nothing else', () => {
     const csp = directives(PRODUCTION_CSP);
-    expect(csp['frame-src']).toEqual(["'self'", 'maws-deliverable:']);
-    expect(csp['media-src']).toEqual(["'self'", 'maws-deliverable:']);
+    expect(csp['frame-src']).toEqual(["'self'", 'maws-deliverable:', 'maws-artifact:']);
+    expect(csp['media-src']).toEqual(["'self'", 'maws-deliverable:', 'maws-artifact:']);
     expect(PRODUCTION_CSP.match(/maws-deliverable:/g)).toHaveLength(2);
   });
   // E2 end
+
+  // P3-A M7 (Decision Log 35g): the artifact store's scheme for frames and media as the deliverable one, and for images and
+  // fonts too (srcdoc frames inherit this policy: a design system's bundled faces, a document's images, D's canon frames);
+  // never for scripts, styles or connections
+  it('admits the maws-artifact: scheme to frames, media, images and fonts, and nothing else', () => {
+    const csp = directives(PRODUCTION_CSP);
+    expect(csp['img-src']).toEqual(["'self'", 'data:', 'blob:', 'maws-artifact:']);
+    expect(csp['font-src']).toEqual(["'self'", 'data:', 'maws-artifact:']);
+    const admitting = Object.entries(csp)
+      .filter(([, sources]) => sources.includes('maws-artifact:'))
+      .map(([name]) => name);
+    expect(admitting.sort()).toEqual(['font-src', 'frame-src', 'img-src', 'media-src']);
+  });
 
   it('takes the socket host and port from the dev server URL', () => {
     const csp = buildCsp({ nonce: 'abc+/=', devServerUrl: 'http://127.0.0.1:5174/' });

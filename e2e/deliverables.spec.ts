@@ -28,7 +28,7 @@ import { deliverableUrl, type DeliverableRecord } from '../src/shared/maws/deliv
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
 import { invoke, value } from './support/c7-replay';
 import {
-  allowNext, closeScene, frameAt, idle, launchScene, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, PASS3, recordedCwd, recordPath, replay, rowOf,
+  allowNext, asPublishReplay, closeScene, frameAt, idle, launchScene, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, PASS3, recordedCwd, recordPath, replay, rowOf,
   scene, scratchProject, seamLines, seedArtifact, seedFile, shoot, show, unfoldWork, viewerOf, type Scene,
 } from './support/maws-tools';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -449,6 +449,9 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
   // `system/init.cwd`, seq 30): the directory is recreated with v1 before the launch and rewritten as v2 before the
   // update is allowed (the recorded Write and Edit are the engine's, replayed, and write nothing).
   const repo = recordedCwd(ARTIFACTS);
+  // P3-A (M6): E2's recording, its retired `artifact_update` calls made `artifact_publish` calls of the v2 page from the
+  // revision the create answers (the store is fresh: its first write is revision 1)
+  const replayed = asPublishReplay(ARTIFACTS, DASHBOARD_V2, 1);
   const existed = existsSync(repo);
   mkdirSync(repo, { recursive: true });
   writeFileSync(join(repo, 'dashboard.html'), DASHBOARD_V1);
@@ -456,15 +459,15 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
     await scene({ titles: ['E2: the dashboard artifact'], repo }, async (s) => {
       const [id] = s.ids;
       await show(s, id);
-      await replay(s, id, ARTIFACTS);
+      await replay(s, id, replayed);
       await allowNext(s, id); // Write (seq 154)
       await allowNext(s, id); // mcp__maws__artifact_create (seq 176)
       await allowNext(s, id); // mcp__maws__artifact_screenshot (seq 200): main's capture of v1 answers it
       await allowNext(s, id); // Edit (seq 338)
       writeFileSync(join(repo, 'dashboard.html'), DASHBOARD_V2);
-      await allowNext(s, id); // mcp__maws__artifact_update (seq 359)
+      await allowNext(s, id); // mcp__maws__artifact_publish (seq 359; E2's update)
       await allowNext(s, id); // mcp__maws__artifact_list (seq 381)
-      await allowNext(s, id); // mcp__maws__artifact_update "nope" (seq 408)
+      await allowNext(s, id); // mcp__maws__artifact_publish "nope" (seq 408)
       await idle(s, id);
 
       // what the host answered, call by call
@@ -473,9 +476,9 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
       expect(calls.map((c) => [c.name, c.args])).toEqual([
         ['artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }],
         ['artifact_screenshot', { id: 'dash' }],
-        ['artifact_update', { id: 'dash', html_path: 'dashboard.html' }],
+        ['artifact_publish', { artifact: 'dash', baseRevision: 1, files: { 'index.html': DASHBOARD_V2 } }],
         ['artifact_list', {}],
-        ['artifact_update', { id: 'nope', html_path: 'dashboard.html' }],
+        ['artifact_publish', { artifact: 'nope', baseRevision: 1, files: { 'index.html': DASHBOARD_V2 } }],
       ]);
       const text = (k: number) => {
         const block = mcpResultOf(rows, calls[k]!.requestId)!.content.find((b) => b.type === 'text')!;
@@ -496,9 +499,10 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
       const captured = text(1);
       expect(captured).toMatchObject({ status: 'captured', id: 'dash', deliverableId, title: 'Dashboard', version: 1, width: 1280, height: 800, bytes: png.length });
       expect((captured.consoleErrors as string[]).some((line) => line.includes('E2_BOOM')), JSON.stringify(captured.consoleErrors)).toBe(true);
-      expect(text(2)).toMatchObject({ status: 'updated', id: 'dash', deliverableId, version: 2, title: 'Dashboard' });
-      expect(text(3)).toMatchObject({ status: 'listed', artifacts: [{ id: 'dash', deliverableId, title: 'Dashboard', versions: 2 }] });
-      expect(mcpResultOf(rows, calls[4]!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.noArtifact('artifact_update', 'nope') }], isError: true });
+      expect(created).toMatchObject({ artifactId: deliverableId, revision: 1 }); // P3-A: the artifact is the record's uuid
+      expect(text(2)).toMatchObject({ status: 'published', id: 'dash', deliverableId, version: 2, title: 'Dashboard', changed: ['index.html'] });
+      expect(text(3)).toMatchObject({ status: 'listed', artifacts: [{ id: deliverableId, handle: 'dash', kind: 'html', title: 'Dashboard' }] });
+      expect(mcpResultOf(rows, calls[4]!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.noArtifact('artifact_publish', 'nope') }], isError: true });
       expect(ofKind(await s.events(id), 'maws.delivery.artifact').map((e) => [e.action, e.artifactId, e.deliverableId, e.version])).toEqual([
         ['create', 'dash', deliverableId, 1],
         ['update', 'dash', deliverableId, 2],

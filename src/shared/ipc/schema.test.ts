@@ -56,9 +56,14 @@ import { DONE_REPORT, PROBE_EXTENSION } from '../../../test/support/import-repor
 import * as mods from './schema/mods';
 import * as ownerChannel from './schema/owner-channel'; // M4
 // P2-C end
+// P3-A start (M4)
+import * as artifacts from './schema/artifacts';
+import * as spaces from './schema/spaces';
+import { ARTIFACT_REFUSALS, artifactRefusalOf } from './schema/artifacts';
+// P3-A end
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -592,7 +597,7 @@ describe('ipc schema validates both directions', () => {
       // `browser` are the ones added since).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -906,9 +911,9 @@ describe('ipc schema validates both directions', () => {
   // E1 start: the maws tool server's commands and its pane request (P1 ledger §5)
   describe('E1 entries', () => {
     it('adds the maws namespace: three engine-host commands and the pane request, all bridged', () => {
-      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.download.recorded' /* E13 */]);
+      expect(Object.keys(maws.commands)).toEqual(['maws.asks.list', 'maws.ask.answer', 'maws.pane.answer', 'maws.artifact.captured' /* E2 */, 'maws.download.recorded' /* E13 */, 'maws.artifact.exported' /* P3-A M7 */]);
       for (const spec of Object.values(maws.commands)) expect(spec.owner).toBe('engine-host');
-      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */]);
+      expect(Object.keys(maws.events)).toEqual(['maws.pane.show', 'maws.artifact.capture' /* E2 */, 'maws.artifact.export' /* P3-A M7 */]);
       expect([...NAMES.maws.commands]).toEqual(Object.keys(maws.commands));
     });
 
@@ -1640,4 +1645,140 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // P2-C end
+
+  // P3-A start (M4): the artifact store's surface (docs/doperpowers/plans/2026-10-12-p3-a-store.md, M4)
+  describe('P3-A entries', () => {
+    const id = '11111111-1111-4111-8111-111111111111';
+    const human = { kind: 'human' };
+    const artifact = { id, kind: 'document', title: 'Plan', createdBy: human, createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 0 };
+
+    it('owns artifacts.* in the engine host but artifacts.open (main), keeps setDefaults and content main-only, and emits both events across the host wire', () => {
+      const owners = Object.fromEntries(Object.entries({ ...artifacts.commands, ...spaces.commands }).map(([name, spec]) => [name, spec.owner]));
+      expect(Object.entries(owners).filter(([, owner]) => owner !== 'engine-host').map(([name]) => name)).toEqual(['artifacts.open', 'artifacts.export' /* M7 */]);
+      expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['artifacts.setDefaults', 'artifacts.content']));
+      expect([...NAMES.artifacts.commands]).not.toContain('artifacts.setDefaults');
+      expect([...NAMES.artifacts.commands]).not.toContain('artifacts.content');
+      expect(HOST_EVENTS).toEqual(expect.arrayContaining(['artifacts.changed', 'spaces.changed']));
+      expect(Object.keys(spaces.commands)).toEqual(['spaces.list', 'spaces.create', 'spaces.update', 'spaces.delete']);
+    });
+
+    // P3-A M7: the export service (main's `artifacts.export`, the host's bridge `maws.artifact.export`/`exported`) and an
+    // artifact frame's console (main's `artifacts.console`, never across the host wire)
+    it('validates the library’s export, the host’s export request and main’s answer, and an artifact frame’s console message', () => {
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'pdf' }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'png', versionId: 3, width: 640, height: 480 }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'gif' }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'png', width: 100_000 }).ok).toBe(false);
+      expect(validateCommandOutput('artifacts.export', { path: '/u/artifacts/x/exports/4-pdf.pdf', revision: 4 }).ok).toBe(true);
+      const request = { appSessionId: 'a', requestId: 'r1', artifactId: id, kind: 'html', format: 'pdf', revision: 4, path: '/u/artifacts/x/exports/4-pdf.pdf' };
+      expect(validateEventPayload('maws.artifact.export', request).ok).toBe(true);
+      expect(validateEventPayload('maws.artifact.export', { ...request, path: 'relative.pdf' }).ok).toBe(false);
+      expect(HOST_EVENTS).toContain('maws.artifact.export');
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: false, unavailable: true, error: 'no exporter' } }).ok).toBe(true);
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, path: '/x' } }).ok).toBe(false); // no revision
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, revision: 8, path: '/u/x/exports/8-pdf.pdf', blockedRequests: 2 } }).ok).toBe(true);
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, revision: 8, path: 'relative.pdf' } }).ok).toBe(false);
+      expect(validateEventPayload('artifacts.console', { artifactId: id, revision: null, level: 'error', message: 'boom', line: 3, source: null }).ok).toBe(true);
+      expect(validateEventPayload('artifacts.console', { artifactId: id, revision: 4, level: 'info', message: 'x', line: null, source: null }).ok).toBe(false);
+      expect(HOST_EVENTS).not.toContain('artifacts.console');
+      expect(ARTIFACT_REFUSALS).toContain('exportUnavailable');
+    });
+
+    it('answers artifacts with their revision and the agent-suggestions flag, and refuses a row without either', () => {
+      expect(validateCommandOutput('artifacts.get', { artifact }).ok).toBe(true);
+      expect(validateCommandOutput('artifacts.get', { artifact: null }).ok).toBe(true);
+      for (const key of ['revision', 'agentEditsAsSuggestions'] as const) {
+        const without: Record<string, unknown> = { ...artifact };
+        delete without[key];
+        expect(validateCommandOutput('artifacts.list', { artifacts: [without] }).ok, key).toBe(false);
+      }
+    });
+
+    it('takes a byte kind’s content as bytes or a path, never both shapes at once', () => {
+      expect(validateCommandInput('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: new Uint8Array([60]), name: 'index.html' } }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.create', { kind: 'file', title: 'Report', content: { path: '/tmp/report.pdf' } }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: [60] } }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: new Uint8Array([60]), path: '/tmp/x' } }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.create', { kind: 'document', title: '' }).ok).toBe(false);
+    });
+
+    it('names a version state by exactly one of its id and its seq', () => {
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id, versionId: 3 }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id, seq: 0 }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.versionState', { artifactId: id, versionId: 3, seq: 4 }).ok).toBe(false);
+      expect(validateCommandOutput('artifacts.versionState', { bytes: new Uint8Array(4) }).ok).toBe(true);
+    });
+
+    it('caps an uploaded asset at 16 MiB and takes the test writer’s three operations only', () => {
+      expect(validateCommandInput('artifacts.uploadAsset', { artifactId: id, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array(16 * 1024 * 1024 + 1) }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.uploadAsset', { artifactId: id, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array(8) }).ok).toBe(true);
+      const ops = [{ op: 'setAttr', key: 'title', value: { nested: [1, 'two'] } }, { op: 'insertText', index: 0, text: 'hi', root: 'body' }, { op: 'deleteText', index: 0, length: 1 }];
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op-1', ops, appSessionId: 'sess-1' }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op-1', ops: [{ op: 'format', index: 0 }] }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op-1', ops: [] }).ok).toBe(false);
+    });
+
+    it('carries the change feed’s four artifact changes and three Space changes', () => {
+      for (const change of ['created', 'updated', 'deleted', 'linked']) expect(validateEventPayload('artifacts.changed', { artifactId: id, kind: 'html', revision: 3, change }).ok).toBe(true);
+      expect(validateEventPayload('artifacts.changed', { artifactId: id, kind: 'html', revision: 3, change: 'resync' }).ok).toBe(false);
+      for (const change of ['created', 'updated', 'deleted']) expect(validateEventPayload('spaces.changed', { spaceId: id, change }).ok).toBe(true);
+      expect(validateEventPayload('spaces.changed', { spaceId: id, change: 'linked' }).ok).toBe(false);
+    });
+
+    // P3-A M5: main's one hook for a reconcile read after events the renderer may have missed (Decision Log in M5)
+    it('announces a resync from main, outside the host wire, with nothing in it', () => {
+      expect(validateEventPayload('artifacts.resync', {}).ok).toBe(true);
+      expect(validateEventPayload('artifacts.resync', { artifactId: id }).ok).toBe(false);
+      expect([...NAMES.artifacts.events]).toContain('artifacts.resync');
+      expect(HOST_EVENTS).not.toContain('artifacts.resync');
+    });
+
+    // P3-A M5: a setAttr value is a JSON value, never `undefined`, so the detached JSON line cannot drop it
+    it('takes a JSON value for the test writer’s setAttr, and no undefined', () => {
+      for (const value of ['s', 1, true, null, [1, { a: 2 }], { nested: { deep: [null] } }]) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, JSON.stringify(value)).toBe(true);
+      }
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value: undefined }] }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k' }] }).ok).toBe(false);
+    });
+
+    // The value is checked all the way down: what JSON would drop or rewrite (undefined to null or nothing, NaN and
+    // Infinity to null) is refused at any depth, since the detached line would carry something else than was sent.
+    it('refuses a non-JSON value at any depth in a setAttr value', () => {
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      const nonJson: [string, unknown][] = [
+        ['undefined in an array', [undefined]],
+        ['undefined in a record', { nested: undefined }],
+        ['undefined at depth', { a: [{ b: [1, { c: undefined }] }] }],
+        ['a function', { f: () => 1 }],
+        ['a function at depth', [[{ f: () => 1 }]]],
+        ['NaN', [Number.NaN]],
+        ['Infinity at depth', { a: { b: [Number.POSITIVE_INFINITY] } }],
+        ['-Infinity', { a: Number.NEGATIVE_INFINITY }],
+        ['a bigint', [1n]],
+        ['a symbol', { s: Symbol('x') }],
+        ['a Date', { d: new Date(0) }],
+        ['a Map', { m: new Map() }],
+        ['a typed array', { b: new Uint8Array(2) }],
+        ['a sparse array', [1, , 3]], // eslint-disable-line no-sparse-arrays
+        ['a cycle', cyclic],
+      ];
+      for (const [label, value] of nonJson) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, label).toBe(false);
+      }
+      for (const value of [[], {}, [[], {}], { a: { b: [0, -0, 1.5, 'x', true, null] } }]) {
+        expect(validateCommandInput('artifacts.testWrite', { artifactId: id, opId: 'op', ops: [{ op: 'setAttr', key: 'k', value }] }).ok, JSON.stringify(value)).toBe(true);
+      }
+    });
+
+    it('reads a store refusal back out of an IpcError, and nothing out of any other error', () => {
+      const refusal = { reason: 'designSystemInUse', data: { artifactIds: [id] } };
+      expect(artifactRefusalOf({ code: 'invalid_input', message: 'in use', issues: refusal })).toEqual(refusal);
+      expect(artifactRefusalOf({ code: 'timeout', message: 'slow' })).toBeNull();
+      expect(artifactRefusalOf({ code: 'invalid_input', message: 'bad', issues: [{ path: ['x'] }] })).toBeNull();
+    });
+  });
+  // P3-A end
 });

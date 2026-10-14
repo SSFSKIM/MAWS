@@ -2,21 +2,19 @@
 // overrides, total over MCP, plugin and future tools. The table is the contract; `presentationOf` says which tool
 // names are rows of another kind rather than cells.
 import type { DenialKind, SafeguardVerdict } from '@shared/graph/enums';
-import { MAWS_SERVER_NAME, type MawsToolName } from '@shared/maws/tools'; // E1
+import { MAWS_SERVER_NAME, MAWS_TOOL_NAMES, type MawsToolName } from '@shared/maws/tools'; // E1
+import { HISTORICAL_ARTIFACT_UPDATE } from '@shared/maws/artifact-update'; // P3-A
 import type { BrowserToolName } from '@shared/maws/browser'; // E4c
 import type { ToolCategory, ToolClassification } from './rows';
 
 export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery' | /* E7 */ 'agent_list' | /* E2 */ 'artifact' | /* E4c */ 'browser_action';
 
 // E1 start: the names the engine gives the `maws` server's tools (X9), as tool uses carry them
-export const MAWS_TOOL_USE: Record<MawsToolName, string> = {
-  send_file: `mcp__${MAWS_SERVER_NAME}__send_file`, ask: `mcp__${MAWS_SERVER_NAME}__ask`, show_pane: `mcp__${MAWS_SERVER_NAME}__show_pane`,
-  // E2 start: the artifact tools (an artifact row for the two writers, cells for the two readers)
-  artifact_create: `mcp__${MAWS_SERVER_NAME}__artifact_create`, artifact_update: `mcp__${MAWS_SERVER_NAME}__artifact_update`,
-  artifact_list: `mcp__${MAWS_SERVER_NAME}__artifact_list`, artifact_screenshot: `mcp__${MAWS_SERVER_NAME}__artifact_screenshot`,
-  // E2 end
-};
+export const MAWS_TOOL_USE = Object.fromEntries(MAWS_TOOL_NAMES.map((name) => [name, `mcp__${MAWS_SERVER_NAME}__${name}`])) as Readonly<Record<MawsToolName, string>>;
 // E1 end
+// P3-A: E2's `artifact_update` as tool uses carried it, retired into `artifact_publish`; frozen, classifying only the
+// journals and fixtures written before
+export const HISTORICAL_ARTIFACT_UPDATE_TOOL_USE = `mcp__${MAWS_SERVER_NAME}__${HISTORICAL_ARTIFACT_UPDATE}`;
 
 // E4c start: the six browser tools' names as tool uses carried them (each call a `browser_action` row). Frozen: the tools
 // left the `maws` server on 2026-10-08 (P1 A-54), and these names classify only journals and fixtures written before.
@@ -47,9 +45,10 @@ const ROW_KIND_TOOLS: Record<string, Presentation> = {
   // Design §4)
   ListAgents: 'agent_list',
   // E7 end
-  // E2 start: an artifact version the agent registered is an artifact row
+  // E2 start: an artifact version the agent registered is an artifact row (P3-A: a publish too, as an update was)
   [MAWS_TOOL_USE.artifact_create]: 'artifact',
-  [MAWS_TOOL_USE.artifact_update]: 'artifact',
+  [MAWS_TOOL_USE.artifact_publish]: 'artifact',
+  [HISTORICAL_ARTIFACT_UPDATE_TOOL_USE]: 'artifact',
   // E2 end
   // E4c start: every historical browser tool call is a browser action row (E4c execution document, Design §10)
   ...Object.fromEntries(Object.values(HISTORICAL_BROWSER_TOOL_USE).map((name) => [name, 'browser_action' as const])),
@@ -81,9 +80,15 @@ const TABLE: Record<string, TableRow> = {
   // that Background work's `Open creating turn` jumps to (E7 execution document, Design §7)
   CronCreate: grouped('other'), CronList: grouped('other'), CronDelete: grouped('other'),
   // E7 end
-  // E2 start: listing and screenshotting artifacts are cells of their own, as show_pane is
+  // E2 start: listing and screenshotting artifacts are cells of their own, as show_pane is (P3-A: as are the namespace's
+  // other readers, its assets and its exports)
   [MAWS_TOOL_USE.artifact_list]: standalone('other'),
   [MAWS_TOOL_USE.artifact_screenshot]: standalone('other'),
+  [MAWS_TOOL_USE.artifact_describe_type]: standalone('other'),
+  [MAWS_TOOL_USE.artifact_read]: standalone('other'),
+  [MAWS_TOOL_USE.artifact_upload_asset]: standalone('other'),
+  [MAWS_TOOL_USE.artifact_list_assets]: standalone('other'),
+  [MAWS_TOOL_USE.artifact_export]: standalone('other'),
   // E2 end
   // E13 start: a cua_repl `js` call is a cell of its own, never folded into a group of MCP calls, so the browser
   // activity under it is in view without opening a group (it folds with the turn's work, as every cell does)

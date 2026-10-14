@@ -398,7 +398,7 @@ test('show_pane: the Terminal opens in the panel, a deliverable no record answer
 
 // ---- G1 and G7 in the app: E0a's round trip ------------------------------------------------------------------------
 
-test('the SDK MCP round trip: the app answers the engine’s handshake with the seven tools and refuses the probe’s own tool', async () => {
+test('the SDK MCP round trip: the app answers the engine’s handshake with the twelve tools and refuses the probe’s own tool', async () => {
   // The probe's journal: its scratch directory is the engine cwd, and from seq 96 on it holds at the probe's own writes,
   // which the app never makes (M1's decisions), so the case ends after the first turn.
   await scene({ titles: ['E1 tools: round trip'] }, async (s) => {
@@ -418,10 +418,16 @@ test('the SDK MCP round trip: the app answers the engine’s handshake with the 
       // E2: the artifact tools, listed from the first `tools/list`; the two writers are not read-only, so the engine never
       // batches them (E2 execution document, Decision Logs 3 and 4)
       ['artifact_create', { title: 'Create artifact', readOnlyHint: false, openWorldHint: false }],
-      ['artifact_update', { title: 'Update artifact', readOnlyHint: false, openWorldHint: false }],
       ['artifact_list', { title: 'List artifacts', readOnlyHint: true, openWorldHint: false }],
       ['artifact_screenshot', { title: 'Screenshot artifact', readOnlyHint: true, openWorldHint: false }],
-      // E4c's six browser tools left on 2026-10-08 (P1 A-54): none listed
+      // E4c's six browser tools left on 2026-10-08 (P1 A-54): none listed. P3-A (M6): artifact_update retired into
+      // artifact_publish, and the namespace's other tools appended
+      ['artifact_describe_type', { title: 'Describe artifact kind', readOnlyHint: true, openWorldHint: false }],
+      ['artifact_read', { title: 'Read artifact', readOnlyHint: true, openWorldHint: false }],
+      ['artifact_publish', { title: 'Publish artifact', readOnlyHint: false, openWorldHint: false }],
+      ['artifact_upload_asset', { title: 'Upload artifact asset', readOnlyHint: false, openWorldHint: false }],
+      ['artifact_list_assets', { title: 'List artifact assets', readOnlyHint: true, openWorldHint: false }],
+      ['artifact_export', { title: 'Export artifact', readOnlyHint: false, openWorldHint: false }],
     ]);
     const [echo] = mcpCalls(rows);
     expect(mcpResultOf(rows, echo!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true });

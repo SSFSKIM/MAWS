@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createHostRuntime, HostCommandError, type HostEmit, type HostPort } from './runtime';
+import { createHostRuntime, HostCommandError, parentPortListener, type HostEmit, type HostPort } from './runtime';
 
 // A fake MessagePortMain: what the runtime posts is recorded; `deliver` plays main posting a message to the host.
 function fakePort() {
@@ -413,3 +413,82 @@ describe('host runtime: a ready client going (E4c)', () => {
   });
 });
 // E4c end
+
+// P3-A M4 start: a document's port on the parent port (docs/doperpowers/plans/2026-10-12-p3-a-store.md, Decision Log 13).
+// Main posts `{t: 'doc', channel, artifactId, actor}` with one end of the document's channel; the runtime hands it to
+// the handler the register installed, and closes what it cannot hand anywhere.
+describe('host runtime: document ports on the parent port (P3-A M4)', () => {
+  beforeEach(() => vi.restoreAllMocks());
+
+  const ARTIFACT = '11111111-1111-4111-8111-111111111111';
+  const doc = { t: 'doc', channel: 7, artifactId: ARTIFACT, actor: { kind: 'human' } };
+  const docPort = () => ({ close: vi.fn(), start: vi.fn(), on: vi.fn(), postMessage: vi.fn() });
+
+  it('hands a doc message and its one port to the register’s handler, after or before the hello alike', () => {
+    const opened: unknown[] = [];
+    const runtime = createHostRuntime((_on, _emit, client) => client.onDocPort((message, port) => opened.push([message, port])));
+    const listen = parentPortListener(runtime);
+    const before = docPort();
+    listen({ data: doc, ports: [before as never] });
+    const hello = fakePort();
+    listen({ data: { t: 'hello' }, ports: [hello.port as never] });
+    expect(hello.port.start).toHaveBeenCalled(); // the hello still serves
+    const after = docPort();
+    listen({ data: { ...doc, channel: 8, actor: { kind: 'session', appSessionId: 'app-1' } }, ports: [after as never] });
+    expect(opened).toEqual([
+      [doc, before],
+      [{ ...doc, channel: 8, actor: { kind: 'session', appSessionId: 'app-1' } }, after],
+    ]);
+    expect(before.close).not.toHaveBeenCalled();
+  });
+
+  it('closes a doc port no handler takes, and every port of a doc message that is not well formed', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const unhandled = docPort();
+    parentPortListener(createHostRuntime(() => {}))({ data: doc, ports: [unhandled as never] });
+    expect(unhandled.close).toHaveBeenCalled();
+    const handler = vi.fn();
+    const listen = parentPortListener(createHostRuntime((_on, _emit, client) => client.onDocPort(handler)));
+    for (const data of [
+      { ...doc, channel: -1 },
+      { ...doc, channel: 2 ** 32 },
+      { ...doc, artifactId: 'not-a-uuid' },
+      { ...doc, actor: { kind: 'system' } },
+      { ...doc, extra: true },
+    ]) {
+      const port = docPort();
+      listen({ data, ports: [port as never] });
+      expect(port.close, JSON.stringify(data)).toHaveBeenCalled();
+    }
+    const [a, b] = [docPort(), docPort()];
+    listen({ data: doc, ports: [a as never, b as never] });
+    listen({ data: doc, ports: [] });
+    expect(a.close).toHaveBeenCalled();
+    expect(b.close).toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalled();
+  });
+
+  it('a throwing handler costs that port only: it is closed and the runtime keeps serving', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const listen = parentPortListener(createHostRuntime((_on, _emit, client) => client.onDocPort(() => { throw new Error('no store'); })));
+    const port = docPort();
+    listen({ data: doc, ports: [port as never] });
+    expect(port.close).toHaveBeenCalled();
+    const hello = fakePort();
+    listen({ data: { t: 'hello' }, ports: [hello.port as never] });
+    expect(hello.port.start).toHaveBeenCalled();
+  });
+
+  it('serves the first hello only, as before', () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const listen = parentPortListener(createHostRuntime(() => {}));
+    const [first, second] = [fakePort(), fakePort()];
+    listen({ data: { t: 'hello' }, ports: [first.port as never] });
+    listen({ data: { t: 'hello' }, ports: [second.port as never] });
+    expect(first.port.start).toHaveBeenCalled();
+    expect(second.port.start).not.toHaveBeenCalled();
+    expect(error).toHaveBeenCalledWith('[host] ignored a second hello');
+  });
+});
+// P3-A M4 end

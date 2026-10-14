@@ -101,7 +101,7 @@ import { sideThreadEvents, startSideThreads } from './side/side-threads';
 // E3 end
 // E2 start
 import { appWindows } from './windows';
-import { registerDeliverableScheme, startDeliverables } from './deliverables';
+import { startDeliverables } from './deliverables';
 // E2 end
 // E10 start
 import { engineQuitDeps } from './lifecycle/engine-quit';
@@ -116,6 +116,9 @@ import { startBrowser, type Browser } from './browser';
 // E4b start
 import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './browser/import';
 // E4b end
+// P3-A start
+import { registerStoreSchemes, startArtifacts } from './artifacts';
+// P3-A end
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -129,8 +132,9 @@ if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DA
 // The smoke runs unattended, so nothing may wait on a person: Chromium keeps its storage key in a mock keychain
 // instead of asking the login keychain, whose access prompt an unsigned or re-signed build can raise.
 if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');
-// E2: the deliverable store's scheme is privileged before the app is ready (protocol.registerSchemesAsPrivileged)
-registerDeliverableScheme();
+// E2: the deliverable store's scheme is privileged before the app is ready (protocol.registerSchemesAsPrivileged);
+// P3-A M7: with the artifact store's, in Electron's one call
+registerStoreSchemes();
 
 // macOS convention (D-11): closing the last window keeps the app running; the dock icon re-creates it (`activate`
 // below). This empty listener is load-bearing: with no `window-all-closed` listener Electron quits when the last
@@ -203,7 +207,7 @@ void startWithProfileLock(app, () => {
   // E2 start: the deliverable store's read side (E2 execution document, Design §2, §3, §7): main's reader over the files
   // the engine host writes, the maws-deliverable: scheme and the frame policies on the window's session and the capture
   // partition, deliverables.* and the capture service; the files service below admits delivered paths through the reader.
-  const deliverables = startDeliverables({ userData: app.getPath('userData'), hosts, register: registerMainHandler, env: process.env });
+  const deliverables = startDeliverables({ userData: app.getPath('userData'), hosts, register: registerMainHandler, env: process.env, appUrl });
   shutdown.add('deliverables', deliverables.stop);
   // E2 end
 
@@ -557,6 +561,19 @@ void startWithProfileLock(app, () => {
     tracked(win); // C5: tracked placement
     return win; // C5: the notifier re-creates the window through here
   };
+  // P3-A M4: `artifacts.open` (a document's port to the asking window) and the design-system defaults' relay, before the
+  // first window loads
+  const artifacts = startArtifacts({
+    hosts,
+    register: registerMainHandler,
+    emit, // P3-A M5: artifacts.resync
+    settings: () => settings.state().settings,
+    onSettingsChanged: (listener) => onEmitted('settings.changed', (state) => listener(state.settings)),
+    env: process.env,
+    openWindow,
+    root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
+  });
+  shutdown.add('artifacts', artifacts.stop);
   openWindow();
 
   // E5 start: each window's unsaved editor files for the quit guard (E5 execution document, M5): the page pushes its
