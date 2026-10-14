@@ -17,6 +17,7 @@ const RELEASED: readonly { version: number; sha256: string }[] = [
   { version: 7, sha256: 'e5dbe799d588c31efa19def80e2c8b54bec78b138b2e1fe3d3c789fb214fce90' }, // cua board #90: an imported profile's bookmarks (X15), pinned by its merging PR
   { version: 8, sha256: 'f9fddca0854e85afd12688f9d4a2661ad034ab61097058a8e794979fa7a0abc8' }, // P2-C: the owner channel's sessions and marks (X15), pinned at its landing merge
   { version: 9, sha256: '2391811d74df93a263f18882e10819105eedc0fbd9a3f7fa60c4ce4af4c2b7e5' }, // P2-C2: the owner channel's style-plus-supplement source (X15), pinned when P3-L merged master
+  { version: 10, sha256: '974cf8b9fe295d91e2a071cee7b338ffc84e4c0a394ff05a4112734e9c6c54be' }, // P3-L: the library's derived rows and FTS (X15), pinned at its landing merge
 ];
 
 const digest = (sql: string) => createHash('sha256').update(sql).digest('hex');
