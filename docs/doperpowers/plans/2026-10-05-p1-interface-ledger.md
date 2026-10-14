@@ -70,6 +70,8 @@ Index (`src/main/index/migrations.ts`, `PRAGMA user_version`): versions 1 to 3 b
 
 Layout `regions` (`src/shared/ipc/schema/layout.ts`): version 3 before P3; version 4 taken by P3-G (`panel.floating: boolean`, `floatingCard {w, h}` per panel tab; the migration from 3 with a test), landed 2026-10-13 (d4e13f85).
 
+Host artifacts store (`<userData>/artifacts/store.sqlite`, `PRAGMA user_version`; the engine host's own schema beside the index, P3 spec §4.1): version 1 taken by P3-A, landed 2026-10-14 (14d350c5); later versions are allocated here in landing order like the index's.
+
 Imported profiles file (`<userData>/browser/profiles.json`, `ImportedProfilesFileSchema.version`; E4b's, A-36): version 1 today. Version 2 taken 2026-10-08 by cua board #90 (adds `bookmarks`, `gaiaName`, `userName`, `avatar` to each record; a version-1 file upgrades in memory; an older build opens a version-2 file read-only); landed on master 2026-10-09 (MAWS PR #6 merged at c80e0514).
 
 ## 5. IPC command namespaces (`src/shared/ipc/names/`, `schema/`)
@@ -140,3 +142,4 @@ Exceptions to "appended blocks only", dated, one line each: 2026-10-06, E4d wide
 - 2026-10-13 04:28: P3-G landed at d4e13f85 (from c73ba534): `regions` version 4, the `artifacts` main-tab kind, keymap `panel.float` (Cmd+Alt+B), X2's `browser.view.capture` and `layout.captureRegion`; the P3 ledger's §5 carries the rest.
 - 2026-10-14 01:47: P2-C2 landed at be567c5e (from 5e8a38ae): index migration 9 (the owner channel's wider source CHECK); no settings, IPC or sidecar change; P3-L renumbers its migration to 10.
 - 2026-10-14 02:30: P2-C3's checkpoint 1 (63747dfd): the X9 `ask` row carries `preview`, `note` and the subagent rule as built; `maws.ask.opened.blocking` reports the effective value (P2 Decision Log 36).
+- 2026-10-14 05:14: P3-A landed at 14d350c5 (from 8b85209c): the host artifacts store at schema 1 (its own `user_version`, a new line above the record); no settings or index change; the P3 ledger's §1 to §3 carry the IPC, host-command and tool names.
