@@ -3,7 +3,7 @@
 // an x-connector's polyline and heads, an x-icon's glyph. The same geometry (glyphs.ts) and the same defaults as the DOM
 // canvas's layout pass (canvas/elements.ts `drawShape`, `drawConnector`, `renderIcon`), written as markup rather than
 // as DOM nodes; a value here is a literal, every token resolved before the page is written. Portable.
-import { connectorHeads, connectorRoute, headPolygon, ICON_GLYPHS, isStrokeOnly, shapePath, splitBorder, type Point } from '../glyphs';
+import { connectorHeads, connectorRoute, dropShadows, headPolygon, ICON_GLYPHS, isStrokeOnly, shapePath, splitBorder, type Point } from '../glyphs';
 import { escAttr } from '../serialize';
 
 const px = (value: string | null | undefined, fallback: number): number => {
@@ -24,6 +24,9 @@ export function shapeSvg(style: Readonly<Record<string, string>>, kind: string, 
   const d = shapePath(kind, w, h, stroke || (isStrokeOnly(kind) ? 2 : 0));
   const fill = style.background && !style.background.includes('gradient') ? style.background : null;
   const paint: Record<string, string> = {};
+  // the box's own shadow is suppressed off a rect (CANVAS_CSS): the outline casts it instead (Decision Log 18)
+  const shadow = style['box-shadow'] ? dropShadows(style['box-shadow']) : null;
+  if (shadow) paint.filter = shadow;
   if (isStrokeOnly(kind)) {
     Object.assign(paint, { fill: 'none', stroke: border?.color ?? fill ?? 'currentColor', 'stroke-width': `${stroke || 2}px` });
   } else {

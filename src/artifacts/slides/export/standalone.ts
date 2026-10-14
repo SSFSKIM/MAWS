@@ -177,7 +177,21 @@ export function cropOf(value: string | undefined): { zoom: number; x: number; y:
   return m ? { zoom: Number(m[1]), x: Number(m[2]) / 100, y: Number(m[3]) / 100 } : null;
 }
 
-/** A crop's view box in the picture's own pixels: `1/zoom` of it, placed at the position. */
+/**
+ * A crop's view box as the canvas draws it (canvas/elements.ts `applyCrop`, M5): `object-view-box: inset(…)` in percent
+ * of the picture, 1/ZOOM of it on each axis with the focus point placed as object-position places it; the element's own
+ * object-fit then fills its box with that region. Null without a crop.
+ */
+export function cropInset(value: string | undefined): string | null {
+  const crop = cropOf(value);
+  if (!crop) return null;
+  const rest = 1 - 1 / Math.max(1, crop.zoom);
+  const [fx, fy] = [crop.x * 100, crop.y * 100];
+  const pct = (v: number) => `${Math.round(v * 1000) / 1000}%`;
+  return `inset(${pct(rest * fy)} ${pct(rest * (100 - fx))} ${pct(rest * (100 - fy))} ${pct(rest * fx)})`;
+}
+
+/** A crop's view box in the picture's own pixels: `1/zoom` of it, placed at the focus point (`cropInset`'s region). */
 export function cropViewBox(natural: { w: number; h: number }, crop: { zoom: number; x: number; y: number }): { x: number; y: number; w: number; h: number } {
   const w = natural.w / crop.zoom;
   const h = natural.h / crop.zoom;
@@ -210,15 +224,8 @@ function elementHtml(el: ElementIR, w: Writer, under: boolean): string {
   if (el.tag === 'img') {
     const src = el.attrs.src?.startsWith('assets/') ? options.asset(el.attrs.src) : null;
     attrs.push(src ? `src="${escAttr(src)}"` : `data-placeholder="${escAttr(el.attrs.src ?? '')}"`);
-    const crop = cropOf(el.attrs['data-crop']);
-    if (crop) {
-      Object.assign(style, { 'object-fit': 'cover', 'object-position': `${crop.x * 100}% ${crop.y * 100}%` });
-      const natural = measured?.image?.natural;
-      if (natural && natural.w > 0 && natural.h > 0 && crop.zoom > 1) {
-        const v = cropViewBox(natural, crop);
-        style['object-view-box'] = `inset(${v.y}px ${natural.w - v.x - v.w}px ${natural.h - v.y - v.h}px ${v.x}px)`;
-      }
-    }
+    const inset = cropInset(el.attrs['data-crop']);
+    if (inset) style['object-view-box'] = inset;
   } else if (el.tag === 'svg') inner = el.raw ?? '';
   else if (el.tag === 'x-icon') inner = iconSvg(el.attrs.name);
   else if (el.tag === 'x-embed') {

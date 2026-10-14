@@ -90,6 +90,19 @@ describe('the PPTX mapping', () => {
     expect(grid.rows[0]![0]!.options?.margin).toEqual([6, 8, 6, 8]);
   });
 
+  it('crops a picture to the owner’s region under its own fit, and lets a shape’s outline cast its shadow', () => {
+    const cover = MEASURED.slides[0]!;
+    const logo = cover.elements.find((e) => e.id === 'logo')!;
+    const cropped = { ...logo, attrs: { ...logo.attrs, 'data-crop': '2 25% 50%' }, image: { ...logo.image!, natural: { w: 400, h: 200 }, fit: 'fill' } };
+    const badge = MEASURED.slides[1]!.elements.find((e) => e.id === 'badge')!;
+    const shadowed = { ...badge, shape: { ...badge.shape!, shadow: { x: 0, y: 8, blur: 24, color: 'rgba(0, 0, 0, 0.25)' } } };
+    const measured = { slides: [{ ...cover, elements: [cropped] }, { ...MEASURED.slides[1]!, elements: [shadowed] }, MEASURED.slides[2]!] };
+    const [first, second] = pptxSlides(deck(), measured, { variant: 'named', pictures: new Map(), asset });
+    // the region (x 50, y 50, 200 × 100 of the picture) fills the 200 × 100 box: the whole picture at scale 1, cropped
+    expect(named(first!.objects, 'logo')).toMatchObject({ options: { x: inches(1600), y: inches(64), w: inches(400), h: inches(200), sizing: { type: 'crop', x: inches(50), y: inches(50), w: inches(200), h: inches(100) } } });
+    expect(named(second!.objects, 'badge')).toMatchObject({ options: { shadow: { type: 'outer', blur: 12, offset: 4, angle: 90, color: '000000', opacity: 0.25 } } });
+  });
+
   it('names basic faces in the basic variant, and makes each slide one picture with its notes in the pictures variant', () => {
     const [cover] = pptxSlides(deck(), MEASURED, { variant: 'basic', pictures: new Map(), asset });
     const faces = cover!.objects.flatMap((o) => (o.kind === 'text' ? o.text.map((r) => r.options?.fontFace) : []));

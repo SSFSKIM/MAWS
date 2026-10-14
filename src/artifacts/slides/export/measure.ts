@@ -110,7 +110,7 @@ export interface MeasuredElement {
   /** svg and x-icon: the graphic's markup, its colour set. */
   svg?: string;
   /** An x-shape's own paint (its box draws none; the outline takes the box's background and border). */
-  shape?: { fill: string | null; stroke: MeasuredBorder | null };
+  shape?: { fill: string | null; stroke: MeasuredBorder | null; shadow?: MeasuredPaint['shadow'] };
   /** The element's attributes but `style`, `src` and the page's own. */
   attrs: Record<string, string>;
 }
@@ -436,7 +436,19 @@ export async function measureDeckPage(args: MeasureArgs): Promise<MeasuredDeck> 
       // a gradient draws the canvas's default fill (the outline takes a flat colour only)
       fill: /gradient\(/.test(own('background-image') + own('background')) ? null : colorOf(own('background-color') || own('background')),
       stroke: kind && kind !== 'none' && strokeWidth > 0 ? { width: strokeWidth, style: kind, color: color ?? 'rgb(0, 0, 0)' } : null,
+      shadow: shadowWith(own('box-shadow')),
     };
+  };
+  // a shadow from an inline value: its colour computed through the probe (a named colour, a hex)
+  const shadowWith = (value: string): MeasuredPaint['shadow'] => {
+    if (!value || value === 'none') return null;
+    for (const layer of value.split(/,(?![^(]*\))/)) {
+      if (/\binset\b/.test(layer)) continue;
+      const lengths = (layer.match(/-?\d*\.?\d+px|(?<![\w#.-])0(?![\w.%])/g) ?? []).map(num);
+      const rest = layer.replace(/-?\d*\.?\d+px|(?<![\w#.-])0(?![\w.%])/g, ' ').trim();
+      return { x: lengths[0] ?? 0, y: lengths[1] ?? 0, blur: lengths[2] ?? 0, color: colorOf(rest) ?? 'rgb(0, 0, 0)' };
+    }
+    return null;
   };
 
   const slides: MeasuredSlide[] = [];

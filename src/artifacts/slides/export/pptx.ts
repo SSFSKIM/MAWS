@@ -234,9 +234,11 @@ function textObject(el: MeasuredElement, variant: PptxFontVariant, withFill: boo
 function placeImage(el: MeasuredElement, natural: { w: number; h: number }): { box: MeasuredBox; crop: { x: number; y: number; w: number; h: number } | null } {
   const { box } = el;
   const image = el.image!;
+  // the owner's crop narrows the picture to a region (as the canvas's object-view-box does); the element's own fit and
+  // position then place that region in its box
   const crop = cropOf(el.attrs['data-crop']);
-  const fit = crop ? 'cover' : image.fit;
-  const [px, py] = crop ? [crop.x, crop.y] : image.position;
+  const fit = image.fit;
+  const [px, py] = image.position;
   const view = crop && crop.zoom > 1 ? cropViewBox(natural, crop) : { x: 0, y: 0, w: natural.w, h: natural.h };
   if (fit === 'cover') {
     const s = Math.max(box.w / view.w, box.h / view.h);
@@ -335,7 +337,7 @@ function shapeObject(el: MeasuredElement): PptxObject[] {
     const { options, shape, sides } = paintObjects(el, true);
     return [{ kind: 'shape', name: el.id, shape, options }, ...sides];
   }
-  const own = el.shape ?? { fill: null, stroke: null };
+  const own = el.shape ?? { fill: null, stroke: null, shadow: null };
   if (kind === 'line') {
     const color = parseColor(own.stroke?.color ?? own.fill ?? el.color);
     const y = el.box.y + el.box.h / 2;
@@ -345,6 +347,8 @@ function shapeObject(el: MeasuredElement): PptxObject[] {
   const options: PptxGenJS.ShapeProps = { ...at(el.box), objectName: el.id, ...(fill && { fill }), ...(el.rotate && { rotate: el.rotate }) };
   const line = lineOf(own.stroke, el.paint.opacity);
   options.line = line ?? { type: 'none' };
+  const shadow = shadowOf({ ...el.paint, shadow: own.shadow ?? null });
+  if (shadow) options.shadow = shadow;
   if (kind === 'rounded') options.rectRadius = inches(Math.min(el.box.w, el.box.h) * 0.2);
   return [{ kind: 'shape', name: el.id, shape: PRESETS[kind] ?? 'rect', options }];
 }

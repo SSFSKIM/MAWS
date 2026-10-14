@@ -10,13 +10,14 @@ import { fixtureDoc } from './deck.test-support';
 import { measureDeckPage, type MeasuredDeck } from './measure';
 import { deckPage, exportDeckOf } from './standalone';
 
-async function measuredFixture(): Promise<MeasuredDeck> {
+async function measuredFixture(prepare: () => void = () => {}): Promise<MeasuredDeck> {
   const deck = exportDeckOf(fixtureDoc(), 'Untitled');
   const html = deckPage(deck, { mode: 'measure', resolveVar: deckTokenValues(builtinView().tokens, deck.overrides), asset: () => null, facesCss: '' });
   const style = /<style>([\s\S]*?)<\/style>/.exec(html)![1]!;
   const body = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)![1]!;
   document.head.innerHTML = `<style>${style}</style>`;
   document.body.innerHTML = body;
+  prepare();
   // the function as main sends it: its source alone, evaluated where nothing of this module is in scope
   const alone = new Function(`return (${String(measureDeckPage)})`)() as typeof measureDeckPage;
   return alone({ textTags: [...TEXT_TAGS] });
@@ -64,5 +65,12 @@ describe('measureDeckPage', () => {
     expect(els.get('star')!.svg).toMatch(/^<svg[^>]*xmlns="http:\/\/www.w3.org\/2000\/svg"/);
     expect(els.get('chart')!.attrs['aria-label']).toBe('A dot');
     expect(els.get('chart')!.attrs['data-layer']).toBeUndefined();
+  });
+
+  it('reads an x-shape’s own shadow, which the canvas’s outline casts', async () => {
+    const measured = await measuredFixture(() => document.querySelector<HTMLElement>('[data-eid="badge"]')!.style.setProperty('box-shadow', '0 8px 24px #00000040'));
+    const badge = measured.slides[1]!.elements.find((e) => e.id === 'badge')!;
+    expect(badge.shape!.shadow).toMatchObject({ x: 0, y: 8, blur: 24 });
+    expect(badge.shape!.shadow!.color).not.toBe('');
   });
 });
