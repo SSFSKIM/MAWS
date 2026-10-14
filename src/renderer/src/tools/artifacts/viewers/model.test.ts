@@ -2,7 +2,7 @@
 // version list in order with its labels, and which version a picker choice or a row's Open shows.
 import { describe, expect, it } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
-import { bodyOf, placeOfNumber, placeOfOpenAt, shownVersion, versionLabel, versionsInOrder, versionToShow } from './model';
+import { bodyOf, placeOfNumber, placeOfOpenAt, selectionAt, selectionOf, shownVersion, versionLabel, versionsInOrder } from './model';
 
 const version = (id: number, seq: number): ArtifactVersion => ({ id, seq, at: seq * 1000, actor: { kind: 'human' }, kind: 'auto', assetRefs: [] });
 
@@ -44,11 +44,17 @@ describe('versions', () => {
     expect(shownVersion([], null)).toBeNull();
   });
 
-  it('follows the latest when the choice is the latest, so a new version is shown as it lands', () => {
-    expect(versionToShow(1, 3)).toBe(1);
-    expect(versionToShow(3, 3)).toBeNull();
-    expect(versionToShow(null, 3)).toBeNull();
-    expect(versionToShow(5, 3)).toBeNull();
+  // M6b fix wave 3: a choice is kept as an identity: the last place follows the latest, any other its revision; a number
+  // asked for is placed once, a revision kept as it is
+  it('keeps a choice as the latest or a revision, so a new version is followed and an older choice stays put', () => {
+    const list = versionsInOrder([version(1, 4), version(2, 9), version(3, 14)]);
+    expect(selectionAt(list, 1)).toEqual({ revision: 4 });
+    expect(selectionAt(list, 3)).toBe('latest');
+    expect(selectionAt(list, 5)).toBe('latest');
+    expect(selectionOf(list, { version: 2 })).toEqual({ revision: 9 });
+    expect(selectionOf(list, { version: 3 })).toBe('latest');
+    expect(selectionOf(list, { revision: 5 })).toEqual({ revision: 5 });
+    expect(selectionOf(list, 'latest')).toBe('latest');
   });
 
   // M6b fix wave 1 (Decision Log 39c): a version number from outside (a legacy anchor's or a transcript row's `n`) is

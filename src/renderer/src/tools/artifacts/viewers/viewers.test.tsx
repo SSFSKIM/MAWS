@@ -257,13 +257,46 @@ describe('a version asked for from outside', () => {
   // M6b fix wave 2: a row of a call whose answer named its revision opens that revision, wherever thinning moved its
   // place; a revision thinning dropped is stood for by the next kept version
   it('shows the version that captured a revision, the next kept one when thinning dropped it', async () => {
+    requestArtifactVersion(ID, { revision: 4 }, 'panel');
+    mount('html');
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    act(() => void requestArtifactVersion(ID, { revision: 5 }, 'panel')); // revision 5's version thinned: 9 kept after it
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    act(() => void requestArtifactVersion(ID, { revision: 14 }, 'panel'));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+  });
+
+  // M6b fix wave 3: the identity asked for (a revision, or the latest) is what the tab keeps, its place derived from each
+  // versions read: a version before it thinned away, a Reload and a refresh of the row still show that revision; the
+  // picker's own choice is an identity too
+  it('keeps showing a revision asked for after an earlier version thins, across a Reload and a refresh', async () => {
     requestArtifactVersion(ID, { revision: 9 }, 'panel');
     mount('html');
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
-    act(() => void requestArtifactVersion(ID, { revision: 5 }, 'panel')); // revision 5's version thinned: 9 kept after it
+    versions = [version(2, 9), version(3, 14)]; // revision 4's version thinned: 9 is now the first place
+    act(() => header().actions!.find((a) => a.id === 'reload')!.onSelect());
+    await waitFor(() => expect(main.callsOf('artifacts.versions').length).toBeGreaterThan(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html'));
+    const reads = main.callsOf('artifacts.versions').length;
+    row = { ...row, revision: 15 }; // the row moves on: its versions read again
+    await act(async () => main.emit('library.changed', { revision: 2 }));
+    await waitFor(() => expect(main.callsOf('artifacts.versions').length).toBeGreaterThan(reads));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html'));
+    expect(screen.getByRole<HTMLSelectElement>('combobox', { name: 'Version' }).value).toBe('1');
+  });
+
+  it('keeps the picker’s choice by its revision when an earlier version thins', async () => {
+    mount('html');
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Version' }), { target: { value: '2' } }); // revision 9
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
-    act(() => void requestArtifactVersion(ID, { revision: 4 }, 'panel'));
-    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    versions = [version(2, 9), version(3, 14)];
+    act(() => header().actions!.find((a) => a.id === 'reload')!.onSelect());
+    await waitFor(() => expect(main.callsOf('artifacts.versions').length).toBeGreaterThan(1));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html'));
   });
 
   // M6b fix wave 2: no wall-clock lapse. A request waits for a versions read however slow; a later open supersedes it,

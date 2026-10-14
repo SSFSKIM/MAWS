@@ -21,7 +21,7 @@
 // OS opens as a document, Reveal in Finder, Open as file for a drawn file inside its session's directories) and the
 // Export menu (the kind's formats main's exporters serve, a File artifact's Save a copy…). The body's own bar holds the
 // version picker and the frame's console chip, when there is either. The tab owns what the actions read (the version
-// chosen, the Reload count, picking), the state the registry holds for it (X32's lifetime rule).
+// selected, the Reload count, picking), the state the registry holds for it (X32's lifetime rule).
 //
 // Comment (P2's, unchanged in behaviour): the frame is told to pick, the hint floats over the body, and a pick opens the
 // comment card beside the element in this viewer's own `artifact-page` host, its anchor the `artifact-element` of the
@@ -58,7 +58,7 @@ import { HtmlFrame, type FrameHandle } from './frames/HtmlFrame';
 import { Media } from './frames/Media';
 import { PdfFrame } from './frames/PdfFrame';
 import { CommentIcon, OpenAsFileIcon, OpenExternallyIcon, ReloadIcon, RevealIcon } from './icons';
-import { bodyOf, placeOfOpenAt, shownVersion, underSession, versionLabel, versionsInOrder, versionToShow, type BodyKind } from './model';
+import { bodyOf, placeOfOpenAt, selectionAt, selectionOf, shownVersion, underSession, versionLabel, versionsInOrder, type BodyKind, type VersionSelection } from './model';
 import { pageElementAnchor, type PickMessage } from './pick';
 import { takeVersionRequest, useVersionRequest } from './requests';
 
@@ -69,7 +69,9 @@ const OPENS_AS_FILE = new Set(['code', 'markdown', 'image', 'head']); // the vie
 // ---- the tab's state ---------------------------------------------------------------------------------------------------
 
 interface ViewState {
-  chosen: number | null; // the version's place shown; null: the latest
+  // M6b fix wave 3: the version shown, by its identity (a revision, or the latest followed as new ones land), never by a
+  // place: each versions read places it afresh, so a version before it thinning away moves nothing on screen
+  selected: VersionSelection;
   reloads: number; // a serial shared by every view, so a Reload's reads and frame are this view's own
   pickingIn: string | null; // the frame asked to pick (its key), if any
 }
@@ -118,12 +120,12 @@ function useReaderSession(home: AppSessionId | null): AppSessionId | null {
 // ---- the editor --------------------------------------------------------------------------------------------------------
 
 function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: ArtifactEditorProps<ByteViewerState> & { kind: ByteKind }) {
-  const { chosen, reloads } = useStore(state.view);
+  const { selected, reloads } = useStore(state.view);
   const row = useLibraryRow(artifactId).value;
   const title = row?.title ?? VIEWERS_COPY.fallbackTitle;
   const versionsRead = useRead(`${artifactId}@${row?.revision ?? '?'}#${reloads}`, () => ipc.invoke('artifacts.versions', { artifactId }));
   const ordered = useMemo(() => (versionsRead.status === 'ready' ? versionsInOrder(versionsRead.value.versions) : null), [versionsRead]);
-  const shown = ordered ? shownVersion(ordered, chosen) : null;
+  const shown = ordered ? shownVersion(ordered, placeOfOpenAt(ordered, selected)) : null;
   const revision = shown?.version.seq;
   const contentRead = useRead<LibraryContent>(ordered === null ? null : `${artifactId}@${revision ?? 'latest'}#${reloads}`, () =>
     ipc.invoke('library.content', { artifactId, ...(revision !== undefined && { revision }) }),
@@ -136,16 +138,16 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
     if (content) clearArtifactConsole(artifactId, content.revision);
     state.view.setState({ reloads: nextReload(), pickingIn: null });
   };
-  const choose = (n: number | null) => state.view.setState({ chosen: versionToShow(n, ordered?.length ?? 0) });
-  // a version asked for from outside (a card thread's artifact row): by its revision, else by its number (X12's on an
-  // imported page), else the latest (M6b fix waves 1 and 2)
-  const chooseAt = (at: ArtifactOpenAt) => choose(ordered === null ? null : placeOfOpenAt(ordered, at));
+  // the picker's place, or a version asked for from outside (a card thread's artifact row: by its revision, else by its
+  // number, X12's on an imported page, else the latest), kept as the identity it names (M6b fix waves 1 to 3)
+  const choose = (n: number) => ordered !== null && state.view.setState({ selected: selectionAt(ordered, n) });
+  const chooseAt = (at: ArtifactOpenAt) => ordered !== null && state.view.setState({ selected: selectionOf(ordered, at) });
   // M6b: the places noted for the transcript row's chip; a version asked for from outside, taken once the versions are read
   const request = useVersionRequest(artifactId, scope.surface);
   useEffect(() => {
     if (ordered === null) return;
     noteArtifactVersions(artifactId, ordered);
-    if (request !== null && takeVersionRequest(request.serial)) state.view.setState({ chosen: versionToShow(placeOfOpenAt(ordered, request.at), ordered.length) });
+    if (request !== null && takeVersionRequest(request.serial)) state.view.setState({ selected: selectionOf(ordered, request.at) });
   }, [artifactId, ordered, request, state.view]);
 
   // the frame picking is asked of, by what keys it: another version or a Reload is another frame
@@ -407,7 +409,7 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
 
 // ---- registration ------------------------------------------------------------------------------------------------------
 
-const createState = (): ByteViewerState => ({ view: createStore<ViewState>()(() => ({ chosen: null, reloads: 0, pickingIn: null })) });
+const createState = (): ByteViewerState => ({ view: createStore<ViewState>()(() => ({ selected: 'latest', reloads: 0, pickingIn: null })) });
 
 const viewers: Record<ByteKind, ArtifactEditor<ByteViewerState>> = {
   html: { Panel: (props) => <ByteViewer kind="html" {...props} />, createState },

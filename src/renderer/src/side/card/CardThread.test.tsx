@@ -497,7 +497,7 @@ describe('the thread’s Edit', () => {
 
 describe('the thread’s artifact row', () => {
   // P3-L M6b: the card's artifact is the one its (legacy) anchor's page names; the viewer's `showVersion` follows the
-  // latest when n is its last version (`versionToShow`), so the place goes as it is
+  // latest when n is its last version (`selectionOf`), so the number goes as it is
   it('Open on the card’s own artifact shows that version in the card’s viewer; another artifact goes to the registered action', async () => {
     const registered = vi.fn();
     offs.push(registerTranscriptActions({ openArtifact: registered }));

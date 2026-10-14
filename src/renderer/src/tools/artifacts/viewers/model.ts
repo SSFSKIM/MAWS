@@ -61,8 +61,21 @@ export function placeOfOpenAt(ordered: readonly Pick<ArtifactVersion, 'seq' | 'k
   return index >= 0 ? index + 1 : null;
 }
 
-// What the viewer keeps for a choice of place `n` among `count`: the place, or null (follow the latest) for the latest.
-export const versionToShow = (n: number | null, count: number): number | null => (n === null || n >= count || n < 1 ? null : n);
+// M6b fix wave 3: what a viewer keeps as its version, an identity: the latest (followed as new ones land), or one
+// revision. A number is resolved once, when it is asked for, to the revision it names then (the last place: the latest).
+export type VersionSelection = 'latest' | { revision: number };
+
+// The picker's place `n` (from 1) among `ordered` as a selection: the last is the latest.
+export function selectionAt(ordered: readonly Pick<ArtifactVersion, 'seq'>[], n: number): VersionSelection {
+  return n >= ordered.length || n < 1 ? 'latest' : { revision: ordered[n - 1]!.seq };
+}
+
+// An open's ask as a selection: a revision kept as it is (however thinning moves its place); a number placed now.
+export function selectionOf(ordered: readonly Pick<ArtifactVersion, 'seq' | 'kind' | 'label'>[], at: ArtifactOpenAt): VersionSelection {
+  if (at === 'latest' || 'revision' in at) return at;
+  return selectionAt(ordered, placeOfNumber(ordered, at.version));
+}
+
 
 // An absolute path with no `.` or `..` segment, no empty segment and no trailing separator: what the files service
 // accepts, and what the host records (it resolves every path it is given).
