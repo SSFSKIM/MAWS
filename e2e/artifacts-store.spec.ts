@@ -272,10 +272,11 @@ test('maws-artifact: serves an html page and its assets to the app, and the expo
   expect(wholeSize.width).toBe(1280);
   expect(wholeSize.height).toBeGreaterThan(2000); // the page's whole height, not the window's first 800
 
-  // A kind no exporter serves yet is refused, naming it.
-  const { artifact: doc } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Notes' });
-  const refused = await invoke(page, 'artifacts.export', { artifactId: doc.id, format: 'pdf' });
-  expect(refused).toMatchObject({ ok: false, error: { code: 'invalid_input', issues: { reason: 'exportUnavailable', data: { kind: 'document', format: 'pdf' } } } });
+  // A kind and format no exporter serves is refused, naming them. (P3-B M9 fix wave 2, amending A's case at the
+  // architect's and controller's choice: P3-B now serves a document's PDF, so the refused pair is an html artifact as
+  // Word, which no child registers.)
+  const refused = await invoke(page, 'artifacts.export', { artifactId: artifact.id, format: 'docx' });
+  expect(refused).toMatchObject({ ok: false, error: { code: 'invalid_input', issues: { reason: 'exportUnavailable', data: { kind: 'html', format: 'docx' } } } });
 });
 
 // M7 fix wave 1 (Decision Log 44a, 44b): the scheme's reach. Only the app's own session and the capture partition serve
