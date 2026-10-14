@@ -59,6 +59,8 @@ function fakeHost(systems: Record<string, Doc>, versions: Record<string, Uint8Ar
     export: async () => ({ path: '' }),
     versionState,
     attributions: async () => new Uint8Array(),
+    acceptSuggestion: async () => ({ revision: 0 }), // P3-D re-merge: A's landed required members
+    rejectSuggestion: async () => ({ revision: 0 }),
     uploadAsset: async () => ({ assetId: '', ref: '' }),
     identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '#000000' }),
   };

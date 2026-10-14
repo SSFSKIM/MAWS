@@ -59,6 +59,8 @@ const host: ArtifactHost = {
   export: async () => ({ path: '' }),
   versionState: async () => new Uint8Array(),
   attributions: async () => new Uint8Array(),
+  acceptSuggestion: async () => ({ revision: 0 }), // P3-D re-merge: A's landed required members
+  rejectSuggestion: async () => ({ revision: 0 }),
   uploadAsset: async () => ({ assetId: '', ref: '' }),
   identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: 'var(--author-1)' }),
 };

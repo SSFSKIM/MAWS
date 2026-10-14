@@ -9,11 +9,13 @@ import { artifactHost } from '..';
 
 function lazyHost(get: () => ArtifactHost): ArtifactHost {
   return {
-    open: (artifactId) => get().open(artifactId),
+    open: (artifactId, options) => get().open(artifactId, options),
     assetUrl: (artifactId, ref) => get().assetUrl(artifactId, ref),
-    export: (artifactId, format, version) => get().export(artifactId, format, version),
+    export: (artifactId, format, version, options) => get().export(artifactId, format, version, options),
     versionState: (artifactId, version) => get().versionState(artifactId, version),
-    attributions: (artifactId, fromSeq, toSeq) => get().attributions(artifactId, fromSeq, toSeq),
+    attributions: (artifactId, fromSeq, toSeq, options) => get().attributions(artifactId, fromSeq, toSeq, options),
+    acceptSuggestion: (artifactId, ranges) => get().acceptSuggestion(artifactId, ranges), // A's required members (P3-D re-merge)
+    rejectSuggestion: (artifactId, ranges) => get().rejectSuggestion(artifactId, ranges),
     uploadAsset: (artifactId, bytes, meta) => get().uploadAsset(artifactId, bytes, meta),
     identity: () => get().identity(),
   };
