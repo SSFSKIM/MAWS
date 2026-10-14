@@ -12,11 +12,14 @@
 // paste moves it, a real mouse drag keeps exactly one; A's restore brings back a deleted tab and the earlier text while
 // a reply posted after the version stays and a thread made after it shows orphaned.
 // Every launch's userData is its own directory under /tmp; windows are never shown (the e2e quiet mode).
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { withNativeClipboard } from './support/clipboard';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
+import { join } from 'node:path';
+import { PerfSeam, type ReadResult } from './support/document-scale';
+import { carriedBy, decodeMap, insertedBy } from '../src/artifacts/yjs';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -40,10 +43,10 @@ test.afterEach(async () => {
 // The panel's harness scenario (C8a): two synthetic sessions main serves, so a session's panel can hold tools.
 const SESSIONS = 'stub:test/fixtures/panel/harness-sessions.json';
 
-async function start(): Promise<Page> {
+async function start(suggestions = false): Promise<Page> {
   mkdirSync('/tmp/maws-harness/a', { recursive: true }); // session A's directory in the scenario
   userData = mkdtempSync('/tmp/maws-e2e-document-');
-  launch = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: SESSIONS } });
+  launch = await launchMaws({ userData, env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: SESSIONS, ...(suggestions ? { MAWS_DOCUMENT_PERF: '1' } : {}) } });
   const { page } = launch;
   await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
   return page;
@@ -552,4 +555,53 @@ test('restore brings back a deleted tab and the earlier text while a later reply
   const listed = await ok<{ versions: { id: number; kind: string; label?: string }[] }>(page, 'artifacts.versions', { artifactId: id });
   expect(listed.versions).toContainEqual(expect.objectContaining({ id: restored.versionId, kind: 'restore', label: 'Restored from Two tabs' }));
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// D14 through the product editor and the existing host-side agent channel (no engine or new IPC API).
+test('suggestions keep the base untouched until Accept, credit the agent, and Reject keeps its content', async () => {
+  const page = await start(true);
+  const seam = new PerfSeam(join(userData!, 'document-perf'));
+  await expect.poll(() => existsSync(join(seam.dir, 'in'))).toBe(true);
+  const { id, main } = await openInMain(page, 'Suggestion review');
+  const live = main.locator('[data-editor="live"]');
+  await live.fill('Original.');
+  await durable(main);
+  const agent = 'document-suggestion-agent';
+  const read = await seam.call<ReadResult>(agent, 'artifact_read', { artifact: id });
+  expect(read.isError).toBe(false);
+  const block = /\^([A-Za-z0-9_-]+)\s*$/m.exec(read.result!.markdown)![1];
+  const edit = (ops: unknown[], mode?: string) => seam.call(agent, 'artifact_edit', { artifact: id, baseRevision: 'last', ops, ...(mode && { mode }) });
+  expect((await edit([{ op: 'replace_text', block, old: 'Original.', new: 'Direct.' }])).isError).toBe(false);
+  await expect(live).toHaveText('Direct.');
+  const baseContent = () => live.evaluate((el) => JSON.stringify((el as HTMLElement & { editor: { getJSON(): unknown } }).editor.getJSON()));
+  const before = await baseContent();
+  expect((await edit([{ op: 'insert', after: block, markdown: 'Proposed by the agent. ^proposal' }], 'suggest')).isError).toBe(false);
+  await expect(main.getByLabel('Suggested document')).toContainText('Proposed by the agent.');
+  expect(await baseContent()).toBe(before);
+  await main.getByRole('button', { name: 'Accept suggestion 1', exact: true }).click();
+  await expect(live).toContainText('Proposed by the agent.');
+  const item = await live.evaluate((el) => {
+    type Item = { id: { client: number; clock: number } };
+    type Node = { getAttr(name: string): unknown; toArray(): Node[]; _start: Item };
+    const editor = (el as HTMLElement & { editor: { extensionManager: { extensions: Array<{ name: string; options: { ytype?: Node } }> } } }).editor;
+    return editor.extensionManager.extensions.find((extension) => extension.name === 'collaboration')!.options.ytype!.toArray().find((node) => node.getAttr('id') === 'proposal')!._start.id;
+  });
+  const bytes = await page.evaluate(async (artifactId) => {
+    const result = await (window as unknown as { maws: { invoke(name: string, args: unknown): Promise<{ ok: boolean; value: { bytes: Uint8Array } }> } }).maws.invoke('artifacts.attributions', { artifactId, fromSeq: 0, toSeq: Number.MAX_SAFE_INTEGER });
+    if (!result.ok) throw new Error('attributions refused');
+    return Array.from(result.value.bytes);
+  }, id);
+  const map = decodeMap(Uint8Array.from(bytes));
+  expect(insertedBy(map, item)?.actor).toBe(`session:${agent}`);
+  expect(carriedBy(map, item)).toBe('accept');
+
+  await ok(page, 'artifacts.update', { artifactId: id, agentEditsAsSuggestions: true });
+  await seam.call(agent, 'artifact_read', { artifact: id });
+  const accepted = await baseContent();
+  expect((await edit([{ op: 'insert', after: block, markdown: 'Reject this proposal. ^rejected' }])).isError).toBe(false);
+  await expect(main.getByLabel('Suggested document')).toContainText('Reject this proposal.');
+  expect(await baseContent()).toBe(accepted);
+  await main.getByRole('button', { name: 'Reject suggestion 1', exact: true }).click();
+  await expect(main.getByRole('button', { name: 'Reject suggestion 1', exact: true })).toHaveCount(0);
+  expect(await baseContent()).toBe(accepted);
 });

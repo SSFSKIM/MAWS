@@ -86,6 +86,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
         host={state.host}
         comments={appSessionId === null ? undefined : comments}
         history={state.history}
+        suggestions={state.host}
         rail={snapshot.rail}
         onRailChange={onRailChange}
         saveVersionRequest={snapshot.saveVersionRequest}

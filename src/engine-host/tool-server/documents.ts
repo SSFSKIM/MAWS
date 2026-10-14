@@ -16,11 +16,12 @@
 //   artifact_create    (a document's) the first tab from the kind's markdown, in the batch of the entity row.
 //
 // Suggestions (D14; parent Decision Log 27): `mode: 'suggest'`, or a plain batch on an artifact whose owner set
-// `agentEditsAsSuggestions`, lands on the artifact's suggestion doc through A's suggestion service (A's M8). Without it
-// the batch is refused `unavailable` and nothing is written; the owner's setting is never bypassed by a direct write.
+// `agentEditsAsSuggestions`, lands on the artifact's suggestion doc through A's suggestion service (A's M8).
+// The owner's setting is never bypassed by a direct write.
 //
 // `mawsTools` lists the four tools after A's and wraps A's `artifact_read` and `artifact_create` with
 // `documentReadTool`/`documentCreateTool`, which answer a document and hand every other kind to A's tool.
+import { precheckEdit } from '@artifacts/document/edit-plan';
 import { DocIndex } from '@artifacts/document/block-index';
 import { caretsOf } from '@artifacts/document/carets';
 import { EditError, type Op } from '@artifacts/document/edit-ops';
@@ -72,17 +73,11 @@ const PRESENCE_EDITING_MS = 1_500; // D11: the agent's editing blocks stay outli
 export class DocumentToolSession {
   readonly views = new DocumentViews();
   readonly guided: Set<ArtifactKind>;
-  readonly presence = new Map<string, ReturnType<typeof setTimeout>>(); // by artifact id
+  readonly presence = new Map<string, ReturnType<typeof setTimeout>>(); // by document key (main or suggestions)
 
   constructor(guided?: Set<ArtifactKind>) {
     this.guided = guided ?? new Set();
   }
-}
-
-// A's suggestion service (X24: `DocumentService.suggestionDoc(artifactId)`, `acceptSuggestion`, `rejectSuggestion`;
-// A's M8), present on the service once A lands it.
-interface SuggestionService {
-  suggestionDoc(artifactId: string): unknown;
 }
 
 export interface DocumentToolDeps {
@@ -217,6 +212,31 @@ function cursorAt(doc: Doc, blockId: string | undefined): { anchor: unknown; hea
   return { anchor: at, head: at };
 }
 
+// A session's first proposal starts from its base read, not from another session's unseen proposals. Compare only
+// the targets whose operations require a read; quoted edits validate themselves and inserts/moves use live anchors.
+function checkProposalTargets(base: Doc, proposal: Doc, ops: readonly Op[]): void {
+  const before = DocIndex.of(base);
+  const next = DocIndex.of(proposal);
+  const stale = new Map<string, string>();
+  const same = (a: Node | undefined, b: Node | undefined) => JSON.stringify(a?.toDelta()) === JSON.stringify(b?.toDelta());
+  const children = (node: Node | undefined) => node?.toArray() as Node[] | undefined;
+  const structure = (node: Node | undefined) => children(node)?.map((child) => [child.name, child.getAttr('id')]);
+  for (const op of ops) {
+    if (op.op !== 'replace_block' && op.op !== 'delete' && op.op !== 'set_cell') continue;
+    const id = op.op === 'set_cell' ? op.table : op.id;
+    const a = before.find(id)?.node;
+    const b = next.find(id);
+    let changed = !same(a, b?.node);
+    if (op.op === 'set_cell') {
+      const ar = children(a)?.[op.row];
+      const br = children(b?.node)?.[op.row];
+      changed = JSON.stringify(structure(a)) !== JSON.stringify(structure(b?.node)) || JSON.stringify(structure(ar)) !== JSON.stringify(structure(br)) || !same(children(ar)?.[op.col], children(br)?.[op.col]);
+    }
+    if (changed) stale.set(id, b ? next.md(b.top) : '(removed in suggestions)');
+  }
+  if (stale.size) throw new EditError({ reason: 'staleTargets', blocks: [...stale].map(([id, text]) => ({ id, text })) }, 'the proposal targets changed since the base read; use the shown text or quote with replace_text');
+}
+
 export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
   const TOOL = 'artifact_edit';
   const now = deps.now ?? Date.now;
@@ -242,27 +262,37 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
             if (!adapter) throw refuse(TOOL, { reason: 'unavailable' }, 'documents are not registered with the artifact store in this run of MAWS');
             const artifact = await liveDocumentIn(TOOL, store, target, input.artifact);
             const id = artifact.id;
-            if (input.mode === 'suggest' || artifact.agentEditsAsSuggestions) return suggest(store, artifact, input.mode === 'suggest');
+            const suggesting = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
+            const writeId = suggesting ? store.service.suggestionDoc(id) : id;
             const live = store.revision(id);
             if (input.baseRevision > live) return refusedAfterCommit(store, refuse(TOOL, { reason: 'invalid', liveRevision: live }, `baseRevision ${input.baseRevision} is newer than the live revision ${live}`));
             const restoredSince = store.listVersions(id).some((version) => version.kind === 'restore' && version.seq > input.baseRevision);
-            const agent = store.service.replica(ctx.appSessionId, id); // keeps the document loaded; carets; presence
+            const agent = store.service.replica(ctx.appSessionId, writeId); // keeps the document loaded; carets; presence
             const outcome: { result?: ArtifactEditResult; refusal?: Refusal; doc?: Doc } = {};
             await store.service.writeAs(
-              id,
+              writeId,
               actor,
               (doc) => {
                 outcome.doc = doc;
                 const view = deps.session.views.base(doc, input.baseRevision);
                 try {
+                  // A first proposal has no view of its own yet. Validate against the main replica the session
+                  // read before applying to the proposal replica; never pretend its unrelated index epoch is a read.
+                  if (suggesting && !view) {
+                    store.service.readAs(id, actor, (base) => {
+                      const seen = deps.session.views.base(base, input.baseRevision);
+                      precheckEdit(base, ops, { since: seen?.epoch ?? -1, restoredAway: restoredSince ? seen?.ids : undefined });
+                      checkProposalTargets(base, doc, ops);
+                    });
+                  }
                   const applied = applyEdit(doc, ops, {
-                    since: view?.epoch ?? -1, // a base the session never saw here: every checked target counts as changed
+                    since: view?.epoch ?? (suggesting ? undefined : -1), // a base the session never saw here: every checked target counts as changed
                     carets: caretsOf(agent.provider.awareness.getStates(), doc, agent.provider.awareness.clientID),
                     restoredAway: restoredSince && view ? view.ids : undefined,
                     answering: input.answering,
                     blocksPerTab: DOCUMENT_LIMITS.blocksPerTab,
                   });
-                  adapter.registerCarries(id, applied.carries);
+                  adapter.registerCarries(writeId, applied.carries);
                   let answered: ArtifactEditResult['answered'];
                   if (applied.answer) {
                     const messageId = `${applied.answer.threadId}:${nanoid8()}`;
@@ -280,17 +310,17 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
               {
                 inFrame: (at) => {
                   if (!outcome.result || !outcome.doc) return;
-                  outcome.result.revision = at;
-                  deps.session.views.record(outcome.doc, at); // the session's own write is a revision it knows
+                  outcome.result.revision = suggesting ? store.service.revision(id) : at;
+                  deps.session.views.record(outcome.doc, outcome.result.revision); // the session's own write is a revision it knows
                   op.record(outcome.result);
                   // D11: the agent's cursor and the blocks it touched, published with the write (nothing of it is
                   // revealed before this frame commits), dropped PRESENCE_EDITING_MS after
                   const blocks = touchedBlocksOf(outcome.doc, ops, outcome.result.results);
                   const cursor = cursorAt(outcome.doc, blocks[0]);
-                  clearTimeout(deps.session.presence.get(id));
+                  clearTimeout(deps.session.presence.get(writeId));
                   agent.setPresence({ ...presence, ...(cursor && { cursor }), editing: { blocks } });
                   shown.agent = agent;
-                  shown.id = id;
+                  shown.id = writeId;
                 },
               },
             );
@@ -313,17 +343,6 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
       return toolText(result);
     }),
   );
-}
-
-// The suggest path (D14): refused with nothing written until A's suggestion service is on this branch (A's M8; Decision
-// Log 8: behind this flag). Then the batch is planned and applied on `service.suggestionDoc(artifact.id)` as the
-// session, and the editor offers Accept and Reject per range; the routing above (an explicit mode, or the owner's
-// setting, which the agent cannot bypass) stands as it is.
-async function suggest(store: ArtifactStore, artifact: Artifact, asked: boolean): Promise<never> {
-  const ready = typeof (store.service as unknown as Partial<SuggestionService>).suggestionDoc === 'function';
-  const why = asked ? 'mode "suggest" asks for' : `the owner set ${artifact.title} to take agent edits as suggestions, which needs`;
-  const missing = ready ? 'which is not wired to the document tools yet' : 'which this build does not have yet';
-  return refusedAfterCommit(store, refuse('artifact_edit', { reason: 'unavailable', mode: 'suggest', setting: !asked }, `${why} MAWS's suggestion service, ${missing}; nothing was written`));
 }
 
 // ── artifact_comments, artifact_reply, artifact_resolve ─────────────────────────────────────────────────────────────

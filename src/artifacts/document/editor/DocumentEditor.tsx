@@ -51,6 +51,7 @@ import { Tabs } from './Tabs';
 import { useTabs } from './tabs-store';
 import type { MentionSource } from './MentionPicker';
 import { Toolbar } from './Toolbar';
+import { Suggestions, type SuggestionHost } from './Suggestions';
 import './chrome.css';
 import './theme.css';
 
@@ -66,6 +67,8 @@ export interface DocumentEditorProps {
   comments?: DocumentComments;
   /** The document's versions and history actions (M5); without it, version history is not offered. */
   history?: HistoryApi;
+  /** The host service that opens and settles the artifact’s proposal replica (D14). */
+  suggestions?: SuggestionHost;
   /**
    * The rail beside the page, when the caller holds it (M8: the X32 header toggles History and Comments from outside the
    * body, and the rail stays open across a remount); the editor's own toggles then ask through `onRailChange`. Without
@@ -103,6 +106,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const held = props.rail !== undefined;
   const rail = held ? (props.rail ?? null) : ownRail;
   const [saving, setSaving] = useState(false);
+  const [pendingSuggestions, setPendingSuggestions] = useState(false);
   const [showing, setShowing] = useState<Showing | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const active = tabs.find((tab) => tab.id === selected) ?? tabs[0] ?? null;
@@ -114,7 +118,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   useEffect(() => history?.setLiveTab(active?.id ?? null), [history, active?.id]);
   // Leaving the history rail leaves history: the page shows the live document again (whoever closed the rail).
   const { onRailChange, saveVersionRequest, onPreviewChange } = props;
-  const previewing = preview !== null;
+  const previewing = preview !== null || pendingSuggestions;
   useEffect(() => {
     onPreviewChange?.(previewing);
   }, [previewing, onPreviewChange]);
@@ -151,27 +155,34 @@ export function DocumentEditor(props: DocumentEditorProps) {
         </div>
       )}
       <div className="doc-editor-body">
-        {active ? (
-          <TabEditor
-            {...props}
-            key={active.id}
-            tabId={active.id}
-            tabTitle={active.title}
-            author={author}
-            rail={rail}
-            openRail={openRail}
-            showing={showing}
-            onShown={() => setShowing(null)}
-            onActiveThread={setActiveThreadId}
-            onPassageClick={() => !preview && openRail('comments')}
-            historyController={history}
-            historySnapshot={snapshot}
-          />
-        ) : (
-          <div className="doc-editor-loading" role="status">
-            Loading…
+        {active && props.suggestions && (
+          <div className="doc-tab-editor" style={{ display: preview ? 'none' : pendingSuggestions ? undefined : 'contents' }}>
+            <Suggestions artifactId={props.artifactId} tabId={active.id} base={props.handle} host={props.suggestions} editorHost={props.host} onPending={setPendingSuggestions} pageScope={props.pageScope} />
           </div>
         )}
+        <div className="doc-tab-editor" style={{ display: pendingSuggestions && !preview ? 'none' : undefined }}>
+          {active ? (
+            <TabEditor
+              {...props}
+              key={active.id}
+              tabId={active.id}
+              tabTitle={active.title}
+              author={author}
+              rail={rail}
+              openRail={openRail}
+              showing={showing}
+              onShown={() => setShowing(null)}
+              onActiveThread={setActiveThreadId}
+              onPassageClick={() => !preview && openRail('comments')}
+              historyController={history}
+              historySnapshot={snapshot}
+            />
+          ) : (
+            <div className="doc-editor-loading" role="status">
+              Loading…
+            </div>
+          )}
+        </div>
         {rail === 'comments' && (
           <ThreadsRail
             doc={doc}

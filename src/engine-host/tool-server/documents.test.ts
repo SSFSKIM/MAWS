@@ -2,11 +2,13 @@
 // kind registered (M7's Proves of docs/doperpowers/plans/2026-10-12-p3-b-documents.md; D7, D14; §4.4 [binding]).
 import * as awarenessProtocol from '@y/protocols/awareness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { charSlots } from '@artifacts/document/structs';
+import { insertedBy, carriedBy } from '@artifacts/yjs';
 import { DocIndex } from '@artifacts/document/block-index';
 import { fingerprint } from '@artifacts/document/fingerprint';
 import { schemaFor } from '@artifacts/document/schema';
-import { getThread } from '@artifacts/document/threads';
-import { body, nodeOf, seedDoc, TAB, textOf } from '@artifacts/document/writer.fixture';
+import { getThread, locate, liveThreadIds } from '@artifacts/document/threads';
+import { body, nodeOf, pmOf, seedDoc, TAB, textOf } from '@artifacts/document/writer.fixture';
 import { createAbsolutePositionFromRelativePosition, createRelativePositionFromJSON, createRelativePositionFromTypeIndex, relativePositionToJSON } from '@artifacts/yjs/document';
 import { pmnodeToDelta } from '@artifacts/yjs/prosemirror';
 import { applyV1, diffV1, stateV2, transact } from '@artifacts/yjs';
@@ -328,22 +330,114 @@ describe('artifact_edit', () => {
   });
 });
 
-describe('suggestions (D14; A’s suggestion service is not on this base)', () => {
+describe('suggestions (D14)', () => {
+  const proposal = (id: string) => live(world.service.suggestionDoc(id));
+  const blockRange = (id: string, block: string) => {
+    const item = nodeOf(proposal(id), block)._item!.id;
+    return { start: { client: item.client, clock: item.clock }, end: { client: item.client, clock: item.clock } };
+  };
+
   it('a batch is direct by default', async () => {
     const { id, revision } = await readSeed();
     json(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'replace_block', id: 'p1', markdown: 'Direct.' }] }));
     expect(textOf(live(id), 'p1')).toBe('Direct.');
   });
 
-  it('mode "suggest" and the owner’s setting each route the batch to suggestions, refused unavailable with the base untouched', async () => {
+  it.each(['mode', 'setting', 'setting-over-direct'] as const)('%s routes a batch to suggestions with the base byte-unchanged', async (route) => {
     const { id, revision } = await readSeed();
     const before = stateV2(live(id));
-    expect(refusalOf(await edit({ artifact: id, baseRevision: revision, mode: 'suggest', ops: [{ op: 'replace_block', id: 'p1', markdown: 'Suggested.' }] }))).toMatchObject({ reason: 'unavailable', mode: 'suggest', setting: false });
-    await world.store.update(id, { agentEditsAsSuggestions: true });
-    expect(refusalOf(await edit({ artifact: id, baseRevision: revision, ops: [{ op: 'replace_block', id: 'p1', markdown: 'Suggested.' }] }))).toMatchObject({ reason: 'unavailable', mode: 'suggest', setting: true });
-    expect(refusalOf(await edit({ artifact: id, baseRevision: revision, mode: 'direct', ops: [{ op: 'replace_block', id: 'p1', markdown: 'Suggested.' }] }))).toMatchObject({ reason: 'unavailable', setting: true });
+    if (route !== 'mode') await world.store.update(id, { agentEditsAsSuggestions: true });
+    json(await edit({ artifact: id, baseRevision: revision, ...(route === 'setting' ? {} : { mode: route === 'mode' ? 'suggest' : 'direct' }), ops: [{ op: 'replace_block', id: 'p1', markdown: 'Suggested.' }] }));
+    expect(textOf(proposal(id), 'p1')).toBe('Suggested.');
     expect(stateV2(live(id))).toEqual(before);
   });
+
+  it('Reject leaves the base content byte-unchanged', async () => {
+    const { id, revision } = await readSeed();
+    const before = JSON.stringify(body(live(id)).toDelta());
+    json(await edit({ artifact: id, baseRevision: revision, mode: 'suggest', ops: [{ op: 'replace_block', id: 'p1', markdown: 'Suggested.' }] }));
+    const node = nodeOf(proposal(id), 'p1');
+    let last = node._start!;
+    while (last.right) last = last.right;
+    await world.service.rejectSuggestion(id, [{ start: node._start!.id, end: last.id }]);
+    expect(JSON.stringify(body(live(id)).toDelta())).toBe(before);
+    expect(textOf(proposal(id), 'p1')).toBe(textOf(live(id), 'p1'));
+  });
+
+  it('Accept credits the suggester through the bound clientID with carry accept', async () => {
+    const { id, revision } = await readSeed();
+    json(await edit({ artifact: id, baseRevision: revision, mode: 'suggest', ops: [{ op: 'insert', after: 'p1', markdown: 'Agent proposal. ^proposal' }] }));
+    await world.service.acceptSuggestion(id, [blockRange(id, 'proposal')], HUMAN);
+    expect(textOf(live(id), 'proposal')).toBe('Agent proposal.');
+    const [client, clock] = charSlots(nodeOf(live(id), 'proposal'))[0].slot;
+    expect(insertedBy(world.service.provenance(id), { client, clock })?.actor).toBe(`session:${SELF}`);
+    expect(carriedBy(world.service.provenance(id), { client, clock })).toBe('accept');
+    expect(world.store.storage.clientActor(id, client)).toEqual({ kind: 'session', appSessionId: SELF });
+  });
+  it('clears direct and suggestion presence independently when a session switches write modes', async () => {
+    const { id, revision } = await readSeed();
+    const tool = artifactEditTool(deps({ presenceEditingMs: 200 }));
+    const first = json<{ revision: number }>(await call(tool, { artifact: id, baseRevision: revision, ops: [{ op: 'insert', after: 'h1', markdown: 'Direct presence.' }] }));
+    json(await call(tool, { artifact: id, baseRevision: first.revision, mode: 'suggest', ops: [{ op: 'insert', after: 'h1', markdown: 'Suggested presence.' }] }));
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    for (const key of [id, world.service.suggestionDoc(id)]) expect(world.service.replica(SELF, key).provider.awareness.getLocalState()).not.toHaveProperty('editing');
+  });
+
+  it('validates quoted edits against the proposal, not the unchanged base', async () => {
+    const { id, revision } = await readSeed();
+    json(await edit({ artifact: id, baseRevision: revision, mode: 'suggest', ops: [{ op: 'replace_block', id: 'p1', markdown: 'First proposal.' }] }));
+    const otherDeps = deps({ session: new DocumentToolSession() });
+    json(await call(documentReadTool(otherDeps), { artifact: id }, { appSessionId: OTHER }));
+    json(await call(artifactEditTool(otherDeps), { artifact: id, baseRevision: revision, mode: 'suggest', ops: [{ op: 'replace_text', block: 'p1', old: 'First proposal.', new: 'Revised proposal.' }] }, { appSessionId: OTHER }));
+    expect(textOf(proposal(id), 'p1')).toBe('Revised proposal.');
+    expect(textOf(live(id), 'p1')).toContain('The quick brown');
+  });
+
+  it('refuses an unread change to a proposal target instead of overwriting another session’s suggestion', async () => {
+    const { id, revision } = await readSeed();
+    json(await edit({ artifact: id, baseRevision: revision, mode: 'suggest', ops: [{ op: 'replace_block', id: 'p1', markdown: 'First proposal.' }] }));
+    await read({ artifact: id }, { appSessionId: OTHER });
+    // Another session read only the base; it has never seen the proposed replacement.
+    const other = new DocumentToolSession();
+    const otherDeps = deps({ session: other });
+    json(await call(documentReadTool(otherDeps), { artifact: id }, { appSessionId: OTHER }));
+    const answer = await call(artifactEditTool(otherDeps), { artifact: id, baseRevision: revision, mode: 'suggest', ops: [{ op: 'replace_block', id: 'p1', markdown: 'Overwrite.' }] }, { appSessionId: OTHER });
+    expect(refusalOf(answer)).toMatchObject({ reason: 'staleTargets' });
+    expect(textOf(proposal(id), 'p1')).toBe('First proposal.');
+  });
+
+  it('a suggested retype carries existing authorship through the document adapter', async () => {
+    const { id, revision } = await readSeed();
+    json(await edit({ artifact: id, baseRevision: revision, mode: 'suggest', ops: [{ op: 'replace_block', id: 'p1', markdown: '## The quick brown fox jumps over the **lazy** [dog](https://example.com). It has two sentences.' }] }));
+    const [client, clock] = charSlots(nodeOf(proposal(id), 'p1'))[0].slot;
+    const map = world.service.provenance(world.service.suggestionDoc(id));
+    expect(insertedBy(map, { client, clock })?.actor).toBe('human');
+    expect(carriedBy(map, { client, clock })).toBe('retype');
+  });
+
+  it('Accept preserves rich marks, block attributes and ids, and comment anchors on the real schema', async () => {
+    const { id, revision } = await readSeed();
+    json(await edit({ artifact: id, baseRevision: revision, mode: 'suggest', ops: [
+      { op: 'insert', after: 'h1', markdown: '### Rich **bold** [link](https://example.com) <mark color="#fde68a">highlight</mark> ^rich\n\n:::callout {tone="warn"}\nCareful. ^inside\n:::\n^callout\n\n```ts\nconst n = 1\n```\n^code' },
+      { op: 'replace_block', id: 'p1', markdown: '## The quick brown fox jumps over the **lazy** [dog](https://example.com). It has two sentences.' },
+    ] }));
+    const ids = ['rich', 'callout', 'code', 'p1'];
+    const expected = ids.map((block) => pmOf(proposal(id), block).toJSON());
+    await world.service.acceptSuggestion(id, ids.map((block) => blockRange(id, block)), HUMAN);
+    expect(ids.map((block) => pmOf(live(id), block).toJSON())).toEqual(expected);
+    const marks: string[] = [];
+    pmOf(live(id), 'rich').descendants((node) => { marks.push(...node.marks.map((mark) => mark.type.name)); });
+    expect(marks).toEqual(expect.arrayContaining(['bold', 'link', 'highlight']));
+    expect(pmOf(live(id), 'rich').attrs.level).toBe(3);
+    expect(pmOf(live(id), 'callout').attrs.tone).toBe('warn');
+    expect(pmOf(live(id), 'code').attrs.language).toBe('ts');
+    for (const threadId of ['t1', 't2']) {
+      const thread = getThread(live(id), threadId)!;
+      expect(liveThreadIds(live(id)).has(threadId)).toBe(true);
+      expect(locate(live(id), thread)).toMatchObject({ how: 'text', blockId: 'p1' });
+    }
+  });
+
 });
 
 describe('comments: artifact_comments, artifact_reply, artifact_resolve', () => {
@@ -416,7 +510,7 @@ describe('fix wave 1: replay before current-state guards, the live revision, the
     const first = await edit(args, { toolUseId });
     await world.store.update(id, { agentEditsAsSuggestions: true });
     expect(await edit(args, { toolUseId })).toEqual(first);
-    expect(refusalOf(await edit(args))).toMatchObject({ reason: 'unavailable', setting: true }); // a new call is routed to suggestions
+    expect(json(await edit(args))).toMatchObject({ status: 'edited' }); // a new call is routed to suggestions
   });
 
   it('a retained-version read answers the live revision, the version’s own in its summary, and is no base for a batch', async () => {
