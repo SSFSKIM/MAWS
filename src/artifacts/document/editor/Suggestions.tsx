@@ -90,6 +90,7 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
     // transaction proposing something over the base refreshes. The renderer's coverage cannot say so: it keeps every
     // settled proposal's withdrawn inserts (M9 addendum fix wave).
     let listed = true;
+    let showing = false; // whether the review is on screen in place of the live editor
     let waiting: ReturnType<typeof setTimeout> | undefined; // a review held back until the person pauses
     setView(null);
     const refresh = async () => {
@@ -110,12 +111,14 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
         current = renderer;
         const body = tabBody(handle.doc, tabId);
         const pending = !renderer.attributed.isEmpty() && body !== undefined && changeList(renderDiff(body, renderer)).length > 0;
-        // a review not yet shown waits while the person types in the live editor, and is checked again at the pause
-        const pause = pending && !listed ? (typing?.remaining() ?? 0) : 0;
+        // a review not yet shown (the first check's included: a replica that opens mid-composition already holds what the
+        // base holds back) waits while the person types in the live editor, and is checked again at the pause
+        const pause = pending && !showing ? (typing?.remaining() ?? 0) : 0;
         clearTimeout(waiting);
         if (pause > 0) waiting = setTimeout(() => void refresh(), pause);
         const shown = pending && pause === 0;
         listed = shown;
+        showing = shown;
         setError(null);
         setView(shown ? { handle, renderer, serial: asked } : null);
         onPending(shown);

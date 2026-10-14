@@ -186,7 +186,7 @@ describe('the composition hold and the suggestion replica', () => {
 
 // M9 follow-up (Decision Log 51): the live editor and the suggestion replica as DocumentEditor holds them, over a main
 // host and a suggestion host fed every main update (A's `inStep`).
-async function mountLive() {
+async function mountLive(options: { openAfter?: Promise<void> } = {}) {
   world = new World(doc(para('p1', 'Mine.'), para('p2', 'Theirs.')));
   const handle = openMemoryHandle(world.host, { log: () => {} });
   closing.push(() => handle.close());
@@ -198,6 +198,7 @@ async function mountLive() {
   let replica: (DocumentHandle & { provider: unknown }) | null = null;
   const host: SuggestionHost = {
     open: vi.fn(async () => {
+      await options.openAfter;
       const opened = openMemoryHandle(suggestionHost, { log: () => {} });
       await whenSynced(opened);
       replica = opened;
@@ -210,11 +211,11 @@ async function mountLive() {
   const previewing: boolean[] = [];
   let live: Editor | null = null;
   render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} suggestions={host} onPreviewChange={(on) => previewing.push(on)} onEditor={(editor) => (live = editor)} />);
-  await until(() => live !== null && live.getText().length > 0 && replica !== null && vi.mocked(host.attributions).mock.calls.length > 0, 'the live editor and the first review check');
+  await until(() => live !== null && live.getText().length > 0 && (options.openAfter !== undefined || (replica !== null && vi.mocked(host.attributions).mock.calls.length > 0)), 'the live editor and the first review check');
   await act(async () => { await ticks(5); });
   /** Content frames the suggestion replica has sent its host. */
   const replicaFrames = () => (replica as unknown as { provider: { sent: number } }).provider.sent;
-  return { handle, suggestionHost, host, previewing, editor: live as unknown as Editor, replicaFrames };
+  return { handle, suggestionHost, host, previewing, editor: live as unknown as Editor, replicaFrames, replica: () => replica };
 }
 
 describe('the typing pause (M9 follow-up)', () => {
@@ -263,5 +264,33 @@ describe('the base reaches the suggestion doc through the host only (M9 follow-u
     await act(async () => { await ticks(10); });
     expect(pmOf(handle.doc, 'p1').textContent).toBe('Mine.typed');
     expect(replicaFrames() - before, 'frames from the suggestion replica').toBe(0);
+  });
+});
+
+// M9 follow-up (the re-review's probe): the suggestion replica opens while the person composes and an agent's write
+// lands in between; the replica joins the hold only after its sync, already holding the write the base holds back, so
+// the first review check would read it as a proposal. The first review goes through the typing pause too.
+describe('the first review check while the person composes (M9 follow-up)', () => {
+  it('a replica that opens mid-composition with a write the base holds back shows no review; none appears once the base catches up', async () => {
+    let open!: () => void;
+    const openAfter = new Promise<void>((resolve) => (open = resolve));
+    const { handle, suggestionHost, host, previewing, editor, replica } = await mountLive({ openAfter });
+    const p2 = (d: Doc) => pmOf(d, 'p2').textContent;
+    act(() => { editor.chain().focus().setTextSelection(endOf(editor, 'p1')).run(); });
+    act(() => { editor.view.dom.dispatchEvent(new Event('compositionstart', { bubbles: true })); });
+    world!.host.write((d) => void applyEdit(d, [{ op: 'replace_text', block: 'p2', old: 'Theirs.', new: 'Theirs, edited.' }]), { kind: 'session', appSessionId: 'agent' } as never);
+    await until(() => p2(suggestionHost.doc) === 'Theirs, edited.', 'the write in the suggestion doc');
+    open();
+    await until(() => replica() !== null && vi.mocked(host.attributions).mock.calls.length > 0, 'the replica opened and first checked');
+    await act(async () => { await ticks(20); });
+    expect(editor.view.composing, 'still composing').toBe(true);
+    expect(p2(handle.doc), 'the base holds the write').toBe('Theirs.');
+    expect(screen.queryByLabelText('Suggestion review')).toBeNull();
+    expect(previewing).not.toContain(true);
+    act(() => { editor.view.dom.dispatchEvent(new Event('compositionend', { bubbles: true })); });
+    await until(() => p2(handle.doc) === 'Theirs, edited.', 'the base after the hold');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_200)); });
+    expect(screen.queryByLabelText('Suggestion review')).toBeNull();
+    expect(previewing).not.toContain(true);
   });
 });
