@@ -182,7 +182,7 @@ describe('the close guard (F-I1)', () => {
         <DesignSystemBody artifactId="ds1" handle={state.handle} host={host} />
       </EditorHostScopeContext.Provider>,
     );
-    act(() => setToken(state.handle.doc, 'color.accent.$root', { $type: 'color', $value: '#112233' }));
+    act(() => setToken(state.handle.doc, 'color.accent.$root', { $type: 'color', $value: { colorSpace: 'srgb', components: [0.1, 0.2, 0.3] } }));
     expect(state.handle.state().unsaved).toBeGreaterThan(0);
     expect(editorHostOf(SCOPE)!.saved).toBe('reconnecting');
     view.unmount(); // a tab switch: the registration and its guard stay with the tab
