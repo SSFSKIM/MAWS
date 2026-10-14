@@ -175,6 +175,17 @@ describe('openDesignSystem (D8)', () => {
     expect(css).not.toContain('fonts.example');
     expect(css).not.toContain('Not Ours');
   });
+
+  // A's Decision Log 46: a deleted system's assets are served at a named revision while a version pins it, never live
+  it('loads a version ref’s faces at the pinned revision, so a retained version keeps them after the system is deleted', async () => {
+    const doc = systemDoc({ 'components/document.css': FACE });
+    const { host } = fakeHost({ a: doc }, { 'a@7': stateV2(doc) });
+    const css = (await openDesignSystem(host, { id: 'a', versionSeq: 7 })).css('[data-ds-scope="x"]', 'document');
+    const faces = css.match(/@font-face \{[^}]*\}/g) ?? [];
+    expect(faces).toHaveLength(1);
+    expect(faces[0]).toMatch(/src: url\("maws-artifact\\3a \/\/a\/7\/assets\/iowan\.woff2"\) format\("woff2"\);/);
+    expect(css).not.toContain('/live/');
+  });
 });
 
 describe('<DesignSystemScope> (D8)', () => {
