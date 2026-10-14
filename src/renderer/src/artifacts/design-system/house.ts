@@ -12,7 +12,10 @@ import { ipc } from '../../ipc/client';
 
 /**
  * The house system followed over `client` while anything listens. Only the latest read's answer is taken, so an answer a
- * later change overtook never lands; a refused read (the host away) keeps the last answer until the next read.
+ * later change overtook never lands. A failed read keeps the last good answer until the next read: quietly when the
+ * host is away (`host_unavailable`, which `artifacts.resync` follows with a read), reported as a console error naming
+ * the read for any other fault (a rejected invoke, an `invalid_output`, the host's own refusal), as the renderer's
+ * stores report a read that failed.
  */
 export function followHouseDesignSystem(client: MawsBridge): HouseDesignSystem {
   let houseId: string | null = null;
@@ -21,14 +24,16 @@ export function followHouseDesignSystem(client: MawsBridge): HouseDesignSystem {
   let asked = 0;
   const read = () => {
     const mine = ++asked;
-    client.invoke('designSystems.house', undefined).then(
-      (result) => {
-        if (mine !== asked || !result.ok || result.value.houseId === houseId) return;
-        houseId = result.value.houseId;
-        for (const listener of [...listeners]) listener();
-      },
-      () => {},
-    );
+    const failed = (fault: unknown) => console.error('[design-systems] designSystems.house failed', fault);
+    client.invoke('designSystems.house', undefined).then((result) => {
+      if (!result.ok) {
+        if (result.error.code !== 'host_unavailable') failed(result.error);
+        return;
+      }
+      if (mine !== asked || result.value.houseId === houseId) return;
+      houseId = result.value.houseId;
+      for (const listener of [...listeners]) listener();
+    }, failed);
   };
   return {
     current: () => houseId,

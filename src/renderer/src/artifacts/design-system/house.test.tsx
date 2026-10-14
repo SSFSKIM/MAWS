@@ -81,7 +81,7 @@ describe('useHouseDesignSystem', () => {
 });
 
 describe('followHouseDesignSystem', () => {
-  it('drops an answer a later read overtook, and keeps the last answer when a read fails', async () => {
+  it('drops an answer a later read overtook', async () => {
     const fake = fakeBridge();
     const house = followHouseDesignSystem(createClient(() => fake.bridge));
     const heard = vi.fn();
@@ -92,12 +92,48 @@ describe('followHouseDesignSystem', () => {
     await fake.answer(0, HOUSE); // the earlier one, overtaken
     expect(house.current()).toBe(COPY);
     expect(heard).toHaveBeenCalledTimes(1);
-    // a refused read (the host away) leaves the answer as it was
+    stop();
+    expect(fake.listening()).toBe(0);
+  });
+
+  // Fix wave 1: the host away is the one expected failure, kept quiet; any other fault is reported on the renderer's
+  // diagnostic route (a console error naming the read), and every failure keeps the last good answer.
+  it('keeps the last good id through a host-unavailable read, quietly, and reports an unexpected rejection or an invalid output', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const fake = fakeBridge();
+    const house = followHouseDesignSystem(createClient(() => fake.bridge));
+    const heard = vi.fn();
+    const stop = house.subscribe(heard);
+    await fake.answer(0, HOUSE);
+    expect(house.current()).toBe(HOUSE);
+    // the host restarting: kept, and nothing reported
     fake.invoke.mockResolvedValueOnce({ ok: false, error: { code: 'host_unavailable', message: 'engine-host is not running' } } as never);
     fake.emit('artifacts.resync', {});
     await act(async () => {});
-    expect(house.current()).toBe(COPY);
+    expect(house.current()).toBe(HOUSE);
+    expect(errors).not.toHaveBeenCalled();
+    // the bridge itself throwing: kept, and reported
+    const thrown = new Error('the bridge is gone');
+    fake.invoke.mockRejectedValueOnce(thrown);
+    fake.emit('artifacts.changed', changed('design_system', 'deleted'));
+    await act(async () => {});
+    expect(house.current()).toBe(HOUSE);
+    expect(errors).toHaveBeenLastCalledWith('[design-systems] designSystems.house failed', thrown);
+    // an answer the registry refuses (not an id): kept, and reported with the client's invalid_output
+    fake.invoke.mockResolvedValueOnce({ ok: true, value: { houseId: 'maws' } } as never);
+    fake.emit('artifacts.changed', changed('design_system', 'created'));
+    await act(async () => {});
+    expect(house.current()).toBe(HOUSE);
+    expect(errors).toHaveBeenLastCalledWith('[design-systems] designSystems.house failed', expect.objectContaining({ code: 'invalid_output' }));
+    // a fault the host answers (the store not opened this run): reported too
+    fake.invoke.mockResolvedValueOnce({ ok: false, error: { code: 'internal', message: 'the artifact store could not be opened this run' } } as never);
+    fake.emit('artifacts.resync', {});
+    await act(async () => {});
+    expect(house.current()).toBe(HOUSE);
+    expect(errors).toHaveBeenLastCalledWith('[design-systems] designSystems.house failed', expect.objectContaining({ code: 'internal' }));
+    expect(errors).toHaveBeenCalledTimes(3);
+    expect(heard).toHaveBeenCalledTimes(1); // only the first answer moved it
     stop();
-    expect(fake.listening()).toBe(0);
+    errors.mockRestore();
   });
 });
