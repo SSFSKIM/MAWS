@@ -5,7 +5,7 @@ import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import type { ArtifactHost, DocumentHandle } from '../../host';
 import { decodeMap, type Doc, type SuggestionRange } from '../../yjs';
-import { ContentType, Item, createDiffRenderer, type DiffRenderer } from '../../yjs/document';
+import { ContentType, Item, createDiffRenderer, proposesOver, type DiffRenderer, type Transaction } from '../../yjs/document';
 import { resolvedPositionsToRelativePositions } from '../../yjs/prosemirror';
 import { attributedRuns, changeList, renderDiff } from '../history';
 import { coreExtensionOptions } from '../ids';
@@ -79,16 +79,14 @@ export function Suggestions({ artifactId, tabId, base, host, editorHost, onPendi
     let handle: DocumentHandle | null = null;
     let current: DiffRenderer | null = null;
     const renderers = new Set<DiffRenderer>();
+    // Whether the last full refresh found proposals to review (true until the first has run). With none, ordinary
+    // typing needs neither attribution IPC nor a full ProseMirror rendering of the tab (M9's scale gate): only a
+    // transaction proposing something over the base refreshes. The renderer's coverage cannot say so: it keeps every
+    // settled proposal's withdrawn inserts (M9 addendum fix wave).
+    let listed = true;
     setView(null);
     const refresh = async () => {
       const asked = ++serial;
-      // The renderer tracks coverage as the base flows into the proposal replica. With no proposals ordinary
-      // typing needs neither attribution IPC nor a full ProseMirror rendering of the tab (M9's scale gate).
-      if (current?.attributed.isEmpty()) {
-        setView(null);
-        onPending(false);
-        return;
-      }
       try {
         const bytes = await host.attributions(artifactId, 0, Number.MAX_SAFE_INTEGER, { doc: 'suggestions' });
         if (closed || asked !== serial || !handle) return;
@@ -103,6 +101,7 @@ export function Suggestions({ artifactId, tabId, base, host, editorHost, onPendi
         current = renderer;
         const body = tabBody(handle.doc, tabId);
         const pending = !renderer.attributed.isEmpty() && body !== undefined && changeList(renderDiff(body, renderer)).length > 0;
+        listed = pending;
         setError(null);
         setView(pending ? { handle, renderer, serial: asked } : null);
         onPending(pending);
@@ -114,17 +113,20 @@ export function Suggestions({ artifactId, tabId, base, host, editorHost, onPendi
         if (!closed && asked === serial) setError(cause instanceof Error ? cause.message : String(cause));
       }
     };
+    // A base change never adds a proposal; a suggestion replica's change refreshes when it proposes something.
+    const onBase = () => void (listed && refresh());
+    const onProposal = (_update: Uint8Array, _origin: unknown, _doc: Doc, tr: Transaction) => void ((listed || proposesOver(tr, base.doc)) && refresh());
     void host.open(artifactId, { doc: 'suggestions' }).then((opened) => {
       if (closed) return opened.close();
       handle = opened;
-      opened.doc.on('update', refresh);
-      base.doc.on('update', refresh);
+      opened.doc.on('update', onProposal);
+      base.doc.on('update', onBase);
       void refresh();
     }).catch((cause: unknown) => { if (!closed) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => {
       closed = true;
-      handle?.doc.off('update', refresh);
-      base.doc.off('update', refresh);
+      handle?.doc.off('update', onProposal);
+      base.doc.off('update', onBase);
       for (const renderer of renderers) renderer.destroy();
       renderers.clear();
       handle?.close();

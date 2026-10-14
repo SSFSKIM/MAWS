@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, newSuggestionDoc, planAccept, stateV2, transact, type Doc, type SuggestionRange } from '../../yjs';
+import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, newSuggestionDoc, planAccept, planReject, stateV2, transact, type Doc, type SuggestionRange } from '../../yjs';
 import { applyEdit } from '../patch-writer';
 import { nodeOf, pmOf } from '../writer.fixture';
 import { memoryEditorHost } from './memory-host';
@@ -81,6 +81,46 @@ describe('document suggestion review', () => {
     await act(async () => { await ticks(10); });
     expect(host.attributions).toHaveBeenCalledTimes(reads);
     expect(screen.queryByLabelText('Suggestion review')).toBeNull();
+  });
+
+  // M9 addendum fix wave: the renderer's coverage keeps settled proposals (withdrawn inserts), so the fast path reads
+  // what the review lists, not that coverage: typing after the last proposal is accepted or rejected costs nothing.
+  it.each(['Accept', 'Reject'] as const)('does not fetch attribution for typing after the last proposal is settled by %s', async (action) => {
+    const { host, handle, attribution } = await mount();
+    const settle = async (_id: string, ranges: SuggestionRange[]) => {
+      const plan = (action === 'Accept' ? planAccept : planReject)(handle.doc, proposal!, attribution, ranges);
+      if (plan.edit) transact(handle.doc, () => plan.edit!(handle.doc));
+      if (plan.remove) applyV1(proposal!, plan.remove);
+      return { revision: 2 };
+    };
+    vi.mocked(action === 'Accept' ? host.acceptSuggestion : host.rejectSuggestion).mockImplementation(settle);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: `${action} suggestion 1` })); });
+    await until(() => screen.queryByLabelText('Suggestion review') === null, 'the settled proposal to leave the review');
+    await act(async () => { await ticks(10); });
+    const reads = vi.mocked(host.attributions).mock.calls.length;
+    for (const word of ['one', 'two', 'three']) {
+      act(() => { applyEdit(handle.doc, [{ op: 'replace_text', block: 'base', old: 'Original.', new: `Original ${word}.` }]); });
+      act(() => { applyEdit(handle.doc, [{ op: 'replace_text', block: 'base', old: `Original ${word}.`, new: 'Original.' }]); });
+    }
+    await act(async () => { await ticks(10); });
+    expect(host.attributions).toHaveBeenCalledTimes(reads);
+    expect(screen.queryByLabelText('Suggestion review')).toBeNull();
+  });
+
+  it.each(['insert', 'delete'] as const)('a new %s proposal after the last one settled is reviewed again', async (kind) => {
+    const { host, handle, attribution } = await mount();
+    vi.mocked(host.rejectSuggestion).mockImplementation(async (_id, ranges) => {
+      const plan = planReject(handle.doc, proposal!, attribution, ranges);
+      if (plan.remove) applyV1(proposal!, plan.remove);
+      return { revision: 2 };
+    });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Reject suggestion 1' })); });
+    await until(() => screen.queryByLabelText('Suggestion review') === null, 'the rejected proposal to leave the review');
+    const reads = vi.mocked(host.attributions).mock.calls.length;
+    act(() => { applyEdit(proposal!, [kind === 'insert' ? { op: 'insert', after: 'base', markdown: 'Another proposal. ^again' } : { op: 'replace_text', block: 'base', old: 'Original.', new: 'Orig.' }]); });
+    await until(() => vi.mocked(host.attributions).mock.calls.length > reads, 'the new proposal to be read');
+    await until(() => screen.queryByLabelText('Suggestion review') !== null, 'the new proposal to be reviewed');
+    expect(screen.getByLabelText('Suggested document').textContent).toContain(kind === 'insert' ? 'Another proposal.' : 'Orig.');
   });
 
   it('closes its suggestion replica when the review unmounts', async () => {

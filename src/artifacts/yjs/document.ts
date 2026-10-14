@@ -26,7 +26,40 @@ export {
   createIdSet,
   createContentIds,
 } from '@y/y';
+export type { Transaction } from '@y/y'; // a suggestion replica's update, read by `proposesOver`
 
 // History's throwaway docs (a version's state and the state it is compared with) keep deleted content, so the diff
 // renderer can show what a change removed; the live doc is gc on (index.ts's `newDoc`).
 export const newDocGcOff = (): Y.Doc => new Y.Doc({ gc: false });
+
+// The clock after the last struct `store` holds of `client` (0 when it holds none).
+const stateOf = (store: Y.Doc['store'], client: number): number => {
+  const last = store.clients.get(client)?.at(-1);
+  return last ? last.id.clock + last.length : 0;
+};
+
+/**
+ * Whether a transaction on a suggestion replica proposed something over `base` (D14, M9 addendum fix wave): a struct
+ * `base` lacks, or a deletion of content `base` still holds. The base flowing into the replica and the service
+ * withdrawing settled proposals (content `base` never had) propose nothing. Reads only the transaction's own ranges, so
+ * the review can skip a typing keystroke without the attribution its renderer keeps for every settled proposal.
+ */
+export function proposesOver(tr: Y.Transaction, base: Y.Doc): boolean {
+  let proposed = false;
+  tr.insertSet.forEach((range, client) => {
+    if (stateOf(base.store, client) < range.clock + range.len) proposed = true;
+  });
+  if (proposed) return true;
+  tr.deleteSet.forEach((range, client) => {
+    const structs = base.store.clients.get(client);
+    const end = Math.min(range.clock + range.len, stateOf(base.store, client));
+    if (proposed || !structs || range.clock >= end) return;
+    for (let i = Y.findIndexSS(structs, range.clock); i < structs.length && structs[i].id.clock < end; i++) {
+      if (!structs[i].deleted) {
+        proposed = true;
+        return;
+      }
+    }
+  });
+  return proposed;
+}
