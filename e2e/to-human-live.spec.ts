@@ -342,7 +342,7 @@ function snapshots(engineSessionId: string): { snapshots: number[]; supplements:
   }
   return out;
 }
-const snapshotWords = (s: ReturnType<typeof snapshots>) => `${s.snapshots.length} prompt snapshot(s) [${s.snapshots.map((c) => (c === 0 ? 'none' : `contract:1${c > 1 ? ` x${c}` : ''}`)).join(', ')}], ${s.boundaries} compact boundaries`;
+const snapshotWords = (s: ReturnType<typeof snapshots>) => `${s.snapshots.length} prompt snapshot(s) [${s.snapshots.map((c) => (c === 0 ? 'none' : `contract:${TO_HUMAN_CONTRACT_VERSION}${c > 1 ? ` x${c}` : ''}`)).join(', ')}], ${s.boundaries} compact boundaries`;
 
 // ---- the page ----------------------------------------------------------------------------------------------------------
 
@@ -768,46 +768,42 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       expect(snap.snapshots.length).toBeGreaterThan(0);
       expect({ contract: snap.snapshots, supplement: snap.supplements }, 'each snapshot carries the supplement once and no contract').toEqual({ contract: snap.snapshots.map(() => 0), supplement: snap.snapshots.map(() => 1) });
       expect(cards).toBeGreaterThanOrEqual(1);
-      expect(asks.map((a) => a.args.blocking), 'one ask through mcp__maws__ask, not blocking').toEqual([false]);
+      expect(asks.length, 'the agent asked through mcp__maws__ask').toBeGreaterThanOrEqual(1);
+      expect(asks.every((a) => a.args.blocking === false), 'without blocking').toBe(true);
       expect(initAskTools, 'Decision Log 33: mcp__maws__ask the one ask (no plugin ask in -p either)').toEqual(['mcp__maws__ask']);
       expect(nativeAsks, 'neither the native ask nor the plugin’s ask is the model’s').toEqual([]);
       expect(tools).toContain('mcp__maws__ask');
       expect(bandText).not.toContain('to-human view');
-      line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE} (declares ${plugin.contractKey}: ${plugin.shape}); --append-system-prompt once, the supplement byte for byte, no contract; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${snap.supplements.length} snapshot(s), each with the supplement once; ${NATIVE_TO_HUMAN_ENV}=${ADVERTISED} logged; ${cards} message card(s); one mcp__maws__ask, blocking false; system/init's asks ${JSON.stringify(initAskTools)}, neither AskUserQuestion nor mcp__doperpowers__AskUserQuestion among ${tools.length} tools; the mod's band absent (deferred)`);
+      line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE} (declares ${plugin.contractKey}: ${plugin.shape}); --append-system-prompt once, the supplement byte for byte, no contract; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${snap.supplements.length} snapshot(s), each with the supplement once; ${NATIVE_TO_HUMAN_ENV}=${ADVERTISED} logged; ${cards} message card(s); ${asks.length} mcp__maws__ask call(s), blocking false; system/init's asks ${JSON.stringify(initAskTools)}, neither AskUserQuestion nor mcp__doperpowers__AskUserQuestion among ${tools.length} tools; the mod's band absent (deferred)`);
     });
 
     // P2-C2: the owner's style asks through a tool, so the question is MAWS's ask, answered from its sheet while the
     // doperpowers mod is active; its answer reaches the agent as the user message naming the ask. (The four marks' cards,
     // Reply, attention and restart ran in the clean home.)
     await step('style-answer', 'style arm: the agent’s non-blocking mcp__maws__ask answered from its sheet with the doperpowers mod active; the agent replies', async () => {
-      const capsule = pane(page).locator('section.transcript-ask').first();
-      await expect(capsule).toHaveAttribute('data-ask-state', 'asked', { timeout: 30_000 });
-      const askId = await capsule.getAttribute('data-ask-id');
-      const sheet = page.locator(`[data-ask-sheet][data-ask-id="${askId}"]`);
-      await expect(sheet).toBeVisible({ timeout: 30_000 });
-      const sections = sheet.locator('section[data-question-id]');
-      const radios = sections.first().getByRole('radio');
-      let answer: string;
-      if ((await radios.count()) > 0) {
-        answer = (await radios.first().getAttribute('aria-label')) ?? '?';
-        await radios.first().click();
-      } else {
-        answer = REPLY;
-        await sections.first().getByRole('textbox').fill(answer);
-      }
-      await shot('08-style-ask');
+      // every ask the turn left waiting, answered through its own sheet (a model may ask twice)
+      const capsules = pane(page).locator('section.transcript-ask[data-ask-state="asked"]');
+      await expect(capsules.first()).toBeVisible({ timeout: 30_000 });
+      const askIds = await capsules.evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-ask-id') ?? ''));
       const prompts = written(s2);
-      await sheet.getByRole('button', { name: /^Submit/ }).click();
-      await expect(capsule).toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 });
+      const answers: string[] = [];
+      for (const askId of askIds) {
+        const sheet = page.locator(`[data-ask-sheet][data-ask-id="${askId}"]`);
+        await expect(sheet, `the sheet of ${askId} (the next ask's comes up once the one before is submitted)`).toBeVisible({ timeout: 30_000 });
+        answers.push(await answerSheet(sheet));
+        await shot('08-style-ask');
+        await sheet.getByRole('button', { name: /^Submit/ }).click();
+        await expect(pane(page).locator(`section.transcript-ask[data-ask-id="${askId}"]`)).toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 });
+      }
       await settle(page, s2, prompts);
-      const delivered = journal(s2).filter((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && textOf((r.frame as Frame).message?.content).includes(askId ?? '\0'));
+      const delivered = askIds.map((askId) => askWrites(s2, askId));
       const reply = lastReply(s2);
-      log(`ask ${askId}: ${await sections.count()} question(s); answered "${answer}"; the answer written ${delivered.length} time(s): ${JSON.stringify(delivered.map((r) => textOf((r.frame as Frame).message?.content).slice(0, 200)))}; reply ${JSON.stringify(reply.slice(0, 300))}`);
-      observe('styleAnswer', { askId, answer, delivered: delivered.map((r) => ({ at: r.at, text: textOf((r.frame as Frame).message?.content) })), reply });
+      log(`asks ${JSON.stringify(askIds)}; answered ${JSON.stringify(answers)}; written ${JSON.stringify(delivered.map((d) => d.length))} time(s): ${JSON.stringify(delivered.flat().map((d) => d.text.slice(0, 200)))}; reply ${JSON.stringify(reply.slice(0, 300))}`);
+      observe('styleAnswer', { askIds, answers, delivered, reply });
       await shot('09-style-answer');
-      expect(delivered, 'the answer reached the engine as a user message naming the ask').toHaveLength(1);
+      expect(delivered.map((d) => d.length), 'each answer reached the engine once, as a user message naming its ask').toEqual(askIds.map(() => 1));
       expect(reply.length).toBeGreaterThan(0);
-      line(`style answer: with the mod active, the mcp__maws__ask sheet answered "${answer}"; the capsule Answered; the answer written once to the engine naming ${askId}; the agent replied`);
+      line(`style answer: with the mod active, ${askIds.length} mcp__maws__ask sheet(s) answered ${JSON.stringify(answers)}; each capsule Answered; each answer written once naming its ask; the agent replied`);
     });
 
     await step('style-off', 'style arm, lane off: the variable unset; the mod draws its own to-human band', async () => {
