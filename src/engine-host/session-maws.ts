@@ -6,7 +6,7 @@
 // write through the host's artifact store; each turn's end writes the session's `turn` versions there, and the process's
 // end closes the session's agent replicas (their bases and presence with them).
 import type { AttentionItem } from '@shared/graph/attention';
-import type { RequestId, SessionId } from '@shared/graph/ids';
+import type { RequestId, SessionId, ToolUseId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { MawsArtifactCapturedResult, MawsDownloadRecorded, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/ask';
@@ -46,6 +46,7 @@ export interface SessionMawsHost {
   respond(requestId: RequestId, response: unknown, opts?: WriteOptions): Promise<void>;
   cwd(): string; // the engine's working directory as the frames report it, else the launch's
   sessionId(): SessionId | null;
+  fromSubagent?(toolUseId: ToolUseId | null): boolean; // P2-C3: whether a `maws` call is a subagent's (Normalizer.fromSubagent)
   publishAttention(): void; // the session's attention list again (the broker's items, then the blocking asks')
   steer: MessageQueue['steer'];
   meta(frame: Record<string, unknown>): void; // journals a meta row; throws when the journal refuses it
@@ -89,6 +90,7 @@ export class SessionMaws {
       version: host.appVersion ?? 'unknown',
       log: host.log,
       onChange: () => host.touch(),
+      fromSubagent: host.fromSubagent && ((toolUseId) => host.fromSubagent!(toolUseId)), // P2-C3
     });
     // E1 end
   }

@@ -9,7 +9,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { expect, type ConsoleMessage, type Locator, type Page } from '@playwright/test';
 import { artifactUrl } from '@shared/artifacts/scheme';
 import type { SessionEvent } from '@shared/graph/events';
@@ -31,7 +31,41 @@ const rowsOf = (path: string): JournalRow[] =>
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line) as JournalRow);
-export const fixtureRows = (fixture: string) => rowsOf(join(REPO_ROOT, fixture));
+export const fixtureRows = (fixture: string) => rowsOf(resolve(REPO_ROOT, fixture)); // a repository path, or a derived fixture's absolute one
+
+// A recorded `ask` fixture with the ask's arguments replaced by `args`, written under `dir` (P2-C3: an option's preview
+// and an answer's note postdate the recordings). Sound because the replay plays the engine's frames as given and checks
+// only what MAWS writes, and that by kind: a `control_response` by request id and behaviour, a `user` frame by type, so
+// no write depends on the arguments. They are replaced in each frame that carries them whole, so the host's call, the
+// permission card and the transcript's capsule agree: the `tools/call` request the host parses, the `can_use_tool`
+// request, and the assistant's `tool_use`. The streamed `input_json_delta` fragments and what the engine said after the
+// answer (its tool result, its reply) stay the recording's; a case reads nothing from them.
+export function askFixture(dir: string, fixture: string, args: Record<string, unknown>): string {
+  const replaced = { call: 0, permission: 0, toolUse: 0 };
+  const rows = fixtureRows(fixture).map((row) => {
+    const frame = structuredClone(row.frame) as Frame;
+    if (row.direction !== 'in') return { ...row, frame };
+    const request = frame.request as { subtype?: string; tool_name?: string; input?: unknown; message?: { method?: string; params?: { name?: string; arguments?: unknown } } } | undefined;
+    if (frame.type === 'control_request' && request?.subtype === 'mcp_message' && request.message?.method === 'tools/call' && request.message.params?.name === 'ask') {
+      request.message.params.arguments = args;
+      replaced.call++;
+    } else if (frame.type === 'control_request' && request?.subtype === 'can_use_tool' && request.tool_name === 'mcp__maws__ask') {
+      request.input = args;
+      replaced.permission++;
+    } else if (frame.type === 'assistant') {
+      for (const block of (frame.message as { content: { type: string; name?: string; input?: unknown }[] }).content) {
+        if (block.type !== 'tool_use' || block.name !== 'mcp__maws__ask') continue;
+        block.input = args;
+        replaced.toolUse++;
+      }
+    }
+    return { ...row, frame };
+  });
+  expect(replaced, `the one ask of ${fixture}`).toEqual({ call: 1, permission: 1, toolUse: 1 });
+  const path = join(dir, fixture.slice(fixture.lastIndexOf('/') + 1).replace(/\.jsonl$/, '-derived.jsonl'));
+  writeFileSync(path, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
 
 // The fixture's recorded human prompt (the replay holds at it), and its `spawn` row's working directory.
 const firstPrompt = (fixture: string) => ((fixtureRows(fixture).find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user')!.frame as Frame).message as { content: string }).content;
