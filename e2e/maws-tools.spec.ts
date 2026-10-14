@@ -429,6 +429,9 @@ test('previews: a single-select question lays its options beside the focused opt
     await expect(pane).toHaveText('No preview for this option');
     await s.page.keyboard.press('ArrowUp');
     await expect(pane).toHaveAttribute('data-preview-of', 'Config file');
+    // the pane follows focus; Radix's radios check on an arrow key only while it is still down, which a loaded machine
+    // can miss, so the pick is a click
+    await section.getByRole('radio', { name: 'Config file' }).click();
     await expect(section.getByRole('radio', { name: 'Config file' })).toHaveAttribute('aria-checked', 'true');
     await shoot(s, 'ask-previews');
 
