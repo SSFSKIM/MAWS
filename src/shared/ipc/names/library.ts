@@ -4,6 +4,7 @@
 export const commands = [
   'library.list', 'library.get', 'library.spaces',
   'library.exportFormats', 'library.content', 'library.openExternally', 'library.reveal', 'library.saveAs', // M5b
+  'library.testImport', // M6b, e2e only
 ] as const;
 
 export const events = ['library.changed'] as const;

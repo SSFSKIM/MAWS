@@ -1793,9 +1793,11 @@ describe('ipc schema validates both directions', () => {
     it('owns the three reads in main and the three host reads in the engine host, main-only, and emits library.changed from main', () => {
       const owners = Object.fromEntries(Object.entries(library.commands).map(([name, spec]) => [name, spec.owner]));
       const files = { 'library.exportFormats': 'main', 'library.content': 'main', 'library.openExternally': 'main', 'library.reveal': 'main', 'library.saveAs': 'main' }; // M5b
-      expect(owners).toEqual({ 'library.list': 'main', 'library.get': 'main', 'library.spaces': 'main', ...files, 'library.snapshot': 'engine-host', 'library.entry': 'engine-host', 'library.text': 'engine-host' });
+      expect(owners).toEqual({ 'library.list': 'main', 'library.get': 'main', 'library.spaces': 'main', ...files, 'library.snapshot': 'engine-host', 'library.entry': 'engine-host', 'library.text': 'engine-host', 'library.testImport': 'engine-host' /* M6b */ });
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['library.snapshot', 'library.entry', 'library.text']));
-      expect([...NAMES.library.commands]).toEqual(['library.list', 'library.get', 'library.spaces', ...Object.keys(files)]);
+      expect(MAIN_ONLY_COMMANDS).not.toContain('library.testImport'); // M6b: the e2e calls it from a window; the host refuses it outside MAWS_E2E=1
+      expect([...NAMES.library.commands]).toEqual(['library.list', 'library.get', 'library.spaces', ...Object.keys(files), 'library.testImport']);
+      expect(validateCommandOutput('library.testImport', { imported: 2, skipped: 1, missing: 0, failed: 0 }).ok).toBe(true);
       expect(HOST_EVENTS).not.toContain('library.changed');
     });
 

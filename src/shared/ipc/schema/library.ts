@@ -57,6 +57,10 @@ export const LibraryRowSchema = LibraryEntrySchema.extend({
 });
 export type LibraryRow = z.infer<typeof LibraryRowSchema>;
 
+// M6b: what one run of the X12 import did with every record under `<userData>/deliverables` (the engine host's
+// `library/import.ts`): landed now, already an artifact, its file gone, or not a record or not landed.
+export const DeliverablesImportSchema = z.strictObject({ imported: Seq, skipped: Seq, missing: Seq, failed: Seq });
+
 export const LIBRARY_QUERY_MAX = 1_000;
 
 export const LibraryFilterSchema = z.strictObject({
@@ -122,6 +126,9 @@ export const commands = {
   'library.entry': host(z.strictObject({ artifactId: Id }), LibraryEntryAnswerSchema),
   // An artifact's searchable text at its current revision. Main-only.
   'library.text': host(z.strictObject({ artifactId: Id }), z.strictObject({ revision: Seq, text: z.string() })),
+  // M6b, e2e only (refused unless the engine host runs under MAWS_E2E=1): the X12 import the host runs at store open, run
+  // again now, so a test's seeded pre-P3 records land as they would at the next start. The counts cover the directory.
+  'library.testImport': host(z.void(), DeliverablesImportSchema),
 } as const satisfies Record<`library.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

@@ -14,7 +14,8 @@ import { readEntry, readSnapshot, readText, type LibraryDocuments } from './read
 
 type LibraryHostCommand = 'library.snapshot' | 'library.entry' | 'library.text';
 
-export const LIBRARY_DEADLINE_SHAPES: Record<LibraryHostCommand, DeadlineShape> = { 'library.snapshot': 'immediate', 'library.entry': 'immediate', 'library.text': 'immediate' };
+// M6b: `library.testImport` (e2e only, `./index.ts`) walks the X12 tree and copies pages: bounded, not immediate.
+export const LIBRARY_DEADLINE_SHAPES: Record<LibraryHostCommand | 'library.testImport', DeadlineShape> = { 'library.snapshot': 'immediate', 'library.entry': 'immediate', 'library.text': 'immediate', 'library.testImport': 'bounded' };
 
 function refused(reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown>, code: 'invalid_input' | 'internal'): HostCommandError {
   return new HostCommandError(ipcError(code, message, { reason, data } satisfies ArtifactRefusal));
