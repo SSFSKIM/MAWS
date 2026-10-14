@@ -38,7 +38,7 @@ afterEach(() => {
   rmSync(userData, { recursive: true, force: true });
 });
 
-const ctx = (over: Partial<McpToolContext> = {}): McpToolContext => ({ appSessionId: A, cwd: root, toolUseId: 'toolu_01' as ToolUseId, requestId: 'r1' as RequestId, signal: new AbortController().signal, ...over });
+const ctx = (over: Partial<McpToolContext> = {}): McpToolContext => ({ appSessionId: A, cwd: root, toolUseId: 'toolu_01' as ToolUseId, requestId: 'r1' as RequestId, signal: new AbortController().signal, fromSubagent: false, ...over });
 const deps = () => ({ deliverables: store, now: () => new Date(Date.UTC(2026, 9, 6, 0, 0, clock++)), newId: () => `00000000-0000-4000-8000-00000000000${++n}` });
 const textOf = (result: McpToolResult) => (result.content.find((block) => block.type === 'text') as { text: string }).text;
 const jsonOf = (result: McpToolResult) => JSON.parse(textOf(result)) as unknown;

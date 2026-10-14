@@ -17,7 +17,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-const ctx = (over: Partial<McpToolContext> = {}): McpToolContext => ({ appSessionId: 'app-1' as AppSessionId, cwd: root, toolUseId: 'toolu_01' as ToolUseId, requestId: 'r1' as RequestId, signal: new AbortController().signal, ...over });
+const ctx = (over: Partial<McpToolContext> = {}): McpToolContext => ({ appSessionId: 'app-1' as AppSessionId, cwd: root, toolUseId: 'toolu_01' as ToolUseId, requestId: 'r1' as RequestId, signal: new AbortController().signal, fromSubagent: false, ...over });
 const text = (result: McpToolResult) => (result.content[0] as { text: string }).text; // E2: content widened to image blocks
 let n = 0;
 const tool = (store: MemoryDeliverableStore) => sendFileTool({ deliverables: store, now: () => new Date('2026-10-05T12:00:00.000Z'), newId: () => `00000000-0000-4000-8000-00000000000${++n}` });

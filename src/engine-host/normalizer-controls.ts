@@ -49,7 +49,8 @@ export type OpenAsks = Set<string>;
 // outcome is read back from it so a journal rebuild reproduces the live event.
 export const CLEAR_AND_IMPLEMENT_MESSAGE = 'Plan approved; MAWS is clearing context and will restart with the plan.';
 
-export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFrame, out: EventSink, attribution: Attribution, openAsks: OpenAsks = new Set() /* E1 */): void {
+// P2-C3: `fromSubagent` names the `maws` calls a subagent made (Normalizer.fromSubagent); none by default.
+export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFrame, out: EventSink, attribution: Attribution, openAsks: OpenAsks = new Set() /* E1 */, fromSubagent: (toolUseId: ToolUseId | null) => boolean = () => false): void {
   const requestId = frame.request_id as RequestId;
   const request = frame.request;
   const remember = (entry: Omit<InboundEntry, 'parentToolUseId' | 'agentId' | 'mcp'> & { mcp?: McpCall }, agentId: AgentId | null = attribution.agentId) =>
@@ -144,10 +145,11 @@ export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFr
       const askId = ask?.ok ? (toolUseId ?? requestId) : null;
       remember({ kind: 'mcp', toolUseId, callbackId: null, mcp: { tool, askId, toolUseId, args, admitted } });
       if (ask?.ok && askId !== null) {
-        // M2: the ask opens at the call, as the host holds it (question ids filled)
+        // M2: the ask opens at the call, as the host holds it (question ids filled); P2-C3 (Decision Log 35): a subagent's
+        // ask waits for its answers whatever its `blocking` said, as the host's `askTool` holds it
         const { title, context, blocking, questions } = ask.data;
         openAsks.add(askId);
-        out.emit({ kind: 'maws.ask.opened', askId, toolUseId, requestId, blocking: blocking ?? true, title: title ?? null, context: context ?? null, questions: withQuestionIds(questions) }, attribution);
+        out.emit({ kind: 'maws.ask.opened', askId, toolUseId, requestId, blocking: (blocking ?? true) || fromSubagent(toolUseId), title: title ?? null, context: context ?? null, questions: withQuestionIds(questions) }, attribution);
       }
       return;
     }
