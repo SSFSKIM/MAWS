@@ -24,7 +24,7 @@
 // Reads go through P3-A's public store methods behind the commit barrier (the mirror never writes a row its batch may
 // yet take back); the only durable state is the manifest in the linked directory (ruling 18(a)).
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { mirrorSlug, mirrorWriterFor } from '@artifacts/library/mirror';
 import { applyV2, newDoc } from '@artifacts/yjs';
@@ -499,15 +499,18 @@ function occupied(path: string): boolean {
   }
 }
 
-// Two mirror paths that are one directory entry spelled two ways: equal but for case and Unicode normalization (as a
-// case-insensitive, normalization-insensitive volume such as APFS compares names) and reaching one file (one device and
-// inode). An owner's hard link under another name reaches the same file but is not an alias.
+// Two mirror paths that are one directory entry spelled two ways (a case-insensitive, normalization-insensitive volume
+// such as APFS): equal but for case and Unicode normalization (a cheap first test), one file that is not a link (one
+// device and inode, by lstat), and one canonical entry (`realpath`, which spells an alias as the entry's own name but
+// keeps a hard link's own). An owner's hard link under another name, by case only on a case-sensitive volume included,
+// is not an alias; anything that cannot be resolved is not either.
 function aliases(root: string, a: string, b: string): boolean {
   const folded = (name: string) => name.normalize('NFC').toLowerCase();
   if (folded(a) !== folded(b)) return false;
   try {
     const [first, second] = [lstatSync(join(root, a)), lstatSync(join(root, b))];
-    return first.dev === second.dev && first.ino === second.ino;
+    if (first.isSymbolicLink() || second.isSymbolicLink() || first.dev !== second.dev || first.ino !== second.ino) return false;
+    return realpathSync.native(join(root, a)) === realpathSync.native(join(root, b));
   } catch {
     return false;
   }
