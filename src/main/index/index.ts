@@ -30,7 +30,7 @@ export class Index {
   readonly browserActivity: BrowserActivityStore; // cua board #93: the agent's browser activity across restarts
   readonly browserBookmarks: BrowserBookmarksStore; // cua board #90: an imported Chrome profile's bookmarks
   readonly ownerChannel: OwnerChannelStore; // P2-C (2026-10-09): the to-human lane's sessions and marks (migration 8)
-  readonly library: LibraryStore; // P3-L: the library's rows, links, Spaces and search, derived from the engine host (migration 9)
+  readonly library: LibraryStore; // P3-L: the library's rows, links, Spaces and search, derived from the engine host (migration 10)
   private readonly db: Db;
   private stamped = 0;
 

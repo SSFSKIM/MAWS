@@ -8,7 +8,7 @@ import { useEffect, useState } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
-import { deliverableUrl } from '@shared/maws/deliverable';
+import { artifactUrl } from '@shared/artifacts/scheme';
 import { useSessions } from '../../stores/sessions';
 import { resetPanelStores } from '../../test-support/panel';
 import type { CardRect } from '../../tools/code/anchor/anchor';
@@ -19,7 +19,7 @@ import { CLAIM_DEADLINE_MS, openCard, useCommentCard } from './store';
 const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const CHILD = 'c5555555-5555-4555-8555-000000000001' as AppSessionId;
 const RECORD = '00000000-0000-4000-8000-000000000001';
-const ANCHOR: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: deliverableUrl(PARENT, RECORD, 1) };
+const ANCHOR: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: artifactUrl(RECORD, 1, 'index.html') };
 const HERO: CardRect = { x: 24, y: 0, width: 300, height: 90 }; // the card goes 4 px under it: top 94
 const MOVED: CardRect = { x: 40, y: 200, width: 300, height: 50 }; // top 254
 const HOST_BOX = { width: 600, height: 800 };
@@ -65,7 +65,7 @@ const frameOf = (key: string, locate?: CardFrame['locate']): CardFrame => ({ sca
 function Host({ frame }: { frame: CardFrame }) {
   return (
     <div className="relative">
-      <CommentCardHost hostId="h1" host="deliverable" mode="panel" layout="anchored" accepts={() => true} frame={frame} visible />
+      <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={frame} visible />
     </div>
   );
 }
@@ -73,7 +73,7 @@ function Host({ frame }: { frame: CardFrame }) {
 // the re-dock: a card with no host and no rect, for a panel viewer of its record to claim
 const redock = (phase: 'composing' | 'thread' = 'composing') =>
   act(() => openCard(ANCHOR, { appSessionId: PARENT, claimMode: 'panel', ...(phase === 'thread' && { phase: { kind: 'thread', child: CHILD, echo: null } }) }));
-const pick = (rect: CardRect = HERO) => act(() => openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'deliverable', hostId: 'h1', rect } }));
+const pick = (rect: CardRect = HERO) => act(() => openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'h1', rect } }));
 
 describe('re-pin', () => {
   it('a claimed card with no rect is pinned where locate finds its element, by the anchor’s locator', async () => {
@@ -166,7 +166,7 @@ describe('re-pin', () => {
   });
 });
 
-// "Show in deliverable" starts from a Side pane drawing the thread; the card closes while the Side pane draws its thread
+// "Show in artifact" starts from a Side pane drawing the thread; the card closes while the Side pane draws its thread
 // (one place draws a session with an input). The host claims a re-docked thread card only once the pane has stopped
 // drawing it, so the card's close rule never sees the pane it came from.
 describe('the re-dock and the card’s close rule', () => {
@@ -179,9 +179,9 @@ describe('the re-dock and the card’s close rule', () => {
     return null;
   }
   // the parent's panel: one tool's body mounted at a time
-  let show: (tool: 'side' | 'deliverables') => void = () => {};
+  let show: (tool: 'side' | 'artifacts') => void = () => {};
   function Panel() {
-    const [tool, setTool] = useState<'side' | 'deliverables'>('side');
+    const [tool, setTool] = useState<'side' | 'artifacts'>('side');
     useEffect(() => {
       show = setTool;
     }, []);
@@ -196,7 +196,7 @@ describe('the re-dock and the card’s close rule', () => {
     render(<Panel />);
     expect(useSidePane.getState().panes.get(PARENT)?.shownChild).toBe(CHILD);
     act(() => {
-      show('deliverables');
+      show('artifacts');
       redock('thread');
     });
     await settle();
@@ -267,7 +267,7 @@ describe('the docked strip', () => {
   function Column() {
     return (
       <div data-column="">
-        <CommentCardHost hostId="h1" host="deliverable" mode="panel" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
+        <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
       </div>
     );
   }

@@ -20,7 +20,6 @@ import { useLayout } from '../../stores/layout';
 import { toast } from '../../stores/notices';
 import { isOpen } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
-import { deliverables, lookupKey } from '../../tools/deliverables/store';
 import { TranscriptSlot, useTranscriptStore } from '../../transcript';
 import type { TranscriptActions } from '../../transcript/view/context';
 import { registeredActions } from '../../transcript/view/registry';
@@ -163,10 +162,11 @@ function Echo({ text }: { text: string }) {
   );
 }
 
-// The thread's artifact row opening the card's own record shows that version in the card's viewer (null for the latest,
-// so the viewer keeps following new ones); any other record goes the registered way (the panel's tool). P2-F L121: a
-// reply of this card's the engine took is marked "Sent to Claude" on its row. P2-F F-C1: a bubble's Edit edits the
-// thread's message (the registered default reads the main pane's active tab, which is never this thread).
+// The thread's artifact row opening the artifact whose page the card is on (P3-L M5b; E2's record before the cutover)
+// shows that version in the card's viewer (the latest followed when it is the last); any other artifact goes the
+// registered way (the panel's tool). P2-F L121: a reply of this card's the engine took is marked "Sent to Claude" on
+// its row. P2-F F-C1: a bubble's Edit edits the thread's message (the registered default reads the main pane's active
+// tab, which is never this thread).
 function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, delivered: ReadonlySet<MessageUuid>): Partial<TranscriptActions> {
   const showVersion = useRef(frame.showVersion);
   useLayoutEffect(() => {
@@ -175,15 +175,15 @@ function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, d
   const { target } = card;
   return useMemo(
     () => ({
-      openDeliverable(appSessionId, id, version) {
+      openArtifact(appSessionId, id, at) {
         const show = showVersion.current;
-        if (target?.kind !== 'deliverable' || show === undefined || appSessionId !== target.appSessionId || id !== target.deliverableId) {
-          registeredActions().openDeliverable(appSessionId, id, version);
+        // the row's id is the artifact's, and the version it asks for (by revision, else by number, else the latest) is
+        // shown in this card's viewer
+        if (target?.kind === 'artifact-page' && show !== undefined && id === target.artifactId) {
+          show(at ?? 'latest');
           return;
         }
-        const lookup = deliverables.getState().lookups.get(lookupKey(appSessionId, id));
-        const latest = lookup?.status === 'ready' ? (lookup.record?.versions.length ?? null) : null;
-        show(version === undefined || version === latest ? null : version);
+        registeredActions().openArtifact(appSessionId, id, at);
       },
       userRowMark: (row) => (row.messageUuid !== null && delivered.has(row.messageUuid) ? COPY.sentToClaude : null),
       editAndResubmit: (row) => editRowOf(child, row, 'edit'),

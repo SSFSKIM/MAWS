@@ -40,6 +40,7 @@ import { mapInboundCancel, mapInboundRequest, mapMawsAskMeta, mapOutboundRespons
 import { mapSystemFrame, pluginLoadIssues, type TaskRegistry } from './normalizer-system';
 import type { SafeguardVerdict } from '@shared/graph/enums';
 import { messageText, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
+import { MAWS_SERVER_NAME } from '@shared/maws/tools'; // P2-C3
 
 export interface NormalizerWarning {
   event: 'block_pairing' | 'unknown_denial_kind' | 'unmatched_response' | 'unknown_permission_mode';
@@ -74,6 +75,11 @@ export interface NormalizerState {
   workflowNames: Map<string, string>;
   trustNotice: { held: string | null; settled: boolean }; // C10: the engine's stderr trust line, held until the launch's initialize response settles it (or the exit does)
   openAsks: Set<string>; // E1: the asks opened (`maws.ask.opened`) and not yet answered or cancelled
+  // P2-C3 (the P2 spec's Decision Log 35): the tool uses of the `maws` server's tools a subagent made, from the assistant
+  // frames whose `parent_tool_use_id` is set; the engine writes that frame before the call reaches the server
+  // (pass3/p2-c3-subagent-ask), so the server's call names one of them by its `claudecode/toolUseId`. Never pruned: a
+  // handful per launch.
+  subagentMawsUses: Set<ToolUseId>;
 }
 
 // C10 start: the engine's trust line on stderr (fixture pass2/trust-no-attestation seq 5). It is printed at settings
@@ -112,6 +118,7 @@ export class Normalizer {
       workflowNames: new Map(),
       trustNotice: { held: null, settled: false }, // C10
       openAsks: new Set(), // E1
+      subagentMawsUses: new Set(), // P2-C3
     };
   }
 
@@ -143,6 +150,11 @@ export class Normalizer {
     }
     return out.events;
   }
+
+  // P2-C3: whether a `maws` tool call (named by its `claudecode/toolUseId`) is a subagent's, read by the host's tool
+  // server for the call it is about to serve and by the ask's `maws.ask.opened` here, so both decide alike live and on
+  // a rebuild.
+  readonly fromSubagent = (toolUseId: ToolUseId | null): boolean => toolUseId !== null && this.state.subagentMawsUses.has(toolUseId);
 
   private get tasks(): TaskRegistry {
     return { taskTypes: this.state.taskTypes, workflowNames: this.state.workflowNames, toolUseToAgent: this.state.toolUseToAgent };
@@ -200,7 +212,7 @@ export class Normalizer {
         return;
       }
       case 'control_request':
-        mapInboundRequest(this.state.inbound, frame as ControlRequestFrame, out, attribution, this.state.openAsks);
+        mapInboundRequest(this.state.inbound, frame as ControlRequestFrame, out, attribution, this.state.openAsks, this.fromSubagent);
         return;
       case 'control_response':
         this.inboundResponse(frame as ControlResponseFrame, out, attribution);
@@ -319,6 +331,7 @@ export class Normalizer {
       out.emit({ kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex, block, model: frame.message.model, supersedes, aborted: (frame as { aborted?: unknown }).aborted === true, userMessageUuids, ...(frame.isApiErrorMessage === true && { isApiErrorMessage: true }), ...(typeof frame.error === 'string' && { error: frame.error }) }, attribution);
       if (block.type === 'tool_use') {
         out.emit({ kind: 'tool.use', toolUseId: String(block.id) as ToolUseId, toolName: String(block.name), input: block.input, apiMessageId, messageUuid }, attribution);
+        if (attribution.parentToolUseId !== null && String(block.name).startsWith(MAWS_TOOL_PREFIX)) this.state.subagentMawsUses.add(String(block.id) as ToolUseId); // P2-C3
       }
     }
   }
@@ -430,7 +443,7 @@ export class Normalizer {
       if (!Array.isArray(list)) continue;
       for (const raw of list) {
         const pending = ControlRequestFrameSchema.safeParse(raw);
-        if (pending.success && !this.state.inbound.has(pending.data.request_id as RequestId)) mapInboundRequest(this.state.inbound, pending.data, out, attribution, this.state.openAsks);
+        if (pending.success && !this.state.inbound.has(pending.data.request_id as RequestId)) mapInboundRequest(this.state.inbound, pending.data, out, attribution, this.state.openAsks, this.fromSubagent);
       }
     }
     const requestId = frame.response.request_id as RequestId;
@@ -621,6 +634,8 @@ class Emitter implements EventSink {
     } as SessionEvent);
   }
 }
+
+const MAWS_TOOL_PREFIX = `mcp__${MAWS_SERVER_NAME}__`; // P2-C3: the engine's name for a `maws` tool, as tool uses carry it
 
 function laneOf(frame: StdoutFrame): ParentToolUseId | null {
   const parent = (frame as { parent_tool_use_id?: unknown }).parent_tool_use_id;

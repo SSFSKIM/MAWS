@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import { ArtifactPublishResultSchema, artifactRefusalOf, TOOL_ERRORS } from '@shared/maws/tools';
+import { Maintenance } from '../documents/maintenance';
 import { ArtifactSession } from './artifact-context';
 import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactReadTool } from './artifact-tools';
@@ -22,17 +23,19 @@ const publish = (args: Record<string, unknown>, over: Ctx = {}, deps: Parameters
 const liveFiles = (id: string): Record<string, string> => Object.fromEntries([...w.store.service.live(id).get('files').attrEntries()].map(([k, v]) => [String(k), v as string]));
 const human = (id: string, edit: (files: ReturnType<ReturnType<World['service']['live']>['get']>) => void) => w.service.writeAs(id, HUMAN, (doc) => edit(doc.get('files')));
 const page = (id: string) => Buffer.from(w.store.files.read(id, w.store.contentRef(id).ref)).toString('utf8');
+// Each version's page, in the order of their revisions (the place `version` names; P3-L's cutover, no X12 record)
+const pages = (id: string) => w.store.listVersions(id).map((v) => readFileSync(w.store.contentRef(id, v.seq).path, 'utf8'));
 
 describe('artifact_publish of an html page', () => {
-  it('writes the page as a new version from the revision its create returned, and the creator’s X12 record gains it', async () => {
+  it('writes the page as a new version from the revision its create returned, answering its place among the versions', async () => {
     const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'Dashboard' }, { toolUseId: 'toolu_create' as ToolUseId });
     const answer = ArtifactPublishResultSchema.parse(jsonOf(await publish({ artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>v2</p>' } }, { toolUseId: 'toolu_pub' as ToolUseId })));
     expect(answer).toMatchObject({ status: 'published', artifactId: created.artifactId, kind: 'html', changed: ['index.html'], kept: [], removed: [], id: 'dash', deliverableId: created.artifactId, version: 2 });
     expect(answer.revision).toBeGreaterThan(created.revision);
     expect(answer.ownerAppSessionId).toBeUndefined();
     expect(page(created.artifactId)).toBe('<p>v2</p>');
-    const record = (await w.deliverables.get(SELF, created.artifactId))!;
-    expect(record.versions.map((v) => [readFileSync(v.path, 'utf8'), v.toolUseId])).toEqual([['<p>v1</p>', 'toolu_create'], ['<p>v2</p>', 'toolu_pub']]);
+    expect(pages(created.artifactId)).toEqual(['<p>v1</p>', '<p>v2</p>']);
+    expect(w.store.listVersions(created.artifactId)[1]!.seq).toBe(answer.revision);
     expect(w.store.links(created.artifactId).map((l) => l.role).sort()).toEqual(['created', 'edited']);
     // its own publish is its new base: the next one goes on from it
     expect(jsonOf(await publish({ artifact: 'dash', baseRevision: answer.revision, files: { 'index.html': '<p>v3</p>' } }))).toMatchObject({ version: 3 });
@@ -54,7 +57,7 @@ describe('artifact_publish of an html page', () => {
     expect(artifactRefusalOf(textOf(refused))).toMatchObject({ reason: 'conflict', paths: ['index.html'] });
     expect(page(created.artifactId)).toBe('<p>user</p>');
     const forced = jsonOf<{ revision: number }>(await publish({ artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>mine</p>' }, force: true }));
-    expect(forced).toMatchObject({ changed: ['index.html'], version: 2 });
+    expect(forced).toMatchObject({ changed: ['index.html'], version: 3 }); // the user's write is the page's second version (P3-L M6b: the place among the artifact's versions)
     expect(page(created.artifactId)).toBe('<p>mine</p>');
     const versions = w.store.listVersions(created.artifactId).length;
     const same = jsonOf(await publish({ artifact: 'dash', baseRevision: forced.revision, files: { 'index.html': '<p>mine</p>' } }));
@@ -80,10 +83,27 @@ describe('artifact_publish of an html page', () => {
     const again = jsonOf(await publish(args, { toolUseId: 'toolu_once' as ToolUseId }));
     expect(again).toEqual(first);
     expect(w.store.listVersions(created.artifactId)).toHaveLength(2);
-    expect((await w.deliverables.get(SELF, created.artifactId))!.versions).toHaveLength(2);
   });
 
-  it('two overlapping calls with one tool-use id publish once, mirror one X12 version and answer alike', async () => {
+  // P3-L M6b fix wave 2: E2's `version` is an ordinal the history around it can move (thinning drops `auto` versions;
+  // a repeated call places its answer again), so the answer's `revision` is what names the version: after the nightly
+  // thinning a replay of the third publish answers another place, the same revision, and that revision is still its page
+  it('a repeated call after thinning answers the same revision under a new place, and the revision still names its page', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' }, { toolUseId: 'toolu_c' as ToolUseId });
+    const second = jsonOf<{ revision: number }>(await publish({ artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>v2</p>' } }, { toolUseId: 'toolu_p2' as ToolUseId }));
+    const args = { artifact: 'dash', baseRevision: second.revision, files: { 'index.html': '<p>v3</p>' } };
+    const third = jsonOf<{ revision: number; version: number }>(await publish(args, { toolUseId: 'toolu_p3' as ToolUseId }));
+    const fourth = jsonOf<{ revision: number }>(await publish({ artifact: 'dash', baseRevision: third.revision, files: { 'index.html': '<p>v4</p>' } }, { toolUseId: 'toolu_p4' as ToolUseId }));
+    expect(third.version).toBe(3);
+    const report = await new Maintenance(w.store, { now: () => Date.now() + 40 * 24 * 3_600_000, log: () => {} }).run();
+    expect(report.versionsThinned).toBe(1); // the second publish's auto version: its week bucket keeps the third's
+    expect(w.store.listVersions(created.artifactId).map((v) => v.seq)).toEqual([created.revision, third.revision, fourth.revision]);
+    const again = jsonOf<{ revision: number; version: number }>(await publish(args, { toolUseId: 'toolu_p3' as ToolUseId }));
+    expect(again).toMatchObject({ revision: third.revision, version: 2 }); // the ordinal moved, the revision did not
+    expect(readFileSync(w.store.contentRef(created.artifactId, third.revision).path, 'utf8')).toBe('<p>v3</p>');
+  });
+
+  it('two overlapping calls with one tool-use id publish once and answer alike', async () => {
     const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' }, { toolUseId: 'toolu_c' as ToolUseId });
     const args = { artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>v2</p>' } };
     const tool = artifactPublishTool(w.deps());
@@ -91,11 +111,10 @@ describe('artifact_publish of an html page', () => {
     const [first, second] = await Promise.all([tool.call(args, ctx), tool.call(args, { ...ctx, requestId: w.ctx().requestId })]);
     expect(jsonOf(first)).toMatchObject({ version: 2, deliverableId: created.artifactId });
     expect(second).toEqual(first);
-    expect((await w.deliverables.get(SELF, created.artifactId))!.versions.map((v) => v.toolUseId)).toEqual(['toolu_c', 'toolu_twice']);
     expect(w.store.listVersions(created.artifactId)).toHaveLength(2);
   });
 
-  it('mirrors a side thread’s publish as a version of its own when its raw tool-use id equals one its parent already used', async () => {
+  it('places a side thread’s publish as a version of its own when its raw tool-use id equals one its parent already used', async () => {
     const created = await create({ handle: 'dash', content: '<p>one</p>', title: 'D' });
     const first = jsonOf(await publish({ artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>two</p>' } }, { toolUseId: 'toolu_reused' as ToolUseId }));
     expect(first).toMatchObject({ version: 2 });
@@ -104,13 +123,12 @@ describe('artifact_publish of an html page', () => {
     const base = await read('dash', { appSessionId: CHILD }, thread);
     const second = jsonOf(await publish({ artifact: 'dash', baseRevision: base.revision, files: { 'index.html': '<p>three</p>' } }, { appSessionId: CHILD, toolUseId: 'toolu_reused' as ToolUseId }, thread));
     expect(second).toMatchObject({ version: 3, ownerAppSessionId: SELF });
-    const record = (await w.deliverables.get(SELF, created.artifactId))!;
-    expect(record.versions.map((v) => readFileSync(v.path, 'utf8'))).toEqual(['<p>one</p>', '<p>two</p>', '<p>three</p>']);
-    expect(record.versions.map((v) => [v.toolUseId, v.appSessionId ?? null])).toEqual([[expect.any(String), null], ['toolu_reused', null], ['toolu_reused', CHILD]]); // the parent's own versions name no session
-    expect(readFileSync(record.path, 'utf8')).toBe('<p>three</p>');
+    expect(pages(created.artifactId)).toEqual(['<p>one</p>', '<p>two</p>', '<p>three</p>']);
+    expect(w.store.listVersions(created.artifactId).map((v) => v.actor)).toEqual([{ kind: 'session', appSessionId: SELF }, { kind: 'session', appSessionId: SELF }, { kind: 'session', appSessionId: CHILD }]);
+    expect(page(created.artifactId)).toBe('<p>three</p>');
   });
 
-  it('a side thread publishes its parent’s page after reading it: the parent’s record gains the version, nothing under the thread', async () => {
+  it('a side thread publishes its parent’s page after reading it: the page gains the version, named as the parent’s, and no X12 record is written', async () => {
     const PARENT = 'app-parent' as AppSessionId;
     const THREAD = 'app-thread' as AppSessionId;
     const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' }, { appSessionId: PARENT });
@@ -118,8 +136,8 @@ describe('artifact_publish of an html page', () => {
     const base = await read('dash', { appSessionId: THREAD }, { artifactScope: [PARENT], session: thread });
     const answer = jsonOf(await publish({ artifact: 'dash', baseRevision: base.revision, files: { 'index.html': '<p>v2</p>' } }, { appSessionId: THREAD }, { artifactScope: [PARENT], session: thread }));
     expect(answer).toMatchObject({ id: 'dash', deliverableId: created.artifactId, version: 2, ownerAppSessionId: PARENT });
-    expect((await w.deliverables.get(PARENT, created.artifactId))!.versions).toHaveLength(2);
-    expect(existsSync(join(w.userData, 'deliverables', THREAD))).toBe(false);
+    expect(pages(created.artifactId)).toEqual(['<p>v1</p>', '<p>v2</p>']);
+    expect(existsSync(join(w.userData, 'deliverables'))).toBe(false);
   });
 });
 
@@ -238,5 +256,68 @@ describe('artifact_publish of a file kind (the generic file model)', () => {
     await w.store.endTurn(SELF);
     expect(w.store.listVersions(created.artifactId).filter((v) => v.kind === 'turn')).toEqual([expect.objectContaining({ actor: { kind: 'session', appSessionId: SELF } })]);
     expect(replica.provider.awareness.getLocalState()).toBeNull();
+  });
+});
+
+describe('artifact_publish as a suggestion (M8; parent Decision Log 27)', () => {
+  const design = () => create({ kind: 'design', title: 'Site', files: { 'a.html': 'A', 'b.css': 'B' } });
+  const suggested = (id: string): Record<string, string> => Object.fromEntries([...w.service.live(w.service.suggestionDoc(id)).get('files').attrEntries()].map(([k, v]) => [String(k), v as string]));
+  const rowsOf = (key: string) => (w.storage.db.prepare('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq').all(key) as { actor: string }[]).map((r) => r.actor);
+
+  it('mode "suggest" writes the files into the artifact’s suggestion doc as the session, leaving the artifact as it was', async () => {
+    const created = await design();
+    await w.store.endTurn(SELF);
+    const versions = w.store.listVersions(created.artifactId).length;
+    const answer = ArtifactPublishResultSchema.parse(jsonOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, mode: 'suggest', files: { 'a.html': 'A2', 'b.css': null, 'c.js': 'C' } })));
+    expect(answer).toMatchObject({ status: 'suggested', artifactId: created.artifactId, kind: 'design', revision: created.revision, changed: ['a.html', 'c.js'], removed: ['b.css'], kept: [] });
+    expect(liveFiles(created.artifactId)).toEqual({ 'a.html': 'A', 'b.css': 'B' });
+    expect(suggested(created.artifactId)).toEqual({ 'a.html': 'A2', 'c.js': 'C' });
+    expect(rowsOf(created.artifactId)).toEqual([`session:${SELF}`]);
+    expect(rowsOf(`${created.artifactId}:suggest`)).toEqual([`session:${SELF}`]);
+    await w.store.endTurn(SELF);
+    expect(w.store.listVersions(created.artifactId)).toHaveLength(versions); // the artifact did not change: no turn version
+  });
+
+  it('the owner’s setting makes every publish a suggestion, mode "direct" included', async () => {
+    const created = await design();
+    await w.store.update(created.artifactId, { agentEditsAsSuggestions: true });
+    const plain = jsonOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { 'a.html': 'A2' } }));
+    expect(plain).toMatchObject({ status: 'suggested', changed: ['a.html'] });
+    const direct = jsonOf<{ revision: number }>(await publish({ artifact: created.artifactId, baseRevision: created.revision, mode: 'direct', files: { 'b.css': 'B2' } }));
+    expect(direct).toMatchObject({ status: 'suggested', changed: ['b.css'] });
+    expect(liveFiles(created.artifactId)).toEqual({ 'a.html': 'A', 'b.css': 'B' });
+    expect(suggested(created.artifactId)).toEqual({ 'a.html': 'A2', 'b.css': 'B2' });
+  });
+
+  it('a session’s next suggestion builds on its last; a file the user changed since the read still refuses it', async () => {
+    const created = await design();
+    const first = jsonOf<{ revision: number }>(await publish({ artifact: created.artifactId, baseRevision: created.revision, mode: 'suggest', files: { 'a.html': 'A2' } }));
+    const second = jsonOf(await publish({ artifact: created.artifactId, baseRevision: first.revision, mode: 'suggest', files: { 'a.html': 'A3' } }));
+    expect(second).toMatchObject({ status: 'suggested', changed: ['a.html'] });
+    await human(created.artifactId, (f) => f.setAttr('b.css', 'B by the user'));
+    const refused = await publish({ artifact: created.artifactId, baseRevision: first.revision, mode: 'suggest', files: { 'b.css': 'B2' } });
+    expect(artifactRefusalOf(textOf(refused))).toMatchObject({ reason: 'conflict', paths: ['b.css'] });
+    expect(suggested(created.artifactId)).toEqual({ 'a.html': 'A3', 'b.css': 'B by the user' });
+  });
+
+  it('answers a repeated tool-use id with its first answer, writing nothing again', async () => {
+    const created = await design();
+    const args = { artifact: created.artifactId, baseRevision: created.revision, mode: 'suggest', files: { 'a.html': 'A2' } };
+    const first = jsonOf(await publish(args, { toolUseId: 'toolu_suggest' as ToolUseId }));
+    expect(jsonOf(await publish(args, { toolUseId: 'toolu_suggest' as ToolUseId }))).toEqual(first);
+    expect(rowsOf(`${created.artifactId}:suggest`)).toHaveLength(1);
+  });
+
+  it('refuses a suggestion to an html page, asked for or set by the owner, writing nothing', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' });
+    const asked = await publish({ artifact: 'dash', baseRevision: created.revision, mode: 'suggest', files: { 'index.html': '<p>v2</p>' } });
+    expect(artifactRefusalOf(textOf(asked))).toEqual({ reason: 'invalid', kind: 'html', mode: 'suggest', setting: false });
+    await w.store.update(created.artifactId, { agentEditsAsSuggestions: true });
+    const set = await publish({ artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>v2</p>' } });
+    expect(artifactRefusalOf(textOf(set))).toEqual({ reason: 'invalid', kind: 'html', mode: 'suggest', setting: true });
+    // `setting` reports the artifact's setting, not the call's mode (M8 review finding 3)
+    const both = await publish({ artifact: 'dash', baseRevision: created.revision, mode: 'suggest', files: { 'index.html': '<p>v2</p>' } });
+    expect(artifactRefusalOf(textOf(both))).toEqual({ reason: 'invalid', kind: 'html', mode: 'suggest', setting: true });
+    expect(page(created.artifactId)).toBe('<p>v1</p>');
   });
 });

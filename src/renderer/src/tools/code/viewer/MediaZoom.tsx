@@ -1,5 +1,5 @@
 // P2-F W-V (L95, §2 item 6): the sizing of an image or a video in its viewer, shared by the file viewer's image (the
-// Files route and a delivered image) and the deliverables viewer's video. The view owns a `useMediaZoom` and draws its
+// Files route and a delivered image) and the artifact viewer's video. The view owns a `useMediaZoom` and draws its
 // media inside `ZoomStage`, which measures the pane (a ResizeObserver on the stage's content box) and lays the media out
 // at `drawn`; `ZoomControls` are the view's bar controls: zoom out, the scale, zoom in, actual size and fit. Fit, the
 // default, follows the pane as it resizes; a zoom keeps the point at the pane's centre where it was.

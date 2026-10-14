@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -71,16 +71,60 @@ describe('layout value shapes', () => {
     expect(tabId({ kind: 'file', path: '/x/y.ts', line: 3, appSessionId: null })).toBe('file:/x/y.ts');
     expect(tabId({ kind: 'diff', appSessionId: 'a1' as never, ref: 'HEAD' })).toBe('diff:a1:HEAD');
     expect(tabId({ kind: 'diagnostics' })).toBe('diagnostics');
-    // E2 (X14): one tab per record, whatever version it was opened at
-    expect(tabId({ kind: 'deliverable', appSessionId: 'App-1' as never, deliverableId: '0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11' })).toBe('deliverable:App-1:0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11');
+    expect(tabId({ kind: 'artifact', artifactId: '0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11' })).toBe('artifact:0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11'); // P3-L
   });
 
-  // E2 (X14): the deliverable tab, appended to the union; its session is required (it restores to the record by id)
-  it('admits a deliverable tab with its session and record', () => {
-    const tab = { id: 'deliverable:a1:d1', kind: 'deliverable', appSessionId: 'a1', deliverableId: 'd1', pinned: false };
-    expect(TabRefSchema.parse(tab)).toEqual(tab);
-    expect(TabRefSchema.safeParse({ ...tab, appSessionId: null }).success).toBe(false);
-    expect(TabRefSchema.safeParse({ ...tab, version: 2 }).success).toBe(false);
+  // P3-L (M6b; Decision Log 10, 18d): the `deliverable` kind is gone from the union; `main.tabs` stays at version 2 and
+  // its reader turns a stored deliverable tab into the artifact tab of the same id (the record's id is the artifact's),
+  // so the owner's open tabs survive the upgrade
+  describe('a stored main.tabs holding a deliverable tab (before P3-L’s cutover)', () => {
+    const ID = '0b6c2f2e-6b1a-4d55-9a57-3f1f6f0c2a11';
+    const session = (n: number) => ({ id: `session:a${n}`, kind: 'session', appSessionId: `a${n}`, pinned: false });
+    const deliverable = (id = ID, pinned = false) => ({ id: `deliverable:App-1:${id}`, kind: 'deliverable', appSessionId: 'App-1', deliverableId: id, pinned });
+    const artifact = (id = ID, pinned = false) => ({ id: `artifact:${id}`, kind: 'artifact', artifactId: id, pinned });
+    const v2 = (panes: unknown[], closedTabs: unknown[] = []) => ({ version: 2, current: 'proj-x', sets: { 'proj-x': { panes, focusedPane: 0, splitRatio: 0.4 }, none: LAYOUT_DEFAULTS.main.sets.none }, closedTabs });
+
+    it('is no tab kind of this build', () => {
+      expect(TabRefSchema.safeParse(deliverable()).success).toBe(false);
+      expect(TabRefSchema.options.map((option) => option.shape.kind.value)).not.toContain('deliverable');
+    });
+
+    it('reads as the artifact tab of the same id, pinned as it was, active where it was, in the panes and the history alike', () => {
+      const other = '1c7d3f3f-7c2b-4e66-8b68-4f2f7f1d3b22';
+      const main = v2([{ tabs: [session(1), deliverable(ID, true)], activeTabId: `deliverable:App-1:${ID}` }, { tabs: [deliverable(other)], activeTabId: `deliverable:App-1:${other}` }], [deliverable(other), session(2)]);
+      expect(StoredMainSchema.parse(main)).toEqual(
+        v2([{ tabs: [session(1), artifact(ID, true)], activeTabId: `artifact:${ID}` }, { tabs: [artifact(other)], activeTabId: `artifact:${other}` }], [artifact(other), session(2)]),
+      );
+    });
+
+    it('keeps one tab when the artifact is open as both, the artifact tab kept, the pane’s active tab following it', () => {
+      const main = v2([{ tabs: [artifact(), session(1), deliverable()], activeTabId: `deliverable:App-1:${ID}` }]);
+      expect(StoredMainSchema.parse(main)).toEqual(v2([{ tabs: [artifact(), session(1)], activeTabId: `artifact:${ID}` }]));
+      const across = v2([{ tabs: [deliverable()], activeTabId: `deliverable:App-1:${ID}` }, { tabs: [artifact(), session(1)], activeTabId: 'session:a1' }]);
+      const read = StoredMainSchema.parse(across) as { sets: Record<string, { panes: { tabs: { id: string }[] }[] }> };
+      expect(read.sets['proj-x']!.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id))).toEqual([`artifact:${ID}`, 'session:a1']);
+    });
+  });
+
+  // P3-L (whole-branch review): E2's `deliverables` panel tool is the `artifacts` tool from the cutover; a stored panel
+  // tab of it reads as an Artifacts tab, its instance id, place, pin and selection kept
+  describe('a stored panel tab of the Deliverables tool (before P3-L’s cutover)', () => {
+    const ref = (id: string, toolId: string, pinned = false) => ({ id, toolId, pinned });
+
+    it('reads as an Artifacts tab in the pins and in a session’s tabs, its id, place, pin and selection kept', () => {
+      expect(PanelPinnedSchema.parse([ref('t1', 'terminal', true), ref('d1', 'deliverables', true)])).toEqual([ref('t1', 'terminal', true), ref('d1', 'artifacts', true)]);
+      expect(PanelSessionStateSchema.parse({ tabs: [ref('d1', 'deliverables'), ref('t1', 'terminal')], activeTabId: 'd1' })).toEqual({ tabs: [ref('d1', 'artifacts'), ref('t1', 'terminal')], activeTabId: 'd1' });
+    });
+
+    it('keeps one Artifacts tab when a list holds both, the selection following the one kept', () => {
+      expect(PanelPinnedSchema.parse([ref('a1', 'artifacts', true), ref('d1', 'deliverables', true)])).toEqual([ref('a1', 'artifacts', true)]);
+      expect(PanelSessionStateSchema.parse({ tabs: [ref('t1', 'terminal'), ref('d1', 'deliverables'), ref('a1', 'artifacts')], activeTabId: 'd1' })).toEqual({ tabs: [ref('t1', 'terminal'), ref('a1', 'artifacts')], activeTabId: 'a1' });
+    });
+
+    it('still rejects what the panel shapes reject', () => {
+      expect(PanelPinnedSchema.safeParse([{ id: 'd1', toolId: 'deliverables' }]).success).toBe(false);
+      expect(PanelSessionStateSchema.safeParse({ tabs: [ref('d1', 'deliverables')] }).success).toBe(false);
+    });
   });
 
   // E4a (X14): a browser tab as a main tab, appended after E2's; one per browser tab, keyed by its session and tab id

@@ -86,6 +86,10 @@ const DELIVERED_TOO: Purpose = { admitDelivered: true };
 export interface FilesService {
   list(input: { appSessionId: AppSessionId; path?: string }): Promise<FilesListOutput>;
   read(input: FilesReadInput): Promise<FilesReadOutput>;
+  // P3-L (M6b fix wave 2): a file at a path main itself resolved (a File artifact's stored file, `library.read`), read as
+  // `read` reads one: the path's realpath opened with no symlink anywhere on it, a regular file, the same answer. No
+  // session and no roots: the caller's resolution is the admission, and a window never names the path.
+  readResolved(input: Omit<FilesReadInput, 'appSessionId'>): Promise<FilesReadOutput>;
   write(input: FilesWriteInput): Promise<FilesWriteOutput>; // E5
   watch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: number): Promise<void>;
@@ -236,6 +240,37 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
 
   async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false }: FilesReadInput): Promise<FilesReadOutput> {
     const { handle, stat, real } = await openConfirmed(appSessionId, path, 'file', DELIVERED_TOO); // E2: a delivered file is read
+    return readOpened(handle, stat, real, offset, length, hash);
+  }
+
+  // P3-L (M6b fix wave 2): see `FilesService.readResolved`.
+  async function readResolved({ path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false }: Omit<FilesReadInput, 'appSessionId'>): Promise<FilesReadOutput> {
+    if (!isAbsolute(path)) throw new Error('path must be absolute');
+    let real: string;
+    try {
+      real = await fs.promises.realpath(path);
+    } catch (error) {
+      throw errno(error) === 'ENOENT' ? new Error(`not found: ${path}`, { cause: error }) : new Refusal();
+    }
+    let handle: FileHandle;
+    try {
+      handle = await fs.promises.open(real, OPEN_FLAGS);
+    } catch (error) {
+      throw errno(error) === 'ENOENT' ? new Error(`not found: ${path}`, { cause: error }) : new Refusal();
+    }
+    let stat: BigIntStats;
+    try {
+      stat = await handle.stat({ bigint: true });
+      if (!stat.isFile()) throw new Error(`not a regular file: ${path}`);
+    } catch (error) {
+      await handle.close();
+      throw error;
+    }
+    return readOpened(handle, stat, real, offset, length, hash);
+  }
+
+  // The read itself, over a confirmed descriptor it closes.
+  async function readOpened(handle: FileHandle, stat: BigIntStats, real: string, offset: number, length: number, hash: boolean): Promise<FilesReadOutput> {
     try {
       // A hashed read is one read of the descriptor: the whole file into one buffer, hashed, and every byte answered
       // (the chunk, the sniffed head, the settle step's extra bytes, `bytes` itself) taken from that buffer, so the chunk
@@ -384,6 +419,7 @@ export function createFilesService({ records, hooks, emit = () => {}, openPath, 
   return {
     list,
     read,
+    readResolved, // P3-L (M6b fix wave 2)
     write,
     watch,
     // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found;

@@ -12,7 +12,7 @@
 // update) and when its box resizes (a reflow moves an element fixed to the frame's viewport); a rect re-pins the card,
 // null keeps it where it is (the top-right corner for a re-docked card, which has no rect). Only the latest ask's answer
 // counts. A re-docked thread card is claimed only once the Side pane has stopped drawing its thread: "Show in
-// deliverable" starts from that pane, and the card's own close rule (one place draws a session with an input) would
+// artifact" starts from that pane, and the card's own close rule (one place draws a session with an input) would
 // otherwise shut it the moment it showed beside a pane still drawing the thread.
 //
 // P2-E2 (the docked layout): a host beside a native view (the browser pane's page) cannot overlay it, since the view lies
@@ -23,6 +23,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
+import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { CommentCard } from './CommentCard';
 import { caretOf, pinOf, placeCard, stripCard, stripMax } from './placement';
 import { claimCard, closeCard, useCommentCard, type CardHostKind, type CardHostMode, type OpenCard } from './store';
@@ -32,7 +33,7 @@ export interface CardFrame {
   offset: { x: number; y: number };
   key: string; // changes when the frame is replaced (the viewer's `frame` string)
   locate?(selector: string): Promise<CardRect | null>; // the HTML frame's handle: one function per mounted frame
-  showVersion?(version: number | null): void; // the host viewer's onVersion; null: the latest
+  showVersion?(at: ArtifactOpenAt): void; // the host viewer's: a version asked for from a card thread's row (P3-L M6b fix wave 2)
   // P3-B start (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): a document's own card controls, drawn in the
   // card's header before Close (its Resolve or Reopen), and a send of the card's composer as it sets out; the call it
   // returns is told whether the send went, before the card turns into its thread or closes, and also after the card went

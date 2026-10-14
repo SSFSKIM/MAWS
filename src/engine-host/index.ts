@@ -72,7 +72,8 @@ const register: HostRegister = (on, emit, client) => {
   if (documents && documentPerfSeamRequested(process.env)) startDocumentPerfSeam(documents.store, join(userData, 'document-perf')); // P3-B M9: the scale gate's seam, MAWS_E2E=1 and MAWS_DOCUMENT_PERF=1 only
   const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env });
   const store = documents?.store ?? null; // M6: the artifact tools' store (a session's tools answer `unavailable` without one)
-  const library = registerLibrary(on, { documents }); // P3-L: main's library reads and the linked-directory mirror
+  // P3-L: main's library reads, the linked-directory mirror and (M6b) the X12 import at store open
+  const library = registerLibrary(on, { documents, deliverablesDir: join(userData, 'deliverables'), e2e: process.env.MAWS_E2E === '1' });
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {

@@ -366,3 +366,16 @@ test('pass3 e7-team: under the teams gate a named background agent keeps its nam
  assert.equal(Object.values(disk.sidecarMeta)[0].name,'scout');
 });
 // E7 end
+// P2-C3 (2026-10-14; docs/doperpowers/plans/2026-10-08-p2-daily-driver.md, Decision Log 35): a subagent's
+// mcp__maws__ask tool_use arrives in an assistant frame whose parent_tool_use_id is set, on the same stdout and before
+// the tools/call that names it by _meta["claudecode/toolUseId"], with no permission round trip between them (the tool
+// allowed by rule); twice, each agent backgrounded as 2.1.299 backgrounds every Agent call under MAWS's launch line.
+test('pass3 p2-c3-subagent-ask: each subagent ask is framed with its parent before the server gets its call',()=>{
+ const rows=load3('p2-c3-subagent-ask');
+ const uses=new Map(rows.filter(r=>r.direction==='in'&&r.frame.type==='assistant').flatMap(r=>r.frame.message.content.filter(b=>b.type==='tool_use').map(b=>[b.id,{seq:r.seq,name:b.name,parent:r.frame.parent_tool_use_id}])));
+ const calls=rows.filter(r=>r.direction==='in'&&r.frame.type==='control_request'&&r.frame.request.message?.method==='tools/call');
+ assert.equal(calls.length,2);
+ for(const call of calls){const use=uses.get(call.frame.request.message.params._meta['claudecode/toolUseId']);
+  assert.ok(use);assert.equal(use.name,'mcp__maws__ask');assert.match(use.parent,/^toolu_/);assert.ok(use.seq<call.seq);}
+ assert.ok(!rows.some(r=>r.frame.type==='control_request'&&r.frame.request.subtype==='can_use_tool'));
+});

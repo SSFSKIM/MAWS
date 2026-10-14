@@ -46,11 +46,10 @@ describe('useCommand is for reads only', () => {
     const w3 = ['settings.userEngineDefaults']; // W3: an unstarted tab's model chip, the model selector
     const e9 = ['voice.status']; // E9: Settings › Voice (a non-prompting probe)
     const e6 = ['scm.status', 'scm.pr.state']; // E6: the Source control tool's and the push-state row's reads
-    const e2 = ['deliverables.list', 'deliverables.listAll', 'deliverables.get']; // E2: the deliverable store's reads
     const e4a = ['browser.tabs.list', 'browser.history.suggest', 'browser.profiles.list']; // E4a: the browser's tab list, suggestions, profiles
     const e4b = ['browser.import.profiles', 'browser.import.list']; // E4b: the import sheet's picker, the imported records
     const cua90 = ['browser.bookmarks.tree', 'browser.bookmarks.favicons', 'browser.extensions.actions']; // cua #90: the bookmarks bar's tree and icons, the action bar's list
-    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11, ...w3, ...e9, ...e6, ...e2, ...e4a, ...e4b, ...cua90].sort());
+    expect([...QUERY_COMMANDS].sort()).toEqual(['engine.hostState', 'engine.ping', 'fs.workflows', 'pty.hostState', 'pty.ping', 'settings.get', ...c7, ...c11, ...w3, ...e9, ...e6, ...e4a, ...e4b, ...cua90].sort());
   });
 
   // Compile-time: writes and void-output commands are not queries (checked by `pnpm typecheck`); they go through

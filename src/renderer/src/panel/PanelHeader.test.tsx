@@ -14,7 +14,7 @@ import { registerSlot, resetSlots } from '../app/slots';
 import { queryClient } from '../ipc/query';
 import { A, probeTool, resetPanelStores, type ProbeState } from '../test-support/panel';
 import { installResizeObserver } from '../test-support/resize';
-import { editorHostOf, registerEditorHost, resetEditorHosts, SAVED_COPY, useEditorHost, useEditorHostScope, type EditorHostAction, type EditorHostRegistration, type SavedState } from './editor-host';
+import { editorHostOf, focusEditorHostAction, registerEditorHost, resetEditorHosts, SAVED_COPY, useEditorHost, useEditorHostScope, type EditorHostAction, type EditorHostRegistration, type SavedState } from './editor-host';
 import { panelHost, registerPanelTool, setTitle } from './host';
 import { PanelHost } from './PanelHost';
 import { PanelRegion } from './PanelRegion';
@@ -214,6 +214,24 @@ describe('the panel header', () => {
     ]);
     await user.click(items[0]);
     expect(calls).toEqual(['a4']);
+  });
+
+  // P3-L (M6b fix wave 1, X32 additive): an editor gives focus back to an action's control in the header over its scope
+  // (a dismissed comment card to Comment); an action folded into "More actions" gives it to that menu's button.
+  it('focuses an action’s control in the header over the scope, "More actions" for a folded one, and answers false otherwise', () => {
+    offs.push(registerPanelTool(probeTool('t').tool));
+    mount();
+    const id = add('t');
+    const scope = { surface: 'panel', tabId: id } as const;
+    const action = (n: number, extra: Partial<EditorHostAction> = {}): EditorHostAction => ({ id: `a${n}`, label: `Action ${n}`, onSelect: () => {}, ...extra });
+    act(() => void registerEditorHost(scope, { title: 'Doc', actions: [1, 2, 3, 4].map((n) => action(n, n === 2 ? { disabled: true } : {})) }));
+    expect(focusEditorHostAction(scope, 'a1')).toBe(true);
+    expect(document.activeElement).toBe(within(header()).getByRole('button', { name: 'Action 1' }));
+    expect(focusEditorHostAction(scope, 'a4')).toBe(true);
+    expect(document.activeElement).toBe(within(header()).getByRole('button', { name: 'More actions' }));
+    expect(focusEditorHostAction(scope, 'a2'), 'a disabled control takes no focus').toBe(false);
+    expect(focusEditorHostAction(scope, 'nope')).toBe(false);
+    expect(focusEditorHostAction({ surface: 'panel', tabId: 'another' }, 'a1'), 'no header over that scope').toBe(false);
   });
 
   it('marks a pressed action in "More actions" with a visible check, and an unpressed one without', async () => {

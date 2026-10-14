@@ -922,7 +922,7 @@ test('P2-C /plugins shows MAWS mods · Built in: To-human with its version, its 
   const row = myItems.getByRole('region', { name: 'MAWS mods · Built in' }).locator('[data-mod-row="maws.to-human"]');
   await expect(row).toContainText('To-human');
   await expect(row).toContainText('Built in');
-  await expect(row).toContainText('Version 1');
+  await expect(row).toContainText('Version 5'); // P2-C2: contract 5
   await expect(row).toContainText('MAWS gives the agent its instructions');
   await expect(row.getByRole('radiogroup', { name: 'To-human in this session' }).getByRole('radio')).toHaveCount(3);
   await expect(row.getByRole('radio', { name: 'Default (On)' })).toBeChecked();

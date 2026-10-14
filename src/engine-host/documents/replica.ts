@@ -33,6 +33,7 @@ export class AgentReplica {
     private readonly connectPort: () => PortLike,
     now: number,
     private readonly log: (line: string) => void,
+    private readonly makeDoc: () => Doc = newDoc, // a suggestion doc's replica is a suggestion doc (gc off)
   ) {
     this.lastUsed = now;
     this.current = this.connectNew();
@@ -108,7 +109,7 @@ export class AgentReplica {
   }
 
   private connectNew(): { doc: Doc; provider: PortProvider } {
-    const doc = newDoc();
+    const doc = this.makeDoc();
     const provider = new PortProvider(doc, { log: this.log });
     provider.connect(this.connectPort());
     return { doc, provider };

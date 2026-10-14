@@ -9,7 +9,7 @@ import { appWindows, registerAppWindow } from './windows'; // E2
 import { recordImeTrace } from './ime-trace'; // P2-F S ime-trace, temporary
 import { showAppWindow } from './window-show';
 // E2 start
-import { attributeConsole, guardFrames, isCspExempt } from './deliverables/policies';
+import { attributeConsole, guardFrames, isCspExempt } from './artifacts/policies';
 import { emit } from './ipc/events';
 // E2 end
 import type { ResolvedTheme } from './settings/store';
@@ -44,7 +44,7 @@ export function installContentSecurityPolicy(): void {
   }
   const csp = buildCsp(devServerUrl ? { nonce: __MAWS_DEV_CSP_NONCE__!, devServerUrl } : null);
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    if (isCspExempt(details.url)) return callback({}); // E2: a deliverable's answer carries its own policy (Design §3)
+    if (isCspExempt(details.url)) return callback({}); // E2: a store frame's answer carries its own policy (Design §3)
     callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [csp] } });
   });
 }
@@ -82,7 +82,7 @@ export function createWindow(theme: ResolvedTheme, placement: WindowState | null
       preload: join(__dirname, '../preload/index.js'),
     },
   });
-  // E2 start: an app window (a capture window is not one), its deliverable frames guarded and their console attributed
+  // E2 start: an app window (a capture window is not one), its store frames guarded and their console attributed
   registerAppWindow(win);
   guardFrames(win.webContents, process.env);
   attributeConsole(win.webContents, emit);

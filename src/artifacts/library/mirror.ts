@@ -8,14 +8,27 @@
 import type { Doc } from '@artifacts/yjs';
 import type { Artifact, ArtifactKind } from '@shared/artifacts/entity';
 
+// One of an artifact's assets as the store lists it (`artifacts.assets`'s shape): its ref (`assets/<name>`, what a format
+// names it by), its name, type and size.
+export interface MirrorAsset {
+  ref: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
 // What the host read for one artifact: a document kind's doc (a fresh replica of the committed state, destroyed after
 // the writer returns), a byte kind's content and its file name. `bytes` is absent when the host did not read the
-// content (a file too large to mirror).
+// content (a file too large to mirror). M6b (Decision Log 35, 37b): the artifact's assets, listed, and `readAsset`,
+// which reads one asset's bytes by its ref when the writer asks (a design system's fonts land in its directory; an
+// asset the writer does not need is never read); it throws for a ref the artifact does not hold.
 export interface MirrorInput {
   artifact: Artifact;
   doc?: Doc;
   bytes?: Uint8Array;
   name?: string;
+  assets?: MirrorAsset[];
+  readAsset?(ref: string): Uint8Array;
 }
 
 // Paths relative to `<linkedDir>/artifacts/`, `/`-separated (a deck is a folder); each one named by the artifact's

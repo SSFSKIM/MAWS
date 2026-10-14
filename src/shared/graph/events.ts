@@ -316,6 +316,7 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
   event('maws.delivery.artifact', {
     toolUseId: ToolUseIdSchema.nullable(), requestId: RequestIdSchema, action: z.enum(['create', 'update']), artifactId: z.string(), deliverableId: z.string(), version: z.number().int(), title: z.string(),
     ownerAppSessionId: AppSessionIdSchema.optional(), // P2-E1
+    revision: z.number().int().nonnegative().optional(), // P3-L (M6b fix wave 2): the revision written, when the answer named it
   }),
   // E2 end
   // E4c start (E4c execution document, Design §10): mapped from an admitted `browser_*` call and its answer (E1 residue

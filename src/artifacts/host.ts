@@ -6,7 +6,7 @@ import type { Awareness } from '@y/protocols/awareness';
 import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { Restored, SaveState } from './provider/port';
-import type { Carry, ContentIds, Doc } from './yjs';
+import type { Carry, ContentIds, Doc, SuggestionRange } from './yjs';
 
 // One row of the threads mirror (`artifact_threads`), which P3-B's adapter keeps from the doc's comment threads so the
 // library and the session panel can list them without opening the doc (Decision Log 23c).
@@ -47,8 +47,10 @@ export interface DocumentStorage {
   // one if none is), and returns the row's seq: the live revision it makes. `hostClient` names the clientID of the
   // host's replica that wrote the row, if one did, so its binding is marked as the host's for that actor. Without
   // `provenance` the row's map is written later in the same frame by `attributeInBatch` (a kind's `afterUpdate` may
-  // first carry authorship onto it, Decision Log 25j).
-  appendInBatch(row: { artifactId: string; actor: Actor; at: number; update: Uint8Array; provenance?: Uint8Array; bindClients: number[]; hostClient?: number }): number;
+  // first carry authorship onto it, Decision Log 25j). `credit` binds named clientIDs among `bindClients` to another
+  // actor than the row's: an accepted suggestion's copy, written by the acceptor under a clientID bound to the
+  // suggester (Decision Log 45).
+  appendInBatch(row: { artifactId: string; actor: Actor; at: number; update: Uint8Array; provenance?: Uint8Array; bindClients: number[]; hostClient?: number; credit?: Map<number, Actor> }): number;
   attributeInBatch(row: { artifactId: string; seq: number; at: number; provenance: Uint8Array }): void;
   // The threads mirror a kind's hooks feed (Decision Log 23c), written in the open batch with the update.
   writeThreads(artifactId: string, change: ThreadChange): void;
@@ -122,12 +124,22 @@ export interface DocumentHandle {
   close(): void;
 }
 
+// Which of an artifact's documents (Decision Log 45): `suggestions`, its suggestion doc (the artifact with its pending
+// proposals on it, a suggestion doc on the replica's side too); omitted, the artifact's own.
+export interface ArtifactDocOption {
+  doc?: 'suggestions';
+}
+
 export interface ArtifactHost {
-  open(artifactId: string): Promise<DocumentHandle>; // resolves once the replica has synced; rejects if the store refuses it
+  open(artifactId: string, options?: ArtifactDocOption): Promise<DocumentHandle>; // resolves once the replica has synced; rejects if the store refuses it
   assetUrl(artifactId: string, ref: string): string;
   export(artifactId: string, format: string, version?: number, options?: { pageSize?: 'letter' | 'a4' }): Promise<{ path: string }>; // M7; `pageSize`: Decision Log 42
   versionState(artifactId: string, version: number | { seq: number }): Promise<Uint8Array>; // V2 bytes (Decision Log 22c)
-  attributions(artifactId: string, fromSeq: number, toSeq: number): Promise<Uint8Array>; // a merged ContentMap (23a)
+  attributions(artifactId: string, fromSeq: number, toSeq: number, options?: ArtifactDocOption): Promise<Uint8Array>; // a merged ContentMap (23a)
+  // The owner settles proposals of the suggestion doc (Decision Log 45): ranges are the item ids the editor's selection
+  // resolves to; the answer is the artifact's revision after the accept's copy (or the reject's restored content).
+  acceptSuggestion(artifactId: string, ranges: SuggestionRange[]): Promise<{ revision: number }>;
+  rejectSuggestion(artifactId: string, ranges: SuggestionRange[]): Promise<{ revision: number }>;
   uploadAsset(artifactId: string, bytes: Uint8Array, meta: { name: string; mime: string }): Promise<{ assetId: string; ref: string }>; // 25l
   identity(): { actor: Actor; name: string; color: string };
 }

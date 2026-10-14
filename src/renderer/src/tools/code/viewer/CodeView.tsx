@@ -69,7 +69,8 @@ const onEdit = (tabId: string) => (doc: Text) => {
 // E5 M3: a gutter mark's line as X10's anchor, for the tab's file and session as they are at the click.
 const onComment = (tabId: string) => (line: number) => {
   const entry = useViewer.getState().entries.get(tabId);
-  if (entry) openCommentComposer(fileLineAnchor(entry.path, line), { appSessionId: entry.appSessionId });
+  // P3-L (M6b fix wave 2): a file read by its artifact alone has no session for the comment to go to
+  if (entry && entry.appSessionId !== null) openCommentComposer(fileLineAnchor(entry.path, line), { appSessionId: entry.appSessionId });
 };
 
 // E5 M3: what the bar counts, from the state as it now is.

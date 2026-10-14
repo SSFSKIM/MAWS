@@ -30,7 +30,6 @@ describe('HOST_EVENTS', () => {
         'fs.foreignWrite',
         'plugins.operation',
         'plugins.changed',
-        'deliverables.changed',
         'maws.pane.show',
         'maws.artifact.capture',
         'maws.artifact.export', // P3-A M7
@@ -42,7 +41,7 @@ describe('HOST_EVENTS', () => {
     );
     for (const name of HOST_EVENTS) expect(events).toHaveProperty([name]);
     expect(HOST_EVENTS).not.toContain('engine.hostState'); // main's own snapshot of the host
-    expect(HOST_EVENTS).not.toContain('deliverables.console'); // main's
+    expect(HOST_EVENTS).not.toContain('artifacts.console'); // main's
     expect(HOST_EVENTS).not.toContain('host.status'); // main's composition of the supervisor's status and its own facts
   });
 });
@@ -78,7 +77,7 @@ describe('wireFingerprint', () => {
     changed.commands['settings.get'] = { ...commands['settings.get'], output: z.strictObject({ anything: z.string() }) };
     changed.commands['pty.ping'] = { ...commands['pty.ping'], input: z.strictObject({ anything: z.string() }) };
     changed.events['engine.hostState'] = z.strictObject({ anything: z.string() });
-    changed.events['deliverables.console'] = z.strictObject({ anything: z.string() });
+    changed.events['artifacts.console'] = z.strictObject({ anything: z.string() });
     // E10: main's host.status (HostStatus, which gains fields such as waitingLiveSessions) never crosses the socket
     changed.commands['host.status'] = { ...commands['host.status'], output: z.strictObject({ anything: z.string() }) };
     changed.events['host.status'] = z.strictObject({ anything: z.string() });

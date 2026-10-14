@@ -25,8 +25,9 @@ const id = z.string().min(1);
 
 export const HostHelloSchema = z.strictObject({ t: z.literal('hello') });
 export const HostReadySchema = z.strictObject({ t: z.literal('ready') }); // E10 (A-29 (3)): additive to C1's envelope
-// P3-A M4: a document's port (the channel is main's u32 key for it, never a Yjs clientID)
-export const HostDocSchema = z.strictObject({ t: z.literal('doc'), channel: z.number().int().nonnegative().max(0xffff_ffff), artifactId: z.uuid(), actor: ActorSchema });
+// P3-A M4: a document's port (the channel is main's u32 key for it, never a Yjs clientID); P3-A M8: `doc: 'suggestions'`
+// for the artifact's suggestion doc
+export const HostDocSchema = z.strictObject({ t: z.literal('doc'), channel: z.number().int().nonnegative().max(0xffff_ffff), artifactId: z.uuid(), actor: ActorSchema, doc: z.enum(['suggestions']).optional() });
 export type HostDoc = z.infer<typeof HostDocSchema>;
 export const HostRequestSchema = z.strictObject({ t: z.literal('req'), id, name: z.string(), input: z.unknown() });
 export const HostResponseSchema = z.union([

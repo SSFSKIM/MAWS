@@ -1183,6 +1183,71 @@ describe('ArtifactStore: write refusals released after the batch they saw (Decis
   });
 });
 
+describe('ArtifactStore: change events reveal only committed revisions (the whole-branch review)', () => {
+  // A write's event follows its own commit, but the next writer may open a batch before that event goes out (here: a
+  // writer woken by the same commit, first in line); the live revision then includes that batch's rows.
+  async function racedWrite(fail: boolean) {
+    reopen([], { manual: true });
+    const creating = store.create({ kind: 'html', title: 'Page', content: { bytes: html('v1') } }, human);
+    tick();
+    const page = await creating;
+    const seen: { revision: number; durable: number }[] = [];
+    store.onChange((event) => seen.push({ revision: event.revision, durable: committed('SELECT MAX(seq) AS s FROM artifact_updates WHERE artifactId = ?', page.id)[0].s as number }));
+    let next: Promise<unknown> | undefined;
+    void service.whenCommitted().then(() => {
+      next = store.writeContent(page.id, { bytes: html('v3') }, human);
+      next.catch(() => {});
+    });
+    const writing = store.writeContent(page.id, { bytes: html('v2') }, human);
+    tick();
+    const { revision } = await writing;
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(next).toBeDefined();
+    const commit = fail
+      ? vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+          throw new Error('disk full');
+        })
+      : null;
+    tick();
+    await next!.catch(() => {});
+    commit?.mockRestore();
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    return { revision, seen };
+  }
+
+  it('holds an entity event read while the next batch is open until that batch commits', async () => {
+    const { revision, seen } = await racedWrite(false);
+    expect(seen.length).toBeGreaterThan(0);
+    for (const event of seen) expect(event.revision).toBeLessThanOrEqual(event.durable);
+    expect(seen[0]!.revision).toBeGreaterThanOrEqual(revision);
+  });
+
+  it('never reveals the revision of a later batch that fails', async () => {
+    const { revision, seen } = await racedWrite(true);
+    expect(seen).toEqual([{ revision, durable: revision }]);
+  });
+});
+
+describe('ArtifactStore: a store a newer MAWS wrote (read-only; Decision Log 12, 24e)', () => {
+  it('takes the owner’s viewing as a read, recording nothing, and still refuses every content write', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'a'));
+    store.close();
+    service.close();
+    storage.close();
+    const newer = new DatabaseSync(join(dir, 'store.sqlite'));
+    newer.exec('PRAGMA user_version = 99');
+    newer.close();
+    make();
+    expect(storage.readOnly).toBe(true);
+    await expect(store.markViewed(doc.id)).resolves.toBeUndefined();
+    expect(store.get(doc.id)!.lastViewedAt).toBeNull();
+    expect(store.listVersions(doc.id)).toEqual([]);
+    await expect(store.update(doc.id, { title: 'Plan B' })).rejects.toThrow(/newer app/);
+    await expect(write(doc.id, human, (d) => d.get('root').insert(0, 'b'))).rejects.toThrow(/newer app/);
+  });
+});
+
 describe('ArtifactStore: refusals', () => {
   it('refuses wrong content per kind and unknown targets with typed errors', async () => {
     await expect(store.create({ kind: 'html', title: 'x' }, human)).rejects.toBeInstanceOf(ArtifactStoreError);

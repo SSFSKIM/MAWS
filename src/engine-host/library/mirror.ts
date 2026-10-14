@@ -10,7 +10,11 @@
 // - The manifest `<linkedDir>/artifacts/.maws-mirror.json` names every file the mirror wrote, per artifact, with the
 //   revision and slug it wrote them at. A rename, a move out of the Space, a delete or an unlink removes exactly those
 //   files; a file at a target name that the manifest does not own is left alone (logged), never overwritten. An
-//   artifact whose revision and slug match its entry, with its files present, is not rewritten.
+//   artifact whose revision and slug match its entry, with its files present, is not rewritten. A name that differs
+//   from one the mirror owns by case or Unicode normalization only, and reaches that same file, is that file, so a
+//   rename by case only on a case-insensitive volume keeps it; any other name, an owner's hard link included, is not.
+// - Something at the manifest's path that is not a MAWS manifest (another file, a link, dangling or not) is the
+//   owner's: the directory is refused (logged, as a failing one) and that entry never rewritten or removed.
 // - Two Spaces linked to one directory share its manifest (the desired set is per directory).
 // - A directory that fails (gone, unwritable, a link) is logged per Space and tried again at the next change, which
 //   reconciles the whole directory once it loads again; the linked directory itself is never created, and no write or
@@ -20,7 +24,7 @@
 // Reads go through P3-A's public store methods behind the commit barrier (the mirror never writes a row its batch may
 // yet take back); the only durable state is the manifest in the linked directory (ruling 18(a)).
 import { randomUUID } from 'node:crypto';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { mirrorSlug, mirrorWriterFor } from '@artifacts/library/mirror';
 import { applyV2, newDoc } from '@artifacts/yjs';
@@ -52,6 +56,8 @@ export interface MirrorOptions {
 
 // One artifact's content as read inside the barrier; the writer runs after it.
 type ContentRead = { state: Uint8Array } | { bytes: Uint8Array; name: string } | { path: string; name: string } | null;
+// M6b: the artifact's assets as the store listed them inside the barrier; their bytes are read only when a writer asks.
+type AssetsRead = { ref: string; name: string; mime: string; size: number; sha256: string }[];
 
 export class LibraryMirror {
   private readonly log: (line: string) => void;
@@ -257,20 +263,21 @@ export class LibraryMirror {
   private async upsert(dir: string, manifest: Manifest, artifactId: string): Promise<void> {
     const { store, service } = this.documents;
     const root = join(dir, MIRROR_DIR);
-    const read = await store.readCommitted((): { artifact: Artifact; revision: number; content: ContentRead } | null => {
+    const read = await store.readCommitted((): { artifact: Artifact; revision: number; content: ContentRead; assets: AssetsRead } | null => {
       const artifact = store.get(artifactId);
       if (!artifact) return null; // deleted since: its event removes it
       const revision = store.revision(artifactId);
       const entry = manifest.artifacts[artifactId];
       if (entry && entry.revision === revision && entry.slug === mirrorSlug(artifact) && entry.files.every((file) => existsSync(join(root, file)))) return null; // current
-      if (!mirrorWriterFor(artifact.kind)) return { artifact, revision, content: null };
-      if (isDocKind(artifact.kind)) return { artifact, revision, content: { state: service.readState(artifactId).state } };
-      return { artifact, revision, content: byteContentOf(store, artifactId) };
+      if (!mirrorWriterFor(artifact.kind)) return { artifact, revision, content: null, assets: [] };
+      const assets = store.listAssets(artifactId).map(({ ref, name, mime, size, sha256 }) => ({ ref, name, mime, size, sha256 }));
+      if (isDocKind(artifact.kind)) return { artifact, revision, content: { state: service.readState(artifactId).state }, assets };
+      return { artifact, revision, content: byteContentOf(store, artifactId), assets };
     });
     const entry = manifest.artifacts[artifactId];
     if (!read || (read.content === null && !entry)) return; // current, gone, or nothing to write and nothing written
     const { artifact, revision, content } = read;
-    const files = content === null ? {} : this.produce(artifact, content);
+    const files = content === null ? {} : this.produce(artifact, content, read.assets);
     const owned = new Set(Object.values(manifest.artifacts).flatMap((other) => other.files));
     const mine = new Set(entry?.files ?? []);
     const written: string[] = [];
@@ -281,7 +288,9 @@ export class LibraryMirror {
         continue;
       }
       const target = join(root, file);
-      if (!mine.has(file) && (owned.has(file) || occupied(target))) {
+      // one of this artifact's own names spelled another way (a rename by case only on a case-insensitive volume)
+      const sameAs = mine.has(file) ? undefined : [...mine].find((own) => aliases(root, own, file));
+      if (!mine.has(file) && sameAs === undefined && (owned.has(file) || occupied(target))) {
         this.log(`${artifactId}: ${target} is not the mirror's file; not written`);
         continue;
       }
@@ -290,6 +299,7 @@ export class LibraryMirror {
           this.log(`${artifactId}: ${target} lies under a link; not written`);
           continue;
         }
+        if (sameAs !== undefined) renameSync(join(root, sameAs), target); // the entry takes the new name's case first
         writeReadOnly(root, file, data);
       } catch (error) {
         failure ??= { error };
@@ -302,7 +312,7 @@ export class LibraryMirror {
     // revision -1, which no revision matches, so the next change tries again.
     const leftover: string[] = [];
     for (const file of mine) {
-      if (written.includes(file)) continue;
+      if (written.some((done) => done === file || aliases(root, file, done))) continue; // the name now reaches what was written
       if (failure) {
         leftover.push(file);
         continue;
@@ -320,19 +330,30 @@ export class LibraryMirror {
     if (failure) throw failure.error;
   }
 
-  // The kind's writer over what was read; a document's replica lives only for the call.
-  private produce(artifact: Artifact, content: Exclude<ContentRead, null>): Record<string, string | Uint8Array> {
+  // The kind's writer over what was read; a document's replica lives only for the call. M6b: the assets listed, each
+  // read from the store's content-addressed file when the writer asks (a failed read fails this artifact's write, which
+  // the next change retries, as any write does).
+  private produce(artifact: Artifact, content: Exclude<ContentRead, null>, listed: AssetsRead): Record<string, string | Uint8Array> {
     const writer = mirrorWriterFor(artifact.kind)!;
-    if ('bytes' in content) return writer({ artifact, bytes: content.bytes, name: content.name }).files;
+    const byRef = new Map(listed.map((asset) => [asset.ref, asset]));
+    const assets = {
+      assets: listed.map(({ ref, name, mime, size }) => ({ ref, name, mime, size })),
+      readAsset: (ref: string): Uint8Array => {
+        const asset = byRef.get(ref);
+        if (!asset) throw new Error(`${artifact.id} has no asset ${ref}`);
+        return this.documents.store.files.readAsset(artifact.id, asset.sha256);
+      },
+    };
+    if ('bytes' in content) return writer({ artifact, bytes: content.bytes, name: content.name, ...assets }).files;
     if ('path' in content) {
       const bytes = fileBytes(content.path, this.maxFileBytes);
       if (!bytes) this.log(`${artifact.id}: ${content.path} is too large to mirror (over ${this.maxFileBytes} bytes) or cannot be read; mirrored as nothing`);
-      return writer({ artifact, name: content.name, ...(bytes ? { bytes } : {}) }).files;
+      return writer({ artifact, name: content.name, ...(bytes ? { bytes } : {}), ...assets }).files;
     }
     const doc = newDoc();
     try {
       applyV2(doc, content.state);
-      return writer({ artifact, doc }).files;
+      return writer({ artifact, doc, ...assets }).files;
     } finally {
       doc.destroy();
     }
@@ -363,19 +384,9 @@ export class LibraryMirror {
     if (!statSync(dir).isDirectory()) throw new Error(`${dir} is not a directory`); // checked every time: never recreated
     const root = join(dir, MIRROR_DIR);
     if (!realDirsUnder(root, MIRROR_MANIFEST)) throw new Error(`${root} is not a directory of its own (a link, or a file)`);
-    if (this.failing.delete(dir)) void this.reconcile(); // working again: the changes it missed, after this step
-    const cached = this.manifests.get(dir);
-    if (cached) return cached;
-    const path = join(root, MIRROR_MANIFEST);
-    const manifest: Manifest = { version: 1, artifacts: {} };
-    if (existsSync(path)) {
-      try {
-        Object.assign(manifest.artifacts, manifestEntries(JSON.parse(readFileSync(path, 'utf8'))));
-      } catch (error) {
-        this.log(`the mirror manifest ${path} is unreadable (${reasonOf(error)}); the files it named are left as the owner's`);
-      }
-    }
+    const manifest = this.manifests.get(dir) ?? readManifest(join(root, MIRROR_MANIFEST));
     this.manifests.set(dir, manifest);
+    if (this.failing.delete(dir)) void this.reconcile(); // working again: the changes it missed, after this step
     return manifest;
   }
 
@@ -393,13 +404,15 @@ export class LibraryMirror {
   private save(dir: string, manifest: Manifest): void {
     const root = join(dir, MIRROR_DIR);
     const path = join(root, MIRROR_MANIFEST);
+    const present = occupied(path); // a link there too, dangling or not
+    if (present && (!lstatSync(path).isFile() || this.saved.get(dir) !== readFileSync(path, 'utf8'))) readManifest(path); // not ours since: left alone
     if (Object.keys(manifest.artifacts).length === 0) {
-      if (existsSync(path)) removeFile(root, MIRROR_MANIFEST);
+      if (present) removeFile(root, MIRROR_MANIFEST);
       this.saved.delete(dir);
       return;
     }
     const json = `${JSON.stringify(manifest, null, 2)}\n`;
-    if (this.saved.get(dir) === json && existsSync(path)) return; // unchanged: a no-op change writes nothing
+    if (this.saved.get(dir) === json && present) return; // unchanged: a no-op change writes nothing
     ensureRoot(root);
     const temp = join(root, `.${MIRROR_MANIFEST}.${randomUUID().slice(0, 8)}.tmp`);
     writeFileSync(temp, json);
@@ -422,17 +435,33 @@ function linkedDirs(spaces: Space[]): Map<string, { spaceIds: Set<string>; names
   return dirs;
 }
 
-// A manifest's entries as read from the directory, which anyone may have edited: an entry whose shape is wrong is
-// dropped and a file name that is not a mirror path is never trusted (so nothing outside `artifacts/` is ever removed).
-function manifestEntries(parsed: unknown): Record<string, ManifestEntry> {
+// The manifest at `path` as read from the directory, which anyone may have edited: none there is an empty one; an entry
+// whose shape is wrong is dropped and a file name that is not a mirror path is never trusted (so nothing outside
+// `artifacts/` is ever removed). A file that is not a MAWS manifest at all is the owner's: it throws, so the directory
+// is refused rather than the file overwritten or removed.
+function readManifest(path: string): Manifest {
+  let entry;
+  try {
+    entry = lstatSync(path); // never followed: a link there is not the mirror's, dangling or not
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, artifacts: {} };
+    throw error;
+  }
+  if (!entry.isFile()) throw new Error(`${path} is not a MAWS mirror manifest (not a regular file); it is left alone`);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    throw new Error(`${path} is not a MAWS mirror manifest (${reasonOf(error)}); it is left alone`, { cause: error });
+  }
   const { version, artifacts } = (parsed ?? {}) as Partial<Manifest>;
-  if (version !== 1 || typeof artifacts !== 'object' || artifacts === null) throw new Error('not a version 1 manifest');
+  if (version !== 1 || typeof artifacts !== 'object' || artifacts === null || Array.isArray(artifacts)) throw new Error(`${path} is not a MAWS mirror manifest (not version 1); it is left alone`);
   const entries: Record<string, ManifestEntry> = {};
   for (const [artifactId, entry] of Object.entries(artifacts as Record<string, Partial<ManifestEntry>>)) {
     if (typeof entry?.revision !== 'number' || typeof entry.slug !== 'string' || !Array.isArray(entry.files)) continue;
     entries[artifactId] = { revision: entry.revision, slug: entry.slug, files: entry.files.filter((file): file is string => typeof file === 'string' && isMirrorPath(file)) };
   }
-  return entries;
+  return { version: 1, artifacts: entries };
 }
 
 // True when `artifacts/` and every folder between it and `file` is a real directory or does not exist yet: never a link
@@ -465,6 +494,23 @@ function occupied(path: string): boolean {
   try {
     lstatSync(path);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+// Two mirror paths that are one directory entry spelled two ways (a case-insensitive, normalization-insensitive volume
+// such as APFS): equal but for case and Unicode normalization (a cheap first test), one file that is not a link (one
+// device and inode, by lstat), and one canonical entry (`realpath`, which spells an alias as the entry's own name but
+// keeps a hard link's own). An owner's hard link under another name, by case only on a case-sensitive volume included,
+// is not an alias; anything that cannot be resolved is not either.
+function aliases(root: string, a: string, b: string): boolean {
+  const folded = (name: string) => name.normalize('NFC').toLowerCase();
+  if (folded(a) !== folded(b)) return false;
+  try {
+    const [first, second] = [lstatSync(join(root, a)), lstatSync(join(root, b))];
+    if (first.isSymbolicLink() || second.isSymbolicLink() || first.dev !== second.dev || first.ino !== second.ino) return false;
+    return realpathSync.native(join(root, a)) === realpathSync.native(join(root, b));
   } catch {
     return false;
   }

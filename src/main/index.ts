@@ -101,7 +101,6 @@ import { sideThreadEvents, startSideThreads } from './side/side-threads';
 // E3 end
 // E2 start
 import { appWindows } from './windows';
-import { startDeliverables } from './deliverables';
 // E2 end
 // E10 start
 import { engineQuitDeps } from './lifecycle/engine-quit';
@@ -117,10 +116,11 @@ import { startBrowser, type Browser } from './browser';
 import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './browser/import';
 // E4b end
 // P3-A start
-import { registerStoreSchemes, startArtifacts } from './artifacts';
+import { installStorePolicies, registerStoreSchemes, startArtifacts } from './artifacts';
 // P3-A end
 // P3-L start
 import { startLibrary } from './library';
+import { fileAdmission } from './library/admission'; // M6b
 // P3-L end
 // P3-B start
 import { registerDocumentExporters } from './artifacts/export-document'; // P3-B
@@ -138,8 +138,8 @@ if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DA
 // The smoke runs unattended, so nothing may wait on a person: Chromium keeps its storage key in a mock keychain
 // instead of asking the login keychain, whose access prompt an unsigned or re-signed build can raise.
 if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');
-// E2: the deliverable store's scheme is privileged before the app is ready (protocol.registerSchemesAsPrivileged);
-// P3-A M7: with the artifact store's, in Electron's one call
+// E2: the store's scheme is privileged before the app is ready (protocol.registerSchemesAsPrivileged); P3-A M7: the
+// artifact store's; P3-L M6b: the deliverable store's no more
 registerStoreSchemes();
 
 // macOS convention (D-11): closing the last window keeps the app running; the dock icon re-creates it (`activate`
@@ -210,12 +210,9 @@ void startWithProfileLock(app, () => {
   process.env.MAWS_USER_DATA = app.getPath('userData');
   // (the attention service starts in C4's block below, over the index that now implements its store: C3's handover)
   // C3 end
-  // E2 start: the deliverable store's read side (E2 execution document, Design §2, §3, §7): main's reader over the files
-  // the engine host writes, the maws-deliverable: scheme and the frame policies on the window's session and the capture
-  // partition, deliverables.* and the capture service; the files service below admits delivered paths through the reader.
-  const deliverables = startDeliverables({ userData: app.getPath('userData'), hosts, register: registerMainHandler, env: process.env, appUrl });
-  shutdown.add('deliverables', deliverables.stop);
-  // E2 end
+  // E2's frame policies on the window's session and the capture partition, before any window loads (P3-L M6b: the
+  // artifact scheme's, `installStorePolicies`; the deliverable store's reader, scheme and IPC are gone)
+  installStorePolicies(process.env, appUrl);
 
   // C4 start: the index (<userData>/index.sqlite) answers the record side of session.*, and its session source folds the
   // engine host's store events into it once the host is ready. C5's read model starts the source (its block below:
@@ -359,7 +356,7 @@ void startWithProfileLock(app, () => {
     emit: (payload) => void emit('files.changed', payload),
     openPath: (path) => shell.openPath(path),
     showItemInFolder: (path) => shell.showItemInFolder(path), // E1: files.reveal
-    admitted: (appSessionId, real) => deliverables.reader.admitted(appSessionId, real), // E2: a delivered file outside the roots
+    admitted: fileAdmission(index.unavailable === null ? index.library : null), // E2; P3-L M6b: a File artifact's file outside the roots, from the library's index
   });
   shutdown.add('files', () => filesService.dispose());
   // C8c end
@@ -584,7 +581,28 @@ void startWithProfileLock(app, () => {
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
   // connection, an entry per change) and library.* answered from it, before the first window loads. Its stop runs in the
   // same will-quit pass as the index's close, so no sync step runs between them, and after it applies nothing.
-  const library = startLibrary({ index, hosts, register: registerMainHandler, emit, e2e: process.env.MAWS_E2E === '1' });
+  const library = startLibrary({
+    index,
+    hosts,
+    register: registerMainHandler,
+    emit,
+    e2e: process.env.MAWS_E2E === '1',
+    // P3-L M5b: the viewers' and the library's reach to a byte kind's stored file and its exports
+    files: {
+      call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+      exporters: artifacts.exporters,
+      root: join(app.getPath('userData'), 'artifacts'),
+      downloads: () => app.getPath('downloads'),
+      showSaveDialog: (options, sender) => {
+        const win = sender ? BrowserWindow.fromWebContents(sender) : null;
+        return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+      },
+      openPath: (path) => shell.openPath(path),
+      showItemInFolder: (path) => shell.showItemInFolder(path),
+      readFile: (input) => filesService.readResolved(input), // M6b fix wave 2: `library.read`
+      env: process.env,
+    },
+  });
   shutdown.add('library', library.stop);
   openWindow();
 

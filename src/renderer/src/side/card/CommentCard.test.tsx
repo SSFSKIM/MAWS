@@ -8,7 +8,7 @@ import { StrictMode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
-import { deliverableUrl } from '@shared/maws/deliverable';
+import { artifactUrl } from '@shared/artifacts/scheme';
 import { digest, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { useNotices } from '../../stores/notices';
@@ -22,7 +22,7 @@ import { useCommentCard } from './store';
 
 const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const RECORD = '00000000-0000-4000-8000-000000000001';
-const ANCHOR: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: deliverableUrl(PARENT, RECORD, 1) };
+const ANCHOR: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: artifactUrl(RECORD, 1, 'index.html') };
 const RECT = { x: 24, y: 0, width: 300, height: 90 };
 const FRAME: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: 'k1' };
 const HOST_BOX = { width: 600, height: 800 };
@@ -63,14 +63,14 @@ afterEach(() => {
   useCommentCard.setState({ open: null });
 });
 
-const cardPlacement = (over: Partial<Extract<CommentPlacement, { kind: 'card' }>> = {}): CommentPlacement => ({ kind: 'card', host: 'deliverable', hostId: 'h1', rect: RECT, ...over });
+const cardPlacement = (over: Partial<Extract<CommentPlacement, { kind: 'card' }>> = {}): CommentPlacement => ({ kind: 'card', host: 'artifact-page', hostId: 'h1', rect: RECT, ...over });
 
 function mount(layout: 'anchored' | 'docked' = 'anchored', frame: CardFrame = FRAME /* P3-B */) {
   return render(
     <>
       <CommentComposerHost />
       <div className="relative">
-        <CommentCardHost hostId="h1" host="deliverable" mode="panel" layout={layout} accepts={() => true} frame={frame} visible restoreFocus={restoreFocus} />
+        <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout={layout} accepts={() => true} frame={FRAME} visible restoreFocus={restoreFocus} />
       </div>
     </>,
   );
@@ -308,7 +308,7 @@ describe('dismissal', () => {
     pick(); // open before the host mounts, so the replay's cleanup meets it
     const { unmount } = render(
       <StrictMode>
-        <CommentCardHost hostId="h1" host="deliverable" mode="panel" layout="anchored" accepts={() => true} frame={FRAME} visible />
+        <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={FRAME} visible />
       </StrictMode>,
     );
     await act(async () => {});

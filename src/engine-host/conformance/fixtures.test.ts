@@ -102,7 +102,8 @@ describe('normaliser replays every probe fixture into the X1 graph', () => {
     // style as attachments, --system-prompt-snapshot off, the contract's convergence runs, the shapes); all under scratch homes
     const p2 = ['p2-no-prompt-resume-1', 'p2-no-prompt-resume-setup', 'p2-to-human-converge-s10-new', 'p2-to-human-converge-s10-resume', 'p2-to-human-converge-s10-then', 'p2-to-human-converge-s11-fork', 'p2-to-human-converge-s11-new', 'p2-to-human-converge-s12-new', 'p2-to-human-converge-s12-resume', 'p2-to-human-converge-s13-new', 'p2-to-human-fork', 'p2-to-human-new', 'p2-to-human-off', 'p2-to-human-resume', 'p2-to-human-shapes-s14-compact', 'p2-to-human-shapes-s14-new', 'p2-to-human-shapes-s15-new', 'p2-to-human-shapes-s16-new', 'p2-to-human-snapoff-s6-new', 'p2-to-human-snapoff-s6-resume', 'p2-to-human-snapoff-s6-then', 'p2-to-human-snapoff-s7-new', 'p2-to-human-snapoff-s7-resume', 'p2-to-human-snapoff-s8-new', 'p2-to-human-snapoff-s8-resume', 'p2-to-human-snapoff-s9-fork', 'p2-to-human-snapoff-s9-new', 'p2-to-human-snapshot-s1-new', 'p2-to-human-snapshot-s1-resume', 'p2-to-human-snapshot-s2-new', 'p2-to-human-snapshot-s2-resume', 'p2-to-human-snapshot-s3-new', 'p2-to-human-snapshot-s3-resume', 'p2-to-human-snapshot-s4-new', 'p2-to-human-snapshot-s4-resume', 'p2-to-human-snapshot-s5-fork', 'p2-to-human-snapshot-s5-new', 'p2-to-human-steer-cancel-disk' /* M4 */, 'p2-to-human-style'];
     // P2 end
-    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2, ...e4c, ...p2].sort());
+    const p2c3 = ['p2-c3-subagent-ask']; // P2-C3 (Decision Log 35): two subagents' mcp__maws__ask on 2.1.299, each framed under its parent before its call
+    expect(listJournals('pass3')).toEqual(['engine-turn-release', 'fork-worktree-fork', 'fork-worktree-resume-in-b', 'fork-worktree-start', 'nested-agents', 'plan-outcomes', 'relay-to-child', 'rewind-files', 'steer-next', 'steer-now', 'steer-now-unheld', 'stop-task', 'workspace-diff-branch', 'workspace-diff-dirty', ...c10, ...wave3, ...wave4, ...c12 /* C12 */, ...wave5, ...w1, ...w3, ...w4, ...w7, ...wave7, ...r0, ...r2, ...r3, 'mods-surface-sitting', 'mods-surface-sitting-2-1-287', 'mods-surface-sitting-headers', ...e0a, ...e8, ...e1, ...e3, ...e7, ...e2, ...e4c, ...p2, ...p2c3].sort());
   });
 
   for (const pass of FIXTURE_PASSES) {
@@ -288,6 +289,16 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(blocks.find((e) => e.aborted)!.block).toMatchObject({ text: expect.stringContaining('History of Tea') as unknown });
     expect(blocks.every((e) => e.supersedes.length === 0)).toBe(true);
     expect(ofKind(events, 'turn.ended').map((e) => e.terminalReason)).toEqual(['aborted_streaming', 'completed']);
+  });
+
+  // P2-C3 (the P2 spec's Decision Log 35): the probe's server answered {status: asked} at once, but MAWS's normaliser
+  // opens each subagent's `blocking: false` ask as blocking, its tool use framed under the Agent call before the call
+  it('pass3/p2-c3-subagent-ask: both subagent asks open blocking, each under its Agent call', async () => {
+    const { events } = await run('pass3', 'p2-c3-subagent-ask');
+    const opened = ofKind(events, 'maws.ask.opened');
+    expect(opened.map((e) => [e.seq, e.askId, e.blocking])).toEqual([[103, 'toolu_01HL5B75dcfCZvbTc2rKzxeP', true], [197, 'toolu_01SSgUamhkfK7R49GftwimML', true]]);
+    const uses = ofKind(events, 'tool.use').filter((e) => e.toolName === 'mcp__maws__ask');
+    expect(uses.map((e) => [e.seq, e.toolUseId, e.parentToolUseId])).toEqual([[101, 'toolu_01HL5B75dcfCZvbTc2rKzxeP', 'toolu_019F92j3rcKrWs3k31f3bt7W'], [195, 'toolu_01SSgUamhkfK7R49GftwimML', 'toolu_01CafVpCvATWa5AC4RxshzDU']]);
   });
 
   it('pass3/question-deny (debt wave 3): a plain deny skips the question tool, the model reads the denial and the turn completes', async () => {
@@ -975,7 +986,7 @@ describe('normaliser: the maws tools recorded live (E1 M2, pass3/p1-maws-*)', ()
     const { events } = await run('pass3', 'p1-maws-show-pane');
     expect(ofKind(events, 'maws.pane.shown')).toMatchObject([
       { pane: 'terminal', target: null, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:live', title: 'Terminal' }, error: null },
-      { pane: 'deliverable', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('deliverable') },
+      { pane: 'artifact', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('artifact') }, // P3-L M6b: the recording's pane renamed with the tool's enum
     ]);
     const nope = ofKind(events, 'tool.use').find((e) => e.toolName === 'mcp__maws__show_pane' && (e.input as { pane?: string }).pane === 'nope')!;
     const refused = ofKind(events, 'tool.result').find((e) => e.toolUseId === nope.toolUseId)!;

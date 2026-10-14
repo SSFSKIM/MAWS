@@ -31,7 +31,6 @@ import * as scm from './names/scm';
 import * as side from './names/side';
 // E3 end
 // E2 start
-import * as deliverables from './names/deliverables';
 // E2 end
 // E10 start
 import * as host from './names/host';
@@ -69,9 +68,6 @@ export const NAMESPACES = [
   // E3 start
   'side',
   // E3 end
-  // E2 start
-  'deliverables',
-  // E2 end
   // E10 start
   'host',
   // E10 end
@@ -96,7 +92,6 @@ export const NAMES = {
   maws, // E1
   scm, // E6
   side, // E3
-  deliverables, // E2
   host, // E10
   browser, // E4a
   mods, // P2-C (2026-10-09)

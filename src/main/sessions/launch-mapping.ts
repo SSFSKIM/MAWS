@@ -7,7 +7,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { EffortSchema, type Effort, type LaunchSpec } from '@shared/engine/launch-spec';
 import type { SetupIntent, TrustDecision } from '@shared/sessions/intent';
 import type { TrustState } from '@shared/sessions/trust';
-import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION } from '@shared/owner/contract'; // P2-C (2026-10-09)
+import { NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C (2026-10-09)
 
 export type Attestation = { accepted: true; directory: string };
 type Gateway = LaunchSpec['gateway'];
@@ -78,10 +78,14 @@ export function toLaunchSpec(input: LaunchInput, settings: C10Settings = readSet
 // P2-C start (2026-10-09): the owner channel's launch decision applied to a spec (the P2-C document, Design §2, §3;
 // src/main/owner/launch.ts decides). While the lane is on, MAWS_NATIVE_TO_HUMAN (the contract version) joins the
 // settings env beside CUA_BROWSER_BACKENDS: the engine applies settings env to its process at startup, so a plugin's
-// hooks read it, and a toggle takes effect at the next launch. The contract is appended and "off" passed as decided.
+// hooks read it, and a toggle takes effect at the next launch. The contract (or, P2-C2, the supplement beside a
+// message-tool style) is appended and "off" passed as decided.
+export type AppendedText = 'contract' | 'supplement';
+const APPENDED: Record<AppendedText, string> = { contract: TO_HUMAN_CONTRACT, supplement: TO_HUMAN_SUPPLEMENT };
+
 export interface OwnerChannelFlags {
   laneOn: boolean;
-  append: boolean; // --append-system-prompt <the contract>
+  append: AppendedText | null; // --append-system-prompt <the contract | the supplement>
   snapshotOff: boolean; // --system-prompt-snapshot off
 }
 
@@ -97,7 +101,7 @@ export function withOwnerChannel(spec: LaunchSpec, flags: OwnerChannelFlags): La
   return {
     ...rest,
     extraSettings: Object.keys(merged).length > 0 ? merged : null,
-    ...(flags.append ? { appendSystemPrompt: TO_HUMAN_CONTRACT } : {}),
+    ...(flags.append !== null ? { appendSystemPrompt: APPENDED[flags.append] } : {}),
     ...(flags.snapshotOff ? { systemPromptSnapshot: 'off' as const } : {}),
   };
 }

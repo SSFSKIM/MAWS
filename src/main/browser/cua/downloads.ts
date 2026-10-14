@@ -5,7 +5,7 @@
 // and Reveal in Finder as for a person's download) and reports it here; this tells the leasing connection's host
 // `downloads.created` and `downloads.changed` in Chrome's shape (the host maps them to the vendor's onDownloadChange,
 // whose `started` is matched by the URL the vendor approved and whose last filename is what `download.path()` answers),
-// tells the windows the download's end, and has a completed file recorded as a deliverable of the session that drove it.
+// tells the windows the download's end, and has a completed file recorded as a File artifact of the session that drove it (P3-L M6b).
 // A cancelled or failed download is never recorded.
 import { basename } from 'node:path';
 import type { MawsDownloadRecorded } from '@shared/ipc/schema/maws';
@@ -62,7 +62,7 @@ export function agentDownloads({ claims, recordDownload, log }: AgentDownloadsDe
         connection.tell(entry, { kind: 'download', filename, state: state === 'completed' ? 'complete' : state });
         if (state !== 'completed' || !recordDownload) return;
         recordDownload({ appSessionId: connection.appSessionId, tabId: entry.tab.tabId, path: saved, filename, url: finalUrl, bytes }).catch((error: unknown) =>
-          log(`could not record tab ${entry.tab.tabId}'s download as a deliverable of ${connection.appSessionId}: ${(error as Error).message}`),
+          log(`could not record tab ${entry.tab.tabId}'s download as a File artifact of ${connection.appSessionId}: ${(error as Error).message}`),
         );
       };
     },

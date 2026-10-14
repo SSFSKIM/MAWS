@@ -6,7 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
-import { applyV1, applyV2, carriedBy, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, idAt, insertedBy, mergeMaps, newDoc, stateVector, type Doc, type Node } from '@artifacts/yjs';
+import { adoptClientId, applyV1, applyV2, carriedBy, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, hasPending, idAt, insertedBy, mergeMaps, newDoc, stateVector, SuggestionError, type Doc, type Node } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostPort } from './ports';
@@ -444,19 +444,6 @@ describe('DocumentService: host-originated writes', () => {
     expect(reader.doc.get('t').toString()).toBe('# > hello!');
   });
 
-  it('treats the document key as opaque: `<artifactId>:suggest` is a doc of its own beside the artifact’s', async () => {
-    make({}, true);
-    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'main'));
-    await service.writeAs('a1:suggest', agent, (doc) => doc.get('t').insert(0, 'suggested'));
-    reopen({}, true);
-    for (const [key, text] of [['a1', 'main'], ['a1:suggest', 'suggested']] as const) {
-      const reader = service.replica(sid('app-9'), key);
-      await reader.whenSynced();
-      expect(reader.doc.get('t').toString()).toBe(text);
-    }
-    expect(committed('SELECT artifactId, actor FROM artifact_updates ORDER BY seq')).toEqual([{ artifactId: 'a1', actor: 'human' }, { artifactId: 'a1:suggest', actor: 'session:app-1' }]);
-  });
-
   it('rejects a write whose edit throws, takes back its rows and evicts the doc', async () => {
     make({}, true);
     await service.writeAs('a1', agent, (doc) => doc.get('t').insert(0, 'kept'));
@@ -523,6 +510,339 @@ describe('DocumentService: host-originated writes', () => {
     tick();
     await kept;
     expect(seen).toEqual([{ artifactId: 'a1', revision: service.revision('a1'), actors: [human] }]);
+  });
+});
+
+describe('DocumentService: suggestion docs (M8; Decision Log 23e)', () => {
+  const text = (key: string) => service.live(key).get('t').toString();
+  const keys = () => committed('SELECT artifactId, actor FROM artifact_updates ORDER BY seq');
+
+  it('opens an artifact’s suggestion doc under `<artifactId>:suggest`: gc off, holding the main doc, its writes its own rows', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'The plan.'));
+    const key = service.suggestionDoc('a1');
+    expect(key).toBe('a1:suggest');
+    expect(service.suggestionDoc('a1')).toBe(key);
+    expect(service.live(key).gc).toBe(false);
+    expect(text(key)).toBe('The plan.');
+    await service.writeAs(key, agent, (doc) => doc.get('t').insert(8, ' and more'));
+    expect(text(key)).toBe('The plan and more.');
+    expect(text('a1')).toBe('The plan.');
+    expect(keys()).toEqual([{ artifactId: 'a1', actor: 'human' }, { artifactId: 'a1:suggest', actor: 'session:app-1' }]);
+    expect(service.revision(key)).toBe(2);
+    expect(() => service.suggestionDoc(key)).toThrow(/is a suggestion doc/);
+  });
+
+  it('keeps it in step with the main doc after the main doc’s commit, logging nothing twice, and rebuilds it from both after a reload', async () => {
+    make();
+    const main = raw('a1', human);
+    main.edit((doc) => doc.get('t').insert(0, 'one'));
+    tick();
+    const key = service.suggestionDoc('a1');
+    const view = raw(key, human);
+    view.send({ type: 'step1', sv: stateVector(view.doc) });
+    tick();
+    for (const frame of view.take()) if (frame.type === 'step2') applyV1(view.doc, frame.update);
+    expect(view.doc.get('t').toString()).toBe('one');
+    main.edit((doc) => doc.get('t').insert(0, 'zero '));
+    expect(view.received).toEqual([]); // nothing revealed before the main doc’s row commits
+    tick();
+    const update = view.take().find((frame) => frame.type === 'update');
+    expect(update).toBeDefined();
+    applyV1(view.doc, (update as { update: Uint8Array }).update);
+    expect(view.doc.get('t').toString()).toBe('zero one');
+    expect(keys()).toEqual([{ artifactId: 'a1', actor: 'human' }, { artifactId: 'a1', actor: 'human' }]);
+
+    void service.writeAs(key, agent, (doc) => doc.get('t').insert(8, ' (suggested)'));
+    tick();
+    reopen();
+    void service.writeAs('a1', human, (doc) => doc.get('n').setAttr('status', 'done')); // while the suggestion doc is not loaded
+    tick();
+    expect(service.loaded(key)).toBeNull();
+    expect(text(key)).toBe('zero one (suggested)');
+    expect(service.live(key).get('n').getAttr('status')).toBe('done');
+    expect(keys().filter((row) => (row as { artifactId: string }).artifactId === key)).toHaveLength(1);
+  });
+
+  it('drops a loaded suggestion doc with its main doc when a main write is taken back, so it never holds what the main doc lost', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'kept'));
+    const key = service.suggestionDoc('a1');
+    await expect(
+      service.writeAs('a1', human, (doc) => {
+        doc.get('t').insert(0, 'half ');
+        throw new Error('broken edit');
+      }),
+    ).rejects.toThrow(/broken edit/);
+    expect(service.loaded(key)).toBeNull();
+    expect(text(key)).toBe('kept');
+  });
+
+  it('refuses a main doc frame carrying new structs under a clientID the suggestion doc binds to another actor (an editor applying a proposal itself)', () => {
+    make();
+    void service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'base'));
+    tick();
+    const synced = (end: ReturnType<typeof raw>) => {
+      end.send({ type: 'step1', sv: stateVector(end.doc) });
+      tick();
+      for (const frame of end.take()) if (frame.type === 'step2') applyV1(end.doc, frame.update);
+    };
+    const proposer = raw(service.suggestionDoc('a1'), agent);
+    synced(proposer);
+    proposer.edit((doc) => doc.get('t').insert(4, ' and more'));
+    tick();
+    const forge = () => {
+      const editor = raw('a1', human);
+      synced(editor);
+      const before = stateVector(editor.doc);
+      applyV1(editor.doc, diffV1(proposer.doc, before)); // the agent's proposal, its structs under the agent's clientID
+      editor.send({ type: 'update', update: diffV1(editor.doc, before) });
+      return editor;
+    };
+    expect(forge().closed).toBe(true);
+    expect(service.stats.rejected.at(-1)?.reason).toMatch(/bound to another actor/);
+    expect(text('a1')).toBe('base');
+    reopen(); // the suggestion doc not loaded: its binding is read from the store
+    expect(forge().closed).toBe(true);
+    expect(service.loaded('a1:suggest')).toBeNull();
+    expect(text('a1')).toBe('base');
+  });
+
+  it('writes through a host replica of the suggestion doc that keeps deleted content (gc off), as the doc itself does', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'abc'));
+    const key = service.suggestionDoc('a1');
+    let replicaGc: boolean | null = null;
+    await service.writeAs(key, agent, (doc) => {
+      replicaGc = doc.gc;
+      doc.get('t').delete(1, 1);
+    });
+    expect(replicaGc).toBe(false);
+    expect(text(key)).toBe('ac');
+    expect(text('a1')).toBe('abc');
+  });
+});
+
+describe('DocumentService: inherited bindings and suggestion replicas (M8 review findings 1 and 2)', () => {
+  const synced = (end: ReturnType<typeof raw>) => {
+    end.send({ type: 'step1', sv: stateVector(end.doc) });
+    tick();
+    for (const frame of end.take()) if (frame.type === 'step2') applyV1(end.doc, frame.update);
+  };
+  // A replica of the suggestion doc that extends `client` (a clientID of the main doc) as the human: a forgery.
+  const extendAs = (client: number) => {
+    const end = raw('a1:suggest', human);
+    synced(end);
+    adoptClientId(end.doc, client);
+    end.edit((doc) => doc.get('t').insert(0, 'forged '));
+    return end;
+  };
+  const sessionClient = (artifactId: string, actor: string) =>
+    (committed('SELECT clientId FROM client_actors WHERE artifactId = ? AND actor = ? ORDER BY firstSeq DESC', artifactId, actor)[0] as { clientId: number }).clientId;
+
+  it('refuses a suggestion-doc frame extending a clientID the main doc binds to another actor, the main doc loaded or not', () => {
+    make();
+    void service.writeAs('a1', agent, (doc) => doc.get('t').insert(0, 'base'));
+    tick();
+    service.suggestionDoc('a1');
+    const client = sessionClient('a1', 'session:app-1');
+    expect(extendAs(client).closed).toBe(true);
+    expect(service.stats.rejected.at(-1)?.reason).toMatch(/bound to another actor \(session:app-1\)/);
+    reopen();
+    service.suggestionDoc('a1');
+    expect(service.loaded('a1')).toBeNull();
+    expect(extendAs(client).closed).toBe(true);
+    expect(service.live('a1:suggest').get('t').toString()).toBe('base');
+  });
+
+  it('refuses one extending a clientID that reached the suggestion doc from a later main-doc write', () => {
+    make();
+    void service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'base'));
+    tick();
+    service.suggestionDoc('a1');
+    const other: Actor = { kind: 'session', appSessionId: sid('app-2') };
+    void service.writeAs('a1', other, (doc) => doc.get('t').insert(4, '!')); // flows into the loaded suggestion doc unlogged
+    tick();
+    expect(extendAs(sessionClient('a1', 'session:app-2')).closed).toBe(true);
+    expect(service.live('a1:suggest').get('t').toString()).toBe('base!');
+  });
+
+  it('gives an agent replica of the suggestion doc a suggestion doc of its own (gc off), also when it is rebuilt', async () => {
+    make({}, true);
+    const replica = service.replica(sid('app-7'), service.suggestionDoc('a1'));
+    await replica.whenSynced();
+    expect(replica.doc.gc).toBe(false);
+    expect(replica.doc.isSuggestionDoc).toBe(true);
+    expect(() => replica.edit(() => { throw new Error('a failed plan'); })).toThrow(/a failed plan/);
+    expect(replica.doc.gc).toBe(false);
+    expect(replica.doc.isSuggestionDoc).toBe(true);
+  });
+});
+
+describe('DocumentService: accepting and rejecting suggestions (M8; Decision Log 45)', () => {
+  const text = (key: string) => service.live(key).get('t').toString();
+  const at = (key: string, index: number) => idAt(service.live(key).get('t'), index)!;
+  const span = (key: string, from: number, to: number) => ({ start: at(key, from), end: at(key, to) });
+  const rows = (key: string) => committed('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq', key).map((row) => (row as { actor: string }).actor);
+  const proposedAt = 10 * DAY;
+  // The main doc reads "The plan."; the agent proposes, in one write, " Zed." at its end and then "Intro. " at its
+  // start, so "Intro. " holds the later clocks.
+  async function proposed(): Promise<string> {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'The plan.'));
+    const key = service.suggestionDoc('a1');
+    await service.writeAs(key, agent, (doc) => {
+      const t = doc.get('t');
+      t.insert(9, ' Zed.');
+      t.insert(0, 'Intro. ');
+    });
+    expect(text(key)).toBe('Intro. The plan. Zed.');
+    return key;
+  }
+
+  it('accepts out of write order by copy: the acceptor’s row, the suggester’s provenance and time, the proposals gone from the suggestion doc, no gap on any replica', async () => {
+    const key = await proposed();
+    const mainReplica = service.replica(sid('app-8'), 'a1');
+    const suggestionReplica = service.replica(sid('app-9'), key);
+    await Promise.all([mainReplica.whenSynced(), suggestionReplica.whenSynced()]);
+    now += 5 * MIN;
+    const revision = await service.acceptSuggestion('a1', [span(key, 0, 6)], human); // "Intro. ": the later clocks first
+    expect(revision).toBe(service.revision('a1'));
+    expect(text('a1')).toBe('Intro. The plan.');
+    expect(text(key)).toBe('Intro. The plan. Zed.');
+    expect(rows('a1')).toEqual(['human', 'human']);
+    expect(rows(key)).toEqual(['session:app-1', 'human']); // the proposal, then its originals deleted by the acceptor
+    const provenance = service.provenance('a1');
+    expect(insertedBy(provenance, at('a1', 0))).toEqual({ actor: 'session:app-1', at: proposedAt });
+    expect(carriedBy(provenance, at('a1', 0))).toBe('accept');
+    const copyClient = at('a1', 0).client;
+    expect(at(key, 0).client).toBe(copyClient); // the suggestion doc shows the copy, its original deleted
+    expect(copyClient).not.toBe((committed('SELECT clientId FROM client_actors WHERE artifactId = ?', key)[0] as { clientId: number }).clientId);
+    expect(committed('SELECT actor, host FROM client_actors WHERE artifactId = ? AND clientId = ?', 'a1', copyClient)).toEqual([{ actor: 'session:app-1', host: 0 }]);
+
+    await service.acceptSuggestion('a1', [span(key, 16, 20)], human); // " Zed."
+    expect(text('a1')).toBe('Intro. The plan. Zed.');
+    await until(() => mainReplica.doc.get('t').toString() === 'Intro. The plan. Zed.' && suggestionReplica.doc.get('t').toString() === 'Intro. The plan. Zed.');
+    for (const doc of [service.live('a1'), service.live(key), mainReplica.doc, suggestionReplica.doc]) expect(hasPending(doc)).toBe(false);
+    // nothing proposed is left: an accept over the whole text writes nothing
+    const before = rows('a1').length;
+    await service.acceptSuggestion('a1', [span(key, 0, 20)], human);
+    expect(rows('a1')).toHaveLength(before);
+  });
+
+  it('rejects: a proposed insert leaves the suggestion doc only; a proposed deletion comes back content-identical, written by the rejector and still credited to its author', async () => {
+    make({}, true);
+    const writer: Actor = { kind: 'session', appSessionId: sid('app-2') };
+    await service.writeAs('a1', writer, (doc) => doc.get('t').insert(0, 'The plan.'));
+    const key = service.suggestionDoc('a1');
+    await service.writeAs(key, agent, (doc) => doc.get('t').insert(9, ' Zed.'));
+    await service.writeAs(key, agent, (doc) => doc.get('t').delete(0, 4)); // "The " struck, apart from " Zed."
+    expect(text(key)).toBe('plan. Zed.');
+    const mainRows = rows('a1').length;
+    await service.rejectSuggestion('a1', [span(key, 5, 5)]); // " Zed."
+    expect(text(key)).toBe('plan.');
+    expect(text('a1')).toBe('The plan.');
+    expect(rows('a1')).toHaveLength(mainRows); // the main doc was not written
+    let struck = service.live(key).get('t')._start;
+    while (struck && !struck.deleted) struck = struck.right as typeof struck;
+    const original = { client: struck!.id.client, clock: struck!.id.clock };
+    now += 5 * MIN;
+    await service.rejectSuggestion('a1', [{ start: original, end: original }]);
+    expect(text('a1')).toBe('The plan.');
+    expect(text(key)).toBe('The plan.');
+    expect(rows('a1').at(-1)).toBe('human'); // the rejector writes the copy
+    const restored = at('a1', 0);
+    expect(restored).not.toEqual(original);
+    expect(insertedBy(service.provenance('a1'), restored)).toEqual({ actor: 'session:app-2', at: proposedAt }); // its author, its time
+    expect(carriedBy(service.provenance('a1'), restored)).toBe('reject');
+  });
+
+  it('keeps a human’s concurrent edit to the main doc through an accept and a reject', async () => {
+    const key = await proposed();
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(4, 'whole '));
+    expect(text(key)).toBe('Intro. The whole plan. Zed.');
+    await service.acceptSuggestion('a1', [span(key, 0, 6)], human);
+    await service.rejectSuggestion('a1', [span(key, 22, 26)]);
+    expect(text('a1')).toBe('Intro. The whole plan.');
+    expect(text(key)).toBe('Intro. The whole plan.');
+  });
+
+  it('refuses a range with no content or that would split an inserted block from its words, writing nothing; a forged clientID stays refused after an accept', async () => {
+    const key = await proposed();
+    const count = rowCount();
+    await expect(service.acceptSuggestion('a1', [{ start: { client: 1, clock: 0 }, end: { client: 1, clock: 0 } }], human)).rejects.toBeInstanceOf(SuggestionError);
+    expect(rowCount()).toBe(count);
+    await service.acceptSuggestion('a1', [span(key, 0, 6)], human);
+    // a replica of the main doc writing under the copy's clientID (bound to the suggester) is refused
+    const copyClient = at('a1', 0).client;
+    const forger = service.replica(sid('app-5'), 'a1');
+    await forger.whenSynced();
+    adoptClientId(forger.doc, copyClient);
+    forger.doc.get('t').insert(0, 'forged ');
+    await until(() => service.stats.rejected.some((r) => r.reason.includes(`clientID ${copyClient}, bound to another actor`)));
+    expect(text('a1')).toBe('Intro. The plan.');
+  });
+});
+
+describe('DocumentService: suggestions, fix wave 1', () => {
+  const sessionA: Actor = { kind: 'session', appSessionId: sid('app-a') };
+  const sessionB: Actor = { kind: 'session', appSessionId: sid('app-b') };
+  const text = (key: string) => service.live(key).get('t');
+  // The ids of the formatting markers of a text, in order.
+  const markers = (key: string) => {
+    const out: { client: number; clock: number }[] = [];
+    for (let item = text(key)._start; item; item = item.right as typeof item) {
+      if (!item.deleted && (item.content as { key?: unknown }).key !== undefined) out.push({ client: item.id.client, clock: item.id.clock });
+    }
+    return out;
+  };
+
+  it('credits a mixed-author range’s format change to its proposer and its inserted text to its own, each at its proposal’s time', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'x z'));
+    const key = service.suggestionDoc('a1');
+    const boldAt = now;
+    await service.writeAs(key, sessionA, (doc) => doc.get('t').format(0, 1, { bold: true })); // A: bold on the existing "x"
+    now += 2 * MIN;
+    const typedAt = now;
+    await service.writeAs(key, sessionB, (doc) => doc.get('t').insert(1, 'y')); // B: a character beside it
+    now += 5 * MIN;
+    const [open] = markers(key);
+    await service.acceptSuggestion('a1', [{ start: open, end: idAt(text(key), 1)! }], human);
+    expect(text('a1').toDelta().toJSON()).toEqual(text(key).toDelta().toJSON());
+    expect(text('a1').toString()).toContain('y');
+    const provenance = service.provenance('a1');
+    const copied = markers('a1');
+    expect(copied.length).toBeGreaterThan(0);
+    for (const marker of copied) {
+      expect(insertedBy(provenance, marker)).toEqual({ actor: 'session:app-a', at: boldAt });
+      expect(carriedBy(provenance, marker)).toBe('accept');
+    }
+    expect(insertedBy(provenance, idAt(text('a1'), 1)!)).toEqual({ actor: 'session:app-b', at: typedAt });
+  });
+
+  it('accepts a mixed-author range whose copy merges formatting runs: characters credited per author, the markers to the proposer who set them', async () => {
+    make({}, true);
+    await service.writeAs('a1', human, (doc) => {
+      doc.get('t').insert(0, 'ab');
+      doc.get('t').format(0, 1, { bold: true }); // "a" bold already: the copy of a bold "b" merges into its run
+    });
+    const key = service.suggestionDoc('a1');
+    const boldAt = now;
+    await service.writeAs(key, sessionA, (doc) => doc.get('t').format(1, 1, { bold: true }));
+    now += 2 * MIN;
+    const typedAt = now;
+    await service.writeAs(key, sessionB, (doc) => doc.get('t').insert(2, 'c'));
+    now += 5 * MIN;
+    const before = new Set(markers('a1').map(({ client, clock }) => `${client}:${clock}`));
+    const [first] = markers(key);
+    await service.acceptSuggestion('a1', [{ start: first, end: idAt(text(key), 2)! }], human);
+    expect(text('a1').toDelta().toJSON()).toEqual(text(key).toDelta().toJSON());
+    const provenance = service.provenance('a1');
+    expect(insertedBy(provenance, idAt(text('a1'), 2)!)).toEqual({ actor: 'session:app-b', at: typedAt }); // "c"
+    const copied = markers('a1').filter(({ client, clock }) => !before.has(`${client}:${clock}`));
+    expect(copied.length).toBeGreaterThan(0);
+    for (const marker of copied) expect(insertedBy(provenance, marker)).toEqual({ actor: 'session:app-a', at: boldAt }); // only A set bold
   });
 });
 

@@ -9,6 +9,8 @@ import * as z from 'zod';
 import { ActorSchema } from '../../artifacts/actor';
 import { ArtifactKindSchema, ArtifactSessionLinkSchema, SpaceSchema } from '../../artifacts/entity';
 import { AppSessionIdSchema, ProjectIdSchema } from '../../graph/ids';
+import { ARTIFACT_EXPORT_FORMATS } from '../../maws/tools';
+import { FilesReadInputSchema, FilesReadOutputSchema } from './files';
 import { ArtifactRowSchema } from './artifacts';
 import type { CommandSpec } from './common';
 
@@ -56,6 +58,10 @@ export const LibraryRowSchema = LibraryEntrySchema.extend({
 });
 export type LibraryRow = z.infer<typeof LibraryRowSchema>;
 
+// M6b: what one run of the X12 import did with every record under `<userData>/deliverables` (the engine host's
+// `library/import.ts`): landed now, already an artifact, its file gone, or not a record or not landed.
+export const DeliverablesImportSchema = z.strictObject({ imported: Seq, skipped: Seq, missing: Seq, failed: Seq });
+
 export const LIBRARY_QUERY_MAX = 1_000;
 
 export const LibraryFilterSchema = z.strictObject({
@@ -79,6 +85,20 @@ export type LibrarySpace = z.infer<typeof LibrarySpaceSchema>;
 export const LibraryChangedSchema = z.strictObject({ revision: Seq }); // the index's library revision after the commit
 export type LibraryChanged = z.infer<typeof LibraryChangedSchema>;
 
+// M5b: a byte kind's stored file as the viewers name it (the scheme URL's last segment, the file a `file` artifact's
+// code body reads), at a revision (the latest when omitted).
+export const LibraryContentSchema = z.strictObject({ revision: Seq, kind: ArtifactKindSchema, name: z.string(), path: z.string() });
+export type LibraryContent = z.infer<typeof LibraryContentSchema>;
+const ContentAt = z.strictObject({ artifactId: Id, revision: Seq.optional() });
+
+// M5b: what Save as… copies out of MAWS: a file `artifacts.export` wrote (its revision and format name it under the
+// store's directory), or a byte kind's stored file at a revision (a File artifact's "Save a copy…").
+export const LibrarySaveSourceSchema = z.union([
+  z.strictObject({ export: z.strictObject({ revision: Seq, format: z.enum(ARTIFACT_EXPORT_FORMATS) }) }),
+  z.strictObject({ content: z.strictObject({ revision: Seq.optional() }) }),
+]);
+export type LibrarySaveSource = z.infer<typeof LibrarySaveSourceSchema>;
+
 export const commands = {
   // The rows the filter admits, by `updatedAt`, newest first, with the counts per kind.
   'library.list': main(z.strictObject({ filter: LibraryFilterSchema.optional() }), z.strictObject({ rows: z.array(LibraryRowSchema), counts: LibraryCountsSchema })),
@@ -86,12 +106,34 @@ export const commands = {
   'library.get': main(z.strictObject({ artifactId: Id }), z.strictObject({ row: LibraryRowSchema.nullable() })),
   // Every Space, by name, with its count of live artifacts.
   'library.spaces': main(z.void(), z.strictObject({ spaces: z.array(LibrarySpaceSchema) })),
+  // M5b (Decision Log 14): the export formats main's exporter registry serves for a kind, in ARTIFACT_EXPORT_FORMATS'
+  // order (a format `artifacts.export` would refuse `exportUnavailable` is not listed).
+  'library.exportFormats': main(z.strictObject({ kind: ArtifactKindSchema }), z.strictObject({ formats: z.array(z.enum(ARTIFACT_EXPORT_FORMATS)) })),
+  // M5b: a byte kind's stored file at a revision, resolved by main through the host (`artifacts.content`).
+  'library.content': main(ContentAt, LibraryContentSchema),
+  // M5b: that file handed to the OS (a kind it opens as a document, never a program) or shown in Finder; a refusal is an
+  // answer with its reason, as `files.openExternal` and `files.reveal` answer.
+  'library.openExternally': main(ContentAt, z.strictObject({ opened: z.boolean(), message: z.string().nullable() })),
+  'library.reveal': main(ContentAt, z.strictObject({ revealed: z.boolean(), message: z.string().nullable() })),
+  // M6b fix wave 2 (Decision Log 36i): a File artifact's stored file read as `files.read` reads a session's, by the
+  // artifact alone: main resolves its path (`artifacts.content`), so the owner's file reads in its viewer with no
+  // session, and a window names no path.
+  'library.read': main(ContentAt.extend(FilesReadInputSchema.pick({ offset: true, length: true, hash: true }).shape), FilesReadOutputSchema),
+  // M5b: the native save dialog at ~/Downloads/<the artifact's title or the file's name>, the source copied to the
+  // chosen path (a temporary file beside it renamed over it); `saved: false` when the dialog was cancelled.
+  'library.saveAs': main(
+    z.strictObject({ artifactId: Id, source: LibrarySaveSourceSchema }),
+    z.discriminatedUnion('saved', [z.strictObject({ saved: z.literal(true), path: z.string() }), z.strictObject({ saved: z.literal(false) })]),
+  ),
   // The host's live set, read behind the store's commit barrier. Main-only.
   'library.snapshot': host(z.void(), LibrarySnapshotSchema),
   // One artifact and its links; null (with no links) when it is gone or deleted. Main-only.
   'library.entry': host(z.strictObject({ artifactId: Id }), LibraryEntryAnswerSchema),
   // An artifact's searchable text at its current revision. Main-only.
   'library.text': host(z.strictObject({ artifactId: Id }), z.strictObject({ revision: Seq, text: z.string() })),
+  // M6b, e2e only (refused unless the engine host runs under MAWS_E2E=1): the X12 import the host runs at store open, run
+  // again now, so a test's seeded pre-P3 records land as they would at the next start. The counts cover the directory.
+  'library.testImport': host(z.void(), DeliverablesImportSchema),
 } as const satisfies Record<`library.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

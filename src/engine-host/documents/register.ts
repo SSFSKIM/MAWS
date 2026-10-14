@@ -23,7 +23,9 @@ import type { commands as SpaceCommands } from '@shared/ipc/schema/spaces';
 import type { DeadlineShape } from '../ipc';
 import { ArtifactFiles } from './bytes';
 import { ArtifactStoreError, StoreTooNewError } from './errors';
+import { SuggestionError } from '@artifacts/yjs';
 import { fromMessagePortMain } from './ports';
+import { suggestionKey, type DocumentService } from './service';
 import type { Documents } from '.';
 import type { ArtifactStore, ByteContent } from './store';
 
@@ -33,8 +35,8 @@ export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShap
   'artifacts.list': 'immediate', 'artifacts.get': 'immediate', 'artifacts.create': 'immediate', 'artifacts.update': 'immediate',
   'artifacts.delete': 'immediate', 'artifacts.duplicate': 'immediate', 'artifacts.search': 'immediate', 'artifacts.versions': 'immediate',
   'artifacts.saveVersion': 'immediate', 'artifacts.nameVersion': 'immediate', 'artifacts.restore': 'immediate', 'artifacts.markViewed': 'immediate', 'artifacts.pruneVersions': 'immediate',
-  'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.testLoopDelay': 'immediate',
-  'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.state': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
+  'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.acceptSuggestion': 'immediate', 'artifacts.rejectSuggestion': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.testLoopDelay': 'immediate',
+  'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.state': 'immediate', 'artifacts.assets': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
   'spaces.list': 'immediate', 'spaces.create': 'immediate', 'spaces.update': 'immediate', 'spaces.delete': 'immediate',
 };
 
@@ -157,13 +159,33 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     const store = storeOf();
     return store.readCommitted(() => ({ bytes: store.versionState(artifactId, versionId ?? { seq: seq! }) }));
   });
-  serve('artifacts.attributions', ({ artifactId, fromSeq, toSeq }) => {
+  serve('artifacts.attributions', ({ artifactId, fromSeq, toSeq, doc }) => {
     const store = storeOf();
     return store.readCommitted(() => {
       required(store, artifactId);
-      return { bytes: store.attributions(artifactId, fromSeq, toSeq) };
+      return { bytes: store.attributions(doc === 'suggestions' ? suggestionKey(artifactId) : artifactId, fromSeq, toSeq) };
     });
   });
+  // Decision Log 45: the human accepts or rejects proposals of a document kind; a range the plan refuses is `invalid`.
+  const settle = (artifactId: string, settled: (service: DocumentService) => Promise<number>) => {
+    const store = storeOf();
+    const artifact = required(store, artifactId);
+    if (!isDocKind(artifact.kind)) throw new ArtifactStoreError('invalid', `a ${artifact.kind} artifact has no suggestions`, { kind: artifact.kind });
+    let pending: Promise<number>;
+    try {
+      pending = settled(store.service);
+    } catch (error) {
+      pending = Promise.reject(error);
+    }
+    return pending.then(
+      (revision) => ({ revision }),
+      (error: unknown) => {
+        throw error instanceof SuggestionError ? new ArtifactStoreError('invalid', error.message, error.data) : error;
+      },
+    );
+  };
+  serve('artifacts.acceptSuggestion', ({ artifactId, ranges }) => settle(artifactId, (service) => service.acceptSuggestion(artifactId, ranges, HUMAN)));
+  serve('artifacts.rejectSuggestion', ({ artifactId, ranges }) => settle(artifactId, (service) => service.rejectSuggestion(artifactId, ranges, HUMAN)));
   serve('artifacts.uploadAsset', ({ artifactId, name, mime, bytes }) => storeOf().uploadAsset(artifactId, bytes, { name, mime }, HUMAN));
   serve('artifacts.testLoopDelay', ({ reset }) => {
     e2eOnly('artifacts.testLoopDelay');
@@ -175,10 +197,18 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     return answer;
   });
   serve('artifacts.setDefaults', ({ owner, spaces }) => storeOf().setDefaults({ owner, spaces }));
+  // A retained version pinned to a since-deleted design system still renders with that system's faces and images
+  // (Decision Log 46, X29): a deleted artifact's files answer for a named revision, never `live`, while any retained
+  // version pins it; otherwise a deleted artifact is not found.
+  const servable = (store: ArtifactStore, artifactId: string, revision: number | undefined): ArtifactRow => {
+    const entity = store.entity(artifactId);
+    if (entity && entity.deletedAt !== null && revision !== undefined && store.versions.pinsSystem(artifactId)) return row(store, artifactId, true)!;
+    return required(store, artifactId);
+  };
   serve('artifacts.content', ({ artifactId, revision, path }) => {
     const store = storeOf();
     return store.readCommitted(() => {
-      const { kind } = required(store, artifactId);
+      const { kind } = servable(store, artifactId, revision);
       if (path !== undefined && path.startsWith('assets/')) {
         const asset = store.listAssets(artifactId).find((candidate) => candidate.ref === path);
         if (!asset) throw new ArtifactStoreError('notFound', `no asset ${path} in ${artifactId}`);
@@ -187,6 +217,13 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
       const content = store.contentRef(artifactId, revision);
       if (path !== undefined && path !== content.ref.name) throw new ArtifactStoreError('notFound', `no file ${path} in ${artifactId} at revision ${content.revision}`);
       return { revision: content.revision, kind, name: content.ref.name, size: content.ref.size, sha256: content.ref.sha256, path: content.path };
+    });
+  });
+  serve('artifacts.assets', ({ artifactId }) => {
+    const store = storeOf();
+    return store.readCommitted(() => {
+      required(store, artifactId);
+      return { assets: store.listAssets(artifactId).map(({ ref, name, mime, size }) => ({ ref, name, mime, size })) };
     });
   });
   serve('artifacts.state', ({ artifactId }) => {
@@ -232,14 +269,14 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
 
   // A document's port (Decision Log 13): attached for a live document kind, closed for anything else, so a window never
   // waits on a port nobody serves.
-  client.onDocPort(({ channel, artifactId, actor }, port) => {
+  client.onDocPort(({ channel, artifactId, actor, doc }, port) => {
     const artifact = documents?.store.get(artifactId) ?? null;
     if (!documents || !artifact || !isDocKind(artifact.kind)) {
       console.error(`[artifacts] closed document channel ${channel}: ${!documents ? 'the store is unavailable' : !artifact ? `no artifact ${artifactId}` : `a ${artifact.kind} artifact has no document`}`);
       port.close();
       return;
     }
-    documents.service.attach(artifactId, fromMessagePortMain(port), actor);
+    documents.service.attach(doc === 'suggestions' ? documents.service.suggestionDoc(artifactId) : artifactId, fromMessagePortMain(port), actor);
   });
 
   return {

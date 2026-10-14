@@ -1097,3 +1097,22 @@ describe('files admission of delivered files', () => {
   });
 });
 // E2 end
+
+// P3-L (M6b fix wave 2): a path main resolved itself (a File artifact's stored file, `library.read`), read with no session
+// and no roots, as `read` answers; a directory or a missing path is refused.
+describe('readResolved', () => {
+  it('reads a file outside every root with no session, chunk and hash alike', async () => {
+    const files = service({ env: {} });
+    const answer = await files.readResolved({ path: join(outside, 'secret.txt'), hash: true });
+    expect(answer).toMatchObject({ encoding: 'utf8', content: 'secret', bytes: 6, offset: 0, length: 6, truncated: false, utf8: true });
+    expect(answer.hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(await files.readResolved({ path: join(outside, 'secret.txt'), offset: 3, length: 2 })).toMatchObject({ content: 're', offset: 3, length: 2, truncated: true });
+  });
+
+  it('refuses a directory, a relative path and a path that is gone', async () => {
+    const files = service({ env: {} });
+    await expect(files.readResolved({ path: join(outside, 'dirs') })).rejects.toThrow();
+    await expect(files.readResolved({ path: 'secret.txt' })).rejects.toThrow('path must be absolute');
+    await expect(files.readResolved({ path: join(outside, 'gone.txt') })).rejects.toThrow('not found');
+  });
+});

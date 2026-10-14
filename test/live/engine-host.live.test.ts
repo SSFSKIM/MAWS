@@ -283,24 +283,49 @@ describe('engine host live', () => {
     });
   }, LONG_CASE_MS);
 
-  it('3.4 AskUserQuestion round trip', async (ctx) => {
+  // P2-C2 (the P2 spec's Decision Log 33): every host launch declares the `maws` server, so the native AskUserQuestion is
+  // withdrawn (`--disallowedTools`) and `mcp__maws__ask` is the one ask; this case is the live pin of that rule, the
+  // native round trip it replaced having no live path in MAWS any more (native asks reach MAWS only from transcripts,
+  // whose rendering the recorded fixtures pin).
+  it('3.4 the one ask: system/init lacks AskUserQuestion and holds mcp__maws__ask; a blocking two-question ask round trip', async (ctx) => {
     const g = live(ctx);
     await withHost(g, '3.4', async (host) => {
       const spec = liveSpec(g.scratch());
       await host.launch(spec);
       const s = sessionView(host, spec);
       await s.send(
-        "Use the AskUserQuestion tool exactly once to ask me two questions in one call: 'Which color do you prefer?' with options Red and Blue, and 'Which fruit do you like?' with options Apple and Pear. After I answer, reply with my two answers.",
+        "Use the mcp__maws__ask tool exactly once, blocking, to ask me two questions in one call: 'Which color do you prefer?' as a choice of Red and Blue, and 'Which fruit do you like?' as free text. After I answer, reply with my two answers.",
       );
-      const q = await s.wait('question.requested', 'two questions');
-      expect(q.questions).toHaveLength(2);
-      const answers = Object.fromEntries(q.questions.map((question, i) => [question.question, question.options[i === 0 ? 0 : 1]!.label]));
-      expect(await s.answer(q.requestId, { kind: 'question', answers })).toEqual({ outcome: 'delivered' });
-      const result = await s.wait('tool.result', 'for the questions', (e) => e.toolUseId === q.toolUseId);
+      const init = await host.waitFor(() => s.journal().find((r) => r.direction === 'in' && (r.frame as { type?: string; subtype?: string }).type === 'system' && (r.frame as { subtype?: string }).subtype === 'init'), 'system/init', TURN_MS);
+      const tools = (init.frame as { tools: string[] }).tools;
+      expect(tools).not.toContain('AskUserQuestion');
+      expect(tools).toContain('mcp__maws__ask');
+      // the ask may first need the permission auto mode asks for an MCP tool
+      const opened = await host.waitFor(
+        () => {
+          const events = s.events();
+          const resolved = new Set(ofKind(events, 'permission.resolved').map((e) => e.requestId));
+          const open = ofKind(events, 'permission.requested').find((e) => !resolved.has(e.requestId) && e.toolName === 'mcp__maws__ask');
+          if (open !== undefined) void s.answer(open.requestId, { kind: 'permission', decision: 'allow', scope: 'once' });
+          return ofKind(events, 'maws.ask.opened')[0];
+        },
+        'maws.ask.opened',
+        TURN_MS,
+      );
+      expect(opened.blocking).toBe(true);
+      expect(opened.questions).toHaveLength(2);
+      const answers = opened.questions.map((question) =>
+        question.modality === 'choice'
+          ? { id: question.id!, question: question.question, status: 'answered' as const, value: [question.options!.find((o) => o.label === 'Blue')?.label ?? question.options![0]!.label] }
+          : { id: question.id!, question: question.question, status: 'answered' as const, value: 'Pear' }, // a text answer is a string
+      );
+      expect(await host.call('maws.ask.answer', { appSessionId: s.id, askId: opened.askId, answers })).toEqual({ outcome: 'delivered' });
+      const answered = await s.wait('maws.ask.answered', 'the answers', (e) => e.askId === opened.askId);
+      expect(answered.delivery).toBe('result');
+      const result = await s.wait('tool.result', 'for the ask', (e) => e.toolUseId === opened.toolUseId);
       const content = text(result.content);
-      console.log(`   question.requested seq ${q.seq}; tool.result seq ${result.seq}: ${content.slice(0, 300)}`);
-      expect(content).toContain('Your questions have been answered');
-      for (const value of Object.values(answers)) expect(content).toContain(value);
+      console.log(`   system/init asks: ${JSON.stringify(tools.filter((t) => t === 'AskUserQuestion' || t.endsWith('__ask')))}; maws.ask.opened ${opened.askId}; tool.result seq ${result.seq}: ${content.slice(0, 300)}`);
+      for (const answer of answers) for (const value of [answer.value].flat()) expect(content).toContain(value);
       await s.waitTurns(1);
     });
   }, LONG_CASE_MS);

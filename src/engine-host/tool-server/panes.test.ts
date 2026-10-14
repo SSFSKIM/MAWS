@@ -22,9 +22,9 @@ describe('the pane bridge (residue 3)', () => {
 
   it("relays a window's refusal word for word", async () => {
     const bridge = new PaneBridge({ show: () => {} });
-    const answer = bridge.request(req('r1', { pane: 'deliverable', target: 'd1' }), new AbortController().signal);
-    bridge.answer('r1' as RequestId, { ok: false, error: TOOL_ERRORS.paneUnavailable('deliverable') });
-    expect(await answer).toEqual({ error: 'show_pane: the deliverable pane is not available in this build of MAWS' });
+    const answer = bridge.request(req('r1', { pane: 'artifact', target: 'd1' }), new AbortController().signal);
+    bridge.answer('r1' as RequestId, { ok: false, error: TOOL_ERRORS.paneUnavailable('artifact') });
+    expect(await answer).toEqual({ error: 'show_pane: the artifact pane is not available in this build of MAWS' });
   });
 
   it('turns silence into the timeout error after PANE_ANSWER_MS', async () => {
