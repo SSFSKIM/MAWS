@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { contentIdsOf, idAt, onUpdate, stateVector, transact, type Node } from '../yjs';
 import { DocIndex } from './block-index';
 import { EditError, type EditRefusal, type Op } from './edit-ops';
+import { precheckEdit } from './edit-plan';
 import { applyEdit, warmWriter } from './patch-writer';
 import { getThread } from './threads';
 import { converged, coveredIn, dupes, ids, liveThreads, marksOf, nodeOf, order, pmOf, replica, seedDoc, sequence, sync, textOf } from './writer.fixture';
@@ -351,6 +352,15 @@ describe('the atomic batch (S4 1c)', () => {
     if (r.reason === 'staleTargets') expect(r.blocks[0].text).toMatch(/^A NEW plain/);
     expect(stateVector(agent)).toEqual(sv);
     expect(textOf(agent, 'p2')).toContain('Friday');
+  });
+
+  // M9 addendum (suggestions): the checks before any op alone, for a batch planned on another doc than the one read
+  it('precheckEdit runs only the checks before any op: a stale target refused, a quote not searched', () => {
+    const doc = seedDoc();
+    const since = DocIndex.of(doc).epoch;
+    transact(doc, () => nodeOf(doc, 'p3').insert(0, 'NEW '));
+    expect(refusal(() => precheckEdit(doc, [{ op: 'replace_block', id: 'p3', markdown: 'Rewritten.' }], { since }))).toMatchObject({ reason: 'staleTargets', blocks: [{ id: 'p3' }] });
+    expect(() => precheckEdit(doc, [{ op: 'replace_text', old: 'a quote no block holds', new: 'x' }], { since })).not.toThrow();
   });
 
   it('the human’s typing elsewhere never conflicts, and a quote validated by its text applies in a block the human typed in', () => {

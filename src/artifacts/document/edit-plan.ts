@@ -934,5 +934,12 @@ function targetsOf(op: Op): string[] {
   }
 }
 
+/**
+ * Only the checks before any op (targets a restore removed, targets changed since `options.since`) against `doc`; throws
+ * `EditError` as `planEdit` would. For a batch planned on another doc than the one the agent read (a suggestion batch,
+ * planned on the suggestion doc and checked against the artifact's own).
+ */
+export const precheckEdit = (doc: Doc, ops: readonly Op[], options: ApplyOptions = {}): void => new Planner(doc, options).precheck(ops);
+
 /** Plans and validates a batch against `doc` (nothing is written); throws `EditError` when any op fails. */
 export const planEdit = (doc: Doc, ops: readonly Op[], options: ApplyOptions = {}): Plan => new Planner(doc, options).plan(ops);
