@@ -13,6 +13,9 @@
 // - D's chain, registered in A's store, governs the pin a version is written with: with no defaults, the house system;
 //   then the defaults chosen in Settings › Artifacts (main's `artifacts.setDefaults`): a document's own system, else its
 //   Space's default, else the owner's; a deleted default falls through to the next link (12);
+// - the window resolves the same chain for a scope (the P3 spec's Decision Log 61): a fixture that names no system,
+//   under no default, draws the house system the host's chain names (`designSystems.house`) as the owner edited it, not
+//   the bundled floor, and the floor once the house system is deleted;
 // - `official`'s bundled face sets its page's Type section through the app's CSP, a canon frame shows the system's
 //   image asset, and the header's "Export for Claude" writes the system as a zip of Claude's files with every asset it
 //   holds (A's export service; D12);
@@ -110,7 +113,7 @@ function recolourAccent(page: Page, artifactId: string, hex: string): Promise<{ 
 }
 
 // The document fixture (the renderer's e2e seam, standing for B's editor): a minimal page in a `DesignSystemScope`.
-type SystemRef = { id: string; versionSeq?: number } | { builtin: 'maws' } | null;
+type SystemRef = { id: string; versionSeq?: number } | { builtin: 'maws' } | null | { governedBy: { designSystemId?: string | null; spaceId?: string | null } };
 interface FixtureSeam {
   __maws_design_system_fixture: { mount(name: string, system: SystemRef): void; unmount(name: string): void };
 }
@@ -386,6 +389,42 @@ test('Official’s bundled face sets its Type section, a canon frame shows an im
   ]);
   const bundledFont = readFileSync(join(REPO_ROOT, 'src/artifacts/types/design_system/defaults/official/assets/NotoSerifKR-Regular-full.woff2'));
   expect(Buffer.from(execFileSync('/usr/bin/unzip', ['-p', path, 'fonts/NotoSerifKR-Regular-full.woff2'], { maxBuffer: 16 * 1024 * 1024 })).equals(bundledFont)).toBe(true);
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// The P3 spec's Decision Log 61: a scope the window resolves itself (as B's documents and C's decks do) ends the chain at
+// the house system the host's chain names, so the owner's edits to it show; the bundled floor only once none is left.
+test('a scope that names no system, under no default, draws the house system as the owner edited it, and the floor once it is deleted', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const house = (await systems(page)).find((s) => s.title === 'MAWS')!;
+  expect(await ok(page, 'designSystems.house')).toEqual({ houseId: house.id });
+  const BUNDLED = bundledHex('maws', 'accent');
+  const EDITED = '#2f6b4f';
+  expect(EDITED).not.toBe(BUNDLED);
+
+  // a document page with no system of its own, in no Space, with no defaults set
+  await mountFixture(page, 'loose', { governedBy: {} });
+  await expect(fixture(page, 'loose')).toHaveAttribute('data-ds-system', house.id, { timeout: 15_000 });
+  await expect(fixture(page, 'loose')).toHaveAttribute('data-status', 'ready', { timeout: 15_000 });
+  await expect.poll(() => fixtureAccent(page, 'loose')).toBe(rgbOf(BUNDLED));
+  // the owner recolours the house system on its page: the scope follows, which the floor never would
+  await openSystemPage(page, 'MAWS', house.id);
+  expect(await recolourAccent(page, house.id, EDITED)).toEqual({ swatch: rgbOf(EDITED), property: EDITED });
+  await expect.poll(() => fixtureAccent(page, 'loose'), { timeout: 10_000 }).toBe(rgbOf(EDITED));
+  // a fixture mounted now resolves the same house, edited
+  await mountFixture(page, 'later', { governedBy: { spaceId: null } });
+  await expect(fixture(page, 'later')).toHaveAttribute('data-ds-system', house.id, { timeout: 15_000 });
+  await expect.poll(() => fixtureAccent(page, 'later'), { timeout: 10_000 }).toBe(rgbOf(EDITED));
+
+  // the house system deleted through its page: no system of the house key is left, so the window learns of it at the
+  // change and the scope falls to the bundled floor
+  await page.getByRole('button', { name: 'Delete design system…' }).click();
+  await page.getByRole('dialog', { name: 'Delete “MAWS”?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect.poll(async () => (await ok<{ artifact: Row | null }>(page, 'artifacts.get', { artifactId: house.id })).artifact, { timeout: 10_000 }).toBeNull();
+  expect(await ok(page, 'designSystems.house')).toEqual({ houseId: null });
+  await expect(fixture(page, 'loose')).toHaveAttribute('data-ds-system', 'floor', { timeout: 10_000 });
+  await expect.poll(() => fixtureAccent(page, 'loose')).toBe(rgbOf(BUNDLED));
   expect(launch!.consoleErrors()).toEqual([]);
 });
 

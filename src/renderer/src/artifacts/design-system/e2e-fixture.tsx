@@ -5,15 +5,24 @@
 // retained version's pin, before B's editor exists. It stands for B's page element (Decision Log 13): the scope wraps
 // the page, the page reads `var(--ds-*)` and the `.ds-type-*` classes. Each fixture is an `article[data-ds-fixture]`
 // whose `data-status` is the system's (`loading`, `ready`, `missing`); the layer lets pointer events through.
+// A fixture mounted `{governedBy: placement}` names no system: it resolves the one governing an artifact so placed, as B's
+// and C's scopes will, through `useGoverningSystem` with the settings' defaults and the window's house system (the P3
+// spec's Decision Log 61), and says which in `data-ds-system` (an id, or `floor`).
 import { createRoot, type Root } from 'react-dom/client';
-import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '@artifacts/design-system/apply';
+import { DesignSystemScope, useDesignSystem, useGoverningSystem, type DesignSystemRef } from '@artifacts/design-system/apply';
+import { useSettings } from '../../stores/settings';
 import { DesignSystemHostProvider } from './provider';
 
 type SystemRef = DesignSystemRef | { builtin: 'maws' } | null;
+type Placement = { designSystemId?: string | null; spaceId?: string | null };
+type FixtureSystem = SystemRef | { governedBy: Placement };
 
 export interface DesignSystemFixtureSeam {
-  /** Shows the fixture `name` in `system` (a live ref, a version ref, the floor, or none), replacing one of that name. */
-  mount(name: string, system: SystemRef): void;
+  /**
+   * Shows the fixture `name` in `system` (a live ref, a version ref, the floor, none, or the system governing an artifact
+   * placed as `governedBy` says), replacing one of that name.
+   */
+  mount(name: string, system: FixtureSystem): void;
   unmount(name: string): void;
 }
 
@@ -23,6 +32,14 @@ declare global {
   }
 }
 
+const NO_SPACES: Record<string, string> = {};
+
+function GovernedFixturePage({ name, placement }: { name: string; placement: Placement }) {
+  const artifacts = useSettings((s) => s.state?.settings.artifacts);
+  const system = useGoverningSystem(placement, { owner: artifacts?.defaultDesignSystem ?? null, spaces: artifacts?.spaceDesignSystems ?? NO_SPACES });
+  return <FixturePage name={name} system={system} />;
+}
+
 function FixturePage({ name, system }: { name: string; system: SystemRef }) {
   const { status } = useDesignSystem(system);
   return (
@@ -30,6 +47,7 @@ function FixturePage({ name, system }: { name: string; system: SystemRef }) {
       <article
         className="ds-doc"
         data-ds-fixture={name}
+        data-ds-system={system === null ? undefined : 'builtin' in system ? 'floor' : system.id}
         data-status={status}
         style={{ background: 'var(--ds-color-bg)', color: 'var(--ds-color-text)', padding: 'var(--ds-space-4)', borderRadius: 'var(--ds-radius-md)' }}
       >
@@ -47,7 +65,7 @@ function FixturePage({ name, system }: { name: string; system: SystemRef }) {
 }
 
 export function installDesignSystemFixture(win: Window): void {
-  const fixtures = new Map<string, { system: SystemRef; mounted: number }>();
+  const fixtures = new Map<string, { system: FixtureSystem; mounted: number }>();
   let mounts = 0;
   let root: Root | null = null;
   const render = () => {
@@ -60,9 +78,13 @@ export function installDesignSystemFixture(win: Window): void {
     }
     root.render(
       <DesignSystemHostProvider>
-        {[...fixtures].map(([name, { system, mounted }]) => (
-          <FixturePage key={`${name}:${mounted}`} name={name} system={system} />
-        ))}
+        {[...fixtures].map(([name, { system, mounted }]) =>
+          system !== null && 'governedBy' in system ? (
+            <GovernedFixturePage key={`${name}:${mounted}`} name={name} placement={system.governedBy} />
+          ) : (
+            <FixturePage key={`${name}:${mounted}`} name={name} system={system} />
+          ),
+        )}
       </DesignSystemHostProvider>,
     );
   };
