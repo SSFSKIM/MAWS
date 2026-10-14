@@ -19,12 +19,12 @@
 // element (its words' bounding box in each, from `pdftotext -bbox`, within 24 slide px).
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { expect, test, type Page } from '@playwright/test';
 import JSZip from 'jszip';
-import { benchShapes } from '../src/artifacts/slides/fixtures/bench';
+import { benchDeckFiles, benchShapes } from '../src/artifacts/slides/fixtures/bench';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
@@ -239,6 +239,23 @@ test('every format through the export service: PPTX in three variants, PDF, stan
   // ---- PNG: the cover slide ----
   expect(pngSize(readFileSync((await exportAs(page, id, 'png')).path))).toEqual([1920, 1080]);
   expect(pngSize(readFileSync((await exportAs(page, id, 'png', { width: 960 })).path))).toEqual([960, 540]);
+});
+
+// S7b's 100-slide deck inside the export's 55 s budget, in the variants that take the most from the window (the load
+// average beside each time, as the scale gate records its bounds)
+test('the 100-slide deck exports to PPTX, named and as pictures, and to PDF within the budget', async () => {
+  test.setTimeout(300_000);
+  const page = await ready();
+  const { id, held } = await seedDeck(page, 'Bench', benchDeckFiles(100));
+  expect(held).toEqual([]);
+  const times: string[] = [];
+  for (const [format, extra] of [['pptx', {}], ['pptx', { fonts: 'pictures' }], ['pdf', {}]] as const) {
+    const started = Date.now();
+    const { path } = await exportAs(page, id, format, extra);
+    times.push(`${format}${'fonts' in extra ? `/${extra.fonts}` : ''} ${Date.now() - started} ms`);
+    if (format === 'pptx') expect(Object.keys((await JSZip.loadAsync(readFileSync(path))).files).filter((f) => /^ppt\/slides\/slide\d+\.xml$/.test(f))).toHaveLength(100);
+  }
+  console.log(`[100-slide export] ${times.join(', ')} at load ${loadavg()[0]!.toFixed(1)}`);
 });
 
 test('the editor’s Export menu saves each format where the owner chooses', async () => {
