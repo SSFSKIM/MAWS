@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { MessageUuid } from '@shared/graph/ids';
-import { CONTRACT_HEADER, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
+import { CONTRACT_HEADER, LEGACY_CONTRACT_1, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
+
+// P2-C2: the full contract is now contract 5; sessions recorded under contract 1 keep reading as contract:1.
+const CONTRACT_1 = LEGACY_CONTRACT_1.text;
 import { TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { classifySnapshot, PromptStateReader, recordedState, transcriptChain, transcriptEvidence } from './prompt-state';
 
@@ -28,7 +31,8 @@ const write = (name: string, lines: string[]) => {
 
 describe('classifySnapshot', () => {
   it('reads contract n from a segment opening with its header, and none otherwise', () => {
-    expect(classifySnapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT])).toBe('contract:1');
+    expect(classifySnapshot([...ENGINE_SEGMENTS, CONTRACT_1])).toBe('contract:1'); // the text sessions recorded before contract 5
+    expect(classifySnapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT])).toBe('contract:5'); // P2-C2: the full contract now
     expect(classifySnapshot([...ENGINE_SEGMENTS, `${CONTRACT_HEADER(2)}\n\nlater semantics`])).toBe('contract:2');
     expect(classifySnapshot([...ENGINE_SEGMENTS, `${CONTRACT_HEADER(12)}\n`])).toBe('contract:12');
     expect(classifySnapshot(ENGINE_SEGMENTS)).toBe('none');
@@ -53,29 +57,29 @@ describe('recordedState reads a transcript', () => {
   });
 
   it('takes the last snapshot, and only one after the last compact boundary', async () => {
-    expect(await recordedState(write('a.jsonl', [snapshot(ENGINE_SEGMENTS), user('x'), snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT]), user('y')]))).toBe('contract:1');
-    expect(await recordedState(write('b.jsonl', [snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT]), user('x'), snapshot(ENGINE_SEGMENTS)]))).toBe('none');
-    expect(await recordedState(write('c.jsonl', [snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT]), BOUNDARY, user('after')]))).toBe('unrecorded'); // the boundary hides it
-    expect(await recordedState(write('d.jsonl', [snapshot(ENGINE_SEGMENTS), BOUNDARY, snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT])]))).toBe('contract:1');
-    expect(await recordedState(write('s.jsonl', [snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT]), user('x'), snapshot([...ENGINE_SEGMENTS, TO_HUMAN_SUPPLEMENT])]))).toBe('supplement:1'); // P2-C2: switched to a message-tool style
+    expect(await recordedState(write('a.jsonl', [snapshot(ENGINE_SEGMENTS), user('x'), snapshot([...ENGINE_SEGMENTS, CONTRACT_1]), user('y')]))).toBe('contract:1');
+    expect(await recordedState(write('b.jsonl', [snapshot([...ENGINE_SEGMENTS, CONTRACT_1]), user('x'), snapshot(ENGINE_SEGMENTS)]))).toBe('none');
+    expect(await recordedState(write('c.jsonl', [snapshot([...ENGINE_SEGMENTS, CONTRACT_1]), BOUNDARY, user('after')]))).toBe('unrecorded'); // the boundary hides it
+    expect(await recordedState(write('d.jsonl', [snapshot(ENGINE_SEGMENTS), BOUNDARY, snapshot([...ENGINE_SEGMENTS, CONTRACT_1])]))).toBe('contract:1');
+    expect(await recordedState(write('s.jsonl', [snapshot([...ENGINE_SEGMENTS, CONTRACT_1]), user('x'), snapshot([...ENGINE_SEGMENTS, TO_HUMAN_SUPPLEMENT])]))).toBe('supplement:1'); // P2-C2: switched to a message-tool style
   });
 
   it('is not misled by a prompt or a record that only mentions the two record types', async () => {
     const mention = user('the "prompt_snapshot" and "compact_boundary" records');
     const attachment = JSON.stringify({ type: 'attachment', attachment: { type: 'output_style', style: 'prompt_snapshot' } });
-    expect(await recordedState(write('e.jsonl', [snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT]), mention, attachment, '{"type":"user", not json prompt_snapshot']))).toBe('contract:1');
+    expect(await recordedState(write('e.jsonl', [snapshot([...ENGINE_SEGMENTS, CONTRACT_1]), mention, attachment, '{"type":"user", not json prompt_snapshot']))).toBe('contract:1');
   });
 
   it('reads records longer than its chunk, and lines split across chunks', async () => {
     const reader = new PromptStateReader({ chunkBytes: 64 });
-    const long = snapshot([...ENGINE_SEGMENTS, `${TO_HUMAN_CONTRACT}${'x'.repeat(500)}`]);
+    const long = snapshot([...ENGINE_SEGMENTS, `${CONTRACT_1}${'x'.repeat(500)}`]);
     expect(await reader.recordedState(write('f.jsonl', [user('a'.repeat(100)), long, user('b'.repeat(90)), user('c')]))).toBe('contract:1');
     expect(await reader.recordedState(write('g.jsonl', [long, BOUNDARY, user('d'.repeat(200))]))).toBe('unrecorded');
   });
 
   it('scans only what was appended since its last read, and starts over when the file shrank', async () => {
     const reader = new PromptStateReader({ chunkBytes: 64 });
-    const path = write('h.jsonl', [snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT]), user('one')]);
+    const path = write('h.jsonl', [snapshot([...ENGINE_SEGMENTS, CONTRACT_1]), user('one')]);
     expect(await reader.recordedState(path)).toBe('contract:1');
     appendFileSync(path, `${user('two')}\n`);
     expect(await reader.recordedState(path)).toBe('contract:1'); // the earlier answer stands for what was read
@@ -83,13 +87,13 @@ describe('recordedState reads a transcript', () => {
     expect(await reader.recordedState(path)).toBe('unrecorded');
     appendFileSync(path, `${snapshot(ENGINE_SEGMENTS)}\n`);
     expect(await reader.recordedState(path)).toBe('none');
-    writeFileSync(path, `${snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT])}\n`); // rewritten shorter
+    writeFileSync(path, `${snapshot([...ENGINE_SEGMENTS, CONTRACT_1])}\n`); // rewritten shorter
     expect(await reader.recordedState(path)).toBe('contract:1');
   });
 
   it('leaves a last line still being written for the next read', async () => {
     const reader = new PromptStateReader({ chunkBytes: 64 });
-    const record = snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT]);
+    const record = snapshot([...ENGINE_SEGMENTS, CONTRACT_1]);
     const path = join(dir, 'i.jsonl');
     writeFileSync(path, `${user('one')}\n${record.slice(0, 80)}`);
     expect(await reader.recordedState(path)).toBe('unrecorded');
@@ -122,7 +126,7 @@ describe('conformance: the classifier on the engine’s recorded prompt snapshot
 
   it('S14 (a new session under the contract) records contract:1, its last segment the contract verbatim', async () => {
     const records = notes('s14-new');
-    expect(records.every((note) => note.systemPrompt?.at(-1) === TO_HUMAN_CONTRACT)).toBe(true);
+    expect(records.every((note) => note.systemPrompt?.at(-1) === CONTRACT_1)).toBe(true);
     expect(await recordedState(rebuild('s14-new'))).toBe('contract:1');
   });
 

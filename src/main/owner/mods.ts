@@ -43,7 +43,7 @@ export function setSessionOverride(deps: Pick<ModsDeps, 'store'>, input: { appSe
 async function nextLaunchSource(deps: ModsDeps, on: boolean, directory: string | null): Promise<ContractSource> {
   if (!on) return 'off';
   const style = await resolveStyle({ configHome: await deps.configHome(), cwd: directory, managedSettingsPath: deps.managedSettingsPath });
-  return desiredSource(on, style.shape);
+  return desiredSource(on, style);
 }
 
 // Whether the instructions still differ from what the lane wants. Never decided while on: the next launch. Decided under

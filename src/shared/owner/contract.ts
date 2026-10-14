@@ -59,11 +59,36 @@ For example, a question with two options:
 Write marks as plain text in your reply, never inside code blocks or inline code, where they are shown as code. Say what you mean directly and literally, without metaphor or flourish.`,
 };
 
+// Contract 5 (P2-C2, the owner's answer of 2026-10-13 on Decision Log 31: parity with the plugin's style). It follows the
+// installed doperpowers `output-styles/to-human.md` paragraph by paragraph in MAWS's words: when a message is due (the
+// style's paragraph whole), `<message>` the one mark, questions through MAWS's own ask tool, plain language, marks
+// never in code. 5 sits above the plugin's 3 and 4, whose ask tool it does not share. Nothing asks for the four marks of
+// contract 1; grammar 2 keeps reading them.
+const CONTRACT_5: ContractText = {
+  version: 5,
+  text: `${CONTRACT_HEADER(5)}
+
+The human reads a report, not this session's transcript. Each \`<message>…</message>\` span, wherever you write it, is one message to them; nothing else reaches them.
+
+Send a message when it changes what the human knows or does: the answer to what they asked, a decision or permission only they can give, a blocker or a departure from what they asked, a finding that changes the answer or the plan, and the result when the work ends. A finished step, a passed test, a worker's completion, or what you are about to do next is working record unless one of those applies; what can wait goes into the next message that has to be sent. The request sets the bar: a direct question expects its answer; a long task expects word at those points, and an acknowledgement at the start only if it will run long enough for the human to wonder; anything they did not ask about has to be new to them, consequential, and useful now rather than later. Silence says only that nothing needed sending, so what is unresolved goes in the next message.
+
+Ask for input with \`mcp__maws__ask\`: \`blocking: false\` when you can go on working (their answer arrives later as a user message naming the askId), \`blocking: true\` when your next step needs it. Use the native AskUserQuestion only where \`mcp__maws__ask\` is missing.
+
+Say what you mean, literally. Metaphor and flourish make the reader work harder. Write marks as plain text, never in code.`,
+};
+
+// Contract 1 (P2-C, 2026-10-09), MAWS's full contract until contract 5: still what sessions recorded under it carry, which
+// the prompt-state reader recognises and the decision table switches at their next launch.
+export const LEGACY_CONTRACT_1: ContractText = CONTRACT_1;
+
 // The full contract MAWS appends where no style carries the channel: the one constant the owner's answer to Decision
-// Log 31's question swaps (MAWS's own contract following the plugin's message-tool shape, or keeping the four marks).
-export const FULL_CONTRACT: ContractText = CONTRACT_1;
+// Log 31's question swapped (2026-10-13: yes, parity with the plugin's message-tool shape).
+export const FULL_CONTRACT: ContractText = CONTRACT_5;
 export const TO_HUMAN_CONTRACT_VERSION = FULL_CONTRACT.version;
 export const TO_HUMAN_CONTRACT = FULL_CONTRACT.text;
+
+// A style declaring exactly MAWS's own full contract already says everything the supplement would: nothing is appended.
+export const carriesFullContract = (declared: number | null): boolean => declared === FULL_CONTRACT.version;
 
 // The supplement (P2-C2), appended beside a message-tool style. Such a style names the plugin's own ask tool, which a
 // headless (`-p`) launch, MAWS's, does not register; MAWS's `ask` tool is there instead. It says only what the style
@@ -71,4 +96,4 @@ export const TO_HUMAN_CONTRACT = FULL_CONTRACT.text;
 export const TO_HUMAN_SUPPLEMENT_VERSION = 1;
 export const TO_HUMAN_SUPPLEMENT = `${SUPPLEMENT_HEADER(TO_HUMAN_SUPPLEMENT_VERSION)}
 
-This session runs in MAWS, which delivers your messages and questions to the human. \`<message>…</message>\` is the one mark here too. Ask the human with \`mcp__maws__ask\`: \`blocking: false\` when you can go on with other work while they decide (their answer arrives later as a user message naming the askId), \`blocking: true\` when you need the answer before your next step. \`mcp__doperpowers__AskUserQuestion\` is not available here; use the native AskUserQuestion only where \`mcp__maws__ask\` is missing. Write marks as plain text, never inside code blocks or inline code.`;
+This session runs in MAWS, which delivers your messages and questions to the human. \`<message>…</message>\` is the one mark here too. Ask the human with \`mcp__maws__ask\`: \`blocking: false\` when you can go on with other work while they decide (their answer arrives later as a user message naming the askId), \`blocking: true\` when you need the answer before your next step. \`mcp__doperpowers__AskUserQuestion\` is not available here. Write marks as plain text, never inside code blocks or inline code.`;

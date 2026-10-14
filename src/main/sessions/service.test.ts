@@ -1034,7 +1034,7 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
     expect(bootstrap!.appSessionId).not.toBe(id);
     expect(bootstrap).not.toHaveProperty('appendSystemPrompt');
     expect(bootstrap!.extraSettings).toBeNull();
-    expect(launch).toMatchObject({ appSessionId: id, appendSystemPrompt: TO_HUMAN_CONTRACT, extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: '1' } } });
+    expect(launch).toMatchObject({ appSessionId: id, appendSystemPrompt: TO_HUMAN_CONTRACT, extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: '5' } } }); // P2-C2: contract 5
     expect(launch).not.toHaveProperty('systemPromptSnapshot');
     const row = h.index.ownerChannel.session(id);
     expect(row).toMatchObject({ desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'maws-contract' });
@@ -1052,7 +1052,7 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
     const launch = h.host.launches.at(-1)!;
     expect(launch).toMatchObject({ appSessionId: record.appId, systemPromptSnapshot: 'off', extraSettings: null });
     expect(launch).not.toHaveProperty('appendSystemPrompt');
-    expect(h.index.ownerChannel.session(record.appId)).toMatchObject({ override: 'off', desired: 'off', recorded: 'contract:1', snapshotOff: true, applied: 'off', enabledAt: null });
+    expect(h.index.ownerChannel.session(record.appId)).toMatchObject({ override: 'off', desired: 'off', recorded: 'contract:5', snapshotOff: true, applied: 'off', enabledAt: null });
   });
 
   it('a fork takes its parent’s override with its record and reads the parent’s transcript', async () => {
@@ -1065,7 +1065,7 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
     expect(await h.settled(outcome.appSessionId)).toMatchObject({ phase: 'ready' });
     expect(h.index.ownerChannel.override(outcome.appSessionId)).toBe('off');
     expect(h.host.launches.at(-1)).toMatchObject({ appSessionId: outcome.appSessionId, resume: { sessionId: SID, fork: true }, systemPromptSnapshot: 'off' });
-    expect(h.index.ownerChannel.session(outcome.appSessionId)).toMatchObject({ recorded: 'contract:1', applied: 'off' });
+    expect(h.index.ownerChannel.session(outcome.appSessionId)).toMatchObject({ recorded: 'contract:5', applied: 'off' });
   });
 });
 // P2-C end

@@ -6,7 +6,7 @@ import type { TrustState } from '@shared/sessions/trust';
 import { record } from '../../../test/support/builders';
 import { bootstrapSpec, C10_SETTING_DEFAULTS, intentLaunchSpec, readSettings, resumeLaunchSpec, toLaunchSpec, trustMapping, type C10Settings, seedPermissionMode } from './launch-mapping';
 import { withOwnerChannel } from './launch-mapping'; // P2-C
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; P2-C2: the supplement
+import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; P2-C2: the supplement
 
 const APP = 'a0000000-0000-4000-8000-000000000001' as AppSessionId;
 const BOOT = 'b0000000-0000-4000-8000-000000000002' as AppSessionId;
@@ -133,14 +133,14 @@ describe('withOwnerChannel', () => {
 
   it('advertises the contract version beside the browser socket while the lane is on, and sets the two keys as decided', () => {
     const decided = withOwnerChannel(spec({ env: { CUA_BROWSER_BACKENDS: socket }, enableWorkflows: true }), { laneOn: true, append: 'contract', snapshotOff: true });
-    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, [NATIVE_TO_HUMAN_ENV]: '1' }, enableWorkflows: true });
+    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket, [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) }, enableWorkflows: true });
     expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_CONTRACT, systemPromptSnapshot: 'off' });
     expect(LaunchSpecSchema.parse(decided)).toEqual(decided);
   });
 
   it('sets the variable alone when the lane is on and a compatible style carries the instructions', () => {
     const decided = withOwnerChannel(spec(null), { laneOn: true, append: null, snapshotOff: false });
-    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: '1' } });
+    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) } });
     expect(decided).not.toHaveProperty('appendSystemPrompt');
     expect(decided).not.toHaveProperty('systemPromptSnapshot');
   });
@@ -153,8 +153,8 @@ describe('withOwnerChannel', () => {
   // P2-C2 (Decision Log 31): a message-tool style gets the supplement, the advertisement unchanged
   it('appends the supplement in place of the contract beside a message-tool style, the variable still the contract version', () => {
     const decided = withOwnerChannel(spec(null), { laneOn: true, append: 'supplement', snapshotOff: true });
-    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT, systemPromptSnapshot: 'off', extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: '1' } } });
-    expect(decided.appendSystemPrompt).not.toContain(CONTRACT_HEADER(1));
+    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT, systemPromptSnapshot: 'off', extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) } } });
+    expect(decided.appendSystemPrompt).not.toContain(CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION));
     expect(LaunchSpecSchema.parse(decided)).toEqual(decided);
   });
 });

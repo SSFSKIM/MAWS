@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
 import { LaunchSpecSchema, type LaunchSpec } from '@shared/engine/launch-spec';
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
+import { CONTRACT_HEADER, LEGACY_CONTRACT_1, NATIVE_TO_HUMAN_ENV, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
 import { slugOf } from '../../engine-host/fs/paths';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
@@ -17,7 +17,8 @@ import type { HostDispatch } from '../ipc/router';
 import { decideFlags, desiredSource, laneOn, OwnerChannelLaunches, ownerChannelLaunch, type OwnerLaunchSetup } from './launch';
 import type { RecordedState } from './prompt-state';
 
-const CURRENT = 'contract:1' as const;
+const CURRENT = `contract:${TO_HUMAN_CONTRACT_VERSION}` as const; // P2-C2: contract 5
+const ADVERTISED = String(TO_HUMAN_CONTRACT_VERSION);
 
 const SUPP = 'supplement:1' as const; // P2-C2
 
@@ -38,7 +39,9 @@ describe('decideFlags: the decision table (Design §2; P2-C2 adds the supplement
     ['external-compatible-style', SUPP, { append: null, off: true, applied: 'external-compatible-style' }],
     ['external-compatible-style', 'none', { append: null, off: false, applied: 'external-compatible-style' }],
     ['external-style-plus-supplement', 'unrecorded', { append: 'supplement', off: false, applied: 'external-style-plus-supplement' }],
-    ['external-style-plus-supplement', CURRENT, { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }], // contract 1 leaves at once
+    ['external-style-plus-supplement', CURRENT, { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }], // the contract leaves at once
+    ['external-style-plus-supplement', 'contract:1', { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }],
+    ['maws-contract', 'contract:1', { append: 'contract', off: true, applied: 'maws-contract' }], // contract 1 gives way to 5 at once
     ['external-style-plus-supplement', SUPP, { append: 'supplement', off: false, applied: 'external-style-plus-supplement' }],
     ['external-style-plus-supplement', 'supplement:2', { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }],
     ['external-style-plus-supplement', 'none', { append: 'supplement', off: true, applied: 'external-style-plus-supplement' }],
@@ -84,7 +87,13 @@ describe('desiredSource: the shape rule (P2-C2)', () => {
     [false, 'message-tool', 'off'],
     [false, 'none', 'off'],
   ] as const)('lane on %s, shape %s: %s', (on, shape, source) => {
-    expect(desiredSource(on, shape)).toBe(source);
+    expect(desiredSource(on, { shape, contract: shape === 'marks' ? 1 : shape === 'message-tool' ? 4 : null })).toBe(source);
+  });
+
+  it('a style declaring MAWS’s own full contract (5) gets nothing appended', () => {
+    expect(desiredSource(true, { shape: 'message-tool', contract: 5 })).toBe('external-compatible-style');
+    expect(desiredSource(true, { shape: 'message-tool', contract: 6 })).toBe('external-style-plus-supplement');
+    expect(desiredSource(false, { shape: 'message-tool', contract: 5 })).toBe('off');
   });
 });
 
@@ -166,9 +175,9 @@ describe('ownerChannelLaunch over a scratch config home', () => {
   it('a new session with the lane on appends the contract, sets the variable and records unrecorded → maws-contract', async () => {
     const { spec: decided, record: decision } = await ownerChannelLaunch(s, spec({ extraSettings: { env: { CUA_BROWSER_BACKENDS: '/sock' } } }), { kind: 'new', transcriptOf: null });
     expect(decided.appendSystemPrompt).toBe(TO_HUMAN_CONTRACT);
-    expect(decided.appendSystemPrompt!.startsWith(CONTRACT_HEADER(1))).toBe(true);
+    expect(decided.appendSystemPrompt!.startsWith(CONTRACT_HEADER(5))).toBe(true);
     expect(decided.systemPromptSnapshot ?? null).toBeNull();
-    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/sock', [NATIVE_TO_HUMAN_ENV]: '1' } });
+    expect(decided.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/sock', [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
     expect(decision).toMatchObject({ appSessionId: record, laneOn: true, desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'maws-contract', style: 'default' });
     expect(binaryCalls).toBe(0); // "off" was never wanted
     launches.launched(decision!, { launchId: 'l1', at: AT });
@@ -179,8 +188,18 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     compatibleStyle(configHome);
     const { spec: decided, record: decision } = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
     expect(decided.appendSystemPrompt ?? null).toBeNull();
-    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: '1' } });
+    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
     expect(decision).toMatchObject({ desired: 'external-compatible-style', applied: 'external-compatible-style', style: 'report' });
+  });
+
+  // P2-C2: the owner's parity answer; a session MAWS gave contract 1 gets contract 5 at its next launch
+  it('a session recorded under contract 1, no style: contract 5 appended and "off" passed, once', async () => {
+    transcript(configHome, LEGACY_CONTRACT_1.text);
+    const { spec: decided, record: decision } = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
+    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_CONTRACT, systemPromptSnapshot: 'off' });
+    expect(decision).toMatchObject({ desired: 'maws-contract', recorded: 'contract:1', snapshotOff: true, applied: 'maws-contract' });
+    recordSnapshot(configHome, TO_HUMAN_CONTRACT);
+    expect((await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record })).record).toMatchObject({ recorded: CURRENT, snapshotOff: false });
   });
 
   // P2-C2 (Decision Log 31): a message-tool style (the owner's doperpowers at 7.149.0 declares 4)
@@ -193,16 +212,16 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     messageToolStyle(configHome);
     const { spec: decided, record: decision } = await ownerChannelLaunch(s, spec(), { kind: 'new', transcriptOf: null });
     expect(decided.appendSystemPrompt).toBe(TO_HUMAN_SUPPLEMENT);
-    expect(decided.appendSystemPrompt).not.toContain(CONTRACT_HEADER(1));
+    expect(decided.appendSystemPrompt).not.toContain(CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION));
     expect(decided.systemPromptSnapshot ?? null).toBeNull();
-    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: '1' } });
+    expect(decided.extraSettings).toEqual({ env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } });
     expect(decision).toMatchObject({ desired: 'external-style-plus-supplement', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'external-style-plus-supplement', style: 'report' });
     launches.launched(decision!, { launchId: 'l1', at: AT });
     expect(index.ownerChannel.session(record)).toMatchObject({ desired: 'external-style-plus-supplement', appended: true, applied: 'external-style-plus-supplement' });
   });
 
   it('a session that started under contract 1 and now has a contract-4 style gets the supplement and loses contract 1 at its next launch', async () => {
-    transcript(configHome, TO_HUMAN_CONTRACT);
+    transcript(configHome, LEGACY_CONTRACT_1.text);
     messageToolStyle(configHome);
     const { spec: decided, record: decision } = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
     expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_SUPPLEMENT, systemPromptSnapshot: 'off' });
@@ -233,7 +252,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     const { spec: decided, record: decision } = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
     expect(decided).toMatchObject({ systemPromptSnapshot: 'off', extraSettings: null });
     expect(decided.appendSystemPrompt ?? null).toBeNull();
-    expect(decision).toMatchObject({ laneOn: false, override: 'off', desired: 'off', recorded: 'contract:1', appended: false, snapshotOff: true, applied: 'off' });
+    expect(decision).toMatchObject({ laneOn: false, override: 'off', desired: 'off', recorded: CURRENT, appended: false, snapshotOff: true, applied: 'off' });
     launches.launched(decision!, { launchId: 'l2', at: AT });
     expect(index.ownerChannel.session(record)).toMatchObject({ enabledAt: null, applied: 'off', snapshotOff: true });
   });
@@ -241,7 +260,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
   it('turned on again over a session that recorded none: the append, the flag and the variable', async () => {
     transcript(configHome, null);
     const { spec: decided, record: decision } = await ownerChannelLaunch(s, resumeSpec(), { kind: 'resume', transcriptOf: record });
-    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_CONTRACT, systemPromptSnapshot: 'off', extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: '1' } } });
+    expect(decided).toMatchObject({ appendSystemPrompt: TO_HUMAN_CONTRACT, systemPromptSnapshot: 'off', extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: ADVERTISED } } });
     expect(decision).toMatchObject({ recorded: 'none', snapshotOff: true, applied: 'maws-contract' });
   });
 

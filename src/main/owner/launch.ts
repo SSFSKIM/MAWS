@@ -19,7 +19,7 @@ import { homedir } from 'node:os';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import { TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT_VERSION, type StyleShape } from '@shared/owner/contract';
+import { carriesFullContract, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT_VERSION, type StyleShape } from '@shared/owner/contract';
 import type { ContractSource, LaneOverride } from '@shared/owner/state';
 import { claudeConfigDir } from '../history/prompt-history';
 import type { SessionStore } from '../index/sessions';
@@ -49,9 +49,13 @@ export interface LaunchDecision {
 // The lane's effective value: the session's override when set, else the app's switch.
 export const laneOn = (appEnabled: boolean, override: LaneOverride): boolean => (override === 'inherit' ? appEnabled : override === 'on');
 
-// The desired state of a launch whose lane is `on` and whose style has `shape` (P2-C2: the shape rule, Decision Log 31).
-export const desiredSource = (on: boolean, shape: StyleShape): ContractSource =>
-  !on ? 'off' : shape === 'marks' ? 'external-compatible-style' : shape === 'message-tool' ? 'external-style-plus-supplement' : 'maws-contract';
+// The desired state of a launch whose lane is `on` and whose style declares `contract`, of `shape` (P2-C2: the shape rule,
+// Decision Log 31). A style declaring MAWS's own full contract carries everything the supplement would say: nothing more.
+export const desiredSource = (on: boolean, style: { shape: StyleShape; contract: number | null }): ContractSource => {
+  if (!on) return 'off';
+  if (style.shape === 'marks' || carriesFullContract(style.contract)) return 'external-compatible-style';
+  return style.shape === 'message-tool' ? 'external-style-plus-supplement' : 'maws-contract';
+};
 
 // The text a desired state appends and the recorded state it leaves in a snapshot; a state without one records none.
 const APPENDS: Partial<Record<ContractSource, { text: AppendedText; records: RecordedState }>> = {
@@ -171,7 +175,7 @@ export async function ownerChannelLaunch(
   // contradicted it, the engine's name decides instead
   const resolved = await resolveStyle(styleContext);
   const style: ResolvedStyle = row?.styleMismatch && row.observedStyle !== null ? await lookupStyle(row.observedStyle, styleContext) : resolved;
-  const desired = desiredSource(on, style.shape);
+  const desired = desiredSource(on, style);
   const recorded = await recordedOf(s, spec, ctx);
   let flags = decideFlags(desired, recorded, true);
   if (flags.off) flags = decideFlags(desired, recorded, await declaresSnapshotFlag(s)); // the binary is asked only when "off" is wanted
