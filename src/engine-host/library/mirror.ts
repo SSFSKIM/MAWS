@@ -444,7 +444,7 @@ function readManifest(path: string): Manifest {
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8'));
   } catch (error) {
-    throw new Error(`${path} is not a MAWS mirror manifest (${reasonOf(error)}); it is left alone`);
+    throw new Error(`${path} is not a MAWS mirror manifest (${reasonOf(error)}); it is left alone`, { cause: error });
   }
   const { version, artifacts } = (parsed ?? {}) as Partial<Manifest>;
   if (version !== 1 || typeof artifacts !== 'object' || artifacts === null || Array.isArray(artifacts)) throw new Error(`${path} is not a MAWS mirror manifest (not version 1); it is left alone`);
