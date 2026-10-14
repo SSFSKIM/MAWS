@@ -17,7 +17,7 @@ The answer carries the format reference: the elements, attributes and CSS the di
 
 ## Reading and editing
 
-`artifact_read` returns the deck's files and its `revision`. Every element in what you read carries an `id`; keep them when you edit. Comments, history and the owner's selection follow an element by its id, and an element you rewrite without one may become a new element. Files come back normalized (attribute and declaration order, colours, numbers, whitespace), so compare them by meaning, not by bytes.
+`artifact_read` returns the deck's files and its `revision`. In what you read, every addressable slide element carries an `id`: the section and every text, `div`, picture, table row, shape, icon, connector, line, `svg` and embed. Table cells carry none, because they are positional. List items and inline markup (`b`, `i`, `u`, `a`, `span`, `br`) carry none either, because they are part of their text element. Keep the ids when you edit. Comments, history and the owner's selection follow an element by its id, and an element you rewrite without one may become a new element. Files come back normalized (attribute and declaration order, colours, numbers, whitespace), so compare them by meaning, not by bytes.
 
 To change the deck, call `artifact_publish` with the `baseRevision` your last read (or create, or publish) returned and only the files you changed: a slide's whole new text, `null` to remove a slide, `project/deck.json` when the order, sections or title change. A new slide goes into `order` where it belongs; a slide file the order leaves out shows last. Several files in one publish land together at one revision or not at all, so change a deck-wide property in one publish.
 

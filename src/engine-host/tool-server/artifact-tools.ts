@@ -35,6 +35,7 @@ import {
   editorOf,
   filesOf,
   lineageOf,
+  loaderFields,
   opIdOf,
   publisherOf,
   readSourceFile,
@@ -113,6 +114,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
 
       // What the artifact starts from, read and checked before anything is written
       let content: ByteContent | undefined;
+      let loaded: Pick<ArtifactCreateResult, 'warnings' | 'notes' | 'held'> = {}; // P3-C: what the kind's loader said of the files
       let page: { bytes: Buffer } | null = null;
       if (kind === 'html') {
         if (path !== undefined) {
@@ -137,7 +139,8 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
         return toolError(TOOL_ERRORS.refused('artifact_create', { reason: 'invalid', kind: 'document' }, "a document's markdown content is read by P3-B's document create, which this build does not have; create it empty"));
       } else if (input.files) {
         // a dry run on an empty doc: files the kind cannot hold are refused before the artifact exists
-        withDoc(null, (scratch) => publisherOf(store, kind)(scratch, {}, input.files!, false));
+        const { warnings, notes, held } = loaderFields(withDoc(null, (scratch) => publisherOf(store, kind)(scratch, {}, input.files!, false)));
+        loaded = { ...(warnings && { warnings }), ...(notes && { notes }), ...(held && { held }) }; // P3-C
       }
 
       // E2 and P2-E1: a handle the session, or a session it was opened from, already holds is refused
@@ -169,7 +172,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
               answer = {
                 status: 'created', artifactId: artifact.id, kind, title: artifact.title, revision, ...(handle !== undefined && { handle }),
                 ...(page !== null && { id: handle ?? artifact.id, deliverableId: artifact.id, version: 1 as const, externalReferences: externalReferenceCount(page.bytes.toString('utf8')) }),
-                ...(guide && { guide }), ...(designSystem !== null && { designSystem }),
+                ...(guide && { guide }), ...(designSystem !== null && { designSystem }), ...loaded, // P3-C: recorded with the op, so a replay says it too
               };
               if (isDocKind(kind)) base = { revision, state: store.service.readState(artifact.id).state };
               op.record(answer);

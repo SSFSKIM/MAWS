@@ -6,18 +6,18 @@
 // the engine host's presentation module gives it the governing system's tokens.
 import type { Artifact } from '@shared/artifacts/entity';
 import { tokenProperties } from '../design-system/css';
+import { overrideLiterals } from '../design-system/literals';
 import type { TokenSet } from '../design-system/tokens';
-import { safeOverrides, type TokenOverrides } from '../design-system/view';
+import type { TokenOverrides } from '../design-system/view';
 import { mirrorSlug, type MirrorWriter } from '../library/mirror';
-import { resolveVars } from './css';
 import { serializeDeckJson } from './deck';
 import { heldOf, readDeckJson, readSlide, slideOrder } from './model';
 import { serializeSlide } from './serialize';
 
 /**
- * The value of each `--ds-*` name in a deck: the system's at the deck's scale (none when the system's tokens do not
- * resolve, or there is no system), each of the deck's overrides over it, an override's own `var()`s resolved against
- * the others and the system (one in a cycle, or resolving to nothing, keeps the system's value).
+ * The value of each `--ds-*` name in a deck, as its stage draws it: P3-D's literal resolver over the system's values at
+ * the deck's scale (none when the system's tokens do not resolve, or there is no system) with the deck's overrides on
+ * top, an override in a reference cycle, or resolving to nothing, dropped so its name keeps the system's value.
  */
 export function deckTokenValues(tokens: TokenSet | null, overrides?: TokenOverrides): (name: string) => string | undefined {
   let system = new Map<string, string>();
@@ -26,21 +26,8 @@ export function deckTokenValues(tokens: TokenSet | null, overrides?: TokenOverri
   } catch {
     // a system mid-edit whose tokens do not resolve: every token takes its fallback
   }
-  const own = new Map(safeOverrides(overrides));
-  const settled = new Map<string, string | undefined>();
-  const resolving = new Set<string>();
-  const valueOf = (name: string): string | undefined => {
-    const override = own.get(name);
-    if (override === undefined) return system.get(name);
-    if (settled.has(name)) return settled.get(name);
-    if (resolving.has(name)) return undefined; // a cycle
-    resolving.add(name);
-    const literal = resolveVars(override, valueOf) ?? undefined;
-    resolving.delete(name);
-    settled.set(name, literal ?? system.get(name));
-    return settled.get(name);
-  };
-  return valueOf;
+  const values = overrideLiterals(system, overrides);
+  return (name) => values.get(name);
 }
 
 /** The writer, over `tokensOf`: the tokens of the system governing an artifact, null when none can be read. */

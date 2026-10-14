@@ -29,11 +29,10 @@ import { actorDisplay } from '@shared/artifacts/actor';
 import { isDocKind, type Artifact } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { parseToolArguments, type ArtifactPublishInput, type ArtifactPublishResult } from '@shared/maws/tools';
-import type { PublishOutcome } from '@artifacts/files';
 import { assetWarnings } from '@artifacts/slides/answer'; // P3-C
 import { stateV2 } from '@artifacts/yjs';
 import type { ArtifactStore } from '../documents/store';
-import { actorOf, answering, filesOf, lineageOf, opIdOf, pathsOf, publisherOf, refuse, refusedAfterCommit, resolveArtifact, storeOf, ToolRefusal, withDoc, type ArtifactToolDeps } from './artifact-context';
+import { actorOf, answering, filesOf, lineageOf, loaderFields, opIdOf, pathsOf, publisherOf, refuse, refusedAfterCommit, resolveArtifact, storeOf, ToolRefusal, withDoc, type ArtifactToolDeps } from './artifact-context';
 import { externalReferenceCount } from './artifacts';
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition } from './server';
 
@@ -227,16 +226,6 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
     if (!suggest) replica.setPresence(actorDisplay(actor));
   }
   return recorded;
-}
-
-// P3-C: what a kind's loader said of the files, each field when it says something
-function loaderFields(outcome: PublishOutcome): Pick<ArtifactPublishResult, 'added' | 'warnings' | 'notes' | 'held'> {
-  return {
-    ...(outcome.added && outcome.added.length > 0 && { added: outcome.added }),
-    ...(outcome.warnings && outcome.warnings.length > 0 && { warnings: outcome.warnings }),
-    ...(outcome.notes !== undefined && outcome.notes > 0 && { notes: outcome.notes }),
-    ...(outcome.held && outcome.held.length > 0 && { held: outcome.held }),
-  };
 }
 
 const isFilesRefusal = (error: unknown): boolean => error instanceof Error && (error as { code?: unknown }).code === 'invalid' && typeof (error as { data?: unknown }).data === 'object';

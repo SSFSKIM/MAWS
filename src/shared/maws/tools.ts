@@ -313,6 +313,11 @@ export const ArtifactDeliverySchema = z.object({
 });
 export type ArtifactDelivery = z.infer<typeof ArtifactDeliverySchema>;
 
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D3; the parent's Decision Log 53 (3)): what a kind's
+// loader said of the files, on a create, a read and a publish: its warnings (what it dropped, each naming the file and, where it
+// can, the slide, the element and the property), and the files it held with their reasons
+const FileWarningSchema = z.strictObject({ path: z.string(), slide: z.string().optional(), element: z.string().optional(), property: z.string().optional(), message: z.string() });
+const HeldFileSchema = z.strictObject({ path: z.string(), reasons: z.array(z.string()) });
 // P3-A (M6): the kind's guide, attached once per session to the first create of that kind (§4.3).
 const KindGuideSchema = z.strictObject({ guide: z.string(), format: z.string() });
 // An `html` create also answers E2's fields (`id`, `deliverableId`, `version` 1,
@@ -323,6 +328,8 @@ export const ArtifactCreateResultSchema = z.strictObject({
   id: z.string().optional(), deliverableId: z.uuid().optional(), version: z.literal(1).optional(), externalReferences: z.number().int().min(0).optional(),
   guide: KindGuideSchema.optional(),
   designSystem: z.string().optional(), // the governing design system's DESIGN.md (Decision Log 22d)
+  // P3-C (M3 fix wave 1): a file kind created from files answers what its loader said of them, as a publish does
+  warnings: z.array(FileWarningSchema).optional(), notes: z.number().int().min(1).optional(), held: z.array(HeldFileSchema).optional(),
 });
 export type ArtifactCreateResult = z.infer<typeof ArtifactCreateResultSchema>;
 // Who wrote an artifact last: the user, the calling session, or another session (named).
@@ -347,11 +354,6 @@ export const ArtifactDescribeTypeResultSchema = z.strictObject({
   designSystem: z.string().optional(), // a document, presentation or design: the governing design system's DESIGN.md (Decision Log 42)
 });
 export type ArtifactDescribeTypeResult = z.infer<typeof ArtifactDescribeTypeResultSchema>;
-// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D3; the parent's Decision Log 53 (3)): what a kind's
-// loader said of the files, on a read and a publish: its warnings (what it dropped, each naming the file and, where it
-// can, the slide, the element and the property), and the files it held with their reasons
-const FileWarningSchema = z.strictObject({ path: z.string(), slide: z.string().optional(), element: z.string().optional(), property: z.string().optional(), message: z.string() });
-const HeldFileSchema = z.strictObject({ path: z.string(), reasons: z.array(z.string()) });
 const VersionSummarySchema = z.strictObject({ id: z.number().int().min(1), kind: z.string(), revision: z.number().int().min(0), at: IsoTimeSchema, by: ArtifactEditorSchema.shape.by, label: z.string().optional() });
 export type VersionSummary = z.infer<typeof VersionSummarySchema>;
 // A file kind's and an `html` artifact's `files`; a Y kind's other root types as `json` (the generic reader, until the

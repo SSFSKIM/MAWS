@@ -14,7 +14,7 @@ import { DECK_PATH } from '@artifacts/slides/deck';
 import { setStyle } from '@artifacts/slides/model';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { ToolUseId } from '@shared/graph/ids';
-import { ArtifactPublishResultSchema, ArtifactReadResultSchema, artifactRefusalOf, type ArtifactPublishResult } from '@shared/maws/tools';
+import { ArtifactCreateResultSchema, ArtifactPublishResultSchema, ArtifactReadResultSchema, artifactRefusalOf, type ArtifactPublishResult } from '@shared/maws/tools';
 import { DesignSystemChain } from '../design-systems/chain';
 import { artifactUploadAssetTool } from '../tool-server/artifact-assets';
 import { artifactPublishTool } from '../tool-server/artifact-publish';
@@ -68,6 +68,22 @@ describe('a deck through A’s tool server (M3)', () => {
     expect(answer.json).toBeUndefined(); // the deck's roots are its files (Decision Log 8 (3))
     expect(answer.held).toBeUndefined();
     expect(answer.warnings).toBeUndefined();
+  });
+
+  it('answers a create from files with the loader’s warnings, notes and held slides, and a replay answers the same (fix wave 1)', async () => {
+    const files = {
+      [DECK_PATH]: index(['s1', 's2']),
+      [S1]: slide('s1', '<h2 id="title" style="font-size:64px; background-color:#eeeeee; cursor:pointer">Plan</h2>'),
+      [S2]: slide('s2', '<div id="box" style="display:flex">loose text</div>'),
+    };
+    const args = { kind: 'presentation', title: 'Q3 review', files };
+    const first = ArtifactCreateResultSchema.parse(jsonOf(await artifactCreateTool(w.deps()).call(args, w.ctx({ toolUseId: 'toolu_create_diag' as ToolUseId }))));
+    expect(first.warnings).toEqual([expect.objectContaining({ path: S1, slide: 's1', element: 'title', property: 'cursor' })]);
+    expect(first.notes).toBeGreaterThanOrEqual(1); // background-color folded into background
+    expect(first.held).toEqual([{ path: S2, reasons: [expect.stringMatching(/text/)] }]);
+    const again = jsonOf(await artifactCreateTool(w.deps()).call(args, w.ctx({ toolUseId: 'toolu_create_diag' as ToolUseId })));
+    expect(again).toEqual(first);
+    expect((await read(first.artifactId)).held).toEqual(first.held);
   });
 
   it('creates an empty deck as its cover, in the design system’s roles', async () => {

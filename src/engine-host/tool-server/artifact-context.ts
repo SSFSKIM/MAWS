@@ -14,7 +14,7 @@ import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
-import { ARTIFACT_MAX_BYTES, TOOL_ERRORS, type ArtifactEditor, type ArtifactRefusal, type ArtifactToolName } from '@shared/maws/tools';
+import { ARTIFACT_MAX_BYTES, TOOL_ERRORS, type ArtifactEditor, type ArtifactPublishResult, type ArtifactRefusal, type ArtifactToolName } from '@shared/maws/tools';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
 import type { ArtifactStore } from '../documents/store';
 import type { McpToolContext, McpToolResult } from './server';
@@ -152,6 +152,16 @@ export function publisherOf(store: ArtifactStore, kind: ArtifactKind): (...args:
 // P3-C (the parent's Decision Log 58): the doc's file paths in `filesOf`'s order, by the kind's `paths` when it has one
 export function pathsOf(store: ArtifactStore, kind: ArtifactKind, doc: Doc): string[] {
   return store.service.adapterFor(kind)?.paths?.(doc) ?? Object.keys(filesOf(store, kind, doc));
+}
+
+// P3-C: what a kind's loader said of the files, each field when it says something
+export function loaderFields(outcome: PublishOutcome): Pick<ArtifactPublishResult, 'added' | 'warnings' | 'notes' | 'held'> {
+  return {
+    ...(outcome.added && outcome.added.length > 0 && { added: outcome.added }),
+    ...(outcome.warnings && outcome.warnings.length > 0 && { warnings: outcome.warnings }),
+    ...(outcome.notes !== undefined && outcome.notes > 0 && { notes: outcome.notes }),
+    ...(outcome.held && outcome.held.length > 0 && { held: outcome.held }),
+  };
 }
 
 // A scratch doc holding `state` (V2; null: an empty doc), destroyed after `use`.
