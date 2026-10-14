@@ -3,8 +3,9 @@
 // `dsOverrides`, every slide canonical with each design-system token resolved to its literal (the overrides applied
 // first, as the deck's stage draws them; a token with neither a value nor a fallback takes its property out, since
 // Claude's grammar has no `var()`), and each uploaded asset the deck draws or loads a face from moved under
-// `project/ds/maws/<name>`, the slides and the index pointing there. A held slide is its held source, verbatim, as the
-// mirror writes it. Portable: the caller gives the token values and the assets' bytes.
+// `project/ds/maws/<name>`, the slides and the index pointing there. A held slide has no Claude-readable form (its source
+// failed the loader; its model is only its last good state): the export is refused, naming each held slide and its
+// reasons (fix wave 1). Portable: the caller gives the token values and the assets' bytes.
 import { DECK_PATH, serializeDeckJson, slidePath, type DeckFace } from '../deck';
 import type { ElementIR } from '../ir';
 import { heldOf, readDeckJson, readSlide, slideOrder } from '../model';
@@ -30,6 +31,11 @@ export interface ClaudeDeckOptions {
 
 /** The export's files, path → content (text, or an asset's bytes). */
 export function claudeDeckFiles(doc: Doc, { resolveVar, assets }: ClaudeDeckOptions): Record<string, string | Uint8Array> {
+  const held = slideOrder(doc).flatMap((id) => {
+    const h = heldOf(doc, id);
+    return h ? [`slide ${id} is held (${h.reasons.join('; ')})`] : [];
+  });
+  if (held.length) throw new Error(`the presentation cannot be exported for Claude while slides are held: ${held.join('; ')}; fix or remove them first`);
   const moved = (src: string) => (src.startsWith('assets/') ? claudeAssetPath(src) : src);
   const deck = readDeckJson(doc);
   delete deck.dsOverrides; // MAWS's, applied in the literals
@@ -44,11 +50,6 @@ export function claudeDeckFiles(doc: Doc, { resolveVar, assets }: ClaudeDeckOpti
   }
   const files: Record<string, string | Uint8Array> = { [DECK_PATH]: serializeDeckJson(deck) };
   for (const id of slideOrder(doc)) {
-    const held = heldOf(doc, id);
-    if (held) {
-      files[slidePath(id)] = held.source;
-      continue;
-    }
     const slide = readSlide(doc, id);
     const walk = (els: ElementIR[]) => {
       for (const el of els) {

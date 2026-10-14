@@ -266,8 +266,10 @@ function imageObject(el: MeasuredElement, ir: ElementIR | undefined, options: Pp
   const transparency = transparencyOf(1, el.paint.opacity);
   if (transparency > 0) base.transparency = transparency;
   if (!placed.crop) return [{ kind: 'image', name: el.id, options: { ...base, ...at(placed.box) } }];
-  // pptxgenjs's crop: `w`/`h` the whole picture and `sizing` the window in the same units, so the window lands at the box
-  const scale = placed.box.w / placed.crop.w;
+  // pptxgenjs's crop: `w`/`h` the whole picture and `sizing` the window in the same units, so the window lands at the box;
+  // each axis scales on its own (a region stretched into a box of another aspect)
+  const sx = placed.box.w / placed.crop.w;
+  const sy = placed.box.h / placed.crop.h;
   return [
     {
       kind: 'image',
@@ -276,9 +278,9 @@ function imageObject(el: MeasuredElement, ir: ElementIR | undefined, options: Pp
         ...base,
         x: inches(placed.box.x),
         y: inches(placed.box.y),
-        w: inches(natural.w * scale),
-        h: inches(natural.h * scale),
-        sizing: { type: 'crop', x: inches(placed.crop.x * scale), y: inches(placed.crop.y * scale), w: inches(placed.box.w), h: inches(placed.box.h) },
+        w: inches(natural.w * sx),
+        h: inches(natural.h * sy),
+        sizing: { type: 'crop', x: inches(placed.crop.x * sx), y: inches(placed.crop.y * sy), w: inches(placed.box.w), h: inches(placed.box.h) },
       },
     },
   ];

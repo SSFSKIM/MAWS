@@ -2,6 +2,9 @@
 // deck: no `var()` anywhere, MAWS's overrides gone from the index but applied in the literals, uploaded assets moved under
 // `project/ds/maws/`, and this child's own loader reading every slide back with nothing held.
 import { describe, expect, it } from 'vitest';
+import { newDoc } from '../../yjs';
+import { heldSlides } from '../answer';
+import { publishDeck } from '../publish';
 import { builtinView } from '../../design-system/view';
 import { DECK_PATH, parseDeckJson, slidePath } from '../deck';
 import { deckTokenValues } from '../mirror';
@@ -50,5 +53,23 @@ describe('the For Claude export', () => {
         expect(text).not.toContain('var(');
       }
     }
+  });
+});
+
+// fix wave 1 (finding 5): a held slide has no Claude-readable form; the export is refused, naming it and its reasons
+describe('the For Claude export of a deck with held slides', () => {
+  it('refuses, naming each held slide and its reasons', () => {
+    const doc = newDoc();
+    publishDeck(doc, {}, { ...FIXTURE_FILES, [slidePath('broken')]: '<section id="broken"><h2 id="b">Broken</h2><blink>x</blink></section>' }, false);
+    const held = heldSlides(doc);
+    expect(held.map((h) => h.path)).toEqual([slidePath('broken')]);
+    let message = '';
+    try {
+      claudeDeckFiles(doc, { resolveVar: () => undefined, assets: new Map() });
+    } catch (error) {
+      message = (error as Error).message;
+    }
+    expect(message).toContain('slide broken is held');
+    expect(message).toContain(held[0]!.reasons[0]!);
   });
 });

@@ -103,6 +103,19 @@ describe('the PPTX mapping', () => {
     expect(named(second!.objects, 'badge')).toMatchObject({ options: { shadow: { type: 'outer', blur: 12, offset: 4, angle: 90, color: '000000', opacity: 0.25 } } });
   });
 
+  // fix wave 1 (finding 3): a region stretched into a box of another aspect scales each axis on its own
+  it('crops a region stretched into a box of another aspect to the region on both axes', async () => {
+    const cover = MEASURED.slides[0]!;
+    const logo = cover.elements.find((e) => e.id === 'logo')!;
+    const stretched = { ...logo, box: { ...logo.box, h: 200 }, attrs: { ...logo.attrs, 'data-crop': '2 25% 50%' }, image: { ...logo.image!, natural: { w: 400, h: 200 }, fit: 'fill' } };
+    const slides = pptxSlides(deck(), { slides: [{ ...cover, elements: [stretched] }] }, { variant: 'named', pictures: new Map(), asset });
+    const zip = await JSZip.loadAsync(await writePptx(slides, { title: 'x' }));
+    const xml = await zip.file('ppt/slides/slide1.xml')!.async('string');
+    // the region (x 50, y 50, 200 × 100 of a 400 × 200 picture): 12.5 % off the left, 37.5 % the right, 25 % top and bottom
+    expect(/<a:srcRect [^>]*\/>/.exec(xml)![0]).toBe('<a:srcRect l="12500" r="37500" t="25000" b="25000"/>');
+    expect(xml).toMatch(/name="logo"[\s\S]*?<a:ext cx="1270000" cy="1270000"\/>/); // 200 × 200 px
+  });
+
   it('names basic faces in the basic variant, and makes each slide one picture with its notes in the pictures variant', () => {
     const [cover] = pptxSlides(deck(), MEASURED, { variant: 'basic', pictures: new Map(), asset });
     const faces = cover!.objects.flatMap((o) => (o.kind === 'text' ? o.text.map((r) => r.options?.fontFace) : []));
