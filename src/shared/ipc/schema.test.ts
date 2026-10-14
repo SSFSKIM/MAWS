@@ -1792,10 +1792,23 @@ describe('ipc schema validates both directions', () => {
 
     it('owns the three reads in main and the three host reads in the engine host, main-only, and emits library.changed from main', () => {
       const owners = Object.fromEntries(Object.entries(library.commands).map(([name, spec]) => [name, spec.owner]));
-      expect(owners).toEqual({ 'library.list': 'main', 'library.get': 'main', 'library.spaces': 'main', 'library.snapshot': 'engine-host', 'library.entry': 'engine-host', 'library.text': 'engine-host' });
+      const files = { 'library.exportFormats': 'main', 'library.content': 'main', 'library.openExternally': 'main', 'library.reveal': 'main', 'library.saveAs': 'main' }; // M5b
+      expect(owners).toEqual({ 'library.list': 'main', 'library.get': 'main', 'library.spaces': 'main', ...files, 'library.snapshot': 'engine-host', 'library.entry': 'engine-host', 'library.text': 'engine-host' });
       expect(MAIN_ONLY_COMMANDS).toEqual(expect.arrayContaining(['library.snapshot', 'library.entry', 'library.text']));
-      expect([...NAMES.library.commands]).toEqual(['library.list', 'library.get', 'library.spaces']);
+      expect([...NAMES.library.commands]).toEqual(['library.list', 'library.get', 'library.spaces', ...Object.keys(files)]);
       expect(HOST_EVENTS).not.toContain('library.changed');
+    });
+
+    // M5b: the viewers' and the library's reach to a byte kind's stored file
+    it('takes Save as… of an export or of the stored file, and answers saved with its path or not', () => {
+      expect(validateCommandInput('library.saveAs', { artifactId: id, source: { export: { revision: 3, format: 'pdf' } } }).ok).toBe(true);
+      expect(validateCommandInput('library.saveAs', { artifactId: id, source: { content: {} } }).ok).toBe(true);
+      expect(validateCommandInput('library.saveAs', { artifactId: id, source: { export: { revision: 3, format: 'gif' } } }).ok).toBe(false);
+      expect(validateCommandInput('library.saveAs', { artifactId: id, source: { path: '/etc/passwd' } }).ok, 'a window names no path').toBe(false);
+      expect(validateCommandOutput('library.saveAs', { saved: false }).ok).toBe(true);
+      expect(validateCommandOutput('library.saveAs', { saved: true, path: '/Users/me/Downloads/Page.pdf' }).ok).toBe(true);
+      expect(validateCommandOutput('library.exportFormats', { formats: ['pdf', 'png'] }).ok).toBe(true);
+      expect(validateCommandOutput('library.content', { revision: 3, kind: 'html', name: 'index.html', path: '/store/x' }).ok).toBe(true);
     });
 
     it('answers rows with the entry, its sessions, Space, project and snippet, and every kind counted', () => {

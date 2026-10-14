@@ -2,7 +2,7 @@
 // and out, to actual size and back to fit from the bar above it; audio keeps its plain player.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { installResizeObserver } from '../../../test-support/resize';
+import { installResizeObserver } from '../../../../test-support/resize';
 import { Media } from './Media';
 
 afterEach(() => {

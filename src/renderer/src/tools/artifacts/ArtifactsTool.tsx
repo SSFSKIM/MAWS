@@ -21,7 +21,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { Icon } from '../../app/IconButton';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
 import { askEditorHostClose, clearEditorHost, type EditorHostScope } from '../../panel/editor-host';
-import { usePanelHost } from '../../panel/host';
+import { panelHost, usePanelHost } from '../../panel/host';
 import type { PanelTool, PanelToolContext } from '../../panel/tool';
 import { ARTIFACTS_TOOL_COPY } from './copy';
 import { ArtifactsList, type ArtifactsScope } from './List';
@@ -34,6 +34,13 @@ export const ARTIFACTS_TOOL_ID = 'artifacts';
 export interface ArtifactsParams {
   target?: string;
   scope?: ArtifactsScope;
+}
+
+// An artifact in the panel's Artifacts tool, in the session's panel, activated (P3-L M5b: the comment card's re-dock).
+// Until a build registers the tool, nothing.
+export function openArtifactInPanel(appSessionId: AppSessionId, artifactId: string): void {
+  if (!usePanelHost.getState().tools.has(ARTIFACTS_TOOL_ID)) return;
+  panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, params: { target: artifactId }, activate: true });
 }
 
 export type ArtifactsView = { kind: 'list' } | { kind: 'record'; artifactId: string };

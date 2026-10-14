@@ -9,12 +9,18 @@ import { create } from 'zustand';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { parseDeliverableUrl } from '@shared/maws/deliverable';
+import { parseArtifactUrl, type ArtifactUrlRevision } from '@shared/artifacts/scheme'; // P3-L (M5b)
 import type { CardRect, CommentContext } from '../../tools/code/anchor/anchor';
 
-// What the card is about, as a host recognises it: a delivered record's version, or (P2-E2) a browser page by its URL.
-export type CardTarget = { kind: 'deliverable'; appSessionId: AppSessionId; deliverableId: string; version: number } | { kind: 'browser'; pageUrl: string };
+// What the card is about, as a host recognises it: a delivered record's version, (P2-E2) a browser page by its URL, or
+// (P3-L M5b, Decision Log 10) an HTML artifact's page on the store's scheme at a revision, whose host is the artifact
+// viewer's. The `deliverable` target and host stay until the cutover (M6).
+export type CardTarget =
+  | { kind: 'deliverable'; appSessionId: AppSessionId; deliverableId: string; version: number }
+  | { kind: 'browser'; pageUrl: string }
+  | { kind: 'artifact-page'; artifactId: string; revision: ArtifactUrlRevision };
 export type CardPhase = { kind: 'composing' } | { kind: 'thread'; child: AppSessionId; echo: string | null };
-export type CardHostKind = 'deliverable' | 'browser';
+export type CardHostKind = 'deliverable' | 'browser' | 'artifact-page';
 export type CardHostMode = 'panel' | 'tab';
 
 export interface OpenCard {
@@ -47,6 +53,8 @@ export function targetOf(anchor: Anchor): CardTarget | null {
   if (anchor.pageUrl === undefined) return null;
   if (anchor.kind === 'browser-element') return { kind: 'browser', pageUrl: anchor.pageUrl }; // P2-E2
   if (anchor.kind !== 'artifact-element') return null;
+  const page = parseArtifactUrl(anchor.pageUrl); // P3-L (M5b)
+  if (page) return { kind: 'artifact-page', artifactId: page.artifactId, revision: page.revision };
   const parsed = parseDeliverableUrl(anchor.pageUrl);
   return parsed && { kind: 'deliverable', appSessionId: parsed.appSessionId, deliverableId: parsed.id, version: parsed.version };
 }

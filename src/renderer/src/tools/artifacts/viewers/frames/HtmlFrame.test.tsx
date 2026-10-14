@@ -5,11 +5,9 @@
 // nothing. Answers are heard whether or not picking is on; an unmounted frame answers null.
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
-import type { CardRect } from '../../code/anchor/anchor';
+import type { CardRect } from '../../../code/anchor/anchor';
 import { HtmlFrame, LOCATE_TIMEOUT_MS, type FrameHandle } from './HtmlFrame';
 
-const A = 'app-a' as AppSessionId;
 const RECT: CardRect = { x: 0, y: 0, width: 640, height: 101 };
 const MOVED: CardRect = { x: 40, y: 200, width: 300, height: 50 };
 
@@ -26,7 +24,7 @@ afterEach(() => {
 function mount(picking = false) {
   let handle: FrameHandle | null = null;
   const onFrame = vi.fn((h: FrameHandle | null) => void (handle = h));
-  const view = render(<HtmlFrame url="maws-deliverable://x/v1.html" title="Dashboard" appSessionId={A} deliverableId="d1" version={1} picking={picking} onFrame={onFrame} />);
+  const view = render(<HtmlFrame url="maws-deliverable://x/v1.html" title="Dashboard" picking={picking} onFrame={onFrame} />);
   const frame = document.querySelector('iframe')!;
   const dispatch = frame.dispatchEvent.bind(frame);
   frame.dispatchEvent = (event: Event) => (event.type === 'load' && !loading ? true : dispatch(event));

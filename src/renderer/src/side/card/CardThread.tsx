@@ -163,10 +163,11 @@ function Echo({ text }: { text: string }) {
   );
 }
 
-// The thread's artifact row opening the card's own record shows that version in the card's viewer (null for the latest,
-// so the viewer keeps following new ones); any other record goes the registered way (the panel's tool). P2-F L121: a
-// reply of this card's the engine took is marked "Sent to Claude" on its row. P2-F F-C1: a bubble's Edit edits the
-// thread's message (the registered default reads the main pane's active tab, which is never this thread).
+// The thread's artifact row opening the card's own record (P3-L M5b: or the artifact whose page the card is on) shows
+// that version in the card's viewer (null for the latest, so the viewer keeps following new ones); any other record goes
+// the registered way (the panel's tool). P2-F L121: a reply of this card's the engine took is marked "Sent to Claude" on
+// its row. P2-F F-C1: a bubble's Edit edits the thread's message (the registered default reads the main pane's active
+// tab, which is never this thread).
 function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, delivered: ReadonlySet<MessageUuid>): Partial<TranscriptActions> {
   const showVersion = useRef(frame.showVersion);
   useLayoutEffect(() => {
@@ -177,6 +178,12 @@ function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, d
     () => ({
       openDeliverable(appSessionId, id, version) {
         const show = showVersion.current;
+        // P3-L (M5b): an artifact store page's card: the row's record is the artifact (its id is the artifact's), and its
+        // version n is the artifact's n-th, which the viewer shows (following the latest when n is the last)
+        if (target?.kind === 'artifact-page' && show !== undefined && id === target.artifactId) {
+          show(version ?? null);
+          return;
+        }
         if (target?.kind !== 'deliverable' || show === undefined || appSessionId !== target.appSessionId || id !== target.deliverableId) {
           registeredActions().openDeliverable(appSessionId, id, version);
           return;

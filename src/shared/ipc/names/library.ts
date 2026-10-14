@@ -1,7 +1,10 @@
 // X2 `library.*` names without their schemas, which the preload bridges (`../names.ts`). With `mainOnlyCommands`,
 // exactly the keys of `../schema/library.ts`, pinned at compile time in `../schema.ts` and per namespace in
 // `../schema.test.ts`.
-export const commands = ['library.list', 'library.get', 'library.spaces'] as const;
+export const commands = [
+  'library.list', 'library.get', 'library.spaces',
+  'library.exportFormats', 'library.content', 'library.openExternally', 'library.reveal', 'library.saveAs', // M5b
+] as const;
 
 export const events = ['library.changed'] as const;
 

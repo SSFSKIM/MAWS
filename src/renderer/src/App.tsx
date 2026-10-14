@@ -117,6 +117,7 @@ import { registerTranscriptActions as registerBrowserAgentTranscriptActions } fr
 // P3-L start
 import { registerArtifactTabs } from './library/ArtifactTab';
 import { artifactsTool } from './tools/artifacts/ArtifactsTool';
+import { registerByteViewers } from './tools/artifacts/viewers/register';
 import { Library } from './library/Library';
 import { connectLibrary } from './library/store';
 // P3-L end
@@ -291,6 +292,7 @@ export function App() {
   useEffect(() => connectLibrary(), []);
   useEffect(() => registerArtifactTabs(), []); // an `artifact` tab with unsaved changes is not replaced by a session
   useEffect(() => registerSlot('artifactsLibrary', Library), []); // the Artifacts tab's library, in P3-G's slot
+  useEffect(() => registerByteViewers(), []); // M5b: the html and file viewers on maws-artifact:, and their frames' console
   // P3-L end
   // P3-D start: the Design System page as the `design_system` kind's editor in L's registry (the library's tab and the
   // panel's Artifacts tool mount it)

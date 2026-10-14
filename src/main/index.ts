@@ -584,7 +584,27 @@ void startWithProfileLock(app, () => {
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
   // connection, an entry per change) and library.* answered from it, before the first window loads. Its stop runs in the
   // same will-quit pass as the index's close, so no sync step runs between them, and after it applies nothing.
-  const library = startLibrary({ index, hosts, register: registerMainHandler, emit, e2e: process.env.MAWS_E2E === '1' });
+  const library = startLibrary({
+    index,
+    hosts,
+    register: registerMainHandler,
+    emit,
+    e2e: process.env.MAWS_E2E === '1',
+    // P3-L M5b: the viewers' and the library's reach to a byte kind's stored file and its exports
+    files: {
+      call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+      exporters: artifacts.exporters,
+      root: join(app.getPath('userData'), 'artifacts'),
+      downloads: () => app.getPath('downloads'),
+      showSaveDialog: (options, sender) => {
+        const win = sender ? BrowserWindow.fromWebContents(sender) : null;
+        return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+      },
+      openPath: (path) => shell.openPath(path),
+      showItemInFolder: (path) => shell.showItemInFolder(path),
+      env: process.env,
+    },
+  });
   shutdown.add('library', library.stop);
   openWindow();
 
