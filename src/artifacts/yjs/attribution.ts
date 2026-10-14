@@ -51,6 +51,9 @@ export function attributionMap(
 }
 
 export const mergeMaps = (maps: ContentMap[]): ContentMap => Y.mergeContentMaps(maps);
+// P3-B (parent Decision Log 57): `over` laid on `beneath`, `over`'s attribution winning on every id both maps hold
+// (`mergeMaps` joins a shared id's attributes, and the lookups read the first).
+export const overlayMap = (beneath: ContentMap, over: ContentMap): ContentMap => mergeMaps([Y.excludeContentMap(beneath, over), over]);
 export const encodeMap = (map: ContentMap): Uint8Array => Y.encodeContentMap(map);
 export const decodeMap = (bytes: Uint8Array): ContentMap => Y.decodeContentMap(bytes);
 
