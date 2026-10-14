@@ -52,7 +52,7 @@ describe('the PPTX mapping', () => {
     const title = named(cover!.objects, 'title');
     expect(title.kind).toBe('text');
     if (title.kind !== 'text') return;
-    expect(title.options).toMatchObject({ objectName: 'title', x: inches(128), y: inches(128), w: inches(1664), h: inches(106), fit: 'none', margin: [0, 0, 0, 0] });
+    expect(title.options).toMatchObject({ objectName: 'title', x: inches(128), y: inches(128), w: inches(1664), h: inches(106), fit: 'none', margin: [0, 0, 0, 0], wrap: false }); // one line in the app: never wrapped
     expect(title.text.map((r) => [r.text, r.options?.fontSize, r.options?.bold, r.options?.color, r.options?.fontFace, r.options?.lineSpacing])).toEqual([
       ['Quarterly ', 48, true, '123456', 'Helvetica Neue', 52.8],
       ['review', 48, true, '123456', 'Helvetica Neue', 52.8],
@@ -78,7 +78,7 @@ describe('the PPTX mapping', () => {
       ['link', { indent: 22.5 }, true, 'https://example.com/', { style: 'sng' }],
       ['Two', { indent: 22.5 }, undefined, undefined, undefined],
     ]);
-    expect(points_.kind === 'text' && points_.options.margin).toEqual([0, 0, 0, 0]);
+    expect(points_.kind === 'text' && [points_.options.margin, points_.options.wrap]).toEqual([[0, 0, 0, 0], true]);
     const grid = named(body!.objects, 'grid');
     expect(grid.kind).toBe('table');
     if (grid.kind !== 'table') return;

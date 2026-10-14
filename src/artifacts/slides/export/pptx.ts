@@ -23,7 +23,7 @@ import type { MeasuredBorder, MeasuredBox, MeasuredDeck, MeasuredElement, Measur
 import { cropOf, cropViewBox, type ExportDeck } from './standalone';
 
 /** Inches from slide px (1920 px = 13.333 in). */
-export const inches = (px: number): number => Math.round((px / 144) * 10_000) / 10_000;
+export const inches = (px: number): number => px / 144; // pptxgenjs rounds to whole EMU
 /** Points from CSS px (1 px = 0.5 pt). */
 export const points = (px: number): number => Math.round(px * 50) / 100;
 
@@ -218,7 +218,9 @@ function textObject(el: MeasuredElement, variant: PptxFontVariant, withFill: boo
     margin: insets(text.padding, listIndent),
     valign: text.valign,
     fit: 'none',
-    wrap: true,
+    // text the app sets on one line stays on one line: a substitute face a little wider runs past the box, not onto a
+    // second line under the next element
+    wrap: !text.oneLine,
     ...(el.rotate && { rotate: el.rotate }),
     ...(paint.fill && 'color' in paint.fill && { fill: paint.fill }),
     ...(paint.line && { line: paint.line }),

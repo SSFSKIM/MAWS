@@ -52,8 +52,8 @@ export interface MeasuredText {
   /** px: top, right, bottom, left. */
   padding: [number, number, number, number];
   valign: 'top' | 'middle' | 'bottom';
-  /** The union of the text's line boxes in slide px (the LibreOffice compare's reference). */
-  ink: MeasuredBox | null;
+  /** Every paragraph sits on one line in the app: the PPTX box does not wrap it (a wider substitute face runs on). */
+  oneLine: boolean;
 }
 
 export interface MeasuredBorder {
@@ -359,18 +359,28 @@ export async function measureDeckPage(args: MeasureArgs): Promise<MeasuredDeck> 
     const line = css(block, 'line-height');
     return { runs: runs.filter((r) => r.text !== ''), align: alignOf(css(block, 'text-align')), lineHeight: line === 'normal' || line === '' ? size * 1.2 : num(line), ...(bullet && { bullet }) };
   };
-  const inkOf = (el: DomElement, slide: DomElement): MeasuredBox | null => {
-    const range = doc.createRange();
-    range.selectNodeContents(el);
-    const rects = Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0);
-    if (!rects.length) return null;
-    const left = Math.min(...rects.map((r) => r.left));
-    const top = Math.min(...rects.map((r) => r.top));
-    const right = Math.max(...rects.map((r) => r.right));
-    const bottom = Math.max(...rects.map((r) => r.bottom));
-    return rectIn({ left, top, width: right - left, height: bottom - top }, slide);
+  // The line boxes of a block's text: one rect per line per text node (the nodes' own, never an element's box).
+  const lineRects = (block: DomElement): DomRect[] => {
+    const rects: DomRect[] = [];
+    const walk = (node: DomNode) => {
+      for (const child of Array.from(node.childNodes)) {
+        if (child.nodeType === 3 && (child.textContent ?? '').trim()) {
+          const range = doc.createRange();
+          range.selectNodeContents(child);
+          for (const r of Array.from(range.getClientRects())) if (r.width > 0 && r.height > 0) rects.push(r);
+        } else if (child.nodeType === 1) walk(child);
+      }
+    };
+    walk(block);
+    return rects;
   };
-  const textOf = (el: DomElement, slide: DomElement): MeasuredText => {
+  // Whether a block's text sits on one line: its line boxes share one band (a taller run on the line still overlaps it).
+  const oneLine = (rects: DomRect[]): boolean => {
+    if (rects.length <= 1) return true;
+    const bottom = Math.min(...rects.map((r) => r.bottom));
+    return rects.every((r) => r.top < bottom - 1);
+  };
+  const textOf = (el: DomElement): MeasuredText => {
     const tag = el.tagName.toLowerCase();
     const paragraphs =
       tag === 'ul' || tag === 'ol'
@@ -378,12 +388,14 @@ export async function measureDeckPage(args: MeasureArgs): Promise<MeasuredDeck> 
             .filter((li) => li.tagName === 'LI')
             .map((li) => paragraphOf(li, tag === 'ol' ? 'decimal' : 'disc'))
         : [paragraphOf(el)];
+    const blocks = tag === 'ul' || tag === 'ol' ? Array.from(el.children).filter((li) => li.tagName === 'LI') : [el];
+    const perBlock = blocks.map(lineRects);
     const valign = css(el, 'vertical-align');
     return {
       paragraphs,
       padding: [num(css(el, 'padding-top')), num(css(el, 'padding-right')), num(css(el, 'padding-bottom')), num(css(el, 'padding-left'))],
       valign: tag === 'td' || tag === 'th' ? (valign === 'middle' ? 'middle' : valign === 'bottom' ? 'bottom' : 'top') : 'top',
-      ink: inkOf(el, slide),
+      oneLine: perBlock.every(oneLine),
     };
   };
 
@@ -439,7 +451,7 @@ export async function measureDeckPage(args: MeasureArgs): Promise<MeasuredDeck> 
       for (const a of Array.from(el.attributes)) if (!['style', 'src', 'data-eid', 'data-layer', 'data-fit-box'].includes(a.name)) attrs[a.name] = a.value;
       const color = css(el, 'color');
       const measured: MeasuredElement = { id: el.getAttribute('data-eid') ?? '', tag, box, rotate, paint: paintOf(el, slide), color, attrs };
-      if (textTags.has(tag)) measured.text = textOf(el, slide);
+      if (textTags.has(tag)) measured.text = textOf(el);
       const fit = fits.get(el);
       if (fit) measured.fit = fit;
       if (tag === 'img') {
@@ -466,7 +478,7 @@ export async function measureDeckPage(args: MeasureArgs): Promise<MeasuredDeck> 
             box: rectIn(cell.getBoundingClientRect(), slide),
             fill: fillOf(cell),
             borders: bordersOf(cell),
-            text: textOf(cell, slide),
+            text: textOf(cell),
             header: cell.tagName === 'TH',
           })),
         }));

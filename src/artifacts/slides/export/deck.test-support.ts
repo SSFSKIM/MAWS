@@ -58,14 +58,14 @@ export const MEASURED: MeasuredDeck = {
           tag: 'h1',
           box: { x: 128, y: 128, w: 1664, h: 106 },
           color: 'rgb(18, 52, 86)',
-          text: { paragraphs: [{ runs: [run('Quarterly ', { size: 96, bold: true, color: 'rgb(18, 52, 86)' }), run('review', { size: 96, bold: true, color: 'rgb(18, 52, 86)' })], align: 'left', lineHeight: 105.6 }], padding: [0, 0, 0, 0], valign: 'top', ink: { x: 128, y: 136, w: 640, h: 90 } },
+          text: { paragraphs: [{ runs: [run('Quarterly ', { size: 96, bold: true, color: 'rgb(18, 52, 86)' }), run('review', { size: 96, bold: true, color: 'rgb(18, 52, 86)' })], align: 'left', lineHeight: 105.6 }], padding: [0, 0, 0, 0], valign: 'top', oneLine: true },
         }),
         el({
           id: 'sub',
           tag: 'p',
           box: { x: 128, y: 234, w: 1664, h: 80 },
           fit: { mode: 'shrink', size: 36, clipped: false },
-          text: { paragraphs: [{ runs: [run('A sized subtitle', { font: '"Brand Sans", Georgia, serif', size: 36 })], align: 'left', lineHeight: 50.4 }], padding: [0, 0, 0, 0], valign: 'top', ink: null },
+          text: { paragraphs: [{ runs: [run('A sized subtitle', { font: '"Brand Sans", Georgia, serif', size: 36 })], align: 'left', lineHeight: 50.4 }], padding: [0, 0, 0, 0], valign: 'top', oneLine: true },
         }),
         el({ id: 'logo', tag: 'img', box: { x: 1600, y: 64, w: 200, h: 100 }, image: { natural: { w: 400, h: 400 }, fit: 'fill', position: [0.5, 0.5], placeholder: false }, attrs: { alt: 'Logo' } }),
       ],
@@ -89,7 +89,7 @@ export const MEASURED: MeasuredDeck = {
             ],
             padding: [0, 0, 0, 45],
             valign: 'top',
-            ink: null,
+            oneLine: false,
           },
         }),
         el({
@@ -97,8 +97,8 @@ export const MEASURED: MeasuredDeck = {
           tag: 'table',
           box: { x: 128, y: 229, w: 400, h: 120 },
           rows: [
-            { id: 'h', box: { x: 128, y: 229, w: 400, h: 60 }, fill: 'rgb(238, 242, 241)', cells: [0, 1].map((k) => ({ box: { x: 128 + k * 200, y: 229, w: 200, h: 60 }, fill: null, borders: [null, null, null, null] as MeasuredPaint['borders'], header: true, text: { paragraphs: [{ runs: [run(['Region', 'Q1'][k]!, { size: 28, bold: true })], align: 'left' as const, lineHeight: 39.2 }], padding: [12, 16, 12, 16] as [number, number, number, number], valign: 'top' as const, ink: null } })) },
-            { id: 'r1', box: { x: 128, y: 289, w: 400, h: 60 }, fill: null, cells: [0, 1].map((k) => ({ box: { x: 128 + k * 200, y: 289, w: 200, h: 60 }, fill: null, borders: [null, null, null, null] as MeasuredPaint['borders'], header: false, text: { paragraphs: [{ runs: [run(['North', '12'][k]!, { size: 28 })], align: 'left' as const, lineHeight: 39.2 }], padding: [12, 16, 12, 16] as [number, number, number, number], valign: 'top' as const, ink: null } })) },
+            { id: 'h', box: { x: 128, y: 229, w: 400, h: 60 }, fill: 'rgb(238, 242, 241)', cells: [0, 1].map((k) => ({ box: { x: 128 + k * 200, y: 229, w: 200, h: 60 }, fill: null, borders: [null, null, null, null] as MeasuredPaint['borders'], header: true, text: { paragraphs: [{ runs: [run(['Region', 'Q1'][k]!, { size: 28, bold: true })], align: 'left' as const, lineHeight: 39.2 }], padding: [12, 16, 12, 16] as [number, number, number, number], valign: 'top' as const, oneLine: true } })) },
+            { id: 'r1', box: { x: 128, y: 289, w: 400, h: 60 }, fill: null, cells: [0, 1].map((k) => ({ box: { x: 128 + k * 200, y: 289, w: 200, h: 60 }, fill: null, borders: [null, null, null, null] as MeasuredPaint['borders'], header: false, text: { paragraphs: [{ runs: [run(['North', '12'][k]!, { size: 28 })], align: 'left' as const, lineHeight: 39.2 }], padding: [12, 16, 12, 16] as [number, number, number, number], valign: 'top' as const, oneLine: true } })) },
           ],
         }),
         el({ id: 'live', tag: 'x-embed', box: { x: 1200, y: 600, w: 400, h: 300 } }),
@@ -107,7 +107,7 @@ export const MEASURED: MeasuredDeck = {
     {
       id: 'gone',
       background: { fill: 'rgb(0, 0, 0)', image: false },
-      elements: [el({ id: 'g', tag: 'p', box: { x: 0, y: 0, w: 1920, h: 45 }, text: { paragraphs: [{ runs: [run('Hidden', { color: 'rgb(255, 255, 255)' })], align: 'left', lineHeight: 44.8 }], padding: [0, 0, 0, 0], valign: 'top', ink: null } })],
+      elements: [el({ id: 'g', tag: 'p', box: { x: 0, y: 0, w: 1920, h: 45 }, text: { paragraphs: [{ runs: [run('Hidden', { color: 'rgb(255, 255, 255)' })], align: 'left', lineHeight: 44.8 }], padding: [0, 0, 0, 0], valign: 'top', oneLine: true } })],
     },
   ],
 };
