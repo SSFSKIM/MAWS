@@ -246,6 +246,11 @@ export function deckFiles(doc: Doc): Record<string, string> {
   return files;
 }
 
+/** `deckFiles`'s paths in its order, without reading a file (M3: a publish's `kept` and `removed`). */
+export function deckPaths(doc: Doc): string[] {
+  return [DECK_PATH, ...slideOrder(doc).map(slidePath)];
+}
+
 /** Write an index into the deck root (inside the caller's transaction): its keys but `order`, the maps as nested nodes. */
 export function writeDeckKeys(doc: Doc, deck: DeckJson): void {
   for (const [key, value] of Object.entries(deck)) {

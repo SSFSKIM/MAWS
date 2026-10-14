@@ -8,7 +8,7 @@
 // missing artifact) is held the same way, so no answer names rows a failed batch takes back.
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { publishFiles, readFiles } from '@artifacts/files';
+import { publishFiles, readFiles, type PublishOutcome } from '@artifacts/files';
 import type { KindAdapter } from '@artifacts/host';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
@@ -144,8 +144,14 @@ export function filesOf(store: ArtifactStore, kind: ArtifactKind, doc: Doc): Rec
   return store.service.adapterFor(kind)?.readFiles?.(doc) ?? readFiles(doc);
 }
 
-export function publisherOf(store: ArtifactStore, kind: ArtifactKind): NonNullable<KindAdapter['publish']> {
+// P3-C: the outcome's loader fields (`added`, `warnings`, `notes`, `held`) reach the answer when the kind gives them
+export function publisherOf(store: ArtifactStore, kind: ArtifactKind): (...args: Parameters<NonNullable<KindAdapter['publish']>>) => PublishOutcome {
   return store.service.adapterFor(kind)?.publish ?? publishFiles;
+}
+
+// P3-C (the parent's Decision Log 58): the doc's file paths in `filesOf`'s order, by the kind's `paths` when it has one
+export function pathsOf(store: ArtifactStore, kind: ArtifactKind, doc: Doc): string[] {
+  return store.service.adapterFor(kind)?.paths?.(doc) ?? Object.keys(filesOf(store, kind, doc));
 }
 
 // A scratch doc holding `state` (V2; null: an empty doc), destroyed after `use`.

@@ -1,12 +1,13 @@
 // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D5): the presentation kind's host-side behaviour on A's
 // `KindAdapter` (src/artifacts/host.ts): a new deck's first content, the files a read returns, the three-way publish,
-// the repair after every update and restore, what a restore keeps, and the turn's summary. Portable: the engine host
-// registers it (M3), P4's network store the same.
+// the repair after every update and restore, what a restore keeps, and the turn's summary; M3 adds the files' paths
+// (A's `paths`, so a publish answers without reading the deck). Portable: the engine host registers it (M3), P4's
+// network store the same.
 import type { KindAdapter } from '../host';
 import { transact, type Doc } from '../yjs';
 import { conversationsSince, touchedSlides } from '../yjs/slides';
 import { DECK_PATH, slideIdOf, type DeckJson } from './deck';
-import { deckFiles, importSlide, repair, writeDeckKeys } from './model';
+import { deckFiles, deckPaths, importSlide, repair, writeDeckKeys } from './model';
 import { loadSlide } from './parse';
 import { publishDeck } from './publish';
 import { escAttr, escText } from './serialize';
@@ -82,6 +83,7 @@ export function createPresentationAdapter(options: { now?: () => Date } = {}): K
     kind: 'presentation',
     initial: (doc, { title }) => writeInitialDeck(doc, title, now()),
     readFiles: deckFiles,
+    paths: deckPaths,
     publish: publishDeck,
     // The repair lands as the triggering actor's write (the doc is that actor's host replica; X29 has no system actor),
     // scoped to the slides the update touched; a full scan when they cannot be told.

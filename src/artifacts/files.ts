@@ -17,6 +17,22 @@ const MAX_PATH = 512;
 export interface PublishOutcome {
   changed: string[]; // the paths written, removals included, sorted
   conflicts: { path: string; detail?: string }[];
+  // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D3; the parent's Decision Log 53 (3)): what a kind's
+  // loader said of the sent files, which the agent's answer carries: the paths it created (a subset of `changed`), its
+  // warnings (what it dropped), how many notes (heals to an equivalent), and the files it held with their reasons
+  added?: string[];
+  warnings?: PublishWarning[];
+  notes?: number;
+  held?: { path: string; reasons: string[] }[];
+}
+
+// P3-C: one warning of a kind's loader, naming the file and, where it can, the slide, the element and the property
+export interface PublishWarning {
+  path: string;
+  slide?: string;
+  element?: string;
+  property?: string;
+  message: string;
 }
 
 export interface FileProblem {

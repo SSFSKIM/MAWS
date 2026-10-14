@@ -19,14 +19,21 @@
 // into the artifact's suggestion doc instead (the artifact with the pending suggestions on it), as the session; the
 // artifact itself does not move, so the answer carries its live revision and no turn version follows. An html page,
 // which has no document to suggest into, is refused.
+//
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md; the parent's Decision Log 53 and 58): a kind's loader
+// fields (`added`, `warnings`, `notes`, `held`) reach the answer, a deck's with the pictures its assets do not hold; the
+// answer's `kept` and `removed` come from the kind's paths, and the session's base keeps the files it knows, so a
+// publish reads no whole document but the session's new base; a presentation takes no suggestion.
 import { createHash } from 'node:crypto';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { isDocKind, type Artifact } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
 import { parseToolArguments, type ArtifactPublishInput, type ArtifactPublishResult } from '@shared/maws/tools';
+import type { PublishOutcome } from '@artifacts/files';
+import { assetWarnings } from '@artifacts/slides/answer'; // P3-C
 import { stateV2 } from '@artifacts/yjs';
 import type { ArtifactStore } from '../documents/store';
-import { actorOf, answering, filesOf, lineageOf, opIdOf, publisherOf, refuse, refusedAfterCommit, resolveArtifact, storeOf, ToolRefusal, withDoc, type ArtifactToolDeps } from './artifact-context';
+import { actorOf, answering, filesOf, lineageOf, opIdOf, pathsOf, publisherOf, refuse, refusedAfterCommit, resolveArtifact, storeOf, ToolRefusal, withDoc, type ArtifactToolDeps } from './artifact-context';
 import { externalReferenceCount } from './artifacts';
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition } from './server';
 
@@ -55,6 +62,11 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (suggest && !isDocKind(artifact.kind)) {
         const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;
         throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}, and an html page takes none; nothing was written`);
+      }
+      // P3-C (the parent's Decision Log 53 (2)): nothing shows or settles a deck's suggestions in P3
+      if (suggest && artifact.kind === 'presentation') {
+        const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion, and a presentation takes none in this build of MAWS: publish with mode "direct"' : `the user set ${artifact.title} to take agent edits as suggestions, and a presentation takes none in this build of MAWS: ask the user to turn off agent edits as suggestions for it`;
+        throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}; nothing was written`);
       }
       const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx, suggest) : await placed(store, await publishPage(deps, store, artifact, input, ctx), input, ctx);
       return toolText(result);
@@ -143,6 +155,7 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
   const base = replica.base;
   const publish = publisherOf(store, artifact.kind);
   const outcome: { conflicts?: { path: string; detail?: string }[]; failure?: unknown; result?: ArtifactPublishResult } = {};
+  let baseFiles: Record<string, string> = {};
   const recorded = await store.writeCommitted(() =>
     store.withOp(
       opIdOf(ctx),
@@ -151,7 +164,8 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
       async (op) => {
         if (!base) return refusedAfterCommit(store, staleBase(store.revision(artifact.id), NEVER_READ));
         if (input.baseRevision !== base.revision) return refusedAfterCommit(store, staleBase(store.revision(artifact.id), notLastRead(input.baseRevision, base.revision)));
-        const baseFiles = withDoc(base.state, (doc) => filesOf(store, artifact.kind, doc));
+        baseFiles = base.files ?? withDoc(base.state, (doc) => filesOf(store, artifact.kind, doc)); // P3-C: the files the session read, kept on its base
+        const assets = artifact.kind === 'presentation' ? new Set(store.listAssets(artifact.id).map((asset) => asset.ref)) : null; // P3-C: D6's warnings
         const restoredSince = store.listVersions(artifact.id).some((v) => v.kind === 'restore' && v.seq > base.revision);
         const linked = store.link(artifact.id, ctx.appSessionId, 'edited');
         linked.catch(() => {}); // awaited below; a write that fails first reports the batch's failure itself
@@ -163,7 +177,7 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
             try {
               const published = publish(doc, baseFiles, input.files, input.force ?? false);
               if (published.conflicts.length > 0) outcome.conflicts = published.conflicts;
-              else outcome.result = { status, artifactId: artifact.id, kind: artifact.kind, title: artifact.title, revision: 0, changed: published.changed, kept: [], removed: [] };
+              else outcome.result = { status, artifactId: artifact.id, kind: artifact.kind, title: artifact.title, revision: 0, changed: published.changed, kept: [], removed: [], ...loaderFields(published) /* P3-C */ };
             } catch (error) {
               // Only the kind's documented refusal of the files, made before it writes anything (`code: 'invalid'`, as
               // `FilesError` and P3-D's `SystemFilesError`), is answered after the write; anything else escapes the write,
@@ -176,10 +190,14 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
             inFrame: (written) => {
               if (!outcome.result) return;
               const revision = suggest ? store.service.revision(artifact.id) : written;
-              const live = filesOf(store, artifact.kind, store.service.live(target));
-              const changed = outcome.result.changed;
-              const removed = changed.filter((path) => !(path in live));
-              outcome.result = { ...outcome.result, revision, changed: changed.filter((path) => path in live), removed, kept: Object.keys(live).filter((path) => !changed.includes(path)) };
+              const doc = store.service.live(target);
+              const live = new Set(pathsOf(store, artifact.kind, doc)); // P3-C: the paths, not the files
+              const changed = new Set(outcome.result.changed);
+              const kept = [...live].filter((path) => !changed.has(path));
+              const changedLive = outcome.result.changed.filter((path) => live.has(path));
+              const removed = outcome.result.changed.filter((path) => !live.has(path));
+              const warnings = [...(outcome.result.warnings ?? []), ...(assets ? assetWarnings(doc, assets, changedLive) : [])]; // P3-C
+              outcome.result = { ...outcome.result, revision, changed: changedLive, kept, removed, ...(warnings.length > 0 && { warnings }) };
               op.record(outcome.result);
             },
           },
@@ -187,7 +205,7 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
         await linked;
         if (outcome.failure !== undefined) throw outcome.failure;
         if (outcome.conflicts) {
-          const restored = (path: string) => restoredSince && path in baseFiles && !(path in filesOf(store, artifact.kind, store.service.live(target)));
+          const restored = (path: string) => restoredSince && path in baseFiles && !pathsOf(store, artifact.kind, store.service.live(target)).includes(path); // P3-C: paths
           throw conflict(outcome.conflicts.map((c) => (restored(c.path) ? { path: c.path, detail: 'removed by restore' } : c)));
         }
         return outcome.result!;
@@ -199,17 +217,26 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
   // still conflicts on a file someone else changed that it never saw); none when that view cannot be built.
   if (outcome.result) {
     try {
-      const known = withDoc(base!.state, (doc) => {
-        publish(doc, filesOf(store, artifact.kind, doc), input.files, true);
-        return stateV2(doc);
+      replica.base = withDoc(base!.state, (doc) => {
+        publish(doc, baseFiles, input.files, true);
+        return { revision: recorded.revision, state: stateV2(doc), files: filesOf(store, artifact.kind, doc) /* P3-C: kept for the next publish */ };
       });
-      replica.base = { revision: recorded.revision, state: known };
     } catch {
       replica.base = null;
     }
     if (!suggest) replica.setPresence(actorDisplay(actor));
   }
   return recorded;
+}
+
+// P3-C: what a kind's loader said of the files, each field when it says something
+function loaderFields(outcome: PublishOutcome): Pick<ArtifactPublishResult, 'added' | 'warnings' | 'notes' | 'held'> {
+  return {
+    ...(outcome.added && outcome.added.length > 0 && { added: outcome.added }),
+    ...(outcome.warnings && outcome.warnings.length > 0 && { warnings: outcome.warnings }),
+    ...(outcome.notes !== undefined && outcome.notes > 0 && { notes: outcome.notes }),
+    ...(outcome.held && outcome.held.length > 0 && { held: outcome.held }),
+  };
 }
 
 const isFilesRefusal = (error: unknown): boolean => error instanceof Error && (error as { code?: unknown }).code === 'invalid' && typeof (error as { data?: unknown }).data === 'object';

@@ -102,6 +102,9 @@ export interface KindAdapter {
   initial?(doc: Doc, info: { title: string }): void;
   readFiles?(doc: Doc): Record<string, string>; // M6
   publish?(live: Doc, base: Record<string, string>, sent: Record<string, string | null>, force: boolean): { changed: string[]; conflicts: { path: string; detail?: string }[] }; // M6
+  // P3-C (the parent's Decision Log 58): the paths `readFiles` would answer, in its order, without their text; a publish
+  // builds its answer's `kept` and `removed` from them. Without it, the paths of `readFiles` (or the generic file model).
+  paths?(doc: Doc): string[];
 }
 
 // What an editor shows of an open document (P3-G's header maps it: `unsaved > 0` while live is saving, phase `off` is

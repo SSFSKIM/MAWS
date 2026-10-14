@@ -347,10 +347,16 @@ export const ArtifactDescribeTypeResultSchema = z.strictObject({
   designSystem: z.string().optional(), // a document, presentation or design: the governing design system's DESIGN.md (Decision Log 42)
 });
 export type ArtifactDescribeTypeResult = z.infer<typeof ArtifactDescribeTypeResultSchema>;
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D3; the parent's Decision Log 53 (3)): what a kind's
+// loader said of the files, on a read and a publish: its warnings (what it dropped, each naming the file and, where it
+// can, the slide, the element and the property), and the files it held with their reasons
+const FileWarningSchema = z.strictObject({ path: z.string(), slide: z.string().optional(), element: z.string().optional(), property: z.string().optional(), message: z.string() });
+const HeldFileSchema = z.strictObject({ path: z.string(), reasons: z.array(z.string()) });
 const VersionSummarySchema = z.strictObject({ id: z.number().int().min(1), kind: z.string(), revision: z.number().int().min(0), at: IsoTimeSchema, by: ArtifactEditorSchema.shape.by, label: z.string().optional() });
 export type VersionSummary = z.infer<typeof VersionSummarySchema>;
 // A file kind's and an `html` artifact's `files`; a Y kind's other root types as `json` (the generic reader, until the
-// kind registers its own); a `file` artifact's `file`. `versions`: the latest ones, newest first (ids `version` takes).
+// kind registers its own; P3-C: a kind with its own `readFiles` answers none); a `file` artifact's `file`. `versions`:
+// the latest ones, newest first (ids `version` takes).
 export const ArtifactReadResultSchema = z.strictObject({
   status: z.literal('read'), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0),
   handle: z.string().optional(),
@@ -358,6 +364,8 @@ export const ArtifactReadResultSchema = z.strictObject({
   files: z.record(z.string(), z.string()).optional(),
   missing: z.array(z.string()).optional(), // named paths the artifact has no file at
   json: z.record(z.string(), z.unknown()).optional(),
+  warnings: z.array(FileWarningSchema).optional(), // P3-C
+  held: z.array(HeldFileSchema).optional(), // P3-C
   file: z.strictObject({ name: z.string(), path: z.string(), size: z.number().int().min(0), sha256: z.string(), text: z.string().optional(), exists: z.boolean() }).optional(),
   versions: z.array(VersionSummarySchema),
 });
@@ -368,6 +376,9 @@ export type ArtifactReadResult = z.infer<typeof ArtifactReadResultSchema>;
 export const ArtifactPublishResultSchema = z.strictObject({
   status: z.enum(['published', 'suggested']), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0),
   changed: z.array(z.string()), kept: z.array(z.string()), removed: z.array(z.string()),
+  // P3-C: the files the publish created (among `changed`), the loader's warnings, its notes (heals to an equivalent,
+  // counted) and the files it held
+  added: z.array(z.string()).optional(), warnings: z.array(FileWarningSchema).optional(), notes: z.number().int().min(1).optional(), held: z.array(HeldFileSchema).optional(),
   id: z.string().optional(), deliverableId: z.uuid().optional(), version: z.number().int().min(1).optional(), externalReferences: z.number().int().min(0).optional(),
   ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1: the page is its creator's
 });

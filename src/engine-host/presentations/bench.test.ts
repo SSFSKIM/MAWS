@@ -12,6 +12,10 @@ import { benchDeckFiles } from '@artifacts/slides/fixtures/bench';
 import { deckFiles, readFlat, setStyle } from '@artifacts/slides/model';
 import { publishDeck } from '@artifacts/slides/publish';
 import { applyV2, diffV1, newDoc, stateV2, stateVector, type Doc } from '@artifacts/yjs';
+import { artifactPublishTool } from '../tool-server/artifact-publish';
+import { artifactCreateTool, artifactReadTool } from '../tool-server/artifact-tools';
+import { openWorld, textOf } from '../tool-server/artifact-world.fixture';
+import type { McpToolDefinition } from '../tool-server/server';
 
 const N = 100;
 const RUNS = 7;
@@ -106,5 +110,53 @@ describe.skipIf(process.env.MAWS_BENCH !== '1')('the deck bench (100 slides)', (
     }
     report('scoped repair per drag-frame update, ms p95 / median of 200', { p95: ms(p95(frames)), median: ms(median(frames)) });
     report('full repair of the deck (contrast), ms p95 / median of 200', { p95: ms(p95(full)), median: ms(median(full)) });
+  });
+
+  // M3 (Decision Log 13): the one-slide publish through A's real tool, store and SQLite file, the deck's adapter
+  // registered. `busy` is the host loop's active time over the call (event-loop utilization), the bound's measure;
+  // `wall` includes the commit's waits. After a read (the session's files cached on its base) and after a publish.
+  it('measures the one-slide publish through A’s real publishDoc', async () => {
+    const w = openWorld();
+    try {
+      w.store.registerAdapter(createPresentationAdapter());
+      const call = async (tool: McpToolDefinition, args: Record<string, unknown>) => {
+        const result = await tool.call(args, w.ctx());
+        if (result.isError) throw new Error(textOf(result));
+        return JSON.parse(textOf(result)) as { artifactId: string; revision: number; files?: Record<string, string> };
+      };
+      const created = await call(artifactCreateTool(w.deps()), { kind: 'presentation', title: 'Bench', files: benchDeckFiles(N) });
+      const slide = 'project/slides/s006.html';
+      let size = 64;
+      const measure = async (baseRevision: number, text: string) => {
+        const next = text.replace(`font-size:${size}px`, `font-size:${size + 2}px`);
+        if (next === text) throw new Error(`the slide has no font-size:${size}px to change`);
+        size += 2;
+        const elu = performance.eventLoopUtilization();
+        const s = performance.now();
+        const answer = await call(artifactPublishTool(w.deps()), { artifact: created.artifactId, baseRevision, files: { [slide]: next } });
+        const wall = performance.now() - s;
+        return { answer, next, wall, busy: performance.eventLoopUtilization(elu).active };
+      };
+      const afterRead: { wall: number; busy: number }[] = [];
+      for (let k = 0; k <= RUNS; k++) {
+        const read = await call(artifactReadTool(w.deps()), { artifact: created.artifactId });
+        const run = await measure(read.revision, read.files![slide]!);
+        if (k > 0) afterRead.push(run); // the first is the warm-up
+      }
+      report('one-slide publish through publishDoc after a read, ms median of 7', { busy: ms(median(afterRead.map((r) => r.busy))), wall: ms(median(afterRead.map((r) => r.wall))) });
+      const read = await call(artifactReadTool(w.deps()), { artifact: created.artifactId });
+      let base = read.revision;
+      let text = read.files![slide]!;
+      const afterPublish: { wall: number; busy: number }[] = [];
+      for (let k = 0; k <= RUNS; k++) {
+        const run = await measure(base, text);
+        base = run.answer.revision;
+        text = run.next;
+        if (k > 0) afterPublish.push(run);
+      }
+      report('one-slide publish through publishDoc after a publish, ms median of 7', { busy: ms(median(afterPublish.map((r) => r.busy))), wall: ms(median(afterPublish.map((r) => r.wall))) });
+    } finally {
+      w.close();
+    }
   });
 });
