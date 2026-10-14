@@ -5,7 +5,7 @@
 // The actions arrive with the milestones that bring them (Present, Comments, History, Theme, Check, Insert: M5 to M8)
 // and the exports with M9; Mark up is the header's own, offered while the stage is registered as its surface.
 import type { DocumentState } from '@artifacts/host';
-import type { EditorHostRegistration, SavedState } from '../../panel/editor-host';
+import type { EditorHostExport, EditorHostRegistration, SavedState } from '../../panel/editor-host';
 
 export function savedOf(document: DocumentState | null, saving: boolean): SavedState | null {
   if (!document) return null;
@@ -19,8 +19,9 @@ export interface DeckHeaderState {
   document: DocumentState | null;
   saving: boolean;
   closeGuard(): Promise<boolean>;
+  exports?: readonly EditorHostExport[]; // M9: the Export menu (exports.ts)
 }
 
-export function deckHeader({ title, document, saving, closeGuard }: DeckHeaderState): EditorHostRegistration {
-  return { title, saved: savedOf(document, saving), closeGuard };
+export function deckHeader({ title, document, saving, closeGuard, exports }: DeckHeaderState): EditorHostRegistration {
+  return { title, saved: savedOf(document, saving), closeGuard, ...(exports && { exports }) };
 }

@@ -11,6 +11,7 @@ import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
 import { useSettings } from '../../stores/settings';
+import { deckExports } from './exports';
 import { deckHeader } from './header';
 import type { DeckTabState } from './tab-state';
 
@@ -41,7 +42,8 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
   const row = useLibraryRow(artifactId).value;
   const title = row?.title ?? 'Presentation';
   useEffect(() => state.setTitle(title), [state, title]);
-  useEditorHost(scope, deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard }));
+  const exports = useMemo(() => deckExports(artifactId), [artifactId]); // M9
+  useEditorHost(scope, deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports }));
 
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
   const system = useGoverningSystem(placement);
