@@ -18,7 +18,9 @@ const RUNS = 7;
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
 const p95 = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length * 0.95)]!;
 const ms = (n: number) => Math.round(n * 100) / 100;
+/** The median of `runs` timed runs after one untimed warm-up run. */
 function time(run: () => void, runs = RUNS): number {
+  run();
   const t: number[] = [];
   for (let k = 0; k < runs; k++) {
     const s = performance.now();
@@ -34,7 +36,6 @@ describe.skipIf(process.env.MAWS_BENCH !== '1')('the deck bench (100 slides)', (
     const files = benchDeckFiles(N);
     const adapter = createPresentationAdapter();
     let doc: Doc = newDoc();
-    time(() => void publishDeck(newDoc(), {}, files, false), 2); // warm-up
     report('import: the whole deck published onto an empty doc, ms median of 7', time(() => {
       doc = newDoc();
       publishDeck(doc, {}, files, false);
@@ -52,7 +53,7 @@ describe.skipIf(process.env.MAWS_BENCH !== '1')('the deck bench (100 slides)', (
     const slide = 'project/slides/s006.html';
     const one = { [slide]: read[slide]!.replace('font-size:64px', 'font-size:66px') };
     expect(one[slide]).not.toBe(read[slide]);
-    const copies = Array.from({ length: RUNS }, () => {
+    const copies = Array.from({ length: RUNS + 1 }, () => {
       const d = newDoc();
       applyV2(d, v2);
       return d;
@@ -60,9 +61,27 @@ describe.skipIf(process.env.MAWS_BENCH !== '1')('the deck bench (100 slides)', (
     let i = 0;
     report('publish one slide with one property changed, ms median of 7', time(() => expect(publishDeck(copies[i++]!, read, one, false).changed).toEqual([slide])));
 
+    // the same publish as A's publishDoc drives it today: the base files read from a doc at the base state, the
+    // publish, the live files for the answer, and the session's new base (the publish again onto a base copy)
+    const hostCopies = Array.from({ length: RUNS + 1 }, () => {
+      const d = newDoc();
+      applyV2(d, v2);
+      return d;
+    });
+    i = 0;
+    report('one-slide publish as A’s publishDoc drives it (4 deck reads or publishes), ms median of 7', time(() => {
+      const baseDoc = newDoc();
+      applyV2(baseDoc, v2);
+      const baseFiles = deckFiles(baseDoc);
+      publishDeck(hostCopies[i++]!, baseFiles, one, false);
+      deckFiles(hostCopies[i - 1]!);
+      publishDeck(baseDoc, deckFiles(baseDoc), one, true);
+      stateV2(baseDoc);
+    }));
+
     // the whole deck: one property changed on every slide
     const whole = Object.fromEntries(Object.entries(read).map(([p, c]) => [p, p === DECK_PATH ? c : c.replace(/^<section id="([^"]+)"/, '<section id="$1" data-transition="push"')]));
-    const wholeCopies = Array.from({ length: RUNS }, () => {
+    const wholeCopies = Array.from({ length: RUNS + 1 }, () => {
       const d = newDoc();
       applyV2(d, v2);
       return d;
