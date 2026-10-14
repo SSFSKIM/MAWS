@@ -7,6 +7,10 @@ export const DESIGN_SYSTEM_COPY = {
   exportClaude: 'Export for Claude',
   exported: (path: string) => `Exported for Claude to ${path}`,
   exportFailed: (reason: string) => `Could not export for Claude: ${reason}`,
+  // the close guard (whole-branch review F-I1): edits the store has not acknowledged
+  unsavedTitle: (name: string) => `Discard unsaved changes to “${name}”?`,
+  unsavedBody: 'Some edits are not saved to the artifact store yet. Cancel keeps the tab open until they save; discarding loses them.',
+  discardChanges: 'Discard changes',
   opening: 'Opening the design system…',
   openFailed: (reason: string) => `Could not open this design system · ${reason}`,
   // the delete sheet (D10)

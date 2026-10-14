@@ -2,15 +2,18 @@
 // actions and the export, read from the tab's state) and its Mark-up surface, over a real replica.
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { DocumentHandle, DocumentState } from '@artifacts/host';
-import { newDoc } from '@artifacts/yjs';
+import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
+import { PortProvider } from '@artifacts/provider/port';
+import { applyV2, newDoc, stateV2 } from '@artifacts/yjs';
 import complete from '@artifacts/design-system/fixtures/complete.tokens.json';
-import { setLaw, writeSystem } from '@artifacts/design-system/model';
+import { setLaw, setToken, writeSystem } from '@artifacts/design-system/model';
 import { parseTokens, serializeTokens } from '@artifacts/design-system/tokens';
 import { markupSurfaceOf, resetMarkupSurfaces } from '../../markup/surface';
-import { editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
+import { askEditorHostClose, editorHostOf, EditorHostScopeContext, resetEditorHosts, type EditorHostScope } from '../../panel/editor-host';
+import { closeDialog, useDialogs } from '../../sessions/dialogs';
 import { useNotices } from '../../stores/notices';
 import { DesignSystemBody, savedStateOf } from './DesignSystemBody';
+import { OpenedSystem } from './editor';
 
 const SCOPE: EditorHostScope = { surface: 'main', tabId: 'artifact:ds1' };
 
@@ -68,7 +71,6 @@ describe('the Design System body (X32, Mark-up)', () => {
       ['Set as my default', true],
     ]);
     expect(registration.exports!.map((e) => e.label)).toEqual(['Export for Claude']);
-    expect(registration.closeGuard ?? null).toBeNull();
     act(() => set({ unsaved: 2 }));
     expect(editorHostOf(SCOPE)!.saved).toBe('saving');
     act(() => setLaw(doc, '# Harbor Press\n'));
@@ -123,5 +125,83 @@ describe('the Design System body (X32, Mark-up)', () => {
     expect(savedStateOf({ ...base, phase: 'handshake' })).toBe('reconnecting');
     expect(savedStateOf({ ...base, phase: 'off' })).toBe('reconnecting');
     expect(savedStateOf({ ...base, readOnly: true })).toBe('readonly');
+  });
+});
+
+// Whole-branch review F-I1: a showing ends only once its edits are saved or the owner discards them. The guard is the
+// tab's (it reads the showing's replica, X32's lifetime rule), asked by a close, Back or a re-target alike.
+describe('the close guard (F-I1)', () => {
+  afterEach(() => closeDialog());
+
+  it('lets a saved system close at once, asking nothing', async () => {
+    mount();
+    expect(await askEditorHostClose(SCOPE)).toBe(true);
+    expect(useDialogs.getState().open).toBeNull();
+  });
+
+  it('waits for a live replica’s edits to be acknowledged, and asks once it loses the host instead', async () => {
+    const { set } = mount();
+    act(() => set({ unsaved: 1 }));
+    const acked = askEditorHostClose(SCOPE)!;
+    act(() => set({ unsaved: 0 }));
+    expect(await acked).toBe(true);
+    expect(useDialogs.getState().open).toBeNull();
+    act(() => set({ unsaved: 1 }));
+    const lost = askEditorHostClose(SCOPE)!;
+    act(() => set({ phase: 'off' }));
+    await act(async () => {});
+    expect(useDialogs.getState().open?.kind).toBe('confirm');
+    closeDialog();
+    expect(await lost).toBe(false);
+  });
+
+  it('keeps an offline replica’s edits until the owner discards them, even with the body gone', async () => {
+    const persisted = newDoc();
+    writeSystem(persisted, { 'DESIGN.md': '# Harbor\n', 'tokens.tokens.json': serializeTokens(parseTokens(complete).tokens!) }, { route: 'derived', at: 0 });
+    // The real provider with no port: an open replica that has lost its host (phase off).
+    const replica = (): DocumentHandle => {
+      const doc = newDoc();
+      applyV2(doc, stateV2(persisted));
+      const provider = new PortProvider(doc);
+      return {
+        doc,
+        awareness: provider.awareness,
+        state: () => ({ ...provider.state, readOnly: false }),
+        subscribe: (listener) => provider.subscribe((s) => listener({ ...s, readOnly: false })),
+        onRestored: (listener) => provider.onRestored(listener),
+        holdRemote: (on) => provider.holdRemote(on),
+        close: () => provider.destroy(),
+      };
+    };
+    const opened = new OpenedSystem('ds1', { ...host, open: async () => replica() } as unknown as ArtifactHost);
+    await act(async () => {});
+    const state = opened.get();
+    if (state.status !== 'open') throw new Error('not open');
+    const view = render(
+      <EditorHostScopeContext.Provider value={SCOPE}>
+        <DesignSystemBody artifactId="ds1" handle={state.handle} host={host} />
+      </EditorHostScopeContext.Provider>,
+    );
+    act(() => setToken(state.handle.doc, 'color.accent.$root', { $type: 'color', $value: '#112233' }));
+    expect(state.handle.state().unsaved).toBeGreaterThan(0);
+    expect(editorHostOf(SCOPE)!.saved).toBe('reconnecting');
+    view.unmount(); // a tab switch: the registration and its guard stay with the tab
+
+    const kept = askEditorHostClose(SCOPE);
+    expect(kept).not.toBeNull();
+    await act(async () => {});
+    const dialog = useDialogs.getState().open;
+    expect(dialog).toMatchObject({ kind: 'confirm', title: 'Discard unsaved changes to “Harbor”?', confirmLabel: 'Discard changes', destructive: true });
+    closeDialog(); // Cancel: the tab stays open with its edits
+    expect(await kept).toBe(false);
+
+    const discarded = askEditorHostClose(SCOPE)!;
+    await act(async () => {});
+    const confirmDialog = useDialogs.getState().open;
+    if (confirmDialog?.kind !== 'confirm') throw new Error('no confirmation');
+    confirmDialog.answer(true);
+    expect(await discarded).toBe(true);
+    opened.dispose();
+    persisted.destroy();
   });
 });

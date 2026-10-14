@@ -7,9 +7,10 @@
 // "Set as my default" (settings 14; disabled when it is already the default, or without a handler), "Delete design
 // system…" (with a handler) and the export "Export for Claude". A registration outlives this body, so its actions read
 // the tab's state, never this component's: the check's request goes through a store keyed by the tab, the export
-// through the host, the default and the delete through the given handlers. Every edit writes through to the replica, so
-// there is nothing unsaved to guard on close. Hidden (`visible` false), the body reports nothing shown and offers no
-// Mark-up surface.
+// through the host, the default and the delete through the given handlers. Every edit writes through to the replica,
+// but the replica keeps it durably only once the host acknowledges it, so the closeGuard (./close-guard.ts) reads the
+// tab's handle and keeps a showing whose edits are unacknowledged until they save or the owner discards them
+// (whole-branch review F-I1). Hidden (`visible` false), the body reports nothing shown and offers no Mark-up surface.
 import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
@@ -19,6 +20,7 @@ import { usePageState } from '@artifacts/design-system/page/use-system';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost, useEditorHostScope, type EditorHostScope, type SavedState } from '../../panel/editor-host';
 import { toast } from '../../stores/notices';
+import { allowSystemClose } from './close-guard';
 import { DESIGN_SYSTEM_COPY } from './copy';
 
 // "Check against law" asks the tab's page to bring its check into view: a serial per tab, outside any component.
@@ -85,6 +87,7 @@ export function DesignSystemBody(props: DesignSystemBodyProps) {
       ...(onDelete ? [{ id: 'design-system.delete', label: DESIGN_SYSTEM_COPY.deleteAction, onSelect: () => onDelete() }] : []),
     ],
     exports: [{ id: 'design-system.export-claude', label: DESIGN_SYSTEM_COPY.exportClaude, onSelect: () => exportForClaude(host, artifactId) }],
+    closeGuard: () => allowSystemClose(handle, shownTitle), // the tab's handle (L's createState), never this body's state
   });
 
   const surface = useRef<HTMLDivElement>(null);
