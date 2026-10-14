@@ -48,6 +48,7 @@ import { COMMENT_COPY } from '../tools/browser/comment/copy';
 // E4d end
 // P2-E1 start (2026-10-09)
 import { openDeliverable } from '../tools/maws/actions';
+import { openArtifactInPanel } from '../tools/artifacts/ArtifactsTool'; // P3-L (M5b)
 import { closeCard, openCard, targetOf, useCommentCard } from './card/store';
 // P2-E1 end
 import { usePageDock } from '../tools/browser/comment/dock'; // P2-F L146
@@ -63,8 +64,9 @@ const COPY = SIDE_COPY.pane;
 // P2-E1 start (2026-10-09): the re-dock (D7)
 function showInDeliverable(parent: AppSessionId, child: AppSessionId, anchor: Anchor): void {
   const target = targetOf(anchor);
-  if (target?.kind !== 'deliverable') return;
-  openDeliverable(target.appSessionId, target.deliverableId); // no version: the latest; activated, so this pane yields the panel
+  if (target?.kind === 'deliverable') openDeliverable(target.appSessionId, target.deliverableId); // no version: the latest; activated, so this pane yields the panel
+  else if (target?.kind === 'artifact-page') openArtifactInPanel(parent, target.artifactId); // P3-L (M5b): the panel's Artifacts tool, on the latest
+  else return;
   openCard(anchor, { appSessionId: parent, phase: { kind: 'thread', child, echo: null }, claimMode: 'panel' });
 }
 // P2-E1 end
@@ -120,7 +122,8 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
   // E4d start
   const pageUrl = anchor?.kind === 'browser-element' ? anchor.pageUrl : undefined;
   // E4d end
-  const redocks = anchor !== null && targetOf(anchor)?.kind === 'deliverable'; // P2-E1: an artifact element whose page names a deliverable
+  const redockTarget = anchor === null ? undefined : targetOf(anchor)?.kind;
+  const redocks = anchor !== null && (redockTarget === 'deliverable' || redockTarget === 'artifact-page'); // P2-E1: an artifact element whose page names a deliverable (P3-L M5b: or an artifact)
   const pageDock = usePageDock(pageUrl ?? null); // P2-F L146: a pane of this window on the thread's page
   const panelPage = usePanelPageTab(parent, child, pageUrl ?? null); // P2-F: the page, a tab the panel's Browser holds
 

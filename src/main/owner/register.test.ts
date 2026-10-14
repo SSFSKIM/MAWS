@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema/settings';
 import type { HostState } from '@shared/ipc/schema';
 import { summary, tempDir } from '../../../test/support/index-fixture';
@@ -34,7 +34,7 @@ describe('startOwnerChannel', () => {
     dir = tempDir();
     index = new Index(join(dir.path, 'index.sqlite'));
     a = index.sessions.upsertFromSummary(summary({ directory: root })).record.appId;
-    settings = structuredClone(SETTINGS_DEFAULTS_V13);
+    settings = structuredClone(SETTINGS_DEFAULTS_V14);
     handlers.clear();
     listeners.clear();
     projected.length = 0;

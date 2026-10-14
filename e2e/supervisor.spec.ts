@@ -17,7 +17,11 @@
 //   (i) P3-A M5: a document a session (the test writer standing in for an agent) edits while no window and no main
 //       exist; the next launch lists it at its new revision and opens it through main's relay over the socket's
 //       document channel, an edit syncing back; a kill -9 of the supervisor during a relayed edit loses nothing
-//       acknowledged once main has started a new one.
+//       acknowledged once main has started a new one;
+//   (j) P3-L M7: the library after a detached edit: a kept session's stand-in edits one artifact, creates another and
+//       deletes a third while the app has quit; the next launch's library (main's derived index, reconciled by one
+//       host read at the connection) lists them at the host's revisions, the session their last editor and their new
+//       words searchable, and drops the deleted one.
 // The evidence (`relaunch.txt`, `crash.txt`, `idle.txt`, the screenshots in both themes) is written from what the cases
 // observe, under MAWS_E10_SHOTS=1 only (E11 W-E: a gate run leaves the committed evidence alone; the both-themes token
 // scans run either way). Run by `pnpm e2e:supervisor` (MAWS_SUPERVISOR_E2E=1), part of `pnpm verify`.
@@ -36,6 +40,7 @@ import { SOCKET_PROTOCOL } from '@shared/host/socket-protocol'; // P3-A M5
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint'; // P3-A M5
 import { invoke, launchReady, replaySpec, turnsJournal, value } from './support/c7-replay';
 import { menu, otherThemeColours } from './support/code-product';
+import { ownTitles } from './support/library'; // P3-L M7
 import { documents, seamReady } from './support/documents'; // P3-A M5
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { isAlive, killScratchProcesses, ps } from './support/processes';
@@ -960,6 +965,68 @@ test('(i) P3-A M5: a document edited while no app runs reads at its new revision
     expect(text.startsWith('agent;human;back;')).toBe(true);
     const lost = Array.from({ length: acked }, (_, i) => `k${i};`).filter((token) => !text.includes(token));
     expect(lost, 'every acknowledged keystroke survived the kill').toEqual([]);
+    expect(second.maws.consoleErrors()).toEqual([]);
+  });
+});
+
+// ---- P3-L M7: the library after a detached edit ---------------------------------------------------------------------
+
+// Main's library row of an artifact (its derived index) and the host's own row, to compare revisions.
+const libraryRow = async (page: Page, artifactId: string) => value(await invoke(page, 'library.get', { artifactId })).row;
+const hostRow = async (page: Page, artifactId: string) => value(await invoke(page, 'artifacts.get', { artifactId })).artifact;
+const searched = async (page: Page, query: string) => value(await invoke(page, 'library.list', { filter: { query } })).rows.map((row) => row.title);
+
+test('(j) P3-L M7: the library is right after a detached edit: what a kept session wrote while the app had quit is listed and searchable at the next launch', async () => {
+  await withScratch('library', async (s) => {
+    // the first run: a session kept mid-turn, and the library indexing what the owner and that session made
+    const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
+    const pid = (await s.ready(first.page)).supervisor!.pid;
+    const id = await s.record(first.page);
+    await startTurn(first.page, s, id);
+    await untilRequested(first.page, id);
+    const { artifact: notes } = value(await invoke(first.page, 'artifacts.create', { kind: 'document', title: 'Field notes' }));
+    const { artifact: doomed } = value(await invoke(first.page, 'artifacts.create', { kind: 'document', title: 'Doomed draft' }));
+    value(await invoke(first.page, 'artifacts.testWrite', { artifactId: notes.id, opId: 'lib-before', appSessionId: id, ops: [{ op: 'insertText', index: 0, text: 'The heron counts start at dawn.' }] }));
+    await expect.poll(() => searched(first.page, 'heron'), { timeout: 15_000, message: 'the first run indexed the notes’ text' }).toEqual(['Field notes']);
+    const before = (await libraryRow(first.page, notes.id))!;
+    expect((await libraryRow(first.page, doomed.id))?.title).toBe('Doomed draft');
+    await s.quit(first);
+    expect(first.quitLines()).toContain('quit-guard: 1 mid-turn, auto-answered keep, 1 session kept');
+    expect(isAlive(pid), 'the supervisor outlives the app').toBe(true);
+
+    // while no window and no main exist, the session's stand-in edits the notes, makes a report and deletes the draft
+    const edited = (await askWithNoApp(s, 'artifacts.testWrite', { artifactId: notes.id, opId: 'lib-away-1', appSessionId: id, ops: [{ op: 'insertText', index: 0, text: 'An okapi crossed the trail. ' }] })) as { revision: number };
+    expect(edited.revision).toBeGreaterThan(before.revision);
+    const { artifact: report } = (await askWithNoApp(s, 'artifacts.create', { kind: 'document', title: 'Away report' })) as { artifact: { id: string } };
+    const reported = (await askWithNoApp(s, 'artifacts.testWrite', { artifactId: report.id, opId: 'lib-away-2', appSessionId: id, ops: [{ op: 'insertText', index: 0, text: 'A narwhal tally, written while MAWS was closed.' }] })) as { revision: number };
+    await askWithNoApp(s, 'artifacts.delete', { artifactId: doomed.id });
+
+    // the next launch reaches the same supervisor; main's index, reconciled at the connection, holds the host's state
+    const second = await s.launch();
+    expect((await s.ready(second.page)).supervisor!.pid, 'the same supervisor').toBe(pid);
+    const { page } = second;
+    await expect.poll(async () => (await libraryRow(page, notes.id))?.revision, { timeout: 15_000, message: 'the notes at the revision written while away' }).toBe(edited.revision);
+    expect((await hostRow(page, notes.id))?.revision).toBe(edited.revision);
+    await expect.poll(async () => (await libraryRow(page, report.id))?.revision, { message: 'the report made while away' }).toBe(reported.revision);
+    expect(await libraryRow(page, doomed.id), 'the draft deleted while away is gone from the library').toBeNull();
+    // the session is each one's last editor (the test writer links no session: a link comes from a session's own create
+    // or tool write, which no IPC stand-in can make)
+    for (const artifactId of [notes.id, report.id]) expect((await libraryRow(page, artifactId))?.lastEditor).toEqual({ kind: 'session', appSessionId: id });
+
+    // the Artifacts tab shows it: the rows, the words written while away found, the deleted draft absent
+    await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+    const library = page.locator('[data-library]');
+    const titles = () => ownTitles(page, library); // without the seeded design systems (P3-D)
+    await expect.poll(titles, { timeout: 15_000 }).toEqual(['Away report', 'Field notes']);
+    const search = library.getByRole('searchbox', { name: 'Search artifacts' });
+    await search.fill('okapi');
+    await expect.poll(titles, { timeout: 15_000, message: 'the words written while away are searchable' }).toEqual(['Field notes']);
+    await search.fill('narwhal');
+    await expect.poll(titles, { timeout: 15_000 }).toEqual(['Away report']);
+    await search.fill('heron');
+    await expect.poll(titles).toEqual(['Field notes']);
+    await search.fill('Doomed');
+    await expect(library.getByText('No artifacts match “Doomed”.')).toBeVisible();
     expect(second.maws.consoleErrors()).toEqual([]);
   });
 });

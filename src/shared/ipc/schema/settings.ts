@@ -3,7 +3,7 @@
 // policy, the near-limit threshold, the monospace font and the per-kind notification switches. Version 4 (C12): the
 // memory budget. Version 5 (W2): the transcript's width. Version 6 (W3): the mode a session takes when the engine refuses
 // auto. Version 7 (W7): the memory budget's switch. Version 8 (W13): the engine's pin retired (MAWS runs the installed
-// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Version 11 (E4a): the in-app browser. Version 12 (cua #90): the bookmarks bar's switch. Version 13 (P2-C): the built-in mods and the owner channel's two notification groups. Migrations live in `src/shared/settings/defaults.ts`,
+// Claude Code). Version 9 (E9): the dictation recognizer's locale. Version 10 (E10): the background supervisor. Version 11 (E4a): the in-app browser. Version 12 (cua #90): the bookmarks bar's switch. Version 13 (P2-C): the built-in mods and the owner channel's two notification groups. Version 14 (P3-D): the design-system defaults. Migrations live in `src/shared/settings/defaults.ts`,
 // run by main's store; the schema never defaults.
 import * as z from 'zod';
 import { ACTION_IDS } from '../../keymap/actions';
@@ -106,9 +106,19 @@ export type BrowserSettings = z.infer<typeof BrowserSettingsSchema>;
 export const ModsSettingsSchema = z.strictObject({ toHuman: z.strictObject({ enabled: z.boolean() }) });
 export type ModsSettings = z.infer<typeof ModsSettingsSchema>;
 // P2-C end
+// P3-D start (2026-10-13): version 14, the design-system defaults (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md
+// D9; the P3 interface ledger's §6 slot): the owner's default system and each Space's, by artifact id. null is the
+// house system; a deleted or missing id is skipped down the chain (own, Space, owner, house), never an error. Main
+// relays them to the engine host (`artifacts.setDefaults`, src/main/artifacts/defaults.ts), which resolves the chain.
+export const ArtifactsSettingsSchema = z.strictObject({
+  defaultDesignSystem: z.uuid().nullable(),
+  spaceDesignSystems: z.record(z.uuid(), z.uuid()), // Space id → design system id
+});
+export type ArtifactsSettings = z.infer<typeof ArtifactsSettingsSchema>;
+// P3-D end
 
 export const SettingsSchema = z.strictObject({
-  version: z.literal(13), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential)
+  version: z.literal(14), // C11: version 3; C12: version 4 (engine.memoryBudgetMiB, engine.statefulMcpServers); W2: version 5 (appearance.transcriptWidth); W3: version 6 (permissions.autoFallback); W7: version 7 (engine.memoryBudget); W13: version 8 (engine.pinnedVersion removed); E9: version 9 (voice); E10: version 10 (supervisor); E4a: version 11 (browser); cua #90: version 12 (browser.bookmarksBar); P2-C: version 13 (mods, notifications.kinds.asyncInput and .essential); P3-D: version 14 (artifacts)
   theme: ThemeSettingSchema,
   // Overrides only; null unbinds; absent means the default. `partialRecord`, because zod 4's enum-keyed `record` is
   // exhaustive and would reject `{}` and every single override; unknown keys are still rejected.
@@ -125,6 +135,7 @@ export const SettingsSchema = z.strictObject({
   supervisor: SupervisorSettingsSchema, // E10
   browser: BrowserSettingsSchema, // E4a
   mods: ModsSettingsSchema, // P2-C (2026-10-09)
+  artifacts: ArtifactsSettingsSchema, // P3-D (2026-10-13)
 });
 export type Settings = z.infer<typeof SettingsSchema>;
 
@@ -146,6 +157,10 @@ export const SettingsPatchSchema = z.strictObject({
   // P2-C start (2026-10-09): a mod's fields are patched one by one, so the to-human switch is written alone
   mods: z.strictObject({ toHuman: ModsSettingsSchema.shape.toHuman.partial().optional() }).optional(),
   // P2-C end
+  // P3-D start (2026-10-13): field by field; the Spaces' record is replaced whole, so a Space's default is removed by
+  // leaving it out
+  artifacts: ArtifactsSettingsSchema.partial().optional(),
+  // P3-D end
 });
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>;
 

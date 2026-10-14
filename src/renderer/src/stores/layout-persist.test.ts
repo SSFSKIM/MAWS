@@ -101,6 +101,21 @@ describe('layout persistence', () => {
     expect(again.sets()).toEqual([]);
   });
 
+  // P3-L (M3): the `artifact` tab kind is written to main.tabs and read back by the next launch as it was.
+  it('writes an artifact tab to main.tabs and reads it back at the next launch, pinned and active', async () => {
+    const artifactId = '00000000-0000-4000-8000-000000000001';
+    const { store, hydrate, sets } = setup();
+    await hydrate();
+    store.getState().openTab({ kind: 'artifact', artifactId });
+    store.getState().togglePinned(`artifact:${artifactId}`);
+    vi.advanceTimersByTime(1000);
+    const written = sets().filter((s) => s.key === 'main.tabs').at(-1)!.value as LayoutMain;
+    expect(currentSet(written).panes[0]).toEqual({ tabs: [{ id: `artifact:${artifactId}`, kind: 'artifact', artifactId, pinned: true }], activeTabId: `artifact:${artifactId}` });
+    const again = setup({ 'main.tabs': JSON.parse(JSON.stringify(written)) });
+    await again.hydrate();
+    expect(again.store.getState().main).toEqual(written);
+  });
+
   it('writes nothing for hydration alone when layout.json holds every key', async () => {
     const { hydrate, sets } = setup();
     await hydrate();

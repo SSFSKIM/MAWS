@@ -70,6 +70,7 @@ export default defineConfig({
           environment: 'node',
           include: ['src/{shared,main,preload,engine-host,pty-host}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS],
           exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts', ...TIMING_NODE_TESTS], // C3: live cases run only in the `live` project; their support's own tests run here
+          css: { include: [/\/design_system\/defaults\/.+\.css/] }, // P3-D: the defaults' `document.css` as text (`?raw`) for the host's and main's tests, as in `artifacts`
           // The compile-time suites (`identifiers are not interchangeable`) run through tsc on the node tsconfig.
           typecheck: { enabled: true, include: ['src/**/*.test-d.ts'], tsconfig: './tsconfig.node.json' },
         },
@@ -88,7 +89,16 @@ export default defineConfig({
       ...liveProjects, // C3
       // P3-A start: the portable artifact layer (src/artifacts/, docs/doperpowers/plans/2026-10-12-p3-a-store.md) under
       // Node; its code imports no Node or Electron module (eslint.config.js), so it runs here as it will in a renderer.
-      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'] } },
+      {
+        resolve: { alias },
+        test: {
+          name: 'artifacts',
+          environment: 'node',
+          include: ['src/artifacts/**/*.test.ts'],
+          // P3-D M5: a design system's `document.css` is bundled as text (`?raw`); vitest empties unprocessed CSS, raw included.
+          css: { include: [/\/design_system\/defaults\/.+\.css/] },
+        },
+      },
       // P3-A end
       // C8a start: the panel host's suites again under the React Compiler, as electron-vite builds the app, so a render
       // that reads mutable module state (the instance map, a tool's state) without selecting it is caught in a test.
@@ -113,6 +123,7 @@ export default defineConfig({
             // E4a start: the Browser tool and its pane render from the browser store and a placement controller held in refs
             'src/renderer/src/tools/browser/**/*.test.tsx',
             // E4a end
+            'src/artifacts/design-system/**/*.test.tsx', // P3-D M4: the apply API and the Design System page, under happy-dom as built
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },

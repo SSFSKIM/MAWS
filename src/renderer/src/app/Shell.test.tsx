@@ -22,11 +22,13 @@ import { beforeCloseUnstarted } from '../sessions/setup-actions';
 import { closeDialog } from '../sessions/dialogs';
 import { ID, intent, putIntent, resetSetupStore } from '../test-support/setup-intents';
 import { useState } from 'react';
+import { Library } from '../library/Library';
+import { resetLibrary } from '../library/store';
 import { Shell } from './Shell';
 import { registerSlot, resetSlots } from './slots';
 import { toolbarTitle } from './Toolbar';
 import { fillStores, scenarioFile } from '../test-support/shell-stores';
-import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -265,7 +267,7 @@ describe('toolbar', () => {
   });
 
   it('shows a rebound chord in the tooltip', () => {
-    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V13, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
+    useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V14, keymap: { 'sidebar.toggle': 'Cmd+Alt+S' } }, resolvedTheme: 'light' } });
     render(<Shell />);
     expect(screen.getByRole('button', { name: 'Toggle sidebar' }).getAttribute('title')).toBe('Toggle sidebar · ⌘⌥S');
     useSettings.setState({ state: null });
@@ -433,12 +435,21 @@ describe('right panel', () => {
 });
 
 // P3-G (§D5, acceptance 12): the sidebar's Artifacts row, directly under New chat, opens the Artifacts main tab, a
-// singleton that a second open activates; until P3-L registers the library its slot shows a quiet placeholder.
+// singleton that a second open activates, showing P3-L's library as App.tsx registers it (the slot's fallback where no
+// host registers it).
 describe('the Artifacts entry', () => {
   const artifactsTabs = () => useLayout.getState().main.sets[NO_PROJECT]!.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.kind === 'artifacts'));
 
-  it('the sidebar row opens the Artifacts tab once, titled and showing the placeholder; a second click activates it', async () => {
+  it('the sidebar row opens the Artifacts tab once, titled and showing the library; a second click activates it', async () => {
     const user = userEvent.setup();
+    const previousBridge = window.maws;
+    const counts = { document: 0, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 0, file: 0 };
+    window.maws = fakeClient({ 'library.list': { rows: [], counts }, 'library.spaces': { spaces: [] } }).client;
+    offs.push(() => {
+      window.maws = previousBridge;
+      resetLibrary();
+    });
+    registerSlot('artifactsLibrary', Library);
     render(<Shell />);
     const sidebar = region('sidebar');
     const row = within(sidebar).getByRole('button', { name: 'Artifacts' });
@@ -450,8 +461,9 @@ describe('the Artifacts entry', () => {
     expect(within(region('main')).getByRole('tab', { name: 'Artifacts' }).getAttribute('aria-selected')).toBe('true');
     expect(within(screen.getByRole('banner')).getByText('Artifacts')).toBeTruthy();
     const panel = within(region('main')).getByRole('tabpanel');
-    expect(within(panel).getByRole('heading', { name: 'Artifacts' })).toBeTruthy();
-    expect(within(panel).getByText('Documents, decks and files you make with your sessions will appear here.')).toBeTruthy();
+    expect(within(panel).getByRole('heading', { level: 1, name: 'Artifacts' })).toBeTruthy();
+    expect(within(panel).getByRole('radiogroup', { name: 'View' })).toBeTruthy();
+    expect(within(panel).getByRole('searchbox', { name: 'Search artifacts' })).toBeTruthy();
     expect(row.getAttribute('aria-current')).toBe('page');
 
     act(() => useLayout.getState().openTab({ kind: 'diagnostics' }));
@@ -471,7 +483,7 @@ describe('the Artifacts entry', () => {
     ['floating', { floating: true }],
     ['maximized', { maximized: true }],
   ] as const)('from a %s panel', (_, patch) => {
-    const placeholder = 'Documents, decks and files you make with your sessions will appear here.';
+    const placeholder = 'Artifacts unavailable';
     const startHidden = () => {
       useSessions.setState({ records: new Map([[A, record('app-a')]]) });
       useLayout.setState({ main: withActive(sessionTab('app-a')) });
@@ -508,7 +520,7 @@ describe('the Artifacts entry', () => {
     useLayout.setState({ main: withActive({ id: 'artifacts', kind: 'artifacts', pinned: false }) });
     render(<Shell />);
     expect(within(region('main')).getByRole('region', { name: 'Library' })).toBeTruthy();
-    expect(screen.queryByText('Documents, decks and files you make with your sessions will appear here.')).toBeNull();
+    expect(screen.queryByText('Artifacts unavailable')).toBeNull();
   });
 
   it('the artifacts.open action opens or activates the same tab', () => {

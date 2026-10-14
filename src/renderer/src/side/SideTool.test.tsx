@@ -39,6 +39,8 @@ import { deliverableUrl } from '@shared/maws/deliverable';
 import { DELIVERABLES_TOOL_ID } from '@shared/maws/panes';
 import type { DeliverablesParams } from '../tools/deliverables/DeliverablesTool';
 import { useCommentCard } from './card/store';
+import { artifactUrl } from '@shared/artifacts/scheme'; // P3-L (M5b)
+import { ARTIFACTS_TOOL_ID, type ArtifactsParams } from '../tools/artifacts/ArtifactsTool'; // P3-L (M5b)
 // P2-E1 end
 import { browser, resetBrowser } from '../tools/browser/store'; // P2-F L146
 import { registerDock } from '../tools/browser/comment/dock'; // P2-F L146
@@ -236,6 +238,30 @@ describe('the Side pane', () => {
         rect: null,
         target: { kind: 'deliverable', appSessionId: A, deliverableId: RECORD_ID },
         phase: { kind: 'thread', child: ONE, echo: null },
+      });
+    });
+
+    // P3-L (M5b): a thread on an HTML artifact's page (the store's scheme) re-docks into the panel's Artifacts tool
+    it('on an artifact store page, opens the parent’s Artifacts tool on the artifact and a card for its viewer to claim', async () => {
+      registerPanelTool<unknown[], ArtifactsParams>({
+        id: ARTIFACTS_TOOL_ID, title: 'Artifacts', icon: () => null, pinnable: true, multiInstance: false,
+        createState: (init) => [init.params],
+        open: (state, params) => void state.push(params),
+        beforeClose: async () => true,
+        dispose: () => {},
+        render: () => null,
+      });
+      const page: Anchor = { ...ELEMENT, label: 'Dashboard v2 › h1#hero “Sales overview”', pageUrl: artifactUrl(RECORD_ID, 7, 'index.html') };
+      withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: page }));
+      act(() => openSideThread(A, ONE));
+      mount();
+      await userEvent.click(screen.getByRole('button', { name: SHOW }));
+      const tab = panelOf(A)!.tabs.find((t) => t.toolId === ARTIFACTS_TOOL_ID)!;
+      expect(panelOf(A)!.activeTabId).toBe(tab.id);
+      expect(instanceOf(tab.id)!.state).toEqual([{ target: RECORD_ID }]); // the latest
+      expect(useCommentCard.getState().open).toMatchObject({
+        parent: A, anchor: page, host: 'artifact-page', hostId: null, claimMode: 'panel',
+        target: { kind: 'artifact-page', artifactId: RECORD_ID, revision: 7 }, phase: { kind: 'thread', child: ONE, echo: null },
       });
     });
   });

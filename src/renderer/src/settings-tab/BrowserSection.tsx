@@ -11,7 +11,7 @@
 // - cua #90: Bookmarks bar, next to the profile: settings 12's switch, which ⌘⇧B in the browser flips too.
 import type { Settings } from '@shared/ipc/schema';
 import { isSearchUrlTemplate } from '@shared/browser/url';
-import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
 import { useCommand } from '../ipc/query';
 import { toast } from '../stores/notices';
 import { BROWSER } from './copy';
@@ -21,7 +21,7 @@ import { BrowserImport } from './BrowserImport';
 // E4b end
 
 const DEFAULT_PROFILE = ''; // the select's value for `profile: null`
-const DEFAULT_SEARCH = SETTINGS_DEFAULTS_V13.browser.searchUrl;
+const DEFAULT_SEARCH = SETTINGS_DEFAULTS_V14.browser.searchUrl;
 const LINK_TARGETS = (['in-app', 'external'] as const).map((value) => ({ value, label: BROWSER.linkTargets[value] }));
 
 export function BrowserSection({ settings }: { settings: Settings }) {

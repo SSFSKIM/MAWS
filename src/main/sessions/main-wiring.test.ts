@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionServiceDeps } from './context';
 import { intentFor } from '../../../test/support/session-host';
-import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema';
 
 const state = vi.hoisted(() => ({
@@ -56,6 +56,7 @@ vi.mock('../widgets/fixture-backend', () => ({ installWidgetBackend: vi.fn() }))
 vi.mock('../deliverables', () => ({ startDeliverables: () => ({ reader: {}, stop: vi.fn() }) })); // E2
 vi.mock('../browser', () => ({ startBrowser: (deps: { settings(): unknown }) => { state.browserSettings = deps.settings; return { stop: vi.fn(), partitions: {} /* E4b */ }; } })); // E4a
 vi.mock('../artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, startArtifacts: () => ({ stop: vi.fn() }) })); // P3-A: the artifact store's main side
+vi.mock('../design-systems/export', () => ({ registerDesignSystemExporters: vi.fn() })); // P3-D: the design system's exporter, registered into the artifacts' registry
 vi.mock('../browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b
 
 const ID = '11111111-1111-4111-8111-111111111111' as AppSessionId;
@@ -65,7 +66,7 @@ describe('main setup-intent and shell-environment wiring', () => {
   beforeEach(async () => {
     vi.resetModules();
     state.handlers.clear();
-    state.settings = SETTINGS_DEFAULTS_V13; // E4a
+    state.settings = SETTINGS_DEFAULTS_V14; // E4a
     state.root = mkdtempSync(join(tmpdir(), 'maws-main-wiring-'));
     state.shellConfig = join(state.root, 'shell-config');
     for (const name of ['userData', 'home', 'shell-config', 'dock-config', 'additional']) mkdirSync(join(state.root, name));
@@ -145,9 +146,9 @@ describe('main setup-intent and shell-environment wiring', () => {
   // E4a: the browser reads settings 11's browser section from the service at each use, so a change reaches the next tab
   // opened and the next new-window link without a restart
   it('hands the browser the live browser settings, read at each call', () => {
-    expect(state.browserSettings!()).toEqual(SETTINGS_DEFAULTS_V13.browser);
+    expect(state.browserSettings!()).toEqual(SETTINGS_DEFAULTS_V14.browser);
     const browser = { profile: 'Profile 1', searchUrl: 'https://duckduckgo.com/?q=%s', linkTarget: 'external', bookmarksBar: 'hidden' } as const; // cua #90: bookmarksBar
-    state.settings = { ...SETTINGS_DEFAULTS_V13, browser };
+    state.settings = { ...SETTINGS_DEFAULTS_V14, browser };
     expect(state.browserSettings!()).toEqual(browser);
   });
 });

@@ -1,0 +1,114 @@
+/* Official: letter blocks. Only under .ds-doc, only var(--ds-*) values for colour, type and space (DESIGN.md §5).
+   The two faces below are the bundled Noto Serif KR subsets (SIL OFL 1.1, assets/OFL.txt) that font.body names. */
+@font-face {
+  font-family: "Noto Serif KR";
+  font-weight: 400;
+  font-display: swap;
+  src: url("assets/NotoSerifKR-Regular-full.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Noto Serif KR";
+  font-weight: 700;
+  font-display: swap;
+  src: url("assets/NotoSerifKR-Bold-full.woff2") format("woff2");
+}
+.ds-doc {
+  background: var(--ds-color-bg);
+  color: var(--ds-color-text);
+  font-family: var(--ds-font-body);
+  font-size: var(--ds-type-body-size);
+  line-height: var(--ds-type-body-line);
+  font-weight: var(--ds-type-body-weight);
+}
+.ds-doc h1 {
+  font-family: var(--ds-font-display);
+  font-size: var(--ds-type-h1-size);
+  line-height: var(--ds-type-h1-line);
+  font-weight: var(--ds-type-h1-weight);
+  margin: var(--ds-space-6) 0 var(--ds-space-2);
+}
+.ds-doc h2 {
+  font-family: var(--ds-font-display);
+  font-size: var(--ds-type-h2-size);
+  line-height: var(--ds-type-h2-line);
+  font-weight: var(--ds-type-h2-weight);
+  margin: var(--ds-space-5) 0 var(--ds-space-2);
+}
+.ds-doc h3 {
+  font-family: var(--ds-font-display);
+  font-size: var(--ds-type-h3-size);
+  line-height: var(--ds-type-h3-line);
+  font-weight: var(--ds-type-h3-weight);
+  margin: var(--ds-space-4) 0 var(--ds-space-1);
+}
+.ds-doc p {
+  margin: 0 0 var(--ds-space-3);
+}
+.ds-doc b,
+.ds-doc strong {
+  font-family: var(--ds-font-display);
+}
+.ds-doc ul,
+.ds-doc ol {
+  margin: var(--ds-space-2) 0 var(--ds-space-4);
+  padding-left: var(--ds-space-5);
+}
+.ds-doc a {
+  color: var(--ds-color-text);
+}
+.ds-doc blockquote {
+  margin: var(--ds-space-3) 0;
+  padding: var(--ds-space-2) var(--ds-space-4);
+  border-left: 2px solid var(--ds-color-text);
+  font-size: var(--ds-type-quote-size);
+  line-height: var(--ds-type-quote-line);
+  font-weight: var(--ds-type-quote-weight);
+}
+.ds-doc figcaption {
+  font-family: var(--ds-font-display);
+  color: var(--ds-color-text-muted);
+  font-size: var(--ds-type-caption-size);
+  line-height: var(--ds-type-caption-line);
+}
+.ds-doc table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: var(--ds-space-5) 0;
+  border-top: 2px solid var(--ds-color-text);
+  border-bottom: 2px solid var(--ds-color-text);
+  font-variant-numeric: tabular-nums;
+}
+.ds-doc th {
+  background: var(--ds-color-bg-raised);
+  font-family: var(--ds-font-display);
+  font-size: var(--ds-type-caption-size);
+  font-weight: var(--ds-type-h3-weight);
+  text-align: left;
+  vertical-align: top;
+  padding: var(--ds-space-2) var(--ds-space-4);
+  border-right: 1px solid var(--ds-color-border);
+  border-bottom: 1px solid var(--ds-color-border);
+}
+.ds-doc td {
+  padding: var(--ds-space-2) var(--ds-space-4);
+  border-bottom: 1px solid var(--ds-color-border);
+}
+.ds-doc code {
+  font-family: var(--ds-font-mono);
+  font-size: var(--ds-type-caption-size);
+}
+.ds-doc hr {
+  border: 0;
+  border-top: 1.5px dashed var(--ds-color-border);
+  margin: var(--ds-space-7) 0 var(--ds-space-6);
+}
+.ds-doc [data-callout-tone] {
+  border-top: 2px solid var(--ds-color-text);
+  border-bottom: 2px solid var(--ds-color-text);
+  padding: var(--ds-space-3) 0;
+  margin: var(--ds-space-5) 0;
+}
+.ds-doc [data-callout-tone="warn"],
+.ds-doc [data-callout-tone="error"] {
+  font-family: var(--ds-font-display);
+}

@@ -14,6 +14,14 @@
     // C1 e2e-tsconfig row): an editor builds this project composite through tsconfig.json's references, and composite
     // mode refuses a file the include does not list (TS6307). `pnpm typecheck` runs it composite too, so a spec that
     // imports a new file outside these lists fails there until the file is added here.
+    // P3-D (M7): the design-system live run validates the mirrored token file and law with the kind's own checks
+    "src/artifacts/design-system/color.ts",
+    "src/artifacts/design-system/extensions.ts",
+    "src/artifacts/design-system/law.ts",
+    "src/artifacts/design-system/resolve.ts",
+    "src/artifacts/design-system/roles.ts",
+    "src/artifacts/design-system/tokens.ts",
+    "src/artifacts/design-system/values.ts",
     "src/engine-host/binary-info.ts",
     "src/engine-host/engine-compat.ts",
     "src/engine-host/fs/paths.ts",
@@ -22,6 +30,7 @@
     "src/engine-host/relay-health.ts",
     "src/engine-host/transport.ts",
     "src/main/git/runner.ts",
+    "src/main/index/migrations.ts",
     "src/renderer/src/app/date-format.ts",
     "src/renderer/src/composer/dev/resume-spec.ts",
     "src/renderer/src/harness/agents/api.ts",

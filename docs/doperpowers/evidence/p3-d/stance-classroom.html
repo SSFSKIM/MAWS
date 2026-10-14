@@ -1,0 +1,219 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>교실 Classroom stance specimen</title>
+<style>
+:root{
+  --ds-color-bg:#ffffff;--ds-color-bg-raised:#f2f5f9;--ds-color-text:#15181d;--ds-color-text-muted:#4b5361;
+  --ds-color-accent:#2453c9;--ds-color-accent-text:#ffffff;--ds-color-border:#8a94a3;
+  --ds-color-status-ok:#18804a;--ds-color-status-warn:#a35a00;--ds-color-status-error:#c8322b;--ds-color-status-info:#0f7488;
+  --ds-font-display:"SF Pro Rounded", "Apple SD Gothic Neo", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  --ds-font-body:"SF Pro Text", "Apple SD Gothic Neo", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  --ds-font-mono:ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ds-type-title-size:34px;--ds-type-title-line:1.3;--ds-type-title-weight:800;
+  --ds-type-subtitle-size:20px;--ds-type-subtitle-line:1.5;--ds-type-subtitle-weight:600;
+  --ds-type-h1-size:28px;--ds-type-h1-line:1.35;--ds-type-h1-weight:800;
+  --ds-type-h2-size:23px;--ds-type-h2-line:1.4;--ds-type-h2-weight:700;
+  --ds-type-h3-size:20px;--ds-type-h3-line:1.5;--ds-type-h3-weight:700;
+  --ds-type-body-size:18px;--ds-type-body-line:1.8;--ds-type-body-weight:400;
+  --ds-type-caption-size:14px;--ds-type-caption-line:1.55;--ds-type-caption-weight:500;
+  --ds-type-quote-size:20px;--ds-type-quote-line:1.7;--ds-type-quote-weight:500;
+  --ds-space-1:4px;--ds-space-2:8px;--ds-space-3:16px;--ds-space-4:24px;--ds-space-5:32px;--ds-space-6:48px;--ds-space-7:64px;--ds-space-8:96px;
+  --ds-radius-sm:8px;--ds-radius-md:14px;--ds-radius-lg:22px;--ds-radius-full:9999px;
+  --ds-shadow-sm:0 1px 2px rgba(21,24,29,0.08);--ds-shadow-md:0 2px 4px rgba(21,24,29,0.06), 0 8px 20px rgba(21,24,29,0.08);--ds-shadow-lg:0 4px 8px rgba(21,24,29,0.08), 0 24px 56px rgba(21,24,29,0.14);
+}
+/* The deck surface: the same role names, the deck column's values, on a 1920x1080 canvas. */
+.deck{
+  --ds-type-title-size:128px;--ds-type-title-line:1.15;--ds-type-title-weight:800;
+  --ds-type-subtitle-size:60px;--ds-type-subtitle-line:1.35;--ds-type-subtitle-weight:600;
+  --ds-type-h1-size:96px;--ds-type-h1-line:1.2;--ds-type-h1-weight:800;
+  --ds-type-h2-size:76px;--ds-type-h2-line:1.25;--ds-type-h2-weight:800;
+  --ds-type-h3-size:64px;--ds-type-h3-line:1.3;--ds-type-h3-weight:700;
+  --ds-type-body-size:56px;--ds-type-body-line:1.45;--ds-type-body-weight:500;
+  --ds-type-caption-size:40px;--ds-type-caption-line:1.4;--ds-type-caption-weight:500;
+  --ds-type-quote-size:68px;--ds-type-quote-line:1.4;--ds-type-quote-weight:600;
+  --ds-space-1:12px;--ds-space-2:24px;--ds-space-3:48px;--ds-space-4:72px;--ds-space-5:96px;--ds-space-6:144px;--ds-space-7:192px;--ds-space-8:288px;
+  --ds-radius-sm:16px;--ds-radius-md:28px;--ds-radius-lg:44px;
+  
+}
+
+*{box-sizing:border-box}
+html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{margin:0;background:var(--ds-color-bg);color:var(--ds-color-text);font-family:var(--ds-font-body);
+  font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight);
+  word-break:keep-all;overflow-wrap:break-word;line-break:strict}
+.t-title{font-size:var(--ds-type-title-size);line-height:var(--ds-type-title-line);font-weight:var(--ds-type-title-weight);margin:0}
+.t-subtitle{font-size:var(--ds-type-subtitle-size);line-height:var(--ds-type-subtitle-line);font-weight:var(--ds-type-subtitle-weight);margin:0}
+.t-h1{font-size:var(--ds-type-h1-size);line-height:var(--ds-type-h1-line);font-weight:var(--ds-type-h1-weight);margin:0}
+.t-h2{font-size:var(--ds-type-h2-size);line-height:var(--ds-type-h2-line);font-weight:var(--ds-type-h2-weight);margin:0}
+.t-h3{font-size:var(--ds-type-h3-size);line-height:var(--ds-type-h3-line);font-weight:var(--ds-type-h3-weight);margin:0}
+.t-body{font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight);margin:0}
+.t-caption{font-size:var(--ds-type-caption-size);line-height:var(--ds-type-caption-line);font-weight:var(--ds-type-caption-weight);margin:0}
+.t-quote{font-size:var(--ds-type-quote-size);line-height:var(--ds-type-quote-line);font-weight:var(--ds-type-quote-weight);margin:0}
+.t-title,.t-subtitle,.t-h1,.t-h2,.t-h3{font-family:var(--ds-font-display)}
+.t-body,.t-caption,.t-quote{font-family:var(--ds-font-body)}
+.t-subtitle,.t-caption{color:var(--ds-color-text-muted)}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--ds-font-mono);font-size:12px;line-height:1.5;letter-spacing:0}
+.muted{color:var(--ds-color-text-muted)}
+.wrap{width:1152px;margin:0 auto;padding:64px 0 96px}
+.spec-head{display:grid;gap:8px;padding-bottom:32px;border-bottom:1px solid var(--ds-color-border)}
+.spec-head .key{font-family:var(--ds-font-mono);font-size:12px;color:var(--ds-color-text-muted)}
+.axis{font-size:13px;line-height:1.6;color:var(--ds-color-text-muted);max-width:980px}
+.sec{margin-top:56px}
+.sec-label{font-family:var(--ds-font-display);font-size:13px;line-height:1.4;font-weight:600;color:var(--ds-color-text-muted);margin:0 0 16px}
+/* palette */
+.swatches{display:grid;grid-template-columns:repeat(7,1fr);gap:16px}
+.swatches.status{grid-template-columns:repeat(4,1fr);margin-top:16px}
+.sw .chip{height:72px;border-radius:var(--ds-radius-md);border:1px solid var(--ds-color-border);display:flex;align-items:flex-end;padding:8px 10px;font-family:var(--ds-font-display);font-weight:700;font-size:20px;line-height:1}
+.sw .role{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.4;margin-top:8px;color:var(--ds-color-text)}
+.sw .hex{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.4;color:var(--ds-color-text-muted)}
+.sw .cr{font-size:12.5px;line-height:1.45;margin-top:2px}
+/* type roles */
+.roles{display:grid;grid-template-columns:96px 1fr 236px;border-top:1px solid var(--ds-color-border)}
+.roles>div{padding:14px 0;border-bottom:1px solid var(--ds-color-border);align-self:stretch}
+.roles .rn{font-family:var(--ds-font-mono);font-size:12px;color:var(--ds-color-text-muted);padding-top:18px}
+.roles .rs{padding-right:24px}
+.roles .rv{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.6;color:var(--ds-color-text-muted);padding-top:18px}
+/* scales */
+.scales{display:grid;grid-template-columns:repeat(3,1fr);gap:32px;align-items:start}
+.bar{height:12px;background:var(--ds-color-text);border-radius:2px;opacity:.85}
+.srow{display:grid;grid-template-columns:44px 1fr;align-items:center;gap:8px;font-family:var(--ds-font-mono);font-size:11.5px;color:var(--ds-color-text-muted);margin-bottom:6px}
+.rbox{width:64px;height:48px;border:1.5px solid var(--ds-color-text);background:var(--ds-color-bg-raised)}
+.rlist{display:flex;gap:14px;align-items:flex-end}
+.rlist figure,.slist figure{margin:0;text-align:center;font-family:var(--ds-font-mono);font-size:11.5px;color:var(--ds-color-text-muted)}
+.slist{display:flex;gap:18px}
+.stile{width:84px;height:56px;background:var(--ds-color-bg-raised);border-radius:var(--ds-radius-md);margin-bottom:8px}
+/* document + notes */
+.docrow{display:grid;grid-template-columns:794px 1fr;gap:48px;align-items:start}
+.sheet{width:794px;padding:56px 64px 64px}
+.notes{display:grid;gap:14px;font-size:13.5px;line-height:1.6}
+.notes h4{font-family:var(--ds-font-display);font-size:14px;line-height:1.4;font-weight:700;margin:0}
+.notes p{margin:0}
+/* slide */
+.slide-frame{width:1152px;height:648px;overflow:hidden;border-radius:var(--ds-radius-md);border:1px solid var(--ds-color-border)}
+.deck{width:1920px;height:1080px;transform:scale(.6);transform-origin:0 0;position:relative;overflow:hidden;
+  font-family:var(--ds-font-body);font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight)}
+.deck-meta{display:flex;justify-content:space-between;margin-top:12px;font-size:12.5px;color:var(--ds-color-text-muted)}
+
+
+.sheet{background:var(--ds-color-bg);border:1px solid var(--ds-color-border);border-radius:4px}
+.ws-top{display:flex;justify-content:space-between;align-items:baseline}
+.ws-top .t-caption{margin:0}
+.name{color:var(--ds-color-text)!important}
+.blank{display:inline-block;vertical-align:-6px;border-bottom:2px solid var(--ds-color-border);height:24px;margin:0 4px}
+.blank.s{width:40px}.blank.m{width:120px}.blank.l{width:150px}
+.act{display:flex;align-items:center;gap:var(--ds-space-3);margin:var(--ds-space-7) 0 var(--ds-space-3)}
+.disc{flex:none;display:inline-grid;place-items:center;width:40px;height:40px;border-radius:var(--ds-radius-full);background:var(--ds-color-accent);color:var(--ds-color-accent-text);font-family:"SF Pro Rounded",var(--ds-font-display);font-weight:800;font-size:24px;line-height:1}
+.act .t-h2{margin:0}
+.sheet .t-body{margin:0}
+.choices{display:flex;gap:var(--ds-space-3);margin-top:var(--ds-space-3)}
+.pill{display:inline-flex;align-items:center;gap:10px;padding:8px 18px 8px 12px;border:2px solid var(--ds-color-border);border-radius:var(--ds-radius-full);font-size:17px;line-height:1.4}
+.pill i{width:20px;height:20px;border:2px solid var(--ds-color-border);border-radius:50%}
+.answer{margin-top:var(--ds-space-2);height:112px;border:2px solid var(--ds-color-border);border-radius:var(--ds-radius-md)}
+.answer.lines{background:linear-gradient(to bottom,transparent 54px,var(--ds-color-border) 54px,var(--ds-color-border) 55px,transparent 55px) no-repeat;background-size:calc(100% - 40px) 100%;background-position:20px 0}
+.steps{margin:0;padding-left:1.3em}.steps li{padding-left:4px}
+.result{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--ds-space-4);margin-top:var(--ds-space-4)}
+.result .t-caption{margin:0 0 6px}
+.cell{height:64px;border:2px solid var(--ds-color-border);border-radius:var(--ds-radius-md);display:flex;align-items:flex-end;justify-content:flex-end;padding:0 14px 10px;font-size:18px;color:var(--ds-color-text-muted)}
+.tip{display:flex;gap:var(--ds-space-3);align-items:baseline;margin-top:var(--ds-space-4);padding:var(--ds-space-3) var(--ds-space-4);background:var(--ds-color-bg-raised);border-radius:var(--ds-radius-md)}
+.tip-k{flex:none;font-family:var(--ds-font-display);font-weight:700;font-size:15px;color:var(--ds-color-status-info)}
+.sum{font-size:20px!important;line-height:2.2!important}
+.notes code{font-family:var(--ds-font-mono);font-size:12px}
+.deck{background:var(--ds-color-bg)}
+.s-wrap{padding:var(--ds-space-5) var(--ds-space-6) 0}
+.s-wrap>.t-caption{margin:0}
+.s-head{display:flex;align-items:center;gap:var(--ds-space-3);margin-top:var(--ds-space-2)}
+.disc.big{width:120px;height:120px;font-size:76px}
+.s-head .t-h1{margin:0}
+.s-body{display:grid;grid-template-columns:1fr 400px;gap:var(--ds-space-5);margin-top:var(--ds-space-5);align-items:start}
+.s-steps{list-style:none;margin:0;padding:0;display:grid;gap:var(--ds-space-3)}
+.s-steps li{display:flex;gap:var(--ds-space-3);align-items:baseline}
+.s-steps b{flex:none;width:64px;font-family:"SF Pro Rounded",var(--ds-font-display);font-weight:800;color:var(--ds-color-text-muted)}
+.s-time{background:var(--ds-color-bg-raised);border-radius:var(--ds-radius-lg);padding:var(--ds-space-4) var(--ds-space-4) var(--ds-space-3)}
+.s-time .t-caption{margin:0}
+.s-min{font-family:"SF Pro Rounded",var(--ds-font-display);font-weight:800;font-size:160px;line-height:1.05;margin:0;white-space:nowrap}.s-min small{font-size:64px;font-weight:700;margin-left:8px}
+.s-foot{position:absolute;left:var(--ds-space-6);right:var(--ds-space-6);bottom:var(--ds-space-4);display:flex;justify-content:space-between;align-items:baseline;border-top:2px solid var(--ds-color-border);padding-top:var(--ds-space-2)}.s-foot p{margin:0}
+
+</style></head><body><main class="wrap">
+<header class="spec-head">
+  <div class="key">stance-classroom · proposal for the owner · 2026-10-12</div>
+  <h1 class="t-title">교실 Classroom</h1>
+  <p class="t-subtitle">복사기와 프로젝터를 모두 견디는 흰 바탕과 진한 잉크, 둥근 숫자 원판 하나가 학생의 눈과 연필이 갈 곳을 가리킵니다. White paper and dark ink that survive the copier and the projector; one rounded cobalt disc tells a student where to look and where to write.</p>
+  <p class="axis">density spacious (a child reads, writes, and looks from the back row) · criticality exploratory · energy lively · type neutral sans with rounded numerals (SF Pro Rounded + Apple SD Gothic Neo) · material printed · colour restrained · accent directional (the current step) · ground light · temperature cool, ink-tinted.</p>
+</header>
+
+<section class="sec"><h2 class="sec-label">Palette (contrast measured on the surface the colour sits on)</h2>
+<div class="swatches">
+<div class="sw"><div class="chip" style="background:#ffffff"></div><div class="role">--ds-color-bg</div><div class="hex">#ffffff</div><div class="cr">ground</div></div>
+<div class="sw"><div class="chip" style="background:#f2f5f9"></div><div class="role">--ds-color-bg-raised</div><div class="hex">#f2f5f9</div><div class="cr">sheet, panel</div></div>
+<div class="sw"><div class="chip" style="background:#15181d;border-color:#15181d"></div><div class="role">--ds-color-text</div><div class="hex">#15181d</div><div class="cr">17.8 : 1 on bg</div></div>
+<div class="sw"><div class="chip" style="background:#4b5361;border-color:#4b5361"></div><div class="role">--ds-color-text-muted</div><div class="hex">#4b5361</div><div class="cr">7.8 : 1 on bg · held high for the projector</div></div>
+<div class="sw"><div class="chip" style="background:#2453c9;border-color:#2453c9;color:#ffffff">가 Aa</div><div class="role">--ds-color-accent</div><div class="hex">#2453c9</div><div class="cr">6.7 : 1 on bg</div></div>
+<div class="sw"><div class="chip" style="background:#ffffff"></div><div class="role">--ds-color-accent-text</div><div class="hex">#ffffff</div><div class="cr">6.7 : 1 on accent</div></div>
+<div class="sw"><div class="chip" style="background:#ffffff;border:2px solid #8a94a3"></div><div class="role">--ds-color-border</div><div class="hex">#8a94a3</div><div class="cr">3.1 : 1 · answer boxes are controls</div></div>
+</div>
+<div class="swatches status">
+<div class="sw"><div class="chip" style="background:#18804a;border-color:#18804a"></div><div class="role">--ds-color-status-ok</div><div class="hex">#18804a</div><div class="cr">5.0 : 1</div></div>
+<div class="sw"><div class="chip" style="background:#a35a00;border-color:#a35a00"></div><div class="role">--ds-color-status-warn</div><div class="hex">#a35a00</div><div class="cr">5.2 : 1</div></div>
+<div class="sw"><div class="chip" style="background:#c8322b;border-color:#c8322b"></div><div class="role">--ds-color-status-error</div><div class="hex">#c8322b</div><div class="cr">5.3 : 1</div></div>
+<div class="sw"><div class="chip" style="background:#0f7488;border-color:#0f7488"></div><div class="role">--ds-color-status-info</div><div class="hex">#0f7488</div><div class="cr">5.4 : 1</div></div>
+</div></section>
+
+<section class="sec"><h2 class="sec-label">Type roles: face · document px/line/weight · deck px on 1920×1080</h2>
+<div class="roles"><div class="rn">title</div><div class="rs"><p class="t-title">공기에도 무게가 있을까요? <span class="muted" style="font-weight:600">Does air weigh anything?</span></p></div><div class="rv">SF Pro Rounded + SD Gothic Neo<br>doc&nbsp; 34/1.3/800<br>deck 128/1.15/800</div><div class="rn">subtitle</div><div class="rs"><p class="t-subtitle">3학년 과학 · 물질의 상태 · 활동지 2</p></div><div class="rv">SF Pro Rounded + SD Gothic Neo<br>doc&nbsp; 20/1.5/600<br>deck 60/1.35/600</div><div class="rn">h1</div><div class="rs"><p class="t-h1">오늘 알아볼 것 Today’s question</p></div><div class="rv">SF Pro Rounded + SD Gothic Neo<br>doc&nbsp; 28/1.35/800<br>deck 96/1.2/800</div><div class="rn">h2</div><div class="rs"><p class="t-h2">예상하기 Predict</p></div><div class="rv">SF Pro Rounded + SD Gothic Neo<br>doc&nbsp; 23/1.4/700<br>deck 76/1.25/800</div><div class="rn">h3</div><div class="rs"><p class="t-h3">그렇게 생각한 까닭을 써 봅시다</p></div><div class="rv">SF Pro Rounded + SD Gothic Neo<br>doc&nbsp; 20/1.5/700<br>deck 64/1.3/700</div><div class="rn">body</div><div class="rs"><p class="t-body">공기 주입기를 20번 누르고, 전자저울의 숫자가 멈추면 읽어요. Press the pump 20 times, then read the scale.</p></div><div class="rv">SF Pro Text + SD Gothic Neo<br>doc&nbsp; 18/1.8/400<br>deck 56/1.45/500</div><div class="rn">caption</div><div class="rs"><p class="t-caption">전자저울은 숫자가 멈출 때까지 3초 기다려요.</p></div><div class="rv">SF Pro Text + SD Gothic Neo<br>doc&nbsp; 14/1.55/500<br>deck 40/1.4/500</div><div class="rn">quote</div><div class="rs"><p class="t-quote" style="padding-left:0">“풍선이 무거워진 게 아니라 공기가 들어간 거야!”</p></div><div class="rv">SF Pro Text + SD Gothic Neo<br>doc&nbsp; 20/1.7/500<br>deck 68/1.4/600</div></div></section>
+
+<section class="sec"><h2 class="sec-label">Space · radius · shadow (document values; the deck doubles radius and multiplies space ×3)</h2>
+<div class="scales">
+<div><div class="srow"><span>1 · 4</span><div class="bar" style="width:8px"></div></div><div class="srow"><span>2 · 8</span><div class="bar" style="width:16px"></div></div><div class="srow"><span>3 · 16</span><div class="bar" style="width:32px"></div></div><div class="srow"><span>4 · 24</span><div class="bar" style="width:48px"></div></div><div class="srow"><span>5 · 32</span><div class="bar" style="width:64px"></div></div><div class="srow"><span>6 · 48</span><div class="bar" style="width:96px"></div></div><div class="srow"><span>7 · 64</span><div class="bar" style="width:128px"></div></div><div class="srow"><span>8 · 96</span><div class="bar" style="width:192px"></div></div></div>
+<div class="rlist"><figure><div class="rbox" style="border-radius:var(--ds-radius-sm)"></div>sm 8</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-md)"></div>md 14</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-lg)"></div>lg 22</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-full)"></div>full 9999</figure></div>
+<div class="slist"><figure><div class="stile" style="box-shadow:var(--ds-shadow-sm)"></div>sm</figure><figure><div class="stile" style="box-shadow:var(--ds-shadow-md)"></div>md</figure><figure><div class="stile" style="box-shadow:var(--ds-shadow-lg)"></div>lg</figure></div>
+</div>
+<p class="t-caption" style="margin-top:12px">Printed material: worksheets and slides carry no shadow at all (a copier turns it into a grey smear, a projector into nothing). The three tiers exist only for MAWS’s own floating editing UI over a classroom document.</p></section>
+
+<section class="sec"><h2 class="sec-label">Document fragment: 3학년 과학 활동지 (A4 worksheet, printed on the school copier)</h2>
+<div class="docrow"><article class="sheet">
+<div class="ws-top">
+  <p class="t-caption">3학년 과학 · 물질의 상태 · 활동지 2</p>
+  <p class="t-caption name">3학년 <span class="blank s"></span>반 <span class="blank s"></span>번 &nbsp;이름 <span class="blank l"></span></p>
+</div>
+<h1 class="t-title" style="margin-top:var(--ds-space-4)">공기에도 무게가 있을까요?</h1>
+
+<div class="act"><span class="disc">1</span><h2 class="t-h2">예상하기</h2></div>
+<p class="t-body">공기를 가득 넣은 공은, 공기를 넣기 전보다 어떻게 될까요? 하나에 ○ 하세요.</p>
+<div class="choices"><span class="pill"><i></i>더 무거워진다</span><span class="pill"><i></i>더 가벼워진다</span><span class="pill"><i></i>그대로다</span></div>
+<p class="t-h3" style="margin-top:var(--ds-space-4)">그렇게 생각한 까닭</p>
+<div class="answer lines"></div>
+
+<div class="act"><span class="disc">2</span><h2 class="t-h2">실험하기</h2></div>
+<ol class="steps t-body"><li>공의 무게를 재어 아래에 써요.</li><li>공기 주입기를 <b>20번</b> 눌러요.</li><li>다시 무게를 재고, 차이를 구해요.</li></ol>
+<div class="result num">
+  <div><p class="t-caption">공기 넣기 전</p><div class="cell"><span>g</span></div></div>
+  <div><p class="t-caption">공기 넣은 뒤</p><div class="cell"><span>g</span></div></div>
+  <div><p class="t-caption">늘어난 무게</p><div class="cell"><span>g</span></div></div>
+</div>
+<div class="tip"><span class="tip-k">도움말</span><p class="t-body">전자저울의 숫자가 멈출 때까지 3초 기다린 뒤 읽어요.</p></div>
+
+<div class="act"><span class="disc">3</span><h2 class="t-h2">정리하기</h2></div>
+<p class="t-body sum">공기는 <span class="blank m"></span> 을/를 차지하고, <span class="blank m"></span> 이/가 있습니다.</p>
+</article><aside class="notes">
+<h4>What the cobalt may do</h4>
+<p>Fill the activity disc (①②③ on paper, the current activity on the slide) and nothing else on a worksheet. On a slide it may also set the one word the class must say back.</p>
+<h4>Copier first</h4>
+<p>Every meaning survives a black-and-white copy: the disc prints as a dark circle with a white numeral, answer boxes are 2 px grey lines at 3.1 : 1, and no tint carries meaning. The light panel tint drops out on the copier and is only a screen nicety.</p>
+<h4>Projector first</h4>
+<p>A lit classroom halves a projector’s contrast, so muted text is held at 7.8 : 1 and no text is lighter than it. Slide body is 56 px (28 pt), captions never below 40 px (20 pt); one idea per line.</p>
+<h4>Hangul</h4>
+<p>Body 18 px at 1.8 on paper, 56 px at 1.45 on the slide; <code>word-break: keep-all</code> so a word is never split across lines.</p></aside></div></section>
+
+<section class="sec"><h2 class="sec-label">Slide: the same activity, read from the back row</h2>
+<div class="slide-frame"><div class="deck">
+<div class="s-wrap">
+  <p class="t-caption">3학년 과학 · 물질의 상태</p>
+  <div class="s-head"><span class="disc big">2</span><h1 class="t-h1">공기를 넣고 무게 재기</h1></div>
+  <div class="s-body">
+    <ol class="s-steps t-body num"><li><b>1</b>공의 무게를 재고 기록지에 써요.</li><li><b>2</b>공기 주입기를 20번 눌러요.</li><li><b>3</b>다시 재고, 두 무게의 차이를 구해요.</li></ol>
+    <div class="s-time num"><p class="t-caption">모둠 활동</p><p class="s-min">15<small>분</small></p></div>
+  </div>
+</div>
+<footer class="s-foot"><p class="t-caption">다 끝낸 모둠은 기록지를 바구니에 넣어요.</p><p class="t-caption num">활동 2 / 3</p></footer></div></div>
+<div class="deck-meta"><span>Drawn on the 1920×1080 canvas at 60 %. Deck values in pt for PowerPoint: px ÷ 2.</span><span>body 56 px = 28 pt · caption 40 px = 20 pt</span></div>
+</section>
+</main></body></html>

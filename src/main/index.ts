@@ -119,6 +119,12 @@ import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './bro
 // P3-A start
 import { registerStoreSchemes, startArtifacts } from './artifacts';
 // P3-A end
+// P3-L start
+import { startLibrary } from './library';
+// P3-L end
+// P3-D start
+import { registerDesignSystemExporters } from './design-systems/export';
+// P3-D end
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -574,6 +580,32 @@ void startWithProfileLock(app, () => {
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
   });
   shutdown.add('artifacts', artifacts.stop);
+  registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
+  // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
+  // connection, an entry per change) and library.* answered from it, before the first window loads. Its stop runs in the
+  // same will-quit pass as the index's close, so no sync step runs between them, and after it applies nothing.
+  const library = startLibrary({
+    index,
+    hosts,
+    register: registerMainHandler,
+    emit,
+    e2e: process.env.MAWS_E2E === '1',
+    // P3-L M5b: the viewers' and the library's reach to a byte kind's stored file and its exports
+    files: {
+      call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+      exporters: artifacts.exporters,
+      root: join(app.getPath('userData'), 'artifacts'),
+      downloads: () => app.getPath('downloads'),
+      showSaveDialog: (options, sender) => {
+        const win = sender ? BrowserWindow.fromWebContents(sender) : null;
+        return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+      },
+      openPath: (path) => shell.openPath(path),
+      showItemInFolder: (path) => shell.showItemInFolder(path),
+      env: process.env,
+    },
+  });
+  shutdown.add('library', library.stop);
   openWindow();
 
   // E5 start: each window's unsaved editor files for the quit guard (E5 execution document, M5): the page pushes its

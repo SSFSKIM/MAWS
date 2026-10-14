@@ -1,13 +1,13 @@
 // The values of MAWS's own settings file (C11 execution document, Interfaces "Settings, version 3"): the current
-// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13), the one migration from every earlier version, and the one patch merge
+// version's defaults (W13: version 8; E9: version 9; E10: version 10; E4a: version 11; cua #90: version 12; P2-C: version 13; P3-D: version 14), the one migration from every earlier version, and the one patch merge
 // `settings.set` applies. Pure; main's store (src/main/settings/store.ts) reads, migrates, merges and writes with these,
 // and nothing else does.
 import * as z from 'zod';
 import { ACTION_IDS, RETIRED_ACTION_IDS } from '../keymap/actions';
 import { BrowserSettingsSchema, ChordSchema, SettingsSchema, ThemeSettingSchema, type Settings, type SettingsPatch } from '../ipc/schema/settings';
 
-export const SETTINGS_DEFAULTS_V13: Settings = {
-  version: 13, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13
+export const SETTINGS_DEFAULTS_V14: Settings = {
+  version: 14, // C12: 4; W2: 5; W3: 6; W7: 7; W13: 8; E9: 9; E10: 10; E4a: 11; cua #90: 12; P2-C: 13; P3-D: 14
   theme: 'light', // light-first (D-4, charter §10 item 10)
   keymap: {},
   notifications: { enabled: true, sound: false, kinds: { approvals: true, questions: true, planReviews: true, errors: true, heldPeerMessages: false, asyncInput: true, essential: true /* P2-C */ } },
@@ -20,6 +20,7 @@ export const SETTINGS_DEFAULTS_V13: Settings = {
   supervisor: { idleExitMinutes: 10, keepRunningDefault: true }, // E10: ruled by A-29 (residue 10 and 11)
   browser: { profile: null, searchUrl: 'https://www.google.com/search?q=%s', linkTarget: 'in-app', bookmarksBar: 'shown' }, // E4a: the default partition; Google (Decision Log 10); new-window links in the app (Decision Log 11); cua #90: the bookmarks bar shown
   mods: { toHuman: { enabled: true } }, // P2-C: the to-human lane on (the P2-C document, §9)
+  artifacts: { defaultDesignSystem: null, spaceDesignSystems: {} }, // P3-D: the house system, no Space defaults (D9)
 };
 
 // The earlier files, as their versions wrote them: C1's and C5's.
@@ -31,9 +32,14 @@ const SettingsV2Schema = z.strictObject({
   notifications: z.strictObject({ enabled: z.boolean(), sound: z.boolean() }),
 });
 
+// P3-D start (2026-10-13): P2-C's version 13, as it wrote it: version 14's sections less the design-system defaults
+const SettingsV13Schema = SettingsSchema.omit({ artifacts: true }).extend({ version: z.literal(13) });
+type SettingsV13 = z.infer<typeof SettingsV13Schema>;
+// P3-D end
+
 // P2-C start (2026-10-09): cua #90's version 12, as it wrote it: version 13's sections less the mods section, and the
-// notification kinds less the owner channel's two groups
-const SettingsV12Schema = SettingsSchema.omit({ mods: true }).extend({
+// notification kinds less the owner channel's two groups (P3-D: re-based on version 13)
+const SettingsV12Schema = SettingsV13Schema.omit({ mods: true }).extend({
   version: z.literal(12),
   notifications: SettingsSchema.shape.notifications.extend({ kinds: SettingsSchema.shape.notifications.shape.kinds.omit({ asyncInput: true, essential: true }) }),
 });
@@ -90,12 +96,23 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 });
 // C12 end
 
-const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V13);
+const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V14);
 
-// P2-C: v12 → v13, the mods section with the to-human lane on, and the owner channel's two notification groups on
+// P3-D: settings as a build before P3-D wrote them (version 13, no design-system defaults). Kept only for P3-A's
+// src/main/artifacts/defaults.test.ts, which tests main's relay over a file without slot 14 and imports this name; it
+// goes when that test builds its own (reported to the architect). Typed as `Settings` because that is what the relay
+// takes; nothing at run time holds such an object, since every file migrates to version 14.
+const { artifacts: _slot14, ...SECTIONS_V13 } = SETTINGS_DEFAULTS_V14;
+void _slot14;
+export const SETTINGS_DEFAULTS_V13 = { ...SECTIONS_V13, version: 13 } as unknown as Settings;
+
+// P3-D: v13 → v14, the design-system defaults empty: the house system, no Space defaults
+const fromV13 = (v13: SettingsV13): Settings => ({ ...v13, version: 14, artifacts: defaults().artifacts });
+// P2-C: v12 → v13, the mods section with the to-human lane on, and the owner channel's two notification groups on;
+// P3-D: then v13 → v14
 const fromV12 = (v12: SettingsV12): Settings => {
   const { mods, notifications } = defaults();
-  return { ...v12, version: 13, notifications: { ...v12.notifications, kinds: { ...v12.notifications.kinds, asyncInput: notifications.kinds.asyncInput, essential: notifications.kinds.essential } }, mods };
+  return fromV13({ ...v12, version: 13, notifications: { ...v12.notifications, kinds: { ...v12.notifications.kinds, asyncInput: notifications.kinds.asyncInput, essential: notifications.kinds.essential } }, mods });
 };
 // cua #90: v11 → v12, the bookmarks bar shown; P2-C: then v12 → v13
 const fromV11 = (v11: SettingsV11): Settings => fromV12({ ...v11, version: 12, browser: { ...v11.browser, bookmarksBar: defaults().browser.bookmarksBar } });
@@ -125,8 +142,8 @@ const fromV4 = (v4: SettingsV4): Settings => fromV5({ ...v4, version: 5, appeara
 // v1 → v2 (C5's step: no keymap overrides, the notification defaults) → v3 (the sections C11 adds, with their
 // defaults) → v4 (C12's budget) → v5 (W2's transcript width) → v6 (W3's auto fallback) → v7 (W7's budget switch) → v8
 // (W13: the pin dropped) → v9 (E9: the voice section) → v10 (E10: the supervisor section) → v11 (E4a: the browser
-// section) → v12 (cua #90: the bookmarks bar's switch) → v13 (P2-C: the mods section and two notification groups). A
-// version 13 object is validated and returned as it is;
+// section) → v12 (cua #90: the bookmarks bar's switch) → v13 (P2-C: the mods section and two notification groups) → v14
+// (P3-D: the design-system defaults). A version 14 object is validated and returned as it is;
 // anything else (another version, an invalid file of a known version) throws the schema's error, which the store turns
 // into the defaults with a warning. At any version, overrides of a retired action are dropped first (W10).
 export function migrateSettings(input: unknown): Settings {
@@ -167,6 +184,8 @@ export function migrateSettings(input: unknown): Settings {
       return fromV11(SettingsV11Schema.parse(raw)); // cua #90
     case 12:
       return fromV12(SettingsV12Schema.parse(raw)); // P2-C
+    case 13:
+      return fromV13(SettingsV13Schema.parse(raw)); // P3-D
     default:
       return SettingsSchema.parse(raw);
   }
@@ -185,7 +204,7 @@ function withoutRetiredActions(raw: unknown): unknown {
 // field, and `notifications.kinds` a second level, key by key, so a kinds patch never replaces the sibling kinds. The
 // theme and the keymap are values of their own and are replaced whole. A key present as `undefined` changes nothing.
 export function applySettingsPatch(state: Settings, patch: SettingsPatch): Settings {
-  const { notifications, engine, gateway, usage, appearance, permissions, voice, supervisor, browser, mods, ...values } = patch; // E4a: browser; P2-C: mods
+  const { notifications, engine, gateway, usage, appearance, permissions, voice, supervisor, browser, mods, artifacts, ...values } = patch; // E4a: browser; P2-C: mods; P3-D: artifacts
   const next: Settings = { ...state, ...defined(values) };
   if (notifications) {
     const { kinds, ...fields } = notifications;
@@ -200,6 +219,7 @@ export function applySettingsPatch(state: Settings, patch: SettingsPatch): Setti
   if (supervisor) next.supervisor = { ...state.supervisor, ...defined(supervisor) }; // E10
   if (browser) next.browser = { ...state.browser, ...defined(browser) }; // E4a
   if (mods?.toHuman) next.mods = { ...state.mods, toHuman: { ...state.mods.toHuman, ...defined(mods.toHuman) } }; // P2-C: a mod's fields one by one
+  if (artifacts) next.artifacts = { ...state.artifacts, ...defined(artifacts) }; // P3-D: the Spaces' record replaced whole
   return next;
 }
 

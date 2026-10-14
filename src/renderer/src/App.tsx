@@ -114,6 +114,17 @@ import { connectBrowserActivity } from './tools/browser/agent/activity'; // E13
 import { connectBrowserAgent } from './tools/browser/agent/connect';
 import { registerTranscriptActions as registerBrowserAgentTranscriptActions } from './transcript';
 // E4c end
+// P3-L start
+import { registerArtifactTabs } from './library/ArtifactTab';
+import { artifactsTool } from './tools/artifacts/ArtifactsTool';
+import { registerByteViewers } from './tools/artifacts/viewers/register';
+import { Library } from './library/Library';
+import { connectLibrary } from './library/store';
+// P3-L end
+// P3-D start
+import { registerDesignSystemEditor } from './artifacts/design-system/editor';
+import { DesignSystemHostProvider } from './artifacts/design-system/provider';
+// P3-D end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -241,6 +252,7 @@ export function App() {
   // artifact row and a delivered file's name open the viewer through openDeliverable
   useEffect(() => {
     registerPanelTool(deliverablesTool);
+    registerPanelTool(artifactsTool); // P3-L (M5): the Artifacts tool, beside Deliverables until the cutover (M6)
     registerSlot('deliverableTab', DeliverableTab);
   }, []);
   useEffect(() => connectDeliverables(), []);
@@ -275,6 +287,17 @@ export function App() {
   useEffect(() => registerBrowserAgentTranscriptActions({ openBrowserTab }), []);
   useEffect(() => connectBrowserAgent(), []);
   // E4c end
+  // P3-L start: the library store reads main's index again at every committed change (`library.changed`), and the
+  // `artifact` tab kind's handlers
+  useEffect(() => connectLibrary(), []);
+  useEffect(() => registerArtifactTabs(), []); // an `artifact` tab with unsaved changes is not replaced by a session
+  useEffect(() => registerSlot('artifactsLibrary', Library), []); // the Artifacts tab's library, in P3-G's slot
+  useEffect(() => registerByteViewers(), []); // M5b: the html and file viewers on maws-artifact:, and their frames' console
+  // P3-L end
+  // P3-D start: the Design System page as the `design_system` kind's editor in L's registry (the library's tab and the
+  // panel's Artifacts tool mount it)
+  useEffect(() => registerDesignSystemEditor(), []);
+  // P3-D end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
@@ -283,6 +306,9 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      {/* P3-D start: every design-system consumer reaches the store through the window's ArtifactHost */}
+      <DesignSystemHostProvider>
+      {/* P3-D end */}
       <Shell />
       {/* C7 start: the one app-level ⌘. and ⌘L, resolving the focused pane's session */}
       <ComposerAppKeys />
@@ -309,6 +335,9 @@ export function App() {
       {/* E3 end */}
       {/* cua #90: the profile popover's Re-import this profile…, the removal's then the import's sheet */}
       <ProfileSheets />
+      {/* P3-D start */}
+      </DesignSystemHostProvider>
+      {/* P3-D end */}
     </QueryClientProvider>
   );
 }
