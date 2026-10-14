@@ -55,7 +55,7 @@ describe('the full contract: contract 5', () => {
 
   it('names the one mark and MAWS’s ask tool, under 250 words, asks for none of the retired marks, and reads as no mark itself', () => {
     expect(words.length).toBeLessThan(250);
-    for (const needle of ['`<message>…</message>`', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', 'a user message naming the askId', 'native AskUserQuestion only where', 'never in code']) {
+    for (const needle of ['`<message>…</message>`', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', 'a user message naming the askId', 'native AskUserQuestion only where', 'never in code', 'your answers included']) {
       expect(TO_HUMAN_CONTRACT).toContain(needle);
     }
     for (const retired of ['need-input', 'insight', 'essential', 'to-human>', 'mcp__doperpowers__']) expect(TO_HUMAN_CONTRACT).not.toContain(retired);

@@ -309,7 +309,9 @@ test('default mode: Allow for this session grants the exact command and a second
 
 // ---- 4. a two-question form --------------------------------------------------------------------------------------
 
-test('auto mode: a two-question AskUserQuestion form submits both answers and the tool result names them', async () => {
+// P2-C2 (the P2 spec's Decision Log 33): a MAWS session's one ask is `mcp__maws__ask` (the native AskUserQuestion is
+// withdrawn at launch), so the two-question form is its sheet: a choice and a text, answered in the panel.
+test('auto mode: a two-question mcp__maws__ask (one choice, one text) answered from its sheet; the tool result names both answers', async () => {
   await withApp('question', async (live) => {
     const { page } = live;
     const pane = paneAt(page, 0);
@@ -317,23 +319,29 @@ test('auto mode: a two-question AskUserQuestion form submits both answers and th
     await send(
       page,
       pane,
-      'Use the AskUserQuestion tool once, with both questions in the one call: "Which color do you prefer?" (options Red and Blue, single choice) and "Which fruits do you like?" (options Apple, Pear and Plum, multiSelect true). Then reply with my answers.',
+      'Use the mcp__maws__ask tool once, blocking, with both questions in the one call: "Which color do you prefer?" (a choice of Red and Blue) and "Which fruit do you like?" (free text). Then reply with my answers.',
     );
-    const frame = pane.getByRole('group', { name: 'Question' });
-    await expect(frame).toBeVisible({ timeout: 90_000 });
-    await frame.getByRole('radio', { name: 'Red' }).click(); // W4: a single-select pick moves on to the next question
-    await expect(frame).toContainText('2 of 2');
-    await frame.getByRole('checkbox', { name: 'Apple' }).click();
-    await frame.getByRole('checkbox', { name: 'Pear' }).click();
-    await frame.getByRole('button', { name: 'Submit' }).click();
+    const sheet = page.locator('[data-ask-sheet]');
+    // auto mode may ask for the MCP tool's permission first: allowed once through the docked card
+    await expect
+      .poll(
+        async () => {
+          const allow = pane.getByRole('group', { name: 'Approval needed' }).getByRole('button', { name: 'Allow', exact: true });
+          if ((await allow.isVisible().catch(() => false)) && (await allow.isEnabled().catch(() => false))) await allow.click();
+          return sheet.locator('section[data-question-id]').count();
+        },
+        { timeout: 90_000, intervals: [500] },
+      )
+      .toBe(2);
+    await sheet.locator('section[data-question-id]').filter({ hasText: /colou?r/i }).getByRole('radio', { name: 'Red' }).click();
+    await sheet.locator('section[data-question-id]').filter({ hasText: /fruit/i }).getByRole('textbox').fill('Pear');
+    await sheet.getByRole('button', { name: /^Submit/ }).click();
     await idle(page, q.id);
-    const asked = controlRequests(q.journalPath, 'can_use_tool');
-    const answers = controlResponsesTo(q.journalPath, asked.map((r) => (r.frame as { request_id: string }).request_id));
-    const toolResults = framesOf(rowsOf(q.journalPath), 'in').filter(({ frame }) => frame.type === 'user' && JSON.stringify(frame.message?.content).includes('tool_result'));
-    observe('question', { answers, toolResults: toolResults.map((t) => JSON.stringify(t.frame.message?.content).slice(0, 600)), results: resultsOf(q.journalPath).slice(-1) });
-    const named = toolResults.map((t) => JSON.stringify(t.frame.message?.content)).join(' ');
+    const toolResults = framesOf(rowsOf(q.journalPath), 'out').filter(({ frame }) => frame.type === 'control_response' && JSON.stringify(frame).includes('"answered"'));
+    observe('question', { toolResults: toolResults.map((t) => JSON.stringify(t.frame).slice(0, 600)), results: resultsOf(q.journalPath).slice(-1) });
+    const named = toolResults.map((t) => JSON.stringify(t.frame)).join(' ');
     expect(named).toContain('Red');
-    expect(named).toMatch(/Apple, Pear/);
+    expect(named).toContain('Pear');
   });
 });
 

@@ -68,13 +68,13 @@ const CONTRACT_5: ContractText = {
   version: 5,
   text: `${CONTRACT_HEADER(5)}
 
-The human reads a report, not this session's transcript. Each \`<message>…</message>\` span, wherever you write it, is one message to them; nothing else reaches them.
+The human reads a report, not the transcript: only what you mark reaches them, so everything you want them to read, your answers included, goes inside \`<message>…</message>\`, one message per span, wherever written.
 
 Send a message when it changes what the human knows or does: the answer to what they asked, a decision or permission only they can give, a blocker or a departure from what they asked, a finding that changes the answer or the plan, and the result when the work ends. A finished step, a passed test, a worker's completion, or what you are about to do next is working record unless one of those applies; what can wait goes into the next message that has to be sent. The request sets the bar: a direct question expects its answer; a long task expects word at those points, and an acknowledgement at the start only if it will run long enough for the human to wonder; anything they did not ask about has to be new to them, consequential, and useful now rather than later. Silence says only that nothing needed sending, so what is unresolved goes in the next message.
 
 Ask for input with \`mcp__maws__ask\`: \`blocking: false\` when you can go on working (their answer arrives later as a user message naming the askId), \`blocking: true\` when your next step needs it. Use the native AskUserQuestion only where \`mcp__maws__ask\` is missing.
 
-Say what you mean, literally. Metaphor and flourish make the reader work harder. Write marks as plain text, never in code.`,
+Say what you mean literally, without metaphor. Marks are plain text, never in code.`,
 };
 
 // Contract 1 (P2-C, 2026-10-09), MAWS's full contract until contract 5: still what sessions recorded under it carry, which
