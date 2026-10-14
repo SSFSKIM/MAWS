@@ -8,6 +8,7 @@ import { mirrorSlug } from '@artifacts/library/mirror';
 import { HostCommandError } from '@shared/host/runtime';
 import { openDocuments, type Documents } from '../documents';
 import { registerLibrary } from '.';
+import { importSettled } from './import-gate';
 import { MIRROR_SETTLE_MS } from './mirror';
 
 let userData: string;
@@ -96,5 +97,29 @@ describe('the X12 import at store open (M6b)', () => {
     expect(await handlers.get('library.testImport')!(undefined)).toEqual({ imported: 1, skipped: 0, missing: 0, failed: 0 });
     expect(documents.store.get(uuid(4))).toMatchObject({ kind: 'file' });
     e2e.close();
+  });
+
+  // Fix wave 1 (Decision Log 39a): no start-up window. The store's gate holds until the start import ends, however it
+  // ends, and main's reads taken meanwhile answer with what it landed.
+  it('holds the store’s gate until the start import lands, and a read taken at once answers with the imported record', async () => {
+    seed('app-1', uuid(5), 'five');
+    const lines: string[] = [];
+    const library = registerLibrary(on, { documents, deliverablesDir: join(userData, 'deliverables'), log: (line) => lines.push(line) });
+    const snapshot = handlers.get('library.snapshot')!(undefined) as Promise<{ artifacts: { id: string }[] }>;
+    await importSettled(documents.store);
+    expect(documents.store.get(uuid(5))).toMatchObject({ kind: 'file' });
+    expect(lines.some((line) => line.includes('imported 1'))).toBe(true);
+    expect((await snapshot).artifacts.map((a) => a.id)).toContain(uuid(5));
+    library.close();
+  });
+
+  it('opens the gate when the start import fails, and logs why', async () => {
+    writeFileSync(join(userData, 'not-a-directory'), 'x'); // a tree that cannot be listed: the import rejects
+    const lines: string[] = [];
+    const library = registerLibrary(on, { documents, deliverablesDir: join(userData, 'not-a-directory'), log: (line) => lines.push(line) });
+    await importSettled(documents.store);
+    await until(() => lines.some((line) => line.includes('did not run')));
+    await expect(handlers.get('library.snapshot')!(undefined)).resolves.toMatchObject({ artifacts: expect.any(Array) });
+    library.close();
   });
 });

@@ -5,6 +5,7 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PendingAsk } from '@shared/maws/ask';
 import type { ArtifactStore } from '../documents/store';
+import { importSettled } from '../library/import-gate';
 import { artifactListAssetsTool, artifactUploadAssetTool } from './artifact-assets';
 import { ArtifactSession, type ArtifactToolDeps } from './artifact-context';
 import { artifactExportTool, type ExportBridge } from './artifact-export';
@@ -29,11 +30,23 @@ export function mawsTools(deps: {
   // P3-A end
 }): McpToolDefinition[] {
   const artifacts: ArtifactToolDeps = { artifacts: deps.artifacts, artifactScope: deps.artifactScope, session: deps.session ?? new ArtifactSession(), log: deps.log };
+  // P3-L (M6b fix wave 1; Decision Log 39a): a call over the store waits for the host's start import of the X12
+  // deliverables (`../library/import-gate.ts`), so a deliverable made before P3 is found from the first call on
+  const afterImport = (tool: McpToolDefinition): McpToolDefinition => ({
+    ...tool,
+    call: async (args, ctx) => {
+      const store = deps.artifacts?.() ?? null;
+      if (store) await importSettled(store);
+      return tool.call(args, ctx);
+    },
+  });
   return [
-    sendFileTool(artifacts), askTool({ asks: deps.asks, cancelled: deps.askCancelled }), showPaneTool(deps),
-    artifactCreateTool(artifacts), artifactListTool(artifacts), artifactScreenshotTool({ ...artifacts, capture: deps.capture }), // E2
-    // P3-A (M6)
-    artifactDescribeTypeTool(artifacts), artifactReadTool(artifacts), artifactPublishTool(artifacts), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
-    artifactExportTool({ ...artifacts, exporter: deps.exporter }),
+    afterImport(sendFileTool(artifacts)), askTool({ asks: deps.asks, cancelled: deps.askCancelled }), showPaneTool(deps),
+    ...[
+      artifactCreateTool(artifacts), artifactListTool(artifacts), artifactScreenshotTool({ ...artifacts, capture: deps.capture }), // E2
+      // P3-A (M6)
+      artifactDescribeTypeTool(artifacts), artifactReadTool(artifacts), artifactPublishTool(artifacts), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
+      artifactExportTool({ ...artifacts, exporter: deps.exporter }),
+    ].map(afterImport),
   ];
 }

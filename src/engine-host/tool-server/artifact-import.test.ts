@@ -16,6 +16,8 @@ import { jsonOf, openWorld, SELF, textOf, type World } from './artifact-world.fi
 import { artifactScreenshotTool, type ArtifactCaptureRequest } from './artifacts';
 import { HostBridge } from './bridge';
 import { importDeliverables } from '../library/import';
+import { holdForImport } from '../library/import-gate';
+import { mawsTools } from './tools';
 
 const PARENT = 'app-parent' as AppSessionId;
 const RECORD = '0b5e1c2d-3a4f-4b6c-8d7e-9f0a1b2c3d4e';
@@ -47,6 +49,22 @@ function write(record: DeliverableRecord): DeliverableRecord {
 const started = () => importDeliverables(w.store, join(w.userData, 'deliverables'), (line) => w.logs.push(line));
 
 describe('a pre-P3 X12 record a tool names, after the cutover’s import', () => {
+  // Fix wave 1 (Decision Log 39a): no start-up window. A call the engine makes while the host's start import is still
+  // landing waits for it (the `maws` server's artifact tools, `mawsTools`), then finds the record as any artifact.
+  it('a tool call issued during a slow import waits, then finds the old record', async () => {
+    await pre(SELF, ['<p>v1</p>']);
+    let land!: () => void;
+    const slow = new Promise<void>((resolve) => (land = resolve));
+    holdForImport(w.store, slow.then(started));
+    const read = mawsTools({ ...(w.deps() as object), bridge: {} as never, capture: {} as never, asks: {} as never, askCancelled: () => {} }).find((tool) => tool.name === 'artifact_read')!;
+    let answered = false;
+    const call = read.call({ artifact: 'dash' }, w.ctx()).finally(() => (answered = true));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(answered).toBe(false);
+    land();
+    expect(jsonOf(await call)).toMatchObject({ artifactId: RECORD, files: { 'index.html': '<p>v1</p>' } });
+  });
+
   it('reads by handle with its id, versions and link, credited to its session; a publish over it adds its third version', async () => {
     await pre(SELF, ['<p>v1</p>', '<p>v2</p>']);
     await started();
