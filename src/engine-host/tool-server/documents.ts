@@ -553,7 +553,8 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
             throw error instanceof ReadError ? readRefusal(error) : error;
           });
           result = { ...head, revision: read.revision, ...publicRead(read.read), ...(input.sinceRevision !== undefined && { sinceRevision: input.sinceRevision }), ...read.since };
-          await store.writeCommitted(() => store.link(artifact.id, ctx.appSessionId, 'viewed'));
+          // a store a newer MAWS wrote is read-only: the read stands, its viewed link is not recorded (A's reader's rule)
+          if (!store.storage.readOnly) await store.writeCommitted(() => store.link(artifact.id, ctx.appSessionId, 'viewed'));
         }
         return toolText(result);
       });
@@ -595,6 +596,13 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
         const handle = input.handle ?? input.id;
         const store = storeOf(TOOL, deps);
         const actor = actorOf(ctx);
+        // a repeated call answers what the first one did, before anything that may have moved since is read (§4.3; A's
+        // generic create)
+        const replayed = await store.replayOf(opIdOf(ctx));
+        if (replayed.found) {
+          deps.session.guided.add('document');
+          return toolText(replayed.result);
+        }
         let body: ReturnType<typeof importMarkdown>;
         try {
           body = importMarkdown(input.content ?? '');
@@ -604,6 +612,10 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
         if (body.childCount > DOCUMENT_LIMITS.blocksPerTab) {
           throw refuse(TOOL, { reason: 'invalid', blocks: body.childCount }, `the content holds ${body.childCount} top-level blocks; a tab takes at most ${DOCUMENT_LIMITS.blocksPerTab}: create the document with less and insert the rest elsewhere, or split it`);
         }
+        // the answer's context, settled before the write so the recorded answer is the whole first answer: the guide when
+        // this session has not had it, the governing system's guide (a new document has no system or Space of its own)
+        const guide = deps.session.guided.has('document') ? undefined : KIND_GUIDES.document;
+        const designSystem = await store.designSystemContextFor({});
         const created = await store.writeCommitted(() =>
           store.withOp(
             opIdOf(ctx),
@@ -615,7 +627,7 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
                 const taken = store.resolve(handle, [ctx.appSessionId]) ? 'this session' : deps.artifactScope?.length && store.resolve(handle, deps.artifactScope) ? 'the conversation this side thread was opened from' : null;
                 if (taken) return refusedAfterCommit(store, refuse(TOOL, { reason: 'handleTaken', handle }, `an artifact "${handle}" already exists in ${taken}; edit it with artifact_edit`));
               }
-              const made: { artifact?: Artifact; doc?: Doc; answer?: { artifactId: string; title: string; revision: number; handle?: string } } = {};
+              const made: { artifact?: Artifact; doc?: Doc; answer?: Record<string, unknown> & { artifactId: string } } = {};
               // `initial` given (empty), so the kind's seed hook writes no first tab: the content's is written below
               const creating = store.create({ kind: 'document', title: input.title, initial: () => {}, ...(handle !== undefined && { handle }) }, actor, (artifact) => (made.artifact = artifact));
               // the first tab, written through the session's host replica in the batch that holds the entity row
@@ -625,7 +637,10 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
                     createDocument(doc, { title: input.title, body });
                   }, {
                     inFrame: (revision) => {
-                      made.answer = { artifactId: made.artifact!.id, title: made.artifact!.title, revision, ...(handle !== undefined && { handle }) };
+                      made.answer = {
+                        status: 'created', kind: 'document', artifactId: made.artifact!.id, title: made.artifact!.title, revision, ...(handle !== undefined && { handle }),
+                        ...(guide && { guide }), ...(designSystem !== null && { designSystem }),
+                      };
                       if (made.doc) deps.session.views.record(made.doc, revision);
                       op.record(made.answer);
                     },
@@ -638,15 +653,9 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
             { actor },
           ),
         );
+        deps.session.guided.add('document');
         store.service.replica(ctx.appSessionId, created.artifactId); // the session's replica keeps the document loaded
-        const result: Record<string, unknown> = { status: 'created', kind: 'document', ...created };
-        if (!deps.session.guided.has('document')) {
-          deps.session.guided.add('document');
-          result.guide = KIND_GUIDES.document;
-        }
-        const system = await store.designSystemContextFor(created.artifactId);
-        if (system !== null) result.designSystem = system;
-        return toolText(result);
+        return toolText(created);
       });
   return fallback ? { ...fallback, call } : defineMawsTool(TOOL, call);
 }

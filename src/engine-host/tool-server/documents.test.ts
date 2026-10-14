@@ -1,5 +1,7 @@
 // The document tools through their `call` with an `McpToolContext` (A's pattern), over A's real store with the document
 // kind registered (M7's Proves of docs/doperpowers/plans/2026-10-12-p3-b-documents.md; D7, D14; §4.4 [binding]).
+import { DatabaseSync } from 'node:sqlite';
+import { join } from 'node:path';
 import * as awarenessProtocol from '@y/protocols/awareness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { charSlots } from '@artifacts/document/structs';
@@ -16,7 +18,11 @@ import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import committedFingerprint from '@artifacts/document/fingerprint.json';
 import { onSessionReplica, isWarming } from '../documents/kinds/document-host';
+import { registerDocumentKind } from '../documents/kinds/document';
 import { HUMAN, openDocumentWorld, type DocumentWorld } from '../documents/kinds/document-world.fixture';
+import { DocumentService } from '../documents/service';
+import { SqliteDocumentStorage } from '../documents/storage';
+import { ArtifactStore } from '../documents/store';
 import { artifactCommentsTool, artifactEditTool, artifactReplyTool, artifactResolveTool, documentCreateTool, documentReadTool, DocumentToolSession, type DocumentToolDeps } from './documents';
 import type { McpToolContext, McpToolDefinition, McpToolResult } from './server';
 
@@ -599,5 +605,49 @@ describe('fix wave 2: a call naming a deleted artifact by handle replays its rec
     await world.store.delete(artifact.id);
     for (const [i, [tool, args, toolUseId]] of calls.entries()) expect(await call(tool, args, { toolUseId })).toEqual(first[i]);
     expect(refusalOf(await call(calls[0][0], calls[0][1]))).toMatchObject({ reason: 'notFound', artifact: 'gone-plan' });
+  });
+});
+
+// The whole-branch review's P3 and P4.
+describe('the whole-branch review: a read-only store, a create’s replay', () => {
+  // The world's store reopened as an older MAWS opens one a newer MAWS wrote: read-only (A's Decision Log 12).
+  function reopenNewer(): { store: ArtifactStore; close(): void } {
+    const path = join(world.dir, 'artifacts', 'store.sqlite');
+    world.kind.close();
+    world.store.close();
+    world.service.close();
+    world.storage.close();
+    const db = new DatabaseSync(path);
+    db.exec('PRAGMA user_version = 99');
+    db.close();
+    const storage = SqliteDocumentStorage.open(path, { log: () => {} });
+    expect(storage.readOnly).toBe(true);
+    const service = new DocumentService(storage, { kindOf: (id) => storage.kindOf(id), log: () => {} });
+    const store = new ArtifactStore(service, storage, { root: join(world.dir, 'artifacts'), log: () => {} });
+    const kind = registerDocumentKind(store);
+    return { store, close: () => (kind.close(), store.close(), service.close(), storage.close()) };
+  }
+
+  it('reads a document from a read-only store, recording no viewed link', async () => {
+    const id = await world.seeded();
+    const readOnly = reopenNewer();
+    try {
+      const answer = json<{ revision: number; markdown: string }>(await call(documentReadTool(deps({ artifacts: () => readOnly.store })), { artifact: id }));
+      expect(answer.markdown).toContain('^p1');
+      expect(readOnly.store.links(id).map((link) => link.role)).not.toContain('viewed');
+    } finally {
+      readOnly.close();
+    }
+  });
+
+  it('answers a create’s replay with the first answer, guide and design system included, without asking for them again', async () => {
+    const lookup = vi.spyOn(world.store, 'designSystemContextFor').mockResolvedValueOnce('The house voice.').mockRejectedValue(new Error('system lookup failed'));
+    const create = documentCreateTool(deps());
+    const toolUseId = 'toolu_create_replay' as ToolUseId;
+    const input = { kind: 'document', title: 'Replay', content: 'Hello.' };
+    const first = await call(create, input, { toolUseId });
+    expect(json(first)).toMatchObject({ guide: KIND_GUIDES.document, designSystem: 'The house voice.' });
+    expect(await call(create, input, { toolUseId })).toEqual(first);
+    expect(lookup).toHaveBeenCalledTimes(1);
   });
 });
