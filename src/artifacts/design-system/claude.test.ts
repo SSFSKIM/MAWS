@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ClaudeShapeError, fromClaude, isClaudeShape, toClaude } from './claude';
 import { validateClaudeTokens } from './claude-grammar';
 import { colorToCss } from './color';
+import { edited } from './fixtures/edit';
 import complete from './fixtures/complete.tokens.json';
 import { TIDEWATER_FILES, TIDEWATER_TOKENS } from './fixtures/claude-tidewater';
 import { resolveTokens, type ResolvedToken } from './resolve';
@@ -339,6 +340,22 @@ describe('fix wave 1: the converter’s safety and its guarantees', () => {
     expect(new Set(names).size).toBe(names.length);
     expect(names).toContain('deck-title');
     expect(names).toContain('deck-title-2');
+    expect(validateClaudeTokens(exported)).toEqual([]);
+  });
+});
+
+describe('whole-branch review: a role found by identity (C1)', () => {
+  // The model writes a role that gained a child as its group's `$root` (Decision Log 12): `type.title` becomes
+  // `type.title.$root` beside `type.title.small`. It is still the title role, and its deck scale still travels.
+  it('exports a rehomed type role under its role’s name, with its deck style', () => {
+    const title = (complete as { type: { title: object } }).type.title;
+    const rehomed = parseTokens(edited(complete, ['type/title', { $root: title, small: { $type: 'number', $value: 2 } }])).tokens!;
+    expect(rehomed.tokens.has('type.title.$root')).toBe(true);
+    const exported = JSON.parse(toClaude({ name: 'T', law: LAW, tokens: rehomed })['tokens.json']!) as { type: { groups: { name: string; styles: { name: string; fontSize: string }[] }[] } };
+    const styles = exported.type.groups.flatMap((g) => g.styles);
+    expect(styles.find((s) => s.name === 'title')).toMatchObject({ fontSize: '40px' });
+    expect(styles.find((s) => s.name === 'deck-title')).toMatchObject({ fontSize: '96px' });
+    expect(styles.map((s) => s.name)).not.toContain('title-2');
     expect(validateClaudeTokens(exported)).toEqual([]);
   });
 });

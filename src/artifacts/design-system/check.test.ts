@@ -132,3 +132,18 @@ describe('fix wave 1: the per-slide counts', () => {
     expect(report.checks).toEqual([{ dont: 0, rule: 'accent-max:1', violations: 0 }]);
   });
 });
+
+describe('whole-branch review: type roles found by identity (C5)', () => {
+  // Every role rehomed to `type.<role>.$root` (Decision Log 12) is still a role: its size is on the type scale.
+  it('counts a rehomed type role’s size as the scale’s', () => {
+    const type = (complete as { type: Record<string, unknown> }).type;
+    const rehomed = parseTokens({
+      ...complete,
+      type: Object.fromEntries(Object.entries(type).map(([role, token]) => [role, role.startsWith('$') ? token : { $root: token, extra: { $type: 'number', $value: 1 } }])),
+    }).tokens!;
+    expect(rehomed.tokens.has('type.body.$root')).toBe(true);
+    const law = parseLaw("## 8. Hard don'ts\n\n- Only the type scale. [check: type-scale]\n");
+    const units = canonUnits({ 'components/sized.html': '<div style="font-size:var(--ds-type-body-size)"><p style="font-size:16px">Text</p></div>' }, parser);
+    expect(checkHardDonts(law, rehomed, units).violations).toEqual([]);
+  });
+});

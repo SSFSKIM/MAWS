@@ -5,8 +5,11 @@ import { HOUSE_KEY, defaultSystem } from '../types/design_system/defaults';
 import { onUpdate, type Doc } from '../yjs';
 import { fontFaces, type AssetUrl } from './assets';
 import { DOCUMENT_CSS_PATH } from './canon';
-import { generateTokensCss, type Medium } from './css';
+import { fontFamilyCss, generateTokensCss, type Medium } from './css';
+import { parseFontStack } from './css-read';
 import { readSystem, type SystemOrigin } from './model';
+import { resolveTokens } from './resolve';
+import { cssNamesOf } from './roles';
 import { parseTokens, type TokenSet } from './tokens';
 
 /** Per-consumer values of `--ds-*` names, set after the system's (the chain's first link, D8). */
@@ -48,12 +51,26 @@ export function safeOverrides(overrides: TokenOverrides | undefined): [string, s
 }
 
 /**
+ * An override of a font-family name with each bundled family's private name set before its authored one, as the
+ * system's own value has it, so an override naming the system's face still draws it. `var()` items stay as written.
+ */
+function aliasedStack(value: string, aliases: ReadonlyMap<string, string>): string {
+  const names = parseFontStack(value);
+  if (!names?.some((name) => aliases.has(name.toLowerCase()))) return value;
+  return names.map((name) => (/^var\(/i.test(name) ? name : fontFamilyCss(name, aliases))).join(', ');
+}
+
+/**
  * The stylesheet of a snapshot for a scope (D3, D8): the system's faces under their private names, `tokens.css` with
- * each bundled family's private name before its authored one, then the overrides.
+ * each bundled family's private name before its authored one, then the overrides (a font family's aliased the same way).
  */
 export function snapshotCss(snapshot: SystemSnapshot, toUrl: AssetUrl | null, scope: string, medium: Medium, overrides?: TokenOverrides): string {
   const faces = fontFaces(snapshot.files[DOCUMENT_CSS_PATH], snapshot.tokens, toUrl, { aliased: true });
-  const own = safeOverrides(overrides);
+  let own = safeOverrides(overrides);
+  if (own.length && faces.aliases.size) {
+    const families = new Set([...resolveTokens(snapshot.tokens).tokens.values()].filter((t) => t.type === 'fontFamily').flatMap((t) => cssNamesOf(t.path, t.type)));
+    own = own.map(([name, value]) => [name, families.has(name) ? aliasedStack(value, faces.aliases) : value]);
+  }
   const after = own.length ? `\n${scope} {\n${own.map(([name, value]) => `  ${name}: ${value};`).join('\n')}\n}\n` : '';
   return `${faces.css}${generateTokensCss(snapshot.tokens, { scope, medium, fontAliases: faces.aliases })}${after}`;
 }

@@ -11,7 +11,7 @@ import { contrastRatio, relativeLuminance, rgbToHex, round4, toSrgb, type ColorV
 import { parseBoxShadow, parseCssColor, parseFontStack, parseLength } from './css-read';
 import { DECK_KEY } from './extensions';
 import { resolveTokens, resolveValueAgainst, type ResolvedToken } from './resolve';
-import { byIdentity, cssNamesOf, ROLES, splitPath, tokenIdentity, TYPE_ROLES, type TypeRole } from './roles';
+import { byIdentity, cssNamesOf, ROLES, splitPath, tokenIdentity, TYPE_ROLES, typeRoleOf, type TypeRole } from './roles';
 import { LIMITS, validateTokenFile, type Token, type TokenSet } from './tokens';
 import { aliasPath, isAlias, type DimensionValue, type FontFamilyValue, type ShadowLayer, type TokenType, type TypographyValue } from './values';
 
@@ -852,9 +852,10 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
     return { size, line };
   };
   const styleNames = new Set<string>();
-  const isRole = (token: (typeof typography)[number]) => (TYPE_ROLES as readonly string[]).includes(token.path.replace(/^type\./, '')) && token.path.startsWith('type.');
-  for (const token of typography.filter(isRole)) {
-    const role = token.path.slice('type.'.length);
+  // A role is found by identity: `type.body.$root`, written once the role has a child (Decision Log 12), is `type.body`.
+  for (const token of typography) {
+    const role = typeRoleOf(token.path);
+    if (role === null) continue;
     styleNames.add(role);
     if (deckScale(token)) styleNames.add(`deck-${role}`);
   }
@@ -868,8 +869,8 @@ export function toClaude(system: ClaudeExportSource): Record<string, string> {
     const segments = splitPath(token.path).filter((s) => s !== '$root');
     const raw = writtenComposite(token, resolved.tokens).fontFamily;
     let key = isAlias(raw) ? familyKeyOf.get(aliasPath(raw)) : undefined;
-    const role = isRole(token);
-    const name = role ? token.path.slice('type.'.length) : unique(styleNames, claudeName(segments[0] === 'type' ? segments.slice(1) : segments));
+    const role = typeRoleOf(token.path);
+    const name = role ?? unique(styleNames, claudeName(segments[0] === 'type' ? segments.slice(1) : segments));
     if (!key) {
       key = familyKey([name]);
       families[key] = stackOf(token.value.fontFamily);

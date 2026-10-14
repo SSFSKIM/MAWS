@@ -68,3 +68,20 @@ describe('faces (I4, I5)', () => {
     expect(faces.css).toMatch(/font-family: ds-face-[a-z0-9]+;/);
   });
 });
+
+describe('whole-branch review: a font override in a scope (C2)', () => {
+  it('keeps the private family before an overridden stack’s bundled face, and leaves var() and other names as written', () => {
+    const files = { 'components/document.css': FACE };
+    const snapshot = { tokens, law: '', name: 'Harbor', files, origin: null };
+    const alias = fontFaces(FACE, tokens, urlOf('a'), { aliased: true }).aliases.get('iowan old style')!;
+    const css = snapshotCss(snapshot, urlOf('a'), '.s', 'document', {
+      '--ds-font-body': "'Iowan Old Style', var(--ds-font-mono), serif",
+      '--ds-font-mono': 'Menlo, monospace',
+      '--ds-color-accent': '#123456',
+    });
+    const after = css.slice(css.lastIndexOf('.s {'));
+    expect(after).toContain(`--ds-font-body: ${alias}, "Iowan Old Style", var(--ds-font-mono), serif;`);
+    expect(after).toContain('--ds-font-mono: Menlo, monospace;');
+    expect(after).toContain('--ds-color-accent: #123456;');
+  });
+});

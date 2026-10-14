@@ -201,3 +201,10 @@ describe('fix wave 1: the canon’s escapes', () => {
     ]);
   });
 });
+
+describe('whole-branch review: document.css reads what document CSS writes (C7)', () => {
+  it('lets document.css read the page size names', () => {
+    const css = '.ds-doc { width: var(--ds-page-width); min-height: var(--ds-page-height); padding: var(--ds-page-margin); }';
+    expect(validateCanon({ 'components/document.css': css }, parser, tokens)).toEqual([]);
+  });
+});

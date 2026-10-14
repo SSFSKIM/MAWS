@@ -8,7 +8,7 @@ import { colorLiterals, parseBoxShadow, parseCssColor, parseFontStack, parseLeng
 import { DECK_KEY } from './extensions';
 import type { HardDont, Law } from './law';
 import { resolveTokens, resolveValueAgainst } from './resolve';
-import { byIdentity, cssNamesOf, splitPath, TYPE_ROLES } from './roles';
+import { byIdentity, cssNamesOf, typeRoleOf } from './roles';
 import type { TokenSet } from './tokens';
 import type { DimensionValue, ShadowLayer } from './values';
 
@@ -102,7 +102,7 @@ function systemOf(tokens: TokenSet): System {
         const deckSize = deck?.fontSize === undefined ? null : resolveValueAgainst(resolved, 'dimension', deck.fontSize, 'fontSize').value;
         if (deckSize) values.push(px(deckSize));
         s.sizeNames.set(names[0]!, values);
-        if ((TYPE_ROLES as readonly string[]).includes(splitPath(token.path)[1] ?? '') && splitPath(token.path).length === 2 && token.path.startsWith('type.')) {
+        if (typeRoleOf(token.path) !== null) {
           s.roleSizeNames.add(names[0]!);
           values.forEach((v) => sizes.add(v));
         }

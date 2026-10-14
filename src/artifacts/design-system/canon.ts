@@ -3,8 +3,8 @@
 // `.ds-doc`). Two things live here: the structural validation D6 asks of canon (the dialect itself is C's parser's), and
 // the adapters from canon files to the element stream the hard-don'ts check reads (`check.ts`). The HTML adapter takes
 // the DOM parser as a parameter (the renderer's `DOMParser`, happy-dom in tests), so this module stays portable (§4.10).
+import { tokenProperties } from './css';
 import { parseDeclarations, parseStylesheet, splitTopLevel, urlsIn, varNamesIn, type Declaration } from './css-read';
-import { resolveTokens } from './resolve';
 import { cssNamesOf, ROLES } from './roles';
 import type { TokenSet } from './tokens';
 
@@ -319,11 +319,8 @@ export function validateCanon(files: Readonly<Record<string, string>>, parser: H
     .sort();
   const problems: CanonProblem[] = [];
   if (paths.length > CANON_LIMITS.files) problems.push({ path: '', message: `${paths.length} canon files; a system holds at most ${CANON_LIMITS.files}` });
-  let names: Set<string> | null = null;
-  if (tokens) {
-    names = new Set();
-    for (const token of resolveTokens(tokens).tokens.values()) for (const name of cssNamesOf(token.path, token.type)) names.add(name);
-  }
+  // The names document CSS sets, from the generator that writes them: the tokens' and the page size's.
+  const names = tokens ? new Set(tokenProperties(tokens, 'document').keys()) : null;
   for (const path of paths) {
     const text = files[path]!;
     const kind = canonKind(path)!;

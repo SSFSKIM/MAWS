@@ -44,6 +44,12 @@ export function byIdentity<T>(map: ReadonlyMap<string, T>, path: string): T | un
 
 export const splitPath = (path: string): string[] => (path === '' ? [] : path.split('.'));
 
+/** The type role a token path is, by identity (`type.body` or `type.body.$root`), or null. */
+export function typeRoleOf(path: string): TypeRole | null {
+  const segments = splitPath(tokenIdentity(path));
+  return segments.length === 2 && segments[0] === 'type' && (TYPE_ROLES as readonly string[]).includes(segments[1]!) ? (segments[1] as TypeRole) : null;
+}
+
 /** Canonical order: the roles in the ledger's order, then every other path by its segments, code unit by code unit. */
 export function comparePaths(a: string, b: string): number {
   const ra = ROLE_INDEX.get(a);
