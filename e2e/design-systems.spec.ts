@@ -310,8 +310,8 @@ test('a retained version keeps its deleted system’s face: served at the pinned
   // once no retained version pins it, the deleted system's face is refused at the pinned revision too
   expect((await ok<{ removed: number }>(page, 'artifacts.pruneVersions', { artifactId: doc.id, olderThan: Date.now() + 60_000 })).removed).toBeGreaterThan(0);
   expect(await loads(faceAt(pin.versionSeq))).toBe(false);
-  // the only console errors are the two refused loads
-  expect(launch!.consoleErrors().filter((line) => !line.includes(system.id))).toEqual([]);
+  // the only console errors are the two refused loads (Chromium's line names no URL)
+  expect(launch!.consoleErrors()).toEqual(Array(2).fill('Failed to load resource: the server responded with a status of 404 (Not Found)'));
 });
 
 // A one-pixel PNG, the canon's image asset.
