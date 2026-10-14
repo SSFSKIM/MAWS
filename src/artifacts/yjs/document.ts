@@ -63,3 +63,15 @@ export function proposesOver(tr: Y.Transaction, base: Y.Doc): boolean {
   });
   return proposed;
 }
+
+/**
+ * A diff renderer that does not write its base's updates into the doc it compares (M9 follow-up): the pinned
+ * `DiffRenderer` applies every base update to that doc, which for a suggestion replica its provider then sends to the
+ * host as a write of its own, though the host already feeds the base into the suggestion doc. Reaches the renderer's
+ * one listener for it (`_prevUpdateListener`), pinned by the suggestion review's frame-count test.
+ */
+export function withoutBaseFeed(renderer: Y.DiffRenderer): Y.DiffRenderer {
+  const internals = renderer as unknown as { _prevDoc: Y.Doc; _prevUpdateListener: (update: Uint8Array, origin: unknown, doc: Y.Doc, tr: Y.Transaction) => void };
+  internals._prevDoc.off('update', internals._prevUpdateListener);
+  return renderer;
+}

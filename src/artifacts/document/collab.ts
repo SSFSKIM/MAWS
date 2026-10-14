@@ -43,6 +43,11 @@ export class JointHold implements Holdable {
 
   constructor(readonly base: Holdable) {} // the live editor's own replica (the e2e seams read its handle here)
 
+  /** Whether a composition's hold stands. */
+  get holding(): boolean {
+    return this.held;
+  }
+
   holdRemote(on: boolean): void {
     this.held = on;
     this.base.holdRemote(on);
@@ -56,6 +61,33 @@ export class JointHold implements Holdable {
     return () => {
       if (this.companions.delete(companion) && this.held) companion.holdRemote(false);
     };
+  }
+}
+
+/** How long the person must stop typing before the suggestion review may replace the live editor (Decision Log 51). */
+export const TYPING_PAUSE_MS = 1_000;
+
+/**
+ * Whether the person is typing in the live editor (M9 follow-up, Decision Log 51): a keystroke within the last
+ * `TYPING_PAUSE_MS`, or a composition's hold standing. The suggestion review waits for the pause before it replaces the
+ * live editor, so a proposal never takes the editor from under the person's keystrokes.
+ */
+export class TypingPause {
+  private last = -Infinity;
+
+  constructor(
+    private readonly hold: JointHold,
+    private readonly now: () => number = () => performance.now(),
+  ) {}
+
+  keystroke(): void {
+    this.last = this.now();
+  }
+
+  /** Milliseconds until the person has paused; 0 when they have. */
+  remaining(): number {
+    if (this.hold.holding) return TYPING_PAUSE_MS;
+    return Math.max(0, this.last + TYPING_PAUSE_MS - this.now());
   }
 }
 

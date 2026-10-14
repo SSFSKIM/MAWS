@@ -183,3 +183,85 @@ describe('the composition hold and the suggestion replica', () => {
     expect(previewing).not.toContain(true);
   });
 });
+
+// M9 follow-up (Decision Log 51): the live editor and the suggestion replica as DocumentEditor holds them, over a main
+// host and a suggestion host fed every main update (A's `inStep`).
+async function mountLive() {
+  world = new World(doc(para('p1', 'Mine.'), para('p2', 'Theirs.')));
+  const handle = openMemoryHandle(world.host, { log: () => {} });
+  closing.push(() => handle.close());
+  await whenSynced(handle);
+  const suggestionHost = new MemoryDocumentHost();
+  closing.push(() => suggestionHost.destroy());
+  applyV2(suggestionHost.doc, stateV2(world.host.doc));
+  closing.push(world.host.onLanded(({ update }) => applyV1(suggestionHost.doc, update)));
+  let replica: (DocumentHandle & { provider: unknown }) | null = null;
+  const host: SuggestionHost = {
+    open: vi.fn(async () => {
+      const opened = openMemoryHandle(suggestionHost, { log: () => {} });
+      await whenSynced(opened);
+      replica = opened;
+      return opened;
+    }),
+    attributions: vi.fn(async () => encodeMap(mergeMaps([]))),
+    acceptSuggestion: vi.fn(async () => ({ revision: 2 })),
+    rejectSuggestion: vi.fn(async () => ({ revision: 2 })),
+  };
+  const previewing: boolean[] = [];
+  let live: Editor | null = null;
+  render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} suggestions={host} onPreviewChange={(on) => previewing.push(on)} onEditor={(editor) => (live = editor)} />);
+  await until(() => live !== null && live.getText().length > 0 && replica !== null && vi.mocked(host.attributions).mock.calls.length > 0, 'the live editor and the first review check');
+  await act(async () => { await ticks(5); });
+  /** Content frames the suggestion replica has sent its host. */
+  const replicaFrames = () => (replica as unknown as { provider: { sent: number } }).provider.sent;
+  return { handle, suggestionHost, host, previewing, editor: live as unknown as Editor, replicaFrames };
+}
+
+describe('the typing pause (M9 follow-up)', () => {
+  const keystroke = (editor: Editor, text: string) => act(() => {
+    fireEvent.keyDown(editor.view.dom, { key: text });
+    editor.commands.insertContent(text);
+  });
+  const propose = (suggestionHost: MemoryDocumentHost) => suggestionHost.write((d) => void applyEdit(d, [{ op: 'insert', after: 'p2', markdown: 'Proposed. ^prop' }]));
+
+  it('a proposal arriving within a second of a keystroke waits: the live editor stays mounted and focused until a second passes with no keystroke', async () => {
+    const { suggestionHost, previewing, editor } = await mountLive();
+    act(() => { editor.chain().focus().setTextSelection(endOf(editor, 'p1')).run(); });
+    keystroke(editor, 'a');
+    propose(suggestionHost);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)); });
+    keystroke(editor, 'b'); // still typing: the wait restarts
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 700)); });
+    expect(screen.queryByLabelText('Suggestion review'), 'the review while the person types').toBeNull();
+    expect(previewing).not.toContain(true);
+    expect(editor.isFocused, 'the live editor keeps focus').toBe(true);
+    expect((editor.view.dom.closest('.doc-tab-editor') as HTMLElement).style.display).not.toBe('none');
+    expect(pmOf(world!.host.doc, 'p1').textContent).toBe('Mine.ab');
+    await until(() => screen.queryByLabelText('Suggestion review') !== null, 'the review at the pause');
+    expect(screen.getByLabelText('Suggested document').textContent).toContain('Proposed.');
+    expect(previewing).toContain(true);
+  });
+
+  it('with no keystroke for a second, a proposal is reviewed at once', async () => {
+    const { suggestionHost, editor } = await mountLive();
+    keystroke(editor, 'a');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_050)); });
+    const at = Date.now();
+    propose(suggestionHost);
+    await until(() => screen.queryByLabelText('Suggestion review') !== null, 'the review');
+    expect(Date.now() - at).toBeLessThan(500);
+  });
+});
+
+describe('the base reaches the suggestion doc through the host only (M9 follow-up)', () => {
+  it('typing in the live editor sends the suggestion replica no frame', async () => {
+    const { editor, handle, suggestionHost, replicaFrames } = await mountLive();
+    const before = replicaFrames();
+    act(() => { editor.chain().focus().setTextSelection(endOf(editor, 'p1')).run(); });
+    for (const ch of 'typed') act(() => void editor.commands.insertContent(ch));
+    await until(() => pmOf(suggestionHost.doc, 'p1').textContent === 'Mine.typed', 'the typing in the suggestion doc through the host');
+    await act(async () => { await ticks(10); });
+    expect(pmOf(handle.doc, 'p1').textContent).toBe('Mine.typed');
+    expect(replicaFrames() - before, 'frames from the suggestion replica').toBe(0);
+  });
+});

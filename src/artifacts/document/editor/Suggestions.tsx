@@ -4,9 +4,9 @@ import { useEffect, useState, type ComponentType, type ReactNode } from 'react';
 import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import type { ArtifactHost, DocumentHandle } from '../../host';
-import type { JointHold } from '../collab';
+import type { JointHold, TypingPause } from '../collab';
 import { decodeMap, type Doc, type SuggestionRange } from '../../yjs';
-import { ContentType, Item, createDiffRenderer, proposesOver, type DiffRenderer, type Transaction } from '../../yjs/document';
+import { ContentType, Item, createDiffRenderer, proposesOver, withoutBaseFeed, type DiffRenderer, type Transaction } from '../../yjs/document';
 import { resolvedPositionsToRelativePositions } from '../../yjs/prosemirror';
 import { attributedRuns, changeList, renderDiff } from '../history';
 import { coreExtensionOptions } from '../ids';
@@ -21,6 +21,8 @@ export interface SuggestionsProps {
   base: DocumentHandle;
   /** The live editor's composition hold, which the suggestion replica joins so it never runs ahead of the base. */
   hold?: JointHold;
+  /** The person's typing in the live editor: the review replaces the live editor only at a pause (Decision Log 51). */
+  typing?: TypingPause;
   host: SuggestionHost;
   editorHost: EditorHost;
   onPending(pending: boolean): void;
@@ -72,7 +74,7 @@ function suggestedBlocks(editor: Editor, doc: Doc): BlockSuggestion[] {
   return [...blocks.values()];
 }
 
-export function Suggestions({ artifactId, tabId, base, hold, host, editorHost, onPending, pageScope }: SuggestionsProps) {
+export function Suggestions({ artifactId, tabId, base, hold, typing, host, editorHost, onPending, pageScope }: SuggestionsProps) {
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
@@ -88,13 +90,16 @@ export function Suggestions({ artifactId, tabId, base, hold, host, editorHost, o
     // transaction proposing something over the base refreshes. The renderer's coverage cannot say so: it keeps every
     // settled proposal's withdrawn inserts (M9 addendum fix wave).
     let listed = true;
+    let waiting: ReturnType<typeof setTimeout> | undefined; // a review held back until the person pauses
     setView(null);
     const refresh = async () => {
       const asked = ++serial;
       try {
         const bytes = await host.attributions(artifactId, 0, Number.MAX_SAFE_INTEGER, { doc: 'suggestions' });
         if (closed || asked !== serial || !handle) return;
-        const renderer = createDiffRenderer(base.doc, handle.doc, { attributions: decodeMap(bytes) });
+        // the host feeds the base into the suggestion doc; the renderer's own feed would send every base update to the
+        // host a second time, from the suggestion replica (M9 follow-up)
+        const renderer = withoutBaseFeed(createDiffRenderer(base.doc, handle.doc, { attributions: decodeMap(bytes) }));
         renderer.suggestionMode = true; // no edit or settle may ever flow from this review into the base
         // A settles by withdrawing originals. The pinned renderer's constructor includes those tombstones in its
         // deletion diff, unlike its live update handler: a deletion is proposed only for content the base held.
@@ -105,10 +110,15 @@ export function Suggestions({ artifactId, tabId, base, hold, host, editorHost, o
         current = renderer;
         const body = tabBody(handle.doc, tabId);
         const pending = !renderer.attributed.isEmpty() && body !== undefined && changeList(renderDiff(body, renderer)).length > 0;
-        listed = pending;
+        // a review not yet shown waits while the person types in the live editor, and is checked again at the pause
+        const pause = pending && !listed ? (typing?.remaining() ?? 0) : 0;
+        clearTimeout(waiting);
+        if (pause > 0) waiting = setTimeout(() => void refresh(), pause);
+        const shown = pending && pause === 0;
+        listed = shown;
         setError(null);
-        setView(pending ? { handle, renderer, serial: asked } : null);
-        onPending(pending);
+        setView(shown ? { handle, renderer, serial: asked } : null);
+        onPending(shown);
         // Unmounted Tiptap views are destroyed on their deferred teardown, before the old renderer is released.
         setTimeout(() => {
           if (previous && renderers.delete(previous)) previous.destroy();
@@ -130,6 +140,7 @@ export function Suggestions({ artifactId, tabId, base, hold, host, editorHost, o
     }).catch((cause: unknown) => { if (!closed) setError(cause instanceof Error ? cause.message : String(cause)); });
     return () => {
       closed = true;
+      clearTimeout(waiting);
       leaveHold?.();
       handle?.doc.off('update', onProposal);
       base.doc.off('update', onBase);

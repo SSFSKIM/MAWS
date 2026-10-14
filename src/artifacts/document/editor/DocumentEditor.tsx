@@ -24,7 +24,7 @@ import type { Editor } from '@tiptap/core';
 import { EditorContent, useEditor } from '@tiptap/react';
 import 'katex/dist/katex.min.css';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import { JointHold, type VersionView } from '../collab';
+import { JointHold, TypingPause, type VersionView } from '../collab';
 import { isDarkGround } from '../export/highlight';
 import { isBindingTransaction, type Carry } from '../../yjs';
 import { ySyncPluginKey } from '../../yjs/prosemirror';
@@ -108,6 +108,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const [saving, setSaving] = useState(false);
   const [pendingSuggestions, setPendingSuggestions] = useState(false);
   const hold = useMemo(() => new JointHold(props.handle), [props.handle]); // the live editor's, the suggestion replica's too
+  const typing = useMemo(() => new TypingPause(hold), [hold]); // the review waits for the person's pause
   const [showing, setShowing] = useState<Showing | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const active = tabs.find((tab) => tab.id === selected) ?? tabs[0] ?? null;
@@ -158,10 +159,10 @@ export function DocumentEditor(props: DocumentEditorProps) {
       <div className="doc-editor-body">
         {active && props.suggestions && (
           <div className="doc-tab-editor" style={{ display: preview ? 'none' : pendingSuggestions ? undefined : 'contents' }}>
-            <Suggestions artifactId={props.artifactId} tabId={active.id} base={props.handle} hold={hold} host={props.suggestions} editorHost={props.host} onPending={setPendingSuggestions} pageScope={props.pageScope} />
+            <Suggestions artifactId={props.artifactId} tabId={active.id} base={props.handle} hold={hold} typing={typing} host={props.suggestions} editorHost={props.host} onPending={setPendingSuggestions} pageScope={props.pageScope} />
           </div>
         )}
-        <div className="doc-tab-editor" style={{ display: pendingSuggestions && !preview ? 'none' : undefined }}>
+        <div className="doc-tab-editor" style={{ display: pendingSuggestions && !preview ? 'none' : undefined }} onKeyDown={() => typing.keystroke()}>
           {active ? (
             <TabEditor
               {...props}
