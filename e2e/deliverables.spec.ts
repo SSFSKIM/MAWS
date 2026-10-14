@@ -843,6 +843,9 @@ test('a 64 px image and a short video fill the pane, in the panel and in a main 
       [png, 'file', '[data-image-view] img', { width: 64, height: 64 }],
       [webm, 'video', 'video[data-artifact-media="video"]', { width: 160, height: 120 }],
     ] as const) {
+      // P3-L M6b: an `artifact` main tab is the library's, not the session's (E2's `deliverable` tab was), so the panel
+      // leaves the session's tools while one is active: the session is shown again before the next row
+      await show(s, id);
       if (await panelViewer.isVisible()) await s.panel.getByRole('button', { name: 'Back' }).click();
       await rowOf(list, record).click();
       await expect(panelViewer).toHaveAttribute('data-body', body);
@@ -1007,7 +1010,9 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await shoot(s, 'comment-card');
     await s.page.keyboard.press('Escape');
     await expect(card).toHaveCount(0);
-    await expect(comment).toBeFocused();
+    // P3-L M6b: the dismissed card gives focus back to the page's frame (the Artifacts viewer's rule, M5b); E2's viewer
+    // gave it to its own Comment button, which is the X32 header's now and out of the viewer's reach
+    await expect(viewer.locator('[data-artifact-frame="html"]')).toBeFocused();
     await expect(artifactsTab).toHaveAttribute('aria-selected', 'true');
 
     // the same pick in the artifact's main tab opens the card inside that tab's viewer
@@ -1029,6 +1034,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(tabCard).toHaveCount(0);
 
     // an element at the bottom of its frame: the card opens above it, its bottom edge 4 px over the element's top
+    await show(s, id); // P3-L M6b: the session again, its panel tools with it (an `artifact` main tab is the library's)
     await s.panel.getByRole('button', { name: 'Back' }).click();
     await rowOf(listOf(s), notes).click();
     await expect(viewer).toHaveAttribute('data-artifact-viewer', notes.id);
