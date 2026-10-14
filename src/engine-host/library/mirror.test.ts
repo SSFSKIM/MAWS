@@ -152,6 +152,59 @@ describe('the linked-directory mirror (M2)', () => {
     expect(read(`${mirrorSlug(page)}.html`)).toBe('theirs');
   });
 
+  it('refuses a directory whose manifest path holds something not a MAWS manifest, never touching it, and mirrors there once it is gone (whole-branch review)', async () => {
+    for (const theirs of ['the owner’s notes, not JSON', `${JSON.stringify({ version: 2, owner: 'another tool' })}\n`]) {
+      mkdirSync(out(), { recursive: true });
+      writeFileSync(out(MIRROR_MANIFEST), theirs);
+      await startMirror();
+      const space = await linkedSpace();
+      const page = await store().create({ kind: 'html', title: 'Page', spaceId: space.id, content: html('x') }, agent);
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST]); // nothing mirrored there
+      expect(read(MIRROR_MANIFEST)).toBe(theirs);
+      expect(logs.some((line) => line.includes('Launch') && line.includes(MIRROR_MANIFEST))).toBe(true);
+
+      await store().update(page.id, { spaceId: null }); // the directory's desired set now empty: the manifest still stays
+      await store().updateSpace(space.id, { linkedDir: null });
+      await mirror!.flush();
+      expect(read(MIRROR_MANIFEST)).toBe(theirs);
+
+      rmSync(out(MIRROR_MANIFEST)); // the owner moves their file away: the next change mirrors
+      await store().updateSpace(space.id, { linkedDir: project });
+      await store().update(page.id, { spaceId: space.id });
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(page)}.html`]);
+      expect(manifest().artifacts[page.id].files).toEqual([`${mirrorSlug(page)}.html`]);
+
+      mirror!.close();
+      mirror = null;
+      await store().delete(page.id);
+      await store().deleteSpace(space.id);
+      rmSync(out(), { recursive: true, force: true });
+      logs.length = 0;
+    }
+  });
+
+  it('keeps the mirror of an artifact renamed by case only, on this machine’s filesystem (whole-branch review)', async () => {
+    await startMirror();
+    const space = await linkedSpace();
+    const page = await store().create({ kind: 'html', title: 'Report', spaceId: space.id, content: html('x') }, agent);
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(page)}.html`]);
+
+    await store().update(page.id, { title: 'report' });
+    await mirror!.flush();
+    const renamed = `${mirrorSlug({ id: page.id, title: 'report' })}.html`;
+    expect(listed()).toEqual([MIRROR_MANIFEST, renamed]);
+    expect(read(renamed)).toBe('<p>x</p>');
+    expect(manifest().artifacts[page.id].files).toEqual([renamed]);
+    expect(logs).toEqual([]);
+
+    await store().delete(page.id); // still owned: removed with the artifact
+    await mirror!.flush();
+    expect(listed()).toEqual([]);
+  });
+
   it('brings the directory up to date at a host start after changes made while it was down', async () => {
     await startMirror();
     const space = await linkedSpace();

@@ -10,7 +10,10 @@
 // - The manifest `<linkedDir>/artifacts/.maws-mirror.json` names every file the mirror wrote, per artifact, with the
 //   revision and slug it wrote them at. A rename, a move out of the Space, a delete or an unlink removes exactly those
 //   files; a file at a target name that the manifest does not own is left alone (logged), never overwritten. An
-//   artifact whose revision and slug match its entry, with its files present, is not rewritten.
+//   artifact whose revision and slug match its entry, with its files present, is not rewritten. A name is the mirror's
+//   when it reaches a file the mirror owns, so a rename by case only on a case-insensitive volume keeps the file.
+// - Something at the manifest's path that is not a MAWS manifest is the owner's: the directory is refused (logged, as a
+//   failing one) and the file never rewritten or removed.
 // - Two Spaces linked to one directory share its manifest (the desired set is per directory).
 // - A directory that fails (gone, unwritable, a link) is logged per Space and tried again at the next change, which
 //   reconciles the whole directory once it loads again; the linked directory itself is never created, and no write or
@@ -284,7 +287,10 @@ export class LibraryMirror {
         continue;
       }
       const target = join(root, file);
-      if (!mine.has(file) && (owned.has(file) || occupied(target))) {
+      // a name that reaches one of this artifact's files under another name: a rename by case only on a case-insensitive
+      // volume, the same file
+      const sameAs = mine.has(file) ? undefined : [...mine].find((own) => sameFile(target, join(root, own)));
+      if (!mine.has(file) && sameAs === undefined && (owned.has(file) || occupied(target))) {
         this.log(`${artifactId}: ${target} is not the mirror's file; not written`);
         continue;
       }
@@ -293,6 +299,7 @@ export class LibraryMirror {
           this.log(`${artifactId}: ${target} lies under a link; not written`);
           continue;
         }
+        if (sameAs !== undefined) renameSync(join(root, sameAs), target); // the entry takes the new name's case first
         writeReadOnly(root, file, data);
       } catch (error) {
         failure ??= { error };
@@ -305,7 +312,7 @@ export class LibraryMirror {
     // revision -1, which no revision matches, so the next change tries again.
     const leftover: string[] = [];
     for (const file of mine) {
-      if (written.includes(file)) continue;
+      if (written.some((done) => done === file || sameFile(join(root, file), join(root, done)))) continue; // the name now reaches what was written
       if (failure) {
         leftover.push(file);
         continue;
@@ -377,19 +384,9 @@ export class LibraryMirror {
     if (!statSync(dir).isDirectory()) throw new Error(`${dir} is not a directory`); // checked every time: never recreated
     const root = join(dir, MIRROR_DIR);
     if (!realDirsUnder(root, MIRROR_MANIFEST)) throw new Error(`${root} is not a directory of its own (a link, or a file)`);
-    if (this.failing.delete(dir)) void this.reconcile(); // working again: the changes it missed, after this step
-    const cached = this.manifests.get(dir);
-    if (cached) return cached;
-    const path = join(root, MIRROR_MANIFEST);
-    const manifest: Manifest = { version: 1, artifacts: {} };
-    if (existsSync(path)) {
-      try {
-        Object.assign(manifest.artifacts, manifestEntries(JSON.parse(readFileSync(path, 'utf8'))));
-      } catch (error) {
-        this.log(`the mirror manifest ${path} is unreadable (${reasonOf(error)}); the files it named are left as the owner's`);
-      }
-    }
+    const manifest = this.manifests.get(dir) ?? readManifest(join(root, MIRROR_MANIFEST));
     this.manifests.set(dir, manifest);
+    if (this.failing.delete(dir)) void this.reconcile(); // working again: the changes it missed, after this step
     return manifest;
   }
 
@@ -407,6 +404,7 @@ export class LibraryMirror {
   private save(dir: string, manifest: Manifest): void {
     const root = join(dir, MIRROR_DIR);
     const path = join(root, MIRROR_MANIFEST);
+    if (existsSync(path) && this.saved.get(dir) !== readFileSync(path, 'utf8')) readManifest(path); // not ours since: left alone
     if (Object.keys(manifest.artifacts).length === 0) {
       if (existsSync(path)) removeFile(root, MIRROR_MANIFEST);
       this.saved.delete(dir);
@@ -436,17 +434,26 @@ function linkedDirs(spaces: Space[]): Map<string, { spaceIds: Set<string>; names
   return dirs;
 }
 
-// A manifest's entries as read from the directory, which anyone may have edited: an entry whose shape is wrong is
-// dropped and a file name that is not a mirror path is never trusted (so nothing outside `artifacts/` is ever removed).
-function manifestEntries(parsed: unknown): Record<string, ManifestEntry> {
+// The manifest at `path` as read from the directory, which anyone may have edited: none there is an empty one; an entry
+// whose shape is wrong is dropped and a file name that is not a mirror path is never trusted (so nothing outside
+// `artifacts/` is ever removed). A file that is not a MAWS manifest at all is the owner's: it throws, so the directory
+// is refused rather than the file overwritten or removed.
+function readManifest(path: string): Manifest {
+  if (!existsSync(path)) return { version: 1, artifacts: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'));
+  } catch (error) {
+    throw new Error(`${path} is not a MAWS mirror manifest (${reasonOf(error)}); it is left alone`);
+  }
   const { version, artifacts } = (parsed ?? {}) as Partial<Manifest>;
-  if (version !== 1 || typeof artifacts !== 'object' || artifacts === null) throw new Error('not a version 1 manifest');
+  if (version !== 1 || typeof artifacts !== 'object' || artifacts === null || Array.isArray(artifacts)) throw new Error(`${path} is not a MAWS mirror manifest (not version 1); it is left alone`);
   const entries: Record<string, ManifestEntry> = {};
   for (const [artifactId, entry] of Object.entries(artifacts as Record<string, Partial<ManifestEntry>>)) {
     if (typeof entry?.revision !== 'number' || typeof entry.slug !== 'string' || !Array.isArray(entry.files)) continue;
     entries[artifactId] = { revision: entry.revision, slug: entry.slug, files: entry.files.filter((file): file is string => typeof file === 'string' && isMirrorPath(file)) };
   }
-  return entries;
+  return { version: 1, artifacts: entries };
 }
 
 // True when `artifacts/` and every folder between it and `file` is a real directory or does not exist yet: never a link
@@ -479,6 +486,16 @@ function occupied(path: string): boolean {
   try {
     lstatSync(path);
     return true;
+  } catch {
+    return false;
+  }
+}
+
+// Two names reach one file (one device and inode): on a case-insensitive volume, names differing by case only.
+function sameFile(a: string, b: string): boolean {
+  try {
+    const [first, second] = [lstatSync(a), lstatSync(b)];
+    return first.dev === second.dev && first.ino === second.ino;
   } catch {
     return false;
   }
