@@ -41,7 +41,6 @@ import * as voice from './schema/voice';
 import * as scm from './schema/scm';
 // E6 end
 // E2 start
-import * as deliverables from './schema/deliverables';
 // E2 end
 // E10 start
 import * as host from './schema/host';
@@ -64,7 +63,7 @@ import { ARTIFACT_REFUSALS, artifactRefusalOf } from './schema/artifacts';
 import * as library from './schema/library'; // P3-L M1
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, deliverables /* E2 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -497,7 +496,9 @@ describe('ipc schema validates both directions', () => {
       expect(layout.SummarySectionsSchema.safeParse({ version: 1, collapsed: ['files'] }).success).toBe(false);
       expect(layout.SummarySectionsSchema.safeParse({ version: 2, collapsed: [] }).success).toBe(false);
       expect(layout.SummarySectionsSchema.safeParse({ ...value, open: [] }).success).toBe(false);
-      expect(layout.SUMMARY_SECTIONS).toEqual(['environment', 'push', 'subagents', 'background', 'sources', 'plugins', 'deliverables']); // E2: deliverables appended
+      expect(layout.SUMMARY_SECTIONS).toEqual(['environment', 'push', 'subagents', 'background', 'sources', 'plugins', 'artifacts']); // E2: deliverables appended; P3-L M6b: artifacts in its place
+      // P3-L M6b: a value stored before the cutover reads its collapsed Deliverables section as the Artifacts section
+      expect(layout.SummarySectionsSchema.parse({ version: 1, collapsed: ['deliverables', 'push'] })).toEqual({ version: 1, collapsed: ['artifacts', 'push'] });
     });
   });
   // C8a end
@@ -594,11 +595,11 @@ describe('ipc schema validates both directions', () => {
     it('adds its six commands under existing namespaces with their owners, and no namespace or event', () => {
       const owners = { 'settings.claudeUsage.status': 'main', 'settings.claudeUsage.open': 'main', 'settings.reveal': 'main', 'layout.saveTextFile': 'main', 'layout.captureChords': 'main', 'engine.configure': 'engine-host' } as const;
       // Every C11 command sits under a namespace that existed before C11 (C8c's `files`, E8's `plugins` and
-      // `marketplaces`, E9's `voice`, E1's `maws`, E6's `scm`, E3's `side`, E2's `deliverables`, E10's `host` and E4a's
-      // `browser` are the ones added since).
+      // `marketplaces`, E9's `voice`, E1's `maws`, E6's `scm`, E3's `side`, E10's `host` and E4a's `browser` are the ones
+      // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'deliverables', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -926,7 +927,7 @@ describe('ipc schema validates both directions', () => {
       expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'file', target: '/r/a.ts', line: 3 }).ok).toBe(true);
       expect(validateEventPayload('maws.pane.show', { appSessionId: 'a', requestId: 'r1', pane: 'nope', target: null, line: null }).ok).toBe(false);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 't', title: 'Terminal' } } }).ok).toBe(true);
-      expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false, error: 'show_pane: the deliverable pane is not available in this build of MAWS' } }).ok).toBe(true);
+      expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false, error: 'show_pane: the artifact pane is not available in this build of MAWS' } }).ok).toBe(true);
       expect(validateCommandInput('maws.pane.answer', { appSessionId: 'a', requestId: 'r1', result: { ok: false } }).ok).toBe(false);
       expect(validateCommandOutput('maws.pane.answer', { outcome: 'write_failed' }).ok).toBe(false);
     });
@@ -1062,36 +1063,23 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // E3 end
-  // E2 start: the store's reads, its change and console events, and the capture bridge (P1 ledger §5)
+  // E2 start: the capture bridge (P1 ledger §5). P3-L M6b: the `deliverables` namespace is gone, and a capture names an
+  // `html` artifact's revision.
   describe('E2 entries', () => {
     const ID = '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';
-    const record = { id: ID, appSessionId: 'a', kind: 'artifact', artifactId: 'dash', title: 'Dashboard', path: `/u/${ID}/v1.html`, versions: [{ path: `/u/${ID}/v1.html`, at: 't', toolUseId: 'toolu_1', sourcePath: '/r/d.html' }], createdAt: 't', updatedAt: 't' };
 
-    it('adds the deliverables namespace: three main-owned reads and two events, all bridged; the capture pair under maws', () => {
-      expect(Object.keys(deliverables.commands)).toEqual(['deliverables.list', 'deliverables.listAll', 'deliverables.get']);
-      for (const spec of Object.values(deliverables.commands)) expect(spec.owner).toBe('main');
-      expect(Object.keys(deliverables.events)).toEqual(['deliverables.changed', 'deliverables.console']);
-      expect([...NAMES.deliverables.commands]).toEqual(Object.keys(deliverables.commands));
-      expect([...NAMES.deliverables.events]).toEqual(Object.keys(deliverables.events));
+    it('keeps the capture pair under maws, and no deliverables namespace (P3-L M6b)', () => {
+      expect(NAMESPACES).not.toContain('deliverables');
+      expect(Object.keys(commands).some((name) => name.startsWith('deliverables.'))).toBe(false);
+      expect(Object.keys(events).some((name) => name.startsWith('deliverables.'))).toBe(false);
+      expect(HOST_EVENTS).not.toContain('deliverables.changed');
       expect(commands['maws.artifact.captured'].owner).toBe('engine-host');
     });
 
-    it('validates the reads, the change and console events, a capture request and its answers', () => {
-      expect(validateCommandInput('deliverables.list', { appSessionId: 'a' }).ok).toBe(true);
-      expect(validateCommandOutput('deliverables.list', { records: [record] }).ok).toBe(true);
-      expect(validateCommandInput('deliverables.listAll', {}).ok).toBe(true);
-      expect(validateCommandInput('deliverables.listAll', { limit: 500 }).ok).toBe(true);
-      expect(validateCommandInput('deliverables.listAll', { limit: 501 }).ok).toBe(false);
-      expect(validateCommandInput('deliverables.listAll', { limit: 0 }).ok).toBe(false);
-      expect(validateCommandInput('deliverables.get', { appSessionId: 'a', id: ID }).ok).toBe(true);
-      expect(validateCommandOutput('deliverables.get', { record, present: [true] }).ok).toBe(true);
-      expect(validateCommandOutput('deliverables.get', { record: null, present: [] }).ok).toBe(true);
-      expect(validateEventPayload('deliverables.changed', { appSessionId: 'a', id: ID, change: 'updated' }).ok).toBe(true);
-      expect(validateEventPayload('deliverables.changed', { appSessionId: 'a', id: ID, change: 'deleted' }).ok).toBe(false);
-      expect(validateEventPayload('deliverables.console', { appSessionId: 'a', deliverableId: ID, version: 1, level: 'error', message: 'Uncaught Error: E2_BOOM', line: 3, source: null }).ok).toBe(true);
-      expect(validateEventPayload('deliverables.console', { appSessionId: 'a', deliverableId: ID, version: 1, level: 'info', message: 'x', line: null, source: null }).ok).toBe(false);
-      expect(validateEventPayload('maws.artifact.capture', { appSessionId: 'a', requestId: 'r1', deliverableId: ID, version: 2, width: 1280, height: 800 }).ok).toBe(true);
-      expect(validateEventPayload('maws.artifact.capture', { appSessionId: 'a', requestId: 'r1', deliverableId: 'dash', version: 2, width: 1280, height: 800 }).ok).toBe(false);
+    it('validates a capture request and its answers', () => {
+      expect(validateEventPayload('maws.artifact.capture', { appSessionId: 'a', requestId: 'r1', artifactId: ID, revision: 2, width: 1280, height: 800 }).ok).toBe(true);
+      expect(validateEventPayload('maws.artifact.capture', { appSessionId: 'a', requestId: 'r1', artifactId: 'dash', revision: 2, width: 1280, height: 800 }).ok).toBe(false);
+      expect(validateEventPayload('maws.artifact.capture', { appSessionId: 'a', requestId: 'r1', deliverableId: ID, version: 2, width: 1280, height: 800 }).ok).toBe(false); // E2's shape
       expect(validateCommandInput('maws.artifact.captured', { appSessionId: 'a', requestId: 'r1', result: { ok: true, png: 'iVBO', width: 64, height: 64, consoleErrors: [] } }).ok).toBe(true);
       expect(validateCommandInput('maws.artifact.captured', { appSessionId: 'a', requestId: 'r1', result: { ok: false, error: 'did-fail-load' } }).ok).toBe(true);
       expect(validateCommandInput('maws.artifact.captured', { appSessionId: 'a', requestId: 'r1', result: { ok: true, png: 'iVBO' } }).ok).toBe(false);

@@ -36,13 +36,12 @@ export type MawsPaneAnswerResult = z.infer<typeof MawsPaneAnswerResultSchema>;
 export const MawsArtifactCaptureSchema = z.strictObject({
   appSessionId: AppSessionIdSchema,
   requestId: RequestIdSchema, // the engine's `mcp_message` request the answer goes back to
-  deliverableId: z.uuid(),
-  version: z.number().int().min(1),
+  // P3-L (M6b): the `html` artifact's page at a revision, on `maws-artifact:` (X12's record and version are gone), whichever
+  // session made it; the answer goes to `appSessionId`, whose call waits for it
+  artifactId: z.uuid(),
+  revision: z.number().int().min(0),
   width: z.number().int(),
   height: z.number().int(),
-  // P2-E1 (D10): the record's session when it is the requesting side thread's ancestor; absent, `appSessionId`'s own.
-  // The answer still goes to `appSessionId`, whose call waits for it.
-  ownerAppSessionId: AppSessionIdSchema.optional(),
 });
 export type MawsArtifactCapture = z.infer<typeof MawsArtifactCaptureSchema>;
 

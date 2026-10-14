@@ -12,7 +12,7 @@
 // update) and when its box resizes (a reflow moves an element fixed to the frame's viewport); a rect re-pins the card,
 // null keeps it where it is (the top-right corner for a re-docked card, which has no rect). Only the latest ask's answer
 // counts. A re-docked thread card is claimed only once the Side pane has stopped drawing its thread: "Show in
-// deliverable" starts from that pane, and the card's own close rule (one place draws a session with an input) would
+// artifact" starts from that pane, and the card's own close rule (one place draws a session with an input) would
 // otherwise shut it the moment it showed beside a pane still drawing the thread.
 //
 // P2-E2 (the docked layout): a host beside a native view (the browser pane's page) cannot overlay it, since the view lies

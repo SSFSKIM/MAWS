@@ -55,19 +55,19 @@ describe('show_pane (G5, host half)', () => {
   });
 
   it('resolves a diff target without requiring it to exist (a deleted file has a diff), and passes the others through', async () => {
-    const { bridge, asked } = windows(() => ({ ok: false, error: TOOL_ERRORS.paneUnavailable('deliverable') }));
+    const { bridge, asked } = windows(() => ({ ok: false, error: TOOL_ERRORS.paneUnavailable('artifact') }));
     await showPaneTool({ bridge }).call({ pane: 'diff', target: 'removed.ts' }, ctx());
     await showPaneTool({ bridge }).call({ pane: 'diff' }, ctx());
-    const unavailable = await showPaneTool({ bridge }).call({ pane: 'deliverable', target: 'none' }, ctx());
+    const unavailable = await showPaneTool({ bridge }).call({ pane: 'artifact', target: 'none' }, ctx());
     await showPaneTool({ bridge }).call({ pane: 'browser', target: 'https://example.com/a' }, ctx());
-    expect(asked.map((r) => [r.pane, r.target])).toEqual([['diff', join(root, 'removed.ts')], ['diff', null], ['deliverable', 'none'], ['browser', 'https://example.com/a']]);
-    expect(unavailable).toEqual({ content: [{ type: 'text', text: 'show_pane: the deliverable pane is not available in this build of MAWS' }], isError: true });
+    expect(asked.map((r) => [r.pane, r.target])).toEqual([['diff', join(root, 'removed.ts')], ['diff', null], ['artifact', 'none'], ['browser', 'https://example.com/a']]);
+    expect(unavailable).toEqual({ content: [{ type: 'text', text: 'show_pane: the artifact pane is not available in this build of MAWS' }], isError: true });
   });
 
   it('names an unknown pane with the known ones, asking no window', async () => {
     const { bridge, asked } = windows(() => ({ ok: false, error: 'unreachable' }));
     const result = await showPaneTool({ bridge }).call({ pane: 'nope' }, ctx());
-    expect(result).toEqual({ content: [{ type: 'text', text: 'show_pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, deliverable, browser, source-control' }], isError: true });
+    expect(result).toEqual({ content: [{ type: 'text', text: 'show_pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, artifact, browser, source-control' }], isError: true });
     expect(asked).toEqual([]);
   });
 });

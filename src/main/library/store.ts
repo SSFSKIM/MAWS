@@ -194,6 +194,21 @@ export class LibraryStore {
       .map((row) => ({ id: row.id, name: row.name, ...(row.linked_dir !== null ? { linkedDir: row.linked_dir } : {}), createdAt: row.created_at, count: row.count }));
   }
 
+  // M6b (Decision Log 16, 36i): the paths of the live File artifacts the files service may admit for `appSessionId`:
+  // those linked to it or to a side thread's ancestor of it, and those no session is linked to (the owner's own), each
+  // as the host recorded it (the caller compares realpaths).
+  fileLinkedPaths(appSessionId: AppSessionId): string[] {
+    const sessions = this.lineageOf(appSessionId);
+    return this.db
+      .all<{ linked_path: string }>(
+        `SELECT DISTINCT a.linked_path FROM library_artifacts a WHERE a.kind = 'file' AND a.linked_path IS NOT NULL AND (
+          EXISTS (SELECT 1 FROM library_links l WHERE l.artifact_id = a.id AND l.app_session_id IN (${sessions.map(() => '?').join(', ')}))
+          OR NOT EXISTS (SELECT 1 FROM library_links l WHERE l.artifact_id = a.id))`,
+        ...sessions,
+      )
+      .map((row) => row.linked_path);
+  }
+
   // ---- internals -----------------------------------------------------------------------------------------------------
 
   private changed(): void {

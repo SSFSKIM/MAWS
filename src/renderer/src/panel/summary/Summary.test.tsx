@@ -368,13 +368,14 @@ describe('summary card', () => {
     expect(panelOf(A)!.tabs.map((t) => t.toolId)).toEqual(['subagents']);
   });
 
-  // E2: Deliverables follows Sources once a build registers the tool, filled by the tool's own summary; none before.
-  it('shows Deliverables after Sources only while the Deliverables tool is registered', async () => {
-    const { tool } = probeTool('deliverables', { title: 'Deliverables', summary: () => <p>3 delivered</p> });
+  // E2: Artifacts (Deliverables until P3-L's cutover) follows Sources once a build registers the tool, filled by the
+  // tool's own summary; none before.
+  it('shows Artifacts after Sources only while the Artifacts tool is registered', async () => {
+    const { tool } = probeTool('artifacts', { title: 'Artifacts', summary: () => <p>3 artifacts</p> });
     offs.push(registerPanelTool(tool));
     await mount();
     const card = screen.getByRole('tabpanel');
-    expect(within(card).getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['Environment', 'Push state', 'Subagents', 'Background work', 'Sources', 'Deliverables']);
-    expect(within(section('Deliverables')).getByText('3 delivered')).toBeTruthy();
+    expect(within(card).getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['Environment', 'Push state', 'Subagents', 'Background work', 'Sources', 'Artifacts']);
+    expect(within(section('Artifacts')).getByText('3 artifacts')).toBeTruthy();
   });
 });

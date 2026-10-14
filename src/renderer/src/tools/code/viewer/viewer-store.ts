@@ -70,7 +70,7 @@ export interface ViewerEntry {
   loads: number; // loads of this entry completed, whether or not they landed anything (a superseded one when its read answers)
   pending: number; // loads of this entry in flight; the e2e's own-save barrier is a `loads` increase with `pending` at 0
   // E5 end
-  readOnly: boolean; // E2: mounted read-only (the deliverables viewer, Decision Log 7): never editable, whatever the file
+  readOnly: boolean; // E2: mounted read-only (the File artifact viewer; E2's Decision Log 7): never editable, whatever the file
 }
 
 // E5: what the disk holds past the baseline, shown as the notice (Changed on disk) or, once compared or a save found

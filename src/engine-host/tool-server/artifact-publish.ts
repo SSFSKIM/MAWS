@@ -8,7 +8,8 @@
 //      restore since the read took it away); `force` skips 2 and 3 for the files sent.
 //
 // An `html` page is its one file (`index.html`, or the name it was created under), written as a new immutable version;
-// its X12 record gains the version after the commit (Decision Log 4). A Y kind's files go through its kind's `publish`
+// its answer carries E2's fields the transcript's artifact row is drawn from (`id`, `deliverableId`, the version's place
+// `version`; P3-L's cutover keeps their names, the deliverable id being the artifact's). A Y kind's files go through its kind's `publish`
 // (else the generic file model) inside the session's host-replica write, so the check and the write see one state and
 // the op row commits in the write's savepoint; the session's base then becomes what it knows: the files it read with
 // its own changes applied, at the new revision. The session's presence shows on the artifact until its turn ends.
@@ -28,13 +29,11 @@ import type { ArtifactStore } from '../documents/store';
 import { actorOf, answering, filesOf, lineageOf, opIdOf, publisherOf, refuse, refusedAfterCommit, resolveArtifact, storeOf, ToolRefusal, withDoc, type ArtifactToolDeps } from './artifact-context';
 import { externalReferenceCount } from './artifacts';
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition } from './server';
-import { X12Mirror } from './x12-mirror';
 
 const TOOL = 'artifact_publish';
 const PAGE = 'index.html';
 
 export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
-  const mirror = new X12Mirror(deps);
   return defineMawsTool(TOOL, (args, ctx) =>
     deps.session.joined(opIdOf(ctx), () => answering(TOOL, async () => {
       const parsed = parseToolArguments(TOOL, args);
@@ -45,9 +44,9 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
       const replayed = await store.replayOf(opIdOf(ctx));
       if (replayed.found) {
         const recorded = replayed.result as ArtifactPublishResult;
-        return toolText(recorded.kind === 'html' ? await mirrored(store, mirror, recorded, input, ctx, false) : recorded);
+        return toolText(recorded.kind === 'html' ? await placed(store, recorded, input, ctx) : recorded);
       }
-      const artifactId = await resolveArtifact(TOOL, deps, store, input.artifact, lineageOf(ctx, deps));
+      const artifactId = await resolveArtifact(TOOL, store, input.artifact, lineageOf(ctx, deps));
       const artifact = await store.readCommitted(() => store.get(artifactId));
       if (!artifact) throw refuse(TOOL, { reason: 'notFound', artifactId }, `the artifact ${input.artifact} was deleted`);
       if (artifact.kind === 'file') throw refuse(TOOL, { reason: 'invalid', kind: 'file' }, 'a file artifact is delivered again with send_file, not published');
@@ -57,7 +56,7 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
         const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;
         throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}, and an html page takes none; nothing was written`);
       }
-      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx, suggest) : await mirrored(store, mirror, await publishPage(deps, store, artifact, input, ctx), input, ctx, true);
+      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx, suggest) : await placed(store, await publishPage(deps, store, artifact, input, ctx), input, ctx);
       return toolText(result);
     })),
   );
@@ -119,22 +118,22 @@ async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifac
   return recorded;
 }
 
-// An html publish's answer with its X12 mirror's new version (Decision Log 4): written now after a fresh publish, found
-// by the call's tool-use id for a repeated one; nothing to add for a publish that changed nothing or a page without a
-// record.
-async function mirrored(store: ArtifactStore, mirror: X12Mirror, recorded: ArtifactPublishResult, input: ArtifactPublishInput, ctx: McpToolContext, fresh: boolean): Promise<ArtifactPublishResult> {
+// An html publish's answer with E2's fields for the transcript's artifact row: `version` is the place, from 1, of the
+// version the publish wrote among the artifact's versions in the order of their revisions (the viewers' `v1 … vN`,
+// P3-L's Decision Log 4), `ownerAppSessionId` the session that made the page when another (P2-E1). Nothing is added
+// for a publish that changed nothing, or a version no longer kept. A repeated call's answer is placed the same way.
+async function placed(store: ArtifactStore, recorded: ArtifactPublishResult, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
   if (recorded.changed.length === 0) return recorded;
-  const owner = await creatorOf(store, recorded.artifactId);
-  const artifact = await store.readCommitted(() => store.get(recorded.artifactId, { includeDeleted: true }));
-  if (owner === null || !artifact) return recorded;
-  let version = await mirror.versionOf(artifact.id, owner, ctx.appSessionId, ctx.toolUseId); // a repeated call's, already written
-  if (version === null && fresh) {
-    const { path } = await store.readCommitted(() => store.contentRef(artifact.id, recorded.revision));
-    version = await mirror.pageVersion(artifact.id, owner, ctx.appSessionId, artifact.title, path, ctx.toolUseId);
-  }
-  if (version === null) return recorded;
+  const found = await store.readCommitted(() => {
+    const artifact = store.get(recorded.artifactId, { includeDeleted: true });
+    const place = artifact ? store.listVersions(artifact.id).findIndex((version) => version.seq === recorded.revision) + 1 : 0;
+    const owner = (store.links(recorded.artifactId).find((link) => link.role === 'created')?.appSessionId as AppSessionId | undefined) ?? null;
+    return artifact && place > 0 ? { artifact, place, owner } : null;
+  });
+  if (found === null) return recorded;
+  const { artifact, place, owner } = found;
   const text = input.files[Object.keys(input.files)[0]!] ?? '';
-  return { ...recorded, id: artifact.handle ?? artifact.id, deliverableId: artifact.id, version, externalReferences: externalReferenceCount(text), ...(owner !== ctx.appSessionId && { ownerAppSessionId: owner }) };
+  return { ...recorded, id: artifact.handle ?? artifact.id, deliverableId: artifact.id, version: place, externalReferences: externalReferenceCount(text), ...(owner !== null && owner !== ctx.appSessionId && { ownerAppSessionId: owner }) };
 }
 
 async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext, suggest: boolean): Promise<ArtifactPublishResult> {
@@ -214,8 +213,3 @@ async function publishDoc(deps: ArtifactToolDeps, store: ArtifactStore, artifact
 }
 
 const isFilesRefusal = (error: unknown): boolean => error instanceof Error && (error as { code?: unknown }).code === 'invalid' && typeof (error as { data?: unknown }).data === 'object';
-
-// The session that created the artifact (whose X12 record mirrors it), or null.
-async function creatorOf(store: ArtifactStore, artifactId: string): Promise<AppSessionId | null> {
-  return store.readCommitted(() => (store.links(artifactId).find((link) => link.role === 'created')?.appSessionId as AppSessionId | undefined) ?? null);
-}

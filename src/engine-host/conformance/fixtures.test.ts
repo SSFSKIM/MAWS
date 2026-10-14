@@ -975,7 +975,7 @@ describe('normaliser: the maws tools recorded live (E1 M2, pass3/p1-maws-*)', ()
     const { events } = await run('pass3', 'p1-maws-show-pane');
     expect(ofKind(events, 'maws.pane.shown')).toMatchObject([
       { pane: 'terminal', target: null, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:live', title: 'Terminal' }, error: null },
-      { pane: 'deliverable', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('deliverable') },
+      { pane: 'artifact', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('artifact') }, // P3-L M6b: the recording's pane renamed with the tool's enum
     ]);
     const nope = ofKind(events, 'tool.use').find((e) => e.toolName === 'mcp__maws__show_pane' && (e.input as { pane?: string }).pane === 'nope')!;
     const refused = ofKind(events, 'tool.result').find((e) => e.toolUseId === nope.toolUseId)!;

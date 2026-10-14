@@ -18,7 +18,9 @@ import { useLayout } from '../../stores/layout';
 import { activeTab, allTabs } from '../../stores/layout-model';
 import { fail, installFakeMain, ok } from '../../test-support/code';
 import { A, B, panelOf, resetPanelStores, TestHost } from '../../test-support/panel';
-import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle, type ArtifactsParams } from './ArtifactsTool';
+import { ARTIFACTS_TOOL_ID, artifactsTool, openArtifactInPanel, type ArtifactsHandle, type ArtifactsParams } from './ArtifactsTool';
+import { ArtifactsSummary } from './Summary';
+import { resetVersionRequests, useVersionRequest } from './viewers/requests';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const NOW = Date.now();
@@ -416,6 +418,56 @@ describe('the record view', () => {
     await settle();
     expect(listFilters().at(-1)).toEqual({ appSessionId: B, lineage: true });
     expect(listed()).toEqual([OTHER.id]);
+  });
+});
+
+// M6b: a transcript row's Open (`TranscriptActions.openArtifact`): the tool in the row's session on the artifact, the
+// version the row names asked of the panel's viewer of it; nothing while no build registers the tool.
+describe('openArtifactInPanel (M6b)', () => {
+  afterEach(() => resetVersionRequests());
+  function Request() {
+    const request = useVersionRequest(NOTES.id, 'panel');
+    return <p data-request="">{request === null ? 'none' : `v${request.version}`}</p>;
+  }
+
+  it('does nothing while no build registers the tool; opens the tool on the artifact and asks its panel viewer for the version', async () => {
+    render(<Request />);
+    openArtifactInPanel(A, NOTES.id, 2);
+    expect(panelOf(A)?.tabs ?? []).toEqual([]);
+    resetVersionRequests();
+    registerPanelTool(artifactsTool);
+    act(() => openArtifactInPanel(B, NOTES.id, 2));
+    expect(panelOf(B)!.tabs.map((tab) => tab.toolId)).toEqual([ARTIFACTS_TOOL_ID]);
+    expect(document.querySelector('[data-request]')!.textContent).toBe('v2');
+    act(() => openArtifactInPanel(B, NOTES.id)); // no version: none asked, the viewer follows the latest
+    expect(document.querySelector('[data-request]')!.textContent).toBe('v2');
+  });
+});
+
+// M6b: the panel summary's Artifacts section (E2's Deliverables section's place): the session's lineage's count and
+// latest title, else that nothing was made, else the refusal; Open opens the tool on its list.
+describe('the summary (M6b)', () => {
+  it('counts the session’s artifacts and names the latest; Open opens the list', async () => {
+    const open = vi.fn();
+    render(<ArtifactsSummary appSessionId={A} open={open} />);
+    await settle();
+    expect(document.querySelector('[data-summary="artifacts"]')!.textContent).toContain('5 artifacts · Launch notes');
+    expect(listFilters()).toContainEqual({ appSessionId: A, lineage: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(open).toHaveBeenCalledWith();
+  });
+
+  it('says when nothing was made yet, and when the index refused', async () => {
+    rows = [];
+    const view = render(<ArtifactsSummary appSessionId={A} open={() => {}} />);
+    await settle();
+    expect(screen.getByText('Nothing made yet')).toBeTruthy();
+    view.unmount();
+    resetLibrary();
+    main = installFakeMain((name) => (name === 'library.list' ? fail('index unavailable') : fail(`unexpected ${name}`)));
+    render(<ArtifactsSummary appSessionId={A} open={() => {}} />);
+    await settle();
+    expect(screen.getByText('Couldn’t read the artifacts: index unavailable')).toBeTruthy();
   });
 });
 

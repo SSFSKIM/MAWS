@@ -56,11 +56,6 @@ export const QUERY_COMMANDS = [
   'scm.status',
   'scm.pr.state',
   // E6 end
-  // E2 start: the deliverable store's reads (main's reader, no cache)
-  'deliverables.list',
-  'deliverables.listAll',
-  'deliverables.get',
-  // E2 end
   // E4a start: the browser's tab list, the address field's history suggestions, the imported profiles
   'browser.tabs.list',
   'browser.history.suggest',

@@ -13,8 +13,8 @@ afterEach(() => {
 describe('Media', () => {
   it('fits a small video to the pane, and zooms in, to actual size and back to fit', () => {
     const { resize } = installResizeObserver();
-    render(<Media kind="video" url="maws-deliverable://a/b/1" />);
-    const video = document.querySelector<HTMLVideoElement>('video[data-deliverable-media="video"]')!;
+    render(<Media kind="video" url="maws-artifact://00000000-0000-4000-8000-000000000001/1/clip.webm" />);
+    const video = document.querySelector<HTMLVideoElement>('video[data-artifact-media="video"]')!;
     const button = (name: string) => screen.getByRole('button', { name });
     expect(button('Zoom in')).toHaveProperty('disabled', true); // nothing to scale until the metadata says the size
     Object.defineProperties(video, { videoWidth: { value: 160 }, videoHeight: { value: 120 } });
@@ -34,8 +34,8 @@ describe('Media', () => {
 
   it('draws audio as a plain player with no zoom', () => {
     installResizeObserver();
-    render(<Media kind="audio" url="maws-deliverable://a/b/1" />);
-    expect(document.querySelector('audio[data-deliverable-media="audio"]')).not.toBeNull();
+    render(<Media kind="audio" url="maws-artifact://00000000-0000-4000-8000-000000000001/1/clip.webm" />);
+    expect(document.querySelector('audio[data-artifact-media="audio"]')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Zoom in' })).toBeNull();
   });
 });

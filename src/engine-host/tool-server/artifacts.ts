@@ -1,8 +1,10 @@
-// `artifact_screenshot` (P1 X9 and X12; E2 execution document, Design §6 and §7; kept by P3-A, X25): main renders an
-// `html` artifact's X12 record offscreen and the PNG comes back as an image block before the text block. The artifact is
-// named by its id or a handle the session's lineage holds (P3-A Decision Log 3); its record is the one the X12 mirror
-// keeps under the session that created it (P3-A Decision Log 4; P2-E1: a side thread screenshots its parent's page, the
-// result naming the owner in `ownerAppSessionId`). The capture bridge has a deadline. The other artifact tools are
+// `artifact_screenshot` (P1 X9 and X12; E2 execution document, Design §6 and §7; kept by P3-A, X25): main renders a
+// version of an `html` artifact offscreen and the PNG comes back as an image block before the text block. The artifact
+// is named by its id or a handle the session's lineage holds (P3-A Decision Log 3); its version by its place, from 1,
+// among the artifact's versions in the order of their revisions (the viewers' `v1 … vN`, P3-L's Decision Log 4), the
+// latest by default; main renders that version's revision on `maws-artifact:` (P3-L's cutover; X12's record is no
+// longer read). The answer keeps E2's fields (`deliverableId` the artifact's id; P2-E1's `ownerAppSessionId` naming
+// the session that made the page when another). The capture bridge has a deadline. The other artifact tools are
 // `./artifact-tools`, `./artifact-publish`, `./artifact-assets` and `./artifact-export`; `externalReferenceCount` is
 // shared with them.
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
@@ -12,15 +14,14 @@ import { answering, lineageOf, resolveArtifact, storeOf, type ArtifactToolDeps }
 import type { HostBridge } from './bridge';
 import { defineMawsTool, toolError, toolText, type McpToolDefinition } from './server';
 
-// What the host asks main to render (`maws.artifact.capture`, the session adding its app session id). P2-E1:
-// `ownerAppSessionId` when the record is an ancestor's (main reads it there; the answer still routes by the requester).
+// What the host asks main to render (`maws.artifact.capture`, the session adding its app session id): the artifact's
+// page at a revision (P3-L's cutover: main resolves it through the store's scheme, whichever session made it).
 export interface ArtifactCaptureRequest {
   requestId: RequestId;
-  deliverableId: string;
-  version: number;
+  artifactId: string;
+  revision: number;
   width: number;
   height: number;
-  ownerAppSessionId?: AppSessionId;
 }
 export type CaptureBridge = HostBridge<ArtifactCaptureRequest, MawsArtifactCapturedResult>;
 
@@ -28,24 +29,28 @@ export type CaptureBridge = HostBridge<ArtifactCaptureRequest, MawsArtifactCaptu
 const WITHDRAWN = 'artifact_screenshot: the request was withdrawn';
 const ENDED = 'artifact_screenshot: the session ended';
 
-export function artifactScreenshotTool(deps: Pick<ArtifactToolDeps, 'artifacts' | 'deliverables' | 'artifactScope' | 'log'> & { capture: CaptureBridge }): McpToolDefinition {
+export function artifactScreenshotTool(deps: Pick<ArtifactToolDeps, 'artifacts' | 'artifactScope' | 'log'> & { capture: CaptureBridge }): McpToolDefinition {
   return defineMawsTool('artifact_screenshot', (args, ctx) =>
     answering('artifact_screenshot', async () => {
       const parsed = parseToolArguments('artifact_screenshot', args);
       if (!parsed.ok) return toolError(parsed.error);
       const { id: ref } = parsed.data;
       const store = storeOf('artifact_screenshot', deps);
-      const artifactId = await resolveArtifact('artifact_screenshot', deps, store, ref, lineageOf(ctx, deps));
-      const creator = await store.readCommitted(() => store.links(artifactId).find((link) => link.role === 'created')?.appSessionId as AppSessionId | undefined);
-      const record = creator === undefined ? null : await deps.deliverables.get(creator, artifactId);
-      if (record === null || record.kind !== 'artifact') return toolError(TOOL_ERRORS.noArtifact('artifact_screenshot', ref));
-      const owner: { ownerAppSessionId?: AppSessionId } = creator === ctx.appSessionId ? {} : { ownerAppSessionId: creator };
-      const versions = record.versions.length;
+      const artifactId = await resolveArtifact('artifact_screenshot', store, ref, lineageOf(ctx, deps));
+      const page = await store.readCommitted(() => {
+        const artifact = store.get(artifactId);
+        if (artifact?.kind !== 'html') return null;
+        const creator = (store.links(artifactId).find((link) => link.role === 'created')?.appSessionId as AppSessionId | undefined) ?? null;
+        return { artifact, versions: store.listVersions(artifactId), creator };
+      });
+      if (page === null || page.versions.length === 0) return toolError(TOOL_ERRORS.noArtifact('artifact_screenshot', ref));
+      const owner: { ownerAppSessionId?: AppSessionId } = page.creator === null || page.creator === ctx.appSessionId ? {} : { ownerAppSessionId: page.creator };
+      const versions = page.versions.length;
       const version = parsed.data.version ?? versions;
       if (version > versions) return toolError(TOOL_ERRORS.noVersion(ref, version, versions));
       const width = parsed.data.width ?? ARTIFACT_SCREENSHOT_DEFAULT.width;
       const height = parsed.data.height ?? ARTIFACT_SCREENSHOT_DEFAULT.height;
-      const outcome = await deps.capture.request({ requestId: ctx.requestId, deliverableId: record.id, version, width, height, ...owner }, ctx.signal);
+      const outcome = await deps.capture.request({ requestId: ctx.requestId, artifactId, revision: page.versions[version - 1]!.seq, width, height }, ctx.signal);
       switch (outcome.kind) {
         case 'timeout':
           return toolError(TOOL_ERRORS.captureTimeout);
@@ -61,7 +66,7 @@ export function artifactScreenshotTool(deps: Pick<ArtifactToolDeps, 'artifacts' 
       const answer = outcome.answer;
       if (!answer.ok) return toolError(TOOL_ERRORS.captureFailed(answer.error));
       const result: ArtifactScreenshotResult = {
-        status: 'captured', id: ref, deliverableId: record.id, title: record.title ?? record.artifactId ?? record.id, version, width: answer.width, height: answer.height,
+        status: 'captured', id: ref, deliverableId: artifactId, title: page.artifact.title, version, width: answer.width, height: answer.height,
         bytes: Buffer.from(answer.png, 'base64').length, consoleErrors: answer.consoleErrors, ...owner,
       };
       return { content: [{ type: 'image', data: answer.png, mimeType: 'image/png' }, ...toolText(result).content] };

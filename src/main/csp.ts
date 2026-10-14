@@ -17,11 +17,11 @@ const directives = (script: string[], connect: string[]) => [
   ['img-src', "'self'", 'data:', 'blob:', 'maws-artifact:'],
   ['font-src', "'self'", 'data:', 'maws-artifact:'],
   ['connect-src', "'self'", ...connect],
-  // E2: the Deliverables viewer's frames and media load the store through the scheme ('self' keeps the request card's
-  // srcdoc frame, which inherits this policy); each answer of the scheme carries its own policy (deliverables/protocol.ts).
-  // P3-A M7: the artifact store's scheme serves the same frames (artifacts/protocol.ts)
-  ['frame-src', "'self'", 'maws-deliverable:', 'maws-artifact:'],
-  ['media-src', "'self'", 'maws-deliverable:', 'maws-artifact:'],
+  // E2: the viewers' frames and media load the store through its scheme ('self' keeps the request card's srcdoc frame,
+  // which inherits this policy); each answer of the scheme carries its own policy (artifacts/scheme-handler.ts). P3-A M7:
+  // the artifact store's scheme; P3-L M6b: E2's `maws-deliverable:` no more
+  ['frame-src', "'self'", 'maws-artifact:'],
+  ['media-src', "'self'", 'maws-artifact:'],
 ];
 
 const serialize = (list: string[][]) => list.map((d) => d.join(' ')).join('; ');

@@ -33,7 +33,7 @@ const list = (args: Record<string, unknown> = {}, deps: Parameters<World['deps']
 const rows = (sql: string, ...params: (string | number)[]) => w.storage.db.prepare(sql).all(...params) as Record<string, unknown>[];
 
 describe('artifact_create', () => {
-  it("keeps E2's call working: an html artifact from the page file, its X12 record mirrored under the same id, linked created", async () => {
+  it("keeps E2's call working: an html artifact from the page file, linked created, answering E2's fields; no X12 record (P3-L's cutover)", async () => {
     const result = await create({ id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }, { toolUseId: 'toolu_create' as ToolUseId });
     const answer = ArtifactCreateResultSchema.parse(jsonOf(result));
     const id = answer.artifactId;
@@ -42,12 +42,8 @@ describe('artifact_create', () => {
     expect(w.store.get(id)).toMatchObject({ kind: 'html', title: 'Dashboard', handle: 'dash', createdBy: { kind: 'session', appSessionId: SELF } });
     expect(w.store.links(id).map((l) => [l.appSessionId, l.role])).toEqual([[SELF, 'created']]);
     expect(Buffer.from(w.store.files.read(id, w.store.contentRef(id).ref)).toString('utf8')).toBe(PAGE);
-    const copy = join(w.userData, 'deliverables', SELF, id, 'v1.html');
-    const record = (await w.deliverables.get(SELF, id))!;
-    expect(record).toMatchObject({ id, appSessionId: SELF, kind: 'artifact', artifactId: 'dash', title: 'Dashboard', path: copy, toolUseId: 'toolu_create' });
-    expect(record.versions).toEqual([{ path: copy, at: record.createdAt, toolUseId: 'toolu_create', sourcePath: join(w.cwd, 'dashboard.html') }]);
-    expect(readFileSync(copy, 'utf8')).toBe(PAGE);
-    expect(w.written).toEqual([[id, 'created']]);
+    expect(w.store.contentRef(id).ref.name).toBe('dashboard.html');
+    expect(existsSync(join(w.userData, 'deliverables'))).toBe(false);
   });
 
   it('attaches the kind’s guide once per session, and an inline page needs no file', async () => {
@@ -56,7 +52,7 @@ describe('artifact_create', () => {
     const second = ArtifactCreateResultSchema.parse(jsonOf(await create({ content: '<p>two</p>', title: 'Two' })));
     expect(second.guide).toBeUndefined();
     expect(second.handle).toBeUndefined();
-    expect(second.id).toBe(second.artifactId); // the X12 name of a page without a handle is its id
+    expect(second.id).toBe(second.artifactId); // E2's name of a page without a handle is its id
     expect(ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'design', title: 'D' }))).guide).toEqual(KIND_GUIDES.design);
   });
 
@@ -87,11 +83,11 @@ describe('artifact_create', () => {
     expect(rows('SELECT id FROM artifacts').length).toBe(before);
   });
 
-  it('a file artifact references its path in place, mirrored as an X12 file record', async () => {
+  it('a file artifact references its path in place', async () => {
     writeFileSync(join(w.cwd, 'report.pdf'), '%PDF-1.4');
     const answer = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'file', path: 'report.pdf', title: 'Report' })));
     expect(w.store.get(answer.artifactId)).toMatchObject({ kind: 'file', linkedPath: join(w.cwd, 'report.pdf') });
-    expect(await w.deliverables.get(SELF, answer.artifactId)).toMatchObject({ kind: 'file', path: join(w.cwd, 'report.pdf'), title: 'Report' });
+    expect(w.store.contentRef(answer.artifactId).path).toBe(join(w.cwd, 'report.pdf'));
   });
 
   it('a replayed tool-use id answers the first result and writes nothing again', async () => {
@@ -99,7 +95,6 @@ describe('artifact_create', () => {
     const again = jsonOf(await create({ content: '<p>once</p>', title: 'Once' }, { toolUseId: 'toolu_same' as ToolUseId }));
     expect(again).toMatchObject({ artifactId: first.artifactId, revision: first.revision, version: 1 });
     expect(rows('SELECT id FROM artifacts')).toHaveLength(1);
-    expect(w.written).toHaveLength(1);
     // the same tool-use id in another session is another call
     const other = jsonOf(await create({ content: '<p>once</p>', title: 'Once' }, { toolUseId: 'toolu_same' as ToolUseId, appSessionId: 'app-other' as AppSessionId }));
     expect(other.artifactId).not.toBe(first.artifactId);
@@ -188,13 +183,12 @@ describe('artifact_create', () => {
     expect(w.store.list({ kind: 'presentation' })).toEqual([]);
   });
 
-  it('answers overlapping creates and deliveries with one tool-use id alike, with one X12 record each', async () => {
+  it('answers overlapping creates and deliveries with one tool-use id alike, with one artifact each', async () => {
     const tool = artifactCreateTool(w.deps());
     const ctx = w.ctx({ toolUseId: 'toolu_both' as ToolUseId });
     const [first, second] = await Promise.all([tool.call({ handle: 'dash', content: '<p/>', title: 'D' }, ctx), tool.call({ handle: 'dash', content: '<p/>', title: 'D' }, { ...ctx, requestId: w.ctx().requestId })]);
     expect(second).toEqual(first);
     expect(rows('SELECT id FROM artifacts')).toHaveLength(1);
-    expect(w.written).toEqual([[jsonOf(first).artifactId, 'created']]);
   });
 
   it('attaches the governing design system’s guide to a document, presentation or design through D’s provider', async () => {

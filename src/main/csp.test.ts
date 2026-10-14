@@ -12,7 +12,7 @@ const directives = (csp: string) =>
 describe('content security policy', () => {
   it('is exactly the production policy without a dev server', () => {
     expect(PRODUCTION_CSP).toBe(
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: maws-artifact:; font-src 'self' data: maws-artifact:; connect-src 'self'; frame-src 'self' maws-deliverable: maws-artifact:; media-src 'self' maws-deliverable: maws-artifact:",
+      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: maws-artifact:; font-src 'self' data: maws-artifact:; connect-src 'self'; frame-src 'self' maws-artifact:; media-src 'self' maws-artifact:",
     );
     expect(buildCsp(null)).toBe(PRODUCTION_CSP);
   });
@@ -20,7 +20,7 @@ describe('content security policy', () => {
   it('adds the nonce to script-src only, and the HMR socket to connect-src, in development', () => {
     const csp = buildCsp({ nonce: 'N', devServerUrl: 'http://localhost:5173' });
     expect(csp).toBe(
-      "default-src 'self'; script-src 'self' 'nonce-N'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: maws-artifact:; font-src 'self' data: maws-artifact:; connect-src 'self' ws://localhost:5173; frame-src 'self' maws-deliverable: maws-artifact:; media-src 'self' maws-deliverable: maws-artifact:",
+      "default-src 'self'; script-src 'self' 'nonce-N'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: maws-artifact:; font-src 'self' data: maws-artifact:; connect-src 'self' ws://localhost:5173; frame-src 'self' maws-artifact:; media-src 'self' maws-artifact:",
     );
     const withNonce = Object.entries(directives(csp))
       .filter(([, sources]) => sources.some((s) => s.includes('nonce-')))
@@ -28,13 +28,13 @@ describe('content security policy', () => {
     expect(withNonce).toEqual(['script-src']);
   });
 
-  // E2 start: the Deliverables viewer's frames and media elements load the store through the scheme (Design §3); 'self'
-  // keeps the request card's srcdoc frame, which inherits the document's policy
-  it('admits the maws-deliverable: scheme to frames and media, and nothing else', () => {
+  // E2 start: the viewers' frames and media elements load the store through its scheme (Design §3); 'self' keeps the
+  // request card's srcdoc frame, which inherits the document's policy. P3-L M6b: the deliverable scheme is gone.
+  it('admits the store scheme to frames and media, and E2’s maws-deliverable: nowhere', () => {
     const csp = directives(PRODUCTION_CSP);
-    expect(csp['frame-src']).toEqual(["'self'", 'maws-deliverable:', 'maws-artifact:']);
-    expect(csp['media-src']).toEqual(["'self'", 'maws-deliverable:', 'maws-artifact:']);
-    expect(PRODUCTION_CSP.match(/maws-deliverable:/g)).toHaveLength(2);
+    expect(csp['frame-src']).toEqual(["'self'", 'maws-artifact:']);
+    expect(csp['media-src']).toEqual(["'self'", 'maws-artifact:']);
+    expect(PRODUCTION_CSP).not.toContain('maws-deliverable:');
   });
   // E2 end
 

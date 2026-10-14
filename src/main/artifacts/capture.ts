@@ -1,6 +1,7 @@
-// `artifact_screenshot`'s capture (E2 execution document, Design §7, Decision Log 8 and 20). The engine host cannot
-// render, so it asks main through the IPC event `maws.artifact.capture`; main renders the version in its own offscreen
-// window and answers through the host command `maws.artifact.captured`. At most two captures run at once (the engine
+// `artifact_screenshot`'s capture (E2 execution document, Design §7, Decision Log 8 and 20; P3-L's cutover: an `html`
+// artifact's revision on `maws-artifact:`, X12's record no longer read). The engine host cannot render, so it asks main
+// through the IPC event `maws.artifact.capture`; main renders the revision in its own offscreen window and answers
+// through the host command `maws.artifact.captured`. At most two captures run at once (the engine
 // may batch two screenshots: the tool is read-only); a third waits for a slot. Each capture has a 20 s guard, and a
 // request still waiting for a slot after CAPTURE_QUEUE_MS is answered with the busy reason instead of being run, so every
 // answer leaves main within 42 s, inside the host's 45 s (CAPTURE_ANSWER_MS).
@@ -11,7 +12,7 @@
 // prevented, subframe navigation guarded and non-proxied UDP off. The page loads top-level, where no `<iframe sandbox>`
 // reaches it; the handler's `sandbox allow-scripts` policy sandboxes it as the viewer's frame is. `disableDialogs` keeps
 // a modal from blocking the load until the guard. The page's console errors go into the result (at most 20, each cut
-// at 500 characters), never into `deliverables.console`: the transcript row counts what the owner's viewer logged.
+// at 500 characters), never into `artifacts.console`: the transcript row counts what the owner's viewer logged.
 // The device scale factor is 1 (offscreen's default): the picture is for the model, not a Retina display.
 //
 // The named fallback, should offscreen rendering misbehave, is a hidden window captured with
@@ -19,10 +20,10 @@
 import { BrowserWindow, type NativeImage } from 'electron';
 import type { CommandInput } from '@shared/ipc/schema';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
-import { deliverableUrl } from '@shared/maws/deliverable';
+import { artifactUrl } from '@shared/artifacts/scheme';
 import { ARTIFACT_SCREENSHOT_MAX_BYTES } from '@shared/maws/tools';
 import { guardFrames, type SeamEnv } from './policies';
-import type { DeliverableReader } from './reader';
+import type { ContentLookup } from './protocol';
 
 export const CAPTURE_PARTITION = 'maws-capture';
 export const CAPTURE_GUARD_MS = 20_000;
@@ -34,22 +35,19 @@ const CONSOLE_ERRORS_MAX = 20;
 const CONSOLE_ERROR_CHARS = 500;
 
 export interface CaptureDeps {
-  reader: Pick<DeliverableReader, 'get'>;
+  content: ContentLookup; // the host's `artifacts.content`, as the scheme resolves through it
   env: SeamEnv;
 }
 
 export class CaptureFailure extends Error {}
 
-// One capture, start to finish: the version checked on disk, the window opened, loaded, settled, captured, encoded and
-// destroyed. Never rejects: every failure is an answer with its reason.
-// P2-E1: a side thread's capture of its ancestor's artifact names the record's session (`ownerAppSessionId`); the version
-// is read and rendered there, and the answer still goes to the requesting session.
-export async function captureArtifact(request: MawsArtifactCapture, { reader, env }: CaptureDeps): Promise<MawsArtifactCapturedResult> {
-  const owner = request.ownerAppSessionId ?? request.appSessionId;
-  const { record, present } = await reader.get(owner, request.deliverableId).catch(() => ({ record: null, present: [] as boolean[] }));
-  if (!record) return { ok: false, error: `no deliverable ${request.deliverableId} in ${request.ownerAppSessionId ? `ancestor session ${owner}` : 'this session'}` }; // P2-F L123
-  if (request.version > record.versions.length) return { ok: false, error: `version ${request.version} does not exist` };
-  if (!present[request.version - 1]) return { ok: false, error: `version ${request.version} is not on disk any more` };
+// One capture, start to finish: the revision's page named by the host, the window opened, loaded, settled, captured,
+// encoded and destroyed. Never rejects: every failure is an answer with its reason. The answer goes to the requesting
+// session whichever session made the page (P2-E1's side thread capturing its ancestor's).
+export async function captureArtifact(request: MawsArtifactCapture, { content, env }: CaptureDeps): Promise<MawsArtifactCapturedResult> {
+  const page = await content({ artifactId: request.artifactId, revision: request.revision }).catch((error: unknown) => ({ ok: false as const, error: { message: error instanceof Error ? error.message : String(error) } }));
+  if (!page.ok) return { ok: false, error: `the page of artifact ${request.artifactId} at revision ${request.revision} could not be read: ${page.error.message}` };
+  if (page.value.kind !== 'html') return { ok: false, error: `artifact ${request.artifactId} is not an html page` };
 
   const win = openCaptureWindow(request.width, request.height, env);
   let guard: ReturnType<typeof setTimeout> | undefined;
@@ -58,7 +56,7 @@ export async function captureArtifact(request: MawsArtifactCapture, { reader, en
       guard = setTimeout(() => reject(new CaptureFailure(`the page did not finish loading within ${CAPTURE_GUARD_MS / 1000} s`)), CAPTURE_GUARD_MS);
     });
     const consoleErrors: string[] = [];
-    const image = await Promise.race([render(win, deliverableUrl(owner, request.deliverableId, request.version), consoleErrors), timedOut]);
+    const image = await Promise.race([render(win, artifactUrl(request.artifactId, page.value.revision, page.value.name), consoleErrors), timedOut]);
     const encoded = encodeCapture(image);
     return 'error' in encoded ? { ok: false, error: encoded.error } : { ok: true, png: encoded.png.toString('base64'), width: encoded.width, height: encoded.height, consoleErrors };
   } catch (error) {
@@ -153,7 +151,7 @@ export function startCaptureService({ onEvent, dispatch, ...deps }: CaptureServi
   return onEvent('maws.artifact.capture', (request) => {
     void slot(() => captureArtifact(request, deps), busy)
       .then((result) => dispatch({ appSessionId: request.appSessionId, requestId: request.requestId, result }))
-      .catch((error: unknown) => console.error('[deliverables] could not answer a capture', error));
+      .catch((error: unknown) => console.error('[artifacts] could not answer a capture', error));
   });
 }
 

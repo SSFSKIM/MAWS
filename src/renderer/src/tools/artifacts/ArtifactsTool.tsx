@@ -1,7 +1,7 @@
 // The panel's Artifacts tool (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M5; Decision Log 8, 21a, 25b): one
 // single-instance, pinnable tool whose view is the session's list or one artifact's record view (Back is a state change;
-// the host sees one tab), in the Deliverables tool's shape: a small handle holding an immutable snapshot the body reads
-// through useSyncExternalStore. Until the cutover (M6) it sits beside the Deliverables tool.
+// the host sees one tab), in E2's Deliverables tool's shape: a small handle holding an immutable snapshot the body reads
+// through useSyncExternalStore. M6b: the Deliverables tool is gone; this is the `artifact` pane's tool (`show_pane`).
 //
 // X32's lifetime rule: the editor a record view mounts keeps its state in the registry's hold for this tab's scope, so
 // its closeGuard and actions read it while the tab is hidden. The handle gives that state back, and clears the editor's
@@ -18,6 +18,7 @@
 // list follows the shown session.
 import { useEffect, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { Icon } from '../../app/IconButton';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
 import { askEditorHostClose, clearEditorHost, type EditorHostScope } from '../../panel/editor-host';
@@ -26,9 +27,12 @@ import type { PanelTool, PanelToolContext } from '../../panel/tool';
 import { ARTIFACTS_TOOL_COPY } from './copy';
 import { ArtifactsList, type ArtifactsScope } from './List';
 import { ArtifactRecordView } from './RecordView';
+import { ArtifactsSummary } from './Summary';
+import { requestArtifactVersion } from './viewers/requests';
 
-// The panel tool's id; the Deliverables tool's (`deliverables`) gives way to it at the cutover (Decision Log 10).
-export const ARTIFACTS_TOOL_ID = 'artifacts';
+// The panel tool's id (shared with `show_pane`'s `artifact` pane); E2's Deliverables tool's (`deliverables`) gave way
+// to it at the cutover (Decision Log 10).
+export { ARTIFACTS_TOOL_ID };
 
 // X5 params: an artifact to show (`target`; none shows the list) and the list's scope.
 export interface ArtifactsParams {
@@ -36,10 +40,12 @@ export interface ArtifactsParams {
   scope?: ArtifactsScope;
 }
 
-// An artifact in the panel's Artifacts tool, in the session's panel, activated (P3-L M5b: the comment card's re-dock).
-// Until a build registers the tool, nothing.
-export function openArtifactInPanel(appSessionId: AppSessionId, artifactId: string): void {
+// An artifact in the panel's Artifacts tool, in the session's panel, activated (P3-L M5b: the comment card's re-dock;
+// M6b: a transcript row's Open, `TranscriptActions.openArtifact`), at the n-th of its versions when `version` names one
+// (else the latest, followed as new ones land). Until a build registers the tool, nothing.
+export function openArtifactInPanel(appSessionId: AppSessionId, artifactId: string, version?: number): void {
   if (!usePanelHost.getState().tools.has(ARTIFACTS_TOOL_ID)) return;
+  if (version !== undefined) requestArtifactVersion(artifactId, version, 'panel');
   panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, params: { target: artifactId }, activate: true });
 }
 
@@ -187,4 +193,5 @@ export const artifactsTool: PanelTool<ArtifactsHandle, ArtifactsParams> = {
   beforeClose: () => Promise.resolve(true), // the editor's own closeGuard is asked by the host first (X32), the view frozen meanwhile
   dispose: (state) => state.dispose(),
   render: ArtifactsBody,
+  summary: ArtifactsSummary, // M6b: the panel summary's Artifacts section
 };

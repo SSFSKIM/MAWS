@@ -1,10 +1,10 @@
 // The artifact viewers' pure decisions (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M5b). Which body draws a
 // stored file is decided by `mimeOf` of its name, the function main's scheme handler types its answer with, so a viewer
 // never frames a file as something main would serve otherwise; only `application/pdf` gets the PDF frame, the one
-// without a `sandbox` attribute (E2's Decision Log 31). Moved here from the Deliverables tool, which reads it too.
+// without a `sandbox` attribute (E2's Decision Log 31). Moved here from E2's Deliverables tool.
 //
 // An artifact's versions are listed in the order of the revision each captured and named by their place, `v1 … vN`,
-// the last marked latest (the Deliverables viewer's labels); the viewer shows a place, or the latest when it was asked
+// the last marked latest (E2's Deliverables viewer's labels); the viewer shows a place, or the latest when it was asked
 // for none, so it follows a new version as it lands.
 import { mimeOf } from '@shared/files/mime';
 import type { ArtifactVersion } from '@shared/artifacts/version';

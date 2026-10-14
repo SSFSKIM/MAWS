@@ -353,8 +353,8 @@ describe('the recorded maws fixtures', () => {
     const cells = ofKind(fixture('p1-maws-show-pane'), 'cell').filter((cell) => cell.toolName === SHOW_PANE);
     expect(cells.map((cell) => [cell.status, cell.label])).toEqual([
       ['done', 'Opened Terminal'],
-      ['error', 'Could not open pane: the deliverable pane is not available in this build of MAWS'],
-      ['error', 'Could not open pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, deliverable, browser, source-control'],
+      ['error', 'Could not open pane: the artifact pane is not available in this build of MAWS'], // P3-L M6b: the recording's pane renamed
+      ['error', 'Could not open pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, artifact, browser, source-control'],
     ]);
   });
 });

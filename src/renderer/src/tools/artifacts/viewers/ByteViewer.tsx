@@ -1,14 +1,17 @@
 // The `html` and `file` editors (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M5b; Decision Log 4, 7, 10, 11, 14,
-// 15, 23, 26h): the artifact store's byte kinds viewed on `maws-artifact:`, doing what the Deliverables viewer does
-// (`../../deliverables/Viewer.tsx`), registered into the editor mount registry for the panel's record view and the
-// `artifact` main tab alike.
+// 15, 23, 26h): the artifact store's byte kinds viewed on `maws-artifact:`, doing what E2's Deliverables viewer did
+// until the cutover (M6b), registered into the editor mount registry for the panel's record view and the `artifact`
+// main tab alike.
 //
 // What is shown: the artifact's versions (`artifacts.versions`, in the order of the revision each captured, `v1 … vN`,
-// the last marked latest) and one of them, the latest unless the picker or a card's row chose another, so a new version
-// is followed as it lands. The shown revision's stored file is named by main (`library.content`) and framed at
+// the last marked latest) and one of them, the latest unless the picker, a card's row or (M6b) a transcript row's Open
+// (`./requests.ts`) chose another, so a new version is followed as it lands. M6b: the places it read are noted for the
+// transcript row's console chip (`noteArtifactVersions`). The shown revision's stored file is named by main (`library.content`) and framed at
 // `maws-artifact://<id>/<revision>/<name>`; the body is chosen by the MIME the name types (an `html` artifact is always
 // its page): the HTML frame (sandboxed, carrying the scheme's pick bridge), the PDF frame, native media, else the file
-// viewer read-only under the session that made the file (the files service admits a delivered file by its session).
+// viewer read-only under the session that made the file (the files service admits a delivered file by its session; M6b:
+// a File artifact no session made, the owner's own, is read under any session the window knows, which the library's
+// index admits for it).
 // `onShown` is called once the content is ready (the frame loaded, the media's metadata, the file read) and the body is
 // visible, so content that loaded hidden counts when it shows. Export and Save a copy are disabled until the shown
 // version and its file are resolved.
@@ -24,7 +27,7 @@
 // shown revision's page URL, about the session that made the page. Picking belongs to one frame (a version switch or a
 // Reload ends it, as do Escape and a pick); the host re-pins the card through the frame's locate handle; an unclaimed
 // card (the Side pane's re-dock) is claimed by a viewer of its artifact in its mode.
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { artifactUrl } from '@shared/artifacts/scheme';
@@ -46,7 +49,7 @@ import { openCommentComposer } from '../../code/anchor/anchor';
 import { openFile } from '../../code/open-file';
 import { FileBody } from '../../code/viewer/FileViewer';
 import { useViewer } from '../../code/viewer/viewer-store';
-import { clearArtifactConsole, useArtifactConsole } from './console';
+import { clearArtifactConsole, noteArtifactVersions, useArtifactConsole } from './console';
 import { ConsoleEntriesChip } from './ConsoleChip';
 import { VIEWERS_COPY } from './copy';
 import { HtmlFrame, type FrameHandle } from './frames/HtmlFrame';
@@ -55,6 +58,7 @@ import { PdfFrame } from './frames/PdfFrame';
 import { CommentIcon, OpenAsFileIcon, OpenExternallyIcon, ReloadIcon, RevealIcon } from './icons';
 import { bodyOf, shownVersion, underSession, versionLabel, versionsInOrder, versionToShow, type BodyKind } from './model';
 import { pageElementAnchor, type PickMessage } from './pick';
+import { takeVersionRequest, useVersionRequest } from './requests';
 
 type ByteKind = 'html' | 'file';
 const OPENS_AS_FILE = new Set(['code', 'markdown', 'image', 'head']); // the viewer kinds a file tab draws the same way
@@ -101,6 +105,13 @@ function useRead<T>(key: string | null, read: () => Promise<{ ok: true; value: T
 const homeSession = (row: LibraryRow | null | undefined): AppSessionId | null =>
   (row?.sessions.find((session) => session.roles.includes('created')) ?? row?.sessions[0])?.appSessionId ?? null;
 
+// M6b (Decision Log 36i): the session a File artifact's body is read under: its home session, else (no session made it)
+// any session this window knows, since the files service needs one and the library's index admits the file for any.
+function useReaderSession(home: AppSessionId | null): AppSessionId | null {
+  const any = useSessions((s) => (home !== null ? null : (s.records.keys().next().value ?? null)));
+  return home ?? any;
+}
+
 // ---- the editor --------------------------------------------------------------------------------------------------------
 
 function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: ArtifactEditorProps<ByteViewerState> & { kind: ByteKind }) {
@@ -108,7 +119,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   const row = useLibraryRow(artifactId).value;
   const title = row?.title ?? VIEWERS_COPY.fallbackTitle;
   const versionsRead = useRead(`${artifactId}@${row?.revision ?? '?'}#${reloads}`, () => ipc.invoke('artifacts.versions', { artifactId }));
-  const ordered = versionsRead.status === 'ready' ? versionsInOrder(versionsRead.value.versions) : null;
+  const ordered = useMemo(() => (versionsRead.status === 'ready' ? versionsInOrder(versionsRead.value.versions) : null), [versionsRead]);
   const shown = ordered ? shownVersion(ordered, chosen) : null;
   const revision = shown?.version.seq;
   const contentRead = useRead<LibraryContent>(ordered === null ? null : `${artifactId}@${revision ?? 'latest'}#${reloads}`, () =>
@@ -117,11 +128,19 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   const content = contentRead.status === 'ready' ? contentRead.value : null;
   const body: BodyKind | null = content === null ? null : kind === 'html' ? 'html' : bodyOf(content.name);
   const session = homeSession(row);
+  const reader = useReaderSession(session);
   const reload = () => {
     if (content) clearArtifactConsole(artifactId, content.revision);
     state.view.setState({ reloads: nextReload(), pickingIn: null });
   };
   const choose = (n: number | null) => state.view.setState({ chosen: versionToShow(n, ordered?.length ?? 0) });
+  // M6b: the places noted for the transcript row's chip; a version asked for from outside, taken once the versions are read
+  const request = useVersionRequest(artifactId, scope.surface);
+  useEffect(() => {
+    if (ordered === null) return;
+    noteArtifactVersions(artifactId, ordered.map((version) => version.seq));
+    if (request !== null && takeVersionRequest(request.serial)) state.view.setState({ chosen: versionToShow(request.version, ordered.length) });
+  }, [artifactId, ordered, request, state.view]);
 
   // the frame picking is asked of, by what keys it: another version or a Reload is another frame
   const frameKey = content ? `${artifactId}/${content.revision}#${reloads}` : null;
@@ -192,7 +211,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
             content={content}
             body={body}
             title={title}
-            session={session}
+            session={reader}
             reloads={reloads}
             picking={picking}
             onPick={onPick}
@@ -280,7 +299,6 @@ function Body({ artifactId, content, body, title, session, reloads, picking, onP
         <HtmlFrame
           url={url}
           title={frameTitle}
-          owner="artifact"
           onMount={() => clearArtifactConsole(artifactId, content.revision)}
           onLoad={onReady}
           picking={picking}
@@ -289,10 +307,10 @@ function Body({ artifactId, content, body, title, session, reloads, picking, onP
         />
       );
     case 'pdf':
-      return <PdfFrame url={url} title={frameTitle} owner="artifact" onLoad={onReady} />;
+      return <PdfFrame url={url} title={frameTitle} onLoad={onReady} />;
     case 'video':
     case 'audio':
-      return <Media kind={body} url={url} owner="artifact" onLoad={onReady} />;
+      return <Media kind={body} url={url} onLoad={onReady} />;
     case 'file':
       if (session === null) {
         return (

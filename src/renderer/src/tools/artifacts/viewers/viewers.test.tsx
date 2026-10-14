@@ -23,6 +23,7 @@ import { registerCommentComposer, type CommentContext } from '../../code/anchor/
 import { useViewer } from '../../code/viewer/viewer-store';
 import { byteViewer, type ByteViewerState } from './ByteViewer';
 import { resetArtifactConsole } from './console';
+import { requestArtifactVersion, resetVersionRequests } from './requests';
 
 const ID = '00000000-0000-4000-8000-0000000000a1';
 const P = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
@@ -63,6 +64,7 @@ beforeEach(() => {
   resetEditorHosts();
   resetArtifactEditors();
   resetArtifactConsole();
+  resetVersionRequests();
   useViewer.getState().reset();
   useCommentCard.setState({ open: null });
   useSessions.setState({ records: new Map([[P, sessionRecord(P, { directory: '/repo' })]]) });
@@ -209,6 +211,46 @@ describe('the HTML viewer', () => {
   });
 });
 
+// M6b: a transcript row's Open names the n-th of the artifact's versions by its place (E2's record version until the
+// cutover; Decision Log 4): the viewer on the asked surface shows the version at that place in the order of the
+// revisions (`listVersions(id)[n - 1]`), never revision n, whether it mounts now or already shows the artifact
+describe('a version asked for from outside', () => {
+  beforeEach(() => {
+    versions = [version(3, 14), version(1, 4), version(2, 9)]; // answered out of order: the place is by revision
+    names = { 4: 'index.html', 9: 'index.html', 14: 'index.html' };
+  });
+
+  it('shows the n-th version by revision when it mounts, never revision n, and takes the request once', async () => {
+    requestArtifactVersion(ID, 2, 'panel');
+    mount('html');
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    expect(main.callsOf('library.content')).not.toContainEqual({ artifactId: ID, revision: 2 });
+    cleanup();
+    mount('html'); // a later mount: the request was taken, the latest shows
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+  });
+
+  it('moves a viewer already showing the artifact, follows the latest for the last place, and leaves another surface’s or artifact’s alone', async () => {
+    mount('html');
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    act(() => requestArtifactVersion(ID, 1, 'main'));
+    act(() => requestArtifactVersion('00000000-0000-4000-8000-0000000000ff', 1, 'panel'));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html'));
+    act(() => requestArtifactVersion(ID, 1, 'panel'));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    act(() => requestArtifactVersion(ID, 3, 'panel'));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+    expect(document.querySelector('[data-artifact-viewer]')?.getAttribute('data-version')).toBe('3');
+  });
+
+  it('lets a request lapse after REQUEST_LAPSE_MS', async () => {
+    requestArtifactVersion(ID, 1, 'panel', Date.now() - 6_000);
+    mount('html');
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+  });
+});
+
 describe('Comment on an HTML page', () => {
   let opened: { anchor: unknown; context: CommentContext }[];
   let offComposer: () => void;
@@ -330,12 +372,20 @@ describe('the File viewer', () => {
     expect(onShown).toHaveBeenCalled();
   });
 
-  it('says where a file opens when no session made or touched it', async () => {
+  // M6b (Decision Log 36i): a File artifact no session made (the owner's "Add a file…") is read under a session the
+  // window knows, which the library's index admits it for; with none open it says so
+  it('reads a file no session made under a session the window knows, and says so when it knows none', async () => {
     names = { 9: 'budget.csv' };
     row = rowOf('file', { title: 'budget', sessions: [] });
     mount('file');
-    expect(await screen.findByText('budget.csv opens outside MAWS: no session made or touched it.')).toBeTruthy();
-    expect(main.callsOf('files.read')).toEqual([]);
+    await waitFor(() => expect(main.callsOf('files.read')[0]).toMatchObject({ appSessionId: P, path: '/store/9/budget.csv' }));
+    cleanup();
+    useViewer.getState().reset();
+    useSessions.setState({ records: new Map() });
+    const reads = main.callsOf('files.read').length;
+    mount('file');
+    expect(await screen.findByText('budget.csv is read through a session, and none is open: open a session to see it here.')).toBeTruthy();
+    expect(main.callsOf('files.read')).toHaveLength(reads);
   });
 
   it('has no Comment, and its Export menu saves a copy', async () => {

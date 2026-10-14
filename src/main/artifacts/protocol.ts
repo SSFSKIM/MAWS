@@ -2,25 +2,21 @@
 // artifact store's byte-kind content and every artifact's assets, served to frames, images, fonts and media in the app
 // and to the capture and export windows. `maws-artifact://<artifactId>/<revision | 'live'>/<path>`; main resolves a URL
 // by asking the engine host (`artifacts.content`), never by opening the host's database or building a path from the
-// URL, so it serves exactly the store's files. One implementation serves this scheme and `maws-deliverable:` (the
-// handler in `../deliverables/protocol.ts`, the frame policies in `../deliverables/policies.ts`): the same headers, the
-// same sandboxing policy, byte ranges, the bridge script in an `html` artifact's page (an asset, and a `file` artifact's
+// URL, so it serves exactly the store's files. The serving is `./scheme-handler.ts` and the frame policies
+// `./policies.ts` (E2's, which served `maws-deliverable:` the same way until P3-L's cutover): the shared headers, the
+// sandboxing policy, byte ranges, the bridge script in an `html` artifact's page (an asset, and a `file` artifact's
 // HTML, are served byte for byte). Its answers also carry `Access-Control-Allow-Origin: *`, since a font is a CORS load
 // and a design system's faces load from the app's page; what may load from the scheme at all is the app's CSP's and
 // each frame's own policy's to say.
 import { protocol, type Session } from 'electron';
 import { ARTIFACT_SCHEME, parseArtifactUrl } from '@shared/artifacts/scheme';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
-import { DELIVERABLE_SCHEME } from '@shared/maws/deliverable';
-import { createSchemeHandler, DELIVERABLE_SCHEME_PRIVILEGES, type SchemeResolver } from '../deliverables/protocol';
+import { createSchemeHandler, STORE_SCHEME_PRIVILEGES, type SchemeResolver } from './scheme-handler';
 
-// Before `app.whenReady()`, once (Electron takes one call): both store schemes. The artifact scheme is the deliverable
-// one's (standard, secure, streamed, no fetch) but CORS-enabled, for its fonts.
+// Before `app.whenReady()`, once (Electron takes one call): the store's scheme (standard, secure, streamed, no fetch),
+// CORS-enabled for its fonts. P3-L's cutover registers `maws-deliverable:` no more.
 export function registerStoreSchemes(): void {
-  protocol.registerSchemesAsPrivileged([
-    { scheme: DELIVERABLE_SCHEME, privileges: DELIVERABLE_SCHEME_PRIVILEGES },
-    { scheme: ARTIFACT_SCHEME, privileges: { ...DELIVERABLE_SCHEME_PRIVILEGES, corsEnabled: true } },
-  ]);
+  protocol.registerSchemesAsPrivileged([{ scheme: ARTIFACT_SCHEME, privileges: { ...STORE_SCHEME_PRIVILEGES, corsEnabled: true } }]);
 }
 
 export type ContentLookup = (input: CommandInput<'artifacts.content'>) => Promise<CommandResult<'artifacts.content'>>;

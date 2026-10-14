@@ -1045,13 +1045,21 @@ describe('side questions (E3 M1)', () => {
   });
 });
 // E3 end
-// E2 start: the store's announcements and the capture bridge through the launcher's own store (E2 Design §2 and §7)
-describe('maws.download.recorded (E13: an agent\'s download through cua)', () => {
-  it('records a finished download as a file deliverable of the session that holds it, once per path, and announces it; not_held elsewhere', async () => {
+// E2 start: the capture bridge through the launcher's sessions and the host's artifact store (E2 Design §7; P3-L M6b: the
+// store's own change feed replaced `deliverables.changed`, and a download is a File artifact)
+describe('the capture bridge and an agent’s downloads (E2 M1, E13)', () => {
+  // P3-A (M6): the artifact tools write through the host's artifact store, handed to every launch
+  let documents: Documents;
+  beforeEach(() => {
+    documents = openDocuments(userData, () => {})!;
+  });
+  afterEach(() => documents.close());
+
+  it('records a finished download as a File artifact of the session that holds it, once per path; not_held elsewhere', async () => {
     const file = join(userData, 'cua-report.pdf');
     writeFileSync(file, '%PDF-1.4');
     const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
-    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }) });
+    const host = engineHost({ spawn: () => transport, checkRelay: async () => OK_RELAY, captureEnv: async () => ({ PATH: '/usr/bin' }), artifacts: () => documents.store });
     const id = 'app-ipc' as AppSessionId;
     const download = { appSessionId: id, tabId: 'b_0123456789ab', path: file, filename: 'cua-report.pdf', url: 'http://127.0.0.1:5000/report.pdf', bytes: 8 };
     expect(MAWS_DEADLINE_SHAPES['maws.download.recorded']).toBe('bounded');
@@ -1060,25 +1068,17 @@ describe('maws.download.recorded (E13: an agent\'s download through cua)', () =>
     await until(() => host.statuses(id).some((s) => s.process === 'ready'), 'ready');
     expect(await host.call('maws.download.recorded', download)).toEqual({ outcome: 'recorded' });
     expect(await host.call('maws.download.recorded', download)).toEqual({ outcome: 'duplicate' });
-    await until(() => host.emitted.some((e) => e.name === 'deliverables.changed'), 'the store announcement');
-    const changed = host.emitted.filter((e) => e.name === 'deliverables.changed').map((e) => e.payload as { appSessionId: string; id: string; change: string });
-    expect(changed).toEqual([{ appSessionId: id, id: expect.any(String), change: 'created' }]);
-    const record = JSON.parse(readFileSync(join(userData, 'deliverables', id, `${changed[0]!.id}.json`), 'utf8'));
-    expect(record).toMatchObject({ kind: 'file', path: file, title: 'cua-report.pdf', sourceUrl: download.url });
+    const [artifact, ...more] = documents.store.list({ kind: 'file' });
+    expect(more).toEqual([]);
+    expect(artifact).toMatchObject({ title: 'cua-report.pdf', linkedPath: file, createdBy: { kind: 'session', appSessionId: id } });
+    expect(documents.store.links(artifact!.id).map((link) => [link.appSessionId, link.role])).toEqual([[id, 'created']]);
+    expect(host.emitted.some((e) => (e.name as string) === 'deliverables.changed')).toBe(false);
+    expect(existsSync(join(userData, 'deliverables'))).toBe(false);
     transport.exit(0);
     await host.ipc.table.get(id)!.exited;
   });
-});
 
-describe('deliverables.changed and the capture bridge (E2 M1)', () => {
-  // P3-A (M6): the artifact tools write through the host's artifact store, handed to every launch
-  let documents: Documents;
-  beforeEach(() => {
-    documents = openDocuments(userData, () => {})!;
-  });
-  afterEach(() => documents.close());
-
-  it("relays the launcher's store writes as deliverables.changed and a screenshot's request as maws.artifact.capture, answered by maws.artifact.captured", async () => {
+  it("relays a screenshot's request as maws.artifact.capture, answered by maws.artifact.captured", async () => {
     const page = join(userData, 'dashboard.html');
     writeFileSync(page, '<h1>HELLO_E2</h1>');
     const transport = scriptedTransport({ onWrite: autoResponder(handshakeResponder()) });
@@ -1090,13 +1090,11 @@ describe('deliverables.changed and the capture bridge (E2 M1)', () => {
     const call = (requestId: string, name: string, args: unknown) =>
       transport.push({ type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name, arguments: args } } } });
     call('mcp-create', 'artifact_create', { id: 'dash', html_path: page, title: 'Dashboard' });
-    await until(() => host.emitted.some((e) => e.name === 'deliverables.changed'), 'the store announcement');
-    const changed = host.emitted.find((e) => e.name === 'deliverables.changed')!.payload as { appSessionId: string; id: string; change: string };
-    expect(changed).toMatchObject({ appSessionId: id, change: 'created' });
-    expect(existsSync(join(userData, 'deliverables', id, `${changed.id}.json`))).toBe(true);
+    await until(() => documents.store.resolve('dash', [id]) !== null, 'the page');
+    const changed = { id: documents.store.resolve('dash', [id])! };
     call('mcp-shot', 'artifact_screenshot', { id: 'dash', width: 640, height: 480 });
     await until(() => host.emitted.some((e) => e.name === 'maws.artifact.capture'), 'the capture request');
-    expect(host.emitted.find((e) => e.name === 'maws.artifact.capture')!.payload).toEqual({ appSessionId: id, requestId: 'mcp-shot', deliverableId: changed.id, version: 1, width: 640, height: 480 });
+    expect(host.emitted.find((e) => e.name === 'maws.artifact.capture')!.payload).toEqual({ appSessionId: id, requestId: 'mcp-shot', artifactId: changed.id, revision: documents.store.revision(changed.id), width: 640, height: 480 });
     const result = { ok: true as const, png: 'iVBORw0KGgo=', width: 640, height: 480, consoleErrors: [] };
     expect(await host.call('maws.artifact.captured', { appSessionId: id, requestId: 'mcp-shot', result })).toEqual({ outcome: 'delivered' });
     expect(await host.call('maws.artifact.captured', { appSessionId: id, requestId: 'mcp-shot', result })).toEqual({ outcome: 'not_pending' });
@@ -1117,7 +1115,7 @@ describe('deliverables.changed and the capture bridge (E2 M1)', () => {
   });
 
   // P2-E1 start (2026-10-09): the artifact scope beside the spec, and one write chain for every session of the host (D10)
-  it("session.launch's artifactScope reaches the thread's tools, and the parent's and the thread's writes to one record queue on one chain", async () => {
+  it("session.launch's artifactScope reaches the thread's tools, and the parent's and the thread's writes take distinct versions of one page", async () => {
     const page = join(userData, 'dashboard.html');
     writeFileSync(page, '<h1>HELLO_E1</h1>');
     const transports = [scriptedTransport({ onWrite: autoResponder(handshakeResponder()) }), scriptedTransport({ onWrite: autoResponder(handshakeResponder()) })];
@@ -1155,11 +1153,8 @@ describe('deliverables.changed and the capture bridge (E2 M1)', () => {
     call(threadT, 'mcp-thread-2', 'artifact_publish', { artifact: 'dash', baseRevision: first.revision, files: { 'index.html': '<h1>thread 2</h1>' }, force: true });
     const raced = [await answered(parentT, 'mcp-parent-2'), await answered(threadT, 'mcp-thread-2')].map((answer) => answer.version);
     expect(raced.sort()).toEqual([3, 4]);
-    const record = JSON.parse(readFileSync(join(userData, 'deliverables', parent, `${String(deliverableId)}.json`), 'utf8')) as { versions: unknown[] };
-    expect(record.versions).toHaveLength(4);
-    expect(existsSync(join(userData, 'deliverables', thread))).toBe(false);
-    const changed = host.emitted.filter((e) => e.name === 'deliverables.changed').map((e) => (e.payload as { appSessionId: string }).appSessionId);
-    expect(new Set(changed)).toEqual(new Set([parent]));
+    expect(documents.store.listVersions(String(deliverableId))).toHaveLength(4);
+    expect(existsSync(join(userData, 'deliverables'))).toBe(false);
     parentT.exit(0);
     threadT.exit(0);
     await Promise.all([host.ipc.table.get(parent)!.exited, host.ipc.table.get(thread)!.exited]);

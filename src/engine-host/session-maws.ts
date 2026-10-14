@@ -13,8 +13,7 @@ import { askAnswersProblem, askSteerText, type PendingAsk } from '@shared/maws/a
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { EXPORT_ANSWER_MS, type AskAnswer, type AskResult } from '@shared/maws/tools';
 import type { ControlRequestFrame } from '@shared/wire/frames';
-import { recordDownload } from './deliverables/downloads'; // E13
-import { MemoryDeliverableStore, type DeliverableChange, type DeliverableWriter, type OnDeliverableWritten } from './deliverables/store';
+import { recordDownload } from './library/downloads'; // E13; P3-L M6b: a File artifact
 import type { WriteOptions } from './outbound-writer';
 import type { MessageQueue } from './queue';
 import { AskAnswerMismatch } from './tool-server/ask';
@@ -33,19 +32,14 @@ type AppSessionIdOf = LaunchSpec['appSessionId'];
 // The session's events the wiring raises, each relayed to the windows or to main by the engine ipc.
 export interface MawsListeners {
   paneShow: (request: PaneShowRequest & { appSessionId: AppSessionIdOf }) => void; // E1: `show_pane` asks the windows (maws.pane.show)
-  // E2 start: the store wrote a record (deliverables.changed); `artifact_screenshot` asks main to capture (maws.artifact.capture)
-  deliverableChanged: (change: { appSessionId: AppSessionIdOf; id: string; change: DeliverableChange }) => void;
-  artifactCapture: (request: ArtifactCaptureRequest & { appSessionId: AppSessionIdOf }) => void;
-  // E2 end
+  artifactCapture: (request: ArtifactCaptureRequest & { appSessionId: AppSessionIdOf }) => void; // E2: `artifact_screenshot` asks main to capture (maws.artifact.capture)
   artifactExport: (request: ArtifactExportRequest) => void; // P3-A M7: `artifact_export` asks main to export (maws.artifact.export)
 }
 
 export interface SessionMawsHost {
   appSessionId: AppSessionIdOf;
   appVersion?: string;
-  // E1: where the `maws` tools record deliverables (EngineSessionOptions.deliverables); E10: whether an app is connected
-  deliverables?: (onWritten: OnDeliverableWritten) => DeliverableWriter;
-  hasClient?: () => boolean;
+  hasClient?: () => boolean; // E10: whether an app is connected
   artifactScope?: readonly AppSessionIdOf[]; // P2-E1: EngineSessionOptions.artifactScope, handed to the artifact tools
   artifacts?: () => ArtifactStore | null; // P3-A (M6): EngineSessionOptions.artifacts
   emit<K extends keyof MawsListeners>(name: K, payload: Parameters<MawsListeners[K]>[0]): void;
@@ -69,24 +63,21 @@ export class SessionMaws {
   private readonly exports: ExportBridge; // P3-A M7: the bridge `artifact_export` asks main through
   private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
   private askItems = new Map<string, AttentionItem>(); // E1 M4b: the blocking asks' attention items, published with the broker's
-  private readonly deliverables: DeliverableWriter; // E1: the tools' writer; E13: an agent's downloads recorded through it too
 
   constructor(private readonly host: SessionMawsHost) {
     // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.panes = new PaneBridge({ show: (request) => host.emit('paneShow', { appSessionId: host.appSessionId, ...request }), hasClient: host.hasClient /* E10 */ });
     this.captures = new HostBridge({ send: (request) => host.emit('artifactCapture', { appSessionId: host.appSessionId, ...request }), answerMs: CAPTURE_ANSWER_MS, hasClient: host.hasClient /* E10 */ }); // E2
     this.exports = new HostBridge({ send: (request) => host.emit('artifactExport', request), answerMs: EXPORT_ANSWER_MS, hasClient: host.hasClient }); // P3-A M7
-    const announce: OnDeliverableWritten = (record, change) => host.emit('deliverableChanged', { appSessionId: record.appSessionId, id: record.id, change }); // E2
     this.askTable = new AskTable({
       onChange: () => {
         this.publishAsks(); // E1 M4b
         host.touch();
       },
     });
-    this.deliverables = host.deliverables?.(announce) ?? new MemoryDeliverableStore({ onWritten: announce });
     this.toolServer = new MawsToolServer({
       tools: mawsTools({
-        deliverables: this.deliverables, bridge: this.panes, capture: this.captures /* E2 */,
+        bridge: this.panes, capture: this.captures /* E2 */,
         asks: this.askTable, askCancelled: (ask, reason) => this.askCancelled(ask, reason),
         artifactScope: host.artifactScope, // P2-E1
         artifacts: host.artifacts, session: new ArtifactSession(), log: host.log, // P3-A (M6)
@@ -137,13 +128,15 @@ export class SessionMaws {
     return this.exports.answer(requestId, answer);
   }
 
-  // E13: an agent's download through cua finished (`maws.download.recorded`): a file deliverable, once per path; a write
-  // that fails is logged and leaves the saved file as it is.
+  // E13: an agent's download through cua finished (`maws.download.recorded`): P3-L M6b, a File artifact of the session,
+  // once per path; a write that fails (or no store this run) is logged and leaves the saved file as it is.
   async recordDownload(download: MawsDownloadRecorded): Promise<'recorded' | 'duplicate'> {
     try {
-      return await recordDownload(this.deliverables, download);
+      const store = this.host.artifacts?.() ?? null;
+      if (store === null) throw new Error('the artifact store is unavailable in this run of MAWS');
+      return await recordDownload(store, download);
     } catch (error) {
-      this.host.log(`could not record the download of tab ${download.tabId} as a deliverable: ${(error as Error).message}`);
+      this.host.log(`could not record the download of tab ${download.tabId} as an artifact: ${(error as Error).message}`);
       throw error;
     }
   }

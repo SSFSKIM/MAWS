@@ -27,7 +27,6 @@ import { resetQueueStore } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { A, panelOf, resetPanelStores } from '../../test-support/panel';
 import { resetSetupStore, trustState } from '../../test-support/setup-intents';
-import { deliverables, lookupKey } from '../../tools/deliverables/store';
 import { openCommentComposer, registerCommentComposer } from '../../tools/code/anchor/anchor';
 import { registerRequestRenderer, registerTranscriptActions, useTranscriptStore } from '../../transcript';
 import { builder, request, tool, uuid } from '../../transcript/model/test-events';
@@ -46,7 +45,7 @@ vi.mock('../../composer/submit/send-human-prompt', async (original) => ({ ...(aw
 
 const PARENT = A;
 const RECORD = '00000000-0000-4000-8000-0000000000e1';
-const ANCHOR: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: deliverableUrl(PARENT, RECORD, 1) };
+const ANCHOR: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: deliverableUrl(PARENT, RECORD, 1) }; // P3-L M6b: a legacy anchor, the artifact's page
 const COMMENT = 'Make the heading larger';
 const REPLY = 'Done: the heading is now 48 px.';
 const HOST_BOX = { width: 600, height: 800 };
@@ -107,7 +106,6 @@ afterEach(() => {
   offs.splice(0).forEach((off) => off());
   useCommentCard.setState({ open: null, shownThread: null });
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
-  deliverables.setState({ lookups: new Map() });
 });
 
 const FRAME: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: 'k1', showVersion };
@@ -115,7 +113,7 @@ const FRAME: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: 'k1', showVers
 function mount() {
   return render(
     <div className="relative">
-      <CommentCardHost hostId="h1" host="deliverable" mode="panel" layout="anchored" accepts={() => true} frame={FRAME} visible />
+      <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={FRAME} visible />
     </div>,
   );
 }
@@ -129,7 +127,7 @@ const push = (events: SessionEvent[]) => act(() => fake.event('session.eventBatc
 // Pick, type the comment, Enter: the fork answers at once and the card turns into the thread.
 async function intoThread() {
   mount();
-  act(() => openCommentComposer(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'deliverable', hostId: 'h1', rect: { x: 24, y: 0, width: 300, height: 90 } } }));
+  act(() => openCommentComposer(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'h1', rect: { x: 24, y: 0, width: 300, height: 90 } } }));
   await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), `${COMMENT}{Enter}`);
   await waitFor(() => expect(card()?.dataset.cardPhase).toBe('thread'));
 }
@@ -195,7 +193,7 @@ describe('the card becomes the thread', () => {
     fake = fakeClient({ 'session.intent.get': null });
     window.maws = fake.client;
     mount();
-    act(() => openCommentComposer(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'deliverable', hostId: 'h1' } }));
+    act(() => openCommentComposer(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'h1' } }));
     await userEvent.type(screen.getByRole('textbox', { name: 'Comment' }), `${COMMENT}{Enter}`);
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: child }));
@@ -498,10 +496,11 @@ describe('the thread’s Edit', () => {
 });
 
 describe('the thread’s artifact row', () => {
-  it('Open on the card’s own record shows that version in the card’s viewer (null for the latest); another record goes to the registered action', async () => {
+  // P3-L M6b: the card's artifact is the one its (legacy) anchor's page names; the viewer's `showVersion` follows the
+  // latest when n is its last version (`versionToShow`), so the place goes as it is
+  it('Open on the card’s own artifact shows that version in the card’s viewer; another artifact goes to the registered action', async () => {
     const registered = vi.fn();
-    offs.push(registerTranscriptActions({ openDeliverable: registered }));
-    deliverables.setState({ lookups: new Map([[lookupKey(PARENT, RECORD), { status: 'ready', record: { versions: [{}, {}, {}] } as never, present: [true, true, true] }]]) });
+    offs.push(registerTranscriptActions({ openArtifact: registered }));
     const b = threadTurn();
     b.turn('t2', 'Update it');
     const update = (id: string, deliverableId: string, version: number) => {
@@ -518,7 +517,7 @@ describe('the thread’s artifact row', () => {
     await waitFor(() => expect(card()!.querySelectorAll('[data-artifact]')).toHaveLength(3));
     const open = (n: number) => fireEvent.click(within(card()!.querySelectorAll<HTMLElement>('[data-artifact]')[n]!).getByRole('button', { name: 'Open' }));
     open(0);
-    expect(showVersion).toHaveBeenLastCalledWith(null);
+    expect(showVersion).toHaveBeenLastCalledWith(3);
     open(1);
     expect(showVersion).toHaveBeenLastCalledWith(2);
     open(2);

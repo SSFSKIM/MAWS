@@ -1,9 +1,15 @@
 // E2 (M4): what an HTML page's frame logged (Design §8): a chip counting its errors (its warnings when it logged no
 // error), present only while there are any, opening a popover that lists each message with its level and line. P3-L
-// (M5b): moved here to be shared by the Deliverables tool's chip (its store's entries, `../../deliverables/ConsoleChip`)
-// and the artifact store's HTML viewer (`artifacts.console`'s).
+// (M5b): moved here beside the artifact store's HTML viewer (`artifacts.console`'s); M6b: the transcript's artifact
+// row draws it too, for the version its row names (`ArtifactVersionConsoleChip`).
 import { Popover } from 'radix-ui';
+import { useArtifactConsoleAt } from './console';
 import { VIEWERS_COPY } from './copy';
+
+// M6b: the chip of the n-th version of an artifact (the transcript's artifact row's, E2's `ConsoleChip` before it).
+export function ArtifactVersionConsoleChip({ artifactId, version }: { artifactId: string; version: number }) {
+  return <ConsoleEntriesChip entries={useArtifactConsoleAt(artifactId, version)} />;
+}
 
 export interface ConsoleChipEntry {
   level: 'error' | 'warning';

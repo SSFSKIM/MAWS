@@ -8,7 +8,7 @@
 // `data-pending`, the entry's completed and in-flight loads: an e2e's barrier for the re-reads after an own save).
 //
 // E2 (E2 execution document, Design §3): the body is `FileBody` (the mount, the notices, the Wrap and Source controls and
-// the content), which the deliverables viewer mounts read-only under its own header; the file tab adds the path at the
+// the content), which the File artifact viewer mounts read-only under its own header; the file tab adds the path at the
 // bar's start and E5's editor controls beside the notices.
 //
 // P2-F W-V (L95, §2 item 6): an image's zoom lives here, beside the bar that draws its controls and the view it sizes.
@@ -82,7 +82,7 @@ function Refused({ path, message }: { path: string; message: string }) {
 const Loading = () => <p className="p-4 text-ui text-fg-muted">{VIEWER_COPY.loading}</p>;
 
 interface FileBodyProps {
-  tabId: string; // the viewer store's key: a file tab's id, or the deliverables viewer's `deliverable:<id>:v<n>`
+  tabId: string; // the viewer store's key: a file tab's id, or the File artifact viewer's `artifact:<id>:<revision>`
   appSessionId: AppSessionId;
   path: string;
   line?: number | null;

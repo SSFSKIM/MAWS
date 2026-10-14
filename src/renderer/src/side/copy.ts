@@ -69,7 +69,7 @@ export const SIDE_COPY = {
     openAsTab: 'Open as tab',
     shownInMain: 'Shown in the main area',
     goToTab: 'Go to tab',
-    showInDeliverable: 'Show in deliverable', // P2-E1: a thread on an artifact element, back in a card beside the element
+    showInArtifact: 'Show in artifact', // P2-E1 (E2's 'Show in deliverable'; P3-L M6b): a thread on an artifact element, back in a card beside the element
     showInBrowser: 'Show in browser', // P2-F L146: a thread on a page element, back in the card under the page
     reopenInBrowser: 'Reopen in browser', // P2-F: the same, when the Side pane took Browser's place in the panel
     shownInCard: 'Shown in the card under the page',

@@ -1,13 +1,13 @@
 // E2 (M5, Design §9): an artifact row on screen. Its heading by state ("Artifact Dashboard · v1", "Updated artifact
 // Dashboard · v2", "Registering artifact Dashboard…", "Artifact Dashboard" when the result named no version, "Could not
 // register artifact nope: …" without the tool's prefix and hint), one quiet Open that hands the row's session,
-// deliverable id and version to `openDeliverable`, and the console chip while the deliverables store holds what that
-// version's frame logged.
+// deliverable id (the artifact's) and version to `openArtifact`, and the console chip while the console store holds
+// what that version's frame logged (P3-L M6b: the revision a viewer placed at the row's version).
 import type { AppSessionId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadJournal } from '../../../../../../test/support/fixtures';
-import { consoleKey, deliverables, resetDeliverables } from '../../../tools/deliverables/store';
+import { applyArtifactConsole, noteArtifactVersions, resetArtifactConsole } from '../../../tools/artifacts/viewers/console';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
 import type { Row } from '../../model/rows';
@@ -15,7 +15,7 @@ import { renderRow, storeWith } from './test-support';
 
 afterEach(() => {
   cleanup();
-  resetDeliverables();
+  resetArtifactConsole();
 });
 
 type ArtifactRow = Extract<Row, { kind: 'artifact' }>;
@@ -76,23 +76,27 @@ describe('the artifact row', () => {
     expect(refused('create', 'artifact_create: x.html is not a file')).toBe('Could not register artifact x: x.html is not a file');
   });
 
-  it('Open hands the row’s session, deliverable id and version to openDeliverable; a child transcript’s row opens in its parent session', () => {
+  it('Open hands the row’s session, artifact id and version to openArtifact; a child transcript’s row opens in its parent session', () => {
     const { actions } = renderRow({ ...BASE, action: 'update', version: 2 }, { storeKey: APP });
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(actions.openDeliverable).toHaveBeenCalledExactlyOnceWith(APP, ID, 2);
+    expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, ID, 2);
     cleanup();
     const child = renderRow(BASE, { storeKey: `${APP}:agent-1` });
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(child.actions.openDeliverable).toHaveBeenCalledExactlyOnceWith(APP, ID, 1);
+    expect(child.actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, ID, 1);
   });
 
-  // P2-E1 (D10): a version a side thread wrote into its parent's artifact opens, and chips, against the parent's record
-  it("a row naming the artifact's owner opens the owner's record and reads the owner's console", () => {
+  // P2-E1 (D10): a version a side thread wrote into its parent's artifact opens in the parent's panel; its console is the
+  // artifact's, whichever session's row names it
+  it("a row naming the artifact's owner opens it in the owner's session and reads the artifact's console", () => {
     const PARENT = 'app-parent' as AppSessionId;
     const { actions, container } = renderRow({ ...BASE, action: 'update', version: 2, ownerAppSessionId: PARENT }, { storeKey: APP });
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(actions.openDeliverable).toHaveBeenCalledExactlyOnceWith(PARENT, ID, 2);
-    act(() => deliverables.setState({ console: new Map([[consoleKey(PARENT, ID, 2), [{ level: 'error', message: 'Uncaught Error: E1_BOOM', line: 3, source: null }]]]) }));
+    expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(PARENT, ID, 2);
+    act(() => {
+      noteArtifactVersions(ID, [3, 8]);
+      applyArtifactConsole({ artifactId: ID, revision: 8, level: 'error', message: 'Uncaught Error: E1_BOOM', line: 3, source: null });
+    });
     expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
   });
 
@@ -101,17 +105,21 @@ describe('the artifact row', () => {
     const open = screen.getByRole<HTMLButtonElement>('button', { name: 'Open' });
     expect(open.disabled).toBe(true);
     fireEvent.click(open);
-    expect(actions.openDeliverable).not.toHaveBeenCalled();
+    expect(actions.openArtifact).not.toHaveBeenCalled();
   });
 
+  // P3-L M6b: the row names its version by its place; a viewer that read the versions placed each revision, and the
+  // chip reads the console of the revision at the row's place (v1 here is revision 5, never revision 1)
   it('shows the console chip for its own version while the store holds what that frame logged, and drops it when cleared', () => {
     const { container } = renderRow(BASE, { storeKey: APP });
-    expect(container.querySelector('[data-console-chip]')).toBeNull();
-    act(() => deliverables.setState({ console: new Map([[consoleKey(APP, ID, 2), [{ level: 'error', message: 'other version', line: 1, source: null }]]]) }));
-    expect(container.querySelector('[data-console-chip]')).toBeNull();
-    act(() => deliverables.setState({ console: new Map([[consoleKey(APP, ID, 1), [{ level: 'error', message: 'Uncaught Error: E2_BOOM', line: 3, source: null }, { level: 'warning', message: 'w', line: null, source: null }]]]) }));
+    act(() => applyArtifactConsole({ artifactId: ID, revision: 5, level: 'error', message: 'Uncaught Error: E2_BOOM', line: 3, source: null }));
+    expect(container.querySelector('[data-console-chip]')).toBeNull(); // no viewer has placed the versions yet
+    act(() => noteArtifactVersions(ID, [5, 9]));
     expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
-    act(() => deliverables.setState({ console: new Map() }));
+    act(() => applyArtifactConsole({ artifactId: ID, revision: 1, level: 'error', message: 'revision 1 is not v1', line: 1, source: null }));
+    act(() => applyArtifactConsole({ artifactId: ID, revision: 9, level: 'error', message: 'other version', line: 1, source: null }));
+    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+    act(() => resetArtifactConsole());
     expect(container.querySelector('[data-console-chip]')).toBeNull();
   });
 });

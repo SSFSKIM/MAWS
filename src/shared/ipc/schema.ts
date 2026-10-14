@@ -35,7 +35,6 @@ import * as scm from './schema/scm';
 import * as side from './schema/side';
 // E3 end
 // E2 start
-import * as deliverables from './schema/deliverables';
 // E2 end
 // E10 start
 import * as host from './schema/host';
@@ -133,7 +132,6 @@ export const commands = {
   ...side.commands,
   // E3 end
   // E2 start
-  ...deliverables.commands,
   // E2 end
   // E10 start
   ...host.commands,
@@ -175,7 +173,6 @@ export const events = {
   ...side.events,
   // E3 end
   // E2 start
-  ...deliverables.events,
   // E2 end
   // E10 start
   ...host.events,
@@ -196,7 +193,7 @@ export type EventName = keyof typeof events;
 // E10 start: the events the engine host emits, and only those (E10 execution document, §Design 2). They cross the
 // main ↔ engine-host wire, so they enter the wire fingerprint (`wire-fingerprint.ts`); the host runtime refuses to emit
 // an event outside the list, so the list cannot drift from the emitters. Main-emitted events (`engine.hostState`,
-// `deliverables.console`, settings, layout, git…) never cross the socket and stay out.
+// `artifacts.console`, settings, layout, git…) never cross the socket and stay out.
 export const HOST_EVENTS = [
   'session.eventBatch',
   'session.status',
@@ -218,7 +215,6 @@ export const HOST_EVENTS = [
   'fs.foreignWrite',
   'plugins.operation',
   'plugins.changed',
-  'deliverables.changed',
   'maws.pane.show',
   'maws.artifact.capture',
   'maws.artifact.export', // P3-A M7: `artifact_export` asks main's export service

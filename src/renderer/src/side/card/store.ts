@@ -8,19 +8,22 @@
 import { create } from 'zustand';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
-import { parseDeliverableUrl } from '@shared/maws/deliverable';
+import { parseDeliverableUrl } from '@shared/maws/deliverable'; // P3-L (M6b): a legacy anchor's page URL
 import { parseArtifactUrl, type ArtifactUrlRevision } from '@shared/artifacts/scheme'; // P3-L (M5b)
 import type { CardRect, CommentContext } from '../../tools/code/anchor/anchor';
 
-// What the card is about, as a host recognises it: a delivered record's version, (P2-E2) a browser page by its URL, or
-// (P3-L M5b, Decision Log 10) an HTML artifact's page on the store's scheme at a revision, whose host is the artifact
-// viewer's. The `deliverable` target and host stay until the cutover (M6).
+// What the card is about, as a host recognises it: (P2-E2) a browser page by its URL, or (P3-L M5b, Decision Log 10) an
+// HTML artifact's page on the store's scheme at a revision, whose host is the artifact viewer's. P3-L M6b: E2's
+// `deliverable` target is gone; an anchor stored before the cutover names its page `maws-deliverable://<id>/<app>/<n>`,
+// whose record id is the artifact's and whose n is the n-th of the artifact's versions in the order of their revisions
+// (Decision Log 4: imported in order, never thinned), never revision n. Its target carries that place as `version`,
+// with `revision` null: the revision is the artifact's n-th version's, which only a read of its versions names (the
+// viewer's places, `versionsInOrder`).
 export type CardTarget =
-  | { kind: 'deliverable'; appSessionId: AppSessionId; deliverableId: string; version: number }
   | { kind: 'browser'; pageUrl: string }
-  | { kind: 'artifact-page'; artifactId: string; revision: ArtifactUrlRevision };
+  | { kind: 'artifact-page'; artifactId: string; revision: ArtifactUrlRevision | null; version?: number };
 export type CardPhase = { kind: 'composing' } | { kind: 'thread'; child: AppSessionId; echo: string | null };
-export type CardHostKind = 'deliverable' | 'browser' | 'artifact-page';
+export type CardHostKind = 'browser' | 'artifact-page';
 export type CardHostMode = 'panel' | 'tab';
 
 export interface OpenCard {
@@ -55,8 +58,8 @@ export function targetOf(anchor: Anchor): CardTarget | null {
   if (anchor.kind !== 'artifact-element') return null;
   const page = parseArtifactUrl(anchor.pageUrl); // P3-L (M5b)
   if (page) return { kind: 'artifact-page', artifactId: page.artifactId, revision: page.revision };
-  const parsed = parseDeliverableUrl(anchor.pageUrl);
-  return parsed && { kind: 'deliverable', appSessionId: parsed.appSessionId, deliverableId: parsed.id, version: parsed.version };
+  const legacy = parseDeliverableUrl(anchor.pageUrl); // P3-L (M6b)
+  return legacy && { kind: 'artifact-page', artifactId: legacy.id, revision: null, version: legacy.version };
 }
 
 // The seam's opener for a card placement (`register.ts`), and the re-dock's (no `hostId`, a `claimMode`). Without a
@@ -69,7 +72,7 @@ export function openCard(anchor: Anchor, context: CommentContext & { phase?: Car
     serial,
     parent: context.appSessionId,
     anchor,
-    host: placement?.host ?? target?.kind ?? 'deliverable',
+    host: placement?.host ?? target?.kind ?? 'artifact-page',
     hostId: placement?.hostId ?? null,
     claimMode: context.claimMode ?? null,
     openedAt: Date.now(),
