@@ -1,7 +1,7 @@
 // The engine host's design-system module over A's real store (P3-D M6; docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md
 // D9, D10; Acceptance 7 through the store, 12 and 13): seeding, the default chain, the context `artifact_create`
 // attaches, the agent's publish through the registered adapter, deletion's refusal and the pinned version's read.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -10,13 +10,14 @@ import { designSystemMirrorWriter } from '@artifacts/design-system/mirror';
 import { isGeneratedPath, readFiles, readSystem, setToken, writeSystem } from '@artifacts/design-system/model';
 import { parseTokens, serializeTokens } from '@artifacts/design-system/tokens';
 import { snapshotOfDoc, staticView } from '@artifacts/design-system/view';
-import { mirrorWriterFor } from '@artifacts/library/mirror';
+import { mirrorSlug, mirrorWriterFor } from '@artifacts/library/mirror';
 import { DEFAULT_SYSTEMS, HOUSE_KEY } from '@artifacts/types/design_system/defaults';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { openDocuments, type Documents } from '../documents';
 import { ArtifactStoreError } from '../documents/errors';
+import { LibraryMirror } from '../library/mirror';
 import { artifactCreateTool, artifactDescribeTypeTool } from '../tool-server/artifact-tools';
 import { jsonOf, openWorld } from '../tool-server/artifact-world.fixture';
 import { registerDesignSystems, type DesignSystems } from '.';
@@ -329,5 +330,24 @@ describe('the mirror (Decision Log 18)', () => {
     systems.close();
     expect(mirrorWriterFor('design_system')).toBeUndefined();
     systems = registerDesignSystems({ documents, log: () => {}, loadAssets: async () => [] }); // afterEach closes it
+  });
+
+  it('mirrors a system in a linked Space with its assets, its face included, read from the store (L’s M6b)', async () => {
+    await systems.seeded;
+    const project = mkdtempSync(join(tmpdir(), 'maws-design-systems-project-'));
+    const mirror = new LibraryMirror(documents, { log: () => {} });
+    try {
+      const space = await store().createSpace({ name: 'Brand', linkedDir: project });
+      const id = byKey('official');
+      await store().update(id, { spaceId: space.id });
+      await mirror.start();
+      await mirror.flush();
+      const folder = join(project, 'artifacts', mirrorSlug(store().get(id)!));
+      expect([...readFileSync(join(folder, 'assets', FONT.name))]).toEqual([...FONT.bytes]);
+      expect(readFileSync(join(folder, 'tokens.css'), 'utf8')).toContain('--ds-color-accent');
+    } finally {
+      mirror.close();
+      rmSync(project, { recursive: true, force: true });
+    }
   });
 });
