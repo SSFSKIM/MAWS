@@ -54,6 +54,10 @@
     "src/artifacts/design-system/apply.ts",
     "src/artifacts/design-system/scope-style.ts",
     "src/artifacts/design-system/page/**/*",
-    "src/artifacts/design-system/**/*.test.tsx"
+    "src/artifacts/design-system/**/*.test.tsx",
+    // P3-C M4: the slide canvas and the deck editor (DOM and React) and their DOM suites, typechecked by tsconfig.web.json
+    "src/artifacts/slides/canvas/**/*",
+    "src/artifacts/slides/editor/**/*",
+    "src/artifacts/**/*.dom.test.tsx"
   ]
 }

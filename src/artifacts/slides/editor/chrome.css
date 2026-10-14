@@ -1,0 +1,331 @@
+/* The deck editor's chrome (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8; M4): the toolbar, the
+   filmstrip, the stage's surround, the held banner, the notes and the menus. The app's UI around the slides, so it reads
+   the app's tokens only (light by default); the slides themselves are deck.css's and CANVAS_CSS's, in the design
+   system's scope. */
+
+.deck-editor {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+}
+.deck-editor-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.deck-editor-main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.deck-ds-scope {
+  display: contents;
+}
+
+/* toolbar */
+.deck-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.deck-toolbar-spacer {
+  flex: 1;
+}
+.deck-button,
+.deck-icon-button,
+.deck-zoom {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: default;
+}
+.deck-button:hover:not(:disabled),
+.deck-icon-button:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.deck-button:disabled {
+  color: var(--fg-faint);
+}
+.deck-button:focus-visible,
+.deck-icon-button:focus-visible,
+.deck-zoom:focus-visible,
+.deck-thumb-button:focus-visible,
+.deck-thumb-menu:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.deck-zoom {
+  border-color: var(--border);
+  color: var(--fg);
+}
+
+/* filmstrip */
+.deck-filmstrip {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.deck-filmstrip-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 8px 8px 8px 0;
+  list-style: none;
+  overflow-y: auto;
+}
+.deck-filmstrip-item {
+  margin: 0 0 8px;
+}
+.deck-thumb {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+.deck-thumb[data-dragging] {
+  z-index: 1;
+  opacity: 0.8;
+}
+.deck-thumb-number {
+  width: 24px;
+  flex-shrink: 0;
+  padding-top: 2px;
+  text-align: right;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  font-variant-numeric: tabular-nums;
+}
+.deck-thumb-button {
+  position: relative;
+  display: block;
+  padding: 0;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  overflow: hidden;
+  cursor: default;
+  touch-action: none;
+}
+.deck-thumb[data-current] .deck-thumb-button {
+  border-color: var(--accent);
+}
+.deck-thumb[data-hidden] .deck-slide-frame {
+  opacity: 0.4;
+}
+.deck-thumb[data-held] .deck-thumb-button {
+  border-style: dashed;
+  border-color: var(--danger);
+}
+.deck-thumb-badge {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--danger);
+  color: var(--bg);
+  font-size: var(--text-ui-sm);
+}
+.deck-thumb-badge-quiet {
+  left: auto;
+  right: 4px;
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+}
+.deck-thumb-menu {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  height: 20px;
+  min-width: 20px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-overlay);
+  color: var(--fg-muted);
+  font: inherit;
+  line-height: 1;
+  opacity: 0;
+}
+.deck-thumb:hover .deck-thumb-menu,
+.deck-thumb:focus-within .deck-thumb-menu,
+.deck-thumb-menu[data-state='open'] {
+  opacity: 1;
+}
+.deck-section {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0 4px 28px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+}
+.deck-section-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deck-section[data-empty] .deck-section-title {
+  font-style: italic;
+}
+.deck-section-actions .deck-icon-button {
+  height: 20px;
+  min-width: 20px;
+  padding: 0 4px;
+  font-size: var(--text-ui-sm);
+}
+.deck-section-input {
+  width: calc(100% - 28px);
+  margin: 8px 0 4px 28px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-ui-sm);
+}
+.deck-new-slide {
+  margin: 8px;
+  border-color: var(--border);
+  color: var(--fg);
+}
+.deck-menu {
+  z-index: 50;
+  min-width: 180px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-overlay);
+  color: var(--fg);
+  box-shadow: var(--shadow-float);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+}
+.deck-menu-item {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  user-select: none;
+}
+.deck-menu-item[data-highlighted] {
+  background: var(--bg-hover);
+}
+.deck-menu-item[data-disabled] {
+  color: var(--fg-faint);
+}
+.deck-menu-item[data-danger] {
+  color: var(--danger);
+}
+.deck-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--border);
+}
+
+/* stage and notes */
+.deck-stage-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.deck-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-active);
+}
+.deck-stage-center {
+  display: flex;
+  min-width: 100%;
+  min-height: 100%;
+  width: max-content;
+  padding: 24px;
+  box-sizing: border-box;
+}
+.deck-stage-frame {
+  position: relative;
+  margin: auto;
+  box-shadow: var(--shadow-float);
+}
+.deck-stage-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.deck-held-banner {
+  flex-shrink: 0;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--danger);
+  font-size: var(--text-ui-sm);
+}
+.deck-held-banner ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  color: var(--fg-muted);
+}
+.deck-notes {
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.deck-notes-field {
+  display: block;
+  width: 100%;
+  height: 96px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+  border: 0;
+  resize: vertical;
+  background: transparent;
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+  line-height: 1.5;
+}
+.deck-notes-field:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.deck-quiet {
+  margin: auto;
+  padding: 24px;
+  color: var(--fg-muted);
+  text-align: center;
+}
+.deck-editor[data-compact] .deck-notes-field {
+  height: 72px;
+}

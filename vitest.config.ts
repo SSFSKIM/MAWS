@@ -37,6 +37,8 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
 ];
 const TIMING_RENDERER_TESTS = ['src/renderer/src/App.test.tsx'];
+// P3-C M4 (B's name and glob): the portable artifact layer's suites that need a DOM.
+const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
 
 // C3 start: the `live` project runs the engine-host suite against the pinned binary through the relay
 // (`MAWS_LIVE=1 pnpm test:live`); it exists only under MAWS_LIVE=1 so `pnpm test` and `pnpm verify` never see it.
@@ -95,11 +97,16 @@ export default defineConfig({
           name: 'artifacts',
           environment: 'node',
           include: ['src/artifacts/**/*.test.ts'],
+          exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS], // P3-C M4: the DOM suites run in `artifacts-dom`
           // P3-D M5: a design system's `document.css` is bundled as text (`?raw`); vitest empties unprocessed CSS, raw included.
           css: { include: [/\/design_system\/defaults\/.+\.css/] },
         },
       },
       // P3-A end
+      // P3-C start (M4): the portable layer's suites that need a DOM (the slide canvas, the deck editor) under happy-dom,
+      // as B's `artifacts-dom` project runs its own (the same name and glob, so the two merge as one project)
+      { resolve: { alias }, test: { name: 'artifacts-dom', environment: 'happy-dom', include: [ARTIFACTS_DOM_TESTS] } },
+      // P3-C end
       // C8a start: the panel host's suites again under the React Compiler, as electron-vite builds the app, so a render
       // that reads mutable module state (the instance map, a tool's state) without selecting it is caught in a test.
       {

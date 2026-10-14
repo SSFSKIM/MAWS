@@ -1,0 +1,25 @@
+/* The slides' frames (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8 "Stage and overlay"; M4): a canvas
+   (1920×1080, CANVAS_CSS's `.maws-slide`) scaled into a frame of its scaled size by a CSS transform, so the slide
+   lays out at its own size at every zoom and every thumbnail. Inside the design system's scope; the slide paints its own
+   ground. */
+
+.deck-slide-frame {
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  contain: layout paint;
+}
+.deck-slide-scaler {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1920px;
+  height: 1080px;
+  transform-origin: 0 0;
+}
+.deck-thumb .deck-slide-scaler {
+  pointer-events: none;
+}
+.deck-thumb .deck-slide-scaler x-embed > iframe {
+  visibility: hidden;
+}
