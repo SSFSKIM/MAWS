@@ -26,7 +26,7 @@ const gates = new Set(
 
 const unknown = [...gates].filter((gate) => !['static', 'unit', 'probes'].includes(gate) && !(gate.startsWith('e2e:') && scriptOf(gate.slice(4)) in scripts));
 if (unknown.length > 0) {
-  console.error(`gate-plan: no such gate: ${unknown.join(', ')} (static, unit, probes, e2e:default or e2e:<group> with a package.json script)`);
+  process.stderr.write(`gate-plan: no such gate: ${unknown.join(', ')} (static, unit, probes, e2e:default or e2e:<group> with a package.json script)\n`);
   process.exit(1);
 }
 
@@ -41,4 +41,4 @@ const e2e = [...gates]
 const has = (gate) => String(gates.has(gate));
 appendFileSync(env.GITHUB_OUTPUT, `static=${has('static')}\nunit=${has('unit')}\nprobes=${has('probes')}\ne2e=${JSON.stringify(e2e)}\n`);
 appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${words(asked).length > 0 ? (env.EVENT === 'workflow_dispatch' ? 'the `gates` input' : 'the `Gates:` trailer') : 'the class-1 default'}\n`);
-console.log([...gates].join('\n'));
+process.stdout.write(`${[...gates].join('\n')}\n`);
