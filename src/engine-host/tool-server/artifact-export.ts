@@ -42,7 +42,7 @@ export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportB
       if (!deps.exporter) throw unavailable(`this build of MAWS cannot export a ${target.kind} artifact as ${input.format}`);
       const path = join(store.files.dirOf(artifactId), 'exports', artifactExportName(target.revision, input.format));
       await mkdir(dirname(path), { recursive: true });
-      const outcome = await deps.exporter.request({ requestId: ctx.requestId, appSessionId: ctx.appSessionId, artifactId, format: input.format, ...target, path, ...(input.pageSize !== undefined && { pageSize: input.pageSize }) }, ctx.signal);
+      const outcome = await deps.exporter.request({ requestId: ctx.requestId, appSessionId: ctx.appSessionId, artifactId, format: input.format, ...target, path, ...(input.pageSize !== undefined && { pageSize: input.pageSize }), ...(input.fonts !== undefined && { fonts: input.fonts }) /* P3-C */ }, ctx.signal);
       switch (outcome.kind) {
         case 'timeout':
           throw new ToolRefusal('artifact_export: MAWS did not answer in time');

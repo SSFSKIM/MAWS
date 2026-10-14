@@ -242,9 +242,14 @@ export type ArtifactExportFormat = (typeof ARTIFACT_EXPORT_FORMATS)[number];
 // The paper an export prints on when asked (P3-A Decision Log 42, P3-B's M8); omitted, the exporter's own default.
 export const ARTIFACT_EXPORT_PAGE_SIZES = ['letter', 'a4'] as const;
 export type ArtifactExportPageSize = (typeof ARTIFACT_EXPORT_PAGE_SIZES)[number];
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D12, H2-4; the parent's Decision Log 53 (4)): a deck's
+// PPTX faces: named (the default), basic faces, slides as pictures, or uploaded faces embedded where their licence allows.
+export const ARTIFACT_EXPORT_FONTS = ['named', 'basic', 'pictures', 'embedded'] as const; // P3-C
+export type ArtifactExportFonts = (typeof ARTIFACT_EXPORT_FONTS)[number]; // P3-C
 export const ArtifactExportInputSchema = z.strictObject({
   artifact: ArtifactIdSchema, format: z.enum(ARTIFACT_EXPORT_FORMATS), version: z.number().int().min(1).optional(), to: PathSchema.optional(),
   pageSize: z.enum(ARTIFACT_EXPORT_PAGE_SIZES).optional(),
+  fonts: z.enum(ARTIFACT_EXPORT_FONTS).optional(), // P3-C: a presentation's PPTX faces; omitted, named
 });
 export type ArtifactExportInput = z.infer<typeof ArtifactExportInputSchema>;
 // How long the host waits for main's export service to answer (P3-A M7, X31) before the call answers an error; main's
@@ -489,7 +494,7 @@ export const MAWS_TOOLS = {
   artifact_export: {
     title: 'Export artifact',
     description:
-      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default. Needs the MAWS app open.',
+      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default; fonts chooses a presentation\'s pptx faces (named, the default: the deck\'s faces by name; basic: faces every Office has; pictures: each slide one picture, notes kept; embedded: uploaded faces embedded where their licence allows). A presentation also exports as pdf, html (one standalone page), png (its cover slide) and claude (a zip of Claude-readable slides). Needs the MAWS app open.', // P3-C: fonts and the deck's formats
     input: ArtifactExportInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },

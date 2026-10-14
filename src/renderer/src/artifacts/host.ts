@@ -222,7 +222,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     // kind and format no exporter serves, rejects (`exportUnavailable` for the latter).
     export: async (artifactId, format, version, options) => {
       const { path } = await call('artifacts.export', {
-        artifactId, format: format as CommandInput<'artifacts.export'>['format'], ...(version !== undefined && { versionId: version }), ...(options?.pageSize !== undefined && { pageSize: options.pageSize }),
+        artifactId, format: format as CommandInput<'artifacts.export'>['format'], ...(version !== undefined && { versionId: version }), ...(options?.pageSize !== undefined && { pageSize: options.pageSize }), ...(options?.fonts !== undefined && { fonts: options.fonts }) /* P3-C */,
       });
       return { path };
     },

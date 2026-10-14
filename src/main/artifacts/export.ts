@@ -36,7 +36,7 @@ import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { ArtifactRefusal } from '@shared/ipc/schema/artifacts';
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
-import { artifactExportName, type ArtifactExportFormat, type ArtifactExportPageSize } from '@shared/maws/tools';
+import { artifactExportName, type ArtifactExportFonts /* P3-C */, type ArtifactExportFormat, type ArtifactExportPageSize } from '@shared/maws/tools';
 import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from './capture';
 import { restrictRequests, type SeamEnv } from './policies';
 import { CommandFailure } from '../ipc/router';
@@ -60,6 +60,7 @@ export interface ExportRequest {
   versionId?: number;
   path: string;
   pageSize?: ArtifactExportPageSize;
+  fonts?: ArtifactExportFonts; // P3-C (H2-4): a presentation's PPTX faces; omitted, named
   width?: number;
   height?: number;
 }
@@ -337,7 +338,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   });
 
   return {
-    async exportForLibrary({ artifactId, format, versionId, pageSize, width, height }) {
+    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height }) {
       const time = new ExportBudget(EXPORT_BUDGET_MS);
       let artifact: CommandOutput<'artifacts.get'>['artifact'];
       try {
@@ -365,7 +366,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
         revision = version.seq;
       }
       const path = join(root, artifactId, 'exports', artifactExportName(revision, format));
-      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(width !== undefined && { width }), ...(height !== undefined && { height }) };
+      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }) };
       const result = await queued(request, time);
       if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new CommandFailure(ipcError('internal', result.error));
       return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }) };

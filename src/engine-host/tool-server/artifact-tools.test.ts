@@ -412,6 +412,16 @@ describe('artifact_export', () => {
     expect((await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', pageSize: 'legal' }, w.ctx())).isError).toBe(true);
   });
 
+  // P3-C M9 (H2-4): a presentation's PPTX faces travel to main as the agent named them
+  it('hands the PPTX font variant the agent chose to main, and refuses one it does not know', async () => {
+    jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
+    const sent: ArtifactExportRequest[] = [];
+    const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: (request) => (sent.push(request), queueMicrotask(() => exporter.answer(request.requestId, { ok: true, revision: request.revision, path: request.path }))), answerMs: 60_000 });
+    expect(jsonOf(await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pptx', fonts: 'basic' }, w.ctx()))).toMatchObject({ status: 'exported' });
+    expect(sent).toEqual([expect.objectContaining({ format: 'pptx', fonts: 'basic' })]);
+    expect((await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pptx', fonts: 'serif' }, w.ctx())).isError).toBe(true);
+  });
+
   // fix wave 1 (the review's finding 3, Decision Log 44b): the answer names the snapshot main exported
   it('answers the revision and path main exported (a document that moved since), the remote requests it refused, and refuses a path outside its exports', async () => {
     const plan = await w.store.create({ kind: 'document', title: 'Plan' }, HUMAN);

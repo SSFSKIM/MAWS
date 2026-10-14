@@ -12,7 +12,7 @@ import * as z from 'zod';
 import { ArtifactKindSchema, ArtifactSchema } from '../../artifacts/entity';
 import { ArtifactVersionSchema } from '../../artifacts/version';
 import { AppSessionIdSchema } from '../../graph/ids';
-import { ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
+import { ARTIFACT_EXPORT_FONTS /* P3-C */, ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
 import type { IpcError } from '../errors';
 import type { CommandSpec } from './common';
 
@@ -225,6 +225,7 @@ export const commands = {
       format: z.enum(ARTIFACT_EXPORT_FORMATS),
       versionId: z.number().int().positive().optional(),
       pageSize: z.enum(ARTIFACT_EXPORT_PAGE_SIZES).optional(),
+      fonts: z.enum(ARTIFACT_EXPORT_FONTS).optional(), // P3-C: a presentation's PPTX faces (omitted: named)
       width: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
       height: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
     }),
