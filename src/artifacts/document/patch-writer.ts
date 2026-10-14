@@ -15,12 +15,13 @@
 // which the caller's replica (A's `AgentReplica.edit`) discards rather than sends.
 import type { Node as PMNode } from '@tiptap/pm/model';
 import * as delta from 'lib0/delta';
-import { transact, type Doc, type Node } from '../yjs';
+import { newDoc, transact, type Doc, type Node } from '../yjs';
 import { pmnodeToDelta, ynodeToPmnode } from '../yjs/prosemirror';
 import type { Applied, ApplyOptions, Carry, Op, Slot } from './edit-ops';
 import { canonicalJSON, joinedCells, pmCells, planEdit, textblocksOf, type Plan, type RootAction } from './edit-plan';
 import { diffCells, equalMap, textOf } from './inline-diff';
 import { schemaFor } from './schema';
+import { createDocument } from './tabs';
 import { sentenceHunks } from './sentence';
 import { deepSlotIds, itemAt, itemOf, slotKey, textblocksY } from './structs';
 
@@ -373,4 +374,37 @@ export function applyEdit(doc: Doc, ops: readonly Op[], options: ApplyOptions = 
     transact(doc, () => (carries = writer.write()), options.origin);
   }
   return { results: plan.results, carries, orphaned: plan.orphaned, answer: plan.answer };
+}
+
+/**
+ * One small batch of every op kind on a throwaway document (M9, the scale gate): the markdown parser's, the diff's and
+ * the writer's first runs in a process cost tens of milliseconds, which a host pays here, at the kind's registration,
+ * rather than inside the first agent's batch. Answers the ops it ran.
+ */
+export function warmWriter(): string[] {
+  const doc = newDoc();
+  try {
+    const schema = schemaFor();
+    const body = schema.nodeFromJSON({
+      type: 'doc',
+      content: [
+        { type: 'heading', attrs: { level: 2, id: 'w0h' }, content: [{ type: 'text', text: 'A heading' }] },
+        { type: 'paragraph', attrs: { id: 'w0p' }, content: [{ type: 'text', text: 'The plan ships ' }, { type: 'text', text: 'on time', marks: [{ type: 'bold' }] }, { type: 'text', text: '. It is reviewed.' }] },
+        { type: 'paragraph', attrs: { id: 'w0q' }, content: [{ type: 'text', text: 'Another paragraph.' }] },
+        { type: 'table', attrs: { id: 'w0t' }, content: [0, 1].map((r) => ({ type: 'tableRow', attrs: { id: `w0r${r}` }, content: [0, 1].map((c) => ({ type: r === 0 ? 'tableHeader' : 'tableCell', attrs: { id: `w0r${r}c${c}` }, content: [{ type: 'paragraph', attrs: { id: `w0r${r}c${c}p` }, content: [{ type: 'text', text: `cell ${r} ${c}` }] }] })) })) },
+      ],
+    });
+    createDocument(doc, { title: 'Warm', id: 'warm', body });
+    const ops: Op[] = [
+      { op: 'replace_text', old: 'It is reviewed.', new: 'It is reviewed twice.' },
+      { op: 'replace_block', id: 'w0q', markdown: 'A *rewritten* paragraph.' },
+      { op: 'insert', after: 'w0h', markdown: 'An inserted paragraph.' },
+      { op: 'set_cell', table: 'w0t', row: 1, col: 1, markdown: '42' },
+    ];
+    const applied = applyEdit(doc, ops);
+    applyEdit(doc, [{ op: 'delete', id: applied.results[2]!.newIds[0]! }]);
+    return [...ops.map((op) => op.op), 'delete'];
+  } finally {
+    doc.destroy();
+  }
 }

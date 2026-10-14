@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { contentIdsOf, idAt, onUpdate, stateVector, transact, type Node } from '../yjs';
 import { DocIndex } from './block-index';
 import { EditError, type EditRefusal, type Op } from './edit-ops';
-import { applyEdit } from './patch-writer';
+import { applyEdit, warmWriter } from './patch-writer';
 import { getThread } from './threads';
 import { converged, coveredIn, dupes, ids, liveThreads, marksOf, nodeOf, order, pmOf, replica, seedDoc, sequence, sync, textOf } from './writer.fixture';
 
@@ -91,6 +91,13 @@ describe('the ops (S4 1)', () => {
     const converted = new Set(pm.mock.calls.map(([top]) => top));
     pm.mockRestore();
     expect(converted.size, 'top-level blocks converted').toBeLessThanOrEqual(1);
+  });
+
+  // M9 (the scale gate): a host process's first batch paid the parser's and the diff's first runs (tens of ms); the
+  // kind's registration runs one small batch of each op on a throwaway document instead.
+  it('warms the writer on a throwaway document: every op kind runs once and nothing escapes', () => {
+    const ran = warmWriter();
+    expect(ran.sort()).toEqual(['delete', 'insert', 'replace_block', 'replace_text', 'set_cell']);
   });
 
   it('replace_text not unique: refused, listing the candidate blocks and their match counts', () => {

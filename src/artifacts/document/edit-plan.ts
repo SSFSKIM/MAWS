@@ -294,7 +294,8 @@ const refuse = (refusal: EditRefusal, message: string): never => {
 // A quote's plain-text needle: the longest run of letters or digits once the dialect's own syntax is removed, which
 // the block's text holds wherever its markdown holds the quote (block-index.ts's `text`). A filter only: a quote with
 // no needle, or a refusal for not finding one, falls back to reading every block's markdown.
-function needleOf(quote: string): string | null {
+/** The words (letter and digit runs) a quote's plain text holds, its markdown syntax set aside. */
+function runsOf(quote: string): string[] {
   const plain = quote
     .replace(/\^[0-9a-z]{2,32}/g, ' ')
     .replace(/<[^>]*>/g, ' ')
@@ -302,8 +303,12 @@ function needleOf(quote: string): string | null {
     .replace(/:{3,}\w*/g, ' ')
     .replace(/\{[^}]*\}/g, ' ')
     .replace(/\]\([^)]*\)/g, ' ');
+  return plain.match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+function needleOf(quote: string): string | null {
   let best: string | null = null;
-  for (const run of plain.match(/[\p{L}\p{N}]+/gu) ?? []) if (!best || run.length > best.length) best = run;
+  for (const run of runsOf(quote)) if (!best || run.length > best.length) best = run;
   return best;
 }
 
@@ -675,9 +680,13 @@ class Planner {
       return top ? this.index.text(top) : this.current(key)!.textBetween(0, this.current(key)!.content.size, '\n');
     };
     // the needle prefilter reads the blocks' Yjs text (no conversion), then each candidate's own text
+    // (every word of the quote in it: the strings a block's Yjs nodes hold, so no candidate is converted to be ruled out)
+    const runs = runsOf(quote);
     const holds = (key: string, needle: string): boolean => {
       const top = !this.tops.has(key) ? this.byKey.get(key) : undefined;
-      return top ? this.index.rawText(top).includes(needle) && this.index.text(top).includes(needle) : textOf(key).includes(needle);
+      if (!top) return textOf(key).includes(needle);
+      const raw = this.index.rawText(top);
+      return runs.every((run) => raw.includes(run));
     };
     const search = (needle: string | null) =>
       live

@@ -14,6 +14,7 @@
 // hook in M9's fix wave.)
 import { documentAdapter, type DocumentAdapter } from '@artifacts/document/adapter';
 import { documentMirrorWriter } from '@artifacts/document/mirror';
+import { warmWriter } from '@artifacts/document/patch-writer';
 import { registerMirrorWriter } from '@artifacts/library/mirror';
 import type { ArtifactStore } from '../store';
 
@@ -29,11 +30,20 @@ export function registerDocumentKind(store: ArtifactStore): DocumentKind {
     if (change.kind === 'document' && change.change === 'deleted') adapter.forgetArtifact(change.artifactId);
   });
   const offMirror = registerMirrorWriter('document', documentMirrorWriter);
+  // the writer's first runs (the parser, the diff) paid here, once, off any agent's batch (M9, the scale gate)
+  const warming = setImmediate(() => {
+    try {
+      warmWriter();
+    } catch (error) {
+      console.warn(`[documents] the writer's warm-up failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  });
   return {
     adapter,
     close: () => {
       off();
       offMirror();
+      clearImmediate(warming);
     },
   };
 }

@@ -190,11 +190,13 @@ export class DocIndex {
    */
   warm(stop: () => boolean = () => false): boolean {
     this.refresh();
-    for (const tab of this.tabs) {
-      for (const top of tab.tops ?? []) {
-        if (top.textCache !== null) continue;
-        if (stop()) return false;
-        this.text(top);
+    // first every block's Yjs text (cheap: what an unscoped quote's prefilter reads), then the converted text
+    for (const pass of [(top: TopBlock) => top.rawTextCache === null && this.rawText(top), (top: TopBlock) => top.textCache === null && this.text(top)]) {
+      for (const tab of this.tabs) {
+        for (const top of tab.tops ?? []) {
+          if (stop()) return false;
+          pass(top);
+        }
       }
     }
     return true;
