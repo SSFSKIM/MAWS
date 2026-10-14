@@ -1,5 +1,5 @@
 // The app's windows (E2 execution document, Design §7, Decision Log 21). Main also creates windows that are not the
-// app's: an `artifact_screenshot` capture renders in a hidden offscreen `BrowserWindow` (`deliverables/capture.ts`).
+// app's: an `artifact_screenshot` capture renders in a hidden offscreen `BrowserWindow` (`artifacts/capture.ts`).
 // Whatever treats "every window" as the app's page (the event emitter, the menu's Select All, the theme's background,
 // the attention relay and focus, the dock's `activate`) reads this registry instead of `BrowserWindow.getAllWindows()`,
 // so a capture never receives the app's events, takes focus, keeps `activate` from opening the app, or resets the

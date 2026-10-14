@@ -1,7 +1,7 @@
 // E4c (M3, Design §10): a browser tool call's row, kept to render journals written before the browser tools left the
 // `maws` server (P1 A-54). One compact line: the browser glyph, what the agent did to which page or element ("Clicked
 // button "Submit""), the time it took and any wait the person or a sheet caused; quiet actions on the right: Show
-// snapshot or Show value when the result carries text to read, a screenshot's Open (the Deliverables viewer), and Open
+// snapshot or Show value when the result carries text to read, a screenshot's Open (its File artifact, P3-L M6b), and Open
 // tab (the Browser tool on the row's tab). Under the line, a refusal's reason, or a cancelled call's note. It stays in
 // view when its turn folds (isPersistentRow). The live waiting line main reported while a call ran left with the tools.
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from '../../model/copy';
@@ -43,7 +43,7 @@ export function BrowserActionRow({ row }: { row: BrowserActionRowData }) {
               </button>
             )}
             {shot !== null && (
-              <button type="button" className="transcript-quiet-button" onClick={() => actions.openDeliverable(appSessionId, shot)}>
+              <button type="button" className="transcript-quiet-button" onClick={() => actions.openArtifact(appSessionId, shot)}>
                 {BROWSER_ACTION.open}
               </button>
             )}

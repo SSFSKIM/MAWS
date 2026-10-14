@@ -16,7 +16,7 @@ const AT = '2026-10-09T10:00:00.000Z';
 const launch = (over: Partial<LaunchRecord>): LaunchRecord => ({
   launchId: 'l1', at: AT, laneOn: true, desired: 'maws-contract', recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: 'maws-contract', style: 'default', ...over,
 });
-const MOD = { id: 'maws.to-human', name: BUILT_IN_MODS[0]!.name, description: BUILT_IN_MODS[0]!.description, version: 1 };
+const MOD = { id: 'maws.to-human', name: BUILT_IN_MODS[0]!.name, description: BUILT_IN_MODS[0]!.description, version: 5 }; // P2-C2: contract 5
 
 describe('mods.list and mods.setSessionOverride', () => {
   let root: string;
@@ -57,6 +57,12 @@ describe('mods.list and mods.setSessionOverride', () => {
       put(join(configHome, 'output-styles/report.md'), '---\nname: report\nmaws-to-human-contract: 1\n---\n');
       put(join(configHome, 'settings.json'), { outputStyle: 'report' });
       expect(await modsList(deps)).toEqual([{ ...MOD, enabled: true, source: 'external-compatible-style' }]);
+    });
+
+    it('the style with MAWS’s supplement when the selected style declares a message-tool contract (P2-C2)', async () => {
+      put(join(configHome, 'output-styles/report.md'), '---\nname: report\nmaws-to-human-contract: 4\n---\n');
+      put(join(configHome, 'settings.json'), { outputStyle: 'report' });
+      expect(await modsList(deps)).toEqual([{ ...MOD, enabled: true, source: 'external-style-plus-supplement' }]);
     });
   });
 

@@ -49,6 +49,37 @@ describe('the async answer steer (residue 13)', () => {
     expect(text.split('\n').slice(1, 3)).toEqual(['1. Colour — Other: "Teal"', '2. Which repository is this for? — /r']);
   });
 
+  // P2-C3 (Decision Log 34): a note reaches the model as the answer does, on its line and in the block
+  it('carries each note under its answer, whatever the status, and in the AskResult', () => {
+    const noted: AskAnswer[] = [
+      { ...answers[0]!, note: 'the darker one' },
+      answers[1]!,
+      answers[2]!,
+      { ...answers[3]!, note: 'assets only,\nnot docs' },
+      answers[4]!,
+      { ...answers[5]!, note: 'ask me after the demo' },
+      { ...answers[6]!, note: 'whatever is fastest' },
+    ];
+    const text = askSteerText('toolu_n', questions, noted);
+    expect(text.split('\n').slice(1, 14)).toEqual([
+      '1. Colour — Blue',
+      '   note: "the darker one"',
+      '2. Which days? — Mon, Wed; Other: "Fri"',
+      '3. What should the title be? — "Launch \\"v2\\""',
+      '4. Assets —',
+      '   /r/assets',
+      '   /r/more',
+      '   note: "assets only,\\nnot docs"',
+      '5. Which repository is this for? — MAWS (/Users/x/MAWS)',
+      '6. Anything else? — skipped',
+      '   note: "ask me after the demo"',
+      '7. Proceed? — decide for me',
+      '   note: "whatever is fastest"',
+    ]);
+    expect(parseAskSteer(text)).toEqual({ askId: 'toolu_n', result: { status: 'answered', askId: 'toolu_n', answers: noted } });
+    expect(askAnswersProblem(questions.map((q, i) => ({ ...q, id: q.id ?? `q${i + 1}` })), noted)).toBeNull(); // a note never makes a skipped answer carry a value
+  });
+
   it('is recognised back from its own text, and nothing else is', () => {
     const text = askSteerText('toolu_9', questions, answers);
     expect(parseAskSteer(text)).toEqual({ askId: 'toolu_9', result: { status: 'answered', askId: 'toolu_9', answers } });

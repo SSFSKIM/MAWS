@@ -27,10 +27,6 @@ export const TabRefSchema = z.discriminatedUnion('kind', [
   // P3-L (Decision Log 7, 8): one artifact in its kind's editor, one tab per artifact; the workspace's, not a session's
   // (it follows the current tab set as the library does), pinnable like a file tab
   z.strictObject({ id: z.string(), kind: z.literal('artifact'), artifactId: z.string(), pinned: z.boolean() }),
-  // E2 start (X14): a deliverable's viewer as a main tab, one per record; restores to the record by id, and a record
-  // that is gone shows the Deliverables list for the tab's session with a notice
-  z.strictObject({ id: z.string(), kind: z.literal('deliverable'), appSessionId: AppSessionIdSchema, deliverableId: z.string(), pinned: z.boolean() }),
-  // E2 end
   // E4a start (X14): one of a session's browser tabs as a main tab; it restores to the Browser tool's empty state with
   // the tab's last URL as a suggestion, never auto-loaded (the page itself lives in main, `<userData>/browser/tabs.json`)
   z.strictObject({ id: z.string(), kind: z.literal('browser'), appSessionId: AppSessionIdSchema, browserTabId: BrowserTabIdSchema, pinned: z.boolean() }),
@@ -59,10 +55,6 @@ export function tabId(tab: TabTarget): string {
       return 'artifacts';
     case 'artifact': // P3-L
       return `artifact:${tab.artifactId}`;
-    // E2 start
-    case 'deliverable':
-      return `deliverable:${tab.appSessionId}:${tab.deliverableId}`;
-    // E2 end
     // E4a start
     case 'browser':
       return `browser:${tab.appSessionId}:${tab.browserTabId}`;
@@ -203,9 +195,84 @@ function dropUnknownTabs(value: unknown): unknown {
   if (dropped.length > 0) console.warn(`[layout] dropped ${dropped.length} tab(s) of unknown kind: ${[...new Set(dropped)].join(', ')}`);
   return { ...rewritten, closedTabs };
 }
-export const StoredMainSchema = z.preprocess(dropUnknownTabs, z.union([LayoutMainSchema, LayoutMainV1Schema]));
-export const PanelPinnedSchema = z.array(PanelTabRefSchema);                                                      // key `panel.pinned`: the global pins (D-10)
-export const PanelSessionStateSchema = z.strictObject({ tabs: z.array(PanelTabRefSchema), activeTabId: z.string().nullable() });   // key `panel.<appSessionId>`
+
+// P3-L (M6b; Decision Log 10, 18d): E2's `deliverable` tab (X14), retired at the cutover, reads as the `artifact` tab of
+// the same id (the record's id is the artifact's), pinned as it was and active where it was, in the panes and the
+// closed-tab history alike; one whose artifact is already open (as an artifact tab, or as an earlier deliverable tab)
+// goes, since a tab id exists once across every set. `main.tabs` keeps its version.
+type DeliverableTab = { id: string; kind: 'deliverable'; deliverableId: string; pinned: boolean };
+const isDeliverableTab = (tab: unknown): tab is DeliverableTab =>
+  isRecord(tab) && tab.kind === 'deliverable' && typeof tab.id === 'string' && typeof tab.deliverableId === 'string' && typeof tab.pinned === 'boolean';
+
+function convertDeliverableTabs(value: unknown): unknown {
+  if (!isRecord(value)) return value;
+  const layouts = isRecord(value.sets) ? Object.values(value.sets) : [value];
+  const open = new Set<unknown>(); // every open tab's id that is not a deliverable's, then each converted one kept
+  for (const layout of layouts) {
+    if (!isRecord(layout) || !Array.isArray(layout.panes)) continue;
+    for (const pane of layout.panes as unknown[]) if (hasTabs(pane)) for (const tab of pane.tabs) if (!isDeliverableTab(tab)) open.add(idOf(tab));
+  }
+  const converted = new WeakSet<object>();
+  const convert = (tab: unknown): unknown => {
+    if (!isDeliverableTab(tab)) return tab;
+    const next = { id: tabId({ kind: 'artifact', artifactId: tab.deliverableId }), kind: 'artifact', artifactId: tab.deliverableId, pinned: tab.pinned };
+    converted.add(next);
+    return next;
+  };
+  const convertLayout = (layout: unknown): unknown => {
+    if (!isRecord(layout) || !Array.isArray(layout.panes)) return layout;
+    const panes = (layout.panes as unknown[]).map((pane) => {
+      if (!hasTabs(pane)) return pane;
+      const tabs = pane.tabs.map(convert);
+      const active = pane.tabs.findIndex((tab) => idOf(tab) === pane.activeTabId);
+      return { ...pane, tabs, activeTabId: active === -1 ? pane.activeTabId : idOf(tabs[active]) };
+    });
+    return keepTabs({ ...layout, panes }, (tab) => {
+      if (!isRecord(tab) || !converted.has(tab)) return true;
+      if (open.has(tab.id)) return false;
+      open.add(tab.id);
+      return true;
+    });
+  };
+  const rewritten = isRecord(value.sets) ? { ...value, sets: Object.fromEntries(Object.entries(value.sets).map(([key, set]) => [key, convertLayout(set)])) } : (convertLayout(value) as Record<string, unknown>);
+  if (!Array.isArray(value.closedTabs)) return rewritten;
+  const closed = new Set<unknown>();
+  const closedTabs = (value.closedTabs as unknown[]).map(convert).filter((tab) => {
+    if (!isRecord(tab) || !converted.has(tab)) return true;
+    if (closed.has(tab.id)) return false;
+    closed.add(tab.id);
+    return true;
+  });
+  return { ...rewritten, closedTabs };
+}
+
+export const StoredMainSchema = z.preprocess((value) => dropUnknownTabs(convertDeliverableTabs(value)), z.union([LayoutMainSchema, LayoutMainV1Schema]));
+// P3-L (whole-branch review; Decision Log 10): E2's `deliverables` panel tool is the `artifacts` tool from the cutover. A
+// stored tab of it reads as an Artifacts tab with its own instance id, place and pin, so the selection still names it;
+// one in a list that already holds an Artifacts tab (a single-instance tool) goes, the selection following the kept one.
+const isPanelRef = (tab: unknown): tab is { id: string; toolId: string } => isRecord(tab) && typeof tab.id === 'string' && typeof tab.toolId === 'string';
+function convertDeliverablesRefs(tabs: unknown): { tabs: unknown; renamed: Map<string, string> } {
+  const renamed = new Map<string, string>(); // a dropped tab's id to the kept Artifacts tab's
+  if (!Array.isArray(tabs)) return { tabs, renamed };
+  const kept = (tabs as unknown[]).find((tab) => isPanelRef(tab) && tab.toolId === 'artifacts') as { id: string } | undefined;
+  let keptId = kept?.id;
+  const next = (tabs as unknown[]).flatMap((tab) => {
+    if (!isPanelRef(tab) || tab.toolId !== 'deliverables') return [tab];
+    if (keptId !== undefined) {
+      renamed.set(tab.id, keptId);
+      return [];
+    }
+    keptId = tab.id;
+    return [{ ...tab, toolId: 'artifacts' }];
+  });
+  return { tabs: next, renamed };
+}
+export const PanelPinnedSchema = z.preprocess((value) => convertDeliverablesRefs(value).tabs, z.array(PanelTabRefSchema));   // key `panel.pinned`: the global pins (D-10)
+export const PanelSessionStateSchema = z.preprocess((value) => {
+  if (!isRecord(value)) return value;
+  const { tabs, renamed } = convertDeliverablesRefs(value.tabs);
+  return { ...value, tabs, ...(typeof value.activeTabId === 'string' && renamed.has(value.activeTabId) ? { activeTabId: renamed.get(value.activeTabId) } : {}) };
+}, z.strictObject({ tabs: z.array(PanelTabRefSchema), activeTabId: z.string().nullable() }));   // key `panel.<appSessionId>`
 export type PanelSessionState = z.infer<typeof PanelSessionStateSchema>;
 export const WindowStateSchema = z.strictObject({ bounds: z.strictObject({ x: z.number().int(), y: z.number().int(), width: z.number().int(), height: z.number().int() }),
                                                   maximized: z.boolean(), fullscreen: z.boolean() });              // key `window.main`, main only, never crosses IPC
@@ -230,9 +297,13 @@ export const LAYOUT_DEFAULTS: { regions: LayoutRegions; main: LayoutMain; panelP
 // C8a start: the panel summary's collapsed sections (C8a execution document, Interfaces *Layout key
 // `summary.sections`*), written by `stores/summary.ts`; an absent key means every section expanded. Outside the
 // `panel.` namespace on purpose: C5's hydration reads every `panel.<x>` key as a session's list.
-export const SUMMARY_SECTIONS = ['environment', 'push', 'subagents', 'background', 'sources', 'plugins' /* R1 */, 'deliverables' /* E2 */] as const;
+// P3-L (M6b): E2's `deliverables` section is the `artifacts` section from the cutover; a value stored before it reads
+// its collapsed `deliverables` as `artifacts`, keeping version 1.
+export const SUMMARY_SECTIONS = ['environment', 'push', 'subagents', 'background', 'sources', 'plugins' /* R1 */, 'artifacts' /* E2's deliverables; P3-L */] as const;
 export type SummarySection = (typeof SUMMARY_SECTIONS)[number];
-export const SummarySectionsSchema = z.strictObject({ version: z.literal(1), collapsed: z.array(z.enum(SUMMARY_SECTIONS)) });   // key `summary.sections`
+const renameDeliverablesSection = (value: unknown): unknown =>
+  isRecord(value) && Array.isArray(value.collapsed) ? { ...value, collapsed: (value.collapsed as unknown[]).map((section) => (section === 'deliverables' ? 'artifacts' : section)) } : value;
+export const SummarySectionsSchema = z.preprocess(renameDeliverablesSection, z.strictObject({ version: z.literal(1), collapsed: z.array(z.enum(SUMMARY_SECTIONS)) }));   // key `summary.sections`
 export type SummarySections = z.infer<typeof SummarySectionsSchema>;
 // C8a end
 

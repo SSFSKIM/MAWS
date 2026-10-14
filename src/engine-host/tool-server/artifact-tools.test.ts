@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
@@ -13,8 +14,12 @@ import {
   artifactRefusalOf,
   TOOL_ERRORS,
 } from '@shared/maws/tools';
+import { DocumentService } from '../documents/service';
+import { SqliteDocumentStorage } from '../documents/storage';
+import { ArtifactStore } from '../documents/store';
 import { artifactListAssetsTool, artifactUploadAssetTool } from './artifact-assets';
 import { artifactExportTool, type ArtifactExportAnswer, type ArtifactExportRequest } from './artifact-export';
+import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactDescribeTypeTool, artifactListTool, artifactReadTool } from './artifact-tools';
 import { HUMAN, jsonOf, openWorld, SELF, textOf, type World } from './artifact-world.fixture';
 import { HostBridge } from './bridge';
@@ -33,7 +38,7 @@ const list = (args: Record<string, unknown> = {}, deps: Parameters<World['deps']
 const rows = (sql: string, ...params: (string | number)[]) => w.storage.db.prepare(sql).all(...params) as Record<string, unknown>[];
 
 describe('artifact_create', () => {
-  it("keeps E2's call working: an html artifact from the page file, its X12 record mirrored under the same id, linked created", async () => {
+  it("keeps E2's call working: an html artifact from the page file, linked created, answering E2's fields; no X12 record (P3-L's cutover)", async () => {
     const result = await create({ id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }, { toolUseId: 'toolu_create' as ToolUseId });
     const answer = ArtifactCreateResultSchema.parse(jsonOf(result));
     const id = answer.artifactId;
@@ -42,12 +47,8 @@ describe('artifact_create', () => {
     expect(w.store.get(id)).toMatchObject({ kind: 'html', title: 'Dashboard', handle: 'dash', createdBy: { kind: 'session', appSessionId: SELF } });
     expect(w.store.links(id).map((l) => [l.appSessionId, l.role])).toEqual([[SELF, 'created']]);
     expect(Buffer.from(w.store.files.read(id, w.store.contentRef(id).ref)).toString('utf8')).toBe(PAGE);
-    const copy = join(w.userData, 'deliverables', SELF, id, 'v1.html');
-    const record = (await w.deliverables.get(SELF, id))!;
-    expect(record).toMatchObject({ id, appSessionId: SELF, kind: 'artifact', artifactId: 'dash', title: 'Dashboard', path: copy, toolUseId: 'toolu_create' });
-    expect(record.versions).toEqual([{ path: copy, at: record.createdAt, toolUseId: 'toolu_create', sourcePath: join(w.cwd, 'dashboard.html') }]);
-    expect(readFileSync(copy, 'utf8')).toBe(PAGE);
-    expect(w.written).toEqual([[id, 'created']]);
+    expect(w.store.contentRef(id).ref.name).toBe('dashboard.html');
+    expect(existsSync(join(w.userData, 'deliverables'))).toBe(false);
   });
 
   it('attaches the kind’s guide once per session, and an inline page needs no file', async () => {
@@ -56,7 +57,7 @@ describe('artifact_create', () => {
     const second = ArtifactCreateResultSchema.parse(jsonOf(await create({ content: '<p>two</p>', title: 'Two' })));
     expect(second.guide).toBeUndefined();
     expect(second.handle).toBeUndefined();
-    expect(second.id).toBe(second.artifactId); // the X12 name of a page without a handle is its id
+    expect(second.id).toBe(second.artifactId); // E2's name of a page without a handle is its id
     expect(ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'design', title: 'D' }))).guide).toEqual(KIND_GUIDES.design);
   });
 
@@ -87,11 +88,11 @@ describe('artifact_create', () => {
     expect(rows('SELECT id FROM artifacts').length).toBe(before);
   });
 
-  it('a file artifact references its path in place, mirrored as an X12 file record', async () => {
+  it('a file artifact references its path in place', async () => {
     writeFileSync(join(w.cwd, 'report.pdf'), '%PDF-1.4');
     const answer = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'file', path: 'report.pdf', title: 'Report' })));
     expect(w.store.get(answer.artifactId)).toMatchObject({ kind: 'file', linkedPath: join(w.cwd, 'report.pdf') });
-    expect(await w.deliverables.get(SELF, answer.artifactId)).toMatchObject({ kind: 'file', path: join(w.cwd, 'report.pdf'), title: 'Report' });
+    expect(w.store.contentRef(answer.artifactId).path).toBe(join(w.cwd, 'report.pdf'));
   });
 
   it('a replayed tool-use id answers the first result and writes nothing again', async () => {
@@ -99,7 +100,6 @@ describe('artifact_create', () => {
     const again = jsonOf(await create({ content: '<p>once</p>', title: 'Once' }, { toolUseId: 'toolu_same' as ToolUseId }));
     expect(again).toMatchObject({ artifactId: first.artifactId, revision: first.revision, version: 1 });
     expect(rows('SELECT id FROM artifacts')).toHaveLength(1);
-    expect(w.written).toHaveLength(1);
     // the same tool-use id in another session is another call
     const other = jsonOf(await create({ content: '<p>once</p>', title: 'Once' }, { toolUseId: 'toolu_same' as ToolUseId, appSessionId: 'app-other' as AppSessionId }));
     expect(other.artifactId).not.toBe(first.artifactId);
@@ -188,13 +188,12 @@ describe('artifact_create', () => {
     expect(w.store.list({ kind: 'presentation' })).toEqual([]);
   });
 
-  it('answers overlapping creates and deliveries with one tool-use id alike, with one X12 record each', async () => {
+  it('answers overlapping creates and deliveries with one tool-use id alike, with one artifact each', async () => {
     const tool = artifactCreateTool(w.deps());
     const ctx = w.ctx({ toolUseId: 'toolu_both' as ToolUseId });
     const [first, second] = await Promise.all([tool.call({ handle: 'dash', content: '<p/>', title: 'D' }, ctx), tool.call({ handle: 'dash', content: '<p/>', title: 'D' }, { ...ctx, requestId: w.ctx().requestId })]);
     expect(second).toEqual(first);
     expect(rows('SELECT id FROM artifacts')).toHaveLength(1);
-    expect(w.written).toEqual([[jsonOf(first).artifactId, 'created']]);
   });
 
   it('attaches the governing design system’s guide to a document, presentation or design through D’s provider', async () => {
@@ -316,7 +315,47 @@ describe('artifact_read', () => {
   it('refuses an artifact no session of the lineage holds', async () => {
     expect(textOf(await read({ artifact: 'nope' }))).toBe(TOOL_ERRORS.noArtifact('artifact_read', 'nope'));
   });
+
+  it('reads from a store a newer MAWS wrote (read-only), linking nothing, while a publish there is still refused (Decision Log 12, 24e)', async () => {
+    const page = jsonOf<{ artifactId: string; revision: number }>(await create({ handle: 'dash', content: '<p>one</p>', title: 'D' }));
+    const site = jsonOf<{ artifactId: string }>(await create({ kind: 'design', title: 'Site', files: { 'a.html': 'A' } }));
+    const readOnly = reopenNewer();
+    try {
+      const deps = w.deps({ artifacts: () => readOnly.store });
+      expect(jsonOf(await artifactReadTool(deps).call({ artifact: 'dash' }, w.ctx()))).toMatchObject({ artifactId: page.artifactId, files: { 'index.html': '<p>one</p>' } });
+      expect(jsonOf(await artifactReadTool(deps).call({ artifact: site.artifactId }, w.ctx()))).toMatchObject({ files: { 'a.html': 'A' } });
+      expect(readOnly.store.links(page.artifactId).map((l) => l.role)).toEqual(['created']);
+      const published = await artifactPublishTool(deps).call({ artifact: 'dash', baseRevision: page.revision, files: { 'index.html': '<p>two</p>' } }, w.ctx());
+      expect(artifactRefusalOf(textOf(published))).toMatchObject({ reason: 'unavailable' });
+    } finally {
+      readOnly.close();
+    }
+  });
 });
+
+// The world's store reopened as an older MAWS opens a store a newer one wrote (user_version above its migrations):
+// read-only (Decision Log 12).
+function reopenNewer(): { store: ArtifactStore; close: () => void } {
+  const path = join(w.userData, 'artifacts', 'store.sqlite');
+  w.store.close();
+  w.service.close();
+  w.storage.close();
+  const db = new DatabaseSync(path);
+  db.exec('PRAGMA user_version = 99');
+  db.close();
+  const storage = SqliteDocumentStorage.open(path, { log: () => {} });
+  expect(storage.readOnly).toBe(true);
+  const service = new DocumentService(storage, { kindOf: (id) => storage.kindOf(id), log: () => {} });
+  const store = new ArtifactStore(service, storage, { root: join(w.userData, 'artifacts'), log: () => {} });
+  return {
+    store,
+    close: () => {
+      store.close();
+      service.close();
+      storage.close();
+    },
+  };
+}
 
 describe('artifact_upload_asset and artifact_list_assets', () => {
   it('adds a file under the working directory as an asset, idempotent by tool-use id, and lists it', async () => {

@@ -20,6 +20,14 @@ export function documents(page: Page) {
     restores: (id: number) => call<number[]>('restores', id),
     startTyping: (id: number, prefix: string, everyMs: number) => call<void>('startTyping', id, prefix, everyMs),
     stopTyping: (id: number) => call<{ typed: number; acked: number }>('stopTyping', id),
+    // A state crosses as base64 (a megabyte of bytes as a JSON number array would be several).
+    applyState: (id: number, state: Uint8Array) =>
+      page.evaluate(([i, base64]) => {
+        const bytes = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+        (window as unknown as { __maws_documents: { applyState(id: number, state: Uint8Array): void } }).__maws_documents.applyState(i, bytes);
+      }, [id, Buffer.from(state).toString('base64')] as const),
+    stateSize: (id: number) => call<number>('stateSize', id),
+    timeAcks: (id: number, count: number, gapMs: [number, number]) => call<number[]>('timeAcks', id, count, gapMs),
     close: (id: number) => call<void>('close', id),
   };
 }

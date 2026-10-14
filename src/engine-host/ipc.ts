@@ -276,10 +276,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       modelKeys.set(spec.appSessionId, catalogueKey(plan.engineVersion, plan.gateway, { env: plan.env, cwd: plan.cwd, flagEnv: plan.flagSettings.env })); // C10; never rejects
       session.on('models', (list) => updateModels(spec.appSessionId, list)); // C10
       session.on('paneShow', (request) => emit('maws.pane.show', request)); // E1: relayed to every window
-      // E2 start: the store's writes (deliverables.changed) and the capture requests main answers (maws.artifact.capture)
-      session.on('deliverableChanged', (change) => emit('deliverables.changed', change));
-      session.on('artifactCapture', (request) => emit('maws.artifact.capture', request));
-      // E2 end
+      session.on('artifactCapture', (request) => emit('maws.artifact.capture', request)); // E2: the capture requests main answers
       session.on('artifactExport', (request) => emit('maws.artifact.export', request)); // P3-A M7: main's export service answers
     },
   });

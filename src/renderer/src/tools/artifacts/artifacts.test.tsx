@@ -11,14 +11,16 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
 import { registerArtifactEditor, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
 import { connectLibrary, resetLibrary, watchLibraryRow } from '../../library/store';
-import { editorHostOf, useEditorHost, type EditorHostScope } from '../../panel/editor-host';
+import { editorHostOf, registerEditorHost, useEditorHost, type EditorHostScope } from '../../panel/editor-host';
 import { panelHost, registerPanelTool } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
 import { useLayout } from '../../stores/layout';
 import { activeTab, allTabs } from '../../stores/layout-model';
 import { fail, installFakeMain, ok } from '../../test-support/code';
 import { A, B, panelOf, resetPanelStores, TestHost } from '../../test-support/panel';
-import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle, type ArtifactsParams } from './ArtifactsTool';
+import { ARTIFACTS_TOOL_ID, artifactsTool, openArtifactInPanel, type ArtifactsHandle, type ArtifactsParams } from './ArtifactsTool';
+import { ArtifactsSummary } from './Summary';
+import { resetVersionRequests, useVersionRequest } from './viewers/requests';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const NOW = Date.now();
@@ -416,6 +418,72 @@ describe('the record view', () => {
     await settle();
     expect(listFilters().at(-1)).toEqual({ appSessionId: B, lineage: true });
     expect(listed()).toEqual([OTHER.id]);
+  });
+});
+
+// M6b: a transcript row's Open (`TranscriptActions.openArtifact`): the tool in the row's session on the artifact, the
+// version the row names asked of the panel's viewer of it; nothing while no build registers the tool. Fix wave 2: every
+// open asks (the latest when it names none), the next open supersedes, and an open the guard refused cancels its own.
+describe('openArtifactInPanel (M6b)', () => {
+  beforeEach(() => resetVersionRequests()); // every open asks, the earlier cases' too
+  afterEach(() => resetVersionRequests());
+  function Request() {
+    const request = useVersionRequest(NOTES.id, 'panel');
+    return <p data-request="">{request === null ? 'none' : JSON.stringify(request.at)}</p>;
+  }
+  const asked = () => document.querySelector('[data-request]')!.textContent;
+
+  it('does nothing while no build registers the tool; opens the tool on the artifact and asks its panel viewer for the version; a version-less open asks for the latest', async () => {
+    render(<Request />);
+    openArtifactInPanel(A, NOTES.id, { version: 2 });
+    expect(panelOf(A)?.tabs ?? []).toEqual([]);
+    expect(asked()).toBe('none');
+    registerPanelTool(artifactsTool);
+    act(() => openArtifactInPanel(B, NOTES.id, { version: 2 }));
+    expect(panelOf(B)!.tabs.map((tab) => tab.toolId)).toEqual([ARTIFACTS_TOOL_ID]);
+    expect(asked()).toBe('{"version":2}');
+    act(() => openArtifactInPanel(B, NOTES.id)); // no version: the latest, superseding the v2 ask
+    expect(asked()).toBe('"latest"');
+    act(() => openArtifactInPanel(B, NOTES.id, { revision: 7 }));
+    expect(asked()).toBe('{"revision":7}');
+  });
+
+  it('cancels the ask of an open the shown artifact’s guard refused', async () => {
+    render(<Request />);
+    registerPanelTool(artifactsTool);
+    act(() => openArtifactInPanel(B, OTHER.id));
+    const scope: EditorHostScope = { surface: 'panel', tabId: panelOf(B)!.tabs[0]!.id };
+    act(() => void registerEditorHost(scope, { title: 'Other', closeGuard: async () => false }));
+    act(() => openArtifactInPanel(B, NOTES.id, { version: 2 }));
+    expect(asked()).toBe('{"version":2}');
+    await waitFor(() => expect(asked()).toBe('none'));
+  });
+});
+
+// M6b: the panel summary's Artifacts section (E2's Deliverables section's place): the session's lineage's count and
+// latest title, else that nothing was made, else the refusal; Open opens the tool on its list.
+describe('the summary (M6b)', () => {
+  it('counts the session’s artifacts and names the latest; Open opens the list', async () => {
+    const open = vi.fn();
+    render(<ArtifactsSummary appSessionId={A} open={open} />);
+    await settle();
+    expect(document.querySelector('[data-summary="artifacts"]')!.textContent).toContain('5 artifacts · Launch notes');
+    expect(listFilters()).toContainEqual({ appSessionId: A, lineage: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(open).toHaveBeenCalledWith();
+  });
+
+  it('says when nothing was made yet, and when the index refused', async () => {
+    rows = [];
+    const view = render(<ArtifactsSummary appSessionId={A} open={() => {}} />);
+    await settle();
+    expect(screen.getByText('Nothing made yet')).toBeTruthy();
+    view.unmount();
+    resetLibrary();
+    main = installFakeMain((name) => (name === 'library.list' ? fail('index unavailable') : fail(`unexpected ${name}`)));
+    render(<ArtifactsSummary appSessionId={A} open={() => {}} />);
+    await settle();
+    expect(screen.getByText('Couldn’t read the artifacts: index unavailable')).toBeTruthy();
   });
 });
 

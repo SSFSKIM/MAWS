@@ -9,17 +9,20 @@
 // directory as a project (the sheet's repository list) and the sidebar shows the session; no engine runs.
 // The M4b cases: a blocking ask is a question attention item (the Overview card, Needs you) that goes at Submit, and an
 // ask from a session not shown never switches the main view; its sheet opens when that session is selected.
+// P2-C3 (the P2 spec's Decision Log 34): a choice's previews beside its options and a note beside an answer, over the
+// same recordings with the ask's arguments rewritten (`askFixture`, which says why the replay still holds).
 // Runs under `pnpm e2e:tools` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list). MAWS_E1_SHOTS=1 also
 // writes the replay's screenshots in both themes under docs/doperpowers/evidence/p1-e1/ (`e1-replay-<surface>-<theme>`).
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator } from '@playwright/test';
 import type { AskAnswer } from '@shared/maws/tools';
+import { parseAskSteer } from '../src/shared/maws/ask';
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
 import { invoke, value } from './support/c7-replay';
 import { REPO_ROOT } from './support/launch';
 import {
-  allowNext, clearToasts, fixtureRows, idle, mcpCalls, mcpResultOf, metaEvents, ofKind, PASS3, recordedCwd, recordEvents, replay, resultText, scene as sharedScene, shootThemes, show,
+  allowNext, askFixture, clearToasts, fixtureRows, idle, mcpCalls, mcpResultOf, metaEvents, ofKind, PASS3, recordedCwd, recordEvents, replay, resultText, scene as sharedScene, shootThemes, show,
   unfoldWork, type Frame, type McpResult, type Scene,
 } from './support/maws-tools';
 import { sidebarOf } from './support/sidebar';
@@ -88,15 +91,17 @@ test('send_file: the delivery row names hello.txt and the caption, its two butto
       await file.getByRole('button', { name: 'Reveal in Finder' }).click();
       await expect.poll(() => (existsSync(s.openLog) ? readFileSync(s.openLog, 'utf8').trim().split('\n') : [])).toEqual([path, `reveal ${path}`]);
 
-      // the result the host wrote lists the deliverable it recorded, and the record is X12's
+      // the result the host wrote lists the deliverable it recorded, and (P3-L M6b) it is a File artifact of the session,
+      // the file in place; the caption is the row's (above), not the artifact's
       const [call] = mcpCalls(s.journal(id));
       expect(call).toMatchObject({ name: 'send_file', args: { files: ['hello.txt'], caption: 'the greeting' } });
       const result = mcpResultOf(s.journal(id), call!.requestId)!;
       expect(result.isError).toBeUndefined();
       const delivered = JSON.parse(resultText(result)) as { status: string; deliverables: { id: string; path: string; name: string }[] };
       expect(delivered).toMatchObject({ status: 'delivered', deliverables: [{ path, name: 'hello.txt' }] });
-      const record = JSON.parse(readFileSync(join(s.maws.userData, 'deliverables', id, `${delivered.deliverables[0]!.id}.json`), 'utf8')) as Record<string, unknown>;
-      expect(record).toMatchObject({ id: delivered.deliverables[0]!.id, appSessionId: id, kind: 'file', path, title: 'hello.txt', caption: 'the greeting', versions: [{ path }] });
+      const { artifact } = value(await invoke(s.page, 'artifacts.get', { artifactId: delivered.deliverables[0]!.id }));
+      expect(artifact).toMatchObject({ id: delivered.deliverables[0]!.id, kind: 'file', linkedPath: path, title: 'hello.txt', createdBy: { kind: 'session', appSessionId: id } });
+      expect(existsSync(join(s.maws.userData, 'deliverables'))).toBe(false); // no X12 record
       expect(ofKind(await s.events(id), 'maws.delivery.file')).toMatchObject([{ deliverables: delivered.deliverables, caption: 'the greeting', urgency: 'normal' }]);
       await idle(s, id);
       await shoot(s, 'delivery');
@@ -311,7 +316,7 @@ test('an ask from a session not shown never switches the main view; its sheet op
 
 // ---- G4: an async ask -----------------------------------------------------------------------------------------------
 
-test('an async ask: acknowledged at once, Submit sends the recorded steer, and the capsule turns answered across the second turn', async () => {
+test('an async ask: acknowledged at once, an async_input item while it waits (P2-C2), Submit sends the recorded steer and retires the item, and the capsule turns answered across the second turn', async () => {
   await scene({ titles: ['E1 tools: async ask'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -325,8 +330,10 @@ test('an async ask: acknowledged at once, Submit sends the recorded steer, and t
     expect(opened).toMatchObject({ blocking: false });
     // the acknowledgement was the host's answer at once
     expect(JSON.parse(resultText(mcpResultOf(s.journal(id), opened!.requestId)!))).toEqual({ status: 'asked', askId: opened!.askId });
-    // no attention item for an async ask
-    expect(value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id)).toEqual([]);
+    // P2-C2 (the P2 spec's Decision Log 32, reversing E1's "no item for an async ask"): the question waits as an
+    // `async_input` item, anchored to the ask by its request, until the answer is committed
+    const items = async () => value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id);
+    await expect.poll(async () => (await items()).map((item) => [item.kind, item.state, item.request.requestId])).toEqual([['async_input', 'pending', opened!.requestId]]);
 
     const sheet = sheetOf(s);
     await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
@@ -343,6 +350,7 @@ test('an async ask: acknowledged at once, Submit sends the recorded steer, and t
     expect((steer!.message as { content: string }).content).toBe(recorded.message.content);
     expect(metaEvents(s.journal(id))).toContain('maws_ask_answered');
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
+    await expect.poll(items).toEqual([]); // P2-C2: retired at the committed answer
     expect(ofKind(await s.events(id), 'maws.ask.answered')).toMatchObject([{ askId: opened!.askId, delivery: 'steer', answers: [{ id: 'q1', status: 'answered', value: ['Yes'] }] }]);
 
     // two main turns (the recording's model ended its first before the answer arrived; Surprises): the reply is the second's
@@ -355,9 +363,151 @@ test('an async ask: acknowledged at once, Submit sends the recorded steer, and t
   });
 });
 
+// ---- P2-C3: previews and notes --------------------------------------------------------------------------------------
+
+// One single-select question whose options carry markdown previews (an ASCII mockup and a tab strip in fences, a JSON
+// configuration under a sentence) and one option that has none.
+const MOCKUP = ['```', '+-----------+-------------------------+', '| General   | Theme      [ Light  v ] |', '| Editor    | Font size  [ 14     ] |', '| Keys      |                       |', '+-----------+-------------------------+', '```'].join('\n');
+const LAYOUT_ASK = {
+  questions: [{
+    id: 'q1', header: 'Layout', question: 'How should the settings page be laid out?', modality: 'choice',
+    options: [
+      { label: 'Sidebar', description: 'Sections listed on the left', preview: MOCKUP },
+      { label: 'Tabs', description: 'Sections as tabs on top', preview: '```text\n[ General | Editor | Keys ]\n  Theme      [ Light v ]\n  Font size  [ 14 ]\n```' },
+      { label: 'Config file', description: 'No page; a file to edit', preview: 'The settings live in `settings.json`:\n\n```json\n{\n  "theme": "light",\n  "fontSize": 14\n}\n```' },
+      { label: 'Ask me later' },
+    ],
+  }],
+};
+
+type Box = { x: number; y: number; width: number; height: number };
+const box = async (locator: Locator): Promise<Box> => (await locator.boundingBox())!;
+
+test('previews: a single-select question lays its options beside the focused option’s preview when the panel is wide and under it when narrow, and Submit sends the label chosen', async () => {
+  await scene({ titles: ['P2-C3: previews'] }, async (s) => {
+    const [id] = s.ids;
+    await show(s, id);
+    // room for the panel's widest (640 px past the main column's 480 px floor and the sidebar)
+    await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.isVisible())!.setSize(1440, 900));
+    await replay(s, id, askFixture(s.scratch.root, ASK_BLOCKING, LAYOUT_ASK));
+    await allowNext(s, id); // mcp__maws__ask
+    const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
+    expect(opened!.questions[0]!.options!.map((option) => option.preview !== undefined)).toEqual([true, true, true, false]);
+
+    const sheet = sheetOf(s);
+    await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
+    const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
+    await resizer.focus();
+    await expect(resizer).toHaveAttribute('aria-valuemax', '640');
+    await s.page.keyboard.press('End');
+    await expect(resizer).toHaveAttribute('aria-valuenow', '640');
+
+    const section = sectionOf(sheet, 'q1');
+    const radios = section.getByRole('radiogroup');
+    const pane = section.locator('[data-ask-preview]');
+    // before any focus or pick, the first option's preview: the mockup, monospace in its fence
+    await expect(pane).toHaveAttribute('data-preview-of', 'Sidebar');
+    await expect(pane).toContainText('| General   | Theme      [ Light  v ] |');
+    const mono = async () => pane.locator('pre').first().evaluate((pre) => getComputedStyle(pre.querySelector('code') ?? pre).fontFamily);
+    expect(await mono()).toMatch(/mono|menlo|monospace/i);
+    // side by side: the pane right of the options, their tops level
+    await expect(async () => {
+      const [options, preview] = [await box(radios), await box(pane)];
+      expect(preview.x).toBeGreaterThanOrEqual(options.x + options.width);
+      expect(preview.y).toBeLessThan(options.y + options.height);
+      expect(options.y).toBeLessThan(preview.y + preview.height);
+    }).toPass({ timeout: 10_000 });
+
+    // a click, then the arrow keys (they move the focus and the pick together)
+    await section.getByRole('radio', { name: 'Tabs' }).click();
+    await expect(pane).toHaveAttribute('data-preview-of', 'Tabs');
+    await expect(pane).toContainText('[ General | Editor | Keys ]');
+    await s.page.keyboard.press('ArrowDown');
+    await expect(pane).toHaveAttribute('data-preview-of', 'Config file');
+    await expect(pane).toContainText('"fontSize": 14');
+    expect(await mono()).toMatch(/mono|menlo|monospace/i);
+    await s.page.keyboard.press('ArrowDown');
+    await expect(pane).toHaveAttribute('data-preview-of', 'Ask me later');
+    await expect(pane).toHaveText('No preview for this option');
+    await s.page.keyboard.press('ArrowUp');
+    await expect(pane).toHaveAttribute('data-preview-of', 'Config file');
+    // the pane follows focus; Radix's radios check on an arrow key only while it is still down, which a loaded machine
+    // can miss, so the pick is a click
+    await section.getByRole('radio', { name: 'Config file' }).click();
+    await expect(section.getByRole('radio', { name: 'Config file' })).toHaveAttribute('aria-checked', 'true');
+    await shoot(s, 'ask-previews');
+
+    // the panel at its narrowest: the pane under the options, as wide as they are
+    await resizer.focus();
+    await s.page.keyboard.press('Home');
+    await expect(resizer).toHaveAttribute('aria-valuenow', '280');
+    await expect(async () => {
+      const [options, preview] = [await box(radios), await box(pane)];
+      expect(preview.y).toBeGreaterThanOrEqual(options.y + options.height);
+      expect(Math.abs(preview.x - options.x)).toBeLessThan(1);
+    }).toPass({ timeout: 10_000 });
+    await expect(pane).toHaveAttribute('data-preview-of', 'Config file');
+
+    await clearToasts(s.page);
+    await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+    expect(await answersWritten(s, id, opened!.requestId)).toEqual([{ id: 'q1', question: LAYOUT_ASK.questions[0]!.question, status: 'answered', value: ['Config file'] }]);
+    await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'answered');
+    await idle(s, id);
+  });
+});
+
+test('notes: an async ask answered with a note beside one answer and a skip with a note beside another; the steer carries both notes on their lines and in its JSON', async () => {
+  const questions = [
+    { id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] },
+    { id: 'q2', question: 'Which branch name?', modality: 'text' },
+  ];
+  await scene({ titles: ['P2-C3: notes'] }, async (s) => {
+    const [id] = s.ids;
+    await show(s, id);
+    await replay(s, id, askFixture(s.scratch.root, ASK_ASYNC, { blocking: false, questions }));
+    await allowNext(s, id); // mcp__maws__ask
+    const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
+    const sheet = sheetOf(s);
+    await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
+
+    await sectionOf(sheet, 'q1').getByRole('radio', { name: 'Yes' }).click();
+    await sectionOf(sheet, 'q1').getByRole('button', { name: 'Add note' }).click();
+    const note1 = sectionOf(sheet, 'q1').getByRole('textbox', { name: 'Note on Proceed?' });
+    await expect(note1).toBeFocused();
+    await s.page.keyboard.type('Only after the tests pass');
+    await sectionOf(sheet, 'q2').getByRole('button', { name: 'Add note' }).click();
+    await sectionOf(sheet, 'q2').getByRole('textbox', { name: 'Note on Which branch name?' }).fill('Pick one when you open the PR');
+    await sectionOf(sheet, 'q2').getByRole('button', { name: 'Skip' }).click();
+    await expect(sectionOf(sheet, 'q2').getByRole('textbox', { name: 'Note on Which branch name?' })).toHaveValue('Pick one when you open the PR');
+    await shoot(s, 'ask-notes');
+    await clearToasts(s.page);
+    await sheet.getByRole('button', { name: 'Submit · 1 skipped' }).click();
+
+    let steer: Frame | undefined;
+    await expect
+      .poll(() => (steer = s.journal(id).find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && (r.frame as Frame).priority === 'next')?.frame as Frame | undefined) !== undefined, { timeout: 20_000 })
+      .toBe(true);
+    const content = (steer!.message as { content: string }).content;
+    expect(content).toContain('1. Proceed? — Yes\n   note: "Only after the tests pass"\n2. Which branch name? — skipped\n   note: "Pick one when you open the PR"\n```json\n');
+    expect(parseAskSteer(content)?.result.answers).toEqual([
+      { id: 'q1', question: 'Proceed?', status: 'answered', value: ['Yes'], note: 'Only after the tests pass' },
+      { id: 'q2', question: 'Which branch name?', status: 'skipped', note: 'Pick one when you open the PR' },
+    ]);
+    const capsule = capsuleOf(s);
+    await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
+    await idle(s, id);
+
+    // the answers reopened read-only show each note under its answer
+    await capsule.getByRole('button', { name: 'View answers' }).click();
+    const readOnly = sheet.locator('[data-ask-readonly]');
+    await expect(sectionOf(readOnly, 'q1').locator('[data-ask-note]')).toContainText('Only after the tests pass');
+    await expect(sectionOf(readOnly, 'q2').locator('[data-ask-note]')).toContainText('Pick one when you open the PR');
+  });
+});
+
 // ---- G5: show_pane --------------------------------------------------------------------------------------------------
 
-test('show_pane: the Terminal opens in the panel, a deliverable no record answers to and an unknown pane are error cells', async () => {
+test('show_pane: the Terminal opens in the panel, an artifact no record answers to and an unknown pane are error cells', async () => {
   await scene({ titles: ['E1 tools: show_pane'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -365,29 +515,29 @@ test('show_pane: the Terminal opens in the panel, a deliverable no record answer
     await allowNext(s, id); // terminal (seq 68)
     const terminalTab = s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Terminal/ });
     await expect(terminalTab).toHaveAttribute('aria-selected', 'true');
-    await allowNext(s, id); // deliverable (seq 85)
+    await allowNext(s, id); // artifact (seq 85; E2's deliverable, the recording renamed by P3-L M6b)
     await allowNext(s, id); // nope (seq 100)
     await idle(s, id);
 
-    // what the host answered: the renderer's Terminal, the renderer's "no deliverable" (E2: the recording's target `none`
+    // what the host answered: the renderer's Terminal, the renderer's "no artifact" (E2: the recording's target `none`
     // names no record; the recording itself carried "not available", and the replay compares no bodies), the host's
     // unknown pane
     const calls = mcpCalls(s.journal(id));
-    expect(calls.map((c) => c.args)).toEqual([{ pane: 'terminal' }, { pane: 'deliverable', target: 'none' }, { pane: 'nope' }]);
+    expect(calls.map((c) => c.args)).toEqual([{ pane: 'terminal' }, { pane: 'artifact', target: 'none' }, { pane: 'nope' }]);
     const results = calls.map((c) => mcpResultOf(s.journal(id), c.requestId)!);
     expect(JSON.parse(resultText(results[0]!))).toMatchObject({ status: 'shown', pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal', title: 'Terminal' } });
-    expect(results[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.deliverableNotFound('none') }], isError: true });
+    expect(results[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactNotFound('none') }], isError: true });
     expect(results[2]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownPane('nope') }], isError: true });
     expect(ofKind(await s.events(id), 'maws.pane.shown').map((e) => [e.pane, e.opened?.kind ?? null, e.error])).toEqual([
       ['terminal', 'panel-tool', null],
-      ['deliverable', null, TOOL_ERRORS.deliverableNotFound('none')],
+      ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
     ]);
 
     // the cells: what opened, and why nothing did twice
     await unfoldWork(s.pane);
     await expect(s.pane.getByText('Opened Terminal')).toBeVisible();
     // the cell reads the engine's tool_result, which the replay plays as recorded (E1's build answered "not available")
-    await expect(s.pane.getByText('Could not open pane: the deliverable pane is not available in this build of MAWS')).toBeVisible();
+    await expect(s.pane.getByText('Could not open pane: the artifact pane is not available in this build of MAWS')).toBeVisible();
     await expect(s.pane.getByText(/Could not open pane: unknown pane "nope"/)).toBeVisible();
     await shoot(s, 'pane');
   });

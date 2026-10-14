@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import type { AppSessionId, SessionId, ToolUseId } from '@shared/graph/ids';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadEngineJournal, loadJournal } from '../../test/support/fixtures';
@@ -707,6 +707,22 @@ describe('maws tools/call admission follows the server envelope (E1)', () => {
   it('opens a well-formed ask', () => {
     const events = feed(make(), [call('r1', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ask', arguments: ASK, _meta: meta } })]);
     expect(kinds(events)).toEqual(['maws.ask.opened']);
+  });
+
+  // P2-C3 (the P2 spec's Decision Log 35): the tool use framed under a parent before the call names a subagent's ask,
+  // which opens blocking whatever its arguments said; the main conversation's and another subagent tool's do not
+  it("opens a subagent's async ask as blocking, told by its tool use's frame before the call", () => {
+    const toolUse = (id: string, name: string, parent: string | null) => inRow({ type: 'assistant', message: { id: `msg_${id}`, role: 'assistant', model: 'm', content: [{ type: 'tool_use', id, name, input: {} }] }, parent_tool_use_id: parent, session_id: 'sess-1', uuid: `a-${id}` });
+    const ask = (requestId: string, toolUseId: string) => call(requestId, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'ask', arguments: { ...ASK, blocking: false }, _meta: { 'claudecode/toolUseId': toolUseId } } });
+    const n = make();
+    const events = feed(n, [
+      toolUse('toolu_sub', 'mcp__maws__ask', 'toolu_agent'), ask('r1', 'toolu_sub'),
+      toolUse('toolu_main', 'mcp__maws__ask', null), ask('r2', 'toolu_main'),
+      toolUse('toolu_bash', 'Bash', 'toolu_agent'),
+      ask('r3', 'toolu_unseen'), // no frame named it: as today
+    ]);
+    expect(only(events, 'maws.ask.opened').map((e) => [e.askId, e.blocking])).toEqual([['toolu_sub', true], ['toolu_main', false], ['toolu_unseen', false]]);
+    expect([n.fromSubagent('toolu_sub' as ToolUseId), n.fromSubagent('toolu_main' as ToolUseId), n.fromSubagent('toolu_bash' as ToolUseId), n.fromSubagent(null)]).toEqual([true, false, false, false]);
   });
 
   it('opens no ask for a message that is not JSON-RPC 2.0, nor for an id that is neither a string nor a number', () => {

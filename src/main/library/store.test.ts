@@ -1,4 +1,4 @@
-// The library's derived index (the P3-L document, Decision Log 6 and 9; index migration 9): the rows main keeps of the
+// The library's derived index (the P3-L document, Decision Log 6 and 9; index migration 10): the rows main keeps of the
 // host's live artifacts, their links and Spaces, and the search over titles and extracted text. A real index in a temp
 // directory, so the side-thread lineage, the session titles and the project names are the index's own.
 import { join } from 'node:path';

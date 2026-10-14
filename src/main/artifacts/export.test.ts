@@ -37,6 +37,7 @@ const sources = (over: Partial<ExportSources> = {}): ExportSources => ({
   title: 'T',
   state: async () => new Uint8Array(),
   readAsset: async () => null,
+  listAssets: async () => [],
   print: async () => new Uint8Array(),
   ...over,
 });
@@ -165,6 +166,8 @@ function fakeHost() {
         return answer({ bytes: bytes(`version ${(input as { versionId: number }).versionId}`) });
       case 'artifacts.state':
         return answer({ revision: liveRevision, bytes: bytes(`live@${liveRevision}`) });
+      case 'artifacts.assets':
+        return row ? answer({ assets: [{ ref: 'assets/a.png', name: 'a.png', mime: 'image/png', size: 3 }, { ref: 'assets/font.woff2', name: 'font.woff2', mime: 'font/woff2', size: 9 }] }) : { ok: false, error: { code: 'invalid_input', message: 'not found', issues: { reason: 'notFound', data: {} } } } as CommandResult<CommandName>;
       case 'artifacts.content': {
         const path = (input as { path?: string }).path;
         if (path === 'assets/a.png') return answer({ revision: 4, kind: row!.kind, name: 'a.png', size: 3, sha256: 'x', path: asset });
@@ -388,6 +391,18 @@ describe('the export’s snapshot and its asset reads (fix wave 1, the review’
     host.moveTo(9); // the library's own: admitted at 7 (artifacts.get), exported at 9
     expect(await service.exportForLibrary({ artifactId: DOC, format: 'pdf' })).toEqual({ path: join(root, DOC, 'exports', '9-pdf.pdf'), revision: 9 });
     expect(await readFile(join(root, DOC, 'exports', '9-pdf.pdf'), 'utf8')).toBe('live@9');
+  });
+
+  it('lists the artifact’s assets for an exporter, those its content does not name included (Decision Log 45e)', async () => {
+    const host = fakeHost();
+    const registry = new ExporterRegistry();
+    registry.register(writing('document', 'pdf', async (_req, ctx) => JSON.stringify(await ctx.assets.list())));
+    const service = startExportService(host.deps(registry));
+    const { path } = await service.exportForLibrary({ artifactId: DOC, format: 'pdf' });
+    expect(JSON.parse(await readFile(path, 'utf8'))).toEqual([
+      { ref: 'assets/a.png', name: 'a.png', mime: 'image/png', size: 3 },
+      { ref: 'assets/font.woff2', name: 'font.woff2', mime: 'font/woff2', size: 9 },
+    ]);
   });
 
   it('answers a missing asset null, and fails the export on any other failure to read one', async () => {

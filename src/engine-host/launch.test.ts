@@ -153,6 +153,7 @@ describe('launch contract builds the X6 command line and environment', () => {
       '--session-id', '11111111-1111-4111-8111-111111111111',
       '--mcp-config', JSON.stringify({ mcpServers: { x: { command: 'node' } } }),
       '--max-budget-usd', '0.5',
+      '--disallowedTools', 'AskUserQuestion', // P2-C2: the app's initialize offers the maws server
       SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never', effortLevel: 'high' }),
     ]);
     expect(plan.sessionId).toBe('11111111-1111-4111-8111-111111111111');
@@ -372,6 +373,7 @@ describe('the owner channel’s flags (P2-C)', () => {
       '--max-budget-usd', '0.5',
       '--append-system-prompt', CONTRACT,
       '--system-prompt-snapshot', 'off',
+      '--disallowedTools', 'AskUserQuestion', // P2-C2
       SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never' }),
     ]);
   });
@@ -394,7 +396,7 @@ describe('the owner channel’s flags (P2-C)', () => {
 
   it('passes "off" alone, without an append (a lane switched off on a session that recorded the contract)', () => {
     const plan = buildLaunch(spec({ systemPromptSnapshot: 'off' }), CAPTURED, { ...OPTS, declaresSystemPromptSnapshot: true });
-    expect(tail(plan.args).slice(-4)).toEqual(['--system-prompt-snapshot', 'off', SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never' })]);
+    expect(tail(plan.args).slice(-6)).toEqual(['--system-prompt-snapshot', 'off', '--disallowedTools', 'AskUserQuestion', SETTINGS_FLAG, JSON.stringify({ dialogExpiry: 'never' })]);
     expect(plan.args).not.toContain('--append-system-prompt');
   });
 
@@ -406,3 +408,20 @@ describe('the owner channel’s flags (P2-C)', () => {
   });
 });
 // P2-C end
+
+// P2-C2 (the P2 spec's Decision Log 33): MAWS's own ask is the one ask where the launch offers the `maws` server
+describe('the native ask withdrawn where the maws server is offered (P2-C2)', () => {
+  const asks = (args: string[]) => args.flatMap((arg, k) => (arg === '--disallowedTools' ? [args[k + 1]] : []));
+
+  it('passes --disallowedTools AskUserQuestion once on a launch whose initialize offers maws (the app’s own, by default)', () => {
+    expect(asks(buildLaunch(spec(), CAPTURED, OPTS).args)).toEqual(['AskUserQuestion']);
+    expect(asks(buildLaunch(spec(), CAPTURED, { ...OPTS, sdkMcpServers: ['maws'] }).args)).toEqual(['AskUserQuestion']);
+    const plan = buildLaunch(spec(), CAPTURED, OPTS);
+    expect(plan.args.slice(0, ENGINE_FLAGS.length)).toEqual([...ENGINE_FLAGS]); // --permission-prompt-tool stdio as it was
+  });
+
+  it('leaves the native ask, the only one, on a launch without the maws server', () => {
+    expect(asks(buildLaunch(spec(), CAPTURED, { ...OPTS, sdkMcpServers: [] }).args)).toEqual([]);
+    expect(asks(buildLaunch(spec(), CAPTURED, { ...OPTS, sdkMcpServers: ['other'] }).args)).toEqual([]);
+  });
+});

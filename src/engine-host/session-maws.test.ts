@@ -4,8 +4,7 @@
 // rebuild. Replayed: E0a's pass3/p1-sdk-mcp-roundtrip through the app's own handshake, up to the probe's own writes.
 // E1 M2 (Plan of Work M2, "What it proves"): the `ask` lifecycle on the same scripted session (blocking and async, the
 // claim-write-commit rule with its failures, the withdrawn and exit cancellations, every event on rebuild).
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -22,7 +21,6 @@ import { ENGINE_BIN, FIXTURE_ENGINE_VERSION } from '../../test/support/engine-pi
 import { handshakePrelude } from './conformance/harness';
 import { MemoryJournal } from './conformance/scripted-transport';
 import { launchSpec, scriptedSession } from './conformance/session-harness';
-import { FileDeliverableStore } from './deliverables/store';
 import { buildLaunch, RELAY_URL } from './launch';
 import { appReplayHandshake } from './replay-handshake';
 import { replayEngine, type ReplayTransport } from './replay-transport';
@@ -56,12 +54,10 @@ type Rpc = { jsonrpc: string; id: unknown; result?: { content?: { text: string }
 
 // A scripted session whose engine sends the `maws` server JSON-RPC messages, as 2.1.290 does (E0a Q1).
 async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSession>[0]>['transport'] = {}, session: Partial<EngineSessionOptions> = {} /* P2-E1 */) {
-  const run = scriptedSession({ spec: { cwd }, session: { deliverables: (onWritten) => new FileDeliverableStore(userData, { onWritten }), appVersion: '0.9.0', ...session }, transport });
+  const run = scriptedSession({ spec: { cwd }, session: { appVersion: '0.9.0', ...session }, transport });
   const shows: unknown[] = [];
   run.session.on('paneShow', (request) => shows.push(request));
-  // E2: the store's announcements and the capture requests
-  const changes: unknown[] = [];
-  run.session.on('deliverableChanged', (change) => changes.push(change));
+  // E2: the capture requests
   const captures: unknown[] = [];
   run.session.on('artifactCapture', (request) => captures.push(request));
   await run.session.start();
@@ -79,7 +75,7 @@ async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSess
     return answerOf(id)!;
   };
   const maws = () => run.events.filter((e) => e.kind.startsWith('maws.'));
-  return { ...run, shows, changes, captures, mcp, call, answerOf, answered, maws };
+  return { ...run, shows, captures, mcp, call, answerOf, answered, maws };
 }
 
 describe('the maws server on an EngineSession (scripted)', () => {
@@ -109,19 +105,17 @@ describe('the maws server on an EngineSession (scripted)', () => {
     await run.session.exited;
   });
 
-  it('send_file writes the X12 record and yields maws.delivery.file, live and on rebuild', async () => {
-    const run = await mawsSession();
+  it('send_file makes a File artifact and yields maws.delivery.file, live and on rebuild', async () => {
+    const documents = openDocuments(userData, () => {})!;
+    const run = await mawsSession({}, { artifacts: () => documents.store });
     const id = run.call('send_file', { files: ['hello.txt'], caption: 'the greeting' }, 'toolu_send');
     const rpc = await run.answered(id);
     const result = JSON.parse(rpc.result!.content![0]!.text) as { status: string; deliverables: { id: string; path: string; name: string }[] };
     expect(result).toMatchObject({ status: 'delivered', deliverables: [{ path: join(cwd, 'hello.txt'), name: 'hello.txt' }] });
-    const dir = join(userData, 'deliverables', run.session.status().appSessionId);
-    expect(await readdir(dir)).toEqual([`${result.deliverables[0]!.id}.json`]);
-    expect(await new FileDeliverableStore(userData).list(run.session.status().appSessionId)).toMatchObject([{ id: result.deliverables[0]!.id, kind: 'file', path: join(cwd, 'hello.txt'), title: 'hello.txt', caption: 'the greeting', toolUseId: 'toolu_send' }]);
+    expect(documents.store.get(result.deliverables[0]!.id)).toMatchObject({ kind: 'file', linkedPath: join(cwd, 'hello.txt'), title: 'hello.txt', createdBy: { kind: 'session', appSessionId: run.session.status().appSessionId } });
+    expect(existsSync(join(userData, 'deliverables'))).toBe(false); // P3-L M6b: no X12 record
     await until(() => run.maws().length > 0, 'the delivery event');
     expect(run.maws()).toMatchObject([{ kind: 'maws.delivery.file', toolUseId: 'toolu_send', requestId: id, deliverables: result.deliverables, caption: 'the greeting', urgency: 'normal' }]);
-    // E2: the store announces the record it wrote (deliverables.changed), send_file untouched
-    expect(run.changes).toEqual([{ appSessionId: run.session.status().appSessionId, id: result.deliverables[0]!.id, change: 'created' }]);
     // a refused call: an error result and no event (residue 1's admission rule)
     const refused = await run.answered(run.call('send_file', { files: ['gone.txt'] }));
     expect(refused.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.notAFile(join(cwd, 'gone.txt')) }], isError: true });
@@ -131,6 +125,7 @@ describe('the maws server on an EngineSession (scripted)', () => {
     run.transport.exit(0);
     await run.session.exited;
     expect(run.rebuilt()).toEqual(run.events);
+    documents.close();
   });
 
   it('show_pane asks the windows, answers what opened and yields maws.pane.shown; a refusal and an unknown pane too', async () => {
@@ -145,10 +140,10 @@ describe('the maws server on an EngineSession (scripted)', () => {
     expect(JSON.parse((await run.answered(terminal)).result!.content![0]!.text)).toEqual({ status: 'shown', pane: 'terminal', opened });
     expect(run.session.status().pendingRequests).toBe(0);
 
-    const deliverable = run.call('show_pane', { pane: 'deliverable', target: 'none' }, 'toolu_deliv');
+    const deliverable = run.call('show_pane', { pane: 'artifact', target: 'none' }, 'toolu_deliv');
     await until(() => run.shows.length === 2, 'the second pane request');
-    run.session.answerPane(deliverable, { ok: false, error: TOOL_ERRORS.paneUnavailable('deliverable') });
-    expect((await run.answered(deliverable)).result).toEqual({ content: [{ type: 'text', text: 'show_pane: the deliverable pane is not available in this build of MAWS' }], isError: true });
+    run.session.answerPane(deliverable, { ok: false, error: TOOL_ERRORS.paneUnavailable('artifact') });
+    expect((await run.answered(deliverable)).result).toEqual({ content: [{ type: 'text', text: 'show_pane: the artifact pane is not available in this build of MAWS' }], isError: true });
 
     const nope = await run.answered(run.call('show_pane', { pane: 'nope' }, 'toolu_nope'));
     expect(nope.result!.content![0]!.text).toBe(TOOL_ERRORS.unknownPane('nope'));
@@ -159,7 +154,7 @@ describe('the maws server on an EngineSession (scripted)', () => {
     await until(() => run.maws().length === 3, 'the pane events');
     expect(run.maws()).toMatchObject([
       { kind: 'maws.pane.shown', toolUseId: 'toolu_term', requestId: terminal, pane: 'terminal', target: null, opened, error: null },
-      { kind: 'maws.pane.shown', toolUseId: 'toolu_deliv', pane: 'deliverable', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('deliverable') },
+      { kind: 'maws.pane.shown', toolUseId: 'toolu_deliv', pane: 'artifact', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('artifact') },
       { kind: 'maws.pane.shown', toolUseId: 'toolu_file', pane: 'file', target: null, opened: null, error: TOOL_ERRORS.targetRequired('file') }, // admitted, refused by the host after
     ]);
     run.transport.exit(0);
@@ -282,6 +277,38 @@ describe('ask on an EngineSession (scripted)', () => {
     expect(run.session.status().pendingRequests).toBe(0);
     expect(run.maws().map((e) => e.kind)).toEqual(['maws.ask.opened', 'maws.ask.answered']);
     expect(run.maws()[1]).toMatchObject({ askId: 'toolu_async', answers, delivery: 'steer' });
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
+  // P2-C3 (the P2 spec's Decision Log 35; pass3/p2-c3-subagent-ask): the subagent's tool use arrives in an assistant
+  // frame under its parent before the call, so the host holds its async ask as a blocking one
+  it("a subagent's async ask is held as a blocking one: no acknowledgement, its answers (with a note) in its own result, nothing steered; live and on rebuild", async () => {
+    const run = await mawsSession();
+    const toolUse = (id: string, parent: string | null) =>
+      run.transport.push({ type: 'assistant', message: { id: `msg_${id}`, model: 'm', role: 'assistant', content: [{ type: 'tool_use', id, name: 'mcp__maws__ask', input: { blocking: false, questions: [QUESTIONS[0]] } }] }, parent_tool_use_id: parent, session_id: 's', uuid: `a-${id}` });
+    toolUse('toolu_sub', 'toolu_agent');
+    const id = run.call('ask', { blocking: false, questions: [QUESTIONS[0]] }, 'toolu_sub');
+    await until(() => run.session.asks().length === 1, 'the subagent’s ask');
+    expect(run.session.asks()).toMatchObject([{ askId: 'toolu_sub', blocking: true }]);
+    expect(run.answerOf(id)).toBeUndefined(); // no {status: 'asked'}: the call waits
+    expect(run.maws()).toMatchObject([{ kind: 'maws.ask.opened', askId: 'toolu_sub', blocking: true }]);
+
+    const answers: AskAnswer[] = [{ ...ANSWERS[0]!, note: 'the darker blue' }];
+    expect(await run.session.answerAsk('toolu_sub', answers)).toBe('delivered');
+    const rpc = await run.answered(id);
+    expect(JSON.parse(rpc.result!.content![0]!.text)).toEqual({ status: 'answered', askId: 'toolu_sub', answers });
+    expect(run.transport.writes.filter((w) => w.type === 'user')).toEqual([]); // nothing into the main conversation
+    expect(metaOf(run.journal.rows, 'maws_ask_answered')).toEqual([]);
+    await until(() => run.maws().length === 2, 'the answered event');
+    expect(run.maws()[1]).toMatchObject({ kind: 'maws.ask.answered', askId: 'toolu_sub', answers, delivery: 'result' });
+
+    // the main conversation's own async ask beside it is unchanged
+    toolUse('toolu_main', null);
+    const ack = await run.answered(run.call('ask', { blocking: false, questions: [QUESTIONS[0]] }, 'toolu_main'));
+    expect(JSON.parse(ack.result!.content![0]!.text)).toEqual({ status: 'asked', askId: 'toolu_main' });
+    expect(run.session.asks()).toMatchObject([{ askId: 'toolu_main', blocking: false }]);
     run.transport.exit(0);
     await run.session.exited;
     expect(run.rebuilt()).toEqual(run.events);
@@ -416,7 +443,8 @@ describe('ask on an EngineSession (scripted)', () => {
 
 // E1 M4b (the architect's ruling 1): a blocking ask waits on the human as an AskUserQuestion does, so it is a `question`
 // attention item published with the broker's list (Overview card, Needs-you, notifier) until it is answered or
-// cancelled, and `session.pendingRequest` answers its `maws.ask.opened` event for the card; an async ask is none.
+// cancelled, and `session.pendingRequest` answers its `maws.ask.opened` event for the card. (P2-C2: an async ask is an
+// `async_input` item, below.)
 describe('a blocking ask as a question attention item (scripted)', () => {
   const QUESTIONS = [{ question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] }];
   const ANSWERS: AskAnswer[] = [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }];
@@ -455,6 +483,31 @@ describe('a blocking ask as a question attention item (scripted)', () => {
     expect(run.stream.pendingRequest(id)).toBeNull();
     run.transport.exit(0);
     await run.session.exited;
+  });
+
+  // P2-C2 (the P2 spec's Decision Log 32, reversing E1's "an async ask is none"): a question that can wait raises the
+  // `async_input` item a need-input mark raised, retired when its answer is committed or the ask is cancelled.
+  it('an async ask is an async_input item while it waits, retired once its answer is committed; an exit counts it no lost question', async () => {
+    const run = await attended();
+    const id = run.call('ask', { blocking: false, title: 'Later', questions: QUESTIONS }, 'toolu_later');
+    await until(() => run.last().length === 1, 'the async ask’s item');
+    const { appSessionId } = run.session.status();
+    expect(run.last()).toEqual([expect.objectContaining({
+      id: `${appSessionId}:${id}`, kind: 'async_input', summary: 'Later', state: 'pending',
+      request: { requestId: id, toolUseId: 'toolu_later', taskId: null, agentId: null },
+    })]);
+    expect(run.last()[0]).not.toHaveProperty('anchor'); // anchored to the ask by its request, never to a mark
+    expect(run.stream.pendingRequest(id)).toEqual(run.maws().find((e) => e.kind === 'maws.ask.opened'));
+    expect(await run.session.answerAsk('toolu_later', ANSWERS)).toBe('delivered');
+    expect(run.last()).toEqual([]);
+    expect(run.stream.pendingRequest(id)).toBeNull();
+
+    run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_cut');
+    await until(() => run.last().length === 1, 'the second async ask’s item');
+    run.transport.exit(1);
+    await run.session.exited;
+    expect(run.last()).toEqual([]); // cancelled with the process
+    expect(run.session.brokerItems()).toEqual([]);
   });
 
   it('summarises an untitled ask by its first question, and retires when the engine withdraws it or the process ends', async () => {
@@ -505,7 +558,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
 
   // M5 fix: exit parity with an AskUserQuestion. The broker confirmed the ask's permission at its tools/call, so it is
   // no longer the broker's loss; the blocking ask, still published, is counted (and named) as a question lost. An async
-  // ask, never an attention item, is not counted.
+  // ask (P2-C2: an `async_input` item while it waits) is not counted.
   it('a blocking ask pending at the exit is lost attention on the exit row and the process.exited event; an async one is not', async () => {
     const run = await attended();
     run.transport.push({ type: 'control_request', request_id: 'perm-1', request: { subtype: 'can_use_tool', tool_name: 'mcp__maws__ask', input: { questions: QUESTIONS }, tool_use_id: 'toolu_lost' } });
@@ -514,7 +567,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
     run.call('ask', { questions: QUESTIONS }, 'toolu_lost');
     run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_async');
     await until(() => run.session.asks().length === 2, 'both asks');
-    expect(run.last().map((i) => [i.kind, i.state])).toEqual([['permission', 'confirmed'], ['question', 'pending']]);
+    expect(run.last().map((i) => [i.kind, i.state])).toEqual([['permission', 'confirmed'], ['question', 'pending'], ['async_input', 'pending']]); // P2-C2: the async ask's item
     run.transport.exit(1);
     expect((await run.session.exited).lostAttentionCount).toBe(1);
     const exitRow = run.journal.rows.find((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'exit')!;
@@ -532,25 +585,12 @@ describe('a blocking ask as a question attention item (scripted)', () => {
     expect(exitRow.frame).not.toHaveProperty('lostAskCount');
     expect(run.events.at(-1)).not.toHaveProperty('lostAskCount');
   });
-
-  it('an async ask is no attention item, and publishes nothing', async () => {
-    const run = await attended();
-    const before = run.published.length;
-    const id = run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_async');
-    await run.answered(id);
-    expect(run.session.asks()).toHaveLength(1);
-    expect(await run.session.answerAsk('toolu_async', ANSWERS)).toBe('delivered');
-    expect(run.published.slice(before)).toEqual([]);
-    expect(run.session.brokerItems()).toEqual([]);
-    expect(run.stream.pendingRequest(id)).toBeNull();
-    run.transport.exit(0);
-    await run.session.exited;
-  });
+  // P2-C2: E1's 'an async ask is no attention item' is reversed (Decision Log 32); the async_input case above.
 });
 
 // E2 start (E2 execution document, M1 step 5; P3-A M6: over the artifact store, `artifact_publish` for the retired
-// update): the artifact tools on the same scripted session: the store's write and the X12 mirror's copy and record,
-// `deliverables.changed`, `maws.delivery.artifact` live and on rebuild, the refusals, the capture bridge, the turn version
+// update; P3-L M6b: no X12 mirror): the artifact tools on the same scripted session: the store's write,
+// `maws.delivery.artifact` live and on rebuild, the refusals, the capture bridge, the turn version
 describe('the artifact tools on an EngineSession (scripted)', () => {
   const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
   const json = (rpc: Rpc) => JSON.parse(rpc.result!.content!.find((b) => (b as { type?: string }).type === 'text')!.text) as Record<string, unknown>;
@@ -561,7 +601,7 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
   afterEach(() => documents.close());
   const withStore = (session: Partial<EngineSessionOptions> = {}) => mawsSession({}, { artifacts: () => documents.store, ...session });
 
-  it('create and publish write the store and its X12 mirror, announce the record and yield maws.delivery.artifact, live and on rebuild; a refusal yields nothing', async () => {
+  it('create and publish write the store and yield maws.delivery.artifact, live and on rebuild; a refusal yields nothing', async () => {
     writeFileSync(join(cwd, 'dashboard.html'), '<h1 style="color:red">HELLO_E2</h1>');
     const run = await withStore();
     const appSessionId = run.session.status().appSessionId;
@@ -570,15 +610,12 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
     expect(created).toMatchObject({ status: 'created', id: 'dash', version: 1, title: 'Dashboard', externalReferences: 0 });
     const deliverableId = created.deliverableId as string;
     expect(created.artifactId).toBe(deliverableId);
-    const dir = join(userData, 'deliverables', appSessionId);
-    expect(await readdir(join(dir, deliverableId))).toEqual(['v1.html']);
-    expect(run.changes).toEqual([{ appSessionId, id: deliverableId, change: 'created' }]);
+    expect(existsSync(join(userData, 'deliverables'))).toBe(false);
 
     const publish = run.call('artifact_publish', { artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<h1 style="color:blue">HELLO_E2</h1>' } }, 'toolu_publish');
-    expect(json(await run.answered(publish))).toMatchObject({ status: 'published', id: 'dash', deliverableId, version: 2, title: 'Dashboard', changed: ['index.html'] });
-    expect((await readdir(join(dir, deliverableId))).sort()).toEqual(['v1.html', 'v2.html']);
-    expect(await new FileDeliverableStore(userData).get(appSessionId, deliverableId)).toMatchObject({ kind: 'artifact', artifactId: 'dash', path: join(dir, deliverableId, 'v2.html'), versions: [{ toolUseId: 'toolu_create' }, { toolUseId: 'toolu_publish' }] });
-    expect(run.changes).toEqual([{ appSessionId, id: deliverableId, change: 'created' }, { appSessionId, id: deliverableId, change: 'updated' }]);
+    const published = json(await run.answered(publish));
+    expect(published).toMatchObject({ status: 'published', id: 'dash', deliverableId, version: 2, title: 'Dashboard', changed: ['index.html'] });
+    expect(documents.store.listVersions(deliverableId).map((v) => v.actor)).toEqual([{ kind: 'session', appSessionId }, { kind: 'session', appSessionId }]);
 
     const listed = json(await run.answered(run.call('artifact_list', {}, 'toolu_list')));
     expect(listed).toMatchObject({ status: 'listed', artifacts: [{ id: deliverableId, handle: 'dash', kind: 'html', title: 'Dashboard', lastEditor: { by: 'this session' } }] });
@@ -589,33 +626,34 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
 
     await until(() => run.maws().length === 2, 'the artifact events');
     await new Promise((r) => setTimeout(r, 20)); // nothing more arrives for the list, the refusal or the invalid call
+    // P3-L M6b fix wave 2: each names the revision its call wrote, the version's stable identity beside E2's ordinal
     expect(run.maws()).toMatchObject([
-      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_create', requestId: create, action: 'create', artifactId: 'dash', deliverableId, version: 1, title: 'Dashboard' },
-      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_publish', requestId: publish, action: 'update', artifactId: 'dash', deliverableId, version: 2, title: 'Dashboard' },
+      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_create', requestId: create, action: 'create', artifactId: 'dash', deliverableId, version: 1, title: 'Dashboard', revision: created.revision },
+      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_publish', requestId: publish, action: 'update', artifactId: 'dash', deliverableId, version: 2, title: 'Dashboard', revision: published.revision },
     ]);
-    expect(run.changes).toHaveLength(2);
     run.transport.exit(0);
     await run.session.exited;
     expect(run.rebuilt()).toEqual(run.events);
   });
 
-  it('answers unavailable when the host has no artifact store, and delivers files as X12 records alone', async () => {
+  it('answers unavailable when the host has no artifact store, and delivers no file (P3-L M6b: no X12 record stands in)', async () => {
     const run = await mawsSession({}, { artifacts: () => null });
     const refused = await run.answered(run.call('artifact_list', {}));
     expect(refused.result!.isError).toBe(true);
     expect(refused.result!.content![0]!.text).toContain('"reason":"unavailable"');
-    const sent = json(await run.answered(run.call('send_file', { files: ['hello.txt'] }))) as { deliverables: { id: string }[] };
-    expect(await new FileDeliverableStore(userData).get(run.session.status().appSessionId, sent.deliverables[0]!.id)).toMatchObject({ kind: 'file' });
+    expect((await run.answered(run.call('send_file', { files: ['hello.txt'] }))).result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.deliveryUnavailable }], isError: true });
+    expect(existsSync(join(userData, 'deliverables'))).toBe(false);
   });
 
   it('artifact_screenshot asks main through maws.artifact.capture and answers the image block first; a second answer is not_pending', async () => {
     writeFileSync(join(cwd, 'dashboard.html'), '<h1>HELLO_E2</h1>');
     const run = await withStore();
     const appSessionId = run.session.status().appSessionId;
-    const deliverableId = json(await run.answered(run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }))).deliverableId;
+    const created = json(await run.answered(run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' })));
+    const deliverableId = created.deliverableId;
     const shot = run.call('artifact_screenshot', { id: 'dash' }, 'toolu_shot');
     await until(() => run.captures.length === 1, 'the capture request');
-    expect(run.captures).toEqual([{ appSessionId, requestId: shot, deliverableId, version: 1, width: 1280, height: 800 }]);
+    expect(run.captures).toEqual([{ appSessionId, requestId: shot, artifactId: deliverableId, revision: created.revision, width: 1280, height: 800 }]);
     expect(run.session.status().pendingRequests).toBe(1);
     expect(run.session.answerCapture(shot, { ok: true, png: PNG, width: 1280, height: 800, consoleErrors: [] })).toBe('delivered');
     expect(run.session.answerCapture(shot, { ok: true, png: PNG, width: 1280, height: 800, consoleErrors: [] })).toBe('not_pending');
@@ -652,16 +690,14 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
   });
 
   // P2-E1 start (2026-10-09): the artifact scope reaches the tools through the session's option (D10)
-  it("a side thread's publish of its parent's page, after its read, writes the parent's record, announced under the parent, its event naming the owner live and on rebuild", async () => {
+  it("a side thread's publish of its parent's page, after its read, adds the page's version, its event naming the owner live and on rebuild", async () => {
     const parent = 'app-parent' as AppSessionId;
     const page = await documents.store.create({ kind: 'html', title: 'Dashboard', handle: 'dash', content: { bytes: Buffer.from('<h1>HELLO_E2</h1>') } }, { kind: 'session', appSessionId: parent });
-    await new FileDeliverableStore(userData).write({ id: page.id, appSessionId: parent, kind: 'artifact', artifactId: 'dash', title: 'Dashboard', path: '/v1.html', versions: [{ path: '/v1.html', at: '2026-10-13T00:00:00.000Z' }], createdAt: '2026-10-13T00:00:00.000Z' });
     const run = await withStore({ artifactScope: [parent] });
     const read = json(await run.answered(run.call('artifact_read', { artifact: 'dash' }, 'toolu_read')));
     const publish = run.call('artifact_publish', { artifact: 'dash', baseRevision: read.revision, files: { 'index.html': '<h1>v2</h1>' } }, 'toolu_publish');
     expect(json(await run.answered(publish))).toMatchObject({ status: 'published', id: 'dash', deliverableId: page.id, version: 2, title: 'Dashboard', ownerAppSessionId: parent });
-    expect(await readdir(join(userData, 'deliverables', parent, page.id))).toEqual(['v2.html']);
-    expect(run.changes).toEqual([{ appSessionId: parent, id: page.id, change: 'updated' }]);
+    expect(documents.store.listVersions(page.id)).toHaveLength(2);
     const own = run.call('artifact_create', { id: 'own', content: '<p>own</p>', title: 'Own' }, 'toolu_own');
     await run.answered(own);
     await until(() => run.maws().length === 2, 'the artifact events');

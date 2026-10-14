@@ -19,7 +19,9 @@ import {
   ArtifactScreenshotInputSchema,
   ArtifactScreenshotResultSchema,
   ASK_MODALITIES, // P3-D
-  AskAnswerSchema, // P3-D
+  ASK_NOTE_MAX,
+  ASK_PREVIEW_MAX,
+  AskAnswerSchema,
   AskInputSchema,
   AskResultSchema,
   MAWS_SERVER_NAME,
@@ -55,13 +57,13 @@ describe('X9: the maws server and its twelve tools', () => {
   it('opens every description with its fallback sentence, word for word', () => {
     for (const name of MAWS_TOOL_NAMES) expect(MAWS_TOOLS[name].description, name).toMatch(/^[^.]*without this tool/);
     expect(MAWS_TOOLS.send_file.description).toBe(
-      'Deliver files to the user inside MAWS; without this tool, write the file and tell the user its path. Each delivered file becomes a row in the MAWS transcript with your caption and buttons to open it or reveal it in Finder; use it when you have produced something the user should look at (a PDF, an HTML page, an image, a document). Paths may be absolute or relative to the working directory and must name existing files. Returns the deliverable ids MAWS recorded.',
+      'Deliver files to the user inside MAWS; without this tool, write the file and tell the user its path. Each delivered file becomes a row in the MAWS transcript with your caption and buttons to open it or reveal it in Finder; use it when you have produced something the user should look at (a PDF, an HTML page, an image, a document). Paths may be absolute or relative to the working directory and must name existing files. Each becomes a File artifact; returns their artifact ids.',
     );
     expect(MAWS_TOOLS.ask.description).toBe(
-      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), "repository" (one of the user\'s MAWS projects), or "design_system" (one of the user\'s design systems, answered with its designSystemId and name; unless allowCreate is false, the user may answer create: true instead, asking you to build a new one with them). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile.',
+      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), "repository" (one of the user\'s MAWS projects), or "design_system" (one of the user\'s design systems, answered with its designSystemId and name; unless allowCreate is false, the user may answer create: true instead, asking you to build a new one with them). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile. In a subagent the call always waits and returns the answers, as with blocking true.',
     );
     expect(MAWS_TOOLS.show_pane.description).toBe(
-      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "deliverable", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), a deliverable id for deliverable, a URL for browser. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
+      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
     );
   });
 
@@ -128,6 +130,33 @@ describe('X9 inputs: strict, bounded, never defaulted', () => {
     expect(AskInputSchema.parse({ questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'a' }] }] })).toEqual({ questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'a' }] }] });
   });
 
+  // P2-C3 (Decision Log 34)
+  it('ask: an option carries a markdown preview up to ASK_PREVIEW_MAX characters, on a single-select question only', () => {
+    const parse = (options: Record<string, unknown>[], extra: Record<string, unknown> = {}) => parseToolArguments('ask', { questions: [{ question: 'Q?', modality: 'choice', options, ...extra }] });
+    expect(parse([{ label: 'A', preview: '```\n+--+\n|A |\n+--+\n```' }, { label: 'B' }]).ok).toBe(true);
+    expect(parse([{ label: 'A', preview: 'x'.repeat(ASK_PREVIEW_MAX) }]).ok).toBe(true);
+    expect(parse([{ label: 'A', preview: 'x'.repeat(ASK_PREVIEW_MAX + 1) }]).ok).toBe(false);
+    expect(parse([{ label: 'A', preview: '' }]).ok).toBe(false);
+    expect(parse([{ label: 'A', preview: 'a' }], { multi: false }).ok).toBe(true);
+    const multi = parse([{ label: 'A' }, { label: 'B', preview: 'b' }], { multi: true });
+    expect(multi).toEqual({ ok: false, error: 'ask: invalid arguments: questions.0.options.1.preview: preview is for single-select questions only' });
+    expect(parse([{ label: 'A' }, { label: 'B' }], { multi: true }).ok).toBe(true);
+    // the model reads the rule where it writes the field
+    const option = (mawsToolList().find((t) => t.name === 'ask')!.inputSchema as { properties: { questions: { items: { properties: { options: { items: { properties: { preview: { description: string; maxLength: number } } } } } } } } }).properties.questions.items.properties.options.items.properties.preview;
+    expect(option.maxLength).toBe(ASK_PREVIEW_MAX);
+    expect(option.description).toMatch(/Single-select questions only: previews on a multi-select question are refused\.$/);
+  });
+
+  it('ask: an answer carries a note of 1 to ASK_NOTE_MAX characters, whatever its status', () => {
+    const answer = (extra: Record<string, unknown>) => AskAnswerSchema.safeParse({ id: 'q1', question: 'Q?', ...extra }).success;
+    expect(answer({ status: 'answered', value: ['A'], note: 'darker, please' })).toBe(true);
+    expect(answer({ status: 'skipped', note: 'ask me tomorrow' })).toBe(true);
+    expect(answer({ status: 'decide_for_me', note: 'x'.repeat(ASK_NOTE_MAX) })).toBe(true);
+    expect(answer({ status: 'decide_for_me', note: 'x'.repeat(ASK_NOTE_MAX + 1) })).toBe(false);
+    expect(answer({ status: 'answered', value: ['A'], note: '' })).toBe(false);
+    expect(answer({ status: 'answered', value: ['A'], note: 3 })).toBe(false);
+  });
+
   it('show_pane takes a known pane, a target up to 4096 characters and a line only for a file', () => {
     expect(ShowPaneInputSchema.safeParse({ pane: 'terminal' }).success).toBe(true);
     expect(ShowPaneInputSchema.safeParse({ pane: 'file', target: 'src/a.ts', line: 3 }).success).toBe(true);
@@ -140,8 +169,8 @@ describe('X9 inputs: strict, bounded, never defaulted', () => {
 
 describe('X9 refusals: one text per offender', () => {
   it('names an unknown pane with the known ones, and every other refusal by its issues', () => {
-    expect(parseToolArguments('show_pane', { pane: 'nope' })).toEqual({ ok: false, error: 'show_pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, deliverable, browser, source-control' });
-    expect(TOOL_ERRORS.unknownPane('nope')).toBe('show_pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, deliverable, browser, source-control');
+    expect(parseToolArguments('show_pane', { pane: 'nope' })).toEqual({ ok: false, error: 'show_pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, artifact, browser, source-control' });
+    expect(TOOL_ERRORS.unknownPane('nope')).toBe('show_pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, artifact, browser, source-control');
     const missing = parseToolArguments('show_pane', {});
     expect(missing.ok === false && missing.error).toMatch(/^show_pane: invalid arguments: pane: /);
     const files = parseToolArguments('send_file', { files: [] });
@@ -155,7 +184,7 @@ describe('X9 refusals: one text per offender', () => {
   it('carries the exact texts of every host refusal', () => {
     expect(TOOL_ERRORS.notAFile('/r/x')).toBe('send_file: not a file: /r/x');
     expect(TOOL_ERRORS.sessionEnded).toBe('ask: the session ended before the user answered');
-    expect(TOOL_ERRORS.paneUnavailable('deliverable')).toBe('show_pane: the deliverable pane is not available in this build of MAWS');
+    expect(TOOL_ERRORS.paneUnavailable('artifact')).toBe('show_pane: the artifact pane is not available in this build of MAWS');
     expect(TOOL_ERRORS.targetRequired('file')).toBe('show_pane: a target is required for the file pane');
     expect(TOOL_ERRORS.fileNotFound('/r/x')).toBe('show_pane: file not found: /r/x');
     expect(TOOL_ERRORS.paneTimeout).toBe('show_pane: no MAWS window answered within 8 s');
@@ -299,8 +328,9 @@ describe('X9 artifact tools (E2)', () => {
     expect(stale).toBe('artifact_publish: read the artifact again {"reason":"staleBase","liveRevision":7}');
     expect(artifactRefusalOf(stale)).toEqual({ reason: 'staleBase', liveRevision: 7 });
     expect(artifactRefusalOf('artifact_publish: no artifact "x" in this session')).toBeNull();
-    expect(TOOL_ERRORS.deliverableNotFound('d1')).toBe('show_pane: no deliverable "d1" in this session');
-    expect(TOOL_ERRORS.deliverableUnreadable('d1', 'EIO')).toBe('show_pane: could not read deliverable "d1": EIO');
+    expect(TOOL_ERRORS.artifactNotFound('d1')).toBe('show_pane: no artifact "d1" in this session'); // P3-L M6b
+    expect(TOOL_ERRORS.artifactUnreadable('d1', 'EIO')).toBe('show_pane: could not read artifact "d1": EIO');
+    expect(TOOL_ERRORS.deliveryUnavailable).toBe('send_file: the artifact store is unavailable in this run of MAWS; nothing was delivered');
     expect(TOOL_ERRORS.unknownTool('echo')).toMatch(/^unknown tool "echo"; the maws server has send_file, ask, show_pane, artifact_create, artifact_list, artifact_screenshot, /); // E4c: thirteen; P1 A-54: seven; P3-A: twelve
   });
 });

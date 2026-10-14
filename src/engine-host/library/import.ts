@@ -6,21 +6,25 @@
 // - `artifact` becomes `html`: its `v<n>.html` copies as `import` versions in order at their own times, the latest the
 //   live content, each named after the page the agent published; the agent's id as the handle. `file` and `screenshot`
 //   become `file`, the file in place. The title is the record's, else its file's name; the times are the record's.
-// - Every version and the creation are the record's session's, with a `created` link: X12 names no session per version
-//   (a side thread's `artifact_update` of an ancestor's page is recorded in the ancestor's record), so there is no other
-//   session to link `edited`. No project (the host knows no session's project), no `caption`, no `sourceUrl`.
+// - The creation is the record's session's, with a `created` link. Each version is its record's session's, or, where X12
+//   names one (A's M6 added `appSessionId` to a version another session wrote: a side thread's publish of its parent's
+//   page), that session's, linked `edited` at its last version's time (Decision Log 33a). An older record names no
+//   session per version, so its history is credited to the record's session (Decision Log 31c). No project (the host
+//   knows no session's project), no `caption`, no `sourceUrl`.
 // - A record whose id is already an artifact (A's mirror of a store write, an earlier run, a deleted one) is skipped
 //   before anything is read, so a rerun after a crash lands only what is left. A handle the session already holds in
 //   the store is dropped (A refuses it `handleTaken`) and the page imported without it. A record whose file is gone
 //   (nothing at its path) is counted `missing`; one that cannot be read (a locked directory, not a regular file) or
 //   landed, `failed` with the reason; each with a log line, none stopping the walk.
 //
-// Not wired to run here: the cutover (M6b) runs it once at store open.
+// Run once at every host start, over the store as it opened (`./index.ts`, M6b): with no marker, a run over records that
+// all landed is a walk that skips each by its id.
 import type { Dirent, Stats } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { Actor } from '@shared/artifacts/actor';
-import { StoredDeliverableRecordSchema, type DeliverableRecord } from '@shared/maws/deliverable';
+import type { AppSessionId } from '@shared/graph/ids';
+import { StoredDeliverableRecordSchema, x12VersionLabel, type DeliverableRecord } from '@shared/maws/deliverable';
 import { ArtifactStoreError } from '../documents/errors';
 import type { ArtifactStore, ImportInput } from '../documents/store';
 
@@ -40,7 +44,7 @@ const isAbsent = (error: unknown) => ['ENOENT', 'ENOTDIR'].includes((error as No
 // A record's import input, or why there is none: a file it names is gone (`missing`), or it cannot be read (`failed`).
 type Prepared = { input: ImportInput } | { outcome: 'missing' | 'failed'; why: string };
 
-export async function importDeliverables(store: Pick<ArtifactStore, 'get' | 'importArtifact'>, deliverablesDir: string, log: (line: string) => void): Promise<DeliverablesImport> {
+export async function importDeliverables(store: Pick<ArtifactStore, 'get' | 'importArtifact' | 'files'>, deliverablesDir: string, log: (line: string) => void): Promise<DeliverablesImport> {
   const counts: DeliverablesImport = { imported: 0, skipped: 0, missing: 0, failed: 0 };
   const count = (outcome: Outcome, line?: string) => {
     counts[outcome]++;
@@ -55,7 +59,7 @@ export async function importDeliverables(store: Pick<ArtifactStore, 'get' | 'imp
       count('skipped');
       continue;
     }
-    const prepared = await prepare(record);
+    const prepared = await prepare(record, store.files);
     if ('outcome' in prepared) {
       count(prepared.outcome, `the deliverable ${record.id} (${path}) ${prepared.why}; not imported`);
       continue;
@@ -86,20 +90,27 @@ async function readTree(root: string): Promise<{ path: string; record?: Delivera
   return found.sort((a, b) => order(a).localeCompare(order(b)) || a.path.localeCompare(b.path));
 }
 
-async function prepare(record: DeliverableRecord): Promise<Prepared> {
+async function prepare(record: DeliverableRecord, files: ArtifactStore['files']): Promise<Prepared> {
   const versions = record.versions.length > 0 ? record.versions : [{ path: record.path, at: record.updatedAt ?? record.createdAt }];
   const createdAt = Date.parse(record.createdAt);
   const ats = versions.map((version) => Date.parse(version.at));
   const updatedAt = record.updatedAt !== undefined ? Date.parse(record.updatedAt) : ats.at(-1)!;
   if (![createdAt, updatedAt, ...ats].every((time) => Number.isSafeInteger(time) && time >= 0)) return { outcome: 'failed', why: 'has a time that is not a date' };
   const actor: Actor = { kind: 'session', appSessionId: record.appSessionId };
+  const writerOf = (version: (typeof versions)[number]): Actor => ('appSessionId' in version && version.appSessionId !== undefined ? { kind: 'session', appSessionId: version.appSessionId } : actor);
+  // another session's versions: an `edited` link each, at its last version's time
+  const edited = new Map<AppSessionId, number>();
+  versions.forEach((version, i) => {
+    const writer = writerOf(version);
+    if (writer.kind === 'session' && writer.appSessionId !== record.appSessionId) edited.set(writer.appSessionId, Math.max(edited.get(writer.appSessionId) ?? 0, ats[i]!));
+  });
   const common = {
     id: record.id,
     title: record.title ?? basename(record.path),
     createdAt,
     updatedAt,
     createdBy: actor,
-    links: [{ appSessionId: record.appSessionId, role: 'created' as const, lastAt: createdAt }],
+    links: [{ appSessionId: record.appSessionId, role: 'created' as const, lastAt: createdAt }, ...[...edited].map(([appSessionId, lastAt]) => ({ appSessionId, role: 'edited' as const, lastAt }))],
   };
   if (record.kind !== 'artifact') {
     // A delivered file stays where it is: its latest path, one version at the last version's time.
@@ -111,7 +122,16 @@ async function prepare(record: DeliverableRecord): Promise<Prepared> {
       return { outcome: 'failed', why: `could not reach ${record.path}: ${reasonOf(error)}` };
     }
     if (!found.isFile()) return { outcome: 'failed', why: `names ${record.path}, which is not a regular file` };
-    return { input: { ...common, kind: 'file', versions: [{ at: ats.at(-1)!, actor, content: { path: record.path } }] } };
+    // hashed now, streamed, so the store only records the digest: an old large file never holds the host's event loop
+    let digest: { sha256: string; size: number };
+    try {
+      const { sha256, size } = await files.describeStreamed(record.path);
+      digest = { sha256, size };
+    } catch (error) {
+      if (isAbsent(error)) return { outcome: 'missing', why: `names a file that is gone (${record.path})` };
+      return { outcome: 'failed', why: `could not read ${record.path}: ${reasonOf(error)}` };
+    }
+    return { input: { ...common, kind: 'file', versions: [{ at: ats.at(-1)!, actor: writerOf(versions.at(-1)!), content: { path: record.path, digest } }] } };
   }
   const read: ImportInput['versions'] = [];
   for (const [i, version] of versions.entries()) {
@@ -123,7 +143,8 @@ async function prepare(record: DeliverableRecord): Promise<Prepared> {
       return { outcome: 'failed', why: `could not read ${version.path}: ${reasonOf(error)}` };
     }
     const name = version.sourcePath !== undefined ? basename(version.sourcePath) : undefined;
-    read.push({ at: ats[i]!, actor, content: name ? { bytes, name } : { bytes } });
+    // fix wave 1 (Decision Log 39c): X12's number kept as the version's label, what a legacy anchor's `n` resolves by
+    read.push({ at: ats[i]!, actor: writerOf(version), content: name ? { bytes, name } : { bytes }, label: x12VersionLabel(i + 1) });
   }
   return { input: { ...common, kind: 'html', ...(record.artifactId !== undefined ? { handle: record.artifactId } : {}), versions: read } };
 }

@@ -3,11 +3,12 @@
 // question and naming how many it skips; Submit through `maws.ask.answer`, the next ask or the resting state after it;
 // `write_failed` keeps the drafts and offers Retry; a restored tab reads the host's table (the reload path); an answered
 // capsule reopens read-only with nothing to submit, with no read at all; a cancelled ask says the session ended.
+// P2-C3: a choice's previews in a pane that follows the focused option; a note beside any answer, shown read-only too.
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import type { PendingAsk } from '@shared/maws/ask';
-import type { AskQuestion } from '@shared/maws/tools';
+import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
 import { project, record } from '../../../../../../test/support/builders';
 import type { PanelToolContext } from '../../../panel/tool';
@@ -23,6 +24,12 @@ vi.mock('../../../ipc/client', () => ({
     invoke: (...args: Parameters<FakeClient['client']['invoke']>) => holder.client!.invoke(...args),
     on: (...args: Parameters<FakeClient['client']['on']>) => holder.client!.on(...args),
   },
+}));
+
+// The preview pane's markdown, as text (the real renderer is a lazy chunk; e2e/maws-tools.spec.ts draws it for real).
+vi.mock('../../../transcript', async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  Markdown: ({ markdown }: { markdown: string }) => <div data-markdown="">{markdown}</div>,
 }));
 
 const A = 'app-a' as AppSessionId;
@@ -269,13 +276,98 @@ describe('the asks a session holds', () => {
   });
 });
 
+describe('previews (P2-C3)', () => {
+  const LAYOUT: AskQuestion = {
+    id: 'p1', question: 'Which layout?', modality: 'choice',
+    options: [{ label: 'Sidebar', preview: '```\n[nav] | body\n```' }, { label: 'Tabs', description: 'One row on top', preview: 'tabs **across** the top' }, { label: 'Stacked' }],
+  };
+  const pane = (id: string) => section(id).querySelector<HTMLElement>('[data-ask-preview]');
+
+  it('only a question whose options carry previews has the pane, first showing the first option with one', async () => {
+    await mountWithAsk([{ ...ASK, questions: [QUESTIONS[0]!, { ...LAYOUT, options: [{ label: 'None' }, ...LAYOUT.options!] }] }]);
+    expect(pane('q1')).toBeNull();
+    expect(pane('p1')?.getAttribute('data-preview-of')).toBe('Sidebar');
+    expect(pane('p1')?.textContent).toBe('```\n[nav] | body\n```');
+    expect(within(section('p1')).getAllByRole('radio').map((radio) => radio.getAttribute('aria-label'))).toEqual(['None', 'Sidebar', 'Tabs', 'Stacked', 'Other…']);
+  });
+
+  it('follows the focused option, says when one has none, and keeps the last on Other', async () => {
+    await mountWithAsk([{ ...ASK, questions: [LAYOUT] }]);
+    const p1 = section('p1');
+    fireEvent.focus(within(p1).getByRole('radio', { name: 'Tabs' }));
+    expect(pane('p1')?.getAttribute('data-preview-of')).toBe('Tabs');
+    expect(within(pane('p1')!).getByText('tabs **across** the top')).toBeTruthy();
+    fireEvent.click(within(p1).getByRole('radio', { name: 'Stacked' }));
+    expect(pane('p1')?.getAttribute('data-preview-of')).toBe('Stacked');
+    expect(within(pane('p1')!).getByText('No preview for this option')).toBeTruthy();
+    expect(pane('p1')?.querySelector('[data-markdown]')).toBeNull();
+    fireEvent.click(within(p1).getByRole('radio', { name: 'Other…' }));
+    expect(pane('p1')?.getAttribute('data-preview-of')).toBe('Stacked');
+  });
+
+  // review fix: two asks often share question ids and labels; the second starts from its own selection, not the first's focus
+  it('a switch to another ask starts from that ask’s own selection', async () => {
+    const second: PendingAsk = { ...ASK, askId: 'toolu_b', toolUseId: 'toolu_b' as ToolUseId, requestId: 'r2' as RequestId, title: 'Again', questions: [LAYOUT] };
+    await mountWithAsk([{ ...ASK, questions: [LAYOUT] }, second]);
+    fireEvent.click(within(section('p1')).getByRole('radio', { name: 'Tabs' }));
+    expect(pane('p1')?.getAttribute('data-preview-of')).toBe('Tabs');
+    fireEvent.click(screen.getByRole('button', { name: 'Again' }));
+    await waitFor(() => expect(document.querySelector('[data-ask-sheet]')?.getAttribute('data-ask-id')).toBe('toolu_b'));
+    expect(within(section('p1')).getByRole('radio', { name: 'Tabs' }).getAttribute('aria-checked')).toBe('false');
+    expect(pane('p1')?.getAttribute('data-preview-of')).toBe('Sidebar');
+  });
+
+  it('before any focus, the selected option’s', async () => {
+    await mountWithAsk([{ ...ASK, questions: [LAYOUT] }]);
+    fireEvent.click(within(section('p1')).getByRole('radio', { name: 'Tabs' }));
+    cleanup(); // the drafts are the store's: a reopened sheet starts with no focus and the same selection
+    mount({ askId: ASK.askId });
+    expect(within(section('p1')).getByRole('radio', { name: 'Tabs' }).getAttribute('aria-checked')).toBe('true');
+    expect(pane('p1')?.getAttribute('data-preview-of')).toBe('Tabs');
+  });
+});
+
+describe('notes (P2-C3)', () => {
+  it('Add note opens a focused field beside the answer; the toggles leave it be, and Submit carries it trimmed', async () => {
+    await mountWithAsk();
+    const colour = section('q1');
+    expect(within(colour).queryByRole('textbox')).toBeNull();
+    fireEvent.click(within(colour).getByRole('button', { name: 'Add note' }));
+    const note = within(colour).getByRole('textbox', { name: 'Note on Which colour?' });
+    expect(document.activeElement).toBe(note);
+    expect(note.getAttribute('placeholder')).toBe('A note for the agent');
+    expect(note.getAttribute('maxlength')).toBe('2000');
+    expect(within(colour).queryByRole('button', { name: 'Add note' })).toBeNull();
+    fireEvent.change(note, { target: { value: ' Anything warm \n' } });
+    fireEvent.click(within(colour).getByRole('button', { name: 'Skip' }));
+    expect(within(colour).getByRole('button', { name: 'Skip' }).getAttribute('aria-pressed')).toBe('true');
+    expect((within(colour).getByRole('textbox', { name: 'Note on Which colour?' }) as HTMLTextAreaElement).value).toBe(' Anything warm \n');
+    // the note's field is not part of the dimmed control
+    expect(note.closest('[data-question-set]')).toBeNull();
+
+    // an answer with a note; a note opened and left blank closes back to its button and sends nothing
+    fireEvent.click(within(section('q3')).getByRole('button', { name: 'Add note' }));
+    fireEvent.blur(within(section('q3')).getByRole('textbox', { name: 'Note on What should the title be?' }));
+    expect(within(section('q3')).getByRole('button', { name: 'Add note' })).toBeTruthy();
+    fireEvent.click(within(section('q2')).getByRole('checkbox', { name: 'Tue' }));
+    fireEvent.click(within(section('q2')).getByRole('button', { name: 'Add note' }));
+    fireEvent.change(within(section('q2')).getByRole('textbox', { name: 'Note on Which days?' }), { target: { value: 'Mornings only' } });
+    fireEvent.click(submitButton());
+    expect((fake.invoked('maws.ask.answer')[0] as { answers: AskAnswer[] }).answers.slice(0, 3)).toEqual([
+      { id: 'q1', question: 'Which colour?', status: 'skipped', note: 'Anything warm' },
+      { id: 'q2', question: 'Which days?', status: 'answered', value: ['Tue'], note: 'Mornings only' },
+      { id: 'q3', question: 'What should the title be?', status: 'skipped' },
+    ]);
+  });
+});
+
 describe('a capsule’s ask, read-only', () => {
   const ANSWERED: AskRowData = {
     askId: 'toolu_old', toolUseId: 'toolu_old' as ToolUseId, title: null, context: null, blocking: true, questions: QUESTIONS, state: 'answered', error: null, cancelReason: null,
     answers: [
       { id: 'q1', question: 'Which colour?', status: 'answered', value: [], otherText: 'Teal' },
       { id: 'q2', question: 'Which days?', status: 'answered', value: ['Mon', 'Wed'] },
-      { id: 'q3', question: 'What should the title be?', status: 'skipped' },
+      { id: 'q3', question: 'What should the title be?', status: 'skipped', note: 'Name it\nafter the release' },
       { id: 'q4', question: 'Which folder holds the assets?', status: 'answered', value: ['/work/app-a/assets'] },
       { id: 'q5', question: 'Which repository is this for?', status: 'decide_for_me' },
     ],
@@ -292,6 +384,8 @@ describe('a capsule’s ask, read-only', () => {
     expect(within(section('q1')).getByText('Other: Teal')).toBeTruthy();
     expect(within(section('q2')).getByText('Mon, Wed')).toBeTruthy();
     expect(within(section('q3')).getByText('Skipped')).toBeTruthy();
+    expect(section('q3').querySelector('[data-ask-note]')?.textContent).toBe('NoteName it\nafter the release'); // P2-C3
+    expect(section('q2').querySelector('[data-ask-note]')).toBeNull();
     expect(within(section('q4')).getByText('/work/app-a/assets')).toBeTruthy();
     expect(within(section('q5')).getByText('Decided for me')).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Submit/ })).toBeNull();

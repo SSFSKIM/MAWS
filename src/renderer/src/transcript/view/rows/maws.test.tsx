@@ -61,6 +61,21 @@ describe('the ask capsule', () => {
     expect(actions.openAsk).toHaveBeenCalledWith(APP, expect.objectContaining({ askId: 'toolu_012dCG4TE89gS8BSqhFFZnjS', state: 'answered' }));
   });
 
+  // P2-C3 (Decision Log 34): a note reads after its answer, whatever the answer's status
+  it('answered with notes: each line ends with its note', async () => {
+    const store = await fixtureRows('p1-maws-ask-blocking');
+    const ask = rowOf(store.rows(), 'ask');
+    const answers = ask.answers!.map((answer, i) => (i === 0 || i === 2 || i === 4 ? { ...answer, note: `n${i}` } : answer));
+    const { container } = renderRow({ ...ask, answers }, { storeKey: APP });
+    expect([...container.querySelectorAll('[data-ask-answer]')].map((line) => line.textContent)).toEqual([
+      'Which colour?→Blue · Note: n0',
+      'Which days?→Mon, Wed · Other: Fri',
+      'What should the title be?→Skipped · Note: n2',
+      'Which folder holds the assets?→/private/tmp/maws-e1-repo-ogdPFU/assets',
+      'Which repository is this for?→Decide for me · Note: n4',
+    ]);
+  });
+
   it('asked, cancelled and error read their chips; a child transcript’s capsule opens its parent session’s sheet', () => {
     const base: RowOf<'ask'> = {
       id: 'ask:t1' as never, turnId: null, at: '2026-10-06T00:00:00.000Z', kind: 'ask', toolUseId: 't1' as never, askId: 't1', title: 'Setup', context: null, blocking: false,

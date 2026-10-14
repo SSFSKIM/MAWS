@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { AskQuestion } from '@shared/maws/tools';
 import { askAnswersProblem } from '@shared/maws/ask';
 import {
-  addPaths, draftStatus, EMPTY_DRAFT, pickOption, removePath, setDecide, setDesignSystem, setOther, setRepository, setSkip, setText, skippedCount, toAnswer, toAnswers, toggleOption, type Draft,
+  addPaths, draftStatus, EMPTY_DRAFT, pickOption, removePath, setDecide, setDesignSystem, setNote, setOther, setRepository, setSkip, setText, skippedCount, toAnswer, toAnswers, toggleOption, type Draft,
 } from './draft';
 
 const single: AskQuestion = { id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Green' }, { label: 'Blue' }] };
@@ -131,6 +131,39 @@ describe('draftStatus and Submit', () => {
   it('skippedCount counts the skipped and the empty questions', () => {
     const drafts = new Map<string, Draft>([['q1', setSkip(EMPTY_DRAFT, true)], ['q3', setText(EMPTY_DRAFT, 'x')]]);
     expect(skippedCount([single, multi, text], drafts)).toBe(2);
+  });
+});
+
+// P2-C3 (the P2 spec's Decision Log 34): a note beside the answer, whatever its status
+describe('the note', () => {
+  it('neither toggle touches it, nor it them, nor does an edit of the answer', () => {
+    const noted = setNote(setDecide(EMPTY_DRAFT, true), 'Keep it small');
+    expect(noted).toMatchObject({ decide: true, note: 'Keep it small' });
+    expect(setSkip(noted, true)).toMatchObject({ skip: true, decide: false, note: 'Keep it small' });
+    expect(setDecide(setSkip(noted, true), false)).toMatchObject({ note: 'Keep it small' });
+    expect(pickOption(single, noted, 'Red')).toMatchObject({ decide: false, note: 'Keep it small' });
+    expect(setText(setNote(EMPTY_DRAFT, 'n'), 'x').note).toBe('n');
+  });
+
+  it('draftStatus ignores it: a note alone leaves the question empty', () => {
+    expect(draftStatus(single, setNote(EMPTY_DRAFT, 'Not sure yet'))).toBe('empty');
+    expect(skippedCount([single], new Map([['q1', setNote(EMPTY_DRAFT, 'Not sure yet')]]))).toBe(1);
+  });
+
+  it('travels trimmed on every status, and not at all when blank or never opened', () => {
+    const base = { id: 'q1', question: 'Which colour?' };
+    expect(toAnswer(single, setNote(pickOption(single, EMPTY_DRAFT, 'Red'), '  warm, please\n'))).toEqual({ ...base, status: 'answered', value: ['Red'], note: 'warm, please' });
+    expect(toAnswer(single, setNote(setSkip(EMPTY_DRAFT, true), 'later'))).toEqual({ ...base, status: 'skipped', note: 'later' });
+    expect(toAnswer(single, setNote(setDecide(EMPTY_DRAFT, true), 'anything bright'))).toEqual({ ...base, status: 'decide_for_me', note: 'anything bright' });
+    expect(toAnswer(single, setNote(EMPTY_DRAFT, 'only a note'))).toEqual({ ...base, status: 'skipped', note: 'only a note' });
+    expect(toAnswer(single, setNote(pickOption(single, EMPTY_DRAFT, 'Red'), '   '))).not.toHaveProperty('note');
+    expect(toAnswer(single, setNote(EMPTY_DRAFT, ''))).not.toHaveProperty('note');
+    expect(toAnswer(single, pickOption(single, EMPTY_DRAFT, 'Red'))).not.toHaveProperty('note');
+  });
+
+  it('a noted answer is one the host admits', () => {
+    const drafts = new Map<string, Draft>([['q1', setNote(setSkip(EMPTY_DRAFT, true), 'later')], ['q3', setNote(setText(EMPTY_DRAFT, 'x'), 'a draft title')]]);
+    expect(askAnswersProblem([single, text], toAnswers([single, text], drafts))).toBeNull();
   });
 });
 

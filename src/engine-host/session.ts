@@ -47,7 +47,6 @@ import { SessionSurface } from './surface'; // R2
 import type { MawsArtifactCapturedResult, MawsArtifactExportAnswer, MawsDownloadRecorded, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import type { PendingAsk } from '@shared/maws/ask';
 import type { AskAnswer } from '@shared/maws/tools';
-import type { DeliverableWriter, OnDeliverableWritten } from './deliverables/store';
 import { SessionMaws, type MawsListeners } from './session-maws';
 // E1 end
 // E3 start
@@ -104,9 +103,6 @@ export interface EngineSessionOptions {
   reconnectTrigger?: 'user' | 'process_exit';
   // C12 end
   sessionStartHookMs?: (plan: LaunchPlan) => Promise<number>; // debt wave 6: the hooks' bound; read from the settings by default
-  // E1: where the `maws` tools record deliverables (the launcher's FileDeliverableStore; in memory by default). E2: built
-  // with the session's announcement, so every write the store settles reaches the windows as `deliverables.changed`.
-  deliverables?: (onWritten: OnDeliverableWritten) => DeliverableWriter;
   // E10: whether an app is connected to the engine host (the runtime's); `show_pane` and `artifact_screenshot` fail at
   // once with `appNotOpen` while it is false. Absent, always connected.
   hasClient?: () => boolean;
@@ -138,7 +134,7 @@ interface SessionListeners {
   catalog: (catalog: Catalog) => void; // C7: the whole catalogue, whenever its revision moved
   models: (models: unknown[]) => void; // C10: the initialize response's model list, for the catalogue cache
 }
-// E1, E2: paneShow, deliverableChanged, artifactCapture; P3-A M7: artifactExport (session-maws.ts)
+// E1, E2: paneShow, artifactCapture; P3-A M7: artifactExport (session-maws.ts)
 type Listeners = SessionListeners & MawsListeners;
 
 type ProcessState = EngineSessionStatus['process'];
@@ -166,7 +162,7 @@ export class EngineSession {
   readonly sideQuestions = new SideQuestionLog(); // E3: this process's `/btw` exchanges (host memory, X13)
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, deliverableChanged: new Set(), artifactCapture: new Set() /* E2 */, artifactExport: new Set() /* P3-A M7 */ };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, artifactCapture: new Set() /* E2 */, artifactExport: new Set() /* P3-A M7 */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
@@ -221,11 +217,12 @@ export class EngineSession {
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.maws = new SessionMaws({
-      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, deliverables: opts.deliverables, hasClient: opts.hasClient, artifactScope: opts.artifactScope /* P2-E1 */, artifacts: opts.artifacts /* P3-A */,
+      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, hasClient: opts.hasClient, artifactScope: opts.artifactScope /* P2-E1 */, artifacts: opts.artifacts /* P3-A */,
       emit: (name, payload) => this.emit(name, payload),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,
       sessionId: () => this.normalizer.state.sessionId,
+      fromSubagent: (toolUseId) => this.normalizer.fromSubagent(toolUseId), // P2-C3: the call's frame was journaled first
       publishAttention: () => this.emit('brokerItems', this.brokerItems()),
       steer: (content, steerOpts) => this.queue.steer(content, steerOpts),
       meta: (frame) => void this.record('meta', frame),
@@ -398,7 +395,7 @@ export class EngineSession {
     return this.maws.answerExport(requestId, answer); // P3-A M7
   }
 
-  // E13: an agent's finished download through cua, as a file deliverable once per path
+  // E13: an agent's finished download through cua, as a File artifact once per path (P3-L M6b)
   recordDownload(download: MawsDownloadRecorded): Promise<'recorded' | 'duplicate'> {
     return this.maws.recordDownload(download);
   }

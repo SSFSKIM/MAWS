@@ -1,5 +1,5 @@
 // P3-G (§D4.1): Mark-up's surfaces. A surface is something a still can be taken of and drawn over, registered per panel
-// or main tab by the body that draws it (the Browser tool's pane, the deliverable viewer; P3-B's and P3-C's editors
+// or main tab by the body that draws it (the Browser tool's pane, the artifact viewers; P3-B's and P3-C's editors
 // later), for as long as that body is mounted. The header's Mark up shows for the selected panel tab when its scope has a
 // surface. Two capture routes: a native browser view captures itself in main (`browser.view.capture`, the Browser
 // tool's `begin`), a surface the renderer draws through `captureWindowRegion` (`layout.captureRegion`).
@@ -86,7 +86,7 @@ export async function captureWindowRegion(rect: CaptureRect, client: MawsBridge 
 const painted = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 
 // A surface the renderer draws (the DOM route), registered under the body's scope while `enabled`: the element's rect
-// captured from the window, nothing to freeze. The deliverable viewer's now; P3-B's and P3-C's editors the same way. The
+// captured from the window, nothing to freeze. The artifact viewers' now; P3-B's and P3-C's editors the same way. The
 // scope is read by its fields (the context's object is new on every render of the body, and re-registering would end
 // a session drawing here); the label is read when a session starts.
 export function useRegionMarkupSurface(element: RefObject<HTMLElement | null>, label: string, enabled: boolean): void {

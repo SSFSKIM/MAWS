@@ -85,7 +85,7 @@ describe('the browser action row', () => {
     expect(document.querySelector('pre')!.textContent).toBe('{\n  "fields": 2\n}');
   });
 
-  it('Open tab shows the row’s tab in the Browser tool; a screenshot’s Open its deliverable', () => {
+  it('Open tab shows the row’s tab in the Browser tool; a screenshot’s Open its artifact', () => {
     const acted = renderRow(row({}), { storeKey: APP });
     expect(buttons(acted.container)).toEqual(['Open tab']);
     fireEvent.click(screen.getByRole('button', { name: 'Open tab' }));
@@ -94,7 +94,7 @@ describe('the browser action row', () => {
     const shot = renderRow(row({ tool: 'browser_screenshot', action: 'screenshot', target: 'page', deliverableId: DELIVERABLE }), { storeKey: APP });
     expect(buttons(shot.container)).toEqual(['Open', 'Open tab']);
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(shot.actions.openDeliverable).toHaveBeenCalledWith(APP, DELIVERABLE);
+    expect(shot.actions.openArtifact).toHaveBeenCalledWith(APP, DELIVERABLE);
   });
 
   it('offers no Open tab for a listing, a closed tab or a refusal, and nothing outside a mounted transcript', () => {

@@ -120,6 +120,26 @@ describe('importDeliverables (M6a)', () => {
     expect(text(store.contentRef(uuid(1)).path)).toBe('<p>v3</p>');
     expect(store.get(uuid(1))).toMatchObject({ title: 'Pricing v3', createdAt: at[0], updatedAt: at[2] });
     expect(store.lastWrite(uuid(1))).toEqual({ actor: session('app-1'), at: at[2] });
+    // M6b fix wave 1 (Decision Log 39c): each keeps X12's number as its label, what a legacy anchor's `n` resolves by
+    expect(versions.map((v) => v.label)).toEqual(['v1', 'v2', 'v3']);
+  });
+
+  it('credits a version another session wrote (X12’s per-version `appSessionId`, A’s M6) to that session and links it `edited` (M6b, Decision Log 33a)', async () => {
+    const at = [now - 30 * DAY, now - 20 * DAY, now - 10 * DAY, now - 5 * DAY];
+    const record = seedHtml('app-1', uuid(1), { handle: 'plan', title: 'Plan', versions: at.map((t, i) => ({ at: t, markup: `<p>v${i + 1}</p>` })) });
+    // a side thread (app-2) published v2 and v4 of its parent's page; v3 was the parent's own
+    record.versions[1] = { ...record.versions[1]!, appSessionId: 'app-2' } as (typeof record.versions)[number];
+    record.versions[3] = { ...record.versions[3]!, appSessionId: 'app-2' } as (typeof record.versions)[number];
+    writeJson(recordFile('app-1', uuid(1)), record);
+
+    expect(await run()).toEqual({ imported: 1, skipped: 0, missing: 0, failed: 0 });
+    expect(store.listVersions(uuid(1)).map((v) => v.actor)).toEqual([session('app-1'), session('app-2'), session('app-1'), session('app-2')]);
+    expect(store.get(uuid(1))?.createdBy).toEqual(session('app-1'));
+    expect(store.links(uuid(1)).map((link) => [link.appSessionId, link.role, link.lastAt])).toEqual([
+      ['app-1', 'created', at[0]],
+      ['app-2', 'edited', at[3]], // its last version's time
+    ]);
+    expect(store.lastWrite(uuid(1))).toEqual({ actor: session('app-2'), at: at[3] });
   });
 
   it('skips a record whose id is already an artifact (A’s mirror), a deleted one included, without touching it', async () => {
@@ -219,6 +239,18 @@ describe('importDeliverables (M6a)', () => {
     expect(store.get(uuid(2))).toMatchObject({ handle: 'report' }); // another session's handle is its own
     expect(store.resolve('report', ['app-1'])).toBe(mine.id);
     expect(logged).toEqual([expect.stringMatching(new RegExp(`${uuid(1)}.*report`))]);
+  });
+
+  it('hashes a sent file streamed before the import, so the store records its digest without hashing it on the event loop (whole-branch review)', async () => {
+    const sent = seedFile('app-1', uuid(1), { name: 'large.bin', at: now - DAY });
+    const streamed = vi.spyOn(store.files, 'describeStreamed');
+    const blocking = vi.spyOn(store.files, 'describe');
+
+    expect(await run()).toEqual({ imported: 1, skipped: 0, missing: 0, failed: 0 });
+    expect(streamed).toHaveBeenCalledWith(sent.path);
+    expect(blocking).not.toHaveBeenCalled();
+    const { sha256, size } = await store.files.describeStreamed(sent.path);
+    expect(store.contentRef(uuid(1)).ref).toMatchObject({ sha256, size });
   });
 
   it('finds nothing to do when there is no deliverables directory', async () => {

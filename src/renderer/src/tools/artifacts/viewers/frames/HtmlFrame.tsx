@@ -1,8 +1,8 @@
-// E2 (M4): an HTML deliverable's frame (Design §3 "The HTML frame"): the scheme URL in an `<iframe>` whose sandbox
+// E2 (M4): an HTML page's frame (Design §3 "The HTML frame"): the scheme URL in an `<iframe>` whose sandbox
 // allows scripts and nothing else (no same-origin, no navigation, no popups, no downloads, no forms, no modals); the
 // handler's per-answer CSP blocks every request that is not `data:` or `blob:`. The URL is set when the element is
 // created and never changed: a version switch or a Reload mounts a new frame (the viewer keys it), so the app never
-// points a deliverable frame anywhere but the scheme, which main's frame policies would refuse.
+// points a page's frame anywhere but the scheme, which main's frame policies would refuse.
 //
 // Every mount loads the page afresh, and the page logs afresh, so what the store holds for this version is cleared as
 // the frame mounts (before any message of this load can arrive): the chip counts one load, however often the frame is
@@ -13,10 +13,9 @@
 // reaches it) and the frame's messages are read: those whose source is this frame's window and whose data is a picked
 // or a cancelled message, nothing else. When picking ends the page is told so.
 //
-// P3-L (M5b): moved from the Deliverables tool to be shared with the artifact store's HTML viewer, which frames a
-// `maws-artifact:` page; what the viewer keeps per load (a console it clears) is its own `onMount`, and `owner` names
-// the frame's data attribute (`data-deliverable-frame` or `data-artifact-frame`). `onLoad` tells the viewer its page is
-// on screen.
+// P3-L (M5b): moved from E2's Deliverables tool to the artifact store's HTML viewer, which frames a `maws-artifact:`
+// page; what the viewer keeps per load (a console it clears) is its own `onMount` (M6b: the Deliverables tool gone, the
+// frame is `data-artifact-frame` alone). `onLoad` tells the viewer its page is on screen.
 //
 // P2-E1 (M3), re-pin (P2-E1 document, D8): the frame hands its parent a handle (`onFrame`) whose `locate(selector)` asks
 // the page where an element is now (`maws:locate`, under an id of its own from this frame's counter) and resolves on the
@@ -36,12 +35,10 @@ export interface FrameHandle {
   locate(selector: string): Promise<CardRect | null>;
 }
 
-export type FrameOwner = 'deliverable' | 'artifact';
 
 interface Props {
   url: string;
   title: string;
-  owner?: FrameOwner; // P3-L: whose frame, for its data attribute (default the Deliverables tool's)
   onMount?(): void; // P3-L: as the frame mounts, before any message of its load can arrive (a console cleared)
   onLoad?(): void; // P3-L: its page loaded
   picking?: boolean;
@@ -49,7 +46,7 @@ interface Props {
   onFrame?(handle: FrameHandle | null): void; // P2-E1: the locate handle, null once the frame is gone
 }
 
-export function HtmlFrame({ url, title, owner = 'deliverable', onMount, onLoad: loaded, picking = false, onPick, onFrame }: Props) {
+export function HtmlFrame({ url, title, onMount, onLoad: loaded, picking = false, onPick, onFrame }: Props) {
   const ref = useRef<HTMLIFrameElement>(null);
   const load = useRef({ loaded: false, waiting: new Set<() => void>() }); // P2-E1: what waits for this frame's load
   const mounted = useEffectEvent(() => onMount?.());
@@ -121,5 +118,5 @@ export function HtmlFrame({ url, title, owner = 'deliverable', onMount, onLoad: 
     loaded?.();
   };
   // P2-E1 end
-  return <iframe ref={ref} {...{ [`data-${owner}-frame`]: 'html' }} sandbox="allow-scripts" src={url} title={title} referrerPolicy="no-referrer" onLoad={onLoad} className="h-full w-full border-0 bg-bg" />;
+  return <iframe ref={ref} data-artifact-frame="html" sandbox="allow-scripts" src={url} title={title} referrerPolicy="no-referrer" onLoad={onLoad} className="h-full w-full border-0 bg-bg" />;
 }

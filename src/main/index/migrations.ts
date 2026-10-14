@@ -179,17 +179,43 @@ CREATE INDEX owner_channel_marks_session ON owner_channel_marks(app_session_id, 
 `,
   },
   // P2-C end
-  // P3-L start (2026-10-13)
+  // P2-C2 start (2026-10-13)
   {
     version: 9,
-    // P3-L (the P3-L document, Decision Log 6; X15's slot 9): the library, a view derived from the engine host's artifact
-    // store (main never opens it), rebuilt from the host's change events and replaced whole by a reconciliation at every
-    // host connection. `library_artifacts` holds each live artifact as the host's `library.entry` answers it (actors as
-    // `actorKey`, times in epoch ms) with the revision its indexed text was extracted at (`text_revision`, null until
-    // fetched) and its row in `library_text` (`text_rowid`, so the text is reached by rowid, never by scanning the
-    // unindexed id); `library_links` its session links; `library_spaces` the Spaces. `library_text` is the search index
-    // over titles and extracted text: FTS5 with the trigram tokenizer (substring matching that works for Korean and for
-    // identifiers). Deleted artifacts are not kept.
+    // P2-C2 (the P2 spec's Decision Log 31; X15's slot, allocated at landing): a launch's `desired` and `applied` source
+    // gains `external-style-plus-supplement`, a message-tool style with MAWS's supplement beside it. SQLite changes a
+    // CHECK only by rebuilding the table: migration 8's `owner_channel_sessions` again with the wider CHECK, its rows
+    // copied whole. No table references it and it has no index.
+    sql: `
+CREATE TABLE owner_channel_sessions_9 (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id) ON DELETE CASCADE,
+  override TEXT NOT NULL DEFAULT 'inherit' CHECK (override IN ('inherit','on','off')),
+  enabled_at TEXT,
+  launch_id TEXT, launched_at TEXT,
+  desired TEXT CHECK (desired IN ('maws-contract','external-compatible-style','external-style-plus-supplement','off')),
+  recorded TEXT,
+  appended INTEGER NOT NULL DEFAULT 0, snapshot_off INTEGER NOT NULL DEFAULT 0, off_unavailable INTEGER NOT NULL DEFAULT 0,
+  applied TEXT CHECK (applied IN ('maws-contract','external-compatible-style','external-style-plus-supplement','off')),
+  style TEXT, observed_style TEXT, style_mismatch INTEGER NOT NULL DEFAULT 0);
+INSERT INTO owner_channel_sessions_9 (app_session_id, override, enabled_at, launch_id, launched_at, desired, recorded, appended, snapshot_off,
+  off_unavailable, applied, style, observed_style, style_mismatch)
+  SELECT app_session_id, override, enabled_at, launch_id, launched_at, desired, recorded, appended, snapshot_off,
+  off_unavailable, applied, style, observed_style, style_mismatch FROM owner_channel_sessions;
+DROP TABLE owner_channel_sessions;
+ALTER TABLE owner_channel_sessions_9 RENAME TO owner_channel_sessions;
+`,
+  },
+  // P2-C2 end
+  // P3-L start (2026-10-13)
+  {
+    version: 10,
+    // P3-L (the P3-L document, Decision Log 6; X15's slot rule: 10, P2-C2 having landed 9): the library, a view derived
+    // from the engine host's artifact store (main never opens it), rebuilt from the host's change events and replaced
+    // whole by a reconciliation at every host connection. `library_artifacts` holds each live artifact as the host's
+    // `library.entry` answers it (actors as `actorKey`, times in epoch ms) with the revision its indexed text was
+    // extracted at (`text_revision`, null until fetched) and its row in `library_text` (`text_rowid`, so the text is
+    // reached by rowid, never by scanning the unindexed id); `library_links` its session links; `library_spaces` the
+    // Spaces. `library_text` is the search index over titles and extracted text: FTS5 with the trigram tokenizer
+    // (substring matching that works for Korean and for identifiers). Deleted artifacts are not kept.
     sql: `
 CREATE TABLE library_artifacts (id TEXT PRIMARY KEY,
   kind TEXT NOT NULL CHECK (kind IN ('document','presentation','design','design_system','dashboard','html','file')),

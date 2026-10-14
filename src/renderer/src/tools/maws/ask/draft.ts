@@ -3,8 +3,10 @@
 // answer: turning one on leaves the draft beneath it untouched (turning it off restores the answer), and any edit of
 // the answer turns both off. A single-select choice's Other row excludes its labels; a multi-select's sits beside them.
 // An empty draft at Submit is skipped; a draft with Other chosen and nothing typed is incomplete, the one state that
-// holds Submit back. P3-D: a design_system question's draft is the system picked (its id and name) or "Build one with
-// me" (`create`), which a question with `allowCreate: false` never answers.
+// holds Submit back. P2-C3 (the P2 spec's Decision Log 34): a note sits beside the answer, whatever its status; no edit
+// of the answer or the toggles touches it, nor it them, and it travels trimmed, only when something is written.
+// P3-D: a design_system question's draft is the system picked (its id and name) or "Build one with me" (`create`),
+// which a question with `allowCreate: false` never answers.
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 
 export interface Draft {
@@ -16,12 +18,13 @@ export interface Draft {
   designSystem: DesignSystemPick | null; // P3-D: design_system
   decide: boolean;
   skip: boolean;
+  note: string | null; // the note beside the answer; null while its field is not opened
 }
 
 // P3-D: a system by its artifact id and name, or the request to build a new one with the agent.
 export type DesignSystemPick = { id: string; name: string } | 'create';
 
-export const EMPTY_DRAFT: Draft = { selected: [], otherText: null, text: '', paths: [], repository: null, designSystem: null, decide: false, skip: false };
+export const EMPTY_DRAFT: Draft = { selected: [], otherText: null, text: '', paths: [], repository: null, designSystem: null, decide: false, skip: false, note: null };
 
 export type DraftStatus = 'answered' | 'decide' | 'skipped' | 'empty' | 'incomplete';
 
@@ -69,6 +72,9 @@ export const setDesignSystem = (draft: Draft, pick: DesignSystemPick | null): Dr
 export const setDecide = (draft: Draft, on: boolean): Draft => ({ ...draft, decide: on, skip: on ? false : draft.skip });
 export const setSkip = (draft: Draft, on: boolean): Draft => ({ ...draft, skip: on, decide: on ? false : draft.decide });
 
+// `null` closes the note's field; a string opens it and holds what is typed.
+export const setNote = (draft: Draft, note: string | null): Draft => ({ ...draft, note });
+
 export function draftStatus(question: AskQuestion, draft: Draft): DraftStatus {
   if (draft.decide) return 'decide';
   if (draft.skip) return 'skipped';
@@ -94,8 +100,13 @@ export interface ProjectRef {
 }
 
 // The answer a draft becomes at Submit (`AskAnswerSchema`): Decide for me, skipped (asked for, or empty), or the
-// modality's value. `projects` names a repository answer's project by its directory.
+// modality's value, with the note when one is written. `projects` names a repository answer's project by its directory.
 export function toAnswer(question: AskQuestion, draft: Draft, projects: readonly ProjectRef[] = []): AskAnswer {
+  const note = draft.note?.trim() ?? '';
+  return { ...answerOf(question, draft, projects), ...(note !== '' && { note }) };
+}
+
+function answerOf(question: AskQuestion, draft: Draft, projects: readonly ProjectRef[]): AskAnswer {
   const base = { id: question.id ?? '', question: question.question };
   const status = draftStatus(question, draft);
   if (status === 'decide') return { ...base, status: 'decide_for_me' };

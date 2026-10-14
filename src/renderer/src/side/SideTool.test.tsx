@@ -36,8 +36,6 @@ import { browserTool } from '../tools/browser/BrowserTool';
 // E4d end
 // P2-E1 start (2026-10-09)
 import { deliverableUrl } from '@shared/maws/deliverable';
-import { DELIVERABLES_TOOL_ID } from '@shared/maws/panes';
-import type { DeliverablesParams } from '../tools/deliverables/DeliverablesTool';
 import { useCommentCard } from './card/store';
 import { artifactUrl } from '@shared/artifacts/scheme'; // P3-L (M5b)
 import { ARTIFACTS_TOOL_ID, type ArtifactsParams } from '../tools/artifacts/ArtifactsTool'; // P3-L (M5b)
@@ -181,16 +179,17 @@ describe('the Side pane', () => {
   });
   // E4d end
 
-  // P2-E1 start (2026-10-09): "Show in deliverable" re-docks a thread opened from an artifact element (P2-E1 document, D7)
-  describe('Show in deliverable', () => {
+  // P2-E1 start (2026-10-09): "Show in artifact" ("Show in deliverable" until P3-L's cutover) re-docks a thread opened
+  // from an artifact element (P2-E1 document, D7). ELEMENT is an anchor stored before the cutover, on E2's scheme.
+  describe('Show in artifact', () => {
     const RECORD_ID = '00000000-0000-4000-8000-0000000000e1';
     const ELEMENT: Anchor = { kind: 'artifact-element', locator: '#hero', label: 'Dashboard v1 › h1#hero “Sales overview”', pageUrl: deliverableUrl(A, RECORD_ID, 1) };
-    const SHOW = 'Show in deliverable';
+    const SHOW = 'Show in artifact';
     beforeEach(() => {
       useCommentCard.setState({ open: null });
-      // the Deliverables tool as the panel opens it: its state is what it was asked to show
-      registerPanelTool<unknown[], DeliverablesParams>({
-        id: DELIVERABLES_TOOL_ID, title: 'Deliverables', icon: () => null, pinnable: true, multiInstance: false,
+      // the Artifacts tool as the panel opens it: its state is what it was asked to show
+      registerPanelTool<unknown[], ArtifactsParams>({
+        id: ARTIFACTS_TOOL_ID, title: 'Artifacts', icon: () => null, pinnable: true, multiInstance: false,
         createState: (init) => [init.params],
         open: (state, params) => void state.push(params),
         beforeClose: async () => true,
@@ -200,7 +199,7 @@ describe('the Side pane', () => {
     });
     afterEach(() => useCommentCard.setState({ open: null }));
 
-    it('is offered in the header of a thread on an artifact element whose page names a deliverable, and of no other', () => {
+    it('is offered in the header of a thread on an artifact element whose page names an artifact (E2’s scheme’s too), and of no other', () => {
       withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: ELEMENT }));
       const view = render(<ThreadView parent={A} child={ONE} visible />);
       expect(screen.getByRole('button', { name: SHOW })).toBeTruthy();
@@ -221,36 +220,28 @@ describe('the Side pane', () => {
       expect(screen.queryByRole('button', { name: SHOW })).toBeNull();
     });
 
-    it('opens the parent’s Deliverables tool on the record at its latest version, and a card on the thread for that panel’s viewer to claim', async () => {
+    it('on a page stored before the cutover, opens the parent’s Artifacts tool on the record’s artifact at its latest version, and a card on the thread for that panel’s viewer to claim', async () => {
       withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: ELEMENT }));
       act(() => openSideThread(A, ONE));
       mount();
       await userEvent.click(screen.getByRole('button', { name: SHOW }));
-      const tab = panelOf(A)!.tabs.find((t) => t.toolId === DELIVERABLES_TOOL_ID)!;
+      const tab = panelOf(A)!.tabs.find((t) => t.toolId === ARTIFACTS_TOOL_ID)!;
       expect(panelOf(A)!.activeTabId).toBe(tab.id);
-      expect(instanceOf(tab.id)!.state).toEqual([{ target: RECORD_ID, appSessionId: A }]); // no version: the latest
+      expect(instanceOf(tab.id)!.state).toEqual([{ target: RECORD_ID }]); // no version: the latest
       expect(useCommentCard.getState().open).toMatchObject({
         parent: A,
         anchor: ELEMENT,
-        host: 'deliverable',
+        host: 'artifact-page',
         hostId: null,
         claimMode: 'panel',
         rect: null,
-        target: { kind: 'deliverable', appSessionId: A, deliverableId: RECORD_ID },
+        target: { kind: 'artifact-page', artifactId: RECORD_ID, revision: null, version: 1 },
         phase: { kind: 'thread', child: ONE, echo: null },
       });
     });
 
     // P3-L (M5b): a thread on an HTML artifact's page (the store's scheme) re-docks into the panel's Artifacts tool
     it('on an artifact store page, opens the parent’s Artifacts tool on the artifact and a card for its viewer to claim', async () => {
-      registerPanelTool<unknown[], ArtifactsParams>({
-        id: ARTIFACTS_TOOL_ID, title: 'Artifacts', icon: () => null, pinnable: true, multiInstance: false,
-        createState: (init) => [init.params],
-        open: (state, params) => void state.push(params),
-        beforeClose: async () => true,
-        dispose: () => {},
-        render: () => null,
-      });
       const page: Anchor = { ...ELEMENT, label: 'Dashboard v2 › h1#hero “Sales overview”', pageUrl: artifactUrl(RECORD_ID, 7, 'index.html') };
       withThreads(thread(ONE, '2026-10-06T01:00:00.000Z', { anchor: page }));
       act(() => openSideThread(A, ONE));

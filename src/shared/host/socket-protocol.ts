@@ -254,7 +254,7 @@ export function splitRecords(handlers: RecordHandlers, lineCap: number = LINE_CA
 // queued). Frames for a channel may follow its open at once: the socket keeps order and the host opens the channel as it
 // reads the line.
 const Channel = z.number().int().nonnegative().max(0xffff_ffff);
-export const DocumentsOpenSchema = z.strictObject({ t: z.literal('documents.open'), channel: Channel, artifactId: z.uuid(), actor: ActorSchema });
+export const DocumentsOpenSchema = z.strictObject({ t: z.literal('documents.open'), channel: Channel, artifactId: z.uuid(), actor: ActorSchema, doc: z.enum(['suggestions']).optional() }); // `doc`: P3-A M8
 export const DocumentsCloseSchema = z.strictObject({ t: z.literal('documents.close'), channel: Channel });
 export const DocumentsClosedSchema = z.strictObject({ t: z.literal('documents.closed'), channel: Channel, reason: z.enum(['host', 'reset']) });
 export type DocumentsOpen = z.infer<typeof DocumentsOpenSchema>;

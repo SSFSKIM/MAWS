@@ -25,7 +25,6 @@ import { buildLaunch, LaunchSpecConflict, RELAY_URL, type LaunchPlan } from './l
 import type { ProcessTable } from './process-table';
 import { replayEngine } from './replay-transport';
 import { EngineSession } from './session';
-import { FileDeliverableStore, SessionChains } from './deliverables/store'; // E1; P2-E1: SessionChains
 import type { EngineTransport } from './transport';
 import { unsettledPrompts } from './prompt-history'; // P2-C
 import type { ObservedFactsService } from './observed-facts'; // P2-A
@@ -64,9 +63,6 @@ function readJournal(path: string): JournalRow[] {
 export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactScope?: readonly AppSessionId[]) => Promise<LaunchResult> {
   let prelude: JournalRow[] | null = null;
   const refused = (reason: Extract<LaunchResult, { status: 'refused' }>['reason'], message: string): LaunchResult => ({ status: 'refused', reason, message });
-  // P2-E1: one write chain per host process, shared by every session's store, so a record's writes queue on its owner's
-  // chain whichever session runs them (a side thread updating its parent's artifact while the parent does)
-  const chains = new SessionChains();
 
   return async (spec, artifactScope = []) => {
     assertSafeAppSessionId(spec.appSessionId); // before anything names a file after it (M5 review)
@@ -113,7 +109,6 @@ export function createLauncher(deps: LauncherDeps): (spec: LaunchSpec, artifactS
         statefulMcpServers: () => deps.table.statefulMcpServers,
         reconnectTrigger: deps.table.takeReleased(spec.appSessionId) ? 'process_exit' : 'user',
         // C12 end
-        deliverables: (onWritten) => new FileDeliverableStore(deps.userData, { onWritten, chains /* P2-E1 */ }), // E1: the maws tools' records under <userData>/deliverables; E2: announced
         hasClient: deps.hasClient, // E10: the bridges fail fast with no app connected
         unsettledPrompts: () => unsettledPrompts(journalDir(deps.userData, spec.appSessionId), plan.launchId), // P2-C
         observedFacts: deps.observedFacts, // P2-A

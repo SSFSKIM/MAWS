@@ -27,6 +27,12 @@ export const SHEET = {
   remove: (path: string) => `Remove ${path}`,
   noProjects: 'MAWS has no projects yet.',
   incomplete: 'Type your Other answer, or clear Other',
+  // P2-C3: the note beside an answer, and a choice's previews
+  addNote: 'Add note',
+  notePlaceholder: 'A note for the agent',
+  noteLabel: (question: string) => `Note on ${question}`,
+  previewOf: (label: string) => `Preview of ${label}`,
+  noPreview: 'No preview for this option',
   // Submit
   submit: 'Submit',
   submitSkipping: (n: number) => `Submit · ${n} skipped`,
@@ -45,6 +51,7 @@ export const SHEET = {
   answerDecided: 'Decided for me',
   answerNone: 'Not answered',
   otherAnswer: (text: string) => `Other: ${text}`,
+  note: 'Note',
   // P3-D start: a design_system question (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D13)
   buildSystem: 'Build one with me',
   buildSystemDetail: 'The agent works out a new design system with you.',

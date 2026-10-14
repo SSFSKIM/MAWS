@@ -14,7 +14,6 @@ import { ArtifactVersionSchema } from '../../artifacts/version';
 import { AppSessionIdSchema } from '../../graph/ids';
 import { ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
 import type { IpcError } from '../errors';
-import { DELIVERABLE_CONSOLE_MESSAGE_MAX } from './deliverables';
 import type { CommandSpec } from './common';
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
@@ -83,6 +82,15 @@ export const ArtifactsChangedSchema = z.strictObject({
 export type ArtifactsChanged = z.infer<typeof ArtifactsChangedSchema>;
 
 // What a store refusal carries in `IpcError.issues`.
+// Which of an artifact's documents a replica opens or an attribution read covers (Decision Log 45): its suggestion doc,
+// the artifact with its pending proposals on it; omitted, the artifact's own.
+export const ArtifactDocSchema = z.enum(['suggestions']);
+// A range of an artifact's suggestion doc (Decision Log 45): the ids of the items an editor's selection starts and ends
+// at (`@y/prosemirror`'s `mapResolvedPositionsToRelativePositions`, `relStart.item` and `relEnd.item`).
+const ItemIdSchema = z.strictObject({ client: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER), clock: z.number().int().nonnegative() });
+export const SuggestionRangeSchema = z.strictObject({ start: ItemIdSchema, end: ItemIdSchema });
+const SuggestionRanges = z.array(SuggestionRangeSchema).min(1).max(1_000);
+
 export const ARTIFACT_REFUSALS = ['notFound', 'invalid', 'tooLarge', 'handleTaken', 'designSystemInUse', 'storeTooNew', 'unavailable', 'exportUnavailable' /* M7 */] as const;
 export const ArtifactRefusalSchema = z.strictObject({ reason: z.enum(ARTIFACT_REFUSALS), data: z.record(z.string(), z.unknown()) });
 export type ArtifactRefusal = z.infer<typeof ArtifactRefusalSchema>;
@@ -98,15 +106,16 @@ const ArtifactAnswer = z.strictObject({ artifact: ArtifactRowSchema });
 // The largest side of an exported picture, in CSS px (M7): within what an offscreen window renders.
 export const EXPORT_SIZE_MAX = 8_192;
 
-// An error or a warning an artifact's frame logged in an app window (M7; `deliverables.console`'s twin for the
-// `maws-artifact:` scheme), main's, cut and rate-bounded. `revision` null: the frame showed the live content.
+// An error or a warning an artifact's frame logged in an app window (M7; E2's `deliverables.console` until P3-L's
+// cutover), main's, cut and rate-bounded. `revision` null: the frame showed the live content.
+export const ARTIFACT_CONSOLE_MESSAGE_MAX = 2000; // main cuts a frame's console message and its source to this many characters
 export const ArtifactConsoleSchema = z.strictObject({
   artifactId: Id,
   revision: Seq.nullable(),
   level: z.enum(['error', 'warning']),
-  message: z.string().max(DELIVERABLE_CONSOLE_MESSAGE_MAX),
+  message: z.string().max(ARTIFACT_CONSOLE_MESSAGE_MAX),
   line: z.number().int().nullable(),
-  source: z.string().max(DELIVERABLE_CONSOLE_MESSAGE_MAX).nullable(),
+  source: z.string().max(ARTIFACT_CONSOLE_MESSAGE_MAX).nullable(),
 });
 export type ArtifactConsole = z.infer<typeof ArtifactConsoleSchema>;
 
@@ -157,7 +166,14 @@ export const commands = {
     z.strictObject({ bytes: Bytes }),
   ),
   // The merged attribution (an encoded ContentMap) of every row overlapping [fromSeq, toSeq] (Decision Log 23a).
-  'artifacts.attributions': host(z.strictObject({ artifactId: Id, fromSeq: Seq, toSeq: Seq }), z.strictObject({ bytes: Bytes })),
+  // `doc: 'suggestions'`: the suggestion doc's (who proposed what; Decision Log 45).
+  'artifacts.attributions': host(z.strictObject({ artifactId: Id, fromSeq: Seq, toSeq: Seq, doc: ArtifactDocSchema.optional() }), z.strictObject({ bytes: Bytes })),
+  // The owner accepts proposals (Decision Log 45): copied into the artifact as the human's write, credited to their
+  // suggester; `revision` the artifact's after it. A range that takes words of an inserted block without the block is
+  // refused `invalid {reason: 'partialBlock'}`; one naming no proposal, `invalid {range}`.
+  'artifacts.acceptSuggestion': host(z.strictObject({ artifactId: Id, ranges: SuggestionRanges }), z.strictObject({ revision: Seq })),
+  // The owner rejects proposals: proposed content leaves the suggestion doc; content a proposal deleted comes back.
+  'artifacts.rejectSuggestion': host(z.strictObject({ artifactId: Id, ranges: SuggestionRanges }), z.strictObject({ revision: Seq })),
   // The human's asset upload (Decision Log 25l): content-addressed, deduplicated per artifact, ≤ 16 MiB.
   'artifacts.uploadAsset': host(
     z.strictObject({ artifactId: Id, name: z.string().min(1).max(255), mime: z.string().min(1).max(255), bytes: Bytes.refine((bytes) => bytes.length <= ARTIFACT_MAX_BYTES, `at most ${ARTIFACT_MAX_BYTES} bytes`) }),
@@ -181,6 +197,12 @@ export const commands = {
   // A document kind's live V2 state and the revision it is at (M7: an exporter's state when no version is named).
   // Main-only.
   'artifacts.state': host(z.strictObject({ artifactId: Id }), z.strictObject({ revision: Seq, bytes: Bytes })),
+  // The artifact's assets, each by the ref a format names it with (`assets/<name>`), so an exporter can carry those its
+  // content does not name (P3-D's request, Decision Log 45e). Main-only.
+  'artifacts.assets': host(
+    z.strictObject({ artifactId: Id }),
+    z.strictObject({ assets: z.array(z.strictObject({ ref: z.string(), name: z.string(), mime: z.string(), size: z.number().int().nonnegative() })) }),
+  ),
   // The store's health (Decision Log 12, 24h): `recovered` when a broken file was moved aside this run.
   'artifacts.status': host(z.void(), z.strictObject({ status: z.enum(ARTIFACT_STORE_STATUSES), reason: z.string().nullable() })),
   // The schema-agnostic test writer (M3), idempotent by `opId`, as the session named (an agent) or the human; refused
@@ -191,7 +213,8 @@ export const commands = {
   ),
   // A replica's port to the document (X24, Decision Log 13): main posts the port to the asking window on `maws:doc-port`
   // with this `channel`, and the host attaches the other end with the human as actor. Refused for a byte kind (`invalid`).
-  'artifacts.open': main(z.strictObject({ artifactId: Id }), z.strictObject({ channel: z.number().int().nonnegative().max(0xffff_ffff) })),
+  // `doc: 'suggestions'` opens the artifact's suggestion doc (Decision Log 45).
+  'artifacts.open': main(z.strictObject({ artifactId: Id, doc: ArtifactDocSchema.optional() }), z.strictObject({ channel: z.number().int().nonnegative().max(0xffff_ffff) })),
   // The library's Export (X31; M7): main's export service writes the artifact's live revision, or a version's, as
   // `format` under the store's directory (`<id>/exports/<revision>-<format>.<ext>`) and answers its path. `pageSize`
   // the paper (omitted: the exporter's default); a PNG is `width` CSS px wide (1280 when omitted) and `height` high (the

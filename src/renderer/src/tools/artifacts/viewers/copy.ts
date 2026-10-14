@@ -1,5 +1,5 @@
 // Every sentence the artifact store's HTML and File viewers show (docs/doperpowers/plans/2026-10-12-p3-l-library.md,
-// M5b): the Deliverables viewer's words where the viewers do what it does (P2's comment card, the console chip, the
+// M5b): E2's Deliverables viewer's words where the viewers do what it did (P2's comment card, the console chip, the
 // actions), "artifact" where it said "deliverable".
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -22,7 +22,6 @@ export const VIEWERS_COPY = {
   couldNotRead: (message: string) => `Couldn’t read this artifact: ${message}`,
   retry: 'Retry',
   // a File artifact no session links: its code body has no session to read it under
-  noSession: (name: string) => `${name} opens outside MAWS: no session made or touched it.`,
   // the Export menu (the header's, the library row's)
   exportFormats: { pdf: 'PDF', png: 'PNG', docx: 'Word document', pptx: 'PowerPoint', md: 'Markdown', html: 'HTML', claude: 'For Claude (zip)' /* P3-D: a design system in Claude's shape */ },
   saveCopy: 'Save a copy…',

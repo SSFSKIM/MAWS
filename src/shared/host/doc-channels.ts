@@ -60,7 +60,7 @@ export class HostDocChannels {
     return this.channels.size;
   }
 
-  open({ channel, artifactId, actor }: DocumentsOpen): void {
+  open({ channel, artifactId, actor, doc }: DocumentsOpen): void {
     if (this.channels.has(channel)) {
       // main reuses a number only for a channel it has forgotten: the stale one goes as main's close would end it
       this.log(`channel ${channel} opened again; the earlier one is ended`);
@@ -68,7 +68,7 @@ export class HostDocChannels {
     }
     const entry = this.channelEnd(channel);
     this.channels.set(channel, entry);
-    this.openPort({ t: 'doc', channel, artifactId, actor }, entry.end);
+    this.openPort({ t: 'doc', channel, artifactId, actor, ...(doc && { doc }) }, entry.end);
   }
 
   deliver(channel: number, frame: Uint8Array): void {

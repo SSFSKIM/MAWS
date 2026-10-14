@@ -1,16 +1,19 @@
 // The `maws` groups' one replay scene (E11 W-E: E2's `deliverables-scene.ts`, which E1's tools group and live sitting
 // had copied, the copies now gone; E2 execution document, M7): a scratch project whose sessions the sidebar shows (one
 // seeded transcript per session), the product app over C3's replay transport (MAWS_ENGINE_REPLAY=1) with the e2e seam
-// log and a console check that leaves a deliverable frame's errors to its chip, the journal readers for the `maws`
-// server's calls and answers, the window's event log, records written straight into the store's layout (the reader's
-// format), the Deliverables tool's locators, the toast clearing and the evidence shots in both themes. Imported by E1's
-// `tools` group and live sitting, E2's `deliverables` group and E4's browser groups.
+// log and a console check that leaves an artifact frame's errors to its chip, the journal readers for the `maws`
+// server's calls and answers, the window's event log, pre-P3 deliverables written straight into X12's layout and
+// imported as the host imports them at start (P3-L M6b), the Artifacts tool's locators (E2's Deliverables tool's until
+// the cutover), the toast clearing and the evidence shots in both themes. Imported by E1's `tools` group and live
+// sitting, E2's `deliverables` group and E4's browser groups.
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { expect, type ConsoleMessage, type Locator, type Page } from '@playwright/test';
+import { artifactUrl } from '@shared/artifacts/scheme';
 import type { SessionEvent } from '@shared/graph/events';
+import type { CommandResult } from '@shared/ipc/schema';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import type { DeliverableRecord } from '../../src/shared/maws/deliverable';
@@ -28,7 +31,41 @@ const rowsOf = (path: string): JournalRow[] =>
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line) as JournalRow);
-export const fixtureRows = (fixture: string) => rowsOf(join(REPO_ROOT, fixture));
+export const fixtureRows = (fixture: string) => rowsOf(resolve(REPO_ROOT, fixture)); // a repository path, or a derived fixture's absolute one
+
+// A recorded `ask` fixture with the ask's arguments replaced by `args`, written under `dir` (P2-C3: an option's preview
+// and an answer's note postdate the recordings). Sound because the replay plays the engine's frames as given and checks
+// only what MAWS writes, and that by kind: a `control_response` by request id and behaviour, a `user` frame by type, so
+// no write depends on the arguments. They are replaced in each frame that carries them whole, so the host's call, the
+// permission card and the transcript's capsule agree: the `tools/call` request the host parses, the `can_use_tool`
+// request, and the assistant's `tool_use`. The streamed `input_json_delta` fragments and what the engine said after the
+// answer (its tool result, its reply) stay the recording's; a case reads nothing from them.
+export function askFixture(dir: string, fixture: string, args: Record<string, unknown>): string {
+  const replaced = { call: 0, permission: 0, toolUse: 0 };
+  const rows = fixtureRows(fixture).map((row) => {
+    const frame = structuredClone(row.frame) as Frame;
+    if (row.direction !== 'in') return { ...row, frame };
+    const request = frame.request as { subtype?: string; tool_name?: string; input?: unknown; message?: { method?: string; params?: { name?: string; arguments?: unknown } } } | undefined;
+    if (frame.type === 'control_request' && request?.subtype === 'mcp_message' && request.message?.method === 'tools/call' && request.message.params?.name === 'ask') {
+      request.message.params.arguments = args;
+      replaced.call++;
+    } else if (frame.type === 'control_request' && request?.subtype === 'can_use_tool' && request.tool_name === 'mcp__maws__ask') {
+      request.input = args;
+      replaced.permission++;
+    } else if (frame.type === 'assistant') {
+      for (const block of (frame.message as { content: { type: string; name?: string; input?: unknown }[] }).content) {
+        if (block.type !== 'tool_use' || block.name !== 'mcp__maws__ask') continue;
+        block.input = args;
+        replaced.toolUse++;
+      }
+    }
+    return { ...row, frame };
+  });
+  expect(replaced, `the one ask of ${fixture}`).toEqual({ call: 1, permission: 1, toolUse: 1 });
+  const path = join(dir, fixture.slice(fixture.lastIndexOf('/') + 1).replace(/\.jsonl$/, '-derived.jsonl'));
+  writeFileSync(path, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
 
 // The fixture's recorded human prompt (the replay holds at it), and its `spawn` row's working directory.
 const firstPrompt = (fixture: string) => ((fixtureRows(fixture).find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user')!.frame as Frame).message as { content: string }).content;
@@ -141,14 +178,14 @@ export async function recordEvents(page: Page): Promise<void> {
 export const eventsOf = (page: Page, id: string): Promise<SessionEvent[]> =>
   page.evaluate((appSessionId) => ((window as unknown as { __mawsEvents: { appSessionId: string; events: SessionEvent[] }[] }).__mawsEvents ?? []).filter((b) => b.appSessionId === appSessionId).flatMap((b) => b.events), id);
 
-// The app window's console errors and uncaught errors, less those of a deliverable frame (or of Chromium's PDF viewer
+// The app window's console errors and uncaught errors, less those of an artifact frame (or of Chromium's PDF viewer
 // beneath one), told by the message's location or the error's stack: a frame's page is the agent's, and what it logs is
 // the console chip's to show. Seeded from what Playwright kept since launch.
 async function appConsoleErrors(page: Page): Promise<() => string[]> {
-  const frameUrl = /^(maws-deliverable|chrome-extension):/;
+  const frameUrl = /^(maws-artifact|chrome-extension):/;
   const live: string[] = [];
   const consoleError = (message: ConsoleMessage) => message.type() === 'error' && !frameUrl.test(message.location().url);
-  const appError = (error: Error) => !(error.stack ?? '').includes('maws-deliverable://');
+  const appError = (error: Error) => !(error.stack ?? '').includes('maws-artifact://');
   page.on('console', (message) => {
     if (consoleError(message)) live.push(message.text());
   });
@@ -263,7 +300,9 @@ export async function unfoldWork(pane: Locator): Promise<void> {
 // The seam log's lines so far (main's openExternal and reveal, and the frame policies' blocked lines).
 export const seamLines = (s: Scene): string[] => (existsSync(s.openLog) ? readFileSync(s.openLog, 'utf8').trim().split('\n').filter(Boolean) : []);
 
-// ---- records, as the engine host writes them ------------------------------------------------------------------------
+// ---- pre-P3 deliverables: X12's records, as E2's engine host wrote them -----------------------------------------------
+// P3-L M6b: the engine host imports them as File and HTML artifacts at its start (`importSeeded` runs that import again,
+// under MAWS_E2E=1, for records a case writes while the app runs); the record's id is the artifact's.
 
 export function seedRecord(userData: string, record: DeliverableRecord): DeliverableRecord {
   const dir = join(userData, 'deliverables', record.appSessionId);
@@ -295,20 +334,62 @@ export function seedArtifact(userData: string, appSessionId: AppSessionId, artif
   return seedRecord(userData, { id, appSessionId, kind: 'artifact', artifactId, title, path: last.path, versions, createdAt: at, updatedAt: last.at });
 }
 
-// ---- the Deliverables tool ------------------------------------------------------------------------------------------
+// The records written so far, imported as the engine host imports them at its start (`library.testImport`, e2e only);
+// every record a case wrote is an artifact once it answers (imported now, or already).
+export async function importSeeded(page: Page): Promise<void> {
+  let answer: CommandResult<'library.testImport'> | undefined;
+  await expect
+    .poll(async () => (answer = await invoke(page, 'library.testImport', undefined)).ok, { timeout: 20_000, message: 'the engine host imports' }) // the host may still be starting
+    .toBe(true);
+  const counts = value(answer!);
+  expect(counts, JSON.stringify(counts)).toMatchObject({ missing: 0, failed: 0 });
+}
 
-export const listOf = (s: Scene) => s.panel.locator('[data-deliverables-list]');
-export const viewerOf = (root: Locator) => root.locator('[data-deliverable-viewer]');
-export const rowOf = (root: Locator, record: { id: string }) => root.locator(`[data-deliverable-row][data-deliverable-id="${record.id}"]`);
+// ---- the Artifacts tool (E2's Deliverables tool until P3-L's cutover) -------------------------------------------------
+
+export const listOf = (s: Scene) => s.panel.locator('[data-artifacts-list]');
+export const viewerOf = (root: Locator) => root.locator('[data-artifact-viewer]');
+export const rowOf = (root: Locator, record: { id: string }) => root.locator(`[data-artifact-row][data-artifact-id="${record.id}"]`);
 
 // The tool added from the panel's "+" menu (it opens on the shown session's list).
-export async function openDeliverables(s: Scene): Promise<void> {
+export async function openArtifacts(s: Scene): Promise<void> {
   await s.panel.getByRole('button', { name: 'Add a tool' }).click();
-  await s.page.getByRole('menuitem', { name: 'Deliverables' }).click();
+  await s.page.getByRole('menuitem', { name: 'Artifacts' }).click();
   await expect(listOf(s)).toBeVisible();
 }
 
-// The frame Playwright reached for a deliverable URL (the frame's own document, cross-origin).
+// The `maws-artifact:` URL a viewer frames for the n-th of an artifact's versions (in the order of their revisions, the
+// viewers' `v1 … vN`; the latest when n is omitted), read from the store as the viewer reads it.
+export async function pageUrlOf(page: Page, artifactId: string, n?: number): Promise<string> {
+  const { versions } = value(await invoke(page, 'artifacts.versions', { artifactId }));
+  const ordered = [...versions].sort((a, b) => a.seq - b.seq || a.id - b.id);
+  const revision = ordered[(n ?? ordered.length) - 1]!.seq;
+  const content = value(await invoke(page, 'library.content', { artifactId, revision }));
+  return artifactUrl(artifactId, content.revision, content.name);
+}
+
+// An artifact viewer's actions are its X32 header's (P3-L M5b; E2's viewer drew them in its body): past three, in the
+// header's "More actions" menu. The labels the header under `root` offers, and one of them run.
+export async function headerActions(page: Page, root: Locator): Promise<string[]> {
+  const header = root.locator('[data-editor-header]');
+  const shown = await header.locator('button[aria-label]').evaluateAll((buttons) => buttons.map((b) => b.getAttribute('aria-label')!));
+  const more = header.getByRole('button', { name: 'More actions' });
+  if ((await more.count()) === 0) return shown;
+  await more.click();
+  const listed = await page.getByRole('menu').getByRole('menuitem').allTextContents();
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  return [...shown, ...listed.map((text) => text.trim())];
+}
+export async function headerAction(page: Page, root: Locator, name: string): Promise<void> {
+  const header = root.locator('[data-editor-header]');
+  const button = header.getByRole('button', { name, exact: true });
+  if ((await button.count()) > 0) return button.click();
+  await header.getByRole('button', { name: 'More actions' }).click();
+  await page.getByRole('menu').getByRole('menuitem', { name, exact: true }).click();
+}
+
+// The frame Playwright reached for a store URL (the frame's own document, cross-origin).
 export async function frameAt(page: Page, url: string) {
   let found: ReturnType<Page['frames']>[number] | undefined;
   await expect.poll(() => (found = page.frames().find((f) => f.url() === url)) !== undefined, { message: `a frame at ${url}` }).toBe(true);

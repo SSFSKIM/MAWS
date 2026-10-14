@@ -26,7 +26,7 @@ function surface(answer: CapturedImage | null = still): MarkupSurface & { begin:
 }
 
 function showSessionWithTab(): void {
-  useLayout.setState({ main: mainShowing(A), panelBySession: new Map([[A, { tabs: [{ id: TAB, toolId: 'browser', pinned: false }, { id: 'deliverables', toolId: 'deliverables', pinned: false }], activeTabId: TAB }]]) });
+  useLayout.setState({ main: mainShowing(A), panelBySession: new Map([[A, { tabs: [{ id: TAB, toolId: 'browser', pinned: false }, { id: 'artifacts', toolId: 'artifacts', pinned: false }], activeTabId: TAB }]]) });
 }
 
 const toasts = () => useNotices.getState().notices.filter((n) => n.kind === 'toast').map((n) => n.text);
@@ -120,7 +120,7 @@ describe('the session’s endings', () => {
 
   it('ends on a panel tab switch and on the panel collapsing', async () => {
     const first = await started();
-    useLayout.setState((st) => ({ panelBySession: new Map(st.panelBySession).set(A, { ...st.panelBySession.get(A)!, activeTabId: 'deliverables' }) }));
+    useLayout.setState((st) => ({ panelBySession: new Map(st.panelBySession).set(A, { ...st.panelBySession.get(A)!, activeTabId: 'artifacts' }) }));
     expect(useMarkup.getState().session).toBeNull();
     expect(first.s.end).toHaveBeenCalledTimes(1);
     first.off();

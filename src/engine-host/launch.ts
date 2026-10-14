@@ -5,6 +5,7 @@
 // host's protected keys applied last. Nothing here spawns; `transport.ts` runs the plan.
 import { randomBytes, randomUUID } from 'node:crypto';
 import { isAbsolute } from 'node:path';
+import { appInitialize } from '@shared/engine/initialize';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionId } from '@shared/graph/ids';
 
@@ -34,6 +35,10 @@ export function setBinaryConfig(cfg: BinaryConfig): void {
 export function getBinaryConfig(): BinaryConfig {
   return { ...binaryConfig };
 }
+
+// P2-C2: the server whose `ask` replaces the native tool, and the native tool's name (the engine's `--disallowedTools`)
+const MAWS_SERVER = 'maws';
+export const NATIVE_ASK_TOOL = 'AskUserQuestion';
 
 export const GATEWAY_AUTH_TOKEN = 'claudeusage-local-gateway'; // D-19: a non-secret marker; the relay substitutes the real token
 export const CHARTER_PIN = '87f8c7881119ea670901205dae35917d3751459c'; // the parent pin this child was authored against
@@ -190,7 +195,12 @@ export function mintLaunchId(): string {
 
 // `bin` and `engineVersion` are the binary probe's answer for this launch (W13): the real path and its `--version`.
 // P2-C: `declaresSystemPromptSnapshot` is the probe's too; absent or false, the spec's "off" is not passed.
-export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, opts: { relayUrl: string; bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean }): LaunchPlan {
+// P2-C2: `sdkMcpServers` is what this launch's initialize declares (the app's own list unless a test says otherwise).
+export function buildLaunch(
+  spec: LaunchSpec,
+  captured: Record<string, string>,
+  opts: { relayUrl: string; bin: string; engineVersion: string; declaresSystemPromptSnapshot?: boolean; sdkMcpServers?: readonly string[] },
+): LaunchPlan {
   if (spec.resume !== null && !spec.resume.fork && spec.sessionId !== null) {
     throw new LaunchSpecConflict('sessionId', '--session-id never co-occurs with a non-fork --resume; a resumed launch takes the resumed id');
   }
@@ -215,6 +225,10 @@ export function buildLaunch(spec: LaunchSpec, captured: Record<string, string>, 
   if (spec.appendSystemPrompt) args.push('--append-system-prompt', spec.appendSystemPrompt);
   if (spec.systemPromptSnapshot === 'off' && opts.declaresSystemPromptSnapshot === true) args.push('--system-prompt-snapshot', 'off');
   // P2-C end
+  // P2-C2 (the P2 spec's Decision Log 33): where the launch offers the `maws` server, its `ask` is the one ask, so the
+  // native AskUserQuestion is withdrawn from the model's view; without the server the native tool stays, the only ask.
+  // The request-card path for native asks is untouched (imported and taken-over transcripts carry them).
+  if ((opts.sdkMcpServers ?? appInitialize().sdkMcpServers ?? []).includes(MAWS_SERVER)) args.push('--disallowedTools', NATIVE_ASK_TOOL);
   args.push('--settings', JSON.stringify(flagSettings));
 
   return {

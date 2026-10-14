@@ -37,8 +37,8 @@ import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@s
 import type { ArtifactRefusal } from '@shared/ipc/schema/artifacts';
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { artifactExportName, type ArtifactExportFormat, type ArtifactExportPageSize } from '@shared/maws/tools';
-import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from '../deliverables/capture';
-import { restrictRequests, type SeamEnv } from '../deliverables/policies';
+import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from './capture';
+import { restrictRequests, type SeamEnv } from './policies';
 import { CommandFailure } from '../ipc/router';
 import type { ContentLookup } from './protocol';
 
@@ -72,6 +72,9 @@ export interface ExportContext {
   state(): Promise<Uint8Array>;
   // An asset's bytes by its ref (`assets/<name>`); null when the artifact has no such asset (any other failure rejects).
   readAsset(ref: string): Promise<{ bytes: Uint8Array; mime: string } | null>;
+  // Every asset of the artifact, by ref, so an exporter can carry those its content does not name (P3-D's request,
+  // Decision Log 45e); empty when the artifact is gone (any other failure rejects).
+  assets: { list(): Promise<ExportAsset[]> };
   // A standalone page printed in the capture partition's hidden window, JavaScript off, on its own `@page` size; what it
   // names outside its own page, `maws-artifact:`, `data:`, `blob:` and `about:` is not loaded.
   printToPdf(html: string): Promise<Uint8Array>;
@@ -108,11 +111,19 @@ export class ExporterRegistry {
 const unavailableMessage = (kind: ArtifactKind, format: ArtifactExportFormat) => `MAWS cannot export a ${kind} artifact as ${format} yet`;
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+export interface ExportAsset {
+  ref: string;
+  name: string;
+  mime: string;
+  size: number;
+}
+
 // What an export reads from the store and prints with, for `runExport` to put in an exporter's context.
 export interface ExportSources {
   title: string;
   state(): Promise<Uint8Array>;
   readAsset(ref: string): Promise<{ bytes: Uint8Array; mime: string } | null>;
+  listAssets(): Promise<ExportAsset[]>;
   print: PdfPrinter;
 }
 // A page printed to PDF: `signal` ends it (its window destroyed), `blocked` hears each request its filter cancelled.
@@ -185,6 +196,7 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
     title: sources.title,
     state: () => sources.state(),
     readAsset: (ref) => sources.readAsset(ref),
+    assets: { list: () => sources.listAssets() },
     printToPdf: (html) => sources.print(html, { signal, blocked: () => void (blocked += 1) }),
     writeFile: async (path, data) => {
       if (signal.aborted) throw cancelled();
@@ -284,6 +296,14 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
             throw new Error(`the asset ${ref} could not be read: ${found.error.message}`);
           }
           return { bytes: new Uint8Array(await time.within(readFile(found.value.path))), mime: mimeOf(found.value.name) };
+        },
+        listAssets: async () => {
+          const found = await time.within(call('artifacts.assets', { artifactId: request.artifactId }));
+          if (!found.ok) {
+            if ((found.error.issues as ArtifactRefusal | undefined)?.reason === 'notFound') return [];
+            throw new Error(`the assets of ${request.artifactId} could not be listed: ${found.error.message}`);
+          }
+          return found.value.assets;
         },
         print,
       },

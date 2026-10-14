@@ -71,7 +71,8 @@ const register: HostRegister = (on, emit, client) => {
   documents = openDocuments(userData);
   const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env });
   const store = documents?.store ?? null; // M6: the artifact tools' store (a session's tools answer `unavailable` without one)
-  const library = registerLibrary(on, { documents }); // P3-L: main's library reads and the linked-directory mirror
+  // P3-L: main's library reads, the linked-directory mirror and (M6b) the X12 import at store open
+  const library = registerLibrary(on, { documents, deliverablesDir: join(userData, 'deliverables'), e2e: process.env.MAWS_E2E === '1' });
   const designSystems = registerDesignSystems({ documents }); // P3-D: the kind's adapter, its mirror writer, the create context and the seeded defaults
   // C3 start
   ipc = registerEngineIpc(on, emit, {

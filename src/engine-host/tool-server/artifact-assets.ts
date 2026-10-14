@@ -20,7 +20,7 @@ export function artifactUploadAssetTool(deps: ArtifactToolDeps): McpToolDefiniti
       const source = pathUnderCwd('artifact_upload_asset', ctx.cwd, input.path);
       const bytes = await readSourceFile('artifact_upload_asset', source);
       const name = input.name ?? basename(source);
-      const artifactId = await resolveArtifact('artifact_upload_asset', deps, store, input.artifact, lineageOf(ctx, deps));
+      const artifactId = await resolveArtifact('artifact_upload_asset', store, input.artifact, lineageOf(ctx, deps));
       const actor = actorOf(ctx);
       const result = await store.writeCommitted(() =>
         store.withOp(
@@ -49,7 +49,7 @@ export function artifactListAssetsTool(deps: ArtifactToolDeps): McpToolDefinitio
       const parsed = parseToolArguments('artifact_list_assets', args);
       if (!parsed.ok) return toolError(parsed.error);
       const store = storeOf('artifact_list_assets', deps);
-      const artifactId = await resolveArtifact('artifact_list_assets', deps, store, parsed.data.artifact, lineageOf(ctx, deps));
+      const artifactId = await resolveArtifact('artifact_list_assets', store, parsed.data.artifact, lineageOf(ctx, deps));
       const assets = await store.readCommitted(() =>
         store.listAssets(artifactId).map(({ assetId, ref, name, mime, size, createdAt }) => ({ assetId, ref, name, mime, size, createdAt: new Date(createdAt).toISOString() })),
       );

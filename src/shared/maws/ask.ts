@@ -119,12 +119,15 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined): strin
 }
 
 // The text of the steer that delivers an async ask's answers: one line per question in the asked order, `<header, else
-// the question> — <answer>`, then the AskResult of status `answered` as a fenced JSON block.
+// the question> — <answer>`, and under it, indented as a path is, `note: "<the note>"` when the user wrote one (P2-C3),
+// then the AskResult of status `answered` as a fenced JSON block.
 export function askSteerText(askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]): string {
   const byId = new Map(answers.map((answer) => [answer.id, answer]));
   const lines = questions.map((question, index) => {
-    const text = answerText(question, byId.get(askQuestionId(question, index)));
-    return `${index + 1}. ${question.header ?? question.question} —${text.startsWith('\n') ? '' : ' '}${text}`;
+    const answer = byId.get(askQuestionId(question, index));
+    const text = answerText(question, answer);
+    const note = answer?.note !== undefined ? `\n   note: ${JSON.stringify(answer.note)}` : '';
+    return `${index + 1}. ${question.header ?? question.question} —${text.startsWith('\n') ? '' : ' '}${text}${note}`;
   });
   const result: AskResult = { status: 'answered', askId, answers: [...answers] };
   return [`[MAWS ask ${askId}] The user answered the questions you asked:`, ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
