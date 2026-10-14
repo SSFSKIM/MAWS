@@ -7,7 +7,8 @@ import { MarkAnchorSchema, MarkIdSchema } from './marks';
 // The lane's per-session override, and what a launch's instructions came from (X20's `source`).
 export const LaneOverrideSchema = z.enum(['inherit', 'on', 'off']);
 export type LaneOverride = z.infer<typeof LaneOverrideSchema>;
-export const ContractSourceSchema = z.enum(['maws-contract', 'external-compatible-style', 'off']);
+// P2-C2: 'external-style-plus-supplement', a message-tool style with MAWS's supplement beside it (Decision Log 31).
+export const ContractSourceSchema = z.enum(['maws-contract', 'external-compatible-style', 'external-style-plus-supplement', 'off']);
 export type ContractSource = z.infer<typeof ContractSourceSchema>;
 // When a lane change reaches the instructions: the session's next launch, or its next compaction when the binary cannot
 // re-render the recorded prompt (Design §2).

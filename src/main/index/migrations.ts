@@ -179,6 +179,32 @@ CREATE INDEX owner_channel_marks_session ON owner_channel_marks(app_session_id, 
 `,
   },
   // P2-C end
+  // P2-C2 start (2026-10-13)
+  {
+    version: 9,
+    // P2-C2 (the P2 spec's Decision Log 31; X15's slot, allocated at landing): a launch's `desired` and `applied` source
+    // gains `external-style-plus-supplement`, a message-tool style with MAWS's supplement beside it. SQLite changes a
+    // CHECK only by rebuilding the table: migration 8's `owner_channel_sessions` again with the wider CHECK, its rows
+    // copied whole. No table references it and it has no index.
+    sql: `
+CREATE TABLE owner_channel_sessions_9 (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id) ON DELETE CASCADE,
+  override TEXT NOT NULL DEFAULT 'inherit' CHECK (override IN ('inherit','on','off')),
+  enabled_at TEXT,
+  launch_id TEXT, launched_at TEXT,
+  desired TEXT CHECK (desired IN ('maws-contract','external-compatible-style','external-style-plus-supplement','off')),
+  recorded TEXT,
+  appended INTEGER NOT NULL DEFAULT 0, snapshot_off INTEGER NOT NULL DEFAULT 0, off_unavailable INTEGER NOT NULL DEFAULT 0,
+  applied TEXT CHECK (applied IN ('maws-contract','external-compatible-style','external-style-plus-supplement','off')),
+  style TEXT, observed_style TEXT, style_mismatch INTEGER NOT NULL DEFAULT 0);
+INSERT INTO owner_channel_sessions_9 (app_session_id, override, enabled_at, launch_id, launched_at, desired, recorded, appended, snapshot_off,
+  off_unavailable, applied, style, observed_style, style_mismatch)
+  SELECT app_session_id, override, enabled_at, launch_id, launched_at, desired, recorded, appended, snapshot_off,
+  off_unavailable, applied, style, observed_style, style_mismatch FROM owner_channel_sessions;
+DROP TABLE owner_channel_sessions;
+ALTER TABLE owner_channel_sessions_9 RENAME TO owner_channel_sessions;
+`,
+  },
+  // P2-C2 end
 ];
 
 export const REPAIRS: readonly Repair[] = [{ version: 1, table: 'sessions', column: 'removed_at', definition: 'TEXT' }];

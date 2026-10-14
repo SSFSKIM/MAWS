@@ -521,6 +521,7 @@ export const LIBRARY = {
     source: {
       'maws-contract': 'MAWS gives the agent its instructions',
       'external-compatible-style': 'The output style gives the agent its instructions',
+      'external-style-plus-supplement': 'Compatible style with MAWS’s supplement', // P2-C2 (the architect's words, Decision Log 31)
       off: 'Off: the agent is not asked to mark anything',
     } satisfies Record<ModRow['source'], string>,
     pending: {

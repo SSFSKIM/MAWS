@@ -224,7 +224,7 @@ export const NOTIFICATIONS = {
   toHuman: {
     label: 'Messages to you',
     name: 'To-human',
-    note: 'Agents mark what is for you: messages, must-reads, insights and questions you answer in place, and a session reads as their report. The view follows at once; the instructions, the next time each session starts.',
+    note: 'Agents send you messages and ask questions you answer in place, and a session reads as their report. The view follows at once; the instructions, the next time each session starts.',
   },
   // P2-C end
   approvalsCaption: 'permission requests, dialogs and MCP elicitations',

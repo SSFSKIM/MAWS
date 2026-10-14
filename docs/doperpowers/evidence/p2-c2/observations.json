@@ -1,0 +1,641 @@
+{
+  "before": {
+    "engine": {
+      "bin": "/Users/new/.local/share/claude/versions/2.1.299",
+      "version": "2.1.299"
+    },
+    "declares": true,
+    "plugin": {
+      "version": "7.149.4",
+      "scope": "user",
+      "installPath": "/Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.149.4",
+      "lastUpdated": "2026-10-14T05:06:43.858Z",
+      "contractKey": "4",
+      "shape": "message-tool",
+      "reads": [
+        "hooks/mods/to-human.tsx",
+        "hooks/to-human-stream.sh"
+      ]
+    },
+    "owner": {
+      "a15": {
+        "keys": [
+          "/private/tmp",
+          "/private/tmp/agtest",
+          "/private/tmp/askcheck",
+          "/private/tmp/askm1/abort.m5b8",
+          "/private/tmp/askm1/base.dNam",
+          "/private/tmp/askm1/builtin.caZi",
+          "/private/tmp/askm1/dev.IG2U",
+          "/private/tmp/askm1/dev2.gZ9o",
+          "/private/tmp/askm1/dev3.PLzN",
+          "/private/tmp/askm1/dev4.wpvP",
+          "/private/tmp/askm1/fix1.3Oiv",
+          "/private/tmp/askm1/fix1b.32nB",
+          "/private/tmp/askm1/fix1c.W0lU",
+          "/private/tmp/askm1/noab.rHYy",
+          "/private/tmp/askm2-fTfH",
+          "/private/tmp/askm2f-kw3Y",
+          "/private/tmp/askm2p-ExTH",
+          "/private/tmp/askm2r-rq8S",
+          "/private/tmp/askm3/acc.1qIz",
+          "/private/tmp/askm3/acc.HXAF",
+          "/private/tmp/askm3/acc.MO2H",
+          "/private/tmp/askm3/acc.a3AA",
+          "/private/tmp/askm3/acc.cpBX",
+          "/private/tmp/askm3/acc.dOnk",
+          "/private/tmp/askm3/acc.gUux",
+          "/private/tmp/askm3/acc.pJbV",
+          "/private/tmp/askm3/acc.sfiL",
+          "/private/tmp/askm3/acc.vslX",
+          "/private/tmp/askm3/fix/after-S1-1",
+          "/private/tmp/askm3/fix/after-S1-2",
+          "/private/tmp/askm3/fix/after-S1-3",
+          "/private/tmp/askm3/fix/after-S2-1",
+          "/private/tmp/askm3/fix/after-S2-2",
+          "/private/tmp/askm3/fix/after-S2-3",
+          "/private/tmp/askm3/fix/after-S3-1",
+          "/private/tmp/askm3/fix/after-S3-2",
+          "/private/tmp/askm3/fix/after-S3-3",
+          "/private/tmp/askm3/fix/before-S1-1",
+          "/private/tmp/askm3/fix/before-S1-2",
+          "/private/tmp/askm3/fix/before-S1-3",
+          "/private/tmp/askm3/fix/before-S2-1",
+          "/private/tmp/askm3/fix/before-S2-2",
+          "/private/tmp/askm3/fix/before-S2-3",
+          "/private/tmp/askm3/fix/before-S3-0",
+          "/private/tmp/askm3/fix/before-S3-1",
+          "/private/tmp/askm3/fix/before-S3-2",
+          "/private/tmp/askm3/fix/before-S3-3",
+          "/private/tmp/askm3/probe.asKp",
+          "/private/tmp/askm3/probe.msBX",
+          "/private/tmp/askprobe-work",
+          "/private/tmp/b2-ws",
+          "/private/tmp/bench-browser",
+          "/private/tmp/bgt2",
+          "/private/tmp/bgtest",
+          "/private/tmp/cc-capture",
+          "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad",
+          "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe",
+          "/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest",
+          "/private/tmp/claude-plugin-smoke-15",
+          "/private/tmp/ctx-ctxoff.4uzy",
+          "/private/tmp/ctx-ctxon.L2LV",
+          "/private/tmp/ctx-dbg.Axyt",
+          "/private/tmp/ctxprobe.bZVv",
+          "/private/tmp/cua-accept",
+          "/private/tmp/denyprobe.nbiG",
+          "/private/tmp/fold-live",
+          "/private/tmp/fold-smoke",
+          "/private/tmp/hooktest",
+          "/private/tmp/maws-accept",
+          "/private/tmp/maws-harness/a",
+          "/private/tmp/md-test",
+          "/private/tmp/oc-ws-b",
+          "/private/tmp/permprobe.1mqW",
+          "/private/tmp/sminos-probe",
+          "/private/tmp/stylecheck/S1-1",
+          "/private/tmp/stylecheck/S1-2",
+          "/private/tmp/stylecheck/S1-3",
+          "/private/tmp/stylecheck/S2-1",
+          "/private/tmp/stylecheck/S2-2",
+          "/private/tmp/stylecheck/S2-3",
+          "/private/tmp/stylecheck/S3-1",
+          "/private/tmp/stylecheck/S3-2",
+          "/private/tmp/stylecheck/S3-3",
+          "/private/tmp/th-pad.Nnz1",
+          "/private/tmp/th-pad.WI9D",
+          "/private/tmp/th-test",
+          "/private/tmp/th-tools.Ozkz",
+          "/private/tmp/th-tools.VY2Y",
+          "/private/tmp/wr-test"
+        ],
+        "digest": "85649dc3aaaffafda545f275768b4fed50a47f31"
+      },
+      "settings": "d157adb8ed26f4dc32ec2023ff9e531a87e3eff67eb029439eaf8095b367e2dc",
+      "cache": {
+        "files": 900,
+        "digest": "56c0106802fa59be009be57f63d2c5e8925dfd0651853853dcd384bea44f5d98"
+      }
+    }
+  },
+  "g1New": {
+    "s1": "2d059d61-d334-4527-a248-5668cf098e6d",
+    "s1Engine": "f9478abd-6466-4149-8ff8-dbde7f938cbc",
+    "spawn": {
+      "at": "2026-10-14T05:57:52.624Z",
+      "launchId": "kbxyaygy",
+      "append": "# Messages to the human (MAWS to-human contract 5)\n\nThe human reads a report, no",
+      "snapshotOff": false,
+      "env": {
+        "CUA_BROWSER_BACKENDS": "/private/tmp/maws-p2c-live-U8SvNY/user-data/browser/cua/2d059d61-d334-4527-a248-5668cf098e6d.sock",
+        "MAWS_NATIVE_TO_HUMAN": "5"
+      },
+      "resume": null
+    },
+    "row": {
+      "launch_id": "kbxyaygy",
+      "desired": "maws-contract",
+      "recorded": "unrecorded",
+      "appended": 1,
+      "snapshot_off": 0,
+      "off_unavailable": 0,
+      "applied": "maws-contract",
+      "style": "default",
+      "observed_style": null,
+      "style_mismatch": 0,
+      "override": "inherit",
+      "enabled_at": "2026-10-14T05:57:52.625Z"
+    },
+    "probe": "5",
+    "model": {
+      "requested": "haiku",
+      "resolved": "claude-haiku-5-5[1m]"
+    },
+    "gateway": {
+      "mode": "gateway",
+      "baseUrl": "http://127.0.0.1:8641",
+      "verified": "routed",
+      "autoModeServer": "unknown",
+      "localLane": null
+    }
+  },
+  "g4Ask": {
+    "askId": "toolu_01J6YeXF8f4pzdLJdXf66p1b",
+    "asks": [
+      {
+        "requestId": "f8690c16-bf52-4547-95e2-9ad20a22624b",
+        "name": "ask",
+        "args": {
+          "questions": [
+            {
+              "question": "Should the CHANGELOG.md follow the Keep a Changelog format?",
+              "modality": "choice",
+              "header": "Changelog format",
+              "id": "changelog-format",
+              "multi": false,
+              "allowOther": false,
+              "options": [
+                {
+                  "label": "Keep a Changelog format",
+                  "description": "Sections per version (Added, Changed, Deprecated, Removed, Fixed, Security) with an Unreleased section at the top."
+                },
+                {
+                  "label": "Free-form format",
+                  "description": "Plain dated or versioned entries with no fixed section headings."
+                }
+              ]
+            }
+          ],
+          "blocking": false,
+          "title": "CHANGELOG format",
+          "context": "Plan for the future CHANGELOG.md: create it at the repo root, add an Unreleased section, and record each user-visible change as an entry under the matching heading. I'll proceed with the rest of the plan while waiting for your answer."
+        }
+      }
+    ],
+    "item": {
+      "id": "2d059d61-d334-4527-a248-5668cf098e6d:f8690c16-bf52-4547-95e2-9ad20a22624b",
+      "appSessionId": "2d059d61-d334-4527-a248-5668cf098e6d",
+      "sessionId": "f9478abd-6466-4149-8ff8-dbde7f938cbc",
+      "kind": "async_input",
+      "request": {
+        "requestId": "f8690c16-bf52-4547-95e2-9ad20a22624b",
+        "toolUseId": "toolu_01J6YeXF8f4pzdLJdXf66p1b",
+        "taskId": null,
+        "agentId": null
+      },
+      "summary": "CHANGELOG format",
+      "createdAt": "2026-10-14T05:58:12.333Z",
+      "state": "pending",
+      "stateChangedAt": "2026-10-14T05:58:12.333Z",
+      "expiresAt": null
+    },
+    "note": {
+      "appSessionId": "2d059d61-d334-4527-a248-5668cf098e6d",
+      "attentionId": "2d059d61-d334-4527-a248-5668cf098e6d:f8690c16-bf52-4547-95e2-9ad20a22624b",
+      "delivery": "fallback",
+      "at": "2026-10-14T05:58:12.340Z"
+    },
+    "running": true,
+    "answer": "Keep a Changelog format",
+    "submittedAt": "2026-10-14T05:58:12.865Z",
+    "write": {
+      "uuid": "fbfee6d3-ed3f-45fe-8353-b82a64790bd5",
+      "text": "[MAWS ask toolu_01J6YeXF8f4pzdLJdXf66p1b] The user answered the questions you asked:\n1. Changelog format — Keep a Changelog format\n```json\n{\n  \"status\": \"answered\",\n  \"askId\": \"toolu_01J6YeXF8f4pzdLJdXf66p1b\",\n  \"answers\": [\n    {\n      \"id\": \"changelog-format\",\n      \"question\": \"Should the CHANGELOG.md follow the Keep a Changelog format?\",\n      \"status\": \"answered\",\n      \"value\": [\n        \"Keep a Changelog format\"\n      ]\n    }\n  ]\n}\n```",
+      "at": "2026-10-14T05:58:12.839Z"
+    },
+    "started": "2026-10-14T05:58:54.177Z"
+  },
+  "g3Report": {
+    "counts": {
+      "message": 1,
+      "mustRead": 0,
+      "insight": 0,
+      "question": 0,
+      "records": 1
+    },
+    "closed": "Working record · 2 tool calls",
+    "dividerText": "Worked for 1m 06s · 2 tool calls",
+    "toolText": "Ran sleep 40 in 41s"
+  },
+  "resume": {
+    "spawn": {
+      "at": "2026-10-14T05:59:05.413Z",
+      "launchId": "g4aqwamo",
+      "append": "# Messages to the human (MAWS to-human contract 5)\n\nThe human reads a report, no",
+      "snapshotOff": false,
+      "env": {
+        "CUA_BROWSER_BACKENDS": "/private/tmp/maws-p2c-live-U8SvNY/user-data/browser/cua/2d059d61-d334-4527-a248-5668cf098e6d.sock",
+        "MAWS_NATIVE_TO_HUMAN": "5"
+      },
+      "resume": "f9478abd-6466-4149-8ff8-dbde7f938cbc"
+    },
+    "row": {
+      "launch_id": "g4aqwamo",
+      "desired": "maws-contract",
+      "recorded": "contract:5",
+      "appended": 1,
+      "snapshot_off": 0,
+      "off_unavailable": 0,
+      "applied": "maws-contract",
+      "style": "default",
+      "observed_style": "default",
+      "style_mismatch": 0,
+      "override": "inherit",
+      "enabled_at": "2026-10-14T05:57:52.625Z"
+    },
+    "probe": "5",
+    "before": {
+      "snapshots": [
+        1,
+        1
+      ],
+      "supplements": [
+        0,
+        0
+      ],
+      "boundaries": 0
+    },
+    "snap": {
+      "snapshots": [
+        1,
+        1
+      ],
+      "supplements": [
+        0,
+        0
+      ],
+      "boundaries": 0
+    },
+    "reply": "message"
+  },
+  "off": {
+    "spawn": {
+      "at": "2026-10-14T05:59:21.090Z",
+      "launchId": "x6mto2ar",
+      "args": [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--permission-prompt-tool",
+        "stdio",
+        "--include-partial-messages",
+        "--forward-subagent-text",
+        "--replay-user-messages",
+        "--include-hook-events",
+        "--setting-sources",
+        "user,project,local",
+        "--model",
+        "haiku",
+        "--permission-mode",
+        "default",
+        "--resume",
+        "f9478abd-6466-4149-8ff8-dbde7f938cbc",
+        "--system-prompt-snapshot",
+        "off",
+        "--disallowedTools",
+        "AskUserQuestion",
+        "--settings",
+        "{\"env\":{\"CUA_BROWSER_BACKENDS\":\"/private/tmp/maws-p2c-live-U8SvNY/user-data/browser/cua/2d059d61-d334-4527-a248-5668cf098e6d.sock\"},\"dialogExpiry\":\"never\"}"
+      ],
+      "snapshotOff": true,
+      "env": {
+        "CUA_BROWSER_BACKENDS": "/private/tmp/maws-p2c-live-U8SvNY/user-data/browser/cua/2d059d61-d334-4527-a248-5668cf098e6d.sock"
+      },
+      "resume": "f9478abd-6466-4149-8ff8-dbde7f938cbc"
+    },
+    "decided": {
+      "launch_id": "x6mto2ar",
+      "desired": "off",
+      "recorded": "contract:5",
+      "appended": 0,
+      "snapshot_off": 1,
+      "off_unavailable": 0,
+      "applied": "off",
+      "style": "default",
+      "observed_style": "default",
+      "style_mismatch": 0,
+      "override": "off",
+      "enabled_at": null
+    },
+    "probe": "<unset>",
+    "reply": "NO",
+    "pendingWords": "Applies the next time this session starts",
+    "sourceWords": "Off: the agent is not asked to mark anything"
+  },
+  "style": {
+    "s2": "79f34c2f-d5bc-405e-8395-4210274fda71",
+    "s2Engine": "b65c5d2c-0976-4291-81a8-b06aa0e6beae",
+    "spawn": {
+      "at": "2026-10-14T05:59:51.627Z",
+      "launchId": "hblrshwk",
+      "append": "# Messages to the human (MAWS to-human supplement 1)\n\nThis session runs in MAWS,",
+      "snapshotOff": false,
+      "env": {
+        "CUA_BROWSER_BACKENDS": "/private/tmp/maws-p2c-live-U8SvNY/user-data/browser/cua/79f34c2f-d5bc-405e-8395-4210274fda71.sock",
+        "MAWS_NATIVE_TO_HUMAN": "5"
+      },
+      "resume": null
+    },
+    "row": {
+      "launch_id": "hblrshwk",
+      "desired": "external-style-plus-supplement",
+      "recorded": "unrecorded",
+      "appended": 1,
+      "snapshot_off": 0,
+      "off_unavailable": 0,
+      "applied": "external-style-plus-supplement",
+      "style": "doperpowers:to-human",
+      "observed_style": null,
+      "style_mismatch": 0,
+      "override": "inherit",
+      "enabled_at": "2026-10-14T05:59:51.627Z"
+    },
+    "observed": {
+      "launch_id": "hblrshwk",
+      "desired": "external-style-plus-supplement",
+      "recorded": "unrecorded",
+      "appended": 1,
+      "snapshot_off": 0,
+      "off_unavailable": 0,
+      "applied": "external-style-plus-supplement",
+      "style": "doperpowers:to-human",
+      "observed_style": "doperpowers:to-human",
+      "style_mismatch": 0,
+      "override": "inherit",
+      "enabled_at": "2026-10-14T05:59:51.627Z"
+    },
+    "probe": "5",
+    "snap": {
+      "snapshots": [
+        0,
+        0
+      ],
+      "supplements": [
+        1,
+        1
+      ],
+      "boundaries": 0
+    },
+    "cards": 1,
+    "asks": [
+      {
+        "requestId": "ac713439-c622-452c-8b52-4c239b6b9892",
+        "name": "ask",
+        "args": {
+          "blocking": false,
+          "title": "README usage section",
+          "questions": [
+            {
+              "id": "readme-usage",
+              "modality": "choice",
+              "question": "Should the README get a usage section?",
+              "multi": false,
+              "allowOther": false,
+              "options": [
+                {
+                  "label": "Yes, add a usage section",
+                  "description": "Add a usage section to the README."
+                },
+                {
+                  "label": "No, leave the README as it is",
+                  "description": "Make no README change."
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "bandText": "(no band)",
+    "reply": "<message>Repository: p2c-repo is on branch master, with one commit (\"seed\") and a clean working tree. I have not read any files yet.\n\nI have sent you one question, asking whether the README should get a usage section. Options: yes, add one, or no, leave the README as it is. I am not waiting on your answer. Until it arrives I will make no changes to any file.</message>",
+    "plugins": [
+      {
+        "name": "doperpowers",
+        "path": "/private/tmp/maws-p2c-live-U8SvNY/doperpowers-market",
+        "source": "doperpowers@doperpowers",
+        "version": "7.149.4"
+      },
+      {
+        "name": "cc-plugin-agents-md",
+        "path": "builtin",
+        "source": "cc-plugin-agents-md@builtin",
+        "version": null
+      },
+      {
+        "name": "cc-plugin-telemetry",
+        "path": "builtin",
+        "source": "cc-plugin-telemetry@builtin",
+        "version": null
+      },
+      {
+        "name": "cc-plugin-plugin-authoring",
+        "path": "builtin",
+        "source": "cc-plugin-plugin-authoring@builtin",
+        "version": null
+      }
+    ]
+  },
+  "styleAnswer": {
+    "askIds": [
+      "toolu_01YNhyRvoMpKVsc78F8chHW9"
+    ],
+    "answers": [
+      "Yes, add a usage section"
+    ],
+    "delivered": [
+      [
+        {
+          "uuid": "2b2d2cf6-7e64-4ca1-adf2-9fcd99132891",
+          "text": "[MAWS ask toolu_01YNhyRvoMpKVsc78F8chHW9] The user answered the questions you asked:\n1. Should the README get a usage section? — Yes, add a usage section\n```json\n{\n  \"status\": \"answered\",\n  \"askId\": \"toolu_01YNhyRvoMpKVsc78F8chHW9\",\n  \"answers\": [\n    {\n      \"id\": \"readme-usage\",\n      \"question\": \"Should the README get a usage section?\",\n      \"status\": \"answered\",\n      \"value\": [\n        \"Yes, add a usage section\"\n      ]\n    }\n  ]\n}\n```",
+          "at": "2026-10-14T06:00:35.486Z"
+        }
+      ]
+    ],
+    "reply": "<message>Thanks. You chose to add a usage section to the README. I will not read or change any file, as you asked.</message>"
+  },
+  "styleOff": {
+    "spawn": {
+      "at": "2026-10-14T06:00:40.029Z",
+      "launchId": "4gsasre4",
+      "args": [
+        "-p",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--permission-prompt-tool",
+        "stdio",
+        "--include-partial-messages",
+        "--forward-subagent-text",
+        "--replay-user-messages",
+        "--include-hook-events",
+        "--setting-sources",
+        "user,project,local",
+        "--model",
+        "haiku",
+        "--permission-mode",
+        "default",
+        "--resume",
+        "b65c5d2c-0976-4291-81a8-b06aa0e6beae",
+        "--system-prompt-snapshot",
+        "off",
+        "--disallowedTools",
+        "AskUserQuestion",
+        "--settings",
+        "{\"env\":{\"CUA_BROWSER_BACKENDS\":\"/private/tmp/maws-p2c-live-U8SvNY/user-data/browser/cua/79f34c2f-d5bc-405e-8395-4210274fda71.sock\"},\"dialogExpiry\":\"never\"}"
+      ],
+      "append": null,
+      "snapshotOff": true,
+      "env": {
+        "CUA_BROWSER_BACKENDS": "/private/tmp/maws-p2c-live-U8SvNY/user-data/browser/cua/79f34c2f-d5bc-405e-8395-4210274fda71.sock"
+      },
+      "resume": "b65c5d2c-0976-4291-81a8-b06aa0e6beae"
+    },
+    "row": {
+      "launch_id": "4gsasre4",
+      "desired": "off",
+      "recorded": "supplement:1",
+      "appended": 0,
+      "snapshot_off": 1,
+      "off_unavailable": 0,
+      "applied": "off",
+      "style": "doperpowers:to-human",
+      "observed_style": "doperpowers:to-human",
+      "style_mismatch": 0,
+      "override": "off",
+      "enabled_at": null
+    },
+    "probe": "<unset>",
+    "bandText": "to-human view ·  full transcript"
+  },
+  "after": {
+    "a15": {
+      "keys": [
+        "/private/tmp",
+        "/private/tmp/agtest",
+        "/private/tmp/askcheck",
+        "/private/tmp/askm1/abort.m5b8",
+        "/private/tmp/askm1/base.dNam",
+        "/private/tmp/askm1/builtin.caZi",
+        "/private/tmp/askm1/dev.IG2U",
+        "/private/tmp/askm1/dev2.gZ9o",
+        "/private/tmp/askm1/dev3.PLzN",
+        "/private/tmp/askm1/dev4.wpvP",
+        "/private/tmp/askm1/fix1.3Oiv",
+        "/private/tmp/askm1/fix1b.32nB",
+        "/private/tmp/askm1/fix1c.W0lU",
+        "/private/tmp/askm1/noab.rHYy",
+        "/private/tmp/askm2-fTfH",
+        "/private/tmp/askm2f-kw3Y",
+        "/private/tmp/askm2p-ExTH",
+        "/private/tmp/askm2r-rq8S",
+        "/private/tmp/askm3/acc.1qIz",
+        "/private/tmp/askm3/acc.HXAF",
+        "/private/tmp/askm3/acc.MO2H",
+        "/private/tmp/askm3/acc.a3AA",
+        "/private/tmp/askm3/acc.cpBX",
+        "/private/tmp/askm3/acc.dOnk",
+        "/private/tmp/askm3/acc.gUux",
+        "/private/tmp/askm3/acc.pJbV",
+        "/private/tmp/askm3/acc.sfiL",
+        "/private/tmp/askm3/acc.vslX",
+        "/private/tmp/askm3/fix/after-S1-1",
+        "/private/tmp/askm3/fix/after-S1-2",
+        "/private/tmp/askm3/fix/after-S1-3",
+        "/private/tmp/askm3/fix/after-S2-1",
+        "/private/tmp/askm3/fix/after-S2-2",
+        "/private/tmp/askm3/fix/after-S2-3",
+        "/private/tmp/askm3/fix/after-S3-1",
+        "/private/tmp/askm3/fix/after-S3-2",
+        "/private/tmp/askm3/fix/after-S3-3",
+        "/private/tmp/askm3/fix/before-S1-1",
+        "/private/tmp/askm3/fix/before-S1-2",
+        "/private/tmp/askm3/fix/before-S1-3",
+        "/private/tmp/askm3/fix/before-S2-1",
+        "/private/tmp/askm3/fix/before-S2-2",
+        "/private/tmp/askm3/fix/before-S2-3",
+        "/private/tmp/askm3/fix/before-S3-0",
+        "/private/tmp/askm3/fix/before-S3-1",
+        "/private/tmp/askm3/fix/before-S3-2",
+        "/private/tmp/askm3/fix/before-S3-3",
+        "/private/tmp/askm3/probe.asKp",
+        "/private/tmp/askm3/probe.msBX",
+        "/private/tmp/askprobe-work",
+        "/private/tmp/b2-ws",
+        "/private/tmp/bench-browser",
+        "/private/tmp/bgt2",
+        "/private/tmp/bgtest",
+        "/private/tmp/cc-capture",
+        "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad",
+        "/private/tmp/claude-501/-Users-new-Developer-GitHub-doperpowers--claude-worktrees-agora-native/30e0568a-f1ee-4dce-8db9-b9799fb23107/scratchpad/sockprobe",
+        "/private/tmp/claude-501/-Users-new-Documents-GitHub-doperpowers/92096179-2640-43bd-9853-e2a820848cfe/scratchpad/bgtest",
+        "/private/tmp/claude-plugin-smoke-15",
+        "/private/tmp/ctx-ctxoff.4uzy",
+        "/private/tmp/ctx-ctxon.L2LV",
+        "/private/tmp/ctx-dbg.Axyt",
+        "/private/tmp/ctxprobe.bZVv",
+        "/private/tmp/cua-accept",
+        "/private/tmp/denyprobe.nbiG",
+        "/private/tmp/fold-live",
+        "/private/tmp/fold-smoke",
+        "/private/tmp/hooktest",
+        "/private/tmp/maws-accept",
+        "/private/tmp/maws-harness/a",
+        "/private/tmp/md-test",
+        "/private/tmp/oc-ws-b",
+        "/private/tmp/permprobe.1mqW",
+        "/private/tmp/sminos-probe",
+        "/private/tmp/stylecheck/S1-1",
+        "/private/tmp/stylecheck/S1-2",
+        "/private/tmp/stylecheck/S1-3",
+        "/private/tmp/stylecheck/S2-1",
+        "/private/tmp/stylecheck/S2-2",
+        "/private/tmp/stylecheck/S2-3",
+        "/private/tmp/stylecheck/S3-1",
+        "/private/tmp/stylecheck/S3-2",
+        "/private/tmp/stylecheck/S3-3",
+        "/private/tmp/th-pad.Nnz1",
+        "/private/tmp/th-pad.WI9D",
+        "/private/tmp/th-test",
+        "/private/tmp/th-tools.Ozkz",
+        "/private/tmp/th-tools.VY2Y",
+        "/private/tmp/wr-test"
+      ],
+      "digest": "85649dc3aaaffafda545f275768b4fed50a47f31"
+    },
+    "settings": "d157adb8ed26f4dc32ec2023ff9e531a87e3eff67eb029439eaf8095b367e2dc",
+    "cache": {
+      "files": 900,
+      "digest": "56c0106802fa59be009be57f63d2c5e8925dfd0651853853dcd384bea44f5d98"
+    },
+    "failures": [],
+    "consoleErrors": [],
+    "spentUsd": 0.020438215000000003,
+    "teardown": null
+  }
+}

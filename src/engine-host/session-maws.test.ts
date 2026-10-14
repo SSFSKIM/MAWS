@@ -413,7 +413,8 @@ describe('ask on an EngineSession (scripted)', () => {
 
 // E1 M4b (the architect's ruling 1): a blocking ask waits on the human as an AskUserQuestion does, so it is a `question`
 // attention item published with the broker's list (Overview card, Needs-you, notifier) until it is answered or
-// cancelled, and `session.pendingRequest` answers its `maws.ask.opened` event for the card; an async ask is none.
+// cancelled, and `session.pendingRequest` answers its `maws.ask.opened` event for the card. (P2-C2: an async ask is an
+// `async_input` item, below.)
 describe('a blocking ask as a question attention item (scripted)', () => {
   const QUESTIONS = [{ question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] }];
   const ANSWERS: AskAnswer[] = [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }];
@@ -452,6 +453,31 @@ describe('a blocking ask as a question attention item (scripted)', () => {
     expect(run.stream.pendingRequest(id)).toBeNull();
     run.transport.exit(0);
     await run.session.exited;
+  });
+
+  // P2-C2 (the P2 spec's Decision Log 32, reversing E1's "an async ask is none"): a question that can wait raises the
+  // `async_input` item a need-input mark raised, retired when its answer is committed or the ask is cancelled.
+  it('an async ask is an async_input item while it waits, retired once its answer is committed; an exit counts it no lost question', async () => {
+    const run = await attended();
+    const id = run.call('ask', { blocking: false, title: 'Later', questions: QUESTIONS }, 'toolu_later');
+    await until(() => run.last().length === 1, 'the async ask’s item');
+    const { appSessionId } = run.session.status();
+    expect(run.last()).toEqual([expect.objectContaining({
+      id: `${appSessionId}:${id}`, kind: 'async_input', summary: 'Later', state: 'pending',
+      request: { requestId: id, toolUseId: 'toolu_later', taskId: null, agentId: null },
+    })]);
+    expect(run.last()[0]).not.toHaveProperty('anchor'); // anchored to the ask by its request, never to a mark
+    expect(run.stream.pendingRequest(id)).toEqual(run.maws().find((e) => e.kind === 'maws.ask.opened'));
+    expect(await run.session.answerAsk('toolu_later', ANSWERS)).toBe('delivered');
+    expect(run.last()).toEqual([]);
+    expect(run.stream.pendingRequest(id)).toBeNull();
+
+    run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_cut');
+    await until(() => run.last().length === 1, 'the second async ask’s item');
+    run.transport.exit(1);
+    await run.session.exited;
+    expect(run.last()).toEqual([]); // cancelled with the process
+    expect(run.session.brokerItems()).toEqual([]);
   });
 
   it('summarises an untitled ask by its first question, and retires when the engine withdraws it or the process ends', async () => {
@@ -502,7 +528,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
 
   // M5 fix: exit parity with an AskUserQuestion. The broker confirmed the ask's permission at its tools/call, so it is
   // no longer the broker's loss; the blocking ask, still published, is counted (and named) as a question lost. An async
-  // ask, never an attention item, is not counted.
+  // ask (P2-C2: an `async_input` item while it waits) is not counted.
   it('a blocking ask pending at the exit is lost attention on the exit row and the process.exited event; an async one is not', async () => {
     const run = await attended();
     run.transport.push({ type: 'control_request', request_id: 'perm-1', request: { subtype: 'can_use_tool', tool_name: 'mcp__maws__ask', input: { questions: QUESTIONS }, tool_use_id: 'toolu_lost' } });
@@ -511,7 +537,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
     run.call('ask', { questions: QUESTIONS }, 'toolu_lost');
     run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_async');
     await until(() => run.session.asks().length === 2, 'both asks');
-    expect(run.last().map((i) => [i.kind, i.state])).toEqual([['permission', 'confirmed'], ['question', 'pending']]);
+    expect(run.last().map((i) => [i.kind, i.state])).toEqual([['permission', 'confirmed'], ['question', 'pending'], ['async_input', 'pending']]); // P2-C2: the async ask's item
     run.transport.exit(1);
     expect((await run.session.exited).lostAttentionCount).toBe(1);
     const exitRow = run.journal.rows.find((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'exit')!;
@@ -529,20 +555,7 @@ describe('a blocking ask as a question attention item (scripted)', () => {
     expect(exitRow.frame).not.toHaveProperty('lostAskCount');
     expect(run.events.at(-1)).not.toHaveProperty('lostAskCount');
   });
-
-  it('an async ask is no attention item, and publishes nothing', async () => {
-    const run = await attended();
-    const before = run.published.length;
-    const id = run.call('ask', { blocking: false, questions: QUESTIONS }, 'toolu_async');
-    await run.answered(id);
-    expect(run.session.asks()).toHaveLength(1);
-    expect(await run.session.answerAsk('toolu_async', ANSWERS)).toBe('delivered');
-    expect(run.published.slice(before)).toEqual([]);
-    expect(run.session.brokerItems()).toEqual([]);
-    expect(run.stream.pendingRequest(id)).toBeNull();
-    run.transport.exit(0);
-    await run.session.exited;
-  });
+  // P2-C2: E1's 'an async ask is no attention item' is reversed (Decision Log 32); the async_input case above.
 });
 
 // E2 start (E2 execution document, M1 step 5): the artifact tools on the same scripted session: the store's copy and
