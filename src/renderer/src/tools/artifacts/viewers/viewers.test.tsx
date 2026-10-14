@@ -192,6 +192,23 @@ describe('the HTML viewer', () => {
     await waitFor(() => expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: ID, format: 'pdf', versionId: 1 }]));
   });
 
+  // whole-branch review: a revision asked for is exported as that version even while it is the latest, so a publish
+  // between the read and the export never exports the newer one; only the latest followed exports live
+  it('exports a revision asked for by its version id though it is the latest, and the followed latest live', async () => {
+    requestArtifactVersion(ID, { revision: 9 }, 'panel');
+    const first = mount('html');
+    await waitFor(() => expect(header().exports?.find((e) => e.label === 'PDF')?.disabled).toBe(false));
+    act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
+    await waitFor(() => expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: ID, format: 'pdf', versionId: 2 }]));
+    first.view.unmount();
+
+    mount('html');
+    await waitFor(() => expect(header().exports?.find((e) => e.label === 'PDF')?.disabled).toBe(false));
+    act(() => header().exports!.find((e) => e.label === 'PDF')!.onSelect());
+    await waitFor(() => expect(main.callsOf('artifacts.export')).toHaveLength(2));
+    expect(main.callsOf('artifacts.export')[1]).toEqual({ artifactId: ID, format: 'pdf' });
+  });
+
   it('Reload mounts a new frame and reads the versions again', async () => {
     mount('html');
     await waitFor(() => expect(frame('html')).not.toBeNull());
