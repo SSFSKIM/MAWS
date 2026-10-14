@@ -25,6 +25,9 @@ export interface McpToolContext {
   toolUseId: ToolUseId | null; // `params._meta["claudecode/toolUseId"]`: the transcript's id for the call
   requestId: RequestId; // the engine's `mcp_message` control request
   signal: AbortSignal; // aborted when the engine withdraws the request or the process ends
+  // P2-C3 (the P2 spec's Decision Log 35): the call is a subagent's, told by its tool use having arrived in an assistant
+  // frame whose `parent_tool_use_id` is set (MawsToolServerDeps.fromSubagent); false when nothing tells
+  fromSubagent: boolean;
 }
 
 // E2: an image block (`artifact_screenshot`'s PNG) reaches the model unchanged; the engine inserts its own text block
@@ -68,6 +71,7 @@ export interface MawsToolServerDeps {
   version: string; // the app's, for `serverInfo`
   log: (message: string) => void;
   onChange?: () => void; // the calls in flight changed (the session's status counts them)
+  fromSubagent?: (toolUseId: ToolUseId | null) => boolean; // P2-C3: the normaliser's reading of the frames before the call
 }
 
 export class MawsToolServer {
@@ -170,7 +174,7 @@ export class MawsToolServer {
     this.deps.onChange?.();
     let result: McpToolResult;
     try {
-      result = await tool.call(args, { appSessionId: this.deps.appSessionId, cwd: this.deps.cwd(), toolUseId, requestId, signal: controller.signal });
+      result = await tool.call(args, { appSessionId: this.deps.appSessionId, cwd: this.deps.cwd(), toolUseId, requestId, signal: controller.signal, fromSubagent: this.deps.fromSubagent?.(toolUseId) ?? false });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.deps.log(`${tool.name} ${requestId} failed: ${message}`);

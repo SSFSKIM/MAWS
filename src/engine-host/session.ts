@@ -226,6 +226,7 @@ export class EngineSession {
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,
       sessionId: () => this.normalizer.state.sessionId,
+      fromSubagent: (toolUseId) => this.normalizer.fromSubagent(toolUseId), // P2-C3: the call's frame was journaled first
       publishAttention: () => this.emit('brokerItems', this.brokerItems()),
       steer: (content, steerOpts) => this.queue.steer(content, steerOpts),
       meta: (frame) => void this.record('meta', frame),

@@ -5,6 +5,9 @@
 // written, or when the engine withdrew it or the process ended (its signal's reason), which cancels the ask with nothing
 // written. An async ask is answered `{status: 'asked', askId}` at once and its answers travel later as a steer; a
 // withdrawal or an exit before that acknowledgement is written cancels it the same way.
+// P2-C3 (the P2 spec's Decision Log 35): a subagent's ask is held as a blocking one whatever its `blocking` said, since
+// an async ask's answers travel as a steer into the main conversation, which never asked, while the subagent never hears
+// them; its call returns the answers, and its attention item is a `question`.
 import type { PendingAsk } from '@shared/maws/ask';
 import { withQuestionIds } from '@shared/maws/ask';
 import { parseToolArguments, type AskResult } from '@shared/maws/tools';
@@ -20,7 +23,8 @@ export function askTool(deps: { asks: AskTable; cancelled: (ask: PendingAsk, rea
   return defineMawsTool('ask', async (args, ctx) => {
     const parsed = parseToolArguments('ask', args);
     if (!parsed.ok) return toolError(parsed.error);
-    const { title, context, blocking = true, questions } = parsed.data;
+    const { title, context, questions } = parsed.data;
+    const blocking = (parsed.data.blocking ?? true) || ctx.fromSubagent;
     const askId = ctx.toolUseId ?? ctx.requestId;
     const ask: PendingAsk = {
       askId, toolUseId: ctx.toolUseId, requestId: ctx.requestId, blocking, title: title ?? null, context: context ?? null,

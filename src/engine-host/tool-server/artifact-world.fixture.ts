@@ -46,7 +46,7 @@ export function openWorld(): World {
   return {
     cwd, userData, storage, service, store, deliverables, written, logs, session,
     deps: (over = {}) => ({ artifacts: () => store, deliverables, session, log: (line) => logs.push(line), ...over }),
-    ctx: (over = {}) => ({ appSessionId: SELF, cwd, toolUseId: `toolu_${++calls}` as ToolUseId, requestId: `r${calls}` as RequestId, signal: new AbortController().signal, ...over }),
+    ctx: (over = {}) => ({ appSessionId: SELF, cwd, toolUseId: `toolu_${++calls}` as ToolUseId, requestId: `r${calls}` as RequestId, signal: new AbortController().signal, fromSubagent: false /* P2-C3 */, ...over }),
     close: () => {
       store.close();
       service.close();

@@ -287,6 +287,38 @@ describe('ask on an EngineSession (scripted)', () => {
     expect(run.rebuilt()).toEqual(run.events);
   });
 
+  // P2-C3 (the P2 spec's Decision Log 35; pass3/p2-c3-subagent-ask): the subagent's tool use arrives in an assistant
+  // frame under its parent before the call, so the host holds its async ask as a blocking one
+  it("a subagent's async ask is held as a blocking one: no acknowledgement, its answers (with a note) in its own result, nothing steered; live and on rebuild", async () => {
+    const run = await mawsSession();
+    const toolUse = (id: string, parent: string | null) =>
+      run.transport.push({ type: 'assistant', message: { id: `msg_${id}`, model: 'm', role: 'assistant', content: [{ type: 'tool_use', id, name: 'mcp__maws__ask', input: { blocking: false, questions: [QUESTIONS[0]] } }] }, parent_tool_use_id: parent, session_id: 's', uuid: `a-${id}` });
+    toolUse('toolu_sub', 'toolu_agent');
+    const id = run.call('ask', { blocking: false, questions: [QUESTIONS[0]] }, 'toolu_sub');
+    await until(() => run.session.asks().length === 1, 'the subagent’s ask');
+    expect(run.session.asks()).toMatchObject([{ askId: 'toolu_sub', blocking: true }]);
+    expect(run.answerOf(id)).toBeUndefined(); // no {status: 'asked'}: the call waits
+    expect(run.maws()).toMatchObject([{ kind: 'maws.ask.opened', askId: 'toolu_sub', blocking: true }]);
+
+    const answers: AskAnswer[] = [{ ...ANSWERS[0]!, note: 'the darker blue' }];
+    expect(await run.session.answerAsk('toolu_sub', answers)).toBe('delivered');
+    const rpc = await run.answered(id);
+    expect(JSON.parse(rpc.result!.content![0]!.text)).toEqual({ status: 'answered', askId: 'toolu_sub', answers });
+    expect(run.transport.writes.filter((w) => w.type === 'user')).toEqual([]); // nothing into the main conversation
+    expect(metaOf(run.journal.rows, 'maws_ask_answered')).toEqual([]);
+    await until(() => run.maws().length === 2, 'the answered event');
+    expect(run.maws()[1]).toMatchObject({ kind: 'maws.ask.answered', askId: 'toolu_sub', answers, delivery: 'result' });
+
+    // the main conversation's own async ask beside it is unchanged
+    toolUse('toolu_main', null);
+    const ack = await run.answered(run.call('ask', { blocking: false, questions: [QUESTIONS[0]] }, 'toolu_main'));
+    expect(JSON.parse(ack.result!.content![0]!.text)).toEqual({ status: 'asked', askId: 'toolu_main' });
+    expect(run.session.asks()).toMatchObject([{ askId: 'toolu_main', blocking: false }]);
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(run.rebuilt()).toEqual(run.events);
+  });
+
   it('refuses answers that do not fit the questions before any claim, writing nothing', async () => {
     const run = await mawsSession();
     run.call('ask', { questions: QUESTIONS }, 'toolu_bad');

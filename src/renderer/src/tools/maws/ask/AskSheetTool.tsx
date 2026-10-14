@@ -16,6 +16,8 @@ import { ipc } from '../../../ipc/client';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
 import { CardButton } from '../../../request-card/controls';
 import { selectProjectOrder, useSessions } from '../../../stores/sessions';
+import { TranscriptActionsProvider } from '../../../transcript/view/context'; // P2-C3
+import { openFile } from '../../code/open-file'; // P2-C3
 import type { AskSheetParams } from '../actions';
 import { SHEET } from './copy';
 import { canSubmit, EMPTY_DRAFT, skippedCount } from './draft';
@@ -130,19 +132,22 @@ function LiveAsk({ appSessionId, ask, state, directory }: { appSessionId: AppSes
     <>
       <div className="min-h-0 flex-1 overflow-y-auto">
         <Header title={ask.title} status={ask.blocking ? SHEET.waitingNote : SHEET.asyncNote} context={ask.context} />
-        <div className="flex flex-col">
-          {ask.questions.map((question) => (
-            <QuestionSection
-              key={question.id}
-              question={question}
-              draft={drafts?.get(question.id ?? '') ?? EMPTY_DRAFT}
-              disabled={sending}
-              edit={(change) => editDraft(appSessionId, ask.askId, question.id ?? '', change)}
-              directory={directory}
-              projects={projects}
-            />
-          ))}
-        </div>
+        {/* P2-C3: a preview's file references open in the ask's own session, as the plan card's do */}
+        <TranscriptActionsProvider actions={{ openFile: (path, line) => openFile(appSessionId, path, line) }}>
+          <div className="flex flex-col">
+            {ask.questions.map((question) => (
+              <QuestionSection
+                key={`${ask.askId}:${question.id}`} // P2-C3: per ask, so a section's own state (the focused preview) never outlives it
+                question={question}
+                draft={drafts?.get(question.id ?? '') ?? EMPTY_DRAFT}
+                disabled={sending}
+                edit={(change) => editDraft(appSessionId, ask.askId, question.id ?? '', change)}
+                directory={directory}
+                projects={projects}
+              />
+            ))}
+          </div>
+        </TranscriptActionsProvider>
       </div>
       <Footer>
         {failed && (

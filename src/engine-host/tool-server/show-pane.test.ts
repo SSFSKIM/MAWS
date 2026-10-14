@@ -16,7 +16,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-const ctx = (): McpToolContext => ({ appSessionId: 'app-1' as AppSessionId, cwd: root, toolUseId: 'toolu_01' as ToolUseId, requestId: 'r1' as RequestId, signal: new AbortController().signal });
+const ctx = (): McpToolContext => ({ appSessionId: 'app-1' as AppSessionId, cwd: root, toolUseId: 'toolu_01' as ToolUseId, requestId: 'r1' as RequestId, signal: new AbortController().signal, fromSubagent: false });
 const text = (result: McpToolResult) => (result.content[0] as { text: string }).text; // E2: content widened to image blocks
 
 // A bridge whose windows answer every request at once with `answer`, recording what they were asked.

@@ -59,7 +59,20 @@ export type SendFileInput = z.infer<typeof SendFileInputSchema>;
 export const ASK_MODALITIES = ['choice', 'text', 'file', 'folder', 'repository'] as const;
 export type AskModality = (typeof ASK_MODALITIES)[number];
 
-export const AskOptionSchema = z.strictObject({ label: z.string().min(1).max(200), description: z.string().max(500).optional() });
+// P2-C3 (2026-10-14; the P2 spec's Decision Log 34): an option's `preview`, markdown the sheet renders beside the
+// options for the focused one, as the native AskUserQuestion's previews are (mockups, code snippets, diagrams,
+// configuration examples). Its description is the only one in the schema: the rule the model cannot read off a type.
+export const ASK_PREVIEW_MAX = 8000;
+export const AskOptionSchema = z.strictObject({
+  label: z.string().min(1).max(200),
+  description: z.string().max(500).optional(),
+  preview: z
+    .string()
+    .min(1)
+    .max(ASK_PREVIEW_MAX)
+    .optional()
+    .describe('Markdown shown beside the options while this option is focused (a mockup, code snippet, diagram or configuration example), so the user can compare the alternatives side by side. Single-select questions only: previews on a multi-select question are refused.'),
+});
 
 // The fields that belong to one modality only; any of them on another modality is refused.
 const MODALITY_FIELDS: Record<'options' | 'multi' | 'allowOther' | 'multiple' | 'placeholder', readonly AskModality[]> = {
@@ -84,6 +97,12 @@ export const AskQuestionSchema = z
       if (question[field as keyof typeof MODALITY_FIELDS] !== undefined && !modalities.includes(question.modality)) {
         ctx.addIssue({ code: 'custom', path: [field], message: `${field} is for ${modalities.join(' or ')} questions only` });
       }
+    }
+    // P2-C3: one preview pane shows the focused option's, which a set of checkboxes has no single answer for
+    if (question.multi === true) {
+      question.options?.forEach((option, index) => {
+        if (option.preview !== undefined) ctx.addIssue({ code: 'custom', path: ['options', index, 'preview'], message: 'preview is for single-select questions only' });
+      });
     }
   });
 export type AskQuestion = z.infer<typeof AskQuestionSchema>;
@@ -233,7 +252,9 @@ export const artifactExportName = (revision: number, format: ArtifactExportForma
 // ---------------------------------------------------------------------------------------------------------------------
 // Results (the text block of a successful call is this JSON, pretty-printed; `isError` absent)
 
-export const DeliveredFileSchema = z.strictObject({ id: z.string(), path: z.string(), name: z.string() });
+export const ASK_NOTE_MAX = 2000; // P2-C3: an answer's note, as long as a question may be
+
+export const DeliveredFileSchema =z.strictObject({ id: z.string(), path: z.string(), name: z.string() });
 export type DeliveredFile = z.infer<typeof DeliveredFileSchema>;
 export const SendFileResultSchema = z.strictObject({ status: z.literal('delivered'), deliverables: z.array(DeliveredFileSchema) });
 export type SendFileResult = z.infer<typeof SendFileResultSchema>;
@@ -247,6 +268,8 @@ export const AskAnswerSchema = z.strictObject({
   value: z.union([z.string(), z.array(z.string())]).optional(),
   otherText: z.string().optional(), // choice: what was typed under Other, present only when used
   name: z.string().optional(), // repository: the project's name
+  // P2-C3 (Decision Log 34): what the user typed beside the answer, whatever its status; absent when nothing was
+  note: z.string().min(1).max(ASK_NOTE_MAX).optional(),
 });
 export type AskAnswer = z.infer<typeof AskAnswerSchema>;
 
@@ -370,7 +393,7 @@ export const MAWS_TOOLS = {
   ask: {
     title: 'Ask questions',
     description:
-      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), or "repository" (one of the user\'s MAWS projects). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile.',
+      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), or "repository" (one of the user\'s MAWS projects). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile. In a subagent the call always waits and returns the answers, as with blocking true.',
     input: AskInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
