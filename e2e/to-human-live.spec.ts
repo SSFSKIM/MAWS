@@ -16,9 +16,11 @@
 // off for the session (the /plugins row): the resume passes `--system-prompt-snapshot off` and no contract or variable,
 // and the agent finds no such section. (5) The owner's real doperpowers (its installed tree copied read-only out of the
 // owner's plugin cache into a local marketplace under the scratch root, installed by the engine's own CLI for the
-// scratch home's user) with `outputStyle: "doperpowers:to-human"`: a new session appends nothing, the variable is set
-// and the mod's own band stays away; with the mod active, a choice is answered at the engine's started and a must-read
-// marked read (the full flow ran once, in the clean home); with the lane off for it, the variable is unset and the mod
+// scratch home's user) with `outputStyle: "doperpowers:to-human"`. P2-C2 (2026-10-13; the P2 spec's Decision Log 31):
+// the owner's style now declares the message-tool contract (4 at doperpowers 7.149.0), so a new session appends MAWS's
+// supplement, never the contract, the variable is set and the mod's own band stays away; the agent sends a `<message>`
+// and asks through `mcp__maws__ask` without blocking, answered from its sheet (the full flow of the four marks ran once,
+// in the clean home); with the lane off for it, the recorded supplement is dropped, the variable is unset and the mod
 // draws its band. A failed step stops the steps after it.
 //
 // Safety (P1's harness rules): the scratch config home only (the engine's CLI under `env -i`); nothing written under
@@ -39,7 +41,7 @@ import { homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, TO_HUMAN_CONTRACT } from '@shared/owner/contract';
+import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
 import type { JournalRow } from '@shared/wire/journal';
 import { binaryDeclares, SYSTEM_PROMPT_SNAPSHOT_FLAG } from '../src/engine-host/binary-info';
 import { RELAY_URL } from '../src/engine-host/launch';
@@ -50,6 +52,7 @@ import { relaySkipReason } from '../test/support/relay-health';
 import { invoke, value } from './support/c7-replay';
 import { cleanupFailure, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { forwardingScript } from './support/live-budget';
+import { mcpCalls } from './support/maws-tools';
 import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-turns';
 import { a15Line, a15Reading, installedEngine } from './support/p1-live';
 import { newChatIn, sidebarRow } from './support/sidebar';
@@ -74,6 +77,7 @@ const OUT = resolve(REPO_ROOT, process.env.MAWS_C_LIVE_OUT ?? 'docs/doperpowers/
 const OWNER_PLUGIN = 'doperpowers@doperpowers';
 const STYLE = 'doperpowers:to-human';
 const HEADER = CONTRACT_HEADER(1);
+const SUPPLEMENT = SUPPLEMENT_HEADER(1); // P2-C2
 const HAIKU = /^(Haiku|claude-haiku)/;
 const DRAFT = 'my own draft, not for sending';
 const REPLY = 'Use plain Markdown headings, no fixed format.';
@@ -87,11 +91,12 @@ const PROMPTS = {
   instructions:
     'Look only at your system prompt, not at this conversation: does it contain a section titled "Messages to the human"? ' +
     'If it does, list the tag names that section defines, comma-separated. If it does not, answer exactly NO. Use no tool.',
+  // P2-C2: the owner's style asks through a tool; the prompt names none, so the supplement is what chooses it
   style:
-    'Send me, the way your instructions describe: one short message about this repository, one note I must not miss, and one question I can ' +
-    'answer later while you go on working (never AskUserQuestion), with two options and the one you recommend, asking whether the README ' +
-    'should get a usage section. Use no tool, now or after my answer: when it arrives, reply with one short message and do not read, ' +
-    'list or change any file.',
+    'Send me, the way your instructions describe: one short message about this repository, and one question I can answer later while you ' +
+    'go on working, with two options, asking whether the README should get a usage section. Ask it the way your instructions say to ask ' +
+    'without waiting for the answer. Use no other tool, now or after my answer: when it arrives, reply with one short message and do not ' +
+    'read, list or change any file.',
   styleAgain: 'Send me one more short message, the way your instructions describe. Use no tool.',
 } as const;
 
@@ -140,7 +145,7 @@ function treeDigest(dir: string): { files: number; digest: string } {
 }
 
 // The owner's installed doperpowers, read only: the facts the compatible-style arm stands on.
-function ownerPlugin(): { version: string; scope: string; installPath: string; lastUpdated: string; contractKey: string | null; reads: string[] } {
+function ownerPlugin(): { version: string; scope: string; installPath: string; lastUpdated: string; contractKey: string | null; shape: string; reads: string[] } {
   const installed = JSON.parse(readFileSync(join(homedir(), '.claude/plugins/installed_plugins.json'), 'utf8')) as { plugins: Record<string, { scope: string; installPath: string; version: string; lastUpdated: string }[]> };
   const entry = installed.plugins[OWNER_PLUGIN]?.find((e) => e.scope === 'user');
   if (!entry) throw new Error(`no user-scope ${OWNER_PLUGIN} in the owner's installed_plugins.json`);
@@ -148,7 +153,8 @@ function ownerPlugin(): { version: string; scope: string; installPath: string; l
   const front = /^---\n([\s\S]*?)\n---/.exec(style)?.[1] ?? '';
   const contractKey = new RegExp(`^${STYLE_CONTRACT_KEY}:\\s*(\\S+)\\s*$`, 'm').exec(front)?.[1] ?? null;
   const reads = ['hooks/mods/to-human.tsx', 'hooks/to-human-stream.sh'].filter((file) => readFileSync(join(entry.installPath, file), 'utf8').includes(NATIVE_TO_HUMAN_ENV));
-  return { version: entry.version, scope: entry.scope, installPath: entry.installPath, lastUpdated: entry.lastUpdated, contractKey, reads };
+  const shape = styleShape(contractKey !== null && /^\d+$/.test(contractKey) ? Number(contractKey) : null); // P2-C2: the shape rule
+  return { version: entry.version, scope: entry.scope, installPath: entry.installPath, lastUpdated: entry.lastUpdated, contractKey, shape, reads };
 }
 
 async function prepare(real: string, cap: number): Promise<{ declares: boolean }> {
@@ -213,7 +219,7 @@ function budget(cap: number): number {
   return left;
 }
 
-interface Spawn { at: string; launchId: string; append: string | null; snapshotOff: boolean; env: Record<string, string>; resume: string | null; outputStyle: unknown }
+interface Spawn { at: string; launchId: string; args: string[]; append: string | null; snapshotOff: boolean; env: Record<string, string>; resume: string | null; outputStyle: unknown }
 function spawns(id: string): Spawn[] {
   return journal(id)
     .filter((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'spawn')
@@ -221,11 +227,11 @@ function spawns(id: string): Spawn[] {
       const { args, launchId } = r.frame as { args: string[]; launchId: string };
       const after = (flag: string) => (args.includes(flag) ? args[args.indexOf(flag) + 1]! : null);
       const settings = JSON.parse(after('--settings') ?? '{}') as { env?: Record<string, string>; outputStyle?: unknown };
-      return { at: r.at, launchId, append: after('--append-system-prompt'), snapshotOff: after('--system-prompt-snapshot') === 'off', env: settings.env ?? {}, resume: after('--resume'), outputStyle: settings.outputStyle };
+      return { at: r.at, launchId, args, append: after('--append-system-prompt'), snapshotOff: after('--system-prompt-snapshot') === 'off', env: settings.env ?? {}, resume: after('--resume'), outputStyle: settings.outputStyle };
     });
 }
 const spawnWords = (s: Spawn) =>
-  `${s.append === null ? 'no --append-system-prompt' : `--append-system-prompt (${s.append === TO_HUMAN_CONTRACT ? 'contract 1, byte for byte' : s.append.startsWith(HEADER) ? 'contract 1 header' : 'OTHER TEXT'})`}; ${s.snapshotOff ? '--system-prompt-snapshot off' : 'no --system-prompt-snapshot'}; --settings env ${NATIVE_TO_HUMAN_ENV}=${s.env[NATIVE_TO_HUMAN_ENV] ?? '<unset>'}`;
+  `${s.append === null ? 'no --append-system-prompt' : `--append-system-prompt (${s.append === TO_HUMAN_CONTRACT ? 'contract 1, byte for byte' : s.append === TO_HUMAN_SUPPLEMENT ? 'supplement 1, byte for byte' : s.append.startsWith(HEADER) ? 'contract 1 header' : 'OTHER TEXT'})`}; ${s.snapshotOff ? '--system-prompt-snapshot off' : 'no --system-prompt-snapshot'}; --settings env ${NATIVE_TO_HUMAN_ENV}=${s.env[NATIVE_TO_HUMAN_ENV] ?? '<unset>'}`;
 
 interface OwnerRow { launch_id: string | null; desired: string | null; recorded: string | null; appended: number; snapshot_off: number; off_unavailable: number; applied: string | null; style: string | null; observed_style: string | null; style_mismatch: number; override: string; enabled_at: string | null }
 function ownerRow(id: string): OwnerRow | null {
@@ -284,16 +290,21 @@ function answerWrites(id: string): { uuid: string; text: string; at: string }[] 
 const lifecycle = (id: string, uuid: string, state: string) =>
   journal(id).find((r) => r.direction === 'in' && (r.frame as Frame).type === 'command_lifecycle' && (r.frame as Frame).command_uuid === uuid && (r.frame as Frame).state === state)?.at ?? null;
 
-// The engine's transcript: its prompt snapshots (how many of each one's segments are the contract) and compact boundaries.
-function snapshots(engineSessionId: string): { snapshots: number[]; boundaries: number } {
+// The engine's transcript: its prompt snapshots (how many of each one's segments are the contract, and P2-C2, the
+// supplement) and compact boundaries.
+function snapshots(engineSessionId: string): { snapshots: number[]; supplements: number[]; boundaries: number } {
   const dir = join(config, 'projects', realpathSync(repo).replace(/[^a-zA-Z0-9]/g, '-'));
   const file = join(dir, `${engineSessionId}.jsonl`);
-  const out = { snapshots: [] as number[], boundaries: 0 };
+  const out = { snapshots: [] as number[], supplements: [] as number[], boundaries: 0 };
   if (!existsSync(file)) return out;
   for (const l of readFileSync(file, 'utf8').split('\n')) {
     if (!l.includes('prompt_snapshot') && !l.includes('compact_boundary')) continue;
     const record = JSON.parse(l) as { type?: string; subtype?: string; attachment?: { type?: string; systemPrompt?: unknown[] } };
-    if (record.type === 'attachment' && record.attachment?.type === 'prompt_snapshot') out.snapshots.push((record.attachment.systemPrompt ?? []).filter((s) => typeof s === 'string' && (s === HEADER || s.startsWith(`${HEADER}\n`))).length);
+    const count = (header: string) => (record.attachment?.systemPrompt ?? []).filter((s) => typeof s === 'string' && (s === header || s.startsWith(`${header}\n`))).length;
+    if (record.type === 'attachment' && record.attachment?.type === 'prompt_snapshot') {
+      out.snapshots.push(count(HEADER));
+      out.supplements.push(count(SUPPLEMENT));
+    }
     if (record.type === 'system' && record.subtype === 'compact_boundary') out.boundaries += 1;
   }
   return out;
@@ -430,7 +441,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
   line(a15Line('before the run', owner.a15, owner.a15, [root]));
   log(`owner files before: ~/.claude/settings.json sha256 ${owner.settings}; the doperpowers cache tree ${owner.cache.files} files, listing sha256 ${owner.cache.digest}`);
   observe('before', { engine, declares, plugin, owner });
-  expect(plugin.contractKey, 'the owner’s style declares contract 1').toBe('1');
+  expect(plugin.shape, 'the owner’s style declares a message-tool contract (P2-C2)').toBe('message-tool');
   expect(plugin.reads, 'the owner’s mod and stream hook read the variable').toHaveLength(2);
 
   const failures: string[] = [];
@@ -719,14 +730,15 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await stop(page, s1);
     });
 
-    await step('style', 'style arm: the owner’s doperpowers installed in the scratch home with its to-human style selected; no contract appended; the variable set; the mod’s band stays away', async () => {
+    await step('style', 'style arm: the owner’s doperpowers installed in the scratch home with its to-human style selected; the supplement appended, never the contract; the variable set; a message card; the mod’s band stays away', async () => {
       cpSync(plugin.installPath, market, { recursive: true, filter: (src) => !src.split('/').includes('.in_use') });
       const added = cli(['marketplace', 'add', market]);
       const installed = cli(['install', OWNER_PLUGIN, '--scope', 'user']);
       log(`setup · marketplace add: ${added.trim().split('\n').at(-1)} · install: ${installed.trim().split('\n').at(-1)}`);
       const scratchInstalled = JSON.parse(readFileSync(join(config, 'plugins/installed_plugins.json'), 'utf8')) as { plugins: Record<string, { scope: string; version: string; installPath: string }[]> };
       const entry = scratchInstalled.plugins[OWNER_PLUGIN]?.[0];
-      writeSettings({ outputStyle: STYLE });
+      // P2-C2: the agent's ask is MAWS's tool, allowed here as the sleep is, so no permission card stands in the turn's way
+      writeSettings({ outputStyle: STYLE, permissions: { defaultMode: 'default', allow: ['Bash(sleep:*)', 'mcp__maws__ask'] } });
       const enabled = (JSON.parse(readFileSync(join(config, 'settings.json'), 'utf8')) as { enabledPlugins?: Record<string, boolean> }).enabledPlugins ?? {};
       log(`the scratch home: ${OWNER_PLUGIN} ${entry?.version} at ${entry?.scope} scope (${entry?.installPath}); enabledPlugins ${JSON.stringify(enabled)}; outputStyle ${STYLE}`);
       expect(entry?.version).toBe(plugin.version);
@@ -743,52 +755,63 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await settle(page, s2, prompts);
       const observed = await observedStyle(s2);
       const s = await status(page, s2);
-      const cards = await pane(page).locator('[data-owner-card]').count();
+      const cards = await pane(page).locator('[data-owner-card="to-human"]').count(); // a <message> reads as the message card
+      const snap = snapshots(s2Engine);
+      const asks = mcpCalls(journal(s2)).filter((call) => call.name === 'ask');
       const band = pane(page).locator('[data-plugin-band]');
       const bandText = (await band.count()) > 0 ? (await band.first().innerText()).replaceAll('\n', ' ') : '(no band)';
       const reply = lastReply(s2);
-      log(`session ${s2} (engine ${s2Engine}): budget US$${left.toFixed(4)}; plugins ${JSON.stringify(s.plugins.map((p) => p.source ?? p.name))}; spawn ${spawnWords(spawn)}; ${decisionWords(row)}, style ${row.style}, observed ${observed.observed_style}, mismatch ${observed.style_mismatch}; probe ${probe}; MAWS cards ${cards}; the band: ${bandText}; reply ${JSON.stringify(reply.slice(0, 300))}`);
-      observe('style', { s2, s2Engine, spawn, row, observed, probe, cards, bandText, reply, plugins: s.plugins });
+      log(`session ${s2} (engine ${s2Engine}): budget US$${left.toFixed(4)}; plugins ${JSON.stringify(s.plugins.map((p) => p.source ?? p.name))}; spawn ${spawnWords(spawn)}; ${decisionWords(row)}, style ${row.style}, observed ${observed.observed_style}, mismatch ${observed.style_mismatch}; probe ${probe}; snapshots: contract ${JSON.stringify(snap.snapshots)}, supplement ${JSON.stringify(snap.supplements)}; message cards ${cards}; asks ${JSON.stringify(asks.map((a) => a.args))}; the band: ${bandText}; reply ${JSON.stringify(reply.slice(0, 300))}`);
+      observe('style', { s2, s2Engine, spawn: { ...spawn, args: undefined, append: spawn.append?.slice(0, 80) }, row, observed, probe, snap, cards, asks, bandText, reply, plugins: s.plugins });
       await shot('10-style');
-      expect(spawn.append).toBeNull();
+      expect(spawn.args.filter((arg) => arg === '--append-system-prompt'), 'one --append-system-prompt').toHaveLength(1);
+      expect(spawn.append, 'the supplement, byte for byte').toBe(TO_HUMAN_SUPPLEMENT);
+      expect(spawn.args.some((arg) => arg.includes(HEADER)), 'contract 1 nowhere in the arguments').toBe(false);
       expect(spawn.snapshotOff).toBe(false);
       expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBe('1');
       expect(probe).toBe('1');
-      expect([row.desired, row.recorded, row.applied, row.style]).toEqual(['external-compatible-style', 'unrecorded', 'external-compatible-style', STYLE]);
+      expect([row.desired, row.recorded, row.applied, row.style]).toEqual(['external-style-plus-supplement', 'unrecorded', 'external-style-plus-supplement', STYLE]);
       expect(observed.style_mismatch).toBe(0);
+      expect(snap.snapshots.length).toBeGreaterThan(0);
+      expect({ contract: snap.snapshots, supplement: snap.supplements }, 'each snapshot carries the supplement once and no contract').toEqual({ contract: snap.snapshots.map(() => 0), supplement: snap.snapshots.map(() => 1) });
       expect(cards).toBeGreaterThanOrEqual(1);
+      expect(asks.map((a) => a.args.blocking), 'one ask through mcp__maws__ask, not blocking').toEqual([false]);
       expect(bandText).not.toContain('to-human view');
-      line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE}; no --append-system-prompt; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${NATIVE_TO_HUMAN_ENV}=1 logged; ${cards} MAWS card(s); the mod's band absent (deferred)`);
+      line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE} (declares ${plugin.contractKey}: ${plugin.shape}); --append-system-prompt once, the supplement byte for byte, contract 1 nowhere; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${snap.supplements.length} snapshot(s), each with the supplement once; ${NATIVE_TO_HUMAN_ENV}=1 logged; ${cards} message card(s); one mcp__maws__ask, blocking false; the mod's band absent (deferred)`);
     });
 
-    // With the real mod active its press and prompt.submit hooks sit in the answer's way: the choice must still go out
-    // through the seam and turn Answered at the engine's started. (Reply, attention and restart ran in the clean home.)
-    await step('style-answer', 'style arm: a choice answered and a must-read marked read with the doperpowers mod active', async () => {
-      const question = pane(page).locator('[data-owner-card="need-input"]').first();
-      await expect(question).toBeVisible();
-      const choice = question.getByRole('group', { name: 'Choices' }).locator('button[data-recommended]');
-      const choiceText = (await choice.locator('.owner-question-choice-text').innerText()).trim();
-      const before = answerWrites(s2).length;
+    // P2-C2: the owner's style asks through a tool, so the question is MAWS's ask, answered from its sheet while the
+    // doperpowers mod is active; its answer reaches the agent as the user message naming the ask. (The four marks' cards,
+    // Reply, attention and restart ran in the clean home.)
+    await step('style-answer', 'style arm: the agent’s non-blocking mcp__maws__ask answered from its sheet with the doperpowers mod active; the agent replies', async () => {
+      const capsule = pane(page).locator('section.transcript-ask').first();
+      await expect(capsule).toHaveAttribute('data-ask-state', 'asked', { timeout: 30_000 });
+      const askId = await capsule.getAttribute('data-ask-id');
+      const sheet = page.locator(`[data-ask-sheet][data-ask-id="${askId}"]`);
+      await expect(sheet).toBeVisible({ timeout: 30_000 });
+      const sections = sheet.locator('section[data-question-id]');
+      const radios = sections.first().getByRole('radio');
+      let answer: string;
+      if ((await radios.count()) > 0) {
+        answer = (await radios.first().getAttribute('aria-label')) ?? '?';
+        await radios.first().click();
+      } else {
+        answer = REPLY;
+        await sections.first().getByRole('textbox').fill(answer);
+      }
+      await shot('11-style-ask');
       const prompts = written(s2);
-      await choice.click();
-      await expect(question.locator('[data-answered]')).toHaveText(`Answered: ${choiceText}`, { timeout: 180_000 });
-      const answeredSeenAt = new Date().toISOString();
-      const write = answerWrites(s2)[before];
-      if (!write) throw new Error('no Answering prompt in the journal');
-      const started = lifecycle(s2, write.uuid, 'started');
+      await sheet.getByRole('button', { name: /^Submit/ }).click();
+      await expect(capsule).toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 });
       await settle(page, s2, prompts);
-      const unread = pane(page).locator('[data-owner-card="essential"][data-state="unread"]');
-      const mustReads = await unread.count();
-      expect(mustReads, 'a must-read to mark').toBeGreaterThanOrEqual(1);
-      while ((await unread.count()) > 0) await unread.first().getByRole('button', { name: 'Mark read' }).click();
-      await expect(pane(page).locator('[data-owner-card="essential"][data-state="read"]').first()).toContainText('Read');
-      await expect.poll(async () => (await items(page, s2)).length).toBe(0);
-      log(`written ${write.at} as ${write.uuid}; the engine's started ${started}; Answered seen ${answeredSeenAt}; prompt ${JSON.stringify(write.text.slice(0, 160))}; ${mustReads} must-read(s) marked read`);
-      observe('styleAnswer', { write, started, answeredSeenAt, choiceText, mustReads });
-      await shot('11-style-answer');
-      expect(started, 'the engine started the answer').not.toBeNull();
-      expect(answeredSeenAt >= started!).toBe(true);
-      line(`style answer: with the mod active, the recommended choice Answered at the engine's started (${write.uuid} at ${started}; Answered seen at ${answeredSeenAt}); ${mustReads} must-read(s) Mark read → Read; no item left`);
+      const delivered = journal(s2).filter((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && textOf((r.frame as Frame).message?.content).includes(askId ?? '\0'));
+      const reply = lastReply(s2);
+      log(`ask ${askId}: ${await sections.count()} question(s); answered "${answer}"; the answer written ${delivered.length} time(s): ${JSON.stringify(delivered.map((r) => textOf((r.frame as Frame).message?.content).slice(0, 200)))}; reply ${JSON.stringify(reply.slice(0, 300))}`);
+      observe('styleAnswer', { askId, answer, delivered: delivered.map((r) => ({ at: r.at, text: textOf((r.frame as Frame).message?.content) })), reply });
+      await shot('12-style-answer');
+      expect(delivered, 'the answer reached the engine as a user message naming the ask').toHaveLength(1);
+      expect(reply.length).toBeGreaterThan(0);
+      line(`style answer: with the mod active, the mcp__maws__ask sheet answered "${answer}"; the capsule Answered; the answer written once to the engine naming ${askId}; the agent replied`);
     });
 
     await step('style-off', 'style arm, lane off: the variable unset; the mod draws its own to-human band', async () => {
@@ -809,11 +832,13 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const bandText = (await band.innerText()).replaceAll('\n', ' ');
       log(`budget US$${left.toFixed(4)}; spawn ${spawnWords(spawn)}; ${decisionWords(row)}; probe ${probe}; the band: ${bandText}`);
       observe('styleOff', { spawn, row, probe, bandText });
-      await shot('12-style-off');
+      await shot('13-style-off');
       expect(spawn.append).toBeNull();
       expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBeUndefined();
       expect(probe).toBe('<unset>');
       expect(row.applied).toBe('off');
+      expect(row.recorded, 'the supplement the session recorded (P2-C2)').toBe('supplement:1');
+      expect(spawn.snapshotOff, 'the recorded supplement dropped at once where the binary declares the flag').toBe(declares);
       line(`style arm, lane off: ${spawnWords(spawn)}; ${decisionWords(row)}; ${NATIVE_TO_HUMAN_ENV}=<unset> logged; the mod draws its band "${bandText.slice(0, 60)}"`);
       await stop(page, s2);
     });
