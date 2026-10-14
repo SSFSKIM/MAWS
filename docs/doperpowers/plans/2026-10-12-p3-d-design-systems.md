@@ -638,6 +638,17 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
     - **The chain is registered** through `store.registerDesignSystemChain(designSystems.chain)`. A's pin and A's tools now resolve the house link and a deleted default's fall-through through it. `governingSystem` and D's chain accept `null` ids, since A passes the artifact row. The house lookup runs inside every version write that reaches the end of the chain, uncached as M6 decided.
     - **Main's tests.** The merge left two main test files whose `startArtifacts` stub had no `exporters`, so each gained one P3-D mock line. B and C will need the same.
     - **Residue.** Vitest returns `''` for a default's `?raw` `document.css` outside the artifacts project, so unit tests elsewhere that read it through `DEFAULT_SYSTEMS` check nothing. M6's seeding test is one of them. This goes to the tracker.
+31. 2026-10-13 (the whole-branch review, as two `reviewer-high` reviews by area at ba7c2aa2, and its fix wave 15152e2a..e81614c4).
+    - **Close guard.** This entry corrects entries 17, 24 and 25 where they say the page needs no `closeGuard`. Edits are written straight to the replica, but a replica's writes are not durable until the host acknowledges them. With the host disconnected, a tab close, Back or re-target used to destroy the provider, and the unacknowledged edits with it.
+      - The page now registers a `closeGuard`. It reads the showing's replica handle, which is tab-owned as entry 10 requires.
+      - When everything is saved, the tab closes at once.
+      - When edits are waiting on a live connection, the guard waits up to 2 s for acknowledgement.
+      - Otherwise it asks through the app's existing confirm sheet. Cancel keeps the tab; "Discard changes" closes it.
+    - **Editing inherited and alias-typed tokens.** An edit of a token the page shows but the file does not author (one inherited through `$extends`, or an alias whose type comes only from its target) writes a local token through `setToken`. That token carries the resolved effective `$type` explicitly, so it still reads if the inheritance later goes.
+    - **Identity everywhere.** Claude's export and the law check recognize type roles by token identity, so a role rehomed to `$root` keeps its deck scale and its size.
+    - **Font overrides keep the alias.** An override of a font-family name keeps the private face alias.
+    - **Page-size names in canon.** `document.css` may use the generated page-size names.
+    - **The Check section** also lists `validateCanon`'s file problems, which delivers entry 26's promise that the page checks canon structure.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
