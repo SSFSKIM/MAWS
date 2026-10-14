@@ -18,7 +18,9 @@ const claudeExporter: Exporter = {
       const assets: Record<string, Uint8Array> = {};
       for (const { ref } of await context.assets.list()) {
         const found = await context.readAsset(ref);
-        if (found) assets[ref] = found.bytes;
+        // an asset the listing advertises and the store cannot read fails the export rather than leave the archive short
+        if (!found) throw new Error(`the asset ${ref} of the design system could not be read`);
+        assets[ref] = found.bytes;
       }
       await context.writeFile(request.path, zipFiles(claudeExportFiles(doc, assets)));
     } finally {

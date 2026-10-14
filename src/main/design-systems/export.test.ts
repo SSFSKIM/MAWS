@@ -88,6 +88,23 @@ describe('the claude exporter', () => {
     expect(asked.sort()).toEqual(Object.keys(held).sort());
   });
 
+  // Fix wave 1: an asset the listing advertises but the store cannot read fails the export, naming it, rather than
+  // writing an archive without it
+  it('fails the export, naming the ref, when a listed asset cannot be read, and writes nothing', async () => {
+    const registry = new ExporterRegistry();
+    registerDesignSystemExporters(registry);
+    const listed = ['assets/OFL.txt', 'assets/vanished.png'];
+    const answer = await runExport(registry, request(), {
+      title: 'Official',
+      state: async () => systemState(official.files),
+      listAssets: async () => listed.map((ref) => ({ ref, name: ref.slice('assets/'.length), mime: 'application/octet-stream', size: 1 })),
+      readAsset: async (ref) => (ref === 'assets/OFL.txt' ? { bytes: bytes('licence'), mime: 'text/plain' } : null),
+      print: async () => new Uint8Array(),
+    });
+    expect(answer).toMatchObject({ ok: false, error: expect.stringContaining('assets/vanished.png') });
+    await expect(readFile(request().path)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('answers the converter’s refusal when the document holds no system, and writes nothing', async () => {
     const registry = new ExporterRegistry();
     registerDesignSystemExporters(registry);
