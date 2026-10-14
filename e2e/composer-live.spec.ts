@@ -337,9 +337,10 @@ test('auto mode: a two-question mcp__maws__ask (one choice, one text) answered f
     await sheet.locator('section[data-question-id]').filter({ hasText: /fruit/i }).getByRole('textbox').fill('Pear');
     await sheet.getByRole('button', { name: /^Submit/ }).click();
     await idle(page, q.id);
-    const toolResults = framesOf(rowsOf(q.journalPath), 'out').filter(({ frame }) => frame.type === 'control_response' && JSON.stringify(frame).includes('"answered"'));
-    observe('question', { toolResults: toolResults.map((t) => JSON.stringify(t.frame).slice(0, 600)), results: resultsOf(q.journalPath).slice(-1) });
-    const named = toolResults.map((t) => JSON.stringify(t.frame)).join(' ');
+    // the engine's tool result for the ask, as the transcript records it
+    const toolResults = framesOf(rowsOf(q.journalPath), 'in').filter(({ frame }) => frame.type === 'user' && JSON.stringify(frame.message?.content).includes('tool_result'));
+    observe('question', { toolResults: toolResults.map((t) => JSON.stringify(t.frame.message?.content).slice(0, 600)), results: resultsOf(q.journalPath).slice(-1) });
+    const named = toolResults.map((t) => JSON.stringify(t.frame.message?.content)).join(' ');
     expect(named).toContain('Red');
     expect(named).toContain('Pear');
   });

@@ -784,12 +784,16 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       // every ask the turn left waiting, answered through its own sheet (a model may ask twice)
       const capsules = pane(page).locator('section.transcript-ask[data-ask-state="asked"]');
       await expect(capsules.first()).toBeVisible({ timeout: 30_000 });
-      const askIds = await capsules.evaluateAll((nodes) => nodes.map((n) => n.getAttribute('data-ask-id') ?? ''));
+      const waiting = await capsules.count();
       const prompts = written(s2);
+      const askIds: string[] = [];
       const answers: string[] = [];
-      for (const askId of askIds) {
-        const sheet = page.locator(`[data-ask-sheet][data-ask-id="${askId}"]`);
-        await expect(sheet, `the sheet of ${askId} (the next ask's comes up once the one before is submitted)`).toBeVisible({ timeout: 30_000 });
+      // the sheet shows one ask at a time (the latest first, then the next): answer whichever it shows
+      for (let k = 0; k < waiting; k += 1) {
+        const sheet = page.locator('[data-ask-sheet][data-ask-id]').first();
+        await expect(sheet).toBeVisible({ timeout: 30_000 });
+        const askId = (await sheet.getAttribute('data-ask-id')) ?? '';
+        askIds.push(askId);
         answers.push(await answerSheet(sheet));
         await shot('08-style-ask');
         await sheet.getByRole('button', { name: /^Submit/ }).click();
