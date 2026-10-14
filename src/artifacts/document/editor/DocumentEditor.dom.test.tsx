@@ -13,7 +13,8 @@ import { DocumentEditor } from './DocumentEditor';
 import type { DocumentHandle, EditorHost } from './host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import type { MentionSource, MentionTarget } from './MentionPicker';
-import { TAB, World, doc, endOf, para, until } from './test-world';
+import type { DocumentComments } from './comments/surface';
+import { TAB, World, doc, endOf, para, readOnlySwitch, until } from './test-world';
 
 let world: World | null = null;
 let handles: DocumentHandle[] = [];
@@ -350,5 +351,62 @@ describe('an empty document', () => {
       cleanup();
       host.destroy();
     }
+  });
+});
+
+// The whole-branch review's P2: a store a newer MAWS wrote is read-only (the handle's state says so, and says it again
+// after a reconnect), and the editor follows it: the page and every control that writes the document are off, and
+// back on when the store is writable again.
+describe('a read-only document', () => {
+  it('follows the handle’s read-only state: the page, the toolbar, the tabs and the comments rail', async () => {
+    world = new World(doc(para('p1', 'Original text')));
+    const opened = openMemoryHandle(world.host, { log: () => {} });
+    handles.push(opened);
+    await whenSynced(opened);
+    const { handle, set } = readOnlySwitch(opened);
+    const comments: DocumentComments = { opened: () => {}, overlay: () => null };
+    let current: Editor | null = null;
+    render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} comments={comments} onEditor={(e) => (current = e)} />);
+    await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
+    const editor = () => current!;
+    // a thread to resolve, and the rail open on it
+    act(() => void editor().chain().focus().setTextSelection({ from: 1, to: 9 }).run());
+    press('Comment');
+    press('Comments (1 open)');
+
+    act(() => set(true));
+    expect(editor().isEditable).toBe(false);
+    expect(editor().view.dom.getAttribute('contenteditable')).toBe('false');
+    for (const name of ['Bold', 'Insert', 'Comment']) expect(within(toolbar()).getByRole('button', { name })).toHaveProperty('disabled', true);
+    expect(screen.getByRole('button', { name: 'Add tab' })).toHaveProperty('disabled', true);
+    act(() => fireEvent.doubleClick(screen.getByRole('tab', { selected: true })));
+    expect(screen.queryByLabelText('Tab title')).toBeNull();
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Tab options' })));
+    for (const item of screen.getAllByRole('menuitem')) expect(item).toHaveProperty('disabled', true);
+    act(() => fireEvent.click(screen.getByRole('button', { name: 'Tab options' })));
+    const rail = screen.getByRole('complementary', { name: 'Comments' });
+    expect(within(rail).getByRole('button', { name: 'Resolve' })).toHaveProperty('disabled', true);
+    expect(within(rail).queryByLabelText('Reply')).toBeNull();
+
+    act(() => set(false));
+    expect(editor().isEditable).toBe(true);
+    expect(within(toolbar()).getByRole('button', { name: 'Bold' })).toHaveProperty('disabled', false);
+    expect(screen.getByRole('button', { name: 'Add tab' })).toHaveProperty('disabled', false);
+    expect(within(rail).getByRole('button', { name: 'Resolve' })).toHaveProperty('disabled', false);
+    expect(within(rail).getByLabelText('Reply')).toBeTruthy();
+  });
+
+  it('opens read-only on a handle that already is', async () => {
+    world = new World(doc(para('p1', 'Original text')));
+    const opened = openMemoryHandle(world.host, { log: () => {} });
+    handles.push(opened);
+    await whenSynced(opened);
+    const { handle, set } = readOnlySwitch(opened);
+    set(true);
+    let current: Editor | null = null;
+    render(<DocumentEditor artifactId="doc1" handle={handle} host={owner} onEditor={(e) => (current = e)} />);
+    await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
+    expect(current!.isEditable).toBe(false);
+    expect(within(toolbar()).getByRole('button', { name: 'Bold' })).toHaveProperty('disabled', true);
   });
 });

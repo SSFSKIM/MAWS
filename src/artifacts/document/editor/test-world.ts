@@ -6,6 +6,7 @@ import { Collaboration } from '../collab';
 import { coreExtensionOptions } from '../ids';
 import { extensions, schemaFor } from '../schema';
 import { createDocument, tabBody } from '../tabs';
+import type { DocumentState } from '../../host';
 import type { DocumentHandle } from './host-types';
 import { MemoryDocumentHost, openMemoryHandle, whenSynced } from './memory-host';
 
@@ -97,4 +98,40 @@ export function endOf(editor: Editor, id: string): number {
   });
   if (at < 0) throw new Error(`no block ${id}`);
   return at;
+}
+
+/**
+ * `handle` with a read-only state the test sets, as the renderer's handle reports a store a newer MAWS wrote (A's
+ * `DocumentState.readOnly`); every subscriber hears each change.
+ */
+export function readOnlySwitch(handle: DocumentHandle): { handle: DocumentHandle; set(readOnly: boolean): void } {
+  let readOnly = false;
+  const listeners = new Set<(state: DocumentState) => void>();
+  const switched: DocumentHandle = {
+    get doc() {
+      return handle.doc;
+    },
+    get awareness() {
+      return handle.awareness;
+    },
+    state: () => ({ ...handle.state(), readOnly }),
+    subscribe(listener) {
+      listeners.add(listener);
+      const off = handle.subscribe((state) => listener({ ...state, readOnly }));
+      return () => {
+        listeners.delete(listener);
+        off();
+      };
+    },
+    onRestored: (listener) => handle.onRestored(listener),
+    holdRemote: (on) => handle.holdRemote(on),
+    close: () => handle.close(),
+  };
+  return {
+    handle: switched,
+    set(next) {
+      readOnly = next;
+      for (const listener of [...listeners]) listener(switched.state());
+    },
+  };
 }

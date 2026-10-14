@@ -24,11 +24,13 @@ interface Props {
   /** The editor's active thread, selected here. */
   activeThread: string | null;
   author: CommentAuthor;
+  /** The store is read-only: threads are listed and shown, not replied to, resolved or reopened. */
+  readOnly?: boolean;
   onShow(thread: ThreadState): void;
   onClose(): void;
 }
 
-export function ThreadsRail({ doc, tabs, activeTab, activeThread, author, onShow, onClose }: Props) {
+export function ThreadsRail({ doc, tabs, activeTab, activeThread, author, readOnly = false, onShow, onClose }: Props) {
   const threads = useThreadStates(doc);
   const [showResolved, setShowResolved] = useState(true);
   const open = threads.filter((thread) => thread.status === 'open');
@@ -40,6 +42,7 @@ export function ThreadsRail({ doc, tabs, activeTab, activeThread, author, onShow
       thread={thread}
       tabTitle={tabTitle(thread)}
       selected={thread.id === activeThread}
+      readOnly={readOnly}
       onShow={() => onShow(thread)}
       onReply={(body) => reply(doc, thread.id, { id: `${thread.id}:${nanoid8()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN)}
       onResolve={() => resolve(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
@@ -73,13 +76,14 @@ interface ItemProps {
   thread: ThreadState;
   tabTitle: string | null;
   selected: boolean;
+  readOnly: boolean;
   onShow(): void;
   onReply(body: string): void;
   onResolve(): void;
   onReopen(): void;
 }
 
-function ThreadItem({ thread, tabTitle, selected, onShow, onReply, onResolve, onReopen }: ItemProps) {
+function ThreadItem({ thread, tabTitle, selected, readOnly, onShow, onReply, onResolve, onReopen }: ItemProps) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     if (selected) ref.current?.scrollIntoView?.({ block: 'nearest' });
@@ -115,14 +119,14 @@ function ThreadItem({ thread, tabTitle, selected, onShow, onReply, onResolve, on
           })}
         </ol>
       )}
-      {thread.status === 'open' && <ReplyField onReply={onReply} />}
+      {thread.status === 'open' && !readOnly && <ReplyField onReply={onReply} />}
       <div className="doc-thread-actions">
         {thread.status === 'open' ? (
-          <button type="button" className="doc-tool" onClick={onResolve}>
+          <button type="button" className="doc-tool" disabled={readOnly} onClick={onResolve}>
             Resolve
           </button>
         ) : (
-          <button type="button" className="doc-tool" onClick={onReopen}>
+          <button type="button" className="doc-tool" disabled={readOnly} onClick={onReopen}>
             Reopen
           </button>
         )}

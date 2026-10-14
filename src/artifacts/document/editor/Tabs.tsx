@@ -7,7 +7,8 @@ import { addTab, deleteTab, moveTab, renameTab, type TabInfo } from '../tabs';
 
 const DRAG_TYPE = 'application/x-maws-document-tab';
 
-export function Tabs({ doc, tabs, active, onSelect }: { doc: Doc; tabs: TabInfo[]; active: string | null; onSelect(tabId: string): void }) {
+/** `readOnly`: the store is read-only, so the tabs can be selected but not added, renamed, moved or deleted. */
+export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: Doc; tabs: TabInfo[]; active: string | null; readOnly?: boolean; onSelect(tabId: string): void }) {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const index = tabs.findIndex((tab) => tab.id === active);
@@ -41,7 +42,7 @@ export function Tabs({ doc, tabs, active, onSelect }: { doc: Doc; tabs: TabInfo[
     <div className="doc-tabs">
       <div role="tablist" aria-label="Tabs" className="doc-tablist">
         {tabs.map((tab) =>
-          renaming === tab.id ? (
+          renaming === tab.id && !readOnly ? (
             <TitleInput
               key={tab.id}
               title={tab.title}
@@ -57,12 +58,12 @@ export function Tabs({ doc, tabs, active, onSelect }: { doc: Doc; tabs: TabInfo[
               role="tab"
               aria-selected={tab.id === active}
               className="doc-tab"
-              draggable
+              draggable={!readOnly}
               onClick={() => onSelect(tab.id)}
-              onDoubleClick={() => setRenaming(tab.id)}
+              onDoubleClick={() => !readOnly && setRenaming(tab.id)}
               onDragStart={(event) => event.dataTransfer.setData(DRAG_TYPE, tab.id)}
               onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => drop(event, tab)}
+              onDrop={(event) => !readOnly && drop(event, tab)}
             >
               {tab.title || 'Untitled'}
             </button>
@@ -76,27 +77,27 @@ export function Tabs({ doc, tabs, active, onSelect }: { doc: Doc; tabs: TabInfo[
           </button>
           {menu && (
             <div role="menu" className="doc-menu">
-              <button type="button" role="menuitem" onClick={() => {
+              <button type="button" role="menuitem" disabled={readOnly} onClick={() => {
                   setRenaming(active);
                   setMenu(false);
                 }}
               >
                 Rename
               </button>
-              <button type="button" role="menuitem" disabled={index <= 0} onClick={() => move(-1)}>
+              <button type="button" role="menuitem" disabled={readOnly || index <= 0} onClick={() => move(-1)}>
                 Move left
               </button>
-              <button type="button" role="menuitem" disabled={index >= tabs.length - 1} onClick={() => move(1)}>
+              <button type="button" role="menuitem" disabled={readOnly || index >= tabs.length - 1} onClick={() => move(1)}>
                 Move right
               </button>
-              <button type="button" role="menuitem" disabled={tabs.length < 2} onClick={remove}>
+              <button type="button" role="menuitem" disabled={readOnly || tabs.length < 2} onClick={remove}>
                 Delete
               </button>
             </div>
           )}
         </div>
       )}
-      <button type="button" className="doc-icon-button" aria-label="Add tab" onClick={add}>
+      <button type="button" className="doc-icon-button" aria-label="Add tab" disabled={readOnly} onClick={add}>
         +
       </button>
     </div>

@@ -52,6 +52,7 @@ import { useTabs } from './tabs-store';
 import type { MentionSource } from './MentionPicker';
 import { Toolbar } from './Toolbar';
 import { Suggestions, type SuggestionHost } from './Suggestions';
+import { useReadOnly } from './read-only';
 import './chrome.css';
 import './theme.css';
 
@@ -101,6 +102,7 @@ interface Showing {
 export function DocumentEditor(props: DocumentEditorProps) {
   const { doc } = props.handle;
   const tabs = useTabs(doc);
+  const readOnly = useReadOnly(props.handle); // a store a newer MAWS wrote: nothing here writes the document
   const [selected, setSelected] = useState<string | null>(null);
   const [ownRail, setOwnRail] = useState<Rail>(null);
   const held = props.rail !== undefined;
@@ -147,7 +149,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
   }, [saveVersionRequest, history, held, onRailChange]);
   return (
     <div className="doc-editor" data-document-editor="">
-      {!preview && <Tabs doc={doc} tabs={tabs} active={active?.id ?? null} onSelect={setSelected} />}
+      {!preview && <Tabs doc={doc} tabs={tabs} active={active?.id ?? null} readOnly={readOnly} onSelect={setSelected} />}
       {snapshot?.banner && (
         <div className="doc-banner" role="status" aria-label="Restored">
           <span>{snapshot.banner}</span>
@@ -179,6 +181,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
               historyController={history}
               historySnapshot={snapshot}
               hold={hold}
+              readOnly={readOnly}
             />
           ) : (
             <div className="doc-editor-loading" role="status">
@@ -193,6 +196,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
             activeTab={active?.id ?? null}
             activeThread={activeThreadId}
             author={author}
+            readOnly={readOnly}
             onShow={(thread) => {
               if (tabs.some((tab) => tab.id === thread.tabId)) setSelected(thread.tabId);
               setShowing({ threadId: thread.id, serial: (showing?.serial ?? 0) + 1 });
@@ -218,6 +222,8 @@ interface TabEditorProps extends DocumentEditorProps {
   historySnapshot: HistorySnapshot | null;
   /** The composition hold: the base replica's, and the suggestion replica's beside it. */
   hold: JointHold;
+  /** The store is read-only: the page is not editable. */
+  readOnly: boolean;
   showing: Showing | null;
   onShown(): void;
   /** The editor's active thread, as it changes (the rail selects it). */
@@ -226,7 +232,7 @@ interface TabEditorProps extends DocumentEditorProps {
   onPassageClick(): void;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, readOnly, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
@@ -253,9 +259,14 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
       }),
       editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'live' } },
       shouldRerenderOnTransaction: false,
+      editable: !readOnly,
     },
     [tabId, handle, host, artifactId, hold],
   );
+  // the store turning read-only (or writable again, after a reconnect) does not re-create the editor
+  useEffect(() => {
+    if (!editor.isDestroyed && editor.isEditable === readOnly) editor.setEditable(!readOnly);
+  }, [editor, readOnly]);
   // the preview's own editor while a version shows (null until it exists); the live one is never put on a version
   const [previewEditor, setPreviewEditor] = useState<Editor | null>(null);
   const shown = preview && previewEditor ? previewEditor : editor;
@@ -370,6 +381,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         pill={preview ? null : (historySnapshot?.pill ?? null)}
         pageScope={pageScope}
         onPage={onPage}
+        readOnly={readOnly}
         onNewChanges={() => {
           openRail('history');
           void historyController?.openNewChanges();
@@ -395,10 +407,12 @@ interface PageFrameProps {
   pill: HistorySnapshot['pill'];
   pageScope: DocumentEditorProps['pageScope'];
   onPage: DocumentEditorProps['onPage'];
+  /** The store is read-only: the overlay's thread changes write nothing. */
+  readOnly: boolean;
   onNewChanges(): void;
 }
 
-function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, onNewChanges }: PageFrameProps) {
+function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, readOnly, onNewChanges }: PageFrameProps) {
   const editors = useShowEditors(live, history, tabId, preview === null);
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
@@ -434,18 +448,18 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
       locate: (threadId) => passageRect(editor, frame.current, threadId),
       setActive: (threadId) => void (!editor.isDestroyed && editor.commands.setActiveThread(threadId)),
       resolve: (threadId) => {
-        if (getThread(doc, threadId)) resolve(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN);
+        if (!readOnly && getThread(doc, threadId)) resolve(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN);
       },
       reopen: (threadId) => {
-        if (getThread(doc, threadId)) reopen(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN);
+        if (!readOnly && getThread(doc, threadId)) reopen(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN);
       },
       record: (threadId, body) => {
-        if (getThread(doc, threadId)) reply(doc, threadId, { id: `${threadId}:${nanoid8()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN);
+        if (!readOnly && getThread(doc, threadId)) reply(doc, threadId, { id: `${threadId}:${nanoid8()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN);
       },
-      discard: (threadId) => void discardThread(doc, threadId, COMMENTS_ORIGIN),
+      discard: (threadId) => void (!readOnly && discardThread(doc, threadId, COMMENTS_ORIGIN)),
       focus: () => void (!editor.isDestroyed && editor.commands.focus()),
     };
-  }, [editor, handle, author]);
+  }, [editor, handle, author, readOnly]);
 
   // a version is drawn with the design-system tokens it pinned (and its own overrides)
   const tokens = preview ? (preview.tokens as CSSProperties) : undefined;

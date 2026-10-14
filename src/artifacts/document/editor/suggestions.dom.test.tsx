@@ -8,7 +8,7 @@ import { DocumentEditor } from './DocumentEditor';
 import type { DocumentHandle } from './host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import { Suggestions, type SuggestionHost } from './Suggestions';
-import { World, doc, endOf, para, ticks, until } from './test-world';
+import { World, doc, endOf, para, readOnlySwitch, ticks, until } from './test-world';
 
 let world: World | null = null;
 let proposal: Doc | null = null;
@@ -17,9 +17,9 @@ afterEach(() => { cleanup(); for (const close of closing.splice(0)) close(); pro
 
 const owner = memoryEditorHost({ actor: { kind: 'human' }, name: 'Owner', color: '--author-2' });
 
-async function mount(kind: 'insert' | 'replace' | 'attrs' | 'retype' | 'none' = 'insert') {
+async function mount(kind: 'insert' | 'replace' | 'attrs' | 'retype' | 'none' = 'insert', wrap: (handle: DocumentHandle) => DocumentHandle = (handle) => handle) {
   world = new World(doc(kind === 'attrs' ? { type: 'heading', attrs: { id: 'base', level: 2 }, content: [{ type: 'text', text: 'Original.' }] } : para('base', 'Original.')));
-  const handle = await world.bare();
+  const handle = wrap(await world.bare());
   proposal = newSuggestionDoc();
   applyV2(proposal, stateV2(handle.doc));
   let update: Uint8Array | null = null;
@@ -43,6 +43,19 @@ async function mount(kind: 'insert' | 'replace' | 'attrs' | 'retype' | 'none' = 
 }
 
 describe('document suggestion review', () => {
+  // The whole-branch review's P2: Accept and Reject write the document, so they follow the base's read-only state.
+  it('offers Accept and Reject only while the store is writable, following its read-only state', async () => {
+    let switched: ReturnType<typeof readOnlySwitch> | null = null;
+    await mount('insert', (handle) => (switched = readOnlySwitch(handle)).handle);
+    const accept = () => screen.getByRole('button', { name: 'Accept suggestion 1' });
+    const reject = () => screen.getByRole('button', { name: 'Reject suggestion 1' });
+    expect([accept(), reject()].map((button) => (button as HTMLButtonElement).disabled)).toEqual([false, false]);
+    act(() => switched!.set(true));
+    expect([accept(), reject()].map((button) => (button as HTMLButtonElement).disabled)).toEqual([true, true]);
+    act(() => switched!.set(false));
+    expect([accept(), reject()].map((button) => (button as HTMLButtonElement).disabled)).toEqual([false, false]);
+  });
+
   it.each(['Accept', 'Reject'] as const)('%s sends the binding’s item-id block range to the host', async (action) => {
     const { host, range } = await mount();
     expect(host.open).toHaveBeenCalledWith('doc1', { doc: 'suggestions' });

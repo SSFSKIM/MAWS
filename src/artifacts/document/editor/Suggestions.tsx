@@ -13,6 +13,7 @@ import { coreExtensionOptions } from '../ids';
 import { tabBody } from '../tabs';
 import { editorExtensions } from './extensions';
 import type { EditorHost } from './host-types';
+import { useReadOnly } from './read-only';
 
 export type SuggestionHost = Pick<ArtifactHost, 'open' | 'attributions' | 'acceptSuggestion' | 'rejectSuggestion'>;
 export interface SuggestionsProps {
@@ -78,6 +79,7 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
   const [view, setView] = useState<View | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  const readOnly = useReadOnly(base); // the store's, which the suggestion replica shares
   useEffect(() => {
     let closed = false;
     let serial = 0;
@@ -155,11 +157,12 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
   }, [artifactId, tabId, base, hold, host, onPending, retry]);
   return <>
     {error && <div className="doc-banner" role="alert">Suggestions could not be loaded: {error}<button type="button" className="doc-tool" onClick={() => setRetry((n) => n + 1)}>Retry</button></div>}
-    {view && <Review key={`${artifactId}:${tabId}:${view.serial}`} view={view} artifactId={artifactId} tabId={tabId} host={host} editorHost={editorHost} pageScope={pageScope} />}
+    {view && <Review key={`${artifactId}:${tabId}:${view.serial}`} view={view} artifactId={artifactId} tabId={tabId} host={host} editorHost={editorHost} pageScope={pageScope} readOnly={readOnly} />}
   </>;
 }
 
-function Review({ view, artifactId, tabId, host, editorHost, pageScope: Scope }: { view: View; artifactId: string; tabId: string; host: SuggestionHost; editorHost: EditorHost; pageScope: SuggestionsProps['pageScope'] }) {
+// `readOnly`: the store is read-only (the base's state, followed), so nothing is accepted or rejected.
+function Review({ view, artifactId, tabId, host, editorHost, pageScope: Scope, readOnly }: { view: View; artifactId: string; tabId: string; host: SuggestionHost; editorHost: EditorHost; pageScope: SuggestionsProps['pageScope']; readOnly: boolean }) {
   const body = tabBody(view.handle.doc, tabId)!;
   const editor = useEditor({
     coreExtensionOptions,
@@ -198,8 +201,8 @@ function Review({ view, artifactId, tabId, host, editorHost, pageScope: Scope }:
       }}>
         {blocks.map((entry, n) => <option key={entry.from} value={n}>{n + 1}. {entry.label}</option>)}
       </select>
-      <button type="button" className="doc-tool" aria-label={`Accept suggestion ${index + 1}`} disabled={busy || !block?.ranges.length || view.handle.state().readOnly} onClick={() => void settle('acceptSuggestion')}>Accept</button>
-      <button type="button" className="doc-tool" aria-label={`Reject suggestion ${index + 1}`} disabled={busy || !block?.ranges.length || view.handle.state().readOnly} onClick={() => void settle('rejectSuggestion')}>Reject</button>
+      <button type="button" className="doc-tool" aria-label={`Accept suggestion ${index + 1}`} disabled={busy || !block?.ranges.length || readOnly} onClick={() => void settle('acceptSuggestion')}>Accept</button>
+      <button type="button" className="doc-tool" aria-label={`Reject suggestion ${index + 1}`} disabled={busy || !block?.ranges.length || readOnly} onClick={() => void settle('rejectSuggestion')}>Reject</button>
     </div>
     {error && <div className="doc-banner" role="alert">{error}</div>}
     {block && block.ranges.length === 0 && <div className="doc-banner" role="status">This change cannot be resolved to a review range.</div>}
