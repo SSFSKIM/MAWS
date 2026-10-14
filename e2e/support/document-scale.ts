@@ -39,8 +39,24 @@ export interface Row {
   value: number;
   unit: string;
   pass: boolean | null;
+  verdict: Verdict;
   load: number;
   note?: string;
+}
+
+/**
+ * A row's verdict under the parent's Decision Log 54 (this child's Decision Log 44): `met` within the bound; `marginal`
+ * a miss of less than 20 percent at a load of 10 or more (P3-F re-measures it); `failed` a miss of 20 percent or more,
+ * or any miss at a load below 10; `recorded` a value with no bound.
+ */
+export type Verdict = 'met' | 'marginal' | 'failed' | 'recorded';
+export const MARGINAL_MISS = 0.2;
+export const MARGINAL_LOAD = 10;
+
+export function verdictOf(value: number, limit: number | null, load: number): Verdict {
+  if (limit === null) return 'recorded';
+  if (value <= limit) return 'met';
+  return limit > 0 && value < limit * (1 + MARGINAL_MISS) && load >= MARGINAL_LOAD ? 'marginal' : 'failed';
 }
 
 export class Rows {
@@ -48,7 +64,8 @@ export class Rows {
   constructor(private readonly path: string, private readonly meta: Record<string, unknown>) {}
 
   add(row: string, measure: string, value: number, unit: string, limit: number | null, bound: string, note?: string): Row {
-    const entry: Row = { row, measure, bound, limit, value: +value.toFixed(2), unit, pass: limit === null ? null : value <= limit, load: load1(), ...(note && { note }) };
+    const load = load1();
+    const entry: Row = { row, measure, bound, limit, value: +value.toFixed(2), unit, pass: limit === null ? null : value <= limit, verdict: verdictOf(value, limit, load), load, ...(note && { note }) };
     this.rows.push(entry);
     this.write();
     return entry;

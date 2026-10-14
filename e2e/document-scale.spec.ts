@@ -174,6 +174,16 @@ async function type(page: Page, text: string, count: number, gap = () => 60 + Ma
 
 const TYPED = 'the owner keeps typing while agents edit elsewhere ';
 
+// The run passes when no row failed (Decision Log 44's reading of the parent's Decision Log 54): a marginal row is listed
+// for P3-F's re-measure, in the output and in the results' `marginal`, and does not fail the run.
+function judged(rows: Rows, key: 'marginal' | 'marginalSigkill'): void {
+  const marginal = rows.rows.filter((r) => r.verdict === 'marginal');
+  rows.write({ [key]: marginal.map((r) => ({ row: r.row, value: r.value, limit: r.limit, unit: r.unit, load: r.load })) });
+  if (marginal.length > 0) console.log(`marginal rows (P3-F re-measures):\n${marginal.map((r) => `  ${r.row}: ${r.value} ${r.unit} against ${r.limit} at load ${r.load}`).join('\n')}`);
+  const failed = rows.rows.filter((r) => r.verdict === 'failed');
+  expect(failed, `bounds failed (a miss of 20 percent or more, or a miss at load under 10; the loads are in ${RESULTS})`).toEqual([]);
+}
+
 test('the scale gate at 200 pages: typing, two agents, first sync, history, memory, Korean under load', async () => {
   rmSync(RESULTS, { force: true }); // this run's rows only
   const { large, small } = seedsOnce();
@@ -376,8 +386,7 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
   });
 
   rows.write({ loads });
-  const failed = rows.rows.filter((r) => r.pass === false);
-  expect(failed, `bounds missed (judge at load under 20; the loads are in ${RESULTS})`).toEqual([]);
+  judged(rows, 'marginal');
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
 
@@ -499,6 +508,5 @@ test('11: a host SIGKILL under load loses no acknowledged edit, and every replic
   rows.add('11 acked lost', 'host SIGKILL under load: acknowledged edits lost (keystrokes acked before the kill; agent batches acked before it)', missing.length + keysLost, 'edits', 0, '0', `${ackedKeysAtKill} keystrokes acked of ${typedAtKill.length} typed before the kill, ${typed.length} typed in all, all in the host after; ${acked.length} acked agent inserts before the kill (${acked.filter((b) => deletedSince.has(b)).length} deleted by the agent's own later batches), ${missing.length} missing`);
   rows.add('11 fork → live', 'host SIGKILL: re-fork → every replica live: both windows’ (live and synced) and both agents’ (their first read after the re-fork answered)', allLive - forkedAt, 'ms', 1000, '≤ 1,000 ms', `kill → re-fork ${forkedAt - killedAt} ms (the supervisor’s restart delay); kill → all live ${allLive - killedAt} ms; from the re-fork: windows ${liveAgain.map((t) => t - forkedAt).join(', ')} ms, agents ${agentLive.map((t) => t - forkedAt).join(', ')} ms`);
   rows.write({ sigkill: { load: load1() } });
-  const failed = rows.rows.filter((r) => r.pass === false);
-  expect(failed, 'bounds missed').toEqual([]);
+  judged(rows, 'marginalSigkill');
 });
