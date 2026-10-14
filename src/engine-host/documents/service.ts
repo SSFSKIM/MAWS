@@ -60,7 +60,6 @@ import {
   clientAbove,
   planAccept,
   planReject,
-  SuggestionError,
   type Carry,
   type ContentMap,
   type SuggestionPlan,
@@ -742,15 +741,13 @@ export class DocumentService {
       return Promise.reject(error instanceof Error ? error : new Error(String(error)));
     }
     // The proposers whose content an accept copies. A copy pairs unit by unit with the proposals it copies, and each
-    // unit's author is carried from its own; where the pairing is incomplete the unit keeps the copy's binding, which is
-    // right only when one proposer is involved, so a range mixing proposers that cannot be fully paired is refused.
+    // unit's author and time are carried from its own; a formatting marker the copy placed differently pairs with the
+    // marker of the proposer who set that format when only one did. A marker left unpaired keeps the copy's binding:
+    // the first proposer, at the accept time (logged; parent tracker).
     const suggesters = [...new Map(plan.suggesters.flatMap((client) => {
       const bound = this.storage.clientActor(suggestion.id, client);
       return bound ? [[actorKey(bound), bound] as const] : [];
     })).values()];
-    if (what === 'accept' && suggesters.length > 1 && !plan.paired) {
-      return Promise.reject(new SuggestionError('the range mixes proposals of several authors whose changes cannot all be told apart in the copy: accept each one’s on its own', { reason: 'mixedAuthors' }));
-    }
     const suggestionDirty = this.dirty.get(suggestion.id);
     const failed = this.inFrame(main, () => {
       if (plan.edit) {
@@ -765,6 +762,7 @@ export class DocumentService {
             });
         });
         const carried = pairs as ReturnType<SuggestionPlan['pairs']>;
+        if (carried && !carried.complete && suggesters.length > 1) this.log(`accept on ${artifactId}: a formatting marker of the copy matches several proposers' and is credited to ${actorKey(suggesters[0])} at the accept time`);
         if (!carried) this.log(`${what} on ${artifactId}: the copy could not be paired with its originals; its provenance is the ${what === 'accept' ? 'suggester’s at the accept time' : 'rejector’s'}`);
         const prior = what === 'accept' ? this.provenance(suggestion.id) : this.provenance(main.id);
         this.afterUpdate(main, adapter, actor, applied, carried && carried.from.length > 0 ? { carries: [{ kind: what, from: carried.from, to: carried.to }], prior } : undefined);
@@ -786,8 +784,8 @@ export class DocumentService {
   // An accepted suggestion's copy (Decision Log 45): written by a one-off replica of the main doc whose clientID is
   // above every clientID either doc holds (so a copied attribute stays its key's value in the suggestion doc once its
   // original is deleted) and is bound to the suggester; the row is `actor`'s. Answers the copy's pairs with the
-  // originals. A range holding several suggesters' proposals binds the clientID to the first and needs a complete
-  // pairing, so the carry credits every unit to its own proposer; without one the write throws and nothing lands.
+  // originals. A range holding several suggesters' proposals binds the clientID to the first; the carry credits each
+  // paired unit to its own proposer.
   private writeCopy(main: HostDoc, suggestion: HostDoc, actor: Actor, plan: SuggestionPlan, suggesters: Actor[]): ReturnType<SuggestionPlan['pairs']> {
     const doc = newDoc();
     applyV1(doc, diffV1(main.doc), MIRROR);
@@ -808,9 +806,7 @@ export class DocumentService {
     try {
       transact(doc, () => plan.edit!(doc), writer);
       if (hasPending(main.doc)) throw new Error('an accepted suggestion’s copy left state pending');
-      const pairs = plan.pairs(doc);
-      if (suggesters.length > 1 && !pairs?.complete) throw new Error('an accepted copy of several authors’ proposals could not be paired with them all');
-      return pairs;
+      return plan.pairs(doc);
     } finally {
       main.credit = null;
       writer.off();

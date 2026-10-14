@@ -32,12 +32,11 @@ export interface SuggestionPlan {
   readonly suggesters: number[];
   // After `edit` ran on `result` (the replica, now holding the copy): the [from, to] pairs of each copied unit, from the
   // id it had (the original proposal, or for a rejected deletion the main doc's deleted content) to its copy's id, for
-  // the provenance carry; null when the two docs' content cannot be paired unit by unit. `complete` is false when the
-  // formatting markers could not be paired too (a copy may place them differently), so some of the copy is uncarried.
+  // the provenance carry; null when the two docs' content cannot be paired unit by unit. Formatting markers a copy
+  // placed differently (v14 merges a format run into an adjacent one) pair with a proposal's marker of the same format
+  // when every such marker in the range is one proposer's; `complete` is false when some copied marker still pairs with
+  // none, and it keeps the copy's binding.
   pairs(result: Doc): Pairs | null;
-  // Whether a dry run of `edit` paired every unit of the copy, formatting included: when not, part of the copy would be
-  // credited to its clientID's binding alone, which is only right when the range holds one suggester's proposals.
-  readonly paired: boolean;
 }
 
 export interface Pairs {
@@ -93,12 +92,11 @@ export function planAccept(main: Doc, suggestion: Doc, attributions: ContentMap,
           };
     return {
       edit,
-      paired: edit === null || dryRun(main, suggestion, edit, acceptedState)?.complete === true,
       remove: taken.isEmpty() ? null : deletionsOf(taken),
       suggesters: [...taken.clients.keys()],
       // The accepted state (the main doc with the originals) against the copy: equal unit by unit, ids differing where
       // copied.
-      pairs: (result) => paired(acceptedState, result),
+      pairs: (result) => paired(acceptedState, result, taken),
     };
   } finally {
     base.destroy();
@@ -146,7 +144,6 @@ export function planReject(main: Doc, suggestion: Doc, attributions: ContentMap,
     edit: update ? (doc) => Y.applyUpdate(doc, update) : null,
     remove: proposed.isEmpty() ? null : deletionsOf(proposed),
     suggesters: [],
-    paired: true, // the rejector writes the copy: nothing is credited to another proposer
     // The main doc before (the deleted content still there) against the copy.
     pairs: (result) => paired(mainState, result),
   };
@@ -188,24 +185,11 @@ function onOneChain(doc: Y.Doc, range: SuggestionRange): boolean {
   return false;
 }
 
-// The edit run on a scratch copy of the main doc, under a clientID above both docs (as the host writes it), paired
-// against the accepted state.
-function dryRun(main: Doc, suggestion: Doc, edit: (doc: Doc) => void, acceptedState: Uint8Array): Pairs | null {
-  const doc = new Y.Doc();
-  try {
-    Y.applyUpdateV2(doc, Y.encodeStateAsUpdateV2(main));
-    doc.clientID = clientAbove([main, suggestion]);
-    doc.transact(() => edit(doc));
-    return paired(acceptedState, doc);
-  } finally {
-    doc.destroy();
-  }
-}
-
-function paired(state: Uint8Array, result: Doc): Pairs | null {
+// `proposals`: the ids a formatting marker of the copy may be credited from when it cannot be paired in place.
+function paired(state: Uint8Array, result: Doc, proposals?: Y.IdSet): Pairs | null {
   const reference = scratch(state);
   try {
-    return pairUnits(reference, result);
+    return pairUnits(reference, result, proposals);
   } finally {
     reference.destroy();
   }
@@ -326,18 +310,42 @@ function unitsOf(doc: Y.Doc, names: string[]): { out: Unit[]; formats: Unit[] } 
   return { out, formats };
 }
 
-function pairUnits(reference: Y.Doc, result: Y.Doc): Pairs | null {
+function pairUnits(reference: Y.Doc, result: Y.Doc, proposals?: Y.IdSet): Pairs | null {
   const names = [...new Set([...reference.share.keys(), ...result.share.keys()])].sort();
   const a = unitsOf(reference, names);
   const b = unitsOf(result, names);
   const content = pairLists(a.out, b.out);
   if (!content) return null;
-  const formats = pairLists(a.formats, b.formats);
+  const formats = pairLists(a.formats, b.formats) ?? (proposals ? bySource(a.formats, b.formats, proposals) : null);
   if (!formats) return { ...content, complete: false };
-  return { from: [...content.from, ...formats.from], to: [...content.to, ...formats.to], complete: true };
+  return { from: [...content.from, ...formats.from], to: [...content.to, ...formats.to], complete: formats.complete ?? true };
 }
 
-function pairLists(a: Unit[], b: Unit[]): { from: [number, number][]; to: [number, number][] } | null {
+// The copy's own formatting markers (those the reference does not hold) when the copy placed them differently: each
+// pairs with a proposal's marker of the same format (key and value, else key), provided every such proposal marker is
+// under one clientID, so its author is the one who set that format. A marker with no such source stays unpaired.
+function bySource(a: Unit[], b: Unit[], proposals: Y.IdSet): { from: [number, number][]; to: [number, number][]; complete: boolean } {
+  const idKey = ([client, clock]: [number, number]) => `${client}:${clock}`;
+  const inReference = new Set(a.map((u) => idKey(u.id)));
+  const sources = a.filter((u) => proposals.has(u.id[0], u.id[1]));
+  const formatKey = (kind: string) => kind.slice(0, kind.indexOf('='));
+  const from: [number, number][] = [];
+  const to: [number, number][] = [];
+  let complete = true;
+  for (const copy of b.filter((u) => !inReference.has(idKey(u.id)))) {
+    let candidates = sources.filter((u) => u.kind === copy.kind);
+    if (candidates.length === 0) candidates = sources.filter((u) => formatKey(u.kind) === formatKey(copy.kind));
+    if (candidates.length > 0 && candidates.every((u) => u.id[0] === candidates[0].id[0])) {
+      from.push(candidates[0].id);
+      to.push(copy.id);
+    } else {
+      complete = false;
+    }
+  }
+  return { from, to, complete };
+}
+
+function pairLists(a: Unit[], b: Unit[]): { from: [number, number][]; to: [number, number][]; complete?: boolean } | null {
   if (a.length !== b.length) return null;
   const from: [number, number][] = [];
   const to: [number, number][] = [];

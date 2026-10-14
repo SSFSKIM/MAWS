@@ -207,7 +207,6 @@ describe('suggestions: fix wave 1', () => {
     const p3 = byId(w.suggestion.get('default'), 'p3');
     const marker = p3._start!; // the proposal's opening format marker
     const plan = planAccept(w.main, w.suggestion, w.attributions(), [{ start: idOf(marker), end: idOf(marker) }]);
-    expect(plan.paired).toBe(true);
     const pairs = w.land(plan)!;
     expect(byId(w.main.get('default'), 'p3').toDelta().toJSON()).toMatchObject({ children: [{ insert: 'Closing', format: { bold: true } }, { insert: ' line.' }] });
     expect(pairs.complete).toBe(true);

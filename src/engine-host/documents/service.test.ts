@@ -821,22 +821,28 @@ describe('DocumentService: suggestions, fix wave 1', () => {
     expect(insertedBy(provenance, idAt(text('a1'), 1)!)).toEqual({ actor: 'session:app-b', at: typedAt });
   });
 
-  it('refuses, writing nothing, a mixed-author range whose copy cannot be paired with every proposal (no change credited to another proposer)', async () => {
+  it('accepts a mixed-author range whose copy merges formatting runs: characters credited per author, the markers to the proposer who set them', async () => {
     make({}, true);
     await service.writeAs('a1', human, (doc) => {
       doc.get('t').insert(0, 'ab');
       doc.get('t').format(0, 1, { bold: true }); // "a" bold already: the copy of a bold "b" merges into its run
     });
     const key = service.suggestionDoc('a1');
+    const boldAt = now;
     await service.writeAs(key, sessionA, (doc) => doc.get('t').format(1, 1, { bold: true }));
+    now += 2 * MIN;
+    const typedAt = now;
     await service.writeAs(key, sessionB, (doc) => doc.get('t').insert(2, 'c'));
-    const rows = rowCount();
+    now += 5 * MIN;
+    const before = new Set(markers('a1').map(({ client, clock }) => `${client}:${clock}`));
     const [first] = markers(key);
-    const outcome = await service.acceptSuggestion('a1', [{ start: first, end: idAt(text(key), 2)! }], human).catch((error: unknown) => error);
-    expect(outcome).toBeInstanceOf(SuggestionError);
-    expect((outcome as SuggestionError).data).toMatchObject({ reason: 'mixedAuthors' });
-    expect(rowCount()).toBe(rows);
-    expect(text('a1').toString()).toBe('ab');
+    await service.acceptSuggestion('a1', [{ start: first, end: idAt(text(key), 2)! }], human);
+    expect(text('a1').toDelta().toJSON()).toEqual(text(key).toDelta().toJSON());
+    const provenance = service.provenance('a1');
+    expect(insertedBy(provenance, idAt(text('a1'), 2)!)).toEqual({ actor: 'session:app-b', at: typedAt }); // "c"
+    const copied = markers('a1').filter(({ client, clock }) => !before.has(`${client}:${clock}`));
+    expect(copied.length).toBeGreaterThan(0);
+    for (const marker of copied) expect(insertedBy(provenance, marker)).toEqual({ actor: 'session:app-a', at: boldAt }); // only A set bold
   });
 });
 
