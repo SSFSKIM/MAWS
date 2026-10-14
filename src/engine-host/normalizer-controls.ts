@@ -241,9 +241,10 @@ function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: E
   if (call.tool === 'artifact_create' || call.tool === 'artifact_publish' || call.tool === HISTORICAL_ARTIFACT_UPDATE) {
     const parsed = ArtifactDeliverySchema.safeParse(json);
     if (!parsed.success) return;
-    const { id: artifactId, deliverableId, version, title, ownerAppSessionId } = parsed.data;
+    const { id: artifactId, deliverableId, version, title, ownerAppSessionId, revision } = parsed.data;
     const owner = ownerAppSessionId !== undefined ? { ownerAppSessionId } : {}; // P2-E1: an ancestor's record
-    out.emit({ kind: 'maws.delivery.artifact', toolUseId: call.toolUseId, requestId, action: call.tool === 'artifact_create' ? 'create' : 'update', artifactId, deliverableId, version, title, ...owner }, attribution);
+    const written = revision !== undefined ? { revision } : {}; // P3-L (M6b fix wave 2): the revision the call wrote
+    out.emit({ kind: 'maws.delivery.artifact', toolUseId: call.toolUseId, requestId, action: call.tool === 'artifact_create' ? 'create' : 'update', artifactId, deliverableId, version, title, ...owner, ...written }, attribution);
     return;
   }
   // E2 end

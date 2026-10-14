@@ -595,6 +595,7 @@ void startWithProfileLock(app, () => {
       },
       openPath: (path) => shell.openPath(path),
       showItemInFolder: (path) => shell.showItemInFolder(path),
+      readFile: (input) => filesService.readResolved(input), // M6b fix wave 2: `library.read`
       env: process.env,
     },
   });

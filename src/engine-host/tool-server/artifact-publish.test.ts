@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import { ArtifactPublishResultSchema, artifactRefusalOf, TOOL_ERRORS } from '@shared/maws/tools';
+import { Maintenance } from '../documents/maintenance';
 import { ArtifactSession } from './artifact-context';
 import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactReadTool } from './artifact-tools';
@@ -82,6 +83,24 @@ describe('artifact_publish of an html page', () => {
     const again = jsonOf(await publish(args, { toolUseId: 'toolu_once' as ToolUseId }));
     expect(again).toEqual(first);
     expect(w.store.listVersions(created.artifactId)).toHaveLength(2);
+  });
+
+  // P3-L M6b fix wave 2: E2's `version` is an ordinal the history around it can move (thinning drops `auto` versions;
+  // a repeated call places its answer again), so the answer's `revision` is what names the version: after the nightly
+  // thinning a replay of the third publish answers another place, the same revision, and that revision is still its page
+  it('a repeated call after thinning answers the same revision under a new place, and the revision still names its page', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' }, { toolUseId: 'toolu_c' as ToolUseId });
+    const second = jsonOf<{ revision: number }>(await publish({ artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>v2</p>' } }, { toolUseId: 'toolu_p2' as ToolUseId }));
+    const args = { artifact: 'dash', baseRevision: second.revision, files: { 'index.html': '<p>v3</p>' } };
+    const third = jsonOf<{ revision: number; version: number }>(await publish(args, { toolUseId: 'toolu_p3' as ToolUseId }));
+    const fourth = jsonOf<{ revision: number }>(await publish({ artifact: 'dash', baseRevision: third.revision, files: { 'index.html': '<p>v4</p>' } }, { toolUseId: 'toolu_p4' as ToolUseId }));
+    expect(third.version).toBe(3);
+    const report = await new Maintenance(w.store, { now: () => Date.now() + 40 * 24 * 3_600_000, log: () => {} }).run();
+    expect(report.versionsThinned).toBe(1); // the second publish's auto version: its week bucket keeps the third's
+    expect(w.store.listVersions(created.artifactId).map((v) => v.seq)).toEqual([created.revision, third.revision, fourth.revision]);
+    const again = jsonOf<{ revision: number; version: number }>(await publish(args, { toolUseId: 'toolu_p3' as ToolUseId }));
+    expect(again).toMatchObject({ revision: third.revision, version: 2 }); // the ordinal moved, the revision did not
+    expect(readFileSync(w.store.contentRef(created.artifactId, third.revision).path, 'utf8')).toBe('<p>v3</p>');
   });
 
   it('two overlapping calls with one tool-use id publish once and answer alike', async () => {

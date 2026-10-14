@@ -273,10 +273,12 @@ const IsoTimeSchema = z.string();
 // create and update; P3-A's create and publish of an `html` artifact): `id` the name the agent gave it (its handle, else
 // its id), `deliverableId` the artifact's id (X12's record id before P3-L's cutover, which keeps the name), `version`
 // the version's place, from 1, among the artifact's versions by revision. Loose on purpose: every answer shape that
-// carries them reads alike.
+// carries them reads alike. P3-L (M6b fix wave 2): `revision`, the revision the call wrote (P3-A's answers carry it), is
+// the version's stable identity: the place shifts when the history before it thins, the revision never does.
 export const ArtifactDeliverySchema = z.object({
   id: z.string(), deliverableId: z.uuid(), version: z.number().int().min(1), title: z.string(),
   ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1
+  revision: z.number().int().min(0).optional(), // P3-L (M6b fix wave 2)
 });
 export type ArtifactDelivery = z.infer<typeof ArtifactDeliverySchema>;
 

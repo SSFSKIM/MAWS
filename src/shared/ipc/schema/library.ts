@@ -10,6 +10,7 @@ import { ActorSchema } from '../../artifacts/actor';
 import { ArtifactKindSchema, ArtifactSessionLinkSchema, SpaceSchema } from '../../artifacts/entity';
 import { AppSessionIdSchema, ProjectIdSchema } from '../../graph/ids';
 import { ARTIFACT_EXPORT_FORMATS } from '../../maws/tools';
+import { FilesReadInputSchema, FilesReadOutputSchema } from './files';
 import { ArtifactRowSchema } from './artifacts';
 import type { CommandSpec } from './common';
 
@@ -114,6 +115,10 @@ export const commands = {
   // answer with its reason, as `files.openExternal` and `files.reveal` answer.
   'library.openExternally': main(ContentAt, z.strictObject({ opened: z.boolean(), message: z.string().nullable() })),
   'library.reveal': main(ContentAt, z.strictObject({ revealed: z.boolean(), message: z.string().nullable() })),
+  // M6b fix wave 2 (Decision Log 36i): a File artifact's stored file read as `files.read` reads a session's, by the
+  // artifact alone: main resolves its path (`artifacts.content`), so the owner's file reads in its viewer with no
+  // session, and a window names no path.
+  'library.read': main(ContentAt.extend(FilesReadInputSchema.pick({ offset: true, length: true, hash: true }).shape), FilesReadOutputSchema),
   // M5b: the native save dialog at ~/Downloads/<the artifact's title or the file's name>, the source copied to the
   // chosen path (a temporary file beside it renamed over it); `saved: false` when the dialog was cancelled.
   'library.saveAs': main(

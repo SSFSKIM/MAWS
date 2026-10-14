@@ -568,7 +568,8 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
     expect(existsSync(join(userData, 'deliverables'))).toBe(false);
 
     const publish = run.call('artifact_publish', { artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<h1 style="color:blue">HELLO_E2</h1>' } }, 'toolu_publish');
-    expect(json(await run.answered(publish))).toMatchObject({ status: 'published', id: 'dash', deliverableId, version: 2, title: 'Dashboard', changed: ['index.html'] });
+    const published = json(await run.answered(publish));
+    expect(published).toMatchObject({ status: 'published', id: 'dash', deliverableId, version: 2, title: 'Dashboard', changed: ['index.html'] });
     expect(documents.store.listVersions(deliverableId).map((v) => v.actor)).toEqual([{ kind: 'session', appSessionId }, { kind: 'session', appSessionId }]);
 
     const listed = json(await run.answered(run.call('artifact_list', {}, 'toolu_list')));
@@ -580,9 +581,10 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
 
     await until(() => run.maws().length === 2, 'the artifact events');
     await new Promise((r) => setTimeout(r, 20)); // nothing more arrives for the list, the refusal or the invalid call
+    // P3-L M6b fix wave 2: each names the revision its call wrote, the version's stable identity beside E2's ordinal
     expect(run.maws()).toMatchObject([
-      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_create', requestId: create, action: 'create', artifactId: 'dash', deliverableId, version: 1, title: 'Dashboard' },
-      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_publish', requestId: publish, action: 'update', artifactId: 'dash', deliverableId, version: 2, title: 'Dashboard' },
+      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_create', requestId: create, action: 'create', artifactId: 'dash', deliverableId, version: 1, title: 'Dashboard', revision: created.revision },
+      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_publish', requestId: publish, action: 'update', artifactId: 'dash', deliverableId, version: 2, title: 'Dashboard', revision: published.revision },
     ]);
     run.transport.exit(0);
     await run.session.exited;

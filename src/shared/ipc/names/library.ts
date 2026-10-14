@@ -3,7 +3,9 @@
 // `../schema.test.ts`.
 export const commands = [
   'library.list', 'library.get', 'library.spaces',
-  'library.exportFormats', 'library.content', 'library.openExternally', 'library.reveal', 'library.saveAs', // M5b
+  'library.exportFormats', 'library.content', 'library.openExternally', 'library.reveal', // M5b
+  'library.read', // M6b fix wave 2
+  'library.saveAs', // M5b
   'library.testImport', // M6b, e2e only
 ] as const;
 

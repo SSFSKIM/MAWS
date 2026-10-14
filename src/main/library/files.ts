@@ -26,6 +26,7 @@ export interface LibraryFilesDeps {
   downloads(): string; // app.getPath('downloads')
   showSaveDialog(options: SaveDialogOptions, sender: WebContents | undefined): Promise<{ canceled: boolean; filePath?: string }>;
   openPath(path: string): Promise<string>; // shell.openPath: '' on success, else the error text
+  readFile(input: Omit<CommandInput<'files.read'>, 'appSessionId'>): Promise<CommandOutput<'files.read'>>; // M6b fix wave 2: the files service's `readResolved`
   showItemInFolder(path: string): void;
   env: NodeJS.ProcessEnv;
 }
@@ -72,6 +73,14 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
     }),
 
     content,
+
+    // M6b fix wave 2 (Decision Log 36i): a File artifact's stored file, read by the artifact alone (its path resolved
+    // here, never taken from the window), so the owner's files read in their viewer with no session
+    async read({ artifactId, revision, ...chunk }: CommandInput<'library.read'>): Out<'library.read'> {
+      const found = await content({ artifactId, revision });
+      if (found.kind !== 'file') throw new CommandFailure(ipcError('invalid_input', `artifact ${artifactId} is not a file artifact`));
+      return deps.readFile({ path: found.path, ...chunk });
+    },
 
     async openExternally(input: CommandInput<'library.openExternally'>): Out<'library.openExternally'> {
       const { name, path } = await content(input);
@@ -130,6 +139,7 @@ export function registerLibraryFiles(register: typeof registerMainHandler, deps:
   const files = createLibraryFiles(deps);
   register('library.exportFormats', files.exportFormats);
   register('library.content', files.content);
+  register('library.read', files.read); // M6b fix wave 2
   register('library.openExternally', files.openExternally);
   register('library.reveal', files.reveal);
   register('library.saveAs', (input, { sender }) => files.saveAs(input, sender));
