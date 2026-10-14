@@ -96,7 +96,7 @@ describe('the supplement (P2-C2)', () => {
 
   it('names the one mark and the ask tool of a MAWS session, under 120 words, and nothing of the retired marks', () => {
     expect(words.length).toBeLessThan(120);
-    for (const needle of ['`<message>…</message>`', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', '`mcp__doperpowers__AskUserQuestion` is not available here', 'never inside code']) {
+    for (const needle of ['`<message>…</message>`', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', '`mcp__doperpowers__AskUserQuestion` is not available here', 'native AskUserQuestion only where', 'never inside code']) {
       expect(TO_HUMAN_SUPPLEMENT).toContain(needle);
     }
     for (const retired of ['need-input', 'insight', 'essential', 'to-human>']) expect(TO_HUMAN_SUPPLEMENT).not.toContain(retired);

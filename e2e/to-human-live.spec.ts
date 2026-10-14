@@ -285,6 +285,24 @@ function lastReply(id: string): string {
     .join('\n')
     .trim();
 }
+// P2-C2 (Decision Log 33): the tools the engine's `system/init` listed at the launch's start
+async function initTools(id: string, launchId: string): Promise<string[]> {
+  let tools: string[] | null = null;
+  await expect
+    .poll(
+      () => {
+        const rows = journal(id);
+        const from = rows.findIndex((r) => r.direction === 'meta' && (r.frame as { event?: string; launchId?: string }).event === 'spawn' && (r.frame as { launchId?: string }).launchId === launchId);
+        const init = rows.slice(from).find((r) => r.direction === 'in' && (r.frame as Frame).type === 'system' && (r.frame as Frame).subtype === 'init');
+        tools = (init?.frame as { tools?: string[] } | undefined)?.tools ?? null;
+        return tools !== null;
+      },
+      { timeout: 60_000, message: 'the launch’s system/init' },
+    )
+    .toBe(true);
+  return tools!;
+}
+const asksOf = (tools: string[]) => tools.filter((tool) => /ask/i.test(tool));
 // P2-C2: the prompts that carried an ask's answer to the engine (the host names the ask in its words)
 function askWrites(id: string, askId: string): { uuid: string; text: string; at: string }[] {
   return journal(id)
@@ -342,6 +360,11 @@ async function settle(page: Page, id: string, before: number, timeout = 300_000)
     const s = await status(page, id);
     return s.turn === null && s.pendingRequests === 0;
   }, { timeout, intervals: [500] }).toBe(true);
+}
+// P2-C2 (review): the turn's end alone, for a turn that leaves an async ask waiting (the host counts it pending)
+async function settleTurn(page: Page, id: string, before: number, timeout = 300_000): Promise<void> {
+  await expect.poll(() => promptsEnded(writtenPrompts(journal(id)), before), { timeout, intervals: [500] }).toBe(true);
+  await expect.poll(async () => (await status(page, id)).turn, { timeout, intervals: [500] }).toBeNull();
 }
 async function closeWidgets(page: Page): Promise<void> {
   if (await page.getByRole('dialog', { name: 'Model and effort' }).isVisible()) await page.keyboard.press('Escape');
@@ -511,6 +534,8 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await expect.poll(async () => (s1Engine = (await status(page, s1)).engineSessionId ?? ''), { timeout: 60_000 }).not.toBe('');
       const probe = await probed(s1Engine, spawn.at);
       const s = await status(page, s1);
+      const initAskTools = asksOf(await initTools(s1, spawn.launchId));
+      log(`system/init asks: ${JSON.stringify(initAskTools)}; --disallowedTools ${JSON.stringify(spawn.args.flatMap((a, k) => (a === '--disallowedTools' ? [spawn.args[k + 1]] : [])))}`);
       log(`session ${s1} (engine ${s1Engine}): model ${s.model.resolved}, gateway ${s.gateway.verified}, budget US$${left.toFixed(4)}; spawn ${spawnWords(spawn)}; ${decisionWords(row)}; appended ${row.appended}, snapshot_off ${row.snapshot_off}, style ${row.style}, enabled_at ${row.enabled_at}; probe ${NATIVE_TO_HUMAN_ENV}=${probe}`);
       observe('g1New', { s1, s1Engine, spawn: { ...spawn, args: undefined, append: spawn.append?.slice(0, 80) }, row, probe, model: s.model, gateway: s.gateway });
       expect(spawn.args.filter((arg) => arg === '--append-system-prompt'), 'one --append-system-prompt').toHaveLength(1);
@@ -520,6 +545,8 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       expect(probe).toBe(ADVERTISED);
       expect([row.desired, row.recorded, row.applied]).toEqual(['maws-contract', 'unrecorded', 'maws-contract']);
       expect(s.gateway.verified).toBe('routed');
+      expect(initAskTools, 'Decision Log 33: mcp__maws__ask the one ask').toEqual(['mcp__maws__ask']);
+      line(`G1 new: system/init's asks ${JSON.stringify(initAskTools)} (AskUserQuestion withdrawn by --disallowedTools);`);
       line(`G1 new: spawn has --append-system-prompt once (contract ${TO_HUMAN_CONTRACT_VERSION}, byte for byte); no --system-prompt-snapshot; ${NATIVE_TO_HUMAN_ENV}=${ADVERTISED} in --settings env and logged by the SessionStart probe; ${decisionWords(row)}`);
     });
 
@@ -715,12 +742,15 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const row = await decision(s2, spawn.launchId);
       await expect.poll(async () => (s2Engine = (await status(page, s2)).engineSessionId ?? ''), { timeout: 60_000 }).not.toBe('');
       const probe = await probed(s2Engine, spawn.at);
-      await settle(page, s2, prompts);
+      await settleTurn(page, s2, prompts); // the agent's async ask waits on the sheet until style-answer: counted in pendingRequests
       const observed = await observedStyle(s2);
       const s = await status(page, s2);
       const cards = await pane(page).locator('[data-owner-card="to-human"]').count(); // a <message> reads as the message card
       const snap = snapshots(s2Engine);
       const asks = mcpCalls(journal(s2)).filter((call) => call.name === 'ask');
+      const tools = await initTools(s2, spawn.launchId);
+      const initAskTools = asksOf(tools);
+      const pluginTools = tools.filter((tool) => tool.startsWith('mcp__doperpowers__'));
       const band = pane(page).locator('[data-plugin-band]');
       const bandText = (await band.count()) > 0 ? (await band.first().innerText()).replaceAll('\n', ' ') : '(no band)';
       const reply = lastReply(s2);
@@ -739,8 +769,10 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       expect({ contract: snap.snapshots, supplement: snap.supplements }, 'each snapshot carries the supplement once and no contract').toEqual({ contract: snap.snapshots.map(() => 0), supplement: snap.snapshots.map(() => 1) });
       expect(cards).toBeGreaterThanOrEqual(1);
       expect(asks.map((a) => a.args.blocking), 'one ask through mcp__maws__ask, not blocking').toEqual([false]);
+      expect(initAskTools, 'Decision Log 33: mcp__maws__ask the one ask (no plugin ask in -p either)').toEqual(['mcp__maws__ask']);
+      expect(pluginTools, 'the plugin registers no tool in a headless launch (its ask included)').toEqual([]);
       expect(bandText).not.toContain('to-human view');
-      line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE} (declares ${plugin.contractKey}: ${plugin.shape}); --append-system-prompt once, the supplement byte for byte, no contract; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${snap.supplements.length} snapshot(s), each with the supplement once; ${NATIVE_TO_HUMAN_ENV}=${ADVERTISED} logged; ${cards} message card(s); one mcp__maws__ask, blocking false; the mod's band absent (deferred)`);
+      line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE} (declares ${plugin.contractKey}: ${plugin.shape}); --append-system-prompt once, the supplement byte for byte, no contract; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${snap.supplements.length} snapshot(s), each with the supplement once; ${NATIVE_TO_HUMAN_ENV}=${ADVERTISED} logged; ${cards} message card(s); one mcp__maws__ask, blocking false; system/init's asks ${JSON.stringify(initAskTools)}, no mcp__doperpowers__ tool (${tools.length} tools); the mod's band absent (deferred)`);
     });
 
     // P2-C2: the owner's style asks through a tool, so the question is MAWS's ask, answered from its sheet while the

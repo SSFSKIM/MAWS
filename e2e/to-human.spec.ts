@@ -7,8 +7,10 @@
 // the composer's draft is untouched.
 // P2-C2: a user output style declaring contract 4 (`<message>` the one mark, questions through a tool) gets MAWS's
 // supplement once and the full contract never, the launch advertising MAWS_NATIVE_TO_HUMAN and recording the decision;
-// a `<message>` draws as the message card, an async `mcp__maws__ask` is answered from its sheet, and the native
-// AskUserQuestion, which a headless launch keeps, still arrives as MAWS's question request.
+// a `<message>` draws as the message card, an async `mcp__maws__ask` waits as an `async_input` item and is answered
+// from its sheet. The launch withdraws the native AskUserQuestion from the model (`--disallowedTools`, Decision Log 33),
+// while a native ask on the wire, as an imported or taken-over transcript or a launch without the server carries one,
+// still arrives as MAWS's question request.
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -120,7 +122,7 @@ test('M6 a question answered from its card: queued while the agent works, answer
 });
 
 // P2-C2 start
-test('a style declaring contract 4: the supplement once and never contract 1, a <message> card, an async maws ask answered from its sheet, and the native AskUserQuestion still asked', async () => {
+test('a style declaring contract 4: the supplement once and never contract 1, the native ask withdrawn, a <message> card, an async maws ask answered from its sheet, and a native ask on the wire still drawn', async () => {
   test.setTimeout(150_000);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c2-supplement-')));
   const repo = join(root, 'repo');
@@ -171,6 +173,7 @@ test('a style declaring contract 4: the supplement once and never contract 1, a 
     const { args } = spawns[0]!.frame as { args: string[] };
     expect(args.flatMap((arg, k) => (arg === '--append-system-prompt' ? [args[k + 1]] : []))).toEqual([TO_HUMAN_SUPPLEMENT]);
     expect(args.filter((arg) => arg.includes(CONTRACT_HEADER(1)) || arg.includes(CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION)))).toEqual([]); // nor MAWS's full contract
+    expect(args.flatMap((arg, k) => (arg === '--disallowedTools' ? [args[k + 1]] : []))).toEqual(['AskUserQuestion']); // Decision Log 33
     const settings = JSON.parse(args[args.indexOf('--settings') + 1]!) as { env?: Record<string, string> };
     expect(settings.env?.[NATIVE_TO_HUMAN_ENV]).toBe(String(TO_HUMAN_CONTRACT_VERSION));
     await expect.poll(async () => { const row = await lane(); return [row.source, row.pending ?? null]; }).toEqual(['external-style-plus-supplement', null]);
@@ -178,19 +181,24 @@ test('a style declaring contract 4: the supplement once and never contract 1, a 
     // The async ask: acknowledged at once, answered from its sheet, the answer written as a `next` steer.
     const capsule = pane.locator('section.transcript-ask');
     await expect(capsule).toHaveAttribute('data-ask-state', 'asked');
+    // Decision Log 32: the waiting question is an async_input item, retired at the committed answer
+    const waiting = async () => value(await invoke(page, 'attention.list', undefined)).filter((item) => item.appSessionId === id && item.kind === 'async_input' && item.state === 'pending');
+    await expect.poll(async () => (await waiting()).length).toBe(1);
     const sheet = page.locator('[data-region="panel"] [data-ask-sheet]');
     await sheet.locator('section[data-question-id="q1"]').getByRole('radio', { name: 'Yes' }).click();
     await clearToasts(page);
     await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await expect(capsule.locator('[data-ask-chip]')).toHaveText('Answered');
+    await expect.poll(async () => (await waiting()).length).toBe(0);
     const steered = () => rows().some((r) => r.direction === 'out' && frameOf(r).type === 'user' && frameOf(r).priority === 'next' && String(frameOf(r).message?.content).includes(`${SUPPLEMENT.askQuestion} — Yes`));
     await expect.poll(steered).toBe(true);
     expect(metaEvents(rows())).toContain('maws_ask_answered');
     await expect(message(SUPPLEMENT.askReply)).toBeVisible({ timeout: 20_000 });
     await expect.poll(turn, { timeout: 20_000 }).toBeNull();
 
-    // Turn 2: the native AskUserQuestion arrives as MAWS's question request, and its answer goes back.
+    // Turn 2: a native AskUserQuestion on the wire (the request-card path kept for transcripts and launches that carry
+    // one) arrives as MAWS's question request, and its answer goes back.
     await composer.click();
     await page.keyboard.type(SUPPLEMENT.second);
     await page.keyboard.press('Enter');
