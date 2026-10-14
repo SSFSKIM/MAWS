@@ -1097,9 +1097,28 @@ export class ArtifactStore {
     this.coalescing.set(row.id, open());
   }
 
+  // An operation's change, announced after its own commit with the artifact's revision (Decision Log 33's barrier): the
+  // next operation may already have opened a batch whose rows the live revision includes, so a revision read while a
+  // batch is open is held until that batch commits, and read again if that batch is lost. A revision read with no batch
+  // open is durable and goes at once.
   private emit(artifactId: string, change: ArtifactChange): void {
     const row = this.entity(artifactId);
-    if (row) this.send({ artifactId, kind: row.kind, revision: this.service.revision(artifactId), change });
+    if (!row) return;
+    const release = (held: number | null): void => {
+      if (this.closed) return;
+      if (!this.storage.batchOpen) return this.send({ artifactId, kind: row.kind, revision: this.service.revision(artifactId), change });
+      if (held !== null) return this.send({ artifactId, kind: row.kind, revision: held, change }); // committed with the batch it was read in
+      const revision = this.service.revision(artifactId);
+      const later = (next: number | null) => () => {
+        try {
+          release(next);
+        } catch (error) {
+          this.log(`the change of ${artifactId} was not announced: ${error instanceof Error ? error.message : String(error)}`); // the store closed meanwhile
+        }
+      };
+      this.service.whenCommitted().then(later(revision), later(null));
+    };
+    release(null);
   }
 
   private send(change: ArtifactChanged): void {
