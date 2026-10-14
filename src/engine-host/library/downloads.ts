@@ -23,13 +23,15 @@ function chained<T>(appSessionId: string, task: () => Promise<T>): Promise<T> {
   return next;
 }
 
-export function recordDownload(store: Pick<ArtifactStore, 'list' | 'create' | 'readCommitted'>, download: MawsDownloadRecorded): Promise<'recorded' | 'duplicate'> {
+export function recordDownload(store: Pick<ArtifactStore, 'list' | 'create' | 'readCommitted' | 'files'>, download: MawsDownloadRecorded): Promise<'recorded' | 'duplicate'> {
   const { appSessionId, path, filename } = download;
   const actor: Actor = { kind: 'session', appSessionId: appSessionId as AppSessionId };
   return chained(appSessionId, async () => {
     const held = await store.readCommitted(() => store.list({ kind: 'file', appSessionId }).some((artifact) => artifact.linkedPath === path));
     if (held) return 'duplicate';
-    await store.create({ kind: 'file', title: filename, content: { path } }, actor);
+    // hashed now, streamed, so the create only records the digest and a large download never holds the event loop
+    const { sha256, size } = await store.files.describeStreamed(path);
+    await store.create({ kind: 'file', title: filename, content: { path, digest: { sha256, size } } }, actor);
     return 'recorded';
   });
 }

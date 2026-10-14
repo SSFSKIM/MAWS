@@ -44,7 +44,7 @@ const isAbsent = (error: unknown) => ['ENOENT', 'ENOTDIR'].includes((error as No
 // A record's import input, or why there is none: a file it names is gone (`missing`), or it cannot be read (`failed`).
 type Prepared = { input: ImportInput } | { outcome: 'missing' | 'failed'; why: string };
 
-export async function importDeliverables(store: Pick<ArtifactStore, 'get' | 'importArtifact'>, deliverablesDir: string, log: (line: string) => void): Promise<DeliverablesImport> {
+export async function importDeliverables(store: Pick<ArtifactStore, 'get' | 'importArtifact' | 'files'>, deliverablesDir: string, log: (line: string) => void): Promise<DeliverablesImport> {
   const counts: DeliverablesImport = { imported: 0, skipped: 0, missing: 0, failed: 0 };
   const count = (outcome: Outcome, line?: string) => {
     counts[outcome]++;
@@ -59,7 +59,7 @@ export async function importDeliverables(store: Pick<ArtifactStore, 'get' | 'imp
       count('skipped');
       continue;
     }
-    const prepared = await prepare(record);
+    const prepared = await prepare(record, store.files);
     if ('outcome' in prepared) {
       count(prepared.outcome, `the deliverable ${record.id} (${path}) ${prepared.why}; not imported`);
       continue;
@@ -90,7 +90,7 @@ async function readTree(root: string): Promise<{ path: string; record?: Delivera
   return found.sort((a, b) => order(a).localeCompare(order(b)) || a.path.localeCompare(b.path));
 }
 
-async function prepare(record: DeliverableRecord): Promise<Prepared> {
+async function prepare(record: DeliverableRecord, files: ArtifactStore['files']): Promise<Prepared> {
   const versions = record.versions.length > 0 ? record.versions : [{ path: record.path, at: record.updatedAt ?? record.createdAt }];
   const createdAt = Date.parse(record.createdAt);
   const ats = versions.map((version) => Date.parse(version.at));
@@ -122,7 +122,16 @@ async function prepare(record: DeliverableRecord): Promise<Prepared> {
       return { outcome: 'failed', why: `could not reach ${record.path}: ${reasonOf(error)}` };
     }
     if (!found.isFile()) return { outcome: 'failed', why: `names ${record.path}, which is not a regular file` };
-    return { input: { ...common, kind: 'file', versions: [{ at: ats.at(-1)!, actor: writerOf(versions.at(-1)!), content: { path: record.path } }] } };
+    // hashed now, streamed, so the store only records the digest: an old large file never holds the host's event loop
+    let digest: { sha256: string; size: number };
+    try {
+      const { sha256, size } = await files.describeStreamed(record.path);
+      digest = { sha256, size };
+    } catch (error) {
+      if (isAbsent(error)) return { outcome: 'missing', why: `names a file that is gone (${record.path})` };
+      return { outcome: 'failed', why: `could not read ${record.path}: ${reasonOf(error)}` };
+    }
+    return { input: { ...common, kind: 'file', versions: [{ at: ats.at(-1)!, actor: writerOf(versions.at(-1)!), content: { path: record.path, digest } }] } };
   }
   const read: ImportInput['versions'] = [];
   for (const [i, version] of versions.entries()) {

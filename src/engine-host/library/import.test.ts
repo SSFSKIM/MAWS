@@ -241,6 +241,18 @@ describe('importDeliverables (M6a)', () => {
     expect(logged).toEqual([expect.stringMatching(new RegExp(`${uuid(1)}.*report`))]);
   });
 
+  it('hashes a sent file streamed before the import, so the store records its digest without hashing it on the event loop (whole-branch review)', async () => {
+    const sent = seedFile('app-1', uuid(1), { name: 'large.bin', at: now - DAY });
+    const streamed = vi.spyOn(store.files, 'describeStreamed');
+    const blocking = vi.spyOn(store.files, 'describe');
+
+    expect(await run()).toEqual({ imported: 1, skipped: 0, missing: 0, failed: 0 });
+    expect(streamed).toHaveBeenCalledWith(sent.path);
+    expect(blocking).not.toHaveBeenCalled();
+    const { sha256, size } = await store.files.describeStreamed(sent.path);
+    expect(store.contentRef(uuid(1)).ref).toMatchObject({ sha256, size });
+  });
+
   it('finds nothing to do when there is no deliverables directory', async () => {
     expect(await run()).toEqual({ imported: 0, skipped: 0, missing: 0, failed: 0 });
     expect(logged).toEqual([]);

@@ -3,7 +3,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DocumentService } from '../documents/service';
 import { SqliteDocumentStorage } from '../documents/storage';
@@ -49,6 +49,16 @@ describe('recordDownload (M6b: an agent’s finished download as a File artifact
     const other = { ...download, appSessionId: 'app-2' as AppSessionId };
     expect((await Promise.all([recordDownload(store, other), recordDownload(store, other)])).sort()).toEqual(['duplicate', 'recorded']);
     expect(store.list().map((artifact) => store.links(artifact.id)[0]!.appSessionId).sort()).toEqual([A, 'app-2']);
+  });
+
+  it('hashes the file streamed before the create, so the store records its digest without hashing it on the event loop (whole-branch review)', async () => {
+    const streamed = vi.spyOn(store.files, 'describeStreamed');
+    const blocking = vi.spyOn(store.files, 'describe');
+    expect(await recordDownload(store, download)).toBe('recorded');
+    expect(streamed).toHaveBeenCalledWith(download.path);
+    expect(blocking).not.toHaveBeenCalled();
+    const { sha256, size } = await store.files.describeStreamed(download.path);
+    expect(store.contentRef(store.list()[0]!.id).ref).toMatchObject({ sha256, size });
   });
 
   it('refuses a path that is no longer a file, recording nothing', async () => {
