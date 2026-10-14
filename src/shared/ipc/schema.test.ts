@@ -61,9 +61,10 @@ import * as spaces from './schema/spaces';
 import { ARTIFACT_REFUSALS, artifactRefusalOf } from './schema/artifacts';
 // P3-A end
 import * as library from './schema/library'; // P3-L M1
+import * as designSystems from './schema/design-systems'; // P3-D (the P3 spec's Decision Log 61)
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -599,7 +600,7 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
@@ -1828,4 +1829,23 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // P3-L end
+  // P3-D start: the house system's id for the renderer (the P3 spec's Decision Log 61; the ledger's X28)
+  describe('P3-D entries', () => {
+    it('owns designSystems.house in the engine host, bridged to windows, with no event', () => {
+      expect(Object.fromEntries(Object.entries(designSystems.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'designSystems.house': 'engine-host' });
+      expect([...NAMES.designSystems.commands]).toEqual(['designSystems.house']);
+      expect(MAIN_ONLY_COMMANDS).not.toContain('designSystems.house');
+      expect(Object.keys(designSystems.events)).toEqual([]);
+    });
+
+    it('designSystems.house takes nothing and answers a system id or null', () => {
+      expect(validateCommandInput('designSystems.house', undefined).ok).toBe(true);
+      expect(validateCommandInput('designSystems.house', { kind: 'design_system' }).ok).toBe(false);
+      expect(validateCommandOutput('designSystems.house', { houseId: '22222222-2222-4222-8222-222222222222' }).ok).toBe(true);
+      expect(validateCommandOutput('designSystems.house', { houseId: null }).ok).toBe(true);
+      expect(validateCommandOutput('designSystems.house', { houseId: 'maws' }).ok, 'an id, never the builtin key').toBe(false);
+      expect(validateCommandOutput('designSystems.house', {}).ok).toBe(false);
+    });
+  });
+  // P3-D end
 });

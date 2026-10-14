@@ -53,6 +53,7 @@ import * as spaces from './schema/spaces';
 // P3-L start (M1)
 import * as library from './schema/library';
 // P3-L end
+import * as designSystems from './schema/design-systems'; // P3-D (the P3 spec's Decision Log 61)
 
 export {
   HostPingSchema,
@@ -144,6 +145,7 @@ export const commands = {
   ...artifacts.commands, // P3-A M4
   ...spaces.commands, // P3-A M4
   ...library.commands, // P3-L M1
+  ...designSystems.commands, // P3-D (Decision Log 61)
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -185,6 +187,7 @@ export const events = {
   ...artifacts.events, // P3-A M4
   ...spaces.events, // P3-A M4
   ...library.events, // P3-L M1
+  ...designSystems.events, // P3-D (Decision Log 61)
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;

@@ -15,12 +15,15 @@ import { DEFAULT_SYSTEMS, HOUSE_KEY } from '@artifacts/types/design_system/defau
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
+import { HostCommandError, type HostOn } from '@shared/host/runtime';
+import { commands, type CommandName, type CommandOutput } from '@shared/ipc/schema';
+import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { openDocuments, type Documents } from '../documents';
 import { ArtifactStoreError } from '../documents/errors';
 import { LibraryMirror } from '../library/mirror';
 import { artifactCreateTool, artifactDescribeTypeTool } from '../tool-server/artifact-tools';
 import { jsonOf, openWorld } from '../tool-server/artifact-world.fixture';
-import { registerDesignSystems, type DesignSystems } from '.';
+import { DESIGN_SYSTEMS_DEADLINE_SHAPES, registerDesignSystems, type DesignSystems } from '.';
 
 const HUMAN: Actor = { kind: 'human' };
 const AGENT: Actor = { kind: 'session', appSessionId: 'app-ds-agent' as AppSessionId };
@@ -30,11 +33,15 @@ let dir: string;
 let documents: Documents;
 let systems: DesignSystems;
 let logs: string[];
+let handlers: Map<string, (input: unknown) => Promise<unknown>>;
+// The runtime's `on` as a test records it (a re-registration replaces the handler, as a fresh host would serve it).
+const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
 
 function open(): void {
   documents = openDocuments(dir, () => {})!;
   logs = [];
-  systems = registerDesignSystems({ documents, log: (line) => logs.push(line), loadAssets: async (key) => (key === 'official' ? [FONT] : []) });
+  handlers = new Map();
+  systems = registerDesignSystems({ on, documents, log: (line) => logs.push(line), loadAssets: async (key) => (key === 'official' ? [FONT] : []) });
 }
 function close(): void {
   systems.close();
@@ -147,6 +154,54 @@ describe('the default chain (Acceptance 12)', () => {
   });
 });
 
+// A call as the runtime makes it: the input validated first, the output checked against the registry after.
+async function call<N extends CommandName>(name: N, input: unknown): Promise<CommandOutput<N>> {
+  const checked = validateCommandInput(name, input);
+  if (!checked.ok) throw new Error(`invalid input for ${name}: ${JSON.stringify(checked.error)}`);
+  const output = validateCommandOutput(name, await handlers.get(name)!(checked.value));
+  if (!output.ok) throw new Error(`invalid output of ${name}: ${JSON.stringify(output.error.issues)}`);
+  return output.value as CommandOutput<N>;
+}
+
+// The renderer's read of the chain's house link (the P3 spec's Decision Log 61; the ledger's X28): a window passes it
+// to `governingSystem` as `house`, so a scope draws the system the host's chain would name, not the bundled floor.
+describe('designSystems.house (Decision Log 61)', () => {
+  it('has a handler and one immediate deadline shape for every command the engine host owns in the namespace', () => {
+    const owned = Object.entries(commands).filter(([name, spec]) => name.startsWith('designSystems.') && spec.owner === 'engine-host').map(([name]) => name);
+    expect(Object.keys(DESIGN_SYSTEMS_DEADLINE_SHAPES).sort()).toEqual(owned.sort());
+    expect(new Set(Object.values(DESIGN_SYSTEMS_DEADLINE_SHAPES))).toEqual(new Set(['immediate']));
+    for (const name of owned) expect(handlers.has(name), name).toBe(true);
+  });
+
+  it('answers the chain’s house system as it moves: the seeded one even renamed and edited, the next on its deletion, null when none is left', async () => {
+    await systems.seeded;
+    const house = byKey(HOUSE_KEY);
+    expect(await call('designSystems.house', undefined)).toEqual({ houseId: house });
+    // the owner's edits do not move it: the origin, not the title or the tokens, names the house
+    await store().update(house, { title: 'Our house' });
+    await service().writeAs(house, HUMAN, (doc) => setToken(doc, 'color.accent.$root', { $value: '#2f6b4f' }));
+    expect(await call('designSystems.house', undefined)).toEqual({ houseId: house });
+    // a copy is a later system of the same origin; it becomes the house once the first is deleted
+    const copy = await store().duplicate(house, {}, HUMAN);
+    expect(await call('designSystems.house', undefined)).toEqual({ houseId: house });
+    await store().delete(house);
+    expect(await call('designSystems.house', undefined)).toEqual({ houseId: copy.id });
+    await store().delete(copy.id);
+    expect(await call('designSystems.house', undefined)).toEqual({ houseId: null });
+    expect(systems.chain!.governing({})).toEqual({ builtin: 'maws' }); // the same answer the host's own chain gives
+  });
+
+  it('answers unavailable when the store could not be opened this run', async () => {
+    handlers = new Map();
+    const without = registerDesignSystems({ on, documents: null, log: () => {} });
+    try {
+      await expect(call('designSystems.house', undefined)).rejects.toSatisfy((error) => error instanceof HostCommandError && error.ipcError.code === 'internal' && (error.ipcError.issues as { reason: string }).reason === 'unavailable');
+    } finally {
+      without.close();
+    }
+  });
+});
+
 // D's chain registered in A's store (X23, A's M7): what A's pin and A's tools ask the store, D's chain answers, with the
 // house link and a deleted default's fall-through that A's own chain lacks.
 describe('the chain registered in A’s store (X23; Acceptance 12)', () => {
@@ -177,7 +232,7 @@ describe('the chain registered in A’s store (X23; Acceptance 12)', () => {
 
   it('attaches the governing system’s law to artifact_create and artifact_describe_type, down the chain', async () => {
     const world = openWorld();
-    const mounted = registerDesignSystems({ documents: { storage: world.storage, service: world.service, store: world.store, close: () => {} }, log: () => {}, loadAssets: async () => [] });
+    const mounted = registerDesignSystems({ on, documents: { storage: world.storage, service: world.service, store: world.store, close: () => {} }, log: () => {}, loadAssets: async () => [] });
     try {
       await mounted.seeded;
       const keyed = (key: string) => world.store.list({ kind: 'design_system' }).find((s) => s.title === DEFAULT_SYSTEMS.find((d) => d.key === key)!.name)!.id;
@@ -329,7 +384,7 @@ describe('the mirror (Decision Log 18)', () => {
     expect(designSystemMirrorWriter({ artifact, doc: newDoc() })).toEqual({ files: {} });
     systems.close();
     expect(mirrorWriterFor('design_system')).toBeUndefined();
-    systems = registerDesignSystems({ documents, log: () => {}, loadAssets: async () => [] }); // afterEach closes it
+    systems = registerDesignSystems({ on, documents, log: () => {}, loadAssets: async () => [] }); // afterEach closes it
   });
 
   it('mirrors a system in a linked Space with its assets, its face included, read from the store (L’s M6b)', async () => {
