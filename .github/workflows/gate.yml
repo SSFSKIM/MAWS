@@ -1,0 +1,128 @@
+# The class-1 gates of docs/doperpowers/plans/2026-10-14-gate-offload.md (§3.1, §3.2): the package scripts run verbatim
+# on a runner. scripts/ci-gate.sh pushes the sha under test to a `ci/` ref, narrowing the set with a `Gates:` trailer.
+name: gate
+
+on:
+  push:
+    branches: ['ci/**']
+  workflow_dispatch:
+    inputs:
+      gates:
+        description: 'A comma list over static, unit, probes, e2e:<group> (e2e:default is the bare `pnpm e2e`); empty runs the whole class-1 set.'
+        type: string
+        default: ''
+
+concurrency:
+  group: gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  # §3.1's class-1 e2e groups. A name whose script is not in package.json is skipped, so a child's group joins the
+  # default set at the commit that adds its script.
+  CLASS1_E2E: >-
+    default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import
+    settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
+    design-systems
+  # The groups that render documents through LibreOffice (P3-B's DOCX-to-PDF case, P3-C's render-and-compare).
+  LIBREOFFICE_E2E: document presentations
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  plan:
+    # The runner is chosen here alone (the jobs below repeat the anchor); a repository variable GATE_RUNNER overrides it.
+    runs-on: &runner ${{ vars.GATE_RUNNER || 'ubuntu-24.04' }}
+    timeout-minutes: 30
+    outputs:
+      static: ${{ steps.plan.outputs.static }}
+      unit: ${{ steps.plan.outputs.unit }}
+      probes: ${{ steps.plan.outputs.probes }}
+      e2e: ${{ steps.plan.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            package.json
+            .github
+          sparse-checkout-cone-mode: false
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_GATES: ${{ inputs.gates }}
+          HEAD_MESSAGE: ${{ github.event.head_commit.message }}
+        run: node .github/scripts/gate-plan.mjs
+
+  static:
+    needs: plan
+    if: needs.plan.outputs.static == 'true'
+    runs-on: *runner
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm typecheck
+      - if: ${{ !cancelled() }}
+        run: .github/scripts/gate-run.sh 'error TS|problems?\b' pnpm lint
+
+  unit:
+    needs: plan
+    if: needs.plan.outputs.unit == 'true'
+    runs-on: *runner
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # The bundle guard among the unit suites reads the built engine-host chunk.
+      - run: .github/scripts/gate-run.sh 'built in|error' pnpm build
+      - run: .github/scripts/gate-run.sh '^ *(Test Files|Tests|Type Errors|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$(getconf _NPROCESSORS_ONLN)"
+
+  probes:
+    needs: plan
+    if: needs.plan.outputs.probes == 'true'
+    runs-on: *runner
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: .github/scripts/gate-run.sh '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' pnpm test:probes
+
+  e2e:
+    needs: plan
+    if: needs.plan.outputs.e2e != '[]'
+    name: e2e:${{ matrix.group }}
+    runs-on: *runner
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.e2e) }}
+    env:
+      MAWS_E2E_QUIET: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          e2e: 'true'
+          libreoffice: ${{ matrix.libreoffice }}
+      - if: matrix.build
+        run: .github/scripts/gate-run.sh 'built in|error' pnpm build
+      - env:
+          SCRIPT: ${{ matrix.script }}
+        run: |
+          display=()
+          if [[ $RUNNER_OS == Linux ]]; then display=(xvfb-run -a --server-args='-screen 0 1920x1080x24'); fi
+          .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' "${display[@]}" pnpm "$SCRIPT"
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ matrix.slug }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
