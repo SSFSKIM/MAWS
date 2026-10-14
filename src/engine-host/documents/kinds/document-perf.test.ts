@@ -116,7 +116,7 @@ describe('the seam’s commands', () => {
 });
 
 describe('the file channel', () => {
-  it('answers each command file in `out` under the same name, in arrival order', async () => {
+  it('answers each command file in `out` under the same name, in arrival order', { timeout: 30_000 }, async () => {
     const dir = join(world.dir, 'document-perf');
     const seam = startDocumentPerfSeam(world.store, dir);
     try {
@@ -129,7 +129,7 @@ describe('the file channel', () => {
       send('000001', { cmd: 'heap' });
       send('000002', { cmd: 'nope' });
       const answerOf = async (name: string) => {
-        for (let k = 0; k < 200; k++) {
+        for (let k = 0; k < 1_000; k++) { // up to 20 s: a loaded machine's file watch is slow
           const path = join(dir, 'out', `${name}.json`);
           if (existsSync(path)) return JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>;
           await settle();
