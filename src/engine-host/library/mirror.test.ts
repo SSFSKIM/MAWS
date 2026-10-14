@@ -1,7 +1,7 @@
 // The linked-directory mirror over a real store (the P3-L document, M2; Decision Log 12): a linked Space's artifacts
 // written read-only under `<linkedDir>/artifacts/` after each change settles, the manifest owning exactly what the
 // mirror wrote, and a host start bringing the directory up to date.
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -203,6 +203,55 @@ describe('the linked-directory mirror (M2)', () => {
     await store().delete(page.id); // still owned: removed with the artifact
     await mirror!.flush();
     expect(listed()).toEqual([]);
+  });
+
+  it('refuses a directory whose manifest path is a link, dangling or not, leaving the link and what it points at alone (fix wave 2)', async () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
+    try {
+      writeFileSync(join(elsewhere, 'kept.json'), 'the owner’s file');
+      for (const target of [join(elsewhere, 'not-mounted.json'), join(elsewhere, 'kept.json')]) {
+        mkdirSync(out(), { recursive: true });
+        symlinkSync(target, out(MIRROR_MANIFEST));
+        await startMirror();
+        const space = await linkedSpace();
+        const page = await store().create({ kind: 'html', title: 'Page', spaceId: space.id, content: html('x') }, agent);
+        await mirror!.flush();
+        expect(listed()).toEqual([MIRROR_MANIFEST]); // nothing mirrored there
+        expect(readlinkSync(out(MIRROR_MANIFEST))).toBe(target);
+        expect(existsSync(join(elsewhere, 'not-mounted.json'))).toBe(false);
+        expect(readFileSync(join(elsewhere, 'kept.json'), 'utf8')).toBe('the owner’s file');
+        expect(logs.some((line) => line.includes('Launch') && line.includes(MIRROR_MANIFEST))).toBe(true);
+
+        mirror!.close();
+        mirror = null;
+        await store().delete(page.id);
+        await store().deleteSpace(space.id);
+        rmSync(out(), { recursive: true, force: true });
+        logs.length = 0;
+      }
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an owner’s hard link of a mirrored file alone when the artifact is renamed to its name (fix wave 2)', async () => {
+    await startMirror();
+    const space = await linkedSpace();
+    const page = await store().create({ kind: 'html', title: 'Original', spaceId: space.id, content: html('original') }, agent);
+    await mirror!.flush();
+    const backup = `${mirrorSlug({ id: page.id, title: 'Backup' })}.html`;
+    linkSync(out(`${mirrorSlug(page)}.html`), out(backup)); // the owner's own copy under the name a rename will want
+
+    await store().update(page.id, { title: 'Backup' });
+    await store().writeContent(page.id, html('new'), agent);
+    await mirror!.flush();
+    expect(read(backup)).toBe('<p>original</p>');
+    expect(logs.some((line) => line.includes(backup) && line.includes("not the mirror's"))).toBe(true);
+    expect(existsSync(out(MIRROR_MANIFEST)) ? manifest().artifacts[page.id]?.files ?? [] : []).toEqual([]);
+
+    await store().delete(page.id);
+    await mirror!.flush();
+    expect(read(backup)).toBe('<p>original</p>');
   });
 
   it('brings the directory up to date at a host start after changes made while it was down', async () => {

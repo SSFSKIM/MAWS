@@ -10,10 +10,11 @@
 // - The manifest `<linkedDir>/artifacts/.maws-mirror.json` names every file the mirror wrote, per artifact, with the
 //   revision and slug it wrote them at. A rename, a move out of the Space, a delete or an unlink removes exactly those
 //   files; a file at a target name that the manifest does not own is left alone (logged), never overwritten. An
-//   artifact whose revision and slug match its entry, with its files present, is not rewritten. A name is the mirror's
-//   when it reaches a file the mirror owns, so a rename by case only on a case-insensitive volume keeps the file.
-// - Something at the manifest's path that is not a MAWS manifest is the owner's: the directory is refused (logged, as a
-//   failing one) and the file never rewritten or removed.
+//   artifact whose revision and slug match its entry, with its files present, is not rewritten. A name that differs
+//   from one the mirror owns by case or Unicode normalization only, and reaches that same file, is that file, so a
+//   rename by case only on a case-insensitive volume keeps it; any other name, an owner's hard link included, is not.
+// - Something at the manifest's path that is not a MAWS manifest (another file, a link, dangling or not) is the
+//   owner's: the directory is refused (logged, as a failing one) and that entry never rewritten or removed.
 // - Two Spaces linked to one directory share its manifest (the desired set is per directory).
 // - A directory that fails (gone, unwritable, a link) is logged per Space and tried again at the next change, which
 //   reconciles the whole directory once it loads again; the linked directory itself is never created, and no write or
@@ -287,9 +288,8 @@ export class LibraryMirror {
         continue;
       }
       const target = join(root, file);
-      // a name that reaches one of this artifact's files under another name: a rename by case only on a case-insensitive
-      // volume, the same file
-      const sameAs = mine.has(file) ? undefined : [...mine].find((own) => sameFile(target, join(root, own)));
+      // one of this artifact's own names spelled another way (a rename by case only on a case-insensitive volume)
+      const sameAs = mine.has(file) ? undefined : [...mine].find((own) => aliases(root, own, file));
       if (!mine.has(file) && sameAs === undefined && (owned.has(file) || occupied(target))) {
         this.log(`${artifactId}: ${target} is not the mirror's file; not written`);
         continue;
@@ -312,7 +312,7 @@ export class LibraryMirror {
     // revision -1, which no revision matches, so the next change tries again.
     const leftover: string[] = [];
     for (const file of mine) {
-      if (written.some((done) => done === file || sameFile(join(root, file), join(root, done)))) continue; // the name now reaches what was written
+      if (written.some((done) => done === file || aliases(root, file, done))) continue; // the name now reaches what was written
       if (failure) {
         leftover.push(file);
         continue;
@@ -404,14 +404,15 @@ export class LibraryMirror {
   private save(dir: string, manifest: Manifest): void {
     const root = join(dir, MIRROR_DIR);
     const path = join(root, MIRROR_MANIFEST);
-    if (existsSync(path) && this.saved.get(dir) !== readFileSync(path, 'utf8')) readManifest(path); // not ours since: left alone
+    const present = occupied(path); // a link there too, dangling or not
+    if (present && (!lstatSync(path).isFile() || this.saved.get(dir) !== readFileSync(path, 'utf8'))) readManifest(path); // not ours since: left alone
     if (Object.keys(manifest.artifacts).length === 0) {
-      if (existsSync(path)) removeFile(root, MIRROR_MANIFEST);
+      if (present) removeFile(root, MIRROR_MANIFEST);
       this.saved.delete(dir);
       return;
     }
     const json = `${JSON.stringify(manifest, null, 2)}\n`;
-    if (this.saved.get(dir) === json && existsSync(path)) return; // unchanged: a no-op change writes nothing
+    if (this.saved.get(dir) === json && present) return; // unchanged: a no-op change writes nothing
     ensureRoot(root);
     const temp = join(root, `.${MIRROR_MANIFEST}.${randomUUID().slice(0, 8)}.tmp`);
     writeFileSync(temp, json);
@@ -439,7 +440,14 @@ function linkedDirs(spaces: Space[]): Map<string, { spaceIds: Set<string>; names
 // `artifacts/` is ever removed). A file that is not a MAWS manifest at all is the owner's: it throws, so the directory
 // is refused rather than the file overwritten or removed.
 function readManifest(path: string): Manifest {
-  if (!existsSync(path)) return { version: 1, artifacts: {} };
+  let entry;
+  try {
+    entry = lstatSync(path); // never followed: a link there is not the mirror's, dangling or not
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { version: 1, artifacts: {} };
+    throw error;
+  }
+  if (!entry.isFile()) throw new Error(`${path} is not a MAWS mirror manifest (not a regular file); it is left alone`);
   let parsed: unknown;
   try {
     parsed = JSON.parse(readFileSync(path, 'utf8'));
@@ -491,10 +499,14 @@ function occupied(path: string): boolean {
   }
 }
 
-// Two names reach one file (one device and inode): on a case-insensitive volume, names differing by case only.
-function sameFile(a: string, b: string): boolean {
+// Two mirror paths that are one directory entry spelled two ways: equal but for case and Unicode normalization (as a
+// case-insensitive, normalization-insensitive volume such as APFS compares names) and reaching one file (one device and
+// inode). An owner's hard link under another name reaches the same file but is not an alias.
+function aliases(root: string, a: string, b: string): boolean {
+  const folded = (name: string) => name.normalize('NFC').toLowerCase();
+  if (folded(a) !== folded(b)) return false;
   try {
-    const [first, second] = [lstatSync(a), lstatSync(b)];
+    const [first, second] = [lstatSync(join(root, a)), lstatSync(join(root, b))];
     return first.dev === second.dev && first.ino === second.ino;
   } catch {
     return false;
