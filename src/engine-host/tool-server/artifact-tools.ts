@@ -3,7 +3,8 @@
 // carries the session as the actor and links it (`created`, `viewed`); a handle resolves over the session's lineage
 // (Decision Log 3); a create is idempotent by its tool-use id (Decision Log 11) and records its answer inside the
 // savepoint of the write that commits it; a read captures the session's base for its next publish (Decision Log 9).
-// An `html` or `file` artifact is mirrored into X12 after the commit (Decision Log 4).
+// An `html` create also answers E2's fields (`id`, `deliverableId`, `version` 1), which the transcript's artifact row is
+// drawn from (P3-L's cutover keeps their names; the deliverable id is the artifact's id).
 import { readFile, stat } from 'node:fs/promises';
 import { basename, extname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -29,7 +30,6 @@ import {
   answering,
   editorOf,
   filesOf,
-  importLineage,
   lineageOf,
   opIdOf,
   publisherOf,
@@ -42,7 +42,6 @@ import {
 } from './artifact-context';
 import { externalReferenceCount } from './artifacts';
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition } from './server';
-import { X12Mirror } from './x12-mirror';
 
 const HTML_EXTENSIONS = new Set(['.html', '.htm']);
 const TEXT_READ_MAX = 1024 * 1024; // a file artifact's text is returned under this size (the file guide)
@@ -59,7 +58,6 @@ export function artifactListTool(deps: ArtifactToolDeps): McpToolDefinition {
       const { kind, spaceId, query, scope } = parsed.data;
       const store = storeOf('artifact_list', deps);
       const lineage = lineageOf(ctx, deps);
-      await importLineage(deps, store, lineage); // pre-P3 records in scope are listed like the rest (Decision Log 40a)
       const artifacts = await store.readCommitted(() => {
         const filter = { kind, spaceId, query };
         const found = scope === 'all' ? store.list(filter) : dedupe(lineage.flatMap((appSessionId) => store.list({ ...filter, appSessionId })));
@@ -91,7 +89,6 @@ export function artifactDescribeTypeTool(deps: Pick<ArtifactToolDeps, 'artifacts
 }
 
 export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
-  const mirror = new X12Mirror(deps);
   return defineMawsTool('artifact_create', (args, ctx) =>
     deps.session.joined(opIdOf(ctx), () => answering('artifact_create', async () => {
       const parsed = parseToolArguments('artifact_create', args);
@@ -107,19 +104,18 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (replayed.found) {
         const answer = replayed.result as ArtifactCreateResult;
         deps.session.guided.add(answer.kind);
-        await ensureMirrored(store, deps, mirror, answer, ctx);
         return toolText(answer);
       }
 
       // What the artifact starts from, read and checked before anything is written
       let content: ByteContent | undefined;
-      let page: { bytes: Buffer; sourcePath?: string } | null = null;
+      let page: { bytes: Buffer } | null = null;
       if (kind === 'html') {
         if (path !== undefined) {
           const source = resolve(ctx.cwd, path);
           const found = await stat(source).catch(() => null);
           if (found?.isFile() && !HTML_EXTENSIONS.has(extname(source).toLowerCase())) return toolError(TOOL_ERRORS.notHtml('artifact_create', source));
-          page = { bytes: await readSourceFile('artifact_create', source), sourcePath: source };
+          page = { bytes: await readSourceFile('artifact_create', source) };
           content = { bytes: page.bytes, name: basename(source) };
         } else {
           page = { bytes: Buffer.from(input.content!, 'utf8') };
@@ -140,8 +136,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
         withDoc(null, (scratch) => publisherOf(store, kind)(scratch, {}, input.files!, false));
       }
 
-      // E2 and P2-E1: a handle the session, or a session it was opened from, already holds is refused (in the store, or
-      // on an X12 record not yet imported, Decision Log 40a)
+      // E2 and P2-E1: a handle the session, or a session it was opened from, already holds is refused
       if (handle !== undefined) {
         const taken = await handleHolder(store, deps, handle, ctx);
         if (taken === 'self') return toolError(TOOL_ERRORS.artifactExists(handle));
@@ -156,14 +151,12 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
       const designSystem = DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor({}) : null;
       const files = isDocKind(kind) ? input.files : undefined;
       let base: { revision: number; state: Uint8Array } | null = null;
-      let fresh = false; // the call ran here, not answered from the ledger
       const recorded = await store.writeCommitted(() =>
         store.withOp(
           opIdOf(ctx),
           'artifact_create',
           null,
           async (op) => {
-            fresh = true;
             let answer: ArtifactCreateResult | undefined;
             // the answer, built and recorded inside the savepoint of the write that completes the create (with the first
             // files when there are any: Decision Log 40b)
@@ -191,33 +184,15 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
       // the session's base: what it just wrote (a replayed call leaves none for a Y kind: the agent reads first)
       if (base) store.service.replica(ctx.appSessionId, recorded.artifactId).base = base;
       if (page !== null) deps.session.byteBases.set(recorded.artifactId, { revision: recorded.revision, sha256: createHash('sha256').update(page.bytes).digest('hex') });
-      if (fresh) await ensureMirrored(store, deps, mirror, recorded, ctx, page?.sourcePath);
       return toolText(recorded);
     })),
   );
 }
 
-// Who already holds a handle a create names: this session, a session above it, in the store or on an X12 record.
+// Who already holds a handle a create names: this session, or a session above it.
 async function handleHolder(store: ArtifactStore, deps: ArtifactToolDeps, handle: string, ctx: McpToolContext): Promise<'self' | 'above' | null> {
   const above = deps.artifactScope ?? [];
-  const inStore = await store.readCommitted(() => (store.resolve(handle, [ctx.appSessionId]) ? 'self' : above.length > 0 && store.resolve(handle, above) ? 'above' : null));
-  if (inStore) return inStore;
-  if (await deps.deliverables.findArtifact(ctx.appSessionId, handle)) return 'self';
-  for (const session of above) if (await deps.deliverables.findArtifact(session, handle)) return 'above';
-  return null;
-}
-
-// A created `html` or `file` artifact's X12 record (Decision Log 4), written when it is not there yet: after the first
-// call's commit, or by its retry when the first never got that far. Its copy is the store's own content file.
-async function ensureMirrored(store: ArtifactStore, deps: ArtifactToolDeps, mirror: X12Mirror, created: ArtifactCreateResult, ctx: McpToolContext, sourcePath?: string): Promise<void> {
-  if (created.kind !== 'html' && created.kind !== 'file') return;
-  if (await deps.deliverables.get(ctx.appSessionId, created.artifactId).catch(() => null)) return;
-  const { path } = await store.readCommitted(() => store.contentRef(created.artifactId, created.revision));
-  if (created.kind === 'html') {
-    await mirror.page({ id: created.artifactId, title: created.title, ...(created.handle !== undefined && { handle: created.handle }) }, ctx.appSessionId, { path, ...(sourcePath !== undefined && { sourcePath }) }, ctx.toolUseId);
-  } else {
-    await mirror.files([{ id: created.artifactId, path, title: created.title }], ctx.appSessionId, undefined, ctx.toolUseId);
-  }
+  return store.readCommitted(() => (store.resolve(handle, [ctx.appSessionId]) ? 'self' : above.length > 0 && store.resolve(handle, above) ? 'above' : null));
 }
 
 export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
@@ -227,7 +202,7 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (!parsed.ok) return toolError(parsed.error);
       const input = parsed.data;
       const store = storeOf('artifact_read', deps);
-      const artifactId = await resolveArtifact('artifact_read', deps, store, input.artifact, lineageOf(ctx, deps));
+      const artifactId = await resolveArtifact('artifact_read', store, input.artifact, lineageOf(ctx, deps));
       const read = await store.readCommitted(() => {
         const artifact = store.get(artifactId);
         if (!artifact) throw new ToolRefusal(TOOL_ERRORS.noArtifact('artifact_read', input.artifact));

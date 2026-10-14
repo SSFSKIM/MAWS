@@ -300,19 +300,22 @@ export type ShowPaneResult = z.infer<typeof ShowPaneResultSchema>;
 const OwnerAppSessionIdSchema = AppSessionIdSchema.optional();
 const IsoTimeSchema = z.string();
 
-// E2's artifact row and `maws.delivery.artifact` read these fields of an answer that registered an X12 version (E2's
-// create and update; P3-A's create and publish of an `html` artifact, whose X12 mirror it reports, Decision Log 4): `id`
-// the name the agent gave it (its handle, else its id), `deliverableId` the record's uuid (the artifact's id),
-// `version` the record's 1-based version. Loose on purpose: every answer shape that carries them reads alike.
+// E2's artifact row and `maws.delivery.artifact` read these fields of an answer that registered a page's version (E2's
+// create and update; P3-A's create and publish of an `html` artifact): `id` the name the agent gave it (its handle, else
+// its id), `deliverableId` the artifact's id (X12's record id before P3-L's cutover, which keeps the name), `version`
+// the version's place, from 1, among the artifact's versions by revision. Loose on purpose: every answer shape that
+// carries them reads alike. P3-L (M6b fix wave 2): `revision`, the revision the call wrote (P3-A's answers carry it), is
+// the version's stable identity: the place shifts when the history before it thins, the revision never does.
 export const ArtifactDeliverySchema = z.object({
   id: z.string(), deliverableId: z.uuid(), version: z.number().int().min(1), title: z.string(),
   ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1
+  revision: z.number().int().min(0).optional(), // P3-L (M6b fix wave 2)
 });
 export type ArtifactDelivery = z.infer<typeof ArtifactDeliverySchema>;
 
 // P3-A (M6): the kind's guide, attached once per session to the first create of that kind (§4.3).
 const KindGuideSchema = z.strictObject({ guide: z.string(), format: z.string() });
-// An `html` create also answers E2's fields for its X12 mirror (`id`, `deliverableId`, `version` 1,
+// An `html` create also answers E2's fields (`id`, `deliverableId`, `version` 1,
 // `externalReferences`: the http(s) URLs the page names, advisory: the frame loads none of them).
 export const ArtifactCreateResultSchema = z.strictObject({
   status: z.literal('created'), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0),
@@ -360,13 +363,13 @@ export const ArtifactReadResultSchema = z.strictObject({
 });
 export type ArtifactReadResult = z.infer<typeof ArtifactReadResultSchema>;
 // `changed` and `removed` are the paths the publish wrote; `kept`, the artifact's other files, as they are live. An
-// `html` publish also answers E2's fields for its X12 mirror's new version. A suggestion (`status: 'suggested'`) answers
+// `html` publish also answers E2's fields for the version it wrote. A suggestion (`status: 'suggested'`) answers
 // the artifact's live revision, which it did not move, and its paths as the suggestions stand.
 export const ArtifactPublishResultSchema = z.strictObject({
   status: z.enum(['published', 'suggested']), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string(), revision: z.number().int().min(0),
   changed: z.array(z.string()), kept: z.array(z.string()), removed: z.array(z.string()),
   id: z.string().optional(), deliverableId: z.uuid().optional(), version: z.number().int().min(1).optional(), externalReferences: z.number().int().min(0).optional(),
-  ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1: the X12 record is its creator's
+  ownerAppSessionId: OwnerAppSessionIdSchema, // P2-E1: the page is its creator's
 });
 export type ArtifactPublishResult = z.infer<typeof ArtifactPublishResultSchema>;
 export const ArtifactUploadAssetResultSchema = z.strictObject({ status: z.literal('uploaded'), artifactId: z.uuid(), assetId: z.string(), ref: z.string(), name: z.string(), size: z.number().int().min(0) });
@@ -394,7 +397,7 @@ export const MAWS_TOOLS = {
   send_file: {
     title: 'Send file',
     description:
-      'Deliver files to the user inside MAWS; without this tool, write the file and tell the user its path. Each delivered file becomes a row in the MAWS transcript with your caption and buttons to open it or reveal it in Finder; use it when you have produced something the user should look at (a PDF, an HTML page, an image, a document). Paths may be absolute or relative to the working directory and must name existing files. Returns the deliverable ids MAWS recorded.',
+      'Deliver files to the user inside MAWS; without this tool, write the file and tell the user its path. Each delivered file becomes a row in the MAWS transcript with your caption and buttons to open it or reveal it in Finder; use it when you have produced something the user should look at (a PDF, an HTML page, an image, a document). Paths may be absolute or relative to the working directory and must name existing files. Each becomes a File artifact; returns their artifact ids.',
     input: SendFileInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
@@ -408,7 +411,7 @@ export const MAWS_TOOLS = {
   show_pane: {
     title: 'Show pane',
     description:
-      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "deliverable", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), a deliverable id for deliverable, a URL for browser. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
+      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
     input: ShowPaneInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
@@ -506,6 +509,7 @@ export const TOOL_ERRORS = {
   invalidArguments: (tool: MawsToolName, issues: string) => `${tool}: invalid arguments: ${issues}`,
   unknownTool: (name: string) => `unknown tool "${name}"; the maws server has ${MAWS_TOOL_NAMES.join(', ')}`,
   notAFile: (path: string) => `send_file: not a file: ${path}`,
+  deliveryUnavailable: 'send_file: the artifact store is unavailable in this run of MAWS; nothing was delivered', // P3-L (M6b): no X12 record stands in for it
   sessionEnded: 'ask: the session ended before the user answered',
   unknownPane: (pane: string) => `show_pane: unknown pane "${pane}"; known panes: ${PANE_NAMES.join(', ')}`,
   paneUnavailable: (pane: string) => `show_pane: the ${pane} pane is not available in this build of MAWS`,
@@ -523,8 +527,9 @@ export const TOOL_ERRORS = {
   noVersion: (id: string, version: number, versions: number) => `artifact_screenshot: version ${version} does not exist; "${id}" has ${versions} version(s)`,
   captureFailed: (reason: string) => `artifact_screenshot: MAWS could not capture the artifact: ${reason}`,
   captureTimeout: `artifact_screenshot: MAWS did not answer within ${CAPTURE_ANSWER_MS / 1000} s`,
-  deliverableNotFound: (id: string) => `show_pane: no deliverable "${id}" in this session`,
-  deliverableUnreadable: (id: string, message: string) => `show_pane: could not read deliverable "${id}": ${message}`, // E2: main refused the read
+  // P3-L (M6b): the `artifact` pane's target names no artifact the session's lineage holds, or main refused the read
+  artifactNotFound: (id: string) => `show_pane: no artifact "${id}" in this session`,
+  artifactUnreadable: (id: string, message: string) => `show_pane: could not read artifact "${id}": ${message}`,
   // E2 end
   // E10: a bridge request made while no app is connected to the engine host (the detached supervisor), answered at once
   appNotOpen: (tool: 'show_pane' | 'artifact_screenshot' | 'artifact_export') => `${tool}: MAWS is not open; the ${tool === 'show_pane' ? 'pane cannot be shown' : tool === 'artifact_export' ? 'artifact cannot be exported' : 'artifact cannot be captured'}`,

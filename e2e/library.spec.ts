@@ -4,12 +4,13 @@
 // a document's text and in an HTML page; Pin moves a row into Pinned; a Space made and an artifact moved into it shows
 // under By Space; Rename and Delete land after the host's event; and the library is right after the host process is
 // killed and restarted (M7: with a write main's index had missed, through main's e2e seam). M7's upgrade case: an index rewound
-// to version 8 beside a populated host store migrates to 9 at launch and the first connection's snapshot fills it. M5b:
+// to version 9 beside a populated host store migrates to 10 at launch and the first connection's snapshot fills it. M5b:
 // an HTML artifact a session made (on C3's replay transport, `support/library-session.ts`) in the panel's Artifacts
 // tool, its versions, P2's comment card and its Side thread, Open in tab and Export to PDF; a PDF, a video and an audio
-// file played from the library.
+// file played from the library. M6b: a profile with X12 records and an index at version 9 upgrades into the library.
 // `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -20,6 +21,7 @@ import { launchMaws, type MawsLaunch } from './support/launch';
 import { ownTitles } from './support/library';
 import { invoke, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
 import { minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // M5b
+import { closeScene, launchScene, scratchProject, seedArtifact, seedRecord, show, viewerOf, type Scratch } from './support/maws-tools'; // M6b
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -201,18 +203,18 @@ function schemaOf(db: DatabaseSync): { version: unknown; objects: unknown[] } {
   };
 }
 
-// An index at version 8 as an install before P3-L left it: the library's four tables dropped (migration 9 only adds
-// them) and the version set back, checked equal to the schema migrations 1 to 8 build.
-function rewindIndexTo8(path: string): void {
+// An index at version 9 as an install before P3-L left it: the library's four tables dropped (migration 10 only adds
+// them) and the version set back, checked equal to the schema migrations 1 to 9 build.
+function rewindIndexTo9(path: string): void {
   const db = new DatabaseSync(path);
   try {
-    expect(schemaOf(db).version, 'the first launch left the index at 9').toBe(9);
-    db.exec('DROP TABLE library_text; DROP TABLE library_links; DROP TABLE library_artifacts; DROP TABLE library_spaces; PRAGMA user_version = 8;');
+    expect(schemaOf(db).version, 'the first launch left the index at 10').toBe(10);
+    db.exec('DROP TABLE library_text; DROP TABLE library_links; DROP TABLE library_artifacts; DROP TABLE library_spaces; PRAGMA user_version = 9;');
     const template = new DatabaseSync(':memory:');
     try {
-      for (const migration of MIGRATIONS.filter((m) => m.version <= 8)) template.exec(migration.sql);
-      template.exec('PRAGMA user_version = 8');
-      expect(schemaOf(db), 'the rewound index is a version-8 index').toEqual(schemaOf(template));
+      for (const migration of MIGRATIONS.filter((m) => m.version <= 9)) template.exec(migration.sql);
+      template.exec('PRAGMA user_version = 9');
+      expect(schemaOf(db), 'the rewound index is a version-9 index').toEqual(schemaOf(template));
     } finally {
       template.close();
     }
@@ -221,7 +223,7 @@ function rewindIndexTo8(path: string): void {
   }
 }
 
-test('an index at version 8 beside a populated host store migrates to 9 at launch, and the first connection’s snapshot fills the library', async () => {
+test('an index at version 9 beside a populated host store migrates to 10 at launch, and the first connection’s snapshot fills the library', async () => {
   test.setTimeout(120_000);
   scratch = mkdtempSync(join(tmpdir(), 'maws-e2e-library-upgrade-'));
   const userData = join(scratch, 'ud');
@@ -242,9 +244,9 @@ test('an index at version 8 beside a populated host store migrates to 9 at launc
   });
   await launch.cleanup();
   launch = null;
-  rewindIndexTo8(join(userData, 'index.sqlite'));
+  rewindIndexTo9(join(userData, 'index.sqlite'));
 
-  // the upgrade: main migrates the index to 9, and the host's snapshot at the first connection is the whole library
+  // the upgrade: main migrates the index to 10, and the host's snapshot at the first connection is the whole library
   launch = await launchMaws({ userData });
   ({ page } = launch);
   await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
@@ -278,10 +280,86 @@ test('an index at version 8 beside a populated host store migrates to 9 at launc
   launch = null;
   const db = new DatabaseSync(join(userData, 'index.sqlite'), { readOnly: true });
   try {
-    expect(schemaOf(db).version, 'the index is at 9 again').toBe(9);
+    expect(schemaOf(db).version, 'the index is at 10 again').toBe(10);
     expect((db.prepare("SELECT count(*) AS n FROM library_artifacts WHERE kind <> 'design_system'").get() as { n: number }).n).toBe(3); // the case's own three (P3-D seeds design systems)
   } finally {
     db.close();
+  }
+});
+
+// ---- M6b: the X12 upgrade ---------------------------------------------------------------------------------------------
+
+// A profile as a build before P3-L left it: X12 deliverable records under `<userData>/deliverables/`, an index at
+// version 9, and an engine transcript whose send_file call was answered with an X12 record's id (E1's answer, in the
+// engine's own record of the call: what a relaunch draws the transcript from). The first launch makes the profile (its
+// index and the two sessions); between the launches the records are written and the index rewound, so the second
+// launch upgrades the index and its host imports the records at its start: the library shows a File and an HTML
+// artifact with their sessions, and the transcript's delivery row opens the File artifact the record became.
+function seedSendFile(scratch: Scratch, engineSessionId: string, path: string, recordId: string): void {
+  const transcript = join(scratch.config, 'projects', scratch.repo.replace(/[^a-zA-Z0-9]/g, '-'), `${engineSessionId}.jsonl`);
+  const first = JSON.parse(readFileSync(transcript, 'utf8').split('\n')[0]!) as { uuid: string };
+  const common = { isSidechain: false, cwd: scratch.repo, sessionId: engineSessionId, version: '2.1.291', userType: 'external' };
+  const toolUseId = 'toolu_01UpgradeSendFile0000000';
+  const call = {
+    ...common, parentUuid: first.uuid, type: 'assistant', uuid: randomUUID(), timestamp: '2026-10-06T00:00:05.000Z',
+    message: { id: 'msg_01UpgradeSendFile', type: 'message', role: 'assistant', model: 'claude-haiku-4-5-20251001', content: [{ type: 'tool_use', id: toolUseId, name: 'mcp__maws__send_file', input: { files: ['hello.txt'] } }], stop_reason: 'tool_use', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } },
+  };
+  const answer = JSON.stringify({ status: 'delivered', deliverables: [{ id: recordId, path, name: 'hello.txt' }] });
+  const result = {
+    ...common, parentUuid: call.uuid, type: 'user', uuid: randomUUID(), timestamp: '2026-10-06T00:00:06.000Z', sourceToolAssistantUUID: call.uuid,
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: [{ type: 'text', text: answer }] }] },
+  };
+  appendFileSync(transcript, `${JSON.stringify(call)}\n${JSON.stringify(result)}\n`);
+}
+
+test('a profile with X12 records and an index at version 9 launches into a library of File and HTML artifacts with their sessions, and a transcript delivery row opens the artifact', async () => {
+  test.setTimeout(180_000);
+  const project = scratchProject({ titles: ['L: delivered here', 'L: the other session'], label: 'p3l-upgrade' });
+  try {
+    const path = join(project.repo, 'hello.txt');
+    writeFileSync(path, 'HELLO_E1');
+    const recordId = randomUUID();
+    seedSendFile(project, project.engineIds[0]!, path, recordId);
+    const first = await launchScene(project);
+    const [here, other] = first.ids;
+    await closeScene(first);
+
+    const at = new Date(Date.now() - 3_600_000).toISOString();
+    seedRecord(project.userData, { id: recordId, appSessionId: here, kind: 'file', path, title: 'hello.txt', versions: [{ path, at }], createdAt: at });
+    const dashboard = seedArtifact(project.userData, other, 'dash', 'Dashboard', ['<!doctype html><html><body><h1 id="heading">DASHBOARD</h1></body></html>'], at);
+    rewindIndexTo9(join(project.userData, 'index.sqlite'));
+
+    const second = await launchScene(project, first.ids);
+    try {
+      const { page } = second;
+      await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+      const library = page.locator('[data-library]');
+      await expect.poll(async () => (await ownTitles(page, library)).sort(), { timeout: 20_000, message: 'the import filled the library' }).toEqual(['Dashboard', 'hello.txt']);
+      const file = library.getByRole('article', { name: 'hello.txt', exact: true });
+      await expect(file).toContainText('File');
+      await expect(file.getByRole('button', { name: 'L: delivered here', exact: true })).toBeVisible();
+      const dashRow = library.getByRole('article', { name: 'Dashboard', exact: true });
+      await expect(dashRow).toContainText('HTML page');
+      await expect(dashRow.getByRole('button', { name: 'L: the other session', exact: true })).toBeVisible();
+      expect(value(await invoke(page, 'artifacts.get', { artifactId: recordId })).artifact!.kind).toBe('file');
+      expect(value(await invoke(page, 'artifacts.get', { artifactId: dashboard.id })).artifact!.kind).toBe('html');
+
+      // the transcript's delivery row, naming the X12 record, opens the File artifact the record became
+      await show(second, here);
+      const toggle = second.pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript', exact: true });
+      if (await toggle.isVisible()) await toggle.click(); // P2-C Design §7: a lane-on pane opens on its Report
+      const name = second.pane.locator('[data-delivery] button.transcript-delivery-open');
+      await expect(name).toHaveText('hello.txt', { timeout: 15_000 });
+      await name.click();
+      await expect(viewerOf(second.panel)).toHaveAttribute('data-artifact-viewer', recordId);
+      await expect(viewerOf(second.panel).locator('[data-file-viewer]')).toContainText('HELLO_E1');
+    } catch (error) {
+      await second.maws.cleanup();
+      throw error;
+    }
+    await closeScene(second);
+  } finally {
+    rmSync(project.root, { recursive: true, force: true });
   }
 });
 

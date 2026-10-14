@@ -1,8 +1,7 @@
 // E2 (M6): comment mode's two halves in the app (Design §10): the messages the bridge script posts from an artifact's
 // frame, read with a schema (anything else is ignored), and the X10 `artifact-element` anchor built from a pick. P3-L
-// (M5b): shared by the Deliverables viewer (its record's `maws-deliverable:` page, `../../deliverables/comment/pick.ts`)
-// and the artifact store's HTML viewer (a `maws-artifact:` page); the anchor is built from the page's title, the shown
-// version's number and the page's URL. Every
+// (M5b): moved from E2's Deliverables viewer to the artifact store's HTML viewer (a `maws-artifact:` page); the anchor
+// is built from the page's title, the shown version's number and the page's URL. Every
 // field of a picked message is the page's to choose (a page can post the same shapes itself) and the title is the
 // agent's, so the builder makes each field one line, cuts the element's text to 40 characters and the label to 200
 // (E3's `AnchorSchema` caps), and puts the page's text nowhere but the label. The anchor carries X10's fields alone; a

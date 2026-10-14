@@ -37,8 +37,8 @@ import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@s
 import type { ArtifactRefusal } from '@shared/ipc/schema/artifacts';
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { artifactExportName, type ArtifactExportFormat, type ArtifactExportPageSize } from '@shared/maws/tools';
-import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from '../deliverables/capture';
-import { restrictRequests, type SeamEnv } from '../deliverables/policies';
+import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from './capture';
+import { restrictRequests, type SeamEnv } from './policies';
 import { CommandFailure } from '../ipc/router';
 import type { ContentLookup } from './protocol';
 

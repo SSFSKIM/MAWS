@@ -86,12 +86,12 @@ const file = (name: string, contents: string | Uint8Array) => {
 const node = (doc: Doc, name?: string): Node => new (doc.get('root').constructor as new (name?: string) => Node)(name);
 
 describe('the library reads (M2)', () => {
-  it('has a handler and exactly one deadline shape for every library command the engine host owns, each immediate', () => {
+  it('has a handler and exactly one deadline shape for every library read the engine host owns, each immediate (M6b: and the e2e import, bounded, registered by the module)', () => {
     const owned = Object.entries(commands).filter(([name, spec]) => name.startsWith('library.') && spec.owner === 'engine-host').map(([name]) => name);
-    expect(owned.sort()).toEqual(['library.entry', 'library.snapshot', 'library.text']);
+    expect(owned.sort()).toEqual(['library.entry', 'library.snapshot', 'library.testImport', 'library.text']);
     expect(Object.keys(LIBRARY_DEADLINE_SHAPES).sort()).toEqual(owned);
-    expect([...handlers.keys()].sort()).toEqual(owned);
-    expect(new Set(Object.values(LIBRARY_DEADLINE_SHAPES))).toEqual(new Set(['immediate']));
+    expect([...handlers.keys()].sort()).toEqual(owned.filter((name) => name !== 'library.testImport'));
+    expect(Object.entries(LIBRARY_DEADLINE_SHAPES).filter(([, shape]) => shape !== 'immediate')).toEqual([['library.testImport', 'bounded']]);
   });
 
   it('snapshots every live artifact with its revision and last editor, their session links and the Spaces', async () => {

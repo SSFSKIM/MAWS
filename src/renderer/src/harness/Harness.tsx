@@ -254,7 +254,7 @@ function toastCallbacks(say: (text: string) => void, open: (ref: SubagentRef) =>
       },
       peerReplies: NO_ACTIONS.peerReplies,
       // E7 end
-      openDeliverable: (_appSessionId, id, version) => say(`openDeliverable ${id}${version === undefined ? '' : ` v${version}`}`), // E2
+      openArtifact: (_appSessionId, id, version) => say(`openArtifact ${id}${version === undefined ? '' : ` v${version}`}`), // E2
       // E4d start
       openBrowserUrl: (_appSessionId, url) => say(`openBrowserUrl ${url}`),
       // E4d end

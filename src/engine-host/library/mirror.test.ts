@@ -1,7 +1,7 @@
 // The linked-directory mirror over a real store (the P3-L document, M2; Decision Log 12): a linked Space's artifacts
 // written read-only under `<linkedDir>/artifacts/` after each change settles, the manifest owning exactly what the
 // mirror wrote, and a host start bringing the directory up to date.
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -152,6 +152,108 @@ describe('the linked-directory mirror (M2)', () => {
     expect(read(`${mirrorSlug(page)}.html`)).toBe('theirs');
   });
 
+  it('refuses a directory whose manifest path holds something not a MAWS manifest, never touching it, and mirrors there once it is gone (whole-branch review)', async () => {
+    for (const theirs of ['the owner’s notes, not JSON', `${JSON.stringify({ version: 2, owner: 'another tool' })}\n`]) {
+      mkdirSync(out(), { recursive: true });
+      writeFileSync(out(MIRROR_MANIFEST), theirs);
+      await startMirror();
+      const space = await linkedSpace();
+      const page = await store().create({ kind: 'html', title: 'Page', spaceId: space.id, content: html('x') }, agent);
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST]); // nothing mirrored there
+      expect(read(MIRROR_MANIFEST)).toBe(theirs);
+      expect(logs.some((line) => line.includes('Launch') && line.includes(MIRROR_MANIFEST))).toBe(true);
+
+      await store().update(page.id, { spaceId: null }); // the directory's desired set now empty: the manifest still stays
+      await store().updateSpace(space.id, { linkedDir: null });
+      await mirror!.flush();
+      expect(read(MIRROR_MANIFEST)).toBe(theirs);
+
+      rmSync(out(MIRROR_MANIFEST)); // the owner moves their file away: the next change mirrors
+      await store().updateSpace(space.id, { linkedDir: project });
+      await store().update(page.id, { spaceId: space.id });
+      await mirror!.flush();
+      expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(page)}.html`]);
+      expect(manifest().artifacts[page.id].files).toEqual([`${mirrorSlug(page)}.html`]);
+
+      mirror!.close();
+      mirror = null;
+      await store().delete(page.id);
+      await store().deleteSpace(space.id);
+      rmSync(out(), { recursive: true, force: true });
+      logs.length = 0;
+    }
+  });
+
+  it('keeps the mirror of an artifact renamed by case only, on this machine’s filesystem (whole-branch review)', async () => {
+    await startMirror();
+    const space = await linkedSpace();
+    const page = await store().create({ kind: 'html', title: 'Report', spaceId: space.id, content: html('x') }, agent);
+    await mirror!.flush();
+    expect(listed()).toEqual([MIRROR_MANIFEST, `${mirrorSlug(page)}.html`]);
+
+    await store().update(page.id, { title: 'report' });
+    await mirror!.flush();
+    const renamed = `${mirrorSlug({ id: page.id, title: 'report' })}.html`;
+    expect(listed()).toEqual([MIRROR_MANIFEST, renamed]);
+    expect(read(renamed)).toBe('<p>x</p>');
+    expect(manifest().artifacts[page.id].files).toEqual([renamed]);
+    expect(logs).toEqual([]);
+
+    await store().delete(page.id); // still owned: removed with the artifact
+    await mirror!.flush();
+    expect(listed()).toEqual([]);
+  });
+
+  it('refuses a directory whose manifest path is a link, dangling or not, leaving the link and what it points at alone (fix wave 2)', async () => {
+    const elsewhere = mkdtempSync(join(tmpdir(), 'maws-mirror-elsewhere-'));
+    try {
+      writeFileSync(join(elsewhere, 'kept.json'), 'the owner’s file');
+      for (const target of [join(elsewhere, 'not-mounted.json'), join(elsewhere, 'kept.json')]) {
+        mkdirSync(out(), { recursive: true });
+        symlinkSync(target, out(MIRROR_MANIFEST));
+        await startMirror();
+        const space = await linkedSpace();
+        const page = await store().create({ kind: 'html', title: 'Page', spaceId: space.id, content: html('x') }, agent);
+        await mirror!.flush();
+        expect(listed()).toEqual([MIRROR_MANIFEST]); // nothing mirrored there
+        expect(readlinkSync(out(MIRROR_MANIFEST))).toBe(target);
+        expect(existsSync(join(elsewhere, 'not-mounted.json'))).toBe(false);
+        expect(readFileSync(join(elsewhere, 'kept.json'), 'utf8')).toBe('the owner’s file');
+        expect(logs.some((line) => line.includes('Launch') && line.includes(MIRROR_MANIFEST))).toBe(true);
+
+        mirror!.close();
+        mirror = null;
+        await store().delete(page.id);
+        await store().deleteSpace(space.id);
+        rmSync(out(), { recursive: true, force: true });
+        logs.length = 0;
+      }
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an owner’s hard link of a mirrored file alone when the artifact is renamed to its name (fix wave 2)', async () => {
+    await startMirror();
+    const space = await linkedSpace();
+    const page = await store().create({ kind: 'html', title: 'Original', spaceId: space.id, content: html('original') }, agent);
+    await mirror!.flush();
+    const backup = `${mirrorSlug({ id: page.id, title: 'Backup' })}.html`;
+    linkSync(out(`${mirrorSlug(page)}.html`), out(backup)); // the owner's own copy under the name a rename will want
+
+    await store().update(page.id, { title: 'Backup' });
+    await store().writeContent(page.id, html('new'), agent);
+    await mirror!.flush();
+    expect(read(backup)).toBe('<p>original</p>');
+    expect(logs.some((line) => line.includes(backup) && line.includes("not the mirror's"))).toBe(true);
+    expect(existsSync(out(MIRROR_MANIFEST)) ? manifest().artifacts[page.id]?.files ?? [] : []).toEqual([]);
+
+    await store().delete(page.id);
+    await mirror!.flush();
+    expect(read(backup)).toBe('<p>original</p>');
+  });
+
   it('brings the directory up to date at a host start after changes made while it was down', async () => {
     await startMirror();
     const space = await linkedSpace();
@@ -200,6 +302,41 @@ describe('the linked-directory mirror (M2)', () => {
     await store().delete(deck.id);
     await mirror!.flush();
     expect(listed()).toEqual([]);
+  });
+
+  // M6b (Decision Log 35, 37b): a writer is handed the artifact's assets as the store lists them (`artifacts.assets`'s
+  // listing) and reads the bytes of the ones it needs, lazily: a design system's fonts land in its linked directory
+  it('hands a writer the artifact’s assets and reads only the ones it asks for', async () => {
+    const asked: string[] = [];
+    const seen: unknown[] = [];
+    offs.push(
+      registerMirrorWriter('design_system', ({ artifact, assets, readAsset }) => {
+        seen.push(assets);
+        const face = assets?.find((asset) => asset.name === 'face.woff2');
+        if (!face) return { files: {} };
+        asked.push(face.ref);
+        return { files: { [`${mirrorSlug(artifact)}/fonts/${face.name}`]: readAsset!(face.ref) } };
+      }),
+    );
+    await startMirror();
+    const reads: string[] = [];
+    const readAsset = store().files.readAsset.bind(store().files);
+    store().files.readAsset = (artifactId, sha256) => (reads.push(sha256), readAsset(artifactId, sha256));
+    const space = await linkedSpace();
+    const system = await store().create({ kind: 'design_system', title: 'House style', spaceId: space.id }, human);
+    await store().uploadAsset(system.id, new Uint8Array([1, 2, 3, 4]), { name: 'face.woff2', mime: 'font/woff2' }, human);
+    await store().uploadAsset(system.id, new Uint8Array([9, 9]), { name: 'logo.png', mime: 'image/png' }, human);
+    await mirror!.flush();
+    await until(() => existsSync(out(mirrorSlug(system), 'fonts', 'face.woff2')));
+    expect([...readFileSync(out(mirrorSlug(system), 'fonts', 'face.woff2'))]).toEqual([1, 2, 3, 4]);
+    expect(seen.at(-1)).toEqual([
+      { ref: 'assets/face.woff2', name: 'face.woff2', mime: 'font/woff2', size: 4 },
+      { ref: 'assets/logo.png', name: 'logo.png', mime: 'image/png', size: 2 },
+    ]);
+    expect(new Set(asked)).toEqual(new Set(['assets/face.woff2']));
+    const logo = store().listAssets(system.id).find((asset) => asset.name === 'logo.png')!;
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads).not.toContain(logo.sha256); // the logo's bytes were never read
   });
 
   it('refuses a writer’s path outside its directory or onto the manifest, logged', async () => {

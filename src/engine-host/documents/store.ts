@@ -79,7 +79,7 @@ export interface ImportInput {
   createdBy: Actor;
   handle?: string;
   projectId?: string;
-  versions: { at: number; actor: Actor; content: ByteContent }[];
+  versions: { at: number; actor: Actor; content: ByteContent; label?: string }[]; // P3-L (M6b fix wave 1): `label`, X12's number
   links: { appSessionId: AppSessionId; role: ArtifactSessionLink['role']; lastAt: number }[];
 }
 
@@ -490,7 +490,7 @@ export class ArtifactStore {
         for (const link of input.links) this.linkInFrame(id, link.appSessionId, link.role, link.lastAt);
         const row = this.entity(id)!;
         // no design-system pin: a historic version was not seen under today's system (Decision Log 38d)
-        for (const version of input.versions) this.writeBytesInFrame(row, version.actor, version.content, { kind: 'import', at: version.at, pin: false });
+        for (const version of input.versions) this.writeBytesInFrame(row, version.actor, version.content, { kind: 'import', at: version.at, pin: false, label: version.label });
         this.storage.db.prepare('UPDATE artifacts SET updatedAt = ? WHERE id = ?').run(input.updatedAt, id);
       });
     } catch (error) {

@@ -1,13 +1,15 @@
 // The artifact viewers' pure decisions (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M5b). Which body draws a
 // stored file is decided by `mimeOf` of its name, the function main's scheme handler types its answer with, so a viewer
 // never frames a file as something main would serve otherwise; only `application/pdf` gets the PDF frame, the one
-// without a `sandbox` attribute (E2's Decision Log 31). Moved here from the Deliverables tool, which reads it too.
+// without a `sandbox` attribute (E2's Decision Log 31). Moved here from E2's Deliverables tool.
 //
 // An artifact's versions are listed in the order of the revision each captured and named by their place, `v1 … vN`,
-// the last marked latest (the Deliverables viewer's labels); the viewer shows a place, or the latest when it was asked
+// the last marked latest (E2's Deliverables viewer's labels); the viewer shows a place, or the latest when it was asked
 // for none, so it follows a new version as it lands.
 import { mimeOf } from '@shared/files/mime';
 import type { ArtifactVersion } from '@shared/artifacts/version';
+import { x12VersionLabel } from '@shared/maws/deliverable';
+import type { ArtifactOpenAt } from '../../../artifacts/open-at';
 import type { SessionRecord } from '@shared/graph/session';
 
 export type BodyKind = 'html' | 'pdf' | 'video' | 'audio' | 'file';
@@ -40,8 +42,40 @@ export function shownVersion(ordered: readonly ArtifactVersion[], chosen: number
   return { n, version: ordered[n - 1]!, latest: n === ordered.length };
 }
 
-// What the viewer keeps for a choice of place `n` among `count`: the place, or null (follow the latest) for the latest.
-export const versionToShow = (n: number | null, count: number): number | null => (n === null || n >= count || n < 1 ? null : n);
+// M6b fix wave 1 (Decision Log 39c): the place of version number `n` from outside the viewer (a legacy anchor's, a
+// transcript row's): the imported version X12 numbered `n` (its label, kept at import) wherever thinning left it; past
+// the imported versions, or on a page made since P3, the place itself.
+export function placeOfNumber(ordered: readonly Pick<ArtifactVersion, 'kind' | 'label'>[], n: number): number {
+  const label = x12VersionLabel(n);
+  const index = ordered.findIndex((version) => version.kind === 'import' && version.label === label);
+  return index >= 0 ? index + 1 : n;
+}
+
+// M6b fix wave 2: the place an open asks for (null: the latest). A revision is the version that captured it; one
+// thinning dropped is stood for by the next kept version after it (the newest of its time bucket, which holds what it
+// wrote and what followed), else the latest.
+export function placeOfOpenAt(ordered: readonly Pick<ArtifactVersion, 'seq' | 'kind' | 'label'>[], at: ArtifactOpenAt): number | null {
+  if (at === 'latest') return null;
+  if ('version' in at) return placeOfNumber(ordered, at.version);
+  const index = ordered.findIndex((version) => version.seq >= at.revision);
+  return index >= 0 ? index + 1 : null;
+}
+
+// M6b fix wave 3: what a viewer keeps as its version, an identity: the latest (followed as new ones land), or one
+// revision. A number is resolved once, when it is asked for, to the revision it names then (the last place: the latest).
+export type VersionSelection = 'latest' | { revision: number };
+
+// The picker's place `n` (from 1) among `ordered` as a selection: the last is the latest.
+export function selectionAt(ordered: readonly Pick<ArtifactVersion, 'seq'>[], n: number): VersionSelection {
+  return n >= ordered.length || n < 1 ? 'latest' : { revision: ordered[n - 1]!.seq };
+}
+
+// An open's ask as a selection: a revision kept as it is (however thinning moves its place); a number placed now.
+export function selectionOf(ordered: readonly Pick<ArtifactVersion, 'seq' | 'kind' | 'label'>[], at: ArtifactOpenAt): VersionSelection {
+  if (at === 'latest' || 'revision' in at) return at;
+  return selectionAt(ordered, placeOfNumber(ordered, at.version));
+}
+
 
 // An absolute path with no `.` or `..` segment, no empty segment and no trailing separator: what the files service
 // accepts, and what the host records (it resolves every path it is given).

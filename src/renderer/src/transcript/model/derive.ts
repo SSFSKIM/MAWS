@@ -257,6 +257,7 @@ interface ArtifactRecord {
   error: string | null;
   answered: boolean; // the call's result is in
   ownerAppSessionId: AppSessionId | null; // P2-E1: the ancestor whose record the version belongs to, as the result or the event names it
+  revision: number | null; // P3-L (M6b fix wave 2): the revision written, as the result or the event names it
 }
 // E2 end
 // E4c start: what a turn's events say about one browser tool call (its row): the call opens it, its result fills it,
@@ -662,7 +663,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'maws.delivery.artifact': {
         const artifact = event.toolUseId === null ? undefined : artifacts.get(event.toolUseId);
         if (!artifact) break;
-        Object.assign(artifact, { deliverableId: event.deliverableId, version: event.version, title: event.title, announced: true, ownerAppSessionId: event.ownerAppSessionId ?? null /* P2-E1 */ });
+        Object.assign(artifact, { deliverableId: event.deliverableId, version: event.version, title: event.title, announced: true, ownerAppSessionId: event.ownerAppSessionId ?? null /* P2-E1 */, revision: event.revision ?? artifact.revision /* P3-L */ });
         break;
       }
       // E2 end
@@ -1213,6 +1214,7 @@ function artifactOfCall(use: Event<'tool.use'>): ArtifactRecord {
   return {
     use, action: use.toolName === MAWS_TOOL_USE.artifact_create ? 'create' : 'update', artifactId: str(input.id ?? input.handle ?? input.artifact), htmlPath: str(input.html_path ?? input.path),
     title: typeof input.title === 'string' ? input.title : null, deliverableId: null, version: null, announced: false, error: null, answered: false, ownerAppSessionId: null,
+    revision: null,
   };
 }
 
@@ -1227,7 +1229,7 @@ function resultOfArtifact(artifact: ArtifactRecord, result: Event<'tool.result'>
   if (!parsed.success) return;
   // P2-E1: the result names the owner too, since a session read from disk has no host event to say it
   const owner = parsed.data.ownerAppSessionId ?? null;
-  Object.assign(artifact, { deliverableId: parsed.data.deliverableId, version: parsed.data.version, title: parsed.data.title, ownerAppSessionId: owner });
+  Object.assign(artifact, { deliverableId: parsed.data.deliverableId, version: parsed.data.version, title: parsed.data.title, ownerAppSessionId: owner, revision: parsed.data.revision ?? null });
 }
 
 function artifactRow(artifact: ArtifactRecord, turnId: TurnId, context: TurnContext): RowOf<'artifact'> {
@@ -1238,6 +1240,7 @@ function artifactRow(artifact: ArtifactRecord, turnId: TurnId, context: TurnCont
     answered: artifact.answered,
     ...(context.closed && !artifact.answered && !artifact.announced && { neverAnswered: true as const }), // E11: as the delivery row's
     ...(artifact.ownerAppSessionId !== null && { ownerAppSessionId: artifact.ownerAppSessionId }), // P2-E1
+    ...(artifact.revision !== null && { revision: artifact.revision }), // P3-L (M6b fix wave 2)
   };
 }
 // E2 end

@@ -115,6 +115,7 @@ export type Row = RowBase &
     | {
         kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean;
         neverAnswered?: true /* E11: as the delivery row's */; ownerAppSessionId?: AppSessionId /* P2-E1 */;
+        revision?: number /* P3-L (M6b fix wave 2): the revision the call wrote, when its answer or event named it */;
       }
     // E2 end
     // E4c start: a browser tool call's row (E4c execution document, Design §10): from the call (`action`, `tabId`,

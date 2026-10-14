@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import type { MawsArtifactCapture } from '@shared/ipc/schema/maws';
-import type { DeliverableRecord } from '@shared/maws/deliverable';
 import { ARTIFACT_SCREENSHOT_MAX_BYTES } from '@shared/maws/tools';
 
 // A fake Electron: a BrowserWindow whose construction announces itself as Electron's does (`browser-window-created`,
@@ -79,12 +78,10 @@ vi.mock('../ipc/router', () => ({ registerMainHandler: vi.fn() }));
 
 const A = 'App-A' as AppSessionId;
 const ID = '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';
-const record = (versions: number): DeliverableRecord => ({
-  id: ID, appSessionId: A, kind: 'artifact', artifactId: 'dash', title: 'Dashboard', path: `/u/v${versions}.html`,
-  versions: Array.from({ length: versions }, (_, k) => ({ path: `/u/v${k + 1}.html`, at: 't' })), createdAt: 't', updatedAt: 't',
-});
-const reader = (versions = 2, present = [true, true]) => ({ get: vi.fn(async () => ({ record: record(versions), present })) });
-const request = (over: Partial<MawsArtifactCapture> = {}): MawsArtifactCapture => ({ appSessionId: A, requestId: 'req-1' as RequestId, deliverableId: ID, version: 2, width: 640, height: 480, ...over });
+// P3-L M6b: the host's `artifacts.content` names the page of the revision asked for (`kind` the artifact's)
+const reader = (kind: 'html' | 'file' = 'html') =>
+  vi.fn(async ({ revision }: { artifactId: string; revision?: number }) => ({ ok: true as const, value: { revision: revision ?? 9, kind, name: 'dash board.html', size: 10, sha256: 'x', path: '/store/x' } }));
+const request = (over: Partial<MawsArtifactCapture> = {}): MawsArtifactCapture => ({ appSessionId: A, requestId: 'req-1' as RequestId, artifactId: ID, revision: 7, width: 640, height: 480, ...over });
 type FakeWindow = InstanceType<typeof electron.FakeWindow>;
 const lastWindow = () => electron.state.windows.at(-1)!;
 
@@ -101,9 +98,9 @@ afterEach(() => {
   electron.app.removeAllListeners();
 });
 
-describe('captureArtifact (E2 Design §7): an offscreen window renders the version and is destroyed', () => {
+describe('captureArtifact (E2 Design §7; P3-L M6b): an offscreen window renders the revision’s page and is destroyed', () => {
   it('loads the scheme URL in an offscreen, sandboxed, dialog-less window on the capture partition and answers the PNG', async () => {
-    const result = await captureArtifact(request(), { reader: reader(), env: {} });
+    const result = await captureArtifact(request(), { content: reader(), env: {} });
     expect(result).toEqual({ ok: true, png: Buffer.alloc(100, 1).toString('base64'), width: 640, height: 480, consoleErrors: [] });
     const win = lastWindow();
     expect(win.options).toMatchObject({
@@ -113,7 +110,7 @@ describe('captureArtifact (E2 Design §7): an offscreen window renders the versi
       webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, partition: 'maws-capture', backgroundThrottling: false, disableDialogs: true },
     });
     expect((win.options.webPreferences as Record<string, unknown>).preload).toBeUndefined();
-    expect(win.webContents.url).toBe(`maws-deliverable://${ID}/${A}/2`);
+    expect(win.webContents.url).toBe(`maws-artifact://${ID}/7/dash%20board.html`);
     expect(win.webContents.webrtc).toBe('disable_non_proxied_udp');
     expect((win.webContents.openHandler as () => unknown)()).toEqual({ action: 'deny' });
     expect(win.destroyed).toBe(true);
@@ -126,32 +123,24 @@ describe('captureArtifact (E2 Design §7): an offscreen window renders the versi
       win.webContents.emit('did-finish-load');
       win.webContents.emit('paint');
     };
-    const result = await captureArtifact(request(), { reader: reader(), env: {} });
+    const result = await captureArtifact(request(), { content: reader(), env: {} });
     expect(result.ok && result.consoleErrors).toHaveLength(20);
     expect(result.ok && result.consoleErrors[0]).toBe('x'.repeat(500));
     expect(result.ok && result.consoleErrors).not.toContain('a warning');
   });
 
-  // P2-E1 (D10): a side thread's screenshot of its ancestor's artifact
-  it("reads an ancestor's record and renders its URL when the request names the owner; the requester's own otherwise", async () => {
-    const OWNER = 'App-Parent' as AppSessionId;
-    const read = reader();
-    expect((await captureArtifact(request({ ownerAppSessionId: OWNER }), { reader: read, env: {} })).ok).toBe(true);
-    expect(read.get).toHaveBeenCalledExactlyOnceWith(OWNER, ID);
-    expect(lastWindow().webContents.url).toBe(`maws-deliverable://${ID}/${OWNER}/2`);
-    read.get.mockClear();
-    await captureArtifact(request(), { reader: read, env: {} });
-    expect(read.get).toHaveBeenCalledExactlyOnceWith(A, ID);
+  it('asks the host for the page at the revision asked for', async () => {
+    const content = reader();
+    expect((await captureArtifact(request(), { content, env: {} })).ok).toBe(true);
+    expect(content).toHaveBeenCalledExactlyOnceWith({ artifactId: ID, revision: 7 });
   });
 
-  it('answers why when the record, the version or its file is gone, and opens no window', async () => {
-    const gone = { get: vi.fn(async () => ({ record: null, present: [] })) };
-    expect(await captureArtifact(request(), { reader: gone, env: {} })).toEqual({ ok: false, error: `no deliverable ${ID} in this session` });
-    // P2-F L123: an ancestor's missing record names that ancestor, not "this session"
-    const OWNER = 'App-Parent' as AppSessionId;
-    expect(await captureArtifact(request({ ownerAppSessionId: OWNER }), { reader: gone, env: {} })).toEqual({ ok: false, error: `no deliverable ${ID} in ancestor session ${OWNER}` });
-    expect(await captureArtifact(request({ version: 3 }), { reader: reader(), env: {} })).toEqual({ ok: false, error: 'version 3 does not exist' });
-    expect(await captureArtifact(request(), { reader: reader(2, [true, false]), env: {} })).toEqual({ ok: false, error: 'version 2 is not on disk any more' });
+  it('answers why when the host names no page (no such artifact or revision, an artifact that is no page), and opens no window', async () => {
+    const gone = vi.fn(async () => ({ ok: false as const, error: { code: 'invalid_input' as const, message: 'no content of x at revision 7' } }));
+    expect(await captureArtifact(request(), { content: gone as never, env: {} })).toEqual({ ok: false, error: `the page of artifact ${ID} at revision 7 could not be read: no content of x at revision 7` });
+    const thrown = vi.fn(async () => Promise.reject(new Error('the host is away')));
+    expect(await captureArtifact(request(), { content: thrown as never, env: {} })).toEqual({ ok: false, error: `the page of artifact ${ID} at revision 7 could not be read: the host is away` });
+    expect(await captureArtifact(request(), { content: reader('file'), env: {} })).toEqual({ ok: false, error: `artifact ${ID} is not an html page` });
     expect(electron.state.windows).toHaveLength(0);
   });
 
@@ -160,14 +149,14 @@ describe('captureArtifact (E2 Design §7): an offscreen window renders the versi
       win.webContents.emit('did-fail-load', {}, -6, 'ERR_FILE_NOT_FOUND', 'about:blank', false); // a subframe's failure is not the page's
       win.webContents.emit('did-fail-load', {}, -2, 'ERR_FAILED', win.webContents.url, true);
     };
-    expect(await captureArtifact(request(), { reader: reader(), env: {} })).toEqual({ ok: false, error: 'the page did not load (-2 ERR_FAILED)' });
+    expect(await captureArtifact(request(), { content: reader(), env: {} })).toEqual({ ok: false, error: 'the page did not load (-2 ERR_FAILED)' });
     expect(lastWindow().destroyed).toBe(true);
   });
 
   it('gives up after 20 s on a page that never finishes loading, and destroys the window', async () => {
     vi.useFakeTimers();
     electron.state.load = () => {};
-    const answer = captureArtifact(request(), { reader: reader(), env: {} });
+    const answer = captureArtifact(request(), { content: reader(), env: {} });
     await vi.advanceTimersByTimeAsync(20_000);
     expect(await answer).toEqual({ ok: false, error: 'the page did not finish loading within 20 s' });
     expect(lastWindow().destroyed).toBe(true);
@@ -176,7 +165,7 @@ describe('captureArtifact (E2 Design §7): an offscreen window renders the versi
   it('captures after 500 ms when no paint arrives', async () => {
     vi.useFakeTimers();
     electron.state.load = (win) => win.webContents.emit('did-finish-load');
-    const answer = captureArtifact(request(), { reader: reader(), env: {} });
+    const answer = captureArtifact(request(), { content: reader(), env: {} });
     await vi.advanceTimersByTimeAsync(499);
     expect(lastWindow().destroyed).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
@@ -185,11 +174,11 @@ describe('captureArtifact (E2 Design §7): an offscreen window renders the versi
 
   it('halves a capture past 3.5 MiB once (a 3.75 MiB PNG is past the cap), and refuses one still past it', async () => {
     electron.state.bytes = (width) => (width >= 640 ? 3.75 * 1024 * 1024 : 1000);
-    expect(await captureArtifact(request(), { reader: reader(), env: {} })).toMatchObject({ ok: true, width: 320, height: 240 });
+    expect(await captureArtifact(request(), { content: reader(), env: {} })).toMatchObject({ ok: true, width: 320, height: 240 });
     electron.state.bytes = (width) => (width >= 640 ? ARTIFACT_SCREENSHOT_MAX_BYTES + 1 : 1000);
-    expect(await captureArtifact(request(), { reader: reader(), env: {} })).toMatchObject({ ok: true, width: 320, height: 240 });
+    expect(await captureArtifact(request(), { content: reader(), env: {} })).toMatchObject({ ok: true, width: 320, height: 240 });
     electron.state.bytes = () => ARTIFACT_SCREENSHOT_MAX_BYTES + 7;
-    expect(await captureArtifact(request(), { reader: reader(), env: {} })).toEqual({ ok: false, error: `screenshot too large (${ARTIFACT_SCREENSHOT_MAX_BYTES + 7} bytes); ask for a smaller size` });
+    expect(await captureArtifact(request(), { content: reader(), env: {} })).toEqual({ ok: false, error: `screenshot too large (${ARTIFACT_SCREENSHOT_MAX_BYTES + 7} bytes); ask for a smaller size` });
   });
 });
 
@@ -199,7 +188,7 @@ describe('the capture service: the event in, the host command out, two at a time
     electron.state.load = (win) => void loads.push(win);
     let listener!: (payload: MawsArtifactCapture) => void;
     const dispatch = vi.fn(async () => ({ ok: true }));
-    const stop = startCaptureService({ onEvent: (_name, l) => ((listener = l), () => {}), dispatch, reader: reader(), env: {} });
+    const stop = startCaptureService({ onEvent: (_name, l) => ((listener = l), () => {}), dispatch, content: reader(), env: {} });
     for (const id of ['r1', 'r2', 'r3']) listener(request({ requestId: id as RequestId }));
     await vi.waitFor(() => expect(loads).toHaveLength(2));
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -218,14 +207,12 @@ describe('the capture service: the event in, the host command out, two at a time
     stop();
   });
 
-  it("P2-E1: a capture of an ancestor's artifact is answered to the requesting session", async () => {
+  it("P2-E1: a capture is answered to the requesting session, whichever session made the page", async () => {
     let listener!: (payload: MawsArtifactCapture) => void;
     const dispatch = vi.fn(async () => ({ ok: true }));
-    const read = reader();
-    const stop = startCaptureService({ onEvent: (_name, l) => ((listener = l), () => {}), dispatch, reader: read, env: {} });
-    listener(request({ requestId: 'r-owner' as RequestId, ownerAppSessionId: 'App-Parent' as AppSessionId }));
+    const stop = startCaptureService({ onEvent: (_name, l) => ((listener = l), () => {}), dispatch, content: reader(), env: {} });
+    listener(request({ requestId: 'r-owner' as RequestId }));
     await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(1));
-    expect(read.get).toHaveBeenCalledWith('App-Parent', ID);
     expect(dispatch).toHaveBeenCalledWith({ appSessionId: A, requestId: 'r-owner', result: expect.objectContaining({ ok: true }) });
     stop();
   });
@@ -239,7 +226,7 @@ describe('the capture queue answers within the host’s deadline', () => {
     const answered: { requestId: string; at: number; result: { ok: boolean; error?: string } }[] = [];
     const dispatch = vi.fn(async (input: { requestId: string; result: { ok: boolean; error?: string } }) => void answered.push({ requestId: input.requestId, at: Date.now(), result: input.result }));
     const start = Date.now();
-    const stop = startCaptureService({ onEvent: (_name, l) => ((listener = l), () => {}), dispatch, reader: reader(), env: {} });
+    const stop = startCaptureService({ onEvent: (_name, l) => ((listener = l), () => {}), dispatch, content: reader(), env: {} });
     for (const id of ['r1', 'r2', 'r3', 'r4', 'r5']) listener(request({ requestId: id as RequestId }));
     await vi.advanceTimersByTimeAsync(CAPTURE_QUEUE_MS);
     // r1 and r2 hit their guard at 20 s and handed their slots to r3 and r4; r5 waited CAPTURE_QUEUE_MS and is answered
@@ -259,7 +246,7 @@ describe('a capture window is not an app window (Decision Log 21)', () => {
     const relay = createNavigationRelay(emit);
     followAppPages(electron.app as never, relay.pageGone);
     relay.take(); // the app's page announced itself
-    await captureArtifact(request(), { reader: reader(), env: {} }); // the capture window loads and closes
+    await captureArtifact(request(), { content: reader(), env: {} }); // the capture window loads and closes
     const navigation = { appSessionId: A, kind: 'session' } as never;
     relay.deliver(navigation);
     expect(emit).toHaveBeenCalledWith('attention.navigate', navigation); // delivered to the page, not queued

@@ -1,38 +1,35 @@
-// Main-side policies for every deliverable frame, whatever its sandbox (E2 execution document, Design §3 and §12, G3;
-// Decision Log 20, 22 and 31): defence in depth for the viewer's sandboxed frames, and the whole defence for the PDF
-// frame, which the trial leaves without a sandbox. A frame is judged by its ancestry: a `maws-deliverable:` frame and
-// every frame beneath it (Chromium's PDF viewer is a `chrome-extension:` child of the PDF's frame, and it is where the
-// PDF's links are handled) may reach only the scheme, the PDF viewer's own files and `chrome://resources/`, all inside
-// Electron. On a session (the window's default session and the capture partition): a request filter, a download filter
-// and permission handlers. On a webContents (the app window, the capture window): a guard on subframe navigations and
-// the WebRTC policy (CSP does not govern WebRTC, and STUN never passes `webRequest`). New windows and top-level
-// navigations are already refused on every window (`window.ts`, `capture.ts`). Under MAWS_E2E=1 with
-// MAWS_E2E_OPEN_LOG set, a cancelled navigation or download appends `blocked-navigation <url>` or
-// `blocked-download <url>` to the seam log, so the e2e sees the policies run on the real session and webContents.
+// Main-side policies for every store frame, whatever its sandbox (E2 execution document, Design §3 and §12, G3;
+// Decision Log 20, 22 and 31; P3-A M7, Decision Log 35e and 44): defence in depth for the viewer's sandboxed frames, and
+// the whole defence for the PDF frame, which the trial leaves without a sandbox. A frame is judged by its ancestry: a
+// `maws-artifact:` frame and every frame beneath it (Chromium's PDF viewer is a `chrome-extension:` child of the PDF's
+// frame, and it is where the PDF's links are handled) may reach only its own artifact on the scheme, the PDF viewer's
+// own files and `chrome://resources/`, all inside Electron. On a session (the window's default session and the capture
+// partition): a request filter, a download filter and permission handlers. On a webContents (the app window, the
+// capture window): a guard on subframe navigations and the WebRTC policy (CSP does not govern WebRTC, and STUN never
+// passes `webRequest`). New windows and top-level navigations are already refused on every window (`window.ts`,
+// `capture.ts`). Under MAWS_E2E=1 with MAWS_E2E_OPEN_LOG set, a cancelled navigation or download appends
+// `blocked-navigation <url>` or `blocked-download <url>` to the seam log, so the e2e sees the policies run on the real
+// session and webContents.
 //
-// Console attribution (Design §8, Decision Log 9) lives here too: a message an app window's deliverable frame logged,
-// read by the frame's URL, becomes the main-owned event `deliverables.console`, cut and rate-bounded.
+// Console attribution (Design §8, Decision Log 9) lives here too: a message an app window's artifact frame logged, read
+// by the frame's URL, becomes the main-owned event `artifacts.console`, cut and rate-bounded.
 //
-// P3-A M7 (Decision Log 35e): one implementation for both of the app's store schemes. A "deliverable frame" below is a
-// frame of either: `maws-deliverable:` or `maws-artifact:`; each scheme's frames, and every frame beneath one, get the
-// same request and download filters, navigation guard and permission denials, and an artifact frame's console becomes
-// `artifacts.console`. P3-L's cutover deletes the deliverable scheme from this list.
+// E2 wrote these for `maws-deliverable:`, P3-A extended them to `maws-artifact:`, and P3-L's cutover (M6b) left the
+// artifact scheme alone: a `maws-deliverable:` URL is no store frame of this build.
 import { appendFile } from 'node:fs/promises';
 import type { Session, WebContents } from 'electron';
 import { ARTIFACT_SCHEME, parseArtifactUrl } from '@shared/artifacts/scheme';
-import type { ArtifactConsole } from '@shared/ipc/schema/artifacts';
-import { DELIVERABLE_CONSOLE_MESSAGE_MAX, type DeliverableConsole } from '@shared/ipc/schema/deliverables';
-import { DELIVERABLE_SCHEME, parseDeliverableUrl } from '@shared/maws/deliverable';
+import { ARTIFACT_CONSOLE_MESSAGE_MAX, type ArtifactConsole } from '@shared/ipc/schema/artifacts';
 
-const PREFIXES = [`${DELIVERABLE_SCHEME}://`, `${ARTIFACT_SCHEME}://`];
-const isDeliverable = (url: string | null | undefined): boolean => typeof url === 'string' && PREFIXES.some((prefix) => url.startsWith(prefix));
+const ARTIFACT_PREFIX = `${ARTIFACT_SCHEME}://`;
+const isStoreUrl = (url: string | null | undefined): boolean => typeof url === 'string' && url.startsWith(ARTIFACT_PREFIX);
 
 // Chromium's built-in PDF viewer (Electron's internal extension, a fixed id): the PDF frame asks it for its bundled
 // files (`pdf_embedder.css`, measured in the trial), and the viewer's own page loads `chrome://resources/` scripts.
 // These are files inside Electron, never the network. Its Save writes a `blob:` of its own origin.
 const PDF_VIEWER = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/';
 const PDF_VIEWER_BLOB = `blob:${PDF_VIEWER}`;
-const ALLOWED_BENEATH = [...PREFIXES, PDF_VIEWER, 'chrome://resources/'];
+const ALLOWED_BENEATH = [ARTIFACT_PREFIX, PDF_VIEWER, 'chrome://resources/'];
 const allowedBeneath = (url: string) => ALLOWED_BENEATH.some((prefix) => url.startsWith(prefix));
 
 // ---- the decisions --------------------------------------------------------------------------------------------------
@@ -45,13 +42,13 @@ export interface FrameLike {
 
 const MAX_DEPTH = 64; // frames nest far less deep; a bound keeps a malformed chain from looping
 
-// Whether a frame is a deliverable frame or lies beneath one; null when that cannot be read (Electron throws on a
-// disposed frame's properties), so the caller falls back to what else it knows.
-export function beneathDeliverable(frame: FrameLike | null | undefined): boolean | null {
+// Whether a frame is a store frame or lies beneath one; null when that cannot be read (Electron throws on a disposed
+// frame's properties), so the caller falls back to what else it knows.
+export function beneathStoreFrame(frame: FrameLike | null | undefined): boolean | null {
   try {
     let current = frame ?? null;
     for (let depth = 0; current && depth < MAX_DEPTH; depth++, current = current.parent) {
-      if (isDeliverable(current.url)) return true;
+      if (isStoreUrl(current.url)) return true;
     }
     return false;
   } catch {
@@ -59,32 +56,28 @@ export function beneathDeliverable(frame: FrameLike | null | undefined): boolean
   }
 }
 
-// The artifact a frame shows (fix wave 1, Decision Log 44a): read from the nearest frame at or above it served by either
-// store scheme, its artifact id; null when that frame is a deliverable's; undefined when no store frame lies above it
-// (the app's own frames). Throws when a frame can no longer be read.
-export function shownArtifact(frame: FrameLike | null | undefined): string | null | undefined {
+// The artifact a frame shows (fix wave 1, Decision Log 44a): read from the nearest store frame at or above it, its
+// artifact id; undefined when no store frame lies above it (the app's own frames). Throws when a frame can no longer be
+// read.
+export function shownArtifact(frame: FrameLike | null | undefined): string | undefined {
   let current = frame ?? null;
   for (let depth = 0; current && depth < MAX_DEPTH; depth++, current = current.parent) {
-    const url = current.url;
-    if (url.startsWith(ARTIFACT_PREFIX)) return artifactIdOf(url);
-    if (isDeliverable(url)) return null;
+    if (isStoreUrl(current.url)) return artifactIdOf(current.url);
   }
   return undefined;
 }
-const ARTIFACT_PREFIX = `${ARTIFACT_SCHEME}://`;
 // The artifact a `maws-artifact:` URL names (its host, as Chromium lowercases it), whatever its path.
 const artifactIdOf = (url: string): string => url.slice(ARTIFACT_PREFIX.length).split(/[/?#]/, 1)[0]!.toLowerCase();
 
 // Whether a request or navigation to `url`, made from within store frames showing `shown`, reaches an artifact other
-// than the one shown: an artifact frame reaches its own artifact (any revision, its assets) and nothing of another's,
-// and a deliverable frame no artifact at all (X12's frame rule, Decision Log 44a). The app's own frames (`shown`
-// undefined) reach every artifact.
+// than the one shown: an artifact frame reaches its own artifact (any revision, its assets) and nothing of another's
+// (Decision Log 44a). The app's own frames (`shown` undefined) reach every artifact.
 function crossesArtifacts(url: string, shown: string | null | undefined): boolean {
   if (!url.startsWith(ARTIFACT_PREFIX) || shown === undefined) return false;
   return shown !== artifactIdOf(url);
 }
 
-// A request whose frame is (or lies beneath) a deliverable frame, or whose initiator is the scheme (an unsandboxed frame
+// A request whose frame is (or lies beneath) a store frame, or whose initiator is the scheme (an unsandboxed frame
 // reports it; a sandboxed one reports the opaque "null"), for anything outside the scheme, the PDF viewer's files and
 // `chrome://resources/`: http, https, ws, wss and file alike. `data:` and `blob:` never reach `webRequest`. Unlike the
 // navigation guard, a frame that can no longer be read counts as not beneath one here (only an initiator in the scheme
@@ -97,11 +90,11 @@ export function shouldCancelRequest(details: { url: string; beneath: boolean | n
   const fromApp = details.appOrigin != null && details.initiatorOrigin === details.appOrigin;
   if (!fromApp && crossesArtifacts(details.url, details.shown)) return true;
   if (allowedBeneath(details.url)) return false;
-  return details.beneath === true || isDeliverable(details.initiatorOrigin);
+  return details.beneath === true || isStoreUrl(details.initiatorOrigin);
 }
 
-// A subframe navigation of a frame that is (or lies beneath) a deliverable frame, or asked by one, to anything outside
-// the same three. The app never points a deliverable frame elsewhere (a version switch stays in the scheme; React
+// A subframe navigation of a frame that is (or lies beneath) a store frame, or asked by one, to anything outside the
+// same three. The app never points a store frame elsewhere (a version switch stays in the scheme; React
 // removes the frame rather than navigating it away). A frame that can no longer be read counts as beneath one.
 // Fix wave 1 (Decision Log 44a): a navigation an artifact frame asks for (`initiatorShows`, `shownArtifact` of the
 // initiator) to another artifact is prevented too; the app's own (initiator outside every store frame) is not.
@@ -115,28 +108,28 @@ export function shouldBlockFrameNavigation(details: { url: string; frameBeneath:
 // origin). Electron's DownloadItem reports no referrer; a sandboxed frame without `allow-downloads` cannot start one at
 // all. The app's own page never downloads (exports go through main's save dialog), and its blobs are `blob:file:`.
 export function shouldCancelDownload(details: { url: string; urlChain: readonly string[] }): boolean {
-  return [details.url, ...details.urlChain].some((url) => isDeliverable(url) || url.startsWith(PDF_VIEWER_BLOB));
+  return [details.url, ...details.urlChain].some((url) => isStoreUrl(url) || url.startsWith(PDF_VIEWER_BLOB));
 }
 
 // The app-wide policy (`window.ts`) leaves the scheme's answers alone: each carries its own (`protocol.ts`). It leaves
 // the PDF viewer's own pages alone too: they carry Chromium's policy, and the app's (`script-src 'self'`) refuses the
 // `chrome://resources` scripts the viewer is built from, so a PDF frame stayed an empty viewer (the PDF trial).
 export function isCspExempt(url: string): boolean {
-  return isDeliverable(url) || url.startsWith(PDF_VIEWER);
+  return isStoreUrl(url) || url.startsWith(PDF_VIEWER);
 }
 
-// Whether a permission request or check comes from a deliverable frame, by every origin Electron reports for it.
-// (Permission details carry no frame, so no ancestry: the only frames that can lie beneath a deliverable frame are the
+// Whether a permission request or check comes from a store frame, by every origin Electron reports for it.
+// (Permission details carry no frame, so no ancestry: the only frames that can lie beneath a store frame are the
 // scheme's own, whose origin is the scheme, and the PDF viewer's, whose needs are Chromium's and keep the default.)
-export function isDeliverablePermission(origins: readonly (string | null | undefined)[]): boolean {
-  return origins.some(isDeliverable);
+export function isStoreFramePermission(origins: readonly (string | null | undefined)[]): boolean {
+  return origins.some(isStoreUrl);
 }
 
 type ConsoleDetails = { frame: { url: string } | null; level: string; message: string; lineNumber: number; sourceId: string };
 
-// A console message's level, text, line and source as both events carry them (cut to their schemas' bound), and the
-// frame's URL; null for a level neither carries or a frame that can no longer be read.
-type ConsoleFields = Pick<DeliverableConsole, 'level' | 'message' | 'line' | 'source'>;
+// A console message's level, text, line and source as `artifacts.console` carries them (cut to its schema's bound),
+// and the frame's URL; null for a level it does not carry or a frame that can no longer be read.
+type ConsoleFields = Pick<ArtifactConsole, 'level' | 'message' | 'line' | 'source'>;
 function consoleParts(details: ConsoleDetails): { url: string; fields: ConsoleFields } | null {
   const level = details.level;
   if (level !== 'error' && level !== 'warning') return null;
@@ -151,19 +144,11 @@ function consoleParts(details: ConsoleDetails): { url: string; fields: ConsoleFi
     url,
     fields: {
       level,
-      message: details.message.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX),
+      message: details.message.slice(0, ARTIFACT_CONSOLE_MESSAGE_MAX),
       line: Number.isInteger(details.lineNumber) ? details.lineNumber : null,
-      source: details.sourceId ? details.sourceId.slice(0, DELIVERABLE_CONSOLE_MESSAGE_MAX) : null,
+      source: details.sourceId ? details.sourceId.slice(0, ARTIFACT_CONSOLE_MESSAGE_MAX) : null,
     },
   };
-}
-
-// A console message of a deliverable frame, as `deliverables.console` carries it (the message and the source cut to
-// their schema's bound); null for anything else.
-export function consoleMessageOf(details: ConsoleDetails): DeliverableConsole | null {
-  const parts = consoleParts(details);
-  const target = parts && parseDeliverableUrl(parts.url);
-  return target ? { appSessionId: target.appSessionId, deliverableId: target.id, version: target.version, ...parts!.fields } : null;
 }
 
 // A console message of an artifact frame (`maws-artifact:`), as `artifacts.console` carries it; null for anything else.
@@ -173,18 +158,18 @@ export function artifactConsoleMessageOf(details: ConsoleDetails): ArtifactConso
   return target ? { artifactId: target.artifactId, revision: target.revision === 'live' ? null : target.revision, ...parts!.fields } : null;
 }
 
-// The console's rate bound: at most CONSOLE_BURST messages per (appSessionId, deliverableId, version), or per
-// (artifactId, revision), in any CONSOLE_WINDOW_MS window; the rest of that window is dropped. 50 is what the renderer's ring buffer keeps per key, so
+// The console's rate bound: at most CONSOLE_BURST messages per (artifactId, revision) in any CONSOLE_WINDOW_MS window;
+// the rest of that window is dropped. 50 is what the renderer's ring buffer keeps per key, so
 // a page logging in a loop costs at most one buffer's worth of IPC every ten seconds.
 export const CONSOLE_BURST = 50;
 export const CONSOLE_WINDOW_MS = 10_000;
 const CONSOLE_KEYS_PRUNE_AT = 256;
 
-export function consoleLimiter(now: () => number = Date.now): (message: DeliverableConsole | ArtifactConsole) => boolean {
+export function consoleLimiter(now: () => number = Date.now): (message: ArtifactConsole) => boolean {
   const windows = new Map<string, { start: number; count: number }>();
   return (message) => {
     const at = now();
-    const key = 'artifactId' in message ? `artifact/${message.artifactId}/${message.revision ?? 'live'}` : `${message.appSessionId}/${message.deliverableId}/${message.version}`;
+    const key = `${message.artifactId}/${message.revision ?? 'live'}`;
     let window = windows.get(key);
     if (!window || at - window.start >= CONSOLE_WINDOW_MS) {
       if (windows.size >= CONSOLE_KEYS_PRUNE_AT) for (const [k, w] of windows) if (at - w.start >= CONSOLE_WINDOW_MS) windows.delete(k);
@@ -200,7 +185,7 @@ export function consoleLimiter(now: () => number = Date.now): (message: Delivera
 
 // `shownArtifact` of a frame read from an Electron event; `unreadable` answers for a frame that can no longer be read
 // (by default undefined: the frame's own CSP holds).
-function shownRead(read: () => FrameLike | null | undefined, unreadable: () => string | null | undefined = () => undefined): string | null | undefined {
+function shownRead(read: () => FrameLike | null | undefined, unreadable: () => string | undefined = () => undefined): string | undefined {
   try {
     return shownArtifact(read());
   } catch {
@@ -208,10 +193,10 @@ function shownRead(read: () => FrameLike | null | undefined, unreadable: () => s
   }
 }
 
-// `beneathDeliverable` of a frame read from an Electron event, whose getter itself throws for a disposed frame.
+// `beneathStoreFrame` of a frame read from an Electron event, whose getter itself throws for a disposed frame.
 function beneathRead(read: () => FrameLike | null | undefined): boolean | null {
   try {
-    return beneathDeliverable(read());
+    return beneathStoreFrame(read());
   } catch {
     return null;
   }
@@ -224,7 +209,7 @@ let seamWrites: Promise<void> = Promise.resolve();
 function seam(env: SeamEnv, line: string): void {
   const path = env.MAWS_E2E_OPEN_LOG;
   if (env.MAWS_E2E !== '1' || !path) return;
-  seamWrites = seamWrites.then(() => appendFile(path, `${line}\n`)).catch((error: unknown) => console.warn('[deliverables] could not write the e2e seam log', error));
+  seamWrites = seamWrites.then(() => appendFile(path, `${line}\n`)).catch((error: unknown) => console.warn('[artifacts] could not write the e2e seam log', error));
 }
 
 // One webContents' own request filter, consulted before the frame policies (P3-A M7 fix wave 1: the export's PDF
@@ -262,12 +247,12 @@ export function installFramePolicies(session: Session, env: SeamEnv, appOrigin: 
 }
 
 // Permissions (the session's only handlers: nothing else in main installs one). `all`: the capture partition, which
-// holds nothing but captures, denies every request and check. `deliverables`: the app's session denies a deliverable
-// frame's and keeps Electron's default (granted) for everything else, the app page and the PDF viewer included, but for
+// holds nothing but captures, denies every request and check. `store-frames`: the app's session denies a store frame's
+// and keeps Electron's default (granted) for everything else, the app page and the PDF viewer included, but for
 // the checks Electron itself denies to every origin: an installed check handler replaces that built-in denial.
 const DENIED_EVERYWHERE = new Set(['deprecated-sync-clipboard-read']); // Electron 32+ denies it when no handler is set
 
-export function guardPermissions(session: Session, scope: 'all' | 'deliverables'): void {
+export function guardPermissions(session: Session, scope: 'all' | 'store-frames'): void {
   if (scope === 'all') {
     session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     session.setPermissionCheckHandler(() => false);
@@ -275,11 +260,11 @@ export function guardPermissions(session: Session, scope: 'all' | 'deliverables'
   }
   session.setPermissionRequestHandler((_contents, _permission, callback, details) => {
     const { requestingUrl, securityOrigin } = details as { requestingUrl?: string; securityOrigin?: string };
-    callback(!isDeliverablePermission([requestingUrl, securityOrigin]));
+    callback(!isStoreFramePermission([requestingUrl, securityOrigin]));
   });
   session.setPermissionCheckHandler(
     (_contents, permission, requestingOrigin, details) =>
-      !DENIED_EVERYWHERE.has(permission) && !isDeliverablePermission([requestingOrigin, details.requestingUrl, details.securityOrigin]),
+      !DENIED_EVERYWHERE.has(permission) && !isStoreFramePermission([requestingOrigin, details.requestingUrl, details.securityOrigin]),
   );
 }
 
@@ -297,21 +282,11 @@ export function guardFrames(contents: WebContents, env: SeamEnv): void {
   });
 }
 
-// An app window's deliverable frames' errors and warnings, as `deliverables.console` (the capture window's go into the
-// screenshot's result instead: `capture.ts`), at most CONSOLE_BURST per deliverable version per window of time; an
-// artifact frame's as `artifacts.console`, bounded the same way per artifact revision.
-type ConsoleEmit = {
-  (name: 'deliverables.console', payload: DeliverableConsole): unknown;
-  (name: 'artifacts.console', payload: ArtifactConsole): unknown;
-};
-export function attributeConsole(contents: WebContents, emit: ConsoleEmit, now?: () => number): void {
+// An app window's artifact frames' errors and warnings, as `artifacts.console` (the capture window's go into the
+// screenshot's result instead: `capture.ts`), at most CONSOLE_BURST per artifact revision per window of time.
+export function attributeConsole(contents: WebContents, emit: (name: 'artifacts.console', payload: ArtifactConsole) => unknown, now?: () => number): void {
   const admit = consoleLimiter(now);
   contents.on('console-message', (event) => {
-    const deliverable = consoleMessageOf(event);
-    if (deliverable) {
-      if (admit(deliverable)) emit('deliverables.console', deliverable);
-      return;
-    }
     const artifact = artifactConsoleMessageOf(event);
     if (artifact && admit(artifact)) emit('artifacts.console', artifact);
   });

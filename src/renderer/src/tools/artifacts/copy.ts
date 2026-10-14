@@ -15,4 +15,8 @@ export const ARTIFACTS_TOOL_COPY = {
   retry: 'Try again',
   back: 'Back',
   openInTab: 'Open in tab',
+  // M6b: the panel summary's Artifacts section
+  summary: (n: number, latestTitle: string) => `${n} ${n === 1 ? 'artifact' : 'artifacts'} · ${latestTitle}`,
+  nothingYet: 'Nothing made yet',
+  open: 'Open',
 } as const;

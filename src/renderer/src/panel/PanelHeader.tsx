@@ -12,7 +12,7 @@ import { runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
 import { MARKUP_COPY, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { useMarkupSurface } from '../markup/surface'; // P3-G
-import { SAVED_COPY, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
+import { SAVED_COPY, useEditorHeaderFocus, useEditorHostRegistration, type EditorHostAction, type EditorHostExport, type EditorHostRegistration, type EditorHostScope } from './editor-host';
 import { isRestoredLog, shownSession, useTabLabel } from './host';
 
 export const HEADER_COPY = {
@@ -36,9 +36,10 @@ export interface EditorHeaderProps {
   registration: EditorHostRegistration | null;
   controls?: ReactNode; // the region's own controls, which never collapse
   markup?: ReactNode; // P3-G (§D2.2, §D4.4): Mark up, after the actions and before Export, when the tab has a surface
+  scope?: EditorHostScope | null; // P3-L (M6b fix wave 1): the tab it is over, for `focusEditorHostAction`
 }
 
-export function EditorHeader({ icon: TabIcon, title, suffix = null, registration, controls, markup }: EditorHeaderProps) {
+export function EditorHeader({ icon: TabIcon, title, suffix = null, registration, controls, markup, scope = null }: EditorHeaderProps) {
   const row = useRef<HTMLDivElement>(null);
   const narrow = useNarrow(row);
   const unresolved = registration?.unresolved ?? 0;
@@ -53,6 +54,19 @@ export function EditorHeader({ icon: TabIcon, title, suffix = null, registration
   const folded = narrow ? exports : [];
   const plain = suffix ? `${title} · ${suffix}` : title;
   const hasEditorControls = listed.length > 0 || exports.length > 0 || Boolean(markup);
+  // P3-L (M6b fix wave 1): focus back to an action's control, "More actions" when it is folded there
+  useEditorHeaderFocus(scope, (actionId) => {
+    const root = row.current;
+    if (!root) return false;
+    const control = shown.some((a) => a.id === actionId)
+      ? [...root.querySelectorAll<HTMLElement>('[data-editor-action]')].find((button) => button.getAttribute('data-editor-action') === actionId)
+      : overflow.some((a) => a.id === actionId)
+        ? root.querySelector<HTMLElement>('[data-editor-more]')
+        : null;
+    if (!(control instanceof HTMLButtonElement) || control.disabled) return false;
+    control.focus({ preventScroll: true });
+    return true;
+  });
 
   return (
     <div ref={row} data-editor-header className="flex h-10 shrink-0 items-center gap-1 border-b border-border px-2">
@@ -131,7 +145,7 @@ function ToolHeader({ tab, controls }: { tab: PanelTabRef; controls: ReactNode }
   const scope = useMemo(() => ({ surface: 'panel', tabId: tab.id }) as const, [tab.id]);
   const registration = useEditorHostRegistration(scope);
   const surface = useMarkupSurface(scope);
-  return <EditorHeader icon={tool?.icon} title={title} suffix={suffix} registration={registration} controls={controls} markup={surface && <MarkupButton scope={scope} />} />;
+  return <EditorHeader icon={tool?.icon} title={title} suffix={suffix} registration={registration} controls={controls} markup={surface && <MarkupButton scope={scope} />} scope={scope} />;
 }
 
 // P3-G (§D4.4): Mark up over the tab's surface, pressed while a session draws over it; disabled with no shown session
@@ -196,14 +210,14 @@ function ActionButton({ action }: { action: EditorHostAction }) {
   const ActionIcon = action.icon;
   if (ActionIcon) {
     return (
-      <IconButton label={action.label} pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()}>
+      <IconButton label={action.label} pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id}>
         <ActionIcon className="size-4" />
       </IconButton>
     );
   }
   // An action with no icon is drawn by its label.
   return (
-    <button type="button" aria-pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} className={`${GHOST} px-2 text-ui`}>
+    <button type="button" aria-pressed={action.pressed} disabled={action.disabled} onClick={() => action.onSelect()} data-editor-action={action.id} className={`${GHOST} px-2 text-ui`}>
       {action.label}
     </button>
   );
@@ -218,7 +232,7 @@ const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline
 function MoreMenu({ actions, exports }: { actions: readonly EditorHostAction[]; exports: readonly EditorHostExport[] }) {
   const checks = actions.some((action) => action.pressed !== undefined);
   return (
-    <HeaderMenu label={HEADER_COPY.more} icon={<MoreIcon />}>
+    <HeaderMenu label={HEADER_COPY.more} icon={<MoreIcon />} more>
       {actions.map((action) =>
         action.pressed === undefined ? (
           <DropdownMenu.Item key={action.id} disabled={action.disabled} onSelect={() => action.onSelect()} className={ITEM}>
@@ -263,11 +277,13 @@ function ExportMenu({ exports }: { exports: readonly EditorHostExport[] }) {
   );
 }
 
-function HeaderMenu({ label, icon, children }: { label: string; icon: ReactNode; children: ReactNode }) {
+function HeaderMenu({ label, icon, children, more = false }: { label: string; icon: ReactNode; children: ReactNode; more?: boolean }) {
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
-        <IconButton label={label}>{icon}</IconButton>
+        <IconButton label={label} data-editor-more={more ? '' : undefined}>
+          {icon}
+        </IconButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content align="end" sideOffset={6} className={MENU}>

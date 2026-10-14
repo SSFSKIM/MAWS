@@ -1,4 +1,4 @@
-// The library's derived index (the P3-L document, Decision Log 6 and 9; index migration 9): main's view of the engine
+// The library's derived index (the P3-L document, Decision Log 6 and 9; index migration 10): main's view of the engine
 // host's live artifacts, their session links and the Spaces, with the search index over titles and extracted text.
 // Everything here is derived from the host's library reads (sync.ts), never from its database: a reconciliation
 // replaces the whole set in one transaction, an entry refresh replaces one artifact and its links, and a revision only
@@ -192,6 +192,21 @@ export class LibraryStore {
         'SELECT s.*, (SELECT count(*) FROM library_artifacts a WHERE a.space_id = s.id) AS count FROM library_spaces s ORDER BY s.name COLLATE NOCASE, s.id',
       )
       .map((row) => ({ id: row.id, name: row.name, ...(row.linked_dir !== null ? { linkedDir: row.linked_dir } : {}), createdAt: row.created_at, count: row.count }));
+  }
+
+  // M6b (Decision Log 16, 36i): the paths of the live File artifacts the files service may admit for `appSessionId`:
+  // those linked to it or to a side thread's ancestor of it, and those no session is linked to (the owner's own), each
+  // as the host recorded it (the caller compares realpaths).
+  fileLinkedPaths(appSessionId: AppSessionId): string[] {
+    const sessions = this.lineageOf(appSessionId);
+    return this.db
+      .all<{ linked_path: string }>(
+        `SELECT DISTINCT a.linked_path FROM library_artifacts a WHERE a.kind = 'file' AND a.linked_path IS NOT NULL AND (
+          EXISTS (SELECT 1 FROM library_links l WHERE l.artifact_id = a.id AND l.app_session_id IN (${sessions.map(() => '?').join(', ')}))
+          OR NOT EXISTS (SELECT 1 FROM library_links l WHERE l.artifact_id = a.id))`,
+        ...sessions,
+      )
+      .map((row) => row.linked_path);
   }
 
   // ---- internals -----------------------------------------------------------------------------------------------------

@@ -45,6 +45,7 @@ function deps(stored: Stored, over: Partial<LibraryFilesDeps> = {}): LibraryFile
     showSaveDialog: vi.fn(async () => ({ canceled: true })),
     openPath: vi.fn(async () => ''),
     showItemInFolder: vi.fn(),
+    readFile: vi.fn(async ({ path, offset = 0 }) => ({ encoding: 'utf8' as const, content: readFileSync(path, 'utf8').slice(offset), bytes: 0, offset, length: 0, truncated: false, mime: 'text/plain', hash: null, utf8: null })),
     env: {},
     ...over,
   };
@@ -70,6 +71,17 @@ describe('library files', () => {
     await expect(files.content({ artifactId: ID })).resolves.toEqual({ revision: 9, kind: 'html', name: 'index.html', path: two });
     await expect(files.content({ artifactId: ID, revision: 4 })).resolves.toEqual({ revision: 4, kind: 'html', name: 'index.html', path: one });
     await expect(files.content({ artifactId: ID, revision: 5 })).rejects.toMatchObject({ error: { code: 'invalid_input' } });
+  });
+
+  // M6b fix wave 2 (Decision Log 36i): a File artifact's file read by the artifact alone, its path resolved here
+  it('reads a File artifact’s stored file at a revision by its id, the path resolved here; refuses another kind', async () => {
+    const csv = put('ledger.csv', 'item,cost\n');
+    const reading = deps({ kind: 'file', title: 'ledger.csv', files: { 2: { name: 'ledger.csv', path: csv } } });
+    const files = createLibraryFiles(reading);
+    await expect(files.read({ artifactId: ID, offset: 0, hash: true })).resolves.toMatchObject({ content: 'item,cost\n' });
+    expect(reading.readFile).toHaveBeenCalledWith({ path: csv, offset: 0, hash: true });
+    const page = createLibraryFiles(deps({ kind: 'html', title: 'Page', files: { 4: { name: 'index.html', path: put('index.html', '<p>x</p>') } } }));
+    await expect(page.read({ artifactId: ID })).rejects.toMatchObject({ error: { code: 'invalid_input' } });
   });
 
   it('opens a document externally and reveals any file, through the e2e seam’s log when it is set', async () => {

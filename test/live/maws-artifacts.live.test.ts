@@ -1,6 +1,6 @@
 // E2 M2's live recording (docs/doperpowers/plans/2026-10-06-e2-deliverables.md, Plan of Work M2): the four artifact tools
 // of the `maws` server against the installed Claude Code (`binary: null`), through MAWS's own engine host (LiveHost:
-// registerEngineIpc, the launcher, EngineSession, the file deliverable store, the journal), under a scratch config home
+// registerEngineIpc, the launcher, EngineSession, the artifact store, the journal), under a scratch config home
 // under /tmp, through ClaudeUsage's relay, on Haiku in default permission mode with every permission allowed once. The
 // host has no main here, so the case plays main's part of `artifact_screenshot`: it answers each `maws.artifact.capture`
 // with a solid-green 64×64 PNG through `maws.artifact.captured`. The page the prompt asks for is red, so a reply that
@@ -11,13 +11,11 @@
 // The gate, the scratch repository, the allow-once loop and the export `finally` are the shared live harness's
 // (test/live/support/harness.ts), as E1's maws-tools.live.test.ts uses them.
 // `MAWS_LIVE=1 pnpm exec vitest run --project live test/live/maws-artifacts.live.test.ts`
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MawsArtifactCapture } from '@shared/ipc/schema/maws';
-import { DeliverableRecordSchema } from '@shared/maws/deliverable';
-import { versionPath } from '@shared/maws/deliverable-files';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import type { JournalRow } from '@shared/wire/journal';
 import { openDocuments } from '../../src/engine-host/documents';
@@ -142,17 +140,14 @@ describe('the maws artifact tools, live (E2 M2)', () => {
       expect(refused.isError).toBe(true);
       expect(textOf(refused.content)).toContain(TOOL_ERRORS.noArtifact('artifact_publish', 'nope'));
 
-      // the X12 mirror on disk: one artifact record with two versions copied under it, `path` on v2 (the first from the
-      // agent's file, the second published inline)
-      const record = DeliverableRecordSchema.parse(JSON.parse(readFileSync(join(g.userData, 'deliverables', id, `${deliverableId}.json`), 'utf8')));
-      const v1 = versionPath(g.userData, id, deliverableId, 1);
-      const v2 = versionPath(g.userData, id, deliverableId, 2);
-      expect(record).toMatchObject({ kind: 'artifact', artifactId: 'dash', title: 'Dashboard', path: v2 });
-      expect(record.versions.map((v) => v.path)).toEqual([v1, v2]);
-      expect(realpathSync(record.versions[0]!.sourcePath!)).toBe(realpathSync(join(repo, 'dashboard.html')));
-      expect(readFileSync(v1, 'utf8')).not.toBe(readFileSync(v2, 'utf8'));
-      expect(readFileSync(v2, 'utf8')).toMatch(/blue/i);
-      report.push(`record ${deliverableId}.json: ${JSON.stringify(record)}`);
+      // the store (P3-L M6b: the X12 mirror retired): the artifact `deliverableId` names has two versions, the first
+      // from the agent's file, the second published inline
+      const pages = documents.store.listVersions(deliverableId).map((v) => readFileSync(documents.store.contentRef(deliverableId, v.seq).path, 'utf8'));
+      expect(pages).toHaveLength(2);
+      expect(pages[0]).toBe(readFileSync(join(repo, 'dashboard.html'), 'utf8'));
+      expect(pages[1]).not.toBe(pages[0]);
+      expect(pages[1]).toMatch(/blue/i);
+      report.push(`artifact ${deliverableId}: ${pages.length} versions`);
 
       // the reply: the colour the picture shows (green, which the prompt never names), the one artifact listed, the error
       expect(ended.resultText).toMatch(/green/i);

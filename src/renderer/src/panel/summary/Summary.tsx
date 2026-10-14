@@ -18,7 +18,7 @@ import { Sources } from './Sources';
 import { Subagents } from './Subagents';
 import { displayTitle } from '../../sessions/title';
 // E2 start
-import { DELIVERABLES_TOOL_ID } from '@shared/maws/panes';
+import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { Section, ToolSummary, useToolSummary } from './Section';
 // E2 end
 
@@ -61,20 +61,20 @@ function SessionSummary({ appSessionId, record }: { appSessionId: AppSessionId; 
       <BackgroundWork appSessionId={appSessionId} />
       <Sources appSessionId={appSessionId} directory={directory} />
       {/* E2 start */}
-      <Deliverables appSessionId={appSessionId} />
+      <Artifacts appSessionId={appSessionId} />
       {/* E2 end */}
     </div>
   );
 }
 
-// E2 start: Deliverables (E2 execution document, Design §4 "The summary"), after Sources: the tool's own summary fills
-// it; a build without the tool shows no section (there is nothing to open).
-function Deliverables({ appSessionId }: { appSessionId: AppSessionId }) {
-  const custom = useToolSummary(DELIVERABLES_TOOL_ID);
+// E2 start: Artifacts (E2 execution document, Design §4 "The summary": Deliverables until P3-L's cutover), after
+// Sources: the tool's own summary fills it; a build without the tool shows no section (there is nothing to open).
+function Artifacts({ appSessionId }: { appSessionId: AppSessionId }) {
+  const custom = useToolSummary(ARTIFACTS_TOOL_ID);
   if (!custom) return null;
   return (
-    <Section id="deliverables">
-      <ToolSummary toolId={DELIVERABLES_TOOL_ID} appSessionId={appSessionId} component={custom} />
+    <Section id="artifacts">
+      <ToolSummary toolId={ARTIFACTS_TOOL_ID} appSessionId={appSessionId} component={custom} />
     </Section>
   );
 }

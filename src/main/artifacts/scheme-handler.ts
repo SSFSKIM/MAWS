@@ -1,32 +1,22 @@
-// The `maws-deliverable:` scheme (E2 execution document, Design §3, Decision Log 6 and 12): the store's files served to
-// the viewer's frames and to the capture window, one recorded file per URL. `maws-deliverable://<recordId>/<appSessionId>/<n>`
-// names version `n` of a record; the handler reads the record through the reader and opens the file by the path the
-// record holds, never by anything in the URL, so it serves exactly the store's files and nothing beside them.
-//
-// P3-A M7 (Decision Log 35e): the serving here is one implementation for both of the app's store schemes. A scheme
-// supplies a resolver (a URL to the file it names, or nothing) and `createSchemeHandler` serves what it names; this
-// file's resolver is the deliverable store's (P3-L's cutover deletes it), `../artifacts/protocol.ts` the artifact
-// store's.
+// The serving of the app's store scheme (E2 execution document, Design §3, Decision Log 6 and 12; P3-A M7, Decision Log
+// 35e): a resolver names the file a URL serves (or nothing) and `createSchemeHandler` serves it, never anything named
+// by the URL itself, so a scheme serves exactly the store's files. E2's `maws-deliverable:` was served here too until
+// P3-L's cutover (M6b), which left `maws-artifact:` (`./protocol.ts`, its resolver) alone.
 //
 // Every answer carries `nosniff`, `inline`, `no-store` and `Accept-Ranges`; a `Range` is answered 206 from a bounded
 // read of the opened file (media seek through it). Every answer but a PDF's also carries a policy whose leading
 // `sandbox allow-scripts` sandboxes the document wherever it loads (the viewer's frame doubles it; the capture window,
 // which loads it top-level, has nothing else) and which admits no network source and no `'self'`: a self-contained page
 // needs nothing from any origin. The app-wide policy (`window.ts`) leaves this scheme's answers alone, so this one reaches the frame.
-// An artifact's HTML gets the bridge script as the first element of its `<head>` (Design §10); a delivered HTML file is
-// served byte for byte.
+// An `html` artifact's page gets the bridge script as the first element of its `<head>` (Design §10); any other file
+// (an asset, a File artifact's HTML) is served byte for byte.
 import { constants } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
-import { basename } from 'node:path';
 import { Readable } from 'node:stream';
-import type { Session } from 'electron';
-import { isSafeAppSessionId } from '@shared/engine/app-session-id';
 import { extensionOf, mimeOf } from '@shared/files/mime';
-import { DELIVERABLE_SCHEME, parseDeliverableUrl } from '@shared/maws/deliverable';
 import { BRIDGE_SCRIPT } from './bridge-script';
-import type { DeliverableReader } from './reader';
 
-export const DELIVERABLE_HTML_CSP = [
+export const STORE_FRAME_CSP = [
   'sandbox allow-scripts',
   "default-src 'none'",
   "script-src 'unsafe-inline' 'unsafe-eval' data: blob:",
@@ -42,22 +32,12 @@ export const DELIVERABLE_HTML_CSP = [
   "form-action 'none'",
 ].join('; ');
 
-// The deliverable scheme's privileges: a standard, secure scheme (its own origin per record, a secure context),
-// streamed, with no fetch and no CORS (nothing is ever fetched from it but a frame's or a media element's own load).
-// Registered with the artifact scheme's in one call before the app is ready (`registerStoreSchemes`).
-export const DELIVERABLE_SCHEME_PRIVILEGES = { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false, stream: true } as const;
-
-// The handler on a session: the window's default session and the capture partition get the same one.
-export function serveDeliverables(session: Session, reader: DeliverableReader): void {
-  session.protocol.handle(DELIVERABLE_SCHEME, createDeliverableHandler(reader));
-}
-
-export function createDeliverableHandler(reader: Pick<DeliverableReader, 'get'>): (request: Request) => Promise<Response> {
-  return createSchemeHandler(deliverableResolver(reader));
-}
+// The store scheme's privileges: a standard, secure scheme (its own origin per artifact, a secure context), streamed,
+// with no fetch (nothing is ever fetched from it but a frame's, an image's, a font's or a media element's own load).
+export const STORE_SCHEME_PRIVILEGES = { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false, stream: true } as const;
 
 // The file a scheme's URL names: its path on disk, the name its type is read from (an artifact's asset is stored under
-// its hash, with no extension), and whether it is an artifact's page, which gets the bridge script.
+// its hash, with no extension), and whether it is an `html` artifact's page, which gets the bridge script.
 export interface SchemeFile {
   path: string;
   name: string;
@@ -65,20 +45,6 @@ export interface SchemeFile {
 }
 // A URL to the file it names, or null (unknown, malformed, unreadable: nothing is said about which). Never throws.
 export type SchemeResolver = (url: string) => Promise<SchemeFile | null>;
-
-// The deliverable store's resolver: version `n` of the record the URL names, as the record holds it.
-export function deliverableResolver(reader: Pick<DeliverableReader, 'get'>): SchemeResolver {
-  return async (url) => {
-    const target = parseDeliverableUrl(url);
-    if (!target || !isSafeAppSessionId(target.appSessionId)) return null;
-    const record = await reader.get(target.appSessionId, target.id).then(
-      (lookup) => lookup.record,
-      () => null, // an id that is not a record uuid, an unreadable directory: nothing is said about either
-    );
-    const version = record?.versions[target.version - 1];
-    return record && version ? { path: version.path, name: basename(version.path), bridge: record.kind === 'artifact' } : null;
-  };
-}
 
 // One scheme's handler over its resolver. `cors` adds `Access-Control-Allow-Origin: *` to every answer, for a scheme
 // whose fonts are loaded across origins (the artifact scheme's; a font load is a CORS request).
@@ -108,7 +74,7 @@ export function createSchemeHandler(resolve: SchemeResolver, options: { cors?: b
       if (options.cors) headers.set('Access-Control-Allow-Origin', '*');
       // Every answer but a PDF's: SVG and XML documents run script too, and a frame may load any type as a document. A PDF
       // has none, since Chromium's viewer draws it (the PDF trial) and the sandbox directive would keep the viewer out.
-      if (mime !== 'application/pdf') headers.set('Content-Security-Policy', DELIVERABLE_HTML_CSP);
+      if (mime !== 'application/pdf') headers.set('Content-Security-Policy', STORE_FRAME_CSP);
       const head = request.method === 'HEAD';
       // An artifact's HTML is read whole (16 MiB at most, the tool's cap) for the bridge script; anything else streams.
       const bytes = resolved.bridge && mime === 'text/html' ? insertBridgeScript(await file.readFile()) : null;

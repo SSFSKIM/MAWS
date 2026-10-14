@@ -10,6 +10,7 @@ import { ActorSchema } from '../../artifacts/actor';
 import { ArtifactKindSchema, ArtifactSessionLinkSchema, SpaceSchema } from '../../artifacts/entity';
 import { AppSessionIdSchema, ProjectIdSchema } from '../../graph/ids';
 import { ARTIFACT_EXPORT_FORMATS } from '../../maws/tools';
+import { FilesReadInputSchema, FilesReadOutputSchema } from './files';
 import { ArtifactRowSchema } from './artifacts';
 import type { CommandSpec } from './common';
 
@@ -56,6 +57,10 @@ export const LibraryRowSchema = LibraryEntrySchema.extend({
   snippet: z.string().optional(),
 });
 export type LibraryRow = z.infer<typeof LibraryRowSchema>;
+
+// M6b: what one run of the X12 import did with every record under `<userData>/deliverables` (the engine host's
+// `library/import.ts`): landed now, already an artifact, its file gone, or not a record or not landed.
+export const DeliverablesImportSchema = z.strictObject({ imported: Seq, skipped: Seq, missing: Seq, failed: Seq });
 
 export const LIBRARY_QUERY_MAX = 1_000;
 
@@ -110,6 +115,10 @@ export const commands = {
   // answer with its reason, as `files.openExternal` and `files.reveal` answer.
   'library.openExternally': main(ContentAt, z.strictObject({ opened: z.boolean(), message: z.string().nullable() })),
   'library.reveal': main(ContentAt, z.strictObject({ revealed: z.boolean(), message: z.string().nullable() })),
+  // M6b fix wave 2 (Decision Log 36i): a File artifact's stored file read as `files.read` reads a session's, by the
+  // artifact alone: main resolves its path (`artifacts.content`), so the owner's file reads in its viewer with no
+  // session, and a window names no path.
+  'library.read': main(ContentAt.extend(FilesReadInputSchema.pick({ offset: true, length: true, hash: true }).shape), FilesReadOutputSchema),
   // M5b: the native save dialog at ~/Downloads/<the artifact's title or the file's name>, the source copied to the
   // chosen path (a temporary file beside it renamed over it); `saved: false` when the dialog was cancelled.
   'library.saveAs': main(
@@ -122,6 +131,9 @@ export const commands = {
   'library.entry': host(z.strictObject({ artifactId: Id }), LibraryEntryAnswerSchema),
   // An artifact's searchable text at its current revision. Main-only.
   'library.text': host(z.strictObject({ artifactId: Id }), z.strictObject({ revision: Seq, text: z.string() })),
+  // M6b, e2e only (refused unless the engine host runs under MAWS_E2E=1): the X12 import the host runs at store open, run
+  // again now, so a test's seeded pre-P3 records land as they would at the next start. The counts cover the directory.
+  'library.testImport': host(z.void(), DeliverablesImportSchema),
 } as const satisfies Record<`library.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

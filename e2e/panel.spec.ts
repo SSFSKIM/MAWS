@@ -1018,9 +1018,9 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await panel.getByRole('button', { name: 'Add a tool' }).click();
       // E6 (a C8a test amended by E6): Source control registers from App.tsx's E6 block; outside MENU_ORDER, it follows the
       // ranked tools. E7: Tasks registers with the agent tools from C8b's block, ahead of E6's and E3's blocks. E3: Side
-      // registers from App.tsx's E3 block; E2: Deliverables from E2's, after it; P3-L: Artifacts right after Deliverables, in
-      // E2's block until the cutover; E4a: Browser from E4a's, after E2's (landing order; the Question sheet is menu: false)
-      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Tasks' /* E7 */, 'Source control', 'Side' /* E3 */, 'Deliverables' /* E2 */, 'Artifacts' /* P3-L */, 'Browser' /* E4a */]); // by MENU_ORDER (Tasks, Source control, Side, Deliverables, Artifacts and Browser, not in it, after in registration order); Log is menu: false
+      // registers from App.tsx's E3 block; E2: Deliverables from E2's, after it; P3-L: Artifacts in E2's block, Deliverables'
+      // place since the cutover (M6b); E4a: Browser from E4a's, after E2's (landing order; the Question sheet is menu: false)
+      await expect(page.getByRole('menuitem'), '"+" offers the registered tools only').toHaveText(['Subagents', 'Review', 'Terminal', 'Files', 'Background work', 'Session info', 'Tasks' /* E7 */, 'Source control', 'Side' /* E3 */, 'Artifacts' /* E2; P3-L */, 'Browser' /* E4a */]); // by MENU_ORDER (Tasks, Source control, Side, Artifacts and Browser, not in it, after in registration order); Log is menu: false
       await page.keyboard.press('Escape');
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
@@ -1128,8 +1128,8 @@ test.describe('the floating session card (P3-G)', () => {
         // The region's 1 px left border sits outside the body the card is placed in
         expect(await near()).toEqual({ left: 17, bottom: 16 });
         await panel.getByRole('button', { name: 'Add a tool' }).click();
-        await page.getByRole('menuitem', { name: 'Deliverables' }).click();
-        await expect(panel.locator('[data-deliverables-list]')).toBeVisible();
+        await page.getByRole('menuitem', { name: 'Artifacts' }).click(); // P3-L M6b: Deliverables' place
+        await expect(panel.locator('[data-artifacts-list]')).toBeVisible();
         expect(await near()).toEqual({ left: 17, bottom: 16 });
         // M1 review: at its largest (its top edge dragged to the window's top) the card stops 16 px under the tool body's
         // top, so the strip above it and its controls stay clear

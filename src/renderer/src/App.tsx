@@ -81,11 +81,7 @@ import { CommentComposerHost } from './side/CommentComposer';
 import { connectSide, registerSidePane } from './side/register';
 // E3 end
 // E2 start
-import { deliverablesTool } from './tools/deliverables/DeliverablesTool';
-import { DeliverableTab } from './tools/deliverables/DeliverableTab';
-import { connectDeliverables } from './tools/deliverables/store';
-import { openDeliverable } from './tools/maws/actions';
-import { registerTranscriptActions as registerDeliverableTranscriptActions } from './transcript';
+import { registerTranscriptActions as registerArtifactTranscriptActions } from './transcript';
 // E2 end
 // E10 start
 import { connectSupervisorNotices } from './app/supervisor-notices';
@@ -116,7 +112,7 @@ import { registerTranscriptActions as registerBrowserAgentTranscriptActions } fr
 // E4c end
 // P3-L start
 import { registerArtifactTabs } from './library/ArtifactTab';
-import { artifactsTool } from './tools/artifacts/ArtifactsTool';
+import { artifactsTool, openArtifactInPanel } from './tools/artifacts/ArtifactsTool';
 import { registerByteViewers } from './tools/artifacts/viewers/register';
 import { Library } from './library/Library';
 import { connectLibrary } from './library/store';
@@ -247,16 +243,12 @@ export function App() {
   }, []);
   useEffect(() => connectSide(), []);
   // E3 end
-  // E2 start: the Deliverables tool and its main tab, registered once and never unregistered (C8a's rule above), and
-  // the host's write announcements and main's console attribution into the deliverables store; the transcript's
-  // artifact row and a delivered file's name open the viewer through openDeliverable
+  // E2 start: the panel tool registered once and never unregistered (C8a's rule above); the transcript's artifact row
+  // and a delivered file's name open it. P3-L (M6b): the Artifacts tool, E2's Deliverables tool and its main tab gone.
   useEffect(() => {
-    registerPanelTool(deliverablesTool);
-    registerPanelTool(artifactsTool); // P3-L (M5): the Artifacts tool, beside Deliverables until the cutover (M6)
-    registerSlot('deliverableTab', DeliverableTab);
+    registerPanelTool(artifactsTool);
   }, []);
-  useEffect(() => connectDeliverables(), []);
-  useEffect(() => registerDeliverableTranscriptActions({ openDeliverable }), []);
+  useEffect(() => registerArtifactTranscriptActions({ openArtifact: openArtifactInPanel }), []);
   // E2 end
   // E10 start: the supervisor's update and incompatibility banners and its crash toast, from main's host.status; this
   // connects the hosts store app-wide (Diagnostics and Settings read it too)
