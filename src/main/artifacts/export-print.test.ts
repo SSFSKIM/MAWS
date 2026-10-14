@@ -93,7 +93,7 @@ describe('the PDF printer’s cancellation while it prepares its page', () => {
     fakes.mkdtempDelay = new Promise<void>((resolve) => (release = resolve));
     const registry = new ExporterRegistry();
     registry.register({ kind: 'document', format: 'pdf', run: async (req, ctx) => ctx.writeFile(req.path, await ctx.printToPdf('<p>late window</p>')) });
-    const sources: ExportSources = { title: 'T', state: async () => new Uint8Array(), readAsset: async () => null, print: printHtmlToPdf };
+    const sources: ExportSources = { title: 'T', state: async () => new Uint8Array(), readAsset: async () => null, listAssets: async () => [], print: printHtmlToPdf };
     const answer = await runExport(registry, { artifactId: 'a', kind: 'document', format: 'pdf', revision: 1, path: join(root, '1-pdf.pdf') }, sources, 10);
     expect(answer).toEqual({ ok: false, error: 'the export did not finish within 0.01 s' });
     release();
@@ -118,7 +118,7 @@ describe('a staged write that fails part-way', () => {
     fakes.writeFails = (path) => path.endsWith('.tmp');
     const registry = new ExporterRegistry();
     registry.register({ kind: 'document', format: 'pdf', run: async (req, ctx) => ctx.writeFile(req.path, 'whole export') });
-    const sources: ExportSources = { title: 'T', state: async () => new Uint8Array(), readAsset: async () => null, print: async () => new Uint8Array() };
+    const sources: ExportSources = { title: 'T', state: async () => new Uint8Array(), readAsset: async () => null, listAssets: async () => [], print: async () => new Uint8Array() };
     const answer = await runExport(registry, { artifactId: 'a', kind: 'document', format: 'pdf', revision: 1, path: join(root, '1-pdf.pdf') }, sources, 1_000);
     expect(answer).toEqual({ ok: false, error: 'ENOSPC: no space left on device' });
     expect(await readdir(root)).toEqual([]);

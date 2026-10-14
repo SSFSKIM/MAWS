@@ -47,7 +47,8 @@ function watchWindow(deps: DocOpenDeps, sender: DocSender): void {
 
 const refusal = (reason: ArtifactRefusal['reason'], message: string) => new CommandFailure(ipcError('invalid_input', message, { reason, data: {} } satisfies ArtifactRefusal));
 
-export async function openDocument(deps: DocOpenDeps, artifactId: string, sender: DocSender): Promise<{ channel: number }> {
+// `doc: 'suggestions'` opens the artifact's suggestion doc (P3-A M8, Decision Log 45) under the same checks.
+export async function openDocument(deps: DocOpenDeps, artifactId: string, sender: DocSender, doc?: 'suggestions'): Promise<{ channel: number }> {
   const found = (await deps.dispatch('engine-host', 'artifacts.get', { artifactId })) as CommandResult<'artifacts.get'>;
   if (!found.ok) throw new CommandFailure(found.error);
   const { artifact } = found.value;
@@ -58,7 +59,7 @@ export async function openDocument(deps: DocOpenDeps, artifactId: string, sender
   const channel = lastChannel;
   const { port1, port2 } = deps.channel();
   watchWindow(deps, sender);
-  if (!deps.postDocPort({ t: 'doc', channel, artifactId, actor: HUMAN }, port1, sender.id)) {
+  if (!deps.postDocPort({ t: 'doc', channel, artifactId, actor: HUMAN, ...(doc && { doc }) }, port1, sender.id)) {
     port1.close();
     port2.close();
     throw new CommandFailure(ipcError('host_unavailable', 'the engine host cannot take a document port now'));

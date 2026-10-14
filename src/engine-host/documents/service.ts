@@ -50,14 +50,20 @@ import {
   insertedClients,
   mergeMaps,
   newDoc,
+  newSuggestionDoc,
   newStructClients,
   onUpdate,
   stateV2,
   stateVector,
   transact,
   wouldChange,
+  clientAbove,
+  planAccept,
+  planReject,
   type Carry,
   type ContentMap,
+  type SuggestionPlan,
+  type SuggestionRange,
   type Doc,
 } from '@artifacts/yjs';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
@@ -96,6 +102,7 @@ interface HostReplica {
   readonly off: () => void;
   reading: boolean; // inside `readAs`: an edit is refused, never relayed to the live doc
   editedWhileReading: boolean;
+  copy?: true; // a one-off writer of an accepted suggestion's copy, under a clientID bound to the suggester
 }
 
 type Writer = Connection | HostReplica;
@@ -119,6 +126,9 @@ interface HostDoc {
   // writes wait here, in seq order, so the authorship the hook carries applies to each (Decision Log 25j, 29a); written
   // in the same savepoint. Null outside that span: a row is attributed as it is written.
   deferred: { seq: number; at: number; map: ContentMap }[] | null;
+  // While an accepted suggestion's copy is written (Decision Log 45): the clientID it is written under and the suggester
+  // that clientID is bound to, in place of the writer.
+  credit: Map<number, Actor> | null;
   readonly loadMs: number;
   idleTimer: ReturnType<typeof setTimeout> | null; // set while nobody holds the doc: its unload
 }
@@ -166,6 +176,16 @@ export interface ServiceOptions {
 
 const LOAD = Symbol('load'); // the origin of a load's applies, which are already in the log
 const MIRROR = Symbol('mirror'); // the origin of the live doc's updates applied to a host replica
+const BASE = Symbol('base'); // the origin of a main doc's update flowing into its suggestion doc, logged in the main doc's log
+
+// An artifact's suggestion doc (M8; Decision Log 23e, S1's topology) is the document stored under this key: a gc-off
+// doc that holds the main doc and, on top of it, the proposals written to it. It is loaded as the main doc's state plus
+// its own head and rows, and while it is loaded every update the main doc integrates flows into it unlogged (the main
+// doc's own row already holds it), so its log holds only what was written to it.
+export const SUGGESTION_SUFFIX = ':suggest';
+export const suggestionKey = (artifactId: string): string => `${artifactId}${SUGGESTION_SUFFIX}`;
+// The main doc a key is the suggestion doc of, or null for a main doc's key.
+export const mainOf = (key: string): string | null => (key.endsWith(SUGGESTION_SUFFIX) ? key.slice(0, -SUGGESTION_SUFFIX.length) : null);
 
 export class DocumentService {
   readonly stats: ServiceStats = { framesIn: 0, contentFramesIn: 0, rowsAppended: 0, commits: 0, rejections: 0, rejected: [], lostBatches: 0 };
@@ -371,6 +391,36 @@ export class DocumentService {
     }
   }
 
+  // The artifact's suggestion doc (X24; Decision Log 23e), opened if it is not, and its key: the key every other method
+  // takes (`attach`, `writeAs`, `readAs`, `replica`, `live`), so a proposal is written and shown like any document's
+  // edit, through a replica whose actor is its author.
+  suggestionDoc(artifactId: string): string {
+    if (this.closed) throw new Error('the document service is closed');
+    if (mainOf(artifactId) !== null) throw new Error(`${artifactId} is a suggestion doc`);
+    const key = suggestionKey(artifactId);
+    this.open(key);
+    this.scheduleFlush(); // the idle unload's clock, as `live` does
+    return key;
+  }
+
+  // Accepts the proposals in `ranges` of the artifact's suggestion doc (X24; Decision Log 45): the accepted result is
+  // written into the main doc as a copy, one transaction by `actor` (the log row's actor) under a fresh clientID bound to
+  // the suggester, each copied unit's provenance carried from its proposal (author and time, `carry = 'accept'`); the
+  // proposals taken are deleted in the suggestion doc in the same savepoint. A range the plan refuses (no such content,
+  // or part of an inserted block without the block) rejects with a `SuggestionError` before anything is written.
+  // Resolves with the main doc's revision after the commit.
+  acceptSuggestion(artifactId: string, ranges: SuggestionRange[], actor: Actor): Promise<number> {
+    return this.settle(artifactId, ranges, actor, 'accept');
+  }
+
+  // Rejects the proposals in `ranges`: proposed content is deleted in the suggestion doc, and content a proposal deleted
+  // comes back in the main doc as a content-identical copy written by `actor`, its provenance carried from the original
+  // (`carry = 'reject'`), since a deletion cannot be undone in place (Decision Log 45). The main doc's content is
+  // unchanged. Resolves with the main doc's revision after the commit.
+  rejectSuggestion(artifactId: string, ranges: SuggestionRange[], actor: Actor = { kind: 'human' }): Promise<number> {
+    return this.settle(artifactId, ranges, actor, 'reject');
+  }
+
   // The live doc, opened if it is not (unloaded after the idle grace period if no connection holds it). Read-only: a
   // write goes through `writeAs`.
   live(artifactId: string): Doc {
@@ -420,7 +470,7 @@ export class DocumentService {
         this.attach(artifactId, fromNodePort(port1), actor);
         return port2 as unknown as PortLike;
       };
-      replica = new AgentReplica(connect, this.now(), (line) => this.log(`agent replica ${appSessionId} on ${artifactId}: ${line}`));
+      replica = new AgentReplica(connect, this.now(), (line) => this.log(`agent replica ${appSessionId} on ${artifactId}: ${line}`), mainOf(artifactId) === null ? newDoc : newSuggestionDoc);
       this.agentReplicas.set(key, replica);
       this.sweepTimer ??= setInterval(() => this.closeIdleReplicas(), 60_000);
       this.sweepTimer.unref?.();
@@ -485,6 +535,7 @@ export class DocumentService {
       provenance: { merged: null, pending: [] },
       lastApplied: null,
       deferred: null,
+      credit: null,
       loadMs: performance.now() - started,
       idleTimer: null,
     };
@@ -502,9 +553,16 @@ export class DocumentService {
     return hostDoc;
   }
 
-  // A doc built from the store: the head, then the log rows after it.
+  // A doc built from the store: the head, then the log rows after it. A suggestion doc starts from its main doc's state
+  // (the live doc's when it is loaded: rows of the open batch included), so it holds every main update since its own
+  // rows were written whether or not it was loaded when they landed.
   private loadDoc(artifactId: string): { doc: Doc; stored: ReturnType<DocumentStorage['load']> } {
-    const doc = newDoc();
+    const main = mainOf(artifactId);
+    const doc = main === null ? newDoc() : newSuggestionDoc();
+    if (main !== null) {
+      const live = this.docs.get(main)?.doc;
+      applyV2(doc, live ? stateV2(live) : this.readState(main).state, LOAD);
+    }
     const stored = this.storage.load(artifactId);
     if (stored.head) applyV2(doc, stored.head.state, LOAD);
     for (const row of stored.updates) applyV1(doc, row.bytes, LOAD);
@@ -565,7 +623,7 @@ export class DocumentService {
       return true; // a restatement: nothing to apply or log
     }
     for (const client of newStructClients(hostDoc.doc, ids)) {
-      const bound = hostDoc.bindings.get(client);
+      const bound = hostDoc.bindings.get(client) ?? this.inheritedBinding(hostDoc, client);
       if (bound !== undefined && bound !== conn.key) return this.refuse(conn, `new structs under clientID ${client}, bound to another actor (${bound})`);
     }
     const adapter = this.adapterOf(hostDoc);
@@ -586,6 +644,21 @@ export class DocumentService {
     return failed === null;
   }
 
+  // For a clientID a doc has not bound: the actor the artifact's other doc binds it to, if any. A main doc and its
+  // suggestion doc share clientIDs (the suggestion doc holds the main doc's structs, flowed in unlogged, and an accepted
+  // copy is bound in the main doc), so neither may let a replica extend a clientID the other binds to someone else.
+  // A replica of the main doc sending a proposal's structs as its own (an editor accepting on its side), or a replica
+  // of the suggestion doc extending a clientID the main doc binds to another actor, forges authorship and is refused
+  // like any other (Decision Log 6). Only bindings are read: neither doc adopts the other's host-replica clientIDs.
+  private inheritedBinding(hostDoc: HostDoc, client: number): string | undefined {
+    const main = mainOf(hostDoc.id);
+    const other = main ?? suggestionKey(hostDoc.id);
+    const loaded = this.docs.get(other);
+    if (loaded) return loaded.bindings.get(client);
+    const actor = this.storage.clientActor(other, client);
+    return actor ? actorKey(actor) : undefined;
+  }
+
   // Applies a frame's own update (an incoming one, or a host-originated edit) and starts holding back the attribution rows
   // of the frame's writes until `afterUpdate` returns; answers what the update integrated, if anything.
   private applyOwn(hostDoc: HostDoc, apply: () => void): Uint8Array | null {
@@ -597,20 +670,22 @@ export class DocumentService {
 
   // The kind's `afterUpdate` on what the frame's own update integrated (through the actor's host replica), then the
   // attribution rows of the frame's writes with any authorship the hook carried, and the hook's thread rows.
-  private afterUpdate(hostDoc: HostDoc, adapter: KindAdapter | undefined, actor: Actor, applied: Uint8Array | null): void {
+  // `carried` is authorship the host itself carries onto the frame's rows (a suggestion's copy), looked up in `prior`.
+  private afterUpdate(hostDoc: HostDoc, adapter: KindAdapter | undefined, actor: Actor, applied: Uint8Array | null, carried?: { carries: Carry[]; prior: ContentMap }): void {
     const after: { outcome?: ReturnType<NonNullable<KindAdapter['afterUpdate']>> } = {};
     if (applied && adapter?.afterUpdate) this.writeThrough(hostDoc, actor, (doc) => (after.outcome = adapter.afterUpdate!(doc, { artifactId: hostDoc.id, update: applied, actor })));
-    this.attribute(hostDoc, after.outcome?.provenance);
+    this.attribute(hostDoc, after.outcome?.provenance, carried);
     if (after.outcome?.threads) this.storage.writeThreads(hostDoc.id, after.outcome.threads);
   }
 
   // The held-back rows in seq order, each carried against the provenance before it (an earlier row of the same frame
   // included, so a repair copying forwarded text credits that text's author).
-  private attribute(hostDoc: HostDoc, carries?: Carry[]): void {
+  private attribute(hostDoc: HostDoc, carries?: Carry[], carried?: { carries: Carry[]; prior: ContentMap }): void {
     const rows = hostDoc.deferred;
     hostDoc.deferred = null;
     for (const row of rows ?? []) {
-      const map = carries && carries.length > 0 ? carryAttribution(row.map, this.provenance(hostDoc.id), carries) : row.map;
+      let map = carried && carried.carries.length > 0 ? carryAttribution(row.map, carried.prior, carried.carries) : row.map;
+      if (carries && carries.length > 0) map = carryAttribution(map, this.provenance(hostDoc.id), carries);
       this.storage.attributeInBatch({ artifactId: hostDoc.id, seq: row.seq, at: row.at, provenance: encodeMap(map) });
       hostDoc.provenance.pending.push(map);
     }
@@ -653,6 +728,93 @@ export class DocumentService {
     }
   }
 
+  private settle(artifactId: string, ranges: SuggestionRange[], actor: Actor, what: 'accept' | 'reject'): Promise<number> {
+    if (this.closed) return Promise.reject(new Error('the document service is closed'));
+    if (this.storage.readOnly) return Promise.reject(new StoreTooNewError('a newer app wrote this store'));
+    if (mainOf(artifactId) !== null) return Promise.reject(new Error(`${artifactId} is a suggestion doc`));
+    const main = this.open(artifactId);
+    const suggestion = this.open(suggestionKey(artifactId));
+    let plan: SuggestionPlan;
+    try {
+      plan = (what === 'accept' ? planAccept : planReject)(main.doc, suggestion.doc, this.provenance(suggestion.id), ranges);
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    // The proposers whose content an accept copies. A copy pairs unit by unit with the proposals it copies, and each
+    // unit's author and time are carried from its own; a formatting marker the copy placed differently pairs with the
+    // marker of the actor who set that format when only one did (whichever of its replicas wrote it). A marker left
+    // unpaired (several actors set that format in the range) keeps the copy's binding:
+    // the first proposer, at the accept time (logged; parent tracker).
+    const suggesters = [...new Map(plan.suggesters.flatMap((client) => {
+      const bound = this.storage.clientActor(suggestion.id, client);
+      return bound ? [[actorKey(bound), bound] as const] : [];
+    })).values()];
+    const suggestionDirty = this.dirty.get(suggestion.id);
+    const failed = this.inFrame(main, () => {
+      if (plan.edit) {
+        const adapter = this.adapterOf(main);
+        let pairs: ReturnType<SuggestionPlan['pairs']> = null;
+        const applied = this.applyOwn(main, () => {
+          if (what === 'accept') pairs = this.writeCopy(main, suggestion, actor, plan, suggesters);
+          else
+            this.writeThrough(main, actor, (doc) => {
+              plan.edit!(doc);
+              pairs = plan.pairs(doc);
+            });
+        });
+        const carried = pairs as ReturnType<SuggestionPlan['pairs']>;
+        if (carried && !carried.complete && suggesters.length > 1) this.log(`accept on ${artifactId}: a formatting marker of the copy matches several actors' proposals and is credited to ${actorKey(suggesters[0])} at the accept time`);
+        if (!carried) this.log(`${what} on ${artifactId}: the copy could not be paired with its originals; its provenance is the ${what === 'accept' ? 'suggester’s at the accept time' : 'rejector’s'}`);
+        const prior = what === 'accept' ? this.provenance(suggestion.id) : this.provenance(main.id);
+        this.afterUpdate(main, adapter, actor, applied, carried && carried.from.length > 0 ? { carries: [{ kind: what, from: carried.from, to: carried.to }], prior } : undefined);
+      }
+      if (plan.remove) this.writeThrough(suggestion, actor, (doc) => applyV1(doc, plan.remove!));
+    });
+    if (failed) {
+      if (suggestionDirty === undefined) this.dirty.delete(suggestion.id);
+      else this.dirty.set(suggestion.id, suggestionDirty);
+      return Promise.reject(new Error(`the ${what} on ${artifactId} failed and the document was reset: ${failed}`));
+    }
+    const revision = main.revision;
+    return new Promise((resolve, reject) => {
+      this.waiters.push({ resolve: () => resolve(revision), reject });
+      this.scheduleFlush();
+    });
+  }
+
+  // An accepted suggestion's copy (Decision Log 45): written by a one-off replica of the main doc whose clientID is
+  // above every clientID either doc holds (so a copied attribute stays its key's value in the suggestion doc once its
+  // original is deleted) and is bound to the suggester; the row is `actor`'s. Answers the copy's pairs with the
+  // originals. A range holding several suggesters' proposals binds the clientID to the first; the carry credits each
+  // paired unit to its own proposer.
+  private writeCopy(main: HostDoc, suggestion: HostDoc, actor: Actor, plan: SuggestionPlan, suggesters: Actor[]): ReturnType<SuggestionPlan['pairs']> {
+    const doc = newDoc();
+    applyV1(doc, diffV1(main.doc), MIRROR);
+    adoptClientId(doc, clientAbove([main.doc, suggestion.doc]));
+    const writer: HostReplica = {
+      kind: 'replica',
+      actor,
+      key: actorKey(actor),
+      doc,
+      reading: false,
+      editedWhileReading: false,
+      copy: true,
+      off: onUpdate(doc, (update, origin) => {
+        if (origin !== MIRROR) applyV1(main.doc, update, writer);
+      }),
+    };
+    main.credit = new Map([[doc.clientID, suggesters[0] ?? actor]]);
+    try {
+      transact(doc, () => plan.edit!(doc), writer);
+      if (hasPending(main.doc)) throw new Error('an accepted suggestion’s copy left state pending');
+      return plan.pairs(doc);
+    } finally {
+      main.credit = null;
+      writer.off();
+      doc.destroy();
+    }
+  }
+
   // Runs `edit` on the host replica of `actor`, whose update lands in the live doc as that actor's.
   private writeThrough(hostDoc: HostDoc, actor: Actor, edit: (doc: Doc) => void): void {
     const replica = this.hostReplica(hostDoc, actor);
@@ -664,7 +826,7 @@ export class DocumentService {
     const key = actorKey(actor);
     const existing = hostDoc.replicas.get(key);
     if (existing) return existing;
-    const doc = newDoc();
+    const doc = mainOf(hostDoc.id) === null ? newDoc() : newSuggestionDoc();
     applyV1(doc, diffV1(hostDoc.doc), MIRROR);
     const bound = hostDoc.hostClients.get(key);
     if (bound !== undefined) adoptClientId(doc, bound); // after the load, which carries that clientID's own structs
@@ -688,6 +850,7 @@ export class DocumentService {
   // Inside the live doc's transaction cleanup: the row joins the open batch; what reveals it waits for the commit.
   private integrated(hostDoc: HostDoc, update: Uint8Array, origin: unknown): void {
     if (origin === LOAD) return;
+    if (origin === BASE) return this.relay(hostDoc, update, null); // its main doc's row holds it, committed in this batch
     const writer = origin as Writer | null;
     if (writer?.kind !== 'connection' && writer?.kind !== 'replica') throw new Error(`the live doc of ${hostDoc.id} was edited outside a replica`);
     const at = this.now();
@@ -695,14 +858,15 @@ export class DocumentService {
     const fresh: number[] = [];
     for (const client of insertedClients(ids)) {
       if (hostDoc.bindings.has(client)) continue;
-      hostDoc.bindings.set(client, writer.key);
+      const credited = hostDoc.credit?.get(client);
+      hostDoc.bindings.set(client, credited ? actorKey(credited) : writer.key);
       fresh.push(client);
     }
-    const hostClient = writer.kind === 'replica' ? writer.doc.clientID : undefined;
+    const hostClient = writer.kind === 'replica' && !writer.copy ? writer.doc.clientID : undefined;
     if (hostClient !== undefined && fresh.includes(hostClient)) hostDoc.hostClients.set(writer.key, hostClient);
     const map = attributionMap(ids, { insertActor: (client) => hostDoc.bindings.get(client) ?? writer.key, deleteActor: writer.key, at });
     const deferred = hostDoc.deferred;
-    const seq = this.storage.appendInBatch({ artifactId: hostDoc.id, actor: writer.actor, at, update, provenance: deferred ? undefined : encodeMap(map), bindClients: fresh, hostClient });
+    const seq = this.storage.appendInBatch({ artifactId: hostDoc.id, actor: writer.actor, at, update, provenance: deferred ? undefined : encodeMap(map), bindClients: fresh, hostClient, credit: hostDoc.credit ?? undefined });
     if (deferred) deferred.push({ seq, at, map });
     else hostDoc.provenance.pending.push(map);
     hostDoc.revision = seq;
@@ -714,9 +878,23 @@ export class DocumentService {
     actors.set(writer.key, writer.actor);
     this.dirtyActors.set(hostDoc.id, actors);
     this.stats.rowsAppended += 1;
+    this.relay(hostDoc, update, writer);
+    const suggestion = this.docs.get(suggestionKey(hostDoc.id));
+    if (suggestion) this.inStep(suggestion, update);
+  }
+
+  // An integrated update goes to every connection (after the commit) and every host replica but its writer's.
+  private relay(hostDoc: HostDoc, update: Uint8Array, writer: Writer | null): void {
     const frame = encodeFrame({ type: 'update', update });
     for (const conn of hostDoc.conns) if (conn !== writer) this.queue(conn, frame);
     for (const replica of hostDoc.replicas.values()) if (replica !== writer) applyV1(replica.doc, update, MIRROR);
+  }
+
+  // A main doc's update into its loaded suggestion doc, which holds everything the main doc holds, so nothing can be
+  // missing; were anything left pending, the suggestion doc is dropped and rebuilt from the store at its next use.
+  private inStep(suggestion: HostDoc, update: Uint8Array): void {
+    applyV1(suggestion.doc, update, BASE);
+    if (hasPending(suggestion.doc)) this.evict(suggestion, 'a main doc update left it pending');
   }
 
   private queue(conn: Connection, frame: Uint8Array): void {
@@ -842,13 +1020,16 @@ export class DocumentService {
 
   // The doc holds state outside the log, or a frame's work failed after its apply: drop it unsent, with its
   // connections; the next attach reloads it from the store and the replicas re-sync. Its rows from earlier frames of
-  // the batch stand and commit with it.
+  // the batch stand and commit with it. A main doc's loaded suggestion doc goes with it: what the frame took back had
+  // already flowed into it.
   private evict(hostDoc: HostDoc, reason: string): void {
     this.stats.rejections += 1;
     this.recordRejection(reason, 0);
     this.log(`evicted ${hostDoc.id}: ${reason}`);
     for (let i = this.outbox.length - 1; i >= 0; i--) if (this.outbox[i].conn.artifactId === hostDoc.id) this.outbox.splice(i, 1);
     this.unload(hostDoc);
+    const suggestion = this.docs.get(suggestionKey(hostDoc.id));
+    if (suggestion) this.evict(suggestion, `its main doc was evicted (${reason})`);
     this.scheduleFlush();
   }
 

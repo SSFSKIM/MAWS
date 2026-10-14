@@ -10,8 +10,9 @@ import { MessageChannel, type MessagePort } from 'node:worker_threads';
 import type { MessagePortMain } from 'electron';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PortProvider, type PortLike } from '@artifacts/provider/port';
-import { applyV2, newDoc } from '@artifacts/yjs';
+import { applyV2, decodeMap, idAt, insertedBy, newDoc } from '@artifacts/yjs';
 import { HostCommandError, type DocPortHandler, type HostEmit, type HostOn } from '@shared/host/runtime';
+import type { AppSessionId } from '@shared/graph/ids';
 import { commands, type CommandName, type CommandOutput, type EventName } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput, validateEventPayload } from '@shared/ipc/validate';
 import { openDocuments, type Documents } from '.';
@@ -396,5 +397,56 @@ describe('document ports from main (Decision Log 13)', () => {
       await closed;
     }
     expect(error).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('suggestions over IPC (M8; Decision Log 45)', () => {
+  it('opens the suggestion doc on `doc: suggestions`, reads its attributions, and lets the human accept and reject proposals', async () => {
+    register({ MAWS_E2E: '1' });
+    const { artifact } = await call('artifacts.create', { kind: 'document', title: 'Notes' });
+    await call('artifacts.testWrite', { artifactId: artifact.id, opId: 'seed', ops: [{ op: 'insertText', index: 0, text: 'seed' }] });
+    const service = documents!.service;
+    const key = service.suggestionDoc(artifact.id);
+    const agent = { kind: 'session', appSessionId: 'app-1' as AppSessionId } as const;
+    await service.writeAs(key, agent, (doc) => {
+      doc.get('root').insert(4, ' and more');
+      doc.get('root').insert(0, 'Proposed: ');
+    });
+    const { port1, port2 } = new MessageChannel();
+    docHandler!({ t: 'doc', channel: 3, artifactId: artifact.id, actor: { kind: 'human' }, doc: 'suggestions' }, asPortMain(port1));
+    const view = newDoc();
+    const provider = new PortProvider(view);
+    provider.connect(port2 as unknown as PortLike);
+    await until(() => provider.state.synced);
+    expect(view.get('root').toString()).toBe('Proposed: seed and more');
+
+    const root = () => service.live(key).get('root');
+    const { bytes } = await call('artifacts.attributions', { artifactId: artifact.id, fromSeq: 0, toSeq: service.revision(key), doc: 'suggestions' });
+    expect(insertedBy(decodeMap(bytes), idAt(root(), 0)!)?.actor).toBe('session:app-1');
+    expect(insertedBy(decodeMap((await call('artifacts.attributions', { artifactId: artifact.id, fromSeq: 0, toSeq: service.revision(key) })).bytes), idAt(root(), 0)!)).toBeNull();
+
+    const first = idAt(root(), 0)!;
+    const { revision } = await call('artifacts.acceptSuggestion', { artifactId: artifact.id, ranges: [{ start: first, end: first }] });
+    expect(revision).toBe(service.revision(artifact.id));
+    expect(service.live(artifact.id).get('root').toString()).toBe('Proposed: seed');
+    const more = idAt(root(), 14)!;
+    await call('artifacts.rejectSuggestion', { artifactId: artifact.id, ranges: [{ start: more, end: more }] });
+    expect(root().toString()).toBe('Proposed: seed');
+    await until(() => view.get('root').toString() === 'Proposed: seed');
+    provider.destroy();
+
+    const page = (await call('artifacts.create', { kind: 'html', title: 'Page', content: { bytes: new Uint8Array([60]) } })).artifact;
+    expect(await refusal('artifacts.acceptSuggestion', { artifactId: page.id, ranges: [{ start: first, end: first }] })).toMatchObject({ code: 'invalid_input', issues: { reason: 'invalid', data: { kind: 'html' } } });
+    const nothing = { client: 1, clock: 0 };
+    expect(await refusal('artifacts.acceptSuggestion', { artifactId: artifact.id, ranges: [{ start: nothing, end: nothing }] })).toMatchObject({ code: 'invalid_input', issues: { reason: 'invalid' } });
+  });
+});
+
+describe('the export service’s asset listing (Decision Log 45e)', () => {
+  it('lists an artifact’s assets by ref, and refuses an unknown artifact notFound', async () => {
+    const { artifact } = await call('artifacts.create', { kind: 'design', title: 'Site' });
+    await call('artifacts.uploadAsset', { artifactId: artifact.id, name: 'logo.png', mime: 'image/png', bytes: new Uint8Array([1, 2, 3]) });
+    expect(await call('artifacts.assets', { artifactId: artifact.id })).toEqual({ assets: [{ ref: 'assets/logo.png', name: 'logo.png', mime: 'image/png', size: 3 }] });
+    expect(await refusal('artifacts.assets', { artifactId: '55555555-5555-4555-8555-555555555555' })).toMatchObject({ issues: { reason: 'notFound' } });
   });
 });

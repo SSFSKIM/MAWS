@@ -16,6 +16,11 @@ export const bindingVersion = 'y14-rc28/ypm2-15';
 // gc on: deleted content is collected, versions are full states (no state-pair snapshots).
 export const newDoc = (): Doc => new Y.Doc({ gc: true });
 
+// An artifact's suggestion doc (P3-A M8, S1's topology), and every replica that writes or shows it: gc off, so content a
+// suggestion deletes stays readable for the diff against the main doc, and flagged as v14's suggestion doc, so the
+// binding's automatic formatting clean-up is not itself shown as a suggestion.
+export const newSuggestionDoc = (): Doc => new Y.Doc({ gc: false, isSuggestionDoc: true });
+
 // Makes `doc` write under a known clientID (the host's replica of one actor reuses its bound clientID across reloads,
 // so the state vector holds one host clientID per actor). Only after the doc has loaded that clientID's whole history:
 // v14 gives a doc a fresh clientID whenever an applied (non-local) update carries structs of its own.

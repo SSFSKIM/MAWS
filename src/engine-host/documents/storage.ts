@@ -106,13 +106,15 @@ export class SqliteDocumentStorage implements DocumentStorage {
     };
   }
 
-  appendInBatch(row: { artifactId: string; actor: Actor; at: number; update: Uint8Array; provenance?: Uint8Array; bindClients: number[]; hostClient?: number }): number {
+  appendInBatch(row: { artifactId: string; actor: Actor; at: number; update: Uint8Array; provenance?: Uint8Array; bindClients: number[]; hostClient?: number; credit?: Map<number, Actor> }): number {
     this.begin();
     const key = this.actorInBatch(row.actor, row.at);
     const seq = Number(this.sql('INSERT INTO artifact_updates (artifactId, actor, at, bytes) VALUES (?, ?, ?, ?)').run(row.artifactId, key, row.at, row.update).lastInsertRowid);
     if (row.provenance) this.attributeInBatch({ artifactId: row.artifactId, seq, at: row.at, provenance: row.provenance });
     for (const clientId of row.bindClients) {
-      this.sql('INSERT INTO client_actors (artifactId, clientId, actor, firstSeq, host) VALUES (?, ?, ?, ?, ?)').run(row.artifactId, clientId, key, seq, clientId === row.hostClient ? 1 : 0);
+      const credited = row.credit?.get(clientId);
+      const bound = credited ? this.actorInBatch(credited, row.at) : key;
+      this.sql('INSERT INTO client_actors (artifactId, clientId, actor, firstSeq, host) VALUES (?, ?, ?, ?, ?)').run(row.artifactId, clientId, bound, seq, clientId === row.hostClient ? 1 : 0);
     }
     return seq;
   }

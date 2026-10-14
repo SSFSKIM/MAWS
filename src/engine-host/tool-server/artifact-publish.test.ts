@@ -240,3 +240,66 @@ describe('artifact_publish of a file kind (the generic file model)', () => {
     expect(replica.provider.awareness.getLocalState()).toBeNull();
   });
 });
+
+describe('artifact_publish as a suggestion (M8; parent Decision Log 27)', () => {
+  const design = () => create({ kind: 'design', title: 'Site', files: { 'a.html': 'A', 'b.css': 'B' } });
+  const suggested = (id: string): Record<string, string> => Object.fromEntries([...w.service.live(w.service.suggestionDoc(id)).get('files').attrEntries()].map(([k, v]) => [String(k), v as string]));
+  const rowsOf = (key: string) => (w.storage.db.prepare('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq').all(key) as { actor: string }[]).map((r) => r.actor);
+
+  it('mode "suggest" writes the files into the artifact’s suggestion doc as the session, leaving the artifact as it was', async () => {
+    const created = await design();
+    await w.store.endTurn(SELF);
+    const versions = w.store.listVersions(created.artifactId).length;
+    const answer = ArtifactPublishResultSchema.parse(jsonOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, mode: 'suggest', files: { 'a.html': 'A2', 'b.css': null, 'c.js': 'C' } })));
+    expect(answer).toMatchObject({ status: 'suggested', artifactId: created.artifactId, kind: 'design', revision: created.revision, changed: ['a.html', 'c.js'], removed: ['b.css'], kept: [] });
+    expect(liveFiles(created.artifactId)).toEqual({ 'a.html': 'A', 'b.css': 'B' });
+    expect(suggested(created.artifactId)).toEqual({ 'a.html': 'A2', 'c.js': 'C' });
+    expect(rowsOf(created.artifactId)).toEqual([`session:${SELF}`]);
+    expect(rowsOf(`${created.artifactId}:suggest`)).toEqual([`session:${SELF}`]);
+    await w.store.endTurn(SELF);
+    expect(w.store.listVersions(created.artifactId)).toHaveLength(versions); // the artifact did not change: no turn version
+  });
+
+  it('the owner’s setting makes every publish a suggestion, mode "direct" included', async () => {
+    const created = await design();
+    await w.store.update(created.artifactId, { agentEditsAsSuggestions: true });
+    const plain = jsonOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, files: { 'a.html': 'A2' } }));
+    expect(plain).toMatchObject({ status: 'suggested', changed: ['a.html'] });
+    const direct = jsonOf<{ revision: number }>(await publish({ artifact: created.artifactId, baseRevision: created.revision, mode: 'direct', files: { 'b.css': 'B2' } }));
+    expect(direct).toMatchObject({ status: 'suggested', changed: ['b.css'] });
+    expect(liveFiles(created.artifactId)).toEqual({ 'a.html': 'A', 'b.css': 'B' });
+    expect(suggested(created.artifactId)).toEqual({ 'a.html': 'A2', 'b.css': 'B2' });
+  });
+
+  it('a session’s next suggestion builds on its last; a file the user changed since the read still refuses it', async () => {
+    const created = await design();
+    const first = jsonOf<{ revision: number }>(await publish({ artifact: created.artifactId, baseRevision: created.revision, mode: 'suggest', files: { 'a.html': 'A2' } }));
+    const second = jsonOf(await publish({ artifact: created.artifactId, baseRevision: first.revision, mode: 'suggest', files: { 'a.html': 'A3' } }));
+    expect(second).toMatchObject({ status: 'suggested', changed: ['a.html'] });
+    await human(created.artifactId, (f) => f.setAttr('b.css', 'B by the user'));
+    const refused = await publish({ artifact: created.artifactId, baseRevision: first.revision, mode: 'suggest', files: { 'b.css': 'B2' } });
+    expect(artifactRefusalOf(textOf(refused))).toMatchObject({ reason: 'conflict', paths: ['b.css'] });
+    expect(suggested(created.artifactId)).toEqual({ 'a.html': 'A3', 'b.css': 'B by the user' });
+  });
+
+  it('answers a repeated tool-use id with its first answer, writing nothing again', async () => {
+    const created = await design();
+    const args = { artifact: created.artifactId, baseRevision: created.revision, mode: 'suggest', files: { 'a.html': 'A2' } };
+    const first = jsonOf(await publish(args, { toolUseId: 'toolu_suggest' as ToolUseId }));
+    expect(jsonOf(await publish(args, { toolUseId: 'toolu_suggest' as ToolUseId }))).toEqual(first);
+    expect(rowsOf(`${created.artifactId}:suggest`)).toHaveLength(1);
+  });
+
+  it('refuses a suggestion to an html page, asked for or set by the owner, writing nothing', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' });
+    const asked = await publish({ artifact: 'dash', baseRevision: created.revision, mode: 'suggest', files: { 'index.html': '<p>v2</p>' } });
+    expect(artifactRefusalOf(textOf(asked))).toEqual({ reason: 'invalid', kind: 'html', mode: 'suggest', setting: false });
+    await w.store.update(created.artifactId, { agentEditsAsSuggestions: true });
+    const set = await publish({ artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<p>v2</p>' } });
+    expect(artifactRefusalOf(textOf(set))).toEqual({ reason: 'invalid', kind: 'html', mode: 'suggest', setting: true });
+    // `setting` reports the artifact's setting, not the call's mode (M8 review finding 3)
+    const both = await publish({ artifact: 'dash', baseRevision: created.revision, mode: 'suggest', files: { 'index.html': '<p>v2</p>' } });
+    expect(artifactRefusalOf(textOf(both))).toEqual({ reason: 'invalid', kind: 'html', mode: 'suggest', setting: true });
+    expect(page(created.artifactId)).toBe('<p>v1</p>');
+  });
+});
