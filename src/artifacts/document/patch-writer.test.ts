@@ -210,6 +210,25 @@ describe('the ops (S4 1)', () => {
     expect(applyEdit(doc, [{ op: 'replace_text', old: '2. second item', new: '2. second entry' }]).results[0].line).toBe('replaced 1 occurrence(s) in ^ol1');
   });
 
+  // The whole-branch review's P1: the quoted edit goes through the block's markdown, whose ` ^id` must not change how the
+  // emphasis before it parses, so formatting outside the replacement is kept.
+  describe('formatting at a block’s end survives a quoted edit', () => {
+    const bold = [{ type: 'bold' }];
+    const cases: Array<[string, JSONContent, string, string, string, JSONContent[]]> = [
+      ['bold closing on punctuation', { type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Hello.', marks: bold }] }, 'p1', 'Hello', 'Hi', [{ type: 'text', text: 'Hi.', marks: bold }]],
+      ['emphasis ending in an encoded space', { type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Say ' }, { type: 'text', text: 'hello ', marks: [{ type: 'italic' }] }] }, 'p1', 'Say', 'Tell', [{ type: 'text', text: 'Tell ' }, { type: 'text', text: 'hello ', marks: [{ type: 'italic' }] }]],
+      ['a list item’s bold (the nested path)', { type: 'bulletList', attrs: { id: 'l1' }, content: [{ type: 'listItem', attrs: { id: 'li1' }, content: [{ type: 'paragraph', attrs: { id: 'lp1' }, content: [{ type: 'text', text: 'Ship it. ' }, { type: 'text', text: 'Done!', marks: bold }] }] }] }, 'li1', 'Ship', 'Send', [{ type: 'text', text: 'Send it. ' }, { type: 'text', text: 'Done!', marks: bold }]],
+    ];
+    it.each(cases)('%s', (_name, block, target, old, replacement, want) => {
+      const doc = seedDoc({ type: 'doc', content: [block] }, {});
+      applyEdit(doc, [{ op: 'replace_text', block: target, old, new: replacement }]);
+      const json = pmOf(doc, String(block.attrs!.id)).toJSON() as JSONContent;
+      let textblock = json;
+      while (textblock.type !== 'paragraph') textblock = textblock.content![0];
+      expect(textblock.content).toEqual(want);
+    });
+  });
+
   it('replace_text not unique: refused, listing the candidate blocks and their match counts', () => {
     const doc = seedDoc();
     const r = refusal(() => applyEdit(doc, [{ op: 'replace_text', old: 'The ', new: 'A ' }]));

@@ -36,7 +36,8 @@
 //
 // `@tiptap/markdown` tracks marks by type and so cannot write overlapping comments, nor does it place ids: both go into
 // the content as private-use sentinel characters before it serializes and become the dialect after; a parse turns the
-// dialect into sentinels first and back into ids after. Text that would read as markup is backslash-escaped, so
+// dialect into sentinels first and back into ids after (the content's own characters of that range are carried as
+// pairs meanwhile, so neither side mistakes one for the other). Text that would read as markup is backslash-escaped, so
 // serialize → parse returns the content. The node and mark forms live in markdown-syntax.ts. Copied and extended from
 // P3-0's `s4/src/markdown.ts` and `s5/lib/read.mjs`.
 import type { AnyExtension, JSONContent } from '@tiptap/core';
@@ -67,6 +68,7 @@ const BLOCK = '\uE004'; // a marker line naming the block before it (parse only)
 const END = '\uE00F';
 const sentinel = (kind: string, index: number): string => `${kind}${index}${END}`;
 const SENTINEL = /[\uE000-\uE004](\d+)\uE00F/g;
+const SPACED_SENTINEL = /[ \t]?([\uE000-\uE004])(\d+)\uE00F/g;
 // single characters the serializer passes through and restore() rewrites
 const ESC = '\uE005'; // a backslash escape the dialect adds
 const EDGE_SPACE = '\uE006'; // a space at a mark's edge: `&#32;`
@@ -76,10 +78,26 @@ const CODE_OPEN = '\uE009'; // around inline code a single-backtick span cannot 
 const CODE_CLOSE = '\uE00A';
 const SPACE_HOLDER = '\uE00B'; // a no-break space the text holds or the placeholder of an empty block: `&#160;`
 const SEPARATOR = '\uE00C'; // `<!---->`: lets `*` and `**` close before, or open after, a letter (read as nothing)
+// The content's own characters of this alphabet: each is written as LITERAL and a letter (`a` for U+E000 … `p` for
+// U+E00F) before the sentinels go in and restored after they are gone, so a generated sentinel and a literal character
+// are never confused (the whole-branch review's P6); a parse does the same around its own sentinels.
+const LITERAL = '\uE00D';
+const ALPHABET = /[\uE000-\uE00F]/g;
+const LITERAL_PAIR = /\uE00D([a-p])/g;
+const toLiteral = (text: string): string => text.replace(ALPHABET, (char) => `${LITERAL}${String.fromCharCode(97 + char.charCodeAt(0) - 0xe000)}`);
+const fromLiteral = (text: string): string => text.replace(LITERAL_PAIR, (_, letter: string) => String.fromCharCode(0xe000 + letter.charCodeAt(0) - 97));
+/** Every string a node's JSON holds (its texts and attribute values), mapped. */
+const mapStrings = <T>(value: T, map: (text: string) => string): T => {
+  if (typeof value === 'string') return map(value) as T;
+  if (Array.isArray(value)) return value.map((item) => mapStrings(item, map)) as T;
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mapStrings(item, map)])) as T;
+};
 
 const ID = '[0-9a-z]{2,32}';
 const MARKER_LINE = new RegExp(`^[ \\t]*\\^(${ID})[ \\t]*$`);
-const MARKER_EOL = new RegExp(`^(.*?)[ \\t]+\\^(${ID})[ \\t]*$`);
+// the one space or tab before a line's `^id` is the marker's; any more is the text's (a trailing space reads back)
+const MARKER_EOL = new RegExp(`^(.*?)[ \\t]\\^(${ID})[ \\t]*$`);
 const MARKER_ROW = new RegExp(`^(.*?)[ \\t]*<!--[ \\t]*\\^(${ID})[ \\t]*-->[ \\t]*$`);
 /** A comment milestone, as the agent reads it. */
 export const MILESTONE = /<\/?c:[A-Za-z0-9_-]+>/g;
@@ -105,7 +123,8 @@ function escapeText(text: string, { lineStart, lineEnd, inCell }: { lineStart: b
   if (inCell) out = out.replace(/\|/g, `${ESC}|`);
   if (lineStart) {
     out = out
-      .replace(/^(\s*)(#{1,6}(?=\s|$)|[-+](?=\s)|:::|\^)/, `$1${ESC}$2`)
+      // a heading, an item, a line of dashes (a thematic break; `*` and `_` are escaped already), a block, a marker
+      .replace(/^(\s*)(#{1,6}(?=\s|$)|[-+](?=\s)|-(?=(?:[ \t]*-){2,}[ \t]*$)|:::|\^)/, `$1${ESC}$2`)
       .replace(/^(\s*\d+)([.)])(?=\s|$)/, `$1${ESC}$2`)
       // a letter or roman marker with two spaces after it would read as an item (Decision Log 19)
       .replace(LETTERED_MARKER, `$1${ESC}$2`);
@@ -173,12 +192,16 @@ function prepareInline(content: Json[], parent: Json, show: ReadonlySet<string>,
 // CommonMark lets `*` and `**` (and GFM `~~`) close only after a letter or before a non-letter, and open only before a
 // letter or after a non-letter: `**end.**x` and `x**.start**` are not emphasis. A separator between the two keeps them so.
 const STARS = new Set(['bold', 'italic', 'strike']);
-const isLetter = (char: string | undefined): boolean => char != null && /[\p{L}\p{N}]/u.test(char);
-/** The first or last character of a text as written; undefined for an atom, a break or a sentinel (not letters). */
+// A letter as CommonMark's flanking rules read it: neither whitespace nor punctuation (a private-use character is one).
+const isLetter = (char: string | undefined): boolean => char != null && /[^\s\p{P}\p{S}]/u.test(char);
+/**
+ * The first or last character of a text as written; undefined for an atom, a break or a sentinel (not letters). A
+ * literal pair starts with LITERAL, which stands for its private-use character (a letter), and ends in a letter.
+ */
 const edgeChar = (node: Json | undefined, end: boolean): string | undefined => {
   if (node?.type !== 'text' || !node.text) return undefined;
-  const char = end ? node.text[node.text.length - 1] : node.text[0];
-  return char >= '\uE000' && char <= '\uF8FF' ? undefined : char;
+  const char = end ? /.$/su.exec(node.text.slice(-2))![0] : String.fromCodePoint(node.text.codePointAt(0)!); // whole code points
+  return char >= '\uE000' && char <= '\uE00F' && char !== LITERAL ? undefined : char;
 };
 function separate(nodes: Json[]): Json[] {
   const out: Json[] = [];
@@ -315,7 +338,7 @@ function restore(markdown: string, tables: Tables): string {
       rows.add(at);
       out = `${out.replace(/[ \t]+$/, '')} <!-- ^${row} -->`;
     }
-    return out;
+    return fromLiteral(out);
   });
   realign(lines, rows);
   return lines.join('\n');
@@ -430,11 +453,13 @@ function toSentinels(markdown: string, ids: string[]): string {
     if (match) {
       const cells = match[1];
       const close = cells.lastIndexOf('|');
-      out.push(`${prefix}${close > 0 ? `${cells.slice(0, close).replace(/[ \t]+$/, '')}${sentinel(ROW, id(match[2]))} ${cells.slice(close)}` : `${cells}${sentinel(ROW, id(match[2]))}`}`);
+      out.push(`${prefix}${close > 0 ? `${cells.slice(0, close).replace(/[ \t]+$/, '')} ${sentinel(ROW, id(match[2]))} ${cells.slice(close)}` : `${cells} ${sentinel(ROW, id(match[2]))}`}`);
       continue;
     }
+    // the sentinel keeps a space before it: emphasis closing on punctuation (`**Hello.**`) or an encoded space must be
+    // followed by whitespace to close (CommonMark's flanking rules), and a private-use character is neither
     match = MARKER_EOL.exec(plain);
-    out.push(`${prefix}${match ? `${match[1]}${sentinel(LINE, id(match[2]))}` : plain}`);
+    out.push(`${prefix}${match ? `${match[1]} ${sentinel(LINE, id(match[2]))}` : plain}`);
   }
   return out.join('\n');
 }
@@ -459,32 +484,25 @@ function assignIds(node: Json, ids: string[], ancestors: Json[]): Json {
   let result: Json = content ? { ...node, content } : { ...node };
   if (TEXTBLOCKS.has(node.type ?? '') && content) {
     const texts: Json[] = [];
-    let marked = false;
     for (const child of content) {
       if (child.type !== 'text' || !child.text) {
         texts.push(child);
         continue;
       }
-      const text = child.text.replace(SENTINEL, (match, index: string) => {
-        marked = true;
+      // a sentinel goes with the one space toSentinels put before it
+      const text = child.text.replace(SPACED_SENTINEL, (_match, kind: string, index: string) => {
         const value = ids[Number(index)];
-        if (match[0] === LINE) {
+        if (kind === LINE) {
           const parent = ancestors[ancestors.length - 1];
           if (parent && ITEMS.has(parent.type ?? '') && parent.content?.[0] === node) parent.attrs = { ...parent.attrs, id: value };
           else result.attrs = { ...result.attrs, id: value };
-        } else if (match[0] === ROW) {
+        } else if (kind === ROW) {
           const row = [...ancestors].reverse().find((ancestor) => ancestor.type === 'tableRow');
           if (row) row.attrs = { ...row.attrs, id: value };
         }
         return '';
       });
       if (text) texts.push({ ...child, text });
-    }
-    // a sentinel's own space went with it
-    const lastText = texts[texts.length - 1];
-    if (marked && lastText?.type === 'text' && lastText.text) {
-      texts[texts.length - 1] = { ...lastText, text: lastText.text.replace(/[ \t]+$/, '') };
-      if (!texts[texts.length - 1].text) texts.pop();
     }
     result = { ...result, content: dropPlaceholder(texts) };
   }
@@ -522,7 +540,7 @@ export class DocMarkdown {
   block(block: PMNode, { ids = true, milestones = null }: SerializeOptions = {}): string {
     const tables: Tables = { ids: [], threads: [] };
     const doc: Json = { type: 'doc', content: [] };
-    const prepared = prepare(block.toJSON() as Json, doc, milestones ?? new Set(), tables, ids, {});
+    const prepared = prepare(mapStrings(block.toJSON() as Json, toLiteral), doc, milestones ?? new Set(), tables, ids, {});
     const text = restore(this.md.serialize({ type: 'doc', content: [prepared] }).replace(/^\n+|\n+$/g, ''), tables);
     const id = block.attrs.id as string | null | undefined;
     return ids && id && !TEXTBLOCKS.has(block.type.name) ? `${text}\n^${id}` : text;
@@ -531,8 +549,8 @@ export class DocMarkdown {
   /** Markdown into top-level blocks of the schema: a `^id` it names is kept, every other block gets a fresh id. */
   parse(markdown: string, { generateID = nanoid8 }: ParseOptions = {}): PMNode[] {
     const ids: string[] = [];
-    const parsed = this.md.parse(toSentinels(markdown, ids)) as Json;
-    const doc = mintIds(assignIds(parsed, ids, []), generateID);
+    const parsed = this.md.parse(toSentinels(toLiteral(markdown), ids)) as Json;
+    const doc = mapStrings(mintIds(assignIds(parsed, ids, []), generateID), fromLiteral);
     if (!doc.content?.length) return [];
     const node = schemaFor().nodeFromJSON(doc);
     node.check();

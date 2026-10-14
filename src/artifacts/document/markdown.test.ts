@@ -7,7 +7,7 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import { describe, expect, it } from 'vitest';
 import { everyKindJSON } from './fixtures';
 import { docMarkdown, stripMilestones } from './markdown';
-import { schemaFor } from './schema';
+import { BLOCK_TYPES, schemaFor } from './schema';
 
 const schema = schemaFor();
 const md = docMarkdown();
@@ -201,6 +201,9 @@ describe('a parse', () => {
 
 // Decision Log 15: every state the schema admits reads back as stored, one at a time, ids and comments aside. Each
 // state is a top-level block; the probe that found the dialect's gaps, kept as its regression.
+/** The private-use characters the dialect's serializer and parser use as sentinels (U+E000 to U+E00F). */
+const SENTINEL_ALPHABET = Array.from({ length: 16 }, (_, k) => String.fromCharCode(0xe000 + k));
+
 describe('every stored state, one at a time', () => {
   const t = (text: string, marks?: JSONContent['marks']): JSONContent => ({ type: 'text', text, ...(marks ? { marks } : {}) });
   const p = (...content: JSONContent[]): JSONContent => ({ type: 'paragraph', content });
@@ -275,11 +278,57 @@ describe('every stored state, one at a time', () => {
     textSep: p(t('<!----> literal')),
     textMarkTag: p(t('<mark color="x">no</mark> <img src="a"/> <math latex="x"/>')),
     pendingQuote: { type: 'pending', attrs: { intent: 'He said "go" & left' } },
+    // the whole-branch review's P1: emphasis closing on punctuation or an encoded space, right before a block's ` ^id`
+    boldEndPunct: p(t('Hello.', [{ type: 'bold' }])),
+    boldEndBang: p(t('Say ', []), t('Hello!', [{ type: 'bold' }])),
+    italicEndPunct: p(t('end.', [{ type: 'italic' }])),
+    strikeEndPunct: p(t('gone?', [{ type: 'strike' }])),
+    boldEndSpace: p(t('hello ', [{ type: 'bold' }])),
+    boldEdgeSpaces: p(t('  hello  ', [{ type: 'bold' }])),
+    boldDashes: p(t('---', [{ type: 'bold' }])),
+    boldStars: p(t('***', [{ type: 'bold' }])),
+    headingBoldPunct: { type: 'heading', attrs: { level: 2 }, content: [t('Title.', [{ type: 'bold' }])] },
+    itemBoldPunct: { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('Done.', [{ type: 'bold' }]))] }] },
+    quoteBoldPunct: { type: 'blockquote', content: [p(t('Quoted.', [{ type: 'italic' }]))] },
+    rowBoldPunct: { type: 'table', content: [{ type: 'tableRow', content: [cell('tableHeader', {}, p(t('H')))] }, { type: 'tableRow', content: [cell('tableCell', {}, p(t('Last.', [{ type: 'bold' }])))] }] },
+    plainTrail: p(t('hello  ')),
+    // found beside it: a line of dashes is text, not a thematic break, where the dialect shows no id before it
+    textDashes: p(t('---')),
+    itemDashes: { type: 'bulletList', content: [{ type: 'listItem', content: [p(t('first')), p(t('---'))] }] },
+    breakDashes: p(t('a'), { type: 'hardBreak' }, t('- - -')),
+    // the whole-branch review's P6: the serializer's private-use sentinels are distinct from the same characters as text
+    ...Object.fromEntries(
+      SENTINEL_ALPHABET.map((char) => [
+        `literal U+${char.charCodeAt(0).toString(16).toUpperCase()}`,
+        p(t(`a${char}0\uE00F b ${char}`), t(` bold${char}`, [{ type: 'bold' }]), t(`${char}end`)),
+      ]),
+    ),
+    // a character outside the basic plane (an emoji is a symbol) read whole at an emphasis edge
+    boldEmojiClose: p(t('hi🎉', [{ type: 'bold' }]), t('x')),
+    boldEmojiOpen: p(t('x'), t('🎉hi', [{ type: 'bold' }])),
+    boldPrivateUseClose: p(t('a.', [{ type: 'bold' }]), t('\uF8FFx')),
+    literalInCode: { type: 'codeBlock', attrs: { language: null }, content: [t(SENTINEL_ALPHABET.join('1'))] },
+    literalInInlineCode: p(t(`x ${SENTINEL_ALPHABET.join('')}`, [{ type: 'code' }])),
+    literalInAttributes: p({ type: 'mention', attrs: { kind: 'person', ref: 'r', label: SENTINEL_ALPHABET.join('') } }, { type: 'image', attrs: { src: 'https://e.com/a.png', alt: `x${SENTINEL_ALPHABET.join('')}`, assetId: null } }),
+    literalInIntent: { type: 'pending', attrs: { intent: SENTINEL_ALPHABET.join(' ') } },
   };
 
   it.each(Object.entries(states))('%s', (_name, json) => {
     const doc = docOf([schema.nodeFromJSON(json)]);
     for (const ids of [true, false]) expect(stored(docOf(md.parse(md.serialize(doc, { ids }))))).toEqual(stored(doc));
+  });
+
+  // The same states with every block named, so each line the dialect marks ends in its ` ^id` (an unnamed block shows no
+  // marker): the marker sits beside the content without changing how it parses (the whole-branch review's P1).
+  const BLOCKS = new Set<string>(BLOCK_TYPES);
+  const named = (json: JSONContent, n = { at: 0 }): JSONContent => ({
+    ...json,
+    ...(BLOCKS.has(json.type ?? '') ? { attrs: { ...json.attrs, id: `b${++n.at}` } } : {}),
+    ...(json.content ? { content: json.content.map((child) => named(child, n)) } : {}),
+  });
+  it.each(Object.entries(states))('%s, its blocks named', (_name, json) => {
+    const doc = docOf([schema.nodeFromJSON(named(json))]);
+    expect(stored(docOf(md.parse(md.serialize(doc))))).toEqual(stored(doc));
   });
 });
 
