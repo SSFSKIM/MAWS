@@ -504,6 +504,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       s1 = await newSession(page);
       const left = budget(cap);
       await send(page, PROMPTS.marks);
+      await maws!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((w) => w.blur())); // G6: notified unfocused
       await expect.poll(() => spawns(s1).length, { timeout: 60_000 }).toBe(1);
       const spawn = spawns(s1)[0]!;
       const row = await decision(s1, spawn.launchId);
@@ -524,11 +525,18 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
 
     // P2-C2: under contract 5 a question is MAWS's ask, not a mark. Answered from its sheet while the sleep runs, the
     // answer goes to the engine as a steer and is delivered when the engine starts it; the composer's draft is untouched.
-    await step('g4-ask', 'G4: the agent’s non-blocking mcp__maws__ask answered from its sheet while the agent runs; delivered when the engine starts it', async () => {
+    await step('g4-ask', 'G4 and G6: the agent’s non-blocking mcp__maws__ask waits as a notified async_input item, answered from its sheet while the agent runs; delivered when the engine starts it, the item retired', async () => {
       const capsule = pane(page).locator('section.transcript-ask').first();
       await expect(capsule).toHaveAttribute('data-ask-state', 'asked', { timeout: 240_000 });
       const askId = (await capsule.getAttribute('data-ask-id')) ?? '';
       const asks = mcpCalls(journal(s1)).filter((call) => call.name === 'ask');
+      // P2-C2 (Decision Log 32): the waiting question is an async_input item anchored to the ask's request, notified
+      // with the window unfocused, as a need-input mark's was
+      const askItem = async () => (await items(page, s1)).filter((i) => i.kind === 'async_input' && i.request.requestId === (asks[0]?.requestId ?? ''));
+      await expect.poll(async () => (await askItem()).length, { timeout: 30_000, message: 'the ask’s async_input item' }).toBe(1);
+      const [item] = await askItem();
+      await expect.poll(async () => (await notified(page, s1)).filter((n) => n.attentionId === item!.id).length, { timeout: 30_000, message: 'the item notified' }).toBe(1);
+      const note = (await notified(page, s1)).find((n) => n.attentionId === item!.id)!;
       const sheet = page.locator(`[data-ask-sheet][data-ask-id="${askId}"]`);
       await expect(sheet).toBeVisible({ timeout: 30_000 });
       await composer(page).click();
@@ -539,17 +547,20 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await sheet.getByRole('button', { name: /^Submit/ }).click();
       const submittedAt = new Date().toISOString();
       await expect(capsule).toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 });
+      await expect.poll(async () => (await askItem()).length, { timeout: 30_000, message: 'the item retired at the answer' }).toBe(0);
       let write: { uuid: string; text: string; at: string } | undefined;
       await expect.poll(() => (write = askWrites(s1, askId)[0]) !== undefined, { timeout: 60_000, message: 'the answer written to the engine' }).toBe(true);
       let started: string | null = null;
       await expect.poll(() => (started = lifecycle(s1, write!.uuid, 'started')), { timeout: 240_000, message: 'the engine started the answer' }).not.toBeNull();
       await expect(composer(page)).toHaveText(DRAFT);
       log(`ask ${askId} ${JSON.stringify(asks.map((a) => a.args))}; turn running at Submit: ${running}; answered "${answer}" at ${submittedAt}; written ${write!.at} as ${write!.uuid}; the engine's started ${started}; prompt ${JSON.stringify(write!.text.slice(0, 200))}`);
-      observe('g4Ask', { askId, asks, running, answer, submittedAt, write, started });
+      log(`the item ${item!.id} "${item!.summary}" (request ${item!.request.requestId}), notified ${note.delivery} at ${note.at}; retired after Submit`);
+      observe('g4Ask', { askId, asks, item, note, running, answer, submittedAt, write, started });
       await shot('02-answered');
       expect(asks.map((a) => a.args.blocking), 'one ask through mcp__maws__ask, not blocking').toEqual([false]);
       expect(running, 'Submit landed while the turn ran').toBe(true);
       expect(askWrites(s1, askId), 'the answer written once').toHaveLength(1);
+      line(`G6 ask: an async_input item "${item!.summary.slice(0, 60)}" anchored to the ask's request, attention.notified (${note.delivery}) with the window unfocused, retired at the answer`);
       line(`G4 ask mid-turn: mcp__maws__ask blocking false; the sheet answered "${answer}" while the sleep ran; written once as ${write!.uuid}, the engine's started at ${started}; composer draft unchanged`);
       await composer(page).click();
       await page.keyboard.press('Meta+A');

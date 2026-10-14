@@ -79,9 +79,10 @@ function requestOnScreen(appSessionId: AppSessionId, item: AttentionItem | undef
 }
 
 // A `maws` ask's item: its originating event read as `maws.ask.opened` (swapOf's test), or, not read yet, an ask the
-// Question sheet's store holds under its request id (the store follows every live `maws.ask.*` batch).
+// Question sheet's store holds under its request id (the store follows every live `maws.ask.*` batch). P2-C2: an async
+// ask's `async_input` item too, which carries no mark anchor.
 function isMawsAsk(item: AttentionItem): boolean {
-  if (item.kind !== 'question') return false;
+  if (item.kind !== 'question' && !(item.kind === 'async_input' && item.anchor === undefined)) return false;
   const request = useAttention.getState().requests.get(item.id);
   if (request !== undefined && request !== null) return request.kind === 'maws.ask.opened';
   return [...askSheet(item.appSessionId).getState().asks.values()].some((ask) => ask.requestId === item.request.requestId);

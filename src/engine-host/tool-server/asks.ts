@@ -87,9 +87,12 @@ export class AskTable {
 // it is a `question` attention item beside the broker's (the broker itself never sees it: the ask is no `can_use_tool`).
 // Keyed like the broker's items by the engine's control request id (the `mcp_message` that carries the call), which is
 // what `session.pendingRequest` answers the ask's `maws.ask.opened` event for. An async ask is none.
+// P2-C2 (2026-10-13; the P2 spec's Decision Log 32): an async ask is an `async_input` item, the kind a `<need-input>` mark
+// raises, since under contract 5 and the supplement every question that can wait is one; a blocking ask stays a
+// `question`. Both are anchored to the ask by its request (the ask's tool call and tool use), never by a mark.
 export function askAttentionItem(ask: PendingAsk, appSessionId: AppSessionId, sessionId: SessionId | null): AttentionItem {
   return {
-    id: `${appSessionId}:${ask.requestId}` as AttentionId, appSessionId, sessionId, kind: 'question',
+    id: `${appSessionId}:${ask.requestId}` as AttentionId, appSessionId, sessionId, kind: ask.blocking ? 'question' : 'async_input',
     request: { requestId: ask.requestId, toolUseId: ask.toolUseId, taskId: null, agentId: null },
     summary: ask.title ?? ask.questions[0]?.question ?? 'Questions', createdAt: ask.openedAt, state: 'pending', stateChangedAt: ask.openedAt, expiresAt: null,
   };
