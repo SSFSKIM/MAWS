@@ -9,7 +9,7 @@
 import type { Doc } from '../../yjs';
 import { childLists, groupOf, readFlat, ROOT, type FlatElement } from '../model';
 import * as Y from '../../yjs/slides';
-import { createNode, drawConnector, drawShape, drawsInLayout, renderText, setImageSource, type AssetUrl } from './elements';
+import { applyCrop, createNode, drawConnector, drawShape, drawsInLayout, renderText, setImageSource, type AssetUrl } from './elements';
 import { clearFit, fitText, isSizedText } from './fit';
 
 export interface SlideCanvasOptions {
@@ -91,6 +91,8 @@ export class SlideCanvas {
   private readonly thumbnail: boolean;
   private laidOut = false;
   private readonly layoutWaiters: (() => void)[] = [];
+  /** Text elements a text box is editing in place: their text is the text box's to draw until it ends (M5). */
+  private readonly editing = new Set<string>();
   /** DOM writes this canvas made, by kind (the "minimal patching" claim's measure). */
   readonly writes = { style: 0, attr: 0, place: 0, text: 0, create: 0, remove: 0, layout: 0 };
 
@@ -127,6 +129,27 @@ export class SlideCanvas {
   node(id: string): HTMLElement | undefined {
     return this.nodes.get(id);
   }
+  /**
+   * Hands a text element's node to a text box editing it in place (M5): its text is no longer redrawn from change
+   * records until `endTextEdit`. Null when the slide has no such element.
+   */
+  beginTextEdit(id: string): HTMLElement | null {
+    const n = this.nodes.get(id);
+    if (!n) return null;
+    this.editing.add(id);
+    return n;
+  }
+  /** Takes the text element back from the text box: redrawn from the model. */
+  endTextEdit(id: string): void {
+    if (!this.editing.delete(id)) return;
+    const n = this.nodes.get(id);
+    if (n && Y.hasElement(this.doc, this.slideId, id)) {
+      renderText(n, Y.elementScalars(this.doc, this.slideId, id).tag as string, Y.readText(this.doc, this.slideId, id));
+      this.writes.text++;
+      schedule(this);
+    }
+  }
+
   /** Resolves once the slide has been laid out and drawn (its first layout pass). */
   whenLaidOut(): Promise<void> {
     return this.laidOut ? Promise.resolve() : new Promise((resolve) => this.layoutWaiters.push(resolve));
@@ -232,7 +255,7 @@ export class SlideCanvas {
           break;
         case 'text': {
           const n = this.nodes.get(c.id);
-          if (n && Y.hasElement(this.doc, this.slideId, c.id)) {
+          if (n && !this.editing.has(c.id) && Y.hasElement(this.doc, this.slideId, c.id)) {
             renderText(n, Y.elementScalars(this.doc, this.slideId, c.id).tag as string, Y.readText(this.doc, this.slideId, c.id));
             this.writes.text++;
           }
@@ -254,6 +277,11 @@ export class SlideCanvas {
               }
             } else if (k === 'attr:src' && s.tag === 'img') {
               setImageSource(n as HTMLImageElement, v, this.assetUrl);
+              this.writes.attr++;
+            } else if (k === 'attr:data-crop' && s.tag === 'img') {
+              if (v === undefined) n.removeAttribute('data-crop');
+              else n.setAttribute('data-crop', v);
+              applyCrop(n, v);
               this.writes.attr++;
             } else if ((k === 'attr:name' && s.tag === 'x-icon') || (k === 'attr:kind' && s.tag === 'x-shape')) replace.add(c.id); // another drawing
             else if (k.startsWith('attr:')) {

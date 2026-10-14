@@ -1,0 +1,284 @@
+/* The deck editor's inspector (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8 "Inspector"; M5): a quiet,
+   compact column beside the stage. App chrome, so the app's tokens only; the swatches and the colour chips paint the
+   deck's own values (content, drawn in the design system's scope). */
+
+.deck-inspector {
+  display: flex;
+  flex-direction: column;
+  width: 248px;
+  flex-shrink: 0;
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--bg-raised);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+}
+.deck-inspector-body {
+  display: flex;
+  flex-direction: column;
+}
+.deck-inspector-title {
+  margin: 0;
+  padding: 12px 12px 8px;
+  font-size: var(--text-ui);
+  font-weight: 600;
+  color: var(--fg);
+}
+
+/* sections */
+.deck-inspector-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--border);
+}
+.deck-inspector-heading {
+  margin: 0;
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+  color: var(--fg-muted);
+}
+.deck-inspector-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.deck-inspector-caption,
+.deck-inspector-mini {
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.deck-inspector-control {
+  display: flex;
+  gap: 4px;
+}
+.deck-inspector-pair,
+.deck-inspector-triple {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.deck-inspector-triple {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+.deck-inspector-number {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* inputs */
+.deck-inspector-input-wrap {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.deck-inspector-input-wrap:focus-within {
+  border-color: var(--accent);
+}
+.deck-inspector-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+.deck-inspector-input::placeholder {
+  color: var(--fg-faint);
+}
+.deck-inspector-input[aria-invalid='true'] {
+  color: var(--danger);
+}
+.deck-inspector-input-wrap:has([aria-invalid='true']) {
+  border-color: var(--danger);
+}
+.deck-inspector-input:disabled {
+  color: var(--fg-faint);
+}
+.deck-inspector-text {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.deck-inspector-text:focus {
+  border-color: var(--accent);
+}
+.deck-inspector-unit {
+  color: var(--fg-faint);
+}
+.deck-inspector-select {
+  width: 100%;
+  min-width: 0;
+  height: 24px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+.deck-inspector-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.deck-inspector-select:disabled {
+  color: var(--fg-faint);
+}
+
+/* colour */
+.deck-inspector-colour {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.deck-inspector-chip {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.deck-inspector-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.deck-inspector-swatch {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: default;
+}
+.deck-inspector-swatch[aria-pressed='true'] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.deck-inspector-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.deck-inspector-swatch:disabled {
+  opacity: 0.5;
+}
+
+/* buttons and toggles */
+.deck-inspector-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.deck-inspector-button,
+.deck-inspector-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  min-width: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  cursor: default;
+}
+.deck-inspector-button:hover:not(:disabled),
+.deck-inspector-toggle:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.deck-inspector-button:disabled,
+.deck-inspector-toggle:disabled {
+  color: var(--fg-faint);
+}
+.deck-inspector-button:focus-visible,
+.deck-inspector-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.deck-inspector-toggles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+}
+.deck-inspector-toggle {
+  border-radius: 0;
+  margin-left: -1px;
+}
+.deck-inspector-toggle:first-child {
+  margin-left: 0;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+}
+.deck-inspector-toggle:last-child {
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.deck-inspector-toggle[aria-pressed='true'] {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+.deck-inspector-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg);
+}
+.deck-inspector-check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* gradient */
+.deck-inspector-gradient {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.deck-inspector-stop {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+}
+.deck-inspector-stop-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 4px;
+}
+
+/* notes and refusals */
+.deck-inspector-note {
+  margin: 0;
+  color: var(--fg-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deck-inspector-refused {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--text-ui-sm);
+  overflow-wrap: anywhere;
+}

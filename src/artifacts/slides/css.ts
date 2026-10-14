@@ -1015,6 +1015,25 @@ function restriction(prop: string, value: string, site: StyleSite): string | nul
   return null;
 }
 
+/**
+ * P3-C M5 (D8, "the editor never writes a value the loader would not accept"): one property as the editor would set it
+ * on the element at `site` whose style becomes `style` with it, checked as the loader checks a declaration: its line,
+ * its applies-to column, the per-element limits and the line-height's ratio to a px font-size. The normalized value, or
+ * the reason it would be dropped.
+ */
+export function checkStyle(prop: string, value: string, site: StyleSite, style: Style): ValueCheck {
+  const checked = checkValue(prop, value);
+  if (!checked.ok) return checked;
+  const next = { ...style, [prop]: checked.value };
+  if (!appliesTo(prop, site, next)) return { ok: false, reason: `${prop} does not apply to <${site.tag}> here (it applies to: ${appliesOf(prop)})` };
+  const limit = restriction(prop, checked.value, site);
+  if (limit !== null) return { ok: false, reason: limit };
+  const lh = /^([\d.]+)px$/.exec(next['line-height'] ?? '');
+  const fs = /^([\d.]+)px$/.exec(next['font-size'] ?? '');
+  if ((prop === 'line-height' || prop === 'font-size') && lh && fs && !between(Number(lh[1]) / Number(fs[1]), 0.5, 4)) return { ok: false, reason: `line-height:${next['line-height']} is outside 0.5–4× the font-size (${next['font-size']})` };
+  return checked;
+}
+
 // ---------------------------------------------------------------- the style attribute
 
 /** Split a style attribute into declarations, respecting parentheses and quotes (`url(a;b)`, `'a;b'`). */

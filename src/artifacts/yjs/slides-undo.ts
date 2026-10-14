@@ -16,6 +16,8 @@ export interface DeckUndo {
   canRedo(): boolean;
   /** Ends the current step: the next tracked write starts a new one. */
   cut(): void;
+  /** P3-C M5: also track another writer's origin (the text box's binding, D8 "Undo"); returns the untrack. */
+  track(origin: unknown): () => void;
   /** Forgets both stacks (a restore replaced what they refer to). */
   clear(): void;
   /** Called whenever either stack changes. */
@@ -45,6 +47,10 @@ export function createDeckUndo(doc: Doc, origin: object = { editor: 'deck' }): D
     canUndo: () => manager.canUndo(),
     canRedo: () => manager.canRedo(),
     cut: () => manager.stopCapturing(),
+    track: (other) => {
+      manager.addTrackedOrigin(other);
+      return () => manager.removeTrackedOrigin(other);
+    },
     clear: () => manager.clear(),
     subscribe: (listener) => {
       listeners.add(listener);

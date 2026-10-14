@@ -1,7 +1,7 @@
 // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8 "Canvas", D6): one model element as DOM, and the
 // size-dependent drawing of the dialect's own elements (x-shape outlines and x-connector lines need their box, so they
 // are drawn in the canvas's layout pass, after the slide has laid out).
-import { connectorHeads, connectorRoute, headPolygon, ICON_GLYPHS, isStrokeOnly, shapePath, splitBorder, type Point } from '../glyphs';
+import { connectorHeads, connectorRoute, dropShadows, headPolygon, ICON_GLYPHS, isStrokeOnly, shapePath, splitBorder, type Point } from '../glyphs';
 import { LIST_TAGS, TEXT_TAGS, type TextBlock } from '../ir';
 import type { FlatElement } from '../model';
 import { escAttr, serializeInline } from '../serialize';
@@ -30,7 +30,10 @@ export function createNode(document: Document, e: FlatElement, text: TextBlock[]
   n.dataset.eid = e.id;
   for (const [k, v] of Object.entries(e.style)) n.style.setProperty(k, v);
   if (TEXT_TAGS.has(e.tag)) renderText(n, e.tag, text ?? []);
-  else if (e.tag === 'img') setImageSource(n as HTMLImageElement, e.attrs.src, assetUrl);
+  else if (e.tag === 'img') {
+    setImageSource(n as HTMLImageElement, e.attrs.src, assetUrl);
+    applyCrop(n, e.attrs['data-crop']);
+  }
   else if (e.tag === 'x-icon') renderIcon(document, n, e.attrs.name);
   else if (e.tag === 'x-embed' && thumbnail) {
     // a hundred thumbnails never run a hundred pages: the embed's place, marked
@@ -63,6 +66,23 @@ export function setImageSource(img: HTMLImageElement, src: string | undefined, a
   }
 }
 
+/**
+ * P3-C M5 (Decision Log 18): a picture's crop, `data-crop="ZOOM X% Y%"` (Claude's: zoom 1 to 50, the focus point as
+ * an object-position), drawn as the picture's view box: 1/ZOOM of the image on each axis, placed so the focus point sits
+ * where object-position puts it; the element's object-fit then fills its box with that region.
+ */
+export function applyCrop(n: HTMLElement, crop: string | undefined): void {
+  const m = crop === undefined ? null : /^(\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)% (-?\d+(?:\.\d+)?)%$/.exec(crop);
+  if (!m) {
+    n.style.removeProperty('object-view-box');
+    return;
+  }
+  const rest = 1 - 1 / Math.max(1, Number(m[1]));
+  const [fx, fy] = [Number(m[2]), Number(m[3])];
+  const pct = (v: number) => `${Math.round(v * 1000) / 1000}%`;
+  n.style.setProperty('object-view-box', `inset(${pct(rest * fy)} ${pct(rest * (100 - fx))} ${pct(rest * (100 - fy))} ${pct(rest * fx)})`);
+}
+
 function renderIcon(document: Document, n: HTMLElement, name: string | undefined): void {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
@@ -80,6 +100,13 @@ function renderIcon(document: Document, n: HTMLElement, name: string | undefined
 
 /** Whether an element's look depends on its laid-out box (drawn in the layout pass). */
 export const drawsInLayout = (tag: string, attrs: Readonly<Record<string, string>>): boolean => tag === 'x-connector' || (tag === 'x-shape' && attrs.kind !== 'rect');
+
+/** A value with its design-system tokens resolved in the element's scope (through a custom property's computed value). */
+function resolved(n: HTMLElement, name: string, value: string): string {
+  n.style.setProperty(name, value);
+  const out = n.ownerDocument.defaultView?.getComputedStyle(n).getPropertyValue(name).trim();
+  return out || value;
+}
 
 /** A stroke width in px from a CSS length the model holds (a token resolved through the computed custom property). */
 function strokeWidthOf(n: HTMLElement, value: string | undefined, fallback: number): number {
@@ -113,6 +140,9 @@ export function drawShape(n: HTMLElement, style: Readonly<Record<string, string>
   const svg = svgIn(n, w, h);
   const path = n.ownerDocument.createElementNS(SVG_NS, 'path');
   path.setAttribute('d', shapePath(kind, w, h, stroke || (isStrokeOnly(kind) ? 2 : 0)));
+  // the box's own shadow is suppressed off a rect (CANVAS_CSS): the outline casts it instead (Decision Log 18)
+  const shadow = style['box-shadow'] ? dropShadows(resolved(n, '--maws-shadow', style['box-shadow'])) : null;
+  if (shadow) path.style.setProperty('filter', shadow);
   const fill = style.background && !style.background.includes('gradient') ? style.background : null;
   if (isStrokeOnly(kind)) {
     path.style.setProperty('fill', 'none');

@@ -3,12 +3,17 @@
 // slides draw in the deck's governing design system (`DesignSystemScope`, medium deck, the deck's `dsOverrides` last),
 // so a token change or a system switch restyles every slide by reference; the editor's chrome reads the app's tokens.
 // Shared by the panel's record view and the `artifact` main tab (the shell, src/renderer/src/tools/presentation/).
+// M5: the transform layer on the stage, the toolbar's Insert and arrange controls, the inspector beside the stage.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { DesignSystemScope, type DesignSystemRef } from '../../design-system/apply';
 import type { AssetUrl, SlideCanvas } from '../canvas';
 import { CANVAS_CSS } from '../canvas';
 import type { DeckFace } from '../deck';
+import { insertElements, newElement, type NewKind } from '../writers-elements';
 import { DECK_COPY as C } from './copy';
+import { ElementBar } from './ElementBar';
+import { Inspector } from './Inspector';
+import { measureInHost } from './transform/Overlay';
 import { useDeckView } from './deck-view';
 import { Filmstrip } from './Filmstrip';
 import { Notes } from './Notes';
@@ -32,7 +37,12 @@ export interface DeckEditorProps {
   onDrawn?: () => void;
   /** Once, when every thumbnail of the first showing is drawn too (how many). */
   onThumbnailsDrawn?: (thumbnails: number) => void;
+  /** M5: uploads a picked image into the artifact and answers its `assets/<name>` ref (Insert's image, the inspector's Replace). */
+  uploadAsset?: (file: File) => Promise<string>;
 }
+
+const NOTICE_MS = 6_000;
+const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers'];
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
 
@@ -58,7 +68,7 @@ function faceRules(faces: Readonly<Record<string, DeckFace>>, assetUrl: AssetUrl
     .join('\n');
 }
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -91,8 +101,10 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
 
   // the first slide drawn: once per showing
   const drawn = useRef(false);
+  const [stageCanvas, setStageCanvas] = useState<SlideCanvas | null>(null);
   const onStageCanvas = useCallback(
     (canvas: SlideCanvas | null) => {
+      setStageCanvas(canvas);
       if (!canvas || drawn.current) return;
       void canvas.whenLaidOut().then(() => {
         if (drawn.current) return;
@@ -114,7 +126,8 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     const mod = event.metaKey || event.ctrlKey;
     if (!mod || readOnly) return;
     const target = event.target as HTMLElement;
-    if (target.tagName === 'INPUT') return; // a section's name keeps its own undo
+    if (event.defaultPrevented || target.isContentEditable) return; // the text box routes its own (M5)
+    if (target.tagName === 'INPUT' || target.tagName === 'SELECT') return; // a field keeps its own undo
     if (event.key.toLowerCase() === 'z') {
       event.preventDefault();
       if (event.shiftKey) session.redoStep();
@@ -125,25 +138,82 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     }
   };
 
+  // M5: what the slide's limits refused, an upload in progress: shown in the toolbar for a while
+  const [notice, setNotice] = useState('');
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(''), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
+  const [inspectorOpen, setInspectorOpen] = useState(!compact);
+  const editable = !readOnly && slide !== null && slide.held === null;
+  const insert = useCallback(
+    (kind: NewKind) => {
+      if (!editable || !slide) return;
+      let ids: string[] = [];
+      try {
+        session.edit((origin) => (ids = insertElements(doc, slide.id, [newElement(kind, { x: SLIDE_W / 2, y: SLIDE_H / 2 })], {}, origin)));
+      } catch (e) {
+        setNotice(e instanceof Error ? e.message : String(e));
+        return;
+      }
+      viewport.current?.focus({ preventScroll: true });
+      if (TEXT_KINDS.includes(kind)) session.editText(ids[0]!);
+      else session.select(ids);
+    },
+    [editable, slide, session, doc],
+  );
+
   const faces = faceRules(view.faces, assetUrl);
   return (
     <div className="deck-editor" data-deck-editor data-compact={compact || undefined} onKeyDown={onKeyDown}>
       {faces && <style data-deck-faces>{faces}</style>}
-      <Toolbar session={session} zoom={state.zoom} scale={scale} canUndo={state.canUndo && !readOnly} canRedo={state.canRedo && !readOnly} />
+      <Toolbar session={session} zoom={state.zoom} scale={scale} canUndo={state.canUndo && !readOnly} canRedo={state.canRedo && !readOnly}>
+        <ElementBar
+          session={session}
+          slideId={slide?.id ?? null}
+          canvas={stageCanvas}
+          scale={scale}
+          readOnly={!editable}
+          onInsert={insert}
+          uploadAsset={uploadAsset}
+          onNotice={setNotice}
+          inspectorOpen={inspectorOpen}
+          onToggleInspector={() => setInspectorOpen((open) => !open)}
+        />
+        <span role="status" className="deck-notice" data-deck-notice>
+          {notice}
+        </span>
+      </Toolbar>
       <div className="deck-editor-body">
         {scope(
           <Filmstrip session={session} view={view} current={slide?.id ?? null} assetUrl={assetUrl} width={compact ? 120 : SLIDE_W / 8} readOnly={readOnly} onDrawn={onThumbnailsDrawn} />,
         )}
         <div className="deck-editor-main">
-          <Stage session={session} slide={slide} scale={scale} assetUrl={assetUrl} viewport={viewport} frame={frame} onCanvas={onStageCanvas} scope={scope} />
+          <Stage
+            session={session}
+            slide={slide}
+            scale={scale}
+            assetUrl={assetUrl}
+            viewport={viewport}
+            frame={frame}
+            onCanvas={onStageCanvas}
+            canvas={stageCanvas}
+            readOnly={!editable}
+            onNotice={setNotice}
+            scope={scope}
+          />
           {slide && <Notes key={slide.id} session={session} slideId={slide.id} token={slide.token} readOnly={readOnly || slide.held !== null} />}
         </div>
+        {inspectorOpen &&
+          slide &&
+          scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} />)}
       </div>
     </div>
   );
 }
 
-function Toolbar({ session, zoom, scale, canUndo, canRedo }: { session: DeckSession; zoom: Zoom; scale: number; canUndo: boolean; canRedo: boolean }) {
+function Toolbar({ session, zoom, scale, canUndo, canRedo, children }: { session: DeckSession; zoom: Zoom; scale: number; canUndo: boolean; canRedo: boolean; children?: ReactNode }) {
   const step = (direction: 1 | -1) => {
     const steps = direction === 1 ? ZOOM_STEPS.filter((s) => s > scale + 0.001) : ZOOM_STEPS.filter((s) => s < scale - 0.001).reverse();
     if (steps[0] !== undefined) session.setZoom(steps[0]);
@@ -156,6 +226,8 @@ function Toolbar({ session, zoom, scale, canUndo, canRedo }: { session: DeckSess
       <button type="button" className="deck-button" aria-label={C.redo} title={`${C.redo} (⇧⌘Z)`} disabled={!canRedo} onClick={() => session.redoStep()}>
         ↷
       </button>
+      <span className="deck-toolbar-divider" aria-hidden />
+      {children}
       <span className="deck-toolbar-spacer" />
       <button type="button" className="deck-button" aria-label={C.zoomOut} disabled={scale <= ZOOM_STEPS[0] + 0.001} onClick={() => step(-1)}>
         −

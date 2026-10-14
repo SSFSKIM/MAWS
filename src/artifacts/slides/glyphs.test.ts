@@ -1,7 +1,7 @@
 // P3-C M4 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8 "Canvas"): the geometry the canvas draws the
 // dialect's own elements with: x-shape outlines filling their box, the thirty x-icon glyphs, x-connector routes and heads.
 import { describe, expect, it } from 'vitest';
-import { connectorRoute, headPolygon, ICON_GLYPHS, shapePath, splitBorder } from './glyphs';
+import { connectorRoute, dropShadows, headPolygon, ICON_GLYPHS, shapePath, splitBorder } from './glyphs';
 import { ICON_NAMES } from './parse';
 
 const numbers = (d: string) => (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
@@ -73,5 +73,16 @@ describe('x-connector routes and heads', () => {
     const route = connectorRoute('hv', 0, 50, 100, 50);
     const head = headPolygon(route[route.length - 2]!, route[route.length - 1]!, 2);
     expect(head.map(([x, y]) => [Math.round(x), Math.round(y)])).toEqual([[100, 50], [92, 54], [92, 46]]);
+  });
+});
+
+describe('shadows on an outline (M5)', () => {
+  it('reads a box-shadow list as drop-shadow filters: outer shadows only, spread dropped', () => {
+    expect(dropShadows('4px 6px 12px #00000040')).toBe('drop-shadow(4px 6px 12px #00000040)');
+    expect(dropShadows('0px 2px 4px 2px rgba(0, 0, 0, 0.2), inset 0px 0px 4px #ffffff')).toBe('drop-shadow(0px 2px 4px rgba(0, 0, 0, 0.2))');
+    expect(dropShadows('#000000 1px 1px')).toBe('drop-shadow(1px 1px 0px #000000)');
+    expect(dropShadows('2px 2px var(--ds-color-text, #1a1a1a)')).toBe('drop-shadow(2px 2px 0px var(--ds-color-text, #1a1a1a))');
+    expect(dropShadows('inset 0px 0px 4px #ffffff')).toBeNull();
+    expect(dropShadows('none')).toBeNull();
   });
 });

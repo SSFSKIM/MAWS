@@ -16,7 +16,18 @@ export interface DeckSessionState {
   zoom: Zoom;
   canUndo: boolean;
   canRedo: boolean;
+  /** M5: the selected elements of the current slide, in the order they were picked (the last is the inspector's). */
+  selection: readonly string[];
+  /** M5: the text element edited in place, if any (always one of the selection). */
+  editingText: string | null;
 }
+
+export interface DeckSessionOptions {
+  /** The replica's composition hold (A's provider, parent Decision Log 33 to 35): set while an IME composes. */
+  holdRemote?: (on: boolean) => void;
+}
+
+const NONE: readonly string[] = Object.freeze([]);
 
 /** Times of one showing, read through the e2e seam (Acceptance 7's open-to-interactive). */
 export interface DeckTimings {
@@ -39,9 +50,10 @@ export class DeckSession {
   constructor(
     readonly doc: Doc,
     openedAt: number = performance.now(),
+    private readonly options: DeckSessionOptions = {},
   ) {
     this.undo = createDeckUndo(doc, { editor: 'deck' });
-    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false };
+    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null };
     this.timings = { openedAt };
     this.stopUndo = this.undo.subscribe(() => this.set({ canUndo: this.undo.canUndo(), canRedo: this.undo.canRedo() }));
   }
@@ -78,6 +90,34 @@ export class DeckSession {
     write(this.origin);
   }
 
+  /** Typing that another writer (the text box's binding) writes: cuts the undo step as `typing` would, writes nothing. */
+  noteTyping(target: string, now: number = performance.now()): void {
+    this.typing(target, () => {}, now);
+  }
+
+  /** Makes the undo stack take another writer's origin as the editor's own (the text box's binding); returns the undo. */
+  trackOrigin(origin: unknown): () => void {
+    return this.undo.track(origin);
+  }
+
+  /** The composition hold: remote updates wait while an IME composes in the text box (no-op without a replica). */
+  holdRemote(on: boolean): void {
+    this.options.holdRemote?.(on);
+  }
+
+  /** Selects elements of the current slide (in pick order); ends a text edit whose element is no longer selected. */
+  select(ids: readonly string[]): void {
+    const same = ids.length === this.state.selection.length && ids.every((id, i) => id === this.state.selection[i]);
+    const selection = same ? this.state.selection : ids.length ? Object.freeze([...ids]) : NONE;
+    this.set({ selection, editingText: this.state.editingText !== null && ids.includes(this.state.editingText) ? this.state.editingText : null });
+  }
+
+  /** Starts (or with null ends) editing a text element in place; it becomes the selection. */
+  editText(id: string | null): void {
+    if (id !== null) this.set({ selection: Object.freeze([id]), editingText: id });
+    else this.set({ editingText: null });
+  }
+
   /** A drag: the writes between `begin` and `end` are one undo step. */
   beginDrag(): void {
     this.typingIn = null;
@@ -104,7 +144,8 @@ export class DeckSession {
   }
 
   show(slideId: string | null): void {
-    this.set({ currentSlide: slideId });
+    if (slideId === this.state.currentSlide) return;
+    this.set({ currentSlide: slideId, selection: NONE, editingText: null });
   }
   setZoom(zoom: Zoom): void {
     this.set({ zoom });

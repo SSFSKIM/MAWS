@@ -83,7 +83,7 @@ export class DeckTabState {
       return;
     }
     if (this.disposed) return void handle.close();
-    const session = new DeckSession(handle.doc, this.openedAt);
+    const session = new DeckSession(handle.doc, this.openedAt, { holdRemote: (on) => handle.holdRemote(on) }); // M5: the text box's composition hold
     session.timings.syncedAt = performance.now();
     this.stops.push(
       handle.subscribe((document) => this.follow(handle, document)),

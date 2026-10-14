@@ -248,3 +248,43 @@ describe('connectors, borders, thumbnails and the design system (findings 5 to 7
     expect(c.node('live')!.querySelector('[data-embed-placeholder]')).not.toBeNull();
   });
 });
+
+// P3-C M5 (Decision Log 18): what the inspector writes that M4's canvas did not draw: a picture's `data-crop`, a shadow
+// on a shape that is not a rect; and a text element handed to the text box while it is edited in place.
+describe('the canvas at M5', () => {
+  const M5 = `<section id="s1" style="background:#ffffff">
+  <img id="pic" alt="" src="assets/hq.jpg" data-crop="2 25% 50%" style="position:absolute; left:0px; top:0px; width:400px; height:300px; object-fit:cover">
+  <x-shape id="dot" kind="ellipse" style="position:absolute; left:500px; top:0px; width:200px; height:100px; background:#2b7a78; box-shadow:4px 6px 12px #00000040, inset 0px 0px 4px #ffffff"></x-shape>
+  <h2 id="title" style="font-size:64px">Plan <b>now</b></h2>
+</section>`;
+
+  it('draws a crop as the picture’s view box: zoomed about its focus point', () => {
+    const doc = deck(M5);
+    const c = mount(doc);
+    const img = c.node('pic')!;
+    expect(img.style.getPropertyValue('object-view-box')).toBe('inset(25% 37.5% 25% 12.5%)');
+    setAttrs(doc, 's1', 'pic', { 'data-crop': '4 0% 100%' });
+    expect(img.style.getPropertyValue('object-view-box')).toBe('inset(75% 75% 0% 0%)');
+    setAttrs(doc, 's1', 'pic', { 'data-crop': null });
+    expect(img.style.getPropertyValue('object-view-box')).toBe('');
+  });
+
+  it('draws a non-rect shape’s outer shadows on its outline', () => {
+    const c = mount(deck(M5));
+    c.layoutNow();
+    const path = c.node('dot')!.querySelector('svg path') as SVGPathElement;
+    expect(path.style.getPropertyValue('filter')).toBe('drop-shadow(4px 6px 12px #00000040)');
+  });
+
+  it('leaves a text element being edited in place to the text box, and redraws it from the model after', () => {
+    const doc = deck(M5);
+    const c = mount(doc);
+    const node = c.beginTextEdit('title')!;
+    expect(node).toBe(c.node('title'));
+    node.innerHTML = '<div class="ProseMirror">editing</div>';
+    setText(doc, 's1', 'title', [{ type: 'p', inline: [{ text: 'Remote', marks: {} }] }]);
+    expect(node.innerHTML).toBe('<div class="ProseMirror">editing</div>');
+    c.endTextEdit('title');
+    expect(c.node('title')!.innerHTML).toBe('Remote');
+  });
+});

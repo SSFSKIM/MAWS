@@ -284,6 +284,161 @@
   inset: 0;
   pointer-events: none;
 }
+.deck-stage:focus {
+  outline: none;
+}
+.deck-stage:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* M5: the transform layer's overlay, in screen px over the scaled slide (handles keep their size at any zoom) */
+.deck-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.deck-sel,
+.deck-sel-all,
+.deck-marquee,
+.deck-ghost,
+.deck-insertion,
+.deck-guide,
+.deck-sel-line {
+  position: absolute;
+  box-sizing: border-box;
+}
+.deck-sel {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 0;
+}
+.deck-sel[data-editing] {
+  outline-style: dashed;
+}
+.deck-sel-all {
+  outline: 1px dashed var(--accent);
+}
+.deck-sel-line {
+  overflow: visible;
+}
+.deck-sel-line polyline {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5px;
+  stroke-dasharray: 4 3;
+}
+.deck-handle {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  box-sizing: border-box;
+  border: 1.5px solid var(--accent);
+  border-radius: 2px;
+  background: var(--bg-raised);
+  pointer-events: auto;
+}
+.deck-handle[data-at='nw'] {
+  left: 0;
+  top: 0;
+  cursor: nwse-resize;
+}
+.deck-handle[data-at='n'] {
+  left: 50%;
+  top: 0;
+  cursor: ns-resize;
+}
+.deck-handle[data-at='ne'] {
+  left: 100%;
+  top: 0;
+  cursor: nesw-resize;
+}
+.deck-handle[data-at='e'] {
+  left: 100%;
+  top: 50%;
+  cursor: ew-resize;
+}
+.deck-handle[data-at='se'] {
+  left: 100%;
+  top: 100%;
+  cursor: nwse-resize;
+}
+.deck-handle[data-at='s'] {
+  left: 50%;
+  top: 100%;
+  cursor: ns-resize;
+}
+.deck-handle[data-at='sw'] {
+  left: 0;
+  top: 100%;
+  cursor: nesw-resize;
+}
+.deck-handle[data-at='w'] {
+  left: 0;
+  top: 50%;
+  cursor: ew-resize;
+}
+.deck-rotate {
+  left: 50%;
+  top: -22px;
+  border-radius: 50%;
+  cursor: grab;
+}
+.deck-end {
+  border-radius: 50%;
+  cursor: move;
+}
+.deck-guide {
+  border: 0 dashed var(--danger);
+  border-left-width: 1px;
+  border-top-width: 1px;
+}
+.deck-guide[data-guide='gap'] {
+  border-style: solid;
+  border-color: var(--info);
+}
+.deck-marquee {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+.deck-ghost {
+  outline: 1px dashed var(--fg-muted);
+  background: var(--bg-hover);
+}
+.deck-insertion {
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* M5: the toolbar's element controls */
+.deck-element-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.deck-toolbar-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--border);
+}
+.deck-notice {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deck-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 32px);
+  gap: 2px;
+}
+.deck-icon-item {
+  justify-content: center;
+  padding: 6px;
+}
 .deck-held-banner {
   flex-shrink: 0;
   padding: 8px 12px;

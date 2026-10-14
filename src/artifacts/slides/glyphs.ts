@@ -159,3 +159,38 @@ export function connectorHeads(attrs: Readonly<Record<string, string>>): { start
 export function splitBorder(value: string): { width: string | null; style: string | null; color: string | null } {
   return borderParts(value) ?? { width: null, style: null, color: null };
 }
+
+/** Splits at `sep` outside parentheses. */
+function splitTop(value: string, sep: RegExp): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = '';
+  for (const ch of value) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    if (depth === 0 && sep.test(ch)) {
+      if (cur.trim()) out.push(cur.trim());
+      cur = '';
+    } else cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+/**
+ * P3-C M5 (Decision Log 18): a `box-shadow` list as `drop-shadow()` filters for a shape drawn as an outline (a box
+ * shadow would paint the box): each outer shadow's offsets, blur and colour; an inset shadow and the spread have no
+ * outline equivalent and are left out. Null when nothing is left.
+ */
+export function dropShadows(value: string): string | null {
+  const isLength = (t: string) => /^-?(?:\d+\.?\d*|\.\d+)(?:px)?$/.test(t);
+  const filters = splitTop(value, /,/).flatMap((shadow) => {
+    const tokens = splitTop(shadow, /\s/);
+    if (tokens.some((t) => t.toLowerCase() === 'inset')) return [];
+    const lengths = tokens.filter(isLength);
+    const color = tokens.filter((t) => !isLength(t)).pop();
+    if (lengths.length < 2 || color === undefined) return [];
+    return [`drop-shadow(${lengths[0]} ${lengths[1]} ${lengths[2] ?? '0px'} ${color})`];
+  });
+  return filters.length ? filters.join(' ') : null;
+}

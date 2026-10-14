@@ -48,6 +48,8 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
   const system = useGoverningSystem(placement);
   const assetUrl = useCallback((ref: string) => state.host.assetUrl(artifactId, ref), [state, artifactId]);
+  // M5: a picked image uploaded into the artifact (Insert's image, the inspector's Replace), answered as its `assets/<name>`
+  const uploadAsset = useCallback(async (file: File) => (await state.host.uploadAsset(artifactId, new Uint8Array(await file.arrayBuffer()), { name: file.name, mime: file.type })).ref, [state, artifactId]);
 
   // the stage is the tab's Mark-up surface while it is on screen
   const stage = useRef<HTMLElement | null>(null);
@@ -81,6 +83,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         onStage={onStage}
         onDrawn={onDrawn}
         onThumbnailsDrawn={onThumbnailsDrawn}
+        uploadAsset={uploadAsset}
       />
     </div>
   );
