@@ -750,7 +750,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const asks = mcpCalls(journal(s2)).filter((call) => call.name === 'ask');
       const tools = await initTools(s2, spawn.launchId);
       const initAskTools = asksOf(tools);
-      const pluginTools = tools.filter((tool) => tool.startsWith('mcp__doperpowers__'));
+      const nativeAsks = tools.filter((tool) => tool === 'AskUserQuestion' || tool === 'mcp__doperpowers__AskUserQuestion');
       const band = pane(page).locator('[data-plugin-band]');
       const bandText = (await band.count()) > 0 ? (await band.first().innerText()).replaceAll('\n', ' ') : '(no band)';
       const reply = lastReply(s2);
@@ -770,9 +770,10 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       expect(cards).toBeGreaterThanOrEqual(1);
       expect(asks.map((a) => a.args.blocking), 'one ask through mcp__maws__ask, not blocking').toEqual([false]);
       expect(initAskTools, 'Decision Log 33: mcp__maws__ask the one ask (no plugin ask in -p either)').toEqual(['mcp__maws__ask']);
-      expect(pluginTools, 'the plugin registers no tool in a headless launch (its ask included)').toEqual([]);
+      expect(nativeAsks, 'neither the native ask nor the plugin’s ask is the model’s').toEqual([]);
+      expect(tools).toContain('mcp__maws__ask');
       expect(bandText).not.toContain('to-human view');
-      line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE} (declares ${plugin.contractKey}: ${plugin.shape}); --append-system-prompt once, the supplement byte for byte, no contract; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${snap.supplements.length} snapshot(s), each with the supplement once; ${NATIVE_TO_HUMAN_ENV}=${ADVERTISED} logged; ${cards} message card(s); one mcp__maws__ask, blocking false; system/init's asks ${JSON.stringify(initAskTools)}, no mcp__doperpowers__ tool (${tools.length} tools); the mod's band absent (deferred)`);
+      line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE} (declares ${plugin.contractKey}: ${plugin.shape}); --append-system-prompt once, the supplement byte for byte, no contract; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${snap.supplements.length} snapshot(s), each with the supplement once; ${NATIVE_TO_HUMAN_ENV}=${ADVERTISED} logged; ${cards} message card(s); one mcp__maws__ask, blocking false; system/init's asks ${JSON.stringify(initAskTools)}, neither AskUserQuestion nor mcp__doperpowers__AskUserQuestion among ${tools.length} tools; the mod's band absent (deferred)`);
     });
 
     // P2-C2: the owner's style asks through a tool, so the question is MAWS's ask, answered from its sheet while the
