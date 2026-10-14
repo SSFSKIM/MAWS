@@ -251,12 +251,16 @@ export function startDocumentPerfSeam(store: ArtifactStore, dir: string, log: (l
   };
   const watcher: FSWatcher = watch(inbox, () => void drain());
   watcher.unref(); // never what keeps the host running
+  // a file watch can drop an event on a loaded machine: the inbox is also read every quarter second
+  const poll = setInterval(() => void drain(), 250);
+  poll.unref();
   void drain();
   log(`listening in ${dir}`);
   return {
     close: () => {
       closed = true;
       watcher.close();
+      clearInterval(poll);
       seam.close();
     },
   };
