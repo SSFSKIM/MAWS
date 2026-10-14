@@ -2,7 +2,8 @@
 // M9): S2's v14 seed (`master:spikes/p3-store/s2/check/seed-v14.ts`), copied, never imported. Paragraph nodes under the
 // `content` root written a word per transaction by three synced writers, about 4 % of words partly deleted and 3 %
 // re-formatted bold, so the state holds the many small items, clients and delete sets a typed document has (one big
-// insert would merge into a few items and sync in no time). Deterministic: the same target gives the same bytes.
+// insert would merge into a few items and sync in no time). The same content every run; the writers' clientIDs are
+// random, so the state's size varies by a few hundred bytes.
 //
 // Yjs is loaded with `require` and typed here as far as the seed calls it: the binding module is the product's only
 // import path to Yjs (Decision Log 25), and its declarations need that module's global shim (Decision Log 19a).
