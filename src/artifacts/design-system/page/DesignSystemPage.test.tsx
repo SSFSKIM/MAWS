@@ -260,7 +260,7 @@ describe('whole-branch review: edits of what the page shows', () => {
     writeSystem(doc, { ...FILES, ...files }, { route: 'derived', at: AT }, { name: 'Harbor' });
     return doc;
   }
-  const raw = () => structuredClone(complete) as Record<string, Record<string, unknown>>;
+  const raw = () => structuredClone(complete) as unknown as Record<string, Record<string, unknown>>;
   const held = (doc: Doc, path: string) => byIdentity(readSystem(doc).tokens.tokens, path);
 
   it('C3: an inherited role is written as a local token of its effective type, and the group it extends keeps its value', () => {
