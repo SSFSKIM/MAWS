@@ -501,3 +501,52 @@ test('the document tools on the real server: a document from markdown, its guide
     if (!existed) rmSync(repo, { recursive: true, force: true });
   }
 });
+
+// P3-B (M9 fix wave 2): the agent's export of a document through the real server: the same recording's five `maws`
+// calls made a create from markdown and four `artifact_export` calls, one per format, each answered by main's export
+// service through the document exporters this child registers (Markdown, HTML, DOCX, and a PDF on A4).
+test('the agent exports a document through the real server: Markdown, HTML, DOCX and a PDF on A4, each written by the document exporters', async () => {
+  const repo = recordedCwd(ARTIFACTS);
+  const replayed = asDocumentReplay(
+    ARTIFACTS,
+    [
+      { name: 'artifact_create', input: { kind: 'document', title: 'Plan', handle: 'plan', content: DOCUMENT_MARKDOWN } },
+      { name: 'artifact_export', input: { artifact: 'plan', format: 'md' } },
+      { name: 'artifact_export', input: { artifact: 'plan', format: 'html' } },
+      { name: 'artifact_export', input: { artifact: 'plan', format: 'docx' } },
+      { name: 'artifact_export', input: { artifact: 'plan', format: 'pdf', pageSize: 'a4' } },
+    ],
+    'document-export',
+  );
+  const existed = existsSync(repo);
+  mkdirSync(repo, { recursive: true });
+  try {
+    await scene({ titles: ['P3-B: document export'], repo }, async (s) => {
+      const [id] = s.ids;
+      await show(s, id);
+      await replay(s, id, replayed);
+      for (let k = 0; k < 7; k++) await allowNext(s, id); // Write, the create, the four exports' cards as recorded, Edit
+      await idle(s, id);
+      const rows = s.journal(id);
+      const calls = mcpCalls(rows);
+      expect(calls.map((c) => c.name)).toEqual(['artifact_create', 'artifact_export', 'artifact_export', 'artifact_export', 'artifact_export']);
+      const exported = (k: number) => {
+        const result = mcpResultOf(rows, calls[k]!.requestId)!;
+        expect(result.isError, resultText(result)).toBeUndefined();
+        return JSON.parse(resultText(result)) as { status: string; format: string; path: string };
+      };
+      const md = exported(1);
+      expect(md).toMatchObject({ status: 'exported', format: 'md' });
+      expect(readFileSync(md.path, 'utf8')).toContain('The review is scheduled for Friday.');
+      expect(readFileSync(md.path, 'utf8')).not.toMatch(/\^[0-9a-z]{2,}/); // no block ids in the file
+      expect(readFileSync(exported(2).path, 'utf8').startsWith('<!doctype html>')).toBe(true);
+      expect(readFileSync(exported(3).path).subarray(0, 2).toString('latin1')).toBe('PK');
+      const pdf = readFileSync(exported(4).path);
+      expect(pdf.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+      const box = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(pdf.toString('latin1'));
+      expect(box && [Math.round(Number(box[1])), Math.round(Number(box[2]))], 'an A4 page, in points').toEqual([595, 842]);
+    });
+  } finally {
+    if (!existed) rmSync(repo, { recursive: true, force: true });
+  }
+});
