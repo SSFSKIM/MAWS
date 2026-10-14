@@ -41,23 +41,47 @@ function element(doc: Doc, slideId: string, id: string): N {
   if (!e) throw new Error(`no element ${slideId}/${id}`);
   return e;
 }
-function scalarsOf(n: N): Scalars {
-  const out: Scalars = {};
-  for (const [k, v] of n.attrEntries() as Iterable<[string, unknown]>) if (!(v instanceof Y.Node)) out[k] = v as Json;
+/** A node's plain attributes (its nested nodes left out), in a dictionary with no prototype. */
+function scalarsOf(n: N, key: (k: string) => string = (k) => k, value: (v: Json) => Json = (v) => v): Scalars {
+  const out = Object.create(null) as Scalars;
+  for (const [k, v] of n.attrEntries() as Iterable<[string, unknown]>) if (!(v instanceof Y.Node)) out[key(k)] = value(v as Json);
+  return out;
+}
+
+// The index's keys and values are any JSON the agent wrote (Claude: "keep every key"), but a Y.Node refuses the attribute
+// `__proto__` and a value's object decodes through plain assignment. So the index is stored escaped: a key that is
+// `__proto__` or starts with ESC gains a leading ESC, at every depth of a value, and is read back into dictionaries with
+// no prototype.
+const ESC = '\u0001';
+const escKey = (k: string): string => (k === '__proto__' || k.startsWith(ESC) ? ESC + k : k);
+const unescKey = (k: string): string => (k.startsWith(ESC) ? k.slice(1) : k);
+function escJson(v: Json): Json {
+  if (Array.isArray(v)) return v.map(escJson);
+  if (v === null || typeof v !== 'object') return v;
+  const out: Record<string, Json> = {};
+  for (const k of Object.keys(v)) out[escKey(k)] = escJson(v[k]!);
+  return out;
+}
+function unescJson(v: Json): Json {
+  if (Array.isArray(v)) return v.map(unescJson);
+  if (v === null || typeof v !== 'object') return v;
+  const out = Object.create(null) as Record<string, Json>;
+  for (const k of Object.keys(v)) out[unescKey(k)] = unescJson(v[k]!);
   return out;
 }
 const attrKeys = (n: N): string[] => [...(n.attrKeys() as Iterable<string>)];
 
 // ---------------------------------------------------------------- deck
 
+/** The index's plain keys (its maps left out), any key or nested key `__proto__` included. */
 export function deckScalars(doc: Doc): Scalars {
-  return scalarsOf(deckNode(doc));
+  return scalarsOf(deckNode(doc), unescKey, unescJson);
 }
 export function setDeckKey(doc: Doc, key: string, v: Json): void {
-  deckNode(doc).setAttr(key, v as never);
+  deckNode(doc).setAttr(escKey(key), escJson(v) as never);
 }
 export function deleteDeckKey(doc: Doc, key: string): void {
-  deckNode(doc).deleteAttr(key);
+  deckNode(doc).deleteAttr(escKey(key));
 }
 function deckSub(doc: Doc, name: DeckMap, create: boolean): N | undefined {
   let m = deckNode(doc).getAttr(name) as N | undefined;
@@ -70,17 +94,17 @@ function deckSub(doc: Doc, name: DeckMap, create: boolean): N | undefined {
 /** A nested map of the index, or undefined when the deck has none. */
 export function deckEntries(doc: Doc, name: DeckMap): Record<string, Json> | undefined {
   const m = deckSub(doc, name, false);
-  return m ? scalarsOf(m) : undefined;
+  return m ? scalarsOf(m, unescKey, unescJson) : undefined;
 }
 /** Creates the nested map (empty) when the deck has none. */
 export function ensureDeckMap(doc: Doc, name: DeckMap): void {
   deckSub(doc, name, true);
 }
 export function setDeckEntry(doc: Doc, name: DeckMap, key: string, v: Json): void {
-  deckSub(doc, name, true)!.setAttr(key, v as never);
+  deckSub(doc, name, true)!.setAttr(escKey(key), escJson(v) as never);
 }
 export function deleteDeckEntry(doc: Doc, name: DeckMap, key: string): void {
-  deckSub(doc, name, false)?.deleteAttr(key);
+  deckSub(doc, name, false)?.deleteAttr(escKey(key));
 }
 export function deleteDeckMap(doc: Doc, name: DeckMap): void {
   deckNode(doc).deleteAttr(name);

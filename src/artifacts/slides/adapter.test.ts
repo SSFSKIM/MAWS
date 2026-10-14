@@ -2,7 +2,7 @@
 // new deck's cover, the files a read returns, the scoped repair and the turn's summary. Its behaviour on A's real
 // document service is src/engine-host/presentations/adapter.test.ts.
 import { describe, expect, it } from 'vitest';
-import { newDoc, onUpdate, transact } from '../yjs';
+import { diffV1, newDoc, onUpdate, transact } from '../yjs';
 import * as Y from '../yjs/slides';
 import { COVER_ID, coverSlide, createPresentationAdapter, summarizeDeckTurn } from './adapter';
 import { DECK_PATH, parseDeckJson, slidePath } from './deck';
@@ -49,6 +49,16 @@ describe('the presentation adapter', () => {
     adapter.afterRestore!(doc, { artifactId: 'x', versionId: 1 });
     expect(parent('b')).toBe('');
     expect(deckFiles(doc)[slidePath('b')]).toContain('<p id="p">x</p>');
+  });
+
+  it('repairs every slide when the update’s content is not the doc’s (fix wave 1’s probe)', () => {
+    const doc = newDoc();
+    publishDeck(doc, {}, { [slidePath('s1')]: '<section id="s1"><div id="g"><p id="a">A</p></div></section>' }, false);
+    transact(doc, () => Y.setElementKey(doc, 's1', 'a', 'parent', 'gone'));
+    const foreign = newDoc();
+    publishDeck(foreign, {}, { [slidePath('s1')]: '<section id="s1"></section>' }, false);
+    adapter.afterUpdate!(doc, { artifactId: 'x', actor: { kind: 'human' }, update: diffV1(foreign) });
+    expect(Y.elementScalars(doc, 's1', 'a').parent).toBe('');
   });
 
   it('summarizes a turn’s publishes by slide', () => {

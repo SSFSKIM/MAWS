@@ -4,11 +4,11 @@
 // refusals of files the deck cannot hold.
 import { describe, expect, it } from 'vitest';
 import { FilesError } from '../files';
-import { applyV2, newDoc, onUpdate, stateV2, stateVector, type Doc } from '../yjs';
+import { applyV2, newDoc, onUpdate, stateV2, stateVector, transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
 import { DECK_PATH, slidePath } from './deck';
 import { claudeExamples } from './fixtures/s6';
-import { deckFiles, deleteElementTree, moveSlide, readFlat, readSlide, reorderFlow, resolveAnchor, setNotes, setStyle, setText, slideOrder, zOrder } from './model';
+import { deckFiles, deleteElementTree, moveInto, moveSlide, readDeckJson, readFlat, readSlide, reorderFlow, resolveAnchor, setNotes, setStyle, setText, slideOrder, zOrder } from './model';
 import { GOOGLE_FONTS_WARNING, publishDeck, type DeckPublishOutcome } from './publish';
 
 const P = (id: string) => slidePath(id);
@@ -434,5 +434,117 @@ describe('publishDeck: what the loader dropped and held, the index, tables', () 
     zOrder(doc, 's1', 'a', 'front', 'human');
     expect(publish(doc, files, { [P('s1')]: files[P('s1')]!.replace('>B<', '>Bee<') }).conflicts).toEqual([]);
     expect(readSlide(doc, 's1').children.map((c) => c.id)).toEqual(['b', 'a']);
+  });
+});
+
+// The M2 task review's probes (fix wave 1), each a regression.
+describe('publishDeck: fix wave 1 (the task review’s probes)', () => {
+  const S = P('s1');
+  function small(html = '<section id="s1"><p id="a">A</p><p id="b">B</p></section>', extra: Record<string, unknown> = {}): Doc {
+    return created({ [DECK_PATH]: JSON.stringify({ v: 4, order: ['s1'], ...extra }), [S]: html });
+  }
+
+  it('compares each entry of an index map the agent left out: refused when one changed since the read', () => {
+    const doc = small(undefined, { dsOverrides: { '--ds-color-bg': '#ffffff' } });
+    const base = deckFiles(doc);
+    transact(doc, () => Y.setDeckEntry(doc, 'dsOverrides', '--ds-color-bg', '#ff0000'));
+    const sent = JSON.parse(base[DECK_PATH]!) as Record<string, unknown>;
+    delete sent.dsOverrides;
+    expect(publish(doc, base, { [DECK_PATH]: JSON.stringify(sent) }).conflicts).toEqual([{ path: DECK_PATH, detail: 'deck.json key dsOverrides.--ds-color-bg: changed since your read' }]);
+    // unchanged since the read: the map goes
+    const doc2 = small(undefined, { dsOverrides: { '--ds-color-bg': '#ffffff' } });
+    expect(publish(doc2, deckFiles(doc2), { [DECK_PATH]: JSON.stringify(sent) }).conflicts).toEqual([]);
+    expect(readDeckJson(doc2).dsOverrides).toBeUndefined();
+  });
+
+  it('keeps, even under force, an index map entry someone added since the read when the agent leaves the map out', () => {
+    const doc = small(undefined, { dsOverrides: { '--ds-color-bg': '#ffffff' } });
+    const base = deckFiles(doc);
+    transact(doc, () => Y.setDeckEntry(doc, 'dsOverrides', '--ds-color-text', '#111111'));
+    const sent = JSON.parse(base[DECK_PATH]!) as Record<string, unknown>;
+    delete sent.dsOverrides;
+    publish(doc, base, { [DECK_PATH]: JSON.stringify(sent) }, true);
+    expect({ ...readDeckJson(doc).dsOverrides }).toEqual({ '--ds-color-text': '#111111' });
+  });
+
+  it('refuses deleting an element whose place changed since the read (sent to the front)', () => {
+    const doc = small('<section id="s1"><p id="a" style="position:absolute;left:0px;top:0px">A</p><p id="b">B</p></section>');
+    const base = deckFiles(doc);
+    zOrder(doc, 's1', 'a', 'front');
+    expect(publish(doc, base, { [S]: '<section id="s1"><p id="b">B</p></section>' }).conflicts).toEqual([{ path: S, detail: 'element a: changed since your read' }]);
+  });
+
+  it('refuses, and under force places as the agent did, an element both re-parented into one list at different places', () => {
+    const html = '<section id="s1"><div id="g"><p id="x">X</p></div><div id="h"><p id="a">A</p><p id="b">B</p></div></section>';
+    const sent = '<section id="s1"><div id="g"></div><div id="h"><p id="x">X</p><p id="a">A</p><p id="b">B</p></div></section>';
+    const doc = small(html);
+    const base = deckFiles(doc);
+    moveInto(doc, 's1', 'x', 'h'); // to the end of h
+    expect(publish(doc, base, { [S]: sent }).conflicts).toEqual([{ path: S, detail: 'order in h: changed since your read' }]);
+    publish(doc, base, { [S]: sent }, true);
+    expect(readSlide(doc, 's1').children.find((c) => c.id === 'h')!.children.map((c) => c.id)).toEqual(['x', 'a', 'b']);
+    // both at the same place: no conflict
+    const same = small(html);
+    const read = deckFiles(same);
+    moveInto(same, 's1', 'x', 'h');
+    expect(publish(same, read, { [S]: sent.replace('<p id="x">X</p><p id="a">A</p><p id="b">B</p>', '<p id="a">A</p><p id="b">B</p><p id="x">X</p>') }).conflicts).toEqual([]);
+  });
+
+  it('writes nothing for a slide created since the read that equals the sent one by meaning', () => {
+    const doc = small();
+    const base = deckFiles(doc);
+    const source = '<section id="s2"><p id="x">X</p></section>';
+    publishDeck(doc, deckFiles(doc), { [P('s2')]: source }, false);
+    expect(publish(doc, base, { [P('s2')]: source })).toMatchObject({ conflicts: [], changed: [], updates: 0 });
+    expect(publish(doc, base, { [P('s2')]: '<section id="s2"><p id="x">Y</p></section>' }).conflicts).toEqual([{ path: P('s2'), detail: 'slide: created since your read' }]);
+  });
+
+  it('keeps any index key, `__proto__` included at the top and nested, from the loader through the model to the file', () => {
+    const doc = newDoc();
+    const index = '{"v":4,"order":["s1"],"__proto__":{"keep":true,"__proto__":{"deep":1}},"\\u0001odd":2,"sections":{"__proto__":{"description":"x","start":"s1"}}}';
+    publish(doc, {}, { [DECK_PATH]: index, [S]: '<section id="s1"></section>' });
+    const file = deckFiles(doc)[DECK_PATH]!;
+    const back = JSON.parse(file) as Record<string, unknown>;
+    expect(Object.hasOwn(back, '__proto__')).toBe(true);
+    expect(JSON.stringify(back['__proto__'])).toBe('{"keep":true,"__proto__":{"deep":1}}');
+    expect(back['\u0001odd']).toBe(2);
+    expect(Object.hasOwn(back.sections as object, '__proto__')).toBe(true);
+    expect(publish(doc, deckFiles(doc), deckFiles(doc)).updates).toBe(0);
+    // and changed by a later publish key by key
+    const changed = file.replace('"keep": true', '"keep": false');
+    expect(changed).not.toBe(file);
+    expect(publish(doc, deckFiles(doc), { [DECK_PATH]: changed }).conflicts).toEqual([]);
+    expect(JSON.stringify((JSON.parse(deckFiles(doc)[DECK_PATH]!) as Record<string, unknown>)['__proto__'])).toBe('{"keep":false,"__proto__":{"deep":1}}');
+  });
+
+  it('merges disjoint marked text and note edits', () => {
+    const doc = small('<section id="s1"><p id="a">Alpha beta gamma</p><aside>First second third</aside></section>');
+    const base = deckFiles(doc);
+    setText(doc, 's1', 'a', [{ type: 'p', inline: [{ text: 'Alpha beta GAMMA', marks: {} }] }]);
+    setNotes(doc, 's1', 'First second THIRD');
+    const sent = base[S]!.replace('Alpha beta gamma', '<b>ALPHA</b> beta gamma').replace('First second third', 'FIRST second third');
+    expect(publish(doc, base, { [S]: sent }).conflicts).toEqual([]);
+    expect(deckFiles(doc)[S]).toContain('<b>ALPHA</b> beta GAMMA');
+    expect(Y.readNotes(doc, 's1')).toBe('FIRST second THIRD');
+  });
+
+  it('mints the same nested id-less parents and children in both calls despite a live addition', () => {
+    const doc = small('<section id="s1"><p id="a">A</p></section>');
+    const base = deckFiles(doc);
+    const known = newDoc();
+    applyV2(known, stateV2(doc));
+    publishDeck(doc, deckFiles(doc), { [S]: '<section id="s1"><p id="a">A</p><p id="human">H</p></section>' }, false);
+    const sent = { [S]: '<section id="s1"><p id="a">A</p><div><p>Nested</p></div></section>' };
+    expect(publish(doc, base, sent).conflicts).toEqual([]);
+    publishDeck(known, deckFiles(known), sent, true);
+    expect(Y.elementIds(doc, 's1').filter((id) => id !== 'human').sort()).toEqual(Y.elementIds(known, 's1').sort());
+  });
+
+  it('refuses replacing a held file when live moved since that read', () => {
+    const doc = small();
+    publishDeck(doc, deckFiles(doc), { [S]: '<section id="s1"><iframe></iframe></section>' }, false);
+    const heldBase = deckFiles(doc);
+    publishDeck(doc, heldBase, { [S]: '<section id="s1"><p id="a">Owner replacement</p></section>' }, false);
+    expect(publish(doc, heldBase, { [S]: '<section id="s1"><p id="a">Agent replacement</p></section>' }).conflicts).toEqual([{ path: S, detail: 'slide: changed since your read' }]);
   });
 });

@@ -132,6 +132,33 @@ function propsOf(e: El | undefined): Map<string, string> {
   for (const [k, v] of Object.entries(e.attrs)) out.set(`attr:${k}`, v);
   return out;
 }
+/** An element's own keys or text differ between two views (its place among its siblings aside). */
+function keysChanged(x: El, y: El): boolean {
+  const [px, py] = [propsOf(x), propsOf(y)];
+  return px.size !== py.size || [...px].some(([k, v]) => py.get(k) !== v) || !sameText(x.text, y.text);
+}
+/**
+ * An element's place differs between two views by meaning: its parent, its layer (flow, under or over), or its position
+ * among the siblings both views share in that list; not the bytes of a fractional key.
+ */
+function placeChanged(key: string, x: View, y: View): boolean {
+  const [ex, ey] = [x.els.get(key)!, y.els.get(key)!];
+  if (ex.group !== ey.group || ex.parent !== ey.parent) return true;
+  const lk = listKey(ex.parent, ex.group);
+  const [lx, ly] = [x.lists.get(lk) ?? [], y.lists.get(lk) ?? []];
+  const inY = new Set(ly);
+  const common = new Set(lx.filter((k) => inY.has(k)));
+  return restrict(lx, common).indexOf(key) !== restrict(ly, common).indexOf(key);
+}
+/** Two views of one slide mean the same: its keys, notes, elements, their keys, text and places. */
+function sameSlide(x: View, y: View): boolean {
+  return (
+    stable(x.scalars) === stable(y.scalars) &&
+    x.notes === y.notes &&
+    x.els.size === y.els.size &&
+    [...x.els].every(([key, e]) => y.els.has(key) && !keysChanged(e, y.els.get(key)!) && !placeChanged(key, x, y))
+  );
+}
 const propName = (key: string) => (key.startsWith('style:') || key.startsWith('attr:') ? key.slice(key.indexOf(':') + 1) : key === 'raw' ? 'content' : key);
 const elementName = (key: string) => (isCellKey(key) ? `${key.slice(0, key.lastIndexOf('#'))} cell ${cellIndex(key) + 1}` : key);
 
@@ -298,14 +325,25 @@ function mergeSequence(members: Set<string>, seqB: string[], seqA: string[], seq
   const [b, a, l] = [restrict(seqB, members), restrict(seqA, members), restrict(seqL, members)];
   const inB = new Set(b);
   const inA = new Set(a);
+  const inL = new Set(l);
   const ab = new Set(a.filter((k) => inB.has(k)));
   const reordered = !sameSeq(restrict(a, ab), restrict(b, ab));
-  let desired: string[];
   let conflict = false;
+  // a member the agent brought into this list that someone else brought in too (by another route: both re-parented it
+  // here): its place is the agent's change, and a different place since is a conflict like any order
+  const both = new Set(a.filter((k) => inL.has(k)));
+  const [aBoth, lBoth] = [restrict(a, both), restrict(l, both)];
+  const misplaced = new Set(a.filter((k) => !inB.has(k) && inL.has(k) && aBoth.indexOf(k) !== lBoth.indexOf(k)));
+  if (misplaced.size > 0 && !force) conflict = true;
+  let desired: string[];
   if (!reordered) {
     desired = [...l];
     a.forEach((k, i) => {
-      if (inB.has(k) || desired.includes(k)) return;
+      if (inB.has(k)) return;
+      if (desired.includes(k)) {
+        if (!misplaced.has(k)) return;
+        desired.splice(desired.indexOf(k), 1);
+      }
       insertNear(desired, k, a.slice(0, i).reverse(), a.slice(i + 1));
     });
   } else {
@@ -344,6 +382,11 @@ interface Loaded {
   idless: number;
 }
 
+/** An own property only: the index may hold any key, `__proto__` among them. */
+function own(o: object | null | undefined, key: string): unknown {
+  return o && Object.hasOwn(o, key) ? (o as Record<string, unknown>)[key] : undefined;
+}
+
 /** Stable JSON: equal by meaning whatever a nested object's key order. */
 function stable(v: unknown): string {
   if (v === undefined) return '';
@@ -351,7 +394,7 @@ function stable(v: unknown): string {
   if (v && typeof v === 'object')
     return `{${Object.keys(v)
       .sort()
-      .map((k) => `${JSON.stringify(k)}:${stable((v as Record<string, unknown>)[k])}`)
+      .map((k) => `${JSON.stringify(k)}:${stable(own(v, k))}`)
       .join(',')}}`;
   return JSON.stringify(v);
 }
@@ -573,7 +616,7 @@ function planSlide(live: Doc, l: Loaded, baseFile: string | undefined, force: bo
   let b: View;
   const lv = liveViewOf(live, id);
   if (baseFile === undefined) {
-    if (liveFile === l.source) return;
+    if (!liveHeld && sameSlide(a, lv)) return; // someone else made the same slide: by meaning, nothing to write
     if (!force) return void conflict('slide: created since your read');
     b = EMPTY;
   } else if (baseIr === null || liveHeld) {
@@ -615,33 +658,31 @@ function planElements(path: string, b: View, a: View, lv: LiveView, force: boole
   const texts = new Map<string, TextBlock[]>();
   const merged = new Map<string, Map<string, string>>(); // each surviving element's props after the publish
 
-  const changedSince = (x: El, y: El) => {
-    const px = propsOf(x);
-    const py = propsOf(y);
-    return px.size !== py.size || [...px].some(([k, v]) => py.get(k) !== v) || !sameText(x.text, y.text);
-  };
+  // an element changed between two views: its keys, its text or its place (removing it, or editing it after someone
+  // removed it, conflicts on any of them)
+  const changedSince = (key: string, x: View, y: View) => keysChanged(x.els.get(key)!, y.els.get(key)!) || placeChanged(key, x, y);
   for (const key of new Set([...b.els.keys(), ...a.els.keys()])) {
     const [eb, ea, el] = [b.els.get(key), a.els.get(key), lv.els.get(key)];
     const name = elementName(key);
     if (eb && !ea) {
       if (!el) continue;
-      if (changedSince(eb, el) && !force) conflict(`element ${name}: changed since your read`);
+      if (changedSince(key, b, lv) && !force) conflict(`element ${name}: changed since your read`);
       else removals.push(key);
       continue;
     }
     if (!ea) continue;
     if (!el) {
-      if (eb && changedSince(eb, ea) && !force) {
+      if (eb && changedSince(key, b, a) && !force) {
         conflict(`element ${name}: removed since your read`);
         continue;
       }
-      if (eb && !changedSince(eb, ea)) continue; // removed by someone else, and the agent did not change it
+      if (eb && !changedSince(key, b, a)) continue; // removed by someone else, and the agent did not change it
       creations.push(key);
       merged.set(key, propsOf(ea));
       continue;
     }
     // in live: key by key against the base (absent when the agent created what someone else created meanwhile)
-    if (!eb && !changedSince(ea, el)) continue;
+    if (!eb && !keysChanged(ea, el) && !placeChanged(key, a, lv)) continue;
     if (!eb && !force) {
       conflict(`element ${name}: created since your read`);
       continue;
@@ -788,30 +829,34 @@ function planDeck(
     const skip = new Set<string>(['order', ...maps]);
     for (const key of new Set([...Object.keys(b), ...Object.keys(sentDeck)])) {
       if (skip.has(key)) continue;
-      const [vb, va, vl] = [stable(b[key]), stable(sentDeck[key]), stable(l[key])];
+      const [vb, va, vl] = [stable(own(b, key)), stable(own(sentDeck, key)), stable(own(l, key))];
       if (va === vb || va === vl) continue;
       if (vl !== vb && !force) {
         conflict(`deck.json key ${key}: changed since your read`);
         continue;
       }
-      const value = sentDeck[key];
+      const value = own(sentDeck, key);
       keyWrites.push((w) => w.on(DECK_PATH, () => (value === undefined ? Y.deleteDeckKey(w.doc, key) : Y.setDeckKey(w.doc, key, value as Y.Json))));
     }
     for (const name of maps) {
-      const [mb, ma, ml] = [b[name] as Record<string, unknown> | undefined, sentDeck[name] as Record<string, unknown> | undefined, l[name] as Record<string, unknown> | undefined];
-      if ((ma === undefined) !== (mb === undefined) && (ml === undefined) === (mb === undefined)) {
-        keyWrites.push((w) => w.on(DECK_PATH, () => (ma === undefined ? Y.deleteDeckMap(w.doc, name) : Y.ensureDeckMap(w.doc, name))));
-      }
-      if (ma === undefined) continue;
-      for (const entry of new Set([...Object.keys(mb ?? {}), ...Object.keys(ma)])) {
-        const [vb, va, vl] = [stable(mb?.[entry]), stable(ma[entry]), stable(ml?.[entry])];
+      const [mb, ma, ml] = [own(b, name), own(sentDeck, name), own(l, name)] as (Record<string, unknown> | undefined)[];
+      // a map the agent left out is a removal of each entry it read, compared one by one; an entry someone added since
+      // is not the agent's to remove, even under force, and keeps the map
+      const removed = new Set<string>();
+      for (const entry of new Set([...Object.keys(mb ?? {}), ...Object.keys(ma ?? {})])) {
+        const [vb, va, vl] = [stable(own(mb, entry)), stable(own(ma, entry)), stable(own(ml, entry))];
         if (va === vb || va === vl) continue;
         if (vl !== vb && !force) {
           conflict(`deck.json key ${name}.${entry}: changed since your read`);
           continue;
         }
-        const value = ma[entry];
+        const value = own(ma, entry);
+        if (value === undefined) removed.add(entry);
         keyWrites.push((w) => w.on(DECK_PATH, () => (value === undefined ? Y.deleteDeckEntry(w.doc, name, entry) : Y.setDeckEntry(w.doc, name, entry, value as Y.Json))));
+      }
+      if (ma !== undefined && mb === undefined && ml === undefined) keyWrites.push((w) => w.on(DECK_PATH, () => Y.ensureDeckMap(w.doc, name)));
+      if (ma === undefined && mb !== undefined && ml !== undefined && Object.keys(ml).every((entry) => removed.has(entry))) {
+        keyWrites.push((w) => w.on(DECK_PATH, () => Y.deleteDeckMap(w.doc, name)));
       }
     }
   }
