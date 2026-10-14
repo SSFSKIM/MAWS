@@ -31,7 +31,7 @@ beforeEach(() => {
 afterEach(() => world.close());
 
 const deps = (over: Partial<DocumentToolDeps> = {}): DocumentToolDeps => ({ artifacts: () => world.store, session, presenceEditingMs: 20, ...over });
-const ctx = (over: Partial<McpToolContext> = {}): McpToolContext => ({ appSessionId: SELF, cwd: world.dir, toolUseId: `toolu_${++calls}` as ToolUseId, requestId: `r${calls}` as RequestId, signal: new AbortController().signal, ...over });
+const ctx = (over: Partial<McpToolContext> = {}): McpToolContext => ({ appSessionId: SELF, cwd: world.dir, toolUseId: `toolu_${++calls}` as ToolUseId, requestId: `r${calls}` as RequestId, signal: new AbortController().signal, fromSubagent: false, ...over });
 const textOfResult = (result: McpToolResult): string => (result.content[0] as { text: string }).text;
 const json = <T = Record<string, unknown>>(result: McpToolResult): T => {
   if (result.isError) throw new Error(`a refusal: ${textOfResult(result)}`);

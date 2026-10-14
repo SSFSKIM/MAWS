@@ -70,7 +70,7 @@ function mount(layout: 'anchored' | 'docked' = 'anchored', frame: CardFrame = FR
     <>
       <CommentComposerHost />
       <div className="relative">
-        <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout={layout} accepts={() => true} frame={FRAME} visible restoreFocus={restoreFocus} />
+        <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout={layout} accepts={() => true} frame={frame} visible restoreFocus={restoreFocus} />
       </div>
     </>,
   );

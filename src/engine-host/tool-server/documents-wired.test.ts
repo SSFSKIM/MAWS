@@ -9,7 +9,6 @@ import { schemaFor } from '@artifacts/document/schema';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { mawsToolList, parseToolArguments } from '@shared/maws/tools';
-import { MemoryDeliverableStore } from '../deliverables/store';
 import { openDocumentWorld, type DocumentWorld } from '../documents/kinds/document-world.fixture';
 import { AskTable } from './asks';
 import { HostBridge } from './bridge';
@@ -25,14 +24,14 @@ let calls = 0;
 beforeEach(() => {
   world = openDocumentWorld();
   const list = mawsTools({
-    deliverables: new MemoryDeliverableStore({}), bridge: new PaneBridge({ show: () => {} }), capture: new HostBridge({ send: () => {}, answerMs: 1_000 }),
+    bridge: new PaneBridge({ show: () => {} }), capture: new HostBridge({ send: () => {}, answerMs: 1_000 }),
     asks: new AskTable(), askCancelled: () => {}, artifacts: () => world.store,
   });
   tools = new Map(list.map((tool) => [tool.name, tool]));
 });
 afterEach(() => world.close());
 
-const ctx = (over: Partial<McpToolContext> = {}): McpToolContext => ({ appSessionId: SELF, cwd: world.dir, toolUseId: `toolu_w${++calls}` as ToolUseId, requestId: `r${calls}` as RequestId, signal: new AbortController().signal, ...over });
+const ctx = (over: Partial<McpToolContext> = {}): McpToolContext => ({ appSessionId: SELF, cwd: world.dir, toolUseId: `toolu_w${++calls}` as ToolUseId, requestId: `r${calls}` as RequestId, signal: new AbortController().signal, fromSubagent: false, ...over });
 const call = (name: string, args: unknown, over: Partial<McpToolContext> = {}) => tools.get(name)!.call(args, ctx(over));
 const index = (id: string, top: Parameters<ReturnType<typeof DocIndex.of>['pm']>[0]) => DocIndex.of(world.service.live(id)).pm(top).textContent;
 const text = (result: McpToolResult) => (result.content[0] as { text: string }).text;

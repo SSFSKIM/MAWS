@@ -47,6 +47,7 @@ function context(state = documentState()) {
     printToPdf: vi.fn(async (html: string) => (printed.push(html), PDF)),
     writeFile: vi.fn(async (path: string, data: Uint8Array | string) => void written.set(path, data)),
     signal: new AbortController().signal,
+    assets: { list: async () => [] },
   };
   return { ctx, written, printed };
 }

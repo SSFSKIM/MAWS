@@ -27,7 +27,7 @@ interface PaintMeta {
 
 export const historyPaintKey = new PluginKey<PaintState>('historyPaint');
 
-const CARRY_LABEL: Record<Carry['kind'], string> = { move: 'Moved', retype: 'Retyped' };
+const CARRY_LABEL: Record<Carry['kind'], string> = { move: 'Moved', retype: 'Retyped', accept: 'Accepted', reject: 'Restored' };
 const authorStyle = (who: string | null) => (who === null ? '' : `--doc-author: var(${authorOf(who).color})`);
 const drawing = (state: EditorState) => (ySyncPluginKey.getState(state) as { renderer?: unknown } | undefined)?.renderer != null;
 const deleted = (node: PMNode) => node.marks.some((mark) => mark.type.name === 'y-attributed-delete');

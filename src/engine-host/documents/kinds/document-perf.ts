@@ -177,7 +177,7 @@ export class DocumentPerfSeam {
     if (!definition) return { ok: false, error: `no tool ${JSON.stringify(tool)}` };
     const input = args.baseRevision === 'last' ? { ...args, baseRevision: session.lastRevision } : args;
     session.calls += 1;
-    const ctx = { appSessionId: name as AppSessionId, cwd: '/', toolUseId: `toolu_perf_${name}_${session.calls}` as ToolUseId, requestId: `perf-${name}-${session.calls}` as RequestId, signal: new AbortController().signal };
+    const ctx = { appSessionId: name as AppSessionId, cwd: '/', toolUseId: `toolu_perf_${name}_${session.calls}` as ToolUseId, requestId: `perf-${name}-${session.calls}` as RequestId, signal: new AbortController().signal, fromSubagent: false };
     // the sampler runs all along, so a call blocking the loop at once is caught by the gap it leaves; the gaps before
     // the call, the command's own parsing among them, are dropped by the reset
     await turned(LOOP_TICK_MS * 3);
