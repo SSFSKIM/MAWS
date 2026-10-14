@@ -349,11 +349,16 @@ test('the scale gate at 200 pages: typing, two agents, first sync, history, memo
       rows.add(`7 leave ${k}`, `history preview leave, preview ${k}`, leave.toPostPaintMs, 'ms', 500, '≤ 500 ms');
     }
     const memory = await processMemory(app);
-    for (const renderer of memory.renderers) rows.add(`8 renderer ${renderer.windowId}`, `renderer working set just after three previews (window ${renderer.windowId})`, renderer.workingSetMB, 'MB', 500, '≤ 500 MB');
     const heaps = { jsHeapA: await jsHeapMB(page), jsHeapB: await jsHeapMB(pageB) };
     await collectGarbage(page);
     await collectGarbage(pageB);
     const collected = await processMemory(app);
+    // Decision Log 44: the 500 MB bound reads on the retained set after a forced collection (row "8 renderer
+    // collected"); the figure right after the previews, before it, is recorded beside it
+    for (const renderer of memory.renderers) {
+      const after = collected.renderers.find((r) => r.windowId === renderer.windowId)?.workingSetMB;
+      rows.add(`8 renderer ${renderer.windowId}`, `renderer working set just after three previews, before a forced collection (window ${renderer.windowId})`, renderer.workingSetMB, 'MB', null, 'recorded; the ≤ 500 MB bound reads after a forced collection (Decision Log 44)', after === undefined ? undefined : `${after} MB right after the forced collection`);
+    }
     rows.write({ memoryAfterPreviews: { ...memory, ...heaps, afterCollection: { ...collected, jsHeapA: await jsHeapMB(page), jsHeapB: await jsHeapMB(pageB) } } });
   });
 
