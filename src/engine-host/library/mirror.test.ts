@@ -202,6 +202,41 @@ describe('the linked-directory mirror (M2)', () => {
     expect(listed()).toEqual([]);
   });
 
+  // M6b (Decision Log 35, 37b): a writer is handed the artifact's assets as the store lists them (`artifacts.assets`'s
+  // listing) and reads the bytes of the ones it needs, lazily: a design system's fonts land in its linked directory
+  it('hands a writer the artifact’s assets and reads only the ones it asks for', async () => {
+    const asked: string[] = [];
+    const seen: unknown[] = [];
+    offs.push(
+      registerMirrorWriter('design_system', ({ artifact, assets, readAsset }) => {
+        seen.push(assets);
+        const face = assets?.find((asset) => asset.name === 'face.woff2');
+        if (!face) return { files: {} };
+        asked.push(face.ref);
+        return { files: { [`${mirrorSlug(artifact)}/fonts/${face.name}`]: readAsset!(face.ref) } };
+      }),
+    );
+    await startMirror();
+    const reads: string[] = [];
+    const readAsset = store().files.readAsset.bind(store().files);
+    store().files.readAsset = (artifactId, sha256) => (reads.push(sha256), readAsset(artifactId, sha256));
+    const space = await linkedSpace();
+    const system = await store().create({ kind: 'design_system', title: 'House style', spaceId: space.id }, human);
+    await store().uploadAsset(system.id, new Uint8Array([1, 2, 3, 4]), { name: 'face.woff2', mime: 'font/woff2' }, human);
+    await store().uploadAsset(system.id, new Uint8Array([9, 9]), { name: 'logo.png', mime: 'image/png' }, human);
+    await mirror!.flush();
+    await until(() => existsSync(out(mirrorSlug(system), 'fonts', 'face.woff2')));
+    expect([...readFileSync(out(mirrorSlug(system), 'fonts', 'face.woff2'))]).toEqual([1, 2, 3, 4]);
+    expect(seen.at(-1)).toEqual([
+      { ref: 'assets/face.woff2', name: 'face.woff2', mime: 'font/woff2', size: 4 },
+      { ref: 'assets/logo.png', name: 'logo.png', mime: 'image/png', size: 2 },
+    ]);
+    expect(new Set(asked)).toEqual(new Set(['assets/face.woff2']));
+    const logo = store().listAssets(system.id).find((asset) => asset.name === 'logo.png')!;
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads).not.toContain(logo.sha256); // the logo's bytes were never read
+  });
+
   it('refuses a writer’s path outside its directory or onto the manifest, logged', async () => {
     offs.push(registerMirrorWriter('document', () => ({ files: { '../escape.md': 'x', [MIRROR_MANIFEST]: '{}', 'a//b.md': 'x', 'ok.md': 'fine' } })));
     await startMirror();

@@ -52,6 +52,8 @@ export interface MirrorOptions {
 
 // One artifact's content as read inside the barrier; the writer runs after it.
 type ContentRead = { state: Uint8Array } | { bytes: Uint8Array; name: string } | { path: string; name: string } | null;
+// M6b: the artifact's assets as the store listed them inside the barrier; their bytes are read only when a writer asks.
+type AssetsRead = { ref: string; name: string; mime: string; size: number; sha256: string }[];
 
 export class LibraryMirror {
   private readonly log: (line: string) => void;
@@ -257,20 +259,21 @@ export class LibraryMirror {
   private async upsert(dir: string, manifest: Manifest, artifactId: string): Promise<void> {
     const { store, service } = this.documents;
     const root = join(dir, MIRROR_DIR);
-    const read = await store.readCommitted((): { artifact: Artifact; revision: number; content: ContentRead } | null => {
+    const read = await store.readCommitted((): { artifact: Artifact; revision: number; content: ContentRead; assets: AssetsRead } | null => {
       const artifact = store.get(artifactId);
       if (!artifact) return null; // deleted since: its event removes it
       const revision = store.revision(artifactId);
       const entry = manifest.artifacts[artifactId];
       if (entry && entry.revision === revision && entry.slug === mirrorSlug(artifact) && entry.files.every((file) => existsSync(join(root, file)))) return null; // current
-      if (!mirrorWriterFor(artifact.kind)) return { artifact, revision, content: null };
-      if (isDocKind(artifact.kind)) return { artifact, revision, content: { state: service.readState(artifactId).state } };
-      return { artifact, revision, content: byteContentOf(store, artifactId) };
+      if (!mirrorWriterFor(artifact.kind)) return { artifact, revision, content: null, assets: [] };
+      const assets = store.listAssets(artifactId).map(({ ref, name, mime, size, sha256 }) => ({ ref, name, mime, size, sha256 }));
+      if (isDocKind(artifact.kind)) return { artifact, revision, content: { state: service.readState(artifactId).state }, assets };
+      return { artifact, revision, content: byteContentOf(store, artifactId), assets };
     });
     const entry = manifest.artifacts[artifactId];
     if (!read || (read.content === null && !entry)) return; // current, gone, or nothing to write and nothing written
     const { artifact, revision, content } = read;
-    const files = content === null ? {} : this.produce(artifact, content);
+    const files = content === null ? {} : this.produce(artifact, content, read.assets);
     const owned = new Set(Object.values(manifest.artifacts).flatMap((other) => other.files));
     const mine = new Set(entry?.files ?? []);
     const written: string[] = [];
@@ -320,19 +323,30 @@ export class LibraryMirror {
     if (failure) throw failure.error;
   }
 
-  // The kind's writer over what was read; a document's replica lives only for the call.
-  private produce(artifact: Artifact, content: Exclude<ContentRead, null>): Record<string, string | Uint8Array> {
+  // The kind's writer over what was read; a document's replica lives only for the call. M6b: the assets listed, each
+  // read from the store's content-addressed file when the writer asks (a failed read fails this artifact's write, which
+  // the next change retries, as any write does).
+  private produce(artifact: Artifact, content: Exclude<ContentRead, null>, listed: AssetsRead): Record<string, string | Uint8Array> {
     const writer = mirrorWriterFor(artifact.kind)!;
-    if ('bytes' in content) return writer({ artifact, bytes: content.bytes, name: content.name }).files;
+    const byRef = new Map(listed.map((asset) => [asset.ref, asset]));
+    const assets = {
+      assets: listed.map(({ ref, name, mime, size }) => ({ ref, name, mime, size })),
+      readAsset: (ref: string): Uint8Array => {
+        const asset = byRef.get(ref);
+        if (!asset) throw new Error(`${artifact.id} has no asset ${ref}`);
+        return this.documents.store.files.readAsset(artifact.id, asset.sha256);
+      },
+    };
+    if ('bytes' in content) return writer({ artifact, bytes: content.bytes, name: content.name, ...assets }).files;
     if ('path' in content) {
       const bytes = fileBytes(content.path, this.maxFileBytes);
       if (!bytes) this.log(`${artifact.id}: ${content.path} is too large to mirror (over ${this.maxFileBytes} bytes) or cannot be read; mirrored as nothing`);
-      return writer({ artifact, name: content.name, ...(bytes ? { bytes } : {}) }).files;
+      return writer({ artifact, name: content.name, ...(bytes ? { bytes } : {}), ...assets }).files;
     }
     const doc = newDoc();
     try {
       applyV2(doc, content.state);
-      return writer({ artifact, doc }).files;
+      return writer({ artifact, doc, ...assets }).files;
     } finally {
       doc.destroy();
     }
