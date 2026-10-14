@@ -312,10 +312,16 @@ function needleOf(quote: string): string | null {
   return best;
 }
 
+/** Where a quote starts in a text, overlapping starts included: a quote is unique only when it starts once (§4.4, D14). */
 const occurrences = (text: string, quote: string): number => {
   let n = 0;
-  for (let at = text.indexOf(quote); at >= 0; at = text.indexOf(quote, at + quote.length)) n++;
+  for (let at = text.indexOf(quote); at >= 0; at = text.indexOf(quote, at + 1)) n++;
   return n;
+};
+/** `all: true`'s replacement: left to right, a match overlapping one already replaced skipped; with how many it replaced. */
+const replaceAll = (text: string, quote: string, replacement: string): { text: string; n: number } => {
+  const parts = text.split(quote);
+  return { text: parts.join(replacement), n: parts.length - 1 };
 };
 
 /** A quote's longer words, for the near candidates a `notFound` refusal lists. */
@@ -720,15 +726,17 @@ class Planner {
         `op ${this.opIndex}: "${op.old}" matches ${total} times; quote more context or pass all`,
       );
     }
+    let replaced = 0;
     for (const hit of hits) {
-      const next = op.all ? hit.markdown.split(quote).join(replacement) : hit.markdown.replace(quote, () => replacement);
-      const blocks = this.parse(next);
+      const next = op.all ? replaceAll(hit.markdown, quote, replacement) : { text: hit.markdown.replace(quote, () => replacement), n: 1 };
+      replaced += next.n;
+      const blocks = this.parse(next.text);
       if (blocks.length !== 1) this.invalid(`the replacement turns ^${idOf(hit.key)} into ${blocks.length} blocks (use replace_block)`);
       const current = this.current(hit.key)!;
       this.setTop(hit.key, hit.tabId, this.patch(current, this.keptWhitespace(current, hit.markdown, blocks[0])));
     }
     const targets = hits.map((hit) => idOf(hit.key));
-    return { line: `replaced ${total} occurrence(s) in ${targets.map((id) => `^${id}`).join(', ')}`, target: targets.join(','), newIds: [] };
+    return { line: `replaced ${replaced} occurrence(s) in ${targets.map((id) => `^${id}`).join(', ')}`, target: targets.join(','), newIds: [] };
   }
 
   /**
@@ -757,7 +765,8 @@ class Planner {
     if (total > 1 && !op.all) {
       refuse({ reason: 'notUnique', opIndex: this.opIndex, candidates: [{ id, text, matches: total }] }, `op ${this.opIndex}: "${op.old}" matches ${total} times in ^${id}; quote more context or pass all`);
     }
-    const blocks = this.parse(op.all ? markdown.split(quote).join(replacement) : markdown.replace(quote, () => replacement));
+    const rewritten = op.all ? replaceAll(markdown, quote, replacement) : { text: markdown.replace(quote, () => replacement), n: 1 };
+    const blocks = this.parse(rewritten.text);
     let parsed: PMNode | null = blocks.length === 1 ? blocks[0] : null;
     for (const type of wrappers) parsed = parsed?.type === type && parsed.childCount === 1 ? parsed.child(0) : null;
     if (!parsed) return this.invalid(`the replacement changes the structure of ^${id} (use replace_block)`);
@@ -768,7 +777,7 @@ class Planner {
     };
     const next = this.keptWhitespace(node, markdown, parsed, unwrap);
     this.rebuild(located, (old) => [this.patch(old, next)]);
-    return { line: `replaced ${total} occurrence(s) in ^${id}`, target: id, newIds: [] };
+    return { line: `replaced ${rewritten.n} occurrence(s) in ^${id}`, target: id, newIds: [] };
   }
 
   /** S4's move rule: never re-insert a block holding a human caret; re-insert what it jumps over, or refuse to retry. */

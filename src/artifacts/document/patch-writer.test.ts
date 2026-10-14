@@ -229,6 +229,33 @@ describe('the ops (S4 1)', () => {
     });
   });
 
+  // The whole-branch review's P5: a quote is unique only when it starts once, overlapping starts counted (§4.4, D14);
+  // `all: true` replaces left to right, a match overlapping one already replaced skipped.
+  describe('overlapping matches', () => {
+    const seed = () => seedDoc({ type: 'doc', content: [
+      { type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'ha ha ha' }] },
+      { type: 'bulletList', attrs: { id: 'l1' }, content: [{ type: 'listItem', attrs: { id: 'li1' }, content: [{ type: 'paragraph', attrs: { id: 'lp1' }, content: [{ type: 'text', text: 'na na na' }] }] }] },
+    ] }, {});
+    it.each([
+      ['scoped to the block', { block: 'p1', old: 'ha ha' }, 'p1'],
+      ['unscoped', { old: 'ha ha' }, 'p1'],
+      ['scoped to a nested node', { block: 'li1', old: 'na na' }, 'li1'],
+    ] as const)('refuses a quote that starts twice, its starts overlapping: %s', (_name, quote, id) => {
+      const doc = seed();
+      const r = refusal(() => applyEdit(doc, [{ op: 'replace_text', ...quote, new: 'X' }]));
+      expect(r.reason).toBe('notUnique');
+      if (r.reason === 'notUnique') expect(r.candidates.map((candidate) => `${candidate.id}×${candidate.matches}`)).toEqual([`${id}×2`]);
+      expect(textOf(doc, 'p1')).toBe('ha ha ha');
+    });
+    it('replaces left to right with all, skipping a match that overlaps one replaced', () => {
+      const doc = seed();
+      const res = applyEdit(doc, [{ op: 'replace_text', block: 'p1', old: 'ha ha', new: 'X', all: true }, { op: 'replace_text', block: 'li1', old: 'na na', new: 'Y', all: true }]);
+      expect(textOf(doc, 'p1')).toBe('X ha');
+      expect(textOf(doc, 'lp1')).toBe('Y na');
+      expect(res.results.map((result) => result.line)).toEqual(['replaced 1 occurrence(s) in ^p1', 'replaced 1 occurrence(s) in ^li1']);
+    });
+  });
+
   it('replace_text not unique: refused, listing the candidate blocks and their match counts', () => {
     const doc = seedDoc();
     const r = refusal(() => applyEdit(doc, [{ op: 'replace_text', old: 'The ', new: 'A ' }]));
