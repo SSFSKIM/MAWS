@@ -1010,9 +1010,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await shoot(s, 'comment-card');
     await s.page.keyboard.press('Escape');
     await expect(card).toHaveCount(0);
-    // P3-L M6b: the dismissed card gives focus back to the page's frame (the Artifacts viewer's rule, M5b); E2's viewer
-    // gave it to its own Comment button, which is the X32 header's now and out of the viewer's reach
-    await expect(viewer.locator('[data-artifact-frame="html"]')).toBeFocused();
+    await expect(comment).toBeFocused();
     await expect(artifactsTab).toHaveAttribute('aria-selected', 'true');
 
     // the same pick in the artifact's main tab opens the card inside that tab's viewer

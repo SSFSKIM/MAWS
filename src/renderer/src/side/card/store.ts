@@ -15,10 +15,9 @@ import type { CardRect, CommentContext } from '../../tools/code/anchor/anchor';
 // What the card is about, as a host recognises it: (P2-E2) a browser page by its URL, or (P3-L M5b, Decision Log 10) an
 // HTML artifact's page on the store's scheme at a revision, whose host is the artifact viewer's. P3-L M6b: E2's
 // `deliverable` target is gone; an anchor stored before the cutover names its page `maws-deliverable://<id>/<app>/<n>`,
-// whose record id is the artifact's and whose n is the n-th of the artifact's versions in the order of their revisions
-// (Decision Log 4: imported in order, never thinned), never revision n. Its target carries that place as `version`,
-// with `revision` null: the revision is the artifact's n-th version's, which only a read of its versions names (the
-// viewer's places, `versionsInOrder`).
+// whose record id is the artifact's and whose n is X12's version number, kept at import as the imported version's label
+// (fix wave 1, Decision Log 39c), never revision n and never a place a thinned history could move. Its target carries n
+// as `version`, with `revision` null: only a read of the artifact's versions names the revision (`placeOfNumber`).
 export type CardTarget =
   | { kind: 'browser'; pageUrl: string }
   | { kind: 'artifact-page'; artifactId: string; revision: ArtifactUrlRevision | null; version?: number };

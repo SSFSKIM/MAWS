@@ -89,7 +89,7 @@ function TabBody({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
 
 function TabHeader({ scope }: { scope: EditorHostScope }) {
   const registration = useEditorHostRegistration(scope);
-  return registration && <EditorHeader title={registration.title} registration={registration} />;
+  return registration && <EditorHeader title={registration.title} registration={registration} scope={scope} />;
 }
 
 function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {

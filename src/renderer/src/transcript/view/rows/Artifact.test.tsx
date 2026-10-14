@@ -26,6 +26,7 @@ const BASE: ArtifactRow = {
   id: 'artifact:t1' as never, turnId: null, at: '2026-10-06T00:00:00.000Z', kind: 'artifact', toolUseId: 't1' as never, action: 'create', artifactId: 'dash', title: 'Dashboard',
   htmlPath: 'dashboard.html', deliverableId: ID, version: 1, error: null, answered: true,
 };
+const placed = (...seqs: number[]) => seqs.map((seq) => ({ seq, kind: 'auto' as const }));
 const heading = (container: HTMLElement) => container.querySelector('[data-artifact-heading]')!.textContent;
 
 describe('the artifact row', () => {
@@ -94,7 +95,7 @@ describe('the artifact row', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
     expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(PARENT, ID, 2);
     act(() => {
-      noteArtifactVersions(ID, [3, 8]);
+      noteArtifactVersions(ID, placed(3, 8));
       applyArtifactConsole({ artifactId: ID, revision: 8, level: 'error', message: 'Uncaught Error: E1_BOOM', line: 3, source: null });
     });
     expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
@@ -114,7 +115,7 @@ describe('the artifact row', () => {
     const { container } = renderRow(BASE, { storeKey: APP });
     act(() => applyArtifactConsole({ artifactId: ID, revision: 5, level: 'error', message: 'Uncaught Error: E2_BOOM', line: 3, source: null }));
     expect(container.querySelector('[data-console-chip]')).toBeNull(); // no viewer has placed the versions yet
-    act(() => noteArtifactVersions(ID, [5, 9]));
+    act(() => noteArtifactVersions(ID, placed(5, 9)));
     expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
     act(() => applyArtifactConsole({ artifactId: ID, revision: 1, level: 'error', message: 'revision 1 is not v1', line: 1, source: null }));
     act(() => applyArtifactConsole({ artifactId: ID, revision: 9, level: 'error', message: 'other version', line: 1, source: null }));
@@ -122,4 +123,16 @@ describe('the artifact row', () => {
     act(() => resetArtifactConsole());
     expect(container.querySelector('[data-console-chip]')).toBeNull();
   });
+
+  // M6b fix wave 1 (Decision Log 39c): a row from before P3 names X12's version number, found on the imported version
+  // that keeps it, wherever the history before it thinned
+  it('reads the console of the imported version its X12 number names', () => {
+    const { container } = renderRow({ ...BASE, version: 3 }, { storeKey: APP });
+    act(() => {
+      noteArtifactVersions(ID, [{ seq: 5, kind: 'import', label: 'v1' }, { seq: 14, kind: 'import', label: 'v3' }, { seq: 20, kind: 'auto' }]);
+      applyArtifactConsole({ artifactId: ID, revision: 14, level: 'error', message: 'Uncaught Error: X12_V3', line: 1, source: null });
+    });
+    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+  });
 });
+

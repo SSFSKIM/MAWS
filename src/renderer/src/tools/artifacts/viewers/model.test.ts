@@ -2,7 +2,7 @@
 // version list in order with its labels, and which version a picker choice or a row's Open shows.
 import { describe, expect, it } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
-import { bodyOf, shownVersion, versionLabel, versionsInOrder, versionToShow } from './model';
+import { bodyOf, placeOfNumber, shownVersion, versionLabel, versionsInOrder, versionToShow } from './model';
 
 const version = (id: number, seq: number): ArtifactVersion => ({ id, seq, at: seq * 1000, actor: { kind: 'human' }, kind: 'auto', assetRefs: [] });
 
@@ -50,4 +50,18 @@ describe('versions', () => {
     expect(versionToShow(null, 3)).toBeNull();
     expect(versionToShow(5, 3)).toBeNull();
   });
+
+  // M6b fix wave 1 (Decision Log 39c): a version number from outside (a legacy anchor's or a transcript row's `n`) is
+  // X12's where the import kept it (an `import` version labelled `v<n>`), so a thinned history cannot drift it; the place
+  // otherwise.
+  it('finds a number at the imported version X12 numbered so, even where the history before it thinned; the place otherwise', () => {
+    const imported = (id: number, seq: number, n: number): ArtifactVersion => ({ ...version(id, seq), kind: 'import', label: `v${n}` });
+    const thinned = versionsInOrder([imported(1, 4, 1), imported(3, 12, 3), version(4, 20), version(5, 30)]); // X12's v2 gone
+    expect(placeOfNumber(thinned, 3)).toBe(2);
+    expect(placeOfNumber(thinned, 1)).toBe(1);
+    expect(placeOfNumber(thinned, 4), 'past the imported versions: the place').toBe(4);
+    const named = versionsInOrder([version(1, 4), { ...version(2, 9), label: 'v1' }]); // the owner's name on an agent's version
+    expect(placeOfNumber(named, 1), 'only an imported version answers by its label').toBe(1);
+  });
 });
+

@@ -244,6 +244,15 @@ describe('a version asked for from outside', () => {
     expect(document.querySelector('[data-artifact-viewer]')?.getAttribute('data-version')).toBe('3');
   });
 
+  // M6b fix wave 1 (Decision Log 39c): an imported page's number is X12's, kept on the version at import, never its place
+  it('shows X12’s version n of an imported page where the history before it thinned', async () => {
+    versions = [{ ...version(1, 4), kind: 'import', label: 'v1' }, { ...version(3, 14), kind: 'import', label: 'v3' }, version(4, 20)]; // v2 gone
+    names = { 4: 'index.html', 14: 'index.html', 20: 'index.html' };
+    requestArtifactVersion(ID, 3, 'panel');
+    mount('html');
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
+  });
+
   it('lets a request lapse after REQUEST_LAPSE_MS', async () => {
     requestArtifactVersion(ID, 1, 'panel', Date.now() - 6_000);
     mount('html');

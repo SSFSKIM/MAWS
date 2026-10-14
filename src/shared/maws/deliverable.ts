@@ -67,3 +67,7 @@ export function parseDeliverableUrl(url: string): { appSessionId: AppSessionId; 
   if (!Number.isSafeInteger(version)) return null;
   return { appSessionId: match[2] as AppSessionId, id: match[1]!, version };
 }
+
+// P3-L (M6b fix wave 1; Decision Log 39c): the label an imported page's version keeps, X12's number for it, by which a
+// legacy page URL's or transcript row's `n` finds it however the history around it thins.
+export const x12VersionLabel = (n: number): string => `v${n}`;

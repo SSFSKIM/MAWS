@@ -120,6 +120,8 @@ describe('importDeliverables (M6a)', () => {
     expect(text(store.contentRef(uuid(1)).path)).toBe('<p>v3</p>');
     expect(store.get(uuid(1))).toMatchObject({ title: 'Pricing v3', createdAt: at[0], updatedAt: at[2] });
     expect(store.lastWrite(uuid(1))).toEqual({ actor: session('app-1'), at: at[2] });
+    // M6b fix wave 1 (Decision Log 39c): each keeps X12's number as its label, what a legacy anchor's `n` resolves by
+    expect(versions.map((v) => v.label)).toEqual(['v1', 'v2', 'v3']);
   });
 
   it('credits a version another session wrote (X12’s per-version `appSessionId`, A’s M6) to that session and links it `edited` (M6b, Decision Log 33a)', async () => {

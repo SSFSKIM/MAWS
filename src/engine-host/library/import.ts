@@ -24,7 +24,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
-import { StoredDeliverableRecordSchema, type DeliverableRecord } from '@shared/maws/deliverable';
+import { StoredDeliverableRecordSchema, x12VersionLabel, type DeliverableRecord } from '@shared/maws/deliverable';
 import { ArtifactStoreError } from '../documents/errors';
 import type { ArtifactStore, ImportInput } from '../documents/store';
 
@@ -134,7 +134,8 @@ async function prepare(record: DeliverableRecord): Promise<Prepared> {
       return { outcome: 'failed', why: `could not read ${version.path}: ${reasonOf(error)}` };
     }
     const name = version.sourcePath !== undefined ? basename(version.sourcePath) : undefined;
-    read.push({ at: ats[i]!, actor: writerOf(version), content: name ? { bytes, name } : { bytes } });
+    // fix wave 1 (Decision Log 39c): X12's number kept as the version's label, what a legacy anchor's `n` resolves by
+    read.push({ at: ats[i]!, actor: writerOf(version), content: name ? { bytes, name } : { bytes }, label: x12VersionLabel(i + 1) });
   }
   return { input: { ...common, kind: 'html', ...(record.artifactId !== undefined ? { handle: record.artifactId } : {}), versions: read } };
 }

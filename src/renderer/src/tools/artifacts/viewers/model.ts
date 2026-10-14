@@ -8,6 +8,7 @@
 // for none, so it follows a new version as it lands.
 import { mimeOf } from '@shared/files/mime';
 import type { ArtifactVersion } from '@shared/artifacts/version';
+import { x12VersionLabel } from '@shared/maws/deliverable';
 import type { SessionRecord } from '@shared/graph/session';
 
 export type BodyKind = 'html' | 'pdf' | 'video' | 'audio' | 'file';
@@ -38,6 +39,15 @@ export function shownVersion(ordered: readonly ArtifactVersion[], chosen: number
   if (ordered.length === 0) return null;
   const n = chosen !== null && chosen >= 1 && chosen <= ordered.length ? chosen : ordered.length;
   return { n, version: ordered[n - 1]!, latest: n === ordered.length };
+}
+
+// M6b fix wave 1 (Decision Log 39c): the place of version number `n` from outside the viewer (a legacy anchor's, a
+// transcript row's): the imported version X12 numbered `n` (its label, kept at import) wherever thinning left it; past
+// the imported versions, or on a page made since P3, the place itself.
+export function placeOfNumber(ordered: readonly Pick<ArtifactVersion, 'kind' | 'label'>[], n: number): number {
+  const label = x12VersionLabel(n);
+  const index = ordered.findIndex((version) => version.kind === 'import' && version.label === label);
+  return index >= 0 ? index + 1 : n;
 }
 
 // What the viewer keeps for a choice of place `n` among `count`: the place, or null (follow the latest) for the latest.

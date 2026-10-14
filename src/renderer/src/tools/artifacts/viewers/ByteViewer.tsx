@@ -5,8 +5,9 @@
 //
 // What is shown: the artifact's versions (`artifacts.versions`, in the order of the revision each captured, `v1 … vN`,
 // the last marked latest) and one of them, the latest unless the picker, a card's row or (M6b) a transcript row's Open
-// (`./requests.ts`) chose another, so a new version is followed as it lands. M6b: the places it read are noted for the
-// transcript row's console chip (`noteArtifactVersions`). The shown revision's stored file is named by main (`library.content`) and framed at
+// (`./requests.ts`) chose another, so a new version is followed as it lands; a number from outside is X12's on an imported
+// page (fix wave 1, `placeOfNumber`). M6b: the versions it read are noted for the transcript row's console chip
+// (`noteArtifactVersions`). The shown revision's stored file is named by main (`library.content`) and framed at
 // `maws-artifact://<id>/<revision>/<name>`; the body is chosen by the MIME the name types (an `html` artifact is always
 // its page): the HTML frame (sandboxed, carrying the scheme's pick bridge), the PDF frame, native media, else the file
 // viewer read-only under the session that made the file (the files service admits a delivered file by its session; M6b:
@@ -41,7 +42,7 @@ import { toastFailure } from '../../../library/dialogs';
 import { exportArtifact, saveArtifactCopy, useExportFormats } from '../../../library/export';
 import { useLibraryRow } from '../../../library/store';
 import { useRegionMarkupSurface } from '../../../markup/surface';
-import { useEditorHost, type EditorHostAction, type EditorHostExport } from '../../../panel/editor-host';
+import { focusEditorHostAction, useEditorHost, type EditorHostAction, type EditorHostExport } from '../../../panel/editor-host';
 import { CommentCardHost, type CardFrame } from '../../../side/card/CardHost';
 import type { OpenCard } from '../../../side/card/store';
 import { useSessions } from '../../../stores/sessions';
@@ -56,11 +57,12 @@ import { HtmlFrame, type FrameHandle } from './frames/HtmlFrame';
 import { Media } from './frames/Media';
 import { PdfFrame } from './frames/PdfFrame';
 import { CommentIcon, OpenAsFileIcon, OpenExternallyIcon, ReloadIcon, RevealIcon } from './icons';
-import { bodyOf, shownVersion, underSession, versionLabel, versionsInOrder, versionToShow, type BodyKind } from './model';
+import { bodyOf, placeOfNumber, shownVersion, underSession, versionLabel, versionsInOrder, versionToShow, type BodyKind } from './model';
 import { pageElementAnchor, type PickMessage } from './pick';
 import { takeVersionRequest, useVersionRequest } from './requests';
 
 type ByteKind = 'html' | 'file';
+const COMMENT_ACTION = 'comment'; // the header action a dismissed card gives focus back to
 const OPENS_AS_FILE = new Set(['code', 'markdown', 'image', 'head']); // the viewer kinds a file tab draws the same way
 
 // ---- the tab's state ---------------------------------------------------------------------------------------------------
@@ -134,12 +136,14 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
     state.view.setState({ reloads: nextReload(), pickingIn: null });
   };
   const choose = (n: number | null) => state.view.setState({ chosen: versionToShow(n, ordered?.length ?? 0) });
+  // a version number from outside (a card thread's artifact row): X12's for an imported page (M6b fix wave 1)
+  const chooseNumbered = (n: number | null) => choose(n === null || ordered === null ? n : placeOfNumber(ordered, n));
   // M6b: the places noted for the transcript row's chip; a version asked for from outside, taken once the versions are read
   const request = useVersionRequest(artifactId, scope.surface);
   useEffect(() => {
     if (ordered === null) return;
-    noteArtifactVersions(artifactId, ordered.map((version) => version.seq));
-    if (request !== null && takeVersionRequest(request.serial)) state.view.setState({ chosen: versionToShow(request.version, ordered.length) });
+    noteArtifactVersions(artifactId, ordered);
+    if (request !== null && takeVersionRequest(request.serial)) state.view.setState({ chosen: versionToShow(placeOfNumber(ordered, request.version), ordered.length) });
   }, [artifactId, ordered, request, state.view]);
 
   // the frame picking is asked of, by what keys it: another version or a Reload is another frame
@@ -186,8 +190,12 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
     openCommentComposer(pageElementAnchor({ title, version: shown.n, url }, message), { appSessionId: session, placement: { kind: 'card', host: 'artifact-page', hostId, rect: { x, y, width, height } } });
   };
   const accepts = (card: OpenCard) => card.target?.kind === 'artifact-page' && card.target.artifactId === artifactId;
-  const cardFrame: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: frameKey ?? '', locate: frameHandle?.locate, showVersion: choose };
-  const restoreFocus = () => bodyBox.current?.querySelector('iframe')?.focus({ preventScroll: true });
+  const cardFrame: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: frameKey ?? '', locate: frameHandle?.locate, showVersion: chooseNumbered };
+  // a dismissed card gives focus back to Comment in the header over the tab (M6b fix wave 1, X32's
+  // `focusEditorHostAction`), or to the frame when Comment is not there to take it
+  const restoreFocus = () => {
+    if (!focusEditorHostAction(scope, COMMENT_ACTION)) bodyBox.current?.querySelector('iframe')?.focus({ preventScroll: true });
+  };
 
   // Fix wave 1: what an export or a copy takes, only once the shown version and its file are resolved (null during a
   // read, a Reload or a remount), so a historical selection is never exported as the live revision
@@ -370,7 +378,7 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
   const at = revision === undefined ? {} : { revision };
   const actions: EditorHostAction[] = [];
   if (commentable) {
-    actions.push({ id: 'comment', label: VIEWERS_COPY.comment, icon: CommentIcon, pressed: picking, onSelect: () => state.view.setState({ pickingIn: picking ? null : frameKey }) });
+    actions.push({ id: COMMENT_ACTION, label: VIEWERS_COPY.comment, icon: CommentIcon, pressed: picking, onSelect: () => state.view.setState({ pickingIn: picking ? null : frameKey }) });
   }
   actions.push({ id: 'reload', label: VIEWERS_COPY.reload, icon: ReloadIcon, onSelect: onReload });
   if (content && opensExternally(content.name)) {

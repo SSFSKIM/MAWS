@@ -9,9 +9,11 @@
 // always one a viewer placed.
 import { createStore } from 'zustand/vanilla';
 import { useStore } from 'zustand';
+import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { ArtifactConsole } from '@shared/ipc/schema/artifacts';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../../ipc/client';
+import { placeOfNumber } from './model';
 
 export const CONSOLE_KEPT = 50;
 
@@ -24,22 +26,25 @@ export interface ConsoleLine {
 // `revision` null: a frame on the live content (the viewers always name a revision, so theirs never is).
 export const consoleKey = (artifactId: string, revision: number | null) => `${artifactId}/${revision ?? 'live'}`;
 
-const store = createStore<{ lines: ReadonlyMap<string, ConsoleLine[]>; places: ReadonlyMap<string, readonly number[]> }>()(() => ({ lines: new Map(), places: new Map() }));
+type Placed = Pick<ArtifactVersion, 'seq' | 'kind' | 'label'>;
+const store = createStore<{ lines: ReadonlyMap<string, ConsoleLine[]>; places: ReadonlyMap<string, readonly Placed[]> }>()(() => ({ lines: new Map(), places: new Map() }));
 const NONE: ConsoleLine[] = [];
 
 export const useArtifactConsole = (artifactId: string, revision: number): ConsoleLine[] => useStore(store, (s) => s.lines.get(consoleKey(artifactId, revision)) ?? NONE);
 
-// M6b: the revisions of an artifact's versions in their order (place n is `revisions[n - 1]`), as a viewer read them.
-export function noteArtifactVersions(artifactId: string, revisions: readonly number[]): void {
+// M6b: an artifact's versions in their order (place n is `versions[n - 1]`), as a viewer read them.
+export function noteArtifactVersions(artifactId: string, versions: readonly Placed[]): void {
   const known = store.getState().places.get(artifactId);
-  if (known && known.length === revisions.length && known.every((revision, i) => revision === revisions[i])) return;
-  store.setState((s) => ({ places: new Map(s.places).set(artifactId, [...revisions]) }));
+  if (known && known.length === versions.length && known.every((v, i) => v.seq === versions[i]!.seq && v.kind === versions[i]!.kind && v.label === versions[i]!.label)) return;
+  store.setState((s) => ({ places: new Map(s.places).set(artifactId, versions.map(({ seq, kind, label }) => ({ seq, kind, label }))) }));
 }
 
-// M6b: the console of the n-th version's revision (none while no viewer has placed it).
+// M6b: the console of version number `version`'s revision, the number found as the viewer finds it (`placeOfNumber`,
+// fix wave 1: X12's on an imported page); none while no viewer has placed the versions.
 export const useArtifactConsoleAt = (artifactId: string, version: number): ConsoleLine[] =>
   useStore(store, (s) => {
-    const revision = s.places.get(artifactId)?.[version - 1];
+    const placed = s.places.get(artifactId);
+    const revision = placed?.[placeOfNumber(placed, version) - 1]?.seq;
     return revision === undefined ? NONE : (s.lines.get(consoleKey(artifactId, revision)) ?? NONE);
   });
 
