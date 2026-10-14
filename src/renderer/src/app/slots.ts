@@ -20,7 +20,6 @@ export interface Slots {
   newSession: ComponentType<{ appSessionId: AppSessionId }>; // C10: an unstarted session's setup, in its pane above the composer (no modal sheet)
   settingsTab: ComponentType<{ section: Extract<TabRef, { kind: 'settings' }>['section'] }>; // C11: the Settings tab's content, at a section
   topBarEnd: ComponentType<Record<never, never>>; // the title-bar toolbar's right-side mount point, for W6's usage pill
-  deliverableTab: ComponentType<{ tab: Extract<TabRef, { kind: 'deliverable' }> }>; // E2: a deliverable's viewer as a main tab
   browserTab: ComponentType<{ tab: Extract<TabRef, { kind: 'browser' }> }>; // E4a: a session's browser tab as a main tab
   artifactsLibrary: ComponentType<Record<never, never>>; // P3-G (§D5): the Artifacts tab's content; P3-L registers the library
 }

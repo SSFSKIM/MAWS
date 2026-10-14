@@ -91,15 +91,17 @@ test('send_file: the delivery row names hello.txt and the caption, its two butto
       await file.getByRole('button', { name: 'Reveal in Finder' }).click();
       await expect.poll(() => (existsSync(s.openLog) ? readFileSync(s.openLog, 'utf8').trim().split('\n') : [])).toEqual([path, `reveal ${path}`]);
 
-      // the result the host wrote lists the deliverable it recorded, and the record is X12's
+      // the result the host wrote lists the deliverable it recorded, and (P3-L M6b) it is a File artifact of the session,
+      // the file in place; the caption is the row's (above), not the artifact's
       const [call] = mcpCalls(s.journal(id));
       expect(call).toMatchObject({ name: 'send_file', args: { files: ['hello.txt'], caption: 'the greeting' } });
       const result = mcpResultOf(s.journal(id), call!.requestId)!;
       expect(result.isError).toBeUndefined();
       const delivered = JSON.parse(resultText(result)) as { status: string; deliverables: { id: string; path: string; name: string }[] };
       expect(delivered).toMatchObject({ status: 'delivered', deliverables: [{ path, name: 'hello.txt' }] });
-      const record = JSON.parse(readFileSync(join(s.maws.userData, 'deliverables', id, `${delivered.deliverables[0]!.id}.json`), 'utf8')) as Record<string, unknown>;
-      expect(record).toMatchObject({ id: delivered.deliverables[0]!.id, appSessionId: id, kind: 'file', path, title: 'hello.txt', caption: 'the greeting', versions: [{ path }] });
+      const { artifact } = value(await invoke(s.page, 'artifacts.get', { artifactId: delivered.deliverables[0]!.id }));
+      expect(artifact).toMatchObject({ id: delivered.deliverables[0]!.id, kind: 'file', linkedPath: path, title: 'hello.txt', createdBy: { kind: 'session', appSessionId: id } });
+      expect(existsSync(join(s.maws.userData, 'deliverables'))).toBe(false); // no X12 record
       expect(ofKind(await s.events(id), 'maws.delivery.file')).toMatchObject([{ deliverables: delivered.deliverables, caption: 'the greeting', urgency: 'normal' }]);
       await idle(s, id);
       await shoot(s, 'delivery');
@@ -505,7 +507,7 @@ test('notes: an async ask answered with a note beside one answer and a skip with
 
 // ---- G5: show_pane --------------------------------------------------------------------------------------------------
 
-test('show_pane: the Terminal opens in the panel, a deliverable no record answers to and an unknown pane are error cells', async () => {
+test('show_pane: the Terminal opens in the panel, an artifact no record answers to and an unknown pane are error cells', async () => {
   await scene({ titles: ['E1 tools: show_pane'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -513,29 +515,29 @@ test('show_pane: the Terminal opens in the panel, a deliverable no record answer
     await allowNext(s, id); // terminal (seq 68)
     const terminalTab = s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Terminal/ });
     await expect(terminalTab).toHaveAttribute('aria-selected', 'true');
-    await allowNext(s, id); // deliverable (seq 85)
+    await allowNext(s, id); // artifact (seq 85; E2's deliverable, the recording renamed by P3-L M6b)
     await allowNext(s, id); // nope (seq 100)
     await idle(s, id);
 
-    // what the host answered: the renderer's Terminal, the renderer's "no deliverable" (E2: the recording's target `none`
+    // what the host answered: the renderer's Terminal, the renderer's "no artifact" (E2: the recording's target `none`
     // names no record; the recording itself carried "not available", and the replay compares no bodies), the host's
     // unknown pane
     const calls = mcpCalls(s.journal(id));
-    expect(calls.map((c) => c.args)).toEqual([{ pane: 'terminal' }, { pane: 'deliverable', target: 'none' }, { pane: 'nope' }]);
+    expect(calls.map((c) => c.args)).toEqual([{ pane: 'terminal' }, { pane: 'artifact', target: 'none' }, { pane: 'nope' }]);
     const results = calls.map((c) => mcpResultOf(s.journal(id), c.requestId)!);
     expect(JSON.parse(resultText(results[0]!))).toMatchObject({ status: 'shown', pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal', title: 'Terminal' } });
-    expect(results[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.deliverableNotFound('none') }], isError: true });
+    expect(results[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactNotFound('none') }], isError: true });
     expect(results[2]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownPane('nope') }], isError: true });
     expect(ofKind(await s.events(id), 'maws.pane.shown').map((e) => [e.pane, e.opened?.kind ?? null, e.error])).toEqual([
       ['terminal', 'panel-tool', null],
-      ['deliverable', null, TOOL_ERRORS.deliverableNotFound('none')],
+      ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
     ]);
 
     // the cells: what opened, and why nothing did twice
     await unfoldWork(s.pane);
     await expect(s.pane.getByText('Opened Terminal')).toBeVisible();
     // the cell reads the engine's tool_result, which the replay plays as recorded (E1's build answered "not available")
-    await expect(s.pane.getByText('Could not open pane: the deliverable pane is not available in this build of MAWS')).toBeVisible();
+    await expect(s.pane.getByText('Could not open pane: the artifact pane is not available in this build of MAWS')).toBeVisible();
     await expect(s.pane.getByText(/Could not open pane: unknown pane "nope"/)).toBeVisible();
     await shoot(s, 'pane');
   });

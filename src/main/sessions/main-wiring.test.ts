@@ -53,9 +53,8 @@ vi.mock('../gateway/claude-usage-app', () => ({ createClaudeUsageApp: () => ({})
 vi.mock('../settings/engine-configure', () => ({ startEngineConfigure: () => ({ stop: vi.fn() }) }));
 vi.mock('../settings/host-configure', () => ({ startHostConfigure: () => vi.fn() })); // E10
 vi.mock('../widgets/fixture-backend', () => ({ installWidgetBackend: vi.fn() }));
-vi.mock('../deliverables', () => ({ startDeliverables: () => ({ reader: {}, stop: vi.fn() }) })); // E2
 vi.mock('../browser', () => ({ startBrowser: (deps: { settings(): unknown }) => { state.browserSettings = deps.settings; return { stop: vi.fn(), partitions: {} /* E4b */ }; } })); // E4a
-vi.mock('../artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, startArtifacts: () => ({ stop: vi.fn() }) })); // P3-A: the artifact store's main side
+vi.mock('../artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn() }) })); // P3-A: the artifact store's main side
 vi.mock('../browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b
 
 const ID = '11111111-1111-4111-8111-111111111111' as AppSessionId;

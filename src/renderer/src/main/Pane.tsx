@@ -11,6 +11,7 @@ import { createSession, focusedProject, NEW_CHAT, runAction, useActionEnabled, u
 import { useKeyChord } from '../keymap/useKeyChord';
 import { EditorHostScopeContext, useEditorHostRegistration, type EditorHostScope } from '../panel/editor-host'; // P3-G
 import { EditorHeader } from '../panel/PanelHeader'; // P3-G
+import { ArtifactTab } from '../library/ArtifactTab'; // P3-L
 import { SessionPane } from '../session/SessionPane';
 import { cardSession } from '../shell/floating'; // P3-G
 import { useLayout } from '../stores/layout';
@@ -88,7 +89,7 @@ function TabBody({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
 
 function TabHeader({ scope }: { scope: EditorHostScope }) {
   const registration = useEditorHostRegistration(scope);
-  return registration && <EditorHeader title={registration.title} registration={registration} />;
+  return registration && <EditorHeader title={registration.title} registration={registration} scope={scope} />;
 }
 
 function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
@@ -111,8 +112,8 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
       return <SettingsTab section={tab.section} />;
     case 'artifacts': // P3-G (§D5)
       return <ArtifactsTab />;
-    case 'deliverable': // E2
-      return <DeliverableTab tab={tab} />;
+    case 'artifact': // P3-L: one artifact in its kind's editor
+      return <ArtifactTab tab={tab} />;
     case 'browser': // E4a
       return <BrowserTab tab={tab} />;
   }
@@ -177,13 +178,6 @@ function FileTab({ tab }: { tab: Extract<TabRef, { kind: 'file' }> }) {
 
 function DiffTab({ tab }: { tab: Extract<TabRef, { kind: 'diff' }> }) {
   const Slot = useSlot('diffTab');
-  // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
-  return <Slot tab={tab} />;
-}
-
-// E2: a deliverable's viewer (X14), the slot E2 registers.
-function DeliverableTab({ tab }: { tab: Extract<TabRef, { kind: 'deliverable' }> }) {
-  const Slot = useSlot('deliverableTab');
   // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
   return <Slot tab={tab} />;
 }

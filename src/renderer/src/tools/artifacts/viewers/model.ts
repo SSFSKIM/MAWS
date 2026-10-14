@@ -1,0 +1,92 @@
+// The artifact viewers' pure decisions (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M5b). Which body draws a
+// stored file is decided by `mimeOf` of its name, the function main's scheme handler types its answer with, so a viewer
+// never frames a file as something main would serve otherwise; only `application/pdf` gets the PDF frame, the one
+// without a `sandbox` attribute (E2's Decision Log 31). Moved here from E2's Deliverables tool.
+//
+// An artifact's versions are listed in the order of the revision each captured and named by their place, `v1 … vN`,
+// the last marked latest (E2's Deliverables viewer's labels); the viewer shows a place, or the latest when it was asked
+// for none, so it follows a new version as it lands.
+import { mimeOf } from '@shared/files/mime';
+import type { ArtifactVersion } from '@shared/artifacts/version';
+import { x12VersionLabel } from '@shared/maws/deliverable';
+import type { ArtifactOpenAt } from '../../../artifacts/open-at';
+import type { SessionRecord } from '@shared/graph/session';
+
+export type BodyKind = 'html' | 'pdf' | 'video' | 'audio' | 'file';
+
+export const basename = (path: string): string => path.split('/').filter(Boolean).at(-1) ?? path;
+
+export function bodyOf(nameOrPath: string): BodyKind {
+  const mime = mimeOf(basename(nameOrPath));
+  if (mime === 'text/html') return 'html';
+  if (mime === 'application/pdf') return 'pdf';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
+export const versionLabel = (n: number, latest: boolean): string => (latest ? `v${n} · latest` : `v${n}`);
+
+export const versionsInOrder = (versions: readonly ArtifactVersion[]): ArtifactVersion[] => [...versions].sort((a, b) => a.seq - b.seq || a.id - b.id);
+
+export interface ShownVersion {
+  n: number; // its place, from 1
+  version: ArtifactVersion;
+  latest: boolean;
+}
+
+// The version at place `chosen` (from 1), else the latest; null when there are none to show.
+export function shownVersion(ordered: readonly ArtifactVersion[], chosen: number | null): ShownVersion | null {
+  if (ordered.length === 0) return null;
+  const n = chosen !== null && chosen >= 1 && chosen <= ordered.length ? chosen : ordered.length;
+  return { n, version: ordered[n - 1]!, latest: n === ordered.length };
+}
+
+// M6b fix wave 1 (Decision Log 39c): the place of version number `n` from outside the viewer (a legacy anchor's, a
+// transcript row's): the imported version X12 numbered `n` (its label, kept at import) wherever thinning left it; past
+// the imported versions, or on a page made since P3, the place itself.
+export function placeOfNumber(ordered: readonly Pick<ArtifactVersion, 'kind' | 'label'>[], n: number): number {
+  const label = x12VersionLabel(n);
+  const index = ordered.findIndex((version) => version.kind === 'import' && version.label === label);
+  return index >= 0 ? index + 1 : n;
+}
+
+// M6b fix wave 2: the place an open asks for (null: the latest). A revision is the version that captured it; one
+// thinning dropped is stood for by the next kept version after it (the newest of its time bucket, which holds what it
+// wrote and what followed), else the latest.
+export function placeOfOpenAt(ordered: readonly Pick<ArtifactVersion, 'seq' | 'kind' | 'label'>[], at: ArtifactOpenAt): number | null {
+  if (at === 'latest') return null;
+  if ('version' in at) return placeOfNumber(ordered, at.version);
+  const index = ordered.findIndex((version) => version.seq >= at.revision);
+  return index >= 0 ? index + 1 : null;
+}
+
+// M6b fix wave 3: what a viewer keeps as its version, an identity: the latest (followed as new ones land), or one
+// revision. A number is resolved once, when it is asked for, to the revision it names then (the last place: the latest).
+export type VersionSelection = 'latest' | { revision: number };
+
+// The picker's place `n` (from 1) among `ordered` as a selection: the last is the latest.
+export function selectionAt(ordered: readonly Pick<ArtifactVersion, 'seq'>[], n: number): VersionSelection {
+  return n >= ordered.length || n < 1 ? 'latest' : { revision: ordered[n - 1]!.seq };
+}
+
+// An open's ask as a selection: a revision kept as it is (however thinning moves its place); a number placed now.
+export function selectionOf(ordered: readonly Pick<ArtifactVersion, 'seq' | 'kind' | 'label'>[], at: ArtifactOpenAt): VersionSelection {
+  if (at === 'latest' || 'revision' in at) return at;
+  return selectionAt(ordered, placeOfNumber(ordered, at.version));
+}
+
+
+// An absolute path with no `.` or `..` segment, no empty segment and no trailing separator: what the files service
+// accepts, and what the host records (it resolves every path it is given).
+const isNormal = (path: string): boolean => path.startsWith('/') && (path === '/' || path.slice(1).split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..'));
+
+// Whether a path lies under one of the session's directories (its directory, additional directories, worktree), judged
+// lexically: the only files the editor could both read and save, so the only ones Open as file is offered for (E2's
+// Decision Log 18; moved here by P3-L M5b, as the File viewer's Open as file reads it too). A path that is not normal is
+// under nothing (the files service would refuse it).
+export function underSession(path: string, session: SessionRecord | undefined): boolean {
+  if (!session || !isNormal(path)) return false;
+  const roots = [session.directory, ...session.additionalDirectories, ...(session.worktree ? [session.worktree.path] : [])];
+  return roots.some((root) => path === root || path.startsWith(root.endsWith('/') ? root : `${root}/`));
+}

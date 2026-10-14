@@ -9,10 +9,11 @@
 // than a new one: the model asks the human to look there, not for another shell. Every other pane goes through
 // `addTool` with its params, so a target always reaches its tool.
 //
-// E2 (E2 execution document, Design §4 "show_pane 'deliverable'"; Decision Log 13): the `deliverable` pane resolves its
-// target through main first, so the answer waits on that read (the bridge allows 8 s; a read takes milliseconds). A
-// record that exists opens the Deliverables tool on it; a target no record answers to is the model's error to read
-// (`deliverableNotFound`), never "shown" over a list; no target opens the list.
+// E2 (E2 execution document, Design §4 "show_pane 'deliverable'"; Decision Log 13; P3-L M6b: the `artifact` pane and
+// the Artifacts tool): the `artifact` pane resolves its target through the engine host's store first, so the answer
+// waits on that read (the bridge allows 8 s; a read takes milliseconds). An artifact that exists opens the Artifacts
+// tool on it; a target no artifact answers to is the model's error to read (`artifactNotFound`), never "shown" over a
+// list; no target opens the list.
 //
 // E4a (E4a execution document, Interfaces "The renderer"; Decision Log 7): the `browser` pane checks its target as main
 // will (`validateBrowserUrl`), so a refused address answers `navigationRefused` before anything opens; otherwise the
@@ -62,7 +63,7 @@ export function showPane({ appSessionId, requestId, pane, target, line }: MawsPa
   }
   const tool = panelHost.tools().find((candidate) => candidate.id === where.toolId);
   if (!tool) return { ok: false, error: TOOL_ERRORS.paneUnavailable(pane) };
-  if (pane === 'deliverable') return showDeliverable(tool, appSessionId, target, client); // E2
+  if (pane === 'artifact') return showArtifact(tool, appSessionId, target, client); // E2; P3-L M6b
   if (pane === 'browser') return showBrowser(tool, appSessionId, requestId, target); // E4a
   const opened = (pane === 'terminal' ? selectTerminal(tool, appSessionId) : null) ?? panelHost.addTool(tool.id, { appSessionId, params: paramsOf(pane, target), activate: true });
   return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
@@ -79,20 +80,16 @@ export function connectPaneShows(client: MawsBridge = ipc): () => void {
   });
 }
 
-// E2 start: the `deliverable` pane. The target is the record's id (what `send_file` and `artifact_create` answer as the
-// deliverable id); an artifact's own short id (`dash`) is also found, through the session's list, since the model holds
-// both and either names one record (an artifact id may itself be shaped like a uuid, so a record id read as absent
-// falls through to the search). P2-F L122: a side thread's target resolves over its ancestor chain as its artifact tools
-// do (`ancestorsOf`), the nearest session holding it owning the record.
-async function deliverableIn(client: MawsBridge, appSessionId: AppSessionId, target: string): Promise<{ id: string | null } | { error: string }> {
-  if (z.uuid().safeParse(target).success) {
-    const found = await client.invoke('deliverables.get', { appSessionId, id: target });
-    if (!found.ok) return { error: found.error.message };
-    if (found.value.record) return { id: found.value.record.id };
-  }
-  const listed = await client.invoke('deliverables.list', { appSessionId });
+// E2 start: the `artifact` pane (P3-L M6b; E2's `deliverable` pane before the cutover). The target is the artifact's id
+// (what `send_file` and `artifact_create` answer as the deliverable id; a pre-P3 record's id is its artifact's), or the
+// handle the agent named it by (`dash`), since the model holds both; an id that names no artifact falls through to the
+// handles (a handle may itself be shaped like a uuid). P2-F L122: a handle resolves over the session's ancestor chain
+// as its artifact tools resolve it (`ancestorsOf`), the nearest session that made an artifact of that handle holding it.
+async function artifactIn(client: MawsBridge, owner: AppSessionId, target: string): Promise<{ id: string | null } | { error: string }> {
+  const listed = await client.invoke('artifacts.list', { filter: { appSessionId: owner } });
   if (!listed.ok) return { error: listed.error.message };
-  return { id: listed.value.records.find((record) => record.kind === 'artifact' && record.artifactId === target)?.id ?? null };
+  const own = listed.value.artifacts.find((artifact) => artifact.handle === target && artifact.createdBy.kind === 'session' && artifact.createdBy.appSessionId === owner);
+  return { id: own?.id ?? null };
 }
 
 // The session's ancestors as main's index walks them for the artifact tools: this window's records first, and an
@@ -112,26 +109,31 @@ async function ancestorsOf(client: MawsBridge, appSessionId: AppSessionId): Prom
   }
 }
 
-// The record the target names and the session holding it, the session itself first; null when none of them holds it.
-async function deliverableOf(client: MawsBridge, appSessionId: AppSessionId, target: string): Promise<{ id: string; owner: AppSessionId } | null | { error: string }> {
+// The artifact the target names, by its id, else by a handle the session or the nearest ancestor holds; null when none.
+async function artifactOf(client: MawsBridge, appSessionId: AppSessionId, target: string): Promise<{ id: string } | null | { error: string }> {
+  if (z.uuid().safeParse(target).success) {
+    const found = await client.invoke('artifacts.get', { artifactId: target.toLowerCase() });
+    if (!found.ok) return { error: found.error.message };
+    if (found.value.artifact) return { id: found.value.artifact.id };
+  }
   for (const owner of [appSessionId, ...(await ancestorsOf(client, appSessionId))]) {
-    const found = await deliverableIn(client, owner, target);
+    const found = await artifactIn(client, owner, target);
     if ('error' in found) return found;
-    if (found.id !== null) return { id: found.id, owner };
+    if (found.id !== null) return { id: found.id };
   }
   return null;
 }
 
-async function showDeliverable(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId, target: string | null, client: MawsBridge): Promise<MawsPaneAnswerResult> {
+async function showArtifact(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId, target: string | null, client: MawsBridge): Promise<MawsPaneAnswerResult> {
   const open = (params: Record<string, string>): MawsPaneAnswerResult => {
     const opened = panelHost.addTool(tool.id, { appSessionId, params, activate: true });
     return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
   };
   if (target === null) return open({});
-  const found = await deliverableOf(client, appSessionId, target);
-  if (found === null) return { ok: false, error: TOOL_ERRORS.deliverableNotFound(target) };
-  if ('error' in found) return { ok: false, error: TOOL_ERRORS.deliverableUnreadable(target, found.error) };
-  return open({ target: found.id, appSessionId: found.owner }); // the record's session named, so a pinned tab showing another one follows it
+  const found = await artifactOf(client, appSessionId, target);
+  if (found === null) return { ok: false, error: TOOL_ERRORS.artifactNotFound(target) };
+  if ('error' in found) return { ok: false, error: TOOL_ERRORS.artifactUnreadable(target, found.error) };
+  return open({ target: found.id });
 }
 // E2 end
 

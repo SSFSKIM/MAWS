@@ -29,7 +29,7 @@ export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportB
       const input = parsed.data;
       const store = storeOf('artifact_export', deps);
       const to = input.to === undefined ? null : pathUnderCwd('artifact_export', ctx.cwd, input.to);
-      const artifactId = await resolveArtifact('artifact_export', deps, store, input.artifact, lineageOf(ctx, deps));
+      const artifactId = await resolveArtifact('artifact_export', store, input.artifact, lineageOf(ctx, deps));
       const target = await store.readCommitted(() => {
         const artifact = store.get(artifactId);
         if (!artifact) throw new ToolRefusal(TOOL_ERRORS.noArtifact('artifact_export', input.artifact));

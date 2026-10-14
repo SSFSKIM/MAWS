@@ -10,24 +10,25 @@
 // question view (`BtwView`, keyed by the thread) opens beneath it, and the header's toggle hides and shows it while the
 // thread has side questions.
 //
-// P2-E1 (M3, D7): a thread a comment on an artifact element opened has "Show in deliverable" beside Open as tab: the
-// parent's Deliverables tool opens on the record at its latest version (the thread may have written versions since the
-// comment, and a viewer on the latest follows its next ones), and a card on this thread opens for that panel's viewer to
-// claim and pin at the element, found again by its selector. Opening the tool takes the panel from this pane, so the
+// P2-E1 (M3, D7): a thread a comment on an artifact element opened has "Show in artifact" (E2's "Show in deliverable")
+// beside Open as tab: the parent's Artifacts tool opens on the artifact at its latest version (the thread may have
+// written versions since the comment, and a viewer on the latest follows its next ones), and a card on this thread opens
+// for that panel's viewer to claim and pin at the element, found again by its selector. P3-L M6b: an anchor stored
+// before the cutover names its page on E2's scheme; its record id is the artifact's, so it re-docks the same way. Opening the tool takes the panel from this pane, so the
 // pane stops drawing the thread and the card's host may claim it (CardHost.tsx). Hidden while a main tab shows the
 // thread, where the card's own close rule would shut it at once.
 //
 // P2-F L146: a thread a comment on a page element opened has "Show in browser" while a pane of this window holds a tab
 // on its page (the browser's dock, `comment/dock.ts`): a card on the thread opens for that pane's strip to claim by the
 // page's URL (the host's `accepts`), with no caret (no pick position is stored). The Side pane cannot hand its panel to
-// that pane as the deliverable's re-dock does (the page shows in the main area), so while a browser card draws the
+// that pane as the artifact's re-dock does (the page shows in the main area), so while a browser card draws the
 // thread the pane says so with Show here, which closes the card and draws the thread here again, as Go to tab does for a
 // main tab.
 //
 // P2-F (the owner's ruling at P2-F's sitting, A5b.2): when Browser is a tool of this panel and the Side pane took its
 // place, no pane holds the page, so "Show in browser" is not offered; while the page is still a tab of the thread's
 // browser, "Reopen in browser" makes Browser the panel's tool again on that tab and opens the thread's card for the
-// panel's pane to claim, as "Show in deliverable" does for its viewer.
+// panel's pane to claim, as "Show in artifact" does for its viewer.
 import { useEffect } from 'react';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -47,7 +48,7 @@ import { openBrowserUrl } from '../tools/browser/comment/actions';
 import { COMMENT_COPY } from '../tools/browser/comment/copy';
 // E4d end
 // P2-E1 start (2026-10-09)
-import { openDeliverable } from '../tools/maws/actions';
+import { openArtifactInPanel } from '../tools/artifacts/ArtifactsTool'; // P3-L (M5b)
 import { closeCard, openCard, targetOf, useCommentCard } from './card/store';
 // P2-E1 end
 import { usePageDock } from '../tools/browser/comment/dock'; // P2-F L146
@@ -61,10 +62,10 @@ import { useBrowser } from '../tools/browser/store';
 const COPY = SIDE_COPY.pane;
 
 // P2-E1 start (2026-10-09): the re-dock (D7)
-function showInDeliverable(parent: AppSessionId, child: AppSessionId, anchor: Anchor): void {
+function showInArtifact(parent: AppSessionId, child: AppSessionId, anchor: Anchor): void {
   const target = targetOf(anchor);
-  if (target?.kind !== 'deliverable') return;
-  openDeliverable(target.appSessionId, target.deliverableId); // no version: the latest; activated, so this pane yields the panel
+  if (target?.kind !== 'artifact-page') return;
+  openArtifactInPanel(parent, target.artifactId); // P3-L: the panel's Artifacts tool, on the latest; activated, so this pane yields the panel
   openCard(anchor, { appSessionId: parent, phase: { kind: 'thread', child, echo: null }, claimMode: 'panel' });
 }
 // P2-E1 end
@@ -120,7 +121,8 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
   // E4d start
   const pageUrl = anchor?.kind === 'browser-element' ? anchor.pageUrl : undefined;
   // E4d end
-  const redocks = anchor !== null && targetOf(anchor)?.kind === 'deliverable'; // P2-E1: an artifact element whose page names a deliverable
+  const redockTarget = anchor === null ? undefined : targetOf(anchor)?.kind;
+  const redocks = anchor !== null && redockTarget === 'artifact-page'; // P2-E1: an artifact element on an artifact's page (P3-L: E2's scheme's too)
   const pageDock = usePageDock(pageUrl ?? null); // P2-F L146: a pane of this window on the thread's page
   const panelPage = usePanelPageTab(parent, child, pageUrl ?? null); // P2-F: the page, a tab the panel's Browser holds
 
@@ -177,8 +179,8 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
         )}
         {/* P2-E1 start (2026-10-09) */}
         {!inMain && redocks && (
-          <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => showInDeliverable(parent, child, anchor)}>
-            {COPY.showInDeliverable}
+          <button type="button" className={`${QUIET} text-ui-sm`} onClick={() => showInArtifact(parent, child, anchor)}>
+            {COPY.showInArtifact}
           </button>
         )}
         {/* P2-E1 end */}

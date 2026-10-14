@@ -162,6 +162,33 @@ export function useEditorHost(scope: EditorHostScope | null, host: EditorHostReg
   }, [surface, tabId]);
 }
 
+// P3-L start (M6b fix wave 1; X32, additive): focus back to an action's control in the header drawn over a scope, for
+// an editor whose own UI an action opened and that is done with it (a dismissed comment card gives focus back to
+// Comment, as E2's viewer did). The header over the scope answers: the action's button when it is drawn, "More actions"
+// when the action is folded there; false when no header is over the scope, the action is not in it, or its control is
+// disabled, so the editor can focus something of its own instead.
+const headerFocus = new Map<string, (actionId: string) => boolean>();
+
+export const focusEditorHostAction = (scope: EditorHostScope, actionId: string): boolean => headerFocus.get(keyOf(scope))?.(actionId) ?? false;
+
+// The header's side: `focus` answers for the scope while the header is mounted over it (its latest render's).
+export function useEditorHeaderFocus(scope: EditorHostScope | null, focus: (actionId: string) => boolean): void {
+  const latest = useRef(focus);
+  useLayoutEffect(() => {
+    latest.current = focus;
+  });
+  const key = scope ? keyOf(scope) : null;
+  useLayoutEffect(() => {
+    if (key === null) return;
+    const entry = (actionId: string) => latest.current(actionId);
+    headerFocus.set(key, entry);
+    return () => {
+      if (headerFocus.get(key) === entry) headerFocus.delete(key);
+    };
+  }, [key]);
+}
+// P3-L end
+
 // Tests: forget every registration.
 export function resetEditorHosts(): void {
   tokens.clear();

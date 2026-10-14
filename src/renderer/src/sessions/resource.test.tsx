@@ -25,7 +25,7 @@ import { registerSidePane } from '../side/register';
 import { registerAgentTools } from '../tools/agents';
 import { browserTool } from '../tools/browser/BrowserTool';
 import { registerCodeTools } from '../tools/code';
-import { deliverablesTool } from '../tools/deliverables/DeliverablesTool';
+import { artifactsTool } from '../tools/artifacts/ArtifactsTool'; // P3-L M6b: the Deliverables tool's place
 import { askSheetTool } from '../tools/maws/ask/AskSheetTool';
 import { registerScmTool } from '../tools/scm';
 import { terminalTool } from '../tools/terminal';
@@ -81,7 +81,7 @@ const ctxOf = (appSessionId: AppSessionId): PanelToolContext => ({
 // The panel's tools as App.tsx registers them, once (the app never unregisters them).
 function registerAppTools(): void {
   if (panelHost.tools().length > 0) return;
-  for (const tool of [terminalTool, sessionInfoTool, askSheetTool, deliverablesTool, browserTool]) registerPanelTool(tool as PanelTool<unknown, unknown>);
+  for (const tool of [terminalTool, sessionInfoTool, askSheetTool, artifactsTool, browserTool]) registerPanelTool(tool as PanelTool<unknown, unknown>);
   registerCodeTools();
   registerAgentTools();
   registerScmTool();
@@ -156,7 +156,7 @@ describe('mounted surfaces on exited sessions start nothing (G5)', () => {
     mount(ID);
     await settle();
     expect(starts()).toEqual([]);
-    expect(panelHost.tools().map((t) => t.id).sort()).toEqual(['ask-sheet', 'background', 'browser', 'deliverables', 'files', 'log', 'review', 'session-info', 'side', 'source-control', 'subagents', 'tasks', 'terminal']);
+    expect(panelHost.tools().map((t) => t.id).sort()).toEqual(['artifacts', 'ask-sheet', 'background', 'browser', 'files', 'log', 'review', 'session-info', 'side', 'source-control', 'subagents', 'tasks', 'terminal']);
     expect([...unmounted].sort(), 'tools that cannot mount in this DOM').toEqual([]);
     expect(screen.getAllByRole('button', { name: 'Load now' }).length).toBeGreaterThan(0);
     fireEvent.click(screen.getAllByRole('button', { name: 'Load now' })[0]);

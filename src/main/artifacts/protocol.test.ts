@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import { artifactUrl } from '@shared/artifacts/scheme';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
-import { DELIVERABLE_HTML_CSP } from '../deliverables/protocol';
+import { STORE_FRAME_CSP } from './scheme-handler';
 import { createArtifactHandler } from './protocol';
 
 vi.mock('electron', () => ({ protocol: {} }));
@@ -45,7 +45,7 @@ async function hold(artifactId: string, revision: number | 'live', path: string,
 }
 const get = (url: string, init: RequestInit = {}) => handle(new Request(url, init));
 
-describe('the maws-artifact: handler (Decision Log 14, 35e): the files the host names, served as maws-deliverable: serves its own', () => {
+describe('the maws-artifact: handler (Decision Log 14, 35e): the files the host names, served by the store’s one handler', () => {
   it('serves an html page, live and at a revision, with the bridge script, the sandboxing policy, CORS and the shared headers', async () => {
     await hold(PAGE, 'live', 'index.html', 'html', '<!doctype html><head><title>v2</title></head><p>two</p>');
     await hold(PAGE, 3, 'index.html', 'html', '<!doctype html><p>one</p>');
@@ -53,7 +53,7 @@ describe('the maws-artifact: handler (Decision Log 14, 35e): the files the host 
     expect(live.status).toBe(200);
     expect(Object.fromEntries(live.headers)).toMatchObject({
       'content-type': 'text/html',
-      'content-security-policy': DELIVERABLE_HTML_CSP,
+      'content-security-policy': STORE_FRAME_CSP,
       'x-content-type-options': 'nosniff',
       'content-disposition': 'inline',
       'cache-control': 'no-store',

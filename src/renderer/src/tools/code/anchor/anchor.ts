@@ -21,7 +21,7 @@ export interface CardRect {
   width: number;
   height: number;
 }
-export type CommentPlacement = { kind: 'card'; host: 'deliverable' | 'browser'; hostId?: string; rect?: CardRect } | { kind: 'sheet' };
+export type CommentPlacement = { kind: 'card'; host: 'browser' | 'artifact-page' /* P3-L (M5b; M6b: E2's 'deliverable' gone) */; hostId?: string; rect?: CardRect } | { kind: 'sheet' };
 export interface CommentContext {
   appSessionId: AppSessionId;
   placement?: CommentPlacement;

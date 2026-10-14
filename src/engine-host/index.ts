@@ -27,6 +27,9 @@ import { openSupervisorLog } from './supervisor-log';
 import { openDocuments, type Documents } from './documents';
 import { registerArtifacts } from './documents/register'; // M4
 // P3-A end
+// P3-L start
+import { registerLibrary } from './library'; // M2
+// P3-L end
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -65,10 +68,13 @@ const register: HostRegister = (on, emit, client) => {
   documents = openDocuments(userData);
   const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env });
   const store = documents?.store ?? null; // M6: the artifact tools' store (a session's tools answer `unavailable` without one)
+  // P3-L: main's library reads, the linked-directory mirror and (M6b) the X12 import at store open
+  const library = registerLibrary(on, { documents, deliverablesDir: join(userData, 'deliverables'), e2e: process.env.MAWS_E2E === '1' });
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
       artifacts.close(); // P3-A
+      library.close(); // P3-L
       documents?.close(); // P3-A
     },
     userData, replayEnabled: process.env.MAWS_ENGINE_REPLAY === '1', appVersion: HOST_VERSION,

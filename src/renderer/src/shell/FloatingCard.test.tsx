@@ -353,7 +353,7 @@ describe('the floating card in the Shell', () => {
 // P3-G (§D4.1, the M4 review's ruling 2): the DOM route's still is the surface alone. The Shell's layers over panel
 // content (the card's layer, the comment card's host) are hidden for the capture, never unmounted, and shown after it.
 describe('a mark-up still taken under the open card', () => {
-  const TAB = 'deliverables:1';
+  const TAB = 'artifacts:1';
   const still = { mediaType: 'image/png', data: 'c3RpbGw=', width: 800, height: 500 } as const;
   afterEach(() => {
     resetMarkup();
@@ -361,13 +361,13 @@ describe('a mark-up still taken under the open card', () => {
     delete (window as { maws?: unknown }).maws;
   });
 
-  // a viewer as the deliverable viewer draws one: its body registered through the DOM route, the comment card's host in it
+  // a viewer as the artifact viewer draws one: its body registered through the DOM route, the comment card's host in it
   function ViewerProbe() {
     const body = useRef<HTMLDivElement>(null);
     useRegionMarkupSurface(body, 'Sales dashboard', true);
     return (
       <div ref={body} data-probe-viewer>
-        <CommentCardHost hostId="viewer" host="deliverable" mode="panel" layout="anchored" accepts={() => false} frame={{ scale: 1, offset: { x: 0, y: 0 }, key: 'v2' }} visible />
+        <CommentCardHost hostId="viewer" host="artifact-page" mode="panel" layout="anchored" accepts={() => false} frame={{ scale: 1, offset: { x: 0, y: 0 }, key: 'v2' }} visible />
       </div>
     );
   }
@@ -384,7 +384,7 @@ describe('a mark-up still taken under the open card', () => {
       const r = this.hasAttribute('data-probe-viewer') ? { left: 300, top: 180, width: 800, height: 500 } : { left: 0, top: 0, width: 0, height: 0 };
       return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => ({}) } as DOMRect;
     });
-    useLayout.setState({ panelBySession: new Map([[A, { tabs: [{ id: TAB, toolId: 'deliverables', pinned: false }], activeTabId: TAB }]]) });
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [{ id: TAB, toolId: 'artifacts', pinned: false }], activeTabId: TAB }]]) });
     useLayout.getState().setPanel({ floating: true });
     render(<Shell />);
     const shown = card()!;
@@ -418,7 +418,7 @@ describe('a mark-up still taken under the open card', () => {
       const r = this.hasAttribute('data-probe-viewer') ? { left: 300, top: 180, width: 800, height: 500 } : { left: 0, top: 0, width: 0, height: 0 };
       return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => ({}) } as DOMRect;
     });
-    useLayout.setState({ panelBySession: new Map([[A, { tabs: [{ id: TAB, toolId: 'deliverables', pinned: false }], activeTabId: TAB }]]) });
+    useLayout.setState({ panelBySession: new Map([[A, { tabs: [{ id: TAB, toolId: 'artifacts', pinned: false }], activeTabId: TAB }]]) });
     useLayout.getState().setPanel({ floating: true });
     render(<Shell />);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});

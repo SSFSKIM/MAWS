@@ -1,22 +1,23 @@
 // The panes `show_pane` can name (X9; E1 execution document, Interfaces "X9", residue 10) and where each one opens: a
 // panel tool by its X5 id, or the `file` pane as a main tab. Siblings supply the tools behind `tasks` (E7),
-// `deliverable` (E2), `browser` (E4) and `source-control` (E6); until a build registers one, the renderer answers the
-// bridge with `paneUnavailableText`, so the model reads that the pane is absent, never a crash.
+// `artifact` (E2's `deliverable` until P3-L's cutover, the Artifacts tool since), `browser` (E4) and `source-control`
+// (E6); until a build registers one, the renderer answers the bridge with `paneUnavailableText`, so the model reads that
+// the pane is absent, never a crash.
 import * as z from 'zod';
 
-export const PANE_NAMES = ['diff', 'file', 'terminal', 'tasks', 'deliverable', 'browser', 'source-control'] as const;
+export const PANE_NAMES = ['diff', 'file', 'terminal', 'tasks', 'artifact', 'browser', 'source-control'] as const;
 export const PaneSchema = z.enum(PANE_NAMES);
 export type Pane = z.infer<typeof PaneSchema>;
 
-// E2: the Deliverables tool's X5 id (the `deliverable` pane's tool).
-export const DELIVERABLES_TOOL_ID = 'deliverables';
+// P3-L (Decision Log 10): the Artifacts tool's X5 id (the `artifact` pane's tool), E2's `deliverables` before the cutover.
+export const ARTIFACTS_TOOL_ID = 'artifacts';
 
 export const PANES: Record<Pane, { toolId: string } | { mainTab: 'file' }> = {
   diff: { toolId: 'review' },
   file: { mainTab: 'file' },
   terminal: { toolId: 'terminal' },
   tasks: { toolId: 'tasks' },
-  deliverable: { toolId: DELIVERABLES_TOOL_ID },
+  artifact: { toolId: ARTIFACTS_TOOL_ID },
   browser: { toolId: 'browser' },
   'source-control': { toolId: 'source-control' },
 };

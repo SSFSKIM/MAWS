@@ -21,9 +21,11 @@ import { EDITOR_COPY } from '../tools/code/copy';
 import { useViewer } from '../tools/code/viewer/viewer-store';
 // E5 end
 // E2 start
-import { DELIVERABLES_COPY } from '../tools/deliverables/copy';
-import { useDeliverableTitle } from '../tools/deliverables/store';
 // E2 end
+// P3-L start
+import { LIBRARY_COPY } from '../library/copy';
+import { useArtifactTitle } from '../library/store';
+// P3-L end
 // E4a start
 import { BROWSER_COPY } from '../tools/browser/copy';
 import { useBrowserTitle } from '../tools/browser/store';
@@ -68,8 +70,8 @@ function useSessionLabel(appSessionId: AppSessionId): TabLabel {
 function useTabLabel(tab: TabRef): TabLabel {
   const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : ('' as AppSessionId);
   const session = useSessionLabel(appSessionId);
-  const deliverableTitle = useDeliverableTitle(tab.kind === 'deliverable' ? tab.appSessionId : null, tab.kind === 'deliverable' ? tab.deliverableId : null); // E2
   const browserTitle = useBrowserTitle(tab.kind === 'browser' ? tab.appSessionId : null, tab.kind === 'browser' ? tab.browserTabId : null); // E4a
+  const artifactTitle = useArtifactTitle(tab.kind === 'artifact' ? tab.artifactId : null); // P3-L
   switch (tab.kind) {
     case 'session':
       return session;
@@ -85,8 +87,8 @@ function useTabLabel(tab: TabRef): TabLabel {
       return { title: 'Settings', secondary: null, glyph: null, fileType: null };
     case 'artifacts': // P3-G
       return { title: 'Artifacts', secondary: null, glyph: null, fileType: null };
-    case 'deliverable': // E2
-      return { title: deliverableTitle ?? DELIVERABLES_COPY.fallbackTitle, secondary: null, glyph: null, fileType: null };
+    case 'artifact': // P3-L
+      return { title: artifactTitle ?? LIBRARY_COPY.fallbackTitle, secondary: null, glyph: null, fileType: null };
     case 'browser': // E4a
       return { title: browserTitle ?? BROWSER_COPY.title, secondary: null, glyph: null, fileType: null };
   }

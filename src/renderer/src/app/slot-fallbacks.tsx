@@ -37,15 +37,9 @@ const NewSession: Slots['newSession'] = () => null;
 const SettingsTab: Slots['settingsTab'] = () => <Placeholder className="h-full">Settings unavailable</Placeholder>;
 // The top bar's right end holds nothing until W6 registers the usage pill there.
 const TopBarEnd: Slots['topBarEnd'] = () => null;
-const DeliverableTab: Slots['deliverableTab'] = ({ tab }) => <Placeholder className="h-full font-mono">{tab.deliverableId}</Placeholder>; // E2
 const BrowserTab: Slots['browserTab'] = () => <Placeholder className="h-full">Browser unavailable</Placeholder>; // E4a
-// P3-G (§D5): the Artifacts tab before P3-L registers its library, a quiet placeholder saying what will be there.
-const ArtifactsLibrary: Slots['artifactsLibrary'] = () => (
-  <div className="flex h-full flex-col items-center justify-center gap-1.5 p-6 text-center">
-    <h2 className="m-0 text-ui font-semibold text-fg">Artifacts</h2>
-    <p className="m-0 max-w-(--measure) text-ui-sm text-fg-muted">Documents, decks and files you make with your sessions will appear here.</p>
-  </div>
-);
+// P3-G (§D5): the Artifacts tab where no host registers P3-L's library (App.tsx does).
+const ArtifactsLibrary: Slots['artifactsLibrary'] = () => <Placeholder className="h-full">Artifacts unavailable</Placeholder>;
 
 export const FALLBACKS: Slots = {
   transcript: Transcript,
@@ -57,7 +51,6 @@ export const FALLBACKS: Slots = {
   newSession: NewSession,
   settingsTab: SettingsTab,
   topBarEnd: TopBarEnd,
-  deliverableTab: DeliverableTab, // E2
   browserTab: BrowserTab, // E4a
   artifactsLibrary: ArtifactsLibrary, // P3-G
 };

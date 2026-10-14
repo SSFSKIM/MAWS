@@ -81,11 +81,7 @@ import { CommentComposerHost } from './side/CommentComposer';
 import { connectSide, registerSidePane } from './side/register';
 // E3 end
 // E2 start
-import { deliverablesTool } from './tools/deliverables/DeliverablesTool';
-import { DeliverableTab } from './tools/deliverables/DeliverableTab';
-import { connectDeliverables } from './tools/deliverables/store';
-import { openDeliverable } from './tools/maws/actions';
-import { registerTranscriptActions as registerDeliverableTranscriptActions } from './transcript';
+import { registerTranscriptActions as registerArtifactTranscriptActions } from './transcript';
 // E2 end
 // E10 start
 import { connectSupervisorNotices } from './app/supervisor-notices';
@@ -114,6 +110,13 @@ import { connectBrowserActivity } from './tools/browser/agent/activity'; // E13
 import { connectBrowserAgent } from './tools/browser/agent/connect';
 import { registerTranscriptActions as registerBrowserAgentTranscriptActions } from './transcript';
 // E4c end
+// P3-L start
+import { registerArtifactTabs } from './library/ArtifactTab';
+import { artifactsTool, openArtifactInPanel } from './tools/artifacts/ArtifactsTool';
+import { registerByteViewers } from './tools/artifacts/viewers/register';
+import { Library } from './library/Library';
+import { connectLibrary } from './library/store';
+// P3-L end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -236,15 +239,12 @@ export function App() {
   }, []);
   useEffect(() => connectSide(), []);
   // E3 end
-  // E2 start: the Deliverables tool and its main tab, registered once and never unregistered (C8a's rule above), and
-  // the host's write announcements and main's console attribution into the deliverables store; the transcript's
-  // artifact row and a delivered file's name open the viewer through openDeliverable
+  // E2 start: the panel tool registered once and never unregistered (C8a's rule above); the transcript's artifact row
+  // and a delivered file's name open it. P3-L (M6b): the Artifacts tool, E2's Deliverables tool and its main tab gone.
   useEffect(() => {
-    registerPanelTool(deliverablesTool);
-    registerSlot('deliverableTab', DeliverableTab);
+    registerPanelTool(artifactsTool);
   }, []);
-  useEffect(() => connectDeliverables(), []);
-  useEffect(() => registerDeliverableTranscriptActions({ openDeliverable }), []);
+  useEffect(() => registerArtifactTranscriptActions({ openArtifact: openArtifactInPanel }), []);
   // E2 end
   // E10 start: the supervisor's update and incompatibility banners and its crash toast, from main's host.status; this
   // connects the hosts store app-wide (Diagnostics and Settings read it too)
@@ -275,6 +275,13 @@ export function App() {
   useEffect(() => registerBrowserAgentTranscriptActions({ openBrowserTab }), []);
   useEffect(() => connectBrowserAgent(), []);
   // E4c end
+  // P3-L start: the library store reads main's index again at every committed change (`library.changed`), and the
+  // `artifact` tab kind's handlers
+  useEffect(() => connectLibrary(), []);
+  useEffect(() => registerArtifactTabs(), []); // an `artifact` tab with unsaved changes is not replaced by a session
+  useEffect(() => registerSlot('artifactsLibrary', Library), []); // the Artifacts tab's library, in P3-G's slot
+  useEffect(() => registerByteViewers(), []); // M5b: the html and file viewers on maws-artifact:, and their frames' console
+  // P3-L end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

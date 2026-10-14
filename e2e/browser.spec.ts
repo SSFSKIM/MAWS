@@ -167,7 +167,7 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
     }
     // another panel tab selected: the Browser tool's pane unmounts and the main tab takes the view back
     await s.panel.getByRole('button', { name: 'Add a tool' }).click();
-    await s.page.getByRole('menuitem', { name: 'Deliverables' }).click();
+    await s.page.getByRole('menuitem', { name: 'Artifacts' }).click();
     await expectOnPane(s, a, paneIn(main), 'main');
     expect((await viewOf(s, a))?.owner?.surface).toBe('main');
 
@@ -369,7 +369,7 @@ test('the cover: the palette hides the view within 200 ms behind its picture and
 
     // the panel's "+" menu drops over the Browser tool's pane: covers
     await s.panel.getByRole('button', { name: 'Add a tool' }).click();
-    await expect(s.page.getByRole('menuitem', { name: 'Deliverables' })).toBeVisible();
+    await expect(s.page.getByRole('menuitem', { name: 'Artifacts' })).toBeVisible();
     await covered(true, 'the + menu');
     await s.page.keyboard.press('Escape');
     await covered(false, 'the + menu closed');

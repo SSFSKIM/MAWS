@@ -31,7 +31,6 @@ import * as scm from './names/scm';
 import * as side from './names/side';
 // E3 end
 // E2 start
-import * as deliverables from './names/deliverables';
 // E2 end
 // E10 start
 import * as host from './names/host';
@@ -47,6 +46,9 @@ import * as ownerChannel from './names/owner-channel'; // P2-C M4 (2026-10-09)
 import * as artifacts from './names/artifacts';
 import * as spaces from './names/spaces';
 // P3-A end
+// P3-L start (M1)
+import * as library from './names/library';
+// P3-L end
 
 export const NAMESPACES = [
   'session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings',
@@ -66,9 +68,6 @@ export const NAMESPACES = [
   // E3 start
   'side',
   // E3 end
-  // E2 start
-  'deliverables',
-  // E2 end
   // E10 start
   'host',
   // E10 end
@@ -80,6 +79,7 @@ export const NAMESPACES = [
   'ownerChannel', // M4
   // P2-C end
   'artifacts', 'spaces', // P3-A M4
+  'library', // P3-L M1
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
@@ -92,18 +92,18 @@ export const NAMES = {
   maws, // E1
   scm, // E6
   side, // E3
-  deliverables, // E2
   host, // E10
   browser, // E4a
   mods, // P2-C (2026-10-09)
   ownerChannel, // P2-C M4 (2026-10-09)
   artifacts, spaces, // P3-A M4
+  library, // P3-L M1
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 
 type Names = typeof NAMES;
 export type BridgedCommandName = { [N in Namespace]: Names[N]['commands'][number] }[Namespace];
-export type MainOnlyCommandName = (typeof engine.mainOnlyCommands)[number] | (typeof host.mainOnlyCommands)[number] /* E10: host's */ | (typeof artifacts.mainOnlyCommands)[number]; // P3-A M4
-export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = [...engine.mainOnlyCommands, ...host.mainOnlyCommands, ...artifacts.mainOnlyCommands /* P3-A M4 */];
+export type MainOnlyCommandName = (typeof engine.mainOnlyCommands)[number] | (typeof host.mainOnlyCommands)[number] /* E10: host's */ | (typeof artifacts.mainOnlyCommands)[number] /* P3-A M4 */ | (typeof library.mainOnlyCommands)[number]; // P3-L M1
+export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = [...engine.mainOnlyCommands, ...host.mainOnlyCommands, ...artifacts.mainOnlyCommands /* P3-A M4 */, ...library.mainOnlyCommands /* P3-L M1 */];
 export type BridgedEventName = { [N in Namespace]: Names[N]['events'][number] }[Namespace];
 
 // Pure, so a bundle that takes only `NAMESPACES` or a channel (the renderer and main, through `./schema.ts`) drops

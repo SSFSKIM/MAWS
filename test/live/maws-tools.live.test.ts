@@ -10,7 +10,7 @@
 // test/fixtures/transcripts/ by hand after a look by eye.
 // `MAWS_LIVE=1 pnpm exec vitest run --project live test/live/maws-tools.live.test.ts`
 import { execFile } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
@@ -20,6 +20,7 @@ import type { MawsPaneShow } from '@shared/ipc/schema/maws';
 import { TOOL_ERRORS, type AskAnswer } from '@shared/maws/tools';
 import type { JournalRow } from '@shared/wire/journal';
 import { buildEnvironment, RELAY_URL } from '../../src/engine-host/launch';
+import { openDocuments } from '../../src/engine-host/documents'; // P3-L M6b: send_file delivers into the artifact store
 import { liveSpec, redactJournal } from './support/live';
 import { LiveHost } from './support/live-host';
 import { a15, answerWhileRunning, checkA15, closeSession, exportTranscript, liveCase, openGate, readJournal, scratchRepo, type GateResult, type LiveGate } from './support/harness';
@@ -57,8 +58,13 @@ afterAll(() => {
 // One session of one case, through the X2 surface: launched on Haiku in default mode, every permission the engine asks
 // allowed once as it arrives, ended with session.stop; the journal booked (cost), exported with E1's provenance, the
 // engine's init plugin list and the A-15 delta checked, whatever the case's outcome (the shared harness's closeSession).
+// P3-L M6b: the open case's artifact store, and an artifact in it
+let documents: ReturnType<typeof openDocuments> = null;
+const artifactOf = (id: string) => documents?.store.get(id) ?? null;
+
 async function withSession(g: LiveGate, scenario: string, fn: (s: ReturnType<typeof view>, repo: string, spec: LaunchSpec) => Promise<void>): Promise<{ journalPath: string; spec: LaunchSpec; repo: string }> {
-  const host = new LiveHost({ userData: g.userData, configHome: g.home, binary: null });
+  documents = openDocuments(g.userData); // P3-L M6b: no X12 record stands in for a store that did not open
+  const host = new LiveHost({ userData: g.userData, configHome: g.home, binary: null, artifacts: () => documents?.store ?? null });
   const repo = scratchRepo(g, 'e1', (dir) => {
     mkdirSync(join(dir, 'assets'));
     writeFileSync(join(dir, 'assets', '.keep'), '');
@@ -82,6 +88,7 @@ async function withSession(g: LiveGate, scenario: string, fn: (s: ReturnType<typ
     const closed = await closeSession(host, g, { appSessionId: spec.appSessionId, journalPath, scenario, provenance }, (line) => console.log(`   ${line}`));
     if (closed.costUsd !== null) costs.push({ label: scenario, costUsd: closed.costUsd });
     if (closed.exported) exports.push(`${scenario}: ${closed.exported} (from ${journalPath})`);
+    documents?.close();
   }
   return { journalPath, spec, repo };
 }
@@ -120,8 +127,8 @@ describe('the maws tool server, live (E1 M2)', () => {
       expect(delivered.deliverables).toHaveLength(1);
       expect(basename(delivered.deliverables[0]!.path)).toBe('hello.txt');
       expect(delivered.caption).toBe('the greeting');
-      const record = join(g.userData, 'deliverables', spec.appSessionId, `${delivered.deliverables[0]!.id}.json`);
-      expect(JSON.parse(readFileSync(record, 'utf8'))).toMatchObject({ id: delivered.deliverables[0]!.id, kind: 'file', path: join(repo, 'hello.txt'), title: 'hello.txt', caption: 'the greeting' });
+      // P3-L M6b: a File artifact of the session, the file in place (the caption is the row's, not the artifact's)
+      expect(artifactOf(delivered.deliverables[0]!.id)).toMatchObject({ kind: 'file', linkedPath: join(repo, 'hello.txt'), title: 'hello.txt', createdBy: { kind: 'session', appSessionId: spec.appSessionId } });
       const ended = await s.host.waitFor(() => mainTurnsEnded(s.events())[0], 'the turn', TURN_MS);
       console.log(`   reply: ${JSON.stringify(ended.resultText)}`);
     });
@@ -177,22 +184,23 @@ describe('the maws tool server, live (E1 M2)', () => {
     expect(transcript?.text).toContain('[MAWS ask ');
   }, CASE_MS);
 
-  it('4 show_pane: terminal opened, deliverable not in this build, an unknown pane refused', async (ctx) => {
+  // P3-L M6b: the `artifact` pane (E2's `deliverable` until the cutover); the recording this re-records was renamed so
+  it('4 show_pane: terminal opened, artifact not in this build, an unknown pane refused', async (ctx) => {
     const g = liveCase(gate, ctx);
     await withSession(g, 'p1-maws-show-pane', async (s) => {
-      await s.send('Call the maws show_pane tool three times: first with pane "terminal", then with pane "deliverable" and target "none", then with pane "nope". Reply with one line per call: the pane name and the result status or error text.');
+      await s.send('Call the maws show_pane tool three times: first with pane "terminal", then with pane "artifact" and target "none", then with pane "nope". Reply with one line per call: the pane name and the result status or error text.');
       const terminal = await s.host.waitFor(() => s.paneShows()[0], 'the terminal pane request', TURN_MS);
       expect(terminal.pane).toBe('terminal');
       expect(await s.host.call('maws.pane.answer', { appSessionId: s.id, requestId: terminal.requestId, result: { ok: true, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:live', title: 'Terminal' } } })).toEqual({ outcome: 'delivered' });
-      const deliverable = await s.host.waitFor(() => s.paneShows()[1], 'the deliverable pane request', TURN_MS);
-      expect(deliverable).toMatchObject({ pane: 'deliverable', target: 'none' });
-      expect(await s.host.call('maws.pane.answer', { appSessionId: s.id, requestId: deliverable.requestId, result: { ok: false, error: TOOL_ERRORS.paneUnavailable('deliverable') } })).toEqual({ outcome: 'delivered' });
+      const artifact = await s.host.waitFor(() => s.paneShows()[1], 'the artifact pane request', TURN_MS);
+      expect(artifact).toMatchObject({ pane: 'artifact', target: 'none' });
+      expect(await s.host.call('maws.pane.answer', { appSessionId: s.id, requestId: artifact.requestId, result: { ok: false, error: TOOL_ERRORS.paneUnavailable('artifact') } })).toEqual({ outcome: 'delivered' });
       const ended = await s.host.waitFor(() => mainTurnsEnded(s.events())[0], 'the turn', TURN_MS);
       console.log(`   reply: ${JSON.stringify(ended.resultText)}`);
       const shown = ofKind(s.events(), 'maws.pane.shown');
       expect(shown).toMatchObject([
         { pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal' }, error: null },
-        { pane: 'deliverable', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('deliverable') },
+        { pane: 'artifact', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('artifact') },
       ]);
       const nope = ofKind(s.events(), 'tool.use').find((e) => e.toolName === 'mcp__maws__show_pane' && (e.input as { pane?: string }).pane === 'nope');
       expect(nope).toBeDefined();

@@ -5,7 +5,7 @@
 // default permission mode, every permission allowed once through the request card where the person would see it.
 //
 //   S3 (items 5, 6, 10)  1 artifact_create, artifact_screenshot (main's real capture: the PNG's dominant colour is the
-//                          page's) and artifact_publish (P3-A M6: E2's artifact_update retired into it); the row, the Deliverables tool, v2 with its version switch, the
+//                          page's) and artifact_publish (P3-A M6: E2's artifact_update retired into it); the row, the Artifacts tool (P3-L M6b), v2 with its version switch, the
 //                          record. 2 a comment picked through the pick overlay goes to a Side thread, which answers in the
 //                          Side pane and sums itself up in the parent. 3 Send to main steers the parent mid-turn.
 //                          4 `/btw` answers in the Side pane. One app and one parent across the four (serial).
@@ -70,7 +70,6 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { launchDefaults } from '../src/shared/composer/launch-defaults';
-import { deliverableUrl } from '../src/shared/maws/deliverable';
 import { RELAY_URL } from '../src/engine-host/launch';
 import { assertConfigHomeSafe, journalCost, redactJournal } from '../test/live/support/live';
 import { ENGINE_BIN } from '../test/support/engine-pin';
@@ -83,7 +82,7 @@ import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { journalSpend, ptyEngine, terminalEnv, transcriptFile, type PtyEngine } from './support/c12-prerun';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
+import { clearToasts, eventsOf, frameAt, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, pageUrlOf, recordEvents, rowOf, seedTranscripts, show, unfoldWork, viewerOf, type Scene } from './support/maws-tools';
 import { a15Line, a15Reading, budgetOf, budgetRefusal, capUsd, CASE_SITTING, chargeOf, colourDistance, costRecorded, costShown, DEFAULT_CAP_USD, dominantColour, forkOverspend, initPluginsOf, installedEngine, launchReservation, liveOutDir, resumeNoOutput, runRoot, settleAll, settledReservation, sittingLog, SITTING_CAP_USD, spentBySitting, terminalUsdBound, type A15Reading, type Budget, type CaseName, type Charge, type Sitting } from './support/p1-live';
 import { isAlive, processesNaming, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
@@ -537,37 +536,45 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     expect(seen.share).toBeGreaterThan(0.5);
     expect.soft(reply, 'the model names the colour it saw').toMatch(V1.word);
 
-    // the record: one artifact, two copied versions, the sources left where the test wrote them
+    // the artifact: two versions in the store, the sources left where the test wrote them (P3-L M6b: X12's record gone)
     const deliverableId = (JSON.parse((mcpResultOf(rows, created!.requestId)!.content.find((b) => b.type === 'text') as { text: string }).text) as { deliverableId: string }).deliverableId;
-    const record = JSON.parse(readFileSync(join(l.sc.userData, 'deliverables', parent, `${deliverableId}.json`), 'utf8')) as { kind: string; artifactId: string; title: string; versions: { path: string }[] };
-    expect(record).toMatchObject({ kind: 'artifact', artifactId: 'p1-page', title: 'P1 page' });
-    expect(record.versions.map((v) => readFileSync(v.path, 'utf8'))).toEqual([artifactPage(V1.rgb, 1), artifactPage(V2.rgb, 2)]);
+    const { artifact: stored } = value(await invoke(l.page, 'artifacts.get', { artifactId: deliverableId }));
+    expect(stored).toMatchObject({ kind: 'html', handle: 'p1-page', title: 'P1 page' });
+    const record = { versions: await pagesOf(l, deliverableId) };
+    expect(record.versions).toEqual([artifactPage(V1.rgb, 1), artifactPage(V2.rgb, 2)]);
 
     // the rows, the Deliverables tool listing it, the viewer on v2 with the switch, v2 drawn in its own colour
     await expect(l.pane.locator('section.transcript-artifact [data-artifact-heading]')).toHaveText(['Artifact P1 page · v1', 'Updated artifact P1 page · v2']);
     await shoot(l, '5', 'artifact-row');
-    await openDeliverables(sceneOf(l));
+    await openArtifacts(sceneOf(l));
     await rowOf(listOf(sceneOf(l)), { id: deliverableId }).click();
     const viewer = viewerOf(l.panel);
     await expect(viewer).toHaveAttribute('data-version', '2');
     await expect(viewer.getByRole('combobox', { name: 'Version' }).locator('option')).toHaveText(['v1', 'v2 · latest']);
-    const frame = await frameAt(l.page, deliverableUrl(parent, deliverableId, 2));
+    const frame = await frameAt(l.page, await pageUrlOf(l.page, deliverableId, 2));
     await expect(frame.locator('#title')).toHaveText('P1 live page, version 2');
     expect(await frame.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe(`rgb(${V2.rgb.join(', ')})`);
     await shoot(l, '5', 'viewer');
     artifact = { deliverableId };
-    note(`case 1: PASS: record ${deliverableId} (${record.versions.length} versions under ${join(l.sc.userData, 'deliverables', parent)}); rows "Artifact P1 page · v1", "Updated artifact P1 page · v2"; the Deliverables tool lists it; the viewer opens v2 with the switch [v1, v2 · latest] and draws v2's colour`);
+    note(`case 1: PASS: artifact ${deliverableId} (${record.versions.length} versions); rows "Artifact P1 page · v1", "Updated artifact P1 page · v2"; the Artifacts tool lists it; the viewer opens v2 with the switch [v1, v2 · latest] and draws v2's colour`);
   });
+
+  // Each version's page of an html artifact, in the order of their revisions, as the store holds them (P3-L M6b).
+  async function pagesOf(l: Live, artifactId: string): Promise<string[]> {
+    const { versions } = value(await invoke(l.page, 'artifacts.versions', { artifactId }));
+    const ordered = [...versions].sort((a, b) => a.seq - b.seq);
+    return Promise.all(ordered.map(async (v) => readFileSync(value(await invoke(l.page, 'library.content', { artifactId, revision: v.seq })).path, 'utf8')));
+  }
 
   // A pick in the viewer through the pick overlay: the comment card beside the element, on its `artifact-element` anchor
   // (P2-E1: the card keeps the sheet's accessible names, so the form's locators are the sheet's).
   async function pickTitle(l: Live): Promise<Locator> {
     const viewer = viewerOf(l.panel);
-    await l.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Deliverables/ }).click();
-    await expect(viewer).toHaveAttribute('data-deliverable-id', artifact!.deliverableId);
-    const frame = await frameAt(l.page, deliverableUrl(parent, artifact!.deliverableId, Number(await viewer.getAttribute('data-version'))));
-    await viewer.getByRole('button', { name: 'Comment', exact: true }).click();
-    const box = (await viewer.locator('[data-deliverable-frame="html"]').boundingBox())!;
+    await l.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Artifacts/ }).click();
+    await expect(viewer).toHaveAttribute('data-artifact-viewer', artifact!.deliverableId);
+    const frame = await frameAt(l.page, await pageUrlOf(l.page, artifact!.deliverableId, Number(await viewer.getAttribute('data-version'))));
+    await l.panel.locator('[data-editor-header]').getByRole('button', { name: 'Comment', exact: true }).click();
+    const box = (await viewer.locator('[data-artifact-frame="html"]').boundingBox())!;
     await l.page.mouse.move(box.x + 60, box.y + 30);
     await expect(frame.locator('[data-maws-pick-overlay]')).toHaveCount(1);
     await l.page.mouse.click(box.x + 60, box.y + 30);
@@ -592,9 +599,8 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     const card = await pickTitle(l);
     await expect(card.getByRole('radio', { name: /Side thread/ })).toBeChecked();
     await card.getByRole('textbox', { name: 'Comment' }).fill(PROMPTS.thread);
-    const recordFile = join(l.sc.userData, 'deliverables', parent, `${artifact!.deliverableId}.json`);
-    const versionsOf = () => (JSON.parse(readFileSync(recordFile, 'utf8')) as { versions: { path: string }[] }).versions;
-    const versionsBefore = versionsOf().length;
+    const versionsOf = () => pagesOf(l, artifact!.deliverableId); // P3-L M6b: the store's versions, X12's record gone
+    const versionsBefore = (await versionsOf()).length;
     // the thread's allocation charged before it can spend, settled once it has stopped
     charge(note, { key: 's3-fork', case: 's3', label: 'the side thread’s allocation (reserved until its journal settles it)', usd: FORK_ALLOCATION_USD });
     await card.getByRole('button', { name: 'Send' }).click();
@@ -603,7 +609,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     let passed = false; // its checks held; PASS is logged only once its spend has settled within the allocation
     let overspend: string | null = null;
     try {
-      // the card stays and becomes the thread (P2-E1): no Side pane, the Deliverables tab still selected
+      // the card stays and becomes the thread (P2-E1): no Side pane, the Artifacts tab still selected
       await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 60_000 });
       await expect.poll(async () => (child = await sideThreadOf(l)), { timeout: 60_000 }).not.toBe('');
       l.started.push({ label: 'side thread', id: child });
@@ -613,7 +619,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       await expect(card.locator(`[data-card-thread="${child}"]`), 'the card draws the thread').toBeVisible();
       await expect(card.locator('[data-chip="anchor"]').first(), 'the comment under its anchor chip').toHaveAttribute('data-anchor-kind', 'artifact-element');
       await expect(l.panel.locator(`[data-side-thread-view="${child}"]`), 'no Side pane on the thread').toHaveCount(0);
-      await expect(l.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Deliverables/ })).toHaveAttribute('aria-selected', 'true');
+      await expect(l.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Artifacts/ })).toHaveAttribute('aria-selected', 'true');
 
       const row = l.page.locator(`[data-region="main"] [data-side-thread="${child}"]`);
       const allowed: string[] = [];
@@ -633,8 +639,8 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       const update = mcpCalls(threadRows).find((c) => c.name === 'artifact_publish');
       const answer = update ? mcpResultOf(threadRows, update.requestId) : null;
       const updated = answer ? (JSON.parse((answer.content.find((b) => b.type === 'text') as { text: string }).text) as Record<string, unknown>) : null;
-      const versions = versionsOf();
-      const latest = versions.length > 0 ? readFileSync(versions.at(-1)!.path, 'utf8') : '';
+      const versions = await versionsOf();
+      const latest = versions.at(-1) ?? '';
       const viewer = viewerOf(l.panel);
       note(`case 2: thread ${child} (lineage ${JSON.stringify({ kind: record?.lineage?.kind, openedBy: record?.lineage?.openedBy, anchor: { kind: anchor?.kind, locator: anchor?.locator, label: anchor?.label } })}); its maws calls ${JSON.stringify(mcpCalls(threadRows).map((c) => [c.name, c.args]))}; artifact_publish answered ${JSON.stringify(updated)}; the parent's record ${versionsBefore} → ${versions.length} versions, the latest's title ${JSON.stringify(/<h1[^>]*>([^<]*)</.exec(latest)?.[1] ?? null)}; deliverables under the thread: ${existsSync(join(l.sc.userData, 'deliverables', child)) ? 'SOME' : 'none'}; the viewer at v${await viewer.getAttribute('data-version')}; its reply ${JSON.stringify(reply)}; permissions allowed in the card ${JSON.stringify(allowed)}; the parent's row ${JSON.stringify(summary)}; the parent's turns ${turnsBefore} → ${turnsAfter}, its written prompts ${usersBefore} → ${usersAfter}; the fork inherits the parent's --max-budget-usd (Q12), within the run's cap by the test's US$${FORK_ALLOCATION_USD.toFixed(2)} allocation`);
       expect(reply).toContain('ANCHORED');

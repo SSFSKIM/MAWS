@@ -14,7 +14,6 @@ import { ArtifactVersionSchema } from '../../artifacts/version';
 import { AppSessionIdSchema } from '../../graph/ids';
 import { ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
 import type { IpcError } from '../errors';
-import { DELIVERABLE_CONSOLE_MESSAGE_MAX } from './deliverables';
 import type { CommandSpec } from './common';
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
@@ -107,15 +106,16 @@ const ArtifactAnswer = z.strictObject({ artifact: ArtifactRowSchema });
 // The largest side of an exported picture, in CSS px (M7): within what an offscreen window renders.
 export const EXPORT_SIZE_MAX = 8_192;
 
-// An error or a warning an artifact's frame logged in an app window (M7; `deliverables.console`'s twin for the
-// `maws-artifact:` scheme), main's, cut and rate-bounded. `revision` null: the frame showed the live content.
+// An error or a warning an artifact's frame logged in an app window (M7; E2's `deliverables.console` until P3-L's
+// cutover), main's, cut and rate-bounded. `revision` null: the frame showed the live content.
+export const ARTIFACT_CONSOLE_MESSAGE_MAX = 2000; // main cuts a frame's console message and its source to this many characters
 export const ArtifactConsoleSchema = z.strictObject({
   artifactId: Id,
   revision: Seq.nullable(),
   level: z.enum(['error', 'warning']),
-  message: z.string().max(DELIVERABLE_CONSOLE_MESSAGE_MAX),
+  message: z.string().max(ARTIFACT_CONSOLE_MESSAGE_MAX),
   line: z.number().int().nullable(),
-  source: z.string().max(DELIVERABLE_CONSOLE_MESSAGE_MAX).nullable(),
+  source: z.string().max(ARTIFACT_CONSOLE_MESSAGE_MAX).nullable(),
 });
 export type ArtifactConsole = z.infer<typeof ArtifactConsoleSchema>;
 

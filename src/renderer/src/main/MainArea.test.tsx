@@ -705,19 +705,6 @@ describe('the settings tab (C11; W6: the Accounts tab retired into the usage pop
   });
 });
 
-// E2 (X14): a deliverable tab renders the slot E2 registers (its fallback until then), titled Deliverable until the
-// deliverables store holds the record.
-describe('the deliverable tab (E2)', () => {
-  it('renders through its slot', () => {
-    render(<Shell />);
-    act(() => useLayout.getState().openTab({ kind: 'deliverable', appSessionId: 'app-a' as AppSessionId, deliverableId: 'd-fallback' }));
-    expect(within(main()).getByText('d-fallback')).toBeTruthy();
-    expect(tabNames()).toContain('Deliverable');
-    act(() => registerSlot('deliverableTab', ({ tab }) => <p>viewer of {tab.deliverableId}</p>));
-    expect(within(main()).getByText('viewer of d-fallback')).toBeTruthy();
-  });
-});
-
 // A transcript slot holding the elements a real pane may contain: a plain textarea, a terminal and a composer.
 function registerSlotForTest() {
   registerSlot('transcript', () => (
