@@ -43,6 +43,7 @@ vi.mock('./windows', () => ({ appWindows: () => fake.windows })); // E2: the app
 vi.mock('./browser', () => ({ startBrowser: () => ({ stop: vi.fn(), partitions: {} /* E4b */ }) })); // E4a: the in-app browser's main side
 vi.mock('./artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn() }) })); // P3-A: the artifact store's main side
 vi.mock('./design-systems/export', () => ({ registerDesignSystemExporters: vi.fn() })); // P3-D: the design system's exporter, registered into the artifacts' registry
+vi.mock('./presentations/export', () => ({ registerPresentationExporters: vi.fn() })); // P3-C M9: the presentation's exporters, registered into the artifacts' registry
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
 vi.mock('./ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: vi.fn() /* C3 */, interceptCommand: vi.fn(), CommandFailure: Error /* C11 */ }));
 // C3 start: main's attention service and its store, started from index.ts, are replaced like the other wired modules

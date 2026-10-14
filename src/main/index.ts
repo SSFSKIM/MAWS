@@ -124,6 +124,8 @@ import { fileAdmission } from './library/admission'; // M6b
 // P3-L end
 // P3-D start
 import { registerDesignSystemExporters } from './design-systems/export';
+import { registerPresentationExporters } from './presentations/export'; // P3-C M9
+import { defaultsOf } from './artifacts/defaults'; // P3-C M9: the chain's links for a deck's export
 // P3-D end
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
@@ -578,6 +580,7 @@ void startWithProfileLock(app, () => {
   });
   shutdown.add('artifacts', artifacts.stop);
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
+  registerPresentationExporters(artifacts.exporters, { call: (name, input) => hosts.dispatch('engine-host', name, input) as never, defaults: () => defaultsOf(settings.state().settings) ?? { owner: null, spaces: {} }, env: process.env }); // P3-C M9: `presentation` as html, pdf, png, pptx, claude
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
   // connection, an entry per change) and library.* answered from it, before the first window loads. Its stop runs in the
   // same will-quit pass as the index's close, so no sync step runs between them, and after it applies nothing.

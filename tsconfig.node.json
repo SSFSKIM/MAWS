@@ -55,8 +55,12 @@
     "src/artifacts/design-system/scope-style.ts",
     "src/artifacts/design-system/page/**/*",
     "src/artifacts/design-system/**/*.test.tsx",
-    // P3-C M4: the slide canvas and the deck editor (DOM and React) and their DOM suites, typechecked by tsconfig.web.json
-    "src/artifacts/slides/canvas/**/*",
+    // P3-C M4: the slide canvas and the deck editor (DOM and React) and their DOM suites, typechecked by tsconfig.web.json;
+    // M9: the canvas's stylesheet (`canvas/css.ts`, a string) stays in, since the exporters in main write it
+    "src/artifacts/slides/canvas/slide-canvas.ts",
+    "src/artifacts/slides/canvas/elements.ts",
+    "src/artifacts/slides/canvas/fit.ts",
+    "src/artifacts/slides/canvas/index.ts",
     "src/artifacts/slides/editor/**/*",
     "src/artifacts/**/*.dom.test.tsx"
   ]
