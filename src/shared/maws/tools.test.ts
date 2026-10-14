@@ -14,6 +14,9 @@ import {
   ArtifactScreenshotResultSchema,
   ArtifactUpdateInputSchema,
   ArtifactUpdateResultSchema,
+  ASK_NOTE_MAX,
+  ASK_PREVIEW_MAX,
+  AskAnswerSchema,
   AskInputSchema,
   AskResultSchema,
   MAWS_SERVER_NAME,
@@ -49,7 +52,7 @@ describe('X9: the maws server and its seven tools', () => {
       'Deliver files to the user inside MAWS; without this tool, write the file and tell the user its path. Each delivered file becomes a row in the MAWS transcript with your caption and buttons to open it or reveal it in Finder; use it when you have produced something the user should look at (a PDF, an HTML page, an image, a document). Paths may be absolute or relative to the working directory and must name existing files. Returns the deliverable ids MAWS recorded.',
     );
     expect(MAWS_TOOLS.ask.description).toBe(
-      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), or "repository" (one of the user\'s MAWS projects). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile.',
+      'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), or "repository" (one of the user\'s MAWS projects). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile. In a subagent the call always waits and returns the answers, as with blocking true.',
     );
     expect(MAWS_TOOLS.show_pane.description).toBe(
       'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "deliverable", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), a deliverable id for deliverable, a URL for browser. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
@@ -112,6 +115,33 @@ describe('X9 inputs: strict, bounded, never defaulted', () => {
     expect(AskInputSchema.safeParse({ questions: [{ question: '', modality: 'text' }] }).success).toBe(false);
     // validators never default: what was not sent stays absent
     expect(AskInputSchema.parse({ questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'a' }] }] })).toEqual({ questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'a' }] }] });
+  });
+
+  // P2-C3 (Decision Log 34)
+  it('ask: an option carries a markdown preview up to ASK_PREVIEW_MAX characters, on a single-select question only', () => {
+    const parse = (options: Record<string, unknown>[], extra: Record<string, unknown> = {}) => parseToolArguments('ask', { questions: [{ question: 'Q?', modality: 'choice', options, ...extra }] });
+    expect(parse([{ label: 'A', preview: '```\n+--+\n|A |\n+--+\n```' }, { label: 'B' }]).ok).toBe(true);
+    expect(parse([{ label: 'A', preview: 'x'.repeat(ASK_PREVIEW_MAX) }]).ok).toBe(true);
+    expect(parse([{ label: 'A', preview: 'x'.repeat(ASK_PREVIEW_MAX + 1) }]).ok).toBe(false);
+    expect(parse([{ label: 'A', preview: '' }]).ok).toBe(false);
+    expect(parse([{ label: 'A', preview: 'a' }], { multi: false }).ok).toBe(true);
+    const multi = parse([{ label: 'A' }, { label: 'B', preview: 'b' }], { multi: true });
+    expect(multi).toEqual({ ok: false, error: 'ask: invalid arguments: questions.0.options.1.preview: preview is for single-select questions only' });
+    expect(parse([{ label: 'A' }, { label: 'B' }], { multi: true }).ok).toBe(true);
+    // the model reads the rule where it writes the field
+    const option = (mawsToolList().find((t) => t.name === 'ask')!.inputSchema as { properties: { questions: { items: { properties: { options: { items: { properties: { preview: { description: string; maxLength: number } } } } } } } } }).properties.questions.items.properties.options.items.properties.preview;
+    expect(option.maxLength).toBe(ASK_PREVIEW_MAX);
+    expect(option.description).toMatch(/Single-select questions only: previews on a multi-select question are refused\.$/);
+  });
+
+  it('ask: an answer carries a note of 1 to ASK_NOTE_MAX characters, whatever its status', () => {
+    const answer = (extra: Record<string, unknown>) => AskAnswerSchema.safeParse({ id: 'q1', question: 'Q?', ...extra }).success;
+    expect(answer({ status: 'answered', value: ['A'], note: 'darker, please' })).toBe(true);
+    expect(answer({ status: 'skipped', note: 'ask me tomorrow' })).toBe(true);
+    expect(answer({ status: 'decide_for_me', note: 'x'.repeat(ASK_NOTE_MAX) })).toBe(true);
+    expect(answer({ status: 'decide_for_me', note: 'x'.repeat(ASK_NOTE_MAX + 1) })).toBe(false);
+    expect(answer({ status: 'answered', value: ['A'], note: '' })).toBe(false);
+    expect(answer({ status: 'answered', value: ['A'], note: 3 })).toBe(false);
   });
 
   it('show_pane takes a known pane, a target up to 4096 characters and a line only for a file', () => {
