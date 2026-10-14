@@ -44,6 +44,7 @@ What does not change: the engine and the wire (D-1); the app's own theme (`src/r
     - Gates at 49ff2c43: typecheck and lint clean; full unit suite 12900 passed, 1 skipped, and 1 failed (the known `live-budget` timeout flake at load 56, which passes alone); e2e design-systems 5/5, settings 10/10, panel 26/26, library 2/2, artifacts 4/4, tools 8/8.
     - Gates at 65f7647c: the design-system, main and engine-host design-system tests 260/260 and 276/276; typecheck and lint clean; `e2e:design-systems` 5/5.
 - [x] (2026-10-13 PDT) Whole-branch review: two `reviewer-high` reviews by area at ba7c2aa2, eight findings, and fix wave 15152e2a..e81614c4 (Decision Log 31). Both re-reviews were clean. Then master and L's 3e99c066 were merged (47573bcf), the final gates run, Outcomes written, and the hand-back made.
+- [x] (2026-10-14 PDT) Final re-merge of master cf33edc6 (Decision Log 33): the follow-up and its fix wave were reviewed clean. Gates at c079f39d: typecheck and lint clean; full unit suite at six workers 12995 passed, 1 skipped, 0 failed; e2e design-systems 6/6, settings 10/10, panel 26/26, library 5/5, artifacts 4/4 (A's perf case skipped), tools 10/10. Gates at d3ece4f4: typecheck and lint clean; the design-system, main and renderer artifacts tests 287/287; e2e design-systems 6/6, artifacts 4/4, library 5/5.
 
 ## Terms
 
@@ -656,6 +657,14 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
       - the renderer's viewers and library pass 127/127;
       - the e2e groups pass: design-systems 5/5, settings 10/10, panel 26/26, library 4/4, artifacts 4/4, tools 8/8.
     - **Lineage.** Through the spec's Decision Log 49, §4.3, §4.6, §4.10 and §5 P3-D are unchanged since the pin (dda3d0b4 → fc1d12d5). Entries 39, 42, 43, 44 and 47 are this child's rulings, all folded here. The pin holds.
+33. 2026-10-14 (the final re-merge of master cf33edc6, which carries A at 14d350c5, L at bcea8eaa, P2-C2 and P2-C3; merged at ae7e7d14, with follow-up commits 5f0733ef..c079f39d and fix wave 33dedb5d..d3ece4f4; the follow-up and its fix wave were reviewed clean).
+    - **A's required members.** `ArtifactHost` now requires `open(id, {doc})`, `attributions(…, {doc})`, `acceptSuggestion` and `rejectSuggestion`. These were taken with P3-C's resolution (e4c3d2fe).
+    - **The Claude export carries every asset `ExportContext.assets.list()` reports.** The reference scan of entry 30 is gone, and an asset the listing advertises but that cannot be read fails the export, naming it.
+    - **The mirror writes the system's assets**, fonts included, at `<slug>/assets/<name>` through L's `readAsset`.
+    - **The `SETTINGS_DEFAULTS_V13` shim is deleted**, A's M8 cleanup.
+    - **The spec's Decision Log 59** amends A's `ArtifactHost.assetUrl(artifactId, ref, revision?)` in place, marked P3-D, in `src/artifacts/host.ts`. The renderer host builds `revision ?? 'live'`. A pinned version's view asks the host for its assets at the version's revision, so nothing under `src/artifacts/` knows the URL scheme any more. A deleted system's retained version keeps its fonts, because A's Decision Log 46 serves them only at a named revision. `e2e:design-systems` covers that case.
+    - **No exhaustive switch** of D's covers `Carry`, so A's new `accept` and `reject` kinds touched nothing. D numbers no index migration; settings 14 stays D's. Nothing of D's relies on `artifact_read`'s generic `json`, which P3-C omits for kinds that register `readFiles`.
+    - **The page** registers through master's editor registry with no change.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
@@ -687,11 +696,11 @@ A machine-made system, the agent's "Harbor Tutoring Design System" from a CSS-va
 
 **Listed for P3-F, not faked here:**
 - the document restyle e2e on B's editor, and the deck restyle on C's (a fixture stands in for both);
-- an asset pinned after a system's deletion, once A's M9 keeps a deleted system's assets reachable;
 - the law edited in B's document editor (format 2, Decision Log 3);
 - the deck check against a system's hard don'ts, once C registers its element stream.
 
 **Retrospective.**
+- **The final re-merge (Decision Log 33)** closed three gaps the landing had carried: the export's asset completeness, the mirror's fonts, and a deleted system's assets for a retained version. It moved asset URLs behind `ArtifactHost` (the spec's Decision Log 59).
 - The milestone reviews caught real defects in every milestone, and most were cross-replica or cross-lifetime cases. A token and a descendant created on two replicas, an inherited `$type` lost on rehome, a shared style owned by the first replica, unacknowledged edits dropped on close: none of these shows on one replica in one tab. Writing the second replica or the second showing into the first test of each milestone would have saved most fix waves.
 - Splitting the whole-branch review by area (portable core, integration) against a synthetic base tree (master plus A plus L) kept the siblings' code out of the package. It found eight cross-milestone defects that the per-milestone reviews had missed.
 - One review round measured stale code (M3's second re-review). After that, every reviewer brief named the checkout head and required line numbers quoted from it.
