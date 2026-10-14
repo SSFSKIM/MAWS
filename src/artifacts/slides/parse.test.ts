@@ -147,13 +147,14 @@ describe('held slides: a structural failure holds the slide with its reason, nev
       'an escaped url()': [svg('<path style="fill:u\\72l(https://x.test/a)" d="M0 0"/>'), /referencing url\(https:\/\/x\.test\/a\)/],
       'an escaped url() in a <style>': [svg('<style>.a{fill:\\75 rl(https://x.test/a)}</style>'), /referencing url\(https/],
       'an escaped @import': [svg('<style>@\\69mport "x.css";</style>'), /@import/],
-      'an image function': [svg('<style>.a{fill:image-set("x.png" 1x)}</style>'), /image function/],
+      'an image function': [svg('<style>.a{fill:image-set("x.png" 1x)}</style>'), /with image-set\(\)/],
+      'a line continuation in a quoted url (fix wave 3)': [svg('<style>.a{fill:url("https://example.com/\\\na.svg#g")}</style>'), /referencing url\(https:\/\/example\.com\/a\.svg#g\)/],
       'nested handler': [svg('<g><g><circle onclick="x()" r="1"/></g></g>'), /event handler \(onclick\)/],
       foreignObject: [svg('<foreignObject><p>x</p></foreignObject>'), /holding <foreignobject>/i],
       script: [svg('<script>alert(1)</script>'), /holding <script>/],
     };
     for (const [name, [html, reason]] of Object.entries(held)) expect(reasons(html), name).toMatch(reason);
-    const fine = svg('<defs><linearGradient id="g"><stop offset="0" stop-color="#000"/></linearGradient><marker id="h"><path d="M0 0"/></marker></defs><style>.a{fill:url(#g)}</style><use href="#h" xlink:href="#h"><set attributeName="href" to="#g" begin="1s"/><animate attributeName="xlink:href" values="#g; #h" dur="2s"/></use><path class="a" fill="u\\72l(#g)" marker-end="url( \'#h\' )" d="M0 0"/>', ' aria-label="A chart"');
+    const fine = svg('<defs><linearGradient id="g"><stop offset="0" stop-color="#000"/></linearGradient><marker id="h"><path d="M0 0"/></marker></defs><style>.a{fill:url(#g)} .b{stroke:url("#g")} .c{fill:url(\'#\\\nh\')}</style><use href="#h" xlink:href="#h"><set attributeName="href" to="#g" begin="1s"/><animate attributeName="xlink:href" values="#g; #h" dur="2s"/></use><path class="a" fill="u\\72l(#g)" marker-end="url( \'#h\' )" d="M0 0"/>', ' aria-label="A chart"');
     expect(reasons(fine)).toBeNull();
     expect(load(fine).slide.children[0]!.attrs).toEqual({ 'aria-label': 'A chart', width: '10', height: '10' });
   });

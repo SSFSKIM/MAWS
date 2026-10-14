@@ -4,6 +4,7 @@
 // fails structurally (a limit, a tag out of place, an image URL) is held with its reasons, never trimmed. The one HTML
 // front end is html.ts (parse5), the same in the host and the renderer.
 import { parseStyle, spanStyle, isAssetRef, type StyleDiagnostic, type StyleSite } from './css';
+import { cssRefs } from './css-refs';
 import { outerMarkup, parseHtml, type RawElement, type RawNode } from './html';
 import {
   isPinned, LIST_TAGS, MARK_ORDER, TEXT_TAGS,
@@ -532,24 +533,13 @@ const REF_ATTRS = new Set(['href', 'xlink:href', 'src']);
 const SCRIPT_URL = /^\s*javascript\s*:/i;
 const ANIMATION_VALUES = new Set(['to', 'from', 'by', 'values']);
 
-/** CSS text as the CSS tokenizer reads it: escapes decoded (`u\72l(` is `url(`), comments removed. */
-function cssDecoded(css: string): string {
-  return css
-    .replace(/\\(?:([0-9a-f]{1,6})[ \t\n\r\f]?|([^\n\r\f0-9a-f]))/gi, (_, hex: string | undefined, ch: string | undefined) => {
-      if (hex === undefined) return ch!;
-      const cp = parseInt(hex, 16);
-      return cp === 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) ? '�' : String.fromCodePoint(cp);
-    })
-    .replace(/\/\*[\s\S]*?\*\//g, '');
-}
-
-/** References in CSS text (`url()`, `@import`, an image function): a reason when anything but a local `url(#id)` is. */
-function cssRefProblem(raw: string): string | null {
-  const css = cssDecoded(raw);
-  if (/@import/i.test(css)) return 'an <svg> style with @import';
-  if (/(?:^|[^\w-])(?:-webkit-)?(?:image-set|image|src)\(/i.test(css)) return 'an <svg> style with an image function (only a local url(#id))';
-  for (const m of css.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)) {
-    if (!LOCAL_REF.test(m[2]!)) return `an <svg> referencing url(${m[2]!.slice(0, 40)}) (only a local #id)`;
+/** The references CSS text makes, as CSS tokenizes it (css-refs.ts): a reason for the first that is not a local `#id`. */
+function cssRefProblem(css: string): string | null {
+  for (const ref of cssRefs(css)) {
+    if (ref.kind === 'import') return 'an <svg> style with @import';
+    if (ref.kind === 'image-function') return `an <svg> style with ${ref.name}() (only a local url(#id))`;
+    if (ref.kind === 'bad-url') return 'an <svg> style with a url() CSS cannot read (only a local url(#id))';
+    if (!LOCAL_REF.test(ref.value)) return `an <svg> referencing url(${ref.value.slice(0, 40)}) (only a local #id)`;
   }
   return null;
 }
