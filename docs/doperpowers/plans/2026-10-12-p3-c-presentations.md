@@ -171,6 +171,7 @@ Registered from main through A's registry by `registerPresentationExporters(regi
 ### Constraints binding every milestone
 
 - `src/artifacts/**` stays portable (A's lint rule); Yjs only through `src/artifacts/yjs/`; one `@y/y` and one `prosemirror-model` (A's overrides; the check that one copy resolves stays green).
+- parse5 is pinned exactly (7.3.0): the loader's document-markup check subclasses its internal `Parser` and relies on `onStartTag`, `onEndTag`, `onDoctype` and `openElements.stackTop` (Decision Log 9b); a re-pin keeps them, the regressions failing otherwise.
 - Every writer of the model goes through `model.ts` and `publish.ts`; the loader and the serializer are the only HTML front end and back end; the editor never writes a value the loader would not accept (a property set through the inspector is validated by `css.ts` first).
 - One gesture is one transaction; the editor's origin is set on every local write; only the host writes repairs.
 - Light theme default; components use the app's tokens; the slide uses `--ds-*` with fallbacks; author colours are B's `--author-1..8` (defined by B; until B is on the base, read with fallbacks).
@@ -256,7 +257,7 @@ Per milestone (W = the worktree):
 
 ### H3. Tracker rows (proposed at landing)
 
-Deck suggestions (H2-2); the LibreOffice compare where `soffice` is absent; `embedded` PPTX fonts if peeled; Google Fonts faces offline (H2-6); native PPTX charts (the dialect has no chart element; svg charts export as pictures); magic-move as a PowerPoint morph; any bound exceeded only above load 10.
+Deck suggestions (H2-2); the loader's dependence on parse5 7.3.0's internal `Parser` hooks (`onStartTag`, `onEndTag`, `onDoctype`, `openElements.stackTop`) to be revisited at any parse5 re-pin; the LibreOffice compare where `soffice` is absent; `embedded` PPTX fonts if peeled; Google Fonts faces offline (H2-6); native PPTX charts (the dialect has no chart element; svg charts export as pictures); magic-move as a PowerPoint morph; any bound exceeded only above load 10.
 
 ## Surprises & Discoveries
 
