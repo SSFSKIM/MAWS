@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
+import { commands, events, LAYOUT_DEFAULTS, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, StoredMainSchema, StoredRegionsSchema, TabRefSchema, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema
 
 describe('layout value shapes', () => {
   it('validates its own defaults', () => {
@@ -103,6 +103,27 @@ describe('layout value shapes', () => {
       const across = v2([{ tabs: [deliverable()], activeTabId: `deliverable:App-1:${ID}` }, { tabs: [artifact(), session(1)], activeTabId: 'session:a1' }]);
       const read = StoredMainSchema.parse(across) as { sets: Record<string, { panes: { tabs: { id: string }[] }[] }> };
       expect(read.sets['proj-x']!.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id))).toEqual([`artifact:${ID}`, 'session:a1']);
+    });
+  });
+
+  // P3-L (whole-branch review): E2's `deliverables` panel tool is the `artifacts` tool from the cutover; a stored panel
+  // tab of it reads as an Artifacts tab, its instance id, place, pin and selection kept
+  describe('a stored panel tab of the Deliverables tool (before P3-L’s cutover)', () => {
+    const ref = (id: string, toolId: string, pinned = false) => ({ id, toolId, pinned });
+
+    it('reads as an Artifacts tab in the pins and in a session’s tabs, its id, place, pin and selection kept', () => {
+      expect(PanelPinnedSchema.parse([ref('t1', 'terminal', true), ref('d1', 'deliverables', true)])).toEqual([ref('t1', 'terminal', true), ref('d1', 'artifacts', true)]);
+      expect(PanelSessionStateSchema.parse({ tabs: [ref('d1', 'deliverables'), ref('t1', 'terminal')], activeTabId: 'd1' })).toEqual({ tabs: [ref('d1', 'artifacts'), ref('t1', 'terminal')], activeTabId: 'd1' });
+    });
+
+    it('keeps one Artifacts tab when a list holds both, the selection following the one kept', () => {
+      expect(PanelPinnedSchema.parse([ref('a1', 'artifacts', true), ref('d1', 'deliverables', true)])).toEqual([ref('a1', 'artifacts', true)]);
+      expect(PanelSessionStateSchema.parse({ tabs: [ref('t1', 'terminal'), ref('d1', 'deliverables'), ref('a1', 'artifacts')], activeTabId: 'd1' })).toEqual({ tabs: [ref('t1', 'terminal'), ref('a1', 'artifacts')], activeTabId: 'a1' });
+    });
+
+    it('still rejects what the panel shapes reject', () => {
+      expect(PanelPinnedSchema.safeParse([{ id: 'd1', toolId: 'deliverables' }]).success).toBe(false);
+      expect(PanelSessionStateSchema.safeParse({ tabs: [ref('d1', 'deliverables')] }).success).toBe(false);
     });
   });
 

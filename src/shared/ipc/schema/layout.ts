@@ -247,8 +247,32 @@ function convertDeliverableTabs(value: unknown): unknown {
 }
 
 export const StoredMainSchema = z.preprocess((value) => dropUnknownTabs(convertDeliverableTabs(value)), z.union([LayoutMainSchema, LayoutMainV1Schema]));
-export const PanelPinnedSchema = z.array(PanelTabRefSchema);                                                      // key `panel.pinned`: the global pins (D-10)
-export const PanelSessionStateSchema = z.strictObject({ tabs: z.array(PanelTabRefSchema), activeTabId: z.string().nullable() });   // key `panel.<appSessionId>`
+// P3-L (whole-branch review; Decision Log 10): E2's `deliverables` panel tool is the `artifacts` tool from the cutover. A
+// stored tab of it reads as an Artifacts tab with its own instance id, place and pin, so the selection still names it;
+// one in a list that already holds an Artifacts tab (a single-instance tool) goes, the selection following the kept one.
+const isPanelRef = (tab: unknown): tab is { id: string; toolId: string } => isRecord(tab) && typeof tab.id === 'string' && typeof tab.toolId === 'string';
+function convertDeliverablesRefs(tabs: unknown): { tabs: unknown; renamed: Map<string, string> } {
+  const renamed = new Map<string, string>(); // a dropped tab's id to the kept Artifacts tab's
+  if (!Array.isArray(tabs)) return { tabs, renamed };
+  const kept = (tabs as unknown[]).find((tab) => isPanelRef(tab) && tab.toolId === 'artifacts') as { id: string } | undefined;
+  let keptId = kept?.id;
+  const next = (tabs as unknown[]).flatMap((tab) => {
+    if (!isPanelRef(tab) || tab.toolId !== 'deliverables') return [tab];
+    if (keptId !== undefined) {
+      renamed.set(tab.id, keptId);
+      return [];
+    }
+    keptId = tab.id;
+    return [{ ...tab, toolId: 'artifacts' }];
+  });
+  return { tabs: next, renamed };
+}
+export const PanelPinnedSchema = z.preprocess((value) => convertDeliverablesRefs(value).tabs, z.array(PanelTabRefSchema));   // key `panel.pinned`: the global pins (D-10)
+export const PanelSessionStateSchema = z.preprocess((value) => {
+  if (!isRecord(value)) return value;
+  const { tabs, renamed } = convertDeliverablesRefs(value.tabs);
+  return { ...value, tabs, ...(typeof value.activeTabId === 'string' && renamed.has(value.activeTabId) ? { activeTabId: renamed.get(value.activeTabId) } : {}) };
+}, z.strictObject({ tabs: z.array(PanelTabRefSchema), activeTabId: z.string().nullable() }));   // key `panel.<appSessionId>`
 export type PanelSessionState = z.infer<typeof PanelSessionStateSchema>;
 export const WindowStateSchema = z.strictObject({ bounds: z.strictObject({ x: z.number().int(), y: z.number().int(), width: z.number().int(), height: z.number().int() }),
                                                   maximized: z.boolean(), fullscreen: z.boolean() });              // key `window.main`, main only, never crosses IPC
