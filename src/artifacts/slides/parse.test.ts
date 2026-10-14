@@ -86,7 +86,7 @@ describe('held slides: a structural failure holds the slide with its reason, nev
       'aside not last': /<aside> \(the notes\) is not the section’s last child/,
       'nested list': /a nested list/,
       'embed inside a div': /<x-embed> is not a direct child of the section/,
-      'svg with script': /<svg> with script/,
+      'svg with script': /<svg> holding <script>/,
       colspan: /colspan on a table cell/,
       '16 nested divs': /more than 15 nested <div>s/,
       '201 elements': /201 elements \(over 200\)/,
@@ -127,6 +127,58 @@ describe('held slides: a structural failure holds the slide with its reason, nev
     }
     const empty = load('<section id="a"><img src="" alt="Placeholder"></section>');
     expect(empty.slide.children[0]!.attrs.src).toBeUndefined();
+  });
+
+  it('holds an svg whose root or any descendant holds script, a handler or any reference but a local #id (fix wave 1)', () => {
+    const svg = (inner: string, root = '') => `<section id="a"><svg${root} width="10" height="10">${inner}</svg></section>`;
+    const held: Record<string, [string, RegExp]> = {
+      'root onload': [svg('<path d="M0 0"/>', ' onload="alert(1)"'), /event handler \(onload\)/],
+      'root reference': [svg('', ' href="x.svg"'), /referencing "x.svg"/],
+      'image href': [svg('<image href="other.svg"/>'), /referencing "other.svg"/],
+      'image xlink:href': [svg('<image xlink:href="data:image/png;base64,AA"/>'), /referencing "data:image/],
+      'use another file': [svg('<use href="sprites.svg#a"/>'), /referencing "sprites.svg#a"/],
+      'url() in an attribute': [svg('<path fill="url(other.svg#g)" d="M0 0"/>'), /referencing url\(other\.svg#g\)/],
+      'url() in a style': [svg('<path style="fill:url(\'https://x.test/a\')" d="M0 0"/>'), /referencing url\(https:\/\/x\.test\/a\)/],
+      'url() in a <style>': [svg('<style>.a{fill:url(https://x.test/a)}</style>'), /referencing url\(https/],
+      '@import': [svg('<style>@import "x.css";</style>'), /@import/],
+      'a script URL': [svg('<a href="javascript:alert(1)"><path d="M0 0"/></a>'), /script URL \(href\)/],
+      'animated reference': [svg('<a href="#x"><set attributeName="href" to="#y"/></a>'), /animating a reference/],
+      'nested handler': [svg('<g><g><circle onclick="x()" r="1"/></g></g>'), /event handler \(onclick\)/],
+      foreignObject: [svg('<foreignObject><p>x</p></foreignObject>'), /holding <foreignobject>/i],
+      script: [svg('<script>alert(1)</script>'), /holding <script>/],
+    };
+    for (const [name, [html, reason]] of Object.entries(held)) expect(reasons(html), name).toMatch(reason);
+    const fine = svg('<defs><linearGradient id="g"><stop offset="0" stop-color="#000"/></linearGradient><marker id="h"><path d="M0 0"/></marker></defs><style>.a{fill:url(#g)}</style><use href="#h" xlink:href="#h"/><path class="a" fill="url(#g)" marker-end="url( \'#h\' )" d="M0 0"/>', ' aria-label="A chart"');
+    expect(reasons(fine)).toBeNull();
+    expect(load(fine).slide.children[0]!.attrs).toEqual({ 'aria-label': 'A chart', width: '10', height: '10' });
+  });
+
+  it('holds an x-shape kind or x-icon name it does not know, or none (Claude’s build errors); a cosmetic enum is dropped (fix wave 1)', () => {
+    expect(reasons('<section id="a"><x-shape kind="star"></x-shape></section>')).toBe('kind="star" on <x-shape> is not one of rect, rounded, ellipse, diamond, arrow-right, arrow-left, arrow-up, arrow-down, line');
+    expect(reasons('<section id="a"><x-shape></x-shape></section>')).toMatch(/an <x-shape> without a kind/);
+    expect(reasons('<section id="a"><x-icon name="Rocket"></x-icon></section>')).toMatch(/^name="Rocket" on <x-icon> is not one of Activity/);
+    expect(reasons('<section id="a"><x-icon></x-icon></section>')).toMatch(/an <x-icon> without a name/);
+    const cosmetic = load('<section id="a"><x-connector id="c" x1="0" y1="0" x2="1" y2="1" head="sideways"></x-connector><p id="p" data-fit="squash">x</p></section>');
+    expect(cosmetic.slide.children.map((c) => c.attrs.head ?? c.attrs['data-fit'])).toEqual([undefined, undefined]);
+    expect(warnings(cosmetic).map((d) => `${d.element} ${d.property}`)).toEqual(['c head', 'p data-fit']);
+  });
+
+  it('holds document markup around or inside the section, before parse5 repairs it away (fix wave 1)', () => {
+    const section = '<section id="a"><p>x</p></section>';
+    const held: Record<string, string> = {
+      'html and body': `<html><body>${section}</body></html>`,
+      'a head': `<head><title>Deck</title><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=A"></head>${section}`,
+      'body alone': `<body>${section}</body>`,
+      'a doctype': `<!DOCTYPE html>${section}`,
+      'a style': `<style>p{color:red}</style>${section}`,
+      'a meta inside': '<section id="a"><meta charset="utf-8"><p>x</p></section>',
+      'a script inside': '<section id="a"><script>alert(1)</script></section>',
+    };
+    for (const [name, html] of Object.entries(held)) expect(reasons(html), name).toMatch(/^a slide file holds no <(html|head|body|title|link|style|script|meta|!DOCTYPE)>/);
+    expect(reasons(`<html><body>${section}</body></html>`)).toBe('a slide file holds no <html>, <body>: only its one <section> (deck.json carries the title and the faces)');
+    // inside an x-embed (a whole small page) and an svg (its own title and style) the same tags are theirs
+    const embed = '<x-embed style="position:absolute; left:0px; top:0px; width:400px; height:300px"><!DOCTYPE html><html><head><title>t</title><style>b{}</style><script>if (1 < 2) {}</script></head><body><p>live</p></body></html></x-embed>';
+    expect(reasons(`<section id="a">${embed}<svg><title>Chart</title><style>.a{fill:#000}</style><path class="a" d="M0 0"/></svg></section>`)).toBeNull();
   });
 
   it('holds a connector given some coordinates but not all, or one that is not a number', () => {

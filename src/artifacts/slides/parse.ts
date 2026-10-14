@@ -4,7 +4,7 @@
 // fails structurally (a limit, a tag out of place, an image URL) is held with its reasons, never trimmed. The one HTML
 // front end is html.ts (parse5), the same in the host and the renderer.
 import { parseStyle, spanStyle, isAssetRef, type StyleDiagnostic, type StyleSite } from './css';
-import { parseHtml, type RawElement, type RawNode } from './html';
+import { outerMarkup, parseHtml, type RawElement, type RawNode } from './html';
 import {
   isPinned, LIST_TAGS, MARK_ORDER, TEXT_TAGS,
   type Attrs, type Diagnostic, type ElementIR, type Inline, type LoadResult, type MarkName, type Marks, type SlideIR, type Style, type Tag, type TextBlock,
@@ -87,7 +87,7 @@ export function loadSlide(source: string, opts: LoadOptions = {}): LoadResult {
   const reasons: string[] = [];
   const loader = new Loader(diags, reasons, opts);
   try {
-    const slide = loader.run(parseHtml(source));
+    const slide = loader.run(source);
     if (reasons.length) return { ok: false, held: { reasons }, diagnostics: loader.resolved() };
     return { ok: true, slide, diagnostics: loader.resolved() };
   } catch (e) {
@@ -165,8 +165,10 @@ class Loader {
     return this.diags;
   }
 
-  run(nodes: RawNode[]): SlideIR {
-    const top = nodes.filter((n) => !(n.kind === 'text' && !n.value.trim()) && n.kind !== 'comment');
+  run(source: string): SlideIR {
+    const outer = outerMarkup(source);
+    if (outer.length) this.hold(`a slide file holds no ${outer.join(', ')}: only its one <section> (deck.json carries the title and the faces)`);
+    const top = parseHtml(source).filter((n) => !(n.kind === 'text' && !n.value.trim()) && n.kind !== 'comment');
     if (top.length !== 1 || top[0]!.kind !== 'element' || top[0]!.tag !== 'section') this.hold('a slide file holds exactly one <section> and nothing else');
     const sec = top[0] as RawElement;
     const id = new Map(sec.attrs).get('id') ?? '';
@@ -262,11 +264,11 @@ class Loader {
     for (const [name, value] of n.attrs) {
       if (name === 'style') style = value;
       else if (name === 'id') this.idAttr(el, value, subject, cell);
-      else if (tag === 'svg') el.attrs[name] = value; // an svg's root attributes are kept verbatim (an opaque graphic)
+      else if (tag === 'svg') this.svgRootAttr(el, name, value, subject); // kept verbatim (an opaque graphic), checked below
       else if (tag === 'img' && /^data-video(-[a-z]+)*$/.test(name)) el.attrs[name] = value;
       else if (!allowed.has(name)) this.dropAttr(subject, name);
       else if (name === 'data-build-in' || name === 'data-build-out') builds.push([name, value]);
-      else if (name in ENUMS) this.enumAttr(el.attrs, name, value, subject);
+      else if (name in ENUMS) this.enumAttr(el.attrs, name, value, subject, (tag === 'x-shape' && name === 'kind') || (tag === 'x-icon' && name === 'name'));
       else if (COORDS.includes(name)) this.coordinate(el, name, value);
       else if (name === 'src') this.src(el, value, subject);
       else if (name === 'data-crop') this.crop(el, value, subject);
@@ -275,6 +277,8 @@ class Loader {
         else this.warn(subject, `data-ph="${value}" is not a placeholder role name; dropped`, name);
       } else el.attrs[name] = value.trim();
     }
+    if (tag === 'x-shape' && el.attrs.kind === undefined) this.hold(`an <x-shape> without a kind (one of ${SHAPE_KINDS.join(', ')})`);
+    if (tag === 'x-icon' && el.attrs.name === undefined) this.hold('an <x-icon> without a name (one of the 30 icon names)');
     if (tag === 'x-connector') {
       const given = COORDS.filter((c) => el.attrs[c] !== undefined);
       if (given.length > 0 && given.length < 4) this.hold(`an <x-connector> with ${given.join(', ')} but not ${COORDS.filter((c) => !given.includes(c)).join(', ')} (a connector takes all four coordinates, or none as a sized flow child)`);
@@ -296,9 +300,8 @@ class Loader {
     else if (tag === 'svg') {
       const raw = n.inner();
       if (byteLength(raw) > SLIDE_LIMITS.svgBytes) this.hold(`an <svg> over ${SLIDE_LIMITS.svgBytes / 1024} KB`);
-      if (/<script|\son[a-z]+\s*=|<foreignobject|(?:href|src)\s*=\s*["']?\s*(?:https?:|data:|\/\/)|url\(\s*["']?\s*(?:https?:|data:|\/\/)/i.test(raw)) {
-        this.hold('an <svg> with script, an event handler, foreignObject or an external URL');
-      }
+      const problem = svgProblem(n);
+      if (problem !== null) this.hold(problem);
       if (/<text[\s>]/i.test(raw)) this.warn(subject, 'an <svg> <text> draws without the deck’s fonts; put labels in <p> elements over it');
       el.raw = raw;
     } else if (tag === 'x-embed') {
@@ -311,6 +314,12 @@ class Loader {
     }
     if (tag === 'x-embed' && !isPinned(tag, el.style, el.attrs)) this.hold('<x-embed> is not pinned (position:absolute)');
     return el;
+  }
+
+  /** An svg's root attribute, kept verbatim when it is an attribute name (svgProblem checks what it says). */
+  private svgRootAttr(el: ElementIR, name: string, value: string, subject: Subject) {
+    if (/^[A-Za-z][A-Za-z0-9:._-]*$/.test(name)) el.attrs[name] = value;
+    else this.warn(subject, `${name} is not an attribute name; dropped`, name);
   }
 
   private idAttr(el: ElementIR, value: string, subject: Subject, cell: boolean) {
@@ -465,10 +474,12 @@ class Loader {
     return { type, inline };
   }
 
-  private enumAttr(target: Attrs, name: string, value: string, subject: Subject) {
+  /** A closed attribute: an unknown value is dropped with a warning, or holds the slide when it is the element's kind. */
+  private enumAttr(target: Attrs, name: string, value: string, subject: Subject, discriminator = false) {
     const v = value.trim().toLowerCase();
     const allowed = ENUMS[name]!;
     const ok = name === 'name' ? allowed.find((a) => a.toLowerCase() === v) : allowed.includes(v) ? v : undefined;
+    if (ok === undefined && discriminator) this.hold(`${name}="${value}" on <${subject.el?.tag}> is not one of ${allowed.join(', ')}`);
     if (ok === undefined) {
       this.warn(subject, `${name}="${value}" is not one of ${allowed.join(', ')}; dropped`, name);
       return;
@@ -513,6 +524,51 @@ class Loader {
     for (let p = parent; p !== null; p = this.parents.get(p) ?? null) ids.unshift(p.id);
     return [this.sectionId, ...ids].join('/');
   }
+}
+
+/** The one reference an svg may hold: a local `#id`. */
+const LOCAL_REF = /^\s*#[^\s#'"()]+\s*$/;
+const REF_ATTRS = new Set(['href', 'xlink:href', 'src']);
+const SCRIPT_URL = /^\s*javascript\s*:/i;
+
+/** `url(…)` and `@import` in CSS text: a reason when anything but a local `url(#id)` is referenced. */
+function cssRefProblem(css: string): string | null {
+  if (/@import/i.test(css)) return 'an <svg> style with @import';
+  for (const m of css.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi)) {
+    if (!LOCAL_REF.test(m[2]!)) return `an <svg> referencing url(${m[2]!.slice(0, 40)}) (only a local #id)`;
+  }
+  return null;
+}
+
+/**
+ * Claude's svg rules (format.md, "Graphics"): one opaque graphic whose root and every descendant hold no `<script>` or
+ * `<foreignObject>`, no `on*` handler, no script URL, and no reference (an `href`, a `src`, a CSS `url()` in an attribute,
+ * a `style` or a `<style>`) but a local `#id`. The reason, or null when it passes.
+ */
+export function svgProblem(root: RawElement): string | null {
+  const walk = (n: RawElement): string | null => {
+    const tag = n.tag.toLowerCase();
+    if (tag === 'script' || tag === 'foreignobject') return `an <svg> holding <${n.tag}>`;
+    for (const [name, value] of n.attrs) {
+      const attr = name.toLowerCase();
+      if (attr.startsWith('on')) return `an <svg> with an event handler (${name})`;
+      if (SCRIPT_URL.test(value)) return `an <svg> with a script URL (${name})`;
+      if (REF_ATTRS.has(attr) && !LOCAL_REF.test(value)) return `an <svg> referencing "${value.slice(0, 40)}" (only a local #id)`;
+      if ((tag === 'animate' || tag === 'set') && attr === 'attributename' && /^(xlink:)?href$/i.test(value.trim())) return 'an <svg> animating a reference';
+      const css = cssRefProblem(value);
+      if (css !== null) return css;
+    }
+    if (tag === 'style') {
+      const css = cssRefProblem(n.children.map((c) => (c.kind === 'text' ? c.value : '')).join(''));
+      if (css !== null) return css;
+    }
+    for (const c of n.children) {
+      const problem = c.kind === 'element' ? walk(c) : null;
+      if (problem !== null) return problem;
+    }
+    return null;
+  };
+  return walk(root);
 }
 
 function describe(parent: ParentSite): string {

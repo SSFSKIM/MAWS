@@ -24,16 +24,20 @@ type Kind =
   | 'kw' // one keyword from a closed set
   | 'border' // [LEN] style [COLOR], defaults filled per Claude's grammar
   | 'lenvalue' // a generic value whose bare numbers are lengths (shadows, text-stroke)
+  | 'flex' // N [N] [LEN]: factors bare, the basis a length
+  | 'tracks' // track lists: lengths px, fr and repeat counts as they are
   | 'value'; // a generic value whose bare numbers stay numbers (flex, transform, filter, background, tracks)
 
 /**
- * Where a property applies, the table's applies-to column: `text` is h1-h3, p, ul, ol and also the section and a div
- * (Claude: "text rows set on body, section, or div inherit down"); `div child` and `grid child` are flow children of a
- * div (the section counts as one) or of a grid; `flex box`, `row div` and `grid box` are the element's own display.
+ * Where a property applies, the table's applies-to column: `text` is h1-h3, p, ul, ol; `inherits` is the section and a
+ * div on the inheritable typography rows only (Claude: "text rows set on body, section, or div inherit down"; colour,
+ * font, line, spacing, alignment, case, wrapping, numerals, stroke, text shadow); `div child` and `grid child` are flow
+ * children of a div (the section counts as one) or of a grid; `flex box`, `row div` and `grid box` are the element's own
+ * effective display, where a section or div without `display` is a flex column (Claude: "no display = column").
  */
 type Target =
   | 'any' | 'not-connector' | 'pinned' | 'div-child' | 'grid-child' | 'flex-box' | 'row-div' | 'grid-box'
-  | 'section' | 'div' | 'text' | 'table' | 'cell' | 'th' | 'tr' | 'img' | 'hr' | 'x-icon' | 'x-shape' | 'rect-shape' | 'x-connector';
+  | 'section' | 'div' | 'text' | 'inherits' | 'table' | 'cell' | 'th' | 'tr' | 'img' | 'hr' | 'x-icon' | 'x-shape' | 'rect-shape' | 'x-connector';
 
 interface Prop {
   kind: Kind;
@@ -369,22 +373,65 @@ function isBackground(ts: Tok[]): boolean {
   return pos.length === 0 || (pos.length === 3 && isKw(pos[0], ['center']) && pos[1]!.t === 'slash' && isKw(pos[2], ['cover', 'contain']));
 }
 
-function isBorder(ts: Tok[]): boolean {
-  if (ts.length === 1 && isKw(ts[0], ['none'])) return true;
-  let width = 0;
-  let style = 0;
-  let color = 0;
-  for (const t of ts) {
-    if (!isWild(t) && isKw(t, BORDER_STYLES)) style++;
-    else if (!isWild(t) && isLen(t)) {
-      if (!isLen(t, 0, 32)) return false;
-      width++;
-    } else if (isWild(t) && color === 0 && width === 1) color++;
-    else if (isWild(t)) width++;
-    else if (isColor(t)) color++;
-    else return false;
+type BorderSlot = 'width' | 'style' | 'color';
+const BORDER_SLOTS: readonly BorderSlot[] = ['width', 'style', 'color'];
+
+/** A border token's slot by its grammar (a token's by its fallback's); 'any' for a token with no fallback; null when none. */
+function borderSlot(t: Tok): BorderSlot | 'any' | null {
+  if (isWild(t)) return 'any';
+  if (t.t === 'fn' && t.name === 'var') {
+    const parts = varParts(t);
+    if (!parts) return null;
+    if (!parts.fallback) return 'any';
+    const fallback = expandVars(parts.fallback);
+    return fallback.length === 1 ? borderSlot(fallback[0]!) : null;
   }
-  return style === 1 && width <= 1 && color <= 1;
+  if (t.t === 'word' && BORDER_STYLES.includes(t.v.toLowerCase())) return 'style';
+  if (isLen(t)) return 'width';
+  if (isColor(t)) return 'color';
+  return null;
+}
+
+/**
+ * A border's tokens in its three slots, `[LEN] style [COLOR]`. A token with no fallback takes its slot by position:
+ * before the style word the width, after it the colour; with no style word it is the style (which is required), then
+ * the colour, then the width. Null when a slot is taken twice or a token fits none.
+ */
+function placeBorder(ts: Tok[]): Partial<Record<BorderSlot, Tok>> | null {
+  const placed: Partial<Record<BorderSlot, Tok>> = {};
+  const open: { t: Tok; i: number }[] = [];
+  let styleAt = -1;
+  for (const [i, t] of ts.entries()) {
+    const slot = borderSlot(t);
+    if (slot === null) return null;
+    if (slot === 'any') open.push({ t, i });
+    else if (placed[slot]) return null;
+    else {
+      placed[slot] = t;
+      if (slot === 'style') styleAt = i;
+    }
+  }
+  if (styleAt !== -1) {
+    for (const { t, i } of open) {
+      const slot = (i < styleAt ? (['width', 'color'] as const) : (['color', 'width'] as const)).find((s) => !placed[s]);
+      if (!slot) return null;
+      placed[slot] = t;
+    }
+    return placed;
+  }
+  const free = BORDER_SLOTS.filter((s) => !placed[s]);
+  if (open.length > free.length) return null;
+  const chosen = (['style', 'color', 'width'] as const).filter((s) => free.includes(s)).slice(0, open.length);
+  BORDER_SLOTS.filter((s) => chosen.includes(s)).forEach((slot, k) => {
+    placed[slot] = open[k]!.t;
+  });
+  return placed;
+}
+
+function isBorder(ts: Tok[]): boolean {
+  const placed = placeBorder(ts);
+  if (!placed?.style) return false;
+  return placed.width === undefined || isWild(placed.width) || isLen(placed.width, 0, 32);
 }
 
 /** One shadow list: ≤8 shadows, each [inset] x y [blur [spread]] COLOR (box) or x y [blur] COLOR (text). */
@@ -507,7 +554,7 @@ const ROWS: readonly Row[] = [
   { line: 'justify-items: ALIGN, no baseline · grid box', props: { 'justify-items': kwProp(ALIGN.filter((a) => a !== 'baseline'), ['grid-box']) } },
   { line: 'align-self: ALIGN | auto · div child', props: { 'align-self': kwProp([...ALIGN, 'auto'], ['div-child']) } },
   { line: 'justify-self: ALIGN | auto, no baseline · grid child', props: { 'justify-self': kwProp([...ALIGN.filter((a) => a !== 'baseline'), 'auto'], ['grid-child']) } },
-  { line: 'flex: none | auto | N [N] [LEN | 0% | auto] (flex:1 = equal share; empty div + flex:1 = spacer) · div child', props: { flex: { kind: 'value', on: ['div-child'], check: isFlex } } },
+  { line: 'flex: none | auto | N [N] [LEN | 0% | auto] (flex:1 = equal share; empty div + flex:1 = spacer) · div child', props: { flex: { kind: 'flex', on: ['div-child'], check: isFlex } } },
   {
     line: 'flex-grow flex-shrink: N · div child',
     props: { 'flex-grow': { kind: 'num', on: ['div-child'], check: one((t) => isBare(t, 0)) }, 'flex-shrink': { kind: 'num', on: ['div-child'], check: one((t) => isBare(t, 0)) } },
@@ -515,7 +562,7 @@ const ROWS: readonly Row[] = [
   { line: 'flex-basis: LEN | auto · div child', props: { 'flex-basis': { kind: 'len', on: ['div-child'], check: one((t) => isLen(t, 0) || isKw(t, ['auto'])) } } },
   {
     line: 'grid-template-columns grid-template-rows: (LEN | Nfr | auto | repeat(INT, …))+ ≤24 tracks — no minmax, auto-fill, names, areas · grid box',
-    props: { 'grid-template-columns': { kind: 'value', on: ['grid-box'], check: isTracks }, 'grid-template-rows': { kind: 'value', on: ['grid-box'], check: isTracks } },
+    props: { 'grid-template-columns': { kind: 'tracks', on: ['grid-box'], check: isTracks }, 'grid-template-rows': { kind: 'tracks', on: ['grid-box'], check: isTracks } },
   },
   {
     line: 'grid-column grid-row: span INT only (cells fill in source order) · grid child',
@@ -524,20 +571,20 @@ const ROWS: readonly Row[] = [
   { line: 'aspect-ratio: N | N / N · div child', props: { 'aspect-ratio': { kind: 'value', on: ['div-child'], check: isRatio } } },
   { line: 'padding: LEN 0–256 ×1–4 · section div text table; td/th: one per table, ≤64', props: { padding: { kind: 'lens', on: ['section', 'div', 'text', 'table', 'cell'], check: (ts) => ts.length >= 1 && ts.length <= 4 && ts.every((t) => isLen(t, 0, 256)) } } },
   { line: 'overflow: hidden | visible · div', props: { overflow: kwProp(['hidden', 'visible'], ['div']) } },
-  { line: 'font-family: FAMILY · text table; on body/section/div it inherits', props: { 'font-family': { kind: 'family', on: ['text', 'table'], check: isFamily } } },
-  { line: 'font-size: LEN 8–400 (Npt converts) · text table; inherits into p/li, not h1–h3', props: { 'font-size': { kind: 'len', on: ['text', 'table'], check: one((t) => isLen(t, 8, 400)) } } },
-  { line: 'font-weight: 100–900 (whole hundreds) | normal | bold · text th; span (≥600 = bold)', props: { 'font-weight': { kind: 'weight', on: ['text', 'th'], check: one((t) => isWild(t) || normWeight([t]) !== null) } } },
-  { line: 'font-style: normal | italic · text span', props: { 'font-style': kwProp(['normal', 'italic'], ['text']) } },
+  { line: 'font-family: FAMILY · text table; on body/section/div it inherits', props: { 'font-family': { kind: 'family', on: ['text', 'inherits', 'table'], check: isFamily } } },
+  { line: 'font-size: LEN 8–400 (Npt converts) · text table; inherits into p/li, not h1–h3', props: { 'font-size': { kind: 'len', on: ['text', 'inherits', 'table'], check: one((t) => isLen(t, 8, 400)) } } },
+  { line: 'font-weight: 100–900 (whole hundreds) | normal | bold · text th; span (≥600 = bold)', props: { 'font-weight': { kind: 'weight', on: ['text', 'inherits', 'th'], check: one((t) => isWild(t) || normWeight([t]) !== null) } } },
+  { line: 'font-style: normal | italic · text span', props: { 'font-style': kwProp(['normal', 'italic'], ['text', 'inherits']) } },
   { line: 'font: [italic] [weight] LEN[/N] FAMILY · text', props: {} },
-  { line: 'line-height: N | PCT | LEN (0.5–4× the font-size) · text', props: { 'line-height': { kind: 'lineheight', on: ['text'], check: one((t) => isBare(t, 0.5, 4) || isPct(t, 50, 400) || ((unitOf(t) === 'px' || unitOf(t) === 'pt') && isLen(t, 0))) } } },
-  { line: 'letter-spacing: LEN | Nem (−24–32px) | normal · text', props: { 'letter-spacing': { kind: 'len', on: ['text'], check: one((t) => isLen(t, -24, 32) || unitOf(t) === 'em' || isKw(t, ['normal'])) } } },
-  { line: 'text-align: left | center | right | justify (not td) · text td/th', props: { 'text-align': kwProp(['left', 'center', 'right', 'justify'], ['text', 'cell']) } },
-  { line: 'text-transform: none | uppercase | lowercase | capitalize · text', props: { 'text-transform': kwProp(['none', 'uppercase', 'lowercase', 'capitalize'], ['text']) } },
-  { line: 'white-space: normal | nowrap · text', props: { 'white-space': kwProp(['normal', 'nowrap'], ['text']) } },
+  { line: 'line-height: N | PCT | LEN (0.5–4× the font-size) · text', props: { 'line-height': { kind: 'lineheight', on: ['text', 'inherits'], check: one((t) => isBare(t, 0.5, 4) || isPct(t, 50, 400) || ((unitOf(t) === 'px' || unitOf(t) === 'pt') && isLen(t, 0))) } } },
+  { line: 'letter-spacing: LEN | Nem (−24–32px) | normal · text', props: { 'letter-spacing': { kind: 'len', on: ['text', 'inherits'], check: one((t) => isLen(t, -24, 32) || unitOf(t) === 'em' || isKw(t, ['normal'])) } } },
+  { line: 'text-align: left | center | right | justify (not td) · text td/th', props: { 'text-align': kwProp(['left', 'center', 'right', 'justify'], ['text', 'inherits', 'cell']) } },
+  { line: 'text-transform: none | uppercase | lowercase | capitalize · text', props: { 'text-transform': kwProp(['none', 'uppercase', 'lowercase', 'capitalize'], ['text', 'inherits']) } },
+  { line: 'white-space: normal | nowrap · text', props: { 'white-space': kwProp(['normal', 'nowrap'], ['text', 'inherits']) } },
   { line: 'text-decoration: none | underline | line-through [solid | double | dotted | dashed | wavy] [COLOR] · text; span: underline only', props: { 'text-decoration': { kind: 'value', on: ['text'], check: isDecoration } } },
-  { line: 'font-variant-numeric: normal | tabular-nums · text', props: { 'font-variant-numeric': kwProp(['normal', 'tabular-nums'], ['text']) } },
-  { line: '-webkit-text-stroke: LEN 0–8 COLOR · text', props: { '-webkit-text-stroke': { kind: 'lenvalue', on: ['text'], check: isStroke } } },
-  { line: 'color: COLOR · text span td/th x-icon x-connector hr; table (it inherits, as the Tables paragraph says)', props: { color: { kind: 'color', on: ['text', 'table', 'cell', 'x-icon', 'x-connector', 'hr'], check: one(isColor) } } },
+  { line: 'font-variant-numeric: normal | tabular-nums · text', props: { 'font-variant-numeric': kwProp(['normal', 'tabular-nums'], ['text', 'inherits']) } },
+  { line: '-webkit-text-stroke: LEN 0–8 COLOR · text', props: { '-webkit-text-stroke': { kind: 'lenvalue', on: ['text', 'inherits'], check: isStroke } } },
+  { line: 'color: COLOR · text span td/th x-icon x-connector hr; table (it inherits, as the Tables paragraph says)', props: { color: { kind: 'color', on: ['text', 'inherits', 'table', 'cell', 'x-icon', 'x-connector', 'hr'], check: one(isColor) } } },
   {
     line: 'background: COLOR | [repeating-]linear-gradient(ANGLE | to SIDE, COLOR [PCT [PCT]], … 2–8 stops; repeating: px stops) | radial-gradient([circle|ellipse] [at X% Y%], …); one gradient[, COLOR under it] · section div text img table x-icon; tr: COLOR; x-shape/hr = flat fill',
     props: { background: { kind: 'value', on: ['section', 'div', 'text', 'img', 'table', 'x-icon', 'tr', 'x-shape', 'hr'], check: isBackground } },
@@ -546,7 +593,7 @@ const ROWS: readonly Row[] = [
     line: 'background-clip: text (+ -webkit-text-fill-color: transparent): glyphs take the gradient | url(IMG) [center / cover|contain]; color = fallback; span: -webkit-text-fill-color: currentcolor · text',
     props: {
       'background-clip': kwProp(['text'], ['text']),
-      '-webkit-text-fill-color': { kind: 'color', on: ['text'], check: one((t) => isColor(t) || isKw(t, ['currentcolor'])) },
+      '-webkit-text-fill-color': { kind: 'color', on: ['text', 'inherits'], check: one((t) => isColor(t) || isKw(t, ['currentcolor'])) },
     },
   },
   { line: 'border: [LEN 0–16, else 1] solid | dashed | dotted | double | none [COLOR, else black] — one stroke; the style word is required · div text img table x-icon; = the stroke on x-shape hr x-connector (≤32)', props: { border: { kind: 'border', on: ['div', 'text', 'img', 'table', 'x-icon', 'x-shape', 'hr', 'x-connector'], check: isBorder } } },
@@ -558,7 +605,7 @@ const ROWS: readonly Row[] = [
   { line: 'border-style: solid | dashed | dotted | double | none · x-connector (MAWS)', props: { 'border-style': kwProp(BORDER_STYLES, ['x-connector']) } },
   { line: 'border-radius: LEN | PCT ×1–4 (TL TR BR BL); 50%=pill · div text img table; rect x-shape', props: { 'border-radius': { kind: 'lens', on: ['div', 'text', 'img', 'table', 'rect-shape'], check: (ts) => ts.length >= 1 && ts.length <= 4 && ts.every((t) => isLen(t, 0) || isPct(t, 0)) } } },
   { line: 'box-shadow: [inset] LEN LEN [LEN [LEN]] COLOR, … ≤8 (x y ±64, blur ≤160, spread ±32) · div text img table x-icon x-shape', props: { 'box-shadow': { kind: 'lenvalue', on: ['div', 'text', 'img', 'table', 'x-icon', 'x-shape'], check: (ts) => isShadows(ts, true) } } },
-  { line: 'text-shadow: LEN LEN [LEN] COLOR, … ≤8 (blur ≤64) · text table', props: { 'text-shadow': { kind: 'lenvalue', on: ['text', 'table'], check: (ts) => isShadows(ts, false) } } },
+  { line: 'text-shadow: LEN LEN [LEN] COLOR, … ≤8 (blur ≤64) · text table', props: { 'text-shadow': { kind: 'lenvalue', on: ['text', 'inherits', 'table'], check: (ts) => isShadows(ts, false) } } },
   { line: 'opacity: N 0–1 · any', props: { opacity: { kind: 'num', on: ['any'], check: one((t) => isBare(t, 0, 1)) } } },
   { line: 'transform: translate(LEN[, LEN]) | translateX|Y(LEN | -50%), rotate(ANGLE), scale(N 0.5–2), skew[X|Y](ANGLE ±60) — any subset in that order, each once · any but x-connector; x-shape: rotate only', props: { transform: { kind: 'value', on: ['not-connector'], check: isTransform } } },
   {
@@ -673,6 +720,11 @@ function serTok(t: Tok, bareIsPx: boolean): string {
       if (COLOR_FNS.has(t.name)) return normColor(`${t.name}(${serTokens(t.args, false)})`) ?? `${t.name}(${serTokens(t.args, false)})`;
       if (t.name === 'var') return normVar(t, bareIsPx) ?? 'var(INVALID)';
       if (t.name === 'url') return `url(${(t.args[0] as { v: string }).v})`;
+      if (t.name.startsWith('repeating-')) {
+        // a repeating gradient's stops are lengths (bare = px); its direction is not
+        const parts = splitCommas(t.args).map((part) => serTokens(part, isColor(expandVars(part)[0])));
+        return `${t.name}(${parts.join(', ')})`;
+      }
       const inner = t.name === 'calc' ? serCalc(t.args) : serTokens(t.args, LEN_FNS.has(t.name));
       return `${t.name}(${inner})`;
     }
@@ -773,39 +825,17 @@ function normWeight(ts: Tok[]): string | null {
 
 /**
  * `[LEN] style [COLOR]` with Claude's defaults (1px, black) made explicit, so the file means the same in any CSS
- * engine. A `var(--ds-color-*)` is the colour and any other `var(--ds-*)` the width, by the token's name (D's names).
+ * engine. Tokens take their slots as placeBorder places them (by fallback, else by position).
  */
 function normBorder(ts: Tok[]): string | null {
-  let width: string | null = null;
-  let style: string | null = null;
-  let color: string | null = null;
-  for (const t of ts) {
-    if (t.t === 'word' && BORDER_STYLES.includes(t.v.toLowerCase())) {
-      style = t.v.toLowerCase();
-      continue;
-    }
-    if (t.t === 'fn' && t.name === 'var') {
-      const isColorToken = /^--ds-color-/.test(varParts(t)?.name ?? '');
-      if (isColorToken && color === null) color = serTok(t, false);
-      else if (!isColorToken && width === null) width = serTok(t, true);
-      else return null;
-      continue;
-    }
-    const len = normLen([t]);
-    if (len !== null && width === null && !/^(auto|normal)/.test(len)) {
-      width = len;
-      continue;
-    }
-    const col = t.t === 'word' || t.t === 'fn' ? normColor(t.t === 'word' ? t.v : serTok(t, false)) : null;
-    if (col !== null && color === null) {
-      color = col;
-      continue;
-    }
-    return null;
-  }
-  if (style === 'none') return 'none';
-  if (style === null) return null;
-  return `${width ?? '1px'} ${style} ${color ?? 'black'}`;
+  const placed = placeBorder(ts);
+  if (!placed?.style) return null;
+  const { width, style, color } = placed;
+  const isVar = (t: Tok) => t.t === 'fn' && t.name === 'var';
+  if (style.t === 'word' && style.v.toLowerCase() === 'none') return 'none';
+  const w = width === undefined ? '1px' : isVar(width) ? serTok(width, true) : normLen([width]);
+  const c = color === undefined ? 'black' : isVar(color) ? serTok(color, false) : normColor(color.t === 'word' ? color.v : serTok(color, false));
+  return w === null || c === null ? null : `${w} ${serTok(style, false)} ${c}`;
 }
 
 function normLineHeight(ts: Tok[]): string | null {
@@ -868,7 +898,28 @@ function normalize(spec: Prop, ts: Tok[], v: string): string | null {
       return serTokens(ts, true);
     case 'value':
       return serTokens(ts, false);
+    case 'flex':
+      return normFlex(ts);
+    case 'tracks':
+      return normTracks(ts);
   }
+}
+
+/** `flex`: the leading bare numbers are the grow and shrink factors; what follows is the basis, a length. */
+function normFlex(ts: Tok[]): string {
+  const factors = ts[1] !== undefined && /^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(ts[1].t === 'word' ? ts[1].v : '') ? 2 : 1;
+  return ts.map((t, i) => (i < factors ? serTok(t, false) : t.t === 'word' ? (normLen([t]) ?? serTok(t, false)) : serTok(t, true))).join(' ');
+}
+
+/** A track list: a bare length is px, `fr` and `auto` stay, a `repeat()` keeps its count and normalizes its tracks. */
+function normTracks(ts: Tok[]): string {
+  return ts
+    .map((t) => {
+      if (t.t !== 'fn' || t.name !== 'repeat') return serTok(t, true);
+      const [count, tracks] = splitCommas(t.args) as [Tok[], Tok[]];
+      return `repeat(${serTokens(count, false)}, ${normTracks(tracks)})`;
+    })
+    .join(' ');
 }
 
 // ---------------------------------------------------------------- applies-to
@@ -880,12 +931,15 @@ export interface StyleSite {
   parent: { tag: Tag | 'section'; style: Style } | null;
 }
 
-const TEXT_ELEMENTS = new Set<string>(['h1', 'h2', 'h3', 'p', 'ul', 'ol', 'section', 'div']);
+const TEXT_ELEMENTS = new Set<string>(['h1', 'h2', 'h3', 'p', 'ul', 'ol']);
 
 function hits(target: Target, site: StyleSite, style: Style): boolean {
   const { tag, parent } = site;
   const pinned = tag !== 'section' && isPinned(tag, style, site.attrs);
   const container = tag === 'section' || tag === 'div';
+  // a section or div without display is a flex column; with display:flex and no direction, a row (CSS)
+  const flex = container && (style.display ?? 'flex') === 'flex';
+  const direction = style['flex-direction'] ?? (style.display === undefined ? 'column' : 'row');
   switch (target) {
     case 'any':
       return true;
@@ -898,13 +952,15 @@ function hits(target: Target, site: StyleSite, style: Style): boolean {
     case 'grid-child':
       return !pinned && parent?.style.display === 'grid';
     case 'flex-box':
-      return container && style.display === 'flex';
+      return flex;
     case 'row-div':
-      return container && style.display === 'flex' && !/^column/.test(style['flex-direction'] ?? '');
+      return flex && direction.startsWith('row');
     case 'grid-box':
       return container && style.display === 'grid';
     case 'text':
       return TEXT_ELEMENTS.has(tag);
+    case 'inherits':
+      return container;
     case 'cell':
       return tag === 'td' || tag === 'th';
     case 'rect-shape':
@@ -923,16 +979,15 @@ export function appliesTo(prop: string, site: StyleSite, style: Style): boolean 
 /** The per-element limits on a value the table states beside its applies-to column; a reason, or null when it is fine. */
 function restriction(prop: string, value: string, site: StyleSite): string | null {
   const { tag } = site;
-  if (prop === 'background' && (tag === 'tr' || tag === 'x-shape' || tag === 'hr')) {
-    const fill = expandVars(tokenize(value));
-    if (fill.length !== 1 || !isColor(fill[0])) return `background on <${tag}> is a flat colour`;
-  }
+  // checked on the value as its fallbacks make it; a token with no fallback stands for any one component
+  const ts = expandVars(tokenize(value));
+  if (prop === 'background' && (tag === 'tr' || tag === 'x-shape' || tag === 'hr') && (ts.length !== 1 || !isColor(ts[0]))) return `background on <${tag}> is a flat colour`;
   if (/^border(-top|-right|-bottom|-left)?$/.test(prop) && tag !== 'x-shape' && tag !== 'hr' && tag !== 'x-connector') {
-    const width = numOf(tokenize(value).find((t) => isLen(t) && !isWild(t)));
-    if (width && width.n > 16) return `a border on <${tag}> is at most 16px wide (32px on x-shape, hr and x-connector)`;
+    const width = placeBorder(ts)?.width;
+    if (width !== undefined && !isLen(width, 0, 16)) return `a border on <${tag}> is at most 16px wide (32px on x-shape, hr and x-connector)`;
   }
-  if (prop === 'padding' && (tag === 'td' || tag === 'th') && !tokenize(value).every((t) => t.t === 'fn' || isLen(t, 0, 64))) return 'a cell’s padding is at most 64px';
-  if (prop === 'transform' && tag === 'x-shape' && !tokenize(value).every((t) => t.t === 'fn' && (t.name === 'rotate' || t.name === 'var'))) return 'an x-shape takes rotate only';
+  if (prop === 'padding' && (tag === 'td' || tag === 'th') && !ts.every((t) => isLen(t, 0, 64))) return 'a cell’s padding is at most 64px';
+  if (prop === 'transform' && tag === 'x-shape' && !ts.every((t) => isWild(t) || (t.t === 'fn' && t.name === 'rotate'))) return 'an x-shape takes rotate only';
   if (tag === 'x-connector' && site.attrs.x1 !== undefined && ['left', 'top', 'right', 'bottom', 'width', 'height'].includes(prop)) {
     return 'a connector with coordinates takes no left, top, right, bottom, width or height';
   }

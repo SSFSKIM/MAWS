@@ -90,6 +90,19 @@ describe('deck.json', () => {
     ]);
   });
 
+  it('keeps a __proto__ key wherever the index holds one (fix wave 1)', () => {
+    const text = '{"order":[],"__proto__":{"top":1},"faces":{"__proto__":{"family":"Proto","src":"assets/p.woff2"}},"sections":{"__proto__":{"description":"P","start":"a"}},"dsOverrides":{"--ds-color-bg":"#fff"},"zeta":{"__proto__":2}}';
+    const { deck } = parse(text);
+    const out = serializeDeckJson(deck);
+    const reread = JSON.parse(out) as Record<string, Record<string, unknown>>;
+    expect(Object.keys(reread)).toEqual(['order', 'sections', 'faces', 'dsOverrides', '__proto__', 'zeta']);
+    expect(Object.getOwnPropertyDescriptor(reread, '__proto__')?.value).toEqual({ top: 1 });
+    expect(Object.keys(reread.faces!)).toEqual(['__proto__']);
+    expect(Object.keys(reread.sections!)).toEqual(['__proto__']);
+    expect(Object.keys(reread.zeta!)).toEqual(['__proto__']);
+    expect(serializeDeckJson(parse(out).deck)).toBe(out);
+  });
+
   it('reads an index without an order as an empty deck', () => {
     expect(parse({ v: 4, title: 'New' }).deck.order).toEqual([]);
   });

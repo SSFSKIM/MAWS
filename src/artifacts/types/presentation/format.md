@@ -56,7 +56,7 @@ Every key is kept when you publish, the ones named here or not: change only the 
 
 ### Supported CSS
 
-Every style is inline, in `style=""`, from exactly this table: one line per property, its values and ranges, then after `·` the elements it applies to. `text` is h1 to h3, p, ul and ol, and a text line set on the section or a div inherits down; `div child` and `grid child` are flow children of a div (the section counts) or a grid; `pinned` is `position:absolute`. `padding-*`, `border-*-radius`, `background-color` and `font` are folded into the lines that hold them.
+Every style is inline, in `style=""`, from exactly this table: one line per property, its values and ranges, then after `·` the elements it applies to. `text` is h1 to h3, p, ul and ol; the inheritable text lines (`font-family`, `font-size`, `font-weight`, `font-style`, `line-height`, `letter-spacing`, `text-align`, `text-transform`, `white-space`, `font-variant-numeric`, `-webkit-text-stroke`, `color`, `text-shadow`, `-webkit-text-fill-color`) also take the section and a div, and inherit down; `div child` and `grid child` are flow children of a div (the section counts) or a grid; a section or div without `display` is a flex box, a column; `pinned` is `position:absolute`. `padding-*`, `border-*-radius`, `background-color` and `font` are folded into the lines that hold them.
 
 ```
 LEN = Npx or bare N (px) — no em rem vw vh %

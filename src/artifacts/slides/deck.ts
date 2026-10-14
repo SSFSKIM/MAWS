@@ -67,6 +67,8 @@ export interface DeckDiagnostic {
 }
 export type DeckParse = { ok: true; deck: DeckJson; diagnostics: DeckDiagnostic[] } | { ok: false; problems: string[] };
 
+/** A dictionary with no prototype, so any key the index holds (`__proto__` too) is kept as an own key. */
+const dict = <T>(): Record<string, T> => Object.create(null) as Record<string, T>;
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const FAMILY_RE = /^[A-Za-z][A-Za-z0-9 _-]{0,39}$/;
 const GOOGLE_FONTS_RE = /^https:\/\/fonts\.googleapis\.com\/css2\?\S+$/;
@@ -88,7 +90,7 @@ export function parseDeckJson(text: string): DeckParse {
   const warn = (property: string, message: string) => diagnostics.push({ severity: 'warning', property, message });
   const note = (property: string, message: string) => diagnostics.push({ severity: 'note', property, message });
 
-  const deck: DeckJson = { order: [] };
+  const deck: DeckJson = Object.assign(dict<unknown>(), { order: [] as string[] });
   for (const [key, value] of Object.entries(raw)) {
     switch (key) {
       case 'order': {
@@ -138,7 +140,7 @@ export function parseDeckJson(text: string): DeckParse {
 }
 
 function sections(value: Record<string, unknown>, warn: (p: string, m: string) => void): Record<string, DeckSection> {
-  const out: Record<string, DeckSection> = {};
+  const out = dict<DeckSection>();
   for (const [key, entry] of Object.entries(value)) {
     const anchor = isRecord(entry) ? [entry.start, entry.before].filter((v) => v !== undefined) : [];
     if (!isRecord(entry) || typeof entry.description !== 'string' || anchor.length !== 1 || typeof anchor[0] !== 'string' || !ID_RE.test(anchor[0])) {
@@ -151,7 +153,7 @@ function sections(value: Record<string, unknown>, warn: (p: string, m: string) =
 }
 
 function faces(value: Record<string, unknown>, warn: (p: string, m: string) => void, note: (p: string, m: string) => void): Record<string, DeckFace> {
-  const out: Record<string, DeckFace> = {};
+  const out = dict<DeckFace>();
   for (const [key, entry] of Object.entries(value)) {
     const where = `faces.${key}`;
     if (!isRecord(entry) || typeof entry.family !== 'string' || !FAMILY_RE.test(entry.family)) {
@@ -176,7 +178,7 @@ function faces(value: Record<string, unknown>, warn: (p: string, m: string) => v
 }
 
 function overrides(value: Record<string, unknown>, warn: (p: string, m: string) => void): Record<string, string> {
-  const out: Record<string, string> = {};
+  const out = dict<string>();
   for (const [name, css] of Object.entries(value)) {
     if (!DS_OVERRIDE_RE.test(name) || name.startsWith('--ds-page-') || typeof css !== 'string') {
       warn(`dsOverrides.${name}`, 'an override is a --ds-* name (not --ds-page-*) to a CSS value; dropped');
@@ -193,13 +195,13 @@ const rank = (key: string, order: readonly string[]) => (order.includes(key) ? o
 const byRank = (order: readonly string[]) => (a: string, b: string) => rank(a, order) - rank(b, order) || (a < b ? -1 : a > b ? 1 : 0);
 
 function ordered<T extends Record<string, unknown>>(value: T, order: readonly string[]): T {
-  const out: Record<string, unknown> = {};
+  const out = dict<unknown>();
   for (const key of Object.keys(value).sort(byRank(order))) out[key] = value[key];
   return out as T;
 }
 /** A map's entries by key, each entry's fields in the given order then sorted: its meaning, not its bytes. */
 function orderedMap<T extends Record<string, unknown>>(map: Record<string, T>, fields: readonly string[]): Record<string, T> {
-  const out: Record<string, T> = {};
+  const out = dict<T>();
   for (const key of Object.keys(map).sort()) out[key] = ordered(map[key]!, fields);
   return out;
 }

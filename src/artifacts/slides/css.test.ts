@@ -104,6 +104,24 @@ describe('values: each property’s line, with its ranges', () => {
     ['filter', 'drop-shadow(0 0 4px #000)', null],
   ];
   it.each(cases)('%s: %s → %s', (prop, value, canonical) => expect(normValue(prop, value)).toBe(canonical));
+
+  it('writes a length in a compound value with px, and keeps factors, counts and fr as they are (fix wave 1)', () => {
+    const fixed: [string, string, string][] = [
+      ['flex', '0 0 240', '0 0 240px'],
+      ['flex', '1 240', '1 240'], // grow and shrink, as CSS reads two numbers
+      ['flex', '2 240px', '2 240px'],
+      ['flex', '1 1 0', '1 1 0px'],
+      ['grid-template-columns', '240 1fr', '240px 1fr'],
+      ['grid-template-columns', 'repeat(3, 240) auto', 'repeat(3, 240px) auto'],
+      ['grid-template-rows', 'repeat(2, 1fr 96)', 'repeat(2, 1fr 96px)'],
+      ['background', 'repeating-linear-gradient(45deg, #000 0, #000 8, #fff 8, #fff 16)', 'repeating-linear-gradient(45deg, #000000 0px, #000000 8px, #ffffff 8px, #ffffff 16px)'],
+      ['background', 'repeating-linear-gradient(#000 0, #fff 8)', 'repeating-linear-gradient(#000000 0px, #ffffff 8px)'],
+    ];
+    for (const [prop, value, canonical] of fixed) {
+      expect(normValue(prop, value), `${prop}:${value}`).toBe(canonical);
+      expect(normValue(prop, canonical), `${prop}:${canonical}`).toBe(canonical);
+    }
+  });
 });
 
 describe('var(--ds-*): a token in any value position, its fallback held to the property’s grammar', () => {
@@ -124,6 +142,22 @@ describe('var(--ds-*): a token in any value position, its fallback held to the p
     expect(normValue('font-size', 'var(--ds-type-h1-size, 500px)')).toBeNull();
     expect(checkValue('color', 'var(--brand)').ok).toBe(false);
     expect(checkValue('color', 'var(--ds-Bad)').ok).toBe(false);
+  });
+
+  it('places a border token by its fallback, else by its position, and reaches a fixed point (fix wave 1)', () => {
+    const fixed = (value: string, canonical: string) => {
+      expect(normValue('border', value), value).toBe(canonical);
+      expect(normValue('border', canonical), canonical).toBe(canonical);
+    };
+    fixed('solid var(--ds-ink, red)', '1px solid var(--ds-ink, red)');
+    fixed('var(--ds-ink, red) solid', '1px solid var(--ds-ink, red)');
+    fixed('var(--ds-hairline, 3) solid', 'var(--ds-hairline, 3px) solid black');
+    fixed('var(--ds-hairline) solid var(--ds-ink)', 'var(--ds-hairline) solid var(--ds-ink)');
+    fixed('solid var(--ds-color-border)', '1px solid var(--ds-color-border)');
+    fixed('2px var(--ds-line-style) red', '2px var(--ds-line-style) red');
+    fixed('var(--ds-border)', 'var(--ds-border)');
+    fixed('solid var(--ds-ink, 12px) red', 'var(--ds-ink, 12px) solid red');
+    expect(normValue('border', 'solid var(--ds-a, red) var(--ds-b, blue)')).toBeNull();
   });
 
   it('notes a name outside the shared list that has no fallback', () => {
@@ -187,6 +221,37 @@ describe('the applies-to column', () => {
     const connector = site('x-connector', {}, { x1: '0', y1: '0', x2: '10', y2: '10' });
     expect(style('color:#2b7a78; border-width:3px; border-style:dashed; left:0; width:10px', connector).style).toEqual({ color: '#2b7a78', 'border-width': '3px', 'border-style': 'dashed' });
     expect(style('width:96px', site('x-connector')).style).toEqual({ width: '96px' });
+  });
+
+  it('holds a token to those limits through its fallback; a token with none may be anything (fix wave 1)', () => {
+    const td = site('td', {}, {}, 'tr');
+    expect(style('padding:var(--ds-pad, 65px)', td).style).toEqual({});
+    expect(style('padding:var(--ds-pad, 64px) 8px', td).style).toEqual({ padding: 'var(--ds-pad, 64px) 8px' });
+    expect(style('padding:var(--ds-pad)', td).style).toEqual({ padding: 'var(--ds-pad)' });
+    expect(style('border:var(--ds-w, 20px) solid red', DIV).style).toEqual({});
+    expect(style('border:var(--ds-w) solid red', DIV).style).toEqual({ border: 'var(--ds-w) solid red' });
+    expect(style('border:var(--ds-w, 20px) solid red', site('x-shape')).style).toEqual({ border: 'var(--ds-w, 20px) solid red' });
+    expect(style('transform:var(--ds-tilt, scale(2))', site('x-shape')).style).toEqual({});
+    expect(style('transform:var(--ds-tilt, rotate(4deg))', site('x-shape')).style).toEqual({ transform: 'var(--ds-tilt, rotate(4deg))' });
+    expect(style('background:var(--ds-wash, linear-gradient(#000, #fff))', site('tr', {}, {}, 'table')).style).toEqual({});
+  });
+
+  it('reads a section or div without display as a flex column (fix wave 1)', () => {
+    expect(style('justify-content:center; flex-direction:row-reverse; flex-wrap:wrap', DIV).style).toEqual({ 'justify-content': 'center', 'flex-direction': 'row-reverse', 'flex-wrap': 'wrap' });
+    expect(style('justify-content:center; flex-wrap:wrap', DIV).style).toEqual({ 'justify-content': 'center' }); // a column: no wrap
+    expect(style('justify-content:center', { tag: 'section', attrs: {}, parent: null }).style).toEqual({ 'justify-content': 'center' });
+    expect(style('display:none; justify-content:center', DIV).style).toEqual({ display: 'none' });
+  });
+
+  it('takes the inheritable typography rows only on the section and a div (fix wave 1)', () => {
+    const section: StyleSite = { tag: 'section', attrs: {}, parent: null };
+    expect(style('color:#111; font-family:Georgia; letter-spacing:1px; text-shadow:0 1px 2px #000; border:1px solid red; filter:blur(2px); box-shadow:0 1px 2px #000; text-decoration:underline; background-clip:text', section).style).toEqual({
+      color: '#111111',
+      'font-family': 'Georgia',
+      'letter-spacing': '1px',
+      'text-shadow': '0px 1px 2px #000000',
+    });
+    expect(style('text-decoration:underline; background-clip:text; border:1px solid red', DIV).style).toEqual({ border: '1px solid red' });
   });
 
   it('warns naming the property and the elements it applies to', () => {
