@@ -305,6 +305,18 @@ describe('previews (P2-C3)', () => {
     expect(pane('p1')?.getAttribute('data-preview-of')).toBe('Stacked');
   });
 
+  // review fix: two asks often share question ids and labels; the second starts from its own selection, not the first's focus
+  it('a switch to another ask starts from that ask’s own selection', async () => {
+    const second: PendingAsk = { ...ASK, askId: 'toolu_b', toolUseId: 'toolu_b' as ToolUseId, requestId: 'r2' as RequestId, title: 'Again', questions: [LAYOUT] };
+    await mountWithAsk([{ ...ASK, questions: [LAYOUT] }, second]);
+    fireEvent.click(within(section('p1')).getByRole('radio', { name: 'Tabs' }));
+    expect(pane('p1')?.getAttribute('data-preview-of')).toBe('Tabs');
+    fireEvent.click(screen.getByRole('button', { name: 'Again' }));
+    await waitFor(() => expect(document.querySelector('[data-ask-sheet]')?.getAttribute('data-ask-id')).toBe('toolu_b'));
+    expect(within(section('p1')).getByRole('radio', { name: 'Tabs' }).getAttribute('aria-checked')).toBe('false');
+    expect(pane('p1')?.getAttribute('data-preview-of')).toBe('Sidebar');
+  });
+
   it('before any focus, the selected option’s', async () => {
     await mountWithAsk([{ ...ASK, questions: [LAYOUT] }]);
     fireEvent.click(within(section('p1')).getByRole('radio', { name: 'Tabs' }));
