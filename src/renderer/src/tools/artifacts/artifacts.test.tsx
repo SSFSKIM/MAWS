@@ -11,7 +11,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { LibraryFilter, LibraryRow } from '@shared/ipc/schema/library';
 import { registerArtifactEditor, resetArtifactEditors, type ArtifactEditorProps } from '../../artifacts/registry';
 import { connectLibrary, resetLibrary, watchLibraryRow } from '../../library/store';
-import { editorHostOf, useEditorHost, type EditorHostScope } from '../../panel/editor-host';
+import { editorHostOf, registerEditorHost, useEditorHost, type EditorHostScope } from '../../panel/editor-host';
 import { panelHost, registerPanelTool } from '../../panel/host';
 import type { PanelToolContext } from '../../panel/tool';
 import { useLayout } from '../../stores/layout';
@@ -422,25 +422,41 @@ describe('the record view', () => {
 });
 
 // M6b: a transcript row's Open (`TranscriptActions.openArtifact`): the tool in the row's session on the artifact, the
-// version the row names asked of the panel's viewer of it; nothing while no build registers the tool.
+// version the row names asked of the panel's viewer of it; nothing while no build registers the tool. Fix wave 2: every
+// open asks (the latest when it names none), the next open supersedes, and an open the guard refused cancels its own.
 describe('openArtifactInPanel (M6b)', () => {
+  beforeEach(() => resetVersionRequests()); // every open asks, the earlier cases' too
   afterEach(() => resetVersionRequests());
   function Request() {
     const request = useVersionRequest(NOTES.id, 'panel');
-    return <p data-request="">{request === null ? 'none' : `v${request.version}`}</p>;
+    return <p data-request="">{request === null ? 'none' : JSON.stringify(request.at)}</p>;
   }
+  const asked = () => document.querySelector('[data-request]')!.textContent;
 
-  it('does nothing while no build registers the tool; opens the tool on the artifact and asks its panel viewer for the version', async () => {
+  it('does nothing while no build registers the tool; opens the tool on the artifact and asks its panel viewer for the version; a version-less open asks for the latest', async () => {
     render(<Request />);
-    openArtifactInPanel(A, NOTES.id, 2);
+    openArtifactInPanel(A, NOTES.id, { version: 2 });
     expect(panelOf(A)?.tabs ?? []).toEqual([]);
-    resetVersionRequests();
+    expect(asked()).toBe('none');
     registerPanelTool(artifactsTool);
-    act(() => openArtifactInPanel(B, NOTES.id, 2));
+    act(() => openArtifactInPanel(B, NOTES.id, { version: 2 }));
     expect(panelOf(B)!.tabs.map((tab) => tab.toolId)).toEqual([ARTIFACTS_TOOL_ID]);
-    expect(document.querySelector('[data-request]')!.textContent).toBe('v2');
-    act(() => openArtifactInPanel(B, NOTES.id)); // no version: none asked, the viewer follows the latest
-    expect(document.querySelector('[data-request]')!.textContent).toBe('v2');
+    expect(asked()).toBe('{"version":2}');
+    act(() => openArtifactInPanel(B, NOTES.id)); // no version: the latest, superseding the v2 ask
+    expect(asked()).toBe('"latest"');
+    act(() => openArtifactInPanel(B, NOTES.id, { revision: 7 }));
+    expect(asked()).toBe('{"revision":7}');
+  });
+
+  it('cancels the ask of an open the shown artifact’s guard refused', async () => {
+    render(<Request />);
+    registerPanelTool(artifactsTool);
+    act(() => openArtifactInPanel(B, OTHER.id));
+    const scope: EditorHostScope = { surface: 'panel', tabId: panelOf(B)!.tabs[0]!.id };
+    act(() => void registerEditorHost(scope, { title: 'Other', closeGuard: async () => false }));
+    act(() => openArtifactInPanel(B, NOTES.id, { version: 2 }));
+    expect(asked()).toBe('{"version":2}');
+    await waitFor(() => expect(asked()).toBe('none'));
   });
 });
 

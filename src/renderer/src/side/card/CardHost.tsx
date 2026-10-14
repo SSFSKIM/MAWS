@@ -23,6 +23,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
+import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { CommentCard } from './CommentCard';
 import { caretOf, pinOf, placeCard, stripCard, stripMax } from './placement';
 import { claimCard, closeCard, useCommentCard, type CardHostKind, type CardHostMode, type OpenCard } from './store';
@@ -32,7 +33,7 @@ export interface CardFrame {
   offset: { x: number; y: number };
   key: string; // changes when the frame is replaced (the viewer's `frame` string)
   locate?(selector: string): Promise<CardRect | null>; // the HTML frame's handle: one function per mounted frame
-  showVersion?(version: number | null): void; // the host viewer's onVersion; null: the latest
+  showVersion?(at: ArtifactOpenAt): void; // the host viewer's: a version asked for from a card thread's row (P3-L M6b fix wave 2)
 }
 
 interface Props {

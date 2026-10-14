@@ -60,6 +60,26 @@ describe('the artifact row', () => {
     expect(ofKind(expandedRows(renamed.events), 'artifact')[0]).toMatchObject({ title: 'Sales, Q3', deliverableId: DELIVERABLE, version: 3 });
   });
 
+  // P3-L M6b fix wave 2: the revision the call wrote, from the result (a session read from disk) or the event, rides the
+  // row beside E2's ordinal; an E2 answer names none
+  it('carries the revision the call wrote, from the result or the event; none from an answer that names none', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_p', UPDATE, { id: 'dash', html_path: 'dashboard.html' });
+    b.result('toolu_p', json({ status: 'published', id: 'dash', deliverableId: DELIVERABLE, version: 2, title: 'Dashboard', revision: 41 }));
+    expect(ofKind(expandedRows(b.events), 'artifact')[0]).toMatchObject({ version: 2, revision: 41 });
+    const live = builder();
+    live.turn('u1');
+    live.toolUse('toolu_q', UPDATE, { id: 'dash', html_path: 'dashboard.html' });
+    live.emit('maws.delivery.artifact', { toolUseId: tool('toolu_q'), requestId: request('r1'), action: 'update', artifactId: 'dash', deliverableId: DELIVERABLE, version: 3, title: 'Dashboard', revision: 57 });
+    expect(ofKind(expandedRows(live.events), 'artifact')[0]).toMatchObject({ version: 3, revision: 57 });
+    const e2 = builder();
+    e2.turn('u1');
+    e2.toolUse('toolu_e', UPDATE, { id: 'dash', html_path: 'dashboard.html' });
+    e2.result('toolu_e', updated(2));
+    expect(ofKind(expandedRows(e2.events), 'artifact')[0]).not.toHaveProperty('revision');
+  });
+
   it('a refused call reads its error, a result that is not the tool’s JSON answers the row without a version, and a call with no result is unanswered', () => {
     const b = builder();
     b.turn('u1');

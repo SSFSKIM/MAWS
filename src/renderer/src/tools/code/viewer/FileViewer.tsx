@@ -24,7 +24,7 @@ import { ImageView } from './ImageView';
 import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
 import { useMediaZoom, ZoomControls, type MediaZoom } from './MediaZoom';
-import { useViewer, type ViewerEntry } from './viewer-store';
+import { useViewer, type ArtifactRead, type ViewerEntry } from './viewer-store';
 
 const CodeView = lazy(() => import('./CodeView'));
 
@@ -83,19 +83,25 @@ const Loading = () => <p className="p-4 text-ui text-fg-muted">{VIEWER_COPY.load
 
 interface FileBodyProps {
   tabId: string; // the viewer store's key: a file tab's id, or the File artifact viewer's `artifact:<id>:<revision>`
-  appSessionId: AppSessionId;
+  appSessionId: AppSessionId | null; // P3-L (M6b fix wave 2): null with `artifact`, a file no session made
   path: string;
   line?: number | null;
   readOnly?: boolean; // E2: never editable (the viewer store's mount option)
+  artifact?: ArtifactRead; // P3-L (M6b fix wave 2): the file read by its artifact alone (`library.read`)
   lead?: ReactNode; // the bar's start (the file tab's path); without one the notices lead and the controls keep right
   controls?: (entry: ViewerEntry) => ReactNode; // beside the notices (the file tab's editor controls)
 }
 
-export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, lead, controls }: FileBodyProps) {
+export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls }: FileBodyProps) {
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
   const zoom = useMediaZoom(`${tabId}\n${path}`);
-  useEffect(() => useViewer.getState().mount(tabId, { appSessionId, path, line, readOnly }), [tabId, appSessionId, path, line, readOnly]);
+  const artifactId = artifact?.artifactId;
+  const revision = artifact?.revision;
+  useEffect(
+    () => useViewer.getState().mount(tabId, { appSessionId, path, line, readOnly, ...(artifactId !== undefined && revision !== undefined && { artifact: { artifactId, revision } }) }),
+    [tabId, appSessionId, path, line, readOnly, artifactId, revision],
+  );
   const entry = found && found.appSessionId === appSessionId && found.path === path ? found : null;
 
   if (entry?.status === 'error' && entry.error?.startsWith('unknown app session')) return <NoSession path={path} />;
@@ -177,7 +183,7 @@ function Controls({ entry, wrap, zoom }: { entry: ViewerEntry; wrap: boolean; zo
           {VIEWER_COPY.loadMore}
         </button>
       ) : null}
-      {entry.kind === 'head' && opensExternally(entry.path) ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} /> : null}
+      {entry.kind === 'head' && opensExternally(entry.path) && entry.appSessionId !== null ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} /> : null}
       {hasSource(entry) ? (
         <button type="button" className={toggle} aria-pressed={entry.sourceView} onClick={() => useViewer.getState().toggleSource(tabId)}>
           {entry.sourceView ? VIEWER_COPY.rendered : VIEWER_COPY.source}

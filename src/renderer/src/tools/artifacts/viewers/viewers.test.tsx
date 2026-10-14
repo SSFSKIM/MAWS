@@ -81,6 +81,7 @@ beforeEach(() => {
     }
     if (name === 'library.exportFormats') return ok({ formats: input.kind === 'html' ? ['pdf', 'png'] : [] });
     if (name === 'files.read') return ok({ encoding: 'utf8', content: 'month,amount\n', bytes: 13, offset: 0, length: 13, truncated: false, mime: 'text/csv', hash: 'a'.repeat(64), utf8: true });
+    if (name === 'library.read') return ok({ encoding: 'utf8', content: 'month,amount\n', bytes: 13, offset: 0, length: 13, truncated: false, mime: 'text/csv', hash: 'a'.repeat(64), utf8: true }); // M6b fix wave 2
     if (name === 'files.watch' || name === 'files.unwatch') return ok();
     return new Promise(() => {});
   });
@@ -221,7 +222,7 @@ describe('a version asked for from outside', () => {
   });
 
   it('shows the n-th version by revision when it mounts, never revision n, and takes the request once', async () => {
-    requestArtifactVersion(ID, 2, 'panel');
+    requestArtifactVersion(ID, { version: 2 }, 'panel');
     mount('html');
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
     expect(main.callsOf('library.content')).not.toContainEqual({ artifactId: ID, revision: 2 });
@@ -233,13 +234,13 @@ describe('a version asked for from outside', () => {
   it('moves a viewer already showing the artifact, follows the latest for the last place, and leaves another surface’s or artifact’s alone', async () => {
     mount('html');
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
-    act(() => requestArtifactVersion(ID, 1, 'main'));
-    act(() => requestArtifactVersion('00000000-0000-4000-8000-0000000000ff', 1, 'panel'));
+    act(() => void requestArtifactVersion(ID, { version: 1 }, 'main'));
+    act(() => void requestArtifactVersion('00000000-0000-4000-8000-0000000000ff', { version: 1 }, 'panel'));
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html'));
-    act(() => requestArtifactVersion(ID, 1, 'panel'));
+    act(() => void requestArtifactVersion(ID, { version: 1 }, 'panel'));
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
-    act(() => requestArtifactVersion(ID, 3, 'panel'));
+    act(() => void requestArtifactVersion(ID, { version: 3 }, 'panel'));
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
     expect(document.querySelector('[data-artifact-viewer]')?.getAttribute('data-version')).toBe('3');
   });
@@ -248,13 +249,40 @@ describe('a version asked for from outside', () => {
   it('shows X12’s version n of an imported page where the history before it thinned', async () => {
     versions = [{ ...version(1, 4), kind: 'import', label: 'v1' }, { ...version(3, 14), kind: 'import', label: 'v3' }, version(4, 20)]; // v2 gone
     names = { 4: 'index.html', 14: 'index.html', 20: 'index.html' };
-    requestArtifactVersion(ID, 3, 'panel');
+    requestArtifactVersion(ID, { version: 3 }, 'panel');
     mount('html');
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
   });
 
-  it('lets a request lapse after REQUEST_LAPSE_MS', async () => {
-    requestArtifactVersion(ID, 1, 'panel', Date.now() - 6_000);
+  // M6b fix wave 2: a row of a call whose answer named its revision opens that revision, wherever thinning moved its
+  // place; a revision thinning dropped is stood for by the next kept version
+  it('shows the version that captured a revision, the next kept one when thinning dropped it', async () => {
+    requestArtifactVersion(ID, { revision: 9 }, 'panel');
+    mount('html');
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    act(() => void requestArtifactVersion(ID, { revision: 5 }, 'panel')); // revision 5's version thinned: 9 kept after it
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 9, 'index.html')));
+    act(() => void requestArtifactVersion(ID, { revision: 4 }, 'panel'));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+  });
+
+  // M6b fix wave 2: no wall-clock lapse. A request waits for a versions read however slow; a later open supersedes it,
+  // a version-less one asking for the latest
+  it('takes a request after a slow versions read, and a later open asking for the latest supersedes an earlier one', async () => {
+    const slow = deferred<ReturnType<typeof ok>>();
+    versionsAnswer = () => slow.promise;
+    requestArtifactVersion(ID, { version: 1 }, 'panel');
+    mount('html');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    const later = Date.now() + 60_000; // the read answers a minute later
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(later);
+    slow.resolve(ok({ versions }));
+    await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 4, 'index.html')));
+    clock.mockRestore();
+    cleanup();
+    versionsAnswer = null;
+    requestArtifactVersion(ID, { version: 1 }, 'panel');
+    requestArtifactVersion(ID, 'latest', 'panel'); // the next open, naming no version
     mount('html');
     await waitFor(() => expect(frame('html')?.getAttribute('src')).toBe(artifactUrl(ID, 14, 'index.html')));
   });
@@ -381,20 +409,24 @@ describe('the File viewer', () => {
     expect(onShown).toHaveBeenCalled();
   });
 
-  // M6b (Decision Log 36i): a File artifact no session made (the owner's "Add a file…") is read under a session the
-  // window knows, which the library's index admits it for; with none open it says so
-  it('reads a file no session made under a session the window knows, and says so when it knows none', async () => {
+  // M6b (Decision Log 36i; fix wave 2): a File artifact no session made (the owner's "Add a file…"), or one whose session
+  // this window does not know, reads by the artifact alone: main resolves its path (`library.read`), with no session at all
+  it('reads a file no session made by the artifact alone, with an empty session store, drawing its content', async () => {
     names = { 9: 'budget.csv' };
     row = rowOf('file', { title: 'budget', sessions: [] });
-    mount('file');
-    await waitFor(() => expect(main.callsOf('files.read')[0]).toMatchObject({ appSessionId: P, path: '/store/9/budget.csv' }));
+    useSessions.setState({ records: new Map() });
+    const { onShown } = mount('file');
+    await waitFor(() => expect(document.querySelector('[data-file-viewer]')?.textContent).toContain('month,amount'));
+    expect(main.callsOf('library.read')[0]).toMatchObject({ artifactId: ID, revision: 9, offset: 0 });
+    expect(main.callsOf('files.read')).toEqual([]);
+    expect(main.callsOf('files.watch')).toEqual([]);
+    await waitFor(() => expect(onShown).toHaveBeenCalled());
     cleanup();
     useViewer.getState().reset();
-    useSessions.setState({ records: new Map() });
-    const reads = main.callsOf('files.read').length;
+    row = rowOf('file', { title: 'budget' }); // its session, which this window does not know
     mount('file');
-    expect(await screen.findByText('budget.csv is read through a session, and none is open: open a session to see it here.')).toBeTruthy();
-    expect(main.callsOf('files.read')).toHaveLength(reads);
+    await waitFor(() => expect(main.callsOf('library.read')).toHaveLength(2));
+    expect(main.callsOf('files.read')).toEqual([]);
   });
 
   it('has no Comment, and its Export menu saves a copy', async () => {

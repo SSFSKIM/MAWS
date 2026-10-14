@@ -10,9 +10,9 @@
 // (`noteArtifactVersions`). The shown revision's stored file is named by main (`library.content`) and framed at
 // `maws-artifact://<id>/<revision>/<name>`; the body is chosen by the MIME the name types (an `html` artifact is always
 // its page): the HTML frame (sandboxed, carrying the scheme's pick bridge), the PDF frame, native media, else the file
-// viewer read-only under the session that made the file (the files service admits a delivered file by its session; M6b:
-// a File artifact no session made, the owner's own, is read under any session the window knows, which the library's
-// index admits for it).
+// viewer read-only under the session that made the file while the window knows it (the files service admits a delivered
+// file by its session), else (fix wave 2, Decision Log 36i: an owner's file, a session gone) by the artifact alone through
+// main (`library.read`).
 // `onShown` is called once the content is ready (the frame loaded, the media's metadata, the file read) and the body is
 // visible, so content that loaded hidden counts when it shows. Export and Save a copy are disabled until the shown
 // version and its file are resolved.
@@ -36,6 +36,7 @@ import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
 import type { LibraryContent, LibraryRow } from '@shared/ipc/schema/library';
+import type { ArtifactOpenAt } from '../../../artifacts/open-at';
 import type { ArtifactEditor, ArtifactEditorProps } from '../../../artifacts/registry';
 import { ipc } from '../../../ipc/client';
 import { toastFailure } from '../../../library/dialogs';
@@ -49,7 +50,7 @@ import { useSessions } from '../../../stores/sessions';
 import { openCommentComposer } from '../../code/anchor/anchor';
 import { openFile } from '../../code/open-file';
 import { FileBody } from '../../code/viewer/FileViewer';
-import { useViewer } from '../../code/viewer/viewer-store';
+import { useViewer, type ArtifactRead } from '../../code/viewer/viewer-store';
 import { clearArtifactConsole, noteArtifactVersions, useArtifactConsole } from './console';
 import { ConsoleEntriesChip } from './ConsoleChip';
 import { VIEWERS_COPY } from './copy';
@@ -57,7 +58,7 @@ import { HtmlFrame, type FrameHandle } from './frames/HtmlFrame';
 import { Media } from './frames/Media';
 import { PdfFrame } from './frames/PdfFrame';
 import { CommentIcon, OpenAsFileIcon, OpenExternallyIcon, ReloadIcon, RevealIcon } from './icons';
-import { bodyOf, placeOfNumber, shownVersion, underSession, versionLabel, versionsInOrder, versionToShow, type BodyKind } from './model';
+import { bodyOf, placeOfOpenAt, shownVersion, underSession, versionLabel, versionsInOrder, versionToShow, type BodyKind } from './model';
 import { pageElementAnchor, type PickMessage } from './pick';
 import { takeVersionRequest, useVersionRequest } from './requests';
 
@@ -107,11 +108,11 @@ function useRead<T>(key: string | null, read: () => Promise<{ ok: true; value: T
 const homeSession = (row: LibraryRow | null | undefined): AppSessionId | null =>
   (row?.sessions.find((session) => session.roles.includes('created')) ?? row?.sessions[0])?.appSessionId ?? null;
 
-// M6b (Decision Log 36i): the session a File artifact's body is read under: its home session, else (no session made it)
-// any session this window knows, since the files service needs one and the library's index admits the file for any.
+// M6b (Decision Log 36i): the session a File artifact's body is read under, following the file as it changes: its home
+// session while this window knows it. Fix wave 2: else none, and the body reads the file by the artifact alone
+// (`library.read`, main resolving its path), so an owner's file or one whose session is gone reads without a session.
 function useReaderSession(home: AppSessionId | null): AppSessionId | null {
-  const any = useSessions((s) => (home !== null ? null : (s.records.keys().next().value ?? null)));
-  return home ?? any;
+  return useSessions((s) => (home !== null && s.records.has(home) ? home : null));
 }
 
 // ---- the editor --------------------------------------------------------------------------------------------------------
@@ -136,14 +137,15 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
     state.view.setState({ reloads: nextReload(), pickingIn: null });
   };
   const choose = (n: number | null) => state.view.setState({ chosen: versionToShow(n, ordered?.length ?? 0) });
-  // a version number from outside (a card thread's artifact row): X12's for an imported page (M6b fix wave 1)
-  const chooseNumbered = (n: number | null) => choose(n === null || ordered === null ? n : placeOfNumber(ordered, n));
+  // a version asked for from outside (a card thread's artifact row): by its revision, else by its number (X12's on an
+  // imported page), else the latest (M6b fix waves 1 and 2)
+  const chooseAt = (at: ArtifactOpenAt) => choose(ordered === null ? null : placeOfOpenAt(ordered, at));
   // M6b: the places noted for the transcript row's chip; a version asked for from outside, taken once the versions are read
   const request = useVersionRequest(artifactId, scope.surface);
   useEffect(() => {
     if (ordered === null) return;
     noteArtifactVersions(artifactId, ordered);
-    if (request !== null && takeVersionRequest(request.serial)) state.view.setState({ chosen: versionToShow(placeOfNumber(ordered, request.version), ordered.length) });
+    if (request !== null && takeVersionRequest(request.serial)) state.view.setState({ chosen: versionToShow(placeOfOpenAt(ordered, request.at), ordered.length) });
   }, [artifactId, ordered, request, state.view]);
 
   // the frame picking is asked of, by what keys it: another version or a Reload is another frame
@@ -190,7 +192,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
     openCommentComposer(pageElementAnchor({ title, version: shown.n, url }, message), { appSessionId: session, placement: { kind: 'card', host: 'artifact-page', hostId, rect: { x, y, width, height } } });
   };
   const accepts = (card: OpenCard) => card.target?.kind === 'artifact-page' && card.target.artifactId === artifactId;
-  const cardFrame: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: frameKey ?? '', locate: frameHandle?.locate, showVersion: chooseNumbered };
+  const cardFrame: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: frameKey ?? '', locate: frameHandle?.locate, showVersion: chooseAt };
   // a dismissed card gives focus back to Comment in the header over the tab (M6b fix wave 1, X32's
   // `focusEditorHostAction`), or to the frame when Comment is not there to take it
   const restoreFocus = () => {
@@ -320,14 +322,7 @@ function Body({ artifactId, content, body, title, session, reloads, picking, onP
     case 'audio':
       return <Media kind={body} url={url} onLoad={onReady} />;
     case 'file':
-      if (session === null) {
-        return (
-          <p data-no-session="" className="m-0 p-4 text-ui text-fg-muted">
-            {VIEWERS_COPY.noSession(content.name)}
-          </p>
-        );
-      }
-      return <DrawnFile tabId={fileTabId(artifactId, content.revision, reloads)} session={session} path={content.path} onReady={onReady} />;
+      return <DrawnFile tabId={fileTabId(artifactId, content.revision, reloads)} session={session} artifact={{ artifactId, revision: content.revision }} path={content.path} onReady={onReady} />;
   }
 }
 
@@ -335,12 +330,13 @@ function Body({ artifactId, content, body, title, session, reloads, picking, onP
 // every view, so a Reload reads afresh even while another view holds the revision's entry).
 const fileTabId = (artifactId: string, revision: number, reloads: number) => `artifact:${artifactId}:${revision}${reloads > 0 ? `:r${reloads}` : ''}`;
 
-function DrawnFile({ tabId, session, path, onReady }: { tabId: string; session: AppSessionId; path: string; onReady(): void }) {
+// Under its session while the window knows it (the file followed as it changes), else by its artifact alone (fix wave 2).
+function DrawnFile({ tabId, session, artifact, path, onReady }: { tabId: string; session: AppSessionId | null; artifact: ArtifactRead; path: string; onReady(): void }) {
   const read = useViewer((s) => s.entries.get(tabId)?.status === 'ready');
   useEffect(() => {
     if (read) onReady();
   }, [read, onReady]);
-  return <FileBody tabId={tabId} appSessionId={session} path={path} readOnly />;
+  return <FileBody tabId={tabId} appSessionId={session} path={path} readOnly {...(session === null && { artifact })} />;
 }
 
 // ---- the header (X32) --------------------------------------------------------------------------------------------------

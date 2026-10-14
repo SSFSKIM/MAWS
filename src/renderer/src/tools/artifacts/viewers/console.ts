@@ -10,6 +10,7 @@
 import { createStore } from 'zustand/vanilla';
 import { useStore } from 'zustand';
 import type { ArtifactVersion } from '@shared/artifacts/version';
+import type { ArtifactOpenAt } from '../../../artifacts/open-at';
 import type { ArtifactConsole } from '@shared/ipc/schema/artifacts';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../../ipc/client';
@@ -39,12 +40,13 @@ export function noteArtifactVersions(artifactId: string, versions: readonly Plac
   store.setState((s) => ({ places: new Map(s.places).set(artifactId, versions.map(({ seq, kind, label }) => ({ seq, kind, label }))) }));
 }
 
-// M6b: the console of version number `version`'s revision, the number found as the viewer finds it (`placeOfNumber`,
-// fix wave 1: X12's on an imported page); none while no viewer has placed the versions.
-export const useArtifactConsoleAt = (artifactId: string, version: number): ConsoleLine[] =>
+// M6b: the console of one version: a revision's own (fix wave 2: a row whose call's answer named it), or a version
+// number's, found as the viewer finds it (`placeOfNumber`, fix wave 1: X12's on an imported page; none while no viewer
+// has placed the versions).
+export const useArtifactConsoleAt = (artifactId: string, at: Exclude<ArtifactOpenAt, 'latest'>): ConsoleLine[] =>
   useStore(store, (s) => {
     const placed = s.places.get(artifactId);
-    const revision = placed?.[placeOfNumber(placed, version) - 1]?.seq;
+    const revision = 'revision' in at ? at.revision : placed?.[placeOfNumber(placed, at.version) - 1]?.seq;
     return revision === undefined ? NONE : (s.lines.get(consoleKey(artifactId, revision)) ?? NONE);
   });
 

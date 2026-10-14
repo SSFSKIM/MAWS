@@ -80,11 +80,11 @@ describe('the artifact row', () => {
   it('Open hands the row’s session, artifact id and version to openArtifact; a child transcript’s row opens in its parent session', () => {
     const { actions } = renderRow({ ...BASE, action: 'update', version: 2 }, { storeKey: APP });
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, ID, 2);
+    expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, ID, { version: 2 });
     cleanup();
     const child = renderRow(BASE, { storeKey: `${APP}:agent-1` });
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(child.actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, ID, 1);
+    expect(child.actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, ID, { version: 1 });
   });
 
   // P2-E1 (D10): a version a side thread wrote into its parent's artifact opens in the parent's panel; its console is the
@@ -93,10 +93,23 @@ describe('the artifact row', () => {
     const PARENT = 'app-parent' as AppSessionId;
     const { actions, container } = renderRow({ ...BASE, action: 'update', version: 2, ownerAppSessionId: PARENT }, { storeKey: APP });
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-    expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(PARENT, ID, 2);
+    expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(PARENT, ID, { version: 2 });
     act(() => {
       noteArtifactVersions(ID, placed(3, 8));
       applyArtifactConsole({ artifactId: ID, revision: 8, level: 'error', message: 'Uncaught Error: E1_BOOM', line: 3, source: null });
+    });
+    expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
+  });
+
+  // P3-L M6b fix wave 2: a row whose call's answer named its revision opens that revision, and its chip reads that
+  // revision's console, whatever place thinning has moved it to
+  it('opens by the revision its call wrote when the row has one, and reads that revision’s console', () => {
+    const { actions, container } = renderRow({ ...BASE, version: 2, revision: 9 }, { storeKey: APP });
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, ID, { revision: 9 });
+    act(() => {
+      noteArtifactVersions(ID, placed(9)); // thinned: v1 gone, the publish now the first place
+      applyArtifactConsole({ artifactId: ID, revision: 9, level: 'error', message: 'Uncaught Error: REV_9', line: 1, source: null });
     });
     expect(container.querySelector('[data-console-chip]')!.textContent).toBe('1 console error');
   });

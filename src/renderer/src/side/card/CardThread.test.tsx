@@ -517,11 +517,11 @@ describe('the thread’s artifact row', () => {
     await waitFor(() => expect(card()!.querySelectorAll('[data-artifact]')).toHaveLength(3));
     const open = (n: number) => fireEvent.click(within(card()!.querySelectorAll<HTMLElement>('[data-artifact]')[n]!).getByRole('button', { name: 'Open' }));
     open(0);
-    expect(showVersion).toHaveBeenLastCalledWith(3);
+    expect(showVersion).toHaveBeenLastCalledWith({ version: 3 }); // an E2 answer names no revision: its ordinal
     open(1);
-    expect(showVersion).toHaveBeenLastCalledWith(2);
+    expect(showVersion).toHaveBeenLastCalledWith({ version: 2 });
     open(2);
     expect(showVersion).toHaveBeenCalledTimes(2);
-    expect(registered).toHaveBeenCalledWith(PARENT, '00000000-0000-4000-8000-0000000000e2', 4);
+    expect(registered).toHaveBeenCalledWith(PARENT, '00000000-0000-4000-8000-0000000000e2', { version: 4 });
   });
 });

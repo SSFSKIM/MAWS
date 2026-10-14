@@ -22,7 +22,6 @@ export const VIEWERS_COPY = {
   couldNotRead: (message: string) => `Couldn’t read this artifact: ${message}`,
   retry: 'Retry',
   // a File artifact no session links: its code body has no session to read it under
-  noSession: (name: string) => `${name} is read through a session, and none is open: open a session to see it here.`, // M6b: only when the window knows no session
   // the Export menu (the header's, the library row's)
   exportFormats: { pdf: 'PDF', png: 'PNG', docx: 'Word document', pptx: 'PowerPoint', md: 'Markdown', html: 'HTML' },
   saveCopy: 'Save a copy…',

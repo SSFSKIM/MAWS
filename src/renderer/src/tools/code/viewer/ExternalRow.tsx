@@ -40,7 +40,7 @@ export function ExternalRow({ entry }: { entry: ViewerEntry }) {
       <div className="flex flex-col items-center gap-2 text-center">
         <p className="text-ui text-fg">{kind === 'Binary' ? VIEWER_COPY.binary(entry.bytes) : VIEWER_COPY.externalKind(kind)}</p>
         {kind === 'Binary' ? null : <p className="text-ui-sm text-fg-muted">{formatSize(entry.bytes)}</p>}
-        {opensExternally(entry.path) ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} /> : null}
+        {opensExternally(entry.path) && entry.appSessionId !== null ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} /> : null /* P3-L: none for a file read by its artifact (its header opens it) */}
       </div>
     </div>
   );

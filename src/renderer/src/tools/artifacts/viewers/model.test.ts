@@ -2,7 +2,7 @@
 // version list in order with its labels, and which version a picker choice or a row's Open shows.
 import { describe, expect, it } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
-import { bodyOf, placeOfNumber, shownVersion, versionLabel, versionsInOrder, versionToShow } from './model';
+import { bodyOf, placeOfNumber, placeOfOpenAt, shownVersion, versionLabel, versionsInOrder, versionToShow } from './model';
 
 const version = (id: number, seq: number): ArtifactVersion => ({ id, seq, at: seq * 1000, actor: { kind: 'human' }, kind: 'auto', assetRefs: [] });
 
@@ -63,5 +63,14 @@ describe('versions', () => {
     const named = versionsInOrder([version(1, 4), { ...version(2, 9), label: 'v1' }]); // the owner's name on an agent's version
     expect(placeOfNumber(named, 1), 'only an imported version answers by its label').toBe(1);
   });
-});
 
+  // M6b fix wave 2: an open's ask: the latest, a revision's version (the next kept one when thinning dropped it), a number
+  it('places an open’s ask: the latest, a revision (the next kept version after a thinned one), a number', () => {
+    const thinned = versionsInOrder([version(1, 4), version(3, 12), version(4, 20)]); // revision 9's version thinned
+    expect(placeOfOpenAt(thinned, 'latest')).toBeNull();
+    expect(placeOfOpenAt(thinned, { revision: 12 })).toBe(2);
+    expect(placeOfOpenAt(thinned, { revision: 9 })).toBe(2);
+    expect(placeOfOpenAt(thinned, { revision: 99 })).toBeNull();
+    expect(placeOfOpenAt(thinned, { version: 2 })).toBe(2);
+  });
+});

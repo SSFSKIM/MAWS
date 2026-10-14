@@ -37,9 +37,17 @@ import { CODE_CAP, kindOf, type ViewerKind } from './kinds';
 
 export const VIEWER_ENTRIES_MAX = 20;
 
+// P3-L (M6b fix wave 2, Decision Log 36i): a File artifact's file read by the artifact alone (`library.read`, main
+// resolving its path), for an artifact no session made: no session, so no watch and no write.
+export interface ArtifactRead {
+  artifactId: string;
+  revision: number;
+}
+
 export interface ViewerEntry {
   tabId: string;
-  appSessionId: AppSessionId;
+  appSessionId: AppSessionId | null; // null: read by `artifact` alone (P3-L M6b fix wave 2)
+  artifact: ArtifactRead | null; // P3-L (M6b fix wave 2)
   path: string;
   status: 'loading' | 'ready' | 'error';
   error: string | null; // the read's refusal, word for word
@@ -106,7 +114,9 @@ export interface ViewState {
 export interface ViewerStore {
   entries: Map<string, ViewerEntry>;
   wrap: boolean; // the Wrap toggle, one for every code view
-  mount(tabId: string, target: { appSessionId: AppSessionId; path: string; line: number | null; readOnly?: boolean }): () => void;
+  // P3-L (M6b fix wave 2): `artifact` reads the file by the artifact alone, the session (null for none) kept for what
+  // the view offers beside the read
+  mount(tabId: string, target: { appSessionId: AppSessionId | null; path: string; line: number | null; readOnly?: boolean; artifact?: ArtifactRead }): () => void;
   loadMore(tabId: string): void;
   toggleSource(tabId: string): void;
   setWrap(wrap: boolean): void;
@@ -185,7 +195,7 @@ export function readOnlyReason(entry: ViewerEntry): 'head' | 'encoding' | 'loadi
   return 'loading';
 }
 
-async function settled<N extends 'files.read' | 'files.write'>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
+async function settled<N extends 'files.read' | 'files.write' | 'library.read'>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
   try {
     return await call;
   } catch (error) {
@@ -194,6 +204,7 @@ async function settled<N extends 'files.read' | 'files.write'>(call: Promise<Com
 }
 
 const isNotFound = (message: string) => message.startsWith('not found:');
+const sameSource = (a: ArtifactRead | null, b: ArtifactRead | null) => a?.artifactId === b?.artifactId && a?.revision === b?.revision;
 
 // What a load read, committed whole at its end (a `change` load) or patched as it goes (an `open` load). `utf8` (E5) is
 // the read's answer about the hashed bytes, which decides `editable` and is not kept on the entry.
@@ -224,6 +235,13 @@ export function createViewerStore(client: MawsBridge) {
 
     // A newer generation: every read in flight for the tab lands nowhere.
     const supersede = (tabId: string) => generations.set(tabId, ++lastGeneration);
+    // One chunk of the entry's file: under its session (`files.read`), or by its artifact alone (`library.read`, P3-L
+    // M6b fix wave 2), which answers alike.
+    const readChunk = (entry: Pick<ViewerEntry, 'appSessionId' | 'artifact' | 'path'>, offset: number, length: number, hash: boolean): Promise<CommandResult<'files.read'>> => {
+      const chunk = { offset, length, ...(hash ? { hash: true } : {}) };
+      if (entry.artifact) return settled(client.invoke('library.read', { ...entry.artifact, ...chunk }));
+      return settled(client.invoke('files.read', { appSessionId: entry.appSessionId!, path: entry.path, ...chunk }));
+    };
 
     const remove = (tabId: string) => {
       holds.get(tabId)?.release();
@@ -309,9 +327,8 @@ export function createViewerStore(client: MawsBridge) {
       const live = () => generations.get(tabId) === generation;
       // A re-read of a head covers what Load more had reached, not only the first chunk.
       const extent = reason === 'change' && entry.kind === 'head' ? Math.min(CODE_CAP, entry.loaded) : 0;
-      const { appSessionId, path } = entry;
-      const read = (offset: number, length: number, hash: boolean) =>
-        settled(client.invoke('files.read', { appSessionId, path, offset, length, ...(hash ? { hash: true } : {}) }));
+      const { path } = entry;
+      const read = (offset: number, length: number, hash: boolean) => readChunk(entry, offset, length, hash);
 
       // The hash is asked for only where it can be used: the kind still undecided (an open load, an entry with none) or
       // one the editor takes. A change load of a head, an image or an external kind asks none (each would cost main a
@@ -415,7 +432,7 @@ export function createViewerStore(client: MawsBridge) {
         patch(tabId, { saving: false, theirs: { ...entry.theirs, view: 'merge' } });
         return true;
       }
-      const answer = await settled(client.invoke('files.read', { appSessionId: entry.appSessionId, path: entry.path, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true }));
+      const answer = await readChunk(entry, 0, FILES_READ_MAX_LENGTH, true);
       if (!current()) return false;
       if (!answer.ok) {
         patch(tabId, { saving: false, saveError: answer.error.message });
@@ -441,11 +458,14 @@ export function createViewerStore(client: MawsBridge) {
       entries: new Map(),
       wrap: false,
 
-      mount(tabId, { appSessionId, path, line, readOnly = false }) {
+      mount(tabId, { appSessionId, path, line, readOnly = false, artifact }) {
         used.set(tabId, ++clock);
         if (!unsubscribe) unsubscribe = useLayout.subscribe((state, prev) => state.main !== prev.main && prune());
         const entry = get().entries.get(tabId);
+        const source = artifact ?? null;
         const watchThenRead = (reason: 'open' | 'change') => {
+          // P3-L (M6b fix wave 2): a file read by its artifact alone has no session to watch under: it is read once
+          if (appSessionId === null) return void load(tabId, reason);
           // The watch first, then the read: a change made while main's watcher restarts is read, not missed (M1 Surprises).
           const hold = useFiles.getState().watch(appSessionId, dirname(path));
           holds.set(tabId, hold);
@@ -461,13 +481,13 @@ export function createViewerStore(client: MawsBridge) {
           supersede(tabId);
           patch(tabId, { appSessionId, ...(line !== entry.line ? { line, pendingJump: line } : {}) });
           watchThenRead('change');
-        } else if (!entry || entry.appSessionId !== appSessionId || entry.path !== path || entry.readOnly !== readOnly) {
+        } else if (!entry || entry.appSessionId !== appSessionId || entry.path !== path || entry.readOnly !== readOnly || !sameSource(entry.artifact, source)) {
           holds.get(tabId)?.release();
           views.delete(tabId);
           stale.delete(tabId);
           supersede(tabId); // an older load lands nowhere
           const fresh: ViewerEntry = {
-            tabId, appSessionId, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
+            tabId, appSessionId, artifact: source, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
             text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
             hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 0, pending: 0, readOnly,
           };
@@ -495,7 +515,7 @@ export function createViewerStore(client: MawsBridge) {
         const generation = generations.get(tabId);
         patch(tabId, { loadingMore: true });
         const length = Math.min(FILES_READ_DEFAULT_LENGTH, CODE_CAP - entry.loaded);
-        void settled(client.invoke('files.read', { appSessionId: entry.appSessionId, path: entry.path, offset: entry.loaded, length })).then((next) => {
+        void readChunk(entry, entry.loaded, length, false).then((next) => {
           // A newer load, or one that replaced the text this read continues, superseded it and cleared `loadingMore`.
           if (generations.get(tabId) !== generation || get().entries.get(tabId)?.epoch !== entry.epoch) return;
           if (!next.ok) return fail(tabId, next.error.message, 'open');
@@ -543,6 +563,7 @@ export function createViewerStore(client: MawsBridge) {
         const incarnation = incarnations.get(tabId);
         const current = () => incarnations.get(tabId) === incarnation;
         patch(tabId, { saving: true, saveError: null });
+        if (entry.appSessionId === null) return 'noop'; // P3-L: an artifact's file read by the artifact is never written
         const answer = await settled(client.invoke('files.write', { appSessionId: entry.appSessionId, path: entry.path, content, expectedHash }));
         if (!current()) return 'noop';
         if (!answer.ok) {

@@ -9,6 +9,7 @@
 import { mimeOf } from '@shared/files/mime';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import { x12VersionLabel } from '@shared/maws/deliverable';
+import type { ArtifactOpenAt } from '../../../artifacts/open-at';
 import type { SessionRecord } from '@shared/graph/session';
 
 export type BodyKind = 'html' | 'pdf' | 'video' | 'audio' | 'file';
@@ -48,6 +49,16 @@ export function placeOfNumber(ordered: readonly Pick<ArtifactVersion, 'kind' | '
   const label = x12VersionLabel(n);
   const index = ordered.findIndex((version) => version.kind === 'import' && version.label === label);
   return index >= 0 ? index + 1 : n;
+}
+
+// M6b fix wave 2: the place an open asks for (null: the latest). A revision is the version that captured it; one
+// thinning dropped is stood for by the next kept version after it (the newest of its time bucket, which holds what it
+// wrote and what followed), else the latest.
+export function placeOfOpenAt(ordered: readonly Pick<ArtifactVersion, 'seq' | 'kind' | 'label'>[], at: ArtifactOpenAt): number | null {
+  if (at === 'latest') return null;
+  if ('version' in at) return placeOfNumber(ordered, at.version);
+  const index = ordered.findIndex((version) => version.seq >= at.revision);
+  return index >= 0 ? index + 1 : null;
 }
 
 // What the viewer keeps for a choice of place `n` among `count`: the place, or null (follow the latest) for the latest.

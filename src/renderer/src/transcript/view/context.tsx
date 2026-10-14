@@ -4,6 +4,7 @@
 // scrolling out of the virtualised list and back.
 import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import type { AskRowData, Cell, Row, Spill, SubagentRef, TurnId } from '../model/rows';
 import { ipcLoadSpill, ipcOpenExternal } from '../source/ipc';
 import { WorkMotion } from './motion';
@@ -29,8 +30,8 @@ export interface TranscriptActions {
   peerReplies: PeerReplies;
   // E7 end
   // E2 start: the artifact row's Open and a delivered file's name (tools/maws/actions.ts, registered from App.tsx's E2 block).
-  // P3-L M6b: the panel's Artifacts tool on the artifact (a delivery's id is the artifact's), at the n-th of its versions
-  openArtifact(appSessionId: AppSessionId, artifactId: string, version?: number): void;
+  // P3-L M6b: the panel's Artifacts tool on the artifact (a delivery's id is the artifact's), at the version `at` asks for
+  openArtifact(appSessionId: AppSessionId, artifactId: string, at?: ArtifactOpenAt): void; // P3-L M6b fix wave 2: none, the latest
   // E2 end
   // E4d start: a page element comment's chip (tools/browser/comment/actions.ts, registered from App.tsx's E4d block)
   openBrowserUrl(appSessionId: AppSessionId, url: string): void; // the in-app browser on the page: the session's, a side thread's parent's

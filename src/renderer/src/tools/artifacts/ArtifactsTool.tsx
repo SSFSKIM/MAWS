@@ -20,6 +20,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { Icon } from '../../app/IconButton';
+import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
 import { askEditorHostClose, clearEditorHost, type EditorHostScope } from '../../panel/editor-host';
 import { panelHost, usePanelHost } from '../../panel/host';
@@ -28,25 +29,26 @@ import { ARTIFACTS_TOOL_COPY } from './copy';
 import { ArtifactsList, type ArtifactsScope } from './List';
 import { ArtifactRecordView } from './RecordView';
 import { ArtifactsSummary } from './Summary';
-import { requestArtifactVersion } from './viewers/requests';
+import { cancelVersionRequest, requestArtifactVersion } from './viewers/requests';
 
 // The panel tool's id (shared with `show_pane`'s `artifact` pane); E2's Deliverables tool's (`deliverables`) gave way
 // to it at the cutover (Decision Log 10).
 export { ARTIFACTS_TOOL_ID };
 
-// X5 params: an artifact to show (`target`; none shows the list) and the list's scope.
+// X5 params: an artifact to show (`target`; none shows the list), the version of it to show (`at`, M6b fix wave 2;
+// none: the latest), and the list's scope.
 export interface ArtifactsParams {
   target?: string;
+  at?: ArtifactOpenAt;
   scope?: ArtifactsScope;
 }
 
 // An artifact in the panel's Artifacts tool, in the session's panel, activated (P3-L M5b: the comment card's re-dock;
-// M6b: a transcript row's Open, `TranscriptActions.openArtifact`), at the n-th of its versions when `version` names one
-// (else the latest, followed as new ones land). Until a build registers the tool, nothing.
-export function openArtifactInPanel(appSessionId: AppSessionId, artifactId: string, version?: number): void {
+// M6b: a transcript row's Open, `TranscriptActions.openArtifact`), at the version `at` asks for (none: the latest,
+// followed as new ones land). Until a build registers the tool, nothing.
+export function openArtifactInPanel(appSessionId: AppSessionId, artifactId: string, at?: ArtifactOpenAt): void {
   if (!usePanelHost.getState().tools.has(ARTIFACTS_TOOL_ID)) return;
-  if (version !== undefined) requestArtifactVersion(artifactId, version, 'panel');
-  panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, params: { target: artifactId }, activate: true });
+  panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, params: { target: artifactId, ...(at !== undefined && { at }) }, activate: true });
 }
 
 export type ArtifactsView = { kind: 'list' } | { kind: 'record'; artifactId: string };
@@ -99,9 +101,10 @@ export class ArtifactsHandle {
   }
 
   // Moves away from the artifact shown (if any) once its editor's closeGuard allows: at once when there is no guard,
-  // else after it answers true, and only if nothing else moved the view meanwhile and the tab is not closing.
-  private leaveThen(view: ArtifactsView): void {
-    if (this.closing) return;
+  // else after it answers true, and only if nothing else moved the view meanwhile and the tab is not closing. `refused`
+  // runs when the move does not happen.
+  private leaveThen(view: ArtifactsView, refused: () => void = () => {}): void {
+    if (this.closing) return refused();
     const shown = this.state.view;
     const go = () => {
       this.leave();
@@ -112,17 +115,21 @@ export class ArtifactsHandle {
     if (asked === null) return go();
     void asked.then((allowed) => {
       if (allowed && !this.disposed && !this.closing && this.state.view === shown) go();
+      else refused();
     });
   }
 
-  // X5's `open`: a target shows that artifact (the one already shown keeps its state); no target shows the list.
+  // X5's `open`: a target shows that artifact (the one already shown keeps its state) at the version `at` asks for (fix
+  // wave 2: every open asks, the latest when it names none, superseding any earlier ask; a move the guard refused
+  // cancels its own); no target shows the list.
   open = (params: ArtifactsParams | undefined) => {
     if (params?.scope !== undefined && params.scope !== this.state.scope) this.update({ scope: params.scope, scrollTop: 0 });
     const target = params?.target;
     if (target === undefined) return this.back();
+    const serial = requestArtifactVersion(target, params?.at ?? 'latest', this.editorScope.surface);
     const { view } = this.state;
     if (view.kind === 'record' && view.artifactId === target) return;
-    this.leaveThen({ kind: 'record', artifactId: target });
+    this.leaveThen({ kind: 'record', artifactId: target }, () => cancelVersionRequest(serial));
   };
 
   back = () => {
