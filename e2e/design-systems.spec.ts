@@ -286,7 +286,8 @@ test('a retained version keeps its deleted system’s face: served at the pinned
 
   expect(await loads(faceAt(pin.versionSeq))).toBe(true);
   expect(await loads(faceAt('live'))).toBe(true);
-  // the retained version renders in the pinned state, its face loaded at the pinned revision
+  // the retained version renders in the pinned state, its face loaded at the pinned revision: the URL the window's
+  // ArtifactHost gives for `assetUrl(id, ref, versionSeq)` (the P3 spec's Decision Log 59)
   await mountFixture(page, 'retained', pin);
   await expect(fixture(page, 'retained')).toHaveAttribute('data-status', 'ready', { timeout: 15_000 });
   await expect.poll(async () => (await fixtureFace('retained'))?.loaded, { timeout: 15_000, message: 'the pinned face loads' }).toBe(true);

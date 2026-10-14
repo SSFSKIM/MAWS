@@ -217,7 +217,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       await replica.first;
       return replica;
     },
-    assetUrl: (artifactId, ref) => artifactUrl(artifactId, 'live', ref),
+    assetUrl: (artifactId, ref, revision) => artifactUrl(artifactId, revision ?? 'live', ref), // P3-D: `revision` (Decision Log 59)
     // Main's export service (M7, X31): the file's path under the store's directory. A format the IPC does not know, or a
     // kind and format no exporter serves, rejects (`exportUnavailable` for the latter).
     export: async (artifactId, format, version, options) => {

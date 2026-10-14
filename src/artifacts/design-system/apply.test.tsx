@@ -176,15 +176,21 @@ describe('openDesignSystem (D8)', () => {
     expect(css).not.toContain('Not Ours');
   });
 
-  // A's Decision Log 46: a deleted system's assets are served at a named revision while a version pins it, never live
-  it('loads a version ref’s faces at the pinned revision, so a retained version keeps them after the system is deleted', async () => {
+  // A's Decision Log 46 and the P3 spec's Decision Log 59: a deleted system's assets are served at a named revision
+  // while a version pins it, never live; the view asks its host for that revision's URL, whatever form the host's URLs
+  // take (the regression: a host that is not the desktop app's)
+  it('asks the host for a version ref’s faces at the pinned revision, and uses the URL the host gives', async () => {
     const doc = systemDoc({ 'components/document.css': FACE });
     const { host } = fakeHost({ a: doc }, { 'a@7': stateV2(doc) });
+    const assetUrl = vi.fn((id: string, ref: string, revision?: number) => `https://assets.example/${id}/${revision ?? 'current'}/${ref}`);
+    host.assetUrl = assetUrl;
     const css = (await openDesignSystem(host, { id: 'a', versionSeq: 7 })).css('[data-ds-scope="x"]', 'document');
+    expect(assetUrl).toHaveBeenCalledWith('a', 'assets/iowan.woff2', 7);
+    expect(assetUrl.mock.calls.every((call) => call[2] === 7)).toBe(true);
     const faces = css.match(/@font-face \{[^}]*\}/g) ?? [];
     expect(faces).toHaveLength(1);
-    expect(faces[0]).toMatch(/src: url\("maws-artifact\\3a \/\/a\/7\/assets\/iowan\.woff2"\) format\("woff2"\);/);
-    expect(css).not.toContain('/live/');
+    expect(faces[0]).toMatch(/src: url\("https\\3a \/\/assets\.example\/a\/7\/assets\/iowan\.woff2"\) format\("woff2"\);/);
+    expect(css).not.toContain('maws-artifact');
   });
 });
 

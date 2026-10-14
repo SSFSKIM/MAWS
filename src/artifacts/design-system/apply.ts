@@ -13,7 +13,6 @@
 //       <div className="ds-doc">…</div>                                (the page reads var(--ds-*) and .ds-type-*)
 //     </DesignSystemScope>
 import { createContext, createElement, useContext, useEffect, useLayoutEffect, useState, type JSX, type ReactNode } from 'react';
-import { artifactUrl } from '@shared/artifacts/scheme';
 import type { ArtifactHost } from '../host';
 import { applyV2, newDoc } from '../yjs';
 import { tokenProperties, type Medium } from './css';
@@ -79,10 +78,10 @@ async function openSystem(host: ArtifactHost, ref: SystemRef, signal: AbortSigna
   const toUrl = (asset: string) => host.assetUrl(ref.id, asset);
   if (ref.versionSeq !== undefined) {
     // A pinned state's assets at its revision, not `live`: the store keeps serving a deleted system's assets at a named
-    // revision while a retained version pins it (A's Decision Log 46), so the version keeps its faces and images. Built
-    // with the scheme's own URL form because `ArtifactHost.assetUrl` names only the live revision.
+    // revision while a retained version pins it (A's Decision Log 46; the P3 spec's Decision Log 59), so the version
+    // keeps its faces and images.
     const seq = ref.versionSeq;
-    const pinnedUrl = (asset: string) => artifactUrl(ref.id, seq, asset);
+    const pinnedUrl = (asset: string) => host.assetUrl(ref.id, asset, seq);
     let bytes: Uint8Array;
     try {
       bytes = await host.versionState(ref.id, { seq: ref.versionSeq });

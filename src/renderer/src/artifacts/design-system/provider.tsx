@@ -10,7 +10,7 @@ import { artifactHost } from '..';
 function lazyHost(get: () => ArtifactHost): ArtifactHost {
   return {
     open: (artifactId, options) => get().open(artifactId, options),
-    assetUrl: (artifactId, ref) => get().assetUrl(artifactId, ref),
+    assetUrl: (artifactId, ref, revision) => get().assetUrl(artifactId, ref, revision),
     export: (artifactId, format, version, options) => get().export(artifactId, format, version, options),
     versionState: (artifactId, version) => get().versionState(artifactId, version),
     attributions: (artifactId, fromSeq, toSeq, options) => get().attributions(artifactId, fromSeq, toSeq, options),
