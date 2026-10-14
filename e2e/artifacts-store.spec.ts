@@ -128,8 +128,11 @@ test('a document syncs across two windows and the test writer, versions and rest
     await expect.poll(async () => seam.restores(id)).toEqual([restored.versionId]);
   }
   await expect.poll(async () => (await forThis(artifact.id)).some((c) => c.revision >= restored.revision), { message: 'the restore is announced' }).toBe(true);
-  const revisions = (await forThis(artifact.id)).map((c) => c.revision);
-  expect(revisions, 'announced revisions only rise').toEqual([...revisions].sort((x, y) => x - y));
+  // Announcements are durable, not necessarily monotonic: each names a committed revision, in whatever order a held event arrives.
+  const announced = (await forThis(artifact.id)).map((c) => c.revision);
+  const { artifact: committed } = await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId: artifact.id });
+  expect(Math.max(...announced), 'no announced revision exceeds the committed one').toBeLessThanOrEqual(committed.revision);
+  expect(Math.max(...announced), 'the restore is among the announced').toBeGreaterThanOrEqual(restored.revision);
 
   // Quit and relaunch on the same profile: the store reopens with the document as it was.
   await launch.app.close();
