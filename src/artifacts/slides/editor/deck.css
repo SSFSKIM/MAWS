@@ -20,6 +20,3 @@
 .deck-thumb .deck-slide-scaler {
   pointer-events: none;
 }
-.deck-thumb .deck-slide-scaler x-embed > iframe {
-  visibility: hidden;
-}

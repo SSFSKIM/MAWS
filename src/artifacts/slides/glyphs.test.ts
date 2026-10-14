@@ -57,4 +57,21 @@ describe('x-connector routes and heads', () => {
     expect(splitBorder('3px dashed var(--ds-color-accent, #2b7a78)')).toEqual({ width: '3px', style: 'dashed', color: 'var(--ds-color-accent, #2b7a78)' });
     expect(splitBorder('solid')).toEqual({ width: null, style: 'solid', color: null });
   });
+
+  // fix wave 1, finding 6: a width token was read as a colour; slots come from a token's fallback, else its position
+  it('places a width token by its fallback, and one with no fallback by its place before the style word', () => {
+    expect(splitBorder('var(--ds-line, 4px) solid #000000')).toEqual({ width: 'var(--ds-line, 4px)', style: 'solid', color: '#000000' });
+    expect(splitBorder('var(--ds-line) dashed var(--ds-ink)')).toEqual({ width: 'var(--ds-line)', style: 'dashed', color: 'var(--ds-ink)' });
+    expect(splitBorder('solid var(--ds-ink, #2b7a78)')).toEqual({ width: null, style: 'solid', color: 'var(--ds-ink, #2b7a78)' });
+  });
+
+  // fix wave 1, finding 5: an aligned hv or vh route has a zero-length leg; the head points along the last real leg
+  it('drops repeated points from a route, so every leg has a length and the heads a direction', () => {
+    expect(connectorRoute('hv', 0, 50, 100, 50)).toEqual([[0, 50], [100, 50]]);
+    expect(connectorRoute('vh', 0, 0, 0, 80)).toEqual([[0, 0], [0, 80]]);
+    expect(connectorRoute('elbow', 0, 0, 100, 0)).toEqual([[0, 0], [50, 0], [100, 0]]); // collinear legs keep their direction
+    const route = connectorRoute('hv', 0, 50, 100, 50);
+    const head = headPolygon(route[route.length - 2]!, route[route.length - 1]!, 2);
+    expect(head.map(([x, y]) => [Math.round(x), Math.round(y)])).toEqual([[100, 50], [92, 54], [92, 46]]);
+  });
 });

@@ -37,4 +37,5 @@ export const CANVAS_CSS = `
 .maws-slide x-connector { display: block; position: relative; border-style: none !important; }
 .maws-slide x-connector[x1] { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; }
 .maws-slide x-embed > iframe { display: block; width: 100%; height: 100%; border: 0; }
+.maws-slide x-embed > [data-embed-placeholder] { width: 100%; height: 100%; background: repeating-linear-gradient(-45deg, #e3e6e4 0 12px, #eef1ef 12px 24px); }
 `;

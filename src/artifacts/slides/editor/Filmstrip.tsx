@@ -10,8 +10,9 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { AssetUrl, SlideCanvas } from '../canvas';
-import { insertSlide, moveSlide, setAttrs, ROOT } from '../model';
-import { blankSlide, duplicateSlide, mintSectionKey, mintSlideId, removeSlide, setSection } from '../writers';
+import { DECK_LIMITS } from '../deck';
+import { moveSlide, setAttrs, ROOT } from '../model';
+import { addSlide, blankSlide, duplicateSlide, mintSectionKey, mintSlideId, removeSlide, setSection } from '../writers';
 import type { DeckView, SectionHeader, SlideEntry } from './deck-view';
 import type { DeckSession } from './session';
 import { SLIDE_W, SlideView } from './SlideView';
@@ -52,9 +53,12 @@ export function Filmstrip({ session, view, current, assetUrl, width, readOnly, o
     session.edit((origin) => moveSlide(session.doc, String(active.id), after, origin));
   };
 
-  const addSlide = () => {
+  // the dialect's bound (DECK_LIMITS.slides): past it the loader would refuse the deck, so the editor offers no more
+  const full = view.slides.length >= DECK_LIMITS.slides;
+  const addBlank = () => {
+    if (full) return;
     const id = mintSlideId(session.doc);
-    session.edit((origin) => insertSlide(session.doc, blankSlide(id), current ?? ids.at(-1) ?? null, origin));
+    session.edit((origin) => addSlide(session.doc, blankSlide(id), current ?? ids.at(-1) ?? null, origin));
     session.show(id);
   };
 
@@ -78,6 +82,7 @@ export function Filmstrip({ session, view, current, assetUrl, width, readOnly, o
                   assetUrl={assetUrl}
                   readOnly={readOnly}
                   startsSection={view.sections.some((s) => s.before === slide.id && !s.empty)}
+                  full={full}
                   onCanvas={(canvas) => (canvas ? canvases.current.set(slide.id, canvas) : canvases.current.delete(slide.id))}
                 />
               </li>
@@ -86,10 +91,11 @@ export function Filmstrip({ session, view, current, assetUrl, width, readOnly, o
         </SortableContext>
       </DndContext>
       {!readOnly && (
-        <button type="button" className="deck-button deck-new-slide" onClick={addSlide}>
+        <button type="button" className="deck-button deck-new-slide" disabled={full} onClick={addBlank}>
           {C.newSlide}
         </button>
       )}
+      {!readOnly && full && <p className="deck-filmstrip-note">{C.deckFull(DECK_LIMITS.slides)}</p>}
     </nav>
   );
 }
@@ -103,15 +109,17 @@ function Thumbnail(props: {
   assetUrl: AssetUrl;
   readOnly: boolean;
   startsSection: boolean;
+  /** The deck holds as many slides as a deck may: no duplicate. */
+  full: boolean;
   onCanvas: (canvas: SlideCanvas | null) => void;
 }) {
-  const { session, slide, index, current, scale, assetUrl, readOnly, startsSection, onCanvas } = props;
+  const { session, slide, index, current, scale, assetUrl, readOnly, startsSection, full, onCanvas } = props;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: slide.id, disabled: readOnly });
   const doc = session.doc;
   const label = C.slideLabel(index + 1, slide.hidden, slide.held !== null);
 
   const duplicate = () => {
-    if (slide.held) return;
+    if (slide.held || full) return;
     const id = mintSlideId(doc);
     session.edit((origin) => duplicateSlide(doc, slide.id, id, origin));
     session.show(id);
@@ -160,7 +168,7 @@ function Thumbnail(props: {
           if (!event.defaultPrevented) (listeners?.onKeyDown as ((e: KeyboardEvent<HTMLElement>) => void) | undefined)?.(event);
         }}
       >
-        <SlideView doc={doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} />
+        <SlideView doc={doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} thumbnail />
         {slide.held && <span className="deck-thumb-badge">{C.held}</span>}
         {slide.hidden && <span className="deck-thumb-badge deck-thumb-badge-quiet">{C.hiddenBadge}</span>}
       </button>
@@ -173,7 +181,7 @@ function Thumbnail(props: {
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content align="start" sideOffset={4} className="deck-menu">
-              <DropdownMenu.Item className="deck-menu-item" disabled={slide.held !== null} onSelect={duplicate}>
+              <DropdownMenu.Item className="deck-menu-item" disabled={slide.held !== null || full} onSelect={duplicate}>
                 {C.duplicate}
               </DropdownMenu.Item>
               <DropdownMenu.Item className="deck-menu-item" onSelect={toggleHidden}>

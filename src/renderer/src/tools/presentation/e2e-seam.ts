@@ -11,6 +11,7 @@ import type { ArtifactHost, DocumentHandle } from '@artifacts/host';
 import { DECK_PATH, slideIdOf } from '@artifacts/slides/deck';
 import { deckFiles, setNotes, setStyle, slideOrder, zOrder } from '@artifacts/slides/model';
 import { publishDeck } from '@artifacts/slides/publish';
+import { setDeckOverride } from '@artifacts/slides/writers';
 import { deckScalars } from '@artifacts/yjs/slides';
 import type { DeckTimings } from '@artifacts/slides/editor/session';
 import { openDeckTabs } from './tab-state';
@@ -18,7 +19,8 @@ import { openDeckTabs } from './tab-state';
 export type DeckSeamEdit =
   | { op: 'setStyle'; slideId: string; elementId: string; props: Record<string, string | null> }
   | { op: 'zOrder'; slideId: string; elementId: string; to: 'front' | 'back' | 'forward' | 'backward' }
-  | { op: 'setNotes'; slideId: string; text: string };
+  | { op: 'setNotes'; slideId: string; text: string }
+  | { op: 'setOverride'; name: string; value: string | null };
 
 export interface PresentationsSeam {
   /** Publishes `files` onto the deck (forced), removing its other slides; answers once the host has them. */
@@ -73,7 +75,8 @@ export function installPresentationsSeam(win: Window, host: () => ArtifactHost):
       withReplica(artifactId, ({ doc }) => {
         if (edit.op === 'setStyle') setStyle(doc, edit.slideId, edit.elementId, edit.props, 'e2e');
         else if (edit.op === 'zOrder') zOrder(doc, edit.slideId, edit.elementId, edit.to, 'e2e');
-        else setNotes(doc, edit.slideId, edit.text, 'e2e');
+        else if (edit.op === 'setNotes') setNotes(doc, edit.slideId, edit.text, 'e2e');
+        else setDeckOverride(doc, edit.name, edit.value, 'e2e');
       }),
     files: (artifactId) => withReplica(artifactId, ({ doc }) => deckFiles(doc)),
     order: (artifactId) => withReplica(artifactId, ({ doc }) => slideOrder(doc)),

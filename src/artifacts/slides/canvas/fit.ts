@@ -13,23 +13,29 @@ export const isSizedText = (tag: Tag, style: Readonly<Record<string, string>>): 
 
 const overflows = (n: HTMLElement) => n.scrollHeight > n.clientHeight + 1 || n.scrollWidth > n.clientWidth + 1;
 
+const restore = (n: HTMLElement, prop: string, value: string | undefined) => (value === undefined ? n.style.removeProperty(prop) : n.style.setProperty(prop, value));
+
+/**
+ * Undoes what a fit wrote (marked `data-fitted`, never the dialect's own `data-fit`): the element's font size, height,
+ * min-height and overflow back to the model's. For an element that stopped being a sized text box, and before every fit.
+ */
+export function clearFit(n: HTMLElement, style: Readonly<Record<string, string>>): void {
+  if (!n.dataset.fitted) return;
+  restore(n, 'font-size', style['font-size']);
+  restore(n, 'height', style.height);
+  restore(n, 'min-height', style['min-height']);
+  restore(n, 'overflow', style.overflow);
+  delete n.dataset.fitted;
+}
+
 /** Fits one sized text element (forces layout). Returns the scale applied (1 when its text fits as it is). */
 export function fitText(n: HTMLElement, style: Readonly<Record<string, string>>, mode: string | undefined): number {
-  // back to the model's own size and box before measuring
-  if (n.dataset.fit) {
-    if (style['font-size'] === undefined) n.style.removeProperty('font-size');
-    else n.style.setProperty('font-size', style['font-size']);
-    n.style.setProperty('height', style.height ?? '');
-    n.style.removeProperty('min-height');
-    if (style.overflow === undefined) n.style.removeProperty('overflow');
-    else n.style.setProperty('overflow', style.overflow);
-    delete n.dataset.fit;
-  }
+  clearFit(n, style); // back to the model's own size and box before measuring
   if (mode === 'none') return 1;
   if (mode === 'grow') {
     n.style.setProperty('min-height', style.height!);
     n.style.setProperty('height', 'auto');
-    n.dataset.fit = 'grow';
+    n.dataset.fitted = 'grow';
     return 1;
   }
   if (!overflows(n)) return 1;
@@ -46,7 +52,7 @@ export function fitText(n: HTMLElement, style: Readonly<Record<string, string>>,
     else lo = mid;
   }
   n.style.setProperty('font-size', `${base * lo}px`);
-  n.dataset.fit = 'shrink';
+  n.dataset.fitted = 'shrink';
   if (overflows(n)) n.style.setProperty('overflow', 'hidden'); // at the floor and still over: clipped
   return lo;
 }

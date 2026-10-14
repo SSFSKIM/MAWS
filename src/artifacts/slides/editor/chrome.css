@@ -320,6 +320,17 @@
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
+.deck-notes-refused,
+.deck-filmstrip-note {
+  margin: 0;
+  padding: 4px 12px 8px;
+  color: var(--danger);
+  font-size: var(--text-ui-sm);
+}
+.deck-notes-field[aria-invalid='true'] {
+  outline: 2px solid var(--danger);
+  outline-offset: -2px;
+}
 .deck-quiet {
   margin: auto;
   padding: 24px;

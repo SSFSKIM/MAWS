@@ -24,4 +24,16 @@ describe('carrying the owner’s composition onto a remote change', () => {
     expect(rebaseText('Say hi.', 'Say hi. 안녕', 'Please say hi.')).toBe('Please say hi. 안녕');
     expect(rebaseText('one two', 'one 2', 'zero one two')).toBe('zero one 2');
   });
+
+  // fix wave 1, finding 1: a deletion's end maps before text inserted at it, its start after text inserted at it
+  it('keeps a remote insertion at either edge of the owner’s deletion', () => {
+    expect(rebaseText('abc', 'ac', 'abXc')).toBe('aXc');
+    expect(rebaseText('abc', 'ac', 'aXbc')).toBe('aXc');
+    expect(rebaseText('abcd', 'ad', 'aXbcYd')).toBe('aXYd');
+  });
+
+  it('maps a position before or after text inserted exactly at it, as asked', () => {
+    expect(mapCaret('ab', 'aXb', 1, 'after')).toBe(2);
+    expect(mapCaret('ab', 'aXb', 1, 'before')).toBe(1);
+  });
 });

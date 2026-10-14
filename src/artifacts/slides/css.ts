@@ -428,6 +428,21 @@ function placeBorder(ts: Tok[]): Partial<Record<BorderSlot, Tok>> | null {
   return placed;
 }
 
+/**
+ * P3-C M4 fix wave 1: a border value's three parts as the loader places them (a token by its fallback's grammar, else by
+ * its place around the style word; Decision Log 9a), each serialized as written; null when it is not a border. What the
+ * canvas strokes an x-shape with.
+ */
+export function borderParts(value: string): { width: string | null; style: string; color: string | null } | null {
+  const placed = placeBorder(tokenize(value));
+  if (!placed?.style) return null;
+  return {
+    width: placed.width ? serTok(placed.width, true) : null,
+    style: serTok(placed.style, false),
+    color: placed.color ? serTok(placed.color, false) : null,
+  };
+}
+
 function isBorder(ts: Tok[]): boolean {
   const placed = placeBorder(ts);
   if (!placed?.style) return false;

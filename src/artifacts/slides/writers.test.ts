@@ -2,10 +2,11 @@
 // model, one transaction each: remove (the deck's cover and sections follow), duplicate, sections, blank slides with ids
 // two replicas never both mint.
 import { describe, expect, it } from 'vitest';
-import { newDoc, onUpdate, transact, type Doc } from '../yjs';
-import { deckFiles, importSlide, readDeckJson, readSlide, setNotes, slideOrder, writeDeckKeys } from './model';
+import { adoptClientId, newDoc, onUpdate, transact, type Doc } from '../yjs';
+import { DECK_LIMITS } from './deck';
+import { deckFiles, importSlide, insertSlide, readDeckJson, readSlide, setNotes, slideOrder, writeDeckKeys } from './model';
 import { ID_RE, loadSlide } from './parse';
-import { blankSlide, duplicateSlide, mintSectionKey, mintSlideId, removeSlide, setSection } from './writers';
+import { addSlide, blankSlide, duplicateSlide, mintSectionKey, mintSlideId, removeSlide, setDeckOverride, setSection, slideRoom } from './writers';
 import * as Y from '../yjs/slides';
 
 function deckOf(ids: string[], extra: Record<string, unknown> = {}): Doc {
@@ -79,25 +80,50 @@ describe('the other slide writers', () => {
     expect(readDeckJson(doc).sections).toEqual({});
   });
 
-  it('mints slide ids the deck does not hold, distinct between two replicas', () => {
+  // fix wave 1, finding 2: hash4 of the clientID collided (1938 and 11610 both minted s1-dver)
+  it('mints ids from the whole clientID and a counter the replica never reuses', () => {
     const one = deckOf(['a']);
-    const two = newDoc();
-    const ids = new Set<string>();
-    for (let k = 0; k < 20; k++) {
-      const id = mintSlideId(one, ids);
-      expect(ID_RE.test(id)).toBe(true);
-      expect(ids.has(id)).toBe(false);
-      ids.add(id);
-    }
-    expect(mintSlideId(two)).not.toBe(mintSlideId(one));
+    const two = deckOf(['a']);
+    adoptClientId(one, 1938);
+    adoptClientId(two, 11610);
+    const c1 = (1938).toString(36);
+    expect(mintSlideId(one)).toBe(`s${c1}-1`);
+    expect(mintSlideId(two)).toBe(`s${(11610).toString(36)}-1`);
+    expect(mintSectionKey(one)).toBe(`section${c1}-2`);
+    // a removed slide never gives its id back, and an id the deck already holds is skipped
+    const first = mintSlideId(one);
+    insertSlide(one, blankSlide(first), 'a');
+    removeSlide(one, first);
+    expect(mintSlideId(one)).toBe(`s${c1}-4`);
+    insertSlide(one, blankSlide(`s${c1}-5`), 'a');
+    expect(mintSlideId(one)).toBe(`s${c1}-6`);
+    // the largest clientID still mints a valid id
+    const big = newDoc();
+    adoptClientId(big, Number.MAX_SAFE_INTEGER);
+    expect(ID_RE.test(mintSlideId(big))).toBe(true);
   });
 
-  it('mints a section key the outline does not hold', () => {
-    const doc = deckOf(['a'], { sections: { section1: { description: 'x', start: 'a' } } });
-    const key = mintSectionKey(doc);
-    expect(key).toMatch(/^section\d+-[0-9a-z]{4}$/);
-    setSection(doc, key, { description: 'y', start: 'a' });
-    expect(mintSectionKey(doc)).not.toBe(key);
+  // fix wave 1, finding 4: a deck holds at most 500 slides; adding and duplicating refuse past it
+  it('refuses to add or duplicate a slide past the deck’s 500', () => {
+    const doc = deckOf(['a']);
+    transact(doc, () => {
+      for (let i = 1; i < DECK_LIMITS.slides; i++) importSlide(doc, blankSlide(`x${i}`), `b${String(i).padStart(4, '0')}`);
+    });
+    expect(slideRoom(doc)).toBe(0);
+    expect(() => addSlide(doc, blankSlide('over'), 'a')).toThrow(/500/);
+    expect(() => duplicateSlide(doc, 'a', 'a2')).toThrow(/500/);
+    expect(slideOrder(doc)).toHaveLength(DECK_LIMITS.slides);
+    removeSlide(doc, 'x1');
+    addSlide(doc, blankSlide('fits'), 'a');
+    expect(slideOrder(doc)).toContain('fits');
+  });
+
+  it('sets and removes one design-system override of the deck', () => {
+    const doc = deckOf(['a']);
+    expect(updatesOf(doc, () => setDeckOverride(doc, '--ds-line', '8px'))).toBe(1);
+    expect(readDeckJson(doc).dsOverrides).toEqual({ '--ds-line': '8px' });
+    setDeckOverride(doc, '--ds-line', null);
+    expect(readDeckJson(doc).dsOverrides).toEqual({});
   });
 
   it('a blank slide loads, in the design system’s ground with the 128 px margins', () => {

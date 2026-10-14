@@ -19,6 +19,8 @@ export interface DeckTabDeps {
   /** Asks the owner whether to close with edits the host has not acknowledged. */
   confirmDiscard(title: string): Promise<boolean>;
   savingShownMs?: number;
+  /** How long the close guard waits for edits in flight before it asks (3 s). */
+  saveWaitMs?: number;
 }
 
 export interface DeckTabSnapshot {
@@ -131,7 +133,7 @@ export class DeckTabState {
       const timer = setTimeout(() => {
         off();
         resolve(false);
-      }, SAVE_WAIT_MS);
+      }, this.deps.saveWaitMs ?? SAVE_WAIT_MS);
       const off = handle.subscribe((state) => {
         if (state.unsaved > 0) return;
         clearTimeout(timer);

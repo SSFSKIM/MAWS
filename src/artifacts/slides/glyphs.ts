@@ -8,6 +8,8 @@
 // - x-connector: Claude's routes (`hv` across then down, `vh` down then across, `elbow` three legs bending at the
 //   midpoint of the longer run) and constant-size heads, about four stroke widths (diagrams.md).
 
+import { borderParts } from './css';
+
 export type Point = [number, number];
 
 const n = (v: number): string => {
@@ -105,8 +107,15 @@ export const ICON_GLYPHS: Readonly<Record<string, string>> = {
   Wrench: 'M 15 3 A 5 5 0 0 0 10.5 9.5 L 3 17 L 7 21 L 14.5 13.5 A 5 5 0 0 0 21 9 L 18 12 L 15 11 L 14 8 L 17 5 Z',
 };
 
-/** A connector's polyline from (x1, y1) to (x2, y2) along its route. */
+/**
+ * A connector's polyline from (x1, y1) to (x2, y2) along its route, with no repeated point: an `hv` or `vh` route between
+ * aligned points, or an elbow between them, has a zero-length leg, which would give a head no direction.
+ */
 export function connectorRoute(route: string | undefined, x1: number, y1: number, x2: number, y2: number): Point[] {
+  const points = routePoints(route, x1, y1, x2, y2);
+  return points.filter((p, i) => i === 0 || p[0] !== points[i - 1]![0] || p[1] !== points[i - 1]![1]);
+}
+function routePoints(route: string | undefined, x1: number, y1: number, x2: number, y2: number): Point[] {
   switch (route) {
     case 'hv':
       return [[x1, y1], [x2, y1], [x2, y2]];
@@ -143,32 +152,10 @@ export function connectorHeads(attrs: Readonly<Record<string, string>>): { start
   return { start: pick(attrs['head-start'], head === 'both'), end: pick(attrs['head-end'], head === 'end' || head === 'both') };
 }
 
-const BORDER_STYLES = new Set(['solid', 'dashed', 'dotted', 'double', 'none']);
-
-/** Top-level whitespace-separated parts of a CSS value (a `var(…)` or `rgb(…)` stays one part). */
-function parts(value: string): string[] {
-  const out: string[] = [];
-  let depth = 0;
-  let cur = '';
-  for (const ch of value.trim()) {
-    if (ch === '(') depth++;
-    if (ch === ')') depth--;
-    if (/\s/.test(ch) && depth === 0) {
-      if (cur) out.push(cur);
-      cur = '';
-    } else cur += ch;
-  }
-  if (cur) out.push(cur);
-  return out;
-}
-
-/** A `border` shorthand as its width, style and colour (each null when it does not say). */
+/**
+ * A `border` value's width, style and colour, each null when it does not say (the style when the value is not a border).
+ * Tokens take their slots as the loader places them (css.ts `borderParts`): by their fallback, else by position.
+ */
 export function splitBorder(value: string): { width: string | null; style: string | null; color: string | null } {
-  const out = { width: null as string | null, style: null as string | null, color: null as string | null };
-  for (const part of parts(value)) {
-    if (BORDER_STYLES.has(part)) out.style = part;
-    else if (/^-?\d/.test(part)) out.width = part;
-    else out.color = part;
-  }
-  return out;
+  return borderParts(value) ?? { width: null, style: null, color: null };
 }

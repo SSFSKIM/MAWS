@@ -4,41 +4,59 @@
 // (an IME's syllable in progress) nothing is written and remote changes wait, so a composition is never split or
 // doubled; when it ends, the owner's change is carried onto what arrived meanwhile and written once. A burst of typing
 // is one undo step.
-import { useEffect, useRef } from 'react';
+//
+// Fix wave 1: the editor never writes what the loader would refuse. Notes past the dialect's 4,000 characters
+// (`SLIDE_LIMITS.notes`; the loader would hold the slide) are not written: the owner's text stays in the field, the
+// refusal says why, and the field writes again once it is short enough. While the field holds text the model refused,
+// remote changes are carried onto it as onto a composition.
+import { useEffect, useRef, useState } from 'react';
 import * as Y from '../../yjs/slides';
 import { mapCaret, rebaseText } from '../caret';
 import { setNotes } from '../model';
+import { SLIDE_LIMITS } from '../parse';
 import { DECK_COPY as C } from './copy';
 import type { DeckSession } from './session';
 
 export function Notes({ session, slideId, token, readOnly }: { session: DeckSession; slideId: string; token: object; readOnly: boolean }) {
   const field = useRef<HTMLTextAreaElement>(null);
   const composingFrom = useRef<string | null>(null); // the model's notes when a composition began
+  const shownFrom = useRef(''); // the model's notes the field's text derives from
+  const [refused, setRefused] = useState<number | null>(null); // the length of text refused, while the field holds it
   const doc = session.doc;
+
+  const write = (value: string) => {
+    if (readOnly) return;
+    if (value.length > SLIDE_LIMITS.notes) {
+      setRefused(value.length);
+      return;
+    }
+    setRefused(null);
+    session.typing(`notes:${slideId}`, (origin) => setNotes(doc, slideId, value, origin));
+    shownFrom.current = value;
+  };
 
   // the field follows the model: at mount, and at each change of the notes made elsewhere
   useEffect(() => {
     const el = field.current!;
     el.value = Y.readNotes(doc, slideId);
+    shownFrom.current = el.value;
     composingFrom.current = null;
     const stop = Y.observeSlide(doc, slideId, (changes, origin) => {
       if (composingFrom.current !== null || origin === session.origin) return;
       if (!changes.some((c) => c.kind === 'notes')) return;
       const next = Y.readNotes(doc, slideId);
       const before = el.value;
-      if (next === before) return;
+      // text the model refused stays the owner's, carried onto the change
+      const shown = before === shownFrom.current ? next : rebaseText(shownFrom.current, before, next);
+      shownFrom.current = next;
+      if (shown === before) return;
       const focused = el.ownerDocument.activeElement === el;
       const [start, end] = [el.selectionStart, el.selectionEnd];
-      el.value = next;
-      if (focused) el.setSelectionRange(mapCaret(before, next, start), mapCaret(before, next, end));
+      el.value = shown;
+      if (focused) el.setSelectionRange(mapCaret(before, shown, start), mapCaret(before, shown, end));
     });
     return stop;
   }, [doc, slideId, token, session]);
-
-  const write = (value: string) => {
-    if (readOnly) return;
-    session.typing(`notes:${slideId}`, (origin) => setNotes(doc, slideId, value, origin));
-  };
 
   return (
     <div className="deck-notes">
@@ -46,6 +64,7 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
         ref={field}
         className="deck-notes-field"
         aria-label={C.notes}
+        aria-invalid={refused !== null || undefined}
         placeholder={C.notesPlaceholder}
         readOnly={readOnly}
         spellCheck
@@ -64,9 +83,15 @@ export function Notes({ session, slideId, token, readOnly }: { session: DeckSess
             el.value = merged;
             el.setSelectionRange(caret, caret);
           }
+          shownFrom.current = current;
           write(merged);
         }}
       />
+      {refused !== null && (
+        <p role="alert" className="deck-notes-refused">
+          {C.notesTooLong(refused, SLIDE_LIMITS.notes)}
+        </p>
+      )}
     </div>
   );
 }

@@ -9,21 +9,21 @@ import { SlideCanvas, type AssetUrl } from '../canvas';
 export const SLIDE_W = 1920;
 export const SLIDE_H = 1080;
 
-export function SlideView(props: { doc: Doc; slideId: string; token: object; assetUrl: AssetUrl; scale: number; onCanvas?: (canvas: SlideCanvas | null) => void; className?: string }) {
-  const { doc, slideId, token, assetUrl, scale, onCanvas, className } = props;
+export function SlideView(props: { doc: Doc; slideId: string; token: object; assetUrl: AssetUrl; scale: number; onCanvas?: (canvas: SlideCanvas | null) => void; className?: string; thumbnail?: boolean }) {
+  const { doc, slideId, token, assetUrl, scale, onCanvas, className, thumbnail = false } = props;
   const host = useRef<HTMLDivElement>(null);
   const latest = useRef(onCanvas);
   useLayoutEffect(() => {
     latest.current = onCanvas;
   });
   useLayoutEffect(() => {
-    const canvas = new SlideCanvas(doc, slideId, host.current!, { assetUrl });
+    const canvas = new SlideCanvas(doc, slideId, host.current!, { assetUrl, thumbnail });
     latest.current?.(canvas);
     return () => {
       latest.current?.(null);
       canvas.dispose();
     };
-  }, [doc, slideId, token, assetUrl]);
+  }, [doc, slideId, token, assetUrl, thumbnail]);
   return (
     <div className={`deck-slide-frame${className ? ` ${className}` : ''}`} style={{ width: SLIDE_W * scale, height: SLIDE_H * scale }}>
       <div ref={host} className="deck-slide-scaler" style={{ transform: `scale(${scale})` }} />

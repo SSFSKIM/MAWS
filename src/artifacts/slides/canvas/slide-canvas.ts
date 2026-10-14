@@ -10,11 +10,13 @@ import type { Doc } from '../../yjs';
 import { childLists, groupOf, readFlat, ROOT, type FlatElement } from '../model';
 import * as Y from '../../yjs/slides';
 import { createNode, drawConnector, drawShape, drawsInLayout, renderText, setImageSource, type AssetUrl } from './elements';
-import { fitText, isSizedText } from './fit';
+import { clearFit, fitText, isSizedText } from './fit';
 
 export interface SlideCanvasOptions {
   /** An uploaded asset's URL (`assets/<name>`); without it every picture is a placeholder. */
   assetUrl?: AssetUrl;
+  /** A filmstrip thumbnail: an x-embed draws as a placeholder, never a live frame. */
+  thumbnail?: boolean;
 }
 
 /** A longest strictly increasing subsequence of `seq` (values, in order). */
@@ -59,13 +61,26 @@ export function flushLayout(): void {
   writes.forEach((write) => write());
   canvases.forEach((c) => c.fitAll());
 }
-// faces arriving change every text's metrics: the fits run again
-const fontWatch = new WeakSet<Document>();
+// What changes measured output without a change record of the slide's own: faces arriving (every text's metrics), and
+// the design system's scope (a token's value: a stroke width, a type role's size the fit read). A system's scope style
+// is rewritten in place on every change of the system, and a change of the deck's overrides or system moves the scope
+// to another id: either lays every canvas of the document out again, in the next frame, after the styles apply.
+const watched = new WeakSet<Document>();
 const live = new Set<SlideCanvas>();
-function watchFonts(document: Document): void {
-  if (fontWatch.has(document) || !document.fonts?.addEventListener) return;
-  fontWatch.add(document);
-  document.fonts.addEventListener('loadingdone', () => live.forEach((c) => c.root.ownerDocument === document && schedule(c)));
+function relayAll(document: Document): void {
+  live.forEach((c) => c.root.ownerDocument === document && schedule(c));
+}
+function watchStyles(document: Document): void {
+  if (watched.has(document)) return;
+  watched.add(document);
+  document.fonts?.addEventListener?.('loadingdone', () => relayAll(document));
+  const View = document.defaultView?.MutationObserver;
+  if (!View) return;
+  const isScopeStyle = (node: Node | null) => node instanceof (document.defaultView as Window & typeof globalThis).HTMLStyleElement && node.hasAttribute('data-ds-scope-style');
+  new View((records) => {
+    if (records.some((r) => isScopeStyle(r.target) || isScopeStyle(r.target.parentNode) || [...r.addedNodes, ...r.removedNodes].some(isScopeStyle))) relayAll(document);
+  }).observe(document.head, { childList: true, subtree: true, characterData: true });
+  new View(() => relayAll(document)).observe(document.body, { attributes: true, attributeFilter: ['data-ds-scope'], subtree: true });
 }
 
 export class SlideCanvas {
@@ -73,10 +88,11 @@ export class SlideCanvas {
   private readonly nodes = new Map<string, HTMLElement>();
   private readonly stop: () => void;
   private readonly assetUrl: AssetUrl;
+  private readonly thumbnail: boolean;
   private laidOut = false;
   private readonly layoutWaiters: (() => void)[] = [];
   /** DOM writes this canvas made, by kind (the "minimal patching" claim's measure). */
-  readonly writes = { style: 0, attr: 0, place: 0, text: 0, create: 0, remove: 0 };
+  readonly writes = { style: 0, attr: 0, place: 0, text: 0, create: 0, remove: 0, layout: 0 };
 
   constructor(
     private readonly doc: Doc,
@@ -85,6 +101,7 @@ export class SlideCanvas {
     options: SlideCanvasOptions = {},
   ) {
     this.assetUrl = options.assetUrl ?? (() => null);
+    this.thumbnail = options.thumbnail ?? false;
     const document = host.ownerDocument;
     this.root = document.createElement('section');
     this.root.className = 'maws-slide';
@@ -97,7 +114,7 @@ export class SlideCanvas {
     this.renderAll();
     this.stop = Y.observeSlide(doc, slideId, (changes) => this.patch(changes));
     live.add(this);
-    watchFonts(document);
+    watchStyles(document);
     schedule(this);
   }
 
@@ -134,7 +151,7 @@ export class SlideCanvas {
   }
 
   private create(e: FlatElement): HTMLElement {
-    const n = createNode(this.root.ownerDocument, e, e.text, this.assetUrl);
+    const n = createNode(this.root.ownerDocument, e, e.text, this.assetUrl, this.thumbnail);
     this.nodes.set(e.id, n);
     this.writes.create++;
     return n;
@@ -238,7 +255,7 @@ export class SlideCanvas {
             } else if (k === 'attr:src' && s.tag === 'img') {
               setImageSource(n as HTMLImageElement, v, this.assetUrl);
               this.writes.attr++;
-            } else if (k === 'attr:name' && s.tag === 'x-icon') replace.add(c.id);
+            } else if ((k === 'attr:name' && s.tag === 'x-icon') || (k === 'attr:kind' && s.tag === 'x-shape')) replace.add(c.id); // another drawing
             else if (k.startsWith('attr:')) {
               if (v === undefined) n.removeAttribute(k.slice(5));
               else n.setAttribute(k.slice(5), v);
@@ -291,11 +308,14 @@ export class SlideCanvas {
   /** The fit pass over every sized text element (each forces a layout of its own). */
   fitAll(): void {
     if (!this.root.isConnected) return;
+    this.writes.layout++;
     for (const [id, s] of Y.allElementScalars(this.doc, this.slideId)) {
       const style: Record<string, string> = {};
       for (const [k, v] of Object.entries(s)) if (k.startsWith('style:')) style[k.slice(6)] = v as string;
       const n = this.nodes.get(id);
-      if (n && isSizedText(s.tag as never, style)) fitText(n, style, s['attr:data-fit'] as string | undefined);
+      if (!n) continue;
+      if (isSizedText(s.tag as never, style)) fitText(n, style, s['attr:data-fit'] as string | undefined);
+      else clearFit(n, style); // no longer a sized text box: nothing a fit wrote stays
     }
     if (!this.laidOut) {
       this.laidOut = true;

@@ -3,13 +3,19 @@
 // writes notes with (fast-diff, S6's `patchNotes`).
 import diff from 'fast-diff';
 
-/** `pos` in `before`, as the position of the same place in `after`. */
-export function mapCaret(before: string, after: string, pos: number): number {
+/**
+ * `pos` in `before`, as the position of the same place in `after`. Text inserted exactly at `pos` lands before the
+ * mapped position with affinity `after` (a caret: the other writer typed there first), after it with `before` (the end
+ * of a range, which must not swallow what was inserted at its edge).
+ */
+export function mapCaret(before: string, after: string, pos: number, affinity: 'after' | 'before' = 'after'): number {
   let from = 0; // position in `before`
   let to = 0; // position in `after`
   for (const [op, text] of diff(before, after)) {
     if (op === diff.INSERT) {
-      to += text.length; // reached only while `from` ≤ `pos`: before the caret, or at it (the other writer typed there first)
+      // reached only while `from` ≤ `pos`: inserted before the position, or exactly at it
+      if (from === pos && affinity === 'before') return to;
+      to += text.length;
       continue;
     }
     if (pos < from + text.length) return op === diff.EQUAL ? to + (pos - from) : to; // inside deleted text: where it was
@@ -40,8 +46,9 @@ export function rebaseText(base: string, mine: string, current: string): string 
   }
   let out = current;
   for (const edit of edits.reverse()) {
-    const start = mapCaret(base, current, edit.at);
-    const end = Math.max(start, mapCaret(base, current, edit.at + edit.remove));
+    // the edit's range grows over nothing inserted at its edges since: its start maps after such text, its end before it
+    const start = mapCaret(base, current, edit.at, 'after');
+    const end = edit.remove === 0 ? start : Math.max(start, mapCaret(base, current, edit.at + edit.remove, 'before'));
     out = out.slice(0, start) + edit.insert + out.slice(end);
   }
   return out;

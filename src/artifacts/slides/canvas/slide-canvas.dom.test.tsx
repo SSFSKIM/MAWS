@@ -126,3 +126,125 @@ describe('the slide canvas', () => {
     setStyle(doc, 's1', 'title', { color: '#ff0000' }); // no observer left to throw
   });
 });
+
+// ---- fix wave 1 ----------------------------------------------------------------------------------------------------
+
+const FIT = `<section id="s1" style="background:#ffffff">
+  <x-shape id="dot" kind="ellipse" style="position:absolute; left:100px; top:100px; width:200px; height:100px; background:#2b7a78"></x-shape>
+  <p id="grow" data-fit="grow" style="position:absolute; left:100px; top:300px; width:400px; height:100px; font-size:32px">Grows</p>
+  <p id="shrink" style="position:absolute; left:100px; top:500px; width:400px; height:100px; font-size:40px">Shrinks</p>
+</section>`;
+
+/** happy-dom lays nothing out: the element reports its text as overflowing while its font is over `fitsAt` px. */
+function overflowsAbove(n: HTMLElement, fitsAt: number): void {
+  Object.defineProperty(n, 'clientHeight', { configurable: true, get: () => 100 });
+  Object.defineProperty(n, 'scrollHeight', { configurable: true, get: () => (Number.parseFloat(n.style.fontSize) > fitsAt ? 200 : 100) });
+}
+/** A node's drawing as data: tag, attributes (the style as sorted declarations), children; order-free where the DOM is. */
+function drawing(n: Element): unknown {
+  const attrs = Object.fromEntries(
+    [...n.attributes].map((a) => [a.name, a.name === 'style' ? a.value.split(';').map((d) => d.trim()).filter(Boolean).sort() : a.value] as const).sort(([a], [b]) => (a < b ? -1 : 1)),
+  );
+  return { tag: n.tagName.toLowerCase(), attrs, children: [...n.childNodes].map((c) => (c.nodeType === 1 ? drawing(c as Element) : c.textContent)) };
+}
+/** A patched canvas's node against a fresh canvas's drawing of the same state. */
+function sameAsFresh(doc: Doc, patched: SlideCanvas, id: string): void {
+  patched.layoutNow();
+  const fresh = mount(doc);
+  fresh.layoutNow();
+  expect(drawing(patched.node(id)!)).toEqual(drawing(fresh.node(id)!));
+}
+
+describe('a patched canvas draws what a fresh one does (finding 3)', () => {
+  it('an ellipse made a rect keeps no outline of the ellipse', () => {
+    const doc = deck(FIT);
+    const c = mount(doc);
+    c.layoutNow();
+    expect(c.node('dot')!.querySelector('svg[data-glyph]')).not.toBeNull();
+    setAttrs(doc, 's1', 'dot', { kind: 'rect' });
+    sameAsFresh(doc, c, 'dot');
+    expect(c.node('dot')!.querySelector('svg')).toBeNull();
+  });
+
+  it('a growing text box that loses its height keeps no min-height', () => {
+    const doc = deck(FIT);
+    const c = mount(doc);
+    c.layoutNow();
+    expect(c.node('grow')!.style.minHeight).toBe('100px');
+    setStyle(doc, 's1', 'grow', { height: null });
+    sameAsFresh(doc, c, 'grow');
+  });
+
+  it('a shrunk text box that loses its height, or opts out of fitting, keeps no display-only size', () => {
+    const doc = deck(FIT);
+    const c = mount(doc);
+    overflowsAbove(c.node('shrink')!, 30);
+    c.layoutNow();
+    expect(Number.parseFloat(c.node('shrink')!.style.fontSize)).toBeLessThanOrEqual(30);
+    setStyle(doc, 's1', 'shrink', { height: null });
+    sameAsFresh(doc, c, 'shrink');
+    setStyle(doc, 's1', 'shrink', { height: '100px' });
+    c.layoutNow();
+    setAttrs(doc, 's1', 'shrink', { 'data-fit': 'none' });
+    sameAsFresh(doc, c, 'shrink');
+  });
+});
+
+describe('connectors, borders, thumbnails and the design system (findings 5 to 7)', () => {
+  it('an aligned hv connector draws its head along the line (finding 5)', () => {
+    const c = mount(deck(`<section id="s1" style="background:#ffffff"><x-connector id="hv" x1="100" y1="300" x2="500" y2="300" route="hv" style="border-width:2px"></x-connector></section>`));
+    c.layoutNow();
+    expect(c.node('hv')!.querySelector('polyline')!.getAttribute('points')).toBe('100,300 500,300');
+    expect(c.node('hv')!.querySelector('polygon')!.getAttribute('points')).toBe('500,300 492,304 492,296');
+  });
+
+  it('a shape’s border width token draws at its value in the scope, with or without a fallback (finding 6)', () => {
+    const doc = deck(`<section id="s1" style="background:#ffffff">
+      <x-shape id="a" kind="ellipse" style="position:absolute; left:0px; top:0px; width:200px; height:100px; border:var(--ds-line, 4px) solid #000000"></x-shape>
+      <x-shape id="b" kind="ellipse" style="position:absolute; left:0px; top:200px; width:200px; height:100px; border:var(--ds-line) solid var(--ds-ink)"></x-shape>
+    </section>`);
+    const scope = document.createElement('div');
+    scope.style.setProperty('--ds-line', '6px');
+    document.body.appendChild(scope);
+    const c = new SlideCanvas(doc, 's1', scope);
+    mounted.push(c);
+    c.layoutNow();
+    expect((c.node('a')!.querySelector('path') as SVGElement).style.strokeWidth).toBe('6px');
+    expect((c.node('b')!.querySelector('path') as SVGElement).style.strokeWidth).toBe('6px');
+    scope.style.removeProperty('--ds-line');
+    c.layoutNow();
+    expect((c.node('a')!.querySelector('path') as SVGElement).style.strokeWidth).toBe('4px');
+  });
+
+  it('a change of a design system’s scope style or of the scope itself lays every canvas out again (finding 7)', async () => {
+    const style = document.createElement('style');
+    style.dataset.dsScopeStyle = 'ds-test';
+    style.textContent = '[data-ds-scope="ds-test"] { --ds-line: 4px; }';
+    document.head.appendChild(style);
+    const scope = document.createElement('div');
+    scope.dataset.dsScope = 'ds-test';
+    document.body.appendChild(scope);
+    const c = new SlideCanvas(deck(FIT), 's1', scope);
+    mounted.push(c);
+    const frame = () => new Promise((resolve) => setTimeout(resolve, 40));
+    await frame();
+    const laidOut = c.writes.layout;
+    style.textContent = '[data-ds-scope="ds-test"] { --ds-line: 8px; }';
+    await frame();
+    expect(c.writes.layout).toBeGreaterThan(laidOut);
+    const again = c.writes.layout;
+    scope.dataset.dsScope = 'ds-other'; // the deck's overrides changed: another scope
+    await frame();
+    expect(c.writes.layout).toBeGreaterThan(again);
+    style.remove();
+  });
+
+  it('a thumbnail draws an embed as a placeholder, never a live frame', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const c = new SlideCanvas(deck(), 's1', host, { thumbnail: true });
+    mounted.push(c);
+    expect(c.node('live')!.querySelector('iframe')).toBeNull();
+    expect(c.node('live')!.querySelector('[data-embed-placeholder]')).not.toBeNull();
+  });
+});

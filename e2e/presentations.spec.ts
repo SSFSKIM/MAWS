@@ -27,7 +27,10 @@ async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
 interface Seam {
   __maws_presentations: {
     seed(artifactId: string, files: Record<string, string>): Promise<{ changed: string[]; held: string[] }>;
-    edit(artifactId: string, edit: { op: 'zOrder'; slideId: string; elementId: string; to: 'front' | 'back' } | { op: 'setNotes'; slideId: string; text: string }): Promise<void>;
+    edit(
+      artifactId: string,
+      edit: { op: 'zOrder'; slideId: string; elementId: string; to: 'front' | 'back' } | { op: 'setNotes'; slideId: string; text: string } | { op: 'setOverride'; name: string; value: string | null },
+    ): Promise<void>;
     order(artifactId: string): Promise<string[]>;
     files(artifactId: string): Promise<Record<string, string>>;
     timings(artifactId: string): { surface: string; timings: { openedAt: number; syncedAt?: number; drawnAt?: number; thumbnails?: number } }[];
@@ -94,7 +97,7 @@ const DECK_JSON = JSON.stringify({
   lists: 'css',
   title: 'Q3 review',
   cover: 'cover',
-  order: ['cover', 'plan', 'layer', 'quiet', 'broken'],
+  order: ['cover', 'plan', 'layer', 'quiet', 'broken', 'tokens'],
   sections: { s1: { description: 'Opening', start: 'cover' }, s2: { description: 'Detail', start: 'layer' } },
   faces: {},
   designSystems: [],
@@ -106,6 +109,8 @@ const FILES: Record<string, string> = {
   // the band is listed after the flow card: it is pinned over the flow layer and covers the card
   'project/slides/layer.html': `<section id="layer" style="background:#ffffff; padding:128px"><p id="card" style="width:800px; height:400px; background:#0000ff; color:#ffffff; font-size:48px">Flow card</p><div id="band" style="position:absolute; left:0px; top:0px; width:1920px; height:1080px; background:#ff0000"></div></section>`,
   'project/slides/quiet.html': `<section id="quiet" hidden style="background:#ffffff; padding:128px"><h2 id="q" style="font-size:64px">Backup slide</h2></section>`,
+  // a stroke width and a type role's size from the design system, with fallbacks (fix wave 1, finding 7)
+  'project/slides/tokens.html': `<section id="tokens" style="background:#ffffff; padding:128px"><x-shape id="ring" kind="ellipse" style="position:absolute; left:128px; top:128px; width:400px; height:200px; background:#ffffff; border:var(--ds-line, 4px) solid #000000"></x-shape><p id="fitted" style="position:absolute; left:800px; top:128px; width:400px; height:120px; font-size:var(--ds-fit-size, 64px)">One two three four five six seven eight nine ten</p></section>`,
   'project/slides/broken.html': `<section id="broken" style="background:#ffffff"><h2 id="b" style="font-size:64px">Broken</h2><blink>not a slide element</blink></section>`,
 };
 
@@ -115,7 +120,7 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   const page = await ready();
   const app = launch!.app;
   const id = await createDeck(page, 'Q3 review', FILES);
-  expect(await order(page, id)).toEqual(['cover', 'plan', 'layer', 'quiet', 'broken']);
+  expect(await order(page, id)).toEqual(['cover', 'plan', 'layer', 'quiet', 'broken', 'tokens']);
 
   // a chat shown, so the panel takes tools; its Artifacts tool pinned, so it stays while a main tab shows the deck
   const project = await ok<{ name: string }>(page, 'session.projects.add', { directory: repo.root });
@@ -142,8 +147,8 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
 
   // the filmstrip: live thumbnails, the sections before their slides, a hidden and a held slide
   const thumbs = (where: Locator) => where.locator('[data-slide-thumb]');
-  await expect(thumbs(inMain)).toHaveCount(5);
-  await expect(thumbs(inMain).locator('.maws-slide')).toHaveCount(5);
+  await expect(thumbs(inMain)).toHaveCount(6);
+  await expect(thumbs(inMain).locator('.maws-slide')).toHaveCount(6);
   await expect(inMain.locator('.deck-section-title')).toHaveText(['Opening', 'Detail']);
   await expect(inMain.locator('[data-slide-thumb="quiet"]')).toHaveAttribute('data-hidden', 'true');
   await expect(inMain.locator('[data-slide-thumb="broken"]')).toHaveAttribute('data-held', '');
@@ -177,15 +182,15 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
 
   // add, duplicate, delete
   await inMain.getByRole('button', { name: 'New slide' }).click();
-  await expect(thumbs(inPanel)).toHaveCount(6);
+  await expect(thumbs(inPanel)).toHaveCount(7);
   const added = (await order(page, id))[1]!;
-  expect(added).toMatch(/^s\d+-/);
+  expect(added).toMatch(/^s[0-9a-z]+-\d+$/);
   await inMain.getByRole('button', { name: 'Slide 3 options' }).click(); // plan, hidden
   await page.getByRole('menuitem', { name: 'Duplicate slide' }).click();
-  await expect(thumbs(inPanel)).toHaveCount(7);
+  await expect(thumbs(inPanel)).toHaveCount(8);
   await inMain.getByRole('button', { name: 'Slide 2 options' }).click(); // the new blank slide
   await page.getByRole('menuitem', { name: 'Delete slide' }).click();
-  await expect(thumbs(inPanel)).toHaveCount(6);
+  await expect(thumbs(inPanel)).toHaveCount(7);
   expect(await order(page, id)).not.toContain(added);
 
   // reorder by the keyboard: the cover lifted, moved down one, dropped
@@ -230,6 +235,21 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await expect.poll(() => pixel(app, at.x, at.y), { message: 'the band sent back sits under the flow card' }).toEqual([0, 0, 255]);
   const slideBox = (await inMain.locator('[data-stage-slide="layer"]').boundingBox())!;
   expect(await pixel(app, slideBox.x + slideBox.width * 0.85, slideBox.y + slideBox.height * 0.85)).toEqual([255, 0, 0]); // the band still paints the slide around the card
+
+  // the design system's tokens re-lay the canvas (fix wave 1, finding 7): a stroke width token and a type role's size,
+  // changed through the deck's overrides, redraw the outline at the new width and re-fit the text
+  await inMain.locator('[data-slide-thumb="tokens"] .deck-thumb-button').click();
+  const ring = inMain.locator('[data-stage-slide="tokens"] [data-eid="ring"] svg path');
+  const fitted = inMain.locator('[data-stage-slide="tokens"] [data-eid="fitted"]');
+  await expect(ring).toHaveCSS('stroke-width', '4px');
+  const shrunk = Number.parseFloat(await fitted.evaluate((n) => getComputedStyle(n).fontSize));
+  expect(shrunk).toBeLessThan(64); // 64 px does not fit the box: shrunk
+  await editDeck(page, id, { op: 'setOverride', name: '--ds-line', value: '8px' });
+  await expect(ring).toHaveCSS('stroke-width', '8px');
+  await editDeck(page, id, { op: 'setOverride', name: '--ds-fit-size', value: '24px' });
+  await expect.poll(() => fitted.evaluate((n) => getComputedStyle(n).fontSize)).toBe('24px'); // fits at the role's new size
+  await editDeck(page, id, { op: 'setOverride', name: '--ds-line', value: null });
+  await expect(ring).toHaveCSS('stroke-width', '4px');
 
   expect(launch!.consoleErrors()).toEqual([]);
 });

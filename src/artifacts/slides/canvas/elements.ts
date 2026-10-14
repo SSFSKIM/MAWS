@@ -16,7 +16,7 @@ const EMBED_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'un
 export const embedDocument = (raw: string): string => `<!doctype html><meta http-equiv="Content-Security-Policy" content="${escAttr(EMBED_CSP)}"><style>html,body{margin:0;height:100%;overflow:hidden}</style>${raw}`;
 
 /** The element's node, its inline style and attributes as the model holds them (the section's `hidden` excepted). */
-export function createNode(document: Document, e: FlatElement, text: TextBlock[] | undefined, assetUrl: AssetUrl): HTMLElement {
+export function createNode(document: Document, e: FlatElement, text: TextBlock[] | undefined, assetUrl: AssetUrl, thumbnail = false): HTMLElement {
   let n: HTMLElement;
   if (e.tag === 'svg') {
     // the opaque markup parses in the SVG namespace through a template, as it does in the file
@@ -32,7 +32,12 @@ export function createNode(document: Document, e: FlatElement, text: TextBlock[]
   if (TEXT_TAGS.has(e.tag)) renderText(n, e.tag, text ?? []);
   else if (e.tag === 'img') setImageSource(n as HTMLImageElement, e.attrs.src, assetUrl);
   else if (e.tag === 'x-icon') renderIcon(document, n, e.attrs.name);
-  else if (e.tag === 'x-embed') {
+  else if (e.tag === 'x-embed' && thumbnail) {
+    // a hundred thumbnails never run a hundred pages: the embed's place, marked
+    const mark = document.createElement('div');
+    mark.dataset.embedPlaceholder = '';
+    n.appendChild(mark);
+  } else if (e.tag === 'x-embed') {
     const frame = document.createElement('iframe');
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.setAttribute('tabindex', '-1');
@@ -138,7 +143,8 @@ export function drawConnector(n: HTMLElement, style: Readonly<Record<string, str
     const from = attrs.from ?? 'tl';
     const [y0, y1] = h < sw ? [h / 2, h / 2] : [0, h];
     const ends: Record<string, [Point, Point]> = { tl: [[0, y0], [w, y1]], tr: [[w, y0], [0, y1]], bl: [[0, y1], [w, y0]], br: [[w, y1], [0, y0]] };
-    points = [...(ends[from] ?? ends.tl!)];
+    const [a, b] = ends[from] ?? ends.tl!;
+    points = a[0] === b[0] && a[1] === b[1] ? [a] : [a, b];
   }
   const svg = svgIn(n, w, h);
   const doc = n.ownerDocument;
@@ -151,6 +157,7 @@ export function drawConnector(n: HTMLElement, style: Readonly<Record<string, str
   const dash = dashOf(style['border-style'], sw);
   if (dash) line.style.setProperty('stroke-dasharray', dash);
   svg.appendChild(line);
+  if (points.length < 2) return; // both ends at one point: no direction for a head
   const heads = connectorHeads(attrs);
   const head = (from: Point, tip: Point, kind: 'none' | 'open' | 'filled') => {
     if (kind === 'none') return;

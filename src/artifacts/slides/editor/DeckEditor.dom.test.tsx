@@ -7,6 +7,7 @@ import { applyV1, diffV1, newDoc, stateVector, transact, type Doc } from '../../
 import * as Y from '../../yjs/slides';
 import { flushLayout } from '../canvas';
 import { importSlide, readSlide, setNotes, slideOrder, writeDeckKeys } from '../model';
+import { DECK_LIMITS } from '../deck';
 import { loadSlide } from '../parse';
 import { DeckEditor } from './DeckEditor';
 import { DeckSession } from './session';
@@ -61,7 +62,7 @@ describe('the deck editor', () => {
     const { doc } = mount();
     fireEvent.click(screen.getByRole('button', { name: 'New slide' }));
     expect(slideOrder(doc)).toHaveLength(4);
-    expect(slideOrder(doc)[1]).toMatch(/^s\d+-/); // after the current slide
+    expect(slideOrder(doc)[1]).toMatch(/^s[0-9a-z]+-\d+$/); // after the current slide
     fireEvent.keyDown(thumbs()[0]!, { key: 'Delete' });
     expect(slideOrder(doc)).toHaveLength(3);
     expect(slideOrder(doc)).not.toContain('a');
@@ -98,5 +99,64 @@ describe('the deck editor', () => {
     act(() => flushLayout());
     await act(async () => {});
     expect(drawn).toEqual([3]);
+  });
+});
+
+// ---- fix wave 1 ----------------------------------------------------------------------------------------------------
+
+const notesField = () => screen.getByRole('textbox', { name: 'Speaker notes' }) as HTMLTextAreaElement;
+
+describe('the notes under a composition and the dialect’s limits (findings 1 and 4)', () => {
+  it('a composition ends carried onto a remote insertion at the edge of the owner’s deletion, nothing of either lost', () => {
+    const { doc } = mount();
+    const field = notesField();
+    fireEvent.compositionStart(field);
+    field.value = 'Note a'; // the owner removes the s while composing
+    fireEvent.input(field);
+    act(() => setNotes(doc, 'a', 'NotesX a', 'remote')); // the other writer types X right after the s
+    expect(field.value).toBe('Note a'); // held while composing
+    fireEvent.compositionEnd(field);
+    expect(readSlide(doc, 'a').notes).toBe('NoteX a');
+    expect(field.value).toBe('NoteX a');
+  });
+
+  it('notes past 4,000 characters are refused with the reason shown, the model untouched, and saved once short enough', () => {
+    const { doc } = mount();
+    const field = notesField();
+    field.value = 'x'.repeat(4_001);
+    fireEvent.input(field);
+    expect(readSlide(doc, 'a').notes).toBe('Notes a');
+    expect(screen.getByRole('alert').textContent).toMatch(/4,000/);
+    expect(field.value).toHaveLength(4_001); // the owner's text stays to shorten, never cut silently
+    field.value = 'x'.repeat(4_000);
+    fireEvent.input(field);
+    expect(readSlide(doc, 'a').notes).toBe('x'.repeat(4_000));
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('a composition whose rebased text passes the limit is refused too', () => {
+    const { doc } = mount();
+    const field = notesField();
+    fireEvent.compositionStart(field);
+    field.value = `Notes a${'y'.repeat(3_993)}`; // 4,000 of the owner's
+    act(() => setNotes(doc, 'a', 'Notes aZ', 'remote'));
+    fireEvent.compositionEnd(field);
+    expect(readSlide(doc, 'a').notes).toBe('Notes aZ');
+    expect(screen.getByRole('alert').textContent).toMatch(/4,000/);
+  });
+
+  it('a deck of 500 slides offers no new slide or duplicate, and says why', () => {
+    const doc = newDoc();
+    transact(doc, () => {
+      writeDeckKeys(doc, { v: 4, title: 'Full', order: [] });
+      for (let i = 0; i < DECK_LIMITS.slides; i++) {
+        const l = loadSlide(`<section id="f${i}" style="background:#ffffff"></section>`);
+        if (!l.ok) throw new Error('fixture');
+        importSlide(doc, l.slide, `b${String(i).padStart(4, '0')}`);
+      }
+    });
+    mount(doc);
+    expect((screen.getByRole('button', { name: 'New slide' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/at most 500 slides/)).toBeTruthy();
   });
 });

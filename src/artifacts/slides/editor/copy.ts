@@ -23,6 +23,8 @@ export const DECK_COPY = {
   stage: 'Slide',
   notes: 'Speaker notes',
   notesPlaceholder: 'Speaker notes',
+  notesTooLong: (length: number, max: number) => `Speaker notes hold at most ${max.toLocaleString('en-US')} characters; these have ${length.toLocaleString('en-US')}. Shorten them to save.`,
+  deckFull: (max: number) => `A deck holds at most ${max} slides: delete one to add another.`,
   emptyDeck: 'This deck has no slides yet.',
   toolbar: 'Deck',
   undo: 'Undo',

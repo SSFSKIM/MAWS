@@ -4,10 +4,10 @@
 // agent (`deck-files.md`: "a `cover` or a section's `start` that named it set to the next slide's id").
 import { transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
-import type { DeckSection } from './deck';
+import { DECK_LIMITS, type DeckSection } from './deck';
 import type { SlideIR } from './ir';
 import { heldOf, insertSlide, readSlide, slideOrder } from './model';
-import { hash4, loadSlide } from './parse';
+import { loadSlide } from './parse';
 
 /**
  * Removes a slide. The deck's `cover` moves to the next slide (else the one before, else it goes); a section starting at
@@ -47,6 +47,7 @@ export function removeSlide(doc: Doc, slideId: string, origin?: unknown): void {
 /** A copy of a slide right after it, under `newId`: its content, attributes and notes. A held slide is not copied. */
 export function duplicateSlide(doc: Doc, slideId: string, newId: string, origin?: unknown): void {
   if (heldOf(doc, slideId)) throw new Error(`slide ${slideId} is held: its file does not load, so there is nothing to copy`);
+  needRoom(doc);
   insertSlide(doc, { ...readSlide(doc, slideId), id: newId }, slideId, origin);
 }
 
@@ -62,27 +63,56 @@ export function setSection(doc: Doc, key: string, section: DeckSection | null, o
   );
 }
 
-/**
- * A slide id the deck does not hold: `s<n>-<hash>` of the writing replica's clientID, so two replicas adding slides at
- * once never mint the same key (one would overwrite the other's slide). `taken` adds ids to avoid (a batch's own).
- */
-export function mintSlideId(doc: Doc, taken: Iterable<string> = []): string {
-  const used = new Set([...Y.slideIds(doc), ...taken]);
-  const h = hash4(`slide\u0000${doc.clientID}`);
-  for (let n = used.size + 1; ; n++) {
-    const id = `s${n}-${h}`;
+// Each replica's mint counter: never reset while the replica lives, so an id it gave out (a slide since removed) is
+// never given again.
+const minted = new WeakMap<Doc, number>();
+function mint(doc: Doc, prefix: string, used: ReadonlySet<string>): string {
+  const client = doc.clientID.toString(36); // the whole clientID (at most 11 characters for 2^53), so no two replicas share a prefix
+  for (;;) {
+    const n = (minted.get(doc) ?? 0) + 1;
+    minted.set(doc, n);
+    const id = `${prefix}${client}-${n}`; // `-` is outside base36: the clientID and the counter never run together
     if (!used.has(id)) return id;
   }
 }
 
-/** A key for a new section of the outline, distinct between replicas as slide ids are. */
+/**
+ * A new slide id, `s<clientID base36>-<n>`: the writing replica's whole clientID and its own counter, so two replicas
+ * adding slides at once never mint the same key (one would overwrite the other's slide), and a replica never reuses
+ * one. An id the deck already holds, or in `taken` (a batch's own), is skipped.
+ */
+export function mintSlideId(doc: Doc, taken: Iterable<string> = []): string {
+  return mint(doc, 's', new Set([...Y.slideIds(doc), ...taken]));
+}
+
+/** A key for a new section of the outline, `section<clientID base36>-<n>`, on the same counter as slide ids. */
 export function mintSectionKey(doc: Doc): string {
-  const used = new Set(Object.keys(Y.deckEntries(doc, 'sections') ?? {}));
-  const h = hash4(`section\u0000${doc.clientID}`);
-  for (let n = used.size + 1; ; n++) {
-    const key = `section${n}-${h}`;
-    if (!used.has(key)) return key;
-  }
+  return mint(doc, 'section', new Set(Object.keys(Y.deckEntries(doc, 'sections') ?? {})));
+}
+
+/** Sets one of the deck's design-system overrides (`dsOverrides`, X28's `TokenOverrides`), or removes it with null. */
+export function setDeckOverride(doc: Doc, name: string, value: string | null, origin?: unknown): void {
+  transact(
+    doc,
+    () => {
+      if (value === null) Y.deleteDeckEntry(doc, 'dsOverrides', name);
+      else Y.setDeckEntry(doc, 'dsOverrides', name, value);
+    },
+    origin,
+  );
+}
+
+/** How many more slides the deck holds (`DECK_LIMITS.slides`, the loader's and the publish's bound). */
+export const slideRoom = (doc: Doc): number => DECK_LIMITS.slides - Y.slideIds(doc).length;
+
+function needRoom(doc: Doc): void {
+  if (slideRoom(doc) <= 0) throw new Error(`a deck holds at most ${DECK_LIMITS.slides} slides`);
+}
+
+/** A new slide after `afterId` (first when null), refused past the deck's slide limit. */
+export function addSlide(doc: Doc, ir: SlideIR, afterId: string | null, origin?: unknown): void {
+  needRoom(doc);
+  insertSlide(doc, ir, afterId, origin);
 }
 
 /** A blank slide: the design system's ground, the 128 px margins, a column. Built through the loader, as every write is. */
