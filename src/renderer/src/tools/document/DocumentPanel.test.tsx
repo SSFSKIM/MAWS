@@ -77,6 +77,8 @@ function deps(): DocumentTabDeps {
     export: async () => Promise.reject(new Error('exporting an artifact is not available yet')),
     versionState: async () => new Uint8Array(),
     attributions: async () => new Uint8Array(),
+    acceptSuggestion: async () => ({ revision: 1 }),
+    rejectSuggestion: async () => ({ revision: 1 }),
   } as unknown as ArtifactHost;
   return { host, ipc, log: () => {}, confirm: () => false, sessionTitle: () => undefined, sessions: () => [], ...(noContentMs !== undefined && { noContentMs }) };
 }

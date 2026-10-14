@@ -120,6 +120,8 @@ it('withdraws a closing tab’s acknowledged unsent draft at the host, not only 
         },
         versionState: async () => new Uint8Array(),
         attributions: async () => new Uint8Array(),
+        acceptSuggestion: async () => ({ revision: 1 }),
+        rejectSuggestion: async () => ({ revision: 1 }),
       } as unknown as ArtifactHost,
       ipc: { invoke: async () => ({ ok: true, value: { artifact: { id: A, kind: 'document', title: 'Draft', lastViewedAt: null, revision: 1 } } }), on: () => () => {} } as unknown as DocumentTabDeps['ipc'],
       log: () => {},
