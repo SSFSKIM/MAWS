@@ -195,11 +195,16 @@ describe('the preview', () => {
     const before = shown!.state.doc;
     act(() => void shown!.commands.insertContentAt(1, 'X'));
     expect(shown!.state.doc).toBe(before); // a local change on the preview is refused
+    const previewDom = shown!.view.dom;
+    const previewFirstBlock = previewDom.firstElementChild!;
 
     click(within(bar()).getByRole('button', { name: 'Back to document' }));
     await until(() => screen.queryByRole('toolbar', { name: 'Formatting' }) !== null && previewEditor() === null, 'the live document');
     expect(rebound).toBe(0);
     await until(() => shown!.isDestroyed, 'the preview editor destroyed'); // nothing of the preview is retained
+    // its document was not drawn again on the way out (EditorContent's unmount clears the node views, which redraws
+    // the whole document — 32,000 nodes of garbage at 200 pages); the blocks it drew are the ones it went with
+    expect(previewFirstBlock.parentNode).toBe(previewDom);
     expect(live.state.doc).toBe(content);
     expect(live.view.dom.closest('[hidden]')).toBeNull();
     expect(live.can().undo()).toBe(true);

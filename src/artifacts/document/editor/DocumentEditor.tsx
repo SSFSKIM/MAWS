@@ -445,7 +445,7 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
         <div className="doc-live" hidden={previewEditor !== null}>
           <EditorContent editor={live} />
         </div>
-        {previewEditor && <EditorContent editor={previewEditor} />}
+        {previewEditor && <PreviewMount editor={previewEditor} />}
       </div>
     </div>
   );
@@ -513,7 +513,23 @@ function passageRect(editor: Editor, frame: HTMLElement | null, threadId: string
 // The preview's own editor (M9): read-only, bound to the version's view from its creation (the binding's microtask),
 // put on another view when the preview changes (a comparison, Show changes), its moved and retyped blocks labelled and
 // the change ↑ ↓ asked for reached once it draws, the controller told what is shown. It never touches the live editor.
+//
+// Its view is drawn detached (`element` a no-op placer) and put in the page by `PreviewMount`, not `EditorContent`:
+// EditorContent's unmount clears the node views, which makes ProseMirror redraw the whole document (32,000 nodes of
+// garbage at 200 pages, and a leave's time) a millisecond before the editor is destroyed; a plain mount just takes it out.
 const PREVIEW_GONE_MS = 10; // past Tiptap's deferred destruction of an unmounted editor (1 ms)
+const detached = (): void => {};
+
+function PreviewMount({ editor }: { editor: Editor }) {
+  const box = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (editor.isDestroyed || !box.current) return;
+    const dom = editor.view.dom;
+    box.current.appendChild(dom);
+    return () => dom.remove();
+  }, [editor]);
+  return <div ref={box} className="doc-preview" />;
+}
 
 interface PreviewEditorProps {
   view: VersionView;
@@ -537,6 +553,7 @@ function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, 
         comments: { doc: handle.doc, tabId, onComment: () => false },
         env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}) },
       }),
+      element: detached,
       editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'preview' } },
       shouldRerenderOnTransaction: false,
       editable: false,
