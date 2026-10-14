@@ -2,7 +2,9 @@
 // installed only when the window was loaded for the e2e harness (main adds `e2e=1` to the page's URL under MAWS_E2E=1).
 // It opens replicas through the window's real ArtifactHost and edits them schema-agnostically (a root type's attributes
 // and text), so `e2e/artifacts-store.spec.ts` drives the product's port route end to end before any editor exists.
+// M9: it also takes a whole state in (a seeded document) and times keystrokes to their durable ack, for S2's numbers.
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
+import { applyV2, stateV2 } from '@artifacts/yjs';
 
 interface Typing {
   prefix: string;
@@ -27,6 +29,12 @@ export interface DocumentsSeam {
   // Appends `<prefix><n>;` to the root's text every `everyMs`, counting what the host acknowledged.
   startTyping(id: number, prefix: string, everyMs: number): void;
   stopTyping(id: number): { typed: number; acked: number };
+  // M9: applies a V2 state as a local edit (it goes to the host like any), and the replica's V2 state size.
+  applyState(id: number, state: Uint8Array): void;
+  stateSize(id: number): number;
+  // M9: `count` appends to the root's text, each `gapMs` (min, max: uniformly drawn) after the last; answers each one's
+  // milliseconds from the edit to the ack that made it durable, in order.
+  timeAcks(id: number, count: number, gapMs: [number, number]): Promise<number[]>;
   close(id: number): void;
 }
 
@@ -87,6 +95,32 @@ export function installDocumentsSeam(win: Window, host: () => ArtifactHost): voi
       clearInterval(typing.timer);
       entry.typing = null;
       return { typed: typing.typed, acked: Math.max(typing.acked, typing.typed - entry.handle.state().unsaved) };
+    },
+    applyState: (id, state) => applyV2(get(id).handle.doc, state),
+    stateSize: (id) => stateV2(get(id).handle.doc).length,
+    timeAcks(id, count, [minGap, maxGap]) {
+      const { handle } = get(id);
+      const editedAt: number[] = [];
+      const latencies: number[] = [];
+      return new Promise((resolve) => {
+        // The provider acks in send order: with n edits made and u unsaved, the first n − u are durable.
+        const off = handle.subscribe((state) => {
+          const now = performance.now();
+          while (latencies.length < editedAt.length - state.unsaved) latencies.push(now - editedAt[latencies.length]);
+          if (latencies.length === count) {
+            off();
+            resolve(latencies);
+          }
+        });
+        const edit = () => {
+          const type = node(id);
+          const length = type.toArray().filter((part): part is string => typeof part === 'string').join('').length;
+          editedAt.push(performance.now());
+          type.insert(length, `t${editedAt.length};`);
+          if (editedAt.length < count) setTimeout(edit, minGap + Math.random() * (maxGap - minGap));
+        };
+        edit();
+      });
     },
     close(id) {
       const entry = get(id);

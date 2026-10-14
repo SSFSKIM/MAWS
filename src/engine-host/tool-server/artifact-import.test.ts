@@ -11,7 +11,7 @@ import type { DeliverableRecord } from '@shared/maws/deliverable';
 import { CAPTURE_ANSWER_MS } from '@shared/maws/panes';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { artifactPublishTool } from './artifact-publish';
-import { artifactCreateTool, artifactReadTool } from './artifact-tools';
+import { artifactCreateTool, artifactListTool, artifactReadTool } from './artifact-tools';
 import { jsonOf, openWorld, SELF, textOf, type World } from './artifact-world.fixture';
 import { artifactScreenshotTool, type ArtifactCaptureRequest } from './artifacts';
 import { HostBridge } from './bridge';
@@ -108,6 +108,25 @@ describe('a pre-P3 X12 record a tool names, after the cutover’s import', () =>
     await started();
     expect(jsonOf(await artifactReadTool(w.deps()).call({ artifact: RECORD }, w.ctx()))).toMatchObject({ artifactId: RECORD, kind: 'file', file: { path, size: 4, exists: true } });
     expect(w.store.get(RECORD)).toMatchObject({ kind: 'file', title: 'Screenshot', linkedPath: path });
+  });
+
+  it('is listed by artifact_list before anything names it: the lineage’s records under the session’s scope, every record under all', async () => {
+    await pre(SELF, ['<p>v1</p>', '<p>v2</p>']);
+    const THEIRS = '1c6f2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';
+    await pre(PARENT, ['<p>p</p>'], THEIRS, 'theirs');
+    const STRANGER = '2d7a3e4f-5c6b-4d7e-9fa0-1b2c3d4e5f60';
+    await pre('app-stranger' as AppSessionId, ['<p>s</p>'], STRANGER, 'stranger');
+    await started();
+    const list = async (args: Record<string, unknown> = {}) => jsonOf<{ artifacts: { id: string; handle?: string; kind: string; title: string; revision: number }[] }>(await artifactListTool(w.deps({ artifactScope: [PARENT] })).call(args, w.ctx())).artifacts;
+    const listed = await list();
+    expect(listed.map((a) => [a.id, a.handle, a.kind])).toEqual(expect.arrayContaining([[RECORD, 'dash', 'html'], [THEIRS, 'theirs', 'html']]));
+    expect(listed).toHaveLength(2);
+    expect(listed.every((a) => a.revision > 0)).toBe(true);
+    expect(w.store.listVersions(RECORD)).toHaveLength(2);
+    await started(); // the next start's import lands nothing twice
+    expect(await list()).toEqual(listed);
+    expect(w.store.listVersions(RECORD)).toHaveLength(2);
+    expect((await list({ scope: 'all' })).map((a) => a.id).sort()).toEqual([RECORD, THEIRS, STRANGER].sort());
   });
 
   it('keeps E2’s refusal of a create whose handle a record of the session or above it holds; a record outside the lineage is not found', async () => {

@@ -197,10 +197,18 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     return answer;
   });
   serve('artifacts.setDefaults', ({ owner, spaces }) => storeOf().setDefaults({ owner, spaces }));
+  // A retained version pinned to a since-deleted design system still renders with that system's faces and images
+  // (Decision Log 46, X29): a deleted artifact's files answer for a named revision, never `live`, while any retained
+  // version pins it; otherwise a deleted artifact is not found.
+  const servable = (store: ArtifactStore, artifactId: string, revision: number | undefined): ArtifactRow => {
+    const entity = store.entity(artifactId);
+    if (entity && entity.deletedAt !== null && revision !== undefined && store.versions.pinsSystem(artifactId)) return row(store, artifactId, true)!;
+    return required(store, artifactId);
+  };
   serve('artifacts.content', ({ artifactId, revision, path }) => {
     const store = storeOf();
     return store.readCommitted(() => {
-      const { kind } = required(store, artifactId);
+      const { kind } = servable(store, artifactId, revision);
       if (path !== undefined && path.startsWith('assets/')) {
         const asset = store.listAssets(artifactId).find((candidate) => candidate.ref === path);
         if (!asset) throw new ArtifactStoreError('notFound', `no asset ${path} in ${artifactId}`);

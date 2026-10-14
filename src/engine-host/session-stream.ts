@@ -34,8 +34,8 @@ export const BATCH_MAX = 500;
 export const BATCH_BYTES = 16 * 1024 * 1024;
 
 const REQUESTED_KINDS = new Set(['permission.requested', 'question.requested', 'plan.requested', 'dialog.requested', 'elicitation.requested']);
-// E1 M4b: a blocking ask's attention item originates in its `maws.ask.opened` (an async ask is no item)
-const isRequested = (event: SessionEvent): boolean => REQUESTED_KINDS.has(event.kind) || (event.kind === 'maws.ask.opened' && event.blocking);
+// E1 M4b: an ask's attention item originates in its `maws.ask.opened` (P2-C2: an async ask's `async_input` item too)
+const isRequested = (event: SessionEvent): boolean => REQUESTED_KINDS.has(event.kind) || event.kind === 'maws.ask.opened';
 
 export interface SessionStreamOptions {
   appSessionId: AppSessionId;

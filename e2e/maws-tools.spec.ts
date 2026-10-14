@@ -313,7 +313,7 @@ test('an ask from a session not shown never switches the main view; its sheet op
 
 // ---- G4: an async ask -----------------------------------------------------------------------------------------------
 
-test('an async ask: acknowledged at once, Submit sends the recorded steer, and the capsule turns answered across the second turn', async () => {
+test('an async ask: acknowledged at once, an async_input item while it waits (P2-C2), Submit sends the recorded steer and retires the item, and the capsule turns answered across the second turn', async () => {
   await scene({ titles: ['E1 tools: async ask'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -327,8 +327,10 @@ test('an async ask: acknowledged at once, Submit sends the recorded steer, and t
     expect(opened).toMatchObject({ blocking: false });
     // the acknowledgement was the host's answer at once
     expect(JSON.parse(resultText(mcpResultOf(s.journal(id), opened!.requestId)!))).toEqual({ status: 'asked', askId: opened!.askId });
-    // no attention item for an async ask
-    expect(value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id)).toEqual([]);
+    // P2-C2 (the P2 spec's Decision Log 32, reversing E1's "no item for an async ask"): the question waits as an
+    // `async_input` item, anchored to the ask by its request, until the answer is committed
+    const items = async () => value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id);
+    await expect.poll(async () => (await items()).map((item) => [item.kind, item.state, item.request.requestId])).toEqual([['async_input', 'pending', opened!.requestId]]);
 
     const sheet = sheetOf(s);
     await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
@@ -345,6 +347,7 @@ test('an async ask: acknowledged at once, Submit sends the recorded steer, and t
     expect((steer!.message as { content: string }).content).toBe(recorded.message.content);
     expect(metaEvents(s.journal(id))).toContain('maws_ask_answered');
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
+    await expect.poll(items).toEqual([]); // P2-C2: retired at the committed answer
     expect(ofKind(await s.events(id), 'maws.ask.answered')).toMatchObject([{ askId: opened!.askId, delivery: 'steer', answers: [{ id: 'q1', status: 'answered', value: ['Yes'] }] }]);
 
     // two main turns (the recording's model ended its first before the answer arrived; Surprises): the reply is the second's

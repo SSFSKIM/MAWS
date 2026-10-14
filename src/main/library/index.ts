@@ -1,5 +1,5 @@
 // The library's side of main (docs/doperpowers/plans/2026-10-12-p3-l-library.md, M1): the derived index (the index's
-// `LibraryStore`, migration 9) kept right by the sync over the engine host's library reads, `library.list`, `.get` and
+// `LibraryStore`, migration 10) kept right by the sync over the engine host's library reads, `library.list`, `.get` and
 // `.spaces` answered from it, and `library.changed` told once per tick after the index committed a change. Main never
 // opens the host's `store.sqlite`. Started after the index opens and before the first window loads.
 import type { EventName, EventPayload } from '@shared/ipc/schema';

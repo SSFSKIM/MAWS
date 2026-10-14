@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { SendFileResultSchema, TOOL_ERRORS } from '@shared/maws/tools';
 import { jsonOf, openWorld, SELF, type World } from './artifact-world.fixture';
@@ -40,6 +41,22 @@ describe('send_file over the artifact store', () => {
     // one commit, idempotent: the replayed call answers the same ids and writes nothing again
     expect(jsonOf(await send())).toEqual(answer);
     expect(w.store.list({ kind: 'file' })).toHaveLength(2);
+  });
+
+  it('hashes each file before the delivery’s batch opens, never synchronously inside it, and records its digest', async () => {
+    const big = Buffer.alloc(3 * 1024 * 1024 + 7);
+    for (let i = 0; i < big.length; i++) big[i] = (i * 31) % 251;
+    writeFileSync(join(w.cwd, 'big.bin'), big);
+    const inBatch: boolean[] = [];
+    const hashInPlace = w.store.files.describe.bind(w.store.files);
+    vi.spyOn(w.store.files, 'describe').mockImplementation((path) => (inBatch.push(w.storage.batchOpen), hashInPlace(path)));
+    const answer = SendFileResultSchema.parse(jsonOf(await sendFileTool(w.deps()).call({ files: ['big.bin', 'hello.txt'] }, w.ctx())));
+    expect(inBatch.filter(Boolean)).toEqual([]);
+    const refs = answer.deliverables.map((file) => w.store.contentRef(file.id).ref);
+    expect(refs.map((ref) => [ref.name, ref.size, ref.sha256])).toEqual([
+      ['big.bin', big.length, createHash('sha256').update(big).digest('hex')],
+      ['hello.txt', 8, createHash('sha256').update('HELLO_E1').digest('hex')],
+    ]);
   });
 });
 

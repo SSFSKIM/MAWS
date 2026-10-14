@@ -4,10 +4,10 @@
 // a document's text and in an HTML page; Pin moves a row into Pinned; a Space made and an artifact moved into it shows
 // under By Space; Rename and Delete land after the host's event; and the library is right after the host process is
 // killed and restarted (M7: with a write main's index had missed, through main's e2e seam). M7's upgrade case: an index rewound
-// to version 8 beside a populated host store migrates to 9 at launch and the first connection's snapshot fills it. M5b:
+// to version 9 beside a populated host store migrates to 10 at launch and the first connection's snapshot fills it. M5b:
 // an HTML artifact a session made (on C3's replay transport, `support/library-session.ts`) in the panel's Artifacts
 // tool, its versions, P2's comment card and its Side thread, Open in tab and Export to PDF; a PDF, a video and an audio
-// file played from the library. M6b: a profile with X12 records and an index at version 8 upgrades into the library.
+// file played from the library. M6b: a profile with X12 records and an index at version 9 upgrades into the library.
 // `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -203,18 +203,18 @@ function schemaOf(db: DatabaseSync): { version: unknown; objects: unknown[] } {
   };
 }
 
-// An index at version 8 as an install before P3-L left it: the library's four tables dropped (migration 9 only adds
-// them) and the version set back, checked equal to the schema migrations 1 to 8 build.
-function rewindIndexTo8(path: string): void {
+// An index at version 9 as an install before P3-L left it: the library's four tables dropped (migration 10 only adds
+// them) and the version set back, checked equal to the schema migrations 1 to 9 build.
+function rewindIndexTo9(path: string): void {
   const db = new DatabaseSync(path);
   try {
-    expect(schemaOf(db).version, 'the first launch left the index at 9').toBe(9);
-    db.exec('DROP TABLE library_text; DROP TABLE library_links; DROP TABLE library_artifacts; DROP TABLE library_spaces; PRAGMA user_version = 8;');
+    expect(schemaOf(db).version, 'the first launch left the index at 10').toBe(10);
+    db.exec('DROP TABLE library_text; DROP TABLE library_links; DROP TABLE library_artifacts; DROP TABLE library_spaces; PRAGMA user_version = 9;');
     const template = new DatabaseSync(':memory:');
     try {
-      for (const migration of MIGRATIONS.filter((m) => m.version <= 8)) template.exec(migration.sql);
-      template.exec('PRAGMA user_version = 8');
-      expect(schemaOf(db), 'the rewound index is a version-8 index').toEqual(schemaOf(template));
+      for (const migration of MIGRATIONS.filter((m) => m.version <= 9)) template.exec(migration.sql);
+      template.exec('PRAGMA user_version = 9');
+      expect(schemaOf(db), 'the rewound index is a version-9 index').toEqual(schemaOf(template));
     } finally {
       template.close();
     }
@@ -223,7 +223,7 @@ function rewindIndexTo8(path: string): void {
   }
 }
 
-test('an index at version 8 beside a populated host store migrates to 9 at launch, and the first connection’s snapshot fills the library', async () => {
+test('an index at version 9 beside a populated host store migrates to 10 at launch, and the first connection’s snapshot fills the library', async () => {
   test.setTimeout(120_000);
   scratch = mkdtempSync(join(tmpdir(), 'maws-e2e-library-upgrade-'));
   const userData = join(scratch, 'ud');
@@ -244,9 +244,9 @@ test('an index at version 8 beside a populated host store migrates to 9 at launc
   });
   await launch.cleanup();
   launch = null;
-  rewindIndexTo8(join(userData, 'index.sqlite'));
+  rewindIndexTo9(join(userData, 'index.sqlite'));
 
-  // the upgrade: main migrates the index to 9, and the host's snapshot at the first connection is the whole library
+  // the upgrade: main migrates the index to 10, and the host's snapshot at the first connection is the whole library
   launch = await launchMaws({ userData });
   ({ page } = launch);
   await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
@@ -280,7 +280,7 @@ test('an index at version 8 beside a populated host store migrates to 9 at launc
   launch = null;
   const db = new DatabaseSync(join(userData, 'index.sqlite'), { readOnly: true });
   try {
-    expect(schemaOf(db).version, 'the index is at 9 again').toBe(9);
+    expect(schemaOf(db).version, 'the index is at 10 again').toBe(10);
     expect((db.prepare("SELECT count(*) AS n FROM library_artifacts WHERE kind <> 'design_system'").get() as { n: number }).n).toBe(3); // the case's own three (P3-D seeds design systems)
   } finally {
     db.close();
@@ -290,7 +290,7 @@ test('an index at version 8 beside a populated host store migrates to 9 at launc
 // ---- M6b: the X12 upgrade ---------------------------------------------------------------------------------------------
 
 // A profile as a build before P3-L left it: X12 deliverable records under `<userData>/deliverables/`, an index at
-// version 8, and an engine transcript whose send_file call was answered with an X12 record's id (E1's answer, in the
+// version 9, and an engine transcript whose send_file call was answered with an X12 record's id (E1's answer, in the
 // engine's own record of the call: what a relaunch draws the transcript from). The first launch makes the profile (its
 // index and the two sessions); between the launches the records are written and the index rewound, so the second
 // launch upgrades the index and its host imports the records at its start: the library shows a File and an HTML
@@ -312,7 +312,7 @@ function seedSendFile(scratch: Scratch, engineSessionId: string, path: string, r
   appendFileSync(transcript, `${JSON.stringify(call)}\n${JSON.stringify(result)}\n`);
 }
 
-test('a profile with X12 records and an index at version 8 launches into a library of File and HTML artifacts with their sessions, and a transcript delivery row opens the artifact', async () => {
+test('a profile with X12 records and an index at version 9 launches into a library of File and HTML artifacts with their sessions, and a transcript delivery row opens the artifact', async () => {
   test.setTimeout(180_000);
   const project = scratchProject({ titles: ['L: delivered here', 'L: the other session'], label: 'p3l-upgrade' });
   try {
@@ -327,7 +327,7 @@ test('a profile with X12 records and an index at version 8 launches into a libra
     const at = new Date(Date.now() - 3_600_000).toISOString();
     seedRecord(project.userData, { id: recordId, appSessionId: here, kind: 'file', path, title: 'hello.txt', versions: [{ path, at }], createdAt: at });
     const dashboard = seedArtifact(project.userData, other, 'dash', 'Dashboard', ['<!doctype html><html><body><h1 id="heading">DASHBOARD</h1></body></html>'], at);
-    rewindIndexTo8(join(project.userData, 'index.sqlite'));
+    rewindIndexTo9(join(project.userData, 'index.sqlite'));
 
     const second = await launchScene(project, first.ids);
     try {

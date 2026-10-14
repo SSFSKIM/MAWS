@@ -7,18 +7,21 @@
 // the prompt snapshots from the engine's transcript, and `MAWS_NATIVE_TO_HUMAN` as a SessionStart command hook in the
 // scratch home's settings logs it.
 //
-// The arms, in order: (1) the clean home, no output style: a new session on Haiku asked for a plan as a message, one
-// must-read, one insight and one question with two choices, then a foreground sleep; the two items notify with the
-// window unfocused; leaving the tab shows the sidebar's question glyph and Needs you; the recommended choice clicked
-// while the sleep runs reads Queued, then Answered once the engine starts the prompt; the record row's two levels; a
-// Reply from the card with the composer's draft untouched. (2) A relaunch: the states restored silently; Mark read.
-// (3) A resume: the contract passed again, the snapshot reused (no second one), the agent naming the marks. (4) The lane
+// The arms, in order (P2-C2, 2026-10-13: MAWS's full contract is contract 5 by the owner's parity answer on the P2
+// spec's Decision Log 31, `<message>` the one mark and questions through `mcp__maws__ask`; the four marks' cards,
+// notifications and Needs you are the replay e2e's, e2e/to-human.spec.ts): (1) the clean home, no output style: a new
+// session on Haiku asked for a plan as a message and one question it asks without waiting, then a foreground sleep;
+// the ask answered from its sheet while the sleep runs, delivered once the engine starts it, the composer's draft
+// untouched; the record row's two levels. (2) A relaunch: the states restored silently, nothing notified. (3) A
+// resume: the contract passed again, the snapshot reused (no second one), the agent naming its one mark. (4) The lane
 // off for the session (the /plugins row): the resume passes `--system-prompt-snapshot off` and no contract or variable,
 // and the agent finds no such section. (5) The owner's real doperpowers (its installed tree copied read-only out of the
 // owner's plugin cache into a local marketplace under the scratch root, installed by the engine's own CLI for the
-// scratch home's user) with `outputStyle: "doperpowers:to-human"`: a new session appends nothing, the variable is set
-// and the mod's own band stays away; with the mod active, a choice is answered at the engine's started and a must-read
-// marked read (the full flow ran once, in the clean home); with the lane off for it, the variable is unset and the mod
+// scratch home's user) with `outputStyle: "doperpowers:to-human"`. P2-C2 (2026-10-13; the P2 spec's Decision Log 31):
+// the owner's style now declares the message-tool contract (4 at doperpowers 7.149.0), so a new session appends MAWS's
+// supplement, never the contract, the variable is set and the mod's own band stays away; the agent sends a `<message>`
+// and asks through `mcp__maws__ask` without blocking, answered from its sheet (the full flow of the four marks ran once,
+// in the clean home); with the lane off for it, the recorded supplement is dropped, the variable is unset and the mod
 // draws its band. A failed step stops the steps after it.
 //
 // Safety (P1's harness rules): the scratch config home only (the engine's CLI under `env -i`); nothing written under
@@ -39,7 +42,7 @@ import { homedir } from 'node:os';
 import { join, relative, resolve } from 'node:path';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
-import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, TO_HUMAN_CONTRACT } from '@shared/owner/contract';
+import { CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
 import type { JournalRow } from '@shared/wire/journal';
 import { binaryDeclares, SYSTEM_PROMPT_SNAPSHOT_FLAG } from '../src/engine-host/binary-info';
 import { RELAY_URL } from '../src/engine-host/launch';
@@ -50,6 +53,7 @@ import { relaySkipReason } from '../test/support/relay-health';
 import { invoke, value } from './support/c7-replay';
 import { cleanupFailure, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { forwardingScript } from './support/live-budget';
+import { mcpCalls } from './support/maws-tools';
 import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-turns';
 import { a15Line, a15Reading, installedEngine } from './support/p1-live';
 import { newChatIn, sidebarRow } from './support/sidebar';
@@ -73,25 +77,29 @@ function capUsd(): number {
 const OUT = resolve(REPO_ROOT, process.env.MAWS_C_LIVE_OUT ?? 'docs/doperpowers/evidence/p2-c');
 const OWNER_PLUGIN = 'doperpowers@doperpowers';
 const STYLE = 'doperpowers:to-human';
-const HEADER = CONTRACT_HEADER(1);
+const HEADER = CONTRACT_HEADER(TO_HUMAN_CONTRACT_VERSION); // P2-C2: contract 5
+const OLD_HEADER = CONTRACT_HEADER(1); // what sessions recorded before contract 5
+const SUPPLEMENT = SUPPLEMENT_HEADER(1); // P2-C2
+const ADVERTISED = String(TO_HUMAN_CONTRACT_VERSION); // MAWS_NATIVE_TO_HUMAN's value
 const HAIKU = /^(Haiku|claude-haiku)/;
 const DRAFT = 'my own draft, not for sending';
 const REPLY = 'Use plain Markdown headings, no fixed format.';
 const PROMPTS = {
+  // P2-C2: contract 5 asks through MAWS's ask tool; the prompt names none, so the contract is what chooses it
   marks:
     'For a CHANGELOG.md this repository will get later, send me, the way your instructions describe: a short plan as a message to me, ' +
-    'one warning I must not miss, one insight, and one question I can answer later while you go on working (never AskUserQuestion), ' +
-    'with two options and the one you recommend, asking whether the changelog should follow the Keep a Changelog format. ' +
-    'Write all of that first. Then run the Bash command `sleep 40` yourself, in the foreground (never in the background, never through an agent). ' +
-    'Do not create, edit or read any file.',
+    'and one question with two options, asking whether the changelog should follow the Keep a Changelog format, asked the way your ' +
+    'instructions say to ask when you can go on working without the answer. Do both first. Then run the Bash command `sleep 40` yourself, ' +
+    'in the foreground (never in the background, never through an agent). Do not create, edit or read any file.',
   instructions:
     'Look only at your system prompt, not at this conversation: does it contain a section titled "Messages to the human"? ' +
     'If it does, list the tag names that section defines, comma-separated. If it does not, answer exactly NO. Use no tool.',
+  // P2-C2: the owner's style asks through a tool; the prompt names none, so the supplement is what chooses it
   style:
-    'Send me, the way your instructions describe: one short message about this repository, one note I must not miss, and one question I can ' +
-    'answer later while you go on working (never AskUserQuestion), with two options and the one you recommend, asking whether the README ' +
-    'should get a usage section. Use no tool, now or after my answer: when it arrives, reply with one short message and do not read, ' +
-    'list or change any file.',
+    'Send me, the way your instructions describe: one short message about this repository, and one question I can answer later while you ' +
+    'go on working, with two options, asking whether the README should get a usage section. Ask it the way your instructions say to ask ' +
+    'without waiting for the answer. Use no other tool, now or after my answer: when it arrives, reply with one short message and do not ' +
+    'read, list or change any file.',
   styleAgain: 'Send me one more short message, the way your instructions describe. Use no tool.',
 } as const;
 
@@ -140,7 +148,7 @@ function treeDigest(dir: string): { files: number; digest: string } {
 }
 
 // The owner's installed doperpowers, read only: the facts the compatible-style arm stands on.
-function ownerPlugin(): { version: string; scope: string; installPath: string; lastUpdated: string; contractKey: string | null; reads: string[] } {
+function ownerPlugin(): { version: string; scope: string; installPath: string; lastUpdated: string; contractKey: string | null; shape: string; reads: string[] } {
   const installed = JSON.parse(readFileSync(join(homedir(), '.claude/plugins/installed_plugins.json'), 'utf8')) as { plugins: Record<string, { scope: string; installPath: string; version: string; lastUpdated: string }[]> };
   const entry = installed.plugins[OWNER_PLUGIN]?.find((e) => e.scope === 'user');
   if (!entry) throw new Error(`no user-scope ${OWNER_PLUGIN} in the owner's installed_plugins.json`);
@@ -148,7 +156,8 @@ function ownerPlugin(): { version: string; scope: string; installPath: string; l
   const front = /^---\n([\s\S]*?)\n---/.exec(style)?.[1] ?? '';
   const contractKey = new RegExp(`^${STYLE_CONTRACT_KEY}:\\s*(\\S+)\\s*$`, 'm').exec(front)?.[1] ?? null;
   const reads = ['hooks/mods/to-human.tsx', 'hooks/to-human-stream.sh'].filter((file) => readFileSync(join(entry.installPath, file), 'utf8').includes(NATIVE_TO_HUMAN_ENV));
-  return { version: entry.version, scope: entry.scope, installPath: entry.installPath, lastUpdated: entry.lastUpdated, contractKey, reads };
+  const shape = styleShape(contractKey !== null && /^\d+$/.test(contractKey) ? Number(contractKey) : null); // P2-C2: the shape rule
+  return { version: entry.version, scope: entry.scope, installPath: entry.installPath, lastUpdated: entry.lastUpdated, contractKey, shape, reads };
 }
 
 async function prepare(real: string, cap: number): Promise<{ declares: boolean }> {
@@ -180,7 +189,7 @@ function writeSettings(extra: Record<string, unknown>): void {
   const settings = {
     ...prior,
     model: 'haiku',
-    permissions: { defaultMode: 'default', allow: ['Bash(sleep:*)'] },
+    permissions: { defaultMode: 'default', allow: ['Bash(sleep:*)', 'mcp__maws__ask'] }, // P2-C2: the agent's ask is MAWS's tool, allowed as the sleep is
     env: { KAIROS_DIR: join(root, 'kairos') },
     hooks: { SessionStart: [{ hooks: [{ type: 'command', command: `'${join(root, 'probe.sh')}'` }] }] },
     ...extra,
@@ -213,7 +222,7 @@ function budget(cap: number): number {
   return left;
 }
 
-interface Spawn { at: string; launchId: string; append: string | null; snapshotOff: boolean; env: Record<string, string>; resume: string | null; outputStyle: unknown }
+interface Spawn { at: string; launchId: string; args: string[]; append: string | null; snapshotOff: boolean; env: Record<string, string>; resume: string | null; outputStyle: unknown }
 function spawns(id: string): Spawn[] {
   return journal(id)
     .filter((r) => r.direction === 'meta' && (r.frame as { event?: string }).event === 'spawn')
@@ -221,11 +230,11 @@ function spawns(id: string): Spawn[] {
       const { args, launchId } = r.frame as { args: string[]; launchId: string };
       const after = (flag: string) => (args.includes(flag) ? args[args.indexOf(flag) + 1]! : null);
       const settings = JSON.parse(after('--settings') ?? '{}') as { env?: Record<string, string>; outputStyle?: unknown };
-      return { at: r.at, launchId, append: after('--append-system-prompt'), snapshotOff: after('--system-prompt-snapshot') === 'off', env: settings.env ?? {}, resume: after('--resume'), outputStyle: settings.outputStyle };
+      return { at: r.at, launchId, args, append: after('--append-system-prompt'), snapshotOff: after('--system-prompt-snapshot') === 'off', env: settings.env ?? {}, resume: after('--resume'), outputStyle: settings.outputStyle };
     });
 }
 const spawnWords = (s: Spawn) =>
-  `${s.append === null ? 'no --append-system-prompt' : `--append-system-prompt (${s.append === TO_HUMAN_CONTRACT ? 'contract 1, byte for byte' : s.append.startsWith(HEADER) ? 'contract 1 header' : 'OTHER TEXT'})`}; ${s.snapshotOff ? '--system-prompt-snapshot off' : 'no --system-prompt-snapshot'}; --settings env ${NATIVE_TO_HUMAN_ENV}=${s.env[NATIVE_TO_HUMAN_ENV] ?? '<unset>'}`;
+  `${s.append === null ? 'no --append-system-prompt' : `--append-system-prompt (${s.append === TO_HUMAN_CONTRACT ? `contract ${TO_HUMAN_CONTRACT_VERSION}, byte for byte` : s.append === TO_HUMAN_SUPPLEMENT ? 'supplement 1, byte for byte' : s.append.startsWith(HEADER) ? 'the contract header' : 'OTHER TEXT'})`}; ${s.snapshotOff ? '--system-prompt-snapshot off' : 'no --system-prompt-snapshot'}; --settings env ${NATIVE_TO_HUMAN_ENV}=${s.env[NATIVE_TO_HUMAN_ENV] ?? '<unset>'}`;
 
 interface OwnerRow { launch_id: string | null; desired: string | null; recorded: string | null; appended: number; snapshot_off: number; off_unavailable: number; applied: string | null; style: string | null; observed_style: string | null; style_mismatch: number; override: string; enabled_at: string | null }
 function ownerRow(id: string): OwnerRow | null {
@@ -276,29 +285,64 @@ function lastReply(id: string): string {
     .join('\n')
     .trim();
 }
-function answerWrites(id: string): { uuid: string; text: string; at: string }[] {
+// P2-C2 (Decision Log 33): the tools the engine's `system/init` listed at the launch's start
+async function initTools(id: string, launchId: string): Promise<string[]> {
+  let tools: string[] | null = null;
+  await expect
+    .poll(
+      () => {
+        const rows = journal(id);
+        const from = rows.findIndex((r) => r.direction === 'meta' && (r.frame as { event?: string; launchId?: string }).event === 'spawn' && (r.frame as { launchId?: string }).launchId === launchId);
+        const init = rows.slice(from).find((r) => r.direction === 'in' && (r.frame as Frame).type === 'system' && (r.frame as Frame).subtype === 'init');
+        tools = (init?.frame as { tools?: string[] } | undefined)?.tools ?? null;
+        return tools !== null;
+      },
+      { timeout: 60_000, message: 'the launch’s system/init' },
+    )
+    .toBe(true);
+  return tools!;
+}
+const asksOf = (tools: string[]) => tools.filter((tool) => tool === 'AskUserQuestion' || tool.endsWith('__ask') || tool.endsWith('__AskUserQuestion')); // the asks, not Task
+// P2-C2: the prompts that carried an ask's answer to the engine (the host names the ask in its words)
+function askWrites(id: string, askId: string): { uuid: string; text: string; at: string }[] {
   return journal(id)
-    .filter((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && textOf((r.frame as Frame).message?.content).startsWith('Answering "'))
+    .filter((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && textOf((r.frame as Frame).message?.content).includes(askId))
     .map((r) => ({ uuid: (r.frame as Frame).uuid!, text: textOf((r.frame as Frame).message?.content), at: r.at }));
+}
+// The first question of an ask's sheet answered: its first option, or the text when it has none.
+async function answerSheet(sheet: Locator): Promise<string> {
+  const first = sheet.locator('section[data-question-id]').first();
+  const radios = first.getByRole('radio');
+  if ((await radios.count()) > 0) {
+    await radios.first().click();
+    return (await radios.first().getAttribute('aria-label')) ?? '?';
+  }
+  await first.getByRole('textbox').fill(REPLY);
+  return REPLY;
 }
 const lifecycle = (id: string, uuid: string, state: string) =>
   journal(id).find((r) => r.direction === 'in' && (r.frame as Frame).type === 'command_lifecycle' && (r.frame as Frame).command_uuid === uuid && (r.frame as Frame).state === state)?.at ?? null;
 
-// The engine's transcript: its prompt snapshots (how many of each one's segments are the contract) and compact boundaries.
-function snapshots(engineSessionId: string): { snapshots: number[]; boundaries: number } {
+// The engine's transcript: its prompt snapshots (how many of each one's segments are the contract, and P2-C2, the
+// supplement) and compact boundaries.
+function snapshots(engineSessionId: string): { snapshots: number[]; supplements: number[]; boundaries: number } {
   const dir = join(config, 'projects', realpathSync(repo).replace(/[^a-zA-Z0-9]/g, '-'));
   const file = join(dir, `${engineSessionId}.jsonl`);
-  const out = { snapshots: [] as number[], boundaries: 0 };
+  const out = { snapshots: [] as number[], supplements: [] as number[], boundaries: 0 };
   if (!existsSync(file)) return out;
   for (const l of readFileSync(file, 'utf8').split('\n')) {
     if (!l.includes('prompt_snapshot') && !l.includes('compact_boundary')) continue;
     const record = JSON.parse(l) as { type?: string; subtype?: string; attachment?: { type?: string; systemPrompt?: unknown[] } };
-    if (record.type === 'attachment' && record.attachment?.type === 'prompt_snapshot') out.snapshots.push((record.attachment.systemPrompt ?? []).filter((s) => typeof s === 'string' && (s === HEADER || s.startsWith(`${HEADER}\n`))).length);
+    const count = (header: string) => (record.attachment?.systemPrompt ?? []).filter((s) => typeof s === 'string' && (s === header || s.startsWith(`${header}\n`))).length;
+    if (record.type === 'attachment' && record.attachment?.type === 'prompt_snapshot') {
+      out.snapshots.push(count(HEADER));
+      out.supplements.push(count(SUPPLEMENT));
+    }
     if (record.type === 'system' && record.subtype === 'compact_boundary') out.boundaries += 1;
   }
   return out;
 }
-const snapshotWords = (s: ReturnType<typeof snapshots>) => `${s.snapshots.length} prompt snapshot(s) [${s.snapshots.map((c) => (c === 0 ? 'none' : `contract:1${c > 1 ? ` x${c}` : ''}`)).join(', ')}], ${s.boundaries} compact boundaries`;
+const snapshotWords = (s: ReturnType<typeof snapshots>) => `${s.snapshots.length} prompt snapshot(s) [${s.snapshots.map((c) => (c === 0 ? 'none' : `contract:${TO_HUMAN_CONTRACT_VERSION}${c > 1 ? ` x${c}` : ''}`)).join(', ')}], ${s.boundaries} compact boundaries`;
 
 // ---- the page ----------------------------------------------------------------------------------------------------------
 
@@ -316,6 +360,11 @@ async function settle(page: Page, id: string, before: number, timeout = 300_000)
     const s = await status(page, id);
     return s.turn === null && s.pendingRequests === 0;
   }, { timeout, intervals: [500] }).toBe(true);
+}
+// P2-C2 (review): the turn's end alone, for a turn that leaves an async ask waiting (the host counts it pending)
+async function settleTurn(page: Page, id: string, before: number, timeout = 300_000): Promise<void> {
+  await expect.poll(() => promptsEnded(writtenPrompts(journal(id)), before), { timeout, intervals: [500] }).toBe(true);
+  await expect.poll(async () => (await status(page, id)).turn, { timeout, intervals: [500] }).toBeNull();
 }
 async function closeWidgets(page: Page): Promise<void> {
   if (await page.getByRole('dialog', { name: 'Model and effort' }).isVisible()) await page.keyboard.press('Escape');
@@ -413,7 +462,6 @@ async function instrument(app: ElectronApplication, page: Page): Promise<void> {
 const notified = async (page: Page, id: string) =>
   (await page.evaluate(() => (window as unknown as { __p2cNotified: { appSessionId: string; attentionId: string; delivery: string; at: string }[] }).__p2cNotified)).filter((n) => n.appSessionId === id);
 const items = async (page: Page, id: string) => value(await invoke(page, 'attention.list', undefined)).filter((i) => i.appSessionId === id && (i.kind === 'async_input' || i.kind === 'essential_unread') && i.state === 'pending');
-const focusedWindow = (app: ElectronApplication) => app.evaluate(({ BrowserWindow }) => BrowserWindow.getFocusedWindow()?.id ?? null);
 
 // ---- the run -------------------------------------------------------------------------------------------------------------
 
@@ -430,7 +478,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
   line(a15Line('before the run', owner.a15, owner.a15, [root]));
   log(`owner files before: ~/.claude/settings.json sha256 ${owner.settings}; the doperpowers cache tree ${owner.cache.files} files, listing sha256 ${owner.cache.digest}`);
   observe('before', { engine, declares, plugin, owner });
-  expect(plugin.contractKey, 'the owner’s style declares contract 1').toBe('1');
+  expect(plugin.shape, 'the owner’s style declares a message-tool contract (P2-C2)').toBe('message-tool');
   expect(plugin.reads, 'the owner’s mod and stream hook read the variable').toHaveLength(2);
 
   const failures: string[] = [];
@@ -475,97 +523,79 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
     const projects = value(await invoke(page, 'session.projects.list', undefined)).projects;
     if (!projects.some((p) => p.directory === repo)) value(await invoke(page, 'session.projects.add', { directory: repo }));
 
-    await step('g1-new', 'G1: a new session in the clean home carries the contract, the variable, and records maws-contract', async () => {
+    await step('g1-new', 'G1: a new session in the clean home carries contract 5, the variable, and records maws-contract', async () => {
       s1 = await newSession(page);
       const left = budget(cap);
       await send(page, PROMPTS.marks);
-      await maws!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((w) => w.blur()));
+      await maws!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((w) => w.blur())); // G6: notified unfocused
       await expect.poll(() => spawns(s1).length, { timeout: 60_000 }).toBe(1);
       const spawn = spawns(s1)[0]!;
       const row = await decision(s1, spawn.launchId);
       await expect.poll(async () => (s1Engine = (await status(page, s1)).engineSessionId ?? ''), { timeout: 60_000 }).not.toBe('');
       const probe = await probed(s1Engine, spawn.at);
       const s = await status(page, s1);
+      const initAskTools = asksOf(await initTools(s1, spawn.launchId));
+      log(`system/init asks: ${JSON.stringify(initAskTools)}; --disallowedTools ${JSON.stringify(spawn.args.flatMap((a, k) => (a === '--disallowedTools' ? [spawn.args[k + 1]] : [])))}`);
       log(`session ${s1} (engine ${s1Engine}): model ${s.model.resolved}, gateway ${s.gateway.verified}, budget US$${left.toFixed(4)}; spawn ${spawnWords(spawn)}; ${decisionWords(row)}; appended ${row.appended}, snapshot_off ${row.snapshot_off}, style ${row.style}, enabled_at ${row.enabled_at}; probe ${NATIVE_TO_HUMAN_ENV}=${probe}`);
-      observe('g1New', { s1, s1Engine, spawn: { ...spawn, append: spawn.append?.slice(0, 80) }, row, probe, model: s.model, gateway: s.gateway });
+      observe('g1New', { s1, s1Engine, spawn: { ...spawn, args: undefined, append: spawn.append?.slice(0, 80) }, row, probe, model: s.model, gateway: s.gateway });
+      expect(spawn.args.filter((arg) => arg === '--append-system-prompt'), 'one --append-system-prompt').toHaveLength(1);
       expect(spawn.append, 'the contract, byte for byte').toBe(TO_HUMAN_CONTRACT);
       expect(spawn.snapshotOff).toBe(false);
-      expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBe('1');
-      expect(probe).toBe('1');
+      expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBe(ADVERTISED);
+      expect(probe).toBe(ADVERTISED);
       expect([row.desired, row.recorded, row.applied]).toEqual(['maws-contract', 'unrecorded', 'maws-contract']);
       expect(s.gateway.verified).toBe('routed');
-      line(`G1 new: spawn has --append-system-prompt (contract 1 header; the contract byte for byte); no --system-prompt-snapshot; ${NATIVE_TO_HUMAN_ENV}=1 in --settings env and logged by the SessionStart probe; ${decisionWords(row)}`);
+      expect(initAskTools, 'Decision Log 33: mcp__maws__ask the one ask').toEqual(['mcp__maws__ask']);
+      line(`G1 new: system/init's asks ${JSON.stringify(initAskTools)} (AskUserQuestion withdrawn by --disallowedTools);`);
+      line(`G1 new: spawn has --append-system-prompt once (contract ${TO_HUMAN_CONTRACT_VERSION}, byte for byte); no --system-prompt-snapshot; ${NATIVE_TO_HUMAN_ENV}=${ADVERTISED} in --settings env and logged by the SessionStart probe; ${decisionWords(row)}`);
     });
 
-    await step('g6-notify', 'G6: with the window unfocused, one notification per item: the question and the must-read', async () => {
-      const question = pane(page).locator('[data-owner-card="need-input"]');
-      await expect(question).toBeVisible({ timeout: 240_000 });
-      await expect.poll(async () => (await items(page, s1)).length, { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
-      const focused = await focusedWindow(maws!.app);
-      await expect.poll(async () => (await notified(page, s1)).length, { timeout: 30_000 }).toBeGreaterThanOrEqual(2);
-      await page.waitForTimeout(2_000);
-      const notes = await notified(page, s1);
-      const list = await items(page, s1);
-      const kinds = notes.map((note) => list.find((i) => i.id === note.attentionId)?.kind ?? '?');
-      log(`window focused at the items: ${focused === null ? 'none' : `window ${focused}`}; items ${JSON.stringify(list.map((i) => [i.kind, i.summary]))}; attention.notified ${JSON.stringify(notes.map((x, k) => [kinds[k], x.delivery]))}`);
-      observe('g6Notify', { focused, items: list.map((i) => ({ kind: i.kind, summary: i.summary, anchor: i.anchor })), notified: notes });
-      await shot('01-marks');
-      expect(kinds.sort()).toEqual(['async_input', 'essential_unread']);
-      line(`G6 notify: attention.notified x${notes.length} (${[...new Set(notes.map((x) => x.delivery))].join('|')}) for ${kinds.join(' and ')}, the window unfocused; none for to-human or insight`);
-    });
-
-    await step('g6-leave', 'G6: leaving the tab, the sidebar row shows the question glyph and Needs you lists the items', async () => {
-      const turnBefore = (await status(page, s1)).turn;
-      await newChatIn(page, REPO_NAME); // another tab in front
-      await expect(page.getByRole('heading', { name: `New chat in ${REPO_NAME}` })).toBeVisible();
-      await expect((await sidebarRow(page, { appSessionId: s1 })).getByRole('img', { name: 'Question waiting' })).toBeVisible();
-      await page.mouse.move(700, 450);
-      const needs = page.getByRole('list', { name: 'Needs you' }).locator(`[data-needs-you="${s1}"]`);
-      await expect(needs).toBeVisible();
-      const row = (await needs.innerText()).replaceAll('\n', ' · ');
-      const summaries = (await items(page, s1)).map((i) => i.summary);
-      log(`turn running when leaving: ${turnBefore !== null}; Needs you row: ${row}; items: ${JSON.stringify(summaries)}`);
-      await shot('02-leave-tab');
-      expect(summaries.some((x) => x.startsWith('Question — '))).toBe(true);
-      expect(summaries.some((x) => x.startsWith('Must read — '))).toBe(true);
-      line(`G6 leave tab: sidebar '?' (Question waiting) and Needs you "${row.slice(0, 120)}"; items ${summaries.map((x) => `"${x.slice(0, 70)}"`).join(', ')}`);
-    });
-
-    await step('g4-choice', 'G4: the recommended choice clicked while the agent runs reads Queued, then Answered when the engine starts it', async () => {
-      await page.getByRole('list', { name: 'Needs you' }).locator(`[data-needs-you="${s1}"]`).click();
-      await page.mouse.move(700, 450);
-      await expect(pane(page).locator(`[data-composer="${s1}"]`)).toBeVisible();
-      await expect(pane(page).getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
+    // P2-C2: under contract 5 a question is MAWS's ask, not a mark. Answered from its sheet while the sleep runs, the
+    // answer goes to the engine as a steer and is delivered when the engine starts it; the composer's draft is untouched.
+    await step('g4-ask', 'G4 and G6: the agent’s non-blocking mcp__maws__ask waits as a notified async_input item, answered from its sheet while the agent runs; delivered when the engine starts it, the item retired', async () => {
+      const capsule = pane(page).locator('section.transcript-ask').first();
+      await expect(capsule).toHaveAttribute('data-ask-state', 'asked', { timeout: 240_000 });
+      const askId = (await capsule.getAttribute('data-ask-id')) ?? '';
+      const asks = mcpCalls(journal(s1)).filter((call) => call.name === 'ask');
+      // P2-C2 (Decision Log 32): the waiting question is an async_input item anchored to the ask's request, notified
+      // with the window unfocused, as a need-input mark's was
+      const askItem = async () => (await items(page, s1)).filter((i) => i.kind === 'async_input' && i.request.requestId === (asks[0]?.requestId ?? ''));
+      await expect.poll(async () => (await askItem()).length, { timeout: 30_000, message: 'the ask’s async_input item' }).toBe(1);
+      const [item] = await askItem();
+      await expect.poll(async () => (await notified(page, s1)).filter((n) => n.attentionId === item!.id).length, { timeout: 30_000, message: 'the item notified' }).toBe(1);
+      const note = (await notified(page, s1)).find((n) => n.attentionId === item!.id)!;
+      const sheet = page.locator(`[data-ask-sheet][data-ask-id="${askId}"]`);
+      await expect(sheet).toBeVisible({ timeout: 30_000 });
       await composer(page).click();
       await page.keyboard.insertText(DRAFT);
-      const question = pane(page).locator('[data-owner-card="need-input"]').first();
-      const choice = question.getByRole('group', { name: 'Choices' }).locator('button[data-recommended]');
-      const choiceText = (await choice.locator('.owner-question-choice-text').innerText()).trim();
+      const answer = await answerSheet(sheet);
+      await shot('01-ask');
       const running = (await status(page, s1)).turn !== null;
-      await choice.click();
-      const clickedAt = new Date().toISOString();
-      await expect(question).toContainText('Queued — sends when the agent reaches a pause', { timeout: 20_000 });
-      await expect(question.getByRole('button', { name: 'Cancel' })).toBeVisible();
-      const queuedSeenAt = new Date().toISOString();
-      const writtenWhileQueued = answerWrites(s1).length;
-      await shot('03-queued');
-      await expect(question.locator('[data-answered]')).toHaveText(`Answered: ${choiceText}`, { timeout: 240_000 });
-      const answeredSeenAt = new Date().toISOString();
-      const write = answerWrites(s1)[0];
-      if (!write) throw new Error('no Answering prompt in the journal');
-      const started = lifecycle(s1, write.uuid, 'started');
-      log(`turn running at the click: ${running}; clicked ${clickedAt}; Queued seen ${queuedSeenAt} (answer prompts written by then: ${writtenWhileQueued}); written ${write.at} as ${write.uuid}; the engine's started ${started}; Answered seen ${answeredSeenAt}; prompt ${JSON.stringify(write.text.slice(0, 160))}`);
-      observe('g4Choice', { running, clickedAt, queuedSeenAt, writtenWhileQueued, write, started, answeredSeenAt, choiceText });
-      await shot('04-answered');
-      expect(running, 'the click landed while the turn ran').toBe(true);
-      expect(started, 'the engine started the answer').not.toBeNull();
-      expect(answeredSeenAt >= started!).toBe(true);
+      await sheet.getByRole('button', { name: /^Submit/ }).click();
+      const submittedAt = new Date().toISOString();
+      await expect(capsule).toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 });
+      await expect.poll(async () => (await askItem()).length, { timeout: 30_000, message: 'the item retired at the answer' }).toBe(0);
+      let write: { uuid: string; text: string; at: string } | undefined;
+      await expect.poll(() => (write = askWrites(s1, askId)[0]) !== undefined, { timeout: 60_000, message: 'the answer written to the engine' }).toBe(true);
+      let started: string | null = null;
+      await expect.poll(() => (started = lifecycle(s1, write!.uuid, 'started')), { timeout: 240_000, message: 'the engine started the answer' }).not.toBeNull();
       await expect(composer(page)).toHaveText(DRAFT);
-      line(`G4 choice mid-turn: Queued → Answered (command_lifecycle started ${write.uuid} at ${started}; written at ${write.at}, Answered seen at ${answeredSeenAt}); composer draft unchanged`);
+      log(`ask ${askId} ${JSON.stringify(asks.map((a) => a.args))}; turn running at Submit: ${running}; answered "${answer}" at ${submittedAt}; written ${write!.at} as ${write!.uuid}; the engine's started ${started}; prompt ${JSON.stringify(write!.text.slice(0, 200))}`);
+      log(`the item ${item!.id} "${item!.summary}" (request ${item!.request.requestId}), notified ${note.delivery} at ${note.at}; retired after Submit`);
+      observe('g4Ask', { askId, asks, item, note, running, answer, submittedAt, write, started });
+      await shot('02-answered');
+      expect(asks.map((a) => a.args.blocking), 'one ask through mcp__maws__ask, not blocking').toEqual([false]);
+      expect(running, 'Submit landed while the turn ran').toBe(true);
+      expect(askWrites(s1, askId), 'the answer written once').toHaveLength(1);
+      line(`G6 ask: an async_input item "${item!.summary.slice(0, 60)}" anchored to the ask's request, attention.notified (${note.delivery}) with the window unfocused, retired at the answer`);
+      line(`G4 ask mid-turn: mcp__maws__ask blocking false; the sheet answered "${answer}" while the sleep ran; written once as ${write!.uuid}, the engine's started at ${started}; composer draft unchanged`);
+      await composer(page).click();
+      await page.keyboard.press('Meta+A');
+      await page.keyboard.press('Backspace');
     });
 
-    await step('g3-report', 'G3: the marked turn reads as cards over one Working record; opened, the divider; expanded, the tool rows; folded again', async () => {
-      await settle(page, s1, 0); // every prompt of the session: the marks prompt and the answer, both written by now (g4-choice)
+    await step('g3-report', 'G3: the turn reads as message cards over one Working record; opened, the divider; expanded, the tool rows; folded again', async () => {
+      await settle(page, s1, 0); // every prompt of the session: the marks prompt and the answer, both written by now (g4-ask)
       const p = pane(page);
       const counts = {
         message: await p.locator('[data-owner-card="to-human"]').count(),
@@ -574,7 +604,6 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
         question: await p.locator('[data-owner-card="need-input"]').count(),
         records: await p.locator('.owner-record').count(),
       };
-      const placement = await p.locator('.owner-insights').first().getAttribute('data-placement').catch(() => null);
       // the sleep's tool row (a cell, or a group holding it), never the prompt that names the command
       const toolRow = p.locator('.transcript-row[data-kind="cell"], .transcript-row[data-kind="group"]').filter({ hasText: 'sleep 40' });
       const record = p.locator('.owner-record button').first();
@@ -589,39 +618,17 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await divider.click();
       await expect(toolRow.first(), 'level 2: the tool row shown').toBeVisible();
       const toolText = (await toolRow.first().innerText()).replaceAll('\n', ' ');
-      await shot('05-record-open');
+      await shot('03-record-open');
       await record.click();
       await expect(record).toContainText('Working record');
       await expect(toolRow, 'folded: the tool row gone again').toHaveCount(0);
-      log(`cards ${JSON.stringify(counts)}; insight placement ${placement}; record closed "${closed}"; divider "${dividerText}"; the tool row: absent at levels 0 and 1, "${toolText.slice(0, 120)}" at level 2, absent after the fold`);
-      observe('g3Report', { counts, placement, closed, dividerText, toolText });
+      log(`cards ${JSON.stringify(counts)}; record closed "${closed}"; divider "${dividerText}"; the tool row: absent at levels 0 and 1, "${toolText.slice(0, 120)}" at level 2, absent after the fold`);
+      observe('g3Report', { counts, closed, dividerText, toolText });
       expect(counts.message).toBeGreaterThanOrEqual(1);
-      expect(counts.mustRead).toBeGreaterThanOrEqual(1);
-      expect(counts.insight).toBeGreaterThanOrEqual(1);
-      expect(counts.question).toBeGreaterThanOrEqual(1);
-      line(`G3 report: ${counts.message} message, ${counts.mustRead} must-read, ${counts.insight} insight (${placement}), ${counts.question} question card(s) over "${closed}"; the sleep's tool row absent; opened: "${dividerText}", the row still absent; expanded: the row "${toolText.slice(0, 40)}"; "Fold to report": absent again`);
+      line(`G3 report: ${counts.message} message card(s) over "${closed}" (contract 5 asks for no other mark: ${counts.mustRead} must-read, ${counts.insight} insight, ${counts.question} question card(s)); the sleep's tool row absent; opened: "${dividerText}", the row still absent; expanded: the row "${toolText.slice(0, 40)}"; "Fold to report": absent again`);
     });
 
-    await step('g4-reply', 'G4: Reply sends free text from the card; the composer’s draft is untouched and focused', async () => {
-      const question = pane(page).locator('[data-owner-card="need-input"]').first();
-      const prompts = written(s1);
-      await question.getByRole('button', { name: 'Reply' }).click();
-      await question.getByRole('textbox', { name: 'Your answer' }).fill(REPLY);
-      await page.keyboard.press('Enter');
-      await expect(question.locator('[data-answered]')).toHaveText(`Answered: ${REPLY}`, { timeout: 180_000 });
-      await expect(composer(page)).toHaveText(DRAFT);
-      await expect(composer(page)).toBeFocused();
-      const write = answerWrites(s1).at(-1)!;
-      await settle(page, s1, prompts);
-      log(`reply written ${write.at} as ${write.uuid}, started ${lifecycle(s1, write.uuid, 'started')}; prompt ${JSON.stringify(write.text)}`);
-      await shot('06-reply');
-      line(`G4 Reply: Answered: ${REPLY} (started ${write.uuid}); composer draft unchanged and focused`);
-      await composer(page).click();
-      await page.keyboard.press('Meta+A');
-      await page.keyboard.press('Backspace');
-    });
-
-    await step('restart', 'restart: the states and items restored silently; the must-read unread until Mark read', async () => {
+    await step('restart', 'restart: the cards and the answered ask restored silently; nothing notified', async () => {
       restoredBefore = (await items(page, s1)).map((i) => i.id).sort();
       await stop(page, s1);
       consoleErrors.push(...maws!.consoleErrors());
@@ -632,28 +639,22 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900));
       await instrument(maws.app, page);
       await open(page, s1);
-      const question = pane(page).locator('[data-owner-card="need-input"]').first();
-      await expect(question.locator('[data-answered]')).toHaveText(`Answered: ${REPLY}`, { timeout: 30_000 });
-      const unread = pane(page).locator('[data-owner-card="essential"][data-state="unread"]');
-      await expect(unread.first()).toBeVisible();
+      await expect(pane(page).locator('[data-owner-card="to-human"]').first()).toBeVisible({ timeout: 30_000 });
+      await expect(pane(page).locator('section.transcript-ask').first()).toHaveAttribute('data-ask-state', 'answered', { timeout: 30_000 });
       await page.waitForTimeout(3_000);
       const after = (await items(page, s1)).map((i) => i.id).sort();
       const notes = await notified(page, s1);
       const attempts = await mainNotifications(maws.app);
-      await shot('07-restart');
-      log(`items before ${JSON.stringify(restoredBefore)}; after ${JSON.stringify(after)}; attention.notified since the page loaded: ${notes.length}; notifications main attempted since it started: ${JSON.stringify(attempts)}; unread must-reads ${await unread.count()}`);
+      await shot('04-restart');
+      log(`items before ${JSON.stringify(restoredBefore)}; after ${JSON.stringify(after)}; attention.notified since the page loaded: ${notes.length}; notifications main attempted since it started: ${JSON.stringify(attempts)}`);
       expect(after).toEqual(restoredBefore);
       expect(attempts, 'the hook loaded first in main').not.toBeNull();
       expect(attempts, 'main attempted no notification from its start').toEqual([]);
       expect(notes).toEqual([]);
-      const before = await unread.count();
-      while ((await unread.count()) > 0) await unread.first().getByRole('button', { name: 'Mark read' }).click();
-      await expect(pane(page).locator('[data-owner-card="essential"][data-state="read"]').first()).toContainText('Read');
-      await expect.poll(async () => (await items(page, s1)).filter((i) => i.kind === 'essential_unread').length).toBe(0);
-      line(`restart: ${after.length} item(s) restored, ${notes.length} notified (main attempted ${attempts!.length} from its start); the question reads "Answered: ${REPLY}"; ${before} must-read(s) unread until Mark read, then Read`);
+      line(`restart: the message card and the answered ask restored; ${after.length} item(s) as before, ${notes.length} notified (main attempted ${attempts!.length} from its start)`);
     });
 
-    await step('resume', 'resume: the contract passed again and the recorded snapshot reused; the agent names the marks', async () => {
+    await step('resume', 'resume: the contract passed again and the recorded snapshot reused; the agent names its one mark', async () => {
       const left = budget(cap);
       const before = snapshots(s1Engine);
       await resume(page, s1);
@@ -666,19 +667,20 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const probe = await probed(s1Engine, spawn.at);
       const reply = lastReply(s1);
       const snap = snapshots(s1Engine);
-      const named = ['to-human', 'essential', 'need-input', 'insight'].filter((tag) => reply.includes(tag));
+      const named = ['message', 'to-human', 'essential', 'need-input', 'insight'].filter((tag) => reply.includes(tag));
       log(`budget US$${left.toFixed(4)}; spawn ${spawnWords(spawn)}; resume ${spawn.resume}; ${decisionWords(row)}; probe ${probe}; before the resume ${snapshotWords(before)}, after its turn ${snapshotWords(snap)}; reply ${JSON.stringify(reply.slice(0, 400))}`);
-      observe('resume', { spawn: { ...spawn, append: spawn.append?.slice(0, 80) }, row, probe, before, snap, reply });
+      observe('resume', { spawn: { ...spawn, args: undefined, append: spawn.append?.slice(0, 80) }, row, probe, before, snap, reply });
       expect(spawn.resume).toBe(s1Engine);
       expect(spawn.append).toBe(TO_HUMAN_CONTRACT);
       expect(spawn.snapshotOff).toBe(false);
-      expect([row.desired, row.recorded, row.applied]).toEqual(['maws-contract', 'contract:1', 'maws-contract']);
+      expect([row.desired, row.recorded, row.applied]).toEqual(['maws-contract', `contract:${TO_HUMAN_CONTRACT_VERSION}`, 'maws-contract']);
       // the first launch may record more than one snapshot (2.1.296 wrote a fuller record mid-turn, its systemPrompt the
       // same); the resume reuses them and records none, and no snapshot carries the contract twice
       expect(snap).toEqual(before);
       expect(snap.snapshots.length).toBeGreaterThan(0);
       expect(snap.snapshots.every((c) => c === 1)).toBe(true);
-      expect(named).toEqual(['to-human', 'essential', 'need-input', 'insight']);
+      expect(named, 'the agent names <message>').toContain('message');
+      expect(named.filter((tag) => ['essential', 'need-input', 'insight'].includes(tag)), 'and none of the retired marks').toEqual([]);
       line(`resume: spawn has --append-system-prompt, no --system-prompt-snapshot; ${decisionWords(row)}; no second append in the snapshot (the resume recorded none: ${snapshotWords(snap)} before and after); agent names ${named.join(', ')}`);
     });
 
@@ -686,7 +688,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const row = await setOverride(page, 'Off');
       await expect(row.locator('[data-mod-pending]')).toHaveText('Applies the next time this session starts');
       const pendingWords = await row.locator('[data-mod-pending]').innerText();
-      await shot('08-off-pending');
+      await shot('05-off-pending');
       await closeWidgets(page);
       await stop(page, s1);
       const left = budget(cap);
@@ -706,12 +708,12 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const reply = lastReply(s1);
       log(`row: "${pendingWords}", then "${sourceWords}"; budget US$${left.toFixed(4)}; spawn ${spawnWords(spawn)}; ${decisionWords(decided)}, snapshot_off ${decided.snapshot_off}, override ${decided.override}; probe ${probe}; reply ${JSON.stringify(reply.slice(0, 400))}`);
       observe('off', { spawn: { ...spawn, append: spawn.append?.slice(0, 80) }, decided, probe, reply, pendingWords, sourceWords });
-      await shot('09-off');
+      await shot('06-off');
       expect(spawn.snapshotOff).toBe(true);
       expect(spawn.append).toBeNull();
       expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBeUndefined();
       expect(probe).toBe('<unset>');
-      expect([decided.desired, decided.recorded, decided.applied]).toEqual(['off', 'contract:1', 'off']);
+      expect([decided.desired, decided.recorded, decided.applied]).toEqual(['off', `contract:${TO_HUMAN_CONTRACT_VERSION}`, 'off']);
       // the answer is its first word; the model may go on to disown what it said under the contract (one run did,
       // naming the tags it no longer has)
       expect(reply).toMatch(/^\W*NO\b/);
@@ -719,7 +721,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await stop(page, s1);
     });
 
-    await step('style', 'style arm: the owner’s doperpowers installed in the scratch home with its to-human style selected; no contract appended; the variable set; the mod’s band stays away', async () => {
+    await step('style', 'style arm: the owner’s doperpowers installed in the scratch home with its to-human style selected; the supplement appended, never the contract; the variable set; a message card; the mod’s band stays away', async () => {
       cpSync(plugin.installPath, market, { recursive: true, filter: (src) => !src.split('/').includes('.in_use') });
       const added = cli(['marketplace', 'add', market]);
       const installed = cli(['install', OWNER_PLUGIN, '--scope', 'user']);
@@ -740,55 +742,72 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const row = await decision(s2, spawn.launchId);
       await expect.poll(async () => (s2Engine = (await status(page, s2)).engineSessionId ?? ''), { timeout: 60_000 }).not.toBe('');
       const probe = await probed(s2Engine, spawn.at);
-      await settle(page, s2, prompts);
+      await settleTurn(page, s2, prompts); // the agent's async ask waits on the sheet until style-answer: counted in pendingRequests
       const observed = await observedStyle(s2);
       const s = await status(page, s2);
-      const cards = await pane(page).locator('[data-owner-card]').count();
+      const cards = await pane(page).locator('[data-owner-card="to-human"]').count(); // a <message> reads as the message card
+      const snap = snapshots(s2Engine);
+      const asks = mcpCalls(journal(s2)).filter((call) => call.name === 'ask');
+      const tools = await initTools(s2, spawn.launchId);
+      const initAskTools = asksOf(tools);
+      const nativeAsks = tools.filter((tool) => tool === 'AskUserQuestion' || tool === 'mcp__doperpowers__AskUserQuestion');
       const band = pane(page).locator('[data-plugin-band]');
       const bandText = (await band.count()) > 0 ? (await band.first().innerText()).replaceAll('\n', ' ') : '(no band)';
       const reply = lastReply(s2);
-      log(`session ${s2} (engine ${s2Engine}): budget US$${left.toFixed(4)}; plugins ${JSON.stringify(s.plugins.map((p) => p.source ?? p.name))}; spawn ${spawnWords(spawn)}; ${decisionWords(row)}, style ${row.style}, observed ${observed.observed_style}, mismatch ${observed.style_mismatch}; probe ${probe}; MAWS cards ${cards}; the band: ${bandText}; reply ${JSON.stringify(reply.slice(0, 300))}`);
-      observe('style', { s2, s2Engine, spawn, row, observed, probe, cards, bandText, reply, plugins: s.plugins });
-      await shot('10-style');
-      expect(spawn.append).toBeNull();
+      log(`session ${s2} (engine ${s2Engine}): budget US$${left.toFixed(4)}; plugins ${JSON.stringify(s.plugins.map((p) => p.source ?? p.name))}; spawn ${spawnWords(spawn)}; ${decisionWords(row)}, style ${row.style}, observed ${observed.observed_style}, mismatch ${observed.style_mismatch}; probe ${probe}; snapshots: contract ${JSON.stringify(snap.snapshots)}, supplement ${JSON.stringify(snap.supplements)}; message cards ${cards}; asks ${JSON.stringify(asks.map((a) => a.args))}; the band: ${bandText}; reply ${JSON.stringify(reply.slice(0, 300))}`);
+      observe('style', { s2, s2Engine, spawn: { ...spawn, args: undefined, append: spawn.append?.slice(0, 80) }, row, observed, probe, snap, cards, asks, bandText, reply, plugins: s.plugins });
+      await shot('07-style');
+      expect(spawn.args.filter((arg) => arg === '--append-system-prompt'), 'one --append-system-prompt').toHaveLength(1);
+      expect(spawn.append, 'the supplement, byte for byte').toBe(TO_HUMAN_SUPPLEMENT);
+      expect(spawn.args.some((arg) => arg.includes(HEADER) || arg.includes(OLD_HEADER)), 'no contract in the arguments').toBe(false);
       expect(spawn.snapshotOff).toBe(false);
-      expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBe('1');
-      expect(probe).toBe('1');
-      expect([row.desired, row.recorded, row.applied, row.style]).toEqual(['external-compatible-style', 'unrecorded', 'external-compatible-style', STYLE]);
+      expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBe(ADVERTISED);
+      expect(probe).toBe(ADVERTISED);
+      expect([row.desired, row.recorded, row.applied, row.style]).toEqual(['external-style-plus-supplement', 'unrecorded', 'external-style-plus-supplement', STYLE]);
       expect(observed.style_mismatch).toBe(0);
+      expect(snap.snapshots.length).toBeGreaterThan(0);
+      expect({ contract: snap.snapshots, supplement: snap.supplements }, 'each snapshot carries the supplement once and no contract').toEqual({ contract: snap.snapshots.map(() => 0), supplement: snap.snapshots.map(() => 1) });
       expect(cards).toBeGreaterThanOrEqual(1);
+      expect(asks.length, 'the agent asked through mcp__maws__ask').toBeGreaterThanOrEqual(1);
+      expect(asks.every((a) => a.args.blocking === false), 'without blocking').toBe(true);
+      expect(initAskTools, 'Decision Log 33: mcp__maws__ask the one ask (no plugin ask in -p either)').toEqual(['mcp__maws__ask']);
+      expect(nativeAsks, 'neither the native ask nor the plugin’s ask is the model’s').toEqual([]);
+      expect(tools).toContain('mcp__maws__ask');
       expect(bandText).not.toContain('to-human view');
-      line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE}; no --append-system-prompt; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${NATIVE_TO_HUMAN_ENV}=1 logged; ${cards} MAWS card(s); the mod's band absent (deferred)`);
+      line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE} (declares ${plugin.contractKey}: ${plugin.shape}); --append-system-prompt once, the supplement byte for byte, no contract; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${snap.supplements.length} snapshot(s), each with the supplement once; ${NATIVE_TO_HUMAN_ENV}=${ADVERTISED} logged; ${cards} message card(s); ${asks.length} mcp__maws__ask call(s), blocking false; system/init's asks ${JSON.stringify(initAskTools)}, neither AskUserQuestion nor mcp__doperpowers__AskUserQuestion among ${tools.length} tools; the mod's band absent (deferred)`);
     });
 
-    // With the real mod active its press and prompt.submit hooks sit in the answer's way: the choice must still go out
-    // through the seam and turn Answered at the engine's started. (Reply, attention and restart ran in the clean home.)
-    await step('style-answer', 'style arm: a choice answered and a must-read marked read with the doperpowers mod active', async () => {
-      const question = pane(page).locator('[data-owner-card="need-input"]').first();
-      await expect(question).toBeVisible();
-      const choice = question.getByRole('group', { name: 'Choices' }).locator('button[data-recommended]');
-      const choiceText = (await choice.locator('.owner-question-choice-text').innerText()).trim();
-      const before = answerWrites(s2).length;
+    // P2-C2: the owner's style asks through a tool, so the question is MAWS's ask, answered from its sheet while the
+    // doperpowers mod is active; its answer reaches the agent as the user message naming the ask. (The four marks' cards,
+    // Reply, attention and restart ran in the clean home.)
+    await step('style-answer', 'style arm: the agent’s non-blocking mcp__maws__ask answered from its sheet with the doperpowers mod active; the agent replies', async () => {
+      // every ask the turn left waiting, answered through its own sheet (a model may ask twice)
+      const capsules = pane(page).locator('section.transcript-ask[data-ask-state="asked"]');
+      await expect(capsules.first()).toBeVisible({ timeout: 30_000 });
+      const waiting = await capsules.count();
       const prompts = written(s2);
-      await choice.click();
-      await expect(question.locator('[data-answered]')).toHaveText(`Answered: ${choiceText}`, { timeout: 180_000 });
-      const answeredSeenAt = new Date().toISOString();
-      const write = answerWrites(s2)[before];
-      if (!write) throw new Error('no Answering prompt in the journal');
-      const started = lifecycle(s2, write.uuid, 'started');
+      const askIds: string[] = [];
+      const answers: string[] = [];
+      // the sheet shows one ask at a time (the latest first, then the next): answer whichever it shows
+      for (let k = 0; k < waiting; k += 1) {
+        const sheet = page.locator('[data-ask-sheet][data-ask-id]').first();
+        await expect(sheet).toBeVisible({ timeout: 30_000 });
+        const askId = (await sheet.getAttribute('data-ask-id')) ?? '';
+        askIds.push(askId);
+        answers.push(await answerSheet(sheet));
+        await shot('08-style-ask');
+        await sheet.getByRole('button', { name: /^Submit/ }).click();
+        await expect(pane(page).locator(`section.transcript-ask[data-ask-id="${askId}"]`)).toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 });
+      }
       await settle(page, s2, prompts);
-      const unread = pane(page).locator('[data-owner-card="essential"][data-state="unread"]');
-      const mustReads = await unread.count();
-      expect(mustReads, 'a must-read to mark').toBeGreaterThanOrEqual(1);
-      while ((await unread.count()) > 0) await unread.first().getByRole('button', { name: 'Mark read' }).click();
-      await expect(pane(page).locator('[data-owner-card="essential"][data-state="read"]').first()).toContainText('Read');
-      await expect.poll(async () => (await items(page, s2)).length).toBe(0);
-      log(`written ${write.at} as ${write.uuid}; the engine's started ${started}; Answered seen ${answeredSeenAt}; prompt ${JSON.stringify(write.text.slice(0, 160))}; ${mustReads} must-read(s) marked read`);
-      observe('styleAnswer', { write, started, answeredSeenAt, choiceText, mustReads });
-      await shot('11-style-answer');
-      expect(started, 'the engine started the answer').not.toBeNull();
-      expect(answeredSeenAt >= started!).toBe(true);
-      line(`style answer: with the mod active, the recommended choice Answered at the engine's started (${write.uuid} at ${started}; Answered seen at ${answeredSeenAt}); ${mustReads} must-read(s) Mark read → Read; no item left`);
+      const delivered = askIds.map((askId) => askWrites(s2, askId));
+      const reply = lastReply(s2);
+      log(`asks ${JSON.stringify(askIds)}; answered ${JSON.stringify(answers)}; written ${JSON.stringify(delivered.map((d) => d.length))} time(s): ${JSON.stringify(delivered.flat().map((d) => d.text.slice(0, 200)))}; reply ${JSON.stringify(reply.slice(0, 300))}`);
+      observe('styleAnswer', { askIds, answers, delivered, reply });
+      await shot('09-style-answer');
+      expect(delivered.map((d) => d.length), 'each answer reached the engine once, as a user message naming its ask').toEqual(askIds.map(() => 1));
+      expect(reply.length).toBeGreaterThan(0);
+      line(`style answer: with the mod active, ${askIds.length} mcp__maws__ask sheet(s) answered ${JSON.stringify(answers)}; each capsule Answered; each answer written once naming its ask; the agent replied`);
     });
 
     await step('style-off', 'style arm, lane off: the variable unset; the mod draws its own to-human band', async () => {
@@ -809,11 +828,13 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const bandText = (await band.innerText()).replaceAll('\n', ' ');
       log(`budget US$${left.toFixed(4)}; spawn ${spawnWords(spawn)}; ${decisionWords(row)}; probe ${probe}; the band: ${bandText}`);
       observe('styleOff', { spawn, row, probe, bandText });
-      await shot('12-style-off');
+      await shot('10-style-off');
       expect(spawn.append).toBeNull();
       expect(spawn.env[NATIVE_TO_HUMAN_ENV]).toBeUndefined();
       expect(probe).toBe('<unset>');
       expect(row.applied).toBe('off');
+      expect(row.recorded, 'the supplement the session recorded (P2-C2)').toBe('supplement:1');
+      expect(spawn.snapshotOff, 'the recorded supplement dropped at once where the binary declares the flag').toBe(declares);
       line(`style arm, lane off: ${spawnWords(spawn)}; ${decisionWords(row)}; ${NATIVE_TO_HUMAN_ENV}=<unset> logged; the mod draws its band "${bandText.slice(0, 60)}"`);
       await stop(page, s2);
     });

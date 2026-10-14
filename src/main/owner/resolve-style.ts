@@ -1,5 +1,6 @@
 // The style resolver (the P2-C document, Design §2, "The resolver"): which output style a launch's settings select, and
-// whether that style declares a to-human contract MAWS can present (then MAWS appends nothing). Reads, never writes. Its
+// the shape its declared to-human contract has (P2-C2, Decision Log 31: `marks`, then MAWS appends nothing; `message-tool`,
+// then MAWS appends its supplement; `none`, then the full contract). Reads, never writes. Its
 // config home is the engine's (the captured login-shell environment's, never main's own `process.env`). `outputStyle` is
 // taken from the highest-precedence source that sets it: managed settings, then MAWS's own `--settings`, then local,
 // project and user settings; a missing or malformed file sets nothing. The named style is then found:
@@ -8,11 +9,11 @@
 //   merged settings' `enabledPlugins` and whose installation applies to the cwd (user scope, or project or local scope
 //   for this project), in `<installPath>/output-styles/*.md` by front-matter `name`, else file stem;
 // - any other name in `<cwd>/.claude/output-styles/`, then `<configHome>/output-styles/`.
-// A style that cannot be found is not compatible (MAWS then appends: doubled instructions over a silent lane), and the
+// A style that cannot be found has no shape (MAWS then appends: doubled instructions over a silent lane), and the
 // reason is said; the engine's own report at `system/init` corrects a misreading (the mismatch check, ./launch.ts).
 import { readdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import { COMPATIBLE_CONTRACTS, STYLE_CONTRACT_KEY } from '@shared/owner/contract';
+import { STYLE_CONTRACT_KEY, styleShape, type StyleShape } from '@shared/owner/contract';
 import { realOrSelf } from '../sessions/context';
 
 export const MANAGED_SETTINGS_PATH = '/Library/Application Support/ClaudeCode/managed-settings.json';
@@ -27,8 +28,8 @@ export interface StyleContext {
 
 export interface ResolvedStyle {
   name: string; // the style name, as the engine reports it in system/init's output_style
-  compatible: boolean;
-  contract: number | null; // the declared contract version, when compatible
+  shape: StyleShape; // P2-C2: what the declared contract carries
+  contract: number | null; // the declared contract version, when it has a shape
   unresolved: string | null; // why the style could not be found, when it could not
 }
 
@@ -66,7 +67,7 @@ export async function lookupStyle(name: string, ctx: StyleContext): Promise<Reso
 }
 
 async function lookupIn(name: string, ctx: StyleContext, settings: SettingsFile[]): Promise<ResolvedStyle> {
-  const none = (unresolved: string | null): ResolvedStyle => ({ name, compatible: false, contract: null, unresolved });
+  const none = (unresolved: string | null): ResolvedStyle => ({ name, shape: 'none', contract: null, unresolved });
   if (BUILT_IN_STYLES.has(name)) return none(null);
   const colon = name.indexOf(':');
   const directories =
@@ -79,7 +80,8 @@ async function lookupIn(name: string, ctx: StyleContext, settings: SettingsFile[
     const style = await findStyle(directory, wanted);
     if (style === null) continue;
     const contract = contractOf(style);
-    return contract === null ? none(null) : { name, compatible: true, contract, unresolved: null };
+    const shape = styleShape(contract);
+    return shape === 'none' ? none(null) : { name, shape, contract, unresolved: null };
   }
   return none(colon > 0 ? `the plugin ${name.slice(0, colon)} has no output style ${wanted}` : `no output style named ${name} in the project or the config home`);
 }
@@ -143,7 +145,5 @@ async function findStyle(directory: string, wanted: string): Promise<FrontMatter
 
 function contractOf(fields: FrontMatter): number | null {
   const value = fields[STYLE_CONTRACT_KEY];
-  if (value === undefined || !/^\d+$/.test(value)) return null;
-  const version = Number(value);
-  return COMPATIBLE_CONTRACTS.includes(version) ? version : null;
+  return value === undefined || !/^\d+$/.test(value) ? null : Number(value);
 }

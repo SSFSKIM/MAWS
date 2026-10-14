@@ -1,5 +1,5 @@
 // The engine host's `library.*` commands (the P3-L document, Decision Log 2; the P3 interface ledger §1): main's reads
-// of the host's artifact store, from which it rebuilds and reconciles its derived library (index version 9). Main-only
+// of the host's artifact store, from which it rebuilds and reconciles its derived library (index version 10). Main-only
 // by the registry (`mainOnlyCommands`), so no window reads the store around main's index. Each is answered from the
 // store at its commit (reads.ts) once the start import has landed or a bound under the bridge's router timeout has
 // passed (M6b fix wave 1, `./index.ts`), so none can outlive that timeout: all `immediate`. A refusal the store

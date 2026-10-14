@@ -198,6 +198,7 @@ export class DocumentService {
   private readonly headDue = new Set<string>(); // heads to rewrite after the next commit (a version was written)
   private readonly committedListeners = new Set<(change: Committed) => void>();
   private readonly beforeCommitListeners = new Set<(artifactIds: string[]) => void>();
+  private readonly unloadListeners = new Set<(artifactId: string) => void>();
   private readonly agentReplicas = new Map<string, AgentReplica>(); // by `${appSessionId}\0${artifactId}`
   private sweepTimer: ReturnType<typeof setInterval> | null = null;
   private flushScheduled = false;
@@ -241,6 +242,13 @@ export class DocumentService {
   onBeforeCommit(listener: (artifactIds: string[]) => void): () => void {
     this.beforeCommitListeners.add(listener);
     return () => this.beforeCommitListeners.delete(listener);
+  }
+
+  // Runs after a doc leaves memory (its idle unload, an eviction, a lost batch, shutdown), so what is kept per loaded doc
+  // elsewhere goes with it (the store's cached version state). A throw is logged.
+  onUnload(listener: (artifactId: string) => void): () => void {
+    this.unloadListeners.add(listener);
+    return () => this.unloadListeners.delete(listener);
   }
 
   adapterFor(kind: ArtifactKind): KindAdapter | undefined {
@@ -1042,7 +1050,15 @@ export class DocumentService {
     }
     hostDoc.awareness.destroy();
     hostDoc.doc.destroy();
-    if (this.docs.get(hostDoc.id) === hostDoc) this.docs.delete(hostDoc.id);
+    if (this.docs.get(hostDoc.id) !== hostDoc) return;
+    this.docs.delete(hostDoc.id);
+    for (const listener of this.unloadListeners) {
+      try {
+        listener(hostDoc.id);
+      } catch (error) {
+        this.log(`an onUnload listener threw: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   private reject(conn: Connection, reason: string): void {

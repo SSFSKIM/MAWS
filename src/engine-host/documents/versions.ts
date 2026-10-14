@@ -65,7 +65,8 @@ export function actorFromKey(key: string): Actor {
 }
 
 export class VersionStore {
-  // The last written version's state per artifact, so the next delta needs no reconstruction.
+  // The last written version's state per artifact, so the next delta needs no reconstruction; held only while the
+  // artifact's doc is loaded (the store forgets it at the service's unload, at delete, and for a doc not loaded).
   private readonly last = new Map<string, { id: number; seq: number; state: Uint8Array }>();
 
   constructor(private readonly db: DatabaseSync) {}
@@ -207,6 +208,11 @@ export class VersionStore {
     }));
   }
 
+  // Whether any retained version (of any artifact) pins `systemId` (Decision Log 46: a deleted system stays readable).
+  pinsSystem(systemId: string): boolean {
+    return this.db.prepare("SELECT 1 FROM artifact_versions WHERE designSystemRef IS NOT NULL AND json_extract(designSystemRef, '$.id') = ? LIMIT 1").get(systemId) !== undefined;
+  }
+
   // The rows thinning drops for one artifact at `now` (unnamed autos only; never the newest or a pinned one).
   thinnable(artifactId: string, now: number, pinned: Set<string>): number[] {
     const rows = this.db.prepare('SELECT id, seq, at, kind, label FROM artifact_versions WHERE artifactId = ? ORDER BY id').all(artifactId) as { id: number; seq: number; at: number; kind: VersionKind; label: string | null }[];
@@ -271,7 +277,7 @@ export class VersionStore {
     return rows.filter((row) => !pinned.has(`${artifactId}\u0000${row.seq}`) && !(byteKind && row.id === newest)).map((row) => row.id);
   }
 
-  // Forgets cached states (a transaction that wrote versions was taken back).
+  // Forgets cached states: an artifact's when its doc leaves memory or the artifact is deleted (the store's calls), all.
   forget(artifactId?: string): void {
     if (artifactId === undefined) this.last.clear();
     else this.last.delete(artifactId);

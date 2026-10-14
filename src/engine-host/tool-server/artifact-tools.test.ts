@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
@@ -13,8 +14,12 @@ import {
   artifactRefusalOf,
   TOOL_ERRORS,
 } from '@shared/maws/tools';
+import { DocumentService } from '../documents/service';
+import { SqliteDocumentStorage } from '../documents/storage';
+import { ArtifactStore } from '../documents/store';
 import { artifactListAssetsTool, artifactUploadAssetTool } from './artifact-assets';
 import { artifactExportTool, type ArtifactExportAnswer, type ArtifactExportRequest } from './artifact-export';
+import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactDescribeTypeTool, artifactListTool, artifactReadTool } from './artifact-tools';
 import { HUMAN, jsonOf, openWorld, SELF, textOf, type World } from './artifact-world.fixture';
 import { HostBridge } from './bridge';
@@ -310,7 +315,47 @@ describe('artifact_read', () => {
   it('refuses an artifact no session of the lineage holds', async () => {
     expect(textOf(await read({ artifact: 'nope' }))).toBe(TOOL_ERRORS.noArtifact('artifact_read', 'nope'));
   });
+
+  it('reads from a store a newer MAWS wrote (read-only), linking nothing, while a publish there is still refused (Decision Log 12, 24e)', async () => {
+    const page = jsonOf<{ artifactId: string; revision: number }>(await create({ handle: 'dash', content: '<p>one</p>', title: 'D' }));
+    const site = jsonOf<{ artifactId: string }>(await create({ kind: 'design', title: 'Site', files: { 'a.html': 'A' } }));
+    const readOnly = reopenNewer();
+    try {
+      const deps = w.deps({ artifacts: () => readOnly.store });
+      expect(jsonOf(await artifactReadTool(deps).call({ artifact: 'dash' }, w.ctx()))).toMatchObject({ artifactId: page.artifactId, files: { 'index.html': '<p>one</p>' } });
+      expect(jsonOf(await artifactReadTool(deps).call({ artifact: site.artifactId }, w.ctx()))).toMatchObject({ files: { 'a.html': 'A' } });
+      expect(readOnly.store.links(page.artifactId).map((l) => l.role)).toEqual(['created']);
+      const published = await artifactPublishTool(deps).call({ artifact: 'dash', baseRevision: page.revision, files: { 'index.html': '<p>two</p>' } }, w.ctx());
+      expect(artifactRefusalOf(textOf(published))).toMatchObject({ reason: 'unavailable' });
+    } finally {
+      readOnly.close();
+    }
+  });
 });
+
+// The world's store reopened as an older MAWS opens a store a newer one wrote (user_version above its migrations):
+// read-only (Decision Log 12).
+function reopenNewer(): { store: ArtifactStore; close: () => void } {
+  const path = join(w.userData, 'artifacts', 'store.sqlite');
+  w.store.close();
+  w.service.close();
+  w.storage.close();
+  const db = new DatabaseSync(path);
+  db.exec('PRAGMA user_version = 99');
+  db.close();
+  const storage = SqliteDocumentStorage.open(path, { log: () => {} });
+  expect(storage.readOnly).toBe(true);
+  const service = new DocumentService(storage, { kindOf: (id) => storage.kindOf(id), log: () => {} });
+  const store = new ArtifactStore(service, storage, { root: join(w.userData, 'artifacts'), log: () => {} });
+  return {
+    store,
+    close: () => {
+      store.close();
+      service.close();
+      storage.close();
+    },
+  };
+}
 
 describe('artifact_upload_asset and artifact_list_assets', () => {
   it('adds a file under the working directory as an asset, idempotent by tool-use id, and lists it', async () => {

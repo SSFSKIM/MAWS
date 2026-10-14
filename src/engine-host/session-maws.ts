@@ -62,7 +62,7 @@ export class SessionMaws {
   private readonly captures: CaptureBridge; // E2: the bridge `artifact_screenshot` asks main through
   private readonly exports: ExportBridge; // P3-A M7: the bridge `artifact_export` asks main through
   private readonly askTable: AskTable; // E1 M2: the asks waiting for the human (host memory, G6)
-  private askItems = new Map<string, AttentionItem>(); // E1 M4b: the blocking asks' attention items, published with the broker's
+  private askItems = new Map<string, AttentionItem>(); // E1 M4b: the asks' attention items (P2-C2: async ones too), published with the broker's
 
   constructor(private readonly host: SessionMawsHost) {
     // E1 start: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
@@ -103,7 +103,7 @@ export class SessionMaws {
     this.toolServer.cancel(requestId);
   }
 
-  // The blocking asks' attention items, published after the broker's (E1 M4b).
+  // The asks' attention items, published after the broker's (E1 M4b; P2-C2: an async ask's is `async_input`).
   attention(): Iterable<AttentionItem> {
     return this.askItems.values();
   }
@@ -194,7 +194,7 @@ export class SessionMaws {
   // The process is gone. Answers the blocking asks still published, counted before the tool server aborts them (E1 M5
   // fix: attention lost like a pending AskUserQuestion, the architect's ruling 1).
   processExited(): number {
-    const lostAsks = this.askItems.size;
+    const lostAsks = [...this.askItems.values()].filter((item) => item.kind === 'question').length; // the blocking asks
     // E1: every tool call in flight is aborted (no pipe takes its answer) and every pane request settles
     this.toolServer.processExited(); // a blocking ask's call aborts with it, cancelling the ask (meta row)
     this.panes.processExited();
@@ -223,13 +223,15 @@ export class SessionMaws {
     }
   }
 
-  // E1 M4b (the architect's ruling 1): the attention list again whenever the blocking asks held changed (one opened,
-  // was answered or was cancelled); an async ask, or a claim or release that leaves the set alone, publishes nothing.
-  // An item is built once per ask, so its fields never move between publications.
+  // E1 M4b (the architect's ruling 1): the attention list again whenever the asks held changed (one opened, was
+  // answered or was cancelled); a claim or release that leaves the set alone publishes nothing, so an ask's item stays
+  // until its answer is committed. An item is built once per ask, so its fields never move between publications.
+  // P2-C2 (Decision Log 32): async asks too, as `async_input` items; no watermark, since asks are host memory, never
+  // replayed.
   private publishAsks(): void {
-    const blocking = this.askTable.list().filter((ask) => ask.blocking);
-    if (blocking.length === this.askItems.size && blocking.every((ask) => this.askItems.has(ask.askId))) return;
-    this.askItems = new Map(blocking.map((ask) => [ask.askId, this.askItems.get(ask.askId) ?? askAttentionItem(ask, this.host.appSessionId, this.host.sessionId())]));
+    const asks = this.askTable.list();
+    if (asks.length === this.askItems.size && asks.every((ask) => this.askItems.has(ask.askId))) return;
+    this.askItems = new Map(asks.map((ask) => [ask.askId, this.askItems.get(ask.askId) ?? askAttentionItem(ask, this.host.appSessionId, this.host.sessionId())]));
     this.host.publishAttention();
   }
 }

@@ -33,13 +33,20 @@ export function sendFileTool(deps: SendFileDeps): McpToolDefinition {
       const found = await stat(path).catch(() => null);
       if (!found?.isFile()) return toolError(TOOL_ERRORS.notAFile(path));
     }
+    // each file hashed now, streamed, so the delivery's savepoint below only records digests (the file stays in place)
+    const digests: { sha256: string; size: number }[] = [];
+    for (const path of paths) {
+      const described = await store.files.describeStreamed(path).catch(() => null);
+      if (!described) return toolError(TOOL_ERRORS.notAFile(path));
+      digests.push({ sha256: described.sha256, size: described.size });
+    }
     const result = await store.writeCommitted(() =>
       store.withOp(opIdOf(ctx), 'send_file', null, async (op) => {
         // one savepoint for the whole delivery: every artifact, its content and link, and the op row (createAll), so it
         // commits whole or not at all and a retry never duplicates a file
         let answer: SendFileResult | undefined;
         await store.createAll(
-          paths.map((path) => ({ kind: 'file', title: basename(path), content: { path } })),
+          paths.map((path, index) => ({ kind: 'file', title: basename(path), content: { path, digest: digests[index]! } })),
           actorOf(ctx),
           (artifacts) => {
             answer = { status: 'delivered', deliverables: artifacts.map((artifact, index) => ({ id: artifact.id, path: paths[index]!, name: basename(paths[index]!) })) };

@@ -4,16 +4,17 @@
 // writer's reaches both; a repeated op id is a no-op; versions list their actors; restore lands whole in both windows;
 // `artifacts.changed` arrives for each change; the store reopens after a relaunch on the same profile; and a SIGKILL of
 // the host while a renderer types loses no acknowledged edit, every replica re-opening by itself. M7: the scheme and the
-// export service (the last case).
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+// export service. M9: S2's numbers measured in the product, under MAWS_ARTIFACTS_PERF=1 (the last case).
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
-import { tmpdir } from 'node:os';
+import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { documents, seamReady } from './support/documents';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { seedDocument } from './support/seed-doc';
 
 const require = createRequire(__filename);
 
@@ -127,8 +128,11 @@ test('a document syncs across two windows and the test writer, versions and rest
     await expect.poll(async () => seam.restores(id)).toEqual([restored.versionId]);
   }
   await expect.poll(async () => (await forThis(artifact.id)).some((c) => c.revision >= restored.revision), { message: 'the restore is announced' }).toBe(true);
-  const revisions = (await forThis(artifact.id)).map((c) => c.revision);
-  expect(revisions, 'announced revisions only rise').toEqual([...revisions].sort((x, y) => x - y));
+  // Announcements are durable, not necessarily monotonic: each names a committed revision, in whatever order a held event arrives.
+  const announced = (await forThis(artifact.id)).map((c) => c.revision);
+  const { artifact: committed } = await ok<{ artifact: { revision: number } }>(page, 'artifacts.get', { artifactId: artifact.id });
+  expect(Math.max(...announced), 'no announced revision exceeds the committed one').toBeLessThanOrEqual(committed.revision);
+  expect(Math.max(...announced), 'the restore is among the announced').toBeGreaterThanOrEqual(restored.revision);
 
   // Quit and relaunch on the same profile: the store reopens with the document as it was.
   await launch.app.close();
@@ -357,4 +361,108 @@ test('maws-artifact: reaches the app and the capture partition only, an artifact
   } finally {
     server.close();
   }
+});
+
+// M9 (the execution document's M9 Decisions; parent §5 P3-A): S2's numbers in the product, measured in real Electron over
+// the product's port route in utility mode, on S2's 1 MB seed. Each bound writes one JSON line to
+// `test-results/artifacts-perf.jsonl` with the load average beside each run, and only then is checked: a missed bound is
+// a finding, never a number to record and pass.
+//   firstSyncMs  open → the replica synced, the host loading the document from SQLite (a fresh app over the profile, so
+//                nothing of it is in memory), the worst of three cold trials; bound < 150 ms.
+//   ackP95Ms     a keystroke (one edit of the open 1 MB document) → the ack that says it is durable, p95 over 500
+//                keystrokes at S2's human pace (60 to 180 ms apart), the store's `synchronous = FULL` and `fullfsync = ON`
+//                (migrations.ts); bound < 10 ms.
+//   ackedLost    acknowledged keystrokes missing after a host SIGKILL mid-typing, summed over three kills; bound 0.
+const PERF_BOUNDS = { firstSyncMs: 150, ackP95Ms: 10, ackedLost: 0 } as const;
+const load = () => loadavg().map((value) => Math.round(value * 100) / 100);
+function recordBound(bound: keyof typeof PERF_BOUNDS, value: number, detail: Record<string, unknown>): void {
+  const limit = PERF_BOUNDS[bound];
+  const pass = bound === 'ackedLost' ? value <= limit : value < limit;
+  const dir = test.info().project.outputDir;
+  mkdirSync(dir, { recursive: true });
+  appendFileSync(join(dir, 'artifacts-perf.jsonl'), `${JSON.stringify({ bound, value, limit, pass, mode: 'utility', at: new Date().toISOString(), ...detail })}\n`);
+}
+const round = (ms: number) => Math.round(ms * 100) / 100;
+const percentile = (values: number[], p: number) => [...values].sort((x, y) => x - y)[Math.ceil((p / 100) * values.length) - 1];
+
+test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to durable ack, nothing acknowledged lost to a host SIGKILL', async () => {
+  test.skip(process.env.MAWS_ARTIFACTS_PERF !== '1', 'measured only under MAWS_ARTIFACTS_PERF=1');
+  test.setTimeout(10 * 60_000);
+  const seed = seedDocument(1_000_000);
+  profile = mkdtempSync(join(tmpdir(), 'maws-e2e-artifacts-perf-'));
+  launch = await launchMaws({ userData: profile });
+  await seamReady(launch.page);
+  await hostReady(launch.page);
+
+  // The 1 MB document: the seed's state applied in a window's replica, which sends it to the host like any edit.
+  const { artifact } = await ok<{ artifact: { id: string } }>(launch.page, 'artifacts.create', { kind: 'document', title: 'Measured' });
+  const writer = documents(launch.page);
+  const seeded = await writer.open(artifact.id);
+  await writer.applyState(seeded, seed);
+  await expect.poll(async () => (await writer.state(seeded)).unsaved, { timeout: 60_000, message: 'the seed is durable' }).toBe(0);
+  const size = await writer.stateSize(seeded);
+  expect(size).toBeGreaterThanOrEqual(seed.length);
+
+  // First sync, cold: a fresh app over the profile each trial, the window's first open of the document.
+  const trials: { ms: number; load: number[] }[] = [];
+  for (let trial = 0; trial < 3; trial++) {
+    await launch.app.close();
+    launch = await launchMaws({ userData: profile });
+    await seamReady(launch.page);
+    await hostReady(launch.page);
+    await launch.page.waitForTimeout(1_000); // the window's own start-up settles; the store has not loaded the document
+    const atLoad = load();
+    const opened = await launch.page.evaluate(async (artifactId) => {
+      const seam = (window as unknown as { __maws_documents: { open(artifactId: string): Promise<number> } }).__maws_documents;
+      const started = performance.now();
+      const id = await seam.open(artifactId);
+      return { id, ms: performance.now() - started };
+    }, artifact.id);
+    expect(await documents(launch.page).stateSize(opened.id), 'the cold replica holds the whole document').toBe(size);
+    trials.push({ ms: round(opened.ms), load: atLoad });
+  }
+  const firstSyncMs = Math.max(...trials.map((t) => t.ms));
+  recordBound('firstSyncMs', firstSyncMs, { seedV2Bytes: seed.length, stateV2Bytes: size, trials });
+
+  // Keystroke to durable ack on the open 1 MB document.
+  const typing = documents(launch.page);
+  const typer = await typing.open(artifact.id);
+  const loadBefore = load();
+  const latencies = await typing.timeAcks(typer, 500, [60, 180]);
+  const ackP95Ms = round(percentile(latencies, 95));
+  recordBound('ackP95Ms', ackP95Ms, { edits: latencies.length, p50: round(percentile(latencies, 50)), max: round(Math.max(...latencies)), load: [loadBefore, load()] });
+
+  // Three host SIGKILLs mid-typing, each in a fresh app (main stops restarting a host that dies three times within 60 s):
+  // every acknowledged keystroke is in the document the restarted host serves.
+  const kills: { typed: number; acked: number; lost: number; load: number[] }[] = [];
+  for (let run = 1; run <= 3; run++) {
+    await launch.app.close();
+    launch = await launchMaws({ userData: profile });
+    const { page } = launch;
+    await seamReady(page);
+    const { pid } = await hostReady(page);
+    const seam = documents(page);
+    const killed = await seam.open(artifact.id);
+    const start = (await seam.state(killed)).revision;
+    await seam.startTyping(killed, `r${run}k`, 5);
+    await expect.poll(async () => (await seam.state(killed)).revision, { message: 'the typing is being acknowledged' }).toBeGreaterThan(start + 20);
+    const atKill = load();
+    process.kill(pid, 'SIGKILL');
+    // What the typer was told is durable, and nothing more: it is closed at once, so it re-sends nothing after the restart.
+    const { typed, acked } = await seam.stopTyping(killed);
+    await seam.close(killed);
+    await expect.poll(async () => (await ok<{ state: string; pid: number | null }>(page, 'engine.hostState')).pid, { timeout: 20_000, message: 'the host restarts' }).not.toBe(pid);
+    await hostReady(page);
+    const fresh = await seam.open(artifact.id);
+    const text = (await seam.json(fresh)).text;
+    const lost = Array.from({ length: acked }, (_, i) => `r${run}k${i};`).filter((token) => !text.includes(token)).length;
+    expect(acked, 'keystrokes were acknowledged before the kill').toBeGreaterThan(0);
+    kills.push({ typed, acked, lost, load: atKill });
+  }
+  const ackedLost = kills.reduce((sum, k) => sum + k.lost, 0);
+  recordBound('ackedLost', ackedLost, { runs: kills });
+
+  expect(firstSyncMs, `first sync of a 1 MB document, cold (trials ${JSON.stringify(trials)})`).toBeLessThan(PERF_BOUNDS.firstSyncMs);
+  expect(ackP95Ms, 'keystroke to durable ack, p95').toBeLessThan(PERF_BOUNDS.ackP95Ms);
+  expect(ackedLost, 'acknowledged keystrokes lost to three host SIGKILLs').toBe(PERF_BOUNDS.ackedLost);
 });

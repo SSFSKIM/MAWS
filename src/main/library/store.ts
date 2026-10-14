@@ -1,4 +1,4 @@
-// The library's derived index (the P3-L document, Decision Log 6 and 9; index migration 9): main's view of the engine
+// The library's derived index (the P3-L document, Decision Log 6 and 9; index migration 10): main's view of the engine
 // host's live artifacts, their session links and the Spaces, with the search index over titles and extracted text.
 // Everything here is derived from the host's library reads (sync.ts), never from its database: a reconciliation
 // replaces the whole set in one transaction, an entry refresh replaces one artifact and its links, and a revision only

@@ -14,7 +14,7 @@ export const BUILT_IN_MODS: readonly BuiltInMod[] = [
   {
     id: 'maws.to-human',
     name: 'To-human',
-    description: 'Agents mark what is for you: messages, must-reads, insights and questions you answer in place.',
+    description: 'Agents send you messages and ask questions you answer in place.', // P2-C2: contract 5 (the owner's parity answer)
     version: TO_HUMAN_CONTRACT_VERSION,
   },
 ];
