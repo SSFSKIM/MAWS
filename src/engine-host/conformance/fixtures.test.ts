@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { parseAskSteer } from '@shared/maws/ask';
-import { ArtifactCreateResultSchema, ArtifactListResultSchema, ArtifactScreenshotResultSchema, ArtifactUpdateResultSchema, AskResultSchema, TOOL_ERRORS } from '@shared/maws/tools';
+import { ArtifactDeliverySchema, ArtifactScreenshotResultSchema, AskResultSchema, TOOL_ERRORS } from '@shared/maws/tools';
+import { ArtifactUpdateResultSchema } from '@shared/maws/artifact-update'; // P3-A: the retired update, as recorded
 import { ClaimSessionResponseSchema, GetStatusResponseSchema, GetWorkspaceDiffResponseSchema, InitializeResponseSchema, UiRenderResponseSchema, RewindConversationResponseSchema, RewindFilesResponseSchema } from '@shared/wire/control';
 import { FIXTURE_PASSES, listJournals, loadEngineJournal /* P2-C (2026-10-09) */, loadJournal, type FixturePass } from '../../../test/support/fixtures';
 import { ownerMarkedText, sittingSeed } from '../../../test/support/r3-surface';
@@ -888,11 +889,11 @@ describe('normaliser: the artifact tools recorded live (E2 M2, pass3/p1-maws-art
     const [create] = callsOf(rows, 'artifact_create');
     const [update] = callsOf(rows, 'artifact_update');
     expect([artifacts[0]!.requestId, artifacts[1]!.requestId]).toEqual([create!.requestId, update!.requestId]);
-    expect(ArtifactCreateResultSchema.parse(resultJson(answerOf(rows, create!.requestId)!.result.content))).toMatchObject({ status: 'created', id: 'dash', deliverableId: artifacts[0]!.deliverableId, version: 1 });
+    expect(ArtifactDeliverySchema.parse(resultJson(answerOf(rows, create!.requestId)!.result.content))).toMatchObject({ id: 'dash', deliverableId: artifacts[0]!.deliverableId, version: 1 }); // E2's create answer, as recorded
     expect(ArtifactUpdateResultSchema.parse(resultJson(answerOf(rows, update!.requestId)!.result.content))).toMatchObject({ status: 'updated', id: 'dash', version: 2 });
     for (const e of artifacts) expect(ofKind(events, 'tool.use').find((u) => u.toolUseId === e.toolUseId)?.toolName).toBe(e.action === 'create' ? 'mcp__maws__artifact_create' : 'mcp__maws__artifact_update');
     const [list] = callsOf(rows, 'artifact_list');
-    expect(ArtifactListResultSchema.parse(resultJson(answerOf(rows, list!.requestId)!.result.content)).artifacts).toMatchObject([{ id: 'dash', deliverableId: artifacts[0]!.deliverableId, title: 'Dashboard', versions: 2 }]);
+    expect((resultJson(answerOf(rows, list!.requestId)!.result.content) as { artifacts: unknown[] }).artifacts).toMatchObject([{ id: 'dash', deliverableId: artifacts[0]!.deliverableId, title: 'Dashboard', versions: 2 }]);
   });
 
   it("the screenshot answer is an image block then the result's JSON; the engine's tool_result inserts its pointer text between them", async () => {
@@ -917,15 +918,17 @@ describe('normaliser: the artifact tools recorded live (E2 M2, pass3/p1-maws-art
     expect(ArtifactScreenshotResultSchema.parse(JSON.parse(blocks[2]!.text!))).toEqual(parsed);
   });
 
+  // E2's refusal text, as the recording carries it (P3-A retired the tool and its text)
+  const E2_NO_ARTIFACT = 'artifact_update: no artifact "nope" in this session; use artifact_create';
   it('the refused update is one isError tool.result with the exact text, and no event', async () => {
     const { events, rows } = await run('pass3', 'p1-maws-artifacts');
     const updates = callsOf(rows, 'artifact_update');
     expect(updates).toHaveLength(2);
     const refusedAnswer = answerOf(rows, updates[1]!.requestId)!;
-    expect(refusedAnswer.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.noArtifact('artifact_update', 'nope') }], isError: true });
+    expect(refusedAnswer.result).toEqual({ content: [{ type: 'text', text: E2_NO_ARTIFACT }], isError: true });
     const errors = ofKind(events, 'tool.result').filter((e) => e.isError && ofKind(events, 'tool.use').find((u) => u.toolUseId === e.toolUseId)?.toolName.startsWith('mcp__maws__artifact_'));
     expect(errors).toHaveLength(1);
-    expect(text(errors[0]!.content)).toBe(TOOL_ERRORS.noArtifact('artifact_update', 'nope')); // seq 418 carries exactly it
+    expect(text(errors[0]!.content)).toBe(E2_NO_ARTIFACT); // seq 418 carries exactly it
     expect(events.filter((e) => e.kind.startsWith('maws.') && (e as { requestId?: string }).requestId === updates[1]!.requestId)).toEqual([]);
   });
 });

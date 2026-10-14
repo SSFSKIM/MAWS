@@ -384,3 +384,53 @@ export async function shoot(s: Scene, surface: string, before?: () => Promise<vo
   if (SHOTS === null) return;
   await shootThemes(s.page, (theme) => join(SHOTS, `e2-${surface}-${theme}.png`), before);
 }
+
+// P3-A (M6; X25): E2's recorded artifact case (`pass3/p1-maws-artifacts`) as this build's tools are called, the recording
+// itself left as it was recorded (the conformance suite and the transcript snapshots read it as E2's). Its two calls of
+// the retired `artifact_update` become `artifact_publish` calls in every frame that carries them (the stream's input
+// deltas, the assistant's tool use, the permission request and its allow, the `tools/call`, the recorded answers and
+// the engine's tool result): the first publishes `page` as the `index.html` of "dash" from `baseRevision` (what its create
+// answered), the second names "nope". Every other mention of the old name reads as the new one. Written under
+// `test-results/replays/` and answered as a path relative to the repository, as `replay` takes a fixture.
+export function asPublishReplay(fixture: string, page: string, baseRevision: number): string {
+  const inputs = [
+    { artifact: 'dash', baseRevision, files: { 'index.html': page } },
+    { artifact: 'nope', baseRevision, files: { 'index.html': page } },
+  ];
+  const E2_REFUSAL = 'artifact_update: no artifact "nope" in this session; use artifact_create';
+  const refusal = 'artifact_publish: no artifact "nope" in this session';
+  let started = -1; // the update blocks begun so far (0: "dash", 1: "nope")
+  let open: { index: number; delta: number } | null = null;
+  const rewrite = (value: unknown): unknown => {
+    if (typeof value === 'string') {
+      if (value.startsWith('{\n  "status": "updated"')) {
+        const old = JSON.parse(value) as { deliverableId: string };
+        return JSON.stringify({ status: 'published', artifactId: old.deliverableId, kind: 'html', title: 'Dashboard', revision: baseRevision + 1, changed: ['index.html'], kept: [], removed: [], id: 'dash', deliverableId: old.deliverableId, version: 2, externalReferences: 0 }, null, 2);
+      }
+      return value.replaceAll(E2_REFUSAL, refusal).replaceAll('artifact_update', 'artifact_publish').replaceAll('Artifact Update', 'Artifact Publish').replaceAll('Update artifact', 'Publish artifact');
+    }
+    if (Array.isArray(value)) return value.map(rewrite);
+    if (value === null || typeof value !== 'object') return value;
+    const record = value as Record<string, unknown>;
+    if (record.html_path === 'dashboard.html' && (record.id === 'dash' || record.id === 'nope') && Object.keys(record).length === 2) return inputs[record.id === 'dash' ? 0 : 1];
+    return Object.fromEntries(Object.entries(record).map(([key, entry]) => [key, rewrite(entry)]));
+  };
+  const rows = fixtureRows(fixture).map((row) => {
+    const event = (row.frame as { type?: string; event?: { type?: string; index?: number; content_block?: { name?: string }; delta?: { type?: string; partial_json?: string } } }).event;
+    if ((row.frame as Frame).type === 'stream_event' && event) {
+      if (event.type === 'content_block_start' && event.content_block?.name === 'mcp__maws__artifact_update') {
+        started += 1;
+        open = { index: event.index!, delta: 0 };
+      } else if (event.type === 'content_block_stop' && open?.index === event.index) open = null;
+      else if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
+        const block = open as { index: number; delta: number } | null;
+        if (block && block.index === event.index) event.delta.partial_json = block.delta++ === 0 ? JSON.stringify(inputs[started]) : '';
+      }
+    }
+    return { ...row, frame: rewrite(row.frame) };
+  });
+  const relative = join('test-results', 'replays', `${fixture.split('/').at(-1)!.replace(/\.jsonl$/, '')}.publish.jsonl`);
+  mkdirSync(join(REPO_ROOT, 'test-results', 'replays'), { recursive: true });
+  writeFileSync(join(REPO_ROOT, relative), rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return relative;
+}

@@ -8,18 +8,17 @@ import type { MawsArtifactCapture } from '@shared/ipc/schema/maws';
 import type { HostSupervisor } from '../hosts/supervisor';
 import type { registerMainHandler } from '../ipc/router';
 import { CAPTURE_PARTITION, captureArtifact, startCaptureService } from './capture';
-import { guardPermissions, installFramePolicies } from './policies';
+import { appOriginOf, guardPermissions, installFramePolicies } from './policies';
 import { serveDeliverables } from './protocol';
 import { DeliverableReader } from './reader';
 import { registerDeliverablesHandlers } from './register';
-
-export { registerDeliverableScheme } from './protocol';
 
 export interface DeliverablesDeps {
   userData: string;
   hosts: Pick<HostSupervisor, 'onEvent' | 'dispatch'>;
   register: typeof registerMainHandler;
   env: NodeJS.ProcessEnv;
+  appUrl: string; // P3-A M7 fix wave 2: the app page's URL (window.ts), whose origin the frame policies trust
 }
 
 export interface Deliverables {
@@ -27,11 +26,11 @@ export interface Deliverables {
   stop(): void;
 }
 
-export function startDeliverables({ userData, hosts, register, env }: DeliverablesDeps): Deliverables {
+export function startDeliverables({ userData, hosts, register, env, appUrl }: DeliverablesDeps): Deliverables {
   const reader = new DeliverableReader(userData);
   for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) {
     serveDeliverables(target, reader);
-    installFramePolicies(target, env);
+    installFramePolicies(target, env, appOriginOf(appUrl)); // P3-A M7 fix wave 2: the app's renderer, trusted to reach every artifact
   }
   guardPermissions(session.defaultSession, 'deliverables'); // a deliverable frame's requests and checks denied
   guardPermissions(session.fromPartition(CAPTURE_PARTITION), 'all'); // the partition holds captures alone

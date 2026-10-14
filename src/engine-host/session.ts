@@ -44,7 +44,7 @@ import { SESSION_START_HOOK_MS, sessionStartHookMs } from './session-start-hooks
 import { MemorySessionStateStore } from './store/memory-session-state-store';
 import { SessionSurface } from './surface'; // R2
 // E1 start (E11: the wiring in session-maws.ts)
-import type { MawsArtifactCapturedResult, MawsDownloadRecorded, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
+import type { MawsArtifactCapturedResult, MawsArtifactExportAnswer, MawsDownloadRecorded, MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import type { PendingAsk } from '@shared/maws/ask';
 import type { AskAnswer } from '@shared/maws/tools';
 import type { DeliverableWriter, OnDeliverableWritten } from './deliverables/store';
@@ -58,6 +58,7 @@ import type { EngineTransport, TransportItem, TransportProblem } from './transpo
 // P2-A start (2026-10-09; X17)
 import type { ObservedFactsAnswer } from '@shared/engine/observed-facts';
 import type { ObservedFactsRecorder, ObservedFactsService } from './observed-facts';
+import type { ArtifactStore } from './documents/store'; // P3-A (M6)
 // P2-A end
 
 export { HostHookRegistry } from './host-hooks';
@@ -118,6 +119,9 @@ export interface EngineSessionOptions {
   // P2-E1 (D10): a side thread's ancestors, nearest first, whose artifacts its artifact tools also resolve (main's
   // `artifactScopeOf`, sent beside the spec by `session.launch`; never stored). Absent or empty for any other session.
   artifactScope?: readonly AppSessionId[];
+  // P3-A (M6): the engine host's artifact store, which the artifact tools write through (null when it failed to open);
+  // its turn version is written at each of the session's turn ends. Absent, the artifact tools answer `unavailable`.
+  artifacts?: () => ArtifactStore | null;
 }
 
 // C12: the budget and the sum a release was made at (X6 `exit.release`, X1 `process.exited.budget`)
@@ -134,7 +138,7 @@ interface SessionListeners {
   catalog: (catalog: Catalog) => void; // C7: the whole catalogue, whenever its revision moved
   models: (models: unknown[]) => void; // C10: the initialize response's model list, for the catalogue cache
 }
-// E1, E2: paneShow, deliverableChanged, artifactCapture (session-maws.ts)
+// E1, E2: paneShow, deliverableChanged, artifactCapture; P3-A M7: artifactExport (session-maws.ts)
 type Listeners = SessionListeners & MawsListeners;
 
 type ProcessState = EngineSessionStatus['process'];
@@ -162,7 +166,7 @@ export class EngineSession {
   readonly sideQuestions = new SideQuestionLog(); // E3: this process's `/btw` exchanges (host memory, X13)
   private readonly reconnect: boolean;
   private readonly log: (message: string) => void;
-  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, deliverableChanged: new Set(), artifactCapture: new Set() /* E2 */ };
+  private readonly listeners: { [K in keyof Listeners]: Set<Listeners[K]> } = { events: new Set(), status: new Set(), brokerItems: new Set(), queue: new Set(), exited: new Set(), catalog: new Set() /* C7 */, models: new Set() /* C10 */, paneShow: new Set() /* E1 */, deliverableChanged: new Set(), artifactCapture: new Set() /* E2 */, artifactExport: new Set() /* P3-A M7 */ };
   private readonly pendingWarnings: NormalizerWarning[] = [];
   private readonly stderrTail: string[] = [];
   private readonly storeWrites = new Set<Promise<void>>();
@@ -217,7 +221,7 @@ export class EngineSession {
     this.surface = new SessionSurface({ log: this.log, touch: () => this.touch() }); // R2
     // E1: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.maws = new SessionMaws({
-      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, deliverables: opts.deliverables, hasClient: opts.hasClient, artifactScope: opts.artifactScope /* P2-E1 */,
+      appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, deliverables: opts.deliverables, hasClient: opts.hasClient, artifactScope: opts.artifactScope /* P2-E1 */, artifacts: opts.artifacts /* P3-A */,
       emit: (name, payload) => this.emit(name, payload),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,
@@ -389,6 +393,10 @@ export class EngineSession {
 
   answerCapture(requestId: RequestId, result: MawsArtifactCapturedResult): 'delivered' | 'not_pending' {
     return this.maws.answerCapture(requestId, result);
+  }
+
+  answerExport(requestId: RequestId, answer: MawsArtifactExportAnswer): 'delivered' | 'not_pending' {
+    return this.maws.answerExport(requestId, answer); // P3-A M7
   }
 
   // E13: an agent's finished download through cua, as a file deliverable once per path
@@ -950,6 +958,7 @@ export class EngineSession {
         if ((event.origin === 'human' || event.origin === null) && this.processState === 'ready') void this.verifyGateway();
         if (this.processState === 'ready') void this.sampleContext();
         this.clearAndImplement.turnEnded(!event.isError && event.result === 'success');
+        this.maws.turnEnded(); // P3-A (M6): the turn's artifact edits become `turn` versions
       } else if (event.kind === 'command.lifecycle') {
         this.queue.onLifecycle(event);
         this.clearAndImplement.commandLifecycle(event.commandUuid, event.state);

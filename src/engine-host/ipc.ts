@@ -73,6 +73,7 @@ import { LastListings, manifestsFor } from './plugins/listings';
 // P2-A start (2026-10-09; X17)
 import { ObservedFactsService } from './observed-facts';
 import { FileObservedFactsStore, type ObservedFactsStore } from './store/observed-facts-store';
+import type { ArtifactStore } from './documents/store'; // P3-A (M6)
 // P2-A end
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
@@ -115,7 +116,7 @@ export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], 
 // E1: the `maws` tool server's commands (P1 ledger §5), each immediate: answered from the host's table or at the
 // answer's flushed write
 type MawsCommand = keyof typeof MawsCommands;
-export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.asks.list': 'immediate', 'maws.ask.answer': 'immediate', 'maws.pane.answer': 'immediate', 'maws.artifact.captured': 'immediate' /* E2 */, 'maws.download.recorded': 'bounded' /* E13 */ };
+export const MAWS_DEADLINE_SHAPES: Record<MawsCommand, DeadlineShape> = { 'maws.asks.list': 'immediate', 'maws.ask.answer': 'immediate', 'maws.pane.answer': 'immediate', 'maws.artifact.captured': 'immediate' /* E2 */, 'maws.download.recorded': 'bounded' /* E13 */, 'maws.artifact.exported': 'immediate' /* P3-A M7 */ };
 // E3: the side-question log's commands (P1 ledger §5), each answered from the host's log at once
 type SideHostCommand = { [N in keyof typeof SideCommands]: (typeof SideCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof SideCommands];
 export const SIDE_DEADLINE_SHAPES: Record<SideHostCommand, DeadlineShape> = { 'side.question.list': 'immediate', 'side.question.clear': 'immediate' };
@@ -158,6 +159,8 @@ export interface EngineIpcDeps {
   onConnect?: (hook: () => void) => void; // E10: the runtime's connect hooks, where the connect burst registers
   hasClient?: () => boolean; // E10: the runtime's, whether a client is connected and ready
   observedStore?: ObservedFactsStore; // P2-A (X17): default the file beside each state file under userData
+  afterShutdown?: () => void; // P3-A: runs at the end of engine.shutdown's body (closes the artifact store)
+  artifacts?: () => ArtifactStore | null; // P3-A (M6): the artifact store each session's tools write through
 }
 
 export interface EngineIpc {
@@ -255,6 +258,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
     log,
     hasClient: deps.hasClient, // E10: each session's bridges fail fast with no client
     observedFacts: observed, // P2-A
+    artifacts: deps.artifacts, // P3-A (M6)
     wire: (session, plan, spec) => {
       specs.set(spec.appSessionId, spec);
       streams.get(spec.appSessionId)?.dispose(); // the previous launch's stream: its events are that launch's
@@ -276,6 +280,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
       session.on('deliverableChanged', (change) => emit('deliverables.changed', change));
       session.on('artifactCapture', (request) => emit('maws.artifact.capture', request));
       // E2 end
+      session.on('artifactExport', (request) => emit('maws.artifact.export', request)); // P3-A M7: main's export service answers
     },
   });
 
@@ -299,6 +304,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   // SIGKILL sooner than a cancel's so the stop fits main's quit bound
   const shutdown = async (graceMs: number) => {
     const [result] = await Promise.all([table.shutdown({ graceMs }), plugins.stop(SHUTDOWN_KILL_GRACE_MS)]);
+    deps.afterShutdown?.(); // P3-A: the artifact store, once the sessions writing to it are gone
     return result;
   };
   handle('engine.shutdown', async ({ graceMs }) => shutdown(graceMs));
@@ -788,6 +794,7 @@ export function registerEngineIpc(on: HostOn, emit: HostEmit, deps: EngineIpcDep
   });
   handleMaws('maws.pane.answer', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerPane(requestId as RequestId, result) ?? 'not_pending' }));
   handleMaws('maws.artifact.captured', async ({ appSessionId, requestId, result }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerCapture(requestId as RequestId, result) ?? 'not_pending' })); // E2
+  handleMaws('maws.artifact.exported', async ({ appSessionId, requestId, answer }) => ({ outcome: table.get(appSessionId as AppSessionId)?.answerExport(requestId as RequestId, answer) ?? 'not_pending' })); // P3-A M7
   // E13: an agent's finished download, recorded once per path by the session that holds it
   handleMaws('maws.download.recorded', async (download) => {
     const session = table.get(download.appSessionId as AppSessionId);

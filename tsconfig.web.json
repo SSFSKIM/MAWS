@@ -6,6 +6,6 @@
     "jsx": "react-jsx",
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/src/**/*", "src/shared/**/*"],
-  "exclude": ["src/shared/**/*.test.ts", "src/shared/**/*.test-d.ts"]
+  "include": ["src/renderer/src/**/*", "src/shared/**/*", "src/artifacts/**/*"],
+  "exclude": ["src/shared/**/*.test.ts", "src/shared/**/*.test-d.ts", "src/artifacts/**/*.test.ts"]
 }

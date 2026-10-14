@@ -1,0 +1,1261 @@
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { KindAdapter } from '@artifacts/host';
+import { applyV1, applyV2, canonicalV2, contentIdsOf, decodeMap, diffV1, idAt, insertedBy, newDoc, stateV2, stateVector, type Doc } from '@artifacts/yjs';
+import type { Actor } from '@shared/artifacts/actor';
+import type { AppSessionId } from '@shared/graph/ids';
+import { ArtifactStoreError } from './errors';
+import { DocumentService } from './service';
+import { SqliteDocumentStorage } from './storage';
+import { ArtifactStore, AUTO_EVERY_MS, AUTO_IDLE_MS, type ArtifactChanged } from './store';
+
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+const sid = (id: string) => id as AppSessionId;
+const human: Actor = { kind: 'human' };
+const agent: Actor = { kind: 'session', appSessionId: sid('app-1') };
+const other: Actor = { kind: 'session', appSessionId: sid('app-2') };
+
+let dir: string;
+let storage: SqliteDocumentStorage;
+let service: DocumentService;
+let store: ArtifactStore;
+let now: number;
+let logs: string[];
+let turns: (() => void)[] | null; // the service's deferred commits when a test drives them (`manual`), else null
+
+function make(adapters: KindAdapter[] = [], options: { manual?: boolean } = {}): void {
+  turns = options.manual ? [] : null;
+  const defer = turns ? (run: () => void) => turns!.push(run) : undefined;
+  storage = SqliteDocumentStorage.open(join(dir, 'store.sqlite'), { log: () => {} });
+  service = new DocumentService(storage, { now: () => now, log: (line) => logs.push(line), kindOf: (id) => storage.kindOf(id), adapters, defer });
+  store = new ArtifactStore(service, storage, { root: dir, now: () => now, log: (line) => logs.push(line) });
+}
+// Runs the commits a manual store deferred.
+const tick = () => {
+  while (turns && turns.length > 0) turns.shift()!();
+};
+function reopen(adapters: KindAdapter[] = [], options: { manual?: boolean } = {}): void {
+  store.close();
+  service.close();
+  storage.close();
+  make(adapters, options);
+}
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'maws-store-'));
+  now = Date.UTC(2026, 9, 12, 9, 0);
+  logs = [];
+  make();
+});
+afterEach(() => {
+  vi.useRealTimers();
+  store?.close();
+  service?.close();
+  storage?.close();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const committed = (sql: string, ...params: (string | number)[]) => {
+  const db = new DatabaseSync(join(dir, 'store.sqlite'), { readOnly: true });
+  try {
+    return db.prepare(sql).all(...params) as Record<string, unknown>[];
+  } finally {
+    db.close();
+  }
+};
+const until = async (test: () => boolean) => {
+  for (let i = 0; i < 400 && !test(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  expect(test()).toBe(true);
+};
+const write = (artifactId: string, actor: Actor, edit: (doc: Doc) => void) => service.writeAs(artifactId, actor, edit);
+// The doc as a fresh replica sees it (the live state through a reload of the store when closed).
+const json = (artifactId: string) => {
+  const doc = newDoc();
+  applyV2(doc, service.readState(artifactId).state);
+  return { root: doc.get('root').toJSON(), files: doc.get('files').toJSON(), notes: doc.get('notes').toString() };
+};
+const rootText = (artifactId: string) => {
+  const doc = newDoc();
+  applyV2(doc, service.readState(artifactId).state);
+  return doc.get('root').toString();
+};
+// Text that does not compress to nothing (so a keyframe weighs what a real document's would).
+const prose = (n: number) => Array.from({ length: n }, (_, i) => ((i * 7919) % 104_729).toString(36)).join(' ');
+const html = (text: string) => new TextEncoder().encode(`<!doctype html><p>${text}</p>`);
+const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+describe('ArtifactStore: entities, spaces and links', () => {
+  it('creates, lists with filters, renames, moves, pins, soft-deletes and links artifacts', async () => {
+    const space = await store.createSpace({ name: 'Teaching' });
+    const doc = await store.create({ kind: 'document', title: 'Quarterly plan' }, human);
+    now += 1;
+    const page = await store.create({ kind: 'html', title: 'Report', handle: 'report', content: { bytes: html('hi') } }, agent);
+    expect(doc).toMatchObject({ kind: 'document', title: 'Quarterly plan', createdBy: human, pinned: false, lastViewedAt: null });
+    expect(page.handle).toBe('report');
+    expect(store.list().map((a) => a.id)).toEqual([page.id, doc.id]); // newest first
+    expect(store.list({ kind: 'html' }).map((a) => a.id)).toEqual([page.id]);
+    expect(store.list({ appSessionId: 'app-1' }).map((a) => a.id)).toEqual([page.id]);
+    expect(store.list({ query: 'QUARTER' }).map((a) => a.id)).toEqual([doc.id]);
+
+    now += 1;
+    await store.update(doc.id, { title: 'Plan', spaceId: space.id, pinned: true });
+    expect(store.get(doc.id)).toMatchObject({ title: 'Plan', spaceId: space.id, pinned: true, updatedAt: now });
+    expect(store.list({ spaceId: space.id, pinned: true }).map((a) => a.id)).toEqual([doc.id]);
+    await store.update(doc.id, { spaceId: null });
+    expect(store.get(doc.id)?.spaceId).toBeUndefined();
+
+    await store.link(doc.id, sid('app-2'), 'viewed');
+    expect(store.links(doc.id)).toEqual([{ artifactId: doc.id, appSessionId: 'app-2', role: 'viewed', lastAt: now }]);
+    expect(store.links(page.id)).toEqual([{ artifactId: page.id, appSessionId: 'app-1', role: 'created', lastAt: now - 1 }]);
+
+    await store.delete(doc.id);
+    expect(store.get(doc.id)).toBeNull();
+    expect(store.get(doc.id, { includeDeleted: true })?.title).toBe('Plan');
+    expect(store.list().map((a) => a.id)).toEqual([page.id]);
+    expect(store.list({ deleted: true }).map((a) => a.id)).toEqual([doc.id]);
+    await expect(store.update(doc.id, { title: 'x' })).rejects.toMatchObject({ code: 'notFound' });
+
+    reopen(); // every row was committed
+    expect(store.get(page.id)?.title).toBe('Report');
+    expect(store.listSpaces()).toEqual([space]);
+  });
+
+  it('seeds a kind’s first content through its adapter’s initial hook in the create’s commit, announcing one created (Decision Log 44c)', async () => {
+    const seeded: { title: string }[] = [];
+    reopen([{ kind: 'document', initial: (doc, info) => (seeded.push(info), doc.get('root').insert(0, `# ${info.title}`)) }]);
+    const changes: ArtifactChanged[] = [];
+    store.onChange((change) => changes.push(change));
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, agent);
+    expect(seeded).toEqual([{ title: 'Plan' }]);
+    expect(rootText(doc.id)).toBe('# Plan');
+    expect(committed('SELECT actor FROM artifact_updates WHERE artifactId = ?', doc.id)).toEqual([{ actor: 'session:app-1' }]); // one row, the creator's
+    await new Promise((resolve) => setTimeout(resolve, 300)); // past the change feed's coalescing window
+    expect(changes.filter((c) => c.artifactId === doc.id).map((c) => c.change)).toEqual(['created']);
+    // a caller's own first content wins over the seed; a kind without the hook starts empty
+    const given = await store.create({ kind: 'document', title: 'Given', initial: (d) => d.get('root').insert(0, 'mine') }, human);
+    expect(rootText(given.id)).toBe('mine');
+    expect(seeded).toHaveLength(1);
+    const deck = await store.create({ kind: 'presentation', title: 'Deck' }, human);
+    expect(store.revision(deck.id)).toBe(0);
+  });
+
+  it('takes back a create whose seed throws: no entity, no row', async () => {
+    reopen([{ kind: 'document', initial: () => { throw new Error('the seed broke'); } }]);
+    await expect(store.create({ kind: 'document', title: 'Plan' }, human)).rejects.toThrow(/the seed broke/);
+    expect(store.list()).toEqual([]);
+    expect(committed('SELECT seq FROM artifact_updates')).toEqual([]);
+  });
+
+  it('resolves a handle over the asking session’s lineage only, and refuses a handle the creating session already holds', async () => {
+    const mine = await store.create({ kind: 'html', title: 'A', handle: 'report', content: { bytes: html('a') } }, agent);
+    const theirs = await store.create({ kind: 'html', title: 'B', handle: 'report', content: { bytes: html('b') } }, other);
+    expect(theirs.id).not.toBe(mine.id); // handles never collide across sessions
+    expect(store.resolve('report', ['app-1'])).toBe(mine.id);
+    expect(store.resolve('report', ['app-3', 'app-2', 'app-1'])).toBe(theirs.id); // nearest first
+    expect(store.resolve('report', ['app-3'])).toBeNull();
+    expect(store.resolve(mine.id, [])).toBe(mine.id);
+    await expect(store.create({ kind: 'html', title: 'C', handle: 'report', content: { bytes: html('c') } }, agent)).rejects.toMatchObject({ code: 'handleTaken' });
+    await expect(store.create({ kind: 'html', title: 'D', handle: '../x', content: { bytes: html('d') } }, agent)).rejects.toMatchObject({ code: 'invalid' });
+  });
+
+  it('deletes a Space leaving its artifacts outside any Space, and announces each change', async () => {
+    const changes: ArtifactChanged[] = [];
+    const spaces: unknown[] = [];
+    store.onChange((change) => changes.push(change));
+    store.onSpaceChange((change) => spaces.push(change));
+    const space = await store.createSpace({ name: 'Repo', linkedDir: '/tmp/repo' });
+    await store.updateSpace(space.id, { name: 'Repository' });
+    const doc = await store.create({ kind: 'document', title: 'Notes', spaceId: space.id }, human);
+    await store.deleteSpace(space.id);
+    expect(store.get(doc.id)?.spaceId).toBeUndefined();
+    expect(spaces).toEqual([
+      { spaceId: space.id, change: 'created' },
+      { spaceId: space.id, change: 'updated' },
+      { spaceId: space.id, change: 'deleted' },
+    ]);
+    expect(changes.map((c) => [c.artifactId, c.kind, c.change])).toEqual([
+      [doc.id, 'document', 'created'],
+      [doc.id, 'document', 'updated'],
+    ]);
+  });
+
+  it('refuses to delete a design system that still governs a live artifact, naming them (Decision Log 22a)', async () => {
+    const system = await store.create({ kind: 'design_system', title: 'House style' }, human);
+    const doc = await store.create({ kind: 'document', title: 'Letter', designSystemId: system.id }, human);
+    await expect(store.delete(system.id)).rejects.toMatchObject({ code: 'designSystemInUse', data: { artifactIds: [doc.id] } });
+    await store.delete(doc.id);
+    await store.delete(system.id);
+    expect(store.get(system.id)).toBeNull();
+  });
+});
+
+describe('ArtifactStore: byte kinds and assets (Decision Log 2, 7)', () => {
+  it('stores each html write immutably under content/<seq>/, with a log row and a version; a file artifact stays in place', async () => {
+    const page = await store.create({ kind: 'html', title: 'Report', content: { bytes: html('one') } }, agent);
+    const first = store.contentRef(page.id);
+    expect(text(readFileSync(first.path))).toContain('one');
+    expect(first.path).toBe(join(dir, page.id, 'content', String(first.revision), 'index.html'));
+    const second = await store.writeContent(page.id, { bytes: html('two') }, agent);
+    expect(second.revision).toBeGreaterThan(first.revision);
+    expect(text(readFileSync(store.contentRef(page.id).path))).toContain('two');
+    expect(text(readFileSync(store.contentRef(page.id, first.revision).path))).toContain('one'); // still there
+    expect(store.listVersions(page.id).map((v) => [v.kind, v.seq])).toEqual([
+      ['import', first.revision],
+      ['auto', second.revision],
+    ]);
+    expect(store.revision(page.id)).toBe(second.revision);
+    await expect(store.writeContent(page.id, { bytes: new Uint8Array(16 * 1024 * 1024 + 1) }, agent)).rejects.toMatchObject({ code: 'tooLarge' });
+
+    const path = join(dir, 'outside.pdf');
+    writeFileSync(path, 'pdf bytes');
+    const file = await store.create({ kind: 'file', title: 'outside.pdf', content: { path } }, agent);
+    expect(store.get(file.id)?.linkedPath).toBe(path);
+    expect(store.contentRef(file.id)).toMatchObject({ path, ref: { name: 'outside.pdf', size: 9 } });
+    await expect(store.create({ kind: 'file', title: 'x', content: { path: join(dir, 'missing') } }, agent)).rejects.toMatchObject({ code: 'invalid' });
+  });
+
+  it('restores an html version by publishing its old bytes as a new write and a `restore` version', async () => {
+    const page = await store.create({ kind: 'html', title: 'Report', content: { bytes: html('one') } }, agent);
+    await store.writeContent(page.id, { bytes: html('two') }, agent);
+    const [imported] = store.listVersions(page.id);
+    const restored = await store.restore(page.id, imported.id, human);
+    expect(text(readFileSync(store.contentRef(page.id).path))).toContain('one');
+    expect(store.contentRef(page.id).revision).toBe(restored.revision);
+    const versions = store.listVersions(page.id);
+    expect(versions.at(-1)).toMatchObject({ id: restored.versionId, kind: 'restore', actor: human, label: expect.stringMatching(/^Restored from /) });
+  });
+
+  it('keeps assets content-addressed, deduplicated and uniquely named per artifact, and lists them in versions’ asset refs', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Deck' }, human);
+    const a = await store.uploadAsset(doc.id, new Uint8Array([1, 2, 3]), { name: 'logo.png', mime: 'image/png' }, human);
+    expect(a.ref).toBe('assets/logo.png');
+    expect(await store.uploadAsset(doc.id, new Uint8Array([1, 2, 3]), { name: 'other.png', mime: 'image/png' }, agent)).toEqual(a);
+    const b = await store.uploadAsset(doc.id, new Uint8Array([9]), { name: 'logo.png', mime: 'image/png' }, agent);
+    expect(b.ref).toBe('assets/logo-2.png');
+    const assets = store.listAssets(doc.id);
+    expect(assets.map((x) => [x.ref, x.createdBy])).toEqual([
+      ['assets/logo.png', human],
+      ['assets/logo-2.png', agent],
+    ]);
+    expect(existsSync(join(dir, doc.id, 'assets', assets[0].sha256))).toBe(true);
+    await expect(store.uploadAsset(doc.id, new Uint8Array([1]), { name: '..', mime: 'x' }, human)).rejects.toMatchObject({ code: 'invalid' });
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'x'));
+    const id = await store.createVersion(doc.id, { kind: 'named', actor: human, label: 'With logos' });
+    expect(store.listVersions(doc.id).find((v) => v.id === id)?.assetRefs.sort()).toEqual([a.assetId, b.assetId].sort());
+  });
+
+  it('answers a deduplicated upload only once the asset row it names has committed, and fails it with that commit (M3 re-review finding 1)', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'document', title: 'Deck' }, human);
+    tick();
+    const doc = await creation;
+    const upload = () => store.uploadAsset(doc.id, new Uint8Array([1]), { name: 'a.png', mime: 'image/png' }, human);
+    const first = upload();
+    let repeatSettled = false;
+    const repeat = upload().finally(() => (repeatSettled = true));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_assets')[0].n).toBe(0);
+    expect(repeatSettled).toBe(false);
+    tick();
+    expect(await repeat).toEqual(await first);
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_assets')[0].n).toBe(1);
+
+    const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    const bytes = () => store.uploadAsset(doc.id, new Uint8Array([2]), { name: 'b.png', mime: 'image/png' }, human);
+    const outcomes = Promise.allSettled([bytes(), bytes()]);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    expect((await outcomes).map((o) => o.status)).toEqual(['rejected', 'rejected']);
+    commit.mockRestore();
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_assets')[0].n).toBe(1);
+  });
+});
+
+describe('ArtifactStore: duplicate (Decision Log 23b)', () => {
+  it('copies a Y kind’s live state or a version’s, and a byte kind’s content, each copy starting with an `import` version', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'first'));
+    const v1 = (await store.createVersion(doc.id, { kind: 'named', actor: human, label: 'v1' }))!;
+    await write(doc.id, agent, (d) => d.get('root').insert(5, ' second'));
+    const live = await store.duplicate(doc.id, {}, agent);
+    const old = await store.duplicate(doc.id, { versionId: v1, title: 'Old plan' }, human);
+    expect(live).toMatchObject({ title: 'Copy of Plan', kind: 'document', createdBy: agent });
+    expect(old.title).toBe('Old plan');
+    expect(json(live.id).root).toEqual(json(doc.id).root);
+    const oldDoc = newDoc();
+    applyV2(oldDoc, service.readState(old.id).state);
+    expect(oldDoc.get('root').toString()).toBe('first');
+    expect(store.listVersions(live.id).map((v) => v.kind)).toEqual(['import']);
+    expect(store.links(live.id).map((l) => l.role)).toEqual(['created']);
+
+    const page = await store.create({ kind: 'html', title: 'Page', content: { bytes: html('page') } }, agent);
+    const pageCopy = await store.duplicate(page.id, {}, human);
+    expect(text(readFileSync(store.contentRef(pageCopy.id).path))).toContain('page');
+    expect(store.contentRef(pageCopy.id).path).not.toBe(store.contentRef(page.id).path);
+  });
+
+  it('copies the assets the copied state needs, keeping their ids and refs, before the copy’s import version (M3 review finding 5)', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const logo = await store.uploadAsset(doc.id, new Uint8Array([1, 2]), { name: 'logo.png', mime: 'image/png' }, human);
+    await write(doc.id, human, (d) => d.get('root').setAttr('image', logo.ref));
+    const v1 = (await store.createVersion(doc.id, { kind: 'named', actor: human, label: 'v1' }))!;
+    const chart = await store.uploadAsset(doc.id, new Uint8Array([3]), { name: 'chart.png', mime: 'image/png' }, agent);
+    await write(doc.id, agent, (d) => d.get('root').setAttr('chart', chart.ref));
+
+    const live = await store.duplicate(doc.id, {}, agent);
+    const sameAssets = (artifactId: string) => store.listAssets(artifactId).map(({ assetId, ref, name, mime, size, sha256 }) => ({ assetId, ref, name, mime, size, sha256 }));
+    expect(sameAssets(live.id)).toEqual(sameAssets(doc.id));
+    expect(store.listVersions(live.id)[0]).toMatchObject({ kind: 'import' });
+    expect(store.listVersions(live.id)[0].assetRefs.sort()).toEqual([logo.assetId, chart.assetId].sort());
+    for (const asset of store.listAssets(live.id)) expect(readFileSync(join(dir, live.id, 'assets', asset.sha256))).toEqual(readFileSync(join(dir, doc.id, 'assets', asset.sha256)));
+
+    const old = await store.duplicate(doc.id, { versionId: v1 }, human);
+    expect(store.listAssets(old.id).map((a) => [a.assetId, a.ref])).toEqual([[logo.assetId, logo.ref]]); // only what v1 had
+    expect(store.listVersions(old.id)[0].assetRefs).toEqual([logo.assetId]);
+
+    const page = await store.create({ kind: 'html', title: 'Page', content: { bytes: html('<img src="assets/logo.png">') } }, agent);
+    const pageLogo = await store.uploadAsset(page.id, new Uint8Array([9]), { name: 'logo.png', mime: 'image/png' }, agent);
+    const pageCopy = await store.duplicate(page.id, {}, human);
+    expect(store.listAssets(pageCopy.id).map((a) => a.assetId)).toEqual([pageLogo.assetId]);
+    expect(store.listVersions(pageCopy.id)[0].assetRefs).toEqual([pageLogo.assetId]);
+  });
+
+  it('leaves no copy when the copied state’s write fails: the entity row commits with its state or not at all (Decision Log 37c)', async () => {
+    let failing = false;
+    const adapter: KindAdapter = {
+      kind: 'document',
+      afterUpdate: () => {
+        if (failing) throw new Error('a repair that cannot run');
+      },
+    };
+    reopen([adapter]);
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await store.uploadAsset(doc.id, new Uint8Array([1, 2]), { name: 'logo.png', mime: 'image/png' }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'first'));
+    const changes: ArtifactChanged[] = [];
+    store.onChange((change) => changes.push(change));
+    const before = committed('SELECT id FROM artifacts ORDER BY id');
+
+    failing = true;
+    await expect(store.duplicate(doc.id, {}, agent)).rejects.toThrow(/a repair that cannot run/);
+    await store.writeCommitted(async () => {}); // any later batch commits
+    await service.whenCommitted();
+    expect(committed('SELECT id FROM artifacts ORDER BY id')).toEqual(before);
+    expect(store.list({ appSessionId: 'app-1' })).toEqual([]);
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_sessions')).toEqual([{ n: 0 }]);
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_assets WHERE artifactId <> ?', doc.id)).toEqual([{ n: 0 }]);
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_versions WHERE artifactId <> ?', doc.id)).toEqual([{ n: 0 }]);
+    expect(changes.filter((change) => change.change === 'created')).toEqual([]);
+    expect(readdirSync(dir).filter((name) => !name.startsWith('store.sqlite'))).toEqual([doc.id]); // the copy's asset files went too
+
+    failing = false;
+    const copy = await store.duplicate(doc.id, {}, agent);
+    expect(rootText(copy.id)).toBe('first');
+    expect(store.listAssets(copy.id)).toHaveLength(1);
+    expect(store.listVersions(copy.id).map((v) => v.kind)).toEqual(['import']);
+  });
+});
+
+describe('ArtifactStore: duplicate whose commit fails (M6a fix wave 1)', () => {
+  it('leaves no copy of a Y kind or a byte kind when the batch it wrote in fails to commit, rows, files or event', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await store.uploadAsset(doc.id, new Uint8Array([1, 2]), { name: 'logo.png', mime: 'image/png' }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'first'));
+    const page = await store.create({ kind: 'html', title: 'Page', content: { bytes: html('page') } }, agent);
+    await store.uploadAsset(page.id, new Uint8Array([3]), { name: 'chart.png', mime: 'image/png' }, agent);
+    const changes: ArtifactChanged[] = [];
+    store.onChange((change) => changes.push(change));
+    const ids = () => committed('SELECT id FROM artifacts ORDER BY id');
+    const before = ids();
+
+    for (const source of [doc.id, page.id]) {
+      const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+        throw new Error('disk full');
+      });
+      await expect(store.duplicate(source, {}, agent)).rejects.toThrow();
+      commit.mockRestore();
+      expect(ids()).toEqual(before);
+      expect(store.list({ appSessionId: 'app-1' }).map((a) => a.id)).toEqual([page.id]);
+      expect(readdirSync(dir).filter((name) => !name.startsWith('store.sqlite')).sort()).toEqual([doc.id, page.id].sort()); // no copy's directory
+    }
+    expect(changes.filter((change) => change.change === 'created')).toEqual([]);
+  });
+});
+
+describe('ArtifactStore: lastWrite (Decision Log 35c, 37a)', () => {
+  it('answers the actor and time of the artifact’s last log row, null when it has none', async () => {
+    expect(store.lastWrite('7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d')).toBeNull();
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    expect(store.lastWrite(doc.id)).toBeNull(); // created, never written
+    now += MIN;
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'by hand'));
+    expect(store.lastWrite(doc.id)).toEqual({ actor: human, at: now });
+    const written = now;
+    now += MIN;
+    await store.update(doc.id, { title: 'Plan B' }); // an entity change is not a write
+    expect(store.lastWrite(doc.id)).toEqual({ actor: human, at: written });
+    await write(doc.id, agent, (d) => d.get('root').insert(0, 'by the agent '));
+    expect(store.lastWrite(doc.id)).toEqual({ actor: agent, at: now });
+
+    const page = await store.create({ kind: 'html', title: 'Page', content: { bytes: html('v1') } }, other);
+    expect(store.lastWrite(page.id)).toEqual({ actor: other, at: now });
+    now += MIN;
+    await store.writeContent(page.id, { bytes: html('v2') }, human);
+    expect(store.lastWrite(page.id)).toEqual({ actor: human, at: now });
+  });
+
+  it('survives maintenance: log pruning keeps each artifact’s newest row', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const start = now;
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'old '));
+    now += MIN;
+    await write(doc.id, agent, (d) => d.get('root').insert(0, 'older still '));
+    const last = now;
+    now = start + 20 * DAY;
+    const report = await store.maintenance.run();
+    expect(report.logRowsPruned).toBe(1); // the first row; the newest stays
+    expect(committed('SELECT actor, at FROM artifact_updates WHERE artifactId = ?', doc.id)).toEqual([{ actor: 'session:app-1', at: last }]);
+    reopen();
+    expect(store.lastWrite(doc.id)).toEqual({ actor: agent, at: last });
+    expect(rootText(doc.id)).toBe('older still old ');
+  });
+});
+
+describe('ArtifactStore: versions (Decision Log 8)', () => {
+  it('lists versions with actors and kinds, stores deltas between keyframes, and reconstructs every version byte-identically', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const captured = new Map<number, Uint8Array>();
+    const versionNow = async (kind: 'auto' | 'named', actor: Actor) => {
+      const id = await store.createVersion(doc.id, { kind, actor, label: kind === 'named' ? 'Named' : undefined });
+      if (id !== null) captured.set(id, service.readState(doc.id).state);
+      return id;
+    };
+    await write(doc.id, human, (d) => d.get('root').insert(0, prose(2_000)));
+    await versionNow('auto', human);
+    for (let i = 0; i < 12; i++) {
+      await write(doc.id, i % 2 ? agent : human, (d) => {
+        d.get('root').insert(i * 7, `edit ${i} `);
+        if (i % 3 === 0) d.get('root').delete(100 + i, 20);
+        d.get('files').setAttr('a.md', `rev ${i}`);
+      });
+      await versionNow(i % 4 === 3 ? 'named' : 'auto', i % 2 ? agent : human);
+    }
+    expect(await versionNow('auto', human)).toBeNull(); // nothing moved
+    const versions = store.listVersions(doc.id);
+    expect(versions).toHaveLength(13);
+    expect(versions.filter((v) => v.kind === 'named').map((v) => v.label)).toEqual(['Named', 'Named', 'Named']);
+    expect(versions[2].actor).toEqual(agent);
+    const encodings = committed('SELECT enc FROM artifact_versions ORDER BY id').map((r) => r.enc);
+    expect(encodings[0]).toBe('full');
+    expect(encodings.filter((e) => e === 'delta').length).toBeGreaterThan(8);
+    for (const [id, state] of captured) expect(canonicalV2(store.versionState(doc.id, id))).toEqual(canonicalV2(state));
+    const last = versions.at(-1)!;
+    expect(canonicalV2(store.versionState(doc.id, { seq: last.seq }))).toEqual(canonicalV2(captured.get(last.id)!));
+    reopen(); // from the stored rows alone, no cache
+    for (const [id, state] of captured) expect(canonicalV2(store.versionState(doc.id, id))).toEqual(canonicalV2(state));
+  });
+
+  it('writes auto versions 2 minutes after the last human update and every 10 minutes of activity, never when nothing changed', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const autos = () => store.listVersions(doc.id).filter((v) => v.kind === 'auto').length;
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'a'));
+    await vi.advanceTimersByTimeAsync(AUTO_IDLE_MS - 1_000);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'b')); // the idle clock restarts
+    await vi.advanceTimersByTimeAsync(AUTO_IDLE_MS - 1_000);
+    expect(autos()).toBe(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await until(() => autos() === 1);
+    await vi.advanceTimersByTimeAsync(AUTO_EVERY_MS);
+    expect(autos()).toBe(1); // the 10-minute timer fired with nothing new since
+    // continuous agent activity: no idle timer, the 10-minute one writes
+    for (let t = 0; t < AUTO_EVERY_MS; t += MIN) {
+      await write(doc.id, agent, (d) => d.get('root').insert(0, 'c'));
+      await vi.advanceTimersByTimeAsync(MIN);
+    }
+    await until(() => autos() === 2);
+    await vi.advanceTimersByTimeAsync(3 * AUTO_EVERY_MS);
+    expect(autos()).toBe(2);
+  });
+
+  it('writes an auto version on markViewed only when the revision moved since the last version', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await store.markViewed(doc.id);
+    expect(store.listVersions(doc.id)).toEqual([]);
+    expect(store.get(doc.id)?.lastViewedAt).toBe(now);
+    await write(doc.id, agent, (d) => d.get('root').insert(0, 'agent work'));
+    await store.markViewed(doc.id);
+    expect(store.listVersions(doc.id).map((v) => [v.kind, v.actor])).toEqual([['auto', agent]]);
+    await store.markViewed(doc.id);
+    expect(store.listVersions(doc.id)).toHaveLength(1);
+  });
+
+  it('names an existing version, any kind, keeping its origin, and renames it; an unknown one is notFound (Decision Log 37d)', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, agent, (d) => d.get('root').insert(0, 'agent work'));
+    await store.markViewed(doc.id); // an auto version credited to the agent
+    const [auto] = store.listVersions(doc.id);
+    const changes: ArtifactChanged[] = [];
+    store.onChange((change) => changes.push(change));
+
+    const named = await store.nameVersion(doc.id, auto.id, { label: 'Draft one', note: 'before review' });
+    expect(named).toEqual({ ...auto, label: 'Draft one', note: 'before review' });
+    expect(store.listVersions(doc.id)).toEqual([named]);
+    expect(changes.map((change) => change.change)).toEqual(['updated']);
+    const renamed = await store.nameVersion(doc.id, auto.id, { label: 'Draft 1' });
+    expect(renamed).toEqual({ ...auto, label: 'Draft 1', note: 'before review' }); // an omitted note is kept (Decision Log 38c)
+    expect(await store.nameVersion(doc.id, auto.id, { label: 'Draft 1', note: 'after review' })).toEqual({ ...auto, label: 'Draft 1', note: 'after review' }); // a string replaces it
+    expect(await store.nameVersion(doc.id, auto.id, { label: 'Draft 1', note: null })).toEqual({ ...auto, label: 'Draft 1' }); // null clears it
+    expect(committed('SELECT kind, label, note FROM artifact_versions WHERE id = ?', auto.id)).toEqual([{ kind: 'auto', label: 'Draft 1', note: null }]);
+
+    const page = await store.create({ kind: 'html', title: 'Page', content: { bytes: html('v1') } }, agent);
+    const [imported] = store.listVersions(page.id);
+    expect(await store.nameVersion(page.id, imported.id, { label: 'Original' })).toMatchObject({ kind: 'import', label: 'Original' });
+
+    await expect(store.nameVersion(doc.id, 999, { label: 'x' })).rejects.toMatchObject({ code: 'notFound', data: { artifactId: doc.id, versionId: 999 } });
+    await expect(store.nameVersion(doc.id, imported.id, { label: 'x' })).rejects.toMatchObject({ code: 'notFound' }); // another artifact's version
+    await store.delete(page.id);
+    await expect(store.nameVersion(page.id, imported.id, { label: 'x' })).rejects.toMatchObject({ code: 'notFound' });
+  });
+
+  it('keeps a named auto version’s label and note when a version written at its revision upgrades it in place', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, agent, (d) => d.get('root').insert(0, 'agent work'));
+    await store.autoVersion(doc.id);
+    const [auto] = store.listVersions(doc.id);
+    await store.nameVersion(doc.id, auto.id, { label: 'Kept', note: 'mine' });
+    await store.endTurn(sid('app-1')); // a turn version at the same revision upgrades the auto row
+    expect(store.listVersions(doc.id)).toEqual([expect.objectContaining({ id: auto.id, kind: 'turn', label: 'Kept', note: 'mine', summary: '1 edit' })]);
+  });
+
+  it('writes one turn version per artifact the session wrote, summarised by the kind or as N edits, and clears its presence', async () => {
+    const adapter: KindAdapter = { kind: 'presentation', summarizeTurn: (results) => `${results.length} slide changes` };
+    reopen([adapter]);
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const deck = await store.create({ kind: 'presentation', title: 'Deck' }, human);
+    const untouched = await store.create({ kind: 'document', title: 'Other' }, human);
+    await store.testWrite(doc.id, 'op-1', [{ op: 'insertText', index: 0, text: 'a' }], agent);
+    await store.testWrite(doc.id, 'op-2', [{ op: 'insertText', index: 0, text: 'b' }], agent);
+    await store.testWrite(deck.id, 'op-3', [{ op: 'setAttr', key: 'k', value: 1 }], agent);
+    await store.endTurn(sid('app-1'));
+    expect(store.listVersions(doc.id).map((v) => [v.kind, v.actor, v.summary])).toEqual([['turn', agent, '2 edits']]);
+    expect(store.listVersions(deck.id).map((v) => v.summary)).toEqual(['1 slide changes']);
+    expect(store.listVersions(untouched.id)).toEqual([]);
+    await store.endTurn(sid('app-1'));
+    expect(store.listVersions(doc.id)).toHaveLength(1);
+  });
+
+  it('writes no turn version for a session that only read an artifact or wrote no edit to it (M3 re-review finding 2)', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'human content'));
+    await store.withOp('read-1', 'artifact_read', doc.id, async () => store.get(doc.id), { readOnly: true, actor: agent });
+    await store.withOp('asset-1', 'artifact_upload_asset', doc.id, (scope) => store.uploadAsset(doc.id, new Uint8Array([5]), { name: 'a.png', mime: 'image/png' }, agent, (r) => scope.record(r)), { actor: agent });
+    await store.endTurn(sid('app-1'));
+    expect(store.listVersions(doc.id)).toEqual([]);
+    // A read beside a real edit is not counted as one.
+    await store.withOp('read-2', 'artifact_read', doc.id, async () => store.get(doc.id), { readOnly: true, actor: agent });
+    await store.testWrite(doc.id, 'op-1', [{ op: 'insertText', index: 0, text: 'a' }], agent);
+    await store.endTurn(sid('app-1'));
+    expect(store.listVersions(doc.id).map((v) => [v.kind, v.actor, v.summary])).toEqual([['turn', agent, '1 edit']]);
+  });
+
+  it('pins the governing design system’s version equal to its live state, writing a system version first when it moved (Decision Log 22b, 22d)', async () => {
+    const system = await store.create({ kind: 'design_system', title: 'House style' }, human);
+    const space = await store.createSpace({ name: 'School' });
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# v1'));
+    const doc = await store.create({ kind: 'document', title: 'Letter', spaceId: space.id }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'text'));
+    expect(await store.createVersion(doc.id, { kind: 'named', actor: human })).not.toBeNull();
+    expect(store.listVersions(doc.id)[0].designSystemRef).toBeUndefined(); // nothing governs it yet
+    await store.setDefaults({ owner: null, spaces: { [space.id]: system.id } });
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'more '));
+    await store.createVersion(doc.id, { kind: 'named', actor: human });
+    const systemVersions = store.listVersions(system.id);
+    expect(systemVersions.map((v) => v.kind)).toEqual(['auto']);
+    const pin = store.listVersions(doc.id)[1].designSystemRef!;
+    expect(pin).toEqual({ id: system.id, versionSeq: store.revision(system.id) });
+    const pinned = newDoc();
+    applyV2(pinned, store.versionState(system.id, { seq: pin.versionSeq }));
+    expect(pinned.get('files').getAttr('DESIGN.md')).toBe('# v1');
+    await store.createVersion(doc.id, { kind: 'named', actor: human });
+    expect(store.listVersions(system.id)).toHaveLength(1); // the system did not move: the same version pinned
+    reopen();
+    expect(store.defaults()).toEqual({ owner: null, spaces: { [space.id]: system.id } });
+    store.registerDesignSystemContext(async (s) => `guide of ${s.title}`);
+    expect(await store.designSystemContextFor(doc.id)).toBe('guide of House style');
+  });
+
+  it('asks a registered design-system chain which system governs: {id} pins and answers that system, {builtin} pins nothing (Decision Log 42)', async () => {
+    const house = await store.create({ kind: 'design_system', title: 'House' }, human);
+    const own = await store.create({ kind: 'design_system', title: 'Own' }, human);
+    await write(house.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# house'));
+    const doc = await store.create({ kind: 'document', title: 'Letter', designSystemId: own.id }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'a'));
+    store.registerDesignSystemContext(async (s) => `guide of ${s.title}`);
+    // before any registration A's chain answers: the artifact's own system
+    expect(await store.designSystemContextFor(doc.id)).toBe('guide of Own');
+
+    const asked: unknown[] = [];
+    let answer: { id: string } | { builtin: 'maws' } = { id: house.id };
+    store.registerDesignSystemChain({ governing: () => ({ id: 'never-used' }) });
+    store.registerDesignSystemChain({
+      governing: (target) => {
+        asked.push(target);
+        return answer;
+      },
+    }); // the last registration wins
+    await store.createVersion(doc.id, { kind: 'named', actor: human });
+    expect(store.listVersions(doc.id)[0].designSystemRef).toEqual({ id: house.id, versionSeq: store.revision(house.id) });
+    expect(asked[0]).toMatchObject({ id: doc.id, designSystemId: own.id, spaceId: null }); // handed the artifact's row
+    expect(await store.designSystemContextFor(doc.id)).toBe('guide of House');
+    expect(await store.designSystemContextFor({})).toBe('guide of House');
+
+    answer = { builtin: 'maws' };
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'b'));
+    await store.createVersion(doc.id, { kind: 'named', actor: human });
+    expect(store.listVersions(doc.id)[1].designSystemRef).toBeUndefined(); // the bundled floor renders: no pin
+    expect(await store.designSystemContextFor(doc.id)).toBeNull(); // nothing attached, no guide made up
+  });
+
+  it('pins a design system never written by writing and keeping its empty state as a version at seq 0 (M3 review finding 2)', async () => {
+    const system = await store.create({ kind: 'design_system', title: 'Empty style' }, human);
+    const doc = await store.create({ kind: 'document', title: 'Letter', designSystemId: system.id }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'a'));
+    expect(await store.createVersion(doc.id, { kind: 'named', actor: human })).not.toBeNull();
+    expect(store.listVersions(doc.id)[0].designSystemRef).toEqual({ id: system.id, versionSeq: 0 });
+    expect(store.listVersions(system.id)).toMatchObject([{ seq: 0, kind: 'auto' }]);
+    const pinned = newDoc();
+    applyV2(pinned, store.versionState(system.id, { seq: 0 }));
+    expect(pinned.get('files').getAttr('DESIGN.md')).toBeUndefined();
+    const page = await store.create({ kind: 'html', title: 'Page', designSystemId: system.id, content: { bytes: html('one') } }, human);
+    expect(store.listVersions(page.id)[0].designSystemRef).toEqual({ id: system.id, versionSeq: 0 });
+    expect(store.listVersions(system.id)).toHaveLength(1); // the same empty version serves every pin
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# later'));
+    await store.createVersion(system.id, { kind: 'named', actor: human });
+    now += DAY;
+    await store.pruneVersions(system.id, now);
+    expect(store.listVersions(system.id).map((v) => v.seq)).toEqual([0]); // a pin's target is kept
+    expect(store.versionState(system.id, { seq: 0 })).toBeInstanceOf(Uint8Array);
+  });
+
+  it('refreshes the asset refs and the pin when an auto version is upgraded in place, a removed system clearing it (M3 review finding 4)', async () => {
+    const system = await store.create({ kind: 'design_system', title: 'House style' }, human);
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# s'));
+    const doc = await store.create({ kind: 'document', title: 'Letter', designSystemId: system.id }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'a'));
+    const auto = await store.createVersion(doc.id, { kind: 'auto', actor: human });
+    expect(store.listVersions(doc.id)[0]).toMatchObject({ assetRefs: [], designSystemRef: { id: system.id } });
+    const asset = await store.uploadAsset(doc.id, new Uint8Array([1]), { name: 'a.png', mime: 'image/png' }, human);
+    await store.update(doc.id, { designSystemId: null });
+    expect(await store.createVersion(doc.id, { kind: 'named', actor: human, label: 'Current' })).toBe(auto);
+    const [upgraded] = store.listVersions(doc.id);
+    expect(upgraded).toMatchObject({ kind: 'named', label: 'Current', assetRefs: [asset.assetId] });
+    expect(upgraded.designSystemRef).toBeUndefined();
+  });
+});
+
+describe('ArtifactStore: restore (Decision Log 16)', () => {
+  async function schemaAgnostic() {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, human, (d) => {
+      d.get('root').setAttr('title', 'Plan');
+      d.get('root').insert(0, 'hello world');
+      const child = new (d.get('root').constructor as new (name: string) => ReturnType<Doc['get']>)('section');
+      child.setAttr('id', 's1');
+      child.insert(0, 'nested');
+      d.get('root').insert(d.get('root').length, [child]);
+      d.get('files').setAttr('index.md', '# one');
+    });
+    return doc;
+  }
+
+  it('brings back every root type, keeps a concurrent edit to an unrelated root, credits the restorer, brackets it with versions and tells connected replicas', async () => {
+    const doc = await schemaAgnostic();
+    const at = (await store.createVersion(doc.id, { kind: 'named', actor: human, label: 'Before the agent' }))!;
+    const before = json(doc.id);
+    await write(doc.id, agent, (d) => {
+      d.get('root').setAttr('title', 'Agent title');
+      d.get('root').setAttr('title', 'Agent title, again'); // overwritten twice since the version (yjs#814)
+      d.get('root').delete(0, 6);
+      (d.get('root').toArray().find((item) => typeof item !== 'string') as ReturnType<Doc['get']>).insert(0, 'changed ');
+      d.get('files').setAttr('index.md', '# two');
+      d.get('files').setAttr('new.md', 'added');
+    });
+    await write(doc.id, agent, (d) => d.get('root').setAttr('title', 'Third title'));
+    const replica = service.replica(sid('app-9'), doc.id);
+    await replica.whenSynced();
+    const seen: unknown[] = [];
+    replica.provider.onRestored((restored) => seen.push(restored));
+    // another replica edits an unrelated root while the restore runs: its update reaches the host after the restore
+    const concurrent = newDoc();
+    applyV2(concurrent, service.readState(doc.id).state);
+    const sv = stateVector(concurrent);
+    concurrent.get('notes').insert(0, 'a concurrent note');
+
+    const result = await store.restore(doc.id, at, human);
+    expect(committed('SELECT actor FROM artifact_updates WHERE seq = ?', result.revision)).toEqual([{ actor: 'human' }]);
+    await write(doc.id, other, (d) => applyV1(d, diffV1(concurrent, sv)));
+    expect(json(doc.id).root).toEqual(before.root);
+    expect(json(doc.id).files).toEqual(before.files);
+    expect(json(doc.id).notes).toEqual('a concurrent note');
+    const kinds = store.listVersions(doc.id).map((v) => v.kind);
+    expect(kinds).toEqual(['named', 'auto', 'restore']);
+    expect(store.listVersions(doc.id).at(-1)).toMatchObject({ id: result.versionId, seq: result.revision, label: 'Restored from Before the agent', actor: human });
+    await until(() => seen.length === 1);
+    expect(seen).toEqual([{ revision: result.revision, versionId: result.versionId }]);
+    await until(() => replica.doc.get('files').getAttr('index.md') === '# one');
+  });
+
+  it('restores a no-op as a decodable empty write, and works after maintenance pruned the log and thinned versions', async () => {
+    const doc = await schemaAgnostic();
+    const at = (await store.createVersion(doc.id, { kind: 'named', actor: human, label: 'v1' }))!;
+    const before = json(doc.id);
+    const noop = await store.restore(doc.id, at, human);
+    expect(json(doc.id)).toEqual(before);
+    expect(noop.revision).toBe(store.revision(doc.id));
+    await write(doc.id, agent, (d) => {
+      d.get('root').setAttr('title', 'x');
+      d.get('files').setAttr('index.md', '# two');
+    });
+    await store.createVersion(doc.id, { kind: 'auto', actor: agent });
+    now += 40 * DAY;
+    await store.maintenance.run();
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_updates WHERE artifactId = ?', doc.id)).toEqual([{ n: 1 }]); // the log is gone but its newest row (lastWrite's)
+    reopen();
+    await store.restore(doc.id, at, human);
+    expect(json(doc.id).root).toEqual(before.root);
+    expect(json(doc.id).files).toEqual(before.files);
+  });
+
+  it('lets a kind scope the revert and write its after-effects, thread rows included, in the restore’s commit', async () => {
+    const told: string[] = []; // the artifact id each restore hook was given (Decision Log 27)
+    const adapter: KindAdapter = {
+      kind: 'document',
+      revertScope: (live, old, { artifactId }) => {
+        told.push(`revertScope ${artifactId}`);
+        expect(old.get('threads').getAttr('t1')).toBeUndefined();
+        const sv = stateVector(old);
+        const posted = diffV1(live, sv);
+        const ids = contentIdsOf(posted);
+        // keep only what was posted to the threads root: everything inserted under its own clientID by the poster
+        const poster = live.get('threads').getAttr('poster') as number;
+        ids.inserts.clients.forEach((_, client) => client !== poster && ids.inserts.clients.delete(client));
+        ids.deletes.clients.clear();
+        return { keep: ids };
+      },
+      afterRestore: (doc, { artifactId, versionId }) => {
+        told.push(`afterRestore ${artifactId}`);
+        doc.get('meta').setAttr('restoredFrom', versionId);
+        return { threads: { upsert: [{ threadId: 't1', status: 'open', quote: 'q', createdAt: 1, updatedAt: 2 }] } };
+      },
+    };
+    reopen([adapter]);
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, human, (d) => d.get('root').setAttr('title', 'v1'));
+    const at = (await store.createVersion(doc.id, { kind: 'named', actor: human }))!;
+    await write(doc.id, human, (d) => d.get('root').setAttr('title', 'v2'));
+    await write(doc.id, agent, (d) => {
+      d.get('threads').setAttr('poster', d.clientID);
+      d.get('threads').setAttr('t1', 'a posted message');
+    });
+    await store.restore(doc.id, at, human);
+    expect(told).toEqual([`revertScope ${doc.id}`, `afterRestore ${doc.id}`]);
+    const live = newDoc();
+    applyV2(live, service.readState(doc.id).state);
+    expect(live.get('root').getAttr('title')).toBe('v1');
+    expect(live.get('threads').getAttr('t1')).toBe('a posted message');
+    expect(live.get('meta').getAttr('restoredFrom')).toBe(at);
+    expect(committed('SELECT threadId FROM artifact_threads WHERE artifactId = ?', doc.id)).toEqual([{ threadId: 't1' }]);
+  });
+});
+
+describe('ArtifactStore: the test writer on an html page (M7 fix wave 1)', () => {
+  it('writes a new page as a new revision, idempotent by op id, and takes no document op on a page nor a page op on a document', async () => {
+    const page = await store.create({ kind: 'html', title: 'Page', content: { bytes: html('one') } }, human);
+    const first = store.revision(page.id);
+    const written = await store.testWrite(page.id, 'p1', [{ op: 'page', text: '<p>two</p>' }], agent);
+    expect(written.revision).toBeGreaterThan(first);
+    expect(text(store.files.read(page.id, store.contentRef(page.id).ref))).toBe('<p>two</p>');
+    expect(text(store.files.read(page.id, store.contentRef(page.id, first).ref))).toContain('one');
+    expect(await store.testWrite(page.id, 'p1', [{ op: 'page', text: '<p>three</p>' }], agent)).toEqual(written);
+    await expect(store.testWrite(page.id, 'p2', [{ op: 'insertText', index: 0, text: 'x' }], agent)).rejects.toMatchObject({ code: 'invalid' });
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await expect(store.testWrite(doc.id, 'p3', [{ op: 'page', text: '<p/>' }], agent)).rejects.toMatchObject({ code: 'invalid' });
+  });
+});
+
+describe('ArtifactStore: idempotency (Decision Log 11)', () => {
+  it('answers a repeated op id with the first result and writes nothing, and runs a concurrent repeat once', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const first = await store.testWrite(doc.id, 'toolu_1', [{ op: 'insertText', index: 0, text: 'hello' }], agent);
+    const rows = committed('SELECT COUNT(*) AS n FROM artifact_updates')[0].n as number;
+    expect(committed('SELECT opId, tool, result FROM artifact_ops')).toEqual([{ opId: 'toolu_1', tool: 'testWrite', result: JSON.stringify(first) }]);
+    expect(await store.testWrite(doc.id, 'toolu_1', [{ op: 'insertText', index: 0, text: 'hello' }], agent)).toEqual(first);
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_updates')[0].n).toBe(rows);
+    const [a, b] = await Promise.all([
+      store.testWrite(doc.id, 'toolu_2', [{ op: 'setAttr', key: 'k', value: 1 }], agent),
+      store.testWrite(doc.id, 'toolu_2', [{ op: 'setAttr', key: 'k', value: 1 }], agent),
+    ]);
+    expect(a).toEqual(b);
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_updates')[0].n).toBe(rows + 1);
+    reopen();
+    expect(await store.testWrite(doc.id, 'toolu_1', [{ op: 'insertText', index: 0, text: 'again' }], agent)).toEqual(first);
+    expect(rootText(doc.id)).toContain('hello');
+    expect(rootText(doc.id)).not.toContain('again');
+  });
+
+  it('records a read-only op in the next commit after it settles, and runs without an id with a logged warning', async () => {
+    expect(await store.withOp('toolu_x', 'artifact_list', null, async () => ({ rows: 3 }), { readOnly: true })).toEqual({ rows: 3 });
+    expect(committed('SELECT result FROM artifact_ops WHERE opId = ?', 'toolu_x')).toEqual([{ result: '{"rows":3}' }]);
+    let runs = 0;
+    await store.withOp(undefined, 'artifact_list', null, async () => ++runs, { readOnly: true });
+    await store.withOp(undefined, 'artifact_list', null, async () => ++runs, { readOnly: true });
+    expect(runs).toBe(2);
+    expect(logs.some((line) => line.includes('without a tool-use id'))).toBe(true);
+  });
+
+  it('answers a retry of an op in flight only once the original’s write has committed (M3 review finding 1)', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'document', title: 'Plan' }, human);
+    tick();
+    const doc = await creation;
+    const first = store.testWrite(doc.id, 'toolu_r', [{ op: 'insertText', index: 0, text: 'a' }], agent);
+    let retrySettled = false;
+    const retry = store.testWrite(doc.id, 'toolu_r', [{ op: 'insertText', index: 0, text: 'a' }], agent).finally(() => (retrySettled = true));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_ops')[0].n).toBe(0); // the op row sits in the open batch
+    expect(retrySettled).toBe(false);
+    tick();
+    expect(await retry).toEqual(await first);
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_updates WHERE bytes IS NOT NULL')[0].n).toBe(1);
+  });
+
+  it('rejects a retry of an op in flight when the original’s commit fails, and runs it afresh after (M3 review finding 1)', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'document', title: 'Plan' }, human);
+    tick();
+    const doc = await creation;
+    const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    const first = store.testWrite(doc.id, 'toolu_f', [{ op: 'insertText', index: 0, text: 'a' }], agent);
+    const retry = store.testWrite(doc.id, 'toolu_f', [{ op: 'insertText', index: 0, text: 'a' }], agent);
+    const outcomes = Promise.allSettled([first, retry]);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    expect((await outcomes).map((o) => o.status)).toEqual(['rejected', 'rejected']);
+    commit.mockRestore();
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_ops')[0].n).toBe(0);
+    const again = store.testWrite(doc.id, 'toolu_f', [{ op: 'insertText', index: 0, text: 'a' }], agent);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    expect(await again).toEqual({ revision: store.revision(doc.id) });
+    expect(committed('SELECT opId FROM artifact_ops')).toEqual([{ opId: 'toolu_f' }]);
+  });
+
+  it('fails a mutating run that never records its op, or records it outside a write’s savepoint (M3 review finding 6)', async () => {
+    await expect(store.withOp('toolu_m', 'artifact_create', null, (scope) => store.create({ kind: 'document', title: 'Unrecorded' }, agent).then((a) => (void scope, a)))).rejects.toThrow(
+      /artifact_create .*never recorded its op/,
+    );
+    await expect(store.withOp(undefined, 'artifact_create', null, () => store.create({ kind: 'document', title: 'No id' }, agent))).rejects.toThrow(/never recorded its op/);
+    await expect(
+      store.withOp('toolu_o', 'artifact_create', null, async (scope) => {
+        scope.record({ early: true });
+        return { early: true };
+      }),
+    ).rejects.toThrow(/inside the savepoint/);
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_ops')[0].n).toBe(0);
+  });
+
+  it('records each mutating store operation’s op in the savepoint of the write that commits it (M3 review finding 6)', async () => {
+    const op = <R>(opId: string, tool: string, artifactId: string | null, run: (record: (result: R) => void) => Promise<unknown>) =>
+      store.withOp(opId, tool, artifactId, async (scope) => {
+        let recorded: R | undefined;
+        await run((result) => scope.record((recorded = result)));
+        return recorded as R;
+      });
+    const stored = (opId: string) => JSON.parse(committed('SELECT result FROM artifact_ops WHERE opId = ?', opId)[0].result as string) as unknown;
+
+    const doc = await op<{ id: string }>('t1', 'artifact_create', null, (record) => store.create({ kind: 'document', title: 'Plan' }, agent, (a) => record(a)));
+    expect(stored('t1')).toMatchObject({ id: doc.id, title: 'Plan' });
+    await op('t2', 'update', doc.id, (record) => store.update(doc.id, { title: 'Plan 2' }, (a) => record(a.title)));
+    expect(stored('t2')).toBe('Plan 2');
+    await op('t3', 'link', doc.id, (record) => store.link(doc.id, sid('app-3'), 'viewed', () => record('linked')));
+    const asset = await op<{ assetId: string }>('t4', 'artifact_upload_asset', doc.id, (record) => store.uploadAsset(doc.id, new Uint8Array([7]), { name: 'a.png', mime: 'image/png' }, agent, record));
+    const same = await op<{ assetId: string }>('t5', 'artifact_upload_asset', doc.id, (record) => store.uploadAsset(doc.id, new Uint8Array([7]), { name: 'b.png', mime: 'image/png' }, agent, record));
+    expect(same.assetId).toBe(asset.assetId); // a deduplicated upload writes no row but still records its op
+    await write(doc.id, agent, (d) => d.get('root').insert(0, 'x'));
+    const version = await op<number | null>('t6', 'version', doc.id, (record) => store.createVersion(doc.id, { kind: 'named', actor: agent, label: 'v' }, record));
+    await op('t7', 'restore', doc.id, (record) => store.restore(doc.id, version!, agent, record));
+    const copy = await op<{ id: string }>('t8', 'duplicate', doc.id, (record) => store.duplicate(doc.id, {}, agent, record));
+    expect(store.get(copy.id)).not.toBeNull();
+    const page = await op<{ id: string }>('t9', 'artifact_create', null, (record) => store.create({ kind: 'html', title: 'Page', content: { bytes: html('one') } }, agent, record));
+    await op('t10', 'artifact_publish', page.id, (record) => store.writeContent(page.id, { bytes: html('two') }, agent, {}, record));
+    await op('t11', 'delete', page.id, (record) => store.delete(page.id, () => record('deleted')));
+    expect(committed('SELECT opId FROM artifact_ops ORDER BY opId').map((row) => row.opId)).toEqual(['t1', 't10', 't11', 't2', 't3', 't4', 't5', 't6', 't7', 't8', 't9']);
+
+    // Atomic: a write whose companion throws after recording takes back both its rows and the op row.
+    await expect(
+      store.withOp('t12', 'artifact_create', null, (scope) =>
+        store.create({ kind: 'document', title: 'Lost' }, agent, (a) => {
+          scope.record(a);
+          throw new Error('after the record');
+        }),
+      ),
+    ).rejects.toThrow(/after the record/);
+    expect(committed('SELECT COUNT(*) AS n FROM artifact_ops WHERE opId = ?', 't12')[0].n).toBe(0);
+    expect(committed("SELECT COUNT(*) AS n FROM artifacts WHERE title = 'Lost'")[0].n).toBe(0);
+  });
+});
+
+describe('ArtifactStore: maintenance and thinning (Decision Log 5, 8)', () => {
+  it('thins only auto versions by age, re-bases a dropped delta’s successor, keeps every retained version exact, and a load is head plus tail', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const start = now;
+    const captured = new Map<number, Uint8Array>();
+    // 40 days of history: an auto version every 12 hours, a named one each week
+    for (let i = 0; i < 80; i++) {
+      now = start + i * 12 * HOUR;
+      await write(doc.id, i % 2 ? agent : human, (d) => {
+        d.get('root').insert(0, `day ${i} `);
+        if (i % 5 === 0) d.get('root').delete(3, 4);
+      });
+      const kind = i % 14 === 13 ? 'named' : 'auto';
+      const id = await store.createVersion(doc.id, { kind, actor: human });
+      captured.set(id!, service.readState(doc.id).state);
+    }
+    const before = store.listVersions(doc.id);
+    now = start + 80 * 12 * HOUR;
+    const provenanceBefore = service.provenance(doc.id);
+    const report = await store.maintenance.run();
+    const after = store.listVersions(doc.id);
+    expect(report.versionsThinned).toBe(before.length - after.length);
+    expect(after.length).toBeLessThan(before.length);
+    expect(after.filter((v) => v.kind === 'named')).toEqual(before.filter((v) => v.kind === 'named')); // never thinned
+    expect(after.at(-1)!.id).toBe(before.at(-1)!.id); // the newest kept
+    // within the last day every auto stays; older ones keep one per hour (here: all), per day, per week
+    const day = (t: number) => Math.floor(t / DAY);
+    const old = after.filter((v) => v.kind === 'auto' && now - v.at >= 7 * DAY && now - v.at < 30 * DAY);
+    expect(new Set(old.map((v) => day(v.at))).size).toBe(old.length);
+    for (const v of after) expect(canonicalV2(store.versionState(doc.id, v.id))).toEqual(canonicalV2(captured.get(v.id)!));
+    reopen();
+    for (const v of after) expect(canonicalV2(store.versionState(doc.id, v.id))).toEqual(canonicalV2(captured.get(v.id)!));
+    // the head covers everything; the log rows older than 7 days are gone, the younger stay
+    const rows = committed('SELECT at FROM artifact_updates WHERE artifactId = ?', doc.id).map((r) => r.at as number);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((t) => now - t <= 7 * DAY)).toBe(true);
+    expect(committed('SELECT tier, COUNT(*) AS n FROM artifact_attributions GROUP BY tier ORDER BY tier').map((r) => r.tier)).toEqual(['day', 'hour']); // every row was over an hour old
+    const loaded = newDoc();
+    applyV2(loaded, service.readState(doc.id).state);
+    expect(stateV2(loaded)).toEqual(captured.get(after.at(-1)!.id));
+    // provenance answers identically after hour and day tiering
+    const merged = service.provenance(doc.id);
+    const probe = idAt(loaded.get('root'), 0)!;
+    expect(insertedBy(merged, probe)).toEqual(insertedBy(provenanceBefore, probe));
+    const deep = idAt(loaded.get('root'), loaded.get('root').length - 2)!;
+    expect(insertedBy(merged, deep)).toEqual(insertedBy(provenanceBefore, deep));
+    expect(insertedBy(decodeMap(store.attributions(doc.id, 1, store.revision(doc.id))), deep)).toEqual(insertedBy(provenanceBefore, deep));
+  }, 60_000);
+
+  it('never thins a named auto version, while its unnamed neighbours thin by the schedule (Decision Log 37d)', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const start = now;
+    const ids: number[] = [];
+    const states = new Map<number, Uint8Array>();
+    for (let i = 0; i < 6; i++) {
+      now = start + i * 10 * MIN; // six autos inside one hour, 40 days ago by the run below
+      await write(doc.id, human, (d) => d.get('root').insert(0, `edit ${i} `));
+      const id = (await store.createVersion(doc.id, { kind: 'auto', actor: human }))!;
+      ids.push(id);
+      states.set(id, service.readState(doc.id).state);
+    }
+    now = start + HOUR;
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'latest '));
+    const newest = (await store.createVersion(doc.id, { kind: 'auto', actor: human }))!;
+    states.set(newest, service.readState(doc.id).state);
+    await store.nameVersion(doc.id, ids[1], { label: 'Worth keeping' });
+    await store.nameVersion(doc.id, ids[3], { label: 'Also', note: 'kept too' });
+
+    now = start + 40 * DAY;
+    await store.maintenance.run();
+    const kept = store.listVersions(doc.id);
+    // one week bucket keeps its newest unnamed auto (the last of the six) and the newest version; the named stay as autos
+    expect(kept.map((v) => v.id)).toEqual([ids[1], ids[3], ids[5], newest]);
+    expect(kept.filter((v) => v.label !== undefined).map((v) => [v.kind, v.label])).toEqual([['auto', 'Worth keeping'], ['auto', 'Also']]);
+    for (const v of kept) expect(canonicalV2(store.versionState(doc.id, v.id))).toEqual(canonicalV2(states.get(v.id)!));
+  });
+
+  it('folds a dropped delta into its successor, and promotes the successor of a dropped keyframe to a keyframe', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const states = new Map<number, Uint8Array>();
+    await write(doc.id, human, (d) => d.get('root').insert(0, prose(1_000)));
+    for (let i = 0; i < 4; i++) {
+      if (i > 0) await write(doc.id, human, (d) => d.get('root').insert(i, `v${i} `));
+      const id = (await store.createVersion(doc.id, { kind: 'named', actor: human }))!;
+      states.set(id, service.readState(doc.id).state);
+    }
+    const [v1, v2, v3, v4] = [...states.keys()];
+    const enc = () => committed('SELECT id, enc FROM artifact_versions ORDER BY id').map((r) => [r.id, r.enc]);
+    expect(enc()).toEqual([
+      [v1, 'full'],
+      [v2, 'delta'],
+      [v3, 'delta'],
+      [v4, 'delta'],
+    ]);
+    await service.inBatch(() => store.versions.drop(doc.id, [v2]));
+    expect(enc()).toEqual([
+      [v1, 'full'],
+      [v3, 'delta'],
+      [v4, 'delta'],
+    ]);
+    await service.inBatch(() => store.versions.drop(doc.id, [v1]));
+    expect(enc()).toEqual([
+      [v3, 'full'],
+      [v4, 'delta'],
+    ]);
+    reopen();
+    for (const id of [v3, v4]) expect(canonicalV2(store.versionState(doc.id, id))).toEqual(canonicalV2(states.get(id)!));
+  });
+
+  it('prunes versions older than a date on the owner’s word, except pinned states, and a byte kind’s live content', async () => {
+    const system = await store.create({ kind: 'design_system', title: 'House style' }, human);
+    await write(system.id, human, (d) => d.get('files').setAttr('DESIGN.md', '# v1'));
+    const doc = await store.create({ kind: 'document', title: 'Letter', designSystemId: system.id }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'a'));
+    await store.createVersion(doc.id, { kind: 'named', actor: human }); // pins the system's auto version
+    const page = await store.create({ kind: 'html', title: 'Page', content: { bytes: html('one') } }, agent);
+    await store.writeContent(page.id, { bytes: html('two') }, agent);
+    const oldPage = store.contentRef(page.id, store.listVersions(page.id)[0].seq).path;
+    now += 10 * DAY;
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'b'));
+    await store.createVersion(doc.id, { kind: 'named', actor: human });
+    const pruned = await store.pruneVersions(null, now - DAY);
+    expect(store.listVersions(system.id)).toHaveLength(1); // pinned
+    expect(store.listVersions(doc.id)).toHaveLength(1);
+    expect(store.listVersions(page.id)).toHaveLength(1); // the live content's version stays
+    expect(pruned).toBe(2);
+    expect(existsSync(oldPage)).toBe(false);
+    expect(existsSync(store.contentRef(page.id).path)).toBe(true);
+    const latest = store.listVersions(doc.id)[0];
+    expect(canonicalV2(store.versionState(doc.id, latest.id))).toEqual(canonicalV2(service.readState(doc.id).state));
+  });
+});
+
+describe('ArtifactStore: the change feed and attributions', () => {
+  it('reports document commits at most once per 250 ms per artifact, the latest revision winning', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const seen: ArtifactChanged[] = [];
+    store.onChange((change) => seen.push(change));
+    const r1 = await write(doc.id, human, (d) => d.get('root').insert(0, 'a'));
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'b'));
+    const r3 = await write(doc.id, human, (d) => d.get('root').insert(0, 'c'));
+    expect(seen).toEqual([{ artifactId: doc.id, kind: 'document', revision: r1, change: 'updated' }]);
+    await vi.advanceTimersByTimeAsync(250);
+    expect(seen.map((c) => c.revision)).toEqual([r1, r3]);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(seen).toHaveLength(2);
+    expect(store.get(doc.id)!.updatedAt).toBe(now); // stamped in the commit
+  });
+
+  it('answers the merged attributions of a seq range', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    const r1 = await write(doc.id, agent, (d) => d.get('root').insert(0, 'agent'));
+    const r2 = await write(doc.id, human, (d) => d.get('root').insert(5, ' human'));
+    const live = newDoc();
+    applyV2(live, service.readState(doc.id).state);
+    const agentChar = idAt(live.get('root'), 0)!;
+    const humanChar = idAt(live.get('root'), 6)!;
+    const first = decodeMap(store.attributions(doc.id, r1, r1));
+    expect(insertedBy(first, agentChar)?.actor).toBe('session:app-1');
+    expect(insertedBy(first, humanChar)).toBeNull();
+    expect(insertedBy(decodeMap(store.attributions(doc.id, r2, r2)), humanChar)?.actor).toBe('human');
+  });
+});
+
+describe('ArtifactStore: reads released after the batch they saw (Decision Log 33)', () => {
+  it('holds a read taken while a batch is open until that batch commits, and releases one taken with none open at once', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'document', title: 'Plan' }, human);
+    let released = false;
+    const listed = store.readCommitted(() => store.list().map((a) => a.title)).finally(() => (released = true));
+    const revision = store.readCommitted(() => store.revision((store.list()[0] as { id: string }).id));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(released).toBe(false); // the rows it read are not durable yet
+    expect(committed('SELECT COUNT(*) AS n FROM artifacts')[0].n).toBe(0);
+    tick();
+    expect(await listed).toEqual(['Plan']);
+    expect(await revision).toBe(0);
+    const doc = await creation;
+
+    void write(doc.id, human, (d) => d.get('root').insert(0, 'a')); // a document row: the live revision moves ahead of the disk
+    const live = store.readCommitted(() => store.revision(doc.id));
+    const versions = store.readCommitted(() => store.listVersions(doc.id).length);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    expect(await live).toBe(1);
+    expect(committed('SELECT MAX(seq) AS s FROM artifact_updates WHERE artifactId = ?', doc.id)[0].s).toBe(1);
+    expect(await versions).toBe(0);
+
+    const idle = store.readCommitted(() => store.get(doc.id)?.title); // nothing open: no commit to wait for
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    expect(turns).toEqual([]);
+    expect(await idle).toBe('Plan');
+  });
+
+  it('fails a read whose batch fails, a refusal it read included, rather than reveal rolled-back rows', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'document', title: 'Plan' }, human);
+    tick();
+    const doc = await creation;
+    const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    const writing = write(doc.id, human, (d) => d.get('root').insert(0, 'lost'));
+    const versioning = store.createVersion(doc.id, { kind: 'named', actor: human, label: 'lost' });
+    const revision = store.readCommitted(() => store.revision(doc.id));
+    const state = store.readCommitted(() => store.versionState(doc.id, { seq: store.revision(doc.id) }));
+    const missing = store.readCommitted(() => store.versionState(doc.id, 99));
+    const outcomes = Promise.allSettled([writing, versioning, revision, state, missing]);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    const settled = await outcomes;
+    expect(settled.map((o) => o.status)).toEqual(['rejected', 'rejected', 'rejected', 'rejected', 'rejected']);
+    expect((settled[4] as PromiseRejectedResult).reason).not.toBeInstanceOf(ArtifactStoreError); // the batch's failure, not the read's answer
+    commit.mockRestore();
+    expect(await store.readCommitted(() => store.revision(doc.id))).toBe(0);
+    expect(store.listVersions(doc.id)).toEqual([]);
+  });
+});
+
+describe('ArtifactStore: write refusals released after the batch they saw (Decision Log 33)', () => {
+  it('holds a refusal a write read from an open batch until that batch commits', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'document', title: 'Plan' }, human);
+    tick();
+    const doc = await creation;
+    const deleting = store.delete(doc.id);
+    let settled = false;
+    const renaming = store.writeCommitted(() => store.update(doc.id, { title: 'Plan B' })).catch((error: unknown) => ((settled = true), error));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(settled).toBe(false); // the delete it saw is not durable yet
+    tick();
+    await deleting;
+    expect(await renaming).toMatchObject({ code: 'notFound' });
+    const next = store.writeCommitted(() => store.create({ kind: 'document', title: 'Next' }, human)); // a write that succeeds
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    expect(await next).toMatchObject({ title: 'Next' });
+  });
+
+  it('replaces a write’s refusal with the failure of the batch it read, rather than reveal rolled-back rows', async () => {
+    reopen([], { manual: true });
+    const creation = store.create({ kind: 'design_system', title: 'House' }, human);
+    const target = store.create({ kind: 'document', title: 'Plan' }, human);
+    tick();
+    const [system, doc] = await Promise.all([creation, target]);
+    const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+      throw new Error('disk full');
+    });
+    const deleting = store.delete(doc.id);
+    const governing = store.create({ kind: 'document', title: 'Governed', designSystemId: system.id }, human);
+    const renaming = store.writeCommitted(() => store.update(doc.id, { title: 'Plan B' }));
+    const dropping = store.writeCommitted(() => store.delete(system.id));
+    const outcomes = Promise.allSettled([deleting, governing, renaming, dropping]);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    const settled = await outcomes;
+    expect(settled.map((o) => o.status)).toEqual(['rejected', 'rejected', 'rejected', 'rejected']);
+    for (const outcome of settled.slice(2)) expect((outcome as PromiseRejectedResult).reason).not.toBeInstanceOf(ArtifactStoreError);
+    commit.mockRestore();
+    expect(store.get(doc.id)?.title).toBe('Plan');
+    const renamed = store.writeCommitted(() => store.update(doc.id, { title: 'Plan B' }));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    tick();
+    expect(await renamed).toMatchObject({ title: 'Plan B' });
+  });
+});
+
+describe('ArtifactStore: change events reveal only committed revisions (the whole-branch review)', () => {
+  // A write's event follows its own commit, but the next writer may open a batch before that event goes out (here: a
+  // writer woken by the same commit, first in line); the live revision then includes that batch's rows.
+  async function racedWrite(fail: boolean) {
+    reopen([], { manual: true });
+    const creating = store.create({ kind: 'html', title: 'Page', content: { bytes: html('v1') } }, human);
+    tick();
+    const page = await creating;
+    const seen: { revision: number; durable: number }[] = [];
+    store.onChange((event) => seen.push({ revision: event.revision, durable: committed('SELECT MAX(seq) AS s FROM artifact_updates WHERE artifactId = ?', page.id)[0].s as number }));
+    let next: Promise<unknown> | undefined;
+    void service.whenCommitted().then(() => {
+      next = store.writeContent(page.id, { bytes: html('v3') }, human);
+      next.catch(() => {});
+    });
+    const writing = store.writeContent(page.id, { bytes: html('v2') }, human);
+    tick();
+    const { revision } = await writing;
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(next).toBeDefined();
+    const commit = fail
+      ? vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+          throw new Error('disk full');
+        })
+      : null;
+    tick();
+    await next!.catch(() => {});
+    commit?.mockRestore();
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    return { revision, seen };
+  }
+
+  it('holds an entity event read while the next batch is open until that batch commits', async () => {
+    const { revision, seen } = await racedWrite(false);
+    expect(seen.length).toBeGreaterThan(0);
+    for (const event of seen) expect(event.revision).toBeLessThanOrEqual(event.durable);
+    expect(seen[0]!.revision).toBeGreaterThanOrEqual(revision);
+  });
+
+  it('never reveals the revision of a later batch that fails', async () => {
+    const { revision, seen } = await racedWrite(true);
+    expect(seen).toEqual([{ revision, durable: revision }]);
+  });
+});
+
+describe('ArtifactStore: a store a newer MAWS wrote (read-only; Decision Log 12, 24e)', () => {
+  it('takes the owner’s viewing as a read, recording nothing, and still refuses every content write', async () => {
+    const doc = await store.create({ kind: 'document', title: 'Plan' }, human);
+    await write(doc.id, human, (d) => d.get('root').insert(0, 'a'));
+    store.close();
+    service.close();
+    storage.close();
+    const newer = new DatabaseSync(join(dir, 'store.sqlite'));
+    newer.exec('PRAGMA user_version = 99');
+    newer.close();
+    make();
+    expect(storage.readOnly).toBe(true);
+    await expect(store.markViewed(doc.id)).resolves.toBeUndefined();
+    expect(store.get(doc.id)!.lastViewedAt).toBeNull();
+    expect(store.listVersions(doc.id)).toEqual([]);
+    await expect(store.update(doc.id, { title: 'Plan B' })).rejects.toThrow(/newer app/);
+    await expect(write(doc.id, human, (d) => d.get('root').insert(0, 'b'))).rejects.toThrow(/newer app/);
+  });
+});
+
+describe('ArtifactStore: refusals', () => {
+  it('refuses wrong content per kind and unknown targets with typed errors', async () => {
+    await expect(store.create({ kind: 'html', title: 'x' }, human)).rejects.toBeInstanceOf(ArtifactStoreError);
+    await expect(store.create({ kind: 'document', title: 'x', content: { bytes: html('x') } }, human)).rejects.toMatchObject({ code: 'invalid' });
+    await expect(store.create({ kind: 'document', title: 'x', spaceId: '7a6b5c4d-3e2f-4a1b-9c8d-7e6f5a4b3c2d' }, human)).rejects.toMatchObject({ code: 'notFound' });
+    const doc = await store.create({ kind: 'document', title: 'x' }, human);
+    await expect(store.update(doc.id, { designSystemId: doc.id })).rejects.toMatchObject({ code: 'invalid' });
+    await expect(store.restore(doc.id, 999, human)).rejects.toMatchObject({ code: 'notFound' });
+    expect(() => store.versionState(doc.id, 999)).toThrow(ArtifactStoreError);
+  });
+});

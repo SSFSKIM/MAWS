@@ -6,6 +6,9 @@ settings:
 
 overrides:
   highlight.js: 11.11.2
+  '@y/y': 14.0.0-rc.28
+  lib0: 1.0.0-rc.36
+  prosemirror-model: 1.25.12
 
 importers:
 
@@ -150,6 +153,15 @@ importers:
       '@xterm/xterm':
         specifier: 6.0.0
         version: 6.0.0
+      '@y/prosemirror':
+        specifier: 2.0.0-15
+        version: 2.0.0-15(@y/protocols@1.0.6-rc.1(@y/y@14.0.0-rc.28))(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)
+      '@y/protocols':
+        specifier: 1.0.6-rc.1
+        version: 1.0.6-rc.1(@y/y@14.0.0-rc.28)
+      '@y/y':
+        specifier: 14.0.0-rc.28
+        version: 14.0.0-rc.28
       babel-plugin-react-compiler:
         specifier: ^1.0.0
         version: 1.0.0
@@ -165,6 +177,9 @@ importers:
       electron-vite:
         specifier: ^5.0.0
         version: 5.0.0(supports-color@7.2.0)(vite@7.3.6(@types/node@24.19.0)(jiti@2.7.0)(lightningcss@1.32.0))
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
       eslint:
         specifier: ^10.11.0
         version: 10.11.0(jiti@2.7.0)(supports-color@7.2.0)
@@ -180,6 +195,9 @@ importers:
       katex:
         specifier: ^0.16.47
         version: 0.16.47
+      lib0:
+        specifier: 1.0.0-rc.36
+        version: 1.0.0-rc.36
       node-api-headers:
         specifier: 1.9.0
         version: 1.9.0
@@ -2404,6 +2422,26 @@ packages:
   '@xterm/xterm@6.0.0':
     resolution: {integrity: sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg==}
 
+  '@y/prosemirror@2.0.0-15':
+    resolution: {integrity: sha512-711VRqaOtu4Mc7aIcxiJsjCEdDm2GnVRiOA/hQotk3DmIFIcettqhzPpjDBsF6UyKfD02jFJFbbvUZYibJuqIg==}
+    engines: {node: '>=16.0.0', npm: '>=8.0.0'}
+    peerDependencies:
+      '@y/protocols': ^1.0.6-rc.1
+      prosemirror-model: ^1.7.1
+      prosemirror-state: ^1.2.3
+      prosemirror-transform: ^1.8.0
+      prosemirror-view: ^1.9.10
+
+  '@y/protocols@1.0.6-rc.1':
+    resolution: {integrity: sha512-e/qs7hXcLk/SeNitxMXv2ymozyWFTULwbJEi7cAf/K/iXw9nGwGXHrR5TNluQ/bMwOX1cwuUT0hjEojkfH0gsA==}
+    engines: {node: '>=16.0.0', npm: '>=8.0.0'}
+    peerDependencies:
+      '@y/y': 14.0.0-rc.28
+
+  '@y/y@14.0.0-rc.28':
+    resolution: {integrity: sha512-Hzw2sSch5RpT4aKz0643LQnoN7qSm63VyWb5D3zzCDEgSe5G0CKu5W7zcAXKDlVwkXg5puKTNX5k/wdVg4LtMA==}
+    engines: {node: '>=22.0.0', npm: '>=8.0.0'}
+
   abbrev@4.0.0:
     resolution: {integrity: sha512-a1wflyaL0tHtJSmLSOVybYhy22vRih4eduhhrkcjgrWGnRfrZtovJ2FRjxuTtkkj47O/baf0R86QU5OuYpz8fA==}
     engines: {node: ^20.17.0 || >=22.9.0}
@@ -3515,6 +3553,11 @@ packages:
   levn@0.4.1:
     resolution: {integrity: sha512-+bT2uH4E5LGE7h/n3evcS/sQlJXCpIp6ym8OWJ5eV6+67Dsql/LaaT7qJBAt2rzfoa/5QBGBhxDix1dMt2kQKQ==}
     engines: {node: '>= 0.8.0'}
+
+  lib0@1.0.0-rc.36:
+    resolution: {integrity: sha512-7t/I+PCQqakal22rhXq5giOUtDP/RfecQtdeKvzCtnAvPkxSLAE+/Zvzi/kJDopg+hBAYKo46qmxmlkhX0tYlQ==}
+    engines: {node: '>=22'}
+    hasBin: true
 
   lightningcss-android-arm64@1.32.0:
     resolution: {integrity: sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg==}
@@ -7126,6 +7169,25 @@ snapshots:
 
   '@xterm/xterm@6.0.0': {}
 
+  '@y/prosemirror@2.0.0-15(@y/protocols@1.0.6-rc.1(@y/y@14.0.0-rc.28))(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-transform@1.12.2)(prosemirror-view@1.42.6)':
+    dependencies:
+      '@y/protocols': 1.0.6-rc.1(@y/y@14.0.0-rc.28)
+      '@y/y': 14.0.0-rc.28
+      lib0: 1.0.0-rc.36
+      prosemirror-model: 1.25.12
+      prosemirror-state: 1.4.4
+      prosemirror-transform: 1.12.2
+      prosemirror-view: 1.42.6
+
+  '@y/protocols@1.0.6-rc.1(@y/y@14.0.0-rc.28)':
+    dependencies:
+      '@y/y': 14.0.0-rc.28
+      lib0: 1.0.0-rc.36
+
+  '@y/y@14.0.0-rc.28':
+    dependencies:
+      lib0: 1.0.0-rc.36
+
   abbrev@4.0.0: {}
 
   acorn-jsx@5.3.2(acorn@8.18.0):
@@ -8477,6 +8539,8 @@ snapshots:
     dependencies:
       prelude-ls: 1.2.1
       type-check: 0.4.0
+
+  lib0@1.0.0-rc.36: {}
 
   lightningcss-android-arm64@1.32.0:
     optional: true

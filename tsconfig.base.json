@@ -11,7 +11,8 @@
     "forceConsistentCasingInFileNames": true,
     "composite": true,
     "paths": {
-      "@shared/*": ["./src/shared/*"]
+      "@shared/*": ["./src/shared/*"],
+      "@artifacts/*": ["./src/artifacts/*"]
     }
   }
 }

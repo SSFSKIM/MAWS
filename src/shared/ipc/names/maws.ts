@@ -5,9 +5,11 @@ export const commands = [
   'maws.asks.list', 'maws.ask.answer', 'maws.pane.answer',
   'maws.artifact.captured', // E2
   'maws.download.recorded', // E13
+  'maws.artifact.exported', // P3-A M7
 ] as const;
 
 export const events = [
   'maws.pane.show',
   'maws.artifact.capture', // E2
+  'maws.artifact.export', // P3-A M7
 ] as const;

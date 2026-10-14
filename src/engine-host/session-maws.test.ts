@@ -29,7 +29,7 @@ import { replayEngine, type ReplayTransport } from './replay-transport';
 import { EngineSession, type EngineSessionOptions } from './session';
 import { SessionStream } from './session-stream';
 import { AskAnswerMismatch } from './tool-server/ask';
-import { artifactCreateTool } from './tool-server/artifacts'; // P2-E1
+import { openDocuments, type Documents } from './documents'; // P3-A
 
 async function until(check: () => boolean, what: string, ms = 10_000): Promise<void> {
   const start = Date.now();
@@ -83,7 +83,7 @@ async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSess
 }
 
 describe('the maws server on an EngineSession (scripted)', () => {
-  it('answers the handshake and lists the seven tools with their annotations', async () => {
+  it('answers the handshake and lists the twelve tools with their annotations', async () => {
     const run = await mawsSession();
     const init = await run.answered(run.mcp({ id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.290' } } }));
     expect(init.result).toEqual({ protocolVersion: '2025-11-25', capabilities: { tools: { listChanged: true } }, serverInfo: { name: 'maws', version: '0.9.0' } });
@@ -92,10 +92,13 @@ describe('the maws server on an EngineSession (scripted)', () => {
     expect(list.result!.tools).toEqual(mawsToolList());
     expect((list.result!.tools as { name: string; annotations: unknown }[]).map((t) => [t.name, t.annotations])).toEqual([
       ['send_file', { ...MAWS_TOOL_ANNOTATIONS, title: 'Send file' }], ['ask', { ...MAWS_TOOL_ANNOTATIONS, title: 'Ask questions' }], ['show_pane', { ...MAWS_TOOL_ANNOTATIONS, title: 'Show pane' }],
-      // E2 (Decision Log 4): the two writers are not read-only
-      ['artifact_create', { readOnlyHint: false, openWorldHint: false, title: 'Create artifact' }], ['artifact_update', { readOnlyHint: false, openWorldHint: false, title: 'Update artifact' }],
+      // E2 (Decision Log 4): the writers are not read-only
+      ['artifact_create', { readOnlyHint: false, openWorldHint: false, title: 'Create artifact' }],
       ['artifact_list', { ...MAWS_TOOL_ANNOTATIONS, title: 'List artifacts' }], ['artifact_screenshot', { ...MAWS_TOOL_ANNOTATIONS, title: 'Screenshot artifact' }],
-      // E4c's six browser tools left on 2026-10-08 (P1 A-54): nothing after the artifact tools
+      // E4c's six browser tools left on 2026-10-08 (P1 A-54); P3-A (M6) appends six and retires artifact_update
+      ['artifact_describe_type', { ...MAWS_TOOL_ANNOTATIONS, title: 'Describe artifact kind' }], ['artifact_read', { ...MAWS_TOOL_ANNOTATIONS, title: 'Read artifact' }],
+      ['artifact_publish', { readOnlyHint: false, openWorldHint: false, title: 'Publish artifact' }], ['artifact_upload_asset', { readOnlyHint: false, openWorldHint: false, title: 'Upload artifact asset' }],
+      ['artifact_list_assets', { ...MAWS_TOOL_ANNOTATIONS, title: 'List artifact assets' }], ['artifact_export', { readOnlyHint: false, openWorldHint: false, title: 'Export artifact' }],
     ]);
     expect((await run.answered(run.mcp({ id: 2, method: 'resources/list' }))).error).toEqual({ code: -32601, message: 'Method not found: resources/list' });
     expect((await run.answered(run.mcp({ id: 0, method: 'initialize' }, 'maws2'))).error!.code).toBe(-32601);
@@ -590,35 +593,42 @@ describe('a blocking ask as a question attention item (scripted)', () => {
   // P2-C2: E1's 'an async ask is no attention item' is reversed (Decision Log 32); the async_input case above.
 });
 
-// E2 start (E2 execution document, M1 step 5): the artifact tools on the same scripted session: the store's copy and
-// record, `deliverables.changed`, `maws.delivery.artifact` live and on rebuild, the refusals, the capture bridge
+// E2 start (E2 execution document, M1 step 5; P3-A M6: over the artifact store, `artifact_publish` for the retired
+// update): the artifact tools on the same scripted session: the store's write and the X12 mirror's copy and record,
+// `deliverables.changed`, `maws.delivery.artifact` live and on rebuild, the refusals, the capture bridge, the turn version
 describe('the artifact tools on an EngineSession (scripted)', () => {
   const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
   const json = (rpc: Rpc) => JSON.parse(rpc.result!.content!.find((b) => (b as { type?: string }).type === 'text')!.text) as Record<string, unknown>;
+  let documents: Documents;
+  beforeEach(() => {
+    documents = openDocuments(userData, () => {})!;
+  });
+  afterEach(() => documents.close());
+  const withStore = (session: Partial<EngineSessionOptions> = {}) => mawsSession({}, { artifacts: () => documents.store, ...session });
 
-  it('create and update copy versions, write the record, announce it and yield maws.delivery.artifact, live and on rebuild; a refusal yields nothing', async () => {
+  it('create and publish write the store and its X12 mirror, announce the record and yield maws.delivery.artifact, live and on rebuild; a refusal yields nothing', async () => {
     writeFileSync(join(cwd, 'dashboard.html'), '<h1 style="color:red">HELLO_E2</h1>');
-    const run = await mawsSession();
+    const run = await withStore();
     const appSessionId = run.session.status().appSessionId;
     const create = run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }, 'toolu_create');
     const created = json(await run.answered(create));
     expect(created).toMatchObject({ status: 'created', id: 'dash', version: 1, title: 'Dashboard', externalReferences: 0 });
     const deliverableId = created.deliverableId as string;
+    expect(created.artifactId).toBe(deliverableId);
     const dir = join(userData, 'deliverables', appSessionId);
-    expect((await readdir(join(dir, deliverableId)))).toEqual(['v1.html']);
+    expect(await readdir(join(dir, deliverableId))).toEqual(['v1.html']);
     expect(run.changes).toEqual([{ appSessionId, id: deliverableId, change: 'created' }]);
 
-    writeFileSync(join(cwd, 'dashboard.html'), '<h1 style="color:blue">HELLO_E2</h1>');
-    const update = run.call('artifact_update', { id: 'dash', html_path: 'dashboard.html' }, 'toolu_update');
-    expect(json(await run.answered(update))).toEqual({ status: 'updated', id: 'dash', deliverableId, version: 2, title: 'Dashboard', externalReferences: 0 });
+    const publish = run.call('artifact_publish', { artifact: 'dash', baseRevision: created.revision, files: { 'index.html': '<h1 style="color:blue">HELLO_E2</h1>' } }, 'toolu_publish');
+    expect(json(await run.answered(publish))).toMatchObject({ status: 'published', id: 'dash', deliverableId, version: 2, title: 'Dashboard', changed: ['index.html'] });
     expect((await readdir(join(dir, deliverableId))).sort()).toEqual(['v1.html', 'v2.html']);
-    expect(await new FileDeliverableStore(userData).get(appSessionId, deliverableId)).toMatchObject({ kind: 'artifact', artifactId: 'dash', path: join(dir, deliverableId, 'v2.html'), versions: [{ toolUseId: 'toolu_create' }, { toolUseId: 'toolu_update' }] });
+    expect(await new FileDeliverableStore(userData).get(appSessionId, deliverableId)).toMatchObject({ kind: 'artifact', artifactId: 'dash', path: join(dir, deliverableId, 'v2.html'), versions: [{ toolUseId: 'toolu_create' }, { toolUseId: 'toolu_publish' }] });
     expect(run.changes).toEqual([{ appSessionId, id: deliverableId, change: 'created' }, { appSessionId, id: deliverableId, change: 'updated' }]);
 
     const listed = json(await run.answered(run.call('artifact_list', {}, 'toolu_list')));
-    expect(listed).toMatchObject({ status: 'listed', artifacts: [{ id: 'dash', deliverableId, title: 'Dashboard', versions: 2 }] });
-    const refused = await run.answered(run.call('artifact_update', { id: 'nope', html_path: 'dashboard.html' }, 'toolu_nope'));
-    expect(refused.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.noArtifact('artifact_update', 'nope') }], isError: true });
+    expect(listed).toMatchObject({ status: 'listed', artifacts: [{ id: deliverableId, handle: 'dash', kind: 'html', title: 'Dashboard', lastEditor: { by: 'this session' } }] });
+    const refused = await run.answered(run.call('artifact_publish', { artifact: 'nope', baseRevision: 1, files: { 'index.html': 'x' } }, 'toolu_nope'));
+    expect(refused.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.noArtifact('artifact_publish', 'nope') }], isError: true });
     const invalid = await run.answered(run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html' }, 'toolu_invalid'));
     expect(invalid.result!.isError).toBe(true);
 
@@ -626,7 +636,7 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
     await new Promise((r) => setTimeout(r, 20)); // nothing more arrives for the list, the refusal or the invalid call
     expect(run.maws()).toMatchObject([
       { kind: 'maws.delivery.artifact', toolUseId: 'toolu_create', requestId: create, action: 'create', artifactId: 'dash', deliverableId, version: 1, title: 'Dashboard' },
-      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_update', requestId: update, action: 'update', artifactId: 'dash', deliverableId, version: 2, title: 'Dashboard' },
+      { kind: 'maws.delivery.artifact', toolUseId: 'toolu_publish', requestId: publish, action: 'update', artifactId: 'dash', deliverableId, version: 2, title: 'Dashboard' },
     ]);
     expect(run.changes).toHaveLength(2);
     run.transport.exit(0);
@@ -634,9 +644,18 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
     expect(run.rebuilt()).toEqual(run.events);
   });
 
+  it('answers unavailable when the host has no artifact store, and delivers files as X12 records alone', async () => {
+    const run = await mawsSession({}, { artifacts: () => null });
+    const refused = await run.answered(run.call('artifact_list', {}));
+    expect(refused.result!.isError).toBe(true);
+    expect(refused.result!.content![0]!.text).toContain('"reason":"unavailable"');
+    const sent = json(await run.answered(run.call('send_file', { files: ['hello.txt'] }))) as { deliverables: { id: string }[] };
+    expect(await new FileDeliverableStore(userData).get(run.session.status().appSessionId, sent.deliverables[0]!.id)).toMatchObject({ kind: 'file' });
+  });
+
   it('artifact_screenshot asks main through maws.artifact.capture and answers the image block first; a second answer is not_pending', async () => {
     writeFileSync(join(cwd, 'dashboard.html'), '<h1>HELLO_E2</h1>');
-    const run = await mawsSession();
+    const run = await withStore();
     const appSessionId = run.session.status().appSessionId;
     const deliverableId = json(await run.answered(run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }))).deliverableId;
     const shot = run.call('artifact_screenshot', { id: 'dash' }, 'toolu_shot');
@@ -661,7 +680,7 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
 
   it('a screenshot the engine withdrew, and one pending at exit, are answered with nothing', async () => {
     writeFileSync(join(cwd, 'dashboard.html'), '<h1>HELLO_E2</h1>');
-    const run = await mawsSession();
+    const run = await withStore();
     await run.answered(run.call('artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }));
     const withdrawn = run.call('artifact_screenshot', { id: 'dash' });
     const atExit = run.call('artifact_screenshot', { id: 'dash' });
@@ -678,24 +697,21 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
   });
 
   // P2-E1 start (2026-10-09): the artifact scope reaches the tools through the session's option (D10)
-  it("a side thread's update of its parent's artifact writes the parent's record, announced under the parent, its event naming the owner live and on rebuild", async () => {
-    writeFileSync(join(cwd, 'dashboard.html'), '<h1>HELLO_E2</h1>');
+  it("a side thread's publish of its parent's page, after its read, writes the parent's record, announced under the parent, its event naming the owner live and on rebuild", async () => {
     const parent = 'app-parent' as AppSessionId;
-    const seeded = await artifactCreateTool({ deliverables: new FileDeliverableStore(userData) }).call(
-      { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' },
-      { appSessionId: parent, cwd, toolUseId: 'toolu_parent' as ToolUseId, requestId: 'r0' as RequestId, signal: new AbortController().signal, fromSubagent: false },
-    );
-    const deliverableId = (JSON.parse((seeded.content[0] as { text: string }).text) as { deliverableId: string }).deliverableId;
-    const run = await mawsSession({}, { artifactScope: [parent] });
-    const update = run.call('artifact_update', { id: 'dash', html_path: 'dashboard.html' }, 'toolu_update');
-    expect(json(await run.answered(update))).toEqual({ status: 'updated', id: 'dash', deliverableId, version: 2, title: 'Dashboard', externalReferences: 0, ownerAppSessionId: parent });
-    expect((await readdir(join(userData, 'deliverables', parent, deliverableId))).sort()).toEqual(['v1.html', 'v2.html']);
-    expect(run.changes).toEqual([{ appSessionId: parent, id: deliverableId, change: 'updated' }]);
-    const own = run.call('artifact_create', { id: 'own', html_path: 'dashboard.html', title: 'Own' }, 'toolu_own');
+    const page = await documents.store.create({ kind: 'html', title: 'Dashboard', handle: 'dash', content: { bytes: Buffer.from('<h1>HELLO_E2</h1>') } }, { kind: 'session', appSessionId: parent });
+    await new FileDeliverableStore(userData).write({ id: page.id, appSessionId: parent, kind: 'artifact', artifactId: 'dash', title: 'Dashboard', path: '/v1.html', versions: [{ path: '/v1.html', at: '2026-10-13T00:00:00.000Z' }], createdAt: '2026-10-13T00:00:00.000Z' });
+    const run = await withStore({ artifactScope: [parent] });
+    const read = json(await run.answered(run.call('artifact_read', { artifact: 'dash' }, 'toolu_read')));
+    const publish = run.call('artifact_publish', { artifact: 'dash', baseRevision: read.revision, files: { 'index.html': '<h1>v2</h1>' } }, 'toolu_publish');
+    expect(json(await run.answered(publish))).toMatchObject({ status: 'published', id: 'dash', deliverableId: page.id, version: 2, title: 'Dashboard', ownerAppSessionId: parent });
+    expect(await readdir(join(userData, 'deliverables', parent, page.id))).toEqual(['v2.html']);
+    expect(run.changes).toEqual([{ appSessionId: parent, id: page.id, change: 'updated' }]);
+    const own = run.call('artifact_create', { id: 'own', content: '<p>own</p>', title: 'Own' }, 'toolu_own');
     await run.answered(own);
     await until(() => run.maws().length === 2, 'the artifact events');
-    const [updated, created] = run.maws();
-    expect(updated).toMatchObject({ kind: 'maws.delivery.artifact', toolUseId: 'toolu_update', action: 'update', artifactId: 'dash', deliverableId, version: 2, ownerAppSessionId: parent });
+    const [published, created] = run.maws();
+    expect(published).toMatchObject({ kind: 'maws.delivery.artifact', toolUseId: 'toolu_publish', action: 'update', artifactId: 'dash', deliverableId: page.id, version: 2, ownerAppSessionId: parent });
     expect(created).toMatchObject({ kind: 'maws.delivery.artifact', toolUseId: 'toolu_own', action: 'create', artifactId: 'own' });
     expect(created).not.toHaveProperty('ownerAppSessionId');
     run.transport.exit(0);
@@ -703,6 +719,22 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
     expect(run.rebuilt()).toEqual(run.events);
   });
   // P2-E1 end
+
+  it("a turn's end writes one turn version per document the session edited, and the process's end closes its replicas", async () => {
+    const run = await withStore();
+    const appSessionId = run.session.status().appSessionId;
+    const created = json(await run.answered(run.call('artifact_create', { kind: 'design', title: 'Site', files: { 'a.html': 'A' } })));
+    const artifactId = created.artifactId as string;
+    await run.answered(run.call('artifact_publish', { artifact: artifactId, baseRevision: created.revision, files: { 'a.html': 'A2' } }));
+    expect(documents.store.listVersions(artifactId).filter((v) => v.kind === 'turn')).toEqual([]);
+    run.transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' } });
+    await until(() => documents.store.listVersions(artifactId).some((v) => v.kind === 'turn'), 'the turn version');
+    expect(documents.store.listVersions(artifactId).find((v) => v.kind === 'turn')).toMatchObject({ actor: { kind: 'session', appSessionId }, summary: '1 edit' }); // the publish: a create names no artifact to its op ledger before it exists
+    const replica = documents.service.replica(appSessionId, artifactId);
+    run.transport.exit(0);
+    await run.session.exited;
+    expect(replica.closed).toBe(true);
+  });
 });
 // E2 end
 
