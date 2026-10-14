@@ -396,8 +396,8 @@ test('11: a host SIGKILL under load loses no acknowledged edit, and every replic
       const samples: Array<{ at: number; phase: string; synced: boolean }> = [];
       (window as unknown as { __phases: typeof samples }).__phases = samples;
       setInterval(() => {
-        const dom = document.querySelector(selector) as (HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold: { state(): { phase: string; synced: boolean } } } }> } } }) | null;
-        const state = dom?.editor?.extensionManager.extensions.find((e) => e.name === 'collaboration')?.options.hold.state();
+        const dom = document.querySelector(selector) as (HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold: { base: { state(): { phase: string; synced: boolean } } } } }> } } }) | null;
+        const state = dom?.editor?.extensionManager.extensions.find((e) => e.name === 'collaboration')?.options.hold.base.state();
         if (state && (samples.at(-1)?.phase !== state.phase || samples.at(-1)?.synced !== state.synced)) samples.push({ at: Date.now(), phase: state.phase, synced: state.synced });
       }, 10);
     }, EDITOR_SELECTOR(id));

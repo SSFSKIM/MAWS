@@ -41,7 +41,7 @@ export class JointHold implements Holdable {
   private held = false;
   private readonly companions = new Set<Holdable>();
 
-  constructor(private readonly base: Holdable) {}
+  constructor(readonly base: Holdable) {} // the live editor's own replica (the e2e seams read its handle here)
 
   holdRemote(on: boolean): void {
     this.held = on;

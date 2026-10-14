@@ -315,13 +315,13 @@ export async function instrumentTyping(page: Page, artifactId: string): Promise<
       state(): { unsaved: number };
     }
     interface EditorLike {
-      extensionManager: { extensions: Array<{ name: string; options: { hold: Handle } }> };
+      extensionManager: { extensions: Array<{ name: string; options: { hold: { base: Handle } } }> };
       on(name: 'transaction', fn: (props: { transaction: { docChanged: boolean; getMeta(key: string): unknown } }) => void): void;
     }
     const dom = document.querySelector(selector) as (HTMLElement & { editor?: EditorLike }) | null;
     if (!dom?.editor) throw new Error(`no editor at ${selector}`);
     const editor = dom.editor;
-    const handle = editor.extensionManager.extensions.find((e) => e.name === 'collaboration')!.options.hold;
+    const handle = editor.extensionManager.extensions.find((e) => e.name === 'collaboration')!.options.hold.base; // the live editor's joint hold over its handle
     const provider = handle.provider;
     const rel = () => performance.now();
     const afterPaint = () =>
@@ -455,9 +455,9 @@ export async function watchRemote(page: Page, artifactId: string, client: number
         doc: { on(name: 'update', fn: (u: Uint8Array, origin: unknown) => void): void; store: { getClock(client: number): number } };
         provider: unknown;
       }
-      const dom = document.querySelector(selector) as (HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold: Handle } }> } } }) | null;
+      const dom = document.querySelector(selector) as (HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold: { base: Handle } } }> } } }) | null;
       if (!dom?.editor) throw new Error(`no editor at ${selector}`);
-      const handle = dom.editor.extensionManager.extensions.find((e) => e.name === 'collaboration')!.options.hold;
+      const handle = dom.editor.extensionManager.extensions.find((e) => e.name === 'collaboration')!.options.hold.base; // the live editor's joint hold over its handle
       const seen: Array<{ clock: number; at: number; raf?: number }> = [];
       let last = handle.doc.store.getClock(watched);
       (window as unknown as { __remote: typeof seen }).__remote = seen;
@@ -712,8 +712,8 @@ export const blockText = (page: Page, artifactId: string, blockId: string): Prom
 /** The replica's save state in the page (the editor's handle). */
 export const replicaState = (page: Page, artifactId: string) =>
   page.evaluate((selector) => {
-    const dom = document.querySelector(selector) as (HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold: { state(): { phase: string; synced: boolean; unsaved: number; revision: number } } } }> } } }) | null;
-    return dom?.editor?.extensionManager.extensions.find((e) => e.name === 'collaboration')?.options.hold.state() ?? null;
+    const dom = document.querySelector(selector) as (HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold: { base: { state(): { phase: string; synced: boolean; unsaved: number; revision: number } } } } }> } } }) | null;
+    return dom?.editor?.extensionManager.extensions.find((e) => e.name === 'collaboration')?.options.hold.base.state() ?? null;
   }, EDITOR_SELECTOR(artifactId));
 
 // ---- the IME drive (S7b's `imeStep`, as e2e/document-editor.spec.ts sends it) ---------------------------------------------

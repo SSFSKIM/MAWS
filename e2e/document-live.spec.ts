@@ -554,7 +554,7 @@ test('the live run: the agent creates, reads and edits a document in one batch w
     await page.keyboard.type(' again');
     await expect.poll(async () => (await blocks(editor)).p1).toBe('The launch moves to the following Tuesday. The team meets on Monday again.');
     // the owner's edit acknowledged by the host before the agent is asked (the replica's own count, not the header's word)
-    const unsaved = () => editor.evaluate((el) => (el as HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold?: { state(): { unsaved: number } } } }> } } }).editor?.extensionManager.extensions.find((x) => x.name === 'collaboration')?.options.hold?.state().unsaved ?? -1);
+    const unsaved = () => editor.evaluate((el) => (el as HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold?: { base: { state(): { unsaved: number } } } } }> } } }).editor?.extensionManager.extensions.find((x) => x.name === 'collaboration')?.options.hold?.base.state().unsaved ?? -1);
     await expect.poll(unsaved, { timeout: 15_000 }).toBe(0);
     const beforeStale = await blocks(editor);
     const editsBeforeStale = calls(s).filter((c) => c.name === 'artifact_edit').length;

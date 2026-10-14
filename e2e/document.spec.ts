@@ -91,8 +91,8 @@ async function durable(scope: Locator): Promise<void> {
       .locator('.ds-doc .ProseMirror')
       .first()
       .evaluate((el) => {
-        const editor = (el as HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold?: { state(): { unsaved: number } } } }> } } }).editor;
-        return editor?.extensionManager.extensions.find((extension) => extension.name === 'collaboration')?.options.hold?.state().unsaved ?? -1;
+        const editor = (el as HTMLElement & { editor?: { extensionManager: { extensions: Array<{ name: string; options: { hold?: { base: { state(): { unsaved: number } } } } }> } } }).editor;
+        return editor?.extensionManager.extensions.find((extension) => extension.name === 'collaboration')?.options.hold?.base.state().unsaved ?? -1;
       });
   await expect.poll(unsaved, { timeout: 10_000, message: 'every edit acknowledged by the host' }).toBe(0);
 }
