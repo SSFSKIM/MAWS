@@ -9,6 +9,7 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey, type EditorState } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type DecorationAttrs } from '@tiptap/pm/view';
 import type { Awareness } from '@y/protocols/awareness';
+import { isBindingTransaction } from '../../yjs';
 import { ySyncPluginKey } from '../../yjs/prosemirror';
 import { cssColor } from './host-types';
 
@@ -89,7 +90,10 @@ export const Presence = Extension.create<{ awareness: Awareness | null }>({
         key: presenceKey,
         state: {
           init: (_config, state) => editingDecorations(state, awareness),
-          apply: (tr, value, _old, state) => (tr.docChanged || tr.getMeta(presenceKey) || tr.getMeta(ySyncPluginKey) ? editingDecorations(state, awareness) : value.map(tr.mapping, tr.doc)),
+          // redrawn (a walk of the whole document) when the others' awareness changed or a remote change arrived (an agent's
+          // new blocks); the person's own typing only maps it (M9: the scale gate's keystroke → frame at 200 pages)
+          apply: (tr, value, _old, state) =>
+            tr.getMeta(presenceKey) || tr.getMeta(ySyncPluginKey) || (tr.docChanged && isBindingTransaction(tr)) ? editingDecorations(state, awareness) : value.map(tr.mapping, tr.doc),
         },
         props: { decorations: (state) => presenceKey.getState(state) },
         view: (view) => {

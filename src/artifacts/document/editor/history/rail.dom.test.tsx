@@ -199,6 +199,7 @@ describe('the preview', () => {
     click(within(bar()).getByRole('button', { name: 'Back to document' }));
     await until(() => screen.queryByRole('toolbar', { name: 'Formatting' }) !== null && previewEditor() === null, 'the live document');
     expect(rebound).toBe(0);
+    await until(() => shown!.isDestroyed, 'the preview editor destroyed'); // nothing of the preview is retained
     expect(live.state.doc).toBe(content);
     expect(live.view.dom.closest('[hidden]')).toBeNull();
     expect(live.can().undo()).toBe(true);

@@ -41,6 +41,20 @@ async function mount() {
 const outlined = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>('[data-agent-editing]')];
 
 describe('the agent’s presence', () => {
+  // M9 (the scale gate's keystroke → frame): the person's keystroke maps the outline; only the others' awareness or a
+  // remote change (an agent's blocks arriving) redraws it, which walks the whole document (1,455 blocks at 200 pages).
+  it('maps the outline through the person’s own typing instead of redrawing it', async () => {
+    const { agent, container, editor } = await mount();
+    agent.awareness.setLocalState({ name: 'Fix the build', color: '--author-3', editing: { blocks: ['p1'] } });
+    await until(() => outlined(container).length === 1, 'the editing outline');
+    const key = editor().state.plugins.find((plugin) => (plugin as unknown as { key: string }).key.startsWith('agentEditing'))!;
+    const before = (key.getState(editor().state) as { find(): unknown[] }).find();
+    editor().commands.insertContentAt(editor().state.doc.content.size - 1, 'X'); // typed in p3, after the outlined p1
+    const after = (key.getState(editor().state) as { find(): unknown[] }).find();
+    expect(after).toHaveLength(1);
+    expect((after[0] as { type: unknown }).type, 'the same decoration, mapped').toBe((before[0] as { type: unknown }).type);
+  });
+
   it('outlines the blocks it is editing in its colour, labelled with its name, and clears them when it drops them', async () => {
     const { agent, container } = await mount();
     agent.awareness.setLocalState({ name: 'Fix the build', color: '--author-3', editing: { blocks: ['p2'] } });
