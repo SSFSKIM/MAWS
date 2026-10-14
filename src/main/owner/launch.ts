@@ -1,11 +1,13 @@
 // The owner channel's launch decision (the P2-C document, Design §2 and §3; X6): run in main immediately before
 // `session.launch` for every MAWS-owned launch (an intent's new session, fork and side thread, and a record's resume),
 // never for the trust bootstrap. It decides three things:
-// 1. the desired state: `off` when the session's lane is off; else `external-compatible-style` when the launch's settings
-//    select a style declaring a compatible contract, and `maws-contract` otherwise (an unresolvable style included);
+// 1. the desired state: `off` when the session's lane is off; else by the shape of the contract the launch's style
+//    declares (P2-C2, Decision Log 31): `external-compatible-style` for MAWS's marks, `external-style-plus-supplement`
+//    for a message-tool style, and `maws-contract` otherwise (an unresolvable style included);
 // 2. the recorded state: what the engine will reuse, read from the transcript being resumed or forked (./prompt-state.ts);
-// 3. the flags: the contract is appended whenever it is desired (a no-op under a snapshot, effective at the next
-//    compaction), and `--system-prompt-snapshot off` is passed while the recorded state differs from the desired one,
+// 3. the flags: the desired state's text (the contract, or the supplement) is appended whenever it is desired (a no-op
+//    under a snapshot, effective at the next compaction), and `--system-prompt-snapshot off` is passed while the
+//    recorded state differs from the one the desired state records,
 //    only where the binary declares the flag; `applied` is what is in effect after the launch.
 // While the lane is on the launch also advertises MAWS_NATIVE_TO_HUMAN (the contract version) in its settings env, so a
 // plugin drawing its own to-human view can defer. The decision is recorded in the index when the host answers
@@ -17,13 +19,13 @@ import { homedir } from 'node:os';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import { TO_HUMAN_CONTRACT_VERSION } from '@shared/owner/contract';
+import { TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT_VERSION, type StyleShape } from '@shared/owner/contract';
 import type { ContractSource, LaneOverride } from '@shared/owner/state';
 import { claudeConfigDir } from '../history/prompt-history';
 import type { SessionStore } from '../index/sessions';
 import type { HostDispatch } from '../ipc/router';
 import { hostCall, transcriptPathOf } from '../sessions/context';
-import { withOwnerChannel } from '../sessions/launch-mapping';
+import { withOwnerChannel, type AppendedText } from '../sessions/launch-mapping';
 import { recordedState, type RecordedState } from './prompt-state';
 import { lookupStyle, resolveStyle, type ResolvedStyle, type StyleContext } from './resolve-style';
 import type { OwnerChannelStore } from './store';
@@ -35,7 +37,7 @@ export interface LaunchDecision {
   override: LaneOverride;
   desired: ContractSource;
   recorded: RecordedState;
-  appended: boolean; // --append-system-prompt passed
+  appended: boolean; // --append-system-prompt passed (the desired state's text: the contract, or the supplement)
   snapshotOff: boolean; // --system-prompt-snapshot off passed
   offUnavailable: boolean; // "off" was wanted and the binary does not declare it: the change waits for a compaction
   applied: ContractSource;
@@ -47,16 +49,33 @@ export interface LaunchDecision {
 // The lane's effective value: the session's override when set, else the app's switch.
 export const laneOn = (appEnabled: boolean, override: LaneOverride): boolean => (override === 'inherit' ? appEnabled : override === 'on');
 
-const CURRENT: RecordedState = `contract:${TO_HUMAN_CONTRACT_VERSION}`;
+// The desired state of a launch whose lane is `on` and whose style has `shape` (P2-C2: the shape rule, Decision Log 31).
+export const desiredSource = (on: boolean, shape: StyleShape): ContractSource =>
+  !on ? 'off' : shape === 'marks' ? 'external-compatible-style' : shape === 'message-tool' ? 'external-style-plus-supplement' : 'maws-contract';
 
-// The decision table (Design §2).
-export function decideFlags(desired: ContractSource, recorded: RecordedState, declares: boolean): { append: boolean; off: boolean; offUnavailable: boolean; applied: ContractSource } {
-  const wanted = recorded !== 'unrecorded' && (desired === 'maws-contract' ? recorded !== CURRENT : recorded.startsWith('contract:'));
+// The text a desired state appends and the recorded state it leaves in a snapshot; a state without one records none.
+const APPENDS: Partial<Record<ContractSource, { text: AppendedText; records: RecordedState }>> = {
+  'maws-contract': { text: 'contract', records: `contract:${TO_HUMAN_CONTRACT_VERSION}` },
+  'external-style-plus-supplement': { text: 'supplement', records: `supplement:${TO_HUMAN_SUPPLEMENT_VERSION}` }, // P2-C2
+};
+
+// The decision table (Design §2; P2-C2 adds the supplement's row and column).
+export function decideFlags(desired: ContractSource, recorded: RecordedState, declares: boolean): { append: AppendedText | null; off: boolean; offUnavailable: boolean; applied: ContractSource } {
+  const appends = APPENDS[desired] ?? null;
+  const wanted = recorded !== 'unrecorded' && recorded !== (appends?.records ?? 'none');
   const off = wanted && declares;
-  // what the snapshot keeps when it is reused: a recorded contract stays in force; none leaves the desired state, except
-  // that a contract wanted over none is missing until the prompt renders again
-  const kept: ContractSource = recorded.startsWith('contract:') ? 'maws-contract' : desired === 'maws-contract' ? 'off' : desired;
-  return { append: desired === 'maws-contract', off, offUnavailable: wanted && !declares, applied: off || recorded === 'unrecorded' ? desired : kept };
+  // what the snapshot keeps when it is reused: a recorded text stays in force (the contract, or the supplement beside its
+  // style); none leaves the desired state less the text it would append, missing until the prompt renders again
+  const kept: ContractSource = recorded.startsWith('contract:')
+    ? 'maws-contract'
+    : recorded.startsWith('supplement:')
+      ? 'external-style-plus-supplement'
+      : desired === 'maws-contract'
+        ? 'off'
+        : desired === 'external-style-plus-supplement'
+          ? 'external-compatible-style'
+          : desired;
+  return { append: appends?.text ?? null, off, offUnavailable: wanted && !declares, applied: off || recorded === 'unrecorded' ? desired : kept };
 }
 
 // What the decision reads beside the spec: the session service's setup (`Setup` satisfies it), whose `env` is the
@@ -152,13 +171,13 @@ export async function ownerChannelLaunch(
   // contradicted it, the engine's name decides instead
   const resolved = await resolveStyle(styleContext);
   const style: ResolvedStyle = row?.styleMismatch && row.observedStyle !== null ? await lookupStyle(row.observedStyle, styleContext) : resolved;
-  const desired: ContractSource = !on ? 'off' : style.compatible ? 'external-compatible-style' : 'maws-contract';
+  const desired = desiredSource(on, style.shape);
   const recorded = await recordedOf(s, spec, ctx);
   let flags = decideFlags(desired, recorded, true);
   if (flags.off) flags = decideFlags(desired, recorded, await declaresSnapshotFlag(s)); // the binary is asked only when "off" is wanted
   if (on && style.unresolved !== null) s.log(`${appSessionId}: ${style.unresolved}; the to-human contract is appended`);
   const record: LaunchDecision = {
-    appSessionId, kind: ctx.kind, laneOn: on, override, desired, recorded, appended: flags.append, snapshotOff: flags.off,
+    appSessionId, kind: ctx.kind, laneOn: on, override, desired, recorded, appended: flags.append !== null, snapshotOff: flags.off,
     offUnavailable: flags.offUnavailable, applied: flags.applied, style: resolved.name, decidedBy: style.name, styleUnresolved: style.unresolved,
   };
   return { spec: withOwnerChannel(spec, { laneOn: on, append: flags.append, snapshotOff: flags.off }), record };

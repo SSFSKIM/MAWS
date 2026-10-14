@@ -32,7 +32,7 @@ const userSettings = (settings: object) => put(join(home, 'settings.json'), sett
 
 describe('which style the settings select, in the engine’s precedence', () => {
   it('is the default when nothing sets one', async () => {
-    expect(await resolveStyle(ctx())).toEqual({ name: 'default', compatible: false, contract: null, unresolved: null });
+    expect(await resolveStyle(ctx())).toEqual({ name: 'default', shape: 'none', contract: null, unresolved: null });
   });
 
   it('managed, then MAWS’s own --settings, then local, then project, then user', async () => {
@@ -59,12 +59,12 @@ describe('which style the settings select, in the engine’s precedence', () => 
   });
 });
 
-describe('whether the selected style carries a compatible contract', () => {
+describe('the shape of the contract the selected style declares', () => {
   it('a built-in is never compatible, even beside a file of its name that declares the key', async () => {
     put(join(home, 'output-styles/Explanatory.md'), style('Explanatory', '1'));
     for (const name of ['default', 'Explanatory', 'Learning']) {
       userSettings({ outputStyle: name });
-      expect(await resolveStyle(ctx())).toEqual({ name, compatible: false, contract: null, unresolved: null });
+      expect(await resolveStyle(ctx())).toEqual({ name, shape: 'none', contract: null, unresolved: null });
     }
   });
 
@@ -72,30 +72,43 @@ describe('whether the selected style carries a compatible contract', () => {
     put(join(home, 'output-styles/report.md'), style('Report Mode', '1'));
     put(join(home, 'output-styles/terse.md'), style(null, '"1"'));
     userSettings({ outputStyle: 'Report Mode' });
-    expect(await resolveStyle(ctx())).toEqual({ name: 'Report Mode', compatible: true, contract: 1, unresolved: null });
+    expect(await resolveStyle(ctx())).toEqual({ name: 'Report Mode', shape: 'marks', contract: 1, unresolved: null });
     userSettings({ outputStyle: 'terse' });
-    expect(await resolveStyle(ctx())).toEqual({ name: 'terse', compatible: true, contract: 1, unresolved: null });
+    expect(await resolveStyle(ctx())).toEqual({ name: 'terse', shape: 'marks', contract: 1, unresolved: null });
   });
 
   it('a project style comes before a user style of the same name', async () => {
     put(join(home, 'output-styles/report.md'), style('report', '1'));
     put(join(project, '.claude/output-styles/report.md'), style('report', null));
     userSettings({ outputStyle: 'report' });
-    expect(await resolveStyle(ctx())).toMatchObject({ compatible: false, unresolved: null });
-    expect(await resolveStyle(ctx({ cwd: null }))).toMatchObject({ compatible: true, contract: 1 });
+    expect(await resolveStyle(ctx())).toMatchObject({ shape: 'none', unresolved: null });
+    expect(await resolveStyle(ctx({ cwd: null }))).toMatchObject({ shape: 'marks', contract: 1 });
   });
 
-  it('a version outside the compatible set, a value that is no integer, or no key is not compatible', async () => {
-    for (const key of ['3', '1.5', 'one', '', null]) {
+  // P2-C2 (Decision Log 31): the shape rule. The owner's doperpowers 7.149.0 declares 4.
+  it.each([
+    ['4', 'message-tool', 4],
+    ['3', 'message-tool', 3],
+    ['2', 'marks', 2],
+    ['1', 'marks', 1],
+    ['12', 'message-tool', 12], // a later key that keeps the shape
+  ] as const)('a style declaring %s has the %s shape', async (key, shape, contract) => {
+    put(join(home, 'output-styles/report.md'), style('report', key));
+    userSettings({ outputStyle: 'report' });
+    expect(await resolveStyle(ctx())).toEqual({ name: 'report', shape, contract, unresolved: null });
+  });
+
+  it('0, a value that is no integer, or no key has no shape', async () => {
+    for (const key of ['0', '1.5', 'one', '', null]) {
       put(join(home, 'output-styles/report.md'), style('report', key));
       userSettings({ outputStyle: 'report' });
-      expect(await resolveStyle(ctx())).toEqual({ name: 'report', compatible: false, contract: null, unresolved: null });
+      expect(await resolveStyle(ctx())).toEqual({ name: 'report', shape: 'none', contract: null, unresolved: null });
     }
   });
 
   it('an unknown name is not compatible and says why', async () => {
     userSettings({ outputStyle: 'nowhere' });
-    expect(await resolveStyle(ctx())).toEqual({ name: 'nowhere', compatible: false, contract: null, unresolved: expect.stringContaining('nowhere') });
+    expect(await resolveStyle(ctx())).toEqual({ name: 'nowhere', shape: 'none', contract: null, unresolved: expect.stringContaining('nowhere') });
   });
 
   describe('a plugin’s style, <plugin>:<style>', () => {
@@ -110,21 +123,28 @@ describe('whether the selected style carries a compatible contract', () => {
     it('is found in an enabled plugin installed at user scope', async () => {
       install([{ ...user, installPath: installPath() }]);
       userSettings({ outputStyle: 'myplug:to-human', enabledPlugins: { 'myplug@mkt': true } });
-      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:to-human', compatible: true, contract: 1, unresolved: null });
+      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:to-human', shape: 'marks', contract: 1, unresolved: null });
       userSettings({ outputStyle: 'myplug:plain', enabledPlugins: { 'myplug@mkt': true } });
-      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:plain', compatible: false, contract: null, unresolved: null });
+      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:plain', shape: 'none', contract: null, unresolved: null });
+    });
+
+    it('declaring 4, as doperpowers 7.149.0’s to-human does, has the message-tool shape (P2-C2)', async () => {
+      put(join(installPath(), 'output-styles/to-human.md'), style('to-human', '4'));
+      install([{ ...user, installPath: installPath() }]);
+      userSettings({ outputStyle: 'myplug:to-human', enabledPlugins: { 'myplug@mkt': true } });
+      expect(await resolveStyle(ctx())).toEqual({ name: 'myplug:to-human', shape: 'message-tool', contract: 4, unresolved: null });
     });
 
     it('is not found when the plugin is disabled, in the merged settings, or not installed', async () => {
       install([{ ...user, installPath: installPath() }]);
       userSettings({ outputStyle: 'myplug:to-human', enabledPlugins: { 'myplug@mkt': true } });
       put(join(project, '.claude/settings.local.json'), { enabledPlugins: { 'myplug@mkt': false } });
-      expect(await resolveStyle(ctx())).toMatchObject({ compatible: false, unresolved: expect.stringContaining('myplug') });
-      expect(await resolveStyle(ctx({ cwd: null }))).toMatchObject({ compatible: true });
+      expect(await resolveStyle(ctx())).toMatchObject({ shape: 'none', unresolved: expect.stringContaining('myplug') });
+      expect(await resolveStyle(ctx({ cwd: null }))).toMatchObject({ shape: 'marks' });
       userSettings({ outputStyle: 'myplug:to-human' });
-      expect(await resolveStyle(ctx({ cwd: null }))).toMatchObject({ compatible: false, unresolved: expect.stringContaining('myplug') });
+      expect(await resolveStyle(ctx({ cwd: null }))).toMatchObject({ shape: 'none', unresolved: expect.stringContaining('myplug') });
       userSettings({ outputStyle: 'other:to-human', enabledPlugins: { 'other@mkt': true } });
-      expect(await resolveStyle(ctx({ cwd: null }))).toMatchObject({ compatible: false, unresolved: expect.stringContaining('other') });
+      expect(await resolveStyle(ctx({ cwd: null }))).toMatchObject({ shape: 'none', unresolved: expect.stringContaining('other') });
     });
 
     it('a project or local installation applies only in its own project (compared by real path)', async () => {
@@ -133,20 +153,20 @@ describe('whether the selected style carries a compatible contract', () => {
       for (const scope of ['project', 'local']) {
         install([{ scope, projectPath: project, installPath: installPath(), version: '0.1.0' }]);
         put(join(project, '.claude/settings.json'), { outputStyle: 'myplug:to-human', enabledPlugins: { 'myplug@mkt': true } });
-        expect(await resolveStyle(ctx({ cwd: link }))).toMatchObject({ compatible: true, contract: 1 });
+        expect(await resolveStyle(ctx({ cwd: link }))).toMatchObject({ shape: 'marks', contract: 1 });
         const elsewhere = join(root, 'elsewhere');
         mkdirSync(elsewhere, { recursive: true });
         put(join(elsewhere, '.claude/settings.json'), { outputStyle: 'myplug:to-human', enabledPlugins: { 'myplug@mkt': true } });
-        expect(await resolveStyle(ctx({ cwd: elsewhere }))).toMatchObject({ compatible: false, unresolved: expect.stringContaining('myplug') });
+        expect(await resolveStyle(ctx({ cwd: elsewhere }))).toMatchObject({ shape: 'none', unresolved: expect.stringContaining('myplug') });
       }
     });
 
     it('a malformed or unknown-version registry finds nothing', async () => {
       userSettings({ outputStyle: 'myplug:to-human', enabledPlugins: { 'myplug@mkt': true } });
       put(join(home, 'plugins/installed_plugins.json'), '{');
-      expect(await resolveStyle(ctx())).toMatchObject({ compatible: false, unresolved: expect.any(String) });
+      expect(await resolveStyle(ctx())).toMatchObject({ shape: 'none', unresolved: expect.any(String) });
       put(join(home, 'plugins/installed_plugins.json'), { version: 1, plugins: { 'myplug@mkt': { installPath: installPath() } } });
-      expect(await resolveStyle(ctx())).toMatchObject({ compatible: false, unresolved: expect.any(String) });
+      expect(await resolveStyle(ctx())).toMatchObject({ shape: 'none', unresolved: expect.any(String) });
     });
   });
 });
@@ -155,7 +175,7 @@ describe('lookupStyle (the engine reported a name: the mismatch check’s next d
   it('looks the named style up directly, whatever the settings say', async () => {
     put(join(home, 'output-styles/report.md'), style('report', '1'));
     userSettings({ outputStyle: 'default' });
-    expect(await lookupStyle('report', ctx())).toEqual({ name: 'report', compatible: true, contract: 1, unresolved: null });
-    expect(await lookupStyle('Learning', ctx())).toEqual({ name: 'Learning', compatible: false, contract: null, unresolved: null });
+    expect(await lookupStyle('report', ctx())).toEqual({ name: 'report', shape: 'marks', contract: 1, unresolved: null });
+    expect(await lookupStyle('Learning', ctx())).toEqual({ name: 'Learning', shape: 'none', contract: null, unresolved: null });
   });
 });

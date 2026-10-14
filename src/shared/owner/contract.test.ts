@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { COMPATIBLE_CONTRACTS, CONTRACT_HEADER, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION } from './contract';
+import {
+  CONTRACT_HEADER, FULL_CONTRACT, NATIVE_TO_HUMAN_ENV, STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT,
+  TO_HUMAN_SUPPLEMENT_VERSION,
+} from './contract';
 import type { MessageUuid } from '../graph/ids';
 import { marksOf } from './marks';
 
@@ -36,9 +39,53 @@ describe('the contract (Design §1)', () => {
     }]);
   });
 
-  it('declares the versions MAWS can present, the style key and the advertisement variable', () => {
-    expect(COMPATIBLE_CONTRACTS).toContain(TO_HUMAN_CONTRACT_VERSION);
+  it('declares the style key and the advertisement variable', () => {
     expect(STYLE_CONTRACT_KEY).toBe('maws-to-human-contract');
     expect(NATIVE_TO_HUMAN_ENV).toBe('MAWS_NATIVE_TO_HUMAN');
+  });
+
+  // P2-C2: the full contract is one constant; the owner's answer on Decision Log 31 swaps it and this test.
+  it('is contract 1 in full until the owner rules otherwise', () => {
+    expect(FULL_CONTRACT.version).toBe(1);
+    expect(FULL_CONTRACT.text).toBe(TO_HUMAN_CONTRACT);
+    expect(styleShape(FULL_CONTRACT.version)).toBe('marks');
+  });
+});
+
+// P2-C2 (the P2 spec's Decision Log 31)
+describe('the shape rule: what a style declaring a contract version carries', () => {
+  it.each([
+    [1, 'marks'],
+    [2, 'marks'],
+    [3, 'message-tool'],
+    [4, 'message-tool'],
+    [17, 'message-tool'], // a later key that keeps the shape needs no MAWS change
+    [0, 'none'],
+    [null, 'none'],
+  ] as const)('%s is %s', (declared, shape) => {
+    expect(styleShape(declared)).toBe(shape);
+  });
+});
+
+describe('the supplement (P2-C2)', () => {
+  const words = TO_HUMAN_SUPPLEMENT.split('\n').slice(1).join(' ').split(/\s+/).filter(Boolean);
+
+  it('opens with its own header, beside the contract’s, and is version 1', () => {
+    expect(TO_HUMAN_SUPPLEMENT_VERSION).toBe(1);
+    expect(SUPPLEMENT_HEADER(1)).toBe('# Messages to the human (MAWS to-human supplement 1)');
+    expect(TO_HUMAN_SUPPLEMENT.startsWith(`${SUPPLEMENT_HEADER(1)}\n\n`)).toBe(true);
+    expect(TO_HUMAN_SUPPLEMENT.startsWith(CONTRACT_HEADER(1).split('contract')[0]!)).toBe(true); // one family of headers
+  });
+
+  it('names the one mark and the ask tool of a MAWS session, under 120 words, and nothing of the retired marks', () => {
+    expect(words.length).toBeLessThan(120);
+    for (const needle of ['`<message>…</message>`', '`mcp__maws__ask`', '`blocking: false`', '`blocking: true`', '`mcp__doperpowers__AskUserQuestion` is not available here', 'native AskUserQuestion only where', 'never inside code']) {
+      expect(TO_HUMAN_SUPPLEMENT).toContain(needle);
+    }
+    for (const retired of ['need-input', 'insight', 'essential', 'to-human>']) expect(TO_HUMAN_SUPPLEMENT).not.toContain(retired);
+  });
+
+  it('quotes its mark in code, so it reads as no mark itself', () => {
+    expect(marksOf(TO_HUMAN_SUPPLEMENT, { messageUuid: 'u' as MessageUuid, blockIndex: 0 })).toEqual([]);
   });
 });

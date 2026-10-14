@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { MessageUuid } from '@shared/graph/ids';
-import { CONTRACT_HEADER, TO_HUMAN_CONTRACT } from '@shared/owner/contract';
+import { CONTRACT_HEADER, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract';
 import { TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { classifySnapshot, PromptStateReader, recordedState, transcriptChain, transcriptEvidence } from './prompt-state';
 
@@ -36,6 +36,14 @@ describe('classifySnapshot', () => {
     expect(classifySnapshot([...ENGINE_SEGMENTS, '# Messages to the human (MAWS to-human contract x)'])).toBe('none');
     expect(classifySnapshot('not segments')).toBe('none');
   });
+
+  // P2-C2: the supplement beside a message-tool style carries its own header
+  it('reads supplement n from a segment opening with the supplement’s header', () => {
+    expect(classifySnapshot([...ENGINE_SEGMENTS, TO_HUMAN_SUPPLEMENT])).toBe('supplement:1');
+    expect(classifySnapshot([...ENGINE_SEGMENTS, `${SUPPLEMENT_HEADER(3)}\n\nlater words`])).toBe('supplement:3');
+    expect(classifySnapshot([...ENGINE_SEGMENTS, `Appended. ${SUPPLEMENT_HEADER(1)}`])).toBe('none');
+    expect(classifySnapshot([...ENGINE_SEGMENTS, '# Messages to the human (MAWS to-human supplement)'])).toBe('none');
+  });
 });
 
 describe('recordedState reads a transcript', () => {
@@ -49,6 +57,7 @@ describe('recordedState reads a transcript', () => {
     expect(await recordedState(write('b.jsonl', [snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT]), user('x'), snapshot(ENGINE_SEGMENTS)]))).toBe('none');
     expect(await recordedState(write('c.jsonl', [snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT]), BOUNDARY, user('after')]))).toBe('unrecorded'); // the boundary hides it
     expect(await recordedState(write('d.jsonl', [snapshot(ENGINE_SEGMENTS), BOUNDARY, snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT])]))).toBe('contract:1');
+    expect(await recordedState(write('s.jsonl', [snapshot([...ENGINE_SEGMENTS, TO_HUMAN_CONTRACT]), user('x'), snapshot([...ENGINE_SEGMENTS, TO_HUMAN_SUPPLEMENT])]))).toBe('supplement:1'); // P2-C2: switched to a message-tool style
   });
 
   it('is not misled by a prompt or a record that only mentions the two record types', async () => {

@@ -58,6 +58,12 @@ describe('mods.list and mods.setSessionOverride', () => {
       put(join(configHome, 'settings.json'), { outputStyle: 'report' });
       expect(await modsList(deps)).toEqual([{ ...MOD, enabled: true, source: 'external-compatible-style' }]);
     });
+
+    it('the style with MAWS’s supplement when the selected style declares a message-tool contract (P2-C2)', async () => {
+      put(join(configHome, 'output-styles/report.md'), '---\nname: report\nmaws-to-human-contract: 4\n---\n');
+      put(join(configHome, 'settings.json'), { outputStyle: 'report' });
+      expect(await modsList(deps)).toEqual([{ ...MOD, enabled: true, source: 'external-style-plus-supplement' }]);
+    });
   });
 
   describe('with a session', () => {
