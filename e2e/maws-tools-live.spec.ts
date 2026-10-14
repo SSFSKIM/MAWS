@@ -48,7 +48,7 @@ const PROMPTS = {
     'Use the maws ask tool (blocking) to ask me five questions, with these ids and modalities: q1 choice single with options Red, Green, Blue ("Which colour?"); q2 choice multi with options Mon, Tue, Wed ("Which days?"); q3 text ("What should the title be?"); q4 folder ("Which folder holds the assets?"); q5 repository ("Which repository is this for?"). Then reply with one line per question: id, then the answer or SKIPPED or DECIDE.',
   // M2's async prompt, asking for the command in the foreground so the answer folds into the running turn (Surprises)
   async: 'Use the maws ask tool with blocking false to ask me one choice question with id q1 and options Yes, No ("Proceed?"). Then, without waiting, run the Bash command `sleep 15; echo WAITED` in the foreground, never in the background, and report its output. When my answer arrives, reply with ANSWER: followed by it.',
-  showPane: 'Call the maws show_pane tool three times: first with pane "terminal", then with pane "deliverable" and target "none", then with pane "nope". Reply with one line per call: the pane name and the result status or error text.',
+  showPane: 'Call the maws show_pane tool three times: first with pane "terminal", then with pane "artifact" and target "none", then with pane "nope". Reply with one line per call: the pane name and the result status or error text.', // P3-L M6b: E2's `deliverable` pane renamed
 } as const;
 
 // ---- the owner file (A-15), the engine, the evidence ------------------------------------------------------------------
@@ -281,8 +281,9 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       const [delivered] = ofKind(events, 'maws.delivery.file');
       const path = join(sc.repo, 'hello.txt');
       expect(delivered).toMatchObject({ caption: 'the greeting', deliverables: [{ path, name: 'hello.txt' }] });
-      const record = JSON.parse(readFileSync(join(maws.userData, 'deliverables', session.id, `${delivered!.deliverables[0]!.id}.json`), 'utf8')) as Record<string, unknown>;
-      expect(record).toMatchObject({ kind: 'file', path, title: 'hello.txt', caption: 'the greeting' });
+      // P3-L M6b: a File artifact of the session, the file in place (the caption is the row's, below, not the artifact's)
+      const { artifact: record } = value(await invoke(s.page, 'artifacts.get', { artifactId: delivered!.deliverables[0]!.id }));
+      expect(record).toMatchObject({ kind: 'file', linkedPath: path, title: 'hello.txt' });
       const delivery = s.pane.locator('[data-delivery]').last();
       await expect(delivery.locator('[data-delivery-heading]')).toHaveText('Delivered hello.txt · the greeting');
       const file = delivery.locator(`[data-path="${path}"]`);
@@ -291,7 +292,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       await expect.poll(() => (existsSync(openLog) ? readFileSync(openLog, 'utf8').trim().split('\n') : [])).toEqual([path, `reveal ${path}`]);
       await shoot(s, 'delivery');
       const reply = mainTurnsEnded(events).at(-1)?.resultText ?? null;
-      note(`G2: maws.delivery.file ${JSON.stringify(delivered!.deliverables.map((d) => ({ id: d.id, name: d.name })))} caption "the greeting"; record ${record.id as string}.json kind file; the row reads "Delivered hello.txt · the greeting"; Open externally and Reveal in Finder logged ${JSON.stringify(readFileSync(openLog, 'utf8').trim().split('\n').map((l) => l.replace(sc.root, '<scratch>')))}; reply ${JSON.stringify(reply)}`);
+      note(`G2: maws.delivery.file ${JSON.stringify(delivered!.deliverables.map((d) => ({ id: d.id, name: d.name })))} caption "the greeting"; File artifact ${record!.id}; the row reads "Delivered hello.txt · the greeting"; Open externally and Reveal in Finder logged ${JSON.stringify(readFileSync(openLog, 'utf8').trim().split('\n').map((l) => l.replace(sc.root, '<scratch>')))}; reply ${JSON.stringify(reply)}`);
       await end(s, session, before);
     });
 
@@ -411,15 +412,16 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       await end(s, session, before);
     });
 
-    // E2 landed the Deliverables tool after E1's sitting, so the deliverable pane exists and target "none" names no record
-    // (the replay spec's expectation, maws-tools.spec.ts); E1's build answered "not available in this build"
-    await test.step('4 show_pane: the Terminal opens, a deliverable that does not exist and an unknown pane are error cells', async () => {
+    // E2 landed the Deliverables tool after E1's sitting, so the pane exists and target "none" names nothing (the replay
+    // spec's expectation, maws-tools.spec.ts); E1's build answered "not available in this build". P3-L M6b: the
+    // `artifact` pane and the Artifacts tool
+    await test.step('4 show_pane: the Terminal opens, an artifact that does not exist and an unknown pane are error cells', async () => {
       const session = await begin(s, 'show_pane', showPaneId, PROMPTS.showPane);
       await drive(s, session, 'the turn end', async () => ofKind(await s.events(session.id), 'turn.ended').some((e) => e.parentToolUseId === null) && (await idleNow(s, session.id)));
       const shown = ofKind(await s.events(session.id), 'maws.pane.shown');
       expect(shown.map((e) => [e.pane, e.opened?.kind ?? null, e.error])).toEqual([
         ['terminal', 'panel-tool', null],
-        ['deliverable', null, TOOL_ERRORS.deliverableNotFound('none')],
+        ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
       ]);
       await expect(s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Terminal/ })).toHaveAttribute('aria-selected', 'true');
       const divider = s.pane.locator('[data-kind="divider"]').last().locator('button[aria-expanded]').first();
@@ -427,11 +429,11 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       // the cells' own labels, since the model's reply may quote the same words (a live run's read "opened Terminal panel")
       const cell = (text: string | RegExp) => s.pane.locator('.transcript-cell-label').filter({ hasText: text });
       await expect(cell(/^Opened Terminal$/)).toBeVisible();
-      await expect(cell(/^Could not open pane: no deliverable "none" in this session$/)).toBeVisible();
+      await expect(cell(/^Could not open pane: no artifact "none" in this session$/)).toBeVisible();
       await expect(cell(/^Could not open pane: unknown pane "nope"/)).toBeVisible();
       await shoot(s, 'pane');
       const reply = mainTurnsEnded(await s.events(session.id)).at(-1)?.resultText ?? '';
-      note(`G5: maws.pane.shown ${JSON.stringify(shown.map((e) => ({ pane: e.pane, opened: e.opened, error: e.error })))}; the Terminal tab opened in the panel; the cells read "Opened Terminal", "Could not open pane: no deliverable "none" in this session", "Could not open pane: unknown pane "nope"…"; reply ${JSON.stringify(reply)}`);
+      note(`G5: maws.pane.shown ${JSON.stringify(shown.map((e) => ({ pane: e.pane, opened: e.opened, error: e.error })))}; the Terminal tab opened in the panel; the cells read "Opened Terminal", "Could not open pane: no artifact "none" in this session", "Could not open pane: unknown pane "nope"…"; reply ${JSON.stringify(reply)}`);
       await end(s, session, before);
     });
   } finally {

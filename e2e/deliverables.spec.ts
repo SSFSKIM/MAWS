@@ -1,5 +1,11 @@
 // E2's `deliverables` group (docs/doperpowers/plans/2026-10-06-e2-deliverables.md; P1 spec §9 E2, gates G1 to G6): the
-// deliverable store, its scheme, its frames and the agent's screenshot in the product app. M3 laid down its first two
+// deliverable store, its scheme, its frames and the agent's screenshot in the product app. P3-L M6b (the cutover): the
+// same cases on the renamed surface, selectors and labels only: a pre-P3 deliverable is an X12 record written as E2's
+// host wrote it, imported as the host imports it at start (`importSeeded`; a record's id is its artifact's), framed on
+// `maws-artifact:` at the place of its version (`pageUrlOf`), in the Artifacts tool (E2's Deliverables tool) whose
+// actions are the viewer's X32 header's. The assertions on what only the Deliverables tool showed (a list row's version
+// count and caption, the All scope's session names, the deleted record's notice over the session's list) are gone with
+// it, each named where it stood. M3 laid down its first two
 // cases on the real Electron, with the scheme handler and the frame policies installed: the PDF trial (Design §3,
 // Decision Log 14), which decides the PDF frame's sandbox by loading a hand-written PDF through the scheme into frames
 // (a) `sandbox="allow-scripts"`, (b) `sandbox="allow-scripts allow-same-origin"` and (c) no sandbox, and the capture
@@ -23,13 +29,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { ArtifactConsole } from '@shared/ipc/schema/artifacts';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
-import { deliverableUrl, type DeliverableRecord } from '../src/shared/maws/deliverable';
+import type { DeliverableRecord } from '../src/shared/maws/deliverable';
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
 import { invoke, value } from './support/c7-replay';
 import {
-  allowNext, asPublishReplay, closeScene, frameAt, idle, launchScene, listOf, mcpCalls, mcpResultOf, ofKind, openDeliverables, PASS3, recordedCwd, recordPath, replay, rowOf,
-  scene, scratchProject, seamLines, seedArtifact, seedFile, shoot, show, unfoldWork, viewerOf, type Scene,
+  allowNext, asPublishReplay, closeScene, frameAt, headerAction, headerActions, idle, importSeeded, launchScene, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, PASS3, pageUrlOf,
+  recordedCwd, replay, rowOf, scene, scratchProject, seamLines, seedArtifact, seedFile, shoot, show, unfoldWork, viewerOf, type Scene,
 } from './support/maws-tools';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu'; // P3-G
@@ -98,9 +105,11 @@ test('the PDF trial: which frame sandbox draws a scheme-served PDF in Chromium�
     writeFileSync(path, minimalPdf());
     const id = randomUUID();
     seed(maws.userData, { id, appSessionId: APP, kind: 'file', path, title: 'trial.pdf', versions: [{ path, at: new Date().toISOString() }], createdAt: new Date().toISOString() });
+    await importSeeded(maws.page);
+    const url = await pageUrlOf(maws.page, id);
     const results: { mode: string; sandbox: string | null; draws: boolean; dark: number; frames: string[]; viewerParents: (string | null)[] }[] = [];
     for (const { mode, sandbox } of PDF_TRIAL) {
-      await mountFrame(maws, deliverableUrl(APP, id, 1), sandbox);
+      await mountFrame(maws, url, sandbox);
       let view = await frameView(maws);
       // Chromium's viewer draws a moment after the frame's load; a frame that never draws is given 8 s
       for (const until = Date.now() + 8_000; view.dark < 2_000 && Date.now() < until; ) {
@@ -117,10 +126,10 @@ test('the PDF trial: which frame sandbox draws a scheme-served PDF in Chromium�
     await testInfo.attach('pdf-trial.txt', { body: report, contentType: 'text/plain' });
     expect(results.find((r) => r.mode === PDF_CHOSEN)?.draws, report).toBe(true);
     // the policies' premise (policies.ts): the viewer's frame lies beneath the PDF's own scheme frame, so its links and
-    // requests are judged as a deliverable's
+    // requests are judged as a store frame's
     const viewerParents = results.find((r) => r.mode === PDF_CHOSEN)!.viewerParents;
     expect(viewerParents.length, report).toBeGreaterThan(0);
-    for (const parent of viewerParents) expect(parent, report).toMatch(/^maws-deliverable:\/\//);
+    for (const parent of viewerParents) expect(parent, report).toMatch(/^maws-artifact:\/\//);
     for (const earlier of PDF_TRIAL.slice(0, PDF_TRIAL.findIndex((t) => t.mode === PDF_CHOSEN))) {
       expect(results.find((r) => r.mode === earlier.mode)?.draws, `${earlier.mode} would have been chosen first\n${report}`).toBe(false);
     }
@@ -143,17 +152,20 @@ test('the capture renders a scheme-served artifact offscreen at the asked size; 
     );
     const at = new Date().toISOString();
     seed(maws.userData, { id, appSessionId: APP, kind: 'artifact', artifactId: 'dash', title: 'Dashboard', path: copy, versions: [{ path: copy, at }], createdAt: at, updatedAt: at });
+    await importSeeded(maws.page);
+    const url = await pageUrlOf(maws.page, id);
+    const revision = Number(url.split('/')[3]);
 
-    // main's deliverables.console events for this page, from before the capture runs, so a capture's would show too
+    // main's artifacts.console events for this page, from before the capture runs, so a capture's would show too
     await maws.page.evaluate(() => {
       const w = window as unknown as { __e2Console?: unknown[] };
       w.__e2Console = [];
-      window.maws.on('deliverables.console', (payload) => void w.__e2Console!.push(payload));
+      window.maws.on('artifacts.console', (payload) => void w.__e2Console!.push(payload));
     });
 
-    const request: MawsArtifactCapture = { appSessionId: APP, requestId: 'e2-capture' as MawsArtifactCapture['requestId'], deliverableId: id, version: 1, width: 640, height: 480 };
+    const request: MawsArtifactCapture = { appSessionId: APP, requestId: 'e2-capture' as MawsArtifactCapture['requestId'], artifactId: id, revision, width: 640, height: 480 };
     const result = await maws.app.evaluate(
-      (_electron, request) => (globalThis as unknown as { __maws_deliverables: { capture(r: unknown): Promise<MawsArtifactCapturedResult> } }).__maws_deliverables.capture(request),
+      (_electron, request) => (globalThis as unknown as { __maws_captures: { capture(r: unknown): Promise<MawsArtifactCapturedResult> } }).__maws_captures.capture(request),
       request,
     );
     expect(result, JSON.stringify(result).slice(0, 300)).toMatchObject({ ok: true, width: 640, height: 480 });
@@ -186,11 +198,11 @@ test('the capture renders a scheme-served artifact offscreen at the asked size; 
           });
         }),
     );
-    await mountFrame(maws, deliverableUrl(APP, id, 1), 'allow-scripts');
+    await mountFrame(maws, url, 'allow-scripts');
     expect(await ran, 'the inline script ran under the handler’s policy, not the app’s').toBe(true);
     await expect
       .poll(() => maws.page.evaluate(() => (window as unknown as { __e2Console: unknown[] }).__e2Console))
-      .toEqual([expect.objectContaining({ appSessionId: APP, deliverableId: id, version: 1, level: 'error', message: 'E2_CONSOLE_ERROR' })]);
+      .toEqual([expect.objectContaining({ artifactId: id, revision, level: 'error', message: 'E2_CONSOLE_ERROR' } satisfies Partial<ArtifactConsole>)]);
   } finally {
     await maws.cleanup();
   }
@@ -214,9 +226,10 @@ test('the bridge script picks an element of an artifact in a sandboxed frame and
     );
     const at = new Date().toISOString();
     seed(maws.userData, { id, appSessionId: APP, kind: 'artifact', artifactId: 'dash', title: 'Dashboard', path: copy, versions: [{ path: copy, at }], createdAt: at, updatedAt: at });
+    await importSeeded(maws.page);
 
-    await mountFrame(maws, deliverableUrl(APP, id, 1), 'allow-scripts');
-    const frame = maws.page.frames().find((f) => f.url().startsWith('maws-deliverable://'))!;
+    await mountFrame(maws, await pageUrlOf(maws.page, id), 'allow-scripts');
+    const frame = maws.page.frames().find((f) => f.url().startsWith('maws-artifact://'))!;
     expect(await frame.evaluate(() => [document.compatMode, document.head.firstElementChild?.hasAttribute('data-maws-bridge') ?? false])).toEqual(['CSS1Compat', true]);
 
     // what the frame posts to the app, as the viewer hears it (source checked)
@@ -431,12 +444,14 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
         ['update', 'dash', deliverableId, 2],
       ]);
 
-      // the store: one record, two copies, the source left where the agent wrote it (G1)
-      const record = JSON.parse(readFileSync(join(s.maws.userData, 'deliverables', id, `${deliverableId}.json`), 'utf8')) as DeliverableRecord;
-      expect(record).toMatchObject({ id: deliverableId, appSessionId: id, kind: 'artifact', artifactId: 'dash', title: 'Dashboard' });
-      expect(record.versions.map((v) => v.path)).toEqual([1, 2].map((n) => join(s.maws.userData, 'deliverables', id, deliverableId, `v${n}.html`)));
-      expect(record.path).toBe(record.versions[1]!.path);
-      expect(record.versions.map((v) => readFileSync(v.path, 'utf8'))).toEqual([DASHBOARD_V1, DASHBOARD_V2]);
+      // the store: one artifact, two versions, the source left where the agent wrote it (G1; P3-L M6b: the artifact store's
+      // versions, X12's record and copies no more)
+      const { artifact } = value(await invoke(s.page, 'artifacts.get', { artifactId: deliverableId }));
+      expect(artifact).toMatchObject({ id: deliverableId, kind: 'html', handle: 'dash', title: 'Dashboard', createdBy: { kind: 'session', appSessionId: id } });
+      const { versions } = value(await invoke(s.page, 'artifacts.versions', { artifactId: deliverableId }));
+      const pages = await Promise.all([...versions].sort((a, b) => a.seq - b.seq).map(async (v) => readFileSync(value(await invoke(s.page, 'library.content', { artifactId: deliverableId, revision: v.seq })).path, 'utf8')));
+      expect(pages).toEqual([DASHBOARD_V1, DASHBOARD_V2]);
+      expect(existsSync(join(s.maws.userData, 'deliverables'))).toBe(false);
 
       // the rows (G4, G5): persistent, so in view with the turn folded
       const artifactRows = s.pane.locator('section.transcript-artifact');
@@ -448,9 +463,9 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
       const v1Row = artifactRows.nth(0);
       await v1Row.getByRole('button', { name: 'Open' }).click();
       const viewer = viewerOf(s.panel);
-      await expect(viewer).toHaveAttribute('data-deliverable-id', deliverableId);
+      await expect(viewer).toHaveAttribute('data-artifact-viewer', deliverableId);
       await expect(viewer).toHaveAttribute('data-version', '1');
-      const frame = await frameAt(s.page, deliverableUrl(id, deliverableId, 1));
+      const frame = await frameAt(s.page, await pageUrlOf(s.page, deliverableId, 1));
       await expect(frame.locator('#heading')).toHaveText('HELLO_E2 v1');
       await expect(viewer.locator('[data-console-chip]')).toHaveText('1 console error');
       await expect(v1Row.locator('[data-console-chip]')).toHaveText('1 console error');
@@ -484,9 +499,12 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
   }
 });
 
-// ---- (2) the Deliverables tool ---------------------------------------------------------------------------------------
+// ---- (2) the Artifacts tool (E2's Deliverables tool) -----------------------------------------------------------------
 
-test('the Deliverables tool: groups newest first, Back to the list’s scroll, the version switcher, Open in tab, the tab across a reload and after its record is deleted', async () => {
+// P3-L M6b: the tab's case after its record is deleted (the restored tab showing the session's list headed by "No
+// deliverable … in this session") was the Deliverables tool's alone and is gone with it; an `artifact` tab's Gone notice
+// is M3's (ArtifactTab's units).
+test('the Artifacts tool: groups newest first, Back to the list’s scroll, the version switcher, Open in tab, the tab across a reload', async () => {
   await scene({ titles: ['E2: the tool'] }, async (s) => {
     const [id] = s.ids;
     const userData = s.maws.userData;
@@ -498,31 +516,34 @@ test('the Deliverables tool: groups newest first, Back to the list’s scroll, t
       return seedFile(userData, id, path, new Date(t0 + k * 60_000).toISOString(), k === 0 ? 'the first note' : undefined);
     });
     const artifact = seedArtifact(userData, id, 'sales', 'Sales dashboard', [pageOf('VERSION_ONE', '#00695c'), pageOf('VERSION_TWO', '#4527a0')], new Date(t0 + 3_600_000).toISOString());
+    await importSeeded(s.page);
 
     await show(s, id);
-    await openDeliverables(s);
+    await openArtifacts(s);
     const list = listOf(s);
-    await expect(list.locator('[data-group]')).toHaveCount(2);
-    expect(await list.locator('[data-group]').evaluateAll((els) => els.map((el) => el.getAttribute('data-group')))).toEqual(['artifact', 'file']);
-    await expect(list.locator('[data-group="artifact"] [data-part="title"]')).toHaveText(['Sales dashboard']);
-    await expect(list.locator('[data-group="artifact"] [data-part="line"]')).toContainText('v2 · ');
-    await expect(list.locator('[data-group="file"] [data-part="title"]')).toHaveText(notes.map((n) => n.title!).reverse());
-    await expect(rowOf(list, notes[0]!).locator('[data-part="line"]')).toHaveText('the first note');
+    await expect(list.locator('[data-artifacts-group]')).toHaveCount(2);
+    expect(await list.locator('[data-artifacts-group]').evaluateAll((els) => els.map((el) => el.getAttribute('data-artifacts-group')))).toEqual(['html', 'file']);
+    await expect(list.locator('[data-artifacts-group="html"] [data-part="title"]')).toHaveText(['Sales dashboard']);
+    // P3-L M6b: the Deliverables list's version count on the row's line ("v2 · …") is gone with it (the line is the
+    // library's "Edited … by …")
+    await expect(list.locator('[data-artifacts-group="file"] [data-part="title"]')).toHaveText(notes.map((n) => n.title!).reverse());
+    // P3-L M6b: the row's caption ("the first note") is gone with the Deliverables list (Decision Log 18e: the caption is
+    // the transcript's delivery row's)
 
     // a row further down opens its viewer; Back returns to the list where it was
     await list.evaluate((el) => (el.scrollTop = 420));
     await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(420);
     const visible = await list.evaluate((el) => {
       const box = el.getBoundingClientRect();
-      const rows = Array.from(el.querySelectorAll<HTMLElement>('[data-deliverable-row]'));
-      return rows.find((row) => row.getBoundingClientRect().top >= box.top + 40 && row.getBoundingClientRect().bottom <= box.bottom)!.dataset.deliverableId!;
+      const rows = Array.from(el.querySelectorAll<HTMLElement>('[data-artifact-row]'));
+      return rows.find((row) => row.getBoundingClientRect().top >= box.top + 40 && row.getBoundingClientRect().bottom <= box.bottom)!.dataset.artifactId!;
     });
     await rowOf(list, { id: visible }).click();
     const viewer = viewerOf(s.panel);
-    await expect(viewer).toHaveAttribute('data-deliverable-id', visible);
+    await expect(viewer).toHaveAttribute('data-artifact-viewer', visible);
     const note = notes.find((n) => n.id === visible)!;
     await expect(viewer.locator('[data-file-viewer]')).toContainText(readFileSync(note.path, 'utf8').trim());
-    await viewer.getByRole('button', { name: 'Back' }).click();
+    await s.panel.getByRole('button', { name: 'Back' }).click();
     await expect(list).toBeVisible();
     await expect.poll(() => list.evaluate((el) => el.scrollTop)).toBe(420);
 
@@ -532,33 +553,26 @@ test('the Deliverables tool: groups newest first, Back to the list’s scroll, t
     await expect(viewer).toHaveAttribute('data-version', '2');
     const versions = viewer.getByRole('combobox', { name: 'Version' });
     await expect(versions.locator('option')).toHaveText(['v1', 'v2 · latest']);
-    await expect((await frameAt(s.page, deliverableUrl(id, artifact.id, 2))).locator('#heading')).toHaveText('VERSION_TWO');
+    const v2 = await pageUrlOf(s.page, artifact.id, 2);
+    await expect((await frameAt(s.page, v2)).locator('#heading')).toHaveText('VERSION_TWO');
     await versions.selectOption('1');
     await expect(viewer).toHaveAttribute('data-version', '1');
-    await expect((await frameAt(s.page, deliverableUrl(id, artifact.id, 1))).locator('#heading')).toHaveText('VERSION_ONE');
-    await expect.poll(() => s.page.frames().some((f) => f.url() === deliverableUrl(id, artifact.id, 2)), { message: 'the v2 frame is gone' }).toBe(false);
+    await expect((await frameAt(s.page, await pageUrlOf(s.page, artifact.id, 1))).locator('#heading')).toHaveText('VERSION_ONE');
+    await expect.poll(() => s.page.frames().some((f) => f.url() === v2), { message: 'the v2 frame is gone' }).toBe(false);
     await shoot(s, 'versions');
 
     // Open in tab: the same viewer as a main tab, on the record's latest version
-    await viewer.getByRole('button', { name: 'Open in tab' }).click();
-    const tab = s.page.locator('[data-region="main"] [data-deliverable-tab]');
-    await expect(viewerOf(tab)).toHaveAttribute('data-deliverable-id', artifact.id);
-    await expect(viewerOf(tab).getByRole('button', { name: 'Open in tab' })).toHaveCount(0);
-    await expect(viewerOf(tab).getByRole('button', { name: 'Back' })).toHaveCount(0);
+    await s.panel.getByRole('button', { name: 'Open in tab' }).click();
+    const tab = s.page.locator('[data-region="main"] [data-artifact-tab]');
+    await expect(viewerOf(tab)).toHaveAttribute('data-artifact-viewer', artifact.id);
+    await expect(tab.getByRole('button', { name: 'Open in tab' })).toHaveCount(0);
+    await expect(tab.getByRole('button', { name: 'Back' })).toHaveCount(0);
     await shoot(s, 'tab');
 
     // the tab is restored after a reload of the window
     await s.page.reload();
-    await expect(viewerOf(tab)).toHaveAttribute('data-deliverable-id', artifact.id, { timeout: 20_000 });
-    await expect((await frameAt(s.page, deliverableUrl(id, artifact.id, 2))).locator('#heading')).toHaveText('VERSION_TWO');
-
-    // the record deleted: the restored tab shows the session's list, headed by the notice
-    rmSync(recordPath(userData, artifact));
-    await s.page.reload();
-    await expect(tab.locator('[data-notice]')).toHaveText(`No deliverable ${artifact.id} in this session`, { timeout: 20_000 });
-    await expect(tab.locator('[data-deliverables-list] [data-group]')).toHaveCount(1);
-    await expect(rowOf(tab, artifact)).toHaveCount(0);
-    await expect(tab.locator('[data-deliverable-row]')).toHaveCount(notes.length);
+    await expect(viewerOf(tab)).toHaveAttribute('data-artifact-viewer', artifact.id, { timeout: 20_000 });
+    await expect((await frameAt(s.page, v2)).locator('#heading')).toHaveText('VERSION_TWO');
   });
 });
 
@@ -611,37 +625,39 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     const downloads = join(s.scratch.root, 'downloads');
     mkdirSync(downloads);
     await s.maws.app.evaluate(({ app }, dir) => app.setPath('downloads', dir), downloads);
+    await importSeeded(s.page);
 
     await show(s, id);
-    await openDeliverables(s);
+    await openArtifacts(s);
     const list = listOf(s);
     const viewer = viewerOf(s.panel);
     const open = async (record: DeliverableRecord, body: string) => {
-      if (await viewer.isVisible()) await viewer.getByRole('button', { name: 'Back' }).click();
+      if (await viewer.isVisible()) await s.panel.getByRole('button', { name: 'Back' }).click();
       await rowOf(list, record).click();
-      await expect(viewer).toHaveAttribute('data-deliverable-id', record.id);
+      await expect(viewer).toHaveAttribute('data-artifact-viewer', record.id);
       await expect(viewer).toHaveAttribute('data-body', body);
     };
-    const button = (name: string) => viewer.getByRole('button', { name, exact: true });
+    // the viewer's actions, in its X32 header (P3-L M5b)
+    const offers = async (name: string) => (await headerActions(s.page, s.panel)).includes(name);
     // Reveal on every one, Open externally on the kinds main hands to the OS (Decision Log 17), each through the seam
     const expected: string[] = [];
     const opened = () => seamLines(s).filter((l) => !l.startsWith('blocked-'));
     const reach = async (record: DeliverableRecord, external: boolean) => {
-      await expect(button('Open externally')).toHaveCount(external ? 1 : 0);
+      await expect.poll(() => offers('Open externally')).toBe(external);
       if (external) {
-        await button('Open externally').click();
+        await headerAction(s.page, s.panel, 'Open externally');
         expected.push(record.path);
         await expect.poll(opened).toEqual(expected);
       }
-      await button('Reveal in Finder').click();
+      await headerAction(s.page, s.panel, 'Reveal in Finder');
       expected.push(`reveal ${record.path}`);
       await expect.poll(opened).toEqual(expected);
     };
 
     // the HTML page: its inline script ran in a scripts-only frame; the fetch failed and shows in the chip
     await open(html, 'html');
-    await expect(viewer.locator('[data-deliverable-frame="html"]')).toHaveAttribute('sandbox', 'allow-scripts');
-    const page = await frameAt(s.page, deliverableUrl(id, html.id, 1));
+    await expect(viewer.locator('[data-artifact-frame="html"]')).toHaveAttribute('sandbox', 'allow-scripts');
+    const page = await frameAt(s.page, await pageUrlOf(s.page, html.id));
     await expect(page.locator('#marker')).toHaveText('SCRIPT_RAN');
     await expect(viewer.locator('[data-console-chip]')).toBeVisible();
     await shoot(s, 'viewer-html');
@@ -668,13 +684,13 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     await expect.poll(navigations).toContain('fail frame -30 https://example.invalid/away'); // ERR_BLOCKED_BY_CSP
     expect((await navigations()).filter((line) => line.startsWith('navigated window'))).toEqual([]);
     expect(s.page.url()).toBe(appUrl);
-    await button('Reload').click();
-    await expect((await frameAt(s.page, deliverableUrl(id, html.id, 1))).locator('#marker')).toHaveText('SCRIPT_RAN');
+    await headerAction(s.page, s.panel, 'Reload');
+    await expect((await frameAt(s.page, await pageUrlOf(s.page, html.id))).locator('#marker')).toHaveText('SCRIPT_RAN');
     await reach(html, true);
 
     // the PDF: Chromium's viewer draws it in its unsandboxed frame (Decision Log 31)
     await open(pdf, 'pdf');
-    const pdfFrame = viewer.locator('[data-deliverable-frame="pdf"]');
+    const pdfFrame = viewer.locator('[data-artifact-frame="pdf"]');
     await expect(pdfFrame).not.toHaveAttribute('sandbox');
     await expect.poll(async () => (await darkIn(s, pdfFrame)).dark, { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
     await shoot(s, 'viewer-pdf');
@@ -688,7 +704,7 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     const after = await framesOfWindow(s);
     expect(after.app).toBe(appUrl);
     expect(s.page.url()).toBe(appUrl);
-    for (const url of after.frames.slice(1)) expect(url, JSON.stringify(after.frames)).toMatch(/^(maws-deliverable:\/\/|chrome-extension:\/\/mhjfbmdgcfjbbpaeojofohoefgiehjai\/|chrome:\/\/resources\/)/);
+    for (const url of after.frames.slice(1)) expect(url, JSON.stringify(after.frames)).toMatch(/^(maws-artifact:\/\/|chrome-extension:\/\/mhjfbmdgcfjbbpaeojofohoefgiehjai\/|chrome:\/\/resources\/)/);
     // its Download button, pressed in the viewer's own page: main cancels the download, and no file is written anywhere
     const pressed = await s.maws.app.evaluate(async ({ BrowserWindow }, viewerOrigin) => {
       const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
@@ -706,7 +722,7 @@ test('delivered files: every kind draws in its body inside and outside the sessi
       return answers;
     }, PDF_VIEWER);
     expect(pressed.some((answer) => answer.endsWith(' pressed')), JSON.stringify(pressed)).toBe(true);
-    await expect.poll(() => seamLines(s)).toContain(`blocked-download ${deliverableUrl(id, pdf.id, 1)}`);
+    await expect.poll(() => seamLines(s)).toContain(`blocked-download ${await pageUrlOf(s.page, pdf.id)}`);
     await s.page.waitForTimeout(1_000);
     expect(filesUnder(downloads, () => true)).toEqual([]);
     expect(filesUnder(userData, (name) => name.endsWith('.pdf') || name.endsWith('.crdownload'))).toEqual([]);
@@ -714,7 +730,7 @@ test('delivered files: every kind draws in its body inside and outside the sessi
 
     // media: the clip plays and seeks; the tone plays
     await open(webm, 'video');
-    const video = viewer.locator('video[data-deliverable-media="video"]');
+    const video = viewer.locator('video[data-artifact-media="video"]');
     await expect(video).toHaveAttribute('controls', '');
     await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
     await video.evaluate(async (v: HTMLVideoElement) => {
@@ -734,7 +750,7 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     await shoot(s, 'viewer-media');
     await reach(webm, true);
     await open(wav, 'audio');
-    const audio = viewer.locator('audio[data-deliverable-media="audio"]');
+    const audio = viewer.locator('audio[data-artifact-media="audio"]');
     await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.duration)).toBeCloseTo(1, 1);
     await audio.evaluate((a: HTMLAudioElement) => a.play());
     await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.currentTime)).toBeGreaterThan(0);
@@ -745,14 +761,14 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     const img = viewer.locator('[data-file-viewer][data-kind="image"] [data-image-view] img');
     await expect(img).toBeVisible();
     expect(await img.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBe(320);
-    await expect(button('Open as file')).toHaveCount(0);
+    expect(await offers('Open as file')).toBe(false);
     await shoot(s, 'viewer-image');
     await reach(png, true);
 
     // markdown renders read-only; inside the session's directory it opens as a file too; not handed to the OS
     await open(markdown, 'file');
     await expect(viewer.locator('[data-file-viewer][data-kind="markdown"] [data-markdown-view] h1')).toHaveText('Summary');
-    await expect(button('Open as file')).toHaveCount(1);
+    await expect.poll(() => offers('Open as file')).toBe(true);
     await shoot(s, 'viewer-markdown');
     await reach(markdown, false);
 
@@ -761,7 +777,7 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     const codeView = viewer.locator('[data-file-viewer][data-kind="code"]');
     await expect(codeView).toHaveAttribute('data-editable', 'false');
     await expect(codeView.locator('.cm-content')).toContainText('export function total');
-    await expect(button('Open as file')).toHaveCount(0);
+    expect(await offers('Open as file')).toBe(false);
     await reach(code, false);
     const read = value(await invoke(s.page, 'files.read', { appSessionId: id, path: code.path, hash: true }));
     const write = await invoke(s.page, 'files.write', { appSessionId: id, path: code.path, content: 'overwritten', expectedHash: read.hash! });
@@ -787,12 +803,13 @@ test('a 64 px image and a short video fill the pane, in the panel and in a main 
     };
     const png = seedFile(s.maws.userData, id, put('dot.png', solidPng(64, 64, [21, 101, 192])), at(0));
     const webm = seedFile(s.maws.userData, id, put('clip.webm', await recordedWebm(s.page)), at(1)); // 160 × 120
+    await importSeeded(s.page);
 
     await show(s, id);
-    await openDeliverables(s);
+    await openArtifacts(s);
     const list = listOf(s);
     const panelViewer = viewerOf(s.panel);
-    const tabViewer = (record: DeliverableRecord) => s.page.locator(`[data-region="main"] [data-deliverable-tab] [data-deliverable-viewer][data-deliverable-id="${record.id}"]`);
+    const tabViewer = (record: DeliverableRecord) => s.page.locator(`[data-region="main"] [data-artifact-tab] [data-artifact-viewer="${record.id}"]`);
 
     // the media's drawn box against the stage's content box: at fit one side meets the pane, neither passes it, the
     // aspect is kept and a small medium is grown well past its natural size
@@ -824,27 +841,28 @@ test('a 64 px image and a short video fill the pane, in the panel and in a main 
 
     for (const [record, body, media, natural] of [
       [png, 'file', '[data-image-view] img', { width: 64, height: 64 }],
-      [webm, 'video', 'video[data-deliverable-media="video"]', { width: 160, height: 120 }],
+      [webm, 'video', 'video[data-artifact-media="video"]', { width: 160, height: 120 }],
     ] as const) {
-      if (await panelViewer.isVisible()) await panelViewer.getByRole('button', { name: 'Back' }).click();
+      if (await panelViewer.isVisible()) await s.panel.getByRole('button', { name: 'Back' }).click();
       await rowOf(list, record).click();
       await expect(panelViewer).toHaveAttribute('data-body', body);
       await sizes(panelViewer, media, natural);
-      await panelViewer.getByRole('button', { name: 'Open in tab' }).click();
+      await s.panel.getByRole('button', { name: 'Open in tab' }).click();
       await expect(tabViewer(record)).toBeVisible();
       await sizes(tabViewer(record), media, natural);
     }
   });
 });
 
-// ---- (4) show_pane 'deliverable' -------------------------------------------------------------------------------------
+// ---- (4) show_pane 'artifact' (E2's 'deliverable'; the recording's pane renamed with the tool's enum, P3-L M6b) ------
 
-test('show_pane: a target no record answers to is the model’s error; an artifact the target names opens in the Deliverables viewer and answers panel-tool', async () => {
+test('show_pane: a target no record answers to is the model’s error; an artifact the target names opens in the Artifacts viewer and answers panel-tool', async () => {
   test.setTimeout(180_000);
   await scene({ titles: ['E2: show_pane, nothing delivered', 'E2: show_pane, an artifact'] }, async (s) => {
     const [bare, seeded] = s.ids;
     // the recording's target is `none`: an artifact may carry that id (Decision Log 34: the model names what it holds)
     const none = seedArtifact(s.maws.userData, seeded, 'none', 'Release notes', [pageOf('RELEASE_NOTES', '#37474f')]);
+    await importSeeded(s.page);
     const answers = (id: string) => {
       const rows = s.journal(id);
       return mcpCalls(rows).map((c) => mcpResultOf(rows, c.requestId)!);
@@ -853,33 +871,33 @@ test('show_pane: a target no record answers to is the model’s error; an artifa
 
     await show(s, bare);
     await replay(s, bare, SHOW_PANE);
-    for (let k = 0; k < 3; k++) await allowNext(s, bare); // terminal, deliverable, nope (seqs 68, 85, 100)
+    for (let k = 0; k < 3; k++) await allowNext(s, bare); // terminal, artifact, nope (seqs 68, 85, 100)
     await idle(s, bare);
-    expect(answers(bare)[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.deliverableNotFound('none') }], isError: true });
+    expect(answers(bare)[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactNotFound('none') }], isError: true });
     expect(await panesShown(bare)).toEqual([
       ['terminal', 'panel-tool', null],
-      ['deliverable', null, TOOL_ERRORS.deliverableNotFound('none')],
+      ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
     ]);
     // the cell draws the engine's recorded tool_result, E1's words (Surprises, M4); the replay compares no bodies
     await unfoldWork(s.pane);
-    await expect(s.pane.getByText('Could not open pane: the deliverable pane is not available in this build of MAWS')).toBeVisible();
+    await expect(s.pane.getByText('Could not open pane: the artifact pane is not available in this build of MAWS')).toBeVisible();
 
     await show(s, seeded);
     await replay(s, seeded, SHOW_PANE);
     await allowNext(s, seeded); // terminal
-    await allowNext(s, seeded); // deliverable "none": the viewer opens on the artifact
+    await allowNext(s, seeded); // artifact "none": the viewer opens on the artifact
     const viewer = viewerOf(s.panel);
-    await expect(viewer).toHaveAttribute('data-deliverable-id', none.id);
-    await expect(s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Deliverables/ })).toHaveAttribute('aria-selected', 'true');
-    await expect((await frameAt(s.page, deliverableUrl(seeded, none.id, 1))).locator('#heading')).toHaveText('RELEASE_NOTES');
+    await expect(viewer).toHaveAttribute('data-artifact-viewer', none.id);
+    await expect(s.panel.getByRole('tablist', { name: 'Panel tools' }).getByRole('tab', { name: /Artifacts/ })).toHaveAttribute('aria-selected', 'true');
+    await expect((await frameAt(s.page, await pageUrlOf(s.page, none.id))).locator('#heading')).toHaveText('RELEASE_NOTES');
     await allowNext(s, seeded); // nope
     await idle(s, seeded);
     const shown = answers(seeded)[1]!;
     expect(shown.isError).toBeUndefined();
-    expect(JSON.parse((shown.content[0] as { text: string }).text)).toMatchObject({ status: 'shown', pane: 'deliverable', opened: { kind: 'panel-tool', toolId: 'deliverables', title: 'Deliverables' } });
+    expect(JSON.parse((shown.content[0] as { text: string }).text)).toMatchObject({ status: 'shown', pane: 'artifact', opened: { kind: 'panel-tool', toolId: 'artifacts', title: 'Artifacts' } });
     expect(await panesShown(seeded)).toEqual([
       ['terminal', 'panel-tool', null],
-      ['deliverable', 'panel-tool', null],
+      ['artifact', 'panel-tool', null],
     ]);
   });
 });
@@ -902,25 +920,26 @@ const FOOTER_PAGE =
 const near = (actual: number, expected: number, what: string) => expect(Math.abs(actual - expected), `${what}: ${actual} against ${expected}`).toBeLessThanOrEqual(1);
 
 // P2-E1 (M1; P2-E1 document, acceptance 1 and 2): a pick opens the comment card beside the element inside the viewer's
-// body (no sheet, no Side tab, the main area's tabs unchanged, the Deliverables tab still selected), below the element
-// with room and above one at the frame's bottom; the same in the record's deliverable main tab; Escape dismisses it and
-// gives focus back to Comment.
+// body (no sheet, no Side tab, the main area's tabs unchanged, the Artifacts tab still selected), below the element
+// with room and above one at the frame's bottom; the same in the artifact's main tab; Escape dismisses it and gives
+// focus back to Comment (the viewer's X32 header's, P3-L M5b).
 test('comment mode: Escape ends picking and nothing else, picking highlights the element under the pointer, and a click opens the comment card beside the element', async () => {
   await scene({ titles: ['E2: comment'] }, async (s) => {
     const [id] = s.ids;
     const record = seedArtifact(s.maws.userData, id, 'dash', 'Dashboard', [COMMENT_PAGE]);
     const notes = seedArtifact(s.maws.userData, id, 'notes', 'Notes', [FOOTER_PAGE], new Date(Date.now() - 60_000).toISOString());
+    await importSeeded(s.page);
     await show(s, id);
-    await openDeliverables(s);
+    await openArtifacts(s);
     await rowOf(listOf(s), record).click();
     const viewer = viewerOf(s.panel);
-    const frame = await frameAt(s.page, deliverableUrl(id, record.id, 1));
+    const frame = await frameAt(s.page, await pageUrlOf(s.page, record.id));
     await expect(frame.locator('#hero')).toHaveText('Sales overview');
     await expect(viewer.locator('[data-console-chip]')).toHaveText('1 console error');
-    const comment = viewer.getByRole('button', { name: 'Comment', exact: true });
+    const comment = s.panel.locator('[data-editor-header]').getByRole('button', { name: 'Comment', exact: true });
     const hint = viewer.locator('[data-picking]');
     const tools = s.panel.getByRole('tablist', { name: 'Panel tools' });
-    const deliverablesTab = tools.getByRole('tab', { name: /Deliverables/ });
+    const artifactsTab = tools.getByRole('tab', { name: /Artifacts/ });
 
     // Escape while picking ends picking; the viewer, the panel's tab and the session's composer stay as they were
     await comment.click();
@@ -929,8 +948,8 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await s.page.keyboard.press('Escape');
     await expect(hint).toHaveCount(0);
     await expect(comment).toHaveAttribute('aria-pressed', 'false');
-    await expect(viewer).toHaveAttribute('data-deliverable-id', record.id);
-    await expect(deliverablesTab).toHaveAttribute('aria-selected', 'true');
+    await expect(viewer).toHaveAttribute('data-artifact-viewer', record.id);
+    await expect(artifactsTab).toHaveAttribute('aria-selected', 'true');
     await expect(s.pane.locator(`[data-composer="${id}"]`)).toBeVisible();
 
     // with the console popover open over a picking viewer, one Escape closes the popover alone
@@ -944,7 +963,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(comment).toHaveAttribute('aria-pressed', 'true');
 
     // the heading under the pointer is highlighted in the page; a click picks it and opens the card beside it
-    const box = (await viewer.locator('[data-deliverable-frame="html"]').boundingBox())!;
+    const box = (await viewer.locator('[data-artifact-frame="html"]').boundingBox())!;
     await s.page.mouse.move(box.x + 60, box.y + 30);
     await expect(frame.locator('[data-maws-pick-overlay]')).toHaveCount(1);
     await shoot(s, 'comment-picking', () => s.page.mouse.move(box.x + 61, box.y + 31));
@@ -961,7 +980,7 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(s.page.locator('[data-comment-composer]')).toHaveCount(0);
     await expect(hint).toHaveCount(0); // one pick per Comment
     await expect(frame.locator('[data-maws-pick-overlay]')).toHaveCount(0);
-    await expect(deliverablesTab).toHaveAttribute('aria-selected', 'true');
+    await expect(artifactsTab).toHaveAttribute('aria-selected', 'true');
     await expect(tools.getByRole('tab', { name: /^Side/ })).toHaveCount(0);
     await expect(mainTabs).toHaveCount(mainTabsBefore);
 
@@ -989,20 +1008,20 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await s.page.keyboard.press('Escape');
     await expect(card).toHaveCount(0);
     await expect(comment).toBeFocused();
-    await expect(deliverablesTab).toHaveAttribute('aria-selected', 'true');
+    await expect(artifactsTab).toHaveAttribute('aria-selected', 'true');
 
-    // the same pick in the record's deliverable main tab opens the card inside that tab's viewer
-    await viewer.getByRole('button', { name: 'Open in tab' }).click();
-    const tabViewer = viewerOf(s.page.locator('[data-region="main"] [data-deliverable-tab]'));
-    await expect(tabViewer).toHaveAttribute('data-deliverable-id', record.id);
-    await tabViewer.getByRole('button', { name: 'Comment', exact: true }).click();
+    // the same pick in the artifact's main tab opens the card inside that tab's viewer
+    await s.panel.getByRole('button', { name: 'Open in tab' }).click();
+    const tabViewer = viewerOf(s.page.locator('[data-region="main"] [data-artifact-tab]'));
+    await expect(tabViewer).toHaveAttribute('data-artifact-viewer', record.id);
+    await s.page.locator('[data-region="main"] [data-editor-header]').getByRole('button', { name: 'Comment', exact: true }).click();
     await expect(tabViewer.locator('[data-picking]')).toBeVisible();
-    const tabFrame = (await tabViewer.locator('[data-deliverable-frame="html"]').boundingBox())!;
+    const tabFrame = (await tabViewer.locator('[data-artifact-frame="html"]').boundingBox())!;
     await s.page.mouse.click(tabFrame.x + 60, tabFrame.y + 30);
     const tabCard = tabViewer.locator('[data-comment-card]');
     await expect(tabCard).toHaveAttribute('data-anchor-locator', '#hero');
     await expect(tabCard).toHaveAttribute('data-placement', 'below');
-    const tabHero = (await tabViewer.locator('[data-deliverable-frame="html"]').contentFrame().locator('#hero').boundingBox())!; // the tab's width wraps it differently
+    const tabHero = (await tabViewer.locator('[data-artifact-frame="html"]').contentFrame().locator('#hero').boundingBox())!; // the tab's width wraps it differently
     near((await tabCard.boundingBox())!.y, tabHero.y + tabHero.height + 4, 'the tab card’s top');
     await expect(viewer.locator('[data-comment-card]')).toHaveCount(0);
     await expect(s.page.locator('[data-comment-composer]')).toHaveCount(0);
@@ -1010,10 +1029,10 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
     await expect(tabCard).toHaveCount(0);
 
     // an element at the bottom of its frame: the card opens above it, its bottom edge 4 px over the element's top
-    await viewer.getByRole('button', { name: 'Back' }).click();
+    await s.panel.getByRole('button', { name: 'Back' }).click();
     await rowOf(listOf(s), notes).click();
-    await expect(viewer).toHaveAttribute('data-deliverable-id', notes.id);
-    const foot = (await frameAt(s.page, deliverableUrl(id, notes.id, 1))).locator('#foot');
+    await expect(viewer).toHaveAttribute('data-artifact-viewer', notes.id);
+    const foot = (await frameAt(s.page, await pageUrlOf(s.page, notes.id))).locator('#foot');
     await expect(foot).toHaveText('Prepared by the analytics team');
     await comment.click();
     await expect(hint).toBeVisible();
@@ -1031,7 +1050,10 @@ test('comment mode: Escape ends picking and nothing else, picking highlights the
 
 // ---- (6) a relaunch, and the All scope -------------------------------------------------------------------------------
 
-test('a relaunch over the same profile lists every deliverable; the All scope shows another session’s with its title and opens it; a delivered file’s name opens the viewer', async () => {
+// P3-L M6b: the two pages are X12 records written between the launches, so the second launch's host imports them at its
+// start, as an upgrade does. The All scope's row naming its session ("E2: the other session") was the Deliverables
+// list's alone and is gone with it.
+test('a relaunch over the same profile lists every deliverable; the All scope shows another session’s and opens it; a delivered file’s name opens the viewer', async () => {
   test.setTimeout(180_000);
   // send_file stats the file in the recording's working directory, recreated before the launch (as E1's case does)
   const repo = recordedCwd(SEND_FILE);
@@ -1053,11 +1075,11 @@ test('a relaunch over the same profile lists every deliverable; the All scope sh
       await idle(first, here);
       const [delivered] = ofKind(await first.events(here), 'maws.delivery.file');
       hello = delivered!.deliverables[0]!.id;
-      // the delivery row's file name opens the Deliverables viewer on the record (G5)
+      // the delivery row's file name opens the Artifacts viewer on the File artifact (G5; P3-L M6b)
       const name = first.pane.locator('[data-delivery] button.transcript-delivery-open');
       await expect(name).toHaveText('hello.txt');
       await name.click();
-      await expect(viewerOf(first.panel)).toHaveAttribute('data-deliverable-id', hello);
+      await expect(viewerOf(first.panel)).toHaveAttribute('data-artifact-viewer', hello);
       await expect(viewerOf(first.panel).locator('[data-file-viewer]')).toContainText('HELLO_E1');
       await first.pane.locator('[data-delivery]').scrollIntoViewIfNeeded();
       await shoot(first, 'delivery-row');
@@ -1072,22 +1094,22 @@ test('a relaunch over the same profile lists every deliverable; the All scope sh
     const second = await launchScene(scratch, first.ids);
     try {
       await show(second, here);
-      // the panel comes back as it was (the Deliverables tool on the viewer), or the tool is opened afresh
+      // the panel comes back as it was (the Artifacts tool on the viewer), or the tool is opened afresh
       const list = listOf(second);
       const viewer = viewerOf(second.panel);
       await expect(list.or(viewer).or(second.panel.getByRole('button', { name: 'Add a tool' })).first()).toBeVisible();
-      if (await viewer.isVisible()) await viewer.getByRole('button', { name: 'Back' }).click();
-      else if (!(await list.isVisible())) await openDeliverables(second);
-      await expect(list.locator('[data-deliverable-row] [data-part="title"]')).toHaveText(['Dashboard', 'hello.txt']);
+      if (await viewer.isVisible()) await second.panel.getByRole('button', { name: 'Back' }).click();
+      else if (!(await list.isVisible())) await openArtifacts(second);
+      await expect(list.locator('[data-artifact-row] [data-part="title"]')).toHaveText(['Dashboard', 'hello.txt'], { timeout: 20_000 });
       await expect(rowOf(list, { id: hello })).toHaveAttribute('data-kind', 'file');
-      await expect(rowOf(list, dashboard)).toHaveAttribute('data-kind', 'artifact');
+      await expect(rowOf(list, dashboard)).toHaveAttribute('data-kind', 'html');
 
-      await list.getByRole('button', { name: 'All sessions' }).click();
-      await expect(list.locator('[data-deliverable-row]')).toHaveCount(3);
-      await expect(rowOf(list, report).locator('[data-part="session"]')).toHaveText('E2: the other session');
+      await list.getByRole('button', { name: 'All', exact: true }).click();
+      // the case's own three among the whole library (P3-D seeds default design systems: Decision Log 32c)
+      await expect(list.locator('[data-artifacts-group="html"] [data-artifact-row], [data-artifacts-group="file"] [data-artifact-row]')).toHaveCount(3);
       await rowOf(list, report).click();
-      await expect(viewer).toHaveAttribute('data-deliverable-id', report.id);
-      await expect((await frameAt(second.page, deliverableUrl(other, report.id, 1))).locator('#heading')).toHaveText('OTHER_REPORT');
+      await expect(viewer).toHaveAttribute('data-artifact-viewer', report.id);
+      await expect((await frameAt(second.page, await pageUrlOf(second.page, report.id))).locator('#heading')).toHaveText('OTHER_REPORT');
     } catch (error) {
       await second.maws.cleanup();
       throw error;
@@ -1109,6 +1131,8 @@ test('a capture while a notification’s navigation is on its way: the page hear
   await scene({ titles: ['E2: attention'] }, async (s) => {
     const [id] = s.ids;
     const record = seedArtifact(s.maws.userData, id, 'dash', 'Dashboard', [pageOf('CAPTURED', '#d32f2f')]);
+    await importSeeded(s.page);
+    const revision = Number((await pageUrlOf(s.page, record.id)).split('/')[3]);
     await show(s, id);
     await s.page.evaluate(() => {
       const w = window as unknown as { __e2Navigate: unknown[] };
@@ -1130,9 +1154,9 @@ test('a capture while a notification’s navigation is on its way: the page hear
     await expect.poll(notifications, { timeout: 30_000 }).toBe(1);
 
     // the capture starts; while its window is up the notification is clicked
-    const request: MawsArtifactCapture = { appSessionId: id, requestId: 'e2-attention' as MawsArtifactCapture['requestId'], deliverableId: record.id, version: 1, width: 800, height: 600 };
+    const request: MawsArtifactCapture = { appSessionId: id, requestId: 'e2-attention' as MawsArtifactCapture['requestId'], artifactId: record.id, revision, width: 800, height: 600 };
     const capture = s.maws.app.evaluate(
-      (_electron, request) => (globalThis as unknown as { __maws_deliverables: { capture(r: unknown): Promise<MawsArtifactCapturedResult> } }).__maws_deliverables.capture(request),
+      (_electron, request) => (globalThis as unknown as { __maws_captures: { capture(r: unknown): Promise<MawsArtifactCapturedResult> } }).__maws_captures.capture(request),
       request,
     );
     await expect.poll(() => s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), { timeout: 10_000 }).toBe(2);
@@ -1150,7 +1174,7 @@ test('a capture while a notification’s navigation is on its way: the page hear
   });
 });
 
-// ---- P3-G: Mark-up over the deliverable viewer (docs/doperpowers/plans/2026-10-12-p3-g-shell.md, M4 and its review) -----
+// ---- P3-G: Mark-up over the artifact viewer (E2's deliverable viewer) (docs/doperpowers/plans/2026-10-12-p3-g-shell.md, M4 and its review) -----
 
 // The window's own pixel at a point (main's capture of the page, as the still's DOM route takes it), as [r, g, b].
 async function windowPixel(s: Scene, at: { x: number; y: number }): Promise<number[]> {
@@ -1165,15 +1189,16 @@ const nearColour = (rgb: number[], expected: number[], tolerance = 16) => rgb.ev
 // The M4 review's ruling 2: the DOM route's still is the surface alone. The floating card overlaps the viewer's body;
 // Mark up takes the still with the card's layer hidden (never unmounted), so the still holds the artifact where the card
 // stands, and the card is back, the same element, once the still is taken.
-test('P3-G: Mark up over the deliverable viewer under the floating card takes the artifact alone; the card stays mounted and shows again', async () => {
+test('P3-G: Mark up over the artifact viewer under the floating card takes the artifact alone; the card stays mounted and shows again', async () => {
   await scene({ titles: ['P3-G: mark-up over a viewer'] }, async (s) => {
     const [id] = s.ids;
     const TEAL = [0x00, 0x69, 0x5c];
     const artifact = seedArtifact(s.maws.userData, id, 'swatch', 'Swatch', [pageOf('SWATCH', '#00695c')]);
+    await importSeeded(s.page);
     await show(s, id);
-    await openDeliverables(s);
+    await openArtifacts(s);
     await rowOf(listOf(s), artifact).click();
-    await expect((await frameAt(s.page, deliverableUrl(id, artifact.id, 1))).locator('#heading')).toHaveText('SWATCH');
+    await expect((await frameAt(s.page, await pageUrlOf(s.page, artifact.id))).locator('#heading')).toHaveText('SWATCH');
 
     await menu(s.maws.app, 'panel.float');
     const card = s.page.getByRole('region', { name: 'Session card' });

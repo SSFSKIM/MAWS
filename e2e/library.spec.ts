@@ -7,9 +7,9 @@
 // to version 8 beside a populated host store migrates to 9 at launch and the first connection's snapshot fills it. M5b:
 // an HTML artifact a session made (on C3's replay transport, `support/library-session.ts`) in the panel's Artifacts
 // tool, its versions, P2's comment card and its Side thread, Open in tab and Export to PDF; a PDF, a video and an audio
-// file played from the library.
+// file played from the library. M6b: a profile with X12 records and an index at version 8 upgrades into the library.
 // `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -20,6 +20,7 @@ import { launchMaws, type MawsLaunch } from './support/launch';
 import { ownTitles } from './support/library';
 import { invoke, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
 import { minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // M5b
+import { allowNext, closeScene, idle, launchScene, ofKind, recordedCwd, replay, scratchProject, seedArtifact, seedFile, show, viewerOf } from './support/maws-tools'; // M6b
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -282,6 +283,88 @@ test('an index at version 8 beside a populated host store migrates to 9 at launc
     expect((db.prepare("SELECT count(*) AS n FROM library_artifacts WHERE kind <> 'design_system'").get() as { n: number }).n).toBe(3); // the case's own three (P3-D seeds design systems)
   } finally {
     db.close();
+  }
+});
+
+// ---- M6b: the X12 upgrade ---------------------------------------------------------------------------------------------
+
+// A profile as a build before P3-L left it: X12 deliverable records under `<userData>/deliverables/`, an index at
+// version 8, and a transcript whose send_file row names an X12 record. The first launch replays E1's send_file
+// recording (the transcript's row) and is then made pre-P3-L between the launches: the File artifact today's send_file
+// made is deleted, and the journal's answer names an X12 record of the same file in its place, as E1's host answered;
+// one more record, an HTML artifact (X12's `artifact`), belongs to the other session. The second launch's host imports
+// the records at its start: the library shows a File and an HTML artifact with their sessions, and the row opens the
+// File artifact.
+const SEND_FILE = 'spikes/protocol-probe/fixtures/pass3/p1-maws-send-file.jsonl';
+
+test('a profile with X12 records and an index at version 8 launches into a library of File and HTML artifacts with their sessions, and a transcript delivery row opens the artifact', async () => {
+  test.setTimeout(180_000);
+  // send_file stats the file in the recording's working directory, recreated before the launch (as E1's case does)
+  const repo = recordedCwd(SEND_FILE);
+  const existed = existsSync(repo);
+  mkdirSync(repo, { recursive: true });
+  writeFileSync(join(repo, 'hello.txt'), 'HELLO_E1');
+  const project = scratchProject({ titles: ['L: delivered here', 'L: the other session'], repo });
+  try {
+    const first = await launchScene(project);
+    const [here, other] = first.ids;
+    let today: string;
+    try {
+      await show(first, here);
+      await replay(first, here, SEND_FILE);
+      await allowNext(first, here); // Write (seq 67)
+      await allowNext(first, here); // mcp__maws__send_file (seq 99)
+      await idle(first, here);
+      today = ofKind(await first.events(here), 'maws.delivery.file')[0]!.deliverables[0]!.id;
+      value(await invoke(first.page, 'artifacts.delete', { artifactId: today }));
+    } catch (error) {
+      await first.maws.cleanup();
+      throw error;
+    }
+    await closeScene(first);
+
+    const at = new Date(Date.now() - 3_600_000).toISOString();
+    const hello = seedFile(project.userData, here, join(repo, 'hello.txt'), at);
+    const dashboard = seedArtifact(project.userData, other, 'dash', 'Dashboard', ['<!doctype html><html><body><h1 id="heading">DASHBOARD</h1></body></html>'], at);
+    const journals = join(project.userData, 'engine-host', 'journal', here);
+    let named = 0;
+    for (const name of readdirSync(journals).filter((n) => n.endsWith('.jsonl'))) {
+      const text = readFileSync(join(journals, name), 'utf8');
+      named += text.split(today).length - 1;
+      writeFileSync(join(journals, name), text.replaceAll(today, hello.id));
+    }
+    expect(named, 'the journal named today’s File artifact').toBeGreaterThan(0);
+    rewindIndexTo8(join(project.userData, 'index.sqlite'));
+
+    const second = await launchScene(project, first.ids);
+    try {
+      const { page } = second;
+      await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+      const library = page.locator('[data-library]');
+      await expect.poll(async () => (await ownTitles(page, library)).sort(), { timeout: 20_000, message: 'the import filled the library' }).toEqual(['Dashboard', 'hello.txt']);
+      const file = library.getByRole('article', { name: 'hello.txt', exact: true });
+      await expect(file).toContainText('File');
+      await expect(file.getByRole('button', { name: 'L: delivered here', exact: true })).toBeVisible();
+      const dashRow = library.getByRole('article', { name: 'Dashboard', exact: true });
+      await expect(dashRow).toContainText('HTML page');
+      await expect(dashRow.getByRole('button', { name: 'L: the other session', exact: true })).toBeVisible();
+      expect(value(await invoke(page, 'artifacts.get', { artifactId: dashboard.id })).artifact!.kind).toBe('html');
+
+      // the transcript's delivery row, naming the X12 record, opens the File artifact the record became
+      await show(second, here);
+      const name = second.pane.locator('[data-delivery] button.transcript-delivery-open');
+      await expect(name).toHaveText('hello.txt');
+      await name.click();
+      await expect(viewerOf(second.panel)).toHaveAttribute('data-artifact-viewer', hello.id);
+      await expect(viewerOf(second.panel).locator('[data-file-viewer]')).toContainText('HELLO_E1');
+    } catch (error) {
+      await second.maws.cleanup();
+      throw error;
+    }
+    await closeScene(second);
+  } finally {
+    rmSync(project.root, { recursive: true, force: true });
+    if (!existed) rmSync(repo, { recursive: true, force: true });
   }
 });
 

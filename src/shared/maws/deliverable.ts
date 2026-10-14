@@ -4,7 +4,7 @@
 // delivered. E2 (E2 execution document, Design §2) extends it additively, every new field optional so E1's files parse
 // unchanged: an artifact's `artifactId` (the agent's short name) and `updatedAt` (its last version's time), and per
 // version the call that added it and the path the agent named (the version's `path` is MAWS's copy). `path` is the
-// latest version's path. The store stays these files (Decision Log 1); `deliverable-files.ts` holds their layout.
+// latest version's path. P3-L (M6b): the store is retired; these schemas remain for the import's reader and the legacy page URL.
 // E4c (E4c execution document, Design §7) writes `kind: 'screenshot'` for `browser_screenshot`, with the page's URL in
 // the additive `sourceUrl` and the picture under `screenshots/`.
 import * as z from 'zod';
