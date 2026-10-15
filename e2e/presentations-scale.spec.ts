@@ -70,10 +70,11 @@ interface Row {
   bound: string;
   limit: number | null;
   unit: string;
-  value: number; // the judged figure: the best trial's
+  value: number; // the judged figure: the best trial's, or the trials' median for a per-publish bound
+  judgedBy: 'best' | 'median';
   load: number; // the highest 1-minute load among the row's trials ("during the run", Decision Log 24)
   verdict: Verdict;
-  trials: Trial[];
+  trials: Trial[]; // every trial, raw, with its load
   note?: string;
 }
 
@@ -82,20 +83,21 @@ class Rows {
   private readonly extra: Record<string, unknown> = {};
   constructor(private readonly meta: Record<string, unknown>) {}
 
-  add(row: string, measure: string, unit: string, limit: number | null, bound: string, trials: Trial[], note?: string): Row {
-    const best = Math.min(...trials.map((t) => t.value));
+  /** A row judged on its best trial (the parent's Decision Log 54), or on the trials' median (`judgedBy: 'median'`). */
+  add(row: string, measure: string, unit: string, limit: number | null, bound: string, trials: Trial[], note?: string, judgedBy: 'best' | 'median' = 'best'): Row {
+    const judged = judgedBy === 'best' ? Math.min(...trials.map((t) => t.value)) : median(trials.map((t) => t.value));
     const load = Math.max(...trials.map((t) => t.load));
-    const entry: Row = { row, measure, bound, limit, unit, value: +best.toFixed(2), load, verdict: verdictOf(best, limit, load), trials: trials.map((t) => ({ ...t, value: +t.value.toFixed(2) })), ...(note && { note }) };
+    const entry: Row = { row, measure, bound, limit, unit, value: +judged.toFixed(2), judgedBy, load, verdict: verdictOf(judged, limit, load), trials: trials.map((t) => ({ ...t, value: +t.value.toFixed(2) })), ...(note && { note }) };
     this.rows.push(entry);
     this.write();
-    console.log(`[deck scale] ${row}: ${entry.value} ${unit} (${entry.verdict}; bound ${bound}; trials ${trials.map((t) => `${t.value.toFixed(1)} at load ${t.load}`).join(', ')})`);
+    console.log(`[deck scale] ${row}: ${entry.value} ${unit} (${judgedBy}; ${entry.verdict}; bound ${bound}; trials ${trials.map((t) => `${t.value.toFixed(1)} at load ${t.load}`).join(', ')})`);
     return entry;
   }
 
   write(extra: Record<string, unknown> = {}): void {
     Object.assign(this.extra, extra);
     mkdirSync(join(RESULTS, '..'), { recursive: true });
-    writeFileSync(RESULTS, `${JSON.stringify({ ...this.meta, ...this.extra, judging: { marginalMiss: MARGINAL_MISS, marginalLoad: MARGINAL_LOAD, rule: 'Decision Log 24: marginal under a 20 % miss at load ≥ 10; failed at a 20 % miss or more, any miss below load 10, any miss of a zero bound; a row judged on its best trial (the parent’s Decision Log 54)' }, rows: this.rows }, null, 2)}\n`);
+    writeFileSync(RESULTS, `${JSON.stringify({ ...this.meta, ...this.extra, judging: { marginalMiss: MARGINAL_MISS, marginalLoad: MARGINAL_LOAD, rule: 'Decision Log 24: marginal under a 20 % miss at load ≥ 10; failed at a 20 % miss or more, any miss below load 10, any miss of a zero bound; a row judged on its best trial (the parent’s Decision Log 54), a per-publish bound on the median of its publishes (judgedBy)' }, rows: this.rows }, null, 2)}\n`);
   }
 }
 
@@ -274,9 +276,8 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
       await sleep(1_000);
     }
     // a publish's figure is its median (M3's measure): the bound is per publish, so one quiet publish of seven is no proof
-    const judged = (trials: Trial[]): Trial[] => [{ value: median(trials.map((t) => t.value)), load: Math.max(...trials.map((t) => t.load)), note: `median of ${trials.length}: ${trials.map((t) => t.value.toFixed(1)).join(', ')} ms` }];
-    rows.add('4 publish one slide', 'a one-slide publish through A’s publishDoc on the 100-slide deck (the agent’s session, after its own publish): the host loop’s busy time over the call, median of 7', 'ms', 50, '≤ 50 ms', judged(one), `per publish: ${one.map((t) => t.note).join(' | ')}; longest stretch p95 ${stats(oneLoop).p95} ms`);
-    rows.add('4 publish whole deck', 'a whole-deck publish (100 slide files, each changed) through A’s publishDoc: the host loop’s busy time over the call, median of 5', 'ms', 200, '≤ 200 ms', judged(whole), `per publish: ${whole.map((t) => t.note).join(' | ')}; longest stretch max ${Math.max(...wholeLoop).toFixed(1)} ms`);
+    rows.add('4 publish one slide', 'a one-slide publish through A’s publishDoc on the 100-slide deck (the agent’s session, after its own publish): the host loop’s busy time over the call, median of 7', 'ms', 50, '≤ 50 ms', one, `longest stretch p95 ${stats(oneLoop).p95} ms`, 'median');
+    rows.add('4 publish whole deck', 'a whole-deck publish (100 slide files, each changed) through A’s publishDoc: the host loop’s busy time over the call, median of 5', 'ms', 200, '≤ 200 ms', whole, `longest stretch max ${Math.max(...wholeLoop).toFixed(1)} ms`, 'median');
   });
 
   await test.step('2: drag move to frame on the cover’s pinned picture while the agent republishes a slide every 0.7 s, three times', async () => {
@@ -290,16 +291,24 @@ test('the deck scale gate on S7b’s 100-slide deck: cold open, drag with an age
       let release!: () => void;
       const dragged = new Promise<void>((resolve) => (release = resolve));
       const publishes = republishing(agent, dragged, 700);
-      await page.mouse.move(from.x, from.y);
-      await page.mouse.down();
-      for (let i = 1; i <= 200; i++) {
-        await page.mouse.move(from.x + (k % 2 === 0 ? -i : i) * 0.8, from.y + (i % 40));
-        await page.waitForTimeout(16);
+      publishes.catch(() => {}); // settled in the finally below
+      let publishing: PromiseSettledResult<DeckCall<PublishResult>[]>;
+      try {
+        await page.mouse.move(from.x, from.y);
+        await page.mouse.down();
+        for (let i = 1; i <= 200; i++) {
+          await page.mouse.move(from.x + (k % 2 === 0 ? -i : i) * 0.8, from.y + (i % 40));
+          await page.waitForTimeout(16);
+        }
+        await page.mouse.up();
+      } finally {
+        // the agent's workload ends with the drag, whether the drag finished or threw (its error wins)
+        release();
+        [publishing] = await Promise.allSettled([publishes]);
       }
-      await page.mouse.up();
-      release();
+      if (publishing.status === 'rejected') throw publishing.reason;
+      const published = publishing.value;
       const drag = await page.evaluate(() => (window as unknown as DeckSeam).__maws_presentations.dragProbe.stop());
-      const published = await publishes;
       expect(published.length, 'the agent republished during the drag').toBeGreaterThan(2);
       expect(drag.withTransaction, 'the drag wrote on its moves').toBeGreaterThan(100);
       trials.push({ value: drag.inputToFrameMs.p95, load: Math.max(load, load1()), note: `${drag.withTransaction}/${drag.moves} moves wrote; move → transaction p95 ${drag.inputToTxMs.p95} ms; move → frame p50 ${drag.inputToFrameMs.p50}, max ${drag.inputToFrameMs.max} ms; ${drag.longTasks} long tasks; the agent published ${published.length} slides (busy p95 ${stats(published.map((p) => p.busyMs)).p95} ms)` });
