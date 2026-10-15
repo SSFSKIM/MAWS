@@ -137,6 +137,9 @@ export default defineConfig({
             'src/renderer/src/tools/browser/**/*.test.tsx',
             // E4a end
             'src/artifacts/design-system/**/*.test.tsx', // P3-D M4: the apply API and the Design System page, under happy-dom as built
+            // P3-D (the P3 spec's Decision Log 61): B's page bound to D's scope as built, where the compiler would memoize a hook
+            // B called inside a memo
+            'src/renderer/src/artifacts/design-system/documents.test.tsx',
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },

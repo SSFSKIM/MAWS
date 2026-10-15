@@ -13,7 +13,7 @@ import { useEditorHost } from '../../panel/editor-host';
 import { shownSession } from '../../panel/host';
 import { useLayout } from '../../stores/layout';
 import { useDocumentComments } from './comments';
-import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides } from './design-system';
+import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useSystemFor } from './design-system'; // P3-D: useSystemFor
 import { documentHeader, type DocumentHeaderCommands } from './header';
 import type { DocumentTabState } from './tab-state';
 
@@ -105,7 +105,8 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
 function SystemScope({ placement, handle, children }: { placement: { designSystemId?: string; spaceId?: string }; handle: NonNullable<ReturnType<DocumentTabState['snapshot']>['handle']>; children: ReactNode }) {
   const overrides = useDocumentOverrides(handle.doc);
   const system = documentDesignSystem();
-  const value = useMemo(() => (system ? { system, governing: system.systemFor(placement), overrides } : null), [system, placement, overrides]);
+  const governing = useSystemFor(placement); // P3-D: a hook (D's follows the defaults, the house and the live systems)
+  const value = useMemo(() => (system && governing ? { system, governing, overrides } : null), [system, governing, overrides]); // P3-D: `governing`
   return <PageSystemProvider value={value}>{children}</PageSystemProvider>;
 }
 
