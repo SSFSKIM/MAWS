@@ -65,6 +65,19 @@ export function proposesOver(tr: Y.Transaction, base: Y.Doc): boolean {
 }
 
 /**
+ * Whether `base` has yet to receive content `suggestion` already holds from one of `base`'s own clients (the whole-branch
+ * review's follow-up to Decision Log 51(a)): a replica's typing the host fed into the suggestion doc ahead of the base.
+ * A client `base` has never heard of cannot be told apart from a proposer here, so it counts as caught up.
+ */
+export function baseBehind(base: Y.Doc, suggestion: Y.Doc): boolean {
+  for (const client of suggestion.store.clients.keys()) {
+    const known = stateOf(base.store, client);
+    if (known > 0 && known < stateOf(suggestion.store, client)) return true;
+  }
+  return false;
+}
+
+/**
  * A diff renderer that does not write its base's updates into the doc it compares (M9 follow-up): the pinned
  * `DiffRenderer` applies every base update to that doc, which for a suggestion replica its provider then sends to the
  * host as a write of its own, though the host already feeds the base into the suggestion doc. Reaches the renderer's

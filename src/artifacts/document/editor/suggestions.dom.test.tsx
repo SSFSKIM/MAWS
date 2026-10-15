@@ -1,7 +1,7 @@
 import type { Editor } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, newSuggestionDoc, planAccept, planReject, stateV2, transact, type Doc, type SuggestionRange } from '../../yjs';
+import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, mergeUpdates, newDoc, newSuggestionDoc, onUpdate, planAccept, planReject, stateV2, transact, type Doc, type SuggestionRange } from '../../yjs';
 import { applyEdit } from '../patch-writer';
 import { nodeOf, pmOf } from '../writer.fixture';
 import { DocumentEditor } from './DocumentEditor';
@@ -264,6 +264,44 @@ describe('the typing pause (M9 follow-up)', () => {
     propose(suggestionHost);
     await until(() => screen.queryByLabelText('Suggestion review') !== null, 'the review');
     expect(Date.now() - at).toBeLessThan(500);
+  });
+});
+
+// The whole-branch review's follow-up (Decision Log 51(a)'s window): another replica's typing reaches the suggestion
+// replica before the base replica, so for a moment the suggestion doc holds text the base lacks. That is no proposal: the
+// review opens only once the difference has held for the settle window with the base caught up.
+describe('another replica’s typing reaching the suggestion replica before the base', () => {
+  it('opens no review while the base catches up; a real proposal is still reviewed, after the settle', async () => {
+    const { suggestionHost, host, previewing } = await mountLive();
+    let map = mergeMaps([]);
+    vi.mocked(host.attributions).mockImplementation(async () => encodeMap(map));
+    // another replica types in p2; the host has it attributed (the main map beneath the suggestion's)
+    const typist = newDoc();
+    applyV2(typist, stateV2(world!.host.doc));
+    const updates: Uint8Array[] = [];
+    const off = onUpdate(typist, (update) => updates.push(update));
+    applyEdit(typist, [{ op: 'replace_text', block: 'p2', old: 'Theirs.', new: 'Theirs, typed.' }]);
+    off();
+    typist.destroy();
+    const typed = mergeUpdates(updates);
+    map = attributionMap(contentIdsOf(typed), { insertActor: 'human', deleteActor: 'human', at: Date.now() });
+    // the suggestion doc first, the base 150 ms later
+    act(() => applyV1(suggestionHost.doc, typed));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
+    act(() => world!.host.write((d) => applyV1(d, typed)));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 500)); });
+    expect(screen.queryByLabelText('Suggestion review'), 'a review of the other replica’s typing').toBeNull();
+    expect(previewing).not.toContain(true);
+
+    const proposing = onUpdate(suggestionHost.doc, (update) => {
+      map = mergeMaps([map, attributionMap(contentIdsOf(update), { insertActor: 'session:agent', deleteActor: 'session:agent', at: Date.now() })]);
+    });
+    const at = Date.now();
+    suggestionHost.write((d) => void applyEdit(d, [{ op: 'insert', after: 'p2', markdown: 'Proposed. ^prop' }]));
+    proposing();
+    await until(() => screen.queryByLabelText('Suggestion review') !== null, 'the review of the proposal');
+    expect(Date.now() - at, 'held for the settle window').toBeGreaterThanOrEqual(250);
+    expect(screen.getByLabelText('Suggested document').textContent).toContain('Proposed.');
   });
 });
 

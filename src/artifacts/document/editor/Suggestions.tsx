@@ -6,7 +6,7 @@ import { EditorContent, useEditor, useEditorState } from '@tiptap/react';
 import type { ArtifactHost, DocumentHandle } from '../../host';
 import type { JointHold, TypingPause } from '../collab';
 import { decodeMap, type Doc, type SuggestionRange } from '../../yjs';
-import { ContentType, Item, createDiffRenderer, proposesOver, withoutBaseFeed, type DiffRenderer, type Transaction } from '../../yjs/document';
+import { ContentType, Item, baseBehind, createDiffRenderer, proposesOver, withoutBaseFeed, type DiffRenderer, type Transaction } from '../../yjs/document';
 import { resolvedPositionsToRelativePositions } from '../../yjs/prosemirror';
 import { attributedRuns, changeList, renderDiff } from '../history';
 import { coreExtensionOptions } from '../ids';
@@ -14,6 +14,9 @@ import { tabBody } from '../tabs';
 import { editorExtensions } from './extensions';
 import type { EditorHost } from './host-types';
 import { useReadOnly } from './read-only';
+
+/** How long a difference must hold, with the base caught up, before the review replaces the live editor. */
+const SETTLE_MS = 250;
 
 export type SuggestionHost = Pick<ArtifactHost, 'open' | 'attributions' | 'acceptSuggestion' | 'rejectSuggestion'>;
 export interface SuggestionsProps {
@@ -94,6 +97,7 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
     let listed = true;
     let showing = false; // whether the review is on screen in place of the live editor
     let waiting: ReturnType<typeof setTimeout> | undefined; // a review held back until the person pauses
+    let settling: { changes: string; since: number } | null = null; // the difference a review not yet shown last found
     setView(null);
     const refresh = async () => {
       const asked = ++serial;
@@ -112,10 +116,20 @@ export function Suggestions({ artifactId, tabId, base, hold, typing, host, edito
         const previous = current;
         current = renderer;
         const body = tabBody(handle.doc, tabId);
-        const pending = !renderer.attributed.isEmpty() && body !== undefined && changeList(renderDiff(body, renderer)).length > 0;
-        // a review not yet shown (the first check's included: a replica that opens mid-composition already holds what the
-        // base holds back) waits while the person types in the live editor, and is checked again at the pause
-        const pause = pending && !showing ? (typing?.remaining() ?? 0) : 0;
+        const changes = !renderer.attributed.isEmpty() && body !== undefined ? changeList(renderDiff(body, renderer)) : [];
+        const pending = changes.length > 0;
+        // A review not yet shown (the first check's included: a replica that opens mid-composition already holds what the
+        // base holds back) waits while the person types in the live editor, and is checked again at the pause. It also
+        // waits until the base has caught up with what the suggestion doc holds of the base's clients and the difference
+        // has held for the settle window: another replica's typing can reach this replica before the base (Decision Log
+        // 51(a)), and is then gone from the difference once the base has it.
+        let pause = 0;
+        if (pending && !showing) {
+          const key = JSON.stringify(changes);
+          const now = Date.now();
+          if (settling?.changes !== key || baseBehind(base.doc, handle.doc)) settling = { changes: key, since: now };
+          pause = Math.max(typing?.remaining() ?? 0, settling.since + SETTLE_MS - now);
+        } else settling = null;
         clearTimeout(waiting);
         if (pause > 0) waiting = setTimeout(() => void refresh(), pause);
         const shown = pending && pause === 0;
