@@ -256,9 +256,13 @@ test('the app sets the icon badge from the grid while it is open, and clears it 
   await expect.poll(badges).toEqual([1, 'clear']);
 });
 
-test('@layout the installed app offers notifications once on the grid, and Not now keeps it gone', async ({ page, hub }) => {
+test('the installed app offers notifications once on the grid, and Not now keeps it gone', async ({ browserName, context, page, hub }) => {
+  // Playwright's WebKit has no Push API, where the banner rightly never shows; a headless browser's notification
+  // permission reads as refused until granted, and a phone's starts undecided (granted here, with no subscription).
+  test.skip(browserName !== 'chromium', 'the Push API');
   await stageProject(hub);
   await seedKey(page, hub);
+  await context.grantPermissions(['notifications'], { origin: hub.url });
   await page.addInitScript(() => Object.defineProperty(navigator, 'standalone', { configurable: true, value: true })); // iOS's home-screen app
   await page.goto(hub.url);
   const banner = page.getByTestId('push-banner');
