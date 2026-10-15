@@ -49,7 +49,7 @@ const IN_SUB = new Set<string>(SUBSCRIPTION_KINDS);
 const SESSION_WIDE = new Set<string>(SESSION_WIDE_KINDS);
 const SETTLED_WINNERS = new Set(['web', 'terminal', 'other']);
 const SETTLED_OUTCOMES = new Set(['allow', 'deny', 'answered', 'withdrawn']);
-const DELIVERY_OUTCOMES = new Set(['delivered', 'recorded', 'refused-read-only', 'failed']);
+const DELIVERY_OUTCOMES = new Set(['delivered', 'recorded', 'refused-read-only', 'uncertain', 'failed']);
 const encoder = new TextEncoder();
 
 const newSocketId = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('');
@@ -940,6 +940,8 @@ function raisedShapeError(raised: unknown): string | null {
   if (!isObject(raised.input)) return "raised carries the tool's input, an object";
   if (raised.deadline !== undefined && !isIsoMillis(raised.deadline)) return 'a deadline is ISO 8601 UTC with milliseconds';
   if (raised.async !== undefined && raised.async !== true) return 'async is true when present';
+  if (raised.agentId !== undefined && !isName(raised.agentId)) return 'agentId names the subagent that asked, when present';
+  if (raised.truncated !== undefined && raised.truncated !== true) return 'truncated is true when present';
   if (!isMac(raised.mac)) return 'mac is {nonce, value}: 16 and 32 bytes, each in canonical base64url';
   return null;
 }

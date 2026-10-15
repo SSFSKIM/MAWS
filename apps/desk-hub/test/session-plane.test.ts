@@ -6,7 +6,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { GridDown, ProjectDown } from '../src/protocol/browser';
 import { FRAME_LIMIT, PartAssembler } from '../src/protocol/parts';
-import { importOrgKey, newNonce, seal, sealRpc } from '../src/protocol/codes';
+import { importOrgKey, newNonce, seal, sealRpc, verify } from '../src/protocol/codes';
 import type { DownFrame } from '../src/protocol/machine';
 import type { Rpc, RpcDraft } from '../src/protocol/rpc';
 import type { Delivery, Raised, SessionMessage, Settled } from '../src/protocol/session';
@@ -311,6 +311,49 @@ describe('the pending set, decisions, and deliveries', () => {
     expect(await late.next((f) => f.t === 'decided', 'replayed')).toMatchObject({ decision: { id: entry.decision.id, settled: decided } });
     late.close();
     b.close();
+    await m.close();
+  });
+
+  it("a subagent's raise, its input capped, is relayed and kept with agentId and truncated, and its code verifies", async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const request = await raised(project, 'toolu_sub', { agentId: 'a7f3', truncated: true, input: { command: 'x'.repeat(64) } });
+    expect(await verify(await KEY, 'raised', project, request)).toBe(true);
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', request) }]);
+    await waitFor(() => (lastPending(b)?.length === 1 ? true : undefined));
+    expect(lastPending(b)).toEqual([{ machine: m.name, raised: request, terminal_only: false }]);
+    expect(sessionKinds(b).find((x) => x.kind === 'raised')?.body).toEqual(request);
+    // Either field in another form is refused.
+    for (const bad of [{ agentId: 7 }, { agentId: '' }, { truncated: false }]) {
+      const from = b.frames.length;
+      await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', { ...(await raised(project, `toolu_bad_${JSON.stringify(bad)}`)), ...bad }) }]);
+      expect(await b.next((f) => f.t === 'refused', JSON.stringify(bad), from)).toMatchObject({ refusal: { reason: 'bad-shape' } });
+    }
+    b.close();
+    await m.close();
+  });
+
+  it('a delivery recorded for a closed terminal session turns delivered after Resume; uncertain is kept as an outcome', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const event = { writer: `hub/${memberId}`, seq: 9 };
+    const recorded: Delivery = await seal(await KEY, 'delivery', project, { event, session: SESSION, outcome: 'recorded', reason: 'the terminal session is closed' });
+    const delivered: Delivery = await seal(await KEY, 'delivery', project, { event, session: SESSION, outcome: 'delivered', reason: '' });
+    const uncertain: Delivery = await seal(await KEY, 'delivery', project, { event, session: SECOND, outcome: 'uncertain', reason: 'woken, never answered' });
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'delivery', recorded) }, { t: 'session', message: envelope(m, project, 'delivery', uncertain, SECOND) }]);
+    const before = await browser(project);
+    const first = ((await before.next((f) => f.t === 'deliveries', 'deliveries')) as Extract<ProjectDown, { t: 'deliveries' }>).deliveries;
+    expect(first).toHaveLength(2);
+    expect(first).toEqual(expect.arrayContaining([recorded, uncertain]));
+    before.close();
+    // Resume brought the session back and the owed event was delivered: the same key's latest outcome.
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'delivery', delivered) }]);
+    const after = await browser(project);
+    const latest = ((await after.next((f) => f.t === 'deliveries', 'deliveries')) as Extract<ProjectDown, { t: 'deliveries' }>).deliveries;
+    expect(latest).toHaveLength(2);
+    expect(latest).toEqual(expect.arrayContaining([delivered, uncertain]));
+    after.close();
     await m.close();
   });
 

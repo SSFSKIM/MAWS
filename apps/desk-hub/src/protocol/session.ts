@@ -13,7 +13,13 @@ export type Raised = {
   request: string;
   session: string;
   tool: string;
+  /** The tool's input as the bridge shows it; capped when `truncated`, and the DX6 digest is over this capped input on
+   * both sides. */
   input: JsonObject;
+  /** The subagent that asked; absent for the main thread. */
+  agentId?: string;
+  /** The bridge capped the input it shows. */
+  truncated?: true;
   /**
    * A background subagent's prompt: when the web's window closes (§2's 3 s). After it nothing is settled: the request
    * stays pending, answerable only in the terminal, until the terminal's answer settles it. The web reads that state
@@ -41,11 +47,16 @@ export type Settled = {
   mac: Mac;
 };
 
-/** One per log event and recipient, when `deliver_next` settles the event on the recipient's machine. */
+/**
+ * One per log event and recipient, when `deliver_next` settles the event on the recipient's machine; the hub keeps the
+ * latest per key. One exception: an event owed to a closed terminal session is reported `recorded` without being
+ * settled, and when Resume brings the session back and it is delivered, a `delivered` follows for the same key.
+ * `uncertain`: a push whose frame was taken but never answered, settled and drawn as possibly delivered.
+ */
 export type Delivery = {
   event: { writer: string; seq: number };
   session: string;
-  outcome: 'delivered' | 'recorded' | 'refused-read-only' | 'failed';
+  outcome: 'delivered' | 'recorded' | 'refused-read-only' | 'uncertain' | 'failed';
   reason: string;
   mac: Mac;
 };
