@@ -38,6 +38,18 @@ export async function importOrgKey(raw: Uint8Array): Promise<OrgKey> {
   return { hmac } as OrgKey;
 }
 
+/**
+ * The org key from a CryptoKey that never exists as bytes in this runtime (the browser derives it and keeps it
+ * non-extractable): HMAC with SHA-256, 256 bits, able to sign and verify. Extractability is the holder's concern.
+ */
+export function orgKeyFromCryptoKey(key: CryptoKey): OrgKey {
+  const algorithm = key.algorithm as { name: string; hash?: { name: string }; length?: number };
+  if (algorithm.name !== 'HMAC' || algorithm.hash?.name !== 'SHA-256') throw new TypeError('the org key is an HMAC-SHA-256 key');
+  if (algorithm.length !== 256) throw new TypeError('the org key is 256 bits');
+  if (!key.usages.includes('sign') || !key.usages.includes('verify')) throw new TypeError('the org key signs and verifies');
+  return { hmac: key } as OrgKey;
+}
+
 /** 128 random bits, base64url: a code's nonce, and an RPC's id. */
 export function newNonce(): string {
   return base64urlEncode(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));

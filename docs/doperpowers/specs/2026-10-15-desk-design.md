@@ -565,7 +565,10 @@ fork.
 - **Humans** sign in through Access in front of the Worker. The registry
   holds one org with the owner as its admin.
 - **Machines** enroll with a one-time code the browser generates and the
-  owner runs as `sminos hub enroll <code>` on the machine. The code carries
+  owner pastes into `sminos hub enroll` on the machine, which reads it from
+  a hidden prompt or from stdin and refuses it as an argument: the code
+  carries the org key, and an argument stays in the process listing and the
+  shell's history. The code carries
   the hub's URL, a one-time token the hub exchanges for the machine's
   Access service token, the machine name to claim (§3), and the org key
   (below). The hub sees the token, never the key. Token and key live under
@@ -812,7 +815,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
   it: the daemon becomes concurrent, enrolls, syncs hub projects' logs with
   authentication codes, and writes the archive.
 - **Acceptance:**
-  - **G1 (enroll):** `sminos hub enroll <code>` enrolls a machine under its
+  - **G1 (enroll):** `sminos hub enroll`, given the code at its prompt or on stdin, enrolls a machine under its
     claimed name and stores the token and the org key; `sminos project init
     --hub` writes the `hub` field; a second installation with the same host
     name is refused at enrollment and told how to pick another name.
@@ -896,7 +899,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 - **Design inheritance:** §2 Web client (the adapter), §3 session plane, §4
   right panel.
 - **Required:** required.
-- **Status:** not-dispatched (blocked-by DC5.G1, DC3.G1).
+- **Status:** in-flight (2026-10-15).
 
 ### DC7: The machine's controls — plan
 
@@ -1566,6 +1569,7 @@ upgrade request like any other):
 | `subscribe` | `machine`, `session`, `agentId`, `sub` | a DX4 subscription scoped to one transcript (`agentId` null for the main one); `sub` is the browser's own nonce, unique at the machine |
 | `unsubscribe` | `sub` | |
 | `rows` | `sub`, `before`, `limit` | older rows of the subscription's transcript |
+| `diff` | `sub` | the session's working-tree diff against its base branch, answered as DX4 `diff` on that sub; only on a main-transcript subscription (`agentId` null). Computed on request, never pushed, since it costs the machine a git run whether or not a view is open |
 | `visibility` | `visible` | whether this tab shows the project; a visible tab holds back its member's pushes |
 | `part` | as DX2 | |
 
@@ -1624,7 +1628,7 @@ type Envelope<K, Session, Sub, N> = {
 // Discriminated by kind; each kind's invariants are in its type:
 type SessionMessage =
   | Envelope<'snapshot', string, string, 0>                                                       // a sub's first message
-  | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'end', string, string, number>   // then n = 1, 2, …
+  | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, …
   | Envelope<'presence' | 'raised' | 'settled' | 'delivery', string, null, null>                 // to every browser, outside subs
   | Envelope<'machine', null, null, null>;                                                         // names no session
 ```
@@ -1640,13 +1644,14 @@ and `streaming` are that agent's own.
 
 | `kind` | in a sub | body |
 | --- | --- | --- |
-| `snapshot` | yes (`n` 0) | `{rows, more, subagents, presence, streaming}`: rows of the sub's transcript newest first up to the last flushed row, as many as fit the frame budget; `more` whether older rows exist; `streaming`: the bridge's snapshot entries (DX5) passed through, one per model request still streaming, `{turnId, agentId, step, blocks: [{index, kind, text, upTo}]}` holding only its content blocks without a `block-row` yet, below (`step` the model request's ordinal in the turn; `index` the content block's, the same `index` its chunks carry; `kind` the block's type as the bridge names it; `upTo` the `chunkIndex` of the last chunk `text` includes, -1 for none) |
+| `snapshot` | yes (`n` 0) | `{rows, more, subagents, presence, streaming, usage}`: `usage` is the bridge's last `usage` (DX5) on a main-transcript subscription, null when the session has no bridge or none has come yet, and absent on a subagent's; rows of the sub's transcript newest first up to the last flushed row, as many as fit the frame budget; `more` whether older rows exist; `streaming`: the bridge's snapshot entries (DX5) passed through, one per model request still streaming, `{turnId, agentId, step, blocks: [{index, kind, text, upTo}]}` holding only its content blocks without a `block-row` yet, below (`step` the model request's ordinal in the turn; `index` the content block's, the same `index` its chunks carry; `kind` the block's type as the bridge names it; `upTo` the `chunkIndex` of the last chunk `text` includes, -1 for none) |
 | `row` | yes | `{row, agentId}`: a transcript row verbatim; `agentId` the subagent whose transcript holds it, or null |
 | `chunk` | yes | `{turnId, agentId, step, chunkIndex, chunk}`: DX5's chunk event, the `turn.step` chunk object verbatim under `chunk` (nested, since it has an index field of its own), `chunkIndex` its index in its message from 0 |
 | `block-row` | yes | `{uuid, turnId, agentId, step, index}`: the engine wrote the row `uuid` for content block `index` of that step; sent before the row itself arrives |
 | `rows` | yes | `{rows, before, more}`: older rows of the sub's transcript, newest first, answering a `rows` request |
 | `subagents` | yes | `{subagents: [{agentId, meta}]}`, each `meta` a `subagents/*.meta.json` verbatim |
 | `diff` | yes | `{base, text}`: unified diff of the working tree against the base branch |
+| `usage` | yes | `{context: {tokens, window, percent}, cost}`: the bridge's `usage` event (DX5) verbatim, after each main turn, on main-transcript subscriptions only. It is the one source of a session's context use and cost on the web: the transcript's rows do not carry them (the engine's `cost-state` records have no `uuid` and are not rows here), so a session without a bridge shows both as unavailable |
 | `end` | yes | `{reason: "unsubscribed" \| "machine-offline" \| "session-ended" \| "discontinuity" \| "error", message?}` |
 | `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
 | `machine` | no (`session` null) | `{online, policy: {read_only, ceiling}, checkouts: [{path, branch}]}`; `online` is the hub's, from the lease (a producer sends true) |
@@ -2073,8 +2078,8 @@ rotates the credential; an answer that never came back from Cloudflare (a lost m
 minted under it. A pending enrollment lasts `ttl_s` from its latest redemption; the machine confirms it by any
 authenticated request. The hub never sees the org key: the browser builds the enrollment code from the token.
 
-**The enrollment code**, built in the browser so the hub never sees the org key, and run on the machine as `sminos
-hub enroll <code>`: the text `smns-enroll-v1.` followed by the base64url (no padding) of the UTF-8 JSON object
+**The enrollment code**, built in the browser so the hub never sees the org key, and pasted on the machine into
+`sminos hub enroll` (read from a hidden prompt or stdin, never an argument, §6): the text `smns-enroll-v1.` followed by the base64url (no padding) of the UTF-8 JSON object
 `{hub, org, token, machine, key}` — `hub` the hub's origin (`https`, or `http` on a loopback host for the local
 runtime), `org` the org id, `token` the one-time token, `machine` the name to claim, `key` the org key as base64url
 (32 bytes). A decoder refuses another prefix, a damaged body, a key that is not 256 bits, a name that is not admitted,
@@ -2115,13 +2120,13 @@ from `App.tsx`.
 
 ```ts
 type SessionTarget = { machine: string; session: string; agentId: string | null }; // agentId null: the main thread
-type SubscriptionMessage = SessionMessage<'snapshot' | 'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff'>;
+type SubscriptionMessage = SessionMessage<'snapshot' | 'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage'>;
 interface SubscriptionListener {
   message(message: SubscriptionMessage): void; // snapshot (n 0) first, then n = 1, 2, … with no gap
   reset(): void;                                // a discontinuity the client recovers from: drop what was delivered
   end(body: SessionBodies['end']): void;        // the hub ended it, or the client cannot serve it; nothing follows
 }
-interface Subscription { rows(before: string, limit: number): void; close(): void }
+interface Subscription { rows(before: string, limit: number): void; diff(): void; close(): void } // diff(): main transcript only
 interface SessionPlane { subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription }
 const transcriptKey: (project: string, target: { session: string; agentId: string | null }) => string;
 ```
@@ -2147,7 +2152,8 @@ reason} | null, charge, status, state: {word, ts} | null, joinedAt, group:
 "waiting" | "working" | "idle" | "ended", presence: SessionPresence |
 null, machineOnline: boolean | null}`. `presence` is null until the hub
 sends one and while the machine is offline. Model, context use, and cost
-are not on it: they come from the transcript, DC6's. Inside an open project
+are not on it: the model comes from the transcript, and context use and
+cost from the main subscription's `usage` (DX4), both DC6's. Inside an open project
 `useDeskSessions(connection)` and `useDeskSession(connection, id)` serve
 any view; `useProjectConnection(project)` (`project/registry.ts`) gives the
 project's connection.
@@ -2244,7 +2250,7 @@ a hub that connects into machines (§2).
 | DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | in-flight (dispatched 2026-10-15) |
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
-| DC6 web: depth | — | ready to plan (DX8 folded 2026-10-15; DC3.G1 met) |
+| DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | in-flight (dispatched 2026-10-15, parent pin 9471766c) |
 | DC7 machine's controls | — | not-dispatched |
 
 ## Surprises & Discoveries
@@ -2450,6 +2456,40 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The enrollment code is never a command-line argument. It
+  carries the org key in reversible base64url, and `sminos hub enroll
+  <code>` left it in the process listing for the command's life (up to
+  three 30 s attempts) and in the shell's history (DC4's M2 review).
+  `sminos hub enroll` reads the code from a hidden prompt, or from stdin
+  when piped, and refuses it as an argument, saying how to run it; the
+  web's enrollment screen says "run `sminos hub enroll` on the machine and
+  paste this code", with the code to copy, never one command line with the
+  code inline. Rejected: keeping the argument form with a warning (the
+  harm is done by the time the warning prints) and an environment variable
+  (it reaches child processes and the shell's history just the same).
+  Flags DC4, DC5.
+  Date/Author: 2026-10-15, design session (DC4's M2 review).
+- Decision: Context use and cost reach the web as DX4 `usage`, on the main
+  transcript's subscription (in its snapshot, then after each main turn),
+  passed through from the bridge's DX5 `usage` event, which already
+  existed but had no route to a browser. DX8 said they "come from the
+  transcript", and they do not: MAWS reads them from its main process's
+  session digest, and the engine's `cost-state` records carry no `uuid`,
+  so a row mapper drops them (the DC6 plan's adversarial review). A
+  session without a bridge shows context and cost as unavailable.
+  Rejected: shipping uuid-less JSONL records as rows, which would break
+  paging by `uuid` and duplicate what the bridge already computes. Flags
+  DC3 (DX4's module), DC5 (DX8's types), DC6, DC7 (the producer).
+  Date/Author: 2026-10-15, design session (DC6's plan review).
+- Decision: The browser asks for a session's diff. DX4 had a `diff`
+  message, but no frame asked for one and no rule said when a machine
+  sent it, which writing DC6's plan exposed. DX3 gains `diff {sub}`,
+  answered as DX4 `diff` on that subscription and valid on a
+  main-transcript subscription only, and DX8's `Subscription` gains
+  `diff()`. Rejected: the machine pushing a diff after every turn, which
+  costs a git run per turn whether or not anyone is looking. Flags DC3
+  (DX3), DC5 (DX8), DC6, DC7 (the producer).
+  Date/Author: 2026-10-15, design session (DC6's plan).
 - Decision: DX8 folded from DC5's M1 (MAWS `66eabe92`, reviewed clean).
   DC6 plugs into two slots, `depth` and `transcript`, registered once
   from `connectDepth()`. It reads sessions through a `SessionPlane` whose
