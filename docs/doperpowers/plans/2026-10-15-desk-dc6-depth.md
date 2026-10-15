@@ -483,6 +483,13 @@ registrations through `connectDepth()`.
   clears; browser suites stay on the Linux lane; no effort on the slot
   wrapper. Refines the Linux-lane entry above.
   Date/Author: 2026-10-15, the owner via the composite's writer.
+- Decision: DC6's PR is based on `smns-erb-web` (ready for review, not a
+  draft); the desk lands on `master` child by child — DC3 (with the
+  composite), DC5, DC6 — merged only by the composite's writer, who
+  retargets DC6's PR to `master` once DC5's merges. The PR body says it
+  stacks on DC5 and that its `smns-erb` merges are DC3's, and names DC6's
+  own range.
+  Date/Author: 2026-10-15, composite's writer.
 
 ## Surprises & Discoveries
 - 2026-10-15 (from DC2's M3, built, in review, via the composite's
