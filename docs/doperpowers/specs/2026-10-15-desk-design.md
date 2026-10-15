@@ -934,9 +934,11 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
     ceiling is refused; on a read-only machine every RPC is refused, and a
     `human` or `say` from outside the machine, addressed to a live session
     and to a stopped seat, starts nothing and settles undelivered; every
-    settled delivery of an outside-origin event produces its DX4 `delivery`
+    delivery of an outside-origin event produces its DX4 `delivery`
     outcome (delivered, recorded for a closed terminal session,
-    refused-read-only), which the web shows.
+    refused-read-only, uncertain), which the web shows; a message recorded
+    for a closed terminal session is delivered when Resume brings it back,
+    and its outcome turns `delivered`.
   - **G4 (resume):** Resume brings an ended terminal session back on its
     machine as a `--bg` job with the same session id, which rejoins; it is
     refused while the session is live anywhere and on a read-only machine;
@@ -1069,19 +1071,28 @@ consumers start after that gate.
   - every `mac` here is computed as DX1's is, with its own domain string
     and its nonce covered;
   - **a pending request** is `raised {request: <tool-use id>, session,
-    tool, input, mac}`, followed by exactly one `settled {request, winner:
+    tool, input, agentId?, truncated?, mac}` (`agentId` the subagent that
+    asked, absent for the main thread; `truncated: true` when the bridge
+    capped the input it shows, and the digest is over that capped input on
+    both sides), followed by exactly one `settled {request, winner:
     "web" | "terminal" | "other", outcome, by, mac}`, where the bridge names
     the side whose answer the engine used. The hub removes the request on
     `settled` and writes its audit record from it; after a reconnect it
     drops any request the daemon does not republish;
   - **a delivery outcome** is `delivery {event: {writer, seq}, session,
-    outcome: "delivered" | "recorded" | "refused-read-only" | "failed",
-    reason, mac}`, produced by the daemon when `deliver_next` settles an
-    event for a recipient on its machine, one per event and recipient. It
-    is how the web knows that a send reached the session, or was only
-    recorded (a closed terminal session) or held back (a read-only
-    machine). The hub keeps the latest outcome per key and returns it to a
-    browser that reconnects. It is kept apart from `settled`, which is
+    outcome: "delivered" | "recorded" | "refused-read-only" | "uncertain" |
+    "failed", reason, mac}`, produced by the daemon when `deliver_next`
+    settles an event for a recipient on its machine, one per event and
+    recipient, with one exception: an event owed to a closed terminal
+    session is reported `recorded` without being settled, and stays owed
+    as smns §4 has it, so when Resume brings the session back and the
+    event is delivered, a `delivered` outcome follows for the same key.
+    `uncertain` is a push whose frame was taken but never answered (the
+    ladder's `sent?` or `woken?`): settled, never pushed again, and drawn
+    as possibly delivered. It is how the web knows that a send reached the
+    session, or was only recorded (a closed terminal session) or held back
+    (a read-only machine). The hub keeps the latest outcome per key and
+    returns it to a browser that reconnects. It is kept apart from `settled`, which is
     about a session's pending request, not a log event.
   The hub interprets presence, pending requests, and delivery outcomes;
   everything else it relays.
@@ -1742,9 +1753,9 @@ and `streaming` are that agent's own.
 | `end` | yes | `{reason: "unsubscribed" \| "machine-offline" \| "session-ended" \| "discontinuity" \| "error", message?}` |
 | `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
 | `machine` | no (`session` null) | `{online, policy: {read_only, ceiling}, checkouts: [{path, branch}]}`; `online` is the hub's, from the lease (a producer sends true) |
-| `raised` | no | `{request, session, tool, input, deadline?, mac}` |
+| `raised` | no | `{request, session, tool, input, agentId?, truncated?, deadline?, mac}`: `agentId` the subagent that asked (absent for the main thread); `truncated: true` when the bridge capped the input |
 | `settled` | no | `{request, winner: "web" \| "terminal" \| "other", outcome, by, mac}` |
-| `delivery` | no | `{event: {writer, seq}, session, outcome: "delivered" \| "recorded" \| "refused-read-only" \| "failed", reason, mac}` |
+| `delivery` | no | `{event: {writer, seq}, session, outcome: "delivered" \| "recorded" \| "refused-read-only" \| "uncertain" \| "failed", reason, mac}`; a `recorded` for a closed terminal session can be followed by `delivered` for the same key after Resume |
 | `compact` | no | `{rpc, phase: "start" \| "end", tokensBefore?, tokensAfter?, skip?, error?}`: a compaction's progress, from the bridge's DX5 `compact` events; `rpc` the nonce of the DX6 `compact` that asked for it, or null for one the session started itself; on `end`, `tokensBefore` and `tokensAfter` (null when the engine recorded none), or `skip` (a hook vetoed it), or `error` (the engine refused it) |
 
 `raised`, `settled`, and `delivery` carry codes under their own domains (DX1). The hub interprets `presence`,
@@ -2779,6 +2790,23 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: Three DX4 amendments from DC7's M2. (1) A message to a closed
+  terminal session is reported `recorded` without being settled: it stays
+  owed, as smns §4 already keeps it, and is delivered if Resume brings the
+  session back, its outcome then turning `delivered` under the same key
+  (the hub keeps the latest). This is the design's own reading of
+  acceptance 7 and §4 ("follows smns §4 as built"), not a new product
+  call. Rejected: settling it as `recorded`, which would make Resume drop
+  what the owner sent while the session was closed. (2) `delivery.outcome`
+  gains `uncertain`, for a push whose frame was taken and never answered.
+  Rejected: `delivered` with an "uncertain:" reason, which shows the web a
+  certainty the daemon does not have; RPCs already carry `uncertain` for
+  the same case. (3) `raised` gains optional `agentId` and `truncated`,
+  as DX5's `raised` carries them, so the web can say which subagent asks
+  and that the input shown was capped; the code covers every field, so
+  binding is unchanged. Flags DC3 (admits the new value and fields), DC5
+  (draws them), DC6, DC7.
+  Date/Author: 2026-10-15, design session (DC7's M2).
 - Decision: The `transcript` slot draws one fold of a direct channel's
   working record, bounded by `range: {from, to}` (DC5's M3, DC6's M1).
   The channel shows what a session sent its human; the working record
