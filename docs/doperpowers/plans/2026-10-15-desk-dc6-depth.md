@@ -282,5 +282,14 @@ registrations through `connectDepth()`.
   Date/Author: 2026-10-15, plan review via the composite's writer.
 
 ## Surprises & Discoveries
+- 2026-10-15 (from DC2's M3, built, in review, via the composite's
+  writer): a snapshot's `streaming` entry carries a message-level `upTo`
+  and `model` beside `blocks`, where DX4 today words `upTo` per block;
+  `chunkIndex` counts across the message, so the adapter's drop rule keys
+  on the message-level value (and tolerates the per-block form until DX4
+  is aligned). A tool-use block streams as text: it carries `id` and
+  `name`, and its `text` is the argument JSON as it streams, not parsed
+  while partial; the fixture holds one. In three live runs the nth
+  response row of a step was block n; settling stays on `block-row`.
 
 ## Outcomes & Retrospective
