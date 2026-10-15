@@ -5,6 +5,7 @@
 import '../../../../../test/support/artifacts-dom-setup'; // first: the editor loads KaTeX, which warns under happy-dom
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { colorToCss, type ColorValue } from '@artifacts/design-system/color';
 import complete from '@artifacts/design-system/fixtures/complete.tokens.json';
 import { setToken, writeSystem } from '@artifacts/design-system/model';
 import { parseTokens, serializeTokens } from '@artifacts/design-system/tokens';
@@ -38,10 +39,13 @@ const HOUSE = '11111111-1111-4111-8111-111111111111';
 const OWNERS = '22222222-2222-4222-8222-222222222222';
 const SCOPE: EditorHostScope = { surface: 'panel', tabId: 'panel-tab-1' };
 const TOKENS = serializeTokens(parseTokens(complete).tokens!);
-const ACCENT = { [HARBOR]: '#2f6b4f', [HOUSE]: '#7a3fb0', [OWNERS]: '#1d4ed8' };
+// Each system's accent as a token value (the guard keeps colour literals to tokens.css), and the CSS its stylesheet draws.
+const srgb = (...components: number[]): ColorValue => ({ colorSpace: 'srgb', components });
+const ACCENT_VALUE = { [HARBOR]: srgb(0.18, 0.42, 0.31), [HOUSE]: srgb(0.48, 0.25, 0.69), [OWNERS]: srgb(0.11, 0.3, 0.85) };
+const ACCENT = Object.fromEntries(Object.entries(ACCENT_VALUE).map(([id, value]) => [id, colorToCss(value)]));
 const FLOOR_ACCENT = /--ds-color-accent: ([^;]+);/.exec(builtinView().css(':root', 'document'))![1]!;
 
-function systemDoc(accent: string): Doc {
+function systemDoc(accent: ColorValue): Doc {
   const doc = newDoc();
   writeSystem(doc, { 'tokens.tokens.json': TOKENS }, { route: 'derived', at: 0 }, { name: 'System' });
   setToken(doc, 'color.accent.$root', { $value: accent });
@@ -50,7 +54,7 @@ function systemDoc(accent: string): Doc {
 
 /** The store's design systems as the app's ArtifactHost opens them: replicas synced at once. */
 function systemHost(): ArtifactHost {
-  const docs = new Map(Object.entries(ACCENT).map(([id, accent]) => [id, systemDoc(accent)]));
+  const docs = new Map(Object.entries(ACCENT_VALUE).map(([id, accent]) => [id, systemDoc(accent)]));
   const open = async (id: string): Promise<DocumentHandle> => {
     const doc = docs.get(id);
     if (!doc) throw new Error(`no artifact ${id}`);
