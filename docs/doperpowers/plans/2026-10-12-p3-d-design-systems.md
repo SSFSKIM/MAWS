@@ -674,6 +674,16 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
     - **The portable seam.** `apply.ts` adds the `HouseDesignSystem` interface and `DesignSystemHouseContext`, filled by the app-root provider. It also adds `useGoverningSystem(artifact, {owner, spaces}, live?)`, the resolver C's deck scope and B's documents call. It ends at the host's house system rather than the floor, and nothing under `src/artifacts/` imports renderer transport.
     - **Tests.** `e2e:design-systems` edits the house system through its page and checks that an ungoverned fixture draws it. After the house is deleted, the same fixture draws the floor.
     - **For part 2.** B's shell computes `systemFor` inside a `useMemo`, so `useGoverningSystem` must run in a component or custom hook with reactive settings and live-system inputs, not inside that memo.
+35. 2026-10-14 (the spec's Decision Log 61, part 2: the document binding; master 06c8ccdf with B landed, merged at 1a849fdd; 27f9bd0e..459b3f34; task-reviewed, with its one finding deferred below).
+    - **Form (b).** B's `SystemScope` calls a `use`-named hook in B's seam file, `useSystemFor`; the edit in B's file is marked P3-D. A plain call inside B's `useMemo` let the React Compiler cache it, and the hooks inside D's `systemFor` then stopped running.
+    - **What D's `systemFor` resolves through.** `useGoverningSystem`, bound to settings 14's owner and Space defaults, part 1's house hook, and the library's live design systems as the `live` check. Every id counts as live until the library first answers.
+    - **When it is provided.** `provideDocumentDesignSystem({Scope: DesignSystemScope, systemFor})` runs at App.tsx's module load, in a P3-D block. A provision arriving after a restored document's first render would change its hook count.
+    - **Exports.** B's document exporters now receive the governing system.
+      - A main-only host command, `designSystems.governing`, answers a version's own pin, else the chain, else the floor. It is main-only because windows never ask the host (the spec's DL 61(d)).
+      - Main wraps B's exporters with `resolveDsVars` and `officeThemeXml`, bound to that system.
+      - `resolveDsVars` moved into the React-free `resolve-vars.ts`; `apply.ts` re-exports it, so X28's import path holds. Before landing it must be reconciled with C's recorded `literals.ts` move (ledger §7).
+    - **B's e2e caret helper** now clicks the paragraph's last line, because the house system's 16 px body wraps in the 288 px panel.
+    - **Deferred, a `[parent-impact]` row.** HTML and PDF exports do not carry the system's bundled faces. The exporter seam receives the tokens but not the `@font-face` declarations or the font bytes, so `official`'s Noto Serif KR falls back where it is not installed. Carrying faces needs B's exporter seam and X31's `fonts?` policy (the spec's DL 53(4)) to accept sanitized face declarations with self-contained assets. That is a cross-child change for P3-F; exports used no system at all before this binding.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
@@ -703,8 +713,11 @@ A machine-made system, the agent's "Harbor Tutoring Design System" from a CSS-va
 - Line 15: the live run.
 - Line 16: the gates.
 
+**Closing (2026-10-14).** A document now renders and exports under its governing system through D's chain. That chain ends at the owner's house system in the renderer (Decision Log 34) and at the version's pin for a retained export (Decision Log 35).
+
 **Listed for P3-F, not faked here:**
-- the document restyle e2e on B's editor, and the deck restyle on C's (a fixture stands in for both);
+- the document restyle e2e on B's editor: buildable now that the binding exists (Decision Log 35). The deck restyle e2e on C's editor. A fixture stands in for both;
+- the system's bundled faces in HTML and PDF exports, which needs B's exporter seam and X31's `fonts?` (Decision Log 35);
 - the law edited in B's document editor (format 2, Decision Log 3);
 - the deck check against a system's hard don'ts, once C registers its element stream.
 
