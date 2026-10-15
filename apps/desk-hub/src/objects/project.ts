@@ -176,9 +176,29 @@ export class Project extends DurableObject<Env> {
 
   // ---- Machines ------------------------------------------------------------------------------------------------
 
-  /** A frame a machine posted, handed over by its `Machine` object; resolves once every reply is on its stream. */
-  async fromMachine(ctx: MachineContext, frame: UpFrame): Promise<void> {
+  /**
+   * The frames a machine posted for this project, in the POST's order, handed over by its `Machine` object in one call
+   * (one call per frame cost a Durable Object round trip each: M5's measured run). Applied one by one, as before; the
+   * call stops before a frame once this project knows of a newer stream of the machine, and says so, so the POST is
+   * refused `stale-generation` with what it applied. Resolves once every reply is on the stream.
+   */
+  async fromMachine(ctx: MachineContext, frames: UpFrame[]): Promise<{ applied: number; stale: boolean }> {
     this.remember(ctx.org, ctx.project);
+    let applied = 0;
+    let stale = false;
+    for (const frame of frames) {
+      if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation) {
+        stale = true;
+        break;
+      }
+      await this.fromMachineFrame(ctx, frame);
+      applied++;
+    }
+    await this.queues.get(queueKey(ctx.machine, ctx.generation));
+    return { applied, stale };
+  }
+
+  private async fromMachineFrame(ctx: MachineContext, frame: UpFrame): Promise<void> {
     // A lease whose time ran out lapses before anything the machine sent is served, whether or not its alarm ran yet.
     this.sweepLeases();
     if (frame.t === 'hello') await this.hello(ctx, frame);
@@ -188,7 +208,6 @@ export class Project extends DurableObject<Env> {
     else if (frame.t === 'rpc-result') this.rpcResult(ctx, frame);
     else if (frame.t === 'pending') this.pendingSet(ctx, frame.raised);
     else if (frame.t === 'session') this.session(ctx, frame.message);
-    await this.queues.get(queueKey(ctx.machine, ctx.generation));
   }
 
   /** The daemon answered a heartbeat on the stream this lease belongs to: the machine stays online, or is online again

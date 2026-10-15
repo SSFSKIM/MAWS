@@ -19,3 +19,5 @@ export const PROJECT_VISIBLE_PATH = '/__test/visible-window';
 export const PROJECTS_PATH = '/__test/projects';
 /** Where the suites' `Registry` takes a member (`{email, role}`). */
 export const MEMBER_PATH = '/__test/member';
+/** Where the suites' `Project` says how many calls from machines it took, and how many frames they carried. */
+export const PROJECT_CALLS_PATH = '/__test/calls';

@@ -12,7 +12,7 @@ import { inject } from 'vitest';
 import { startProxy, type Proxy } from '../../local/proxy.ts';
 import { AccessStandin, IDENTITY_HEADER } from '../../local/standin.ts';
 import { generateVapidKey } from '../../src/push/web-push';
-import { ABORT_REASON, MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_HOLD_PATH, PROJECT_VISIBLE_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, PROJECTS_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
+import { ABORT_REASON, MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_CALLS_PATH, PROJECT_HOLD_PATH, PROJECT_VISIBLE_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, PROJECTS_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
 
 const require = createRequire(import.meta.url);
 const { unstable_getMiniflareWorkerOptions } = require('wrangler') as typeof import('wrangler');
@@ -161,6 +161,10 @@ export async function startLocalHub() {
     /** Which instance of a project's object answers; a different one after an eviction or a hibernation. */
     async projectLife(project: string): Promise<string> {
       return seam('PROJECT', project, PROJECT_LIFE_PATH);
+    },
+    /** How many calls machines made to a project's object, and how many frames they carried. */
+    async projectCalls(project: string): Promise<{ calls: number; frames: number }> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_CALLS_PATH)) as { calls: number; frames: number };
     },
     /** Hands a project a lease's renewal or close for any generation, as a late one from an older stream would come. */
     async lease(project: string, change: { op: 'renew' | 'closed'; machine: string; generation: number; leaseMs?: number }) {

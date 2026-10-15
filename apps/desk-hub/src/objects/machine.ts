@@ -106,9 +106,11 @@ export class Machine extends DurableObject<Env> {
   /**
    * A POST of NDJSON frames. Refused whole, with nothing applied, when it is not for the current stream, too large, or
    * holds a line that is not a frame; otherwise each frame goes to its project in order, and the answer comes once
-   * every reply the projects owe (`have`, the backlog, `resend`, `refused`) is written down the stream. The stream is
-   * checked again once the body is read and before each frame: a POST that a newer stream outlived stops there
-   * (`stale-generation`, with how many frames it applied), so it changes nothing the newer stream set up. A reply that
+   * every reply the projects owe (`have`, the backlog, `resend`, `refused`) is written down the stream. Consecutive
+   * frames for one project reach it in one call. The stream is checked again once the body is read and before each
+   * call, and the project stops a call before a frame once it knows of a newer stream: a POST that a newer stream
+   * outlived stops there (`stale-generation`, with how many frames it applied), so it changes nothing the newer stream
+   * set up. A reply that
    * could not be written ends the stream and answers `503 delivery-failed`: reconnect, and the handshake heals it.
    */
   private async frames(request: Request): Promise<Response> {
@@ -140,44 +142,69 @@ export class Machine extends DurableObject<Env> {
       frames.push(frame as UpFrame);
     }
 
+    // Consecutive frames for one project go to it in one call (a run): one Durable Object round trip per frame was the
+    // session plane's limit (M5's measured run). Each frame weighs the posted lines it took (a joined frame its parts),
+    // so `applied` counts posted frames as before.
     let applied = 0;
-    for (const posted of frames) {
+    let carry = 0;
+    let run: { project: string; frames: UpFrame[]; weights: number[] } | null = null;
+    const flush = async (): Promise<Response | null> => {
+      if (!run) return null;
+      const { project, frames: batch, weights } = run;
+      run = null;
       if (this.stream !== stream) return stale(applied);
+      let result: { applied: number; stale: boolean };
+      try {
+        result = await this.project(stream, project).fromMachine(this.context(stream, project), batch);
+      } catch {
+        this.end(stream);
+        return json(503, { error: 'delivery-failed', message: 'a reply to this POST could not be written to the stream; reconnect and send it again', frames: applied });
+      }
+      applied += weights.slice(0, result.applied).reduce((sum, weight) => sum + weight, 0);
+      return result.stale ? stale(applied) : null;
+    };
+
+    for (const posted of frames) {
       let frame: UpFrame | undefined = posted;
       if (posted.t === 'part') {
         try {
           frame = stream.parts.add(posted as Part) as UpFrame | undefined;
         } catch {
-          return json(400, { error: 'bad-shape', message: 'a malformed part' });
+          return (await flush()) ?? json(400, { error: 'bad-shape', message: 'a malformed part' });
         }
         if (frame === undefined) {
-          applied++;
+          carry++;
           continue;
         }
       }
+      const weight = carry + 1;
+      carry = 0;
       const project = projectOf(frame);
+      if (typeof project === 'string' && PROJECT_ID.test(project)) {
+        if (frame.t === 'hello') stream.projects.add(project);
+        if (run && run.project !== project) {
+          const refused = await flush();
+          if (refused) return refused;
+        }
+        run ??= { project, frames: [], weights: [] };
+        run.frames.push(frame);
+        run.weights.push(weight);
+        continue;
+      }
+      const refused = await flush();
+      if (refused) return refused;
+      if (this.stream !== stream) return stale(applied);
       if (project === null) {
         // `hb-ack`: renews the lease in every project this stream opened, when it names this stream's generation.
         if (frame.t === 'hb-ack' && frame.generation === stream.generation) await this.renew(stream);
-        applied++;
-        continue;
-      }
-      if (typeof project !== 'string' || !PROJECT_ID.test(project)) {
+      } else {
         await this.send({ t: 'refused', project: String(project), refusal: { reason: 'bad-shape', message: 'the frame names no .smns project id' } }, stream.generation);
-        applied++;
-        continue;
       }
-      const target = this.project(stream, project);
-      if (frame.t === 'hello') stream.projects.add(project);
-      try {
-        await target.fromMachine(this.context(stream, project), frame);
-      } catch {
-        this.end(stream);
-        return json(503, { error: 'delivery-failed', message: 'a reply to this POST could not be written to the stream; reconnect and send it again', frames: applied });
-      }
-      applied++;
+      applied += weight;
     }
-    return json(200, { ok: true, frames: applied });
+    const refused = await flush();
+    if (refused) return refused;
+    return json(200, { ok: true, frames: applied + carry });
   }
 
   private async write(stream: Stream, frame: DownFrame): Promise<boolean> {

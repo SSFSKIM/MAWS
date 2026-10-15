@@ -8,13 +8,15 @@
 //     for any generation, as a late one from an older stream would arrive;
 //   - a `Project` that holds a `hello` at its registration, so a close can arrive while the Registry answers, and
 //     takes a shorter window for a socket's visibility, so one can expire within a test;
+//   - a `Project` that counts the calls machines make to it and the frames they carry;
 //   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand.
 import { Machine as DeployedMachine, type Timing } from '../../src/objects/machine';
 import { Project as DeployedProject } from '../../src/objects/project';
 import { Registry as DeployedRegistry } from '../../src/objects/registry';
-import type { DownFrame } from '../../src/protocol/machine';
+import type { DownFrame, UpFrame } from '../../src/protocol/machine';
+import type { MachineContext } from '../../src/objects/project';
 import type { ProjectRecord } from '../../src/protocol/identity';
-import { ABORT_REASON, MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_HOLD_PATH, PROJECT_VISIBLE_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, PROJECTS_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
+import { ABORT_REASON, MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_CALLS_PATH, PROJECT_HOLD_PATH, PROJECT_VISIBLE_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, PROJECTS_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
 
 export { default } from '../../src/worker';
 
@@ -72,6 +74,12 @@ export class Machine extends DeployedMachine {
 export class Project extends DeployedProject {
   private held: { promise: Promise<void>; release: () => void } | undefined;
 
+  async fromMachine(ctx: MachineContext, frames: UpFrame[]): Promise<{ applied: number; stale: boolean }> {
+    const calls = this.ctx.storage.kv.get<{ calls: number; frames: number }>('calls') ?? { calls: 0, frames: 0 };
+    this.ctx.storage.kv.put('calls', { calls: calls.calls + 1, frames: calls.frames + frames.length });
+    return super.fromMachine(ctx, frames);
+  }
+
   protected visibleMs(): number {
     return this.ctx.storage.kv.get<number>('visible-window') ?? super.visibleMs();
   }
@@ -100,6 +108,7 @@ export class Project extends DeployedProject {
       return new Response('held');
     }
     if (url.pathname === PROJECT_LIFE_PATH) return new Response(this.life);
+    if (url.pathname === PROJECT_CALLS_PATH) return Response.json(this.ctx.storage.kv.get('calls') ?? { calls: 0, frames: 0 });
     if (url.pathname === PROJECT_LEASE_PATH) {
       const { op, ...ctx } = (await request.json()) as { op: 'renew' | 'closed'; org: string; project: string; machine: string; generation: number; leaseMs: number };
       if (op === 'renew') this.renew(ctx);
