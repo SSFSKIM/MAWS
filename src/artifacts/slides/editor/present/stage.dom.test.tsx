@@ -8,6 +8,7 @@ import { SlideCanvas } from '../../canvas';
 import { importSlide, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
 import { slideSteps } from './sequence';
+import type { Affine } from '../../geometry';
 import { magicMotions, ShowStage, type MagicItem, type MotionRect } from './stage';
 
 interface Fake {
@@ -145,33 +146,86 @@ describe('a first entry', () => {
   });
 });
 
-// The screen rect an element shows at the motion's start: each motion (translate after a scale about the element's own
-// final centre) applied from the element up through its moving ancestors.
-function startRect(items: readonly MagicItem[], motions: Map<string, { dx: number; dy: number; sx: number; sy: number }>, id: string, scale: number): MotionRect {
-  let rect = items.find((i) => i.id === id)!.to;
-  for (let at: MagicItem | undefined = items.find((i) => i.id === id); at; at = items.find((i) => i.id === at!.ancestor)) {
-    const m = motions.get(at.id)!;
-    const [cx, cy] = [at.to.x + at.to.w / 2, at.to.y + at.to.h / 2];
-    rect = { x: cx + (rect.x - cx) * m.sx + m.dx * scale, y: cy + (rect.y - cy) * m.sy + m.dy * scale, w: rect.w * m.sx, h: rect.h * m.sy };
-  }
-  return rect;
+// Where an element's centre and its screen box start: its own motion (a translate in its parent's frame, a scale about its
+// own centre in that frame) then each moving ancestor's, all mapped to the screen through each one's parent frame, as
+// the browser composes them; written apart from `magicMotions` so the test checks the composition, not the code.
+type Motions = Map<string, { dx: number; dy: number; sx: number; sy: number }>;
+const lin = (m: Affine, x: number, y: number) => ({ x: m.a * x + m.c * y, y: m.b * x + m.d * y });
+const solve = (m: Affine, x: number, y: number) => {
+  const det = m.a * m.d - m.b * m.c;
+  return { x: (m.d * x - m.c * y) / det, y: (-m.b * x + m.a * y) / det };
+};
+function moveOf(item: MagicItem, m: Motions, p: { x: number; y: number }) {
+  const own = m.get(item.id)!;
+  const c = { x: item.to.x + item.to.w / 2, y: item.to.y + item.to.h / 2 };
+  const local = solve(item.parent, p.x - c.x, p.y - c.y); // into the parent's frame, about the centre
+  const scaled = lin(item.parent, local.x * own.sx, local.y * own.sy);
+  const shifted = lin(item.parent, own.dx, own.dy);
+  return { x: c.x + scaled.x + shifted.x, y: c.y + scaled.y + shifted.y };
+}
+function startOf(items: readonly MagicItem[], m: Motions, id: string): MotionRect {
+  const item = items.find((i) => i.id === id)!;
+  const chain: MagicItem[] = [];
+  for (let at: MagicItem | undefined = item; at; at = items.find((i) => i.id === at!.ancestor)) chain.push(at);
+  const map = (p: { x: number; y: number }) => chain.reduce((q, at) => moveOf(at, m, q), p);
+  const tl = map({ x: item.to.x, y: item.to.y });
+  const br = map({ x: item.to.x + item.to.w, y: item.to.y + item.to.h });
+  const [x0, x1] = [Math.min(tl.x, br.x), Math.max(tl.x, br.x)];
+  const [y0, y1] = [Math.min(tl.y, br.y), Math.max(tl.y, br.y)];
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 const near = (a: MotionRect, b: MotionRect) => expect([a.x, a.y, a.w, a.h].map((v) => Math.round(v * 1000) / 1000)).toEqual([b.x, b.y, b.w, b.h]);
+const scaled = (k: number): Affine => ({ a: k, b: 0, c: 0, d: k, e: 0, f: 0 });
+const turned = (deg: number, k: number): Affine => {
+  const t = (deg * Math.PI) / 180;
+  return { a: k * Math.cos(t), b: k * Math.sin(t), c: -k * Math.sin(t), d: k * Math.cos(t), e: 0, f: 0 };
+};
 
 describe('a magic move’s motions', () => {
   it('gives a matched child inside a matched, scaling group only its own motion', () => {
     const scale = 0.5;
     const items: MagicItem[] = [
-      { id: 'g', ancestor: null, from: { x: 0, y: 0, w: 200, h: 100 }, to: { x: 400, y: 200, w: 400, h: 200 } },
+      { id: 'g', ancestor: null, parent: scaled(scale), from: { x: 0, y: 0, w: 200, h: 100 }, to: { x: 400, y: 200, w: 400, h: 200 } },
       // moved and scaled with its group exactly: no motion of its own
-      { id: 'still', ancestor: 'g', from: { x: 50, y: 25, w: 50, h: 25 }, to: { x: 500, y: 250, w: 100, h: 50 } },
+      { id: 'still', ancestor: 'g', parent: scaled(scale), from: { x: 50, y: 25, w: 50, h: 25 }, to: { x: 500, y: 250, w: 100, h: 50 } },
       // moved within its group too, and nested once more
-      { id: 'inner', ancestor: 'g', from: { x: 120, y: 60, w: 40, h: 20 }, to: { x: 450, y: 300, w: 160, h: 40 } },
-      { id: 'deep', ancestor: 'inner', from: { x: 125, y: 62, w: 10, h: 10 }, to: { x: 470, y: 310, w: 20, h: 20 } },
+      { id: 'inner', ancestor: 'g', parent: scaled(scale), from: { x: 120, y: 60, w: 40, h: 20 }, to: { x: 450, y: 300, w: 160, h: 40 } },
+      { id: 'deep', ancestor: 'inner', parent: scaled(scale), from: { x: 125, y: 62, w: 10, h: 10 }, to: { x: 470, y: 310, w: 20, h: 20 } },
     ];
-    const motions = magicMotions(items, scale);
+    const motions = magicMotions(items);
     const still = motions.get('still')!;
-    expect([still.dx, still.dy, still.sx, still.sy].map((v) => Math.round(v * 1e6) / 1e6)).toEqual([0, 0, 1, 1]);
-    for (const item of items) near(startRect(items, motions, item.id, scale), item.from);
+    expect([still.dx, still.dy, still.sx, still.sy].map((v) => Math.round(v * 1e6) / 1e6 + 0)).toEqual([0, 0, 1, 1]);
+    for (const item of items) near(startOf(items, motions, item.id), item.from);
+  });
+
+  // fix wave 2: the child's motion is in its parent's own frame, which the parent's authored transform turns
+  it('maps a residual through a parent turned by its own transform (the review’s case), and through a turned, moving group', () => {
+    // a 400×200 group turned 90° moves from left 200 to left 500 (top 300); its 50×50 child from local left 50 to 100
+    // (top 25). Drawn: the group's box turned about its centre; the child's centre through the turn.
+    const turn = (left: number, top: number, w: number, h: number, x: number, y: number) => {
+      const [cx, cy] = [left + w / 2, top + h / 2];
+      return { x: cx - (y - (top + h / 2)) + 0 * x, y: cy + (x - (left + w / 2)) };
+    };
+    const box = (c: { x: number; y: number }, w: number, h: number): MotionRect => ({ x: c.x - w / 2, y: c.y - h / 2, w, h });
+    const groupFrom = box({ x: 400, y: 400 }, 200, 400); // turned: its bounds are 200 wide, 400 tall
+    const groupTo = box({ x: 700, y: 400 }, 200, 400);
+    const kidFrom = box(turn(200, 300, 400, 200, 200 + 75, 300 + 50), 50, 50);
+    const kidTo = box(turn(500, 300, 400, 200, 500 + 125, 300 + 50), 50, 50);
+    const items: MagicItem[] = [
+      { id: 'g', ancestor: null, parent: scaled(1), from: groupFrom, to: groupTo },
+      { id: 'kid', ancestor: 'g', parent: turned(90, 1), from: kidFrom, to: kidTo },
+    ];
+    const motions = magicMotions(items);
+    const kid = motions.get('kid')!;
+    // in the group's own frame the child only moves back by its own 50 px
+    expect([kid.dx, kid.dy, kid.sx, kid.sy].map((v) => Math.round(v * 1e6) / 1e6 + 0)).toEqual([-50, 0, 1, 1]);
+    near(startOf(items, motions, 'kid'), kidFrom);
+    // the same under a stage at half size and a child that also grows in its turned frame
+    const half: MagicItem[] = [
+      { id: 'g', ancestor: null, parent: scaled(0.5), from: { x: 150, y: 150, w: 100, h: 200 }, to: { x: 300, y: 150, w: 100, h: 200 } },
+      { id: 'kid', ancestor: 'g', parent: turned(90, 0.5), from: { x: 180, y: 160, w: 20, h: 40 }, to: { x: 330, y: 170, w: 40, h: 40 } },
+    ];
+    const m2 = magicMotions(half);
+    for (const item of half) near(startOf(half, m2, item.id), item.from);
   });
 });

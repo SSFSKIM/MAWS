@@ -253,3 +253,61 @@ test('the presenter: the audience window and the presenter view, builds, a fade,
   expect(presentPages(app)).toHaveLength(0);
   await expect(page.locator('[data-region="main"]')).toBeVisible();
 });
+
+// M6 fix wave 2: a magic move under a parent turned by its own transform. The group (400×200, turned 90°) moves from left
+// 200 to 500; its child moves inside it from local left 50 to 100. On the move's first frame each is drawn where it was:
+// the group's centre at (400, 400), the child's at (450, 275) (its centre (75, 50) in the group turned about the group's
+// centre), read from the audience window with the motion held at its start.
+const MAGIC = (left: number, kidLeft: number, id: string, transition = '') =>
+  `<section id="${id}"${transition} style="background:#ffffff"><div id="g" data-group="" style="position:absolute; left:${left}px; top:300px; width:400px; height:200px; transform:rotate(90deg); background:#e0e0ff"><div id="kid" style="position:absolute; left:${kidLeft}px; top:25px; width:50px; height:50px; background:#ff0000"></div></div></section>`;
+const MAGIC_DECK: Record<string, string> = {
+  'project/deck.json': DECK_JSON(['m1', 'm2'], { title: 'Magic' }),
+  'project/slides/m1.html': MAGIC(200, 50, 'm1', ' data-transition="magic"'),
+  'project/slides/m2.html': MAGIC(500, 100, 'm2'),
+};
+
+test('a magic move starts each element where it was, a child inside a turned group included', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const app = launch!.app;
+  const id = await createDeck(page, 'Magic', MAGIC_DECK);
+  await openFromLibrary(page, 'Magic', id);
+  await headerAction(page, 'Present');
+  await expect.poll(() => presentPages(app).length, { timeout: 15_000 }).toBeGreaterThan(0);
+  const audience = presentPages(app).find((w) => w.url().includes('role=audience'))!;
+  await expect(audience.locator('[data-present-view="audience"]')).toBeVisible({ timeout: 15_000 });
+  expect(await at(audience)).toBe('m1/0');
+  // every motion from here lasts a minute, so its first frame can be read
+  await audience.evaluate(() => {
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, frames: Keyframe[] | PropertyIndexedKeyframes | null, options?: number | KeyframeAnimationOptions) {
+      return animate.call(this, frames, { ...(typeof options === 'object' ? options : {}), duration: 60_000 });
+    };
+  });
+  await audience.keyboard.press('ArrowRight');
+  await expect.poll(() => at(audience)).toBe('m2/0');
+  const centres = await audience.evaluate(() => {
+    for (const a of document.getAnimations()) {
+      a.pause();
+      a.currentTime = 0;
+    }
+    const stage = document.querySelector('.present-audience .present-stage')!.getBoundingClientRect();
+    const k = stage.width / 1920;
+    const layers = document.querySelectorAll('.present-audience .present-layer');
+    const layer = layers[layers.length - 1]!;
+    const centre = (eid: string) => {
+      const r = layer.querySelector(`[data-eid="${eid}"]`)!.getBoundingClientRect();
+      return { x: (r.left + r.width / 2 - stage.left) / k, y: (r.top + r.height / 2 - stage.top) / k };
+    };
+    return { g: centre('g'), kid: centre('kid') };
+  });
+  const round = (p: { x: number; y: number }) => ({ x: Math.round(p.x), y: Math.round(p.y) });
+  expect(round(centres.g)).toEqual({ x: 400, y: 400 });
+  expect(round(centres.kid)).toEqual({ x: 450, y: 275 });
+  const closed = Promise.all(presentPages(app).map((w) => w.waitForEvent('close')));
+  await audience.keyboard.press('Escape').catch((error: unknown) => {
+    if (!/has been closed/.test(String(error))) throw error;
+  });
+  await closed;
+});
+

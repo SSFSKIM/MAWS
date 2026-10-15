@@ -9,6 +9,7 @@ import { slideToken } from '../../../yjs/slides-observe';
 import { SlideCanvas, type AssetUrl } from '../../canvas';
 import { isPinned, type Tag } from '../../ir';
 import { readFlat } from '../../model';
+import { apply, applyLinear, IDENTITY, invert, linear, multiply, shift, transformMatrix, type Affine } from '../../geometry';
 import { BUILD_MS, buildKeyframes, canAnimate, EASE_IN_OUT, EASE_OUT, TRANSITION_MS } from './effects';
 import { hiddenAt, type BuildEvent, type Position, type SlideSteps, type Transition } from './sequence';
 
@@ -258,15 +259,22 @@ export class ShowStage {
     };
     found.sort((a, b) => depth(a.node) - depth(b.node));
     for (const f of found) nodes.set(f.id, f.node);
+    // a parent's frame on screen: the stage's scale, then each element's own transform down to it (computed, so a token
+    // reads as what it draws; the moving ancestors' motions are the composite's, not this)
+    const frameOf = (parent: HTMLElement | null): Affine => {
+      const chain: HTMLElement[] = [];
+      for (let at = parent; at && at !== to.canvas.root; at = at.parentElement) chain.unshift(at);
+      return chain.reduce((m, el) => multiply(m, linear(transformMatrix(getComputedStyle(el).transform, el.offsetWidth, el.offsetHeight))), { ...IDENTITY, a: scale, d: scale });
+    };
     const items: MagicItem[] = found.map((f) => {
       let ancestor: string | null = null;
       for (let at = f.node.parentElement; at && at !== to.canvas.root && ancestor === null; at = at.parentElement) {
         const id = at.dataset.eid;
         if (id !== undefined && nodes.get(id) === at) ancestor = id;
       }
-      return { id: f.id, ancestor, from: f.from, to: f.to };
+      return { id: f.id, ancestor, parent: frameOf(f.node.parentElement), from: f.from, to: f.to };
     });
-    const motions = magicMotions(items, scale);
+    const motions = magicMotions(items);
     for (const f of found) {
       const m = motions.get(f.id)!;
       this.track(f.node.animate([{ translate: `${m.dx}px ${m.dy}px`, scale: `${m.sx} ${m.sy}` }, { translate: '0px 0px', scale: '1 1' }], options));
@@ -291,14 +299,19 @@ export interface MotionRect {
   w: number;
   h: number;
 }
-/** A matched element of a magic move: its nearest moving ancestor (listed before it), and its box before and after. */
+/**
+ * A matched element of a magic move: its nearest moving ancestor (listed before it), its box on screen before and after,
+ * and `parent`: the linear map of its parent's frame onto the screen as the arriving slide is drawn (the stage's scale
+ * and every ancestor's own transform), where its `translate` and `scale` act.
+ */
 export interface MagicItem {
   id: string;
   ancestor: string | null;
+  parent: Affine;
   from: MotionRect;
   to: MotionRect;
 }
-/** An element's own starting motion: `translate` in its local px, `scale` about its own centre. */
+/** An element's own starting motion: `translate` in its parent's frame (px), `scale` about its own centre in that frame. */
 export interface Motion {
   dx: number;
   dy: number;
@@ -307,27 +320,31 @@ export interface Motion {
 }
 
 /**
- * Each matched element's starting motion, so that with its moving ancestors' it starts where it was. Per axis, an
- * ancestor's start maps a final screen point x to k·x + t; an element's own maps x to g·(x − c) + c + d about its final
- * centre c, inside its ancestors'. Choosing g and d so that the composite takes the element's final box to its earlier
- * one gives g = (from size / to size) / k and d = (from centre − t) / k − c, in screen px (divided by the stage's scale for
- * CSS px: the translate is in the element's parent's frame, before its ancestors' scale).
+ * Each matched element's starting motion, so that with its moving ancestors' it starts where it was (fix wave 2: in its
+ * parent's own frame). On screen, the ancestors' start maps a point of the arriving layout by F (an affine); the element
+ * itself maps a point x by c + P·d + P·G·P⁻¹·(x − c) about its centre c, P its parent frame's map onto the screen, d its
+ * translate and G its scale. The composite takes its centre to its earlier one when d = P⁻¹·(F⁻¹(from centre) − c), and
+ * its size to its earlier one when G = P⁻¹·F⁻¹·D·P, D the ratio of its boxes on screen (CSS's `scale` is diagonal: G's
+ * diagonal is taken, exact for a parent turned by a multiple of 90° or not turned).
  */
-export function magicMotions(items: readonly MagicItem[], scale: number): Map<string, Motion> {
-  const composite = new Map<string, { kx: number; tx: number; ky: number; ty: number }>();
+export function magicMotions(items: readonly MagicItem[]): Map<string, Motion> {
+  const composite = new Map<string, Affine>();
   const out = new Map<string, Motion>();
   for (const item of items) {
-    const f = (item.ancestor !== null && composite.get(item.ancestor)) || { kx: 1, tx: 0, ky: 1, ty: 0 };
-    const axis = (k: number, t: number, fromAt: number, fromSize: number, toAt: number, toSize: number) => {
-      const c = toAt + toSize / 2;
-      const g = fromSize / toSize / k;
-      const d = (fromAt + fromSize / 2 - t) / k - c;
-      return { g, d, k: k * g, t: k * (c * (1 - g) + d) + t };
-    };
-    const x = axis(f.kx, f.tx, item.from.x, item.from.w, item.to.x, item.to.w);
-    const y = axis(f.ky, f.ty, item.from.y, item.from.h, item.to.y, item.to.h);
-    composite.set(item.id, { kx: x.k, tx: x.t, ky: y.k, ty: y.t });
-    out.set(item.id, { dx: x.d / scale, dy: y.d / scale, sx: x.g, sy: y.g });
+    const f = (item.ancestor !== null && composite.get(item.ancestor)) || IDENTITY;
+    const p = linear(item.parent);
+    const pInv = invert(p);
+    const fInv = invert(f);
+    const c = { x: item.to.x + item.to.w / 2, y: item.to.y + item.to.h / 2 };
+    const back = apply(fInv, { x: item.from.x + item.from.w / 2, y: item.from.y + item.from.h / 2 });
+    const d = applyLinear(pInv, { x: back.x - c.x, y: back.y - c.y });
+    const ratio: Affine = { ...IDENTITY, a: item.from.w / item.to.w, d: item.from.h / item.to.h };
+    const full = multiply(pInv, multiply(linear(fInv), multiply(ratio, p)));
+    const g: Affine = { ...IDENTITY, a: full.a, d: full.d };
+    // this element's own start on screen, its descendants' F
+    const own = multiply(shift(c.x, c.y), multiply(shift(applyLinear(p, d).x, applyLinear(p, d).y), multiply(p, multiply(g, multiply(pInv, shift(-c.x, -c.y))))));
+    composite.set(item.id, multiply(f, own));
+    out.set(item.id, { dx: d.x, dy: d.y, sx: g.a, sy: g.d });
   }
   return out;
 }
