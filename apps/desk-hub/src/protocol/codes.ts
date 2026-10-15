@@ -8,7 +8,7 @@
 // and `ts` too, which the hub assigns after the browser computed the code. An RPC carries its nonce as its own
 // top-level field (its id) and the value alone as `mac`, and is covered without `mac`. Each shape has its own domain, so
 // a code for one never verifies as another; the project id binds an event to its project.
-import { base64urlDecode, base64urlEncode } from './base64url';
+import { base64urlDecode, base64urlEncode, isBase64urlOf } from './base64url';
 import { canonicalize } from './canonical';
 import type { JsonValue } from './json';
 import { isHubPosition, isHubWriter, type Mac } from './log';
@@ -72,8 +72,9 @@ async function sign(key: OrgKey, bytes: Uint8Array<ArrayBuffer>): Promise<string
   return base64urlEncode(new Uint8Array(await crypto.subtle.sign('HMAC', key.hmac, bytes)));
 }
 
-async function check(key: OrgKey, kind: ShapeKind, project: string, shape: object, value: unknown): Promise<boolean> {
-  if (typeof value !== 'string') return false;
+/** A code's value and its nonce, each in its one canonical base64url spelling (32 and 16 bytes). */
+async function check(key: OrgKey, kind: ShapeKind, project: string, shape: object, value: unknown, nonce: unknown): Promise<boolean> {
+  if (typeof value !== 'string' || !isBase64urlOf(value, 32) || !isBase64urlOf(nonce, 16)) return false;
   let bytes: Uint8Array<ArrayBuffer>;
   let code: Uint8Array<ArrayBuffer>;
   try {
@@ -93,14 +94,16 @@ export async function seal<T extends object>(key: OrgKey, kind: MacKind, project
 }
 
 /**
- * True when the code verifies and, for a log event of a `hub/` writer, its position (`writer`, `seq`, `ts`, which the
- * code leaves out) passes `isHubPosition`: an importer or a browser refuses such an event as it refuses a bad code.
+ * True when the code verifies, its value and nonce are canonical base64url (32 and 16 bytes), and, for a log event of
+ * a `hub/` writer, its position (`writer`, `seq`, `ts`, which the code leaves out) passes `isHubPosition`: an importer
+ * or a browser refuses such an event as it refuses a bad code.
  */
 export async function verify(key: OrgKey, kind: MacKind, project: string, shape: object): Promise<boolean> {
   const writer = (shape as { writer?: unknown }).writer;
   if (kind === 'log' && typeof writer === 'string' && isHubWriter(writer) && !isHubPosition(shape)) return false;
   const mac = (shape as { mac?: Partial<Mac> }).mac;
-  return check(key, kind, project, shape, typeof mac === 'object' && mac !== null ? mac.value : undefined);
+  if (typeof mac !== 'object' || mac === null) return false;
+  return check(key, kind, project, shape, mac.value, mac.nonce);
 }
 
 /** Seals an RPC under its own project; the draft carries the nonce (`newNonce()`), which is the RPC's id. */
@@ -110,7 +113,7 @@ export async function sealRpc(key: OrgKey, draft: RpcDraft): Promise<Rpc> {
 
 /** Verifies an RPC against the project the verifier serves, which must also be the RPC's own. */
 export async function verifyRpc(key: OrgKey, rpc: Rpc, project: string): Promise<boolean> {
-  return check(key, 'rpc', project, rpc, (rpc as { mac?: unknown }).mac);
+  return check(key, 'rpc', project, rpc, (rpc as { mac?: unknown }).mac, (rpc as { nonce?: unknown }).nonce);
 }
 
 /** The digest's `input_sha256`: the lowercase hex SHA-256 of the tool input's canonical JSON. */

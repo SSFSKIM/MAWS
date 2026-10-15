@@ -23,7 +23,9 @@ float() and formats the result, never str(int).
 
 What a hub/ event's code leaves out is checked by shape before the event is stored or drawn (`is_hub_position`): the
 writer is exactly hub/ and the event's own member, the seq a positive integer, ts ISO 8601 UTC with milliseconds. A
-negative vector's `fails_by` says whether its code fails ("code") or only that check ("position").
+negative vector's `fails_by` names the first check that refuses it (`failure`): "encoding" — base64url has one
+spelling per value (no padding, the last character's unused bits zero), and the code's value and nonce must be that
+spelling of 32 and 16 bytes —, then "position", then "code".
 """
 
 import base64
@@ -45,6 +47,27 @@ DOMAINS = {
 
 def b64url(raw):
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+B64URL = re.compile(r"[A-Za-z0-9_-]*")
+
+
+def b64url_decode_strict(text):
+    """The canonical spelling only: no padding, the base64url alphabet, a possible length, and the unused low bits of
+    the last character zero. Every other spelling raises ValueError; nothing is normalized."""
+    if not isinstance(text, str) or not B64URL.fullmatch(text) or len(text) % 4 == 1:
+        raise ValueError("not canonical base64url: %r" % (text,))
+    raw = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+    if b64url(raw) != text:
+        raise ValueError("unused bits set: %r" % (text,))
+    return raw
+
+
+def is_b64url_of(text, size):
+    try:
+        return len(b64url_decode_strict(text)) == size
+    except ValueError:
+        return False
 
 
 def es_number(value):
@@ -166,12 +189,23 @@ def is_hub_position(event):
     )
 
 
-def verifies(org_key, kind, project, shape):
-    """What an importer checks: the code, and for a hub/ log event its position too."""
+def failure(org_key, kind, project, shape):
+    """What an importer checks, in order, and the first that refuses: "encoding" (the code's value and its nonce are not
+    the canonical base64url of 32 and 16 bytes), "position" (a hub/ log event's writer, seq, or ts fails its shape), or
+    "code" (the HMAC does not match). None when the shape verifies."""
+    value = shape.get("mac") if kind == "rpc" else (shape.get("mac") or {}).get("value")
+    nonce = shape.get("nonce") if kind == "rpc" else (shape.get("mac") or {}).get("nonce")
+    if not is_b64url_of(value, 32) or not is_b64url_of(nonce, 16):
+        return "encoding"
     if kind == "log" and isinstance(shape.get("writer"), str) and shape["writer"].startswith("hub/") and not is_hub_position(shape):
-        return False
-    stored = shape["mac"] if kind == "rpc" else shape["mac"]["value"]
-    return hmac.compare_digest(code(org_key, kind, project, shape), stored)
+        return "position"
+    if not hmac.compare_digest(code(org_key, kind, project, shape), value):
+        return "code"
+    return None
+
+
+def verifies(org_key, kind, project, shape):
+    return failure(org_key, kind, project, shape) is None
 
 
 ORG_KEY = bytes(range(32))
@@ -354,6 +388,7 @@ def main():
         value = code(ORG_KEY, kind, project, shape)
         raw = covered_bytes(kind, project, shape)
         sealed[name] = (kind, project, seal(kind, shape, value))
+        assert verifies(ORG_KEY, kind, project, sealed[name][2]), name
         vectors.append(
             {
                 "name": name,
@@ -376,10 +411,9 @@ def main():
         mutate(altered)
         target = project or original_project
         verify_as = as_kind or kind
-        assert not verifies(ORG_KEY, verify_as, target, altered), name
-        # "code" when the code itself fails; "position" when it verifies and only a hub/ event's position check refuses.
-        stored = altered["mac"] if kind == "rpc" else altered["mac"]["value"]
-        fails_by = "code" if code(ORG_KEY, verify_as, target, altered) != stored else "position"
+        # The first check that refuses it: "encoding", "position", or "code" (see `failure`).
+        fails_by = failure(ORG_KEY, verify_as, target, altered)
+        assert fails_by is not None, name
         negatives.append(
             {
                 "name": name,
@@ -422,6 +456,33 @@ def main():
         lambda e: e.update(ts="2026-10-15T08:05:00Z"),
     )
     negative("hub-human-seq-zero", "hub-human", "a hub/ event whose seq is not a positive integer", lambda e: e.update(seq=0))
+
+    # base64url has one spelling per value. Each variant below decodes, leniently, to the same bytes as the original,
+    # so a decoder that ignores spare bits or padding would accept it; a canonical one refuses it before any HMAC.
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+
+    def respell(text):
+        """The last character's successor: the same high bits, a spare bit set; checked to decode to the same bytes."""
+        variant = text[:-1] + alphabet[alphabet.index(text[-1]) + 1]
+        assert base64.urlsafe_b64decode(variant + "=" * (-len(variant) % 4)) == b64url_decode_strict(text)
+        return variant
+
+    negative(
+        "say-value-spare-bits",
+        "say-ascii",
+        "the code's value with its last character's unused bits set: the same 32 bytes, not the canonical spelling",
+        lambda e: e["mac"].update(value=respell(e["mac"]["value"])),
+    )
+    negative("say-value-padded", "say-ascii", "the code's value with a padding character", lambda e: e["mac"].update(value=e["mac"]["value"] + "="))
+    negative(
+        "say-nonce-spare-bits",
+        "say-ascii",
+        "the nonce with its last character's unused bits set: the same 16 bytes, not the canonical spelling",
+        lambda e: e["mac"].update(nonce=respell(e["mac"]["nonce"])),
+    )
+    negative("rpc-mac-spare-bits", "rpc-decide", "an RPC's code with its last character's unused bits set", lambda e: e.update(mac=respell(e["mac"])))
+    for name in ("say-value-spare-bits", "say-value-padded", "say-nonce-spare-bits", "rpc-mac-spare-bits"):
+        assert next(n for n in negatives if n["name"] == name)["fails_by"] == "encoding", name
 
     # The position check by itself, agreeing with the TypeScript suite's cases.
     good = sealed["hub-human"][2]

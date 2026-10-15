@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import vectorsFile from '../../src/protocol/vectors/codes.json';
-import { base64urlDecode } from '../../src/protocol/base64url';
+import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../../src/protocol/base64url';
 import { canonicalize } from '../../src/protocol/canonical';
 import { coveredBytes, DOMAINS, importOrgKey, inputSha256, newNonce, seal, sealRpc, verify, verifyRpc, type ShapeKind } from '../../src/protocol/codes';
 import type { JsonValue } from '../../src/protocol/json';
@@ -43,6 +43,10 @@ describe('the committed vectors (written by generate.py, an independent implemen
         'hub-human-writer-control',
         'hub-human-ts-malformed',
         'hub-human-seq-zero',
+        'say-value-spare-bits',
+        'say-value-padded',
+        'say-nonce-spare-bits',
+        'rpc-mac-spare-bits',
       ]),
     );
   });
@@ -149,6 +153,37 @@ describe('codes', () => {
     expect(await verifyRpc(key, rpc, project)).toBe(true);
     expect(await verifyRpc(key, rpc, '0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59')).toBe(false);
     expect(await verifyRpc(key, { ...rpc, project: '0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59' }, '0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59')).toBe(false);
+  });
+
+  describe('base64url has one spelling per value (no padding, spare bits zero)', () => {
+    const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    /** The next character in the alphabet: the same high bits, a spare bit set. */
+    const respell = (text: string) => text.slice(0, -1) + ALPHABET[ALPHABET.indexOf(text.at(-1)!) + 1];
+
+    it('decodes the canonical spelling and refuses every other: spare bits, padding, an impossible length', () => {
+      const bytes = new Uint8Array(32).fill(0xab);
+      const text = base64urlEncode(bytes);
+      expect(base64urlDecode(text)).toEqual(bytes);
+      for (const variant of [respell(text), `${text}=`, `${text}==`, text.slice(0, -1) + '+', 'A']) {
+        expect(() => base64urlDecode(variant), variant).toThrow(TypeError);
+      }
+      expect(base64urlDecode('')).toEqual(new Uint8Array(0));
+    });
+
+    it('names the 128-bit nonce and the 256-bit code by their canonical spelling alone', () => {
+      expect(isBase64urlOf(newNonce(), 16)).toBe(true);
+      expect(isBase64urlOf(respell(newNonce()), 16)).toBe(false);
+      expect(isBase64urlOf(base64urlEncode(new Uint8Array(32)), 16)).toBe(false);
+      expect(isBase64urlOf(base64urlEncode(new Uint8Array(32)), 32)).toBe(true);
+    });
+
+    it('refuses a sealed shape whose code value or nonce is respelled, though its bytes are the same', async () => {
+      const key = await importOrgKey(new Uint8Array(32).fill(7));
+      const sealed = await seal(key, 'log', project, human());
+      expect(await verify(key, 'log', project, { ...sealed, mac: { ...sealed.mac, value: respell(sealed.mac.value) } })).toBe(false);
+      const renonced = await seal(key, 'log', project, human(), respell(newNonce()));
+      expect(await verify(key, 'log', project, renonced)).toBe(false);
+    });
   });
 
   describe("a hub/ event's position, which its code leaves out, is checked by shape", () => {

@@ -30,6 +30,17 @@ describe('the enrollment code (built in the browser, run as `sminos hub enroll <
     expect(() => decodeEnrollmentCode(damage(encodeEnrollmentCode(code())))).toThrow(TypeError);
   });
 
+  it('refuses a key spelled other than canonically: spare bits set, or padding (DX1: one spelling per value)', () => {
+    const key = code().key;
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    const respelled = key.slice(0, -1) + alphabet[alphabet.indexOf(key.at(-1)!) + 1];
+    for (const variant of [respelled, `${key}=`]) {
+      const body = base64urlEncode(new TextEncoder().encode(JSON.stringify({ ...code(), key: variant })));
+      expect(() => decodeEnrollmentCode(`smns-enroll-v1.${body}`)).toThrow(TypeError);
+      expect(() => encodeEnrollmentCode({ ...code(), key: variant })).toThrow(TypeError);
+    }
+  });
+
   it.each([
     ['a key that is not 256 bits', { key: base64urlEncode(new Uint8Array(16)) }],
     ['a machine name that is not admitted', { machine: 'hub' }],
