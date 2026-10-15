@@ -977,6 +977,14 @@ consumers start after that gate.
   - the hub adds nothing inside an event except a `hub/` event's `writer`,
     `seq`, and `ts`: the project offset travels beside the event in DX3's
     frames, so a stored event's code verifies as it did on arrival;
+  - what the code leaves out is checked by shape before anything is stored
+    or delivered: a `hub/` event's `writer` is exactly `hub/` and its own
+    `member` (32 lowercase hex, which the code covers), its `seq` a
+    positive integer, and its `ts` an ISO 8601 UTC time with milliseconds.
+    Daemons and browsers refuse an event that fails, as they refuse a bad
+    code: the delivery path interpolates the writer into the frame a
+    session reads (`writer_short`, `event_ref`, `frame_of` in
+    `sminos.py`), so an unchecked writer would carry text no code covers;
   - `.smns` gains `"hub": {"url": "<https url>", "org": "<org id>"}`;
   - no new log kinds for permission prompts or RPCs (§3).
   Binds DC2 (writes `message` and `question` as today), DC3 (stores, never
@@ -988,9 +996,20 @@ consumers start after that gate.
   §3, then live tail both ways; RPC requests down and results up; session
   subscriptions down and DX4 messages up; machine and session presence and
   the pending set republished on every reconnect, with every RPC result
-  the hub has not acknowledged. Binds DC4, DC7.
+  the hub has not acknowledged. A machine's lease is renewed only by
+  traffic from the daemon — its answer to each heartbeat, fenced by the
+  stream's generation — never by the hub's own heartbeat, so a suspended
+  daemon or a half-open stream lapses within the lease. A daemon that
+  refuses an event it was sent (a bad code, a seen nonce, a writer that
+  fails its shape) reports the refusal up, naming the project, the event's
+  position or nonce, and the reason; the hub keeps it in the audit record
+  and shows it to the project's browsers (acceptance 8), apart from the
+  hub's own refusals of uploads. Binds DC4, DC7.
 - **DX3 — Browser ↔ hub protocol (owner DC3, at DC3.G1).** Resume by project
-  offset for the log; subscriptions for the session plane; log events,
+  offset for the log; subscriptions for the session plane, each scoped to
+  a session and an `agentId` (null for the main transcript), which DX2
+  carries to the machine and which binds the subscription's snapshot and
+  older-row pages to that one transcript; log events,
   presence, the pending set, and DX4 messages down; authenticated `human`
   events and RPCs up, with their results. Binds DC5, DC6.
 - **DX4 — Session-plane messages (envelope owner DC3, at DC3.G1; producers DC2
@@ -1023,12 +1042,19 @@ consumers start after that gate.
     the snapshot already holds (by row uuid) and chunks at or below their
     message's `upTo` — subscribe before snapshot, as MAWS's hydration does
     (`src/renderer/src/transcript/source/hydrate.ts`), with the watermark
-    standing in for event ids that aggregated text lacks. A row's arrival
-    settles its message's partial text, and chunks for a settled message
-    are ignored. Any discontinuity — a gap in `n`, a hub restart, a dropped
-    connection — makes the browser subscribe again and take a fresh
-    snapshot; nothing is resumed from a hub buffer, which is an
-    optimization only;
+    standing in for event ids that aggregated text lacks. Streaming is
+    tracked per content block, since one API response is several rows, one
+    per block, and the mod sees no API message id: a `block-row {uuid,
+    turnId, agentId, step, index}` message, sent when the engine writes the
+    row for block `index` of that step, names the row that settles the
+    block, and arrives before the row itself; a row whose `uuid` a
+    `block-row` named settles that block's partial text, chunks for a
+    settled block are ignored, and a snapshot's `streaming` holds only
+    unsettled blocks. Any discontinuity — a gap in `n`, a hub restart, a
+    dropped connection, or a gap in the bridge's own stream (DX5's `gap`)
+    — ends the subscription (`end`), and the browser subscribes again and
+    takes a fresh snapshot; nothing is resumed from a hub buffer, which is
+    an optimization only;
   - every `mac` here is computed as DX1's is, with its own domain string
     and its nonce covered;
   - **a pending request** is `raised {request: <tool-use id>, session,
@@ -2114,6 +2140,28 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The Interfaces review (2026-10-15, adversarial, over DX1–DX7
+  at `cd818262`) found six gaps, all adopted. (1) A `hub/` event's
+  writer, seq, and ts, which its code leaves out, could carry text into a
+  session's prompt: importers now check them by shape, the writer bound
+  to the covered `member` (DX1). (2) The hub's own heartbeat renewed a
+  machine's lease: only the daemon's answers renew it now (DX2). (3) A
+  daemon had no way to report an event it refused, which acceptance 8
+  needs shown in the web: an upward refusal report (DX2). (4) A bridge
+  `gap` during an open subscription had no DX4 consequence: it ends the
+  subscription (DX4), correcting the DX5 entry's claim. (5) A
+  subscription named only a session, so a subagent's transcript could not
+  be paged: subscriptions are scoped by `agentId` (DX3, DX2). (6)
+  Enrollment's endpoints are DC3's M2, so DC4's and DC5's enrollment
+  milestones wait for DC3's M2 rather than its G1. With these, from DC2's
+  M2 (2026-10-15): streaming is per content block, settled by row uuid
+  through `block-row` (DX4, DX5), since the mod sees no API message id
+  and one response is several rows. DC3 aligns its module and the
+  Interfaces subsections, which are re-folded from it. Rejected then:
+  pairing rows to streams by API message id (invisible to the mod), and
+  relaying `gap` and `resync` to browsers (a fresh snapshot is simpler and
+  already the rule). Flags DC3, DC4, DC5, DC6, DC7.
+  Date/Author: 2026-10-15, design session (Interfaces review; DC2's M2).
 - Decision: DC3.G1 — DX1's vectors, DX2, DX3, the DX4 envelope, the DX6
   shapes, and DX7 folded from DC3's M1 (MAWS `140c834b`), with the
   choices that bind consumers: every number in a covered object is an
@@ -2143,6 +2191,9 @@ a hub that connects into machines (§2).
   by its socket's inode; a `/clear` stops routing to the old child at
   once. `resync` stays local to DX5: DC7 does not relay it, since the
   snapshot a DX4 subscriber takes already reflects it. Flags DC7.
+  (Corrected the same day: a subscriber whose snapshot preceded the loss
+  does not reflect it, so DC7 ends every DX4 subscription a bridge `gap`
+  touches; see the Interfaces review's entry.)
   Date/Author: 2026-10-15, design session (DC2's M1 review).
 - Decision: DX5 version 1 folded from DC2's M1 (doperpowers `434953ce`).
   Two of DC2's choices revise DX4: the bridge's endpoint, not the daemon,
