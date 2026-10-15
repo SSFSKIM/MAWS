@@ -314,6 +314,42 @@ describe('the pending set, decisions, and deliveries', () => {
     await m.close();
   });
 
+  it.each([
+    ['in one life of the object', false],
+    ['across an eviction of the object between the two', true],
+  ])('a settlement sent again is accepted once: one broadcast, one decision in the record (%s)', async (_, evict) => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const request = await raised(project, 'toolu_twice');
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', request) }]);
+    await waitFor(() => (lastPending(b)?.length === 1 ? true : undefined));
+    const decided = await settled(project, 'toolu_twice', 'web', 'allow', memberId);
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'settled', decided) }]);
+    await b.next((f) => f.t === 'decided', 'decided');
+    if (evict) {
+      const before = await hub.projectLife(project);
+      await hub.evict('Project', `${ORG}:${project}`, 'hibernate');
+      expect(await hub.projectLife(project)).not.toBe(before);
+    }
+    // The daemon restarted between sending its settlement and recording that it did: it sends it again.
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'settled', decided) }]);
+    // A marker after it, so the browser has seen everything the second settlement could have caused.
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'presence', presence('busy')) }]);
+    await b.next((f) => f.t === 'session' && f.message.kind === 'presence', 'the marker');
+    expect(sessionKinds(b).filter((x) => x.kind === 'settled')).toHaveLength(1);
+    expect(ofType(b, 'decided')).toHaveLength(1);
+    const late = await browser(project);
+    late.send({ t: 'resume', after: 0 });
+    await late.next((f) => f.t === 'caught-up', 'caught-up');
+    await waitFor(() => (ofType(late, 'decided').length > 0 ? true : undefined));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(ofType(late, 'decided')).toHaveLength(1);
+    late.close();
+    b.close();
+    await m.close();
+  });
+
   it("a subagent's raise, its input capped, is relayed and kept with agentId and truncated, and its code verifies", async () => {
     const project = newProject();
     const m = await machine(project);

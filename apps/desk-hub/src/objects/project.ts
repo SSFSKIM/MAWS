@@ -413,6 +413,9 @@ export class Project extends DurableObject<Env> {
       isMac(s.mac);
     if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'settled is {request, winner, outcome, by, mac}' });
     const settled = message.body as Settled;
+    // Once per request: a daemon that restarted between sending a settlement and recording it sends it again, and the
+    // hub takes it without a second broadcast or decision. The ids are in storage, so this holds across an eviction.
+    if (!this.plane.markSettled(ctx.machine, message.session, settled.request, Date.now())) return;
     const raised = this.plane.settle(ctx.machine, message.session, settled.request);
     this.broadcast({ t: 'session', message });
     this.broadcast(this.audited(this.log.record('decided', { machine: ctx.machine, session: message.session, settled, raised: raised ?? null })));
