@@ -55,6 +55,14 @@ describe('a machine enrolls', () => {
     expect((await hub.fetchAs('stranger@example.com', '/api/enrollments', { body: {} })).status).toBe(403);
   });
 
+  it('takes a JSON body of at most 64 KiB, counted in UTF-8 bytes', async () => {
+    expect((await hub.fetchAs(ADMIN, '/api/enrollments', { body: { padding: 'x'.repeat(60_000) } })).status).toBe(201);
+    // 30,000 characters, 90,000 bytes.
+    const over = await hub.fetchAs(ADMIN, '/api/enrollments', { body: { padding: '한'.repeat(30_000) } });
+    expect(over.status).toBe(400);
+    expect(await over.json()).toMatchObject({ error: 'bad-shape' });
+  });
+
   it('refuses a token it never issued, and a body that is not a redemption', async () => {
     expect((await redeem('A'.repeat(43), 'ghost')).status).toBe(404);
     expect((await hub.fetchAs(null, '/machine/enroll', { body: 'not json' })).status).toBe(400);
@@ -185,6 +193,36 @@ describe('enrollment recovers', () => {
     expect(tokensNamed('rotated').map((t) => t.client_id)).toEqual([fresh.client_id]);
     expect((await hub.fetchAs(creds(lost), '/machine/stream')).status).toBe(403);
     const machine = new MachineClient(hub, 'rotated', creds(fresh));
+    await machine.connect();
+    await machine.close();
+  });
+
+  it("from a revocation's cleanup racing a new enrollment of the name: the cleanup never deletes the new token", async () => {
+    const old = new MachineClient(hub, 'reused', await enroll(hub, ADMIN, 'reused'));
+    await old.connect();
+    await old.close();
+    const tokenName = serviceTokenName(ORG, 'reused');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let held = false;
+    hub.faults.push((request) => {
+      if (held || request.method !== 'GET' || new URL(request.url).searchParams.get('name') !== tokenName) return null;
+      held = true;
+      // The revocation's cleanup lists the name's tokens; its listing waits here.
+      return gate.then(() => null);
+    });
+    const revocation = hub.fetchAs(ADMIN, '/api/machines/reused', { method: 'DELETE' });
+    await waitFor(() => held);
+    const redeemed = redeem(await enrollmentToken(hub, ADMIN), 'reused');
+    // Give the redemption the time to mint and answer, as it could before cleanup and mint were one queue per name.
+    await Promise.race([redeemed, new Promise((resolve) => setTimeout(resolve, 1000))]);
+    release();
+    expect((await revocation).status).toBe(200);
+    const answered = await redeemed;
+    expect(answered.status).toBe(200);
+    const body = (await answered.json()) as { client_id: string; client_secret: string };
+    expect(tokensNamed('reused').map((t) => t.client_id)).toEqual([body.client_id]);
+    const machine = new MachineClient(hub, 'reused', creds(body));
     await machine.connect();
     await machine.close();
   });

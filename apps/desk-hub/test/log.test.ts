@@ -2,13 +2,15 @@
 // The hub holds no org key, so machines' events here carry codes it never checks; a browser's `human` is sealed for
 // real, since its position must pass DX1's check once the hub assigns it. The hub does check that every code is spelled
 // canonically (DX1), so the machines' codes here are random 32 bytes in canonical base64url.
-import { get as httpGet } from 'node:http';
+import { get as httpGet, request as httpRequest } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ProjectDown } from '../src/protocol/browser';
 import { base64urlEncode } from '../src/protocol/base64url';
 import { importOrgKey, newNonce, seal, verify } from '../src/protocol/codes';
 import { isHubPosition, withoutPosition, type HumanDraft, type LogEvent } from '../src/protocol/log';
-import type { DownFrame } from '../src/protocol/machine';
+import { GENERATION_HEADER, type DownFrame } from '../src/protocol/machine';
+import { FRAME_LIMIT, toWire } from '../src/protocol/parts';
+import type { SessionMessage } from '../src/protocol/session';
 import { BrowserClient, enroll, MachineClient, sorted } from './support/clients';
 import { ADMIN, credentials, startLocalHub, type LocalHub } from './support/local';
 
@@ -283,6 +285,19 @@ describe('refusals', () => {
     await a.close();
   });
 
+  it('stops a writer at a malformed event that names it: the rest of its batch is neither stored nor asked for again', async () => {
+    const project = newProject();
+    const a = await machine('stopped');
+    await a.sync(project);
+    const [first, second, third] = [say(a, project, 1), say(a, project, 2), say(a, project, 3)];
+    const from = a.frames.length;
+    await a.postOk([{ t: 'events', project, events: [first, { ...second, mac: undefined } as never, third] }]);
+    expect(await a.next((f) => f.t === 'refused', 'refused', from)).toMatchObject({ refusal: { reason: 'bad-shape', writer: first.writer, seq: 2 } });
+    expect((await hubCounts(project)).counts).toEqual({ [first.writer]: 1 });
+    expect(a.frames.slice(from).filter((f) => f.t === 'refused' || f.t === 'resend')).toHaveLength(1);
+    await a.close();
+  });
+
   it('refuses a POST for an older stream, and events for a project its stream has not opened', async () => {
     const project = newProject();
     const a = await machine('fenced');
@@ -295,6 +310,38 @@ describe('refusals', () => {
     expect(await a.next((f) => f.t === 'refused', 'refused', from)).toMatchObject({ refusal: { reason: 'not-open' } });
     expect((await a.post([{ t: 'hello', project, name: 'demo', have: {} }, 'not json' as never])).status).toBe(400);
     await a.close();
+  });
+
+  it('refuses a POST its stream outlived: one in flight when a newer stream opened changes nothing for the newer one', async () => {
+    const project = newProject();
+    const m = await machine('fenced');
+    const text = JSON.stringify({ t: 'hello', project, name: 'demo', have: {} });
+    let finish!: () => void;
+    const stale = new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const headers = { ...credentials(m.creds), 'content-type': 'application/x-ndjson', 'content-length': String(Buffer.byteLength(text)), [GENERATION_HEADER]: String(m.generation) };
+      const request = httpRequest(`${hub.url}/machine/frames`, { method: 'POST', headers }, (response) => {
+        let body = '';
+        response.on('data', (chunk) => (body += chunk));
+        response.on('end', () => resolve({ status: response.statusCode ?? 0, body }));
+      });
+      request.on('error', reject);
+      // Half the body now, the rest once the newer stream has opened the project.
+      request.write(text.slice(0, 10));
+      finish = () => request.end(text.slice(10));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await m.connect();
+    expect(m.generation).toBe(2);
+    await m.sync(project);
+    finish();
+    const answer = await stale;
+    expect(answer.status).toBe(409);
+    expect(JSON.parse(answer.body)).toMatchObject({ error: 'stale-generation' });
+    const from = m.frames.length;
+    await m.postOk([{ t: 'events', project, events: [say(m, project, 1)] }]);
+    expect((await hubCounts(project)).counts).toEqual({ [`${m.name}/${SESSION}`]: 1 });
+    expect(m.frames.slice(from).filter((f) => f.t === 'refused')).toEqual([]);
+    await m.close();
   });
 
   it("records a daemon's report of an event it refused and shows it to the project's browsers", async () => {
@@ -370,6 +417,154 @@ describe('browsers', () => {
     browser.send({ t: 'human', event: positioned as never });
     expect(await browser.next((f) => f.t === 'refused', 'refused', from)).toMatchObject({ refusal: { reason: 'bad-shape' } });
     expect((await hubCounts(project)).counts).toEqual({});
+    browser.close();
+    await a.close();
+  });
+  it('a human re-sent on a new socket after the log moved on gets its original ack; its nonce with another payload is a conflict', async () => {
+    const project = newProject();
+    const a = await machine('resent');
+    await a.sync(project);
+    const first = await BrowserClient.open(hub, ADMIN, project);
+    const sealed = await human(project, memberId, 'keep user_id');
+    first.send({ t: 'human', event: sealed });
+    const ack = await first.next((f) => f.t === 'human-ack', 'human-ack');
+    expect(ack).toEqual({ t: 'human-ack', nonce: sealed.mac.nonce, offset: 1, writer: `hub/${memberId}`, seq: 1 });
+    await a.postOk([{ t: 'events', project, events: [say(a, project, 1)] }]);
+    first.send({ t: 'human', event: await human(project, memberId, 'a later one') });
+    expect(await first.next((f) => f.t === 'human-ack' && f.seq === 2, 'the second ack')).toMatchObject({ offset: 3 });
+    first.close();
+
+    const second = await BrowserClient.open(hub, ADMIN, project);
+    second.send({ t: 'human', event: sealed });
+    expect(await second.next((f) => f.t === 'human-ack', 'the original ack')).toEqual(ack);
+
+    const { mac, ...draft } = sealed;
+    const other = await seal(await KEY, 'log', project, { ...draft, text: 'drop user_id' }, mac.nonce);
+    const from = second.frames.length;
+    second.send({ t: 'human', event: other });
+    const refused = (await second.next((f) => f.t === 'refused', 'refused', from)) as Extract<ProjectDown, { t: 'refused' }>;
+    expect(refused.refusal).toMatchObject({ reason: 'conflict', writer: `hub/${memberId}`, seq: 1, nonce: mac.nonce });
+    expect((await hubCounts(project)).counts).toEqual(sorted({ [`hub/${memberId}`]: 2, [`${a.name}/${SESSION}`]: 1 }));
+    second.close();
+    await a.close();
+  });
+  it('refuses a socket frame over 1 MiB on the wire before reading it, and joins a larger frame sent as parts', async () => {
+    const project = newProject();
+    const a = await machine('bounded');
+    await a.sync(project);
+    const browser = await BrowserClient.open(hub, ADMIN, project);
+    const large = { t: 'resume', after: 0, padding: 'x'.repeat(FRAME_LIMIT) };
+    browser.send(large as never);
+    expect(await browser.next((f) => f.t === 'refused', 'refused')).toMatchObject({ refusal: { reason: 'too-large', member: memberId } });
+    expect(browser.frames.some((f) => f.t === 'caught-up')).toBe(false);
+    for (const line of toWire(large)) browser.send(JSON.parse(line));
+    await browser.next((f) => f.t === 'caught-up', 'caught-up');
+    browser.close();
+    await a.close();
+  });
+});
+
+describe('delivery failures', () => {
+  async function until(check: () => boolean, ms = 8000) {
+    const deadline = Date.now() + ms;
+    while (!check()) {
+      if (Date.now() > deadline) throw new Error('timed out');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
+  it("answers 503 to a POST whose first reply failed though a later one went out; the stream ends, and a reconnect's hello heals it", async () => {
+    const project = newProject();
+    const source = await machine('source');
+    await source.sync(project);
+    const event = say(source, project, 1);
+    await source.postOk([{ t: 'events', project, events: [event] }]);
+    const target = await machine('target');
+    // The hello owes two replies: `have`, then the backlog's `events`. The first fails.
+    await hub.failNextSend(target.name, 'have');
+    const response = await target.post([{ t: 'hello', project, name: 'demo', have: {} }]);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: 'delivery-failed', frames: 0 });
+    await until(() => target.isEnded);
+    await target.connect();
+    await target.sync(project);
+    expect(countsOf(target, project)).toEqual({ [event.writer]: 1 });
+    await source.close();
+    await target.close();
+  });
+
+  it('ends a stream a live event could not be sent to; the machine reconnects, and its hello heals what it missed', async () => {
+    const project = newProject();
+    const source = await machine('live-source');
+    const target = await machine('live-target');
+    await source.sync(project);
+    await target.sync(project);
+    await hub.failNextSend(target.name, 'events');
+    const event = say(source, project, 1);
+    await source.postOk([{ t: 'events', project, events: [event] }]);
+    await until(() => target.isEnded);
+    expect(countsOf(target, project)).toEqual({});
+    await target.connect();
+    await target.sync(project);
+    expect(countsOf(target, project)).toEqual({ [event.writer]: 1 });
+    await source.close();
+    await target.close();
+  });
+});
+
+describe('session presence', () => {
+  const OTHER = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a';
+  const presence = (m: MachineClient, project: string, session: string, status: string | null): Extract<SessionMessage, { kind: 'presence' }> => ({
+    project,
+    machine: m.name,
+    session,
+    kind: 'presence',
+    sub: null,
+    n: null,
+    body: { record: status === null ? null : { status }, bridge: status !== null },
+  });
+  const presences = (b: BrowserClient) =>
+    b.frames.flatMap((f) => (f.t === 'session' && f.message.kind === 'presence' ? [f.message] : []));
+
+  it("a browser is sent each session's latest presence on connect, then each change", async () => {
+    const project = newProject();
+    const a = await machine('present');
+    await a.sync(project);
+    await a.postOk([
+      { t: 'session', message: presence(a, project, SESSION, 'busy') },
+      { t: 'session', message: presence(a, project, OTHER, null) },
+      { t: 'session', message: presence(a, project, SESSION, 'waiting') },
+    ]);
+    const browser = await BrowserClient.open(hub, ADMIN, project);
+    browser.send({ t: 'resume', after: 0 });
+    await browser.next((f) => f.t === 'caught-up', 'caught-up');
+    expect(Object.fromEntries(presences(browser).map((m) => [m.session, m]))).toEqual({
+      [SESSION]: presence(a, project, SESSION, 'waiting'),
+      [OTHER]: presence(a, project, OTHER, null),
+    });
+    expect(presences(browser)).toHaveLength(2);
+
+    await a.postOk([{ t: 'session', message: presence(a, project, OTHER, 'idle') }]);
+    await browser.next((f) => f.t === 'session' && f.message.session === OTHER && presences(browser).length === 3, 'the change');
+    expect(presences(browser)[2]).toEqual(presence(a, project, OTHER, 'idle'));
+    browser.close();
+    await a.close();
+  });
+
+  it("refuses presence for a project the stream has not opened, and presence naming another machine", async () => {
+    const project = newProject();
+    const a = await machine('presence-guard');
+    let from = a.frames.length;
+    await a.postOk([{ t: 'session', message: presence(a, project, SESSION, 'busy') }]);
+    expect(await a.next((f) => f.t === 'refused', 'refused', from)).toMatchObject({ refusal: { reason: 'not-open' } });
+    await a.sync(project);
+    from = a.frames.length;
+    await a.postOk([{ t: 'session', message: { ...presence(a, project, SESSION, 'busy'), machine: 'someone-else' } }]);
+    expect(await a.next((f) => f.t === 'refused', 'refused', from)).toMatchObject({ refusal: { reason: 'bad-shape' } });
+    const browser = await BrowserClient.open(hub, ADMIN, project);
+    browser.send({ t: 'resume', after: 0 });
+    await browser.next((f) => f.t === 'caught-up', 'caught-up');
+    expect(presences(browser)).toEqual([]);
     browser.close();
     await a.close();
   });

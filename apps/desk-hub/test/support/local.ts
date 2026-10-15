@@ -11,6 +11,7 @@ import { convertV4MiniflareOptions, Miniflare, Response as MiniflareResponse, ty
 import { inject } from 'vitest';
 import { startProxy, type Proxy } from '../../local/proxy.ts';
 import { AccessStandin, IDENTITY_HEADER } from '../../local/standin.ts';
+import { SEND_FAULT_PATH } from './send-fault';
 
 const require = createRequire(import.meta.url);
 const { unstable_getMiniflareWorkerOptions } = require('wrangler') as typeof import('wrangler');
@@ -106,6 +107,14 @@ export async function startLocalHub() {
     faults,
     fetchAs,
     mf: () => mf,
+    /** Makes the machine's next send of a `kind` frame throw, as a failed RPC from a project would (the suites' Worker
+     * only: test/support/worker-under-test.ts). */
+    async failNextSend(machine: string, kind: string) {
+      const namespace = await mf.getDurableObjectNamespace('MACHINE');
+      const response = await namespace.get(namespace.idFromName(`${ORG}:${machine}`)).fetch(`http://machine${SEND_FAULT_PATH}?kind=${kind}`);
+      if (response.status !== 200) throw new Error(`arming the send fault: ${response.status}`);
+      await response.arrayBuffer();
+    },
     /** Stops the runtime and starts it again on its stored state, as a redeploy does: every object restarts and every
      * connection drops. */
     async restart() {

@@ -52,6 +52,11 @@ export class Machine extends DurableObject<Env> {
     return (await this.write(stream, frame)) ? 'written' : 'offline';
   }
 
+  /** Ends the stream of this generation, if it is still the current one (a project could not deliver to it). */
+  close(generation: number): void {
+    if (this.stream?.generation === generation) this.end(this.stream);
+  }
+
   /** The machine was revoked: its stream ends now (the Worker refuses its credential from here on). */
   revoke(): void {
     this.end(this.stream);
@@ -81,7 +86,10 @@ export class Machine extends DurableObject<Env> {
   /**
    * A POST of NDJSON frames. Refused whole, with nothing applied, when it is not for the current stream, too large, or
    * holds a line that is not a frame; otherwise each frame goes to its project in order, and the answer comes once
-   * every reply the projects owe (`have`, the backlog, `resend`, `refused`) is written down the stream.
+   * every reply the projects owe (`have`, the backlog, `resend`, `refused`) is written down the stream. The stream is
+   * checked again once the body is read and before each frame: a POST that a newer stream outlived stops there
+   * (`stale-generation`, with how many frames it applied), so it changes nothing the newer stream set up. A reply that
+   * could not be written ends the stream and answers `503 delivery-failed`: reconnect, and the handshake heals it.
    */
   private async frames(request: Request): Promise<Response> {
     const org = request.headers.get(ORG_HEADER) ?? '';
@@ -93,6 +101,9 @@ export class Machine extends DurableObject<Env> {
     if (Number(request.headers.get('Content-Length') ?? 0) > POST_LIMIT) return json(413, { error: 'too-large' });
     const text = await request.text();
     if (utf8Length(text) > POST_LIMIT) return json(413, { error: 'too-large' });
+    const stale = (applied: number) =>
+      json(409, { error: 'stale-generation', message: 'a newer stream of this machine opened while this POST was read; send it again on that one', frames: applied });
+    if (this.stream !== stream) return stale(0);
 
     const frames: UpFrame[] = [];
     const lines = text.split('\n');
@@ -113,6 +124,7 @@ export class Machine extends DurableObject<Env> {
 
     let applied = 0;
     for (const posted of frames) {
+      if (this.stream !== stream) return stale(applied);
       let frame: UpFrame | undefined = posted;
       if (posted.t === 'part') {
         try {
@@ -137,7 +149,12 @@ export class Machine extends DurableObject<Env> {
         continue;
       }
       const target = this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${project}`));
-      await target.fromMachine({ org, project, machine, generation: stream.generation }, frame);
+      try {
+        await target.fromMachine({ org, project, machine, generation: stream.generation }, frame);
+      } catch {
+        this.end(stream);
+        return json(503, { error: 'delivery-failed', message: 'a reply to this POST could not be written to the stream; reconnect and send it again', frames: applied });
+      }
       applied++;
     }
     return json(200, { ok: true, frames: applied });

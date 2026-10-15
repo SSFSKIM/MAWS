@@ -8,7 +8,8 @@
 // minted under it. A second redemption while pending rotates the credential. A pending enrollment that expires, and a
 // revoked machine, leave their token's name in `orphans`, swept until the API confirms the deletion. A mint in flight
 // is the one thing held only in memory (`busy`): an object restart ends the mint with it, and the name makes whatever
-// it left behind findable.
+// it left behind findable. Every call to the API under one token name (a sweep's deletion by name, a redemption's
+// deletion and mint) runs in turn on that name's queue, so a deletion by name never lists a token minted after it began.
 import { DurableObject } from 'cloudflare:workers';
 import { hubConfig, type Env, type HubConfig } from '../env';
 import type { AccessIdentity } from '../identity/access';
@@ -70,6 +71,8 @@ type EnrollmentRow = EnrollmentRecord & { ttl_s: number };
 export class Registry extends DurableObject<Env> {
   /** Enrollments whose mint is in flight in this object's life. */
   private readonly busy = new Set<string>();
+  /** Per service-token name, the tail of the API work queued under it (an object restart ends the work with it). */
+  private readonly nameQueues = new Map<string, Promise<unknown>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -190,17 +193,19 @@ export class Registry extends DurableObject<Env> {
     this.busy.add(id);
 
     try {
-      const api = serviceTokens(this.config.api);
-      await api.deleteNamed(tokenName);
-      const minted = await api.create(tokenName);
-      // A revocation may have run while the API answered; then the token is no machine's.
-      const held = this.sql.exec<{ enrollment: string }>('SELECT enrollment FROM machines WHERE name = ?', machine).toArray()[0];
-      if (this.enrollmentById(id)?.state !== 'pending' || held?.enrollment !== id) {
-        await api.delete(minted.id).catch(() => this.orphan(tokenName));
-        return fail(410, 'expired', 'the enrollment ended while its token was minted');
-      }
-      this.sql.exec('UPDATE machines SET client_id = ? WHERE name = ?', minted.client_id, machine);
-      return ok({ org: org.id, machine, client_id: minted.client_id, client_secret: minted.client_secret });
+      return await this.onName(tokenName, async (): Promise<Result<Redeemed>> => {
+        const api = serviceTokens(this.config.api);
+        await api.deleteNamed(tokenName);
+        const minted = await api.create(tokenName);
+        // A revocation may have run while the API answered; then the token is no machine's.
+        const held = this.sql.exec<{ enrollment: string }>('SELECT enrollment FROM machines WHERE name = ?', machine).toArray()[0];
+        if (this.enrollmentById(id)?.state !== 'pending' || held?.enrollment !== id) {
+          await api.delete(minted.id).catch(() => this.orphan(tokenName));
+          return fail(410, 'expired', 'the enrollment ended while its token was minted');
+        }
+        this.sql.exec('UPDATE machines SET client_id = ? WHERE name = ?', minted.client_id, machine);
+        return ok({ org: org.id, machine, client_id: minted.client_id, client_secret: minted.client_secret });
+      });
     } catch (error) {
       if (error instanceof ServiceTokenApiError) return fail(502, 'mint-failed', `${error.message}; redeem again`);
       throw error;
@@ -300,24 +305,38 @@ export class Registry extends DurableObject<Env> {
     await this.scheduleAlarm();
   }
 
-  /** Deletes orphaned tokens by name. A name some machine holds again is that machine's: its redemption deletes every
-   * token of the name before it mints, so the orphan's row just goes. */
+  /** Deletes orphaned tokens by name, each on its name's queue. A name some machine holds again is that machine's: its
+   * redemption, queued behind this deletion, deletes every token of the name before it mints, so the orphan's row just
+   * goes. Whether the name is held is read on the queue, so a redemption that reserved it meanwhile is seen. */
   private async sweepOrphans(): Promise<void> {
     const orphans = this.sql.exec<{ token_name: string }>('SELECT token_name FROM orphans').toArray();
     if (orphans.length === 0) return;
     const api = serviceTokens(this.config.api);
     for (const { token_name } of orphans) {
-      const held = this.sql.exec('SELECT 1 FROM machines WHERE token_name = ?', token_name).toArray().length > 0;
-      if (!held) {
-        try {
-          await api.deleteNamed(token_name);
-        } catch (error) {
-          if (error instanceof ServiceTokenApiError) continue;
-          throw error;
+      await this.onName(token_name, async () => {
+        const held = this.sql.exec('SELECT 1 FROM machines WHERE token_name = ?', token_name).toArray().length > 0;
+        if (!held) {
+          try {
+            await api.deleteNamed(token_name);
+          } catch (error) {
+            if (error instanceof ServiceTokenApiError) return;
+            throw error;
+          }
         }
-      }
-      this.sql.exec('DELETE FROM orphans WHERE token_name = ?', token_name);
+        this.sql.exec('DELETE FROM orphans WHERE token_name = ?', token_name);
+      });
     }
+  }
+
+  /** Runs `work` once every piece of API work queued before it under `tokenName` has settled. */
+  private onName<T>(tokenName: string, work: () => Promise<T>): Promise<T> {
+    const run = (this.nameQueues.get(tokenName) ?? Promise.resolve()).then(work);
+    const tail = run.catch(() => {});
+    this.nameQueues.set(tokenName, tail);
+    void tail.then(() => {
+      if (this.nameQueues.get(tokenName) === tail) this.nameQueues.delete(tokenName);
+    });
+    return run;
   }
 
   /** The alarm at the next expiry, or sooner when an orphan waits for a retry; never in the past, so an enrollment kept

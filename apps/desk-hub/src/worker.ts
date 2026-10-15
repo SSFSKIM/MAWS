@@ -41,10 +41,11 @@ const answer = <T>(result: Result<T>, status = 200) =>
 
 /** A small JSON body; undefined when it is missing, too large, or not JSON (the callee answers `bad-shape`). */
 async function body(request: Request): Promise<unknown> {
-  const text = await request.text();
-  if (text.length > BODY_LIMIT) return undefined;
+  if (Number(request.headers.get('Content-Length') ?? 0) > BODY_LIMIT) return undefined;
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength > BODY_LIMIT) return undefined;
   try {
-    return JSON.parse(text) as unknown;
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
   } catch {
     return undefined;
   }
