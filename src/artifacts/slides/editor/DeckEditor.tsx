@@ -11,8 +11,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { AssetUrl, SlideCanvas } from '../canvas';
-import { CANVAS_CSS } from '../canvas';
-import { DECK_LIMITS, type DeckFace } from '../deck';
+import { DECK_LIMITS } from '../deck';
 import { insertElements, newElement, type NewKind } from '../writers-elements';
 import { DECK_COPY as C } from './copy';
 import { ElementBar } from './ElementBar';
@@ -20,6 +19,7 @@ import type { ImportAsset } from './transform/clipboard';
 import { Inspector } from './Inspector';
 import { measureInHost } from './transform/Overlay';
 import { useDeckView } from './deck-view';
+import { faceRules, useCanvasCss } from './page-styles';
 import { Filmstrip } from './Filmstrip';
 import type { CommentAuthor, DocumentComments } from '../../document/editor/comments/surface';
 import { CommentButtons } from './comments/CommentButtons';
@@ -68,28 +68,6 @@ const NOTICE_MS = 6_000;
 const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers'];
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
-
-// the canvas's stylesheet, once per document
-function useCanvasCss(): void {
-  useLayoutEffect(() => {
-    if (document.querySelector('style[data-maws-canvas-css]')) return;
-    const style = document.createElement('style');
-    style.dataset.mawsCanvasCss = '';
-    style.textContent = CANVAS_CSS;
-    document.head.appendChild(style);
-  }, []);
-}
-
-/** The deck's uploaded faces as @font-face rules (a Google Fonts face is named, never fetched: D6). */
-function faceRules(faces: Readonly<Record<string, DeckFace>>, assetUrl: AssetUrl): string {
-  return Object.values(faces)
-    .map((face) => {
-      const url = typeof face.src === 'string' && face.src.startsWith('assets/') ? assetUrl(face.src) : null;
-      return url ? `@font-face { font-family: ${JSON.stringify(face.family)}; src: url(${JSON.stringify(url)}); }` : '';
-    })
-    .filter(Boolean)
-    .join('\n');
-}
 
 export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor }: DeckEditorProps) {
   useCanvasCss();

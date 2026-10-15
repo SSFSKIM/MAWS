@@ -247,6 +247,22 @@ describe('connectors, borders, thumbnails and the design system (findings 5 to 7
     expect(c.node('live')!.querySelector('iframe')).toBeNull();
     expect(c.node('live')!.querySelector('[data-embed-placeholder]')).not.toBeNull();
   });
+
+  // P3-C M6 (Decision Log 18): the presenter runs an embed from the store's scheme, whose answer carries the embed's own
+  // sandbox policy (a srcdoc frame would inherit the app's, which runs no inline script)
+  it('loads an embed from the URL the canvas is given for it, not again for a restyle', () => {
+    const host = document.createElement('div'); // detached: happy-dom fetches nothing for the frame
+    const doc = deck();
+    const asked: string[] = [];
+    const c = new SlideCanvas(doc, 's1', host, { embedUrl: (slideId, id, raw) => (asked.push(`${slideId}/${id}`), `maws-artifact://a/live/embeds/${slideId}/${id}.html?v=${raw.length}`) });
+    mounted.push(c);
+    const frame = c.node('live')!.querySelector('iframe')!;
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
+    expect(frame.getAttribute('src')).toMatch(/^maws-artifact:\/\/a\/live\/embeds\/s1\/live\.html\?v=\d+$/);
+    expect(frame.hasAttribute('srcdoc')).toBe(false);
+    transact(doc, () => setStyle(doc, 's1', 'live', { left: '700px' }));
+    expect(asked).toEqual(['s1/live']); // a restyle keeps the running page
+  });
 });
 
 // P3-C M5 (Decision Log 18): what the inspector writes that M4's canvas did not draw: a picture's `data-crop`, a shadow

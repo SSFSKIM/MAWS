@@ -11,12 +11,17 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 
 /** What the canvas resolves an image's `src` through: an uploaded asset's URL (`assets/<name>`), else null. */
 export type AssetUrl = (ref: string) => string | null;
+/**
+ * M6 (Decision Log 18): where an x-embed's page is served with its own sandbox policy (the presenter's `maws-artifact:`
+ * route), by the element and its markup; without one the embed is a `srcdoc` frame, which inherits the page's policy.
+ */
+export type EmbedUrl = (elementId: string, raw: string) => string;
 
 // An x-embed runs in a sandboxed frame with no network (render-rules.ts, shared with the export page).
 export { embedDocument } from '../render-rules';
 
 /** The element's node, its inline style and attributes as the model holds them (the section's `hidden` excepted). */
-export function createNode(document: Document, e: FlatElement, text: TextBlock[] | undefined, assetUrl: AssetUrl, thumbnail = false): HTMLElement {
+export function createNode(document: Document, e: FlatElement, text: TextBlock[] | undefined, assetUrl: AssetUrl, thumbnail = false, embedUrl?: EmbedUrl): HTMLElement {
   let n: HTMLElement;
   if (e.tag === 'svg') {
     // the opaque markup parses in the SVG namespace through a template, as it does in the file
@@ -44,7 +49,8 @@ export function createNode(document: Document, e: FlatElement, text: TextBlock[]
     const frame = document.createElement('iframe');
     frame.setAttribute('sandbox', 'allow-scripts');
     frame.setAttribute('tabindex', '-1');
-    frame.srcdoc = embedDocument(e.raw ?? '');
+    if (embedUrl) frame.src = embedUrl(e.id, e.raw ?? '');
+    else frame.srcdoc = embedDocument(e.raw ?? '');
     n.appendChild(frame);
   }
   return n;

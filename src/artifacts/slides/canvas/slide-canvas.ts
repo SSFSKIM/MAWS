@@ -9,7 +9,7 @@
 import type { Doc } from '../../yjs';
 import { childLists, groupOf, readFlat, ROOT, type FlatElement } from '../model';
 import * as Y from '../../yjs/slides';
-import { applyCrop, createNode, drawConnector, drawShape, drawsInLayout, renderText, setImageSource, type AssetUrl } from './elements';
+import { applyCrop, createNode, drawConnector, drawShape, drawsInLayout, renderText, setImageSource, type AssetUrl, type EmbedUrl } from './elements';
 import { clearFit, fitText, isSizedText } from './fit';
 
 export interface SlideCanvasOptions {
@@ -17,6 +17,8 @@ export interface SlideCanvasOptions {
   assetUrl?: AssetUrl;
   /** A filmstrip thumbnail: an x-embed draws as a placeholder, never a live frame. */
   thumbnail?: boolean;
+  /** M6: where an x-embed's page is served (the presenter's; Decision Log 18), by slide, element and markup. */
+  embedUrl?: (slideId: string, elementId: string, raw: string) => string;
 }
 
 /** A longest strictly increasing subsequence of `seq` (values, in order). */
@@ -89,6 +91,7 @@ export class SlideCanvas {
   private readonly stop: () => void;
   private readonly assetUrl: AssetUrl;
   private readonly thumbnail: boolean;
+  private readonly embedUrl: EmbedUrl | undefined;
   private laidOut = false;
   private readonly layoutWaiters: (() => void)[] = [];
   /** Text elements a text box is editing in place: their text is the text box's to draw until it ends (M5). */
@@ -104,6 +107,8 @@ export class SlideCanvas {
   ) {
     this.assetUrl = options.assetUrl ?? (() => null);
     this.thumbnail = options.thumbnail ?? false;
+    const embedUrl = options.embedUrl;
+    this.embedUrl = embedUrl && ((id, raw) => embedUrl(slideId, id, raw));
     const document = host.ownerDocument;
     this.root = document.createElement('section');
     this.root.className = 'maws-slide';
@@ -174,7 +179,7 @@ export class SlideCanvas {
   }
 
   private create(e: FlatElement): HTMLElement {
-    const n = createNode(this.root.ownerDocument, e, e.text, this.assetUrl, this.thumbnail);
+    const n = createNode(this.root.ownerDocument, e, e.text, this.assetUrl, this.thumbnail, this.embedUrl);
     this.nodes.set(e.id, n);
     this.writes.create++;
     return n;

@@ -33,11 +33,17 @@ export function artifactResolver(content: ContentLookup): SchemeResolver {
   };
 }
 
-export function createArtifactHandler(content: ContentLookup): (request: Request) => Promise<Response> {
-  return createSchemeHandler(artifactResolver(content), { cors: true });
+// P3-C M6: a responder asked first, answering the URLs that are its own and null for the rest (the presenter's live
+// embeds, src/main/presentations/present-embeds.ts, which answer under the embed's own policy).
+export type SchemeResponder = (request: Request) => Promise<Response | null>;
+
+export function createArtifactHandler(content: ContentLookup, first?: SchemeResponder): (request: Request) => Promise<Response> {
+  const files = createSchemeHandler(artifactResolver(content), { cors: true });
+  if (!first) return files;
+  return async (request) => (await first(request).catch(() => null)) ?? files(request); // P3-C M6
 }
 
 // The handler on a session: the window's default session and the capture partition get the same one.
-export function serveArtifacts(session: Session, content: ContentLookup): void {
-  session.protocol.handle(ARTIFACT_SCHEME, createArtifactHandler(content));
+export function serveArtifacts(session: Session, content: ContentLookup, first?: SchemeResponder /* P3-C M6 */): void {
+  session.protocol.handle(ARTIFACT_SCHEME, createArtifactHandler(content, first));
 }

@@ -128,6 +128,7 @@ import { registerDocumentExporters } from './artifacts/export-document'; // P3-B
 // P3-D start
 import { registerDesignSystemExporters } from './design-systems/export';
 import { registerPresentationExporters } from './presentations/export'; // P3-C M9
+import { registerPresenter } from './presentations/present'; // P3-C M6
 import { defaultsOf } from './artifacts/defaults'; // P3-C M9: the chain's links for a deck's export
 // P3-D end
 
@@ -585,6 +586,7 @@ void startWithProfileLock(app, () => {
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(exporter))); // P3-B: document × md, html, docx, pdf
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
   registerPresentationExporters(artifacts.exporters, { call: (name, input) => hosts.dispatch('engine-host', name, input) as never, defaults: () => defaultsOf(settings.state().settings) ?? { owner: null, spaces: {} }, env: process.env }); // P3-C M9: `presentation` as html, pdf, png, pptx, claude
+  shutdown.add('presenter', registerPresenter({ register: registerMainHandler, appUrl, env: process.env }).end); // P3-C M6: `presentations.present`, the show's windows
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
   // connection, an entry per change) and library.* answered from it, before the first window loads. Its stop runs in the
   // same will-quit pass as the index's close, so no sync step runs between them, and after it applies nothing.

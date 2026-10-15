@@ -57,6 +57,7 @@ vi.mock('../browser', () => ({ startBrowser: (deps: { settings(): unknown }) => 
 vi.mock('../artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side
 vi.mock('../design-systems/export', () => ({ registerDesignSystemExporters: vi.fn() })); // P3-D: the design system's exporter, registered into the artifacts' registry
 vi.mock('../presentations/export', () => ({ registerPresentationExporters: vi.fn() })); // P3-C M9: the presentation's exporters, registered into the artifacts' registry
+vi.mock('../presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('../browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b
 
 const ID = '11111111-1111-4111-8111-111111111111' as AppSessionId;

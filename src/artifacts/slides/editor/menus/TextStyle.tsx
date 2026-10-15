@@ -4,10 +4,10 @@
 // (`var(--ds-type-<role>-{size,line,weight})`), so the text follows the system and its overrides by reference. One
 // gesture, one transaction, every value checked by the dialect first; the menu marks the role the selection is set in.
 import { DropdownMenu } from 'radix-ui';
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import { TYPE_ROLES, type TypeRole } from '../../../design-system/roles';
 import type { TokenSet } from '../../../design-system/tokens';
-import type { Doc } from '../../../yjs';
+import { onUpdate, type Doc } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
 import { TEXT_TAGS, type Style, type Tag } from '../../ir';
 import { checkStyle } from '../../css';
@@ -15,7 +15,6 @@ import { setStyles, siteOf } from '../../writers-elements';
 import { TEXT_STYLE_COPY as C } from './copy';
 import './menus.css';
 import type { DeckSession } from '../session';
-import { useDocVersion } from '../transform/use-doc-version';
 
 export const ROLE_LABELS: Record<TypeRole, string> = { title: 'Title', subtitle: 'Subtitle', h1: 'Heading 1', h2: 'Heading 2', h3: 'Heading 3', body: 'Body', caption: 'Caption', quote: 'Quote' };
 
@@ -81,18 +80,40 @@ export interface TextStyleMenuProps {
   onNotice: (text: string) => void;
 }
 
+/**
+ * What the menu shows for the selection: `off` (nothing selected, or not all text), `mixed` (text in several roles or
+ * none), else the role. A string read through useSyncExternalStore on the replica's updates and the session's, so the
+ * label follows an edit from anywhere (and a memoizing compiler never keeps a stale one).
+ */
+function shownRole(session: DeckSession, slideId: string | null, readOnly: boolean): TypeRole | 'off' | 'mixed' {
+  const { selection } = session.snapshot();
+  const doc = session.doc;
+  if (readOnly || slideId === null || selection.length === 0 || !selection.every((id) => isText(doc, slideId, id))) return 'off';
+  const roles = new Set(selection.map((id) => roleOfStyle(styleOf(doc, slideId, id))));
+  return roles.size === 1 ? ([...roles][0] ?? 'mixed') : 'mixed';
+}
+
 /** The toolbar's Text style menu: enabled while the selection is text. */
 export function TextStyleMenu({ session, slideId, tokens, readOnly, onNotice }: TextStyleMenuProps) {
-  const { selection } = useSyncExternalStore(session.subscribe, session.snapshot);
-  useDocVersion(session);
-  const doc = session.doc;
-  const usable = !readOnly && slideId !== null && selection.length > 0 && selection.every((id) => isText(doc, slideId, id));
-  const roles = usable ? new Set(selection.map((id) => roleOfStyle(styleOf(doc, slideId!, id)))) : new Set<TypeRole | null>();
-  const current = roles.size === 1 ? [...roles][0]! : null;
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const offDoc = onUpdate(session.doc, listener);
+      const offSession = session.subscribe(listener);
+      return () => {
+        offDoc();
+        offSession();
+      };
+    },
+    [session],
+  );
+  const shown = useSyncExternalStore(subscribe, () => shownRole(session, slideId, readOnly));
+  const usable = shown !== 'off';
+  const current = usable && shown !== 'mixed' ? shown : null;
   const apply = (role: TypeRole) => {
-    if (!usable) return;
+    const selection = session.snapshot().selection;
+    if (!usable || slideId === null) return;
     let reasons: string[] = [];
-    session.edit((origin) => (reasons = applyTextStyle(doc, slideId!, selection, role, tokens, origin)));
+    session.edit((origin) => (reasons = applyTextStyle(session.doc, slideId, selection, role, tokens, origin)));
     if (reasons.length) onNotice(reasons.join('; '));
   };
   return (
