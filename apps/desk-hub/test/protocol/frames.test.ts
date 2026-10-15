@@ -63,6 +63,11 @@ export const outcomes: RpcOutcome<'interrupt' | 'steer'>[] = [
   { state: 'failed', error: { code: 'idle', message: 'no turn is running to steer: send it instead' } },
   { state: 'failed', error: { code: 'wrong-machine', message: 'this RPC names another machine' } },
   { state: 'failed', error: { code: 'unknown-project', message: 'no such project on this machine' } },
+  // A late decision names the side whose answer was used; one within 200 ms of a background deadline says so.
+  { state: 'failed', error: { code: 'not-pending', message: 'already answered in the terminal', winner: 'terminal', by: 'terminal' } },
+  { state: 'failed', error: { code: 'not-pending', message: 'the window closed', terminalOnly: true } },
+  // @ts-expect-error the winner is a side, as Settled names it
+  { state: 'failed', error: { code: 'not-pending', message: '', winner: 'phone' } },
   // @ts-expect-error an interrupt names the tasks still running
   { state: 'done', result: { turnId: null, stopped: [] } },
 ];
@@ -85,6 +90,6 @@ describe("DX2's and DX3's frames", () => {
   it('are pinned by their types', () => {
     expect(up.length + down.length + browserUp.length + browserDown.length).toBe(23);
     expect(Object.keys(results)).toHaveLength(9);
-    expect(outcomes).toHaveLength(4);
+    expect(outcomes).toHaveLength(7);
   });
 });

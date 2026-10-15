@@ -1,4 +1,5 @@
 // DX6 — RPCs: the shapes (DC3's). The policy that refuses them is DC7's; the at-most-once ledger is the daemon's.
+import type { Settled } from './session';
 
 /** An RPC older than this is not forwarded by the hub and is refused by the daemon (unless its ledger knows the nonce). */
 export const RPC_FRESHNESS_MS = 60_000;
@@ -96,9 +97,25 @@ export type RpcErrorCode =
   | 'interrupted'
   | 'failed';
 
+/**
+ * Why an RPC failed. A decision or answer that reaches the bridge too late is refused there (DX5's 409) and fails at the
+ * daemon (DX6's `not-pending` fits; the mapping is DC7's), carrying what the bridge said, so the web draws the request
+ * as settled by that side rather than as an error. The request's own `settled` still follows and is the record.
+ */
+export type RpcError = {
+  code: RpcErrorCode;
+  message: string;
+  /** Another side's answer was used first: the side, as `Settled.winner` names it. */
+  winner?: Settled['winner'];
+  /** Who decided, as `Settled.by` names it (a member id, `"terminal"`, `"cli"`, or `"bridge"`), when the bridge said. */
+  by?: string;
+  /** Within 200 ms of a background request's deadline: the window closed, and only the terminal answers it now. */
+  terminalOnly?: true;
+};
+
 export type RpcOutcome<N extends RpcName = RpcName> =
   | { state: 'done'; result: RpcResults[N] }
-  | { state: 'failed'; error: { code: RpcErrorCode; message: string } };
+  | { state: 'failed'; error: RpcError };
 
 /** The hub's record of an RPC: `forwarded` until a result, `uncertain` when the machine's lease lapsed before one. */
 export type RpcState = 'forwarded' | 'done' | 'failed' | 'uncertain';
