@@ -5,7 +5,7 @@
 // Every time a cron names is the machine's local time, so each expectation is computed through `nextCronMatch`.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { nextCronMatch, parseCron, RECURRING_MAX_AGE_MS } from '@shared/engine/cron';
 import type { SessionEvent } from '@shared/graph/events';
 import { replayed } from '../../../../../../test/support/agents-events';
@@ -26,6 +26,16 @@ const MINUTE = 60_000;
 const DAY = 24 * 60 * MINUTE;
 
 describe('createdCrons and sessionCrons over e7-cron', () => {
+  // The recording's crons name times in its machine's zone, America/Los_Angeles (the fixture's `timezone`): its one-shot
+  // "15 4 6 10 *" fires three minutes after its creation there, and only a year later in UTC or Asia/Seoul, after the
+  // nightly job expired. The cases read the recording in its own zone, whatever this machine's.
+  const zone = process.env.TZ;
+  beforeAll(() => void (process.env.TZ = 'America/Los_Angeles'));
+  afterAll(() => {
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  });
+
   it('folds the creates and the delete in order across the resume: the deleted recurring job gone, the durable one kept as created', () => {
     const activity = activityOf([...CRON, ...RESUME]);
     expect(createdCrons(activity).map(({ id, cron, prompt, recurring, durable, humanSchedule }) => ({ id, cron, prompt, recurring, durable, humanSchedule }))).toEqual([

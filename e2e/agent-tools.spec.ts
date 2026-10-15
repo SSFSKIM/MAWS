@@ -658,6 +658,15 @@ function nextIn(job: { cron: string; toolUseId: string }, recurring: boolean, no
 test.describe('E7: the orchestration views', () => {
   test.use({ mawsEnv: HARNESS_ENV });
   test.beforeAll(() => mkdirSync(DIR_A, { recursive: true }));
+  // The E7 recordings name cron times in their machine's zone, America/Los_Angeles (e7-cron's `timezone`): G5's one-shot
+  // "15 4 6 10 *" fires three minutes after its creation there, and a year on in UTC, never spent. This process and every
+  // app it launches (launchEnvironment passes TZ on) read the recordings in that zone, whatever this machine's.
+  const zone = process.env.TZ;
+  test.beforeAll(() => void (process.env.TZ = 'America/Los_Angeles'));
+  test.afterAll(() => {
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  });
 
   test('G1: a workflow run opens from the summary into its widget, and the disk-only ref opens the same widget', async ({ maws }) => {
     const h = await Harness.open(maws);

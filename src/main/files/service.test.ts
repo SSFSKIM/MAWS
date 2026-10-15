@@ -216,7 +216,8 @@ describe('files service boundary', () => {
   describe('swap and restore, at before-open then after-open', () => {
     // Before the M1 review this reached step 5 and was refused by (dev, ino); with real0 opened under O_NOFOLLOW_ANY the
     // open itself refuses (ELOOP), so no descriptor to outside bytes ever exists and `after-open` is never reached.
-    it('refuses an ancestor swapped outside before the open, at the open, before anything could restore it', async () => {
+    // macOS: the kernel honours O_NOFOLLOW_ANY (0x20000000, macOS 11 and later; another kernel ignores the bit).
+    it.skipIf(process.platform !== 'darwin')('refuses an ancestor swapped outside before the open, at the open, before anything could restore it', async () => {
       const open = vi.spyOn(fs.promises, 'open');
       points['before-open'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
       points['after-open'] = () => restore(inRoot('src'));
@@ -280,7 +281,9 @@ describe('files service boundary', () => {
     // link at the open, a directory at the realpath and a link again at the stat passes the (dev, ino) check with the
     // outside descriptor. The service opens real0 with O_NOFOLLOW_ANY, so the same first flip ends at the open (the
     // `swap and restore` case above).
-    it('serves the outside file through the pre-review open-then-confirm shape when an ancestor flips link, directory, link', async () => {
+    // macOS: its last step is the service's open refusing the flip, and the kernel honours O_NOFOLLOW_ANY (0x20000000,
+    // macOS 11 and later; another kernel ignores the bit).
+    it.skipIf(process.platform !== 'darwin')('serves the outside file through the pre-review open-then-confirm shape when an ancestor flips link, directory, link', async () => {
       const path = inRoot('src', 'a.ts');
       const roots = await rootsOf(records.get(A)!);
       swapToLink(inRoot('src'), join(outside, 'src'));
@@ -324,7 +327,9 @@ describe('files service boundary', () => {
 
   // The guard on this platform: if the kernel ignored O_NOFOLLOW_ANY (a port, or a macOS that dropped it), the read
   // race the flag closes would silently reopen. Fail loudly instead.
-  it('has a kernel that honours O_NOFOLLOW_ANY: the service flags refuse a symlink anywhere on the path', async () => {
+  // macOS: the kernel honours O_NOFOLLOW_ANY (0x20000000, macOS 11 and later; another kernel ignores the bit); MAWS
+  // runs on macOS alone, and this case keeps failing loudly there.
+  it.skipIf(process.platform !== 'darwin')('has a kernel that honours O_NOFOLLOW_ANY: the service flags refuse a symlink anywhere on the path', async () => {
     symlinkSync(join(root, 'src'), inRoot('alias'));
     await expect(fs.promises.open(inRoot('alias', 'a.ts'), OPEN_FLAGS)).rejects.toMatchObject({ code: 'ELOOP' }); // an ancestor
     // a symlink high on the path, several real directories above the target (as /var → /private/var would be)
@@ -875,7 +880,8 @@ describe('files service write', () => {
       expect(readFileSync(join(outside, 'secret.txt'), 'utf8')).toBe('secret');
     });
 
-    it('refuses an ancestor swapped to an outside link at before-open (ELOOP), writing nothing outside', async () => {
+    // macOS: the kernel honours O_NOFOLLOW_ANY (0x20000000, macOS 11 and later; another kernel ignores the bit).
+    it.skipIf(process.platform !== 'darwin')('refuses an ancestor swapped to an outside link at before-open (ELOOP), writing nothing outside', async () => {
       points['before-open'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
       const open = vi.spyOn(fs.promises, 'open');
       await expect(attempt(file())).rejects.toThrow(new Error(OUT));
