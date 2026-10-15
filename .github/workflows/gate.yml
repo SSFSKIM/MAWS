@@ -28,8 +28,6 @@ env:
     design-systems
   # The groups that render documents through LibreOffice (P3-B's DOCX-to-PDF case, P3-C's render-and-compare).
   LIBREOFFICE_E2E: document presentations
-  # The Mac's zone, so a suite that reads local time means on the runner what it means there.
-  TZ: America/Los_Angeles
 
 defaults:
   run:
