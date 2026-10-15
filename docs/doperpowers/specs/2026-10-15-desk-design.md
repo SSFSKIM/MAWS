@@ -1697,7 +1697,7 @@ below); a frame naming a `sub` this socket does not hold (one that just ended, s
 | `unsubscribe` | `sub` | carried to the machine; the hub forgets the sub at once, so no `end {unsubscribed}` follows |
 | `rows` | `sub`, `before`, `limit` | older rows of the subscription's transcript, `limit` 1 to 1000 |
 | `diff` | `sub` | the session's working-tree diff against its base branch, answered as DX4 `diff` on that sub; only on a main-transcript subscription (`agentId` null: an agent-scope sub's is refused `bad-shape`). Computed on request, never pushed, since it costs the machine a git run whether or not a view is open |
-| `visibility` | `visible` | whether this tab shows the project; a visible tab holds back its member's pushes (DX7). A socket starts not visible |
+| `visibility` | `visible` | whether this tab shows the project; a visible tab holds back its member's pushes (DX7). A socket starts not visible. While visible, the browser repeats `visibility {visible: true}` every 30 s, and the hub counts a socket visible only while that frame is under 90 s old, so a phone that sleeps or is swiped away before its hidden frame arrives stops holding back pushes within 90 s |
 | `part` | as DX2 | |
 
 `HumanDraft` is `{kind: "human", from: "human", member, to: "*" | [{session, alias}], text, created, wake?}`; the
@@ -2474,7 +2474,10 @@ switches verification off; the Worker refuses everything while its deploy config
 `ORG_NAME`, `ORG_ADMIN_EMAIL`, `ACCESS_ISSUER`, `ACCESS_AUD`, `ACCESS_CERTS_URL`, `CF_API_URL`, `CF_ACCOUNT_ID`, the
 secret `CF_API_TOKEN` — those three the API through which it mints and deletes machines' service tokens (Cloudflare's
 API deployed; the local stand-in for Access locally) — and the secret `VAPID_KEY`, the hub's key for Web Push (below).
-The one path that takes no assertion is enrollment's redemption (below), which Access does not guard either.
+The one path that takes no assertion is enrollment's redemption (below), which Access does not guard either. Outside
+the Worker's routes, the web app's manifest and icons (`/manifest.webmanifest`, `/icons/*`) are public static assets
+with an Access bypass of their own (M5's deployment), because iOS fetches them for a home-screen app without the
+Access cookie; they carry nothing of the org.
 
 **The org** is made from deploy configuration on first use, with `ORG_ADMIN_EMAIL` as its admin — never by whoever
 signs in first.
@@ -2597,8 +2600,9 @@ a machine's first sync of an old backlog pushes nothing), each push once to ever
 of the org who has no browser socket showing the project (DX3 `visibility`, kept in the socket's attachment, so a
 hibernated object still holds it) — and to none of a member who has one. The payload, `PushNotice` in `browser.ts`,
 carries only what points to a card, since the service worker holds no org key and could check nothing it drew:
-`{v: 1, project, session, alias, kind, request?, event?, waiting}` — `kind` `question` (an `AskUserQuestion`, the ask
-mod's tool, or an `async` request), `permission` (any other request), or `message`; `request` the raised request's id,
+`{v: 1, project, name, session, alias, kind, request?, event?, waiting}` — `name` the project's name as the grid
+shows it, so a notification says where; `kind` `question` (an `AskUserQuestion`, the ask mod's tool, or an `async`
+request), `permission` (any other request), or `message`; `request` the raised request's id,
 or `event` the message's `{writer, seq}`; `alias` the session's, from its feed's latest event's `from` (null when the
 hub holds none); `waiting` the org's waiting count once the push's own event is counted, the sum of the grid's
 `ProjectSummary.waiting` over the org's projects, which the service worker sets as the app icon's badge (the app sets
@@ -3092,6 +3096,18 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: Three hub changes from DC5's M4 (the phone). Visibility
+  expires: a visible socket repeats its `visibility` every 30 s and counts
+  as visible for 90 s after the last, because a phone that sleeps before
+  its hidden frame reaches the hub would otherwise hold back that
+  member's pushes until the socket closed. `PushNotice` gains `name`, so
+  a notification says which project. The manifest and icons get an Access
+  bypass at deployment, since iOS fetches them without the Access cookie
+  and a home-screen icon would otherwise be a screenshot. Rejected: the
+  hub pinging sockets (a hibernated object would wake for every visible
+  tab), and inferring the project from the alias. Flags DC3 (M4 and M5),
+  DC5.
+  Date/Author: 2026-10-15, design session (DC5's M4).
 - Decision: The phone as DC5's mockup `05-phone.html` draws it (owner,
   2026-10-15, every recommendation taken). The phone is a stack (Projects,
   a project, a channel, one full screen each, each with its own back);
