@@ -3,9 +3,12 @@
 // this tab's life (`session`, memory only) or the device's IndexedDB (`device`, still non-extractable). Locking forgets
 // it from both.
 //
-// A Lock wins over everything begun before it. Each unlock and each restore of the device's key belongs to the
-// generation it began in, and a Lock starts a new one: an unlock whose derivation ends after the Lock — its form open or
-// long gone — holds nothing and stores nothing, and a restore that read the key before the Lock publishes nothing.
+// The newest operation wins, in memory and on the device alike. Every unlock and every Lock takes a fresh token from one
+// counter when it begins (an unlock before its derivation, which takes seconds). An operation publishes to memory only
+// if its token is still the newest when it finishes; a restore of the device's key, which writes nothing, publishes only
+// if no operation began while it read. Every write of the device key runs on one serial chain, and a step whose token
+// was superseded by the time it runs is skipped — except a Lock's own deletion, which always runs — so the last write to
+// run is the newest writing operation's. The chain's order is the order IndexedDB applies them in.
 import { create } from 'zustand';
 import type { OrgKey } from 'desk-hub/protocol';
 import { holdKeyBytes, keyFingerprint } from './derive';
@@ -27,38 +30,22 @@ export type KeyHolder = {
 
 export const useKeyHolder = create<KeyHolder>()(() => ({ state: 'loading', key: null, kept: null, fingerprint: null, forgetError: null }));
 
-let generation = 0;
+/** The newest operation's token. */
+let op = 0;
+/** Every device-key write, one after the other. */
+let writes: Promise<unknown> = Promise.resolve();
+
+/** Runs `write` after every write asked for before it; it settles as `write` does, and never holds the chain up. */
+function serially(write: () => Promise<void>): Promise<void> {
+  const run = writes.then(write);
+  writes = run.catch(() => {});
+  return run;
+}
 
 const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-// What the device should keep for each org: the key (device) or nothing (a Lock, a session unlock), as the newest of
-// them asked. A write that settles after a newer one was asked for — an older unlock's save landing late, behind a Lock
-// and a newer unlock — asks for the newest intent again, so storage ends where the newest Lock or unlock left it and a
-// stale write can neither erase nor overwrite it. The real store (IndexedDB) applies writes in the order asked, where
-// the repeat changes nothing; the repeat covers a store whose writes can land out of order.
-type Intent = { key: CryptoKey | null };
-const intents = new Map<string, Intent>();
-
-const write = (store: KeyStore, org: string, key: CryptoKey | null) => (key ? store.save(org, key) : store.forget(org));
-
-/** Asks the device to keep `key`, or nothing, as the newest intent; rejects when that write fails. */
-async function persist(store: KeyStore, org: string, key: CryptoKey | null): Promise<void> {
-  const mine: Intent = { key };
-  intents.set(org, mine);
-  await write(store, org, key);
-  const latest = intents.get(org)!;
-  if (latest === mine) return;
-  try {
-    await write(store, org, latest.key);
-  } catch (error) {
-    // A deletion that failed leaves a key behind that a reload would load: reported as a Lock's failure is.
-    if (latest.key === null) useKeyHolder.setState({ forgetError: reason(error) });
-    else console.error('desk: storing the device key again', error);
-  }
-}
-
 export async function loadDeviceKey(org: string, store: KeyStore = idbKeyStore()): Promise<void> {
-  const began = generation;
+  const began = op;
   let key: OrgKey | null = null;
   try {
     key = await loadOrgKey(store, org);
@@ -66,53 +53,57 @@ export async function loadDeviceKey(org: string, store: KeyStore = idbKeyStore()
     console.error('desk: reading the device key', error);
   }
   const fingerprint = key ? await keyFingerprint(key) : null;
-  if (began !== generation) return; // locked meanwhile
+  if (began !== op) return; // an unlock or a Lock began meanwhile: it decides
   useKeyHolder.setState(key ? { state: 'unlocked', key, kept: 'device', fingerprint } : { state: 'locked', key: null, kept: null, fingerprint: null });
 }
 
 export type UnlockAttempt = {
-  /** Holds freshly derived bytes as the org key (wiping them), kept where the owner chose. False when a Lock came
-   * after the attempt began: the bytes are wiped and nothing is held or stored. */
+  /** Holds freshly derived bytes as the org key (wiping them), kept where the owner chose. False when a newer unlock or
+   * a Lock began after this one: nothing of it is published, and its write, if not yet run, is skipped. */
   finish(raw: Uint8Array, keep: Keep): Promise<boolean>;
 };
 
-/** Begins an unlock now, before the derivation, so a Lock pressed while it derives wins over it. */
+/** Begins an unlock now, before the derivation, so whatever begins after it — a Lock, another unlock — wins over it. */
 export function beginUnlock(org: string, store: KeyStore = idbKeyStore()): UnlockAttempt {
-  const began = generation;
-  const current = () => began === generation;
+  const token = ++op;
+  const newest = () => token === op;
   return {
     async finish(raw, keep) {
-      if (!current()) {
+      if (!newest()) {
         raw.fill(0);
         return false;
       }
       const key = await holdKeyBytes(raw);
-      if (!current()) return false;
-      await persist(store, org, keep === 'device' ? key.hmac : null);
-      if (!current()) return false;
+      if (!newest()) return false;
+      await serially(async () => {
+        if (!newest()) return;
+        if (keep === 'device') await store.save(org, key.hmac);
+        else await store.forget(org);
+      });
       const fingerprint = await keyFingerprint(key);
-      if (!current()) return false;
+      if (!newest()) return false;
       useKeyHolder.setState({ state: 'unlocked', key, kept: keep, fingerprint, forgetError: null });
       return true;
     },
   };
 }
 
-export async function unlock(org: string, raw: Uint8Array, keep: Keep, store: KeyStore = idbKeyStore()): Promise<void> {
-  await beginUnlock(org, store).finish(raw, keep);
+export async function unlock(org: string, raw: Uint8Array, keep: Keep, store: KeyStore = idbKeyStore()): Promise<boolean> {
+  return beginUnlock(org, store).finish(raw, keep);
 }
 
 /**
- * Locks: the tab drops the key at once, every unlock or restore under way is void, and the device forgets the key it
- * kept. When it cannot, `forgetError` says so until a later Lock (the retry) succeeds; never rejects.
+ * Locks: the tab drops the key at once, before anything is awaited; every unlock or restore under way is superseded;
+ * and the device forgets the key it kept, after every write asked for before. When it cannot, `forgetError` says so
+ * until a later Lock (the retry) succeeds. Never rejects.
  */
 export async function lock(org: string, store: KeyStore = idbKeyStore()): Promise<void> {
-  const mine = ++generation;
+  const token = ++op;
   useKeyHolder.setState({ state: 'locked', key: null, kept: null, fingerprint: null });
   try {
-    await persist(store, org, null);
-    if (mine === generation) useKeyHolder.setState({ forgetError: null });
+    await serially(() => store.forget(org)); // always runs, superseded or not
+    if (token === op) useKeyHolder.setState({ forgetError: null });
   } catch (error) {
-    if (mine === generation) useKeyHolder.setState({ forgetError: reason(error) });
+    if (token === op) useKeyHolder.setState({ forgetError: reason(error) });
   }
 }

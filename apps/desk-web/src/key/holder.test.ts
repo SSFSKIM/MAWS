@@ -3,7 +3,7 @@
 // when it was pressed, and a stored key the device failed to forget stays reported until a retry forgets it.
 import { beforeEach, describe, expect, it } from 'vitest';
 import { VECTOR_KEY } from '../../test/vectors';
-import { keyFingerprint } from './derive';
+import { holdKeyBytes, keyFingerprint } from './derive';
 import { beginUnlock, loadDeviceKey, lock, unlock, useKeyHolder } from './holder';
 import { memoryKeyStore, type KeyStore } from './org-key';
 
@@ -141,40 +141,52 @@ describe('lock', () => {
     expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', kept: 'device' });
     expect(await inner.load('org')).toBe(useKeyHolder.getState().key!.hmac); // a reload unlocks with it
   });
+});
 
-  it("an older save that lands after a newer unlock's own leaves the newer key stored (a store that does not order writes)", async () => {
-    const inner = memoryKeyStore();
-    const first = deferred();
-    let saves = 0;
-    const store: KeyStore = { ...inner, save: async (org, key) => (++saves === 1 && (await first.promise), inner.save(org, key)) };
-    const old = beginUnlock('org', store).finish(vector(), 'device');
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await lock('org', store);
-    expect(await beginUnlock('org', store).finish(vector().reverse(), 'device')).toBe(true);
-    first.resolve(); // the old key lands now, over the newer one
-    expect(await old).toBe(false);
-    expect(await inner.load('org')).toBe(useKeyHolder.getState().key!.hmac);
+describe('two unlocks with no Lock between them', () => {
+  const fingerprintOf = async (raw: Uint8Array) => keyFingerprint(await holdKeyBytes(Uint8Array.from(raw)));
+
+  it('the newer decides memory and storage alike, though the older one\'s save was already under way', async () => {
+    // The project view's form and the key dialog's can both be unlocking: A asks to keep the key on the device, then B,
+    // begun while A's save is still in the store, asks for this tab only.
+    const { store, inner, open } = gatedStore('save');
+    const a = beginUnlock('org', store).finish(vector(), 'device');
+    await new Promise((resolve) => setTimeout(resolve, 0)); // A's save is in the store
+    const bRaw = vector().reverse();
+    const bFingerprint = await fingerprintOf(bRaw);
+    const b = beginUnlock('org', store).finish(bRaw, 'session');
+    open();
+    expect(await b).toBe(true);
+    expect(await a).toBe(false); // superseded: it publishes nothing
+    expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', kept: 'session', fingerprint: bFingerprint });
+    expect(await inner.load('org')).toBeNull(); // B's deletion ran after A's save
   });
 
-  it('an older key that lands after a Lock and a session unlock, and cannot be removed, is reported', async () => {
+  it("the older one's write, not yet run when the newer one began, is skipped", async () => {
     const inner = memoryKeyStore();
-    const first = deferred();
-    let failing = false;
+    const held = deferred();
+    let saves = 0;
     const store: KeyStore = {
       load: (org) => inner.load(org),
-      save: async (org, key) => (await first.promise, inner.save(org, key)),
-      forget: async (org) => (failing ? Promise.reject(new Error('device deletion failed')) : inner.forget(org)),
+      save: async (org, key) => (saves++, inner.save(org, key)),
+      forget: async (org) => (await held.promise, inner.forget(org)),
     };
-    const old = beginUnlock('org', store).finish(vector(), 'device');
+    const locking = lock('org', store); // its deletion holds the chain
+    const aRaw = vector();
+    const a = beginUnlock('org', store).finish(aRaw, 'device'); // A's save waits behind it
     await new Promise((resolve) => setTimeout(resolve, 0));
-    await lock('org', store);
-    expect(await beginUnlock('org', store).finish(vector().reverse(), 'session')).toBe(true);
-    failing = true;
-    first.resolve();
-    expect(await old).toBe(false);
-    expect(await inner.load('org')).not.toBeNull(); // the old key, which a reload would load
-    expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', kept: 'session', forgetError: 'device deletion failed' });
+    const b = beginUnlock('org', store).finish(vector().reverse(), 'session');
+    held.resolve();
+    await locking;
+    expect(await b).toBe(true);
+    expect(await a).toBe(false);
+    expect(saves).toBe(0); // A's save never reached the store
+    expect(await inner.load('org')).toBeNull();
+    expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', kept: 'session' });
   });
+});
+
+describe('a failed deletion', () => {
 
   it('a device that fails to forget the key: the tab drops it, the failure stays reported, and a retry forgets it', async () => {
     const inner = memoryKeyStore();
