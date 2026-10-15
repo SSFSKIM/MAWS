@@ -943,7 +943,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 - **Design inheritance:** §3 session plane [binding], §5 [binding], §6
   [binding: the daemon as boundary, codes, digests, read-only].
 - **Required:** required.
-- **Status:** not-dispatched (blocked-by DC2.G1, DC4).
+- **Status:** in-flight (2026-10-15).
 
 ## Cross-Child Contracts
 
@@ -2478,7 +2478,7 @@ a hub that connects into machines (§2).
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | in-flight (dispatched 2026-10-15, parent pin 9471766c) |
-| DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, branch `worktree-smns-erb` at d1f12efa) | planned; in plan review; dispatch when DC4's M3 is reviewed clean |
+| DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | in-flight (dispatched 2026-10-15, after DC4's M3 was reviewed clean) |
 
 ## Surprises & Discoveries
 
