@@ -15,7 +15,7 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json --tsBuildInfoFile /dev/null && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --tsBuildInfoFile /dev/null",
     "lint": "eslint .",
-    "test": "NODE_OPTIONS=--disable-warning=ExperimentalWarning vitest run",
+    "test": "NODE_OPTIONS=\"$NODE_OPTIONS --disable-warning=ExperimentalWarning\" vitest run",
     "test:probes": "node --test spikes/protocol-probe/*.test.mjs",
     "test:live": "MAWS_LIVE=1 vitest run --project live --silent=false",
     "e2e": "playwright test",
