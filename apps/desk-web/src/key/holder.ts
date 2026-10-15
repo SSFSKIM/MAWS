@@ -79,10 +79,11 @@ export function beginUnlock(org: string, store: KeyStore = idbKeyStore()): Unloc
         if (!newest()) return;
         if (keep === 'device') await store.save(org, key.hmac);
         else await store.forget(org);
+        storedNothingStale(); // the stored key is now the one held, or none
       });
       const fingerprint = await keyFingerprint(key);
       if (!newest()) return false;
-      useKeyHolder.setState({ state: 'unlocked', key, kept: keep, fingerprint, forgetError: null });
+      useKeyHolder.setState({ state: 'unlocked', key, kept: keep, fingerprint });
       return true;
     },
   };
@@ -94,16 +95,25 @@ export async function unlock(org: string, raw: Uint8Array, keep: Keep, store: Ke
 
 /**
  * Locks: the tab drops the key at once, before anything is awaited; every unlock or restore under way is superseded;
- * and the device forgets the key it kept, after every write asked for before. When it cannot, `forgetError` says so
- * until a later Lock (the retry) succeeds. Never rejects.
+ * and the device forgets the key it kept, after every write asked for before. When it cannot, `forgetError` says so,
+ * whatever began meanwhile, until a later write leaves nothing stale stored. Never rejects.
  */
 export async function lock(org: string, store: KeyStore = idbKeyStore()): Promise<void> {
-  const token = ++op;
+  ++op;
   useKeyHolder.setState({ state: 'locked', key: null, kept: null, fingerprint: null });
-  try {
-    await serially(() => store.forget(org)); // always runs, superseded or not
-    if (token === op) useKeyHolder.setState({ forgetError: null });
-  } catch (error) {
-    if (token === op) useKeyHolder.setState({ forgetError: reason(error) });
-  }
+  await serially(async () => {
+    // Always runs, superseded or not.
+    try {
+      await store.forget(org);
+      storedNothingStale();
+    } catch (error) {
+      useKeyHolder.setState({ forgetError: reason(error) });
+    }
+  });
+}
+
+/** `forgetError` follows what storage did, on the chain, never which operation is newest: a failed Lock deletion sets
+ * it, and only a later write that succeeds — a deletion, or a device save replacing the key — clears it. */
+function storedNothingStale(): void {
+  useKeyHolder.setState({ forgetError: null });
 }

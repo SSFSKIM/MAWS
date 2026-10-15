@@ -187,6 +187,52 @@ describe('two unlocks with no Lock between them', () => {
 });
 
 describe('a failed deletion', () => {
+  it('stays reported though an unlock began while it was pending and was cancelled', async () => {
+    const inner = memoryKeyStore();
+    const deletion = deferred();
+    let failing = false;
+    const store: KeyStore = {
+      ...inner,
+      forget: async (org) => {
+        if (!failing) return inner.forget(org);
+        await deletion.promise;
+        throw new Error('IndexedDB is unavailable');
+      },
+    };
+    await unlock('org', vector(), 'device', store);
+    failing = true;
+    const locking = lock('org', store); // its deletion is pending
+    beginUnlock('org', store); // a form begins unlocking; its passkey prompt is cancelled, so it never finishes
+    deletion.resolve();
+    await locking;
+    expect(useKeyHolder.getState()).toMatchObject({ state: 'locked', key: null, forgetError: 'IndexedDB is unavailable' });
+    expect(await inner.load('org')).not.toBeNull(); // a reload would restore it, so it must stay reported
+  });
+
+  it('is cleared by a later deletion that succeeds, or a device save that replaces the key, and by nothing else', async () => {
+    const inner = memoryKeyStore();
+    let failing = true;
+    const store: KeyStore = { ...inner, forget: async (org) => (failing ? Promise.reject(new Error('IndexedDB is unavailable')) : inner.forget(org)) };
+    await unlock('org', vector(), 'device', store);
+    await lock('org', store);
+    expect(useKeyHolder.getState().forgetError).toBe('IndexedDB is unavailable');
+
+    // A device unlock's save replaces the stored key with the one now held: nothing stale is left behind.
+    expect(await unlock('org', vector().reverse(), 'device', store)).toBe(true);
+    expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', kept: 'device', forgetError: null });
+
+    await lock('org', store);
+    expect(useKeyHolder.getState().forgetError).toBe('IndexedDB is unavailable');
+    // A session unlock whose own deletion fails leaves the report standing (the old key is still stored).
+    await expect(unlock('org', vector(), 'session', store)).rejects.toThrow('IndexedDB is unavailable');
+    expect(useKeyHolder.getState().forgetError).toBe('IndexedDB is unavailable');
+    // One whose deletion succeeds clears it.
+    failing = false;
+    expect(await unlock('org', vector(), 'session', store)).toBe(true);
+    expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', kept: 'session', forgetError: null });
+    expect(await inner.load('org')).toBeNull();
+  });
+
 
   it('a device that fails to forget the key: the tab drops it, the failure stays reported, and a retry forgets it', async () => {
     const inner = memoryKeyStore();
