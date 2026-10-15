@@ -8,7 +8,11 @@
 // a frame in parts, hold acknowledgements, store an event whose code fails. For the conversation (the plan's M3) it also
 // stands in for what DC3's M3 routes and its fake machine (M4) produces: requests raised and settled, deliveries, the
 // RPC record per nonce (a retry answered from it, an offline machine failing at once, a dropped machine leaving its
-// forwarded RPCs `uncertain`), subscriptions numbered and ended, and a session's compaction messages.
+// forwarded RPCs `uncertain`), subscriptions numbered and ended, and a session's compaction messages. Where DC3's hub
+// is built, the double follows it (DX3 as `interfaces-M3` has it, checked by the local-hub suite): the order of what a
+// socket gets on connect, presence withheld while its machine is offline, the audit record (`refused`, `rejected`,
+// `decided`) replayed after every `caught-up`, the hub's at-once RPC failures sent to the sender and never recorded, an
+// unknown frame refused `bad-shape`, and the subscription limits (32 a socket, `rows` 1 to 1000).
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -39,14 +43,15 @@ import {
   type Rejection,
   type Raised,
   type Settled,
+  type Decision,
   type RpcState,
   type SessionBodies,
   type SubscriptionKind,
+  RPC_FRESHNESS_MS,
 } from 'desk-hub/protocol';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { OrgKeysDouble } from './org-keys';
 import { PushDouble } from './push';
-import type { DeliveryAhead, RaisedAhead } from '../../src/hub/protocol-ahead';
 
 /** The org as the double holds it before any key is set up (`/api/me` answers its current `key_check`). */
 export const DOUBLE_ORG: OrgRecord = { id: 'org-double', name: 'Double org', created: '2026-10-15T00:00:00.000Z', key_check: null };
@@ -55,7 +60,8 @@ export const DOUBLE_MEMBER: MemberRecord = { id: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b
 /** The fields a machine writes beyond `ts`, `writer`, `seq`, and `mac`. */
 export type EventDraft = { writer: string; kind: string } & Record<string, unknown>;
 
-type ProjectSocket = { ws: WebSocket; resumed: boolean; assembler: PartAssembler };
+type ProjectSocket = { ws: WebSocket; resumed: boolean; assembler: PartAssembler; subs: Set<string> };
+type AuditFrame = Extract<ProjectDown, { t: 'refused' | 'rejected' | 'decided' }>;
 type ProjectState = {
   log: Array<{ offset: number; event: LogEvent }>;
   seqs: Map<string, number>;
@@ -69,7 +75,14 @@ type ProjectState = {
   rpcs: Map<string, { rpc: Rpc; state: RpcState; outcome?: RpcOutcome }>;
   /** Each open subscription's machine and the `n` of its next message. */
   subs: Map<string, { machine: string; next: number }>;
+  /** The audit record: the hub's refusals, the daemons' rejections, and the decisions, oldest first. */
+  audit: AuditFrame[];
 };
+
+/** How many audit entries a browser is shown again after each `caught-up` (DX3). */
+const AUDIT_REPLAY = 100;
+/** Subscriptions a socket may hold (DX3). */
+const SUBS_PER_SOCKET = 32;
 
 export type DoubleOptions = {
   /** The org key's 32 bytes; what the double seals with, as an enrolled machine would. */
@@ -163,12 +176,20 @@ export class HubDouble {
   // The session plane.
 
   /**
-   * A DX4 message to every socket of the project. A `presence` is also kept and sent to each socket that connects
-   * later: DX3 sends `machines` on connect and does not say whether presence follows it; the double assumes it does.
+   * A DX4 message to every socket of the project. A `presence` is also kept and sent to each socket that connects later
+   * (DX3); a presence of a machine whose lease lapsed is kept and not shown until the machine is back.
    */
   sendSession(project: string, message: SessionMessage): void {
-    if (message.kind === 'presence') this.project(project).presence.set(message.session, message);
+    if (message.kind === 'presence') {
+      this.project(project).presence.set(message.session, message);
+      if (!this.online(project, message.machine)) return;
+    }
     this.broadcast(project, { t: 'session', message });
+  }
+
+  /** Whether the hub holds a machine online: one it has no `machines` entry for counts as online here. */
+  private online(project: string, machine: string): boolean {
+    return this.project(project).machines.find((m) => m.machine === machine)?.online !== false;
   }
 
   setMachines(project: string, machines: Array<{ machine: string } & MachinePresence>): void {
@@ -185,7 +206,7 @@ export class HubDouble {
    * A request the bridge raised on a machine, sealed with the org key as the machine would: a `raised` message to every
    * browser, and the pending set again. `terminalOnly` stands for the hub's own clock having passed its deadline.
    */
-  async raise(project: string, machine: string, draft: Omit<RaisedAhead, 'mac'>, options: { terminalOnly?: boolean } = {}): Promise<Raised> {
+  async raise(project: string, machine: string, draft: Omit<Raised, 'mac'>, options: { terminalOnly?: boolean } = {}): Promise<Raised> {
     const raised = await seal(this.key, 'raised', project, draft);
     this.raiseRaw(project, machine, raised, options);
     return raised;
@@ -204,17 +225,27 @@ export class HubDouble {
     this.setPending(project, state.pending.map((p) => (p.raised.request === request ? { ...p, terminal_only: true } : p)));
   }
 
-  /** The bridge settled a request: a `settled` message to every browser, and the pending set without it. */
+  /**
+   * The bridge settled a request: a `settled` message to every browser, the decision in the audit record (with the
+   * `raised` it settled, null when the hub no longer held it), and the pending set without it.
+   */
   async settle(project: string, machine: string, session: string, draft: Omit<Settled, 'mac'>): Promise<Settled> {
     const settled = await seal(this.key, 'settled', project, draft);
     const state = this.project(project);
+    const raised = state.pending.find((p) => p.raised.request === draft.request)?.raised ?? null;
     this.sendSession(project, { project, machine, session, kind: 'settled', sub: null, n: null, body: settled });
+    this.decide(project, { machine, session, settled, raised });
     this.setPending(project, state.pending.filter((p) => p.raised.request !== draft.request));
     return settled;
   }
 
+  /** A decision entered in the audit record exactly as given (an altered one included) and sent to every browser. */
+  decide(project: string, decision: Decision): void {
+    this.record(project, { t: 'decided', decision: { ...this.audit(), ...decision } });
+  }
+
   /** A machine's `deliver_next` settled an event for a recipient: kept as the latest per event and recipient, and sent on. */
-  async deliver(project: string, machine: string, draft: Omit<DeliveryAhead, 'mac'>): Promise<Delivery> {
+  async deliver(project: string, machine: string, draft: Omit<Delivery, 'mac'>): Promise<Delivery> {
     return this.deliverRaw(project, machine, (await seal(this.key, 'delivery', project, draft)) as unknown as Delivery);
   }
 
@@ -265,15 +296,17 @@ export class HubDouble {
    */
   dropMachine(project: string, machine: string): void {
     const state = this.project(project);
+    if (!state.machines.some((m) => m.machine === machine)) state.machines.push({ machine, online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [] });
     this.setMachines(project, state.machines.map((m) => (m.machine === machine ? { ...m, online: false } : m)));
     for (const [sub, open] of [...state.subs]) if (open.machine === machine) this.sendSub(project, sub, 'end', { reason: 'machine-offline' });
     for (const [nonce, record] of state.rpcs) if (record.rpc.machine === machine && record.state === 'forwarded') this.answerRpc(project, nonce, 'uncertain');
   }
 
-  /** The machine's lease is fresh again. */
+  /** The machine's lease is fresh again: its sessions' kept presence goes to the browsers. */
   restoreMachine(project: string, machine: string): void {
     const state = this.project(project);
     this.setMachines(project, state.machines.map((m) => (m.machine === machine ? { ...m, online: true } : m)));
+    for (const message of state.presence.values()) if (message.machine === machine) this.broadcast(project, { t: 'session', message });
   }
 
   sendRpcState(project: string, nonce: string, outcome: RpcOutcome | 'forwarded' | 'uncertain'): void {
@@ -283,12 +316,18 @@ export class HubDouble {
 
   /** A refusal of the hub's own, entered in the project's audit record and sent to its browsers. */
   refuse(project: string, refusal: Refusal & { nonce?: string; machine?: string; member?: string }): void {
-    this.broadcast(project, { t: 'refused', refusal: { ...this.audit(), ...refusal } });
+    this.record(project, { t: 'refused', refusal: { ...this.audit(), ...refusal } });
   }
 
   /** A daemon's report of an event it refused (DX2 `rejected`), entered in the audit record and sent on. */
   reject(project: string, rejection: Rejection & { machine: string }): void {
-    this.broadcast(project, { t: 'rejected', rejection: { ...this.audit(), ...rejection } });
+    this.record(project, { t: 'rejected', rejection: { ...this.audit(), ...rejection } });
+  }
+
+  /** An entry of the audit record, to every browser of the project whether or not it follows the log. */
+  private record(project: string, frame: AuditFrame): void {
+    this.project(project).audit.push(frame);
+    this.broadcast(project, frame);
   }
 
   private auditId = 0;
@@ -345,7 +384,7 @@ export class HubDouble {
   private project(id: string): ProjectState {
     let state = this.projects.get(id);
     if (!state) {
-      state = { log: [], seqs: new Map(), sockets: new Set(), machines: [], pending: [], deliveries: [], presence: new Map(), rpcs: new Map(), subs: new Map() };
+      state = { log: [], seqs: new Map(), sockets: new Set(), machines: [], pending: [], deliveries: [], presence: new Map(), rpcs: new Map(), subs: new Map(), audit: [] };
       this.projects.set(id, state);
     }
     return state;
@@ -400,9 +439,12 @@ export class HubDouble {
 
   private openProject(project: string, ws: WebSocket): void {
     const state = this.project(project);
-    const socket: ProjectSocket = { ws, resumed: false, assembler: new PartAssembler() };
+    const socket: ProjectSocket = { ws, resumed: false, assembler: new PartAssembler(), subs: new Set() };
     state.sockets.add(socket);
-    ws.on('close', () => state.sockets.delete(socket));
+    ws.on('close', () => {
+      state.sockets.delete(socket);
+      for (const sub of socket.subs) state.subs.delete(sub);
+    });
     ws.on('message', (data) => {
       let frame = JSON.parse(String(data)) as ProjectUp;
       if (frame.t === 'part') {
@@ -413,11 +455,17 @@ export class HubDouble {
       this.up.push({ project, frame });
       void this.receive(project, socket, frame);
     });
+    // DX3's order on connect: each session's presence only for a machine that is online now.
     this.sendRaw(ws, { t: 'welcome', project, member: DOUBLE_MEMBER.id, head: this.head(project) });
     this.sendRaw(ws, { t: 'machines', machines: state.machines });
+    for (const message of state.presence.values()) if (this.online(project, message.machine)) this.sendRaw(ws, { t: 'session', message });
     this.sendRaw(ws, { t: 'pending', requests: state.pending });
     this.sendRaw(ws, { t: 'deliveries', deliveries: state.deliveries });
-    for (const message of state.presence.values()) this.sendRaw(ws, { t: 'session', message });
+  }
+
+  /** A refusal of a browser's frame: into the audit record, to every browser of the project. */
+  private refuseFrame(project: string, message: string): void {
+    this.refuse(project, { reason: 'bad-shape', message, member: DOUBLE_MEMBER.id });
   }
 
   private async receive(project: string, socket: ProjectSocket, frame: ProjectUp): Promise<void> {
@@ -428,17 +476,32 @@ export class HubDouble {
         if (backlog.length > 0) this.sendRaw(socket.ws, { t: 'log', events: backlog });
         this.sendRaw(socket.ws, { t: 'caught-up', offset: this.head(project) });
         socket.resumed = true;
+        for (const frame of state.audit.slice(-AUDIT_REPLAY)) this.sendRaw(socket.ws, frame);
         return;
       }
       case 'human':
         return this.receiveHuman(project, socket, frame.event);
       case 'rpc':
         return this.receiveRpc(project, socket, frame.rpc);
-      case 'subscribe':
+      case 'subscribe': {
+        // A subscribe the hub cannot take on ends at once, at n 0.
+        const end = (reason: 'machine-offline' | 'error', message?: string) =>
+          this.sendRaw(socket.ws, { t: 'session', message: { project, machine: frame.machine, session: frame.session, kind: 'end', sub: frame.sub, n: 0, body: { reason, ...(message && { message }) } } });
+        if (state.subs.has(frame.sub)) return end('error', 'this sub is in use: pick a fresh one');
+        if (socket.subs.size >= SUBS_PER_SOCKET) return end('error', `at most ${SUBS_PER_SOCKET} subscriptions a socket`);
+        if (!this.online(project, frame.machine)) return end('machine-offline');
         state.subs.set(frame.sub, { machine: frame.machine, next: 0 });
+        socket.subs.add(frame.sub);
         return;
+      }
       case 'unsubscribe':
         state.subs.delete(frame.sub);
+        socket.subs.delete(frame.sub);
+        return;
+      case 'rows':
+        if (!Number.isInteger(frame.limit) || frame.limit < 1 || frame.limit > 1000) this.refuseFrame(project, 'rows is {sub, before: row uuid, limit: 1 to 1000}');
+        return;
+      case 'visibility':
         return;
       case 'diff': {
         // Answered as DX4 `diff` on that sub; a main-transcript subscription's only, as DX3 has it.
@@ -447,13 +510,14 @@ export class HubDouble {
         return;
       }
       default:
+        this.refuseFrame(project, `no frame ${JSON.stringify((frame as { t?: unknown }).t)}`);
         return;
     }
   }
 
   private receiveHuman(project: string, socket: ProjectSocket, event: HumanEvent): void {
     if (event.member !== DOUBLE_MEMBER.id) {
-      this.sendRaw(socket.ws, { t: 'refused', refusal: { ...this.audit(), reason: 'bad-shape', message: 'member is not the signed-in member', nonce: event.mac.nonce } });
+      this.refuse(project, { reason: 'writer-not-yours', member: DOUBLE_MEMBER.id, nonce: event.mac.nonce, message: 'a web human is written by the member signed in' });
       return;
     }
     const known = this.project(project).log.find((entry) => (entry.event.mac as { nonce?: string }).nonce === event.mac.nonce);
@@ -468,29 +532,28 @@ export class HubDouble {
   }
 
   /**
-   * DX6 at the hub: a nonce it holds a result for is answered from its record; an RPC to a machine without a fresh lease
-   * fails at once, `machine-offline`, nothing queued; anything else is forwarded (again, for a retry of a `forwarded`
-   * or `uncertain` one), and the test answers it with `answerRpc`.
+   * DX6 at the hub, in its order: a nonce it has recorded is answered from its record (an `uncertain` one forwarded
+   * again once its machine is back); then an RPC older than 60 s, or to a machine without a fresh lease, fails at once
+   * — to the sender alone, never recorded, so a retry is judged afresh; anything else is recorded `forwarded` and the
+   * test answers it with `answerRpc`. A recorded state goes to every socket of the member (here, every socket).
    */
   private receiveRpc(project: string, socket: ProjectSocket, rpc: Rpc): void {
     const state = this.project(project);
     const known = state.rpcs.get(rpc.nonce);
-    if (known?.outcome) {
-      this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: known.outcome.state, outcome: known.outcome });
+    if (known) {
+      if (known.state === 'uncertain' && this.online(project, rpc.machine)) {
+        known.state = 'forwarded';
+        this.sendRpcState(project, rpc.nonce, 'forwarded');
+        return;
+      }
+      this.sendRaw(socket.ws, known.outcome ? { t: 'rpc-state', nonce: rpc.nonce, state: known.outcome.state, outcome: known.outcome } : { t: 'rpc-state', nonce: rpc.nonce, state: known.state });
       return;
     }
-    if (known && state.machines.find((m) => m.machine === rpc.machine)?.online === false) {
-      this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: known.state });
-      return;
-    }
-    if (state.machines.find((m) => m.machine === rpc.machine)?.online === false) {
-      const outcome: RpcOutcome = { state: 'failed', error: { code: 'machine-offline', message: `${rpc.machine} is offline` } };
-      state.rpcs.set(rpc.nonce, { rpc, state: 'failed', outcome });
-      this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: 'failed', outcome });
-      return;
-    }
+    const fail = (code: 'stale' | 'machine-offline', message: string) => this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: 'failed', outcome: { state: 'failed', error: { code, message } } });
+    if (!(Date.now() - Date.parse(rpc.created) <= RPC_FRESHNESS_MS)) return fail('stale', 'older than 60 seconds: issue it again');
+    if (!this.online(project, rpc.machine)) return fail('machine-offline', `${rpc.machine} is offline`);
     state.rpcs.set(rpc.nonce, { rpc, state: 'forwarded' });
-    this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: 'forwarded' });
+    this.sendRpcState(project, rpc.nonce, 'forwarded');
   }
 
   private async http(req: IncomingMessage, res: ServerResponse): Promise<void> {

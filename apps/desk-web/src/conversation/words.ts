@@ -1,9 +1,8 @@
 // The words for what came back: an RPC's failure by its DX6 code, a result by its RPC, a delivery's outcome, a
 // settlement's winner. Kept in one place so every surface says the same thing.
-import type { JsonObject, Settled } from 'desk-hub/protocol';
-import type { DeliveryOutcome, RpcFailure } from '../hub/protocol-ahead';
+import type { Delivery, JsonObject, RpcError, Settled } from 'desk-hub/protocol';
 
-export function failureText(failure: RpcFailure, machine: string): string {
+export function failureText(failure: RpcError, machine: string): string {
   const said = failure.message ? `: ${failure.message}` : '';
   switch (failure.code) {
     case 'machine-offline':
@@ -51,7 +50,9 @@ const list = (items: unknown): string[] => (Array.isArray(items) ? items.map(Str
 export function resultText(rpc: string, result: JsonObject): { text: string; warning: boolean } {
   switch (rpc) {
     case 'steer':
-      return { text: 'steered: read at the next model request', warning: false };
+      // Null when the session has no bridge: the steer went out as a `--bg` seat's reply or as a send, with no row of its
+      // own to point at.
+      return { text: typeof result.row === 'string' ? 'steered: read at the next model request' : 'sent: the session has no bridge, so there is no row to point at', warning: false };
     case 'interrupt': {
       const running = list(result.running);
       const stopped = list(result.stopped);
@@ -77,7 +78,7 @@ export function resultText(rpc: string, result: JsonObject): { text: string; war
   }
 }
 
-export const DELIVERY_TEXT: Record<DeliveryOutcome, string> = {
+export const DELIVERY_TEXT: Record<Delivery['outcome'], string> = {
   delivered: 'delivered',
   // The frame was taken but never answered: neither delivered nor not.
   uncertain: 'possibly delivered',
@@ -86,11 +87,16 @@ export const DELIVERY_TEXT: Record<DeliveryOutcome, string> = {
   failed: 'not delivered: it failed',
 };
 
-export function settledText(winner: Settled['winner'] | string, outcome: Settled['outcome'] | null, by: string, me: string): string {
+/**
+ * Who decided, and how. `winner` is the side the bridge names; a late decision's refusal may name only `by` (a member
+ * id, `"terminal"`, `"cli"`, or `"bridge"`), which then says the side.
+ */
+export function settledText(winner: Settled['winner'] | null, outcome: Settled['outcome'] | null, by: string, me: string): string {
   const what = outcome === 'allow' ? 'Allowed' : outcome === 'deny' ? 'Denied' : outcome === 'answered' ? 'Answered' : outcome === 'withdrawn' ? 'Withdrawn' : 'Settled';
-  if (outcome === 'withdrawn') return by === 'bridge' ? 'Withdrawn: the session moved on without an answer' : 'Withdrawn';
-  if (winner === 'terminal') return `${what} in the terminal`;
-  if (winner === 'web') return `${what} from the web${by === me ? ' by you' : ''}`;
+  if (outcome === 'withdrawn' || by === 'bridge') return by === 'bridge' ? 'Withdrawn: the session moved on without an answer' : 'Withdrawn';
+  const side = winner ?? (by === 'terminal' ? 'terminal' : by === 'cli' ? 'other' : by ? 'web' : null);
+  if (side === 'terminal') return `${what} in the terminal`;
+  if (side === 'web') return `${what} from the web${by === me ? ' by you' : ''}`;
   if (by === 'cli') return `${what} from the command line`;
   return what;
 }

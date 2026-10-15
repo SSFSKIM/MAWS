@@ -78,6 +78,17 @@ export class ProjectLog {
     this.queue(() => this.record.clear(this.project));
   }
 
+  /**
+   * The offset of the last entry held whose time is at or before `time`: where something that happened then belongs in
+   * the stream. Each event's `ts` is its writer's clock, so this is as close as their clocks are; 0 when none is.
+   */
+  offsetAt(time: string): number {
+    const at = Date.parse(time);
+    let offset = 0;
+    for (const { offset: o, event } of this.store.getState().entries) if (typeof event.ts === 'string' && Date.parse(event.ts) <= at) offset = Math.max(offset, o);
+    return offset;
+  }
+
   /** Verified entries, in offset order: the only ones a view draws. */
   drawable(): Array<HeldEntry & { event: LogEvent }> {
     return drawable(this.store.getState());

@@ -13,7 +13,6 @@ import type { StreamItem } from '../../conversation/stream';
 import { deliveryKey, type OutboxItem } from '../../project/conversation';
 import { useSlot } from '../../shell/slots';
 import { DELIVERY_TEXT } from '../../conversation/words';
-import { outcomeOf } from '../../hub/protocol-ahead';
 import { useNarrow } from '../../shell/viewport';
 import { RequestCard } from '../requests/RequestCard';
 import { useDesk } from './desk-context';
@@ -139,7 +138,7 @@ function Deliveries({ event, to, wake }: { event: LogEvent; to: '*' | Recipient[
       {to.map((r) => {
         // The latest outcome per recipient: a `recorded` one turns `delivered` when Resume brings the session back.
         const delivery = outcomes?.[r.session];
-        const outcome = delivery ? outcomeOf(delivery) : undefined;
+        const outcome = delivery?.outcome;
         const tone = outcome === 'delivered' ? 'text-fg-muted' : outcome === 'uncertain' ? 'text-fg-muted italic' : outcome ? 'text-warning' : 'text-fg-faint';
         return (
           <li key={r.session} data-recipient={r.session} data-outcome={outcome ?? 'pending'} className={tone}>
@@ -229,7 +228,7 @@ function WorkingRecord({ session, range }: { session: string; range: { from: str
     );
   return (
     <div className="py-1 text-ui-sm text-fg-muted">
-      <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="rounded-sm border border-border px-2 py-0.5 hover:bg-bg-hover hover:text-fg" data-testid="working-record">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="rounded-sm border border-border px-2 py-0.5 hover:bg-bg-hover hover:text-fg" data-testid="working-record" data-from={range.from ?? ''} data-to={range.to ?? ''}>
         [ working record ]
       </button>
       {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}

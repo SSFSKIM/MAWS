@@ -108,6 +108,9 @@ export class ProjectConnection {
           // On connect the hub names no machine for them; a live `delivery` message does.
           for (const delivery of deliveries) this.conversation.delivery(null, delivery);
         },
+        // A decision this tab may not have seen raised (one settled before it connected, replayed after caught-up): its
+        // card is placed after the log as it stood when the hub recorded the decision.
+        decided: (decision) => this.conversation.decided(decision, this.log.offsetAt(decision.at)),
         refused: (entry) => this.record({ kind: 'refused', entry }),
         rejected: (entry) => this.record({ kind: 'rejected', entry }),
         status: (status) => this.live.setState({ status }),

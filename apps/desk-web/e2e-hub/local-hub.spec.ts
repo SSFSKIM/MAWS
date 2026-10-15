@@ -4,30 +4,29 @@
 // and M2's with its M2b ruling: the org key drawn at random at first setup and kept at the hub wrapped once per method,
 // every method opening the same key, a method added and removed, the hub's `not-key-holder` in both its meanings, and
 // an enrollment code the browser made with that key, which enrolls a machine whose events the browser then verifies.
-// The machine is a DX7/DX2 test client (test/local/machine.ts) until DC4's uplink lands; the grid's counts wait on
-// DC3's M3 (the registry's socket).
+// The machine here is a DX7/DX2 test client (test/local/machine.ts); the grid's counts and M3's proofs against DC3's
+// session plane and fake machine are session-plane.spec.ts.
 //
 // The local hub's state outlives a run (apps/desk-hub/.wrangler), and an org has one key ever: first setup is proved on
 // a hub whose org has none. It adds the suite's passphrase, which a later run unlocks with instead.
 //
 // One browser page for the suite: its virtual authenticator holds the org's passkey from the setup on.
 import { randomUUID } from 'node:crypto';
-import { expect, test, type BrowserContext, type CDPSession, type Locator, type Page, type WebSocket } from '@playwright/test';
-import { keyCheck, seal, verify, type DownFrame, type HumanDraft, type LogEvent, type ProjectDown, type ProjectUp, type WrappedKeys } from 'desk-hub/protocol';
+import { expect, test, type BrowserContext, type CDPSession, type Page, type WebSocket } from '@playwright/test';
+import { keyCheck, seal, verify, type DownFrame, type HumanDraft, type LogEvent, type ProjectDown, type ProjectUp } from 'desk-hub/protocol';
 import { checkFingerprint } from '../src/key/derive';
 import { ProjectClient } from '../src/hub/project-client';
 import { clearOrigin, virtualAuthenticator } from '../e2e/authenticator';
 import { seedKey } from '../e2e/fixtures';
 import { LocalHub } from '../test/local/hub';
 import { TestMachine } from '../test/local/machine';
+import { keyDialog, newPassphrase, openKeyDialog, orgKeys as orgKeysOf, SUITE_PASSPHRASE, unlockWithPassphrase } from './org';
 
 test.describe.configure({ mode: 'serial' });
 
 const PROJECT = randomUUID();
 const SESSION = randomUUID();
 const MACHINE = `e2e-${randomUUID().slice(0, 8)}`;
-/** The passphrase this suite's first setup adds; a run against a hub whose org already has a key unlocks with it. */
-const SUITE_PASSPHRASE = 'desk local hub suite passphrase';
 
 let hub: LocalHub;
 let context: BrowserContext;
@@ -66,30 +65,7 @@ function watchSockets(target: Page) {
 }
 
 /** The org's wrapped keys, as any member reads them (DX7). */
-async function orgKeys(): Promise<WrappedKeys> {
-  return (await (await fetch(`${hub.url}/api/org/keys`)).json()) as WrappedKeys;
-}
-
-const keyDialog = (target: Page) => target.getByRole('dialog', { name: 'Org key' });
-
-async function openKeyDialog(target: Page): Promise<Locator> {
-  await target.getByTestId('key-state').click();
-  return keyDialog(target);
-}
-
-async function unlockWithPassphrase(scope: Locator, passphrase: string, keep: boolean) {
-  if (keep) await scope.getByLabel('Keep unlocked on this device').check();
-  const form = scope.getByRole('form', { name: 'Passphrase' });
-  await form.getByLabel(/passphrase/).fill(passphrase);
-  await form.getByRole('button', { name: 'Unlock', exact: true }).click();
-}
-
-async function newPassphrase(scope: Locator, passphrase: string, submit: string) {
-  const form = scope.getByRole('form', { name: 'New passphrase' });
-  await form.getByLabel(/Or a passphrase/).fill(passphrase);
-  await form.getByLabel('The passphrase again').fill(passphrase);
-  await form.getByRole('button', { name: submit, exact: true }).click();
-}
+const orgKeys = () => orgKeysOf(hub);
 
 test('signed in through the stand-in, the Worker serves the built app at every path of the app', async ({ browser }) => {
   const response = await page.goto(hub.localhost);

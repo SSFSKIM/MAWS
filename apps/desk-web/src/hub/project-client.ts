@@ -23,6 +23,9 @@ import { backoff, HubSocket, type ConnectionStatus } from './socket';
 /** How often a visible tab says so again: a third of the 90 s the hub counts a socket as visible after the last. */
 const VISIBLE_REPEAT_MS = 30_000;
 
+/** DX3's `rows` takes a `limit` from 1 to 1000; the hub refuses anything else as `bad-shape`, into the audit record. */
+const rowsLimit = (limit: number) => Math.min(1000, Math.max(1, Math.trunc(limit) || 1));
+
 export type { ConnectionStatus } from './socket';
 
 export type Welcome = Extract<ProjectDown, { t: 'welcome' }>;
@@ -53,6 +56,8 @@ export type ProjectHandlers = {
   refused?(refusal: HubRefusal): void;
   /** A daemon's report of an event it refused (DX2's `rejected`), as the audit record has it. */
   rejected?(rejection: Extract<ProjectDown, { t: 'rejected' }>['rejection']): void;
+  /** A decision on a pending request, as the audit record has it: live, and replayed after every `caught-up`. */
+  decided?(decision: Extract<ProjectDown, { t: 'decided' }>['decision']): void;
   status?(status: ConnectionStatus): void;
 };
 
@@ -156,7 +161,7 @@ export class ProjectClient implements SessionPlane {
     if (this.welcomed) this.sendSubscribe(open);
     return {
       rows: (before, limit) => {
-        if (open.sub && this.subs.has(open)) this.socket.send({ t: 'rows', sub: open.sub, before, limit });
+        if (open.sub && this.subs.has(open)) this.socket.send({ t: 'rows', sub: open.sub, before, limit: rowsLimit(limit) });
       },
       diff: () => {
         if (open.sub && this.subs.has(open) && open.target.agentId === null) this.socket.send({ t: 'diff', sub: open.sub });
@@ -252,6 +257,9 @@ export class ProjectClient implements SessionPlane {
       }
       case 'rejected':
         handlers.rejected?.(frame.rejection);
+        return;
+      case 'decided':
+        handlers.decided?.(frame.decision);
         return;
       default:
         return;

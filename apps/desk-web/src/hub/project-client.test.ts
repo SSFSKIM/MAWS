@@ -138,7 +138,7 @@ describe('what goes up', () => {
     const { c, caughtUp } = client();
     await until(() => caughtUp.length === 1);
     const event = await seal(key, 'log', PROJECT, { ...draft('as someone else'), member: '0'.repeat(32) });
-    await expect(c.sendHuman(event)).rejects.toMatchObject({ refusal: { reason: 'bad-shape', nonce: event.mac.nonce } });
+    await expect(c.sendHuman(event)).rejects.toMatchObject({ refusal: { reason: 'writer-not-yours', nonce: event.mac.nonce } });
     double.dropConnections();
     await until(() => caughtUp.length === 2);
     await new Promise((r) => setTimeout(r, 50));
@@ -236,6 +236,21 @@ describe('the session plane', () => {
     expect(double.up.filter((u) => u.frame.t === 'diff')).toEqual([{ project: PROJECT, frame: { t: 'diff', sub } }]);
   });
 
+  it("asks older rows within the hub's limit of 1 to 1000, so a request out of range is never refused", async () => {
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    const subscription = c.subscribe({ machine: MACHINE, session: SESSION, agentId: null }, recorder().listener);
+    await until(() => double.subscriptions(PROJECT).length === 1);
+    const { sub } = double.subscriptions(PROJECT)[0];
+    double.sendSub(PROJECT, sub, 'snapshot', { rows: [], more: true, subagents: [], presence: { record: null, bridge: true }, streaming: [], usage: null });
+    subscription.rows('u9', 5000);
+    subscription.rows('u9', 0);
+    subscription.rows('u9', 2.5);
+    subscription.rows('u9', 200);
+    await until(() => double.up.filter((u) => u.frame.t === 'rows').length === 4);
+    expect(double.up.filter((u) => u.frame.t === 'rows').map((u) => (u.frame as { limit: number }).limit)).toEqual([1000, 1, 2, 200]);
+  });
+
   it('subscribes again after a gap in n, under a fresh sub', async () => {
     const { c, caughtUp } = client();
     await until(() => caughtUp.length === 1);
@@ -331,6 +346,24 @@ describe('the session plane', () => {
     expect(log).toEqual(['end:session-ended']);
   });
 
+  it("ends a subscription the hub cannot take on (a socket's 33rd, a machine offline) at n 0, and never asks it again", async () => {
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    const held = Array.from({ length: 32 }, (_, i) => c.subscribe({ machine: MACHINE, session: SESSION, agentId: `a${i}` }, recorder().listener));
+    const over = recorder();
+    c.subscribe({ machine: MACHINE, session: SESSION, agentId: 'a32' }, over.listener);
+    await until(() => over.log.length === 1);
+    expect(over.log).toEqual(['end:error']);
+    held[0].close();
+    double.dropMachine(PROJECT, 'elsewhere');
+    const offline = recorder();
+    c.subscribe({ machine: 'elsewhere', session: SESSION, agentId: null }, offline.listener);
+    await until(() => offline.log.length === 1);
+    expect(offline.log).toEqual(['end:machine-offline']);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(double.up.filter((u) => u.frame.t === 'subscribe')).toHaveLength(34);
+  });
+
   it('subscribes again after a discontinuity at n 0 only after a backoff, so a bridge still starting cannot loop it', async () => {
     const delays: number[] = [];
     const { c, caughtUp } = client({ resubscribeDelay: (attempt) => (delays.push(attempt), 150) });
@@ -388,6 +421,26 @@ describe('the audit record', () => {
     double.reject(PROJECT, { machine: 'mini', event: { writer: 'hub/x', seq: 3 }, reason: 'bad-code', message: 'its code does not match' });
     await until(() => refusals.length === 1 && rejections.length === 1);
     expect(rejections[0]).toMatchObject({ machine: 'mini', reason: 'bad-code', event: { writer: 'hub/x', seq: 3 } });
+  });
+
+  it('hands on each decision, live and replayed after every caught-up', async () => {
+    const decisions: Array<{ id: number; settled: { request: string } }> = [];
+    const c = new ProjectClient({
+      base: double.url.replace(/^http/, 'ws'),
+      project: PROJECT,
+      delay: () => 20,
+      handlers: { held: () => 0, decided: (d) => decisions.push(d) },
+    });
+    clients.push(c);
+    await double.raise(PROJECT, 'mini', { request: 'toolu_1', session: '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', tool: 'Bash', input: { command: 'ls' } });
+    await double.settle(PROJECT, 'mini', '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', { request: 'toolu_1', winner: 'terminal', outcome: 'allow', by: 'terminal' });
+    c.start();
+    await until(() => decisions.length === 1); // the record's replay after caught-up
+    expect(decisions[0]).toMatchObject({ machine: 'mini', settled: { request: 'toolu_1', winner: 'terminal' }, raised: { request: 'toolu_1' } });
+    await double.raise(PROJECT, 'mini', { request: 'toolu_2', session: '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', tool: 'Bash', input: { command: 'ls' } });
+    await double.settle(PROJECT, 'mini', '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b', { request: 'toolu_2', winner: 'terminal', outcome: 'deny', by: 'terminal' });
+    await until(() => decisions.length === 2); // live
+    expect(decisions.map((d) => d.settled.request)).toEqual(['toolu_1', 'toolu_2']);
   });
 });
 

@@ -11,9 +11,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from 'zustand';
 import type { LogEvent } from 'desk-hub/protocol';
-import { buildStream, type PlacedRequest } from '../../conversation/stream';
+import { buildStream, placedRequest, type PlacedRequest } from '../../conversation/stream';
 import { capabilities, kindOf } from '../../conversation/capabilities';
-import { isQuestion } from '../../conversation/card-state';
 import { landedItem, landingReady, landingStatus } from '../../conversation/landing';
 import { refused } from '../../log/project-log';
 import { useLanding } from '../../pwa/service-worker';
@@ -33,15 +32,15 @@ export function ChannelView(props: {
 }) {
   const { name, channel, session, events } = props;
   const phone = useNarrow();
-  const { connection, sessions } = useDesk();
+  const { connection, sessions, member } = useDesk();
   const requests = useStore(connection.conversation.store, (s) => s.requests);
   const outboxAll = useStore(connection.conversation.store, (s) => s.outbox);
   const items = useMemo(() => {
     const aliases = new Map([...sessions.values()].map((s) => [s.session, s.alias]));
-    const placed: PlacedRequest[] = Object.values(requests).map((r) => ({ request: r.request, session: r.raised.session, at: r.at, question: isQuestion(r.raised.tool) }));
+    const placed: PlacedRequest[] = Object.values(requests).map(placedRequest);
     const live = session !== null && ['bridged', 'seat', 'terminal'].includes(kindOf(session));
-    return buildStream(channel, events, aliases, placed, { live });
-  }, [channel, events, sessions, requests, session]);
+    return buildStream(channel, events, aliases, placed, { live, member });
+  }, [channel, events, sessions, requests, session, member]);
   const outbox = Object.values(outboxAll).filter((o) => channel.kind === 'group' || (o.to !== '*' && o.to.some((r) => r.session === channel.session)));
   const landed = useLanded(channel, items);
   return (

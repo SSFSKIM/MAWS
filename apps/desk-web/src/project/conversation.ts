@@ -4,7 +4,7 @@
 // settlements, and deliveries carry codes (DX1, DX4) and are drawn only once they verify under the org key; one that
 // fails is kept out and reported. Every verdict holds only under the key it was reached with.
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import { verify, type Delivery, type OrgKey, type PendingRequest, type Raised, type Recipient, type Rpc, type RpcOutcome, type SessionBodies, type Settled } from 'desk-hub/protocol';
+import { verify, type Decision, type Delivery, type OrgKey, type PendingRequest, type Raised, type Recipient, type Rpc, type RpcOutcome, type SessionBodies, type Settled } from 'desk-hub/protocol';
 
 export type CompactBody = SessionBodies['compact'];
 
@@ -102,6 +102,21 @@ export class Conversation {
 
   settled(machine: string, settled: Settled): void {
     this.settlements.set(settled.request, { machine, settled });
+    void this.recompute();
+  }
+
+  /**
+   * A decision from the project's audit record (DX3 `decided`): the `raised` it settled (verbatim, or null when the hub
+   * no longer held it) is seen as any request is — at `at` when this tab never saw it — and its `settled` taken as the
+   * request's settlement. Both are verified before anything of them is drawn. So a card settled before the tab
+   * connected (a reload, another device) is drawn settled.
+   */
+  decided(decision: Decision, at: number): void {
+    if (decision.raised) {
+      const known = this.seen.get(decision.raised.request);
+      this.seen.set(decision.raised.request, known ?? { machine: decision.machine, raised: decision.raised, at });
+    }
+    this.settlements.set(decision.settled.request, { machine: decision.machine, settled: decision.settled });
     void this.recompute();
   }
 

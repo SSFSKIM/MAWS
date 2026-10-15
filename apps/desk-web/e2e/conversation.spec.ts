@@ -196,8 +196,16 @@ test("controls a session cannot use are drawn disabled with §5's reason, by kin
   await expect(composer.getByRole('button', { name: 'Steer' })).toBeEnabled();
   await expect(composer.getByRole('button', { name: 'Interrupt' })).toBeDisabled();
   await expect(composer.getByRole('button', { name: 'Compact' })).toHaveAttribute('title', 'bg-seat runs without the bridge');
+  // Its steer goes out as the seat's `reply`, which leaves no row of its own: the result's row is null.
+  await page.getByRole('textbox', { name: 'Message bg-seat' }).fill('the failing case first');
+  await composer.getByRole('button', { name: 'Steer' }).click();
+  const steer = await lastRpc(hub, 1);
+  expect(steer).toMatchObject({ rpc: 'steer', args: { session: seat, text: 'the failing case first' } });
+  hub.answerRpc(PROJECT, steer.nonce, { state: 'done', result: { row: null } });
+  await expect(composer.locator('[data-rpc-state="done"]')).toHaveText('Sent: the session has no bridge, so there is no row to point at');
 
   // A bridged session at rest: Send starts a turn, and neither Steer nor Interrupt is offered.
+  expect(hub.rpcs(PROJECT)).toHaveLength(1);
   await nav(page).locator(`[data-session="${S.works}"]`).click();
   presence(hub, 'SK.local', S.works, 'idle');
   await expect(composer.getByRole('button', { name: 'Steer' })).toHaveCount(0);
@@ -264,6 +272,9 @@ test('a permission prompt is decided in place with the digest of exactly what it
   hub.answerRpc(PROJECT, decide.nonce, { state: 'done', result: {} });
   await hub.settle(PROJECT, 'mini', S.asks, { request: 'toolu_1', winner: 'web', outcome: 'allow', by: M });
   await expect(card.getByTestId('settled')).toHaveText('Allowed from the web by you');
+  // A reload holds no tab state: the audit record's `decided`, replayed after caught-up, draws it settled again.
+  await page.reload();
+  await expect(card.getByTestId('settled')).toHaveText('Allowed from the web by you');
 
   // Answered in the terminal while the card was open.
   await hub.raise(PROJECT, 'mini', { ...BASH, request: 'toolu_2' });
@@ -278,7 +289,7 @@ test('a permission prompt is decided in place with the digest of exactly what it
   await late.getByRole('button', { name: 'Deny', exact: true }).click();
   const refused = await lastRpc(hub, 2);
   expect(refused.args).toMatchObject({ decision: 'deny' });
-  hub.answerRpc(PROJECT, refused.nonce, { state: 'failed', error: { code: 'not-pending', message: 'answered in the terminal', winner: 'terminal' } as never });
+  hub.answerRpc(PROJECT, refused.nonce, { state: 'failed', error: { code: 'not-pending', message: 'answered in the terminal', winner: 'terminal', by: 'terminal' } });
   await expect(late.getByTestId('settled')).toHaveText('Settled in the terminal');
   await expect(late.getByRole('alert')).toHaveCount(0);
 

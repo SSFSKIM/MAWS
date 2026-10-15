@@ -4,7 +4,7 @@
 // ceiling). Only an online machine is offered: a spawn to one that is offline fails at once.
 import { useState, type FormEvent } from 'react';
 import { useStore } from 'zustand';
-import { resultOf } from '../../hub/protocol-ahead';
+import { resultOf } from '../../conversation/outcome';
 import { buttonPrimary, buttonSecondary, Dialog, textInput } from '../common/Dialog';
 import { useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';

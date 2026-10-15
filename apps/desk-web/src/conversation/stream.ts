@@ -15,8 +15,9 @@
 // Each working-record fold carries its bounds for DX8's `transcript` slot: the `src` of the session's exchange item
 // before it and of the one after it (a `<message>` span's `<row uuid>#<span index>`; a question's call id), null for
 // an open end; a live session's channel ends with an open-ended fold after its last item.
-import type { LogEvent, Recipient } from 'desk-hub/protocol';
+import type { LogEvent, Raised, Recipient } from 'desk-hub/protocol';
 import type { Channel } from '../shell/layout';
+import { isQuestion } from './card-state';
 
 export type Entry = { offset: number; event: LogEvent };
 
@@ -32,9 +33,19 @@ export type StreamItem =
 /**
  * A request as the stream places it: `at` is the offset of the last log entry the browser held when it first saw it;
  * `question` whether it is a question (an exchange item, so it bounds the working record: a native one has no
- * `question` event to do it).
+ * `question` event to do it); `call` the transcript's tool-use id of the call it belongs to, the bound a question
+ * gives the working record (its `request` when absent).
  */
-export type PlacedRequest = { request: string; session: string; at: number; question?: boolean };
+export type PlacedRequest = { request: string; session: string; at: number; question?: boolean; call?: string };
+
+/**
+ * A request the browser holds, placed: a raised request names its transcript call as `toolUseId ?? request` (DX4,
+ * composite 43a27604) — `toolUseId` is there only where the two differ, as for the ask mod's blocking question, raised
+ * under the engine dialog's id while the transcript holds the outer call. Decisions and answers still go to `request`.
+ */
+export function placedRequest(record: { request: string; raised: Raised; at: number }): PlacedRequest {
+  return { request: record.request, session: record.raised.session, at: record.at, question: isQuestion(record.raised.tool), call: record.raised.toolUseId ?? record.request };
+}
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const recipients = (to: unknown): Recipient[] =>
@@ -46,12 +57,22 @@ export const writerSession = (writer: string): string | null => {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) ? id : null;
 };
 
-function systemText(event: LogEvent, alias: (id: unknown) => string): string | null {
+/** A web member's id (DX7: 128 bits as 32 lowercase hex), which `retired` and spawn's `joined` record as `by`. */
+const MEMBER_ID = /^[0-9a-f]{32}$/;
+
+/** Who `by` names: you, another member of the org (by its id: the browser holds no member list), or what sminos wrote. */
+function byWhom(by: string, member: string | null): string {
+  if (member !== null && by === member) return 'you';
+  if (MEMBER_ID.test(by)) return `another member (${by.slice(0, 8)})`;
+  return by;
+}
+
+function systemText(event: LogEvent, alias: (id: unknown) => string, member: string | null): string | null {
   switch (event.kind) {
     case 'joined':
       return `${alias(event.session)} joined on ${str(event.machine)}`;
     case 'retired':
-      return `${alias(event.session)} ${event.reason === 'ended' ? 'ended' : 'retired'}${str(event.by) ? ` by ${str(event.by)}` : ''}`;
+      return `${alias(event.session)} ${event.reason === 'ended' ? 'ended' : 'retired'}${str(event.by) ? ` by ${byWhom(str(event.by), member)}` : ''}`;
     case 'renamed':
       return `${alias(event.session)} is now ${str(event.alias)}`;
     case 'in-charge':
@@ -89,8 +110,17 @@ function inChannel(event: LogEvent, channel: Channel): boolean {
 
 const RUNNING = new Set(['busy', 'idle', 'waiting']);
 
-/** `live`: the direct channel's session is running now, so its working record goes on past its last item. */
-export function buildStream(channel: Channel, entries: readonly Entry[], aliases: ReadonlyMap<string, string>, requests: readonly PlacedRequest[], options: { live?: boolean } = {}): StreamItem[] {
+/**
+ * `live`: the direct channel's session is running now, so its working record goes on past its last item. `member`: the
+ * signed-in member, named "you" where an event records it as `by`.
+ */
+export function buildStream(
+  channel: Channel,
+  entries: readonly Entry[],
+  aliases: ReadonlyMap<string, string>,
+  requests: readonly PlacedRequest[],
+  options: { live?: boolean; member?: string } = {},
+): StreamItem[] {
   const alias = (id: unknown) => (typeof id === 'string' ? (aliases.get(id) ?? id.slice(0, 8)) : '');
   const shown = entries.filter((e) => inChannel(e.event, channel));
   // A question's answer, wherever its channel draws it (a direct channel does not draw `answered` on its own).
@@ -124,7 +154,7 @@ export function buildStream(channel: Channel, entries: readonly Entry[], aliases
     while (next < placed.length && placed[next].at < offset) {
       const r = placed[next];
       // A question with no `question` event (a native one) is the exchange item that bounds the working record.
-      if (r.question) workBefore(`work:request:${r.request}`, r.at, r.session, r.request);
+      if (r.question) workBefore(`work:request:${r.request}`, r.at, r.session, r.call ?? r.request);
       push({ kind: 'request', key: `request:${r.request}`, request: r.request });
       next++;
     }
@@ -180,7 +210,7 @@ export function buildStream(channel: Channel, entries: readonly Entry[], aliases
       }
       default: {
         if (event.kind === 'joined') running.set(str(event.session), true);
-        const text = systemText(event, alias);
+        const text = systemText(event, alias, options.member ?? null);
         if (text !== null) push({ kind: 'system', key, offset, event, text });
       }
     }

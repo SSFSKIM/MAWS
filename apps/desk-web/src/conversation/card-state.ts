@@ -5,7 +5,7 @@
 // waiting in the terminal when the hub marks it `terminal_only` or the session has no bridge; shown but not answerable
 // while the machine is offline; closed when it left the pending set with no settlement this tab saw.
 import type { Raised, Settled } from 'desk-hub/protocol';
-import { failureOf } from '../hub/protocol-ahead';
+import { failureOf } from './outcome';
 import type { RequestRecord, RpcEntry } from '../project/conversation';
 import type { Capability } from './capabilities';
 
@@ -16,7 +16,8 @@ export type CardState =
   | { kind: 'uncertain'; offline: boolean }
   | { kind: 'failed'; code: string; message: string }
   | { kind: 'sent' }
-  | { kind: 'settled'; winner: Settled['winner'] | string; outcome: Settled['outcome'] | null; by: string }
+  /** `winner` null: a late decision's refusal named only who decided (`by`). */
+  | { kind: 'settled'; winner: Settled['winner'] | null; outcome: Settled['outcome'] | null; by: string }
   | { kind: 'terminal'; why: 'window' | string }
   | { kind: 'offline' }
   | { kind: 'closed' };
@@ -33,7 +34,8 @@ export function cardState(record: RequestRecord, rpc: RpcEntry | null, capabilit
   if (record.settled) return { kind: 'settled', winner: record.settled.winner, outcome: record.settled.outcome, by: record.settled.by };
   const failure = failureOf(rpc?.outcome);
   if (failure?.terminalOnly) return { kind: 'terminal', why: 'window' };
-  if (failure?.winner) return { kind: 'settled', winner: failure.winner, outcome: null, by: failure.winner === 'terminal' ? 'terminal' : failure.winner };
+  // A late decision, refused naming who decided: `by` says who, and may come without `winner`.
+  if (failure && (failure.winner || failure.by)) return { kind: 'settled', winner: failure.winner ?? null, outcome: null, by: failure.by ?? '' };
   if (!record.pending) return { kind: 'closed' };
   // A decision whose result is unknown stays so whatever the machine does: its retry is the only way to learn it.
   if (rpc?.state === 'uncertain') return { kind: 'uncertain', offline: machineOnline === false };
