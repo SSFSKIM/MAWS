@@ -390,6 +390,18 @@ describe('the main transcript through the session plane', () => {
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(recording.session));
   });
 
+  it('a turn its own subagent’s hand-back opens is the session’s own, continued, not a peer session’s', async () => {
+    // Rows 13 and 19 are the two subagents' hand-backs (`<agent-message from=…>`, the peer origin), each of which opens
+    // a turn the session runs on its own; MAWS reads the engine's origin as "Continued for …".
+    plane.snapshot(scriptOf(recording.session, null), Number.MAX_SAFE_INTEGER);
+    await settle();
+    await settle();
+    const dividers = store.getState().entries[controller.key].rows.filter((row) => row.kind === 'divider');
+    const handback = (uuid: unknown) => dividers.find((row) => row.turnId !== null && store.getState().entries[controller.key].state.turns.get(row.turnId)?.events.some((e) => 'messageUuid' in e && e.messageUuid === uuid));
+    for (const at of [13, 19]) expect(handback(recording.session[at].uuid)?.origin, `row ${at}'s turn`).toBe('engine');
+    expect(dividers.map((row) => row.origin)).not.toContain('peer');
+  });
+
   it('closes its subscription when closed', () => {
     controller.close();
     expect(plane.current.closed).toBe(true);

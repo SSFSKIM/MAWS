@@ -90,10 +90,18 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
   };
 }
 
-/** One row's X1 events under a backfill context; a row that is not a transcript record yields none. */
+/**
+ * One row's X1 events under a backfill context; a row that is not a transcript record yields none. A turn that a
+ * message from the session's own subagent opens (its hand-back, an `<agent-message>` of the peer origin, which MAWS's
+ * backfill reads as a `subagent.message`) is the session woken by its subagent, not a peer session's: it takes the
+ * engine's origin, whose divider MAWS reads as "Continued for …", as it reads a task notification's turn.
+ */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
   const record = TranscriptRecordSchema.safeParse(row);
-  return record.success ? recordToEvents(record.data, ctx) : [];
+  if (!record.success) return [];
+  const events = recordToEvents(record.data, ctx);
+  if (!events.some((event) => event.kind === 'subagent.message')) return events;
+  return events.map((event) => (event.kind === 'turn.started' && event.origin === 'peer' ? { ...event, origin: 'task-notification' } : event));
 }
 
 const contextFor = (target: SessionTarget, subagents: SubagentLookup): BackfillContext =>
