@@ -41,6 +41,8 @@ export class OrgKeysDouble {
     if (member.role !== 'admin') return refuse(403, 'not-admin');
     const b = isObject(body) ? body : {};
     const { method, label, credential, kdf, iv, wrapped, check, auth } = b;
+    // In an org that has a key, the key's `auth` is checked before anything else: missing or malformed is `not-key-holder`.
+    if (this.key_auth !== null && (!bytesOf(auth, 32) || (await digest(auth as string)) !== this.key_auth)) return refuse(403, 'not-key-holder');
     const valid =
       (method === 'passkey' || method === 'passphrase') &&
       typeof label === 'string' &&
@@ -55,7 +57,6 @@ export class OrgKeysDouble {
       (method === 'passkey' ? typeof credential === 'string' && credential !== '' : credential === undefined || credential === null);
     if (!valid) return refuse(400, 'bad-shape');
     const hash = await digest(auth as string);
-    if (this.key_auth !== null && this.key_auth !== hash) return refuse(403, 'not-key-holder');
     if (this.key_check !== null && this.key_check !== check) return refuse(409, 'different-key');
     if (method === 'passkey' && this.keys.some((k) => k.credential === credential)) return refuse(409, 'credential-taken');
     const key: WrappedKeyRecord = {
