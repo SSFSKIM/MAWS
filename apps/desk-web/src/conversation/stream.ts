@@ -73,8 +73,9 @@ function inChannel(event: LogEvent, channel: Channel): boolean {
 export function buildStream(channel: Channel, entries: readonly Entry[], aliases: ReadonlyMap<string, string>, requests: readonly PlacedRequest[]): StreamItem[] {
   const alias = (id: unknown) => (typeof id === 'string' ? (aliases.get(id) ?? id.slice(0, 8)) : '');
   const shown = entries.filter((e) => inChannel(e.event, channel));
+  // A question's answer, wherever its channel draws it (a direct channel does not draw `answered` on its own).
   const answers = new Map<string, Entry>();
-  for (const e of shown) if (e.event.kind === 'answered' && str(e.event.src)) answers.set(str(e.event.src), e);
+  for (const e of entries) if (e.event.kind === 'answered' && str(e.event.src)) answers.set(str(e.event.src), e);
   const questionCalls = new Set(shown.filter((e) => e.event.kind === 'question').map((e) => str(e.event.src)));
   const placed = requests
     .filter((r) => (channel.kind === 'group' || r.session === channel.session) && !questionCalls.has(r.request))

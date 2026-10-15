@@ -60,6 +60,7 @@ describe('a direct channel', () => {
   it("holds the session's exchange with the human and its own lifecycle, the working record folded before each of its messages", () => {
     const items = buildStream({ kind: 'session', session: S1 }, log(), aliases, [{ request: 'toolu_2', session: S1, at: 9 }, { request: 'toolu_x', session: S2, at: 9 }]);
     expect(shape(items)).toEqual(['system:1', 'work:2', 'message:2', 'agents:3,4', 'human:6', 'work:7', 'question:7', 'agents:8', 'request:toolu_2', 'system:10']);
+    expect(items.find((i) => i.kind === 'question')).toMatchObject({ answered: { text: 'user_id' } });
   });
 
   it("draws a human event addressed elsewhere nowhere in this channel, and an untagged one only in the group", () => {

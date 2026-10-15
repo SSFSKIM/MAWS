@@ -58,9 +58,10 @@ function SessionActions({ session }: { session: DeskSession }) {
   const [confirming, setConfirming] = useState(false);
   const can = capabilities(session);
   const ended = session.group === 'ended';
-  const button = 'rounded-sm border border-border-strong px-2 py-0.5 text-ui-sm hover:bg-bg-hover disabled:cursor-not-allowed disabled:text-fg-faint disabled:hover:bg-transparent';
+  const button = 'shrink-0 rounded-sm border border-border-strong px-2 py-0.5 text-ui-sm hover:bg-bg-hover disabled:cursor-not-allowed disabled:text-fg-faint disabled:hover:bg-transparent';
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-2">
+    // The header's own width bounds it: a confirmation's words truncate rather than run under the depth column.
+    <span className="ml-auto flex min-w-0 items-center gap-2">
       <RpcStatus nonce={rpc} />
       {ended ? (
         <button type="button" className={button} disabled={!can.resume.can} title={can.resume.reason ?? undefined} onClick={async () => setRpc(await connection.rpc(member, session.machine, 'resume', { session: session.session }))}>
@@ -68,7 +69,9 @@ function SessionActions({ session }: { session: DeskSession }) {
         </button>
       ) : confirming ? (
         <>
-          <span className="text-ui-sm text-fg-muted">{can.retire.note ? `Retire ${session.alias}? This ${can.retire.note}.` : `Retire ${session.alias}? Its job stops.`}</span>
+          <span className="min-w-0 truncate text-ui-sm text-fg-muted" title={can.retire.note ? `This ${can.retire.note}.` : 'Its job stops.'}>
+            {can.retire.note ? `Retire ${session.alias}? This ${can.retire.note}.` : `Retire ${session.alias}? Its job stops.`}
+          </span>
           <button
             type="button"
             className={`${button} text-danger`}
