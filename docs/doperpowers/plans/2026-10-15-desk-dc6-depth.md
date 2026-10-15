@@ -315,5 +315,15 @@ registrations through `connectDepth()`.
   unavailable; the streaming entry as settled above; `compact` is
   session-wide (`SESSION_WIDE_KINDS`); DX3 `diff {sub}` is up. DC6 merges
   `smns-erb` to build on them.
+- 2026-10-15, composite `cd2667d8` (DX4): in a main-scope sub a
+  subagent's `block-row` settles its block at once (the main sub never
+  carries a subagent's rows; only main-loop blocks wait for their `row`);
+  an `end` may be a sub's first message at n 0 (ended before its snapshot:
+  unknown session, bridge not ready, a cut row never on disk), drawn as
+  reconnecting, not empty, while DC5's shell resubscribes with backoff on
+  `discontinuity`. Rows arrive in strict disk order within a transcript,
+  live as in history (DC7's daemon, from DC2's revised DX5 notices).
+  DC5's renderer cut landed as `5bd20087` on `smns-erb-web`
+  (`DEFAULT_ACTIONS` to `view/default-actions.ts`).
 
 ## Outcomes & Retrospective
