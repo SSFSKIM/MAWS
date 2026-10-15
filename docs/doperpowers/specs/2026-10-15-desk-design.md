@@ -1750,10 +1750,10 @@ entry's `upTo`, the snapshot and the live part neither overlap nor leave a gap. 
 tool's, whose block streamed as none of the three kinds) settles nothing and is simply drawn.
 
 **Discontinuity.** A gap in `n`, a hub restart, or a dropped connection makes the browser subscribe again for a fresh
-snapshot. A gap in the bridge's own stream (DX5's `gap`), and a `resync` arriving on a DX5 subscription the daemon
-already holds (a module reload, or a child that answered before the mod's first `resync`), each end every
-subscription they touch with `end {reason: "discontinuity"}`, and the browser does the same. Nothing is resumed from a
-hub buffer.
+snapshot. A gap in the bridge's own stream (DX5's `gap`), and the end of a DX5 subscription the daemon holds (the
+child ends every open one when it applies any `resync` after its first: a module reload, a replacement child), each
+end every DX4 subscription they touch with `end {reason: "discontinuity"}`, and the browser does the same. Nothing is
+resumed from a hub buffer.
 
 **Settlement (confirmed by DC2, DX4's producer).** `settled.outcome` is one of `allow`, `deny`, `answered`,
 `withdrawn`. `winner` and `by` name who decided: `web` with `by` the member id; `terminal` with `by` `"terminal"`;
@@ -2713,16 +2713,20 @@ a hub that connects into machines (§2).
   on the hub's routing (DX6). (2) The browser's `diff` had no machine-side
   frame: DX2 gains `diff` down. (3) A compaction's outcome had no route to
   a browser: DX4 gains `compact`, outside subscriptions, carrying the
-  RPC's nonce. (4) A `resync` on a DX5 subscription the daemon already
-  holds ends the DX4 subscriptions it touches, as a `gap` does. A child
-  can answer before the mod's first `resync`, so a subscriber could take
-  an empty snapshot and then lose the prefix of a message already
-  streaming. (5) Resume's "live anywhere" means live on the session's
-  machine, since a session's transcript lives where it ran. Still open,
-  with DC2: DX5 must give DC7 a transcript cut and an order for rows, so a
-  snapshot never holds a row and its streaming block together, and no
-  live row arrives ahead of its `block-row` (DX5's snapshot keeps no row
-  cut today, and the mod's `block-row` can trail the row on disk). DC7's
+  RPC's nonce. (4) A child could answer before the mod's first `resync`,
+  so a subscriber could take an empty snapshot and then lose the prefix
+  of a message already streaming. DC2's M4 makes the child hold `GET
+  /events` until its first `resync` is applied, and end every open DX5
+  subscription on any later one; a DX5 subscription ending ends the DX4
+  subscriptions it touches, as a `gap` does. (5) Resume's "live anywhere"
+  means live on the session's machine, since a session's transcript lives
+  where it ran. And DX5 gives DC7 a transcript cut and an order for rows
+  (DC2's M4, agreed): every row the mod observes gets one notice before it
+  is written (`block-row` for a response row, `row-seen` for any other),
+  the snapshot carries the per-loop `cut` of notices applied, history is
+  read from disk up to the cut and live rows follow their notices, and a
+  `block-row` for a row already emitted unnamed ends the DX4 subscription
+  as a discontinuity. DC7's
   plan is amended to put its safeguards ahead of the paths they protect:
   the policy, read-only delivery included, comes before any remote
   execution or outside-origin delivery is enabled. Flags DC2, DC3, DC5,
