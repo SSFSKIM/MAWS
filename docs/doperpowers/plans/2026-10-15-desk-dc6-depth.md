@@ -346,6 +346,23 @@ registrations through `connectDepth()`.
   it mounts; the composite's writer relays it.
   Date/Author: 2026-10-15, composite's writer (DC5's answer, the writer's
   ruling).
+- Decision (M3): The `transcript` slot's props are fixed (composite
+  `d7ad26d8`, DC5 `55248421` on `smns-erb-web`, `shell/slots.ts:22–28`):
+  `{project, session: DeskSession, plane: SessionPlane, range: {from:
+  string | null, to: string | null}}`, mounted once per fold of a direct
+  channel's working record. Each end is the `src` of the exchange item
+  bounding the fold — `<row uuid>#<span index>` for a `<message>` span, the
+  call id for a question — and null when open (the first fold's `from`, a
+  live session's last fold's `to`). The slot owns the cut at span
+  granularity through the to-human Presenter. M3's proof adds: a row with
+  unmarked text and a bounding marked span (text drawn, span not); a fold
+  bounded by a question's call id; `to` null on a live session drawing rows
+  that arrive after the last item.
+  Date/Author: 2026-10-15, composite's writer.
+- Decision: Heavy commands run directly, one at a time, once the load check
+  clears; browser suites stay on the Linux lane; no effort on the slot
+  wrapper. Refines the Linux-lane entry above.
+  Date/Author: 2026-10-15, the owner via the composite's writer.
 
 ## Surprises & Discoveries
 - 2026-10-15 (from DC2's M3, built, in review, via the composite's
