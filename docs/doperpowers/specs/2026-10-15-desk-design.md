@@ -2403,7 +2403,7 @@ from `App.tsx`.
 
 ```ts
 type SessionTarget = { machine: string; session: string; agentId: string | null }; // agentId null: the main thread
-type SubscriptionMessage = SessionMessage<'snapshot' | 'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage'>;
+type SubscriptionMessage = SessionMessage<'snapshot' | 'row' | 'chunk' | 'block-row' | 'step-end' | 'rows' | 'subagents' | 'diff' | 'usage'>;
 interface SubscriptionListener {
   message(message: SubscriptionMessage): void; // snapshot (n 0) first, then n = 1, 2, … with no gap
   reset(): void;                                // a discontinuity the client recovers from: drop what was delivered
