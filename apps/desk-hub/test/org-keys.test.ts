@@ -52,6 +52,11 @@ const textOf = async (response: Response) => {
 describe('wrapped org keys', () => {
   it('two first posts that race: one sets the key check and key auth in one step, the other is refused', async () => {
     expect(await list()).toEqual({ key_check: null, keys: [] });
+    // Before the first key there is no proof to ask for: a malformed first post is refused for its shape, and sets nothing.
+    const malformed = await post(ADMIN, wrappedKey({ iv: random(16) }));
+    expect(malformed.status).toBe(400);
+    expect(await textOf(malformed)).toMatchObject({ error: 'bad-shape' });
+    expect(await list()).toEqual({ key_check: null, keys: [] });
     const other = wrappedKey({ check: await keyCheck(await OTHER_KEY), auth: await keyAuth(await OTHER_KEY), label: 'another key' });
     const [a, b] = await Promise.all([post(ADMIN, wrappedKey()), post(ADMIN, other)]);
     expect([a.status, b.status].sort()).toEqual([201, 403]);
@@ -89,6 +94,12 @@ describe('wrapped org keys', () => {
   it('the attack without the key — junk under the public check, then every real record deleted — is refused at each step', async () => {
     const before = await list();
     const stolen = random(32);
+    // Without the key, the shape of what is posted tells nothing either: every post is not-key-holder first.
+    for (const body of [wrappedKey({ auth: undefined }), wrappedKey({ auth: 'not base64url!' }), wrappedKey({ auth: stolen, iv: random(16) }), { auth: stolen }, {}]) {
+      const response = await post(ADMIN, body);
+      expect(response.status, JSON.stringify(body)).toBe(403);
+      expect(await textOf(response)).toMatchObject({ error: 'not-key-holder' });
+    }
     const junk = await post(ADMIN, wrappedKey({ auth: stolen, wrapped: random(48) }));
     expect(junk.status).toBe(403);
     expect(await textOf(junk)).toMatchObject({ error: 'not-key-holder' });
@@ -119,7 +130,6 @@ describe('wrapped org keys', () => {
       { iv: random(16) },
       { wrapped: random(32) },
       { check: random(31) },
-      { auth: undefined },
       { method: 'password' },
       { method: 'passkey' },
       { method: 'passphrase', credential: random(20) },

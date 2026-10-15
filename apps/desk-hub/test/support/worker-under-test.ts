@@ -6,12 +6,14 @@
 //     projects, only the lease's lapse;
 //   - a `Project` that says which instance answers (a woken object is a new one), and takes a lease's renewal or close
 //     for any generation, as a late one from an older stream would arrive;
-//   - a `Registry` that takes a member, so a suite has a member who is not an admin.
+//   - a `Project` that holds a `hello` at its registration, so a close can arrive while the Registry answers;
+//   - a `Registry` that takes a member, so a suite has a member who is not an admin, and projects by the thousand.
 import { Machine as DeployedMachine, type Timing } from '../../src/objects/machine';
 import { Project as DeployedProject } from '../../src/objects/project';
 import { Registry as DeployedRegistry } from '../../src/objects/registry';
 import type { DownFrame } from '../../src/protocol/machine';
-import { MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
+import type { ProjectRecord } from '../../src/protocol/identity';
+import { ABORT_REASON, MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_HOLD_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, PROJECTS_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
 
 export { default } from '../../src/worker';
 
@@ -19,6 +21,17 @@ export { default } from '../../src/worker';
 export class Registry extends DeployedRegistry {
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === PROJECTS_PATH) {
+      const { count, prefix } = (await request.json()) as { count: number; prefix: string };
+      const created = new Date().toISOString();
+      this.ctx.storage.transactionSync(() => {
+        for (let i = 0; i < count; i++) {
+          const id = `${prefix}-${String(i).padStart(12, '0')}`;
+          this.ctx.storage.sql.exec('INSERT OR IGNORE INTO projects (id, name, registered_by, created, archive_machine) VALUES (?, ?, ?, ?, NULL)', id, `${id} ${'n'.repeat(160)}`, 'suite', created);
+        }
+      });
+      return new Response('added');
+    }
     if (url.pathname !== MEMBER_PATH) return super.fetch(request);
     const { email, role } = (await request.json()) as { email: string; role: 'admin' | 'member' };
     const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
@@ -38,7 +51,7 @@ export class Machine extends DeployedMachine {
       this.ctx.storage.kv.put('timing', { heartbeatMs: Number(url.searchParams.get('heartbeatMs')), leaseMs: Number(url.searchParams.get('leaseMs')) });
       return new Response('timed');
     }
-    if (url.pathname === MACHINE_ABORT_PATH) this.ctx.abort('terminated by the suite');
+    if (url.pathname === MACHINE_ABORT_PATH) this.ctx.abort(ABORT_REASON);
     return super.fetch(request);
   }
 
@@ -56,8 +69,27 @@ export class Machine extends DeployedMachine {
 }
 
 export class Project extends DeployedProject {
+  private held: { promise: Promise<void>; release: () => void } | undefined;
+
+  protected async register(project: string, name: string, machine: string): Promise<ProjectRecord> {
+    await this.held?.promise;
+    return super.register(project, name, machine);
+  }
+
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === PROJECT_HOLD_PATH) {
+      const { hold } = (await request.json()) as { hold: boolean };
+      if (hold && !this.held) {
+        let release!: () => void;
+        const promise = new Promise<void>((resolve) => (release = resolve));
+        this.held = { promise, release };
+      } else if (!hold && this.held) {
+        this.held.release();
+        this.held = undefined;
+      }
+      return new Response('held');
+    }
     if (url.pathname === PROJECT_LIFE_PATH) return new Response(this.life);
     if (url.pathname === PROJECT_LEASE_PATH) {
       const { op, ...ctx } = (await request.json()) as { op: 'renew' | 'closed'; org: string; project: string; machine: string; generation: number; leaseMs: number };

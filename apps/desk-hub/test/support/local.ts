@@ -12,7 +12,7 @@ import { inject } from 'vitest';
 import { startProxy, type Proxy } from '../../local/proxy.ts';
 import { AccessStandin, IDENTITY_HEADER } from '../../local/standin.ts';
 import { generateVapidKey } from '../../src/push/web-push';
-import { MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
+import { ABORT_REASON, MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_HOLD_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, PROJECTS_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
 
 const require = createRequire(import.meta.url);
 const { unstable_getMiniflareWorkerOptions } = require('wrangler') as typeof import('wrangler');
@@ -68,6 +68,16 @@ export async function startLocalHub() {
     return response;
   };
 
+  // workerd's own log lines. A line a suite said it expects (`expectRuntimeLog`) is kept for it to assert and not
+  // printed; every other goes out as Miniflare's default handler would print it, so an unexpected error stays visible.
+  const runtimeLogs: Array<{ level: string; message: string }> = [];
+  const expectedLogs: RegExp[] = [];
+  const handleStructuredLogs = ({ level, message }: { level: string; message: string }) => {
+    if (expectedLogs.some((pattern) => pattern.test(message))) return void runtimeLogs.push({ level, message });
+    if (level === 'error' || level === 'warn') console.error(message);
+    else console.log(message);
+  };
+
   const { workerOptions } = unstable_getMiniflareWorkerOptions(resolve(import.meta.dirname, '../../wrangler.jsonc'));
   const picked = workerOptions as Pick<V4WorkerOptions, 'durableObjects' | 'compatibilityDate' | 'compatibilityFlags' | 'bindings' | 'assets'>;
   let port = 0;
@@ -76,6 +86,7 @@ export async function startLocalHub() {
       convertV4MiniflareOptions({
         host: '127.0.0.1',
         port,
+        handleStructuredLogs,
         resourcePersistencePath: persist,
         workers: [
           {
@@ -163,17 +174,32 @@ export async function startLocalHub() {
       await mf.unsafeEvictDurableObject('desk-hub', className, { name, webSockets });
     },
     /** Terminates a machine's object (`ctx.abort()`): its memory and its stream end, and nothing tells its projects.
-     * `evict` cannot do this to a `Machine` with an open stream, which workerd holds as an active reference. */
+     * `evict` cannot do this to a `Machine` with an open stream, which workerd holds as an active reference. The seam's
+     * request fails with the abort's own reason, and only that failure is taken for a termination. */
     async terminate(machine: string) {
-      await seam('MACHINE', machine, MACHINE_ABORT_PATH).then(
-        () => {
-          throw new Error('the Machine object outlived its abort');
-        },
-        (error: unknown) => {
-          if (String(error).includes('outlived')) throw error;
-        },
-      );
+      let failure: unknown;
+      try {
+        await seam('MACHINE', machine, MACHINE_ABORT_PATH);
+      } catch (error) {
+        failure = error;
+      }
+      if (!(failure instanceof Error && failure.message.includes(ABORT_REASON))) {
+        throw new Error(`the Machine was not terminated: ${failure === undefined ? 'its seam answered' : String(failure)}`);
+      }
     },
+    /** Holds, or releases, a project's `hello`s at their registration. */
+    async holdHellos(project: string, hold: boolean) {
+      await seam('PROJECT', project, PROJECT_HOLD_PATH, { hold });
+    },
+    /** Puts `count` projects straight into the Registry, with long names. */
+    async addProjects(count: number, prefix: string) {
+      await seam('REGISTRY', ORG, PROJECTS_PATH, { count, prefix });
+    },
+    /** Takes workerd's log lines matching `pattern` out of the output, kept in `runtimeLogs` for the suite to assert. */
+    expectRuntimeLog(pattern: RegExp) {
+      expectedLogs.push(pattern);
+    },
+    runtimeLogs,
     /** Stops the runtime and starts it again on its stored state, as a redeploy does: every object restarts and every
      * connection drops. */
     async restart() {
