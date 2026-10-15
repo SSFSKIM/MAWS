@@ -10,5 +10,6 @@ const hub = process.env.DESK_HUB_URL ?? 'http://127.0.0.1:8787';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: { outDir: 'dist', emptyOutDir: true },
-  server: { proxy: { '/api': { target: hub, ws: true, changeOrigin: true } } },
+  // /machine too: an enrollment code made in dev names this origin as the hub, and the machine redeems it here.
+  server: { proxy: { '/api': { target: hub, ws: true, changeOrigin: true }, '/machine': { target: hub, changeOrigin: true } } },
 });

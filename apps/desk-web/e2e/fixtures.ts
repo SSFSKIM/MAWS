@@ -8,7 +8,7 @@ import { VECTOR_KEY } from '../test/vectors';
 import { DESK_DB } from '../src/store/idb';
 import { DOUBLE_ORG } from '../test/double/hub-double';
 
-const DIST = join(import.meta.dirname, '..', 'dist');
+export const DIST = join(import.meta.dirname, '..', 'dist');
 
 export const test = base.extend<{ hub: HubDouble }>({
   // eslint-disable-next-line no-empty-pattern

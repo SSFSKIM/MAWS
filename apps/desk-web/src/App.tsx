@@ -1,13 +1,15 @@
 // The desk's frame: sign-in (Access admits the person; `/api/me` names the member), the device's org key, the grid's
 // socket, and the route — the grid, or a project.
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { fetchMe, SignInError, type Me } from './hub/me';
 import { loadDeviceKey, useKeyHolder } from './key/holder';
 import { hubBase } from './project/registry';
 import { followHistory, useDeskLayout } from './shell/layout';
 import { startGrid, useGrid } from './state/grid';
 import { GridView } from './views/grid/GridView';
+import { KeyDialog } from './views/key/KeyDialog';
+import { MachinesDialog } from './views/machines/MachinesDialog';
 import { ProjectView } from './views/project/ProjectView';
 
 const queries = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
@@ -40,20 +42,26 @@ function SignedIn() {
   return <Desk me={me.data} />;
 }
 
+type Panel = 'key' | 'machines' | null;
+
 function Desk({ me }: { me: Me }) {
   const route = useDeskLayout((s) => s.route);
+  const [panel, setPanel] = useState<Panel>(null);
+  const close = useCallback(() => setPanel(null), []);
   useEffect(() => followHistory(), []);
   useEffect(() => startGrid(hubBase()), []);
   useEffect(() => void loadDeviceKey(me.org.id), [me.org.id]);
   return (
     <div className="grid h-full grid-rows-[var(--toolbar-h)_minmax(0,1fr)]">
-      <TopBar me={me} />
-      {route.view === 'grid' ? <GridView /> : <ProjectView key={route.project} project={route.project} channel={route.channel} />}
+      <TopBar me={me} open={setPanel} />
+      {route.view === 'grid' ? <GridView /> : <ProjectView key={route.project} me={me} project={route.project} channel={route.channel} />}
+      {panel === 'key' && <KeyDialog me={me} onClose={close} />}
+      {panel === 'machines' && <MachinesDialog me={me} onClose={close} />}
     </div>
   );
 }
 
-function TopBar({ me }: { me: Me }) {
+function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
   const route = useDeskLayout((s) => s.route);
   const navigate = useDeskLayout((s) => s.navigate);
   const gridStatus = useGrid((s) => s.status);
@@ -76,7 +84,12 @@ function TopBar({ me }: { me: Me }) {
         )}
       </nav>
       <div className="ml-auto flex items-center gap-3 text-ui-sm text-fg-muted">
-        <span data-testid="key-state">{keyState === 'locked' ? 'Locked' : keyState === 'unlocked' ? 'Unlocked' : ''}</span>
+        <button type="button" onClick={() => open('machines')} className="rounded-sm px-1 hover:bg-bg-hover hover:text-fg">
+          Machines
+        </button>
+        <button type="button" onClick={() => open('key')} className="rounded-sm px-1 hover:bg-bg-hover hover:text-fg" data-testid="key-state" disabled={keyState === 'loading'}>
+          {keyState === 'locked' ? 'Locked' : keyState === 'unlocked' ? 'Unlocked' : ''}
+        </button>
         <span className="flex items-center gap-1.5" data-testid="grid-status">
           <span className={['h-1.5 w-1.5 rounded-full', gridStatus === 'open' ? 'bg-success' : 'bg-warning'].join(' ')} aria-hidden />
           {gridStatus === 'open' ? 'Live' : 'Reconnecting'}
