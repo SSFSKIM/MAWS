@@ -79,7 +79,7 @@ const listening = (path: string) => until(() => statSync(path, { throwIfNoEntry:
 
 describe('the socket file', () => {
   it('is 0600 once it listens', async () => {
-    const h = harness();
+    const h = harness({ peer: null });
     const path = h.backend.socketPathFor(A)!;
     await listening(path);
     await until(() => (statSync(path).mode & 0o777) === 0o600);
@@ -145,7 +145,8 @@ describe('a peer judged at accept, before anything is read', () => {
     expect(h.backend.inspect().peerModule).toBe('unavailable');
   });
 
-  it('the committed addon loaded reports loaded, and the test process as trusted root lets its own host in', async () => {
+  // macOS: the committed peer identity addon is a darwin-arm64 prebuild, loaded only on Apple silicon macOS.
+  it.skipIf(process.platform !== 'darwin')('the committed addon loaded reports loaded, and the test process as trusted root lets its own host in', async () => {
     const h = harness({ peer: testPeer() });
     expect(h.backend.inspect().peerModule).toBe('loaded');
     const host = await h.host(A);
