@@ -27,7 +27,7 @@ function world(ids: string[]) {
   const maps: ContentMap[] = [];
   let at = T0;
   const replicas = new Map<string, Doc>();
-  const land = (actor: string, edit: (doc: Doc) => void) => {
+  const land = (actor: string, edit: (doc: Doc) => void, { sameMinute = false }: { sameMinute?: boolean } = {}) => {
     const doc = replicas.get(actor) ?? newDoc();
     replicas.set(actor, doc);
     applyV2(doc, stateV2(host));
@@ -37,7 +37,7 @@ function world(ids: string[]) {
     off();
     for (const u of updates) {
       applyV1(host, u);
-      at += MIN;
+      if (!sameMinute) at += MIN; // fix wave 3: the store floors provenance to the minute
       maps.push(attributionMap(contentIdsOf(u), { insertActor: actor, deleteActor: actor, at }));
     }
   };
@@ -374,6 +374,19 @@ describe('fix wave 2 (R1’s leftovers): text edits after a restore (the re-revi
       ['.', 'human:restore', T0 + 4 * MIN],
     ]);
     expect(parts.filter((p) => p.kind === 'ins').map((p) => [p.text, p.by])).toEqual([['!', 'human:restore']]);
+  });
+});
+
+describe('fix wave 3: a restore and an edit in the same minute', () => {
+  it('credits a text edit made in the restore’s own minute to its writer, not the restorer', () => {
+    const w = world(['a']);
+    w.land('human', (doc) => setText(doc, 'a', 'title', [{ type: 'p', inline: [{ text: 'Initial title', marks: {} }] }])); // + 2 min
+    const v = w.mark();
+    w.land('human', (doc) => Y.deleteSlide(doc, 'a')); // + 3 min
+    w.land('human:restore', (doc) => transact(doc, () => importSlide(doc, slideIR('a', '<h1 id="title" style="font-size:72px">Initial title</h1>'), 'a0'))); // + 4 min
+    w.land('session:x', (doc) => setText(doc, 'a', 'title', [{ type: 'p', inline: [{ text: 'Later title', marks: {} }] }]), { sameMinute: true }); // + 4 min too
+    const key = changesOf(w, v).slides[0]?.elements.find((e) => e.id === 'title')?.keys.find((k) => k.key === 'text');
+    expect([key?.by, key?.at]).toEqual(['session:x', T0 + 4 * MIN]);
   });
 });
 

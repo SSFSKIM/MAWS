@@ -398,12 +398,33 @@ function replacedSlide(id: string, op: Op, prev: Doc, next: Doc, attributions: C
 function leafTouch(d: Delta | undefined, key: string, fallback: Touch): Touch {
   const op = d?.attrs?.[key];
   if (!op) return fallback;
-  // fix wave 2: a nested node (an element's text) inserted by the restore and edited since is its latest edit's
+  // fix wave 2: a nested node (an element's text) inserted by the restore and edited since is its latest edit's;
+  // fix wave 3: provenance is floored to the minute, so on a tie a changed leaf by someone other than the node's
+  // re-creator wins over the re-created structure
   const own = op.attribution ? touchOf(op.attribution) : null;
-  const inner = latestIn(op.value);
-  const t = inner && own ? later({ by: own.by, at: own.at }, inner) : (inner ?? own);
-  return t ? { by: t.by, at: t.at } : fallback;
+  const creator = own?.by ?? fallback.by;
+  let best: Touch | null = own ? { by: own.by, at: own.at } : null;
+  for (const t of touchesIn(op.value)) {
+    const [at, bestAt] = [t.at ?? -Infinity, best?.at ?? -Infinity];
+    if (best === null || at > bestAt || (at === bestAt && best.by === creator && t.by !== creator)) best = t;
+  }
+  return best ?? fallback;
 }
+
+/** Every attributed leaf inside a delta, in order. */
+function touchesIn(d: unknown, out: Touch[] = []): Touch[] {
+  if (!isDelta(d)) return out;
+  for (const op of Object.values(d.attrs ?? {})) {
+    if (op.attribution) out.push(pick(touchOf(op.attribution)));
+    touchesIn(op.value, out);
+  }
+  for (const op of d.children ?? []) {
+    if (op.attribution) out.push(pick(touchOf(op.attribution)));
+    if (Array.isArray(op.insert)) for (const child of op.insert) touchesIn(child, out);
+  }
+  return out;
+}
+const pick = (t: Touch): Touch => ({ by: t.by, at: t.at });
 
 /** The keys a node new under a kept id differs in from the earlier node, each credited by its leaf. */
 const replacedKeys = (a: YType, b: YType, d: Delta | undefined, fallback: Touch): KeyChange[] => differingKeys(a, b).map((k) => ({ ...k, ...leafTouch(d, k.key, fallback) }));
