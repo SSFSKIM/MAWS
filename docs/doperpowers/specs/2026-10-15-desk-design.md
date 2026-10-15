@@ -1104,6 +1104,462 @@ DX6 shapes, and DX7 by DC3 at G1; DX5 by DC2 at G1; DX8 by DC5 at G1. Each lands
 here, reviewed with its gate, and a later change to one is a Decision Log
 entry that flags its consumers.
 
+DX1's vectors, DX2, DX3, the DX4 envelope, the DX6 shapes, and DX7 are
+folded verbatim from DC3's M1 (MAWS `140c834b`, reviewed). Their
+reference is the protocol module `apps/desk-hub/src/protocol/` (exported
+as `desk-hub/protocol`) with its vectors
+`apps/desk-hub/src/protocol/vectors/codes.json`, written by `generate.py`
+beside them, a stdlib-Python implementation independent of the
+TypeScript one: where this text and the module ever differ, the module's
+tests decide and the text is corrected. Each subsection ends with what
+DC3's later milestones extend. DX5 is DC2's; DX8 waits for DC5.
+
+Conventions throughout: hub-owned multi-word fields are snake_case (as smns's log and DX6's `input_sha256`); fields
+that pass through from the engine keep the engine's camelCase (`turnId`, `agentId`, `upTo`, `waitingFor`). Times are
+ISO 8601 UTC with milliseconds. A nonce is 128 random bits, base64url without padding (22 characters).
+
+### DX1 — The authentication code and its vectors (owner: this document; written by DC3 at G1)
+
+**The rule, for every shape that carries a code** (DX1 log events; DX4 `raised`, `settled`, `delivery`; DX6 RPCs).
+The code is HMAC-SHA256, keyed with the 256-bit org key, over the bytes
+
+    <domain> LF <project id> LF <RFC 8785 canonical JSON of the covered object>
+
+all UTF-8, where `<project id>` is the `.smns` id of the project the verifier serves and the domain is the shape's own:
+
+| shape | domain |
+| --- | --- |
+| log event | `smns-hub-log-v1` |
+| RPC | `smns-hub-rpc-v1` |
+| `raised` | `smns-hub-raised-v1` |
+| `settled` | `smns-hub-settled-v1` |
+| `delivery` | `smns-hub-delivery-v1` |
+
+The covered object is the shape without the code's own value:
+- a shape whose `mac` is `{"nonce", "value"}` (log events, `raised`, `settled`, `delivery`) is covered with `mac`
+  reduced to `{"nonce": …}`, every other field included, unknown ones too;
+- a log event whose `writer` begins `hub/` is covered without `writer`, `seq`, and `ts` as well (the hub assigns them
+  after the browser computed the code); every other writer's event is covered with them;
+- an RPC carries its nonce as its own top-level field (`nonce`, its id) and the value alone as `mac` (a string): it is
+  covered without `mac`, i.e. exactly `{"args", "created", "machine", "member", "nonce", "project", "rpc"}`.
+
+`mac.value` (and an RPC's `mac`) is the 32-byte HMAC, base64url without padding (43 characters). A verifier compares
+in constant time, and treats a shape with no usable nonce, a value that is not base64url, or anything the canonical
+form refuses as failing.
+
+**Canonical JSON (RFC 8785, JCS), as the implementations must agree byte for byte.** No whitespace. Object keys sorted
+by their UTF-16 code units — not by code point, which is what Python's `sort_keys` does: `"😀"` (U+1F600, units
+D83D DE00) sorts before `"\ue000"` (U+E000); sort by `key.encode("utf-16-be")` in Python. Strings as ECMAScript's
+`JSON.stringify` writes them: `\"` and `\\`, the short escapes `\b \f \n \r \t`, every other code point below U+0020
+as `\u00xx` in lowercase hex, and everything else as itself (no escape for `/`, U+007F, U+2028, U+2029, or non-ASCII;
+Python's `json.dumps(s, ensure_ascii=False)` agrees). A string holding a lone surrogate is refused. A key whose
+value is absent is absent (the TypeScript side drops `undefined`, as `JSON.stringify` does on the wire).
+
+**Numbers (RFC 8785 §3.2.2.3).** Every number, integral or not, is the IEEE-754 double nearest it, written as
+ECMAScript's Number::toString writes that double — which is what `JSON.stringify` does. Tool inputs (`raised.input`,
+and the `input_sha256` an RPC's digest carries) are arbitrary JSON, so fractions, exponents, and integers past 2^53
+all reach the code. The layout, for a positive double with shortest round-trip digits `s` (`k` of them) and value
+`0.s × 10^n`: `s` followed by `n − k` zeros when `k ≤ n ≤ 21`; `s` with a point after its first `n` digits when
+`0 < n ≤ 21`; `0.` then `−n` zeros then `s` when `−6 < n ≤ 0`; otherwise `d[.ddd]e±(n−1)` (exponent sign always
+written, `e+21`, `e-7`). Zero, negative zero included, is `0`; a negative number is `-` and its magnitude; NaN and the
+infinities are refused. **In Python:** convert every `int` and `float` with `float()` — never `str(int)`, which keeps
+digits a double cannot hold (2^53 + 1 must become `9007199254740992`); take the digits and exponent from
+`repr(x)` (the shortest string that round-trips, as ECMAScript's digits are; `decimal.Decimal(repr(x)).as_tuple()`
+gives both) and apply the layout above. `es_number` in `generate.py` is that reference, checked against the table
+below.
+
+**The request digest** an answer or decision RPC carries (DX6) is `{session, request, tool, input_sha256}`, where
+`input_sha256` is the lowercase hex SHA-256 of the UTF-8 canonical JSON of the tool input as the browser drew it.
+
+**Vectors.** The same cases, machine-readable, with the covered bytes also in hex, are
+`apps/desk-hub/src/protocol/vectors/codes.json`; DC4 tests its Python against that file or this text.
+
+All cases use the org key `AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8` (the 32 bytes 0x00 to 0x1f, base64url).
+
+**Numbers.** Each JSON text, parsed and canonicalized, gives the canonical text beside it:
+
+| JSON | canonical | case |
+| --- | --- | --- |
+| `0.5` | `0.5` | a fraction |
+| `-0` | `0` | negative zero, as an integer literal |
+| `-0.0` | `0` | negative zero, as a fraction literal |
+| `100` | `100` | an integer |
+| `1e20` | `100000000000000000000` | the largest power of ten written plainly |
+| `1e21` | `1e+21` | the smallest power of ten written with an exponent |
+| `123456789012345680000` | `123456789012345680000` | a large integral value, plainly |
+| `1.2345678901234568e21` | `1.2345678901234568e+21` | a large integral value, past the plain range |
+| `1e-6` | `0.000001` | the smallest power of ten written plainly |
+| `1e-7` | `1e-7` | the largest power of ten below 1 written with an exponent |
+| `-1.5e-7` | `-1.5e-7` | a negative fraction with an exponent |
+| `9007199254740992` | `9007199254740992` | 2^53, the last integer every double holds |
+| `9007199254740993` | `9007199254740992` | 2^53 + 1, which no double holds: it becomes 2^53 |
+| `333333333.33333329` | `333333333.3333333` | RFC 8785's sample: the shortest digits that round-trip |
+| `4.50` | `4.5` | RFC 8785's sample: trailing zeros go |
+| `2e-3` | `0.002` | RFC 8785's sample |
+| `1E30` | `1e+30` | RFC 8785's sample |
+| `0.000000000000000000000000001` | `1e-27` | RFC 8785's sample |
+| `5e-324` | `5e-324` | the smallest subnormal |
+| `1.7976931348623157e308` | `1.7976931348623157e+308` | the largest double |
+
+**Digests** (`input_sha256` over the canonical JSON of a tool input):
+
+- **bash-input**: input `{"command": "pnpm e2e", "description": "Run the e2e suite"}`, canonical `{"command":"pnpm e2e","description":"Run the e2e suite"}`, `input_sha256` `8294a36b488d0be1f3033e6f1c6d7c22eccefd6717f1d6552f6604feef65024e`.
+- **input-with-fraction**: input `{"command": "python3 -c 'import time; time.sleep(0.5)'", "timeout": 0.5, "budget": 1e+21, "id": 9007199254740993}`, canonical `{"budget":1e+21,"command":"python3 -c 'import time; time.sleep(0.5)'","id":9007199254740992,"timeout":0.5}`, `input_sha256` `5866483371fad05cc4e773dbcb9e2c6e11506ce7c80c5d680942b1e92daee06b`.
+
+**say-ascii** (domain `smns-hub-log-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`)
+
+- input (as stored, with its code; JSON, non-ASCII written as escapes):
+
+  ```json
+  {"ts": "2026-10-15T08:01:02.123Z", "writer": "SK.local/e0ad139c-18bc-45bd-9489-be8653145f80", "seq": 42, "kind": "say", "from": "doperpowers-1e", "to": [{"session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "alias": "maws-45"}], "text": "your change renames a column I read", "mac": {"nonce": "AQEBAQEBAQEBAQEBAQEBAQ", "value": "qqDqpjy4rH_1vmjD-dlpiPrQIfbyLKb1IIsbbyuJ9qk"}}
+  ```
+- covered bytes, UTF-8, written as a JSON string (so every escape is visible; the hex is in codes.json):
+
+  ```json
+  "smns-hub-log-v1\n6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\n{\"from\":\"doperpowers-1e\",\"kind\":\"say\",\"mac\":{\"nonce\":\"AQEBAQEBAQEBAQEBAQEBAQ\"},\"seq\":42,\"text\":\"your change renames a column I read\",\"to\":[{\"alias\":\"maws-45\",\"session\":\"67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b\"}],\"ts\":\"2026-10-15T08:01:02.123Z\",\"writer\":\"SK.local/e0ad139c-18bc-45bd-9489-be8653145f80\"}"
+  ```
+- code: `qqDqpjy4rH_1vmjD-dlpiPrQIfbyLKb1IIsbbyuJ9qk`
+
+**message-unicode** (domain `smns-hub-log-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`)
+
+- input (as stored, with its code; JSON, non-ASCII written as escapes):
+
+  ```json
+  {"ts": "2026-10-15T08:02:03.456Z", "writer": "mini/9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a", "seq": 7, "kind": "message", "from": "maws-45", "to": "host", "text": "\uceec\ub7fc \uc774\ub984\uc740 `user_id`\ub85c \uc720\uc9c0\ud560\uac8c\uc694 \ud83d\ude42\n\tquote \" backslash \\ nul \u0000 unit-sep \u001f bs \b ff \f del \u007f ls \u2028 \ub05d", "src": "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a:0", "mac": {"nonce": "AgICAgICAgICAgICAgICAg", "value": "kY1lxWBlgUQhtE7M5FYsanYsu4eZ5bBxeX3qGlanu18"}}
+  ```
+- covered bytes, UTF-8, written as a JSON string (so every escape is visible; the hex is in codes.json):
+
+  ```json
+  "smns-hub-log-v1\n6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\n{\"from\":\"maws-45\",\"kind\":\"message\",\"mac\":{\"nonce\":\"AgICAgICAgICAgICAgICAg\"},\"seq\":7,\"src\":\"5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a:0\",\"text\":\"\uceec\ub7fc \uc774\ub984\uc740 `user_id`\ub85c \uc720\uc9c0\ud560\uac8c\uc694 \ud83d\ude42\\n\\tquote \\\" backslash \\\\ nul \\u0000 unit-sep \\u001f bs \\b ff \\f del \u007f ls \u2028 \ub05d\",\"to\":\"host\",\"ts\":\"2026-10-15T08:02:03.456Z\",\"writer\":\"mini/9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a\"}"
+  ```
+- code: `kY1lxWBlgUQhtE7M5FYsanYsu4eZ5bBxeX3qGlanu18`
+
+**hub-human** (domain `smns-hub-log-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`)
+
+- input (as stored, with its code; JSON, non-ASCII written as escapes):
+
+  ```json
+  {"ts": "2026-10-15T08:05:00.000Z", "writer": "hub/4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c", "seq": 3, "kind": "human", "from": "human", "member": "4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c", "to": [{"session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "alias": "maws-45"}], "text": "keep user_id", "created": "2026-10-15T08:04:59.870Z", "mac": {"nonce": "AwMDAwMDAwMDAwMDAwMDAw", "value": "NE9MrZ6PlMIlulrJzoHRH8gj4cZnaFF2erR0QaVpEP8"}}
+  ```
+- covered bytes, UTF-8, written as a JSON string (so every escape is visible; the hex is in codes.json):
+
+  ```json
+  "smns-hub-log-v1\n6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\n{\"created\":\"2026-10-15T08:04:59.870Z\",\"from\":\"human\",\"kind\":\"human\",\"mac\":{\"nonce\":\"AwMDAwMDAwMDAwMDAwMDAw\"},\"member\":\"4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c\",\"text\":\"keep user_id\",\"to\":[{\"alias\":\"maws-45\",\"session\":\"67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b\"}]}"
+  ```
+- code: `NE9MrZ6PlMIlulrJzoHRH8gj4cZnaFF2erR0QaVpEP8`
+
+**nested-object** (domain `smns-hub-log-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`)
+
+- input (as stored, with its code; JSON, non-ASCII written as escapes):
+
+  ```json
+  {"ts": "2026-10-15T08:06:00.001Z", "writer": "SK.local/e0ad139c-18bc-45bd-9489-be8653145f80", "seq": 43, "kind": "say", "from": "doperpowers-1e", "to": "*", "text": "every field is covered, unknown ones too", "meta": {"z": [1, -2, 0, 9007199254740991, true, false, null, {"b": "", "a": []}], "\u00e9": "e-acute (U+00E9)", "\ud83d\ude00": "an astral key: UTF-16 orders it before U+E000, code points after", "\ue000": "a private-use key (U+E000)", "A": "upper", "a": "lower", "": "the empty key"}, "mac": {"nonce": "BAQEBAQEBAQEBAQEBAQEBA", "value": "gvC-Es0bMfkLUM5mNlu750OrDozy_8wNYnVn-onWII0"}}
+  ```
+- covered bytes, UTF-8, written as a JSON string (so every escape is visible; the hex is in codes.json):
+
+  ```json
+  "smns-hub-log-v1\n6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\n{\"from\":\"doperpowers-1e\",\"kind\":\"say\",\"mac\":{\"nonce\":\"BAQEBAQEBAQEBAQEBAQEBA\"},\"meta\":{\"\":\"the empty key\",\"A\":\"upper\",\"a\":\"lower\",\"z\":[1,-2,0,9007199254740991,true,false,null,{\"a\":[],\"b\":\"\"}],\"\u00e9\":\"e-acute (U+00E9)\",\"\ud83d\ude00\":\"an astral key: UTF-16 orders it before U+E000, code points after\",\"\ue000\":\"a private-use key (U+E000)\"},\"seq\":43,\"text\":\"every field is covered, unknown ones too\",\"to\":\"*\",\"ts\":\"2026-10-15T08:06:00.001Z\",\"writer\":\"SK.local/e0ad139c-18bc-45bd-9489-be8653145f80\"}"
+  ```
+- code: `gvC-Es0bMfkLUM5mNlu750OrDozy_8wNYnVn-onWII0`
+
+**rpc-decide** (domain `smns-hub-rpc-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`)
+
+- input (as stored, with its code; JSON, non-ASCII written as escapes):
+
+  ```json
+  {"rpc": "decide", "project": "6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f", "machine": "mini", "member": "4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c", "created": "2026-10-15T08:07:00.000Z", "nonce": "BQUFBQUFBQUFBQUFBQUFBQ", "args": {"session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "decision": "allow", "digest": {"session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "request": "toolu_01QmZ7wq3V8nEXAMPLE", "tool": "Bash", "input_sha256": "8294a36b488d0be1f3033e6f1c6d7c22eccefd6717f1d6552f6604feef65024e"}}, "mac": "gbTIjG4zE2Zd6Gxpc1FxarxfVDufsjEwKg-K_L1pepQ"}
+  ```
+- covered bytes, UTF-8, written as a JSON string (so every escape is visible; the hex is in codes.json):
+
+  ```json
+  "smns-hub-rpc-v1\n6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\n{\"args\":{\"decision\":\"allow\",\"digest\":{\"input_sha256\":\"8294a36b488d0be1f3033e6f1c6d7c22eccefd6717f1d6552f6604feef65024e\",\"request\":\"toolu_01QmZ7wq3V8nEXAMPLE\",\"session\":\"67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b\",\"tool\":\"Bash\"},\"session\":\"67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b\"},\"created\":\"2026-10-15T08:07:00.000Z\",\"machine\":\"mini\",\"member\":\"4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c\",\"nonce\":\"BQUFBQUFBQUFBQUFBQUFBQ\",\"project\":\"6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\",\"rpc\":\"decide\"}"
+  ```
+- code: `gbTIjG4zE2Zd6Gxpc1FxarxfVDufsjEwKg-K_L1pepQ`
+
+**raised** (domain `smns-hub-raised-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`)
+
+- input (as stored, with its code; JSON, non-ASCII written as escapes):
+
+  ```json
+  {"request": "toolu_01QmZ7wq3V8nEXAMPLE", "session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "tool": "Bash", "input": {"command": "pnpm e2e", "description": "Run the e2e suite"}, "mac": {"nonce": "BgYGBgYGBgYGBgYGBgYGBg", "value": "EOZ2HgjEWZHiuKlv6wZ5CYduHZtbNIMEmqdXDrEo48M"}}
+  ```
+- covered bytes, UTF-8, written as a JSON string (so every escape is visible; the hex is in codes.json):
+
+  ```json
+  "smns-hub-raised-v1\n6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\n{\"input\":{\"command\":\"pnpm e2e\",\"description\":\"Run the e2e suite\"},\"mac\":{\"nonce\":\"BgYGBgYGBgYGBgYGBgYGBg\"},\"request\":\"toolu_01QmZ7wq3V8nEXAMPLE\",\"session\":\"67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b\",\"tool\":\"Bash\"}"
+  ```
+- code: `EOZ2HgjEWZHiuKlv6wZ5CYduHZtbNIMEmqdXDrEo48M`
+
+**raised-fraction** (domain `smns-hub-raised-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`)
+
+- input (as stored, with its code; JSON, non-ASCII written as escapes):
+
+  ```json
+  {"request": "toolu_01FracTi0nEXAMPLE", "session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "tool": "Bash", "input": {"command": "python3 -c 'import time; time.sleep(0.5)'", "timeout": 0.5, "budget": 1e+21, "id": 9007199254740993}, "mac": {"nonce": "CwsLCwsLCwsLCwsLCwsLCw", "value": "pVCnkJvM-Mtsc_48DN0yt1oG_XxdU_iLe4bVg6Rij2c"}}
+  ```
+- covered bytes, UTF-8, written as a JSON string (so every escape is visible; the hex is in codes.json):
+
+  ```json
+  "smns-hub-raised-v1\n6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\n{\"input\":{\"budget\":1e+21,\"command\":\"python3 -c 'import time; time.sleep(0.5)'\",\"id\":9007199254740992,\"timeout\":0.5},\"mac\":{\"nonce\":\"CwsLCwsLCwsLCwsLCwsLCw\"},\"request\":\"toolu_01FracTi0nEXAMPLE\",\"session\":\"67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b\",\"tool\":\"Bash\"}"
+  ```
+- code: `pVCnkJvM-Mtsc_48DN0yt1oG_XxdU_iLe4bVg6Rij2c`
+
+**settled** (domain `smns-hub-settled-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`)
+
+- input (as stored, with its code; JSON, non-ASCII written as escapes):
+
+  ```json
+  {"request": "toolu_01QmZ7wq3V8nEXAMPLE", "winner": "web", "outcome": "allow", "by": "4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c", "mac": {"nonce": "BwcHBwcHBwcHBwcHBwcHBw", "value": "8Wd8vAKTYnP3JIM_7yRz8iMKOFW-Xu1R0m06MAxQ-J0"}}
+  ```
+- covered bytes, UTF-8, written as a JSON string (so every escape is visible; the hex is in codes.json):
+
+  ```json
+  "smns-hub-settled-v1\n6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\n{\"by\":\"4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c\",\"mac\":{\"nonce\":\"BwcHBwcHBwcHBwcHBwcHBw\"},\"outcome\":\"allow\",\"request\":\"toolu_01QmZ7wq3V8nEXAMPLE\",\"winner\":\"web\"}"
+  ```
+- code: `8Wd8vAKTYnP3JIM_7yRz8iMKOFW-Xu1R0m06MAxQ-J0`
+
+**delivery** (domain `smns-hub-delivery-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`)
+
+- input (as stored, with its code; JSON, non-ASCII written as escapes):
+
+  ```json
+  {"event": {"writer": "hub/4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c", "seq": 3}, "session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "outcome": "recorded", "reason": "a terminal session the human closed", "mac": {"nonce": "CAgICAgICAgICAgICAgICA", "value": "emPX__7S4fcpC5kDiBl02XYIHeSlyer3ht4ZdBIqw8Q"}}
+  ```
+- covered bytes, UTF-8, written as a JSON string (so every escape is visible; the hex is in codes.json):
+
+  ```json
+  "smns-hub-delivery-v1\n6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\n{\"event\":{\"seq\":3,\"writer\":\"hub/4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c\"},\"mac\":{\"nonce\":\"CAgICAgICAgICAgICAgICA\"},\"outcome\":\"recorded\",\"reason\":\"a terminal session the human closed\",\"session\":\"67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b\"}"
+  ```
+- code: `emPX__7S4fcpC5kDiBl02XYIHeSlyer3ht4ZdBIqw8Q`
+
+**Negative vectors** — each must fail verification under the domain and project given:
+
+- **hub-human-fresh-nonce** (the hub re-sequenced a web human under a fresh nonce; verify under `smns-hub-log-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`, altered from `hub-human`):
+
+  ```json
+  {"ts": "2026-10-15T08:05:00.000Z", "writer": "hub/4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c", "seq": 3, "kind": "human", "from": "human", "member": "4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c", "to": [{"session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "alias": "maws-45"}], "text": "keep user_id", "created": "2026-10-15T08:04:59.870Z", "mac": {"nonce": "CQkJCQkJCQkJCQkJCQkJCQ", "value": "NE9MrZ6PlMIlulrJzoHRH8gj4cZnaFF2erR0QaVpEP8"}}
+  ```
+- **say-text-changed** (a covered field changed; verify under `smns-hub-log-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`, altered from `say-ascii`):
+
+  ```json
+  {"ts": "2026-10-15T08:01:02.123Z", "writer": "SK.local/e0ad139c-18bc-45bd-9489-be8653145f80", "seq": 42, "kind": "say", "from": "doperpowers-1e", "to": [{"session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "alias": "maws-45"}], "text": "your change renames a column I write", "mac": {"nonce": "AQEBAQEBAQEBAQEBAQEBAQ", "value": "qqDqpjy4rH_1vmjD-dlpiPrQIfbyLKb1IIsbbyuJ9qk"}}
+  ```
+- **hub-human-other-project** (a hub/ event moved to another project; verify under `smns-hub-log-v1`, project `0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59`, altered from `hub-human`):
+
+  ```json
+  {"ts": "2026-10-15T08:05:00.000Z", "writer": "hub/4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c", "seq": 3, "kind": "human", "from": "human", "member": "4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c", "to": [{"session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "alias": "maws-45"}], "text": "keep user_id", "created": "2026-10-15T08:04:59.870Z", "mac": {"nonce": "AwMDAwMDAwMDAwMDAwMDAw", "value": "NE9MrZ6PlMIlulrJzoHRH8gj4cZnaFF2erR0QaVpEP8"}}
+  ```
+- **rpc-nonce-changed** (an RPC replayed under another nonce; verify under `smns-hub-rpc-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`, altered from `rpc-decide`):
+
+  ```json
+  {"rpc": "decide", "project": "6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f", "machine": "mini", "member": "4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c", "created": "2026-10-15T08:07:00.000Z", "nonce": "CgoKCgoKCgoKCgoKCgoKCg", "args": {"session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "decision": "allow", "digest": {"session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "request": "toolu_01QmZ7wq3V8nEXAMPLE", "tool": "Bash", "input_sha256": "8294a36b488d0be1f3033e6f1c6d7c22eccefd6717f1d6552f6604feef65024e"}}, "mac": "gbTIjG4zE2Zd6Gxpc1FxarxfVDufsjEwKg-K_L1pepQ"}
+  ```
+- **raised-as-settled** (a code for one shape offered as another's; verify under `smns-hub-settled-v1`, project `6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f`, altered from `raised`):
+
+  ```json
+  {"request": "toolu_01QmZ7wq3V8nEXAMPLE", "session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b", "tool": "Bash", "input": {"command": "pnpm e2e", "description": "Run the e2e suite"}, "mac": {"nonce": "BgYGBgYGBgYGBgYGBgYGBg", "value": "EOZ2HgjEWZHiuKlv6wZ5CYduHZtbNIMEmqdXDrEo48M"}}
+  ```
+
+**Left for later milestones:** none in the rule or the vectors. M2 uses them to check that a `hub/` event's `member`
+matches the signed-in member (the hub never verifies a code; it holds no key).
+
+### DX2 — Machine ↔ hub (owner DC3; G1)
+
+**Transport.** One connection per machine, opened outbound and multiplexing its projects, as an HTTP pair:
+
+- **Down:** `GET /machine/stream`, a Server-Sent Events stream held by the machine's `Machine` object (one per
+  enrolled machine, named `<org>:<machine name>`). Each event is `event: <t>` and one `data:` line holding the frame's
+  JSON (which never holds a line break), then a blank line.
+- **Up:** `POST /machine/frames`, `Content-Type: application/x-ndjson`, one JSON frame per line, at most 4 MiB a
+  body, with the header `X-Desk-Generation: <n>` naming the stream the POST belongs to. The Worker routes each frame
+  to its project's `Project` object (`<org>:<project id>`).
+- **Admission.** The daemon sends its service token (`CF-Access-Client-Id`, `CF-Access-Client-Secret`) on every
+  request; Access turns it into the assertion whose `common_name` is the client id, and the Worker maps that client id
+  to the enrolled machine through the `Registry` (DX7). A client id the registry never enrolled is refused
+  (`403 {"error": "not-enrolled"}`) though Access admitted it, since Access's service-auth policy admits any service
+  token of the account.
+
+**The stream.** The first frame is `welcome {org, machine, generation, heartbeat_ms}`. `generation` counts the
+machine's streams (1, 2, …, kept in the object's storage): a new stream ends the previous one, and every later frame
+and POST belongs to the newest. The object writes `hb {at}` every `heartbeat_ms` (15 000); the daemon treats a stream
+silent for three periods as dead and reconnects with backoff. A client closing the stream reaches the object at once
+(the request's abort, compatibility flag `enable_request_signal`).
+
+**Frames down** (`DownFrame`):
+
+| `t` | fields | meaning |
+| --- | --- | --- |
+| `welcome` | `org`, `machine`, `generation`, `heartbeat_ms` | first on every stream |
+| `hb` | `at` | heartbeat |
+| `have` | `project`, `have` (vector), `archive` (bool) | the answer to `hello`: the hub's `{writer: max seq}` for the project, and whether this machine writes its archive |
+| `events` | `project`, `events` (log events) | events the machine lacks, each writer's in seq order, then live as they arrive |
+| `resend` | `project`, `writer`, `from` | a gap: upload `writer` again from seq `from` |
+| `refused` | `project`, `refusal` | an uploaded event refused (below) |
+| `rpc` | `rpc` | an RPC for this machine (DX6) |
+| `rpc-ack` | `project`, `nonce` | the hub recorded this result; stop republishing it |
+| `subscribe` | `project`, `session`, `sub` | serve a DX4 subscription |
+| `unsubscribe` | `project`, `sub` | end it |
+| `rows` | `project`, `session`, `sub`, `before`, `limit` | older transcript rows for a subscription, before row `before` |
+| `part` | `id`, `index`, `count`, `data` | a slice of a larger frame (below) |
+
+**Frames up** (`UpFrame`):
+
+| `t` | fields | meaning |
+| --- | --- | --- |
+| `hello` | `project`, `name`, `have` (vector) | opens a project on this stream: the machine's `{writer: max seq}`, and the project's name from `.smns` |
+| `events` | `project`, `events` | the machine's own writers' events, each writer's in seq order |
+| `rpc-result` | `project`, `nonce`, `outcome` | a result from the daemon's ledger (DX6) |
+| `session` | `message` | a DX4 message |
+| `pending` | `project`, `raised` (list) | the machine's complete pending set for the project |
+| `part` | as down | |
+
+`Refusal` is `{reason, writer?, seq?, message}`, `reason` one of `writer-not-yours` (a writer outside `<machine>/`,
+or `legacy/` from a machine that is not the project's archive machine), `conflict` (a payload at an existing
+`(writer, seq)` whose canonical form differs), `gap`, `bad-shape`, `too-large`, `stale-generation`.
+
+**The log handshake, per project.** The daemon sends `hello` with its vector; the hub answers `have` with its own and
+then streams, as `events`, every writer's suffix the machine lacks. The daemon uploads, as `events`, the suffix of
+its own writers (`<machine>/…`, sminos's `writer_id`) beyond the hub's vector; the archive machine also uploads the
+project's `legacy/` feeds (pre-`.smns` chats, frozen, so the one-payload rule keeps them intact). Inserts are
+idempotent on `(writer, seq)`; then both directions tail live. A machine sending `hello` for a project id the
+registry does not know registers it, under the `name` it sent; any enrolled machine of the org may.
+
+**After every (re)connect** the daemon sends, per project: `hello`; `pending` with its complete set (the hub drops any
+request of that machine's the set no longer holds); every `rpc-result` the hub has not acknowledged; and its
+presence as DX4 `machine` and `presence` messages.
+
+**Liveness is a lease** (M3 builds it): a `Project` holds a machine online only while its lease is fresh. The
+`Machine` object renews the lease on each heartbeat with every project the machine serves, and every renewal carries
+the stream's `generation`, so a renewal or close from an older stream is ignored. When the lease lapses, or the
+current generation's stream closes, the machine is offline, its subscriptions end (`end {reason:
+"machine-offline"}`), and its forwarded RPCs without a result become `uncertain` (DX6).
+
+**Frame bound.** Every frame, either direction, is at most 1 MiB of UTF-8. A larger one travels as `part` frames:
+each holds a slice of the frame's JSON text (`data`), all with one random `id` and the set's `count`, `index` from 0;
+the receiver joins the slices in index order when the last arrives, in whatever order they came, and parses the
+whole. A slice never splits a surrogate pair. (`toWire` and `PartAssembler` in `parts.ts`.)
+
+**Measured (M1's probe on the owner's account, 2026-10-15):** an SSE stream held by a Durable Object for 11 minutes
+with 15-second heartbeats, never evicted; a second stream idle 150 seconds between heartbeats also held, so the
+15-second period is margin, not a requirement found on `workers.dev`; a write from another object's RPC reached the
+stream (RPC 43–134 ms); the client's close reached the object at once through the request's abort.
+
+**Left for M2:** the POST's response body; `resend` and `refused` in use, and how a refusal also reaches the project's
+audit record; registration by `hello`; the archive flag in `have`. **For M3:** the lease's length and renewal frame,
+`rpc` forwarding and `rpc-ack`, the subscription frames in use.
+
+### DX3 — Browser ↔ hub (owner DC3; G1)
+
+**Transport.** WebSockets, JSON text frames, behind Access (the browser's Access session becomes the assertion on the
+upgrade request like any other):
+- `GET /api/projects/<project id>/socket` — a project's view, held by its `Project` object with the Hibernation API.
+  Each socket's member, visibility, and subscription ids ride in its attachment, so a woken object can route again.
+- `GET /api/registry/socket` — the grid, held by the org's `Registry` (M3).
+- `GET /api/me` — `{org: OrgRecord, member: MemberRecord}` for the signed-in member (DX7); `403 {"error":
+  "not-a-member"}` for a person Access admitted whom the org does not hold.
+
+**Frames up** on a project socket (`ProjectUp`):
+
+| `t` | fields | meaning |
+| --- | --- | --- |
+| `resume` | `after` | every event with an offset above `after` (0 is the start), then `caught-up`, then live |
+| `human` | `event` (a sealed `HumanEvent`) | a web `human`; the hub assigns `writer` `hub/<member>`, `seq`, `ts` and answers `human-ack` |
+| `rpc` | `rpc` | a sealed RPC (DX6); answered by `rpc-state` |
+| `subscribe` | `machine`, `session`, `sub` | a DX4 subscription; `sub` is the browser's own nonce, unique at the machine |
+| `unsubscribe` | `sub` | |
+| `rows` | `sub`, `before`, `limit` | older rows for a subscription |
+| `visibility` | `visible` | whether this tab shows the project; a visible tab holds back its member's pushes |
+| `part` | as DX2 | |
+
+`HumanDraft` is `{kind: "human", from: "human", member, to: "*" | [{session, alias}], text, created, wake?}`; the
+browser seals it as a log event (DX1), so `HumanEvent` is that plus `mac`. The hub accepts it only when `member` is
+the signed-in member.
+
+**Frames down** on a project socket (`ProjectDown`):
+
+| `t` | fields | meaning |
+| --- | --- | --- |
+| `welcome` | `project`, `member`, `head` | first on every socket: whom the hub admitted, and the project's latest offset |
+| `log` | `events`: `[{offset, event}]` | log events with their project offset beside them (never inside: a stored event's code verifies as it did on arrival) |
+| `caught-up` | `offset` | the backlog after `resume` is sent |
+| `human-ack` | `nonce`, `offset`, `writer`, `seq` | the web `human` with this `mac.nonce` is stored |
+| `session` | `message` | a DX4 message |
+| `pending` | `requests`: `[{machine, raised, terminal_only}]` | the project's pending set, on connect and whenever it changes (a raise, a settlement, a machine's republish, a `deadline` passing); `terminal_only` (below) |
+| `deliveries` | `deliveries` | the latest DX4 `delivery` per event and recipient, on connect |
+| `machines` | `machines`: `[{machine} + MachinePresence]` | machine presence, on connect and on change |
+| `rpc-state` | `nonce`, `state`, `outcome?` | `forwarded`, `done`, `failed`, or `uncertain` (DX6) |
+| `refused` | `refusal` (DX2's, with `nonce?`, `machine?`) | a refusal, to the sender and to the project's browsers as its audit record |
+| `part` | as DX2 | |
+
+**`terminal_only`** is the hub's, computed by its own clock: a background subagent's request whose `raised.deadline`
+has passed. Such a request stays pending (nothing is settled at the deadline) but only the terminal can answer it, and
+the web draws it as waiting in the terminal, without Allow or Deny. The web reads it from `pending` and never compares
+`deadline` with its own clock; the hub sends `pending` again when the deadline passes (an alarm, M3).
+
+**Grid** (`GridDown`, registry socket): `grid {projects: [ProjectSummary]}` on connect, then `summary {project}` on
+change; `ProjectSummary` is `{id, name, machines, machines_online, working, waiting}`.
+
+**Left for M2:** `resume`, `log`, `caught-up`, `human`, `human-ack`, and `refused` in use, and `welcome.head` from
+the stored log (M1 sends 0). **For M3:** the session-plane frames, `rpc-state`, `pending`, `deliveries`, `machines`,
+`visibility`, the registry socket and its summaries, the attachment's subscription ids.
+
+### DX4 — The session-plane envelope (owner DC3; G1)
+
+```ts
+type Envelope<K, Session, Sub, N> = {
+  project: string;            // .smns id
+  machine: string;            // the enrolled name
+  session: Session;
+  kind: K;
+  sub: Sub;
+  n: N;
+  body: SessionBodies[K];
+};
+// Discriminated by kind; each kind's invariants are in its type:
+type SessionMessage =
+  | Envelope<'snapshot', string, string, 0>                                          // a sub's first message
+  | Envelope<'row' | 'chunk' | 'rows' | 'subagents' | 'diff' | 'end', string, string, number>   // then n = 1, 2, …
+  | Envelope<'presence' | 'raised' | 'settled' | 'delivery', string, null, null>    // to every browser, outside subs
+  | Envelope<'machine', null, null, null>;                                            // names no session
+```
+
+(`session.ts` writes it as a mapped type over the kinds, one `Envelope` per kind, so a `chunk` without a sub or a
+`machine` message with a session fails to typecheck.)
+
+| `kind` | in a sub | body |
+| --- | --- | --- |
+| `snapshot` | yes (`n` 0) | `{rows, more, subagents, presence, streaming}`: rows newest first up to the last flushed row, as many as fit the frame budget; `more` whether older rows exist; `streaming`: the bridge's snapshot entries (DX5) passed through, each at least `{turnId, agentId, step, text, upTo}` for a message still streaming (`step` the model request's ordinal in the turn, `upTo` the `chunkIndex` of the last chunk `text` includes, -1 for none; the bridge adds `thinking` and `model`) |
+| `row` | yes | `{row, agentId}`: a transcript row verbatim; `agentId` the subagent whose transcript holds it, or null |
+| `chunk` | yes | `{turnId, agentId, step, chunkIndex, chunk}`: DX5's chunk event, the `turn.step` chunk object verbatim under `chunk` (nested, since it has an index field of its own), `chunkIndex` its index in its message from 0 |
+| `rows` | yes | `{rows, before, more}`: older rows, newest first, answering a `rows` request |
+| `subagents` | yes | `{subagents: [{agentId, meta}]}`, each `meta` a `subagents/*.meta.json` verbatim |
+| `diff` | yes | `{base, text}`: unified diff of the working tree against the base branch |
+| `end` | yes | `{reason: "unsubscribed" \| "machine-offline" \| "session-ended" \| "error", message?}` |
+| `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
+| `machine` | no (`session` null) | `{online, policy: {read_only, ceiling}, checkouts: [{path, branch}]}`; `online` is the hub's, from the lease (a producer sends true) |
+| `raised` | no | `{request, session, tool, input, deadline?, mac}` |
+| `settled` | no | `{request, winner: "web" \| "terminal" \| "other", outcome, by, mac}` |
+| `delivery` | no | `{event: {writer, seq}, session, outcome: "delivered" \| "recorded" \| "refused-read-only" \| "failed", reason, mac}` |
+
+`raised`, `settled`, and `delivery` carry codes under their own domains (DX1). The hub interprets `presence`,
+`machine`, `raised`, `settled`, and `delivery`; it relays every other kind without reading its body. A gap in `n`, a
+hub restart, or a dropped connection makes the browser subscribe again for a fresh snapshot.
+
+**Settlement (confirmed by DC2, DX4's producer).** `settled.outcome` is one of `allow`, `deny`, `answered`,
+`withdrawn`. `winner` and `by` name who decided: `web` with `by` the member id; `terminal` with `by` `"terminal"`;
+`other` with `by` `"cli"` for an answer from the local CLI. A request that ends with no answer used — the turn was
+aborted, the session ended, or the call settled another way — is `outcome: "withdrawn", winner: "other", by:
+"bridge"`.
+
+**A background subagent's deadline.** `raised.deadline` (optional) is when the web's window on a background
+subagent's prompt closes (§2's 3 seconds). Nothing is settled then: the request stays in the pending set, no longer
+answerable from outside, until the terminal answers, which settles it with `winner: "terminal"` and the real outcome.
+The hub keeps it pending and marks it `terminal_only` in DX3's `pending` (decided here: an explicit flag computed by
+the hub, not a comparison the web makes with its own clock, which would be subject to skew).
+
+**Left for M3:** the relay and the hub's reconnect buffer; `end` on a lapsed lease. **For M4:** the fake machine
+producing all of it.
+
 ### DX5 — Local bridge protocol (owner DC2; version 1 as amended by DC2's M1 review, folded 2026-10-15)
 
 Folded from DC2's plan (doperpowers `a3756267`,
@@ -1262,6 +1718,119 @@ ended or on Ctrl-C. A bridge that comes back within 5 s (a module reload) is fol
 **[fw2]** On a `gap`, the human view says so, subscribes again at once, and prints the fresh
 snapshot, each streaming message whole, then follows on (DX4's rule on a discontinuity).
 With `--json`, the `gap` and its `resync` are passed through for the reader to act on.
+
+### DX6 — RPC shapes (owner DC3; G1)
+
+```ts
+type Rpc<N> = {
+  rpc: N;               // the name
+  project: string;      // the .smns id; also the code's project
+  machine: string;      // the enrolled name that executes it
+  member: string;       // the member who issued it
+  created: string;      // ISO time; older than 60 s → not forwarded, refused by the daemon
+  nonce: string;        // 128 bits base64url: the RPC's id
+  args: RpcArgs[N];
+  mac: string;          // HMAC (DX1, domain smns-hub-rpc-v1) over the RPC without `mac`
+};
+```
+
+| `rpc` | `args` | result (`done`) |
+| --- | --- | --- |
+| `steer` | `{session, text}` | `{row}` — the uuid of the appended user row |
+| `interrupt` | `{session}` | `{}` |
+| `answer` | `{session, digest, answers}` — `answers` maps each question's text to the chosen label (several joined by `", "`) | `{}` |
+| `decide` | `{session, digest, decision: "allow" \| "deny", message?}` | `{}` |
+| `model` | `{session, model?, effort?}` (at least one) | `{}` |
+| `compact` | `{session}` | `{at: "now" \| "turn-end"}` |
+| `spawn` | `{checkout, worktree?, brief, model?, effort?, permission_mode?}` | `{session, alias}` |
+| `retire` | `{session}` | `{}` |
+| `resume` | `{session}` | `{session}` — the same id |
+
+`digest` is `{session, request, tool, input_sha256}` (DX1). An outcome is `{state: "done", result}` or `{state:
+"failed", error: {code, message}}`; the hub's record of an RPC adds `forwarded` (sent, no result yet) and
+`uncertain` (the machine's lease lapsed after forwarding, before a result).
+
+**Error codes.** The hub's: `machine-offline` (no fresh lease: fails at once, nothing queued), `stale` (older than 60
+seconds), `not-member` (`member` is not the signed-in member), `bad-shape`. The daemon's, before it executes:
+`bad-code`, `read-only`, `digest-mismatch`, `not-pending` (the request is no longer pending), `unknown-checkout`,
+`above-ceiling`, `no-session`, `unsupported` (the session's kind cannot, per §5's table), `session-live` (a Resume of
+a session live somewhere). After a claim: `copy-started` (a Resume raced the owner reopening the session; the copy is
+stopped), `interrupted` (below), `failed` (execution failed; `message` says how).
+
+**At most once.** The nonce is the RPC's id. The daemon claims it in its ledger (`claimed`) before the RPC has any
+effect, records the outcome before sending the result, and keeps the entry a day. A nonce the ledger knows is answered
+from the ledger, before the freshness check, and never executed again. A nonce left `claimed` with no outcome (the
+daemon stopped between the two writes) is not executed again either: it is reconciled from the action's own trace
+where one exists (a spawned seat carries its nonce; a steer's row is in the transcript), and otherwise answered
+`failed` with `interrupted`. A browser retry reuses the nonce; the hub answers it from its record or forwards it again
+once the machine is back. Results reach the hub as DX2 `rpc-result` frames, republished until `rpc-ack`.
+
+**Left for M3:** forwarding, the record per nonce, `uncertain` on a lapsed lease, `rpc-ack`. The policy (DC7) is
+unchanged by these shapes.
+
+### DX7 — Identity (owner DC3; G1)
+
+**Access.** Members sign in through Access; the Worker verifies `Cf-Access-Jwt-Assertion` on every request (RS256
+against the team's certificate endpoint, the application's AUD, the team's issuer, `exp` and `nbf`) and names a
+person by `email` (with `sub`), a service token by `common_name`, its client id. The `Registry` then answers who that
+is: a member (by email, case-insensitive), an enrolled machine (by client id), or no one (refused). No configuration
+switches verification off; the Worker refuses everything while its deploy configuration (`ORG_ID`, `ORG_NAME`,
+`ORG_ADMIN_EMAIL`, `ACCESS_ISSUER`, `ACCESS_AUD`, `ACCESS_CERTS_URL`) is incomplete.
+
+**The org** is made from deploy configuration on first use, with `ORG_ADMIN_EMAIL` as its admin — never by whoever
+signs in first.
+
+**Records** (`identity.ts`):
+
+```ts
+type OrgRecord = { id: string; name: string; created: string };
+type MemberRecord = { id: MemberId; email: string; role: 'admin' | 'member'; created: string };
+type MachineRecord = {
+  name: string;
+  client_id: string | null;      // the Access service token's client id; null until the mint returns
+  token_name: string;            // `desk-<org>-<machine>`
+  state: 'pending' | 'active';   // pending until its first authenticated connection confirms it
+  enrollment: string;            // the enrollment that created it
+  created: string;
+  confirmed: string | null;
+};
+type EnrollmentRecord = {
+  id: string; created_by: MemberId; created: string; expires: string;
+  state: 'open' | 'pending' | 'confirmed' | 'expired';
+  machine: string | null;        // the one machine this token may ever enroll, once redeemed
+};
+type ProjectRecord = { id: string; name: string; registered_by: string; created: string; archive_machine: string | null };
+type PushSubscriptionRecord = { member: MemberId; endpoint: string; keys: { p256dh: string; auth: string }; created: string };
+```
+
+**Member ids** are 128 random bits as 32 lowercase hex characters: stable (written into logs for good as
+`hub/<member-id>` and `member`), and deliberately not uuids, which sminos reads as session ids (`writer_session`).
+
+**Machine names** match `^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`, are unique in the org compared without case (a
+case-insensitive disk would put two machines' writers in one file), and are never `hub` or `legacy` in any case (the
+log's `hub/` and `legacy/` prefixes).
+
+**Enrollment** is a durable state machine in the `Registry` (behaviour M2's): the browser asks for a one-time token
+(`open`, short-lived); redeeming it on the path Access does not guard reserves the name and records the intent to mint
+before Cloudflare's API is called, mints the service token `desk-<org>-<machine>`, and returns its client id and
+secret once (`pending`); the machine's first authenticated connection confirms it (`confirmed`, machine `active`). A
+second redemption while pending rotates the credential (the minted token deleted, a fresh one minted and returned); a
+pending enrollment that expires deletes its token and releases the name; a token used for one machine never enrolls
+another. Revoking a machine deletes its service token and its record.
+
+**The enrollment code**, built in the browser so the hub never sees the org key, and run on the machine as `sminos
+hub enroll <code>`: the text `smns-enroll-v1.` followed by the base64url (no padding) of the UTF-8 JSON object
+`{hub, org, token, machine, key}` — `hub` the hub's origin (`https`, or `http` on a loopback host for the local
+runtime), `org` the org id, `token` the one-time token, `machine` the name to claim, `key` the org key as base64url
+(32 bytes). A decoder refuses another prefix, a damaged body, a key that is not 256 bits, a name that is not admitted,
+and an empty field. (`encodeEnrollmentCode`, `decodeEnrollmentCode`.)
+
+**Archive designation:** `ProjectRecord.archive_machine`, which DX2's `have.archive` tells that machine. **Push
+subscriptions:** `PushSubscriptionRecord`, one per member device.
+
+**Left for M2:** the enrollment endpoints (asking for a token, redeeming it, revoking a machine, designating the
+archive machine), their paths and bodies, and how to run the local hub and its stand-in for Access. **For M3:** the
+push-subscription endpoint and the VAPID public key.
 
 ## Ordering & Dependency Map
 
@@ -1545,6 +2114,28 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DC3.G1 — DX1's vectors, DX2, DX3, the DX4 envelope, the DX6
+  shapes, and DX7 folded from DC3's M1 (MAWS `140c834b`), with the
+  choices that bind consumers: every number in a covered object is an
+  IEEE-754 double written as ECMAScript writes it (RFC 8785 in full; tool
+  inputs carry fractions, so an integer-only rule would have broken
+  request cards), with the Python recipe in DX1; each authenticated shape
+  has its own domain string, and an RPC carries its nonce at the top
+  level and its code as a bare string, so the one rule is "a code covers
+  its shape minus its own value"; member ids are 32 hex characters, never
+  uuids, which sminos would read as session ids; machine names follow a
+  grammar, are unique without regard to case, and exclude `hub` and
+  `legacy`; the enrollment code is `smns-enroll-v1.` plus base64url JSON;
+  a background subagent's request past its deadline stays pending, marked
+  `terminal_only` by the hub's clock rather than compared against the
+  browser's; and settlement's values are DC2's (`allow | deny | answered |
+  withdrawn`; a web win names the member, a CLI win is `other` with
+  `cli`, an end with no answer used is `withdrawn`, `other`, `bridge`).
+  For DC4: the enrolled machine name must be the daemon's writer host
+  (sminos's `host_name()`, which reads `DAEMON_HOST`). Rejected then: a
+  deadline the web compares with its own clock (skew), uuid member ids.
+  Flags DC4, DC5, DC6, DC7.
+  Date/Author: 2026-10-15, design session (DC3's M1).
 - Decision: DX5 amended by DC2's M1 review (doperpowers `a3756267`): a
   `resync` event carries the mod's own live state to every new child and
   after every `gap`, and the child replaces its state with it, so no
