@@ -47,7 +47,7 @@ export function transcriptStatus(state: DepthTranscriptState): string {
  * The controller's life in the column: subscribed while mounted, its store key forgotten when it goes (reopening draws
  * a fresh snapshot), told the session's liveness, and subscribed again after an end once the session is reachable.
  */
-export function useDeskTranscript(controller: DeskTranscript, session: DeskSession): DepthTranscriptState {
+export function useDeskTranscript(controller: DeskTranscript, session: DeskSession): PaneState {
   const state = useStore(controller.state);
   const live = reachable(session);
 
@@ -66,26 +66,65 @@ export function useDeskTranscript(controller: DeskTranscript, session: DeskSessi
   }, [controller.key, live]);
 
   // After an end (other than a discontinuity, which the hub client recovers from itself) the transcript is taken up
-  // again only when the session becomes reachable again: it was unreachable at some moment since its last snapshot and
-  // is reachable now. An end while the session stays reachable (an agent's transcript the machine cannot serve) is not
-  // retried, or each failure would subscribe again at once, without end.
+  // again: at once when the session becomes reachable again (it was unreachable at some moment since its last snapshot
+  // and is reachable now); while it stays reachable, after a backoff of 1 s doubling to 60 s, so a machine replaced while
+  // its lease was fresh (its old subscriptions ended `machine-offline`, no offline presence between) is taken up, and
+  // repeated failures (an agent's transcript the machine cannot serve) are spaced retries, never a tight loop. A snapshot
+  // resets the backoff; while the session is unreachable nothing is retried.
   const unreachableSince = useRef(!live);
+  const attempts = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [retryIn, setRetryIn] = useState<number | null>(null);
   useEffect(() => {
     if (!live) unreachableSince.current = true;
   }, [live]);
   useEffect(() => {
-    if (state.phase === 'live') unreachableSince.current = !live;
-    if (state.phase !== 'ended' || !live || !unreachableSince.current) return;
-    unreachableSince.current = false;
-    controller.resubscribe();
+    const cancel = () => {
+      if (timer.current !== null) clearTimeout(timer.current);
+      timer.current = null;
+      setRetryIn(null);
+    };
+    if (state.phase === 'live') {
+      unreachableSince.current = !live;
+      attempts.current = 0;
+    }
+    if (state.phase !== 'ended' || !live) return cancel();
+    if (unreachableSince.current) {
+      cancel();
+      unreachableSince.current = false;
+      controller.resubscribe();
+      return;
+    }
+    if (timer.current !== null) return;
+    const delay = Math.min(RETRY_FIRST_MS * 2 ** attempts.current, RETRY_MAX_MS);
+    attempts.current += 1;
+    setRetryIn(delay);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      setRetryIn(null);
+      controller.resubscribe();
+    }, delay);
   }, [controller, state.phase, live]);
+  useEffect(
+    () => () => {
+      if (timer.current !== null) clearTimeout(timer.current);
+    },
+    [],
+  );
 
-  return state;
+  return useMemo(() => ({ ...state, retryIn }), [state, retryIn]);
 }
+
+/** The first retry after an end while the session stays reachable, doubling up to the cap. */
+const RETRY_FIRST_MS = 1000;
+const RETRY_MAX_MS = 60_000;
+
+/** A transcript's state as the pane draws it: the controller's, and when the next retry after an end is due. */
+export type PaneState = DepthTranscriptState & { retryIn?: number | null };
 
 type PaneProps = {
   controller: DeskTranscript;
-  state: DepthTranscriptState;
+  state: PaneState;
   variant: 'session' | 'child';
   actions: Partial<TranscriptActions>;
   list: RefObject<TranscriptListHandle | null>;
@@ -126,6 +165,7 @@ export function TranscriptPane({ controller, state, variant, actions, list }: Pa
         <p className="m-0 border-b border-border px-4 py-1.5 text-ui-sm text-fg-muted" role="status" data-testid="depth-unavailable">
           {ENDED[state.ended.reason]}
           {state.ended.message ? ` ${state.ended.message}` : ''}
+          {state.retryIn != null ? ` Trying again in ${Math.round(state.retryIn / 1000)} s.` : ''}
         </p>
       )}
       <Transcript source={state.source} variant={variant} actions={actions} tail={tail} handle={list} className="min-h-0 flex-1" />
