@@ -502,6 +502,15 @@ registrations through `connectDepth()`.
   there). Its interrupt does not cut the replayed transcript, and the
   recording's haiku ran both subagents in the background. The reviewed
   interfaces come through the composite's writer; M3 consumes them.
+- 2026-10-15: DC3's M4 reviewed clean (MAWS `3b7c4315`, last code
+  `c100ed17`); the fake machine's API is in the composite at `0473e509`
+  ("### The fake machine", before DX8). M3's acceptance merges `smns-erb`
+  at or after `c100ed17`. Since `60bf893c`: the TWO_SUBAGENTS recording
+  gains a peer's `joined`, two `say`s, and two delivery outcomes; `Step`
+  gains `delivery`; `Memory['trace']` is `{rpc, session, result, row?}`; a
+  decision's `settled` precedes the RPC's `done`; misfit decisions are
+  `bad-shape` before the claim; DC3's oracle now drops only unpaired
+  blocks at `step-end`, as depth does.
 - 2026-10-15 (M2): the gate uploads only the repo root's `test-results/`,
   so a failing desk-web browser trace never comes back from the Linux lane.
 
