@@ -60,6 +60,8 @@ export const results: { [N in keyof RpcResults]: RpcResults[N] } = {
 };
 
 export const outcomes: RpcOutcome<'interrupt' | 'steer'>[] = [
+  // A steer to a session without a bridge names no row.
+  { state: 'done', result: { row: null } },
   { state: 'failed', error: { code: 'idle', message: 'no turn is running to steer: send it instead' } },
   { state: 'failed', error: { code: 'wrong-machine', message: 'this RPC names another machine' } },
   { state: 'failed', error: { code: 'unknown-project', message: 'no such project on this machine' } },
@@ -90,6 +92,6 @@ describe("DX2's and DX3's frames", () => {
   it('are pinned by their types', () => {
     expect(up.length + down.length + browserUp.length + browserDown.length).toBe(23);
     expect(Object.keys(results)).toHaveLength(9);
-    expect(outcomes).toHaveLength(7);
+    expect(outcomes).toHaveLength(8);
   });
 });

@@ -35,8 +35,11 @@ export type RpcName = keyof RpcArgs;
 export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'spawn', 'retire', 'resume'] as const satisfies readonly RpcName[];
 
 export type RpcResults = {
-  /** The uuid of the appended row. */
-  steer: { row: string };
+  /**
+   * The uuid of the appended row; null when the session has no bridge and the steer went out another way (a `--bg`
+   * seat's supervisor `reply`, or a send), which leaves no row of its own to name.
+   */
+  steer: { row: string | null };
   /**
    * The aborted turn (null when idle), the background tasks its Bash calls were moved to and TaskStop ended, and those
    * whose stop failed: a non-empty `running` is an incomplete interrupt.
