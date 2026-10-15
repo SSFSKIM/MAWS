@@ -8,6 +8,7 @@
 // CF_DESK_HUB_SERVICE_TOKENS (the redeploy is `deployment deploy`'s own). Options as `deployment deploy` takes them
 // (--org-id, --assets), plus --seconds (the writing's length, default 60) and --redeploy-at (default 15).
 import { randomUUID } from 'node:crypto';
+import { loadavg } from 'node:os';
 import { FakeMachine } from '../fake-machine/machine';
 import { importOrgKey, newNonce, seal } from '../src/protocol/codes';
 import type { HumanDraft, LogEvent } from '../src/protocol/log';
@@ -127,14 +128,18 @@ export async function main(argv: string[]): Promise<number> {
   const redeployStart = Date.now();
   // When each connection was cut and came back, relative to the redeploy's start.
   const cuts: string[] = [];
+  const cut = (what: string) => {
+    cuts.push(what);
+    console.log(`cut: ${what} (load ${loadavg().map((l) => Math.round(l)).join('/')})`);
+  };
   const last = machines.map((fm) => fm.generation);
   let socketSeen = socket;
   const watch = setInterval(() => {
     machines.forEach((fm, i) => {
-      if (fm.generation !== last[i]) cuts.push(`${fm.name} on generation ${(last[i] = fm.generation)} at +${((Date.now() - redeployStart) / 1000).toFixed(1)} s`);
+      if (fm.generation !== last[i]) cut(`${fm.name} on generation ${(last[i] = fm.generation)} at +${((Date.now() - redeployStart) / 1000).toFixed(1)} s`);
     });
     if (socket !== socketSeen && socket) {
-      cuts.push(`the browser reopened at +${((Date.now() - redeployStart) / 1000).toFixed(1)} s`);
+      cut(`the browser reopened at +${((Date.now() - redeployStart) / 1000).toFixed(1)} s`);
       socketSeen = socket;
     }
   }, 250);
@@ -203,6 +208,10 @@ export async function main(argv: string[]): Promise<number> {
       `the browser reopened ${browserReopens} time(s); post errors ${machines.map((fm) => fm.postErrors.length).join(', ')}`,
   );
 
+  for (const fm of machines) {
+    const kinds = [...new Set(fm.postErrors.map((e) => e.message.slice(0, 120)))];
+    if (kinds.length) console.log(`${fm.name}'s refused POSTs (${fm.postErrors.length}): ${kinds.slice(0, 3).join(' | ')}`);
+  }
   for (const fm of machines) await fm.close();
   for (const name of names) console.log(`revoked ${name}: ${(await owner.fetch(`/api/machines/${name}`, { method: 'DELETE' })).status}`);
   if (problems.length) {

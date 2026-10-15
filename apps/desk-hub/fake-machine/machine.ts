@@ -19,7 +19,7 @@ import type { LogEvent, Vector } from '../src/protocol/log';
 import type { DownFrame, Refusal, RejectionReason, UpFrame } from '../src/protocol/machine';
 import { RPC_FRESHNESS_MS, type Rpc, type RpcError, type RpcName, type RpcOutcome } from '../src/protocol/rpc';
 import type { Delivery, MachinePresence, Raised, SessionMessage, Settled } from '../src/protocol/session';
-import { Link, type Credentials } from './link';
+import { Link, LinkError, type Credentials } from './link';
 import { emptyMemory, expireLedger, type Memory } from './memory';
 import type { Recording, Row, Step } from './recording';
 import { SessionDepth, type SnapshotOptions } from './session';
@@ -130,7 +130,13 @@ export class FakeMachine {
     this.project = options.project;
     this.memory = options.memory ?? emptyMemory();
     this.memory.written ??= {};
-    this.link = new Link(options.hub, options.credentials, (frame) => this.receive(frame), () => this.closed());
+    this.link = new Link(
+      options.hub,
+      options.credentials,
+      (frame) => this.receive(frame),
+      () => this.closed(),
+      (error) => this.refused(error),
+    );
     const where = { project: this.project, machine: this.name };
     for (const recording of options.recordings ?? []) {
       const depth = new SessionDepth(recording.session, recording, (m) => this.queue({ t: 'session', message: m }), where, options.bridge !== false, this.diffBase(recording.session));
@@ -230,6 +236,18 @@ export class FakeMachine {
     this.stopped = true;
     for (const resolve of this.waiters.values()) resolve();
     await this.link.drop();
+  }
+
+  /**
+   * A POST refused because the stream it names is no longer the machine's current one (409 stale-generation), or
+   * because the hub could not write its replies (503 delivery-failed): the stream this machine holds is not the one the
+   * hub serves, though it may still be open and beating. (M5 saw it on the deployment: minutes after a deploy, new
+   * requests reached a restarted object while the old one kept the stream.) A machine that reconnects by itself drops
+   * the stream and opens a fresh one, as the daemon does.
+   */
+  private refused(error: LinkError): void {
+    if (!this.options.reconnect || this.stopped || this.crashed || this.reconnecting) return;
+    if (error.status === 409 || error.status === 503) void this.drop();
   }
 
   private onDrop: Array<() => void> = [];
@@ -799,7 +817,12 @@ export class FakeMachine {
     this.flushScheduled = false;
     const frames = this.outbox.splice(0);
     if (frames.length && this.link.isOpen && !this.crashed) {
-      this.flushing = this.flushing.then(() => this.link.post(frames).catch((error: unknown) => void this.postErrors.push(error as Error)));
+      this.flushing = this.flushing.then(() =>
+        this.link.post(frames).catch((error: unknown) => {
+          this.postErrors.push(error as Error);
+          if (error instanceof LinkError) this.refused(error);
+        }),
+      );
     }
     return this.flushing;
   }

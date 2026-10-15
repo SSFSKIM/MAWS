@@ -14,6 +14,7 @@
 // --fanout-k <K> (default 4), --step-s <s> (default 60), --skip-fanout.
 import { randomUUID } from 'node:crypto';
 import { writeFileSync } from 'node:fs';
+import { loadavg } from 'node:os';
 import { parseArgs } from 'node:util';
 import type { Link } from '../fake-machine/link';
 import type { DownFrame, UpFrame } from '../src/protocol/machine';
@@ -36,6 +37,8 @@ type Step = {
   latency: { p50: number; p95: number; p99: number; max: number; count: number };
   post: { p50: number; p95: number; max: number; count: number; avgFrames: number };
   loopLagMax: number;
+  /** This machine's load average (1, 5, 15 minutes) at the step's end: the client shares the Mac with other work. */
+  load: number[];
   errors: string[];
 };
 
@@ -218,11 +221,12 @@ export async function main(argv: string[]): Promise<number> {
       latency: { p50: pct(lat, 50), p95: pct(lat, 95), p99: pct(lat, 99), max: lat.at(-1) ?? NaN, count: lat.length },
       post: { p50: pct(postMs, 50), p95: pct(postMs, 95), max: postMs.at(-1) ?? NaN, count: ps.length, avgFrames: Math.round(ps.reduce((s, p) => s + p.frames, 0) / Math.max(1, ps.length)) },
       loopLagMax: lagMax,
+      load: loadavg().map((l) => Math.round(l)),
       errors: [...new Set(errors)].slice(0, 5),
     };
     console.log(
       `${series} K=${kNow} browsers=${active}: ${step.chunksPerSecond} chunks/s, ${step.relayedPerSecond} relayed/s, latency p50 ${step.latency.p50} p95 ${step.latency.p95} p99 ${step.latency.p99} ms; ` +
-        `POST p95 ${step.post.p95} ms (${step.post.avgFrames} frames); client lag ≤ ${lagMax} ms${step.errors.length ? `; errors ${step.errors.join(' | ')}` : ''}`,
+        `POST p95 ${step.post.p95} ms (${step.post.avgFrames} frames); client lag ≤ ${lagMax} ms; load ${step.load.join('/')}${step.errors.length ? `; errors ${step.errors.join(' | ')}` : ''}`,
     );
     steps.push(step);
     // Drain between steps: no chunk, so the next step starts from an empty pipe.

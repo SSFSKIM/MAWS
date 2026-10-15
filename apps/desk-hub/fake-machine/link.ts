@@ -31,6 +31,8 @@ export class Link {
     readonly credentials: Credentials,
     private readonly onFrame: (frame: DownFrame) => void,
     private readonly onClose: () => void,
+    /** A POST the hub refused, the hb-acks' included (a write's refusal its caller sees too). */
+    private readonly onRefused: (error: LinkError) => void = () => {},
   ) {}
 
   get isOpen(): boolean {
@@ -77,7 +79,7 @@ export class Link {
             frame = whole as DownFrame;
           }
           first(frame);
-          if (frame.t === 'hb' && this.answerHeartbeats) void this.post([{ t: 'hb-ack', generation: this.generation, at: frame.at }]).catch(() => {});
+          if (frame.t === 'hb' && this.answerHeartbeats) void this.post([{ t: 'hb-ack', generation: this.generation, at: frame.at }]).catch((error: unknown) => error instanceof LinkError && this.onRefused(error));
           this.onFrame(frame);
         }
       }
