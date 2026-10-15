@@ -1625,7 +1625,7 @@ type Envelope<K, Session, Sub, N> = {
 // Discriminated by kind; each kind's invariants are in its type:
 type SessionMessage =
   | Envelope<'snapshot', string, string, 0>                                                       // a sub's first message
-  | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'end', string, string, number>   // then n = 1, 2, …
+  | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, …
   | Envelope<'presence' | 'raised' | 'settled' | 'delivery', string, null, null>                 // to every browser, outside subs
   | Envelope<'machine', null, null, null>;                                                         // names no session
 ```
@@ -1641,13 +1641,14 @@ and `streaming` are that agent's own.
 
 | `kind` | in a sub | body |
 | --- | --- | --- |
-| `snapshot` | yes (`n` 0) | `{rows, more, subagents, presence, streaming}`: rows of the sub's transcript newest first up to the last flushed row, as many as fit the frame budget; `more` whether older rows exist; `streaming`: the bridge's snapshot entries (DX5) passed through, one per model request still streaming, `{turnId, agentId, step, blocks: [{index, kind, text, upTo}]}` holding only its content blocks without a `block-row` yet, below (`step` the model request's ordinal in the turn; `index` the content block's, the same `index` its chunks carry; `kind` the block's type as the bridge names it; `upTo` the `chunkIndex` of the last chunk `text` includes, -1 for none) |
+| `snapshot` | yes (`n` 0) | `{rows, more, subagents, presence, streaming, usage}`: `usage` is the bridge's last `usage` (DX5) on a main-transcript subscription, null when the session has no bridge or none has come yet, and absent on a subagent's; rows of the sub's transcript newest first up to the last flushed row, as many as fit the frame budget; `more` whether older rows exist; `streaming`: the bridge's snapshot entries (DX5) passed through, one per model request still streaming, `{turnId, agentId, step, blocks: [{index, kind, text, upTo}]}` holding only its content blocks without a `block-row` yet, below (`step` the model request's ordinal in the turn; `index` the content block's, the same `index` its chunks carry; `kind` the block's type as the bridge names it; `upTo` the `chunkIndex` of the last chunk `text` includes, -1 for none) |
 | `row` | yes | `{row, agentId}`: a transcript row verbatim; `agentId` the subagent whose transcript holds it, or null |
 | `chunk` | yes | `{turnId, agentId, step, chunkIndex, chunk}`: DX5's chunk event, the `turn.step` chunk object verbatim under `chunk` (nested, since it has an index field of its own), `chunkIndex` its index in its message from 0 |
 | `block-row` | yes | `{uuid, turnId, agentId, step, index}`: the engine wrote the row `uuid` for content block `index` of that step; sent before the row itself arrives |
 | `rows` | yes | `{rows, before, more}`: older rows of the sub's transcript, newest first, answering a `rows` request |
 | `subagents` | yes | `{subagents: [{agentId, meta}]}`, each `meta` a `subagents/*.meta.json` verbatim |
 | `diff` | yes | `{base, text}`: unified diff of the working tree against the base branch |
+| `usage` | yes | `{context: {tokens, window, percent}, cost}`: the bridge's `usage` event (DX5) verbatim, after each main turn, on main-transcript subscriptions only. It is the one source of a session's context use and cost on the web: the transcript's rows do not carry them (the engine's `cost-state` records have no `uuid` and are not rows here), so a session without a bridge shows both as unavailable |
 | `end` | yes | `{reason: "unsubscribed" \| "machine-offline" \| "session-ended" \| "discontinuity" \| "error", message?}` |
 | `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
 | `machine` | no (`session` null) | `{online, policy: {read_only, ceiling}, checkouts: [{path, branch}]}`; `online` is the hub's, from the lease (a producer sends true) |
@@ -2116,7 +2117,7 @@ from `App.tsx`.
 
 ```ts
 type SessionTarget = { machine: string; session: string; agentId: string | null }; // agentId null: the main thread
-type SubscriptionMessage = SessionMessage<'snapshot' | 'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff'>;
+type SubscriptionMessage = SessionMessage<'snapshot' | 'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage'>;
 interface SubscriptionListener {
   message(message: SubscriptionMessage): void; // snapshot (n 0) first, then n = 1, 2, … with no gap
   reset(): void;                                // a discontinuity the client recovers from: drop what was delivered
@@ -2148,7 +2149,8 @@ reason} | null, charge, status, state: {word, ts} | null, joinedAt, group:
 "waiting" | "working" | "idle" | "ended", presence: SessionPresence |
 null, machineOnline: boolean | null}`. `presence` is null until the hub
 sends one and while the machine is offline. Model, context use, and cost
-are not on it: they come from the transcript, DC6's. Inside an open project
+are not on it: the model comes from the transcript, and context use and
+cost from the main subscription's `usage` (DX4), both DC6's. Inside an open project
 `useDeskSessions(connection)` and `useDeskSession(connection, id)` serve
 any view; `useProjectConnection(project)` (`project/registry.ts`) gives the
 project's connection.
@@ -2451,6 +2453,18 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: Context use and cost reach the web as DX4 `usage`, on the main
+  transcript's subscription (in its snapshot, then after each main turn),
+  passed through from the bridge's DX5 `usage` event, which already
+  existed but had no route to a browser. DX8 said they "come from the
+  transcript", and they do not: MAWS reads them from its main process's
+  session digest, and the engine's `cost-state` records carry no `uuid`,
+  so a row mapper drops them (the DC6 plan's adversarial review). A
+  session without a bridge shows context and cost as unavailable.
+  Rejected: shipping uuid-less JSONL records as rows, which would break
+  paging by `uuid` and duplicate what the bridge already computes. Flags
+  DC3 (DX4's module), DC5 (DX8's types), DC6, DC7 (the producer).
+  Date/Author: 2026-10-15, design session (DC6's plan review).
 - Decision: The browser asks for a session's diff. DX4 had a `diff`
   message, but no frame asked for one and no rule said when a machine
   sent it, which writing DC6's plan exposed. DX3 gains `diff {sub}`,
