@@ -134,7 +134,16 @@ test('older rows page in when the reader reaches the top, and the reader stays w
   await expect(depth).not.toContainText('Think briefly first');
 
   const scroller = depth.locator('[data-transcript-scroller]');
-  await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+  // The reader scrolls to the top and so leaves MAWS's follow mode, which its "Jump to latest" button shows. The list
+  // leaves follow mode only on a scroll it reads as upward at an unchanged viewport height; once on the Linux lane it
+  // did not, and the stream pulled the reader back to the end. The reader scrolls again until the list has left it.
+  const jump = depth.getByRole('button', { name: 'Jump to latest' });
+  await expect
+    .poll(async () => {
+      await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+      return jump.isVisible();
+    })
+    .toBe(true);
   await expect.poll(() => hub.up.filter((u) => u.frame.t === 'rows').length).toBe(1); // the reader reached the top
   // The reader's anchor: the first drawn row whose id outlives the rebuild (a turn's time and divider rows are keyed
   // by the turn, which the older page can re-identify once it holds the turn's prompt).
