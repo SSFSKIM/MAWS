@@ -333,5 +333,10 @@ registrations through `connectDepth()`.
   live as in history (DC7's daemon, from DC2's revised DX5 notices).
   DC5's renderer cut landed as `5bd20087` on `smns-erb-web`
   (`DEFAULT_ACTIONS` to `view/default-actions.ts`).
+- 2026-10-15, composite `1cf94bd2` (DX8, additive, DC5's M3 at
+  `7a3ebe39`): `DeskSession.seat` (the latest `joined`'s seat, empty for
+  a session the human opened) with `presence` gives the session's kind —
+  bridged, `--bg` seat, terminal, not running — through DC5's derivation,
+  which depth uses rather than copies.
 
 ## Outcomes & Retrospective
