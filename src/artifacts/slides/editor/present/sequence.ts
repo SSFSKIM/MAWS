@@ -2,8 +2,8 @@
 // show is the deck's slides in order without the hidden ones. A slide's builds (`data-build-in` and `data-build-out`
 // on its pinned elements: an effect, an order 1 to 50, `auto`) play as clicks: builds sort by their order number (the
 // unnumbered after, in the slide's order); builds of one number are one click, played together; an `auto` build plays
-// by itself right after the build before it (a beat later in the same click), or on the slide's entry when nothing
-// precedes it. A position is a slide and how many clicks have played on it (0 to `clicks`); next plays the slide's next
+// by itself right after the builds before it (a beat later in the same click, its number's click when it has one), or
+// on the slide's entry when nothing precedes it. A position is a slide and how many clicks have played on it (0 to `clicks`); next plays the slide's next
 // click or moves to the next slide, back undoes a click or returns to the previous slide fully built. Positions name
 // slides by id, so a re-order or a removal while the show runs keeps the show where it can be. Portable (§4.10).
 import type { Doc } from '../../../yjs';
@@ -74,20 +74,22 @@ export function slideSteps(doc: Doc, slideId: string): SlideSteps {
     walk(ROOT);
   }
   events.sort((a, b) => (a.order ?? 51) - (b.order ?? 51) || a.at - b.at);
-  const groups: Beat[][] = [[]];
-  let clickOrder: number | null = null; // the order number of the last click, while its first beat is the group's last
+  // fix wave 1: builds of one order number are gathered first (an unnumbered build is a set of its own); a set with a
+  // build that is not `auto` is a click, those builds its first beat and its `auto` ones a beat each after; a set of
+  // `auto` builds only follows the click before it (or the entry), a beat each
+  const sets: BuildEvent[][] = [];
   for (const { id, kind, effect, order, auto } of events) {
     const event: BuildEvent = { id, kind, effect, order, auto };
-    const last = groups[groups.length - 1]!;
-    if (event.auto) {
-      last.push([event]);
-      clickOrder = null;
-    } else if (event.order !== null && event.order === clickOrder && groups.length > 1 && last.length === 1) {
-      last[0]!.push(event);
-    } else {
-      groups.push([[event]]);
-      clickOrder = event.order;
-    }
+    const last = sets.at(-1);
+    if (order !== null && last && last[0]!.order === order) last.push(event);
+    else sets.push([event]);
+  }
+  const groups: Beat[][] = [[]];
+  for (const set of sets) {
+    const clicked = set.filter((e) => !e.auto);
+    const beats = set.filter((e) => e.auto).map((e) => [e]);
+    if (clicked.length) groups.push([clicked, ...beats]);
+    else groups[groups.length - 1]!.push(...beats);
   }
   return { slideId, transition: transition ?? null, groups, clicks: groups.length - 1 };
 }

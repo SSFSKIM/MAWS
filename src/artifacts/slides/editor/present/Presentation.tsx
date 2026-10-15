@@ -91,7 +91,8 @@ export function Presentation({ doc, artifactId, role, paired, start, system, ass
   useCanvasCss();
   const deck = useDeckView(doc);
   const version = useDocVersion(doc);
-  const [show, setShow] = useState<ShowState>(() => ({ pos: startPosition(doc, start), move: 'jump', transition: null, black: false }));
+  // the audience's first sight plays the first slide's entry builds (fix wave 1); every later jump shows it built
+  const [show, setShow] = useState<ShowState>(() => ({ pos: startPosition(doc, start), move: role === 'audience' ? 'enter' : 'jump', transition: null, black: false }));
   const [presenterShown, setPresenterShown] = useState(role === 'presenter');
   const [startedAt] = useState(() => Date.now());
   const read = readShow(doc, show.pos, version);

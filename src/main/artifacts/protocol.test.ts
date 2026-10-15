@@ -112,21 +112,33 @@ describe('the maws-artifact: handler (Decision Log 14, 35e): the files the host 
     expect((await get(artifactUrl(PAGE, 'live', 'assets/dir'))).status).toBe(404);
   });
 
-  // P3-C M6: the presenter's embeds answer their own URLs first; anything they leave (null) or fail on is the store's
-  it('asks a responder first, its answer standing and its null or failure leaving the URL to the store', async () => {
+  // P3-C M6: the presenter's embeds answer their own URLs first; null is "not mine" and leaves the URL to the store; a
+  // responder that fails is logged and answered 500, never taken for "not mine" (M6 fix wave 1, finding 5)
+  it('asks a responder first: its answer stands, its null leaves the URL to the store, its failure is a logged 500', async () => {
     await hold(PAGE, 'live', 'index.html', 'html', '<p>page</p>');
     const seen: string[] = [];
+    const resolved: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const withFirst = createArtifactHandler(
-      async (input) => ({ ok: true, value: { revision: 1, kind: 'html', name: 'index.html', size: 0, sha256: 'x', path: files.get(`${input.artifactId} live ${input.path}`)!.path } }),
+      async (input) => {
+        resolved.push(input.path ?? '');
+        return { ok: true, value: { revision: 1, kind: 'html', name: 'index.html', size: 0, sha256: 'x', path: files.get(`${input.artifactId} live ${input.path}`)!.path } };
+      },
       async (request) => {
         seen.push(request.url);
         if (request.url.includes('/embeds/')) return new Response('embed', { status: 200 });
-        if (request.url.includes('broken')) throw new Error('down');
+        if (request.url.includes('broken')) throw new Error('the host is down');
         return null;
       },
     );
     expect(await (await withFirst(new Request(`maws-artifact://${PAGE}/live/embeds/s/e.html`))).text()).toBe('embed');
     expect(await (await withFirst(new Request(artifactUrl(PAGE, 'live', 'index.html')))).text()).toContain('<p>page</p>');
-    expect(seen).toHaveLength(2);
+    const failed = await withFirst(new Request(`maws-artifact://${PAGE}/live/broken/e.html`));
+    expect(failed.status).toBe(500);
+    expect(failed.headers.get('Cache-Control')).toBe('no-store');
+    expect(seen).toHaveLength(3);
+    expect(resolved).toEqual(['index.html']); // the failure never reached the store's files
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('the host is down'));
+    warn.mockRestore();
   });
 });

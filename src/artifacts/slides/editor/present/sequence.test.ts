@@ -48,6 +48,14 @@ describe('the show’s order', () => {
     expect(slideSteps(deckOf(DECK), 'intro')).toMatchObject({ transition: 'fade', clicks: 0, groups: [[]] });
   });
 
+  // fix wave 1 (finding 4): an auto build inside a numbered click stays in that click
+  it('keeps one order number one click with an auto build among it, the auto a beat after the click’s own', () => {
+    const doc = deckOf({ one: `<section id="one">${pin('x', 'data-build-in="fade 1"')}${pin('y', 'data-build-in="rise 1 auto"')}${pin('z', 'data-build-in="pop 1"')}${pin('w', 'data-build-in="scale 2 auto"')}</section>` });
+    const steps = slideSteps(doc, 'one');
+    expect(steps.groups.map((g) => g.map((beat) => beat.map((e) => e.id)))).toEqual([[], [['x', 'z'], ['y'], ['w']]]);
+    expect(steps.clicks).toBe(1);
+  });
+
   it('plays an auto build before the first click on the slide’s entry', () => {
     const steps = slideSteps(deckOf(DECK), 'entry');
     expect(steps.groups.map((g) => g.map((beat) => beat.map((e) => e.id)))).toEqual([[['auto1']], [['click1']]]);

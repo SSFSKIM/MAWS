@@ -77,4 +77,20 @@ describe('the deck as check units', () => {
     expect(elementOfLocator('section#planted')).toBeNull();
     expect(elementOfLocator('section#s > svg#pic > defs:nth-child(1) > lineargradient#g')).toBe('pic');
   });
+
+  // M6 fix wave 1 (finding 3): an inline colour mark is on the slide too
+  it('checks an inline colour mark, in a paragraph and in a table cell, selecting its owner, its words counted once', () => {
+    const marked = `<section id="m" style="background:var(--ds-color-bg); padding:128px"><p id="say" style="font-size:var(--ds-type-body-size); color:var(--ds-color-text)">Calm words and <span style="color:#ff0044">loud ones</span> here</p><table id="t" style="font-size:24px"><tr id="r1"><th>Mass</th></tr><tr id="r2"><td>one <span style="color:#00ff00">green</span></td></tr></table></section>`;
+    const report = checkHardDonts(parseLaw(law), tokens, unitsOfDeck(deckOf({ m: marked })));
+    const literal = report.violations.filter((v) => v.rule === 'literal-color');
+    expect(literal.map((v) => [v.element, elementOfLocator(v.element)])).toEqual([
+      ['section#m > p#say > span:nth-of-type(1)', 'say'],
+      ['section#m > table#t > tr#r2 > td:nth-child(1) > span:nth-of-type(1)', 't'],
+    ]);
+    expect(literal[0]!.message).toContain('#ff0044');
+    // every word once: "Calm words and loud ones here" (6), "Mass" (1), "one green" (2)
+    const words = (els: readonly { text: string; children: readonly unknown[] }[]): number =>
+      els.reduce((n, e) => n + (e.text.match(/[\p{L}\p{N}]+/gu)?.length ?? 0) + words(e.children as never), 0);
+    expect(words(unitsOfDeck(deckOf({ m: marked }))[0]!.elements)).toBe(9);
+  });
 });

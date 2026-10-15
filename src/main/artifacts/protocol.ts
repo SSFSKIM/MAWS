@@ -33,14 +33,25 @@ export function artifactResolver(content: ContentLookup): SchemeResolver {
   };
 }
 
-// P3-C M6: a responder asked first, answering the URLs that are its own and null for the rest (the presenter's live
-// embeds, src/main/presentations/present-embeds.ts, which answer under the embed's own policy).
+// P3-C M6: a responder asked first, answering the URLs that are its own and null ("not mine") for the rest (the
+// presenter's live embeds, src/main/presentations/present-embeds.ts, which answer under the embed's own policy). A
+// responder that fails is logged and answered 500, never taken for "not mine" (fix wave 1).
 export type SchemeResponder = (request: Request) => Promise<Response | null>;
 
 export function createArtifactHandler(content: ContentLookup, first?: SchemeResponder): (request: Request) => Promise<Response> {
   const files = createSchemeHandler(artifactResolver(content), { cors: true });
   if (!first) return files;
-  return async (request) => (await first(request).catch(() => null)) ?? files(request); // P3-C M6
+  // P3-C M6
+  return async (request) => {
+    let answer: Response | null;
+    try {
+      answer = await first(request);
+    } catch (error) {
+      console.warn(`[artifacts] ${request.url} failed: ${error instanceof Error ? error.message : String(error)}`);
+      return new Response('the request failed', { status: 500, headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' } });
+    }
+    return answer ?? files(request);
+  };
 }
 
 // The handler on a session: the window's default session and the capture partition get the same one.
