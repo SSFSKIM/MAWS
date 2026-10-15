@@ -464,6 +464,54 @@ describe('browsers', () => {
   });
 });
 
+describe('delivery failures', () => {
+  async function until(check: () => boolean, ms = 8000) {
+    const deadline = Date.now() + ms;
+    while (!check()) {
+      if (Date.now() > deadline) throw new Error('timed out');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }
+
+  it("answers 503 to a POST whose first reply failed though a later one went out; the stream ends, and a reconnect's hello heals it", async () => {
+    const project = newProject();
+    const source = await machine('source');
+    await source.sync(project);
+    const event = say(source, project, 1);
+    await source.postOk([{ t: 'events', project, events: [event] }]);
+    const target = await machine('target');
+    // The hello owes two replies: `have`, then the backlog's `events`. The first fails.
+    await hub.failNextSend(target.name, 'have');
+    const response = await target.post([{ t: 'hello', project, name: 'demo', have: {} }]);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: 'delivery-failed', frames: 0 });
+    await until(() => target.isEnded);
+    await target.connect();
+    await target.sync(project);
+    expect(countsOf(target, project)).toEqual({ [event.writer]: 1 });
+    await source.close();
+    await target.close();
+  });
+
+  it('ends a stream a live event could not be sent to; the machine reconnects, and its hello heals what it missed', async () => {
+    const project = newProject();
+    const source = await machine('live-source');
+    const target = await machine('live-target');
+    await source.sync(project);
+    await target.sync(project);
+    await hub.failNextSend(target.name, 'events');
+    const event = say(source, project, 1);
+    await source.postOk([{ t: 'events', project, events: [event] }]);
+    await until(() => target.isEnded);
+    expect(countsOf(target, project)).toEqual({});
+    await target.connect();
+    await target.sync(project);
+    expect(countsOf(target, project)).toEqual({ [event.writer]: 1 });
+    await source.close();
+    await target.close();
+  });
+});
+
 describe('session presence', () => {
   const OTHER = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a';
   const presence = (m: MachineClient, project: string, session: string, status: string | null): Extract<SessionMessage, { kind: 'presence' }> => ({

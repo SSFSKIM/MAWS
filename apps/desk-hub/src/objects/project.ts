@@ -30,7 +30,7 @@ const encoder = new TextEncoder();
 export class Project extends DurableObject<Env> {
   private readonly log: LogStore;
   /** One promise chain per machine stream (`<machine>#<generation>`), so every frame this object sends a stream arrives
-   * in the order it was queued; a chain that failed rejects for the POST waiting on it, and the next frame still goes. */
+   * in the order it was queued; a chain that failed stays failed, its stream ended (`toMachine`). */
   private readonly queues = new Map<string, Promise<void>>();
   /** Part sets a socket is sending (lost with a hibernation, as the socket's half-sent frame would be). */
   private readonly parts = new Map<WebSocket, PartAssembler>();
@@ -287,15 +287,16 @@ export class Project extends DurableObject<Env> {
   /**
    * Queues a frame for a machine's stream behind everything queued for it before. A stream that is gone (or older than
    * the machine's current one) leaves the fan-out until the machine's next `hello`. A send that fails otherwise leaves
-   * it too, and its stream is ended, so the machine reconnects and its `hello` heals what it missed; the failure
-   * rejects the chain for the POST that waits on it, which answers it as an error.
+   * it too, and its stream is ended, so the machine reconnects and its `hello` heals what it missed. The chain stays
+   * failed from then on: nothing more is sent on that stream, and every POST waiting on the chain (one whose first
+   * reply failed, though later replies were queued behind it, included) answers the failure, until the machine's next
+   * stream starts a chain of its own.
    */
   private toMachine(ctx: MachineContext, frame: DownFrame): void {
     const key = queueKey(ctx);
     for (const other of this.queues.keys()) if (other.startsWith(`${ctx.machine}#`) && other !== key) this.queues.delete(other);
     const machine = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${ctx.org}:${ctx.machine}`));
     const next = (this.queues.get(key) ?? Promise.resolve())
-      .catch(() => {})
       .then(async () => {
         let sent: 'written' | 'offline';
         try {

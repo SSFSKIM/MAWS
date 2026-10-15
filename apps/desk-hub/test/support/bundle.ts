@@ -1,5 +1,6 @@
 // vitest's global setup: bundles the Worker once per run, as wrangler does (ES modules, the workerd conditions,
-// `cloudflare:*` left to the runtime), for test/support/hub.ts to load into Miniflare.
+// `cloudflare:*` left to the runtime), for test/support/local.ts to load into Miniflare. Its entry is the Worker with
+// the suites' one seam (worker-under-test.ts); the deployed Worker's entry stays src/worker.ts.
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -18,7 +19,7 @@ export default async function setup(project: TestProject) {
   const dir = mkdtempSync(join(tmpdir(), 'desk-hub-test-'));
   const outfile = join(dir, 'worker.js');
   await build({
-    entryPoints: [resolve(import.meta.dirname, '../../src/worker.ts')],
+    entryPoints: [resolve(import.meta.dirname, 'worker-under-test.ts')],
     outfile,
     bundle: true,
     format: 'esm',
