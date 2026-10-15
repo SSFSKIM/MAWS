@@ -44,7 +44,7 @@
     "e2e:artifacts": "electron-vite build && playwright test e2e/artifacts-store.spec.ts",
     "e2e:library": "electron-vite build && NODE_OPTIONS=--disable-warning=ExperimentalWarning playwright test e2e/library.spec.ts",
     "e2e:design-systems": "electron-vite build && NODE_OPTIONS=--disable-warning=ExperimentalWarning playwright test e2e/design-systems.spec.ts",
-    "e2e:presentations": "electron-vite build && playwright test e2e/presentations.spec.ts e2e/presentations-export.spec.ts",
+    "e2e:presentations": "electron-vite build && playwright test e2e/presentations.spec.ts e2e/presentations-export.spec.ts e2e/presentations-comments.spec.ts",
     "e2e:library-live": "electron-vite build && playwright test e2e/library-live.spec.ts",
     "e2e:design-systems-live": "electron-vite build && playwright test e2e/design-systems-live.spec.ts",
     "e2e:supervisor": "electron-vite build && MAWS_SUPERVISOR_E2E=1 MAWS_HOST_MODE=detached MAWS_ENGINE_REPLAY=1 playwright test e2e/supervisor.spec.ts",

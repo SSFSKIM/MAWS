@@ -7,8 +7,8 @@
 // rail's selected one, scrolled into view. App chrome, so it reads the app's tokens.
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
-import { slideOrder } from '../../model';
 import { newThreadId, reopen, reply, resolve, type DeckThreadState } from '../../threads';
+import { useDeckView } from '../deck-view';
 import { COMMENTS_ORIGIN, type DeckCommentsApi } from './controller';
 import { COMMENTS_COPY as C } from './copy';
 import { useDeckThreadStates } from './use-threads';
@@ -19,7 +19,9 @@ export function CommentsRail({ api, onClose }: { api: DeckCommentsApi; onClose()
   const doc = session.doc;
   const threads = useDeckThreadStates(doc);
   const [showResolved, setShowResolved] = useState(true);
-  const numbers = new Map(slideOrder(doc).map((id, i) => [id, i + 1])); // read on each render: the list follows the deck
+  // the slides' numbers follow the deck at once, as the filmstrip's do (the thread list waits for a quiet moment)
+  const slides = useDeckView(doc).slides;
+  const numbers = new Map(slides.map((slide, i) => [slide.id, i + 1]));
   const open = threads.filter((thread) => thread.status === 'open');
   const resolved = threads.filter((thread) => thread.status === 'resolved');
   const item = (thread: DeckThreadState) => (

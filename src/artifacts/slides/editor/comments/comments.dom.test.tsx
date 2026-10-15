@@ -9,7 +9,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '../../../document/editor/comments/surface';
 import { newDoc, transact, type Doc } from '../../../yjs';
-import { deleteElementTree, importSlide, setStyle, writeDeckKeys } from '../../model';
+import { deleteElementTree, importSlide, moveSlide, setStyle, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
 import { getThread, listThreads } from '../../threads';
 import { DeckEditor } from '../DeckEditor';
@@ -141,6 +141,13 @@ describe('comments on a deck’s elements (D9)', () => {
     const [body, title] = listThreads(doc).map((t) => t.id);
     const item = (id: string) => rail.querySelector<HTMLElement>(`article[data-thread="${id}"]`)!;
     expect(within(item(body!)).getByRole('button', { name: 'Show element: One path' }).textContent).toBe('Slide 1One path');
+
+    // the slides re-ordered elsewhere: the thread names the slide's new number
+    act(() => moveSlide(doc, 's1', 's2'));
+    await settle();
+    expect(within(item(body!)).getByRole('button', { name: 'Show element: One path' }).textContent).toBe('Slide 2One path');
+    act(() => moveSlide(doc, 's1', null));
+    await settle();
 
     // a reply typed and posted with Enter
     const field = within(item(body!)).getByRole('textbox', { name: 'Reply' });
