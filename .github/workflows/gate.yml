@@ -32,7 +32,7 @@ env:
     settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
     design-systems
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default).
-  LINUX_E2E: library artifacts settings available tools browser-import agents
+  LINUX_E2E: library artifacts available tools agents
   # The groups that render documents through LibreOffice (P3-B's DOCX-to-PDF case, P3-C's render-and-compare).
   LIBREOFFICE_E2E: document presentations
 

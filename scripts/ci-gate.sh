@@ -88,7 +88,7 @@ interrupted() {
 trap interrupted INT TERM
 
 echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}"
-git -C "$git_dir" push --quiet --force origin "$pushed:refs/heads/$ref" || { echo 'ci-gate: push failed' >&2; exit 1; }
+{ git -C "$git_dir" push --quiet --force origin "$pushed:refs/heads/$ref" 2>&1; } | sed '/^remote:/d' || { echo 'ci-gate: push failed' >&2; exit 1; }
 
 # The run appears a few seconds after the push; a minute without it means the workflow did not trigger.
 for _ in $(seq 1 30); do
@@ -106,7 +106,8 @@ gh -R "$REPO" run view "$run_id" --json jobs --jq '.jobs[] | "\(.conclusion // .
 if [[ $conclusion != success ]]; then
   rm -rf "$out/ci-$short"
   if gh -R "$REPO" run download "$run_id" -D "$out/ci-$short" 2>/dev/null; then echo "ci-gate: failed jobs' reports in $out/ci-$short/"; fi
-  gh -R "$REPO" run view "$run_id" --log-failed | tail -200
+  # The failed steps' last lines, each under its job's name, colours and timestamps stripped.
+  gh -R "$REPO" run view "$run_id" --log-failed | perl -pe 's/(\e|\^\[)\[[0-9;]*[A-Za-z]//g; s/^([^\t]*)\t[^\t]*\t\S+ /$1  /' | tail -80
 fi
 echo "ci-gate: run $run_id $conclusion"
 [[ $conclusion == success ]] && finish 0

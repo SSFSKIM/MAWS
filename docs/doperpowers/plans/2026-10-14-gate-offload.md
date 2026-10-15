@@ -22,17 +22,18 @@ One Mac carries three child executors, their workers, their reviewers and the ow
 | Class | Gates | Where |
 |---|---|---|
 | 1a, hardware-independent, Linux-portable | `typecheck`, `lint`, `test` (every vitest project except `live`), `build` then the bundle guard, `test:probes` | GitHub Actions, `ubuntu-24.04`, through `scripts/ci-gate.sh`: the default set of every run |
-| 1b, hardware-independent Electron e2e | every `e2e:<group>`: `default`, the bare `pnpm e2e` after `pnpm build` as `verify` orders them (Decision Log 5); artifacts, library, side, tools, to-human, deliverables, panel, supervisor, browser, browser-comment, browser-import, settings, transcript, terminal, code, agents, widgets, c7, scm, c12, available; the children's document, document-app, presentations, design-systems as they land | A macOS runner through the same workflow and script (§3.6), once one is registered; until then the Mac under the load rule. The Linux lane also takes, on request, the groups the table below found green there (`LINUX_E2E`: library, artifacts, settings, available, tools, browser-import, agents) |
+| 1b, hardware-independent Electron e2e | every `e2e:<group>`: `default`, the bare `pnpm e2e` after `pnpm build` as `verify` orders them (Decision Log 5); artifacts, library, side, tools, to-human, deliverables, panel, supervisor, browser, browser-comment, browser-import, settings, transcript, terminal, code, agents, widgets, c7, scm, c12, available; the children's document, document-app, presentations, design-systems as they land | A macOS runner through the same workflow and script (§3.6), once one is registered; until then the Mac under the load rule. The Linux lane also takes, on request, the groups the table below found green there (`LINUX_E2E`: library, artifacts, available, tools, agents) |
 | 2, hardware-bound | every measured bound (B's `document-scale`, A's perf case, C's M10 scale gate, any `MAWS_*_PERF` seam); macOS-only groups (`browser-chrome`, `browser-cua`, `voice`, `e2e:packaged`, `supervisor:packaged`, `verify:fuses`, `build:app`); the paid live specs (`MAWS_LIVE`, `MAWS_C7_LIVE`, `*-live.spec.ts`) | The Mac, under `waitload20.sh` and `with-slot.sh`, Decision Log 54 and 63; the dedicated quiet Mac at P3-F |
 
 M2 ran every 1b group on `ubuntu-24.04` (Decision Log 13 records the split that followed): Electron e2e on Linux diverges from the Mac on platform facts in most groups, so the Linux lane carries class 1a and the groups green there, 1b is macOS work, and no Linux guard is written for an e2e case. Each group's Linux outcome, from the discovery runs at 8d40a5af ([38663070234](https://github.com/SSFSKIM/MAWS/actions/runs/38663070234), [38663070601](https://github.com/SSFSKIM/MAWS/actions/runs/38663070601)) and the rerun of the failing groups with zsh as `SHELL` and `/private/tmp` present ([38665454771](https://github.com/SSFSKIM/MAWS/actions/runs/38665454771)); "not traced" marks a failure whose cause M2 did not pin down once the group was macOS work:
 
 | Group | Linux outcome | The platform fact behind its failures |
 |---|---|---|
-| library, artifacts, settings, available | green | none |
+| library, artifacts, available | green in every run | none |
+| settings | green in discovery; in M2's run accounts' usage case failed (the popover's heading not found), as it did in the default group | not traced; flaky on Linux, so not in `LINUX_E2E` |
 | tools | green once `/private/tmp` exists | the recorded fixtures name paths under macOS's `/private/tmp` |
-| browser-import | green in the rerun; the Keychain-denied case failed once in discovery | the Keychain the import reads on macOS (the case stubs it; flaky on Linux) |
-| agents | green but G5, a zone defect fixed in the test (Surprises) | none |
+| browser-import | the Keychain-denied case failed in 2 of 3 runs (a Cancel click timed out), green in the third | not traced past the Keychain path the import reads on macOS; flaky on Linux, so not in `LINUX_E2E` |
+| agents | 22 of 23 until G5's zone defect was fixed in the test (Surprises), then 23 of 23 in UTC | none |
 | side | 2 to 3 of 12 fail: the comment card's geometry (Allow outside the card, the card not pinned 4 px under the heading) | Linux Electron draws the app menu inside the window: the viewport is 1440×873 for the Mac's 900 under the hidden-inset title bar |
 | browser-comment | 1 of 16: the card under the view | the menu-in-window viewport |
 | panel | 1 to 3 of 26: a Terminal tab's ⌘V paste; the floating card at its minimum size | Meta accelerators (the app menu's CmdOrCtrl is Ctrl off macOS); the menu-in-window viewport |
@@ -75,6 +76,13 @@ Shared setup (a composite action `.github/actions/setup` so the jobs do not repe
 ### 3.5 What changes for a child
 
 Its brief says: class-1 gates through `scripts/ci-gate.sh <worktree> --gates <what you touched>`; class-2 gates locally under the load rule as today; a Linux-only failure is reported to the architect, never guarded by the child. The P3 spec's Decision Log 64 records the split; the P2 and P3 briefs in flight keep their local gates until their executors are told.
+
+The brief's wording as of M3 (Decision Log 13):
+
+- Class 1a through the script, from any directory: `scripts/ci-gate.sh <worktree>` runs static, unit and probes (about 12 minutes); `--gates static`, `--gates unit` or `--gates probes` narrows it to what you touched. The script prints each job's conclusion and the run's URL, keeps the transcript in `/tmp/maws-review/gates/ci-<short>.log` and exits 0 only when the run is green.
+- Class 1b, the e2e groups, are macOS work. Until a macOS runner is registered, run them on the Mac under the load rule as today; the Linux lane takes only the groups green there (`--gates e2e:library`, …, the list in §3.1). Once the runner exists: `scripts/ci-gate.sh <worktree> --gates e2e:<group> --runner macos`, and a failed group's HTML report and `test-results/` come down to `/tmp/maws-review/gates/ci-<short>/`.
+- The unit cases §6 guards run nowhere on the runner, so they stay a Mac gate; when your change touches one of those files, or before a landing, run exactly `/tmp/maws-review/waitload20.sh && /tmp/maws-review/with-slot.sh pnpm -C <worktree> exec vitest run src/main/browser/cua/admission.test.ts src/main/browser/cua/index.test.ts src/main/browser/cua/peer.test.ts src/main/browser/cua/retained.test.ts src/main/browser/index.test.ts src/main/files/allowlist.test.ts src/main/files/service.test.ts src/main/files/watch.test.ts src/main/index/sessions.test.ts src/main/sessions/stub-store.test.ts src/engine-host/fs/replay/runner.test.ts src/pty-host/table.test.ts test/support/shell-home.test.ts`.
+- A failure on the runner that does not reproduce on the Mac is reported to the architect with the run URL, never guarded by the child.
 
 ### 3.6 The macOS runner (Decision Log 13 and 14)
 
