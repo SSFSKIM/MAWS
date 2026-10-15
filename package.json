@@ -47,6 +47,8 @@
     "e2e:presentations": "electron-vite build && playwright test e2e/presentations.spec.ts e2e/presentations-export.spec.ts e2e/presentations-comments.spec.ts e2e/presentations-present.spec.ts e2e/presentations-history.spec.ts",
     "e2e:library-live": "electron-vite build && playwright test e2e/library-live.spec.ts",
     "e2e:design-systems-live": "electron-vite build && playwright test e2e/design-systems-live.spec.ts",
+    "e2e:presentations-live": "electron-vite build && playwright test e2e/presentations-live.spec.ts",
+    "e2e:presentations-scale": "electron-vite build && playwright test e2e/presentations-scale.spec.ts",
     "e2e:supervisor": "electron-vite build && MAWS_SUPERVISOR_E2E=1 MAWS_HOST_MODE=detached MAWS_ENGINE_REPLAY=1 playwright test e2e/supervisor.spec.ts",
     "e2e:supervisor:packaged": "MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} MAWS_SUPERVISOR_E2E=1 MAWS_HOST_MODE=detached playwright test e2e/supervisor-packaged.spec.ts",
     "verify:fuses": "out=$(FORCE_COLOR=0 NO_COLOR=1 electron-fuses read --app dist/mac-arm64/MAWS.app) && echo \"$out\" && echo \"$out\" | grep -q '^ *RunAsNode is Enabled$' || { echo 'verify:fuses: dist/mac-arm64/MAWS.app does not report RunAsNode is Enabled; the E10 supervisor runs the app binary as Node (ELECTRON_RUN_AS_NODE)' >&2; exit 1; }",

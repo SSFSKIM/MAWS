@@ -37,6 +37,7 @@ import { registerDesignSystems } from './design-systems'; // M6
 // P3-D end
 // P3-C start
 import { registerPresentations } from './presentations'; // M3
+import { presentationsScaleSeamRequested, startPresentationsScaleSeam } from './presentations/scale-seam'; // M10: the scale gate's seam (e2e only)
 // P3-C end
 
 const HOST_VERSION = __MAWS_VERSION__;
@@ -82,6 +83,7 @@ const register: HostRegister = (on, emit, client) => {
   const library = registerLibrary(on, { documents, deliverablesDir: join(userData, 'deliverables'), e2e: process.env.MAWS_E2E === '1' });
   const designSystems = registerDesignSystems({ on, documents }); // P3-D: the kind's adapter, its mirror writer, the create context, the seeded defaults and the windows' designSystems.* reads
   const presentations = registerPresentations({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-C: the deck's adapter and its mirror writer, kept fresh under its governing system (Decision Log 29)
+  if (documents && presentationsScaleSeamRequested(process.env)) startPresentationsScaleSeam(documents.store, join(userData, 'presentations-scale')); // P3-C M10: the scale gate's seam, MAWS_E2E=1 and MAWS_PRESENTATIONS_SCALE=1 only
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
