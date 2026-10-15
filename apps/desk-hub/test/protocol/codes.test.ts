@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import vectorsFile from '../../src/protocol/vectors/codes.json';
 import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../../src/protocol/base64url';
 import { canonicalize } from '../../src/protocol/canonical';
-import { coveredBytes, DOMAINS, importOrgKey, inputSha256, newNonce, seal, sealRpc, verify, verifyRpc, type ShapeKind } from '../../src/protocol/codes';
+import { coveredBytes, DOMAINS, importOrgKey, inputSha256, newNonce, orgKeyFromCryptoKey, seal, sealRpc, verify, verifyRpc, type ShapeKind } from '../../src/protocol/codes';
 import type { JsonValue } from '../../src/protocol/json';
 import type { HumanDraft, LogEvent } from '../../src/protocol/log';
 import type { Rpc, RpcDraft } from '../../src/protocol/rpc';
@@ -222,5 +222,31 @@ describe('codes', () => {
 
   it('takes only a 256-bit org key', async () => {
     await expect(importOrgKey(new Uint8Array(16))).rejects.toThrow(TypeError);
+  });
+});
+
+describe('orgKeyFromCryptoKey: a key that exists only as a CryptoKey, such as one the browser derived', () => {
+  const hmac = (raw: Uint8Array, hash: string, usages: KeyUsage[]) => crypto.subtle.importKey('raw', Uint8Array.from(raw), { name: 'HMAC', hash }, false, usages);
+  const bytes = (length: number) => new Uint8Array(length).fill(7);
+
+  it('seals a vector with a non-extractable key', async () => {
+    const v = vectors.find((x) => x.name === 'say-ascii')!;
+    const key = orgKeyFromCryptoKey(await hmac(base64urlDecode(v.org_key), 'SHA-256', ['sign', 'verify']));
+    expect(key.hmac.extractable).toBe(false);
+    const { mac, ...draft } = v.input as { mac: { nonce: string; value: string } };
+    expect(await seal(key, 'log', v.project, draft as never, mac.nonce)).toEqual(v.input);
+    expect(await verify(key, 'log', v.project, v.input)).toBe(true);
+  });
+
+  it.each([
+    ['another algorithm', 'is an HMAC-SHA-256 key', () => crypto.subtle.importKey('raw', bytes(32), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])],
+    ['another hash', 'is an HMAC-SHA-256 key', () => hmac(bytes(32), 'SHA-384', ['sign', 'verify'])],
+    ['another length', 'is 256 bits', () => hmac(bytes(16), 'SHA-256', ['sign', 'verify'])],
+    ["HMAC's generated default, 512 bits", 'is 256 bits', () => crypto.subtle.generateKey({ name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])],
+    ['no verify usage', 'signs and verifies', () => hmac(bytes(32), 'SHA-256', ['sign'])],
+    ['no sign usage', 'signs and verifies', () => hmac(bytes(32), 'SHA-256', ['verify'])],
+  ])('refuses a key with %s', async (_case, why, make) => {
+    const key = (await make()) as CryptoKey;
+    expect(() => orgKeyFromCryptoKey(key)).toThrow(new TypeError(`the org key ${why}`));
   });
 });

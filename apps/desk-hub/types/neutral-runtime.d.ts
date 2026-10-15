@@ -4,6 +4,8 @@
 
 interface CryptoKey {
   readonly type: string;
+  readonly algorithm: { readonly name: string };
+  readonly usages: string[];
 }
 
 interface SubtleCrypto {
