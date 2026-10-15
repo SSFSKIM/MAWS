@@ -56,8 +56,9 @@ describe('the seam’s commands', () => {
       for (const answer of [read, published]) {
         expect(answer.wallMs).toBeGreaterThan(0);
         expect(answer.loop.max).toBeGreaterThan(0);
-        expect(answer.busyMs).toBeGreaterThanOrEqual(answer.loop.max - 1); // the busy time holds the longest stretch
-        expect(answer.busyMs).toBeLessThanOrEqual(answer.wallMs + 20); // and lies within the call's span (and the turns around it)
+        // the busy time holds the longest stretch (a gap within twice the tick counts as idle); it is not bounded by the
+        // call's wall time, since the turns after the call count too (a loaded runner read 185 ms against a 164 ms call)
+        expect(answer.busyMs).toBeGreaterThanOrEqual(answer.loop.max > 2 ? answer.loop.max - 1 : 0);
       }
       // 'last' follows the session: its publish is now its base, so a second publish from 'last' is not stale
       const again = (await seam.run({ cmd: 'call', session: 'deck-agent', tool: 'artifact_publish', args: { artifact: id, baseRevision: 'last', files: { [SLIDE]: text.replace('font-size:64px', 'font-size:68px') } } })) as Published;
