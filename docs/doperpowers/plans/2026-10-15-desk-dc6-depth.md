@@ -225,6 +225,20 @@ registrations through `connectDepth()`.
   Paths and anything identifying in the recording are scrubbed to
   placeholders before commit.
   Date/Author: 2026-10-15, controller (pre-flight).
+- Decision: The fixture's conditions, from the composite's writer. The
+  synthesized chunks take DX5's real shape, `{turnId, agentId, step,
+  chunkIndex, chunk}` with `chunk` the engine's `{kind, index, text}`
+  (samples: doperpowers `tests/sminos/test-bridge.sh` near line 198), and
+  cover every block kind the recorded responses carry (thinking and tool
+  use beside text) so each kind's settling is exercised; the split keeps
+  DX4's order (chunks, `block-row`, row), the snapshot's `streaming` and
+  `upTo` covering exactly the chunks up to the cut, and one case has a
+  chunk arrive after its block's `block-row`, which is ignored; the
+  throwaway session runs in a scratch directory outside every repository,
+  touching nothing of the owner's (no `~/.claude/settings.json` change),
+  and is scrubbed of paths, user names, and host names. DC3's M4 recording
+  becomes the one that counts once it lands at M3.
+  Date/Author: 2026-10-15, composite's writer via the controller.
 
 ## Surprises & Discoveries
 
