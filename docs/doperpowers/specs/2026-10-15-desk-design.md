@@ -2264,6 +2264,15 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The enrolled machine name becomes the machine's one identity in sminos (`host_name()`),
+  for hub and git projects alike, ahead of `DAEMON_HOST` and the system name. Enrollment defaults the
+  name to the current host name, so most enrollments rename nothing, and a pinned name no longer
+  drifts with macOS's `.local` renames. A rename keeps the machine's existing seats and members
+  local and controllable. Its writers already written stay under the old name and never reach the
+  hub (DX2's `writer-not-yours`), and the CLI tells the human so. Rejected: a per-project writer
+  name, which would change `writer_id` across sminos.py for no gain over one name per machine.
+  Flags DC2 (shares sminos.py), DC7.
+  Date/Author: 2026-10-15, design session (DC4's M2).
 - Decision: Base64url is canonical everywhere DX1–DX7 use it: the unused low bits of the last character
   must be zero, and decoders refuse any other spelling. DC4's Python module (M1) found that the hub's
   decoder accepted all four spellings of a 43-character code while the Python one accepted only the
