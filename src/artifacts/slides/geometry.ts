@@ -164,6 +164,15 @@ const lengthOf = (text: string | undefined, size: number): number => {
   const t = text.trim();
   return t.endsWith('%') ? (Number.parseFloat(t) / 100) * size : Number.parseFloat(t) || 0;
 };
+/**
+ * Fix wave 3: the literal a transform that is one design-system token (`var(--ds-x, fallback)`) falls back to, or null
+ * when the value is not one token or has no fallback: what "Detach transform" writes in its place.
+ */
+export function transformFallback(transform: string | undefined): string | null {
+  const m = /^var\(\s*--[A-Za-z0-9_-]+\s*,\s*([\s\S]+)\)$/.exec(transform?.trim() ?? '');
+  return m ? m[1]!.trim() : null;
+}
+
 /** The px a transform's translate moves a box of `w` × `h` (a token or calc reads as 0). */
 export function translateOf(transform: string | undefined, w: number, h: number): [number, number] {
   let [dx, dy] = [0, 0];

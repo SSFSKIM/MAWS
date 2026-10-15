@@ -340,6 +340,7 @@ const LAB: Record<string, string> = {
   // fix wave 1: an element drawn scaled, and a group drawn turned (its children measured as drawn)
   'project/slides/xf.html': `<section id="xf" style="background:#ffffff">
 <div id="sc" style="position:absolute; left:300px; top:300px; width:200px; height:100px; transform:scale(2); background:#ff00ff"></div>
+<div id="tk" style="position:absolute; left:1500px; top:700px; width:150px; height:100px; transform:var(--ds-pose, scale(1.5)); background:#00aaaa"></div>
 <div id="g" data-group="" style="position:absolute; left:1000px; top:300px; width:400px; height:100px; transform:rotate(90deg)"><div id="k1" style="position:absolute; left:0px; top:0px; width:100px; height:100px; background:#00aa00"></div><div id="k2" style="position:absolute; left:300px; top:0px; width:100px; height:100px; background:#0000aa"></div></div>
 </section>`,
 };
@@ -482,6 +483,13 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
     expect([Math.round(now.x - was.x), Math.round(now.y - was.y), Math.round(now.width - was.width), Math.round(now.height - was.height)]).toEqual([0, 0, 0, 0]);
   }
   expect((await elementOf(page, id, 'xf', 'k1'))?.style.transform).toBe('rotate(90deg)');
+  // fix wave 3: a transform that is a design-system token is not rotated beside: the handle says why, nothing is written
+  const tk = await painted('tk');
+  await page.mouse.click(tk.x + tk.width / 2, tk.y + tk.height / 2);
+  const tkRot = (await tab.locator('[data-overlay] [data-handle="rotate"]').boundingBox())!;
+  await drag(page, { x: tkRot.x + tkRot.width / 2, y: tkRot.y + tkRot.height / 2 }, { x: tkRot.x + 120, y: tkRot.y + 80 });
+  await expect(tab.locator('[data-deck-notice]')).toContainText('design-system token');
+  expect((await elementOf(page, id, 'xf', 'tk'))?.style.transform).toBe('var(--ds-pose, scale(1.5))');
   // another replica's selection, outlined in its colour with its name
   await page.evaluate(([a]) => (window as unknown as Seam).__maws_presentations.presence.show(a!, 'xf', ['sc']), [id] as const);
   await expect(tab.locator('[data-overlay] [data-remote-selected="sc"]')).toHaveCount(1);

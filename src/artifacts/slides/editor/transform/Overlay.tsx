@@ -122,7 +122,13 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
         const id = current[0]!;
         const make = () =>
           handle === 'rotate' ? startRotate(c, id, p) : handle === 'end0' || handle === 'end1' ? startEndpoint(c, id, handle === 'end0' ? 0 : 1) : startResize(c, id, handle as Handle, p);
-        gesture.current = make();
+        const g = make();
+        if (g.refused) {
+          onNotice?.(g.refused);
+          e.preventDefault();
+          return;
+        }
+        gesture.current = g;
         el.setPointerCapture?.(e.pointerId);
         e.preventDefault();
         return;
@@ -154,6 +160,10 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
         if (Math.hypot(e.clientX - pend.start.x, e.clientY - pend.start.y) < DRAG_START_PX) return;
         gesture.current = pend.make();
         pending.current = null;
+        if (gesture.current?.refused) {
+          onNotice?.(gesture.current.refused);
+          gesture.current = null;
+        }
         if (!gesture.current) return;
       }
       const g = gesture.current;

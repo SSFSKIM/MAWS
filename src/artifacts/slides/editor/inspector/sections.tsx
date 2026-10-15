@@ -6,7 +6,7 @@
 // letter spacing, `data-fit`).
 import { useId } from 'react';
 import { checkValue } from '../../css';
-import { pinToLeftTop, px, rotationOf, withRotation } from '../../geometry';
+import { pinToLeftTop, px, readTransform, rotationOf, transformFallback, withRotation } from '../../geometry';
 import { INSPECTOR_COPY as C } from './copy';
 import { Button, ColourField, NumberField, Refusal, Row, Section, SelectField, Toggles, useInspector, useRefusal, type Choice } from './fields';
 import { canAll, common, type Picked } from './selection';
@@ -59,6 +59,9 @@ export function Arrange() {
     );
   };
   const rotation = common(picked, (p) => rotationOf(p.style.transform));
+  // fix wave 3: a transform that is a design-system token is taken whole; a rotation cannot be composed beside it
+  const token = picked.some((p) => p.style.transform !== undefined && readTransform(p.style.transform, 1, 1) === null);
+  const detachable = token && picked.every((p) => p.style.transform === undefined || readTransform(p.style.transform, 1, 1) !== null || transformFallback(p.style.transform) !== null);
   const opacity = common(picked, (p) => bareOf(p.style.opacity));
   return (
     <Section title={C.arrange}>
@@ -72,8 +75,14 @@ export function Arrange() {
             unit="°"
             value={rotation.value ?? null}
             mixed={rotation.mixed}
+            disabled={token}
             onCommit={(n, how) => style((p) => ({ transform: withRotation(p.style.transform, n ?? 0) }), how)}
           />
+        )}
+        {turns && token && detachable && (
+          <Button label={C.detachTransform} onClick={() => style((p) => (readTransform(p.style.transform, 1, 1) === null ? { transform: transformFallback(p.style.transform) } : null), 'edit')}>
+            {C.detachTransform}
+          </Button>
         )}
         {fades && (
           <NumberField
@@ -86,6 +95,7 @@ export function Arrange() {
           />
         )}
       </div>
+      {turns && token && <p className="deck-inspector-note">{C.tokenTransform}</p>}
     </Section>
   );
 }

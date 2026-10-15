@@ -31,6 +31,7 @@ import {
   normalizeDeg,
   pinToLeftTop,
   px,
+  readTransform,
   resizePlaced,
   rotationOf,
   shift,
@@ -49,7 +50,9 @@ import {
 } from '../../geometry';
 import { isPinned } from '../../ir';
 import { reorderFlow, ROOT } from '../../model';
-import { writeElements, type ElementWrites } from '../../writers-elements';
+import { checkStyle } from '../../css';
+import { siteOf, writeElements, type ElementWrites } from '../../writers-elements';
+import { DECK_COPY as C } from '../copy';
 import type { SlideCanvas } from '../../canvas';
 import type { DeckSession } from '../session';
 import { boxInParent, containerMatrix, flowDirection, measure, measureAll, type Measured } from './measure';
@@ -75,12 +78,21 @@ export interface Frame {
   ghost?: Box;
 }
 export interface Gesture {
+  /** Fix wave 3: why the gesture does nothing (shown to the owner); it writes nothing at all. */
+  refused?: string;
   frame(p: Pt, mods: Mods): Frame;
   /** Ends it (`commit` false: a cancelled flow drag drops nothing). */
   end(commit?: boolean): void;
 }
 
 const NO_GUIDES: Frame = { guides: [] };
+const refusal = (reason: string): Gesture => ({ refused: reason, frame: () => NO_GUIDES, end: () => {} });
+/**
+ * A gesture that composes or reads the element's transform (rotate, resize) needs it readable: a design-system token
+ * (`var(--ds-pose, …)`) is a whole value the dialect takes as it is, and a rotation composed beside it would be dropped
+ * on reload (fix wave 3).
+ */
+const unreadable = (transform: string | undefined, w: number, h: number): boolean => transform !== undefined && readTransform(transform, w, h) === null;
 const PX = /^(-?\d+(?:\.\d+)?)px$/;
 const MIN_SIZE = 8;
 /**
@@ -278,6 +290,7 @@ export function startResize(ctx: GestureContext, id: string, handle: Handle, p0:
   const e = tree.element(id);
   const m = measure(ctx.canvas, id, ctx.scale);
   if (!e || !m) return { frame: () => NO_GUIDES, end: () => {} };
+  if (unreadable(e.style.transform, m.w, m.h)) return refusal(C.tokenTransform);
   const pinned = isPinned(e.tag, e.style, e.attrs);
   const start = placeOf(e.style, m);
   const conv = pinned ? pinToLeftTop(e.style, start) : {};
@@ -341,6 +354,9 @@ export function startRotate(ctx: GestureContext, id: string, p0: Pt): Gesture {
   const e = tree.element(id);
   const m = measure(ctx.canvas, id, ctx.scale);
   if (!e || !m) return { frame: () => NO_GUIDES, end: () => {} };
+  if (unreadable(e.style.transform, m.w, m.h)) return refusal(C.tokenTransform);
+  // every composed transform is checked as the loader checks it before it lands
+  const { site, style } = siteOf(ctx.session.doc, ctx.slideId, id);
   // the angle as the host sees it: a rotation inside a turned group is the group's own
   const back = invert(m.hostMatrix);
   const centre = apply(back, apply(m.matrix, { x: m.w / 2, y: m.h / 2 }));
@@ -354,7 +370,9 @@ export function startRotate(ctx: GestureContext, id: string, p0: Pt): Gesture {
       const deg = normalizeDeg(mods.shift ? Math.round(turned / 15) * 15 : Math.round(turned * 100) / 100);
       if (deg === last) return NO_GUIDES;
       last = deg;
-      drag.write({ [id]: { style: { transform: withRotation(e.style.transform, deg) } } });
+      const transform = withRotation(e.style.transform, deg);
+      if (transform !== null && !checkStyle('transform', transform, site, { ...style, transform }).ok) return NO_GUIDES;
+      drag.write({ [id]: { style: { transform } } });
       return NO_GUIDES;
     },
     end() {

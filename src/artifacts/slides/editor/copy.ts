@@ -63,5 +63,6 @@ export const DECK_COPY = {
   tableSize: (rows: number, cols: number) => `${rows} × ${cols} table`,
   shapeName: (kind: string) => ({ rect: 'Rectangle', rounded: 'Rounded rectangle', ellipse: 'Ellipse', diamond: 'Diamond', 'arrow-right': 'Arrow right', 'arrow-left': 'Arrow left', 'arrow-up': 'Arrow up', 'arrow-down': 'Arrow down', line: 'Line shape' })[kind] ?? kind,
   uploading: 'Uploading the image…',
+  tokenTransform: 'This element’s transform is a design-system token: detach it (Detach transform, in the inspector) to rotate or resize it.',
   uploadFailed: (reason: string) => `The image could not be uploaded: ${reason}`,
 } as const;

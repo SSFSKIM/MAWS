@@ -392,3 +392,27 @@ describe('fix wave 2: a connector is hit in its place in the paint order', () =>
     expect(ids(PIC + LINE)).toEqual(['line', 'pic']);
   });
 });
+
+// ---------------------------------------------------------------- fix wave 3 (the M5 re-review 2's reproduction)
+
+describe('fix wave 3: a transform that is a design-system token', () => {
+  it('rotating or resizing an element whose whole transform is a token is refused with the reason, nothing written', () => {
+    const doc = deck(`<section id="s" style="background:#ffffff"><div id="t" style="position:absolute; left:300px; top:300px; width:200px; height:100px; transform:var(--ds-pose, scale(1.5)); background:#ff0000"></div></section>`);
+    const clean = loadSlide(slideFile(doc, 's'), { fileId: 's' });
+    expect(clean.ok && clean.diagnostics.filter((d) => d.severity === 'warning')).toEqual([]); // the loader takes the token whole
+    const ctx = gestureContext(doc);
+    let n = 0;
+    const off = onUpdate(doc, () => n++);
+    const r = startRotate(ctx, 't', { x: 400, y: 200 });
+    expect(r.refused).toMatch(/design-system token/);
+    r.frame({ x: 700, y: 350 }, NO);
+    r.end();
+    const z = startResize(ctx, 't', 'se', { x: 500, y: 400 });
+    expect(z.refused).toMatch(/design-system token/);
+    z.frame({ x: 560, y: 430 }, NO);
+    z.end();
+    off();
+    expect(n).toBe(0);
+    expect(styleOf(doc, 't').transform).toBe('var(--ds-pose, scale(1.5))');
+  });
+});

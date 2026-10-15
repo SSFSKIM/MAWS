@@ -27,6 +27,8 @@ export const INSPECTOR_COPY = {
   width: 'Width',
   height: 'Height',
   rotation: 'Rotation',
+  detachTransform: 'Detach transform',
+  tokenTransform: 'This transform is a design-system token; detach it to rotate this element.',
   opacity: 'Opacity',
   // fill
   fillKind: 'Fill',

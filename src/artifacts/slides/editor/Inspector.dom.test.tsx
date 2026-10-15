@@ -341,3 +341,18 @@ describe('fix wave 1: a shadow the canvas cannot draw is never offered', () => {
     expect(screen.getByText(/drawn from its outline/)).toBeTruthy();
   });
 });
+
+describe('fix wave 3: a transform that is a design-system token', () => {
+  it('holds the rotation off with the reason, and Detach writes the token’s own value, which reloads clean', async () => {
+    const { setStyles } = await import('../writers-elements');
+    const { doc } = mount(['box']);
+    act(() => setStyles(doc, 'a', { box: { transform: 'var(--ds-pose, scale(1.5))' } }));
+    expect(box('Rotation').disabled).toBe(true);
+    expect(screen.getByText(/design-system token/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Detach transform' }));
+    expect(styleOf(doc, 'box').transform).toBe('scale(1.5)');
+    expect(box('Rotation').disabled).toBe(false);
+    const reloaded = loadSlide(slideFile(doc, 'a'), { fileId: 'a' });
+    expect(reloaded.ok && reloaded.diagnostics.filter((d) => d.severity === 'warning')).toEqual([]);
+  });
+});
