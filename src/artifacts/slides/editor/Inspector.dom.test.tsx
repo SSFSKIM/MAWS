@@ -355,4 +355,17 @@ describe('fix wave 3: a transform that is a design-system token', () => {
     const reloaded = loadSlide(slideFile(doc, 'a'), { fileId: 'a' });
     expect(reloaded.ok && reloaded.diagnostics.filter((d) => d.severity === 'warning')).toEqual([]);
   });
+
+  // M6 (M5's review, Minor): the note says what Detach does, and never points at a button it does not show
+  it('says Detach replaces the token with its fallback value, and with no fallback offers no Detach and asks for none', async () => {
+    const { setStyles } = await import('../writers-elements');
+    const { doc } = mount(['box']);
+    act(() => setStyles(doc, 'a', { box: { transform: 'var(--ds-pose, scale(1.5))' } }));
+    expect(screen.getByText(/Detach transform replaces the token with its fallback value, scale\(1\.5\)/)).toBeTruthy();
+    act(() => setStyles(doc, 'a', { box: { transform: 'var(--ds-pose)' } }));
+    expect(screen.queryByRole('button', { name: 'Detach transform' })).toBeNull();
+    const note = screen.getByText(/design-system token/).textContent!;
+    expect(note).toMatch(/no fallback value/);
+    expect(note).not.toMatch(/[Dd]etach/);
+  });
 });

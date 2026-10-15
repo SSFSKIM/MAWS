@@ -95,7 +95,7 @@ export function Arrange() {
           />
         )}
       </div>
-      {turns && token && <p className="deck-inspector-note">{C.tokenTransform}</p>}
+      {turns && token && <p className="deck-inspector-note">{picked.length === 1 ? C.tokenTransform(transformFallback(picked[0]!.style.transform)) : C.tokenTransforms(detachable)}</p>}
     </Section>
   );
 }

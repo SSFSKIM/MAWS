@@ -28,7 +28,15 @@ export const INSPECTOR_COPY = {
   height: 'Height',
   rotation: 'Rotation',
   detachTransform: 'Detach transform',
-  tokenTransform: 'This transform is a design-system token; detach it to rotate this element.',
+  // M6 (M5's review): what Detach does, said only where it is offered; a token with no fallback has nothing to detach to
+  tokenTransform: (fallback: string | null) =>
+    fallback === null
+      ? 'This transform is a design-system token with no fallback value, so it is not rotated here: give it a fallback in the slide (var(--ds-…, value)) or change it in the design system.'
+      : `This transform is a design-system token. Detach transform replaces the token with its fallback value, ${fallback}, which can then be rotated.`,
+  tokenTransforms: (detachable: boolean) =>
+    detachable
+      ? 'These transforms are design-system tokens. Detach transform replaces each token with its fallback value, which can then be rotated.'
+      : 'Some of these transforms are design-system tokens with no fallback value, so they are not rotated here: give each a fallback in the slide (var(--ds-…, value)) or change it in the design system.',
   opacity: 'Opacity',
   // fill
   fillKind: 'Fill',

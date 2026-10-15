@@ -63,6 +63,10 @@ export const DECK_COPY = {
   tableSize: (rows: number, cols: number) => `${rows} × ${cols} table`,
   shapeName: (kind: string) => ({ rect: 'Rectangle', rounded: 'Rounded rectangle', ellipse: 'Ellipse', diamond: 'Diamond', 'arrow-right': 'Arrow right', 'arrow-left': 'Arrow left', 'arrow-up': 'Arrow up', 'arrow-down': 'Arrow down', line: 'Line shape' })[kind] ?? kind,
   uploading: 'Uploading the image…',
-  tokenTransform: 'This element’s transform is a design-system token: detach it (Detach transform, in the inspector) to rotate or resize it.',
+  // M6 (M5's review): Detach transform is named only where the inspector offers it (the token has a fallback)
+  tokenTransform: (detachable: boolean) =>
+    detachable
+      ? 'This element’s transform is a design-system token: Detach transform, in the inspector, replaces it with its fallback value, which can then be rotated and resized.'
+      : 'This element’s transform is a design-system token with no fallback value, so it is not rotated or resized here: give it a fallback in the slide or change it in the design system.',
   uploadFailed: (reason: string) => `The image could not be uploaded: ${reason}`,
 } as const;

@@ -39,6 +39,7 @@ import {
   snapMove,
   snapResize,
   SNAP_SCREEN_PX,
+  transformFallback,
   transformMatrix,
   union,
   withRotation,
@@ -290,7 +291,7 @@ export function startResize(ctx: GestureContext, id: string, handle: Handle, p0:
   const e = tree.element(id);
   const m = measure(ctx.canvas, id, ctx.scale);
   if (!e || !m) return { frame: () => NO_GUIDES, end: () => {} };
-  if (unreadable(e.style.transform, m.w, m.h)) return refusal(C.tokenTransform);
+  if (unreadable(e.style.transform, m.w, m.h)) return refusal(C.tokenTransform(transformFallback(e.style.transform) !== null));
   const pinned = isPinned(e.tag, e.style, e.attrs);
   const start = placeOf(e.style, m);
   const conv = pinned ? pinToLeftTop(e.style, start) : {};
@@ -354,7 +355,7 @@ export function startRotate(ctx: GestureContext, id: string, p0: Pt): Gesture {
   const e = tree.element(id);
   const m = measure(ctx.canvas, id, ctx.scale);
   if (!e || !m) return { frame: () => NO_GUIDES, end: () => {} };
-  if (unreadable(e.style.transform, m.w, m.h)) return refusal(C.tokenTransform);
+  if (unreadable(e.style.transform, m.w, m.h)) return refusal(C.tokenTransform(transformFallback(e.style.transform) !== null));
   // every composed transform is checked as the loader checks it before it lands
   const { site, style } = siteOf(ctx.session.doc, ctx.slideId, id);
   // the angle as the host sees it: a rotation inside a turned group is the group's own
