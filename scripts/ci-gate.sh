@@ -4,8 +4,8 @@
 #   scripts/ci-gate.sh <worktree-or-sha> [--gates static,unit,probes,e2e:<group>,…] [--runner linux|macos]
 #                      [--label <name>] [--keep]
 #
-# Pushes the tree's sha to refs/heads/ci/<label>-<short> (force), waits for .github/workflows/gate.yml's run of it,
-# prints each job's conclusion, downloads the failed e2e jobs' reports to /tmp/maws-review/gates/ci-<short>/, keeps the
+# Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for .github/workflows/gate.yml's
+# run of it, prints each job's conclusion, downloads the failed e2e jobs' reports to /tmp/maws-review/gates/ci-<short>/, keeps the
 # whole transcript in /tmp/maws-review/gates/ci-<short>.log, deletes the ref (unless --keep) and exits with the run's
 # status (0 green, 1 anything else).
 #
@@ -16,14 +16,15 @@
 #   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
 #   --keep             leave the ci/ ref in place
 #
-# --gates or --runner writes `Gates:` and `Runner:` trailers onto an empty commit on top of the sha, so the pushed tree
-# is the tested tree plus one message. A Linux lane admits only the e2e groups green there (§3.1); the plan refuses the
-# rest. Every gh call names the repository, so the script runs from any directory.
+# Every invocation pushes a fresh empty commit on top of the sha: its message carries a unique nonce (so the push always
+# triggers a run of its own and the run found is this one's) and, when given, the `Gates:` and `Runner:` trailers. The
+# pushed tree is always the tested tree plus that one commit. A Linux lane admits only the e2e groups green there
+# (§3.1); the plan refuses the rest. Every gh call names the repository, so the script runs from any directory.
 set -uo pipefail
 
 REPO=SSFSKIM/MAWS
 usage() {
-  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
@@ -65,18 +66,23 @@ mkdir -p "$out"
 log=$out/ci-$short.log
 exec > >(tee "$log") 2>&1
 
-pushed=$sha
-if [[ -n $gates || -n $runner ]]; then
-  trailers=()
-  [[ -n $gates ]] && trailers+=("Gates: $gates")
-  [[ -n $runner ]] && trailers+=("Runner: $runner")
-  pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short" -m "$(printf '%s\n' "${trailers[@]}")") || exit 1
-fi
+# One paragraph of trailers: the nonce makes every pushed sha unique, so pushing the same sha again still triggers a run.
+trailers="Nonce: $(date +%s)-$$"
+[[ -n $gates ]] && trailers+=$'\n'"Gates: $gates"
+[[ -n $runner ]] && trailers+=$'\n'"Runner: $runner"
+pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short" -m "$trailers") || exit 1
 
 run_id=''
 finish() {
   local status=$1
-  if [[ $keep == false ]]; then git -C "$git_dir" push --quiet origin --delete "refs/heads/$ref" 2>/dev/null && echo "ci-gate: removed $ref"; fi
+  if [[ $keep == false ]]; then
+    # Only while the ref is still this invocation's commit: a later invocation's push to it is not ours to delete.
+    if git -C "$git_dir" push --quiet --force-with-lease="refs/heads/$ref:$pushed" origin ":refs/heads/$ref" 2>/dev/null; then
+      echo "ci-gate: removed $ref"
+    else
+      echo "ci-gate: left $ref (moved by a later push)"
+    fi
+  fi
   echo "ci-gate: transcript in $log"
   exit "$status"
 }
@@ -92,14 +98,19 @@ echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner
 
 # The run appears a few seconds after the push; a minute without it means the workflow did not trigger.
 for _ in $(seq 1 30); do
-  run_id=$(gh -R "$REPO" run list --branch "$ref" --json databaseId,headSha --jq ".[] | select(.headSha == \"$pushed\") | .databaseId" | head -1)
+  run_id=$(gh -R "$REPO" run list --workflow gate.yml --event push --branch "$ref" --json databaseId,headSha --jq ".[] | select(.headSha == \"$pushed\") | .databaseId" | head -1)
   [[ -n $run_id ]] && break
   sleep 2
 done
 [[ -n $run_id ]] || { echo "ci-gate: no run of $pushed on $ref" >&2; finish 1; }
 echo "ci-gate: https://github.com/$REPO/actions/runs/$run_id"
 
-gh -R "$REPO" run watch "$run_id" --compact --interval 30 >/dev/null
+# A failed watch (an API error mid-poll) is not the end of the run: only the status `completed` is.
+while :; do
+  gh -R "$REPO" run watch "$run_id" --compact --interval 30 >/dev/null 2>&1
+  [[ $(gh -R "$REPO" run view "$run_id" --json status --jq .status 2>/dev/null) == completed ]] && break
+  sleep 15
+done
 conclusion=$(gh -R "$REPO" run view "$run_id" --json conclusion --jq .conclusion)
 gh -R "$REPO" run view "$run_id" --json jobs --jq '.jobs[] | "\(.conclusion // .status)\t\(.name)"' | sort -k2
 
