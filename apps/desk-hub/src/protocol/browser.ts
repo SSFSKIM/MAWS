@@ -21,6 +21,9 @@ export type ProjectUp =
   | { t: 'subscribe'; machine: string; session: string; agentId: string | null; sub: string }
   | { t: 'unsubscribe'; sub: string }
   | { t: 'rows'; sub: string; before: string; limit: number }
+  /** The session's working-tree diff, answered as DX4 `diff` on that sub; a main-transcript sub's only (`agentId` null).
+   * Computed on request, never pushed. */
+  | { t: 'diff'; sub: string }
   /** Whether this tab shows the project; a visible tab of a member holds back that member's pushes. */
   | { t: 'visibility'; visible: boolean }
   | Part;

@@ -356,6 +356,39 @@ describe('refusals', () => {
     browser.close();
     await a.close();
   });
+
+  it('records a conflict a daemon reports: an authentic event at a position where it holds another', async () => {
+    const project = newProject();
+    const a = await machine('conflicted');
+    await a.sync(project);
+    const browser = await BrowserClient.open(hub, ADMIN, project);
+    await a.postOk([{ t: 'rejected', project, event: { writer: `hub/${memberId}`, seq: 2 }, nonce: 'AwMDAwMDAwMDAwMDAwMDAw', reason: 'conflict', message: 're-sequenced' }]);
+    expect(await browser.next((f) => f.t === 'rejected', 'rejected')).toMatchObject({
+      rejection: { machine: a.name, event: { writer: `hub/${memberId}`, seq: 2 }, reason: 'conflict', message: 're-sequenced' },
+    });
+    expect(a.frames.filter((f) => f.t === 'refused')).toEqual([]);
+    browser.close();
+    await a.close();
+  });
+
+  it('never fills a hole: a daemon whose vector moved past a refused seq is not sent that seq again', async () => {
+    const project = newProject();
+    const writer = await machine('holder');
+    await writer.sync(project);
+    await writer.postOk([{ t: 'events', project, events: [1, 2, 3].map((seq) => say(writer, project, seq)) }]);
+    const reader = await machine('spender');
+    // The reader refused seq 2 of the writer's feed and spent the position: its vector says 3 while it holds 1 and 3.
+    const feed = `${writer.name}/${SESSION}`;
+    const from = reader.frames.length;
+    await reader.postOk([{ t: 'hello', project, name: 'demo', have: { [feed]: 3 } }]);
+    await reader.next((f) => f.t === 'have' && f.project === project, 'have', from);
+    await writer.postOk([{ t: 'events', project, events: [say(writer, project, 4)] }]);
+    await reader.next((f) => f.t === 'events' && f.events.some((e) => e.seq === 4), 'the live seq 4', from);
+    const sent = reader.frames.slice(from).flatMap((f) => (f.t === 'events' ? f.events.map((e) => e.seq) : []));
+    expect(sent).toEqual([4]);
+    await writer.close();
+    await reader.close();
+  });
 });
 
 describe('browsers', () => {

@@ -50,9 +50,24 @@ export function orgKeyFromCryptoKey(key: CryptoKey): OrgKey {
   return { hmac: key } as OrgKey;
 }
 
-/** 128 random bits, base64url: a code's nonce, and an RPC's id. */
+/** 128 random bits, base64url: a browser's nonces, every RPC's id, and a machine's when it does not derive them. */
 export function newNonce(): string {
   return base64urlEncode(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)));
+}
+
+export const NONCE_DOMAIN = 'smns-hub-nonce-v1';
+
+/**
+ * A machine's own log event's nonce, derived rather than drawn: the first 16 bytes of HMAC-SHA256 with the org key over
+ * `smns-hub-nonce-v1\n<project id>\n<JCS of the event without mac>`. The same event always gets the same nonce, so an
+ * upload resent after a lost answer carries the same bytes and the hub does not refuse it as a conflict; two events
+ * differ, so their nonces do. A browser never derives: its `human` events carry random nonces (`newNonce`).
+ */
+export async function deriveLogNonce(key: OrgKey, project: string, event: object): Promise<string> {
+  const unsealed: Record<string, unknown> = { ...event };
+  delete unsealed.mac;
+  const code = new Uint8Array(await crypto.subtle.sign('HMAC', key.hmac, utf8(`${NONCE_DOMAIN}\n${project}\n${canonicalize(unsealed)}`)));
+  return base64urlEncode(code.slice(0, NONCE_BYTES));
 }
 
 /** The object the code covers; throws a TypeError when the shape has no usable `mac` nonce. */

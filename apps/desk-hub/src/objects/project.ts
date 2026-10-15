@@ -24,7 +24,7 @@ export type MachineContext = { org: string; project: string; machine: string; ge
 
 /** How many audit entries a browser that resumes is shown after `caught-up`. */
 const AUDIT_REPLAY = 100;
-const REJECTION_REASONS = new Set<string>(['bad-code', 'seen-nonce', 'bad-shape']);
+const REJECTION_REASONS = new Set<string>(['bad-code', 'seen-nonce', 'bad-shape', 'conflict']);
 const encoder = new TextEncoder();
 
 export class Project extends DurableObject<Env> {
