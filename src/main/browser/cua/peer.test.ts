@@ -127,13 +127,16 @@ describe('the loader', () => {
     expect(peerAddonPath({ packaged: false, resourcesPath: '/App/Contents/Resources', appRoot: '/src' })).toBe('/src/native/peer-auth/prebuilds/darwin-arm64/peer-auth.node');
   });
 
-  // macOS: its last line loads the prebuild for real, and the committed peer identity addon is a darwin-arm64 prebuild,
-  // loaded only on Apple silicon macOS.
-  it.skipIf(process.platform !== 'darwin')('reports unavailable for a missing file, and off Apple silicon macOS without trying', () => {
+  it('reports unavailable for a missing file, and off Apple silicon macOS without trying', () => {
     const real = peerAddonPath({ packaged: false, resourcesPath: '/nowhere', appRoot });
     expect(loadPeerAddon(join(appRoot, 'native', 'peer-auth', 'missing.node'))).toBeNull();
     expect(loadPeerAddon(real, { platform: 'linux', arch: 'arm64' })).toBeNull();
     expect(loadPeerAddon(real, { platform: 'darwin', arch: 'x64' })).toBeNull();
+  });
+
+  // macOS: the committed peer identity addon is a darwin-arm64 prebuild, loaded only on Apple silicon macOS.
+  it.skipIf(process.platform !== 'darwin')('loads the committed prebuild on Apple silicon macOS', () => {
+    const real = peerAddonPath({ packaged: false, resourcesPath: '/nowhere', appRoot });
     expect(loadPeerAddon(real, { platform: 'darwin', arch: 'arm64' })).not.toBeNull();
   });
 });

@@ -74,7 +74,9 @@ describe('replay runner plays a journal through the normaliser', () => {
     expect(progress.at(-1)).toMatchObject({ appSessionId: APP, state: 'done', index: played.length, total: played.length, speed: 'instant', message: null });
   });
 
-  it("'instant' over 3,300 rows completes in under 200 ms in batches of at most 500", async () => {
+  // macOS: a CPU-time budget measured on the Apple silicon Mac (a hardware-bound gate,
+  // docs/doperpowers/plans/2026-10-14-gate-offload.md §3.1).
+  it.skipIf(process.platform !== 'darwin')("'instant' over 3,300 rows completes in under 200 ms in batches of at most 500", async () => {
     const rows = Array.from({ length: 3300 }, (_, i) => row(i + 1, i * 1000));
     const { runner, batches, events, progress } = harness('instant');
     // The bound is on the work the run costs (this process's CPU time), so a loaded machine's scheduling does not decide

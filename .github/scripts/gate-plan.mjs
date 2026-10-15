@@ -30,6 +30,15 @@ if (unknown.length > 0) {
   process.exit(1);
 }
 
+// A Linux runner cannot pass a class-2 group (§3.1: the packaged app, the CUA harness, anything needing the Mac), so an
+// explicit request for one is refused rather than scheduled to fail; any other runner OS takes every group with a script.
+const class1 = new Set(words(env.CLASS1_E2E));
+const class2 = env.RUNNER_OS === 'Linux' ? [...gates].filter((gate) => gate.startsWith('e2e:') && !class1.has(gate.slice(4))) : [];
+if (class2.length > 0) {
+  process.stderr.write(`gate-plan: class 2, run on the Mac: ${class2.join(', ')} (a Linux runner takes only the class-1 e2e groups)\n`);
+  process.exit(1);
+}
+
 const libreoffice = new Set(words(env.LIBREOFFICE_E2E));
 const e2e = [...gates]
   .filter((gate) => gate.startsWith('e2e:'))

@@ -23,7 +23,9 @@ describe('stub store (the scenario backend behind C4’s record side)', () => {
     expect(s.get('zz' as AppSessionId)).toBeNull();
   });
 
-  it('answers session.list for a thousand sessions from memory in under a millisecond', () => {
+  // macOS: a latency budget measured on the Apple silicon Mac (a hardware-bound gate,
+  // docs/doperpowers/plans/2026-10-14-gate-offload.md §3.1).
+  it.skipIf(process.platform !== 'darwin')('answers session.list for a thousand sessions from memory in under a millisecond', () => {
     const many = Array.from({ length: 1000 }, (_, i) => record(`s${i}`));
     const { s } = store(many);
     const times: number[] = [];
