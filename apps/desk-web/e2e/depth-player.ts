@@ -1,7 +1,8 @@
 // The session plane of one recorded session, served through DC5's DX3 double (the DC6 plan's Decision Log, "The
 // double's fixture"): it answers each `subscribe` the browser sends for the session's main transcript with the snapshot
 // at the playhead, plays the live script (chunks, `block-row`, rows, synthesized from the recording) to every open
-// subscription as the suite advances it, and answers `rows` with older pages. Each subagent's transcript is a track of
+// subscription as the suite advances it, and answers `rows` with older pages and `diff` with the session's diff. The
+// main transcript's snapshot carries the session's last `usage`, and `sendUsage` plays one after a turn. Each subagent's transcript is a track of
 // its own (`agent(id)`), with its own script, playhead, and subscriptions, as DX3 scopes a subscription by `agentId`.
 // The double itself is used as it stands: the player reads the frames it records (`hub.up`) and sends through
 // `hub.sendSession`.
@@ -38,6 +39,12 @@ export class DepthPlayer {
   holdSubscriptions = false;
   /** The next this-many subscriptions are ended before their snapshot (`end {discontinuity}` at n 0). */
   endBeforeSnapshot = 0;
+  /** What a main-transcript snapshot carries as `usage` (null: no bridge, or none yet). */
+  usage: SessionBodies['usage'] | null = null;
+  /** What a `diff` request is answered with. */
+  diff: SessionBodies['diff'] = { base: 'main', text: '' };
+  /** How many `diff` requests the browser sent. */
+  diffsAsked = 0;
   private held: Array<() => void> = [];
   private readonly open: Open[] = [];
   private cursor = 0;
@@ -109,6 +116,7 @@ export class DepthPlayer {
         this.closeSub(frame.sub);
         for (const track of this.agents.values()) track.closeSub(frame.sub);
       } else if (frame.t === 'rows') this.rows(frame.sub, frame.before, frame.limit);
+      else if (frame.t === 'diff') this.answerDiff(frame.sub);
     }
   }
 
@@ -138,13 +146,25 @@ export class DepthPlayer {
     this.open.push(open);
     const cut = Math.max(0, this.playhead - this.overlapNext);
     this.overlapNext = 0;
-    this.send(open, 'snapshot', snapshotAt(this.script, this.playhead, { subagents: this.subagents, limit: this.options.limit }));
+    this.send(open, 'snapshot', { ...snapshotAt(this.script, this.playhead, { subagents: this.subagents, limit: this.options.limit }), usage: this.usage });
     for (const item of this.script.slice(cut, this.playhead)) this.send(open, item.kind, item.body);
   }
 
   private closeSub(sub: string): void {
     const at = this.open.findIndex((open) => open.sub === sub);
     if (at >= 0) this.open.splice(at, 1);
+  }
+
+  /** A `usage` after a main turn, to every open main-transcript subscription; later snapshots carry it. */
+  sendUsage(usage: SessionBodies['usage']): void {
+    this.usage = usage;
+    for (const open of this.open) this.send(open, 'usage', usage);
+  }
+
+  private answerDiff(sub: string): void {
+    this.diffsAsked += 1;
+    const open = this.open.find((o) => o.sub === sub);
+    if (open) this.send(open, 'diff', this.diff);
   }
 
   /** Answers the `rows` requests held so far; how many there were. */
