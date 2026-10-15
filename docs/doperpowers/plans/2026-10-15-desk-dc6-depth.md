@@ -296,6 +296,28 @@ registrations through `connectDepth()`.
   `waitload20.sh` never clears. Supersedes the constraint's load-rule
   wording and the Concrete Steps' local `e2e`.
   Date/Author: 2026-10-15, composite's writer.
+- Decision (M1): MAWS's transcript view is imported as it stands, no edge
+  cut: the ~16 edges to `ipc/client.ts` stay reachable but inert on the
+  desk (the depth column passes its own `openExternal` and `loadSpill`;
+  engine-surface sites ask nothing without a `uiSurface`; browser tests
+  assert no page or console error). Cost: desk-web's typecheck covers
+  MAWS's renderer closure with MAWS's `env.d.ts`, and the lazy depth chunk
+  carries xterm and mermaid. Streaming draws through `Transcript`'s `tail`
+  prop with MAWS's row components and Markdown; tool input is not drawn
+  while it streams (MAWS draws none). A block settles when the row its
+  `block-row` named is *applied* in the store; a `block-row` for another
+  transcript's block (`agentId !== target.agentId`) settles at once. Older
+  rows rebuild under a new source object, which MAWS's store stages and
+  swaps whole; `onReset` serves only DX8's `reset`, which puts the view in
+  a `reconnecting` phase until the fresh snapshot. After an `end`, the view
+  resubscribes once the session is reachable (`presence.record != null &&
+  machineOnline !== false`, the `setLive` value); a fresh snapshot
+  continues the held rows only when its oldest row is among them. Leaving
+  a session drops its store key. Desk `app.css` (DC5's file, outside
+  `shell/`) gains `@source` lines for MAWS's `transcript/`, `owner/`,
+  `engine-surface/`, `ui/`. The fixture's thinking text is a one-sentence
+  stand-in (the engine recorded it omitted).
+  Date/Author: 2026-10-15, M1 executor, folded by the controller.
 
 ## Surprises & Discoveries
 - 2026-10-15 (from DC2's M3, built, in review, via the composite's
@@ -338,5 +360,17 @@ registrations through `connectDepth()`.
   a session the human opened) with `presence` gives the session's kind —
   bridged, `--bg` seat, terminal, not running — through DC5's derivation,
   which depth uses rather than copies.
+- 2026-10-15 (M1): thinking is recorded omitted on this engine
+  (`thinking: ""`, `thinkingDisplay: "omitted"`); if live `thinking`
+  chunks carry text, it vanishes when the row settles — check against real
+  `sminos watch` at M3. Assistant rows carry `apiBlockIndex`, equal to the
+  chunk `index` (the natural check for DC3's producer). A turn's row ids
+  change once an older page brings its opening prompt (`turn:e<eventId>`
+  → `turn:<uuid>`). `<message>` marks render literally in the depth column
+  (MAWS's to-human Presenter is not attached without an owner lane). A
+  response aborted before its `block-row`s leaves partial text drawn until
+  the next reset or snapshot: DX4 carries no step end on a subscription.
+  desk-hub's `enrollment.test.ts` failed once (502 vs 404), passed on
+  rerun.
 
 ## Outcomes & Retrospective
