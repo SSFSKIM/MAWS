@@ -34,6 +34,7 @@ import type { MawsArtifactCapture, MawsArtifactCapturedResult } from '@shared/ip
 import type { DeliverableRecord } from '../src/shared/maws/deliverable';
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
 import { invoke, value } from './support/c7-replay';
+import { FIRST_CREATED_REVISION } from './support/design-systems'; // Decision Log 67: fresh artifacts follow the seeded defaults.
 import {
   allowNext, asPublishReplay, closeScene, frameAt, headerAction, headerActions, idle, importSeeded, launchScene, listOf, mcpCalls, mcpResultOf, ofKind, openArtifacts, PASS3, pageUrlOf,
   recordedCwd, replay, rowOf, scene, scratchProject, seamLines, seedArtifact, seedFile, shoot, show, unfoldWork, viewerOf, type Scene,
@@ -386,8 +387,8 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
   // update is allowed (the recorded Write and Edit are the engine's, replayed, and write nothing).
   const repo = recordedCwd(ARTIFACTS);
   // P3-A (M6): E2's recording, its retired `artifact_update` calls made `artifact_publish` calls of the v2 page from the
-  // revision the create answers (the store is fresh: its first write is revision 1)
-  const replayed = asPublishReplay(ARTIFACTS, DASHBOARD_V2, 1);
+  // revision the create answers (Decision Log 67: the seeded defaults take the first log rows).
+  const replayed = asPublishReplay(ARTIFACTS, DASHBOARD_V2, FIRST_CREATED_REVISION); // Decision Log 67: publish from the fresh base.
   const existed = existsSync(repo);
   mkdirSync(repo, { recursive: true });
   writeFileSync(join(repo, 'dashboard.html'), DASHBOARD_V1);
@@ -412,9 +413,9 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
       expect(calls.map((c) => [c.name, c.args])).toEqual([
         ['artifact_create', { id: 'dash', html_path: 'dashboard.html', title: 'Dashboard' }],
         ['artifact_screenshot', { id: 'dash' }],
-        ['artifact_publish', { artifact: 'dash', baseRevision: 1, files: { 'index.html': DASHBOARD_V2 } }],
+        ['artifact_publish', { artifact: 'dash', baseRevision: FIRST_CREATED_REVISION, files: { 'index.html': DASHBOARD_V2 } }], // Decision Log 67: fresh base.
         ['artifact_list', {}],
-        ['artifact_publish', { artifact: 'nope', baseRevision: 1, files: { 'index.html': DASHBOARD_V2 } }],
+        ['artifact_publish', { artifact: 'nope', baseRevision: FIRST_CREATED_REVISION, files: { 'index.html': DASHBOARD_V2 } }], // Decision Log 67: same replay base.
       ]);
       const text = (k: number) => {
         const block = mcpResultOf(rows, calls[k]!.requestId)!.content.find((b) => b.type === 'text')!;
@@ -435,7 +436,7 @@ test('the artifact replay: two artifact rows and a refusal, the list and screens
       const captured = text(1);
       expect(captured).toMatchObject({ status: 'captured', id: 'dash', deliverableId, title: 'Dashboard', version: 1, width: 1280, height: 800, bytes: png.length });
       expect((captured.consoleErrors as string[]).some((line) => line.includes('E2_BOOM')), JSON.stringify(captured.consoleErrors)).toBe(true);
-      expect(created).toMatchObject({ artifactId: deliverableId, revision: 1 }); // P3-A: the artifact is the record's uuid
+      expect(created).toMatchObject({ artifactId: deliverableId, revision: FIRST_CREATED_REVISION }); // Decision Log 67: the artifact keeps the record's uuid, after the seeded revisions.
       expect(text(2)).toMatchObject({ status: 'published', id: 'dash', deliverableId, version: 2, title: 'Dashboard', changed: ['index.html'] });
       expect(text(3)).toMatchObject({ status: 'listed', artifacts: [{ id: deliverableId, handle: 'dash', kind: 'html', title: 'Dashboard' }] });
       expect(mcpResultOf(rows, calls[4]!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.noArtifact('artifact_publish', 'nope') }], isError: true });
