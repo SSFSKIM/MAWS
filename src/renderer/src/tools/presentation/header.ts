@@ -7,10 +7,11 @@
 // M6: Present (the audience window, D13), Theme and Check against the design system (panels beside the stage, D10),
 // each driving the tab's own deck session, offered once the deck has opened.
 // M7: Comments (the threads rail beside the stage, D9) after Present, and the deck's open threads as the header's count.
+// M8: Version history (B's rail beside the stage, D11) after Comments, offered when the tab has the deck's history.
 import type { DocumentState } from '@artifacts/host';
 import type { DeckRail } from '@artifacts/slides/editor/session';
 import type { EditorHostAction, EditorHostExport, EditorHostRegistration, SavedState } from '../../panel/editor-host';
-import { CommentsIcon } from '../document/icons'; // M7: the document's, so both kinds' Comments look alike
+import { CommentsIcon, HistoryIcon } from '../document/icons'; // M7: the document's, so both kinds' Comments look alike (M8: and History)
 import { CheckIcon, PresentIcon, ThemeIcon } from './icons';
 
 export function savedOf(document: DocumentState | null, saving: boolean): SavedState | null {
@@ -29,6 +30,7 @@ export interface DeckHeaderState {
   rail: DeckRail | null; // M6: the panel open beside the stage
   canPresent: boolean; // M6: the deck has a slide to show
   unresolved?: number; // M7: open threads, orphans included (0 or absent: no count)
+  history?: boolean; // M8: version history is offered
 }
 
 /** M6: what the header's actions do, on the tab's own state (X32's lifetime rule). */
@@ -41,6 +43,7 @@ function deckActions(state: DeckHeaderState, commands: DeckHeaderCommands): Edit
   return [
     { id: 'present', label: 'Present', icon: PresentIcon, disabled: !state.canPresent, onSelect: () => commands.present() },
     { id: 'comments', label: 'Comments', icon: CommentsIcon, pressed: state.rail === 'comments', onSelect: () => commands.toggleRail('comments') }, // M7
+    ...(state.history ? [{ id: 'history', label: 'Version history', icon: HistoryIcon, pressed: state.rail === 'history', onSelect: () => commands.toggleRail('history') }] : []), // M8
     { id: 'theme', label: 'Theme', icon: ThemeIcon, pressed: state.rail === 'theme', onSelect: () => commands.toggleRail('theme') },
     { id: 'check', label: 'Check against the design system', icon: CheckIcon, pressed: state.rail === 'check', onSelect: () => commands.toggleRail('check') },
   ];

@@ -42,4 +42,15 @@ describe('the deck header’s actions (M6)', () => {
     expect(header.unresolved).toBe(3);
     expect(deckHeader(state({ unresolved: 0 })).unresolved).toBeUndefined();
   });
+
+  // M8 (D11): Version history after Comments, when the tab has the deck's history
+  it('offers Version history after Comments, pressed while its rail is open, only with the deck’s history', () => {
+    const calls: string[] = [];
+    const header = deckHeader(state({ rail: 'history', history: true }), { present: () => {}, toggleRail: (rail) => calls.push(rail) });
+    expect(header.actions?.map((a) => a.id)).toEqual(['present', 'comments', 'history', 'theme', 'check']);
+    const history = header.actions!.find((a) => a.id === 'history')!;
+    expect([history.label, history.pressed]).toEqual(['Version history', true]);
+    history.onSelect();
+    expect(calls).toEqual(['history']);
+  });
 });
