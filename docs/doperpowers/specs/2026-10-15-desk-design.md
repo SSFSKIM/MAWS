@@ -1104,14 +1104,17 @@ DX6 shapes, and DX7 by DC3 at G1; DX5 by DC2 at G1; DX8 by DC5 at G1. Each lands
 here, reviewed with its gate, and a later change to one is a Decision Log
 entry that flags its consumers.
 
-### DX5 — Local bridge protocol (owner DC2; version 1, folded 2026-10-15)
+### DX5 — Local bridge protocol (owner DC2; version 1 as amended by DC2's M1 review, folded 2026-10-15)
 
-Folded from DC2's plan (doperpowers `434953ce`,
+Folded from DC2's plan (doperpowers `a3756267`,
 `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md`, built at DC2's
-M1, `fbd19b1a`). Rows marked reserved are proposals that DC2's M2 and M3
-fix and send as extensions; until DC2 closes, its plan's copy is the
-working text and this one is refreshed from it at each extension. Paths in
-this subsection are doperpowers'.
+M1 and amended by its review's fix waves, `79bb122b` and `6ac34e14`; rows
+marked [fw1] or [fw2] changed there). Rows marked reserved are proposals
+that DC2's M2 and M3 fix and send as extensions; until DC2 closes, its
+plan's copy is the working text and this one is refreshed from it at each
+extension. Paths in this subsection are doperpowers'.
+
+Rows changed by fix wave 1 are marked **[fw1]**.
 
 The session endpoint of a bridged session. **Built at M1** unless marked
 **reserved (M2)** or **reserved (M3)**; reserved shapes are proposals the
@@ -1134,7 +1137,9 @@ milestone that builds them fixes and sends as an extension.
   response (one request per connection).
 - **Placement:** the child binds `.<first 8 of id>.<pid>.sock` in the directory, listens,
   sets 0600, and renames it onto the path; then it writes `hello` on stdout. So the path
-  never names a socket that is not yet listening.
+  never names a socket that is not yet listening. **[fw1]** A child's identity is the
+  inode of its own socket, read from the temporary name before the rename (never from
+  the path after it, where a newer child's socket may already stand).
 - **Presence:** a session has a bridge when `GET /status` on its path answers 200 with its
   session id. (DX4's "bridge connected".)
 - **Stale rule:** a socket file whose connect fails is stale; whoever finds it removes it,
@@ -1149,8 +1154,12 @@ milestone that builds them fixes and sends as an extension.
 - **When the mod spawns one:** at `session.start`; again after a module reload (the reload
   kills the child and runs `session.start` again); again after a child ends on its own
   (1 s, doubling to 60 s, back to 1 s once a child lived 30 s); and under the new id when
-  the session id changes (a `/clear`), noticed at the next heartbeat (≤ 5 s). Never in a
-  session with `SMNS_INTERNAL` set.
+  the session id changes. **[fw1]** A `/clear` is seen at its `session.end` (reason
+  `clear`): from then nothing more goes to the old child, the new id is looked for every
+  100 ms (up to 5 s), and once found the old child is given up to 1 s to receive what was
+  already queued for it, then stopped, and a child for the new id started. The heartbeat
+  (every 5 s) is the fallback for a change of id with no `session.end`. Never in a session
+  with `SMNS_INTERNAL` set.
 
 #### Routes
 
@@ -1171,7 +1180,9 @@ One JSON object per line, flushed:
 
 - First, once the socket answers:
   `{"op": "hello", "session": "<id>", "pid": <child pid>, "socket": "<path>", "protocol": 1}`.
-  The mod posts nothing before it, then posts the session's start first.
+  The mod posts nothing before it. **[fw1]** Its first post to a child is always the
+  session's `start` then a `resync`; events queued while no child answered are not sent
+  (the resync holds their effect on the live state).
 - Then one line per command: `{"id": "<32 hex, minted by the child>", "op": "<op>", ...args}`,
   `id` first, the client's other fields as given (a client's own `id` is replaced). The mod
   answers every command with a `result` event (below) carrying the same `id`; an op it does
@@ -1194,8 +1205,8 @@ Every event is an object with `type` and `t` (the mod's clock, epoch ms). `agent
 | `type` / `phase` | Built | Fields |
 | --- | --- | --- |
 | `session` / `start` | M1 | `session, cwd, surface, isInteractive, model, version` |
-| `session` / `end` | M1 | `reason` (the engine's; `clear` for a /clear) — best effort, the process exits next |
-| `turn` / `start` | M1 | `turnId, agentId, text` (the prompt) |
+| `session` / `end` | M1 | `reason` (the engine's; `clear` for a /clear) — best effort, the process exits next. **[fw1]** After a `clear` end, the old child gets nothing more; the next session's events go to its own child |
+| `turn` / `start` | M1 | `turnId, agentId, text` (the prompt), `truncated?` **[fw1]** |
 | `turn` / `complete` | M1 | `turnId, agentId, reason` (`answer`, `aborted`, `refusal`, `error`), `usage` (the turn's, or null) |
 | `step` / `start` | M1 | `turnId, agentId, step` (the request's index in the turn), `model, effort, messageCount` |
 | `step` / `end` | M1 | `turnId, agentId, step, stopReason, usage` |
@@ -1207,14 +1218,15 @@ Every event is an object with `type` and `t` (the mod's clock, epoch ms). `agent
 | `usage` | M1 | `context: {tokens, window, percent}, cost` — after each main turn |
 | `heartbeat` | M1 | `state` (as `ping`'s) — every 5 s |
 | `result` | M1 | `id, op, ok, result?, error?` — the mod's answer to a command |
-| `gap` | M1 | `dropped` — events lost on the way (a failed post); resubscribe |
+| `gap` | M1 | `dropped` — events that reached no child (a failed post, an overflowing queue). **[fw1]** Always followed at once by a `resync`; a live subscriber may also resubscribe |
+| `resync` | M1 **[fw1]** | `turns: [{turnId, agentId, t}], streaming: [{turnId, agentId, step, model, text, thinking, upTo}], agents: [...]` — the mod's own copy of the session's live state, whole; the child replaces its turns, streaming messages and subagents with it. Sent as the first post to every child (after the session's start) and right after every `gap`; after it, chunks follow on from each message's `upTo` |
 | `command` | M1 (the child's own) | `id, op` — a command relayed to the mod |
 | `raised` | **reserved (M3)** | `request` (the tool-use id), `tool, input, agentId, deadline?` (a background subagent's 3 s bound) — DX4's pending request |
 | `settled` | **reserved (M3)** | `request, winner` (DX4's: the side whose answer the engine used), `outcome, by` (`cli`, `terminal`, later `web`) — exactly one per `raised` |
 | `delivered` | **reserved (M2)** | `key: {writer, seq}, outcome: "submitted" \| "duplicate"` |
 
-String fields of a tool's input, a result's text, a denial, and a prompt are held to
-65,536 characters (`truncated: true` where cut). Events reach the child in the order they
+**[fw1]** Every string in a tool's input, at any depth, a result's text, a denial, and a
+prompt is held to 65,536 characters, and the event carrying any cut says `truncated: true`. Events reach the child in the order they
 happened: the mod keeps one post in flight, batches of up to 500.
 
 #### Subscription (`GET /events`, built)
@@ -1223,7 +1235,10 @@ happened: the mod keeps one post in flight, batches of up to 500.
   `{"type": "snapshot", "session", "protocol": 1, "pid", "sessionInfo": {...the session start, "ended"?}, "turns": [{turnId, agentId, t}], "streaming": [{turnId, agentId, step, model?, text, thinking, upTo}], "agents": [{agentId, ...the spawn's fields, agentType?, running}], "usage": <the last usage event or null>, "pending": [], "settled": []}`.
   `streaming` holds every message still streaming: its partial text and thinking and
   `upTo`, the `chunkIndex` of the last chunk they include (-1 for none). A message leaves
-  it at its step's end or its turn's end.
+  it at its step's end or its turn's end. **[fw1]** A snapshot never claims an `upTo` its
+  text does not cover: a chunk that does not follow its message's `upTo` (one was lost, or
+  the message began before this child) takes the message out of `streaming` until the
+  next `resync` puts it back whole.
   **`pending` and `settled` are reserved (M3)**: the requests pending now and the ones
   settled recently, so a subscriber that arrives after a request settled sees it settled
   (the plan's G3 fourth case).
@@ -1244,6 +1259,9 @@ this machine (a stale socket is removed), is unknown, holds no session, or runs 
 machine; 1 when the bridge ended and none answers again within 5 s; 0 when the session
 ended or on Ctrl-C. A bridge that comes back within 5 s (a module reload) is followed:
 "· the bridge restarted; reconnected", and a fresh snapshot.
+**[fw2]** On a `gap`, the human view says so, subscribes again at once, and prints the fresh
+snapshot, each streaming message whole, then follows on (DX4's rule on a discontinuity).
+With `--json`, the `gap` and its `resync` are passed through for the reader to act on.
 
 ## Ordering & Dependency Map
 
@@ -1527,6 +1545,14 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DX5 amended by DC2's M1 review (doperpowers `a3756267`): a
+  `resync` event carries the mod's own live state to every new child and
+  after every `gap`, and the child replaces its state with it, so no
+  snapshot claims an `upTo` its text does not cover; a child knows itself
+  by its socket's inode; a `/clear` stops routing to the old child at
+  once. `resync` stays local to DX5: DC7 does not relay it, since the
+  snapshot a DX4 subscriber takes already reflects it. Flags DC7.
+  Date/Author: 2026-10-15, design session (DC2's M1 review).
 - Decision: DX5 version 1 folded from DC2's M1 (doperpowers `434953ce`).
   Two of DC2's choices revise DX4: the bridge's endpoint, not the daemon,
   builds the live half of a subscription's snapshot under the lock that
