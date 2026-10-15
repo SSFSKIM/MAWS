@@ -510,12 +510,12 @@ afleet's. Taste-heavy surfaces are reviewed as mockups in the web children.
 | From the web | Plane | Path |
 | --- | --- | --- |
 | Send | log | `human` event → `deliver_next` → bridge `$.prompt.submit({asUser: true})`, queued until idle |
-| Steer | RPC | bridge `$.session.append` of a user row, read at the loop's next request |
-| Interrupt | RPC | bridge `$.turn.abort` (the main loop's turn), then `TaskStop` through `$.tool.call` on any Bash the abort moved to the background, as Esc kills it in the terminal |
+| Steer | RPC | bridge `$.session.append` of a user row, read at the loop's next request; refused when no turn is running (the web offers Send instead); a turn that answers before any request read the steer gets one wake prompt, at most once per turn (DX5) |
+| Interrupt | RPC | bridge `$.turn.abort` (the main loop's turn), then `TaskStop` through `$.tool.call` on each Bash of that turn the abort moved to the background, the main loop's and its foreground subagents' (a background subagent's never), as Esc kills it in the terminal; the result names the tasks stopped and any still running, and a task still running means the interrupt is incomplete |
 | Answer a question | RPC | bridge: `classic.PermissionRequest` returning `updatedInput: {questions, answers}` for a native AskUserQuestion; the ask mod's external-answer path for an async one |
 | Allow / deny | RPC | bridge `classic.PermissionRequest`, racing the terminal's dialog |
-| Model, effort | RPC | bridge rewrites `model` and `effort` on each of the session's requests in `turn.step` (this session only). `$.config.set({key: 'model'})` was rejected: it also saves the model as the user's default in `settings.json` (DC1) |
-| Compact | RPC | bridge `$.session.compact()`; asked during a turn, the bridge holds it and runs it at `turn.complete` (the engine refuses it mid-turn) |
+| Model, effort | RPC | bridge rewrites `model` and `effort` on each of the session's main-loop requests in `turn.step` (this session only; subagents untouched). The rewrite reaches the API verbatim, so `model` is a model id, a family alias the session's `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` maps, or `default`; an alias it does not map is refused, and the web offers ids. `$.config.set({key: 'model'})` was rejected: it also saves the model as the user's default in `settings.json` (DC1) |
+| Compact | RPC | bridge `$.session.compact()`; asked during a turn, the bridge holds it and runs it at `turn.complete` (the engine refuses it mid-turn). It answers at once, queued or started; the outcome follows as the session's `compact` events (DX5) |
 | Spawn | RPC | daemon runs `sminos spawn` (`claude --bg`) with brief, model, effort |
 | Retire | RPC | daemon runs `sminos retire` |
 | Resume an ended session | RPC | daemon runs `claude --bg --resume <session>` in the session's working directory with no other flags (a flag makes the engine start a copy, `claude_args` in `sminos.py`), serialized per session, after checking it is live nowhere; then verifies the session the engine reports is the same id and, if the engine started a copy (the owner reopened it in a terminal meanwhile), stops the copy and fails — the postcondition `resume_session` in `sminos.py` already checks for seats; it rejoins (smns §2) |
@@ -544,7 +544,7 @@ button is pressed; the acceptance timings cite it]**
 | Send | log → `deliver_next` → `$.prompt.submit`, queued until idle | `control.sock` `reply`, at the next step | cross-session frame, at the next tool round | in the log; delivered when the daemon reconnects |
 | Steer | `$.session.append`, at the next model request | `reply`, at the next step | as send | fails at once |
 | Interrupt | `$.turn.abort` and `TaskStop`, within 2 s | no | no | fails at once |
-| Question | native: `PermissionRequest` racing the dialog; async: the ask mod's external path | native: `reply` answers it; async: none (the ask mod is itself a mod) | terminal only | shown, not answerable |
+| Question | native: `PermissionRequest` racing the dialog; async: the ask mod's external path | terminal only: the supervisor's `reply` goes out with `nextTurn`, which queues a prompt rather than answering, and no path sends one without it in phase 1; async: none (the ask mod is itself a mod) | terminal only | shown, not answerable |
 | Allow / deny | `PermissionRequest` racing the dialog; a background subagent's prompt within its 3 s window, then terminal only; a person-only prompt terminal only | terminal only | terminal only | shown, not answerable |
 | Model / compact | per request / at the turn's end | no | no | fails at once |
 | Messages to the human | as each span completes | at Stop (the record hook) | at Stop | already in the log |
@@ -1691,15 +1691,18 @@ the hub, not a comparison the web makes with its own clock, which would be subje
 **Left for M3:** the relay and the hub's reconnect buffer; `end` on a lapsed lease. **For M4:** the fake machine
 producing all of it, `block-row` for its rows included.
 
-### DX5 — Local bridge protocol (owner DC2; version 1 as amended by DC2's M1 review, folded 2026-10-15)
+### DX5 — Local bridge protocol (owner DC2; version 1 with its M2 extension, folded 2026-10-15)
 
-Folded from DC2's plan (doperpowers `a3756267`,
-`docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md`, built at DC2's
-M1 and amended by its review's fix waves, `79bb122b` and `6ac34e14`; rows
-marked [fw1] or [fw2] changed there). Rows marked reserved are proposals
-that DC2's M2 and M3 fix and send as extensions; until DC2 closes, its
-plan's copy is the working text and this one is refreshed from it at each
-extension. Paths in this subsection are doperpowers'.
+Folded from DC2's plan (doperpowers `7487ace4`,
+`docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md`): version 1 as
+built at DC2's M1 and amended by its review's fix waves, and the M2
+extension as reviewed clean after two fix waves (`75faba58`, `7842ae4e`).
+Rows marked [fw1] or [fw2] changed in the fix waves of the milestone that
+built them, and rows marked [M2] were built or changed at M2. Rows marked
+reserved are proposals that DC2's M3 fixes and sends as an extension.
+Until DC2 closes, its plan's copy is the working text, and this one is
+refreshed from it at each extension. Paths in this subsection are
+doperpowers'.
 
 Rows changed by fix wave 1 are marked **[fw1]**.
 
@@ -1850,6 +1853,107 @@ ended or on Ctrl-C. A bridge that comes back within 5 s (a module reload) is fol
 snapshot, each streaming message whole, then follows on (DX4's rule on a discontinuity).
 With `--json`, the `gap` and its `resync` are passed through for the reader to act on.
 
+#### M2 extension (as reviewed clean; rows changed by its fix waves marked [fw1]/[fw2])
+
+Every DX5 row M2 built or changed, as it should now read (rows fix waves 1 and 2 changed are also marked **[fw1]** and **[fw2]**). Rows not listed here stand as
+M1 left them (with fw1/fw2). Changed rows are marked **[M2]**.
+
+##### Parties
+
+- **Local clients**: the CLI (`sminos watch`; `steer`, `interrupt`, `model`, `compact`;
+  the log's delivery, `deliver_next` and `send`, through `push_live`) and the daemon
+  (DC7). **[M2]**
+
+##### What the child keeps (built, M2) **[M2]**
+
+- **File:** `$SMINOS_HOME/bridge/<session-id>.json`, mode 0600, written whole
+  (temporary name, then rename) whenever it changes:
+  `{"override": {"model": <id or null>, "effort": <effort or null>} | null, "delivered": {"<writer>": <seq>}}`.
+- **Written from the mod's events:** `model` (sets `override`; null when both are null),
+  `delivered` with outcome `submitted` (raises the writer's seq), `resync` (replaces
+  `override` and `delivered` with the mod's copy).
+- **[fw1] A failed write is not taken as kept.** The child holds the mod's copy in memory and
+  writes it whole whenever it differs from what the file holds; what the file holds moves
+  only after a write succeeds. **[fw2]** The write is made at the end of every batch of the
+  mod's events (`POST /events`), whatever the batch carries, so a failed write is retried by
+  any later event — a duplicate `delivered`, a heartbeat — not only by one that changes what
+  is kept. Writing that starts to fail is said once as the child's own `kept {ok: false}`
+  event, and writing that works again as `kept {ok: true}` (below).
+- **Lifetime:** outlives the child (a module reload) and the session's process (a session
+  resumed under its id goes on with both). Discovery (DC7) lists `*.sock` only.
+
+##### The child's stdout: lines for the mod
+
+- First, once the socket answers:
+  `{"op": "hello", "session": "<id>", "pid": <child pid>, "socket": "<path>", "protocol": 1, "kept": {"override": …, "delivered": {…}}}`
+  **[M2]** `kept` is what the child keeps for the session (above). A module that holds no
+  kept state yet (fresh, after a reload) takes it; one that already holds its own (a child
+  restarted, a /clear) keeps its own and hands it to the child in the resync. The mod's
+  first post is still the session's `start` then a `resync` (fw1).
+
+| Op | Built | Arguments | Result |
+| --- | --- | --- | --- |
+| `steer` | M2 **[M2]** **[fw1]** | `{text}` | `{row: <uuid of the appended user row>}`. During the main turn: `$.session.append` of a user row (one text block), read at the main loop's next model request; the running tool goes on; mirrored as the transcript line `steer: <text>` (`$.ui.log`). Refused idle (`ok: false`, "no turn is running to steer: send it instead"). **[fw1]** The steer is bound to the main turn it was given in before the append is awaited. When that turn ends with `answer` and no main-loop request of it began after the row was in (or the turn ended while the append was pending, and the row then lands), the bridge submits **one wake prompt** (`asUser`) that does not repeat the steer. **[fw2]** The wake is owned by the originating turn: it is decided once the turn has ended *and* every append given in it has settled (in, refused, or failed), and is issued at most once per turn: "I added a note to the conversation while you were finishing your answer. Read it and act on it." (`STEER_WAKE`); the next request reads the row. A turn ending `aborted`/`error`/`refusal` wakes nothing. One wake per turn, however many steers |
+| `interrupt` | M2 **[M2]** **[fw1]** | — | `{turnId, stopped: [<task ids>], running: [<task ids>]}`: `$.turn.abort` on the main turn, then `TaskStop` (`$.tool.call`) on each Bash call **attributable to that turn** and running at the abort whose result names the background task the abort moved it to (`running in background with ID: <id>`; their results awaited at most 3 s). **[fw1]** Attributable: a main-loop call made during that turn, or a call of a foreground subagent spawned in it (nested foreground subagents inherit their parent's turn); a background subagent's calls never are. **[fw1]** `running` names each task whose TaskStop failed (an `isError` result or a rejection): the interrupt is incomplete when it is not empty. Idle: `{turnId: null, stopped: [], running: []}` |
+| `model` | M2 **[M2]** | `{model, effort?}` — `model` an id, a family alias, `"default"` or null; `effort` one of `low medium high xhigh max`, or null | `{model, effort}` now in force (null: the session's own). Rewritten on every **main-loop** `turn.step` request, subagents untouched; never `$.config.set`. A family alias (`haiku`, `sonnet`, `opus`, `fable`) is resolved through the session's `ANTHROPIC_DEFAULT_<FAMILY>_MODEL`; one it does not map is refused, naming the id to use. Emits `model`; kept by the child |
+| `compact` | M2 **[M2]** | `{instructions?}` | During the main turn `{queued: true, turnId}`: held, and run inside that turn's `turn.complete` (a second while one is held keeps the first). Idle `{started: true}`: run at once. Either way the outcome follows on the stream as `compact` events carrying this command's `id` |
+| `deliver` | M2 **[M2]** **[fw1]** | `{key: {writer, seq}, text}` | `{submitted: true}` or `{duplicate: true}`. `text` is submitted with `$.prompt.submit({text, asUser: true})` (queued until the session is idle; not awaited). **The delivery key** is the log event's `(writer, seq)` — for a push carrying several events of one writer, the last. A key whose seq is at or below the highest already submitted for its writer is a duplicate and dropped (delivery goes per writer in seq order). The per-writer seqs are kept by the child across reloads; a /clear starts them anew (a new id is a new recipient). **[fw1]** The `delivered` event is emitted before the submission is made, so it is the next thing posted. Deduplication across a module reload is **best effort when the reload lands mid-submission**: a key submitted whose `delivered` had not reached the child is not kept, and a redelivery of it may submit again (a residual of at-least-once delivery, §3) |
+
+##### Events (the mod's posts; the stream's lines)
+
+| `type` / `phase` | Built | Fields |
+| --- | --- | --- |
+| `step` / `start` | M1, **[M2]** | `turnId, agentId, step, model, effort, messageCount` — **[M2]** `model` and `effort` are what the request was sent with, after the bridge's rewrite |
+| `resync` | M1 **[fw1]**, **[M2]** | `turns, streaming, agents` (fw1) **and `override, delivered`** — what the child keeps, which it replaces with these |
+| `model` | M2 **[M2]** | `model, effort` — the choice now in force (null: the session's own) |
+| `compact` / `start` | M2 **[M2]** | `id` — the `compact` command's id |
+| `compact` / `end` | M2 **[M2]** | `id`, and one of: `tokensBefore, tokensAfter` (null when the engine recorded none); `skip` (a hook vetoed it); `error` (the engine refused it, as during a turn) |
+| `delivered` | M2 **[M2]** (was reserved) | `key: {writer, seq}, outcome: "submitted" \| "duplicate" \| "refused"`, `reason?` — `refused` follows a `submitted` when the engine later dropped or rejected the prompt |
+| `kept` | M2 **[fw1]** **[fw2]** (the child's own) | `ok: false, error` when writing `<id>.json` starts to fail (said once, however many batches it keeps failing; retried at the end of every batch); `ok: true` when a write works again after a failure |
+
+##### Subscription (`GET /events`)
+
+- **Line 1, the snapshot** gains **`"override": {model, effort} | null`** **[M2]**: the
+  session's model choice made through the bridge (the session start's `model` stays the
+  launch model).
+
+##### The control verbs (built, M2) **[M2]**
+
+`<member>` resolves as for `watch` (a name, `alias#short`, a seat, or a session id; exit 4
+for unknown, seatless, or another machine's).
+
+| Verb | Bridged | No bridge | Exit |
+| --- | --- | --- | --- |
+| `sminos steer <member> <text>` | op `steer` | live `--bg` job: the supervisor's `reply` (raw text, human origin, `nextTurn`); else a live session: inbox frame `[sminos steer from human]\n<text>`; not live: exit 4 | 0; 1 refused (idle) or no answer |
+| `sminos interrupt <member>` | op `interrupt`; prints the stopped tasks, or "idle: nothing to interrupt". **[fw1]** A non-empty `running` is printed as "incomplete: background task(s) … still running (TaskStop failed)" and exits 1 | refused, exit 4 "no bridge" | 0; 1 |
+| `sminos model <member> <model\|default> [--effort E]` | op `model` | refused, exit 4 | 0; 1; 2 bad effort |
+| `sminos compact <member> [instructions]` | subscribes, then op `compact`; queued: says so and exits; started: waits (≤ 300 s from the command, **[fw1]** a monotonic deadline, not reset by other events) for its `compact` end and prints the counts | refused, exit 4 | 0; 1 error or no outcome |
+
+##### Delivery's last hop (`push_live`, built, M2) **[M2]**
+
+For a live recipient, `deliver_next` (through `push_member`) and `send` (through
+`send_to_seat` / `send_to_member`) push the frame text the inbox would carry, in this
+order:
+
+1. **The bridge**, when the push carries a log event: op `deliver` keyed by the last event
+   (wait 10 s). Answered `ok` (submitted or duplicate): delivered (`sent`). No bridge
+   answering: next path. Refused (nothing submitted): a warning, next path. Taken and not
+   answered: uncertain (`sent?`, settled, never pushed again).
+2. **The engine supervisor**, for a `human` event to a live `--bg` job (the engine record's
+   `kind: "bg"` and 8-hex `jobId`): `{"proto": 1, "op": "reply", "short", "text", "auth":
+   <~/.claude/daemon/control.key>, "nextTurn": true}` on
+   `/tmp/cc-daemon-<uid>/<sha256(abspath(~/.claude))[:8]>/control.sock`. `ok`: delivered;
+   refused or unreachable: next path; written and unanswered: uncertain.
+3. **The inbox frame**, as before.
+
+A push with no log event (a seat outside any project, the raw session-name route) goes
+straight to the inbox frame.
+
+##### Reserved for M3 (unchanged)
+
+The `/requests/…` routes, the `raised` and `settled` events, and the snapshot's `pending`
+and `settled` stand as M1 reserved them.
+
 ### DX6 — RPC shapes (owner DC3; G1)
 
 ```ts
@@ -1867,12 +1971,12 @@ type Rpc<N> = {
 
 | `rpc` | `args` | result (`done`) |
 | --- | --- | --- |
-| `steer` | `{session, text}` | `{row}` — the uuid of the appended user row |
-| `interrupt` | `{session}` | `{}` |
+| `steer` | `{session, text}` | `{row}` — the uuid of the appended user row; refused `idle` when no turn is running |
+| `interrupt` | `{session}` | `{turnId, stopped, running}` — the aborted turn (null when idle), the background tasks stopped, and those whose stop failed; a non-empty `running` is an incomplete interrupt, drawn as such |
 | `answer` | `{session, digest, answers}` — `answers` maps each question's text to the chosen label (several joined by `", "`) | `{}` |
 | `decide` | `{session, digest, decision: "allow" \| "deny", message?}` | `{}` |
-| `model` | `{session, model?, effort?}` (at least one) | `{}` |
-| `compact` | `{session}` | `{at: "now" \| "turn-end"}` |
+| `model` | `{session, model?, effort?}` (at least one) — `model` an id, a family alias the session maps, or `"default"` (§5) | `{model, effort}` now in force, null for the session's own |
+| `compact` | `{session}` | `{at: "now" \| "turn-end"}` — answered at once; the compaction's outcome follows as the session's `compact` events (DX5), carried on the session plane by DC7 |
 | `spawn` | `{checkout, worktree?, brief, model?, effort?, permission_mode?}` | `{session, alias}` |
 | `retire` | `{session}` | `{}` |
 | `resume` | `{session}` | `{session}` — the same id |
@@ -1885,7 +1989,7 @@ type Rpc<N> = {
 seconds), `not-member` (`member` is not the signed-in member), `bad-shape`. The daemon's, before it executes:
 `bad-code`, `read-only`, `digest-mismatch`, `not-pending` (the request is no longer pending), `unknown-checkout`,
 `above-ceiling`, `no-session`, `unsupported` (the session's kind cannot, per §5's table), `session-live` (a Resume of
-a session live somewhere). After a claim: `copy-started` (a Resume raced the owner reopening the session; the copy is
+a session live somewhere), `idle` (a steer while no turn is running: the web offers Send instead). After a claim: `copy-started` (a Resume raced the owner reopening the session; the copy is
 stopped), `interrupted` (below), `failed` (execution failed; `message` says how).
 
 **At most once.** The nonce is the RPC's id. The daemon claims it in its ledger (`claimed`) before the RPC has any
@@ -2264,6 +2368,32 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DX5 refreshed with DC2's M2 extension (doperpowers `7487ace4`,
+  reviewed clean after two fix waves), and §5 and DX6 aligned with what
+  the bridge proved. (1) Steer is refused when no turn is running, as the
+  new DX6 code `idle`, and the web offers Send instead. A turn that
+  answers before any request read the steer gets one wake prompt that
+  does not repeat it. (2) Interrupt stops only the aborted turn's
+  background Bash (the main loop's and its foreground subagents'), and
+  its result names the tasks still running when a stop failed; DX6's
+  interrupt result carries them. (3) Model applies to the main loop only,
+  and its rewrite reaches the API verbatim, so a bare alias the session
+  does not map is refused and the web offers ids; DX6's model result is
+  the choice in force. (4) Compact answers at once with `at`, and its
+  outcome follows as events, not as the RPC's result, since a compaction
+  takes 17–24 s. (5) The `--bg` supervisor's `reply` is sent only with
+  `nextTurn`, so it queues a prompt and cannot answer an open question:
+  a question in a `--bg` seat without a bridge is terminal only in phase
+  1. (6) A peer's `say` reaches a bridged session as the inbox frame's
+  text submitted `asUser`, naming the peer in its first line, as every
+  live delivery already did. Delivery through the bridge is keyed by the
+  event's position and de-duplicated per writer; a module reload in the
+  middle of a submission may submit twice, which is §3's at-least-once,
+  accepted over persisting first, which would open a window for loss.
+  Rejected: a compact RPC that waits for the compaction (it holds an RPC
+  open for tens of seconds and gains nothing over the events). Flags DC3
+  (DX6's module), DC5, DC7.
+  Date/Author: 2026-10-15, design session (DC2's M2).
 - Decision: The enrolled machine name becomes the machine's one identity in sminos (`host_name()`),
   for hub and git projects alike, ahead of `DAEMON_HOST` and the system name. Enrollment defaults the
   name to the current host name, so most enrollments rename nothing, and a pinned name no longer
