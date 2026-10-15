@@ -6,7 +6,8 @@ import { transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
 import { DECK_LIMITS, type DeckSection } from './deck';
 import type { SlideIR } from './ir';
-import { heldOf, insertSlide, readSlide, slideOrder } from './model';
+import { heldOf, insertSlide, quoteSource, readSlide, slideOrder } from './model';
+import { storeRemovedQuotes } from './quote'; // P3-C M7 fix wave 1
 import { loadSlide } from './parse';
 
 /**
@@ -24,6 +25,7 @@ export function removeSlide(doc: Doc, slideId: string, origin?: unknown): void {
   transact(
     doc,
     () => {
+      if (Y.hasSlide(doc, slideId)) storeRemovedQuotes(doc, slideId, null, () => quoteSource(doc, slideId)); // M7 fix wave 1: the threads' last text
       Y.deleteSlide(doc, slideId);
       if (Y.deckScalars(doc).cover === slideId) {
         const cover = next ?? before;

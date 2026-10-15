@@ -9,6 +9,7 @@ import { DECK_PATH, serializeDeckJson, slidePath, type DeckFace, type DeckJson, 
 import { CELL_TAGS, CONTAINER_TAGS, TEXT_TAGS, isPinned, type Attrs, type ElementIR, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
 import { ANY, FLOW_LAYER, OVER, UNDER, byKey, keyAfter, rekey, repairCollisions, type Bounds } from './order';
 import { hash4, ID_RE } from './parse';
+import { storeRemovedQuotes } from './quote'; // P3-C M7 fix wave 1
 import { partition, serializeSlide } from './serialize';
 
 export const ROOT = ''; // the parent value of a section's direct children; as an element id, the section itself
@@ -428,7 +429,20 @@ function subtree(els: FlatElement[], eff: Map<string, string>, ids: Iterable<str
 export function deleteElementTree(doc: Doc, slideId: string, ids: string | string[], origin?: unknown): void {
   const els = readFlat(doc, slideId, false);
   const doomed = subtree(els, resolveParents(els), typeof ids === 'string' ? [ids] : ids);
-  transact(doc, () => doomed.forEach((d) => Y.hasElement(doc, slideId, d) && Y.deleteElement(doc, slideId, d)), origin);
+  transact(
+    doc,
+    () => {
+      storeRemovedQuotes(doc, slideId, new Set(doomed), () => quoteSource(doc, slideId)); // M7: their last text, in this write
+      doomed.forEach((d) => Y.hasElement(doc, slideId, d) && Y.deleteElement(doc, slideId, d));
+    },
+    origin,
+  );
+}
+
+/** A slide's elements with their text and child lists: what a removal writer's quote store reads (M7 fix wave 1). */
+export function quoteSource(doc: Doc, slideId: string): { flat: FlatElement[]; lists: Map<string, FlatElement[]> } {
+  const flat = readFlat(doc, slideId);
+  return { flat, lists: childLists(flat) };
 }
 
 /**
@@ -526,7 +540,14 @@ export function insertSlide(doc: Doc, ir: SlideIR, afterId: string | null, origi
 }
 
 export function deleteSlide(doc: Doc, slideId: string, origin?: unknown): void {
-  transact(doc, () => Y.deleteSlide(doc, slideId), origin);
+  transact(
+    doc,
+    () => {
+      if (Y.hasSlide(doc, slideId)) storeRemovedQuotes(doc, slideId, null, () => quoteSource(doc, slideId)); // M7 fix wave 1
+      Y.deleteSlide(doc, slideId);
+    },
+    origin,
+  );
 }
 
 // ---------------------------------------------------------------- repair (the host runs it after applying an update)

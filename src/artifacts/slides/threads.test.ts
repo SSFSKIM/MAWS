@@ -8,10 +8,12 @@ import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { applyV1, diffV1, newDoc, stateVector, type Doc } from '../yjs';
 import { DECK_PATH, slidePath } from './deck';
-import { deckFiles, deleteElementTree, moveSlide, setStyle, setText } from './model';
+import { deckFiles, deleteElementTree, deleteSlide, moveSlide, setStyle, setText } from './model';
+import { removeSlide } from './writers';
+import { onUpdate } from '../yjs';
 import { publishDeck } from './publish';
 import * as Y from '../yjs/slides';
-import { addThread, captureQuotes, discardThread, elementQuote, getThread, listThreads, reopen, reply, resolve, slideTitle, storeDeletedQuotes, threadStates } from './threads';
+import { addThread, captureQuotes, discardThread, elementQuote, getThread, listThreads, reopen, reply, resolve, slideTitle, storeDeletedQuotes, storedQuotes, threadStates } from './threads';
 
 const human: Actor = { kind: 'human' };
 const agent: Actor = { kind: 'session', appSessionId: 'app-1' as AppSessionId };
@@ -74,7 +76,7 @@ describe('a deck’s comment threads (D9)', () => {
     expect(stored()).toBe('One path'); // nothing written while the element lives
 
     const before = captureQuotes(doc); // what the adapter reads before an update that deletes
-    deleteElementTree(doc, 's1', 'body');
+    Y.deleteElement(doc, 's1', 'body'); // a raw deletion, not a writer's (the host's route)
     expect(storeDeletedQuotes(doc, before)).toEqual(['t1']);
     expect(storeDeletedQuotes(doc, before)).toEqual([]); // written once
     expect(stored()).toBe('One path, rewritten');
@@ -126,5 +128,44 @@ describe('a deck’s comment threads (D9)', () => {
     const doc = deck();
     expect(() => reply(doc, 'nope', { id: 'x', by: human, at: 1, body: 'hi' })).toThrow(/no thread nope/);
     expect(() => resolve(doc, 'nope', human, 1)).toThrow(/no thread nope/);
+  });
+
+  // fix wave 1: a removal writer stores the last text in the write that removes the element
+  it('the removal writers store each removed element’s last text in the one update that removes it', () => {
+    const rewrite = (doc: Doc) => setText(doc, 's1', 'body', [{ type: 'p', inline: [{ text: 'Last words', marks: {} }] }]);
+    const updates = (doc: Doc, write: () => void) => {
+      let n = 0;
+      const off = onUpdate(doc, () => n++);
+      write();
+      off();
+      return n;
+    };
+    const cases: Array<{ remove: (doc: Doc) => void; t1: string; t2: string }> = [
+      { remove: (doc) => deleteElementTree(doc, 's1', 'body'), t1: 'Last words', t2: 'Card title' },
+      { remove: (doc) => deleteElementTree(doc, 's1', 'card'), t1: 'One path', t2: 'Card title (kept)' },
+      { remove: (doc) => removeSlide(doc, 's1'), t1: 'Last words', t2: 'Card title (kept)' },
+      { remove: (doc) => deleteSlide(doc, 's1'), t1: 'Last words', t2: 'Card title (kept)' },
+    ];
+    for (const { remove, t1, t2 } of cases) {
+      const doc = deck();
+      comment(doc, 't1', 's1', 'body');
+      comment(doc, 't2', 's1', 'ct'); // inside the card: removed with it, or with the slide
+      rewrite(doc);
+      setText(doc, 's1', 'ct', [{ type: 'p', inline: [{ text: 'Card title (kept)', marks: {} }] }]);
+      expect(updates(doc, () => remove(doc))).toBe(1);
+      expect(Y.threadScalars(doc, 't1').quote).toBe(t1); // stored only for what was removed
+      expect(Y.threadScalars(doc, 't2').quote).toBe(t2);
+    }
+  });
+
+  it('the host’s store leaves a quote the deleting frame wrote itself', () => {
+    const doc = deck();
+    comment(doc, 't1', 's1', 'body');
+    const captured = captureQuotes(doc); // the host's read before the frame: 'One path'
+    const before = storedQuotes(doc, captured.keys());
+    setText(doc, 's1', 'body', [{ type: 'p', inline: [{ text: 'Offline words', marks: {} }] }]); // the frame: a rewrite,
+    deleteElementTree(doc, 's1', 'body'); // and the writer's deletion, storing the rewrite
+    expect(storeDeletedQuotes(doc, captured, undefined, before)).toEqual([]);
+    expect(Y.threadScalars(doc, 't1').quote).toBe('Offline words');
   });
 });

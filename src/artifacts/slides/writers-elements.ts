@@ -18,9 +18,10 @@ import { checkStyle, type StyleSite } from './css';
 import { connectorRoute } from './glyphs';
 import { apply, boundsOf, cornersOf, isIdentityLinear, linear, multiply, pinToLeftTop, placement, px, readTransform, shift, transformOf, union, type Box, type Pt } from './geometry';
 import { CELL_TAGS, CONTAINER_TAGS, isPinned, type ElementIR, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
-import { cellMinter, childLists, elementMinter, flatten, fromScalars, groupOf, readFlat, readSlide, resolveParents, ROOT, toScalars, type FlatElement } from './model';
+import { cellMinter, childLists, elementMinter, flatten, fromScalars, groupOf, quoteSource, readFlat, readSlide, resolveParents, ROOT, toScalars, type FlatElement } from './model';
 import { ANY, keyAfter, OVER, rekey, UNDER } from './order';
 import { loadSlide } from './parse';
+import { storeRemovedQuotes } from './quote'; // P3-C M7 fix wave 1
 import { serializeSlide } from './serialize';
 
 // ---------------------------------------------------------------- restyle
@@ -179,6 +180,7 @@ export function commit(doc: Doc, slideId: string, plan: Plan, origin?: unknown):
   transact(
     doc,
     () => {
+      if (plan.remove.size > 0) storeRemovedQuotes(doc, slideId, plan.remove, () => quoteSource(doc, slideId)); // M7 fix wave 1
       for (const id of plan.remove) if (Y.hasElement(doc, slideId, id)) Y.deleteElement(doc, slideId, id);
       for (const e of plan.create) Y.createElement(doc, slideId, e.id, toScalars(e), e.text);
       for (const [id, keys] of plan.set)

@@ -16,7 +16,7 @@ import { deckFiles, deckPaths, importSlide, repair, writeDeckKeys } from './mode
 import { loadSlide } from './parse';
 import { publishDeck } from './publish';
 import { escAttr, escText } from './serialize';
-import { captureQuotes, getThread, listThreads, storeDeletedQuotes, type DeckThread } from './threads';
+import { captureQuotes, getThread, listThreads, storeDeletedQuotes, storedQuotes, type DeckThread } from './threads';
 
 export const COVER_ID = 'cover';
 
@@ -125,6 +125,9 @@ export function createPresentationAdapter(options: { now?: () => Date } = {}): K
   // Per artifact, the quotes a restore's `revertScope` read from the live deck just before its write, for its
   // `afterRestore` (Decision Log 27 of A: a kind's per-artifact state); taken by the next restore of that artifact.
   const beforeRestore = new Map<string, Map<string, string>>();
+  // Fix wave 1: the threads a frame's forwarding edit stored a quote in, for the `afterUpdate` that follows it on the same
+  // replica (A calls both in one frame), whose mirror rows otherwise cover only what the frame itself touched.
+  const forwarded = new WeakMap<Doc, string[]>();
   return {
     kind: 'presentation',
     initial: (doc, { title }) => writeInitialDeck(doc, title, now()),
@@ -138,12 +141,19 @@ export function createPresentationAdapter(options: { now?: () => Date } = {}): K
       return outcome;
     },
     // A replica's frame that deletes content of a slide with threads: their quotes read before it lands, the forwarding
-    // edit storing those of the elements it took away. A frame that deletes nothing in the slides has none.
+    // edit storing those of the elements it took away. A frame that deletes nothing in the slides has none. Fix wave 1: a
+    // quote the frame wrote itself (the replica's removal writer, which read text this host may never have had, as in a
+    // reconnecting replica's merged rewrite and deletion) is kept; the threads written are mirrored by `afterUpdate`.
     beforeApply: (live, incoming) => {
       const slides = slidesDeletedIn(live, incoming);
       if (slides !== null && slides.size === 0) return null;
       const quotes = captureQuotes(live, slides === null ? {} : { slides });
-      return quotes.size === 0 ? null : (doc) => void storeDeletedQuotes(doc, quotes);
+      if (quotes.size === 0) return null;
+      const before = storedQuotes(live, quotes.keys());
+      return (doc) => {
+        const written = storeDeletedQuotes(doc, quotes, undefined, before);
+        if (written.length > 0) forwarded.set(doc, written);
+      };
     },
     // The repair lands as the triggering actor's write (the doc is that actor's host replica; X29 has no system actor),
     // scoped to the slides the update touched; a full scan when they cannot be told.
@@ -151,8 +161,10 @@ export function createPresentationAdapter(options: { now?: () => Date } = {}): K
       const touched = touchedSlides(live, update);
       if (touched === null) repair(live);
       else if (touched.size > 0) repair(live, { slides: touched });
-      // M7: the mirror rows of every thread the update changed (a forwarding edit's stored quote among them)
-      const threads = mirrorRows(live, touchedThreads(live, update));
+      // M7: the mirror rows of every thread the update changed, and (fix wave 1) of those its forwarding edit wrote
+      const carried = forwarded.get(live) ?? [];
+      forwarded.delete(live);
+      const threads = mirrorRows(live, [...touchedThreads(live, update), ...carried]);
       return threads ? { threads } : undefined;
     },
     revertScope: (live, old, { artifactId }) => {

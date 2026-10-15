@@ -20,16 +20,16 @@ import type { Actor } from '@shared/artifacts/actor';
 import type { ThreadMessage, ThreadStatus } from '../document/threads';
 import { transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
-import { CONTAINER_TAGS, type TextBlock } from './ir';
-import { childLists, readFlat, resolveAnchor, ROOT, type FlatElement } from './model';
+import { CONTAINER_TAGS } from './ir';
+import { childLists, readFlat, resolveAnchor, ROOT } from './model';
+import { blocksText, clipQuote as clip, quoteOf, QUOTE_MAX } from './quote';
 
 export type { ThreadMessage, ThreadStatus };
 
 /** A new thread's id (B's alphabet and length). */
 export const newThreadId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 8);
 
-/** The longest quote kept: a container's or a table's text is cut here. */
-export const QUOTE_MAX = 500;
+export { QUOTE_MAX };
 
 export interface DeckThread {
   id: string;
@@ -166,26 +166,6 @@ export function discardThread(doc: Doc, threadId: string, origin?: unknown): boo
 
 // ── the quote: what the element says, or what it is ──
 
-const blocksText = (blocks: readonly TextBlock[]): string => blocks.map((b) => b.inline.map((r) => ('text' in r ? r.text : ' ')).join('')).join('\n');
-const clip = (text: string): string => (text.length <= QUOTE_MAX ? text : `${text.slice(0, QUOTE_MAX - 1)}…`);
-
-function quoteOf(e: FlatElement, lists: Map<string, FlatElement[]>): string {
-  const texts: string[] = [];
-  const walk = (el: FlatElement) => {
-    if (el.text) {
-      const t = blocksText(el.text).trim();
-      if (t) texts.push(t);
-    }
-    if (CONTAINER_TAGS.has(el.tag)) for (const child of lists.get(el.id) ?? []) walk(child);
-  };
-  walk(e);
-  if (texts.length > 0) return clip(texts.join('\n'));
-  const what = e.attrs.alt ?? e.attrs['aria-label'];
-  if (what) return clip(`${e.tag} “${what}”`);
-  const kind = e.tag === 'x-shape' ? e.attrs.kind : e.tag === 'x-icon' ? e.attrs.name : undefined;
-  return kind ? `${e.tag} ${kind}` : e.tag;
-}
-
 /** An element's quote (its text, its descendants' text for a container, else its tag and alt or kind); '' when gone. */
 export function elementQuote(doc: Doc, slideId: string, elementId: string): string {
   if (!Y.hasElement(doc, slideId, elementId)) return '';
@@ -256,17 +236,28 @@ export function captureQuotes(doc: Doc, options: { slides?: Iterable<string> } =
   return liveQuotesBySlide(doc, anchors);
 }
 
+/** Each thread's stored quote now, by id (of `ids` when given): what a frame is compared with after it lands. */
+export function storedQuotes(doc: Doc, ids?: Iterable<string>): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const id of ids ?? Y.threadIds(doc)) if (Y.hasThread(doc, id)) out.set(id, String(Y.threadScalars(doc, id).quote ?? ''));
+  return out;
+}
+
 /**
  * Stores, for every thread `captured` whose element is gone now, the quote it had just before (one transaction, only
- * where the stored quote differs): the quote a deleted element's thread keeps. Returns the ids written.
+ * where the stored quote differs): the quote a deleted element's thread keeps. With `storedBefore` (fix wave 1), a
+ * thread whose stored quote is no longer the one it had then is left alone: the frame that deleted the element wrote
+ * its quote too (the replica's removal writer, which read text the host never had). Returns the ids written.
  */
-export function storeDeletedQuotes(doc: Doc, captured: ReadonlyMap<string, string>, origin?: unknown): string[] {
+export function storeDeletedQuotes(doc: Doc, captured: ReadonlyMap<string, string>, origin?: unknown, storedBefore?: ReadonlyMap<string, string>): string[] {
   const written: { id: string; quote: string }[] = [];
   for (const [id, quote] of captured) {
     if (!Y.hasThread(doc, id)) continue;
     const s = Y.threadScalars(doc, id);
     if (resolveAnchor(doc, { slideId: String(s.slideId ?? ''), elementId: String(s.elementId ?? '') }).live) continue;
-    if (String(s.quote ?? '') !== quote) written.push({ id, quote });
+    const stored = String(s.quote ?? '');
+    if (storedBefore?.has(id) && storedBefore.get(id) !== stored) continue; // the frame wrote it
+    if (stored !== quote) written.push({ id, quote });
   }
   if (written.length > 0) transact(doc, () => written.forEach(({ id, quote }) => Y.setThreadKey(doc, id, 'quote', quote)), origin);
   return written.map((w) => w.id).sort();
