@@ -368,8 +368,15 @@ registrations through `connectDepth()`.
   keeps the reader's place when an older page renames the row under them
   (`view/keep-place.ts`; MAWS's list anchors on the oldest turn's
   time/divider rows, whose ids change when its prompt arrives — M1's test
-  passed only inside the 80 px follow threshold).
-  Date/Author: 2026-10-15, M2 executor, folded by the controller.
+  passed only inside the 80 px follow threshold). The kept place is armed
+  when the older-page request is answered and used up at the page's rows
+  (a live row in between leaves it pending); a jump to an unrendered row
+  keeps the saved offset by a per-frame correction (5 steady frames, at
+  most 120), which a reader's own wheel, touch, pointer-down, or
+  navigation key ends — plain scroll events do not, so the list's own
+  realignments are still corrected.
+  Date/Author: 2026-10-15, M2 executor (fix waves 1–2 after task review),
+  folded by the controller.
 - Decision: The siblings' `step-end` sides are ready (DC5's M3 ticked at
   `2af4fbc6` on `smns-erb-web`, with the client's passthrough and DX8's
   `transcript` slot type; DC3's protocol type at `b7fc7ebd` on `smns-erb`
@@ -478,5 +485,12 @@ registrations through `connectDepth()`.
   is ignored, and its row draws like any other. Producers remove a block
   from `streaming` at its step's end as at its `block-row`, so a snapshot
   never carries an aborted block.
+- 2026-10-15: DC3's fake machine landed at MAWS `60bf893c` (`smns-erb`, in
+  task review; API in `.doperpowers/sde/2026-10-15-desk-dc3-hub/interfaces-M4.md`
+  there). Its interrupt does not cut the replayed transcript, and the
+  recording's haiku ran both subagents in the background. The reviewed
+  interfaces come through the composite's writer; M3 consumes them.
+- 2026-10-15 (M2): the gate uploads only the repo root's `test-results/`,
+  so a failing desk-web browser trace never comes back from the Linux lane.
 
 ## Outcomes & Retrospective
