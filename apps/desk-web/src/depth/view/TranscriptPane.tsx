@@ -5,15 +5,18 @@
 import { useEffect, useMemo, useState, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
+import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
 import type { TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import { Transcript, type TranscriptListHandle } from '../../../../../src/renderer/src/transcript/view/Transcript';
 import type { DeskSession } from '../../shell/sessions';
 import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
 import type { StreamBlock } from '../stream/layer';
+import { useKeepPlaceThroughOlderRows } from './keep-place';
 import { streamingRows } from './streaming-rows';
 
 /** Within this many pixels of the top the reader has reached it, and older rows are asked for. */
 const TOP = 160;
+const NO_ROWS: readonly Row[] = [];
 
 /** A transcript is live while its session has a live process and its machine's lease holds (DX8). */
 export const reachable = (session: DeskSession) => session.presence?.record != null && session.machineOnline !== false;
@@ -80,7 +83,9 @@ type PaneProps = {
 /** The transcript's rows and stream, and what its subscription's disruptions say. */
 export function TranscriptPane({ controller, state, variant, actions, list }: PaneProps) {
   // Older rows when the reader scrolls to the top, or while the rows drawn do not fill the pane (its top is in view).
-  const drawnRows = useTranscriptStore((s) => s.entries[controller.key]?.rows.length ?? 0);
+  const rows = useTranscriptStore((s) => s.entries[controller.key]?.rows ?? NO_ROWS);
+  const drawnRows = rows.length;
+  useKeepPlaceThroughOlderRows(list, rows, state.loadingOlder);
   useEffect(() => {
     const element = list.current?.scrollElement;
     if (!element) return;
