@@ -280,6 +280,14 @@ registrations through `connectDepth()`.
   supersedes M3's "model, context use, and cost from the transcript" for
   context and cost; the model stays the transcript's.
   Date/Author: 2026-10-15, plan review via the composite's writer.
+- Decision: DC6 cuts no MAWS renderer edge on its own branch. DC5 makes
+  the cut on `smns-erb-web` (its M3, one isolated commit: `DEFAULT_ACTIONS`
+  out of `transcript/view/context.tsx` and the survey's other edges
+  Markdown and the to-human Presenter need), which DC6 merges; an edge DC6
+  needs beyond it goes to the composite's writer, who routes it so each
+  cut is made once. Supersedes the constraint's "whichever child makes a
+  cut first".
+  Date/Author: 2026-10-15, composite's writer.
 
 ## Surprises & Discoveries
 - 2026-10-15 (from DC2's M3, built, in review, via the composite's
