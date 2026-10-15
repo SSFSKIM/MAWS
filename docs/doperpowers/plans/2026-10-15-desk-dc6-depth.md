@@ -352,6 +352,24 @@ registrations through `connectDepth()`.
   (`d75f2924`) is merged; then the stand-in and cast go and a browser spec
   covers it. Until then the double's unit coverage carries it.
   Date/Author: 2026-10-15, M1 executor; rulings by the composite's writer.
+- Decision (M2): A desk tree view over MAWS's `tools/agents/model/*`, not
+  `setAgentWorkClient`/`setChildSourceFor`: MAWS's agent store needs an
+  engine status and `seq`/launch ids the desk has no source for, and its
+  drill-in issues writes (Stop, Relay). The tree and drill-in are copies of
+  MAWS's `AgentList` and `DrillIn` without the team roster, waiting marks,
+  live footer, Stop, or Relay. The tree comes from the main subscription's
+  `subagents`; each agent's transcript is its own `DeskTranscript` keyed by
+  its `agentId`, so one's disruption never touches another's view. An
+  agent's status is only as complete as the main transcript's held rows:
+  one whose call is older than the snapshot, and any nested agent, reads
+  "On disk / status unavailable". The main transcript's view stays mounted,
+  hidden and inert, under the Subagents tab. The double synthesizes a text
+  answer before each subagent's hand-back; the fixture is unedited. Depth
+  keeps the reader's place when an older page renames the row under them
+  (`view/keep-place.ts`; MAWS's list anchors on the oldest turn's
+  time/divider rows, whose ids change when its prompt arrives — M1's test
+  passed only inside the 80 px follow threshold).
+  Date/Author: 2026-10-15, M2 executor, folded by the controller.
 - Decision: The siblings' `step-end` sides are ready (DC5's M3 ticked at
   `2af4fbc6` on `smns-erb-web`, with the client's passthrough and DX8's
   `transcript` slot type; DC3's protocol type at `b7fc7ebd` on `smns-erb`
