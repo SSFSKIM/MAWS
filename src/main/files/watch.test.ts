@@ -68,7 +68,8 @@ afterEach(() => {
 
 // FSEvents can lag by seconds under a loaded machine (pnpm verify runs suites in parallel): the waits are bounded at 6 s.
 describe('files watch', { timeout: 20_000 }, () => {
-  // macOS: APFS moves a file's birth time back to an earlier mtime set through utimes (`age`); ext4 keeps the real birth time.
+  // macOS: APFS moves a file's birth time back to an earlier mtime set through utimes (`age`); ext4 keeps the real
+  // birth time.
   it.skipIf(process.platform !== 'darwin')('ages a file on this volume as the suite relies on', () => {
     expect(statSync(join(dir, 'old.txt')).birthtimeMs).toBeLessThan(Date.now() - 30_000);
   });
@@ -89,7 +90,8 @@ describe('files watch', { timeout: 20_000 }, () => {
     ]);
   });
 
-  // macOS: `changed` needs an aged file, and APFS moves a file's birth time back to an earlier mtime set through utimes (`age`); ext4 keeps the real birth time.
+  // macOS: `changed` needs an aged file, and APFS moves a file's birth time back to an earlier mtime set through utimes
+  // (`age`); ext4 keeps the real birth time.
   it.skipIf(process.platform !== 'darwin')('reports created, changed and removed', async () => {
     await files.watch(A, dir, 1);
     await quiet();
@@ -112,7 +114,8 @@ describe('files watch', { timeout: 20_000 }, () => {
     expect(emitted).toContainEqual({ appSessionId: A, path: dir, kind: 'changed' });
   });
 
-  // macOS: `changed` needs an aged file, and APFS moves a file's birth time back to an earlier mtime set through utimes (`age`); ext4 keeps the real birth time.
+  // macOS: `changed` needs an aged file, and APFS moves a file's birth time back to an earlier mtime set through utimes
+  // (`age`); ext4 keeps the real birth time.
   it.skipIf(process.platform !== 'darwin')('coalesces a burst of events per filename into one batch', async () => {
     await files.watch(A, dir, 1);
     await quiet();
@@ -166,7 +169,8 @@ describe('files watch', { timeout: 20_000 }, () => {
     expect(files.watching()).toEqual([]);
   });
 
-  // macOS: the temporary directory is on a case-insensitive APFS volume, where a case-only rename keeps the path naming it.
+  // macOS: the temporary directory is on a case-insensitive APFS volume, where a case-only rename keeps the path naming
+  // it.
   it.skipIf(process.platform !== 'darwin')('unwatch drops the hold on the directory the path names now when its realpath moved between two watches', async () => {
     const asked = join(root, 'Case'); // APFS is case-insensitive: a case-only rename moves the realpath under the same path
     mkdirSync(asked);

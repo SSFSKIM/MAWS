@@ -223,7 +223,8 @@ describe('session records in the index', () => {
   });
   // C10 end
 
-  // macOS: a CPU-time bound measured on the Apple silicon Mac (a hardware-bound gate, docs/doperpowers/plans/2026-10-14-gate-offload.md §3.1).
+  // macOS: a CPU-time bound measured on the Apple silicon Mac (a hardware-bound gate,
+  // docs/doperpowers/plans/2026-10-14-gate-offload.md §3.1).
   it.skipIf(process.platform !== 'darwin')('upserts 4,000 synthetic summaries inside one transaction in under 500 ms of CPU time', () => {
     const summaries = Array.from({ length: 4_000 }, (_, i) => summary({ sessionId: sessionIdFor(i + 1), customTitle: i % 3 === 0 ? `t${i}` : null }));
     // The bound is on the work the upserts cost (this process's CPU time; vitest runs each file in its own process), so

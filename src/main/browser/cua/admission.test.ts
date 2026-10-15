@@ -78,7 +78,8 @@ const until = async (done: () => boolean, ms = 2000) => {
 const listening = (path: string) => until(() => statSync(path, { throwIfNoEntry: false }) !== undefined);
 
 describe('the socket file', () => {
-  // macOS: the harness's default peer is the committed peer identity addon is a darwin-arm64 prebuild, loaded only on Apple silicon macOS.
+  // macOS: the harness's default peer is the committed peer identity addon is a darwin-arm64 prebuild, loaded only on
+  // Apple silicon macOS.
   it.skipIf(process.platform !== 'darwin')('is 0600 once it listens', async () => {
     const h = harness();
     const path = h.backend.socketPathFor(A)!;

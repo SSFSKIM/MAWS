@@ -281,7 +281,8 @@ describe('files service boundary', () => {
     // link at the open, a directory at the realpath and a link again at the stat passes the (dev, ino) check with the
     // outside descriptor. The service opens real0 with O_NOFOLLOW_ANY, so the same first flip ends at the open (the
     // `swap and restore` case above).
-    // macOS: its last step is the service's open refusing the flip, and the kernel honours O_NOFOLLOW_ANY (0x20000000, macOS 11 and later; another kernel ignores the bit).
+    // macOS: its last step is the service's open refusing the flip, and the kernel honours O_NOFOLLOW_ANY (0x20000000,
+    // macOS 11 and later; another kernel ignores the bit).
     it.skipIf(process.platform !== 'darwin')('serves the outside file through the pre-review open-then-confirm shape when an ancestor flips link, directory, link', async () => {
       const path = inRoot('src', 'a.ts');
       const roots = await rootsOf(records.get(A)!);
@@ -326,7 +327,8 @@ describe('files service boundary', () => {
 
   // The guard on this platform: if the kernel ignored O_NOFOLLOW_ANY (a port, or a macOS that dropped it), the read
   // race the flag closes would silently reopen. Fail loudly instead.
-  // macOS: the kernel honours O_NOFOLLOW_ANY (0x20000000, macOS 11 and later; another kernel ignores the bit); MAWS runs on macOS alone, and this case keeps failing loudly there.
+  // macOS: the kernel honours O_NOFOLLOW_ANY (0x20000000, macOS 11 and later; another kernel ignores the bit); MAWS
+  // runs on macOS alone, and this case keeps failing loudly there.
   it.skipIf(process.platform !== 'darwin')('has a kernel that honours O_NOFOLLOW_ANY: the service flags refuse a symlink anywhere on the path', async () => {
     symlinkSync(join(root, 'src'), inRoot('alias'));
     await expect(fs.promises.open(inRoot('alias', 'a.ts'), OPEN_FLAGS)).rejects.toMatchObject({ code: 'ELOOP' }); // an ancestor
