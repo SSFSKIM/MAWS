@@ -4,10 +4,10 @@
 #   scripts/ci-gate.sh <worktree-or-sha> [--gates static,unit,probes,e2e:<group>,…] [--runner linux|macos]
 #                      [--label <name>] [--keep]
 #
-# Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for .github/workflows/gate.yml's
-# run of it, prints each job's conclusion, downloads the failed e2e jobs' reports to /tmp/maws-review/gates/ci-<short>/, keeps the
-# whole transcript in /tmp/maws-review/gates/ci-<short>.log, deletes the ref (unless --keep) and exits with the run's
-# status (0 green, 1 anything else).
+# Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for the run of
+# .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
+# /tmp/maws-review/gates/ci-<short>/, keeps the whole transcript in /tmp/maws-review/gates/ci-<short>.log, deletes the
+# ref (unless --keep) and exits with the run's status (0 green, 1 anything else).
 #
 #   <worktree-or-sha>  a worktree path (its HEAD is tested) or a commit
 #   --gates            narrow the set; without it the run takes the default (class 1a: static, unit, probes; with every
