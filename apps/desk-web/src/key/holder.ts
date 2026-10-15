@@ -31,6 +31,32 @@ let generation = 0;
 
 const reason = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+// What the device should keep for each org: the key (device) or nothing (a Lock, a session unlock), as the newest of
+// them asked. A write that settles after a newer one was asked for — an older unlock's save landing late, behind a Lock
+// and a newer unlock — asks for the newest intent again, so storage ends where the newest Lock or unlock left it and a
+// stale write can neither erase nor overwrite it. The real store (IndexedDB) applies writes in the order asked, where
+// the repeat changes nothing; the repeat covers a store whose writes can land out of order.
+type Intent = { key: CryptoKey | null };
+const intents = new Map<string, Intent>();
+
+const write = (store: KeyStore, org: string, key: CryptoKey | null) => (key ? store.save(org, key) : store.forget(org));
+
+/** Asks the device to keep `key`, or nothing, as the newest intent; rejects when that write fails. */
+async function persist(store: KeyStore, org: string, key: CryptoKey | null): Promise<void> {
+  const mine: Intent = { key };
+  intents.set(org, mine);
+  await write(store, org, key);
+  const latest = intents.get(org)!;
+  if (latest === mine) return;
+  try {
+    await write(store, org, latest.key);
+  } catch (error) {
+    // A deletion that failed leaves a key behind that a reload would load: reported as a Lock's failure is.
+    if (latest.key === null) useKeyHolder.setState({ forgetError: reason(error) });
+    else console.error('desk: storing the device key again', error);
+  }
+}
+
 export async function loadDeviceKey(org: string, store: KeyStore = idbKeyStore()): Promise<void> {
   const began = generation;
   let key: OrgKey | null = null;
@@ -62,18 +88,8 @@ export function beginUnlock(org: string, store: KeyStore = idbKeyStore()): Unloc
       }
       const key = await holdKeyBytes(raw);
       if (!current()) return false;
-      if (keep === 'device') await store.save(org, key.hmac);
-      else await store.forget(org);
-      if (!current()) {
-        // The Lock came while the key was being stored: forget it again, since that Lock's own deletion may have run
-        // first. A failure leaves the key stored, which a locked browser reports as the Lock's.
-        if (keep === 'device') {
-          await store.forget(org).catch((error: unknown) => {
-            if (useKeyHolder.getState().state === 'locked') useKeyHolder.setState({ forgetError: reason(error) });
-          });
-        }
-        return false;
-      }
+      await persist(store, org, keep === 'device' ? key.hmac : null);
+      if (!current()) return false;
       const fingerprint = await keyFingerprint(key);
       if (!current()) return false;
       useKeyHolder.setState({ state: 'unlocked', key, kept: keep, fingerprint, forgetError: null });
@@ -94,7 +110,7 @@ export async function lock(org: string, store: KeyStore = idbKeyStore()): Promis
   const mine = ++generation;
   useKeyHolder.setState({ state: 'locked', key: null, kept: null, fingerprint: null });
   try {
-    await store.forget(org);
+    await persist(store, org, null);
     if (mine === generation) useKeyHolder.setState({ forgetError: null });
   } catch (error) {
     if (mine === generation) useKeyHolder.setState({ forgetError: reason(error) });
