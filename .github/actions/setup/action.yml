@@ -11,6 +11,9 @@ inputs:
   libreoffice:
     description: Install LibreOffice Writer and Impress.
     default: 'false'
+  apt:
+    description: More apt packages for a Linux runner, space-separated.
+    default: ''
 runs:
   using: composite
   steps:
@@ -27,13 +30,14 @@ runs:
         path: ${{ runner.os == 'macOS' && '~/Library/Caches/electron' || '~/.cache/electron' }}
         key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
     # The Linux packages; a macOS runner carries its display and fonts, and LibreOffice there is the machine's own.
-    - if: runner.os == 'Linux' && (inputs.e2e == 'true' || inputs.libreoffice == 'true')
+    - if: runner.os == 'Linux' && (inputs.e2e == 'true' || inputs.libreoffice == 'true' || inputs.apt != '')
       shell: bash
       env:
         E2E: ${{ inputs.e2e }}
         LIBREOFFICE: ${{ inputs.libreoffice }}
+        APT: ${{ inputs.apt }}
       run: |
-        packages=()
+        read -ra packages <<<"$APT"
         if [[ $E2E == true ]]; then packages+=(xvfb fonts-noto-cjk); fi
         if [[ $LIBREOFFICE == true ]]; then packages+=(libreoffice-writer libreoffice-impress); fi
         sudo apt-get update -q

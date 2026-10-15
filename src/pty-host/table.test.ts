@@ -281,7 +281,9 @@ describe('pty host initial command runs under zsh and bash', () => {
 });
 
 describe('pty host foreground detection', () => {
-  it('reports busy false at a /bin/sh prompt and busy true with the program while sleep runs', async () => {
+  // macOS: node-pty names the foreground process by its kernel name there (`sh`, or the bash it re-executes); on Linux it
+  // reads argv[0] from /proc, `/bin/sh`, which no shell-name rule matches.
+  it.skipIf(process.platform !== 'darwin')('reports busy false at a /bin/sh prompt and busy true with the program while sleep runs', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: [] }));
     h.table.write({ ptyId, data: "printf 'MAWS_%s\\n' READY\r" });

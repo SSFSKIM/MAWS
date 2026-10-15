@@ -22,7 +22,9 @@ async function leasedTab(h: ReturnType<typeof harness>, group?: { key: string; t
   return { host, id: created.id, entry, send, cdp: h.cdp(entry) };
 }
 
-describe('the takeover gate through a lease', () => {
+// macOS: every stand here admits its fake host through the committed peer identity addon, a darwin-arm64 prebuild
+// loaded only on Apple silicon macOS, so each describe below is guarded to macOS.
+describe.skipIf(process.platform !== 'darwin')('the takeover gate through a lease', () => {
   it('a Runtime.callFunctionOn while the person holds the tab is held, then refused within its deadline, never sent; a screenshot passes and leaves control human', async () => {
     const h = harness({ presence: true });
     const t = await leasedTab(h);
@@ -99,7 +101,7 @@ describe('the takeover gate through a lease', () => {
   });
 });
 
-describe('the Browser panel follows the agent (the owner\'s decision; E4c\'s browser.agent.acting, P1 A-54)', () => {
+describe.skipIf(process.platform !== 'darwin')('the Browser panel follows the agent (the owner\'s decision; E4c\'s browser.agent.acting, P1 A-54)', () => {
   const acting = (h: ReturnType<typeof harness>) => h.emitted.filter((e) => e.name === 'browser.agent.acting').map((e) => e.payload);
 
   it('a lease\'s first acting command tells the windows once, naming the tab and who acts; reads do not; the tab stays unselected', async () => {
@@ -136,7 +138,7 @@ describe('the Browser panel follows the agent (the owner\'s decision; E4c\'s bro
   });
 });
 
-describe("the vendor's screenshot is a screencast first (BS:43892-44050; the spec's final-review rule)", () => {
+describe.skipIf(process.platform !== 'darwin')("the vendor's screenshot is a screencast first (BS:43892-44050; the spec's final-review rule)", () => {
   // tab.screenshot() and the AX state's screenshot bound the screencast to the viewport (css mode, BS:43985-44016); the
   // vendor's device-mode capture of the surface after each cell (its response metadata, BS:65063) does not
   const VIEWPORT_SCREENCAST = { everyNthFrame: 1, format: 'jpeg', maxHeight: 800, maxWidth: 1280, quality: 80 };
@@ -216,7 +218,7 @@ describe("the vendor's screenshot is a screencast first (BS:43892-44050; the spe
   });
 });
 
-describe('the agent\'s activity, told to the windows', () => {
+describe.skipIf(process.platform !== 'darwin')('the agent\'s activity, told to the windows', () => {
   it('a tab opened, a navigation, a labelled click, typing as a count (never the text), a key, a screenshot, a tab closed; in the connection\'s session', async () => {
     const h = harness({ presence: true });
     const t = await leasedTab(h);
@@ -293,7 +295,7 @@ describe('the agent\'s activity, told to the windows', () => {
   });
 });
 
-describe('the panel\'s badge', () => {
+describe.skipIf(process.platform !== 'darwin')('the panel\'s badge', () => {
   it('a tab created in a group shows "agent", the group\'s name once the agent names it, nothing once ungrouped or let go', async () => {
     const h = harness({ presence: true });
     const t = await leasedTab(h, { key: 's1', title: 'cua' });
@@ -312,7 +314,7 @@ describe('the panel\'s badge', () => {
   });
 });
 
-describe('the file chooser and the agent\'s downloads', () => {
+describe.skipIf(process.platform !== 'darwin')('the file chooser and the agent\'s downloads', () => {
   it('a disconnect during a file-chooser wait switches interception off, so the person\'s next file-input click opens the picker', async () => {
     const h = harness({ presence: true });
     const t = await leasedTab(h);

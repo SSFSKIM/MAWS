@@ -28,7 +28,8 @@ const PEER_AUTH_SOURCE_SHA256 = '5c94d2b4606c66a09b5011f29ce0d6915101fdc0533d011
 const appRoot = process.cwd(); // vitest runs from the repository root
 const uid = process.getuid!();
 
-describe('the addon (the committed prebuild, real processes)', () => {
+// macOS: the committed peer identity addon is a darwin-arm64 prebuild, loaded only on Apple silicon macOS.
+describe.skipIf(process.platform !== 'darwin')('the addon (the committed prebuild, real processes)', () => {
   const cleanups: (() => void)[] = [];
   afterEach(() => {
     for (const cleanup of cleanups.splice(0)) cleanup();
@@ -126,7 +127,8 @@ describe('the loader', () => {
     expect(peerAddonPath({ packaged: false, resourcesPath: '/App/Contents/Resources', appRoot: '/src' })).toBe('/src/native/peer-auth/prebuilds/darwin-arm64/peer-auth.node');
   });
 
-  it('reports unavailable for a missing file, and off Apple silicon macOS without trying', () => {
+  // macOS: its last line loads the prebuild for real, and the committed peer identity addon is a darwin-arm64 prebuild, loaded only on Apple silicon macOS.
+  it.skipIf(process.platform !== 'darwin')('reports unavailable for a missing file, and off Apple silicon macOS without trying', () => {
     const real = peerAddonPath({ packaged: false, resourcesPath: '/nowhere', appRoot });
     expect(loadPeerAddon(join(appRoot, 'native', 'peer-auth', 'missing.node'))).toBeNull();
     expect(loadPeerAddon(real, { platform: 'linux', arch: 'arm64' })).toBeNull();
