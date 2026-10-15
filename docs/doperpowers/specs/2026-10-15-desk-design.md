@@ -2401,7 +2401,17 @@ from `App.tsx`.
 | slot | props | where the shell mounts it |
 | --- | --- | --- |
 | `depth` | `{project, session: DeskSession \| null, plane: SessionPlane}` | the project view's right column while it is open; `session` is the selected direct channel's, null on the group chat and while the browser is locked |
-| `transcript` | `{project, session: DeskSession, plane: SessionPlane}` | a direct channel's working record, unfolded in the center (DC5's M3 mounts it) |
+| `transcript` | `{project, session: DeskSession, plane: SessionPlane, range: {from: string \| null, to: string \| null}}` | a direct channel's working record, unfolded in the center at one fold (DC5's M3 mounts it); `range` is that fold's bounds, below |
+
+**The working record's range.** The `transcript` slot draws a session's
+transcript through the to-human Presenter, and each fold hands it
+`range: {from, to}`: each end is the `src` of the exchange item bounding the
+fold — a `<message>` span's `<transcript row uuid>#<span index>`, or a
+question's call id — or null for an open end (the first fold's `from`; a live
+session's last fold, after its last item, has `to` null). The slot draws only
+what lies strictly between, at span granularity: a bounding message's marked
+span is excluded, and unmarked text in the same row is drawn. The shell passes
+the bounds and trims nothing.
 
 **The session plane** (`session-plane.ts`), handed to both slots as `plane`:
 
@@ -2769,6 +2779,21 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The `transcript` slot draws one fold of a direct channel's
+  working record, bounded by `range: {from, to}` (DC5's M3, DC6's M1).
+  The channel shows what a session sent its human; the working record
+  between two of those items folds behind a button, and unfolding one
+  fold must draw that stretch and nothing the channel already shows. The
+  bounds are the exchange items' own `src` (a span's row uuid and index,
+  or a question's call id), exclusive, at span granularity, because one
+  transcript row can hold both a marked span the channel draws and
+  unmarked text the fold draws; the slot draws through the to-human
+  Presenter so a fold reads like the terminal's `[ working record ]`.
+  Rejected: bounds by row uuid, which either repeats a message the
+  channel shows or loses the text beside it; and the shell trimming the
+  slot's output, which would need the shell to parse transcripts. Flags
+  DC6.
+  Date/Author: 2026-10-15, design session (DC5's M3).
 - Decision: The grid socket sends `part` frames down (DC3's M3 review).
   The Registry sent every project's summary in one `grid` value, which an
   org with enough projects pushes past the 1 MiB frame bound; it now
