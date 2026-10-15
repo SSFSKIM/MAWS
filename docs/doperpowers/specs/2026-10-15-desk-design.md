@@ -1833,7 +1833,7 @@ and `streaming` are that agent's own.
 | `end` | yes | `{reason: "unsubscribed" \| "machine-offline" \| "session-ended" \| "discontinuity" \| "error", message?}` |
 | `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
 | `machine` | no (`session` null) | `{online, policy: {read_only, ceiling}, checkouts: [{path, branch}]}`; `online` is the hub's, from the lease (a producer sends true) |
-| `raised` | no | `{request, session, tool, input, agentId?, truncated?, deadline?, async?, mac}`: `request` the call's tool-use id where the engine gives one (`toolu_…`; an ask-mod question's `toolu_plugin_…`), otherwise a synthetic `request-…`, opaque to every consumer, the DX6 digest included; `deadline` ISO 8601 UTC with milliseconds (the producer converts DX5's epoch milliseconds); `async: true` for the ask mod's async question, answered or withdrawn, never denied; `agentId` the subagent that asked (absent for the main thread), a non-empty string; `truncated: true` when the bridge capped the input it shows, and the DX6 digest is over that capped input on both sides. The code covers every field, and the hub keeps and relays them as received; another form of `agentId`, `truncated`, `deadline`, or `async` is refused `bad-shape` |
+| `raised` | no | `{request, session, tool, input, agentId?, truncated?, deadline?, async?, toolUseId?, mac}`: `request` the call's tool-use id where the engine gives one (`toolu_…`; an ask-mod question's `toolu_plugin_…`), otherwise a synthetic `request-…`, opaque to every consumer, the DX6 digest included; `toolUseId` the transcript's tool-use id of the call the request belongs to, present only where it differs from `request` (the ask mod's blocking question, whose `request` is the engine dialog it opens inside its own call, a call no transcript row names), so `toolUseId ?? request` is always the id a transcript row carries, or a synthetic id no row carries; `deadline` ISO 8601 UTC with milliseconds (the producer converts DX5's epoch milliseconds); `async: true` for the ask mod's async question, answered or withdrawn, never denied; `agentId` the subagent that asked (absent for the main thread), a non-empty string; `truncated: true` when the bridge capped the input it shows, and the DX6 digest is over that capped input on both sides. The code covers every field, and the hub keeps and relays them as received; another form of `agentId`, `truncated`, `deadline`, or `async` is refused `bad-shape` |
 | `settled` | no | `{request, winner: "web" \| "terminal" \| "other", outcome, by, mac}`; taken once per request: the hub removes the request and records its decision from the first, and a `settled` for a request it already settled (a daemon that restarted between sending and recording it) is accepted without a second broadcast or decision; the settled ids are in storage, kept a month, so this holds across an eviction |
 | `delivery` | no | `{event: {writer, seq}, session, outcome: "delivered" \| "recorded" \| "refused-read-only" \| "uncertain" \| "failed", reason, mac}`; a `recorded` for a closed terminal session can be followed by `delivered` for the same key after Resume; `uncertain` is a push whose frame was taken but never answered |
 | `compact` | no | `{rpc, phase: "start" \| "end", tokensBefore?, tokensAfter?, skip?, error?}`: a compaction's progress, from the bridge's DX5 `compact` events; `rpc` the nonce of the DX6 `compact` that asked for it, or null for one the session started itself; on `end`, `tokensBefore` and `tokensAfter` (null when the engine recorded none), or `skip` (a hook vetoed it), or `error` (the engine refused it) |
@@ -2198,7 +2198,7 @@ and M2 left them. Changed rows are marked **[M3]**; rows fix wave 1 changed are 
 
 | `type` / `phase` | Built | Fields |
 | --- | --- | --- |
-| `raised` | M3 **[M3]** (was reserved) | `request` (the call's tool-use id; `toolu_plugin_…` for the ask mod's dialog; `request-<base36>-<n>` for a call no check named), `tool`, `input` (strings capped, fw1), `agentId`, `deadline?` (epoch ms, only for a background subagent: raise + 3000), `async?: true` (an ask mod async question, tool `mcp__doperpowers__AskUserQuestion`), `truncated?`. DX4's pending request. Raised only when the settings hooks beneath did not decide. A person-only prompt raises nothing |
+| `raised` | M3 **[M3]** (was reserved) | `request` (the call's tool-use id; `toolu_plugin_…` for the ask mod's dialog; `request-<base36>-<n>` for a call no check named), `tool`, `input` (strings capped, fw1), `agentId`, `deadline?` (epoch ms, only for a background subagent: raise + 3000), `async?: true` (an ask mod async question, tool `mcp__doperpowers__AskUserQuestion`), `truncated?`, **`toolUseId?`** (added after DC2's close, by DC7: the outer `mcp__doperpowers__AskUserQuestion` call's tool-use id when `request` is the ask mod's dialog, whose own `tool/call` and `tool/result` are not posted either, since no transcript row holds them). DX4's pending request. Raised only when the settings hooks beneath did not decide. A person-only prompt raises nothing |
 | `settled` | M3 **[M3]** (was reserved), **[fw1]** | `request, winner, outcome, by`. `outcome` ∈ `allow \| deny \| answered \| withdrawn`. `winner` ∈ `terminal \| other \| web`. `by` is `terminal` when the terminal's answer was used, `cli` when the CLI's was (winner `other`), the member id when the web's was (winner `web`), and `bridge` for `withdrawn` (winner `other`). A passed deadline settles nothing: the request stays pending, answerable only in the terminal, until the terminal's answer settles it as `terminal` with its real outcome. Exactly one per `raised`. **[fw1] Evidence, all tied to the call's own id:** (1) the engine's `tool_decision` record for the call, which arrives at decision time: source `hook` with the bridge's handed-out decision of the same behavior means the decider; `user_temporary`, `user_permanent` or `user_reject` means the terminal, with the record's real outcome (accept is `allow`/`answered`, reject is `deny`); anything else (`user_abort`, `config`, a hook's decision the bridge did not hand out) means `withdrawn` by `bridge`. A request the bridge's interrupt aborted is `withdrawn` whatever the record says. (2) With no record within 1 s of a real call's result row, the call's transcript (its subagent's own for a subagent) once the result row is in it: a `hook_permission_decision` mark carrying the call's `toolUseID` means the hook's answer was used (then as (1) with source `hook`); none means the terminal's, with the outcome the result shows. (3) Neither available (the ask mod's dialog keeps no rows; the transcript unreadable or the result never written within about 2 s): `withdrawn` by `bridge`. A turn's end and the session's end withdraw as before. An async question answered through a dialog a press opened settles with that dialog's request: `answered` by its `by` (or `withdrawn` when the dialog's was) |
 | `block-row` | M3 **[M3]** | `uuid, turnId, agentId, step, index`: the transcript row `uuid` holds block `index` of that message. Posted from `session.append` for each response row, paired by the row's block type and the order of the step's block starts (a tool row by its call id), never by position. The child removes the block from `streaming` under the lock; later chunks of that block are ignored. A row whose block never streamed (a server tool) names none |
 | `chunk` | M1, **[M3]** | Unchanged on the wire. The child now folds each chunk into its **block** (`chunk.index`) |
@@ -2981,7 +2981,7 @@ from `App.tsx`.
 transcript through the to-human Presenter, and each fold hands it
 `range: {from, to}`: each end is the `src` of the exchange item bounding the
 fold — a `<message>` span's `<transcript row uuid>#<span index>`, or a
-question's call id — or null for an open end (the first fold's `from`; a live
+question's call id (a raised question's `toolUseId ?? request`, DX4) — or null for an open end (the first fold's `from`; a live
 session's last fold, after its last item, has `to` null). The slot draws only
 what lies strictly between, at span granularity: a bounding message's marked
 span is excluded, and unmarked text in the same row is drawn. The shell passes
@@ -3354,6 +3354,24 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A raised request names the transcript call it belongs to
+  (`toolUseId`, DX4 and DX5), where that differs from `request`. The ask
+  mod's blocking question, the way every interactive session asks, is
+  raised by the bridge under the id of the engine dialog the mod opens
+  inside its own `mcp__doperpowers__AskUserQuestion` call; no transcript
+  row carries that id, so the web could neither bound a working-record
+  fold by the question nor tie its card to its row (DC6's M3, from DC3's
+  real recording: `toolu_plugin_…` raised, `toolu_01…` in the
+  transcript). The bridge already pairs the two, since the raised input
+  is the outer call's; it now says so, and stops posting the dialog's own
+  `tool/call` and `tool/result`, which name a call no row holds.
+  `request` stays the id a decision answers. Rejected: raising under the
+  outer call's id and translating inside the bridge, which changes what
+  every settlement names; and matching by timing or question text in the
+  browser. Flags DC3 (the hub keeps and relays `toolUseId`), DC5 (bounds
+  and cards use `toolUseId ?? request`), DC6, DC7 (the bridge and the
+  relay).
+  Date/Author: 2026-10-15, design session (DC6's M3).
 - Decision: The real org is `ssfskim` (display name `SSFSKIM`), and its
   admin, the one email Access allows, is supremekim17@gmail.com (owner,
   2026-10-15). The id is written into every hub project's `.smns` and
