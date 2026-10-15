@@ -1554,7 +1554,10 @@ refused `bad-shape`. A machine joins the project's fan-out in the same step the 
 stored after it reaches the machine behind the backlog and none falls between; the backlog is every writer's events
 past the `hello`'s vector, the machine's own included (a fresh machine bootstraps them), each writer's in seq order,
 in `events` frames of about 256 KiB. `have.archive` is read from the registry at each `hello`: a designation made later
-reaches the machine at its next `hello`. What a project sends a machine is fenced by the generation the project was
+reaches the machine at its next `hello`. A `hello` for a project already open on the stream is allowed and idempotent:
+the hub answers it with a fresh `have` and the backlog past that `hello`'s vector (events the machine already holds
+import idempotently), and the machine's place in the fan-out is unchanged. The daemon re-sends `hello` for each open
+project once per archive period, so a designation made or cleared later reaches a machine whose stream never drops. What a project sends a machine is fenced by the generation the project was
 opened on: a newer stream receives nothing of a project until the machine sends `hello` for it on that stream.
 
 **The POST's answer and the replies.** The hub writes its replies to a POST's frames — `have` and the backlog after a
@@ -2710,6 +2713,22 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A repeated `hello` on an open stream is allowed and
+  idempotent (DX2), answered with a fresh `have` and the backlog past its
+  vector. DX2 told a machine its archive designation only at `hello`, so a
+  machine whose stream never drops would never learn of a later one; DC4's
+  M4 re-sends `hello` per open project once per archive period (15
+  minutes), and DC3's hub already accepted the repeat without side
+  effect. Rejected: a hub push when the designation changes, a new frame
+  and new hub work for a backup whose latency does not matter. The
+  archive runs only on a fresh `have` naming this machine, so a machine
+  that loses the designation stops at the first answer after the change.
+  Residue: sminos's SKILL.md still says a `remote` makes `log/` a git
+  mirror, wrong for hub projects since DC4's M2; it is updated once for
+  the whole desk (hub projects, the bridge, the web's controls) after the
+  children merge, through doperpowers:writing-skills, as its own ticket.
+  Flags DC3, DC4.
+  Date/Author: 2026-10-15, design session (DC4's M4).
 - Decision: DX5's row order is disk order. DC2's M4 review broke the
   agreed ordering live: a notice posted at hook entry can precede a row
   the engine writes earlier (a session's first prompt was noticed before
