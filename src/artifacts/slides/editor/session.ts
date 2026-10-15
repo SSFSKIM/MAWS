@@ -8,6 +8,7 @@ import type { Awareness } from '@y/protocols/awareness';
 import { transact, type Doc } from '../../yjs';
 import { createDeckUndo, type DeckUndo } from '../../yjs/slides-undo';
 import { slideOrder } from '../model';
+import { keepingRemovedQuotes } from '../threads'; // M7 fix wave 1
 
 export type Zoom = 'fit' | number;
 export const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2] as const;
@@ -179,11 +180,11 @@ export class DeckSession {
 
   undoStep(): void {
     this.typingIn = null;
-    this.undo.undo();
+    keepingRemovedQuotes(this.doc, () => this.undo.undo()); // M7 fix wave 1: a removed commented element keeps its text
   }
   redoStep(): void {
     this.typingIn = null;
-    this.undo.redo();
+    keepingRemovedQuotes(this.doc, () => this.undo.redo()); // M7 fix wave 1
   }
 
   /** The first showing is drawn: the stage and every thumbnail (the e2e seam's open-to-interactive). */

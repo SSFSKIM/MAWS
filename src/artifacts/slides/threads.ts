@@ -26,6 +26,9 @@ import { blocksText, clipQuote as clip, quoteOf, QUOTE_MAX } from './quote';
 
 export type { ThreadMessage, ThreadStatus };
 
+/** The origin of every thread write the deck editor makes: never tracked by the deck's undo (M7). */
+export const COMMENTS_ORIGIN = 'deck-comments';
+
 /** A new thread's id (B's alphabet and length). */
 export const newThreadId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 8);
 
@@ -234,6 +237,19 @@ export function captureQuotes(doc: Doc, options: { slides?: Iterable<string> } =
     if (!only || only.has(slideId)) anchors.push({ id, slideId, elementId: String(s.elementId ?? '') });
   }
   return liveQuotesBySlide(doc, anchors);
+}
+
+/**
+ * Runs a step that may remove commented elements without a removal writer (an undo of an element's creation, a redo of
+ * its deletion; M7 fix wave 1), keeping their last text: the commented elements' quotes read just before it, stored for
+ * those it removed in a transaction right after it, under the comments' origin (never undone). Offline the two merge into
+ * one frame, whose quote the host's forwarding keeps (Decision Log 31). Answers the step's own answer.
+ */
+export function keepingRemovedQuotes(doc: Doc, step: () => boolean): boolean {
+  const quotes = captureQuotes(doc);
+  const done = step();
+  if (done && quotes.size > 0) storeDeletedQuotes(doc, quotes, COMMENTS_ORIGIN);
+  return done;
 }
 
 /** Each thread's stored quote now, by id (of `ids` when given): what a frame is compared with after it lands. */

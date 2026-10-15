@@ -13,8 +13,9 @@ import { addThread, elementQuote, newThreadId, slideTitle, type DeckThread } fro
 import type { DeckSession } from '../session';
 import { COMMENTS_COPY as C } from './copy';
 
-/** The origin of every thread write the editor makes: outside the deck's undo. */
-export const COMMENTS_ORIGIN = 'deck-comments';
+/** The origin of every thread write the editor makes: outside the deck's undo (threads.ts holds it; fix wave 1). */
+import { COMMENTS_ORIGIN } from '../../threads';
+export { COMMENTS_ORIGIN };
 
 export const HUMAN_AUTHOR: CommentAuthor = { actor: { kind: 'human' }, now: () => Date.now() };
 

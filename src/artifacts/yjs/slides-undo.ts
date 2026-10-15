@@ -7,17 +7,9 @@
 // undone with that gesture; the conversation (a thread's creation, its messages, resolve, reopen, a withdrawn draft) is
 // written under the comments' own origin, which the stack never tracks, so ⌘Z never takes a comment back (B's rule,
 // the parent's Decision Log 32).
-// M7 fix wave 1: an undo or a redo that removes a commented element (an undo of its creation, a redo of its deletion)
-// is no removal writer, so the step stores the element's last text itself: the commented elements' quotes read just
-// before it, written for those it took away in a transaction right after it, under the comments' origin (never undone).
-// Offline the two merge into one frame, which the host's forwarding keeps (Decision Log 31).
 import * as Y from '@y/y';
-import { captureQuotes, storeDeletedQuotes } from '../slides/threads';
 import type { Doc } from './doc';
 import { DECK_ROOT, SLIDES_ROOT, THREADS_ROOT } from './slides';
-
-/** The origin of the thread writes an undo or a redo makes (the editor's comments' origin, which the stack never tracks). */
-const COMMENTS_ORIGIN = 'deck-comments';
 
 export interface DeckUndo {
   /** The origin the editor writes with; only writes carrying it are undoable. */
@@ -46,18 +38,16 @@ export function createDeckUndo(doc: Doc, origin: object = { editor: 'deck' }): D
   const listeners = new Set<() => void>();
   const changed = () => listeners.forEach((listener) => listener());
   for (const name of EVENTS) manager.on(name, changed);
-  // M7 fix wave 1: a step, keeping the last text of every commented element it removes
-  const step = (run: () => unknown): boolean => {
-    manager.stopCapturing();
-    const quotes = captureQuotes(doc);
-    const done = run() !== null;
-    if (done && quotes.size > 0) storeDeletedQuotes(doc, quotes, COMMENTS_ORIGIN);
-    return done;
-  };
   return {
     origin,
-    undo: () => step(() => manager.undo()),
-    redo: () => step(() => manager.redo()),
+    undo: () => {
+      manager.stopCapturing();
+      return manager.undo() !== null;
+    },
+    redo: () => {
+      manager.stopCapturing();
+      return manager.redo() !== null;
+    },
     canUndo: () => manager.canUndo(),
     canRedo: () => manager.canRedo(),
     cut: () => manager.stopCapturing(),

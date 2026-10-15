@@ -9,9 +9,10 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, describe, expect, it } from 'vitest';
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '../../../document/editor/comments/surface';
 import { newDoc, transact, type Doc } from '../../../yjs';
-import { deleteElementTree, importSlide, moveSlide, setStyle, writeDeckKeys } from '../../model';
+import { deleteElementTree, importSlide, moveSlide, setStyle, setText, writeDeckKeys } from '../../model';
+import * as Y from '../../../yjs/slides';
 import { loadSlide } from '../../parse';
-import { getThread, listThreads } from '../../threads';
+import { addThread, getThread, listThreads } from '../../threads';
 import { DeckEditor } from '../DeckEditor';
 import { DeckSession } from '../session';
 
@@ -232,5 +233,20 @@ describe('comments on a deck’s elements (D9)', () => {
     } finally {
       token.shift = 0;
     }
+  });
+
+  // fix wave 1: the session's undo is no removal writer: an undo that removes a commented element keeps its last text
+  it('an undo that removes a commented element stores the text it had, under the comments’ origin', () => {
+    const { doc, session } = mount();
+    act(() => session.edit((origin) => transact(doc, () => Y.createElement(doc, 's1', 'q', { tag: 'p', parent: '', order: 'a9' }, [{ type: 'p', inline: [{ text: 'Old', marks: {} }] }]), origin)));
+    act(() => session.edit((origin) => setText(doc, 's1', 'q', [{ type: 'p', inline: [{ text: 'New', marks: {} }] }], origin)));
+    addThread(doc, { threadId: 'tq', slideId: 's1', elementId: 'q', quote: 'New', by: { kind: 'human' }, at: 1 }, 'deck-comments');
+    act(() => session.undoStep()); // the typing
+    act(() => session.undoStep()); // the creation
+    expect(Y.hasElement(doc, 's1', 'q')).toBe(false);
+    expect(getThread(doc, 'tq')!.quote).toBe('Old');
+    expect(session.snapshot().canRedo).toBe(true);
+    act(() => session.redoStep()); // the element back: its quote is derived again
+    expect(getThread(doc, 'tq')!.quote).toBe('Old');
   });
 });
