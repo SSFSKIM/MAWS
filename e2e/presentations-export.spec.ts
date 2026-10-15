@@ -547,6 +547,14 @@ test('the PPTX under LibreOffice draws each corpus slide as the app’s own canv
     ...readdirSync(claudeDir).filter((f) => f.endsWith('.html')).sort().map((f) => ({ name: `claude/${f}`, html: readFileSync(join(claudeDir, f), 'utf8') })),
     ...readdirSync(defaults).sort().flatMap((key) => readdirSync(join(defaults, key, 'layouts')).sort().map((f) => ({ name: `layout/${key}/${f}`, html: readFileSync(join(defaults, key, 'layouts', f), 'utf8') }))),
     ...benchShapes.map((shape, i) => ({ name: `bench/${i + 1}`, html: shape(`b${i + 1}`, i) })),
+    // a turned text box (judged by its centre) and a table in an installed face (its cells on four edges)
+    {
+      name: 'm9/turned',
+      html: `<section id="turned" style="background:#ffffff; padding:128px; gap:32px">
+<table id="grid" style="font-size:32px; font-family:Georgia, serif; color:#1a1a1a"><tr id="h" style="background:#eef2f1"><th>Region</th><th>Q1</th><th>Q2</th></tr><tr id="r1"><td>North</td><td>12</td><td>19</td></tr></table>
+<p id="turn" style="position:absolute; left:700px; top:600px; width:800px; font-size:56px; font-family:Georgia, serif; color:#2b7a78; transform:rotate(-12deg)">A turned line of text</p>
+</section>`,
+    },
   ];
   const named = (slides: typeof all) => {
     const ids = slides.map((_, i) => `c${i}`);
@@ -601,6 +609,7 @@ test('the PPTX under LibreOffice draws each corpus slide as the app’s own canv
     }
   }
   expect(compared).toBeGreaterThan(50);
+  expect(rotated).toBeGreaterThan(0);
   mkdirSync(test.info().outputDir, { recursive: true });
   writeFileSync(join(test.info().outputDir, 'libreoffice-compare.txt'), `${report.join('\n')}\n`);
   console.log(`[libreoffice compare] ${compared} text boxes (${fourEdges} on four edges, ${rotated} by their centre); mean difference per slide: ${report.join(', ')}`);
