@@ -760,7 +760,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
   second per streaming subagent, a post to the daemon p50 1–3 ms, p95 at
   most 35 ms.
 - **Required:** required.
-- **Status:** in-flight (2026-10-15).
+- **Status:** merged (2026-10-15; PR #195, `a6c90a13`, 7.155.0).
 
 ### DC3: The hub — plan
 
@@ -846,7 +846,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 - **Design inheritance:** §2 Daemon uplink [binding: outbound only, sole
   connection], §3 log plane [binding parts], §6 org key, §8 unknown 2.
 - **Required:** required.
-- **Status:** in-flight (2026-10-15).
+- **Status:** merged (2026-10-15; PR #194, `9e7d3d30`, 7.156.0).
 
 ### DC5: The web — projects and the conversation — plan
 
@@ -906,7 +906,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 - **Design inheritance:** §2 Web client (the adapter), §3 session plane, §4
   right panel.
 - **Required:** required.
-- **Status:** in-flight (2026-10-15).
+- **Status:** PR open (2026-10-15; MAWS PR #12, stacked on `smns-erb-web`).
 
 ### DC7: The machine's controls — plan
 
@@ -952,7 +952,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 - **Design inheritance:** §3 session plane [binding], §5 [binding], §6
   [binding: the daemon as boundary, codes, digests, read-only].
 - **Required:** required.
-- **Status:** in-flight (2026-10-15).
+- **Status:** merged (2026-10-15; PR #196, `af3a5573`, 7.157.0).
 
 ## Cross-Child Contracts
 
@@ -3125,8 +3125,8 @@ a hub that connects into machines (§2).
 | DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | in-flight (dispatched 2026-10-15) |
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/194, merge `9e7d3d30`, 7.156.0 (main merged in at `2a864e49` after DC2); report `docs/doperpowers/plans/2026-10-15-desk-dc4-report.md` |
 | DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
-| DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | in-flight (dispatched 2026-10-15, parent pin 9471766c) |
-| DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | in-flight (dispatched 2026-10-15, after DC4's M3 was reviewed clean) |
+| DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | **PR open 2026-10-15**: M1–M3 and the branch reviewed clean (`high`, after two final fix waves); PR https://github.com/SSFSKIM/MAWS/pull/12, stacked on `smns-erb-web`, retargeted to `master` when DC5 merges; Linux gate run 38818748087 green (67 browser tests, 8 acceptance specs against the fake machine); report `docs/doperpowers/plans/2026-10-15-desk-dc6-report.md` |
+| DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`; four P2 fixed after the final review, the presence watermark among them); PR https://github.com/SSFSKIM/doperpowers/pull/196 (branch `dc7-controls`), merge `af3a5573`, 7.157.0; sminos 1740/1742 (the two load-timing assertions in TECH-DEBT), mods 298/298; Resume live 5/5 on 2.1.301; report `docs/doperpowers/plans/2026-10-15-desk-dc7-report.md` |
 
 ## Surprises & Discoveries
 
