@@ -673,6 +673,34 @@ describe('Web Push', () => {
     expect(await deleted.json()).toEqual({ deleted: true });
   });
 
+  it('a visible socket that has not refreshed its visibility within the window no longer holds pushes back', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    // The window shortened to 400 ms for this project (90 s deployed), through a suite seam.
+    await hub.visibleWindow(project, 400);
+    const ua = await userAgent(`https://push.test/asleep-${project}`);
+    await hub.fetchAs(ADMIN, '/api/push/subscriptions', { method: 'PUT', body: { endpoint: ua.endpoint, keys: ua.keys } });
+    const mine = () => hub.pushes.filter((p) => p.endpoint === ua.endpoint);
+    const b = await browser(project);
+    b.send({ t: 'visibility', visible: true });
+    // Within the window: held back.
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', await raised(project, 'toolu_awake')) }]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(mine()).toEqual([]);
+    // The phone slept: no refresh came, and the window passed.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', await raised(project, 'toolu_asleep')) }]);
+    await waitFor(() => (mine().length === 1 ? true : undefined));
+    // A refresh holds them back again.
+    b.send({ t: 'visibility', visible: true });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', await raised(project, 'toolu_refreshed')) }]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(mine()).toHaveLength(1);
+    b.close();
+    await m.close();
+  });
+
   it('a raise and a <message> push once to each device of a member with no visible browser, and none when one is visible', async () => {
     const project = newProject();
     const m = await machine(project);
@@ -694,10 +722,12 @@ describe('Web Push', () => {
       expect(JSON.parse(new TextDecoder().decode(await decrypt(ua, push.body)))).toEqual({
         v: 1,
         project,
+        name: 'demo',
         session: SESSION,
         alias: 'maws-45',
         kind: 'question',
         request: 'toolu_push',
+        waiting: expect.any(Number),
       });
       expect((await vapidClaims(push.headers.authorization)).claims).toMatchObject({ aud: 'https://push.test', sub: `mailto:${ADMIN}` });
     }
@@ -711,10 +741,12 @@ describe('Web Push', () => {
     expect(JSON.parse(new TextDecoder().decode(await decrypt(phone, mine().filter((p) => p.endpoint === phone.endpoint)[1].body)))).toEqual({
       v: 1,
       project,
+      name: 'demo',
       session: SESSION,
       alias: 'maws-45',
       kind: 'message',
       event: { writer: message.writer, seq: 2 },
+      waiting: expect.any(Number),
     });
 
     // A visible browser of the member: nothing.

@@ -91,9 +91,14 @@ export type GridDown = { t: 'grid'; projects: ProjectSummary[] } | { t: 'summary
 export type PushNotice = {
   v: 1;
   project: string;
+  /** The project's name, as the grid shows it. */
+  name: string;
   session: string;
   alias: string | null;
   kind: 'question' | 'permission' | 'message';
   request?: string;
   event?: { writer: string; seq: number };
+  /** The org's waiting count with this push's own event counted: the sum of the grid's `ProjectSummary.waiting`, for
+   * the app icon's badge. */
+  waiting: number;
 };
