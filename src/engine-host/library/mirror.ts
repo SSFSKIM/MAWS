@@ -20,6 +20,10 @@
 //   reconciles the whole directory once it loads again; the linked directory itself is never created, and no write or
 //   removal passes through a link inside it.
 // - At start every linked directory is reconciled against its manifest: what changed while the host was down.
+// - P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): a writer
+//   that declares `inputs` (what its output depends on beyond the revision) has them kept in the entry beside the
+//   revision, and the entry is current only while both match (an entry without them is rewritten once); `refresh`
+//   schedules artifacts as their own change does, for a change elsewhere that their `inputs` may tell.
 //
 // Reads go through P3-A's public store methods behind the commit barrier (the mirror never writes a row its batch may
 // yet take back); the only durable state is the manifest in the linked directory (ruling 18(a)).
@@ -39,6 +43,7 @@ const MIRROR_DIR = 'artifacts';
 
 interface ManifestEntry {
   revision: number;
+  inputs?: string; // P3-C: the writer's `inputs` it was written at, when its kind declares them (version 1, optional)
   slug: string;
   files: string[]; // relative to `<linkedDir>/artifacts/`
 }
@@ -103,6 +108,12 @@ export class LibraryMirror {
       await chain;
       if (chain === this.chain && this.timers.size === 0) return;
     }
+  }
+
+  // P3-C (Decision Log 29): schedules each artifact as its change would; one whose entry is current (its revision and its
+  // writer's `inputs` unchanged) is not rewritten, so a caller may name more than changed.
+  refresh(artifactIds: Iterable<string>): void {
+    for (const artifactId of artifactIds) this.schedule(artifactId);
   }
 
   close(): void {
@@ -263,20 +274,22 @@ export class LibraryMirror {
   private async upsert(dir: string, manifest: Manifest, artifactId: string): Promise<void> {
     const { store, service } = this.documents;
     const root = join(dir, MIRROR_DIR);
-    const read = await store.readCommitted((): { artifact: Artifact; revision: number; content: ContentRead; assets: AssetsRead } | null => {
+    const read = await store.readCommitted((): { artifact: Artifact; revision: number; inputs: string | undefined; content: ContentRead; assets: AssetsRead } | null => {
       const artifact = store.get(artifactId);
       if (!artifact) return null; // deleted since: its event removes it
       const revision = store.revision(artifactId);
+      const writer = mirrorWriterFor(artifact.kind);
+      const inputs = writer?.inputs?.(artifact); // P3-C (Decision Log 29)
       const entry = manifest.artifacts[artifactId];
-      if (entry && entry.revision === revision && entry.slug === mirrorSlug(artifact) && entry.files.every((file) => existsSync(join(root, file)))) return null; // current
-      if (!mirrorWriterFor(artifact.kind)) return { artifact, revision, content: null, assets: [] };
+      if (entry && entry.revision === revision && entry.inputs === inputs && entry.slug === mirrorSlug(artifact) && entry.files.every((file) => existsSync(join(root, file)))) return null; // current
+      if (!writer) return { artifact, revision, inputs, content: null, assets: [] };
       const assets = store.listAssets(artifactId).map(({ ref, name, mime, size, sha256 }) => ({ ref, name, mime, size, sha256 }));
-      if (isDocKind(artifact.kind)) return { artifact, revision, content: { state: service.readState(artifactId).state }, assets };
-      return { artifact, revision, content: byteContentOf(store, artifactId), assets };
+      if (isDocKind(artifact.kind)) return { artifact, revision, inputs, content: { state: service.readState(artifactId).state }, assets };
+      return { artifact, revision, inputs, content: byteContentOf(store, artifactId), assets };
     });
     const entry = manifest.artifacts[artifactId];
     if (!read || (read.content === null && !entry)) return; // current, gone, or nothing to write and nothing written
-    const { artifact, revision, content } = read;
+    const { artifact, revision, inputs, content } = read;
     const files = content === null ? {} : this.produce(artifact, content, read.assets);
     const owned = new Set(Object.values(manifest.artifacts).flatMap((other) => other.files));
     const mine = new Set(entry?.files ?? []);
@@ -325,7 +338,7 @@ export class LibraryMirror {
       }
     }
     const kept = [...new Set([...written, ...leftover])].sort();
-    if (kept.length > 0) manifest.artifacts[artifactId] = { revision: failure ? -1 : revision, slug: mirrorSlug(artifact), files: kept };
+    if (kept.length > 0) manifest.artifacts[artifactId] = { revision: failure ? -1 : revision, ...(inputs !== undefined && { inputs }), slug: mirrorSlug(artifact), files: kept }; // P3-C: inputs
     else delete manifest.artifacts[artifactId];
     if (failure) throw failure.error;
   }
@@ -459,7 +472,7 @@ function readManifest(path: string): Manifest {
   const entries: Record<string, ManifestEntry> = {};
   for (const [artifactId, entry] of Object.entries(artifacts as Record<string, Partial<ManifestEntry>>)) {
     if (typeof entry?.revision !== 'number' || typeof entry.slug !== 'string' || !Array.isArray(entry.files)) continue;
-    entries[artifactId] = { revision: entry.revision, slug: entry.slug, files: entry.files.filter((file): file is string => typeof file === 'string' && isMirrorPath(file)) };
+    entries[artifactId] = { revision: entry.revision, ...(typeof entry.inputs === 'string' && { inputs: entry.inputs }) /* P3-C */, slug: entry.slug, files: entry.files.filter((file): file is string => typeof file === 'string' && isMirrorPath(file)) };
   }
   return { version: 1, artifacts: entries };
 }

@@ -26,7 +26,7 @@ let w: World;
 let presentations: Presentations;
 beforeEach(() => {
   w = openWorld();
-  presentations = registerPresentations({ documents: w, chain: new DesignSystemChain(w.store, w.service) });
+  presentations = registerPresentations({ documents: w, chain: new DesignSystemChain(w.store, w.service), refresh: () => {} });
 });
 afterEach(() => {
   presentations.close();

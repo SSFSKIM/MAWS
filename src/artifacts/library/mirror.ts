@@ -37,7 +37,12 @@ export interface MirrorOutput {
   files: Record<string, string | Uint8Array>;
 }
 
-export type MirrorWriter = (input: MirrorInput) => MirrorOutput;
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): `inputs`,
+// a writer's dependency fingerprint beyond the artifact's revision (a deck's: the governing design system and that
+// system's revision, whose tokens its files resolve). The host keeps it in the artifact's manifest entry and holds the
+// entry current only while both match; a kind without it is current on its revision alone. Read inside the host's
+// commit barrier, so it is a pure function of committed state.
+export type MirrorWriter = ((input: MirrorInput) => MirrorOutput) & { inputs?(artifact: Artifact): string };
 
 const SLUG_MAX = 64; // characters of the title kept
 

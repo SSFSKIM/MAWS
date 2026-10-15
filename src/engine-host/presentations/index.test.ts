@@ -7,11 +7,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tokenProperties } from '@artifacts/design-system/css';
+import { readSystem, setToken, writeSystem } from '@artifacts/design-system/model';
 import { builtinView } from '@artifacts/design-system/view';
 import { mirrorSlug, mirrorWriterFor } from '@artifacts/library/mirror';
 import { slidePath } from '@artifacts/slides/deck';
 import { deckFiles } from '@artifacts/slides/model';
 import { publishDeck } from '@artifacts/slides/publish';
+import { DEFAULT_SYSTEMS } from '@artifacts/types/design_system/defaults';
+import { applyV2, newDoc } from '@artifacts/yjs';
 import * as Y from '@artifacts/yjs/slides';
 import type { Actor } from '@shared/artifacts/actor';
 import { DesignSystemChain } from '../design-systems/chain';
@@ -26,12 +29,16 @@ let project: string;
 let documents: Documents;
 let presentations: Presentations;
 let mirror: LibraryMirror | null;
+let refreshed: string[][]; // P3-C (Decision Log 29): what the module asked the mirror to refresh
 beforeEach(() => {
   userData = mkdtempSync(join(tmpdir(), 'maws-deck-host-'));
   project = mkdtempSync(join(tmpdir(), 'maws-deck-project-'));
   documents = openDocuments(userData, () => {})!;
-  presentations = registerPresentations({ documents, chain: new DesignSystemChain(documents.store, documents.service) });
   mirror = null;
+  refreshed = [];
+  // the library's mirror, once a case starts one; the calls recorded either way
+  const refresh = (artifactIds: string[]) => (refreshed.push(artifactIds), mirror?.refresh(artifactIds));
+  presentations = registerPresentations({ documents, chain: new DesignSystemChain(documents.store, documents.service), refresh });
 });
 afterEach(() => {
   mirror?.close();
@@ -49,7 +56,7 @@ describe('the host’s presentation module (D7)', () => {
     expect(mirrorWriterFor('presentation')).toBeTypeOf('function');
     presentations.close();
     expect(mirrorWriterFor('presentation')).toBeUndefined();
-    presentations = registerPresentations({ documents, chain: null }); // afterEach closes it
+    presentations = registerPresentations({ documents, chain: null, refresh: () => {} }); // afterEach closes it
   });
 
   it('mirrors a deck in a linked Space with its tokens resolved, the deck’s overrides over the system’s, and a held slide as sent', async () => {
@@ -79,5 +86,80 @@ describe('the host’s presentation module (D7)', () => {
     expect(cover).toContain(`font-size:${house.get('--ds-type-title-size')}`);
     expect(readFileSync(out('slides', 'broken.html'), 'utf8')).toBe(HELD);
     expect(existsSync(join(project, 'artifacts', '.maws-mirror.json'))).toBe(true);
+  });
+});
+
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): the
+// deck's mirror follows the system governing it with no write to the deck: the writer's `inputs` are the governing ref
+// and that system's revision, and the module refreshes every deck when a design system changes or the defaults do.
+describe('the deck mirror’s freshness under its governing system (Decision Log 29)', () => {
+  const official = DEFAULT_SYSTEMS.find((system) => system.key === 'official')!;
+  async function officialSystem() {
+    const system = await documents.store.create({ kind: 'design_system', title: 'Official' }, HUMAN);
+    await documents.service.writeAs(system.id, HUMAN, (doc) => void writeSystem(doc, official.files, { route: 'default', key: 'official', at: 0 }, { name: 'Official' }));
+    return system;
+  }
+
+  it('declares the deck’s inputs as the governing ref and that system’s revision', async () => {
+    const writer = mirrorWriterFor('presentation')!;
+    const deck = await documents.store.create({ kind: 'presentation', title: 'Kickoff' }, HUMAN);
+    expect(writer.inputs?.(deck)).toBe('builtin:maws');
+    const system = await officialSystem();
+    const placed = await documents.store.update(deck.id, { designSystemId: system.id });
+    expect(writer.inputs?.(placed)).toBe(`${system.id}@${documents.store.revision(system.id)}`);
+    await documents.service.writeAs(system.id, HUMAN, (doc) => setToken(doc, 'color.bg.$root', { $value: { colorSpace: 'srgb', components: [0, 0, 0] } }));
+    expect(writer.inputs?.(placed)).toBe(`${system.id}@${documents.store.revision(system.id)}`);
+  });
+
+  it('refreshes every deck when a design system changes and when the defaults do, and not for another kind', async () => {
+    const decks = [await documents.store.create({ kind: 'presentation', title: 'One' }, HUMAN), await documents.store.create({ kind: 'presentation', title: 'Two' }, HUMAN)];
+    const ids = decks.map((deck) => deck.id).sort();
+    refreshed.length = 0;
+    await documents.store.create({ kind: 'html', title: 'Page', content: { bytes: new TextEncoder().encode('<p>x</p>') } }, HUMAN);
+    expect(refreshed).toEqual([]);
+    const system = await officialSystem();
+    expect(refreshed.length).toBeGreaterThan(0);
+    expect(refreshed.every((asked) => [...asked].sort().join() === ids.join())).toBe(true);
+    refreshed.length = 0;
+    await documents.store.setDefaults({ owner: system.id, spaces: {} });
+    expect(refreshed.map((asked) => [...asked].sort())).toEqual([ids]);
+  });
+
+  it('rewrites a mirrored deck when the owner’s default changes and when its system is edited, with no write to the deck', async () => {
+    mirror = new LibraryMirror(documents, { log: () => {} });
+    await mirror.start();
+    const space = await documents.store.createSpace({ name: 'Talks', linkedDir: project });
+    const deck = await documents.store.create({ kind: 'presentation', title: 'Kickoff', spaceId: space.id }, HUMAN);
+    await mirror.flush();
+    const cover = () => readFileSync(join(project, 'artifacts', mirrorSlug(deck), 'slides', 'cover.html'), 'utf8');
+    const bgOf = (systemId: string) => {
+      const doc = newDoc();
+      try {
+        applyV2(doc, documents.service.readState(systemId).state);
+        return tokenProperties(readSystem(doc).tokens, 'deck').get('--ds-color-bg')!;
+      } finally {
+        doc.destroy();
+      }
+    };
+    const until = async (test: () => boolean) => {
+      for (let i = 0; i < 400 && !test(); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(test()).toBe(true);
+    };
+    await until(() => existsSync(join(project, 'artifacts', mirrorSlug(deck), 'slides', 'cover.html')));
+    const revision = documents.store.revision(deck.id);
+
+    const system = await officialSystem();
+    const officialBg = bgOf(system.id);
+    expect(cover()).not.toContain(`background:${officialBg}`); // the floor's ground, until the default names the system
+    await documents.store.setDefaults({ owner: system.id, spaces: {} });
+    await mirror.flush();
+    expect(cover()).toContain(`background:${officialBg}`);
+
+    await documents.service.writeAs(system.id, HUMAN, (doc) => setToken(doc, 'color.bg.$root', { $value: { colorSpace: 'srgb', components: [0, 0, 0] } }));
+    await mirror.flush();
+    const editedBg = bgOf(system.id);
+    expect(editedBg).not.toBe(officialBg);
+    await until(() => cover().includes(`background:${editedBg}`));
+    expect(documents.store.revision(deck.id)).toBe(revision); // the deck itself was never written
   });
 });

@@ -5,7 +5,7 @@ import { chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, rea
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mirrorSlug, registerMirrorWriter, type MirrorOutput } from '@artifacts/library/mirror';
+import { mirrorSlug, registerMirrorWriter, type MirrorInput, type MirrorOutput, type MirrorWriter } from '@artifacts/library/mirror';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { openDocuments, type Documents } from '../documents';
@@ -563,3 +563,96 @@ describe('the linked-directory mirror (M2)', () => {
     expect(existsSync(project)).toBe(false);
   });
 });
+
+// P3-C start (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): a
+// writer's `inputs`, what its output depends on beyond the artifact's revision (a deck's: its governing design system and
+// that system's revision), kept in the manifest entry and compared beside the revision; `refresh`, scheduling artifacts
+// as their own change does, for a change elsewhere that `inputs` may tell. L's cases above run unmodified.
+describe('a writer’s inputs and the mirror’s refresh (P3-C)', () => {
+  /** A deck writer whose output names `state.inputs`; it declares `inputs` unless `declares` is false. */
+  function registerDeckWriter(state: { inputs: string }, declares = true): { calls: string[] } {
+    const calls: string[] = [];
+    const write = ({ artifact }: MirrorInput): MirrorOutput => {
+      calls.push(artifact.title);
+      return { files: { [`${mirrorSlug(artifact)}/deck.json`]: JSON.stringify({ inputs: state.inputs }) } };
+    };
+    const writer: MirrorWriter = declares ? Object.assign(write, { inputs: () => state.inputs }) : write;
+    offs.push(registerMirrorWriter('presentation', writer));
+    return { calls };
+  }
+  const entryOf = (artifactId: string) => (JSON.parse(read(MIRROR_MANIFEST)) as { artifacts: Record<string, Record<string, unknown>> }).artifacts[artifactId];
+  async function mirroredDeck(title = 'Deck') {
+    const space = await linkedSpace();
+    const deck = await store().create({ kind: 'presentation', title, spaceId: space.id }, human);
+    await store().testWrite(deck.id, 'w1', [{ op: 'insertText', index: 0, text: 'slide one' }], agent);
+    await mirror!.flush();
+    await until(() => existsSync(out(mirrorSlug(deck), 'deck.json')));
+    return deck;
+  }
+
+  it('rewrites an artifact refreshed when only its inputs changed, keeps them in its entry, and not when neither changed', async () => {
+    const state = { inputs: 'system@1' };
+    const { calls } = registerDeckWriter(state);
+    await startMirror();
+    const deck = await mirroredDeck();
+    const written = calls.length;
+    expect(entryOf(deck.id)).toMatchObject({ revision: store().revision(deck.id), inputs: 'system@1' });
+
+    mirror!.refresh([deck.id]); // nothing changed: current
+    await mirror!.flush();
+    expect(calls).toHaveLength(written);
+
+    state.inputs = 'system@2'; // the system the deck draws in changed; the deck did not
+    mirror!.refresh([deck.id]);
+    await mirror!.flush();
+    expect(calls).toHaveLength(written + 1);
+    expect(JSON.parse(read(mirrorSlug(deck), 'deck.json'))).toEqual({ inputs: 'system@2' });
+    expect(entryOf(deck.id)).toMatchObject({ inputs: 'system@2' });
+  });
+
+  it('rewrites once an entry written without inputs for a kind that now declares them', async () => {
+    const state = { inputs: 'system@1' };
+    registerDeckWriter(state, false);
+    await startMirror();
+    const deck = await mirroredDeck();
+    expect(entryOf(deck.id)).not.toHaveProperty('inputs');
+
+    const { calls } = registerDeckWriter(state); // a later build's writer, declaring them
+    mirror!.refresh([deck.id]);
+    await mirror!.flush();
+    expect(calls).toEqual(['Deck']);
+    expect(entryOf(deck.id)).toMatchObject({ inputs: 'system@1' });
+    mirror!.refresh([deck.id]);
+    await mirror!.flush();
+    expect(calls).toEqual(['Deck']);
+  });
+
+  it('schedules a refresh as a change: written once it settles, and an id the store does not hold writes nothing', async () => {
+    const state = { inputs: 'system@1' };
+    const { calls } = registerDeckWriter(state);
+    await startMirror({ settleMs: 40 });
+    const deck = await mirroredDeck();
+    const written = calls.length;
+    state.inputs = 'system@2';
+    mirror!.refresh([deck.id, '00000000-0000-4000-8000-00000000dead']);
+    expect(calls).toHaveLength(written); // not yet: it waits for the settle, as a change does
+    await until(() => calls.length === written + 1);
+    expect(JSON.parse(read(mirrorSlug(deck), 'deck.json'))).toEqual({ inputs: 'system@2' });
+    await mirror!.flush();
+    expect(logs).toEqual([]);
+  });
+
+  it('keeps a kind without inputs as it was: a refresh rewrites nothing and its entry names no inputs', async () => {
+    await startMirror();
+    const space = await linkedSpace();
+    const page = await store().create({ kind: 'html', title: 'Page', spaceId: space.id, content: html('x') }, agent);
+    await mirror!.flush();
+    await until(() => existsSync(out(`${mirrorSlug(page)}.html`)));
+    const before = statSync(out(`${mirrorSlug(page)}.html`)).mtimeMs;
+    mirror!.refresh([page.id]);
+    await mirror!.flush();
+    expect(statSync(out(`${mirrorSlug(page)}.html`)).mtimeMs).toBe(before);
+    expect(Object.keys(entryOf(page.id)!).sort()).toEqual(['files', 'revision', 'slug']);
+  });
+});
+// P3-C end

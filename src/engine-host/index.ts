@@ -81,7 +81,7 @@ const register: HostRegister = (on, emit, client) => {
   // P3-L: main's library reads, the linked-directory mirror and (M6b) the X12 import at store open
   const library = registerLibrary(on, { documents, deliverablesDir: join(userData, 'deliverables'), e2e: process.env.MAWS_E2E === '1' });
   const designSystems = registerDesignSystems({ on, documents }); // P3-D: the kind's adapter, its mirror writer, the create context, the seeded defaults and the windows' designSystems.* reads
-  const presentations = registerPresentations({ documents, chain: designSystems.chain }); // P3-C: the deck's adapter and its mirror writer
+  const presentations = registerPresentations({ documents, chain: designSystems.chain, refresh: library.refresh }); // P3-C: the deck's adapter and its mirror writer, kept fresh under its governing system (Decision Log 29)
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
