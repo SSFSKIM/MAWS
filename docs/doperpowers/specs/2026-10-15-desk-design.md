@@ -1602,7 +1602,7 @@ round.
 **The session plane, up.** Every frame below needs the project opened on the current stream (`not-open` otherwise),
 and one the hub cannot read is refused `bad-shape` down the stream and recorded in the audit record, as an upload's is.
 - `rpc-result {project, nonce, outcome}`: `outcome` is DX6's `{state: "done", result: object}` or `{state: "failed",
-  error: {code, message}}`. The hub answers every well-formed one with `rpc-ack {project, nonce}`, so the daemon stops
+  error: {code, message, winner?, by?, terminalOnly?}}`. The hub answers every well-formed one with `rpc-ack {project, nonce}`, so the daemon stops
   republishing it; it applies the outcome only to an RPC it forwarded to this machine and that has no result yet
   (`forwarded` or `uncertain`), and a result for any other nonce (unknown, another machine's, already resolved) is
   acknowledged and changes nothing.
@@ -1871,8 +1871,9 @@ resumed from a hub buffer.
 aborted, the session ended, or the call settled another way — is `outcome: "withdrawn", winner: "other", by:
 "bridge"`. `"terminal"` and `"bridge"` are reserved: no member id is either. A decision that reaches the bridge after
 another side has won, or within 200 ms of a background request's deadline, is refused there (DX5's 409, naming the
-winner, or `terminalOnly`), and the RPC fails at the daemon (DX6's `not-pending` fits; the mapping is DC7's); the
-request's own `settled` says who won. The hub refuses no decision itself: the bridge alone knows.
+winner, or `terminalOnly`), and the RPC fails at the daemon (DX6's `not-pending` fits; the mapping is DC7's), its
+error carrying what the refusal knew: `winner` and `by` from an `already settled` 409's `settled`, `by` alone from a 409
+that names who answered first, `terminalOnly` from the closed window (DX6). The request's own `settled` says who won. The hub refuses no decision itself: the bridge alone knows.
 
 **The relay (the hub's part).** The hub reads a subscription message's envelope, never its body: it checks that the
 message names this project and machine, a session, a `sub` and a non-negative integer `n`, and passes it to the one
@@ -2182,7 +2183,7 @@ and M2 left them. Changed rows are marked **[M3]**; rows fix wave 1 changed are 
 | `GET /requests` | M3 **[M3]** | — | 200 `{pending: [<raised>…], settled: [<settlement>…]}` (the snapshot's two lists) |
 | `GET /requests/<request>` | M3 **[M3]** | — | 200 the pending request's `raised` fields plus `session` (DC7's digest check); 404 `{error}` when not pending; 410 `{error: "settled", settled}` once settled |
 | `GET /requests/<request>/wait?ms=` | M3 **[M3]** **[fw1]** (the mod's) | — | Held up to `min(ms, 20000)`. 200 `{decision: {behavior, message?, updatedInput?}, by}`: a client's decision, handed out once. 410 `{reason: "terminal"}`: the terminal answered it (the session record left `waiting`); this only ends the poll and closes the request to new decisions, and settles nothing. 410 `{reason: "settled", settled}`: settled. 204: nothing yet (an unknown request is held too, since its `raised` may still be in flight). **[fw1]** `watch=1` is gone: once its hook stops polling, nothing watches a request; the engine's record settles it |
-| `POST /requests/<request>/decision` | M3 **[M3]** | `{behavior: "allow"\|"deny", message?, updatedInput?: {answers: {<question>: <answer>}}, by}`. `by` is `cli` or a member id (`terminal` and `bridge` are reserved). `updatedInput` only for a question, whose allow requires `answers` keyed by its questions. An async question cannot be denied | 200 `{accepted: true, request}`: the settlement follows on the stream. 400 `{error}`: malformed or not allowed. 404: not pending. 409 `{error: "already settled", settled}`. 409 `{error: "already answered by <by>; …"}`. 409 `{error: "the window … closed; the terminal answers it", terminalOnly: true}`: past a background deadline minus 200 ms. 409 `{error: "the terminal answered it; …"}`. For an async question, the child relays it as op `answer` (wait 5 s); the mod's refusal is a 409 carrying its error |
+| `POST /requests/<request>/decision` | M3 **[M3]** | `{behavior: "allow"\|"deny", message?, updatedInput?: {answers: {<question>: <answer>}}, by}`. `by` is `cli` or a member id (`terminal` and `bridge` are reserved). `updatedInput` only for a question, whose allow requires `answers` keyed by its questions. An async question cannot be denied | 200 `{accepted: true, request}`: the settlement follows on the stream. 400 `{error}`: malformed or not allowed. 404: not pending. 409 `{error: "already settled", settled}`. 409 `{error: "already answered by <by>; …", by}` (`by` added after DC2's close, below). 409 `{error: "the window … closed; the terminal answers it", terminalOnly: true}`: past a background deadline minus 200 ms. 409 `{error: "the terminal answered it; …", winner: "terminal", by: "terminal"}` (likewise). For an async question, the child relays it as op `answer` (wait 5 s); the mod's refusal is a 409 carrying its error |
 
 ##### The child's stdout: lines for the mod
 
@@ -2444,7 +2445,10 @@ type Rpc<N> = {
 
 `digest` is `{session, request, tool, input_sha256}` (DX1), `request` as the `raised` named it, opaque; `input_sha256` is
 over the `raised`'s `input` as sent, the capped input when it is `truncated`. An outcome is
-`{state: "done", result}` or `{state: "failed", error: {code, message}}`; the hub's record of an RPC adds `forwarded`
+`{state: "done", result}` or `{state: "failed", error: {code, message, winner?, by?, terminalOnly?}}` (desk-hub's
+`RpcError`): a refused `decide` or `answer` carries `winner` and `by` as DX4's `settled` names them, or `by` alone when
+the bridge knows who answered first but not yet how it settles, and `terminalOnly: true` when the window closed;
+nothing else sets them. The hub's record of an RPC adds `forwarded`
 (written to the machine's stream, no result yet) and `uncertain` (the machine's lease lapsed, or its stream closed,
 after forwarding and before a result).
 
@@ -3117,6 +3121,21 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A refused decision says who won, as fields (DC3's M4,
+  MAWS `c547aaa5`). DX6's failed outcome gains `winner?`, `by?` and
+  `terminalOnly?` beside `code` and `message`, so the web's card shows
+  "answered by …" without parsing a message or waiting for the
+  request's `settled`. DX5's two 409s that name the first answerer only
+  in their text gain it as fields: `by` on "already answered by", and
+  `winner: "terminal", by: "terminal"` on "the terminal answered it".
+  That is an additive change to the bridge (`sminos_bridge.py`'s
+  `decide`), which DC7 makes, since it maps these 409s to DX6.
+  Rejected: DC7 parsing `by` out of the error text, and leaving the card
+  to wait for `settled`, which arrives on another path and may be late.
+  Flags DC3 (the hub's shape check admits the fields), DC5 (the card
+  reads `failure.by`; `protocol-ahead.ts` goes), DC7 (the bridge's 409s
+  and the mapping).
+  Date/Author: 2026-10-15, design session (DC3's M4).
 - Decision: DX5 final from DC2's close (PR #195, plan `0afc902f`). The
   whole-branch review's two fix waves add: a main turn the module never
   saw start (a reload mid-turn) is taken back from its next request as a
