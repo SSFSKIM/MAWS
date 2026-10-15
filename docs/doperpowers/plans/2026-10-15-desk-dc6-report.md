@@ -17,6 +17,20 @@ blocked. To recover, read the ledger and the spec's living sections.
   or after b7fc7ebd, delete the `step-end` stand-in and its cast, and add
   the `step-end` browser spec (Decision Log, c58e366a).
 
+## Update 2
+
+- **M2 (subagents)** is built: 7ac8c095, plus fb674567 and c86352d8, which
+  fix M1's paging. The gate was green on the Linux lane (run 38781403428).
+  The screenshot is at `.doperpowers/sde/2026-10-15-desk-dc6-depth/m2-depth.png`.
+- **M2's task review** approved the subagent work and found two Important
+  issues in `view/keep-place.ts` (`review-2.md`):
+  - a live row uses up the pending scroll restore while an older page is
+    still loading;
+  - the fallback for a page longer than overscan loses the reader's offset.
+- **Fix wave 1** is running on the M2 executor, from fix-base d7da475f.
+- **MAWS's own paging:** not established. MAWS loads full history at once.
+  Nothing is logged as debt.
+
 ## Where things stood at the first hand-back
 
 - Spec: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md`. The parent is
