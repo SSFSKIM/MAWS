@@ -82,6 +82,30 @@ describe('deliveries', () => {
     expect(conv(again).deliveries[`hub/${M}:1`][S1].outcome).toBe('recorded');
     expect(conv(again).deliveries[`hub/${M}:2`]).toBeUndefined();
   });
+
+  it('turns a recorded outcome delivered when the newer one comes live (Resume brought the session back)', async () => {
+    const c = await connect();
+    const at = { event: { writer: `hub/${M}`, seq: 1 }, session: S1, reason: '' };
+    await hub.deliver(PROJECT, 'mini', { ...at, outcome: 'recorded' });
+    await until(() => conv(c).deliveries[`hub/${M}:1`]?.[S1]?.outcome === 'recorded');
+    await hub.deliver(PROJECT, 'mini', { ...at, outcome: 'delivered' });
+    await until(() => conv(c).deliveries[`hub/${M}:1`][S1].outcome === 'delivered');
+  });
+
+  it("turns it delivered from a reconnect's deliveries too, and keeps an uncertain outcome as such", async () => {
+    const c = await connect();
+    const at = { event: { writer: `hub/${M}`, seq: 1 }, session: S1, reason: '' };
+    await hub.deliver(PROJECT, 'mini', { ...at, outcome: 'recorded' });
+    await hub.deliver(PROJECT, 'mini', { event: { writer: `hub/${M}`, seq: 2 }, session: S1, reason: 'no answer', outcome: 'uncertain' });
+    await until(() => conv(c).deliveries[`hub/${M}:1`]?.[S1]?.outcome === 'recorded' && conv(c).deliveries[`hub/${M}:2`] !== undefined);
+    expect(conv(c).deliveries[`hub/${M}:2`][S1].outcome).toBe('uncertain');
+    hub.admit = 'not-a-member'; // hold the browser off while the session is resumed and the message delivered
+    hub.dropConnections();
+    await until(() => c.live.getState().status === 'connecting');
+    await hub.deliver(PROJECT, 'mini', { ...at, outcome: 'delivered' });
+    hub.admit = 'member';
+    await until(() => conv(c).deliveries[`hub/${M}:1`][S1].outcome === 'delivered');
+  });
 });
 
 describe('RPCs', () => {

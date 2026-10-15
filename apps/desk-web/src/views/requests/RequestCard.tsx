@@ -18,6 +18,7 @@ import { QuestionBody } from '../../../../../src/renderer/src/request-card/varia
 import { capabilities } from '../../conversation/capabilities';
 import { cardState, isAsyncQuestion, isQuestion, type CardState } from '../../conversation/card-state';
 import { settledText } from '../../conversation/words';
+import { raisedAgent, raisedTruncated } from '../../hub/protocol-ahead';
 import type { RequestRecord, RpcEntry } from '../../project/conversation';
 import { useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
@@ -66,7 +67,10 @@ export function RequestCard({ request, embedded = false }: { request: string; em
   const rpc = latestRpc(rpcs, request);
   const state = cardState(record, rpc, capability, session?.machineOnline ?? null);
   const who = session?.alias ?? record.raised.session.slice(0, 8);
-  const what = question ? 'asks' : `wants to ${toolVerb(asPermission(record.raised))}`;
+  const agent = raisedAgent(record.raised);
+  const verb = question ? 'asks' : `wants to ${toolVerb(asPermission(record.raised))}`;
+  // A subagent's request names the subagent asking, as the session's.
+  const what = agent ? (embedded ? `its subagent ${agent} ${verb}` : `${verb}, through its subagent ${agent}`) : verb;
   return (
     <article
       className={['my-2 flex max-w-[640px] flex-col gap-3 rounded-md border px-3.5 py-3 text-ui', state.kind === 'open' || state.kind === 'failed' || state.kind === 'uncertain' ? 'border-border-strong bg-bg-raised' : 'border-border bg-bg'].join(' ')}
@@ -93,6 +97,11 @@ export function RequestCard({ request, embedded = false }: { request: string; em
         <QuestionCard record={record} state={state} member={member} />
       ) : (
         <PermissionCard record={record} state={state} member={member} />
+      )}
+      {raisedTruncated(record.raised) && (
+        <p className="m-0 text-ui-sm text-warning" data-testid="truncated">
+          The input shown was capped: the full input was too large to send. A decision binds to what is shown here.
+        </p>
       )}
       <StateLine state={state} machine={record.machine} rpc={rpc?.nonce ?? null} me={member} />
     </article>

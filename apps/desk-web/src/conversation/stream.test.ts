@@ -106,6 +106,28 @@ describe('a direct channel', () => {
     expect(buildStream({ kind: 'session', session: S1 }, log().slice(0, 9), aliases, []).at(-1)?.kind).not.toBe('work');
   });
 
+  it('bounds the working record at a native question, which is a request with no question event, by its call id', () => {
+    const items = buildStream({ kind: 'session', session: S1 }, log().slice(0, 2), aliases, [{ request: 'toolu_native', session: S1, at: 2, question: true }], { live: true });
+    expect(shape(items)).toEqual(['system:1', 'work:2', 'message:2', 'work:2', 'request:toolu_native', 'work:9007199254740991']);
+    expect(items.filter((i) => i.kind === 'work').map((i) => (i as { range: unknown }).range)).toEqual([
+      { from: null, to: 'r1#0' },
+      { from: 'r1#0', to: 'toolu_native' },
+      { from: 'toolu_native', to: null },
+    ]);
+  });
+
+  it('makes one bound of a question that is pending and in the log, and none of a permission prompt', () => {
+    const items = buildStream({ kind: 'session', session: S1 }, log(), aliases, [
+      { request: 'toolu_1', session: S1, at: 2, question: true }, // also the `question` event at 7
+      { request: 'toolu_perm', session: S1, at: 7, question: false },
+    ]);
+    expect(items.filter((i) => i.kind === 'work').map((i) => (i as { range: unknown }).range)).toEqual([
+      { from: null, to: 'r1#0' },
+      { from: 'r1#0', to: 'toolu_1' },
+    ]);
+    expect(shape(items).filter((k) => k.startsWith('request'))).toEqual(['request:toolu_perm']);
+  });
+
   it("draws a human event addressed elsewhere nowhere in this channel, and an untagged one only in the group", () => {
     offset = 0;
     const entries = [ev(`hub/${M}`, 'human', { from: 'human', member: M, to: '*', text: 'status', created: 'x' })];

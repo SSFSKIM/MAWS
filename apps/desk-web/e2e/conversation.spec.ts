@@ -111,10 +111,11 @@ test("posting follows sminos say's grammar, sealed by the member, and each recip
   await hub.deliver(PROJECT, 'mini', { event: at(taggedEvent), session: S.asks, outcome: 'delivered', reason: '' });
   await hub.deliver(PROJECT, 'mini', { event: at(allEvent), session: S.asks, outcome: 'delivered', reason: '' });
   await hub.deliver(PROJECT, 'SK.local', { event: at(allEvent), session: S.works, outcome: 'refused-read-only', reason: 'read-only' });
+  await hub.deliver(PROJECT, 'mini', { event: at(allEvent), session: S.rests, outcome: 'uncertain', reason: 'taken, never answered' });
   const deliveriesOf = (event: LogEvent) => center(page).locator(`[data-offset="${hub.logOf(PROJECT).find((e) => e.event === event)!.offset}"]`).getByTestId('deliveries');
   await expect(deliveriesOf(taggedEvent)).toContainText('maws-45: delivered');
   await expect(deliveriesOf(allEvent)).toContainText('maws-fe: not delivered: the machine is read-only');
-  await expect(deliveriesOf(allEvent)).toContainText('cua_repl: not delivered yet');
+  await expect(deliveriesOf(allEvent)).toContainText('cua_repl: possibly delivered');
 
   await page.reload();
   await expect(deliveriesOf(taggedEvent)).toContainText('maws-45: delivered');
@@ -227,6 +228,9 @@ test('an ended session keeps its channel with Resume, a send to it shows as reco
   expect(resume).toMatchObject({ rpc: 'resume', machine: 'SK.local', args: { session: S.gone } });
   hub.answerRpc(PROJECT, resume.nonce, { state: 'done', result: { session: S.gone } });
   await expect(page.getByTestId('channel-header')).toContainText('Resumed; it rejoins in a moment');
+  // The message stayed owed: Resume brought the session back, and the newer outcome replaces the recorded one.
+  await hub.deliver(PROJECT, 'SK.local', { event: { writer: note.writer, seq: note.seq }, session: S.gone, outcome: 'delivered', reason: '' });
+  await expect(center(page).getByTestId('deliveries')).toContainText('doperpowers-1e: delivered');
 
   await nav(page).locator(`[data-session="${S.rests}"]`).click();
   await page.getByTestId('channel-header').getByRole('button', { name: 'Retire…' }).click();
@@ -277,6 +281,15 @@ test('a permission prompt is decided in place with the digest of exactly what it
   hub.answerRpc(PROJECT, refused.nonce, { state: 'failed', error: { code: 'not-pending', message: 'answered in the terminal', winner: 'terminal' } as never });
   await expect(late.getByTestId('settled')).toHaveText('Settled in the terminal');
   await expect(late.getByRole('alert')).toHaveCount(0);
+
+  // A subagent's request, its input capped: the card names the subagent and says so; the digest is of what it drew.
+  const capped = { ...BASH, request: 'toolu_6', input: { command: 'pnpm e2e --grep …' }, agentId: 'a7f3c2', truncated: true as const };
+  await hub.raise(PROJECT, 'mini', capped);
+  const sub = center(page).locator('[data-request="toolu_6"]');
+  await expect(sub).toContainText('Its subagent a7f3c2 wants to run a command');
+  await expect(sub.getByTestId('truncated')).toContainText('The input shown was capped');
+  await sub.getByRole('button', { name: 'Allow' }).click();
+  expect((await lastRpc(hub, 3)).args).toMatchObject({ digest: { request: 'toolu_6', input_sha256: await inputSha256(capped.input) } });
 
   // A background agent's prompt: its window shown while open, then waiting in the terminal with no controls.
   await hub.raise(PROJECT, 'mini', { ...BASH, request: 'toolu_4', deadline: '2026-10-15T08:00:03.000Z' });

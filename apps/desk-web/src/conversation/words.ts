@@ -1,7 +1,7 @@
 // The words for what came back: an RPC's failure by its DX6 code, a result by its RPC, a delivery's outcome, a
 // settlement's winner. Kept in one place so every surface says the same thing.
-import type { Delivery, JsonObject, Settled } from 'desk-hub/protocol';
-import type { RpcFailure } from '../hub/protocol-ahead';
+import type { JsonObject, Settled } from 'desk-hub/protocol';
+import type { DeliveryOutcome, RpcFailure } from '../hub/protocol-ahead';
 
 export function failureText(failure: RpcFailure, machine: string): string {
   const said = failure.message ? `: ${failure.message}` : '';
@@ -77,8 +77,10 @@ export function resultText(rpc: string, result: JsonObject): { text: string; war
   }
 }
 
-export const DELIVERY_TEXT: Record<Delivery['outcome'], string> = {
+export const DELIVERY_TEXT: Record<DeliveryOutcome, string> = {
   delivered: 'delivered',
+  // The frame was taken but never answered: neither delivered nor not.
+  uncertain: 'possibly delivered',
   recorded: 'recorded, not delivered',
   'refused-read-only': 'not delivered: the machine is read-only',
   failed: 'not delivered: it failed',

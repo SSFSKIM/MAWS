@@ -43,6 +43,7 @@ import {
 } from 'desk-hub/protocol';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { OrgKeysDouble } from './org-keys';
+import type { DeliveryAhead, RaisedAhead } from '../../src/hub/protocol-ahead';
 
 /** The org as the double holds it before any key is set up (`/api/me` answers its current `key_check`). */
 export const DOUBLE_ORG: OrgRecord = { id: 'org-double', name: 'Double org', created: '2026-10-15T00:00:00.000Z', key_check: null };
@@ -179,7 +180,7 @@ export class HubDouble {
    * A request the bridge raised on a machine, sealed with the org key as the machine would: a `raised` message to every
    * browser, and the pending set again. `terminalOnly` stands for the hub's own clock having passed its deadline.
    */
-  async raise(project: string, machine: string, draft: Omit<Raised, 'mac'>, options: { terminalOnly?: boolean } = {}): Promise<Raised> {
+  async raise(project: string, machine: string, draft: Omit<RaisedAhead, 'mac'>, options: { terminalOnly?: boolean } = {}): Promise<Raised> {
     const raised = await seal(this.key, 'raised', project, draft);
     this.raiseRaw(project, machine, raised, options);
     return raised;
@@ -208,8 +209,8 @@ export class HubDouble {
   }
 
   /** A machine's `deliver_next` settled an event for a recipient: kept as the latest per event and recipient, and sent on. */
-  async deliver(project: string, machine: string, draft: Omit<Delivery, 'mac'>): Promise<Delivery> {
-    return this.deliverRaw(project, machine, await seal(this.key, 'delivery', project, draft));
+  async deliver(project: string, machine: string, draft: Omit<DeliveryAhead, 'mac'>): Promise<Delivery> {
+    return this.deliverRaw(project, machine, (await seal(this.key, 'delivery', project, draft)) as unknown as Delivery);
   }
 
   /** A delivery exactly as given, code and all. */

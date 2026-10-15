@@ -29,8 +29,12 @@ export type StreamItem =
   | { kind: 'work'; key: string; offset: number; session: string; range: { from: string | null; to: string | null } }
   | { kind: 'request'; key: string; request: string };
 
-/** A request as the stream places it: `at` is the offset of the last log entry the browser held when it first saw it. */
-export type PlacedRequest = { request: string; session: string; at: number };
+/**
+ * A request as the stream places it: `at` is the offset of the last log entry the browser held when it first saw it;
+ * `question` whether it is a question (an exchange item, so it bounds the working record: a native one has no
+ * `question` event to do it).
+ */
+export type PlacedRequest = { request: string; session: string; at: number; question?: boolean };
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const recipients = (to: unknown): Recipient[] =>
@@ -109,18 +113,21 @@ export function buildStream(channel: Channel, entries: readonly Entry[], aliases
     flush();
     items.push(item);
   };
-  const placeUpTo = (offset: number) => {
-    while (next < placed.length && placed[next].at < offset) {
-      push({ kind: 'request', key: `request:${placed[next].request}`, request: placed[next].request });
-      next++;
-    }
-  };
   /** The `src` of the channel's session's last exchange item: where the next working-record fold begins. */
   let lastSrc: string | null = null;
-  const workBefore = (offset: number, session: string | null, src: string) => {
+  const workBefore = (key: string, offset: number, session: string | null, src: string) => {
     if (channel.kind !== 'session' || session !== channel.session) return;
-    push({ kind: 'work', key: `work:${offset}`, offset, session, range: { from: lastSrc, to: src || null } });
+    push({ kind: 'work', key, offset, session, range: { from: lastSrc, to: src || null } });
     lastSrc = src || null;
+  };
+  const placeUpTo = (offset: number) => {
+    while (next < placed.length && placed[next].at < offset) {
+      const r = placed[next];
+      // A question with no `question` event (a native one) is the exchange item that bounds the working record.
+      if (r.question) workBefore(`work:request:${r.request}`, r.at, r.session, r.request);
+      push({ kind: 'request', key: `request:${r.request}`, request: r.request });
+      next++;
+    }
   };
   /** Whether each session is running, as its `joined` and `state` events say: only a change is drawn. */
   const running = new Map<string, boolean>();
@@ -138,14 +145,14 @@ export function buildStream(channel: Channel, entries: readonly Entry[], aliases
         break;
       case 'message': {
         const session = writerSession(event.writer);
-        workBefore(offset, session, str(event.src));
+        workBefore(`work:${offset}`, offset, session, str(event.src));
         push({ kind: 'message', key, offset, event, session, from: str(event.from), text: str(event.text) });
         break;
       }
       case 'question': {
         const session = writerSession(event.writer);
         const answer = answers.get(str(event.src));
-        workBefore(offset, session, str(event.src));
+        workBefore(`work:${offset}`, offset, session, str(event.src));
         push({
           kind: 'question',
           key,
