@@ -92,7 +92,10 @@ export function union(boxes: readonly Box[]): Box | null {
 // ---------------------------------------------------------------- transforms
 
 interface Fn {
+  /** As written (the loader writes lowercase, `skewx`; CSS also takes `skewX`). */
   name: string;
+  /** The name lowercased: what parsing, dispatch and ordering read (fix wave 2). */
+  key: string;
   args: string;
 }
 /** The transform's functions in order (`name(args)`), parentheses respected. */
@@ -108,12 +111,12 @@ function fnsOf(value: string | undefined): Fn[] {
       if (value[i] === '(') depth++;
       else if (value[i] === ')') depth--;
     }
-    out.push({ name: m[1]!, args: value.slice(re.lastIndex, i - 1).trim() });
+    out.push({ name: m[1]!, key: m[1]!.toLowerCase(), args: value.slice(re.lastIndex, i - 1).trim() });
     re.lastIndex = i;
   }
   return out;
 }
-const ORDER = ['translate', 'translateX', 'translateY', 'rotate', 'scale', 'skew', 'skewX', 'skewY'];
+const ORDER = ['translate', 'translatex', 'translatey', 'rotate', 'scale', 'skew', 'skewx', 'skewy'];
 
 function angleDeg(text: string): number {
   const m = /^(-?[\d.]+(?:e[+-]?\d+)?)(deg|turn|rad|grad)?$/i.exec(text.trim());
@@ -140,7 +143,7 @@ export function normalizeDeg(deg: number): number {
 
 /** The element's rotation in degrees (0 without a `rotate()`). */
 export function rotationOf(transform: string | undefined): number {
-  const r = fnsOf(transform).find((f) => f.name === 'rotate');
+  const r = fnsOf(transform).find((f) => f.key === 'rotate');
   return r ? angleDeg(r.args) : 0;
 }
 
@@ -150,9 +153,9 @@ export function rotationOf(transform: string | undefined): number {
  */
 export function withRotation(transform: string | undefined, deg: number): string | null {
   const d = round2(normalizeDeg(deg));
-  const fns = fnsOf(transform).filter((f) => f.name !== 'rotate');
-  if (d !== 0) fns.push({ name: 'rotate', args: `${d}deg` });
-  fns.sort((a, b) => ORDER.indexOf(a.name) - ORDER.indexOf(b.name));
+  const fns = fnsOf(transform).filter((f) => f.key !== 'rotate');
+  if (d !== 0) fns.push({ name: 'rotate', key: 'rotate', args: `${d}deg` });
+  fns.sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key));
   return fns.length ? fns.map((f) => `${f.name}(${f.args})`).join(' ') : null;
 }
 
@@ -165,12 +168,12 @@ const lengthOf = (text: string | undefined, size: number): number => {
 export function translateOf(transform: string | undefined, w: number, h: number): [number, number] {
   let [dx, dy] = [0, 0];
   for (const f of fnsOf(transform)) {
-    if (f.name === 'translate') {
+    if (f.key === 'translate') {
       const [a, b] = f.args.split(',');
       dx += lengthOf(a, w);
       dy += lengthOf(b, h);
-    } else if (f.name === 'translateX') dx += lengthOf(f.args, w);
-    else if (f.name === 'translateY') dy += lengthOf(f.args, h);
+    } else if (f.key === 'translatex') dx += lengthOf(f.args, w);
+    else if (f.key === 'translatey') dy += lengthOf(f.args, h);
   }
   return [dx, dy];
 }
@@ -268,51 +271,83 @@ export const linear = (m: Affine): Affine => ({ ...m, e: 0, f: 0 });
 export const isIdentityLinear = (m: Affine, eps = 1e-6): boolean => Math.abs(m.a - 1) < eps && Math.abs(m.d - 1) < eps && Math.abs(m.b) < eps && Math.abs(m.c) < eps;
 
 const rad = (deg: number) => (deg * Math.PI) / 180;
-/** The dialect's transform (and CSS's 2D functions) as one matrix, % of a `w` × `h` box; an unread value is identity. */
+/** The dialect's transform (and CSS's 2D functions) as one matrix, % of a `w` × `h` box; what it cannot read is identity. */
 export function transformMatrix(value: string | undefined, w: number, h: number): Affine {
+  return parseTransform(value, w, h).matrix;
+}
+
+/**
+ * The transform as one matrix, or null when any part of it cannot be read (a token, a calc(), a function outside the 2D
+ * set): fix wave 2, so a writer that must keep a pose refuses rather than reading it as absent.
+ */
+export function readTransform(value: string | undefined, w: number, h: number): Affine | null {
+  const read = parseTransform(value, w, h);
+  return read.ok ? read.matrix : null;
+}
+
+const LENGTH = /^-?(?:\d+\.?\d*|\.\d+)(?:px|%)?$/;
+const ANGLE = /^-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?(?:deg|turn|rad|grad)?$/i;
+const NUMBER = /^-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/;
+function parseTransform(value: string | undefined, w: number, h: number): { matrix: Affine; ok: boolean } {
   let m = IDENTITY;
+  let ok = true;
   for (const f of fnsOf(value)) {
     const args = f.args.split(',').map((a) => a.trim());
+    const all = (re: RegExp, min: number, max: number) => args.length >= min && args.length <= max && args.every((a) => re.test(a));
     let n: Affine = IDENTITY;
-    switch (f.name) {
+    switch (f.key) {
       case 'translate':
+        ok &&= all(LENGTH, 1, 2);
         n = shift(lengthOf(args[0], w), lengthOf(args[1], h));
         break;
-      case 'translateX':
+      case 'translatex':
+        ok &&= all(LENGTH, 1, 1);
         n = shift(lengthOf(args[0], w), 0);
         break;
-      case 'translateY':
+      case 'translatey':
+        ok &&= all(LENGTH, 1, 1);
         n = shift(0, lengthOf(args[0], h));
         break;
       case 'rotate': {
+        ok &&= all(ANGLE, 1, 1);
         const t = rad(angleDeg(args[0] ?? '0'));
         n = { a: Math.cos(t), b: Math.sin(t), c: -Math.sin(t), d: Math.cos(t), e: 0, f: 0 };
         break;
       }
       case 'scale': {
+        ok &&= all(NUMBER, 1, 2);
         const sx = Number.parseFloat(args[0] ?? '1');
         const sy = args[1] === undefined ? sx : Number.parseFloat(args[1]);
         n = { ...IDENTITY, a: Number.isFinite(sx) ? sx : 1, d: Number.isFinite(sy) ? sy : 1 };
         break;
       }
       case 'skew':
+        ok &&= all(ANGLE, 1, 2);
         n = { ...IDENTITY, c: Math.tan(rad(angleDeg(args[0] ?? '0'))), b: Math.tan(rad(angleDeg(args[1] ?? '0'))) };
         break;
-      case 'skewX':
+      case 'skewx':
+        ok &&= all(ANGLE, 1, 1);
         n = { ...IDENTITY, c: Math.tan(rad(angleDeg(args[0] ?? '0'))) };
         break;
-      case 'skewY':
+      case 'skewy':
+        ok &&= all(ANGLE, 1, 1);
         n = { ...IDENTITY, b: Math.tan(rad(angleDeg(args[0] ?? '0'))) };
         break;
       case 'matrix': {
         const v = args.map(Number);
-        if (v.length === 6 && v.every((x) => Number.isFinite(x))) n = { a: v[0]!, b: v[1]!, c: v[2]!, d: v[3]!, e: v[4]!, f: v[5]! };
+        const fine = v.length === 6 && v.every((x) => Number.isFinite(x));
+        ok &&= fine;
+        if (fine) n = { a: v[0]!, b: v[1]!, c: v[2]!, d: v[3]!, e: v[4]!, f: v[5]! };
         break;
       }
+      default:
+        ok = false;
     }
     m = multiply(m, n);
   }
-  return m;
+  // text left over between the functions (a bare token) is unread too
+  if (value && value.trim() && value.trim() !== 'none' && fnsOf(value).length === 0) ok = false;
+  return { matrix: m, ok };
 }
 
 /** Where a box placed at left/top in its host is drawn under its transform (about its centre): local px → host px. */

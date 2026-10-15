@@ -689,6 +689,18 @@ export class ArtifactStore {
     }
   }
 
+  // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, Decision Log 25; the parent's 65): an asset of one
+  // artifact copied into another, generic (a deck's pasted picture, a document's): the source's bytes written through
+  // `uploadAsset` on the target, so the bytes and mime arrive unchanged, identical bytes answer the target's existing ref
+  // and a name taken there is made unique. Both artifacts must be live; a deleted or missing one is refused by name.
+  async copyAsset(from: string, ref: string, to: string, actor: Actor): Promise<{ assetId: string; ref: string }> {
+    this.requireLive(from);
+    this.requireLive(to);
+    const asset = this.listAssets(from).find((candidate) => candidate.ref === ref);
+    if (!asset) throw new ArtifactStoreError('notFound', `no asset ${ref} in ${from}`, { artifactId: from, ref });
+    return this.uploadAsset(to, this.files.readAsset(from, asset.sha256), { name: asset.name, mime: asset.mime }, actor);
+  }
+
   listAssets(artifactId: string): Asset[] {
     const rows = this.storage.db.prepare('SELECT * FROM artifact_assets WHERE artifactId = ? ORDER BY createdAt, rowid').all(artifactId) as unknown as (Omit<Asset, 'ref' | 'createdBy'> & { createdBy: string })[];
     return rows.map((row) => ({ assetId: row.assetId, ref: `assets/${row.name}`, name: row.name, mime: row.mime, size: row.size, sha256: row.sha256, createdAt: row.createdAt, createdBy: actorFromKey(row.createdBy) }));

@@ -526,6 +526,8 @@ test('the scale gate’s drag: move to frame p95 within 16 ms on the 100-slide d
 
 // a 4 × 1 picture: two red pixels, then two blue (fix wave 1's crop)
 const STRIPE_4X1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAIAAAB2XpiaAAAAEElEQVR4nGP4z8AARGDiPwAZ8wP9mthzMQAAAABJRU5ErkJggg==', 'base64');
+// fix wave 2: an SVG mark, which a store copy carries byte for byte (a pixel copy would make it a PNG)
+const MARK_SVG = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20" viewBox="0 0 4 2"><rect width="4" height="2" fill="#c9663f"/></svg>');
 const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const SECOND: Record<string, string> = {
   'project/deck.json': JSON.stringify({ v: 4, title: 'Second deck', cover: 'one', order: ['one'] }),
@@ -672,16 +674,21 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
     await page.mouse.click(second.at(1800, 1000).x, second.at(1800, 1000).y);
     await page.keyboard.press('Meta+v');
     await expect.poll(async () => plain(findIn((await slideOf(page, other, 'one')).children, 'head'))).toBe('Heading');
-    // fix wave 1: a picture copied across decks brings its asset: the stripe drawn from the second deck's own store
+    // a picture copied across decks brings its asset (fix wave 2: the store's copy, so an SVG stays an SVG): drawn from
+    // the second deck's own store
     await openFromLibrary(page, 'Inspector lab', id);
-    const stripeNow = (await tab.locator(`[data-stage-slide="lab"] [data-eid="${stripe.id}"]`).boundingBox())!;
-    await page.mouse.click(stripeNow.x + stripeNow.width / 2, stripeNow.y + stripeNow.height / 2);
+    await tab.locator('[data-insert-image]').setInputFiles({ name: 'mark.svg', mimeType: 'image/svg+xml', buffer: MARK_SVG });
+    await expect.poll(async () => (await slideOf(page, id, 'lab')).children.filter((c) => c.tag === 'img').length).toBe(3);
+    const mark = (await slideOf(page, id, 'lab')).children.find((c) => c.tag === 'img' && c.attrs.src?.startsWith('assets/mark'))!;
+    const markBox = (await tab.locator(`[data-stage-slide="lab"] [data-eid="${mark.id}"]`).boundingBox())!;
+    await page.mouse.click(markBox.x + markBox.width / 2, markBox.y + markBox.height / 2);
+    await expect(tab.locator(`[data-overlay] [data-selected="${mark.id}"]`)).toHaveCount(1);
     await page.keyboard.press('Meta+c');
     await openFromLibrary(page, 'Second deck', other);
     await page.mouse.click(second.at(1800, 1000).x, second.at(1800, 1000).y);
     await page.keyboard.press('Meta+v');
-    await expect.poll(async () => (await slideOf(page, other, 'one')).children.find((c) => c.tag === 'img')?.attrs.src ?? '').toMatch(/^assets\/stripe.*\.png$/);
-    await expect.poll(() => otherTab.locator('[data-stage-slide] img[data-eid]').evaluate((n) => (n as HTMLImageElement).naturalWidth)).toBe(4);
+    await expect.poll(async () => (await slideOf(page, other, 'one')).children.find((c) => c.tag === 'img')?.attrs.src ?? '').toBe('assets/mark.svg');
+    await expect.poll(() => otherTab.locator('[data-stage-slide] img[data-eid]').evaluate((n) => (n as HTMLImageElement).naturalWidth)).toBe(40);
   });
   expect((await elementOf(page, other, 'one', 'head'))?.style['font-size']).toBe('72px'); // its style came with it
 

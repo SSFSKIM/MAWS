@@ -144,5 +144,8 @@ export interface ArtifactHost {
   acceptSuggestion(artifactId: string, ranges: SuggestionRange[]): Promise<{ revision: number }>;
   rejectSuggestion(artifactId: string, ranges: SuggestionRange[]): Promise<{ revision: number }>;
   uploadAsset(artifactId: string, bytes: Uint8Array, meta: { name: string; mime: string }): Promise<{ assetId: string; ref: string }>; // 25l
+  // P3-C (Decision Log 25; the parent's 65): one artifact's asset copied into another by the store, bytes and mime
+  // unchanged; answers the target's ref (an existing one for identical bytes).
+  copyAsset(from: string, ref: string, to: string): Promise<{ assetId: string; ref: string }>;
   identity(): { actor: Actor; name: string; color: string };
 }

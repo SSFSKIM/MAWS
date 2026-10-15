@@ -12,8 +12,9 @@ import { DeckEditor } from '../DeckEditor';
 import { DeckSession } from '../session';
 import { startFlowMove, startMove, startResize, startRotate, type GestureContext } from './gestures';
 import { CLIPBOARD_TYPE, copySelection, pasteClipboard } from './clipboard';
+import { apply, applyLinear } from '../../geometry';
 import { selectionCommands } from './commands';
-import { measure } from './measure';
+import { hitIds, measure } from './measure';
 
 const SLIDE = `<section id="s" style="background:#ffffff">
 <h2 id="title" style="font-size:64px">Title</h2>
@@ -138,7 +139,8 @@ describe('the gestures', () => {
     r.frame({ x: 600, y: 400 }, { ...NO, shift: true, meta: true });
     r.end();
     expect(styleOf(doc, 'a')).toMatchObject({ left: '300px', top: '300px', width: '300px', height: '150px' });
-    const t = startRotate(ctx, 'a');
+    fakeLayout(ctx.canvas); // laid out again at its new size
+    const t = startRotate(ctx, 'a', { x: 450, y: 200 }); // the handle above its centre (450, 375)
     t.frame({ x: 1000, y: 375 }, NO); // right of its centre (450, 375): 90°
     t.frame({ x: 1000, y: 380 }, { ...NO, shift: true });
     t.end();
@@ -325,5 +327,68 @@ describe('fix wave 1: other replicas’ selections', () => {
     expect(mine.getLocalState()).toMatchObject({ name: 'You', color: '--author-1', deck: { slideId: 's', elementIds: ['b'] } });
     mine.destroy();
     theirs.destroy();
+  });
+});
+
+// ---------------------------------------------------------------- fix wave 2 (the M5 re-review's reproductions)
+
+describe('fix wave 2: resize snapping and the rotation handle under the element’s own transform', () => {
+  it('snaps the drawn edge of a translated element, keeping its held drawn edge (a % translate too)', () => {
+    const doc = deck(`<section id="s" style="background:#ffffff">
+<div id="px" style="position:absolute; left:660px; top:300px; width:200px; height:100px; transform:translateX(100px); background:#ff0000"></div>
+<div id="pc" style="position:absolute; left:1790px; top:600px; width:200px; height:100px; transform:translateX(-50%); background:#0000ff"></div></section>`);
+    const ctx = gestureContext(doc);
+    const a = startResize(ctx, 'px', 'e', { x: 960, y: 350 });
+    a.frame({ x: 963, y: 350 }, NO); // drawn right edge 963: snaps to the slide's centre at 960
+    a.end();
+    expect(styleOf(doc, 'px')).toMatchObject({ left: '660px', width: '200px' });
+    const b = startResize(ctx, 'pc', 'e', { x: 1890, y: 650 });
+    b.frame({ x: 1795, y: 650 }, NO); // drawn 1690..1795: the right edge snaps to the margin at 1792, the left held at 1690
+    b.end();
+    expect(styleOf(doc, 'pc')).toMatchObject({ width: '102px', left: '1741px' });
+  });
+
+  it('a rotation starts where the element is: an unmoved handle on a skewed element writes nothing; a quarter turn adds 90°', () => {
+    const doc = deck(`<section id="s" style="background:#ffffff"><div id="k" style="position:absolute; left:300px; top:300px; width:200px; height:100px; transform:skew(20deg); background:#ff0000"></div></section>`);
+    const ctx = gestureContext(doc);
+    const m = measure(ctx.canvas, 'k', ctx.scale)!;
+    const top = apply(m.matrix, { x: m.w / 2, y: 0 });
+    const up = applyLinear(m.matrix, { x: 0, y: -1 });
+    const len = Math.hypot(up.x, up.y);
+    const handle = { x: top.x + (up.x / len) * 44, y: top.y + (up.y / len) * 44 }; // 22 screen px at half scale
+    const centre = apply(m.matrix, { x: m.w / 2, y: m.h / 2 });
+    let n = 0;
+    const off = onUpdate(doc, () => n++);
+    const g = startRotate(ctx, 'k', handle);
+    g.frame(handle, NO);
+    expect(n).toBe(0);
+    // the pointer turned a quarter about the centre
+    const quarter = { x: centre.x - (handle.y - centre.y), y: centre.y + (handle.x - centre.x) };
+    g.frame(quarter, { ...NO, shift: true });
+    g.end();
+    off();
+    expect(styleOf(doc, 'k').transform).toBe('rotate(90deg) skew(20deg)');
+  });
+});
+
+describe('fix wave 2: a connector is hit in its place in the paint order', () => {
+  it('a picture painted over a connector takes the press; a connector painted over a picture does', () => {
+    const ids = (html: string) => {
+      const doc = deck(`<section id="s" style="background:#ffffff">${html}</section>`);
+      const ctx = gestureContext(doc);
+      const pic = ctx.canvas.node('pic')!;
+      const original = document.elementsFromPoint;
+      document.elementsFromPoint = () => [pic]; // the browser's hit test: the picture (a connector takes no pointer)
+      try {
+        const line = measure(ctx.canvas, 'line', ctx.scale)!;
+        return hitIds(ctx.canvas, { x: 0, y: 0 }, { x: 500, y: 540 }, 16, [line]);
+      } finally {
+        document.elementsFromPoint = original;
+      }
+    };
+    const LINE = `<x-connector id="line" x1="300" y1="540" x2="700" y2="540" head="none"></x-connector>`;
+    const PIC = `<img id="pic" alt="" src="assets/a.png" style="position:absolute; left:400px; top:440px; width:200px; height:200px">`;
+    expect(ids(LINE + PIC)).toEqual(['pic', 'line']);
+    expect(ids(PIC + LINE)).toEqual(['line', 'pic']);
   });
 });

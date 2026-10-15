@@ -179,6 +179,11 @@ export const commands = {
     z.strictObject({ artifactId: Id, name: z.string().min(1).max(255), mime: z.string().min(1).max(255), bytes: Bytes.refine((bytes) => bytes.length <= ARTIFACT_MAX_BYTES, `at most ${ARTIFACT_MAX_BYTES} bytes`) }),
     z.strictObject({ assetId: z.uuid(), ref: z.string() }),
   ),
+  // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, Decision Log 25; the parent's 65): one artifact's asset
+  // copied into another by the store, the human the actor: the source's bytes written through the upload path on the
+  // target (content-addressed, so identical bytes answer the target's existing ref and a name is made unique there);
+  // both artifacts live, a deleted or missing one refused by name.
+  'artifacts.copyAsset': host(z.strictObject({ from: Id, ref: z.string().min(1).max(1_000), to: Id }), z.strictObject({ assetId: z.uuid(), ref: z.string() })),
   // The host's event-loop delay in ms since the last reset (Decision Log 23h); refused unless the host runs under MAWS_E2E=1.
   'artifacts.testLoopDelay': host(
     z.strictObject({ reset: z.boolean().optional() }),

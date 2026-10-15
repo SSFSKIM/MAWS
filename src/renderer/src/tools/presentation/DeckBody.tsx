@@ -51,9 +51,12 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
   const assetUrl = useCallback((ref: string) => state.host.assetUrl(artifactId, ref), [state, artifactId]);
   // M5: a picked image uploaded into the artifact (Insert's image, the inspector's Replace), answered as its `assets/<name>`
   const uploadAsset = useCallback(async (file: File) => (await state.host.uploadAsset(artifactId, new Uint8Array(await file.arrayBuffer()), { name: file.name, mime: file.type })).ref, [state, artifactId]);
-  // fix wave 1: a picture pasted from another deck brings its asset into this one (copyAsset reads it through the store's
-  // scheme and uploads it here)
-  const importAsset = useCallback((source: string, ref: string) => copyAsset(state.host, source, ref, artifactId), [state, artifactId]);
+  // a picture pasted from another deck brings its asset into this one: a MAWS asset copied by the store, bytes and mime
+  // unchanged (fix wave 2, Decision Log 25); anything else drawn and uploaded as PNG pixels (fix wave 1's route)
+  const importAsset = useCallback(
+    async (source: string, ref: string) => (ref.startsWith('assets/') ? (await state.host.copyAsset(source, ref, artifactId)).ref : copyPixels(state.host, source, ref, artifactId)),
+    [state, artifactId],
+  );
 
   // the stage is the tab's Mark-up surface while it is on screen
   const stage = useRef<HTMLElement | null>(null);
@@ -104,13 +107,12 @@ function Notice({ children }: { children: ReactNode }) {
 }
 
 /**
- * Fix wave 1: one deck's picture brought into another. The renderer reads an asset only as the page draws it (the app's
- * CSP keeps `connect-src` to the app itself, and the store's scheme answers no fetch), so the picture is loaded through
- * its `maws-artifact:` URL (CORS-enabled), drawn at its natural size and uploaded into the target as a PNG under its
- * name: the pixels travel exactly; an SVG arrives rasterized and a GIF as its first frame (a byte-exact copy needs a
- * store-side copy, an IPC this child does not own).
+ * A picture that is not one of the store's assets brought into a deck as pixels: the renderer reads an image only as the
+ * page draws it (the app's CSP keeps `connect-src` to the app itself), so it is loaded through its URL (CORS-enabled),
+ * drawn at its natural size and uploaded as a PNG under its name. A MAWS asset never takes this route: the store copies
+ * its bytes (`ArtifactHost.copyAsset`).
  */
-async function copyAsset(host: ArtifactHost, source: string, ref: string, target: string): Promise<string> {
+async function copyPixels(host: ArtifactHost, source: string, ref: string, target: string): Promise<string> {
   const img = new Image();
   img.crossOrigin = 'anonymous';
   img.src = host.assetUrl(source, ref);

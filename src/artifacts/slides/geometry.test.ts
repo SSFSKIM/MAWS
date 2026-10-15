@@ -6,9 +6,12 @@ import { describe, expect, it } from 'vitest';
 import {
   angleFromPointer,
   apply,
+  IDENTITY,
   invert,
   linear,
   placement,
+  readTransform,
+  transformMatrix,
   transformOf,
   corners,
   flowInsertIndex,
@@ -25,6 +28,7 @@ import {
   withRotation,
   type Box,
 } from './geometry';
+import { loadSlide } from './parse';
 
 const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) < eps;
 const box = (x: number, y: number, w: number, h: number): Box => ({ x, y, w, h });
@@ -249,5 +253,35 @@ describe('fix wave 1: transforms as matrices', () => {
     expect(transformOf(linear(placement({ x: 0, y: 0, w: 10, h: 10 }, '')))).toBeNull();
     expect(() => transformOf({ a: 3, b: 0, c: 0, d: 3, e: 0, f: 0 })).toThrow(/scale/);
     expect(() => transformOf({ a: 1, b: 0, c: 0, d: 2, e: 0, f: 0 })).toThrow(/scale/);
+  });
+});
+
+describe('fix wave 2: transforms as the loader writes them (lowercase names)', () => {
+  const loaded = (transform: string) => {
+    const l = loadSlide(`<section id="s"><div id="a" style="position:absolute; left:100px; top:100px; width:200px; height:100px; transform:${transform}; background:#ff0000"></div></section>`);
+    if (!l.ok) throw new Error('fixture');
+    return l.slide.children[0]!.style.transform!;
+  };
+
+  it('reads skewX and translateX in the loader’s own form', () => {
+    const skew = loaded('skewX(20deg)');
+    expect(skew).toBe('skewx(20deg)');
+    expect(transformMatrix(skew, 200, 100).c).toBeCloseTo(Math.tan((20 * Math.PI) / 180));
+    expect(translateOf(loaded('translateX(-50%)'), 200, 100)).toEqual([-100, 0]);
+  });
+
+  it('composes a rotation into a loaded skew in the dialect’s order, so the file keeps both', () => {
+    const next = withRotation(loaded('skewX(20deg)'), 30)!;
+    expect(next).toBe('rotate(30deg) skewx(20deg)');
+    const again = loadSlide(`<section id="s"><div id="a" style="position:absolute; left:100px; top:100px; width:200px; height:100px; transform:${next}; background:#ff0000"></div></section>`);
+    expect(again.ok && again.diagnostics).toEqual([]);
+    expect(again.ok && again.slide.children[0]!.style.transform).toBe(next);
+  });
+
+  it('says when a transform cannot be read', () => {
+    expect(readTransform('translate(var(--ds-x, 10px), 0px)', 10, 10)).toBeNull();
+    expect(readTransform('perspective(10px)', 10, 10)).toBeNull();
+    expect(readTransform(undefined, 10, 10)).toEqual(IDENTITY);
+    expect(readTransform('translate(10px, 5px)', 10, 10)).toMatchObject({ e: 10, f: 5 });
   });
 });

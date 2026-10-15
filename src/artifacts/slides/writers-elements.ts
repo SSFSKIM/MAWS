@@ -15,7 +15,8 @@
 import { transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
 import { checkStyle, type StyleSite } from './css';
-import { apply, boundsOf, cornersOf, isIdentityLinear, linear, multiply, pinToLeftTop, placement, px, transformMatrix, transformOf, union, type Box, type Pt } from './geometry';
+import { connectorRoute } from './glyphs';
+import { apply, boundsOf, cornersOf, isIdentityLinear, linear, multiply, pinToLeftTop, placement, px, readTransform, shift, transformOf, union, type Box, type Pt } from './geometry';
 import { CELL_TAGS, CONTAINER_TAGS, isPinned, type ElementIR, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
 import { cellMinter, childLists, elementMinter, flatten, fromScalars, groupOf, readFlat, readSlide, resolveParents, ROOT, toScalars, type FlatElement } from './model';
 import { ANY, keyAfter, OVER, rekey, UNDER } from './order';
@@ -344,7 +345,7 @@ export function groupElements(doc: Doc, slideId: string, ids: string[], boxes: R
       continue;
     }
     const b = boxes.get(m.id)!;
-    putStyle(plan, m.id, { ...pinToLeftTop(m.style, b), left: px(b.x - area.x), top: px(b.y - area.y) });
+    putStyle(plan, m.id, { ...pinToLeftTop(m.style, b), ...bakedSize(m.style, b), left: px(b.x - area.x), top: px(b.y - area.y) });
   }
   commit(doc, slideId, plan, origin);
   return groupId;
@@ -368,10 +369,18 @@ export function ungroup(doc: Doc, slideId: string, groupId: string, origin?: unk
   const parent = eff.get(groupId)!;
   const [gx, gy] = [pxOf(g.style.left ?? '0px'), pxOf(g.style.top ?? '0px')];
   if (gx === null || gy === null) throw new Error('the group is not placed by left/top px');
-  const turned = g.style.transform !== undefined && !isIdentityLinear(transformMatrix(g.style.transform, 1, 1));
+  // the group's whole pose (its offset, and any transform, a translation alone included); one that cannot be read is
+  // refused rather than read as absent (fix wave 2)
   const [gw, gh] = [pxOf(g.style.width), pxOf(g.style.height)];
-  if (turned && (gw === null || gh === null || g.style.transform!.includes('var('))) throw new Error('a turned group ungroups only with a px size and no token in its transform');
-  const G = placement({ x: gx, y: gy, w: gw ?? 0, h: gh ?? 0 }, turned ? g.style.transform : undefined);
+  let G = shift(gx, gy);
+  if (g.style.transform !== undefined) {
+    const sized = gw !== null && gh !== null;
+    const M = readTransform(g.style.transform, gw ?? 0, gh ?? 0);
+    if (!M) throw new Error(`the group's transform ${g.style.transform} cannot be read; give it plain values first`);
+    if (!sized && (!isIdentityLinear(M) || g.style.transform.includes('%'))) throw new Error('a turned or %-translated group ungroups only with a px width and height');
+    G = placement({ x: gx, y: gy, w: gw ?? 0, h: gh ?? 0 }, g.style.transform);
+  }
+  const turned = !isIdentityLinear(G);
   const side = groupOf(g);
   const list = (lists.get(parent) ?? []).filter((e) => groupOf(e) === side);
   const desired = list.flatMap((e) => (e.id === groupId ? kids.map((k) => k.id) : [e.id]));
@@ -383,32 +392,62 @@ export function ungroup(doc: Doc, slideId: string, groupId: string, origin?: unk
     put(plan, k.id, 'parent', parent);
     put(plan, k.id, 'z', keys.get(k.id) ?? k.z!);
     if (k.tag === 'x-connector' && k.attrs.x1 !== undefined) {
-      for (const [x, y] of COORDS) {
-        const p = apply(G, { x: coordOf(k.attrs[x]), y: coordOf(k.attrs[y]) });
-        put(plan, k.id, `attr:${x}`, num(p.x));
-        put(plan, k.id, `attr:${y}`, num(p.y));
-      }
+      for (const [key, value] of Object.entries(routedOut(k.attrs, G))) put(plan, k.id, `attr:${key}`, value);
       continue;
     }
     const own = { x: pxOf(k.style.left), y: pxOf(k.style.top), w: pxOf(k.style.width), h: pxOf(k.style.height) };
     const measured = boxes?.get(k.id);
     const box: Box | null = measured ?? (own.x !== null && own.y !== null && k.style.right === undefined && k.style.bottom === undefined ? { x: own.x, y: own.y, w: own.w ?? 0, h: own.h ?? 0 } : null);
     if (!box) throw new Error(`${k.id} is not placed by left/top px`);
+    const sizes = bakedSize(k.style, box);
     if (!turned) {
-      putStyle(plan, k.id, { ...pinToLeftTop(k.style, box), left: px(box.x + gx), top: px(box.y + gy) });
+      // the group's offset and translation carry the child's place; its own transform is untouched
+      const at = apply(G, { x: box.x, y: box.y });
+      putStyle(plan, k.id, { ...pinToLeftTop(k.style, box), ...sizes, left: px(at.x), top: px(at.y) });
       continue;
     }
-    if (k.style.transform?.includes('var(')) throw new Error(`${k.id}'s transform holds a token; it cannot fold the group's`);
     if (own.w === null && !measured) throw new Error(`${k.id} has no size to turn about`);
-    const world = multiply(G, placement(box, k.style.transform));
+    const mine = readTransform(k.style.transform, box.w, box.h);
+    if (!mine) throw new Error(`${k.id}'s transform ${k.style.transform} cannot be read; the group's cannot fold into it`);
+    const world = multiply(G, multiply(shift(box.x + box.w / 2, box.y + box.h / 2), multiply(mine, shift(-box.w / 2, -box.h / 2))));
     const transform = transformOf(linear(world));
     if (k.tag === 'x-shape' && transform !== null && !/^rotate\([^)]*\)$/.test(transform)) throw new Error('an x-shape takes rotate only; this group’s scale or skew has no form on it');
     const centre = apply(world, { x: box.w / 2, y: box.h / 2 });
-    putStyle(plan, k.id, { ...pinToLeftTop(k.style, box), left: px(centre.x - box.w / 2), top: px(centre.y - box.h / 2), transform });
+    putStyle(plan, k.id, { ...pinToLeftTop(k.style, box), ...sizes, left: px(centre.x - box.w / 2), top: px(centre.y - box.h / 2), transform });
   }
   for (const [id, z] of keys) if (id !== groupId && !kids.some((k) => k.id === id)) put(plan, id, 'z', z);
   commit(doc, slideId, plan, origin);
   return kids.map((k) => k.id);
+}
+
+/**
+ * A size in % (or anything but px and auto) is a share of the host: moving to another host, it is written as the px
+ * it is drawn at (fix wave 2).
+ */
+function bakedSize(style: Readonly<Record<string, string>>, box: Box): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (style.width !== undefined && style.width !== 'auto' && pxOf(style.width) === null) out.width = px(box.w);
+  if (style.height !== undefined && style.height !== 'auto' && pxOf(style.height) === null) out.height = px(box.h);
+  return out;
+}
+
+const ROUTES = ['straight', 'hv', 'vh', 'elbow'] as const;
+/**
+ * A pinned connector's attributes after its host's map `G`: its ends moved, and its route the supported one that draws
+ * the moved route exactly (a quarter turn makes `hv` a `vh`); refused when none does (fix wave 2).
+ */
+function routedOut(attrs: Readonly<Record<string, string>>, G: ReturnType<typeof shift>): Record<string, string | null> {
+  const [x1, y1, x2, y2] = [coordOf(attrs.x1), coordOf(attrs.y1), coordOf(attrs.x2), coordOf(attrs.y2)];
+  const moved = connectorRoute(attrs.route, x1, y1, x2, y2).map(([x, y]) => apply(G, { x, y }));
+  const [a, b] = [moved[0]!, moved[moved.length - 1]!];
+  const same = (route: string) => {
+    const drawn = connectorRoute(route, a.x, a.y, b.x, b.y);
+    return drawn.length === moved.length && drawn.every(([x, y], i) => Math.abs(x - moved[i]!.x) < 0.01 && Math.abs(y - moved[i]!.y) < 0.01);
+  };
+  const was = attrs.route ?? 'straight';
+  const route = same(was) ? was : ROUTES.find(same);
+  if (route === undefined) throw new Error(`the connector's ${was} route has no equal in the dialect once its group's turn is folded in`);
+  return { x1: num(a.x), y1: num(a.y), x2: num(b.x), y2: num(b.y), ...(route !== was && { route: route === 'straight' ? null : route }) };
 }
 
 // ---------------------------------------------------------------- insert

@@ -28,14 +28,17 @@ import {
   isIdentityLinear,
   linear,
   multiply,
+  normalizeDeg,
   pinToLeftTop,
   px,
   resizePlaced,
+  rotationOf,
   shift,
   slideLines,
   snapMove,
   snapResize,
   SNAP_SCREEN_PX,
+  transformMatrix,
   union,
   withRotation,
   type Affine,
@@ -292,8 +295,16 @@ export function startResize(ctx: GestureContext, id: string, handle: Handle, p0:
       let b = resizePlaced(start, e.style.transform, handle, delta, { keepAspect: mods.shift, fromCentre: mods.alt && pinned, min: MIN_SIZE });
       let guides: readonly Guide[] = [];
       if (plain && !mods.meta && !mods.shift && !mods.alt) {
-        const snapped = snapResize({ ...b, x: b.x + origin.x, y: b.y + origin.y }, handle, { lines, siblings }, threshold(ctx), MIN_SIZE);
-        b = { ...snapped.box, x: snapped.box.x - origin.x, y: snapped.box.y - origin.y };
+        // the drawn edges snap (the element's own translate, % of its size, moves them off its layout box); the result
+        // goes back to layout px at its new size, the held drawn edge where it was (fix wave 2)
+        const t = (w: number, h: number) => {
+          const m = transformMatrix(e.style.transform, w, h);
+          return { x: m.e, y: m.f };
+        };
+        const at = t(b.w, b.h);
+        const snapped = snapResize({ ...b, x: b.x + at.x + origin.x, y: b.y + at.y + origin.y }, handle, { lines, siblings }, threshold(ctx), MIN_SIZE);
+        const after = t(snapped.box.w, snapped.box.h);
+        b = { ...snapped.box, x: snapped.box.x - origin.x - after.x, y: snapped.box.y - origin.y - after.y };
         guides = snapped.guides;
       }
       const wide = mods.shift || handle.includes('e') || handle.includes('w');
@@ -320,7 +331,12 @@ export function startResize(ctx: GestureContext, id: string, handle: Handle, p0:
 
 // ---------------------------------------------------------------- rotate
 
-export function startRotate(ctx: GestureContext, id: string): Gesture {
+/**
+ * Turns an element by its handle from the pointer's press `p0`: the rotation moves by the angle the pointer turns about
+ * the centre, from the element's own rotation (fix wave 2: a skewed element's handle is not straight above its centre,
+ * so an absolute angle would jump on the first move); Shift snaps the result to 15°.
+ */
+export function startRotate(ctx: GestureContext, id: string, p0: Pt): Gesture {
   const tree = slideTree(ctx.session.doc, ctx.slideId);
   const e = tree.element(id);
   const m = measure(ctx.canvas, id, ctx.scale);
@@ -328,11 +344,14 @@ export function startRotate(ctx: GestureContext, id: string): Gesture {
   // the angle as the host sees it: a rotation inside a turned group is the group's own
   const back = invert(m.hostMatrix);
   const centre = apply(back, apply(m.matrix, { x: m.w / 2, y: m.h / 2 }));
+  const from = angleFromPointer(centre, apply(back, p0), false);
+  const start = rotationOf(e.style.transform);
   const drag = dragWriter(ctx);
-  let last: number | null = null;
+  let last: number | null = normalizeDeg(start);
   return {
     frame(p, mods) {
-      const deg = angleFromPointer(centre, apply(back, p), mods.shift);
+      const turned = start + angleFromPointer(centre, apply(back, p), false) - from;
+      const deg = normalizeDeg(mods.shift ? Math.round(turned / 15) * 15 : Math.round(turned * 100) / 100);
       if (deg === last) return NO_GUIDES;
       last = deg;
       drag.write({ [id]: { style: { transform: withRotation(e.style.transform, deg) } } });

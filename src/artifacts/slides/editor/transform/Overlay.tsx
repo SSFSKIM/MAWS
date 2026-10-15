@@ -121,7 +121,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       if (handle && !readOnly && current.length === 1) {
         const id = current[0]!;
         const make = () =>
-          handle === 'rotate' ? startRotate(c, id) : handle === 'end0' || handle === 'end1' ? startEndpoint(c, id, handle === 'end0' ? 0 : 1) : startResize(c, id, handle as Handle, p);
+          handle === 'rotate' ? startRotate(c, id, p) : handle === 'end0' || handle === 'end1' ? startEndpoint(c, id, handle === 'end0' ? 0 : 1) : startResize(c, id, handle as Handle, p);
         gesture.current = make();
         el.setPointerCapture?.(e.pointerId);
         e.preventDefault();

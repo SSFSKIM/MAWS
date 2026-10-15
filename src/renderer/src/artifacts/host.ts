@@ -231,6 +231,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     acceptSuggestion: (artifactId, ranges) => call('artifacts.acceptSuggestion', { artifactId, ranges }),
     rejectSuggestion: (artifactId, ranges) => call('artifacts.rejectSuggestion', { artifactId, ranges }),
     uploadAsset: (artifactId, bytes, { name, mime }) => call('artifacts.uploadAsset', { artifactId, bytes, name, mime }),
+    copyAsset: (from, ref, to) => call('artifacts.copyAsset', { from, ref, to }), // P3-C (Decision Log 25)
     identity: () => ({ actor: HUMAN, ...actorDisplay(HUMAN) }),
   };
 }

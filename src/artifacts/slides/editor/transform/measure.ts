@@ -176,20 +176,27 @@ export function boxInParent(canvas: SlideCanvas, parent: string, id: string): Bo
 
 /**
  * The element drawn under a point of the window, deepest first as painted (the browser's own hit test), among the
- * canvas's elements; a pinned connector (which takes no pointer) is hit within `slack` px of its line.
+ * canvas's elements; a pinned connector (which takes no pointer) is hit within `slack` px of its line, in its place in
+ * the paint order (fix wave 2: before whatever it is drawn over, after whatever is drawn over it; the canvas places its
+ * nodes in paint order, so a node later in the document paints over an earlier one).
  */
 export function hitIds(canvas: SlideCanvas, client: Pt, slide: Pt, slack: number, connectors: readonly Measured[]): string[] {
-  const near = connectors.filter((c) => c.route && distanceToRoute(slide, c.route) <= slack).map((c) => c.id);
   const doc = canvas.root.ownerDocument;
   const stack = typeof doc.elementsFromPoint === 'function' ? doc.elementsFromPoint(client.x, client.y) : [];
-  const out: string[] = [...near];
+  const painted: HTMLElement[] = [];
   for (const el of stack) {
     if (!canvas.root.contains(el) || el === canvas.root) continue;
     const owner = (el as HTMLElement).closest?.('[data-eid]') as HTMLElement | null;
-    const id = owner?.dataset.eid;
-    if (id && !out.includes(id)) out.push(id);
+    if (owner && !painted.includes(owner)) painted.push(owner);
   }
-  return out;
+  for (const c of connectors) {
+    const node = canvas.node(c.id);
+    if (!node || !c.route || distanceToRoute(slide, c.route) > slack || painted.includes(node)) continue;
+    // over a node it follows in the document (unless inside it); under one that follows it
+    const at = painted.findIndex((n) => !n.contains(node) && (node.compareDocumentPosition(n) & 2) !== 0);
+    painted.splice(at < 0 ? painted.length : at, 0, node);
+  }
+  return painted.map((n) => n.dataset.eid!);
 }
 
 function distanceToRoute(p: Pt, route: Pt[]): number {

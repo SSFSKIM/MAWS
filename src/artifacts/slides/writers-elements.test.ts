@@ -313,3 +313,66 @@ describe('fix wave 1: refusals write nothing, and nothing written is held', () =
     refuses(doc, () => ungroup(doc, 's', g, 'ed'), /scale/);
   });
 });
+
+// ---------------------------------------------------------------- fix wave 2 (the M5 re-review's reproductions)
+
+describe('fix wave 2: re-parenting keeps sizes, translations and routes', () => {
+  const section = (body: string) => deckWith(`<section id="s" style="background:#ffffff">${body}</section>`);
+  const attrsOf = (doc: Doc, id: string) => readFlat(doc, 's', false).find((e) => e.id === id)!.attrs;
+  function refuses(doc: Doc, write: () => unknown, reason: RegExp) {
+    const before = slideFile(doc, 's');
+    let n = 0;
+    const off = onUpdate(doc, () => n++);
+    expect(write).toThrow(reason);
+    off();
+    expect(n).toBe(0);
+    expect(slideFile(doc, 's')).toBe(before);
+  }
+
+  it('a member sized in % of the slide keeps its size inside the group, and a child in % of the group outside it', () => {
+    const doc = section(`<div id="a" style="position:absolute; left:100px; top:100px; width:50%; height:100px; background:#ff0000"></div><div id="b" style="position:absolute; left:1100px; top:100px; width:100px; height:100px; background:#0000ff"></div>`);
+    const g = groupElements(
+      doc,
+      's',
+      ['a', 'b'],
+      new Map([
+        ['a', { x: 100, y: 100, w: 960, h: 100 }],
+        ['b', { x: 1100, y: 100, w: 100, h: 100 }],
+      ]),
+      'ed',
+    );
+    expect(styleOf(doc, 'a').width).toBe('960px');
+    setStyles(doc, 's', { a: { width: '50%' } }, 'ed'); // half the group's 1100 px
+    ungroup(
+      doc,
+      's',
+      g,
+      'ed',
+      new Map([
+        ['a', { x: 0, y: 0, w: 550, h: 100 }],
+        ['b', { x: 1000, y: 0, w: 100, h: 100 }],
+      ]),
+    );
+    expect(styleOf(doc, 'a')).toMatchObject({ left: '100px', width: '550px' });
+  });
+
+  it('ungrouping a group moved by a translate keeps its children where they are drawn', () => {
+    const doc = section(`<div id="g" data-group="" style="position:absolute; left:100px; top:100px; width:300px; height:100px; transform:translate(100px, 50px)"><div id="a" style="position:absolute; left:0px; top:0px; width:100px; height:100px; background:#ff0000"></div><div id="b" style="position:absolute; left:200px; top:0px; width:100px; height:100px; background:#0000ff"></div></div>`);
+    ungroup(doc, 's', 'g', 'ed');
+    expect(styleOf(doc, 'a')).toMatchObject({ left: '200px', top: '150px' });
+    expect(styleOf(doc, 'a').transform).toBeUndefined();
+  });
+
+  it('a group whose transform cannot be read is not ungrouped, nothing written', () => {
+    const doc = section(`<div id="g" data-group="" style="position:absolute; left:100px; top:100px; width:300px; height:100px; transform:translate(var(--ds-shift, 10px), 0px)"><div id="a" style="position:absolute; left:0px; top:0px; width:100px; height:100px; background:#ff0000"></div><div id="b" style="position:absolute; left:200px; top:0px; width:100px; height:100px; background:#0000ff"></div></div>`);
+    refuses(doc, () => ungroup(doc, 's', 'g', 'ed'), /cannot be read/);
+  });
+
+  it('a routed connector in a turned group keeps its drawn route: hv turned a quarter is vh; a route with no equal is refused', () => {
+    const doc = section(`<div id="g" data-group="" style="position:absolute; left:300px; top:300px; width:200px; height:200px; transform:rotate(90deg)"><x-connector id="line" x1="0" y1="0" x2="100" y2="100" route="hv"></x-connector><div id="d" style="position:absolute; left:150px; top:150px; width:50px; height:50px; background:#000000"></div></div>`);
+    ungroup(doc, 's', 'g', 'ed');
+    expect(attrsOf(doc, 'line')).toMatchObject({ x1: '500', y1: '300', x2: '400', y2: '400', route: 'vh' });
+    const turned = section(`<div id="g" data-group="" style="position:absolute; left:300px; top:300px; width:200px; height:200px; transform:rotate(45deg)"><x-connector id="line" x1="0" y1="0" x2="100" y2="100" route="hv"></x-connector><div id="d" style="position:absolute; left:150px; top:150px; width:50px; height:50px; background:#000000"></div></div>`);
+    refuses(turned, () => ungroup(turned, 's', 'g', 'ed'), /route/);
+  });
+});
