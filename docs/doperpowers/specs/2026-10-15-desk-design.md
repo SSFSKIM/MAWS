@@ -896,7 +896,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 - **Design inheritance:** §2 Web client (the adapter), §3 session plane, §4
   right panel.
 - **Required:** required.
-- **Status:** not-dispatched (blocked-by DC5.G1, DC3.G1).
+- **Status:** in-flight (2026-10-15).
 
 ### DC7: The machine's controls — plan
 
@@ -1566,6 +1566,7 @@ upgrade request like any other):
 | `subscribe` | `machine`, `session`, `agentId`, `sub` | a DX4 subscription scoped to one transcript (`agentId` null for the main one); `sub` is the browser's own nonce, unique at the machine |
 | `unsubscribe` | `sub` | |
 | `rows` | `sub`, `before`, `limit` | older rows of the subscription's transcript |
+| `diff` | `sub` | the session's working-tree diff against its base branch, answered as DX4 `diff` on that sub; only on a main-transcript subscription (`agentId` null). Computed on request, never pushed, since it costs the machine a git run whether or not a view is open |
 | `visibility` | `visible` | whether this tab shows the project; a visible tab holds back its member's pushes |
 | `part` | as DX2 | |
 
@@ -2121,7 +2122,7 @@ interface SubscriptionListener {
   reset(): void;                                // a discontinuity the client recovers from: drop what was delivered
   end(body: SessionBodies['end']): void;        // the hub ended it, or the client cannot serve it; nothing follows
 }
-interface Subscription { rows(before: string, limit: number): void; close(): void }
+interface Subscription { rows(before: string, limit: number): void; diff(): void; close(): void } // diff(): main transcript only
 interface SessionPlane { subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription }
 const transcriptKey: (project: string, target: { session: string; agentId: string | null }) => string;
 ```
@@ -2244,7 +2245,7 @@ a hub that connects into machines (§2).
 | DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | in-flight (dispatched 2026-10-15) |
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
-| DC6 web: depth | — | ready to plan (DX8 folded 2026-10-15; DC3.G1 met) |
+| DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | in-flight (dispatched 2026-10-15, parent pin 9471766c) |
 | DC7 machine's controls | — | not-dispatched |
 
 ## Surprises & Discoveries
@@ -2450,6 +2451,15 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The browser asks for a session's diff. DX4 had a `diff`
+  message, but no frame asked for one and no rule said when a machine
+  sent it, which writing DC6's plan exposed. DX3 gains `diff {sub}`,
+  answered as DX4 `diff` on that subscription and valid on a
+  main-transcript subscription only, and DX8's `Subscription` gains
+  `diff()`. Rejected: the machine pushing a diff after every turn, which
+  costs a git run per turn whether or not anyone is looking. Flags DC3
+  (DX3), DC5 (DX8), DC6, DC7 (the producer).
+  Date/Author: 2026-10-15, design session (DC6's plan).
 - Decision: DX8 folded from DC5's M1 (MAWS `66eabe92`, reviewed clean).
   DC6 plugs into two slots, `depth` and `transcript`, registered once
   from `connectDepth()`. It reads sessions through a `SessionPlane` whose
