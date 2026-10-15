@@ -73,6 +73,11 @@ export function passphraseProblem(passphrase: string): string | null {
   return characters < PASSPHRASE_MIN_CHARACTERS ? `A passphrase has at least ${PASSPHRASE_MIN_CHARACTERS} characters.` : null;
 }
 
+let lastPassphraseWork: { ms: number; cost: PassphraseCost } | null = null;
+
+/** How long this tab's last passphrase derivation took, and at what cost: what a phone pays per unlock (the M4 walk). */
+export const passphraseWork = () => lastPassphraseWork;
+
 /** A wrapping key's bytes from a passphrase (seconds of work, reported through `progress` from 0 to 1). */
 export async function wrappingKeyFromPassphrase(passphrase: string, org: string, cost: PassphraseCost, progress?: (fraction: number) => void): Promise<Uint8Array> {
   const problem = passphraseProblem(passphrase);
@@ -81,7 +86,10 @@ export async function wrappingKeyFromPassphrase(passphrase: string, org: string,
   try {
     // Loaded when a passphrase is first used, so the app's first load (the phone's included) does not carry it.
     const { argon2idAsync } = await import('@noble/hashes/argon2');
-    return await argon2idAsync(password, utf8(passphraseSalt(org)), { ...cost, dkLen: 32, version: 0x13, onProgress: progress });
+    const started = performance.now();
+    const bytes = await argon2idAsync(password, utf8(passphraseSalt(org)), { ...cost, dkLen: 32, version: 0x13, onProgress: progress });
+    lastPassphraseWork = { ms: Math.round(performance.now() - started), cost };
+    return bytes;
   } finally {
     password.fill(0);
   }

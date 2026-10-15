@@ -43,16 +43,20 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
   const locked = keyState !== 'unlocked';
   const failed = refused(logState);
   const selected = channel.kind === 'session' ? (sessions.get(channel.session) ?? null) : null;
-  // A visible tab of the project holds back its member's pushes (DX3's `visibility`).
+  // A visible tab of the project holds back its member's pushes (DX3's `visibility`): one the owner can read, so not
+  // while it is locked, and not once the page is hidden or closing (an installed app swiped away gets `pagehide`).
   useEffect(() => {
-    const report = () => connection.client.setVisible(document.visibilityState === 'visible');
+    const report = () => connection.client.setVisible(document.visibilityState === 'visible' && !locked);
+    const hide = () => connection.client.setVisible(false);
     report();
     document.addEventListener('visibilitychange', report);
+    addEventListener('pagehide', hide);
     return () => {
       document.removeEventListener('visibilitychange', report);
+      removeEventListener('pagehide', hide);
       connection.client.setVisible(false);
     };
-  }, [connection]);
+  }, [connection, locked]);
   const select = (next: Channel) => {
     setChannelsOpen(false);
     navigate({ view: 'project', project: connection.project, channel: next });

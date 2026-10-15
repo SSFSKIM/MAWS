@@ -89,8 +89,14 @@ test('@layout request cards fit the phone: a question answerable in place, a per
   await fitsTheWidth(page);
 });
 
-/** The service worker's registration id, as Chromium's DevTools protocol knows it, once it runs. */
-async function workerRegistration(context: BrowserContext, page: Page): Promise<{ deliver(data: string): Promise<void> }> {
+type Shown = { title: string; options: { body?: string; tag?: string; data?: { url?: string }; actions?: unknown[] } };
+
+/**
+ * The running service worker, with each notification it asks the platform for recorded as it asks (headless Chromium
+ * may display none, and what the worker asked for is what is proved), and a push delivered to it through Chromium's
+ * DevTools protocol, as a push service's would arrive.
+ */
+async function serviceWorker(context: BrowserContext, page: Page) {
   const cdp = await context.newCDPSession(page);
   const registrations = new Map<string, string>();
   cdp.on('ServiceWorker.workerRegistrationUpdated', ({ registrations: updated }) => {
@@ -100,14 +106,21 @@ async function workerRegistration(context: BrowserContext, page: Page): Promise<
   await page.evaluate(() => navigator.serviceWorker.ready.then(() => undefined));
   await expect.poll(() => registrations.size).toBeGreaterThan(0);
   const [scope, registrationId] = [...registrations][0];
-  const origin = new URL(scope).origin;
-  return { deliver: async (data) => void (await cdp.send('ServiceWorker.deliverPushMessage', { origin, registrationId, data })) };
+  const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
+  await worker.evaluate(() => {
+    const scope = self as unknown as { registration: { showNotification(title: string, options?: object): Promise<void> }; __shown: unknown[] };
+    const show = scope.registration.showNotification.bind(scope.registration);
+    scope.__shown = [];
+    scope.registration.showNotification = (title, options) => {
+      scope.__shown.push({ title, options });
+      return show(title, options).catch(() => {});
+    };
+  });
+  return {
+    deliver: async (data: string) => void (await cdp.send('ServiceWorker.deliverPushMessage', { origin: new URL(scope).origin, registrationId, data })),
+    shown: () => worker.evaluate(() => (self as unknown as { __shown: Shown[] }).__shown),
+  };
 }
-
-const shown = (page: Page) =>
-  page.evaluate(async () =>
-    (await (await navigator.serviceWorker.ready).getNotifications()).map((n) => ({ title: n.title, body: n.body, tag: n.tag, data: n.data as unknown, actions: (n as Notification & { actions?: unknown[] }).actions ?? [] })),
-  );
 
 test('a pushed question draws from its payload alone, with no Allow or Deny, and its tap lands on the verified card', async ({ browserName, context, page, hub }) => {
   test.skip(browserName !== 'chromium', "a push is delivered through Chromium's DevTools protocol");
@@ -116,19 +129,21 @@ test('a pushed question draws from its payload alone, with no Allow or Deny, and
   await context.grantPermissions(['notifications'], { origin: hub.url });
   await page.goto(hub.url);
   await expect(page.getByTestId('grid')).toBeVisible();
-  const worker = await workerRegistration(context, page);
+  const worker = await serviceWorker(context, page);
 
   await raiseQuestion(hub);
   await worker.deliver(JSON.stringify(notice('toolu_q1')));
-  await expect.poll(() => shown(page)).toHaveLength(1);
-  const [notification] = await shown(page);
-  expect(notification).toMatchObject({ title: 'maws-45 has a question', body: 'Open the desk to answer it.', actions: [] });
-  const url = (notification.data as { url: string }).url;
+  await expect.poll(worker.shown).toHaveLength(1);
+  const [notification] = await worker.shown();
+  expect(notification.title).toBe('maws-45 has a question');
+  expect(notification.options.body).toBe('Open the desk to answer it.');
+  expect(notification.options.actions).toBeUndefined(); // no Allow, no Deny: the worker holds no key to answer with
+  const url = notification.options.data!.url!;
   expect(url).toBe(`/p/${PROJECT}/s/${S.asks}?request=toolu_q1`);
 
   // A payload it cannot read still draws a notification (a silent push costs the subscription on iOS), opening the grid.
   await worker.deliver('not json');
-  await expect.poll(async () => (await shown(page)).map((n) => n.title)).toContain('The desk');
+  await expect.poll(async () => (await worker.shown()).map((n) => n.title)).toEqual(['maws-45 has a question', 'The desk']);
 
   // A tap with no window open opens one at the card's URL (what `clients.openWindow` is handed): the card lands once
   // it verified, and the answer from the phone reaches the machine sealed, with the digest of what was drawn.
@@ -170,4 +185,23 @@ test('a card the push named says why it is not drawn: settled before the tap, or
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}?request=toolu_forged`);
   await expect(page.getByTestId('landing')).toContainText('This request failed verification, so it is not shown.');
   await expect(center(page)).not.toContainText('Delete the database?');
+});
+
+test("a project holds back its member's pushes only while the owner can read it: not locked, not hidden", async ({ page, hub }) => {
+  await stageProject(hub);
+  const visibility = () => hub.up.filter((u) => u.frame.t === 'visibility').map((u) => (u.frame as { visible: boolean }).visible);
+  await page.goto(`${hub.url}/p/${PROJECT}`);
+  await expect(page.getByTestId('locked')).toBeVisible();
+  await expect.poll(visibility).toContain(false);
+  expect(visibility()).not.toContain(true); // locked, the owner reads nothing there
+
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}`);
+  await expect(center(page)).toContainText('the migration is merged');
+  await expect.poll(() => visibility().at(-1)).toBe(true);
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => visibility().at(-1)).toBe(false); // the phone locked, or the app sent to the background
 });

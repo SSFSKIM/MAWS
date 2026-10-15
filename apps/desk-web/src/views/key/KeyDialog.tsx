@@ -7,7 +7,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import type { OrgKey, WrappedKeyRecord, WrappedKeys } from 'desk-hub/protocol';
 import type { Me } from '../../hub/me';
-import { checkFingerprint } from '../../key/derive';
+import { checkFingerprint, passphraseWork } from '../../key/derive';
 import { lock, stillHolds, useKeyHolder } from '../../key/holder';
 import { addMethod, prepareMethod, rememberedMethod, removeMethod, type NewMethod, type OrgMethod, type PreparedMethod } from '../../key/unlock';
 import { listWrappedKeys, WRAPPED_KEYS_QUERY } from '../../key/wrapped-keys';
@@ -32,6 +32,7 @@ export function KeyDialog({ me, onClose }: { me: Me; onClose: () => void }) {
             </code>
           </p>
           <p className="m-0 text-ui-sm leading-5 text-fg-muted">Every browser that holds your org key shows this same fingerprint; one that shows another holds another key.</p>
+          <PassphraseWork />
           <div>
             <button type="button" className={buttonSecondary} onClick={() => void lock(me.org.id)}>
               Lock
@@ -47,6 +48,17 @@ export function KeyDialog({ me, onClose }: { me: Me; onClose: () => void }) {
 }
 
 /** The org key's methods, for a browser that holds the key. */
+/** What the passphrase cost this device, once it was used in this tab (Argon2id: the phone's time is the owner's to read). */
+function PassphraseWork() {
+  const work = passphraseWork();
+  if (!work) return null;
+  return (
+    <p className="m-0 text-ui-sm text-fg-muted" data-testid="passphrase-work">
+      Deriving from the passphrase took {(work.ms / 1000).toFixed(1)} s on this device (Argon2id, {Math.round(work.cost.m / 1024)} MiB, t {work.cost.t}, p {work.cost.p}).
+    </p>
+  );
+}
+
 function Methods({ me, held, fingerprint }: { me: Me; held: OrgKey; fingerprint: string | null }) {
   const keys = useQuery({ queryKey: WRAPPED_KEYS_QUERY, queryFn: listWrappedKeys });
   const queries = useQueryClient();
