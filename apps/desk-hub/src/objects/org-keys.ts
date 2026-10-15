@@ -63,6 +63,9 @@ export class OrgKeys {
     id: string,
     now: string,
   ): KeyResult<StoredKey> {
+    // Once the org has a key, the proof of holding it comes before anything else: a caller without it learns nothing,
+    // not even what is wrong with the shape of what it posted. A missing or malformed `auth` has no digest.
+    if (org.keyAuth !== null && org.keyAuth !== authHash) return notKeyHolder();
     const b = isObject(body) ? body : {};
     const { method, label, credential, kdf, iv, wrapped, check, auth } = b;
     const kdfText = isObject(kdf) ? JSON.stringify(kdf) : undefined;
@@ -86,7 +89,6 @@ export class OrgKeys {
         'the body is {method: passkey | passphrase, label: 1 to 100 characters, credential: a passkey\'s id in base64url (none for a passphrase), kdf: an object of at most 1 KiB, iv, wrapped, check, auth: 12, 48, 32, and 32 bytes in canonical base64url}',
       );
     }
-    if (org.keyAuth !== null && org.keyAuth !== authHash) return notKeyHolder();
     if (org.keyCheck !== null && org.keyCheck !== check) return refuse(409, 'different-key', "this wraps another key than the org's: unlock the org's key and wrap that one");
     if (method === 'passkey' && this.sql.exec('SELECT 1 FROM wrapped_keys WHERE credential = ?', credential as string).toArray().length > 0) {
       return refuse(409, 'credential-taken', 'a wrapped key for this passkey exists; remove it first to wrap again');

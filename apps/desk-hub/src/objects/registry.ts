@@ -18,6 +18,7 @@ import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens'
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
 import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../protocol/base64url';
 import type { GridDown, ProjectSummary, PushNotice } from '../protocol/browser';
+import { toWire } from '../protocol/parts';
 import {
   ENROLLMENT_TTL_S,
   isMachineName,
@@ -315,9 +316,10 @@ export class Registry extends DurableObject<Env> {
     for (const socket of this.ctx.getWebSockets()) this.send(socket, frame);
   }
 
+  /** A frame above `FRAME_LIMIT` (a grid of many projects) goes in numbered parts, as on a project socket. */
   private send(socket: WebSocket, frame: GridDown): void {
     try {
-      socket.send(JSON.stringify(frame));
+      for (const line of toWire(frame)) socket.send(line);
     } catch {
       // closing as it is written to: the browser reconnects and gets the grid whole
     }

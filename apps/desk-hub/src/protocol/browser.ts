@@ -79,8 +79,9 @@ export type ProjectSummary = {
   waiting: number;
 };
 
-/** Hub → browser over the registry socket. */
-export type GridDown = { t: 'grid'; projects: ProjectSummary[] } | { t: 'summary'; project: ProjectSummary };
+/** Hub → browser over the registry socket. A frame above `FRAME_LIMIT` (a grid of many projects) comes as numbered parts,
+ * joined as on a project socket. */
+export type GridDown = { t: 'grid'; projects: ProjectSummary[] } | { t: 'summary'; project: ProjectSummary } | Part;
 
 /**
  * What a push carries (encrypted for the device, RFC 8291): only what points to a card, since the service worker holds

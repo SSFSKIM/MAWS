@@ -5,6 +5,7 @@
 // reference workerd will not evict, so its termination is `ctx.abort()` through a suite seam.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { GridDown, ProjectDown } from '../src/protocol/browser';
+import { FRAME_LIMIT, PartAssembler } from '../src/protocol/parts';
 import { importOrgKey, newNonce, seal, sealRpc } from '../src/protocol/codes';
 import type { DownFrame } from '../src/protocol/machine';
 import type { Rpc, RpcDraft } from '../src/protocol/rpc';
@@ -385,6 +386,68 @@ describe('presence and machine leases', () => {
     await m.close();
   });
 
+  it('a renewal that reaches the project after its lease ran out, before the alarm, ends the old work first', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const sub = newNonce();
+    b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub });
+    await m.next((f) => f.t === 'subscribe', 'subscribe');
+    const call = await rpc(project, m.name, 'interrupt', { session: SESSION });
+    b.send({ t: 'rpc', rpc: call });
+    await m.next((f) => f.t === 'rpc', 'the rpc');
+    // The lease runs out within a millisecond; its alarm comes 50 ms on at the soonest, and the renewal before it.
+    await hub.lease(project, { op: 'renew', machine: m.name, generation: m.generation, leaseMs: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await hub.lease(project, { op: 'renew', machine: m.name, generation: m.generation, leaseMs: 45_000 });
+    await b.next((f) => f.t === 'session' && f.message.kind === 'end' && f.message.sub === sub, 'the sub ended');
+    expect(await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce && f.state !== 'forwarded', 'uncertain')).toMatchObject({ state: 'uncertain' });
+    // And the renewal puts the machine online again, on the same stream.
+    await waitFor(() => (ofType(b, 'machines').at(-1)?.machines.find((x) => x.machine === m.name)?.online ? true : undefined));
+    b.close();
+    await m.close();
+  });
+
+  it('presence posted while the lease is lapsed is kept, not shown, until the lease is renewed', async () => {
+    const project = newProject();
+    const m = await machine(project, { heartbeatMs: 60_000, leaseMs: 800 });
+    const b = await browser(project);
+    await b.next((f) => f.t === 'machines' && f.machines.some((x) => x.machine === m.name && !x.online), 'offline', 0, 6000);
+    const from = b.frames.length;
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'presence', presence('waiting')) }]);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(sessionKinds(b, from).filter((x) => x.kind === 'presence')).toEqual([]);
+    const late = await browser(project);
+    expect(sessionKinds(late).filter((x) => x.kind === 'presence')).toEqual([]);
+    late.close();
+    await hub.lease(project, { op: 'renew', machine: m.name, generation: m.generation, leaseMs: 45_000 });
+    expect(((await b.next((f) => f.t === 'session' && f.message.kind === 'presence', 'presence once renewed', from)) as Extract<ProjectDown, { t: 'session' }>).message).toMatchObject({
+      machine: m.name,
+      body: presence('waiting'),
+    });
+    b.close();
+    await m.close();
+  });
+
+  it("a close that arrives while the stream's first hello waits on the registry leaves the machine offline", async () => {
+    const project = newProject();
+    const name = `sp-${++machines}`;
+    const m = new MachineClient(hub, name, await enroll(hub, ADMIN, name));
+    await m.connect();
+    await hub.holdHellos(project, true);
+    const hello = m.post([{ t: 'hello', project, name: 'demo', have: {} }]);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await hub.lease(project, { op: 'closed', machine: m.name, generation: m.generation });
+    await hub.holdHellos(project, false);
+    expect((await hello).status).toBe(200);
+    const b = await browser(project);
+    const call = await rpc(project, m.name, 'interrupt', { session: SESSION });
+    b.send({ t: 'rpc', rpc: call });
+    expect(await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce, 'machine-offline')).toMatchObject({ outcome: { error: { code: 'machine-offline' } } });
+    b.close();
+    await m.close();
+  });
+
   it("the Machine object terminated after forwarding, the daemon kept away: offline, subscriptions ended, the RPC uncertain within the lease; its presence withheld", async () => {
     const project = newProject();
     const m = await machine(project, { heartbeatMs: 200, leaseMs: 1500 });
@@ -402,8 +465,14 @@ describe('presence and machine leases', () => {
 
     // The daemon is kept from reconnecting (this client never does on its own) and answers no heartbeat.
     m.autoAck = false;
+    hub.expectRuntimeLog(/terminated by the suite/);
     const at = Date.now();
     await hub.terminate(m.name);
+    // The termination is real: the object's stream ended under the daemon.
+    await waitFor(() => (m.isEnded ? true : undefined));
+    // workerd on Linux logs the abort as an uncaught exception, which the suite takes out of the output here and nowhere
+    // else; workerd on macOS logs nothing for it (checked with a capture of every line).
+    if (process.platform === 'linux') await waitFor(() => (hub.runtimeLogs.some((l) => /terminated by the suite/.test(l.message)) ? true : undefined));
     await b.next((f) => f.t === 'rpc-state' && f.state === 'uncertain', 'uncertain', 0, 6000);
     await b.next((f) => f.t === 'session' && f.message.kind === 'end' && f.message.sub === sub, 'the sub ended', 0, 6000);
     await b.next((f) => f.t === 'machines' && f.machines.some((x) => x.machine === m.name && !x.online), 'offline', 0, 6000);
@@ -597,6 +666,19 @@ describe('the grid', () => {
   });
 });
 
+describe('the grid, past the frame bound', () => {
+  it('sends a grid larger than one frame in numbered parts, none above the bound', async () => {
+    await hub.addProjects(6000, 'bulk');
+    const grid = await GridClient.open(hub, ADMIN);
+    await waitFor(() => (grid.frames.some((f) => f.t === 'grid') ? true : undefined), 10_000);
+    const whole = grid.frames.find((f) => f.t === 'grid') as Extract<GridDown, { t: 'grid' }>;
+    expect(whole.projects.filter((p) => p.id.startsWith('bulk-'))).toHaveLength(6000);
+    expect(grid.wire.length).toBeGreaterThan(1);
+    expect(Math.max(...grid.wire)).toBeLessThanOrEqual(FRAME_LIMIT);
+    grid.close();
+  });
+});
+
 /** A `say` on `m`'s session feed, from the alias maws-45. */
 function say(m: MachineClient, project: string, seq: number, text: string) {
   const event = {
@@ -625,16 +707,26 @@ async function waitFor<T>(probe: () => T | undefined | Promise<T | undefined>, m
 
 class GridClient {
   readonly frames: GridDown[] = [];
+  /** The size in bytes of every message the socket carried, parts included. */
+  readonly wire: number[] = [];
+  private readonly parts = new PartAssembler();
   private socket!: WebSocket;
   static async open(hub: LocalHub, who: string): Promise<GridClient> {
     const client = new GridClient();
     client.socket = new WebSocket(`${hub.url.replace('http', 'ws')}/api/registry/socket`, { headers: { 'x-desk-standin-user': who } } as unknown as string[]);
-    client.socket.addEventListener('message', (event) => client.frames.push(JSON.parse(String(event.data))));
+    client.socket.addEventListener('message', (event) => {
+      const text = String(event.data);
+      client.wire.push(Buffer.byteLength(text));
+      const frame = JSON.parse(text) as GridDown;
+      if (frame.t !== 'part') return void client.frames.push(frame);
+      const whole = client.parts.add(frame);
+      if (whole !== undefined) client.frames.push(whole as GridDown);
+    });
     await new Promise<void>((resolve, reject) => {
       client.socket.addEventListener('open', () => resolve());
       client.socket.addEventListener('error', () => reject(new Error('grid socket refused')));
     });
-    await waitFor(() => (client.frames.length > 0 ? true : undefined));
+    await waitFor(() => (client.frames.length > 0 ? true : undefined), 15_000);
     return client;
   }
   next(predicate: (frame: GridClient['frames'][number]) => boolean, what: string) {

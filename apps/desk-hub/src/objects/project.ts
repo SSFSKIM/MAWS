@@ -14,7 +14,7 @@ import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import { isBase64urlOf } from '../protocol/base64url';
 import type { AuditEntry, PendingRequest, ProjectDown, PushNotice } from '../protocol/browser';
 import { canonicalize } from '../protocol/canonical';
-import { isMemberId } from '../protocol/identity';
+import { isMemberId, type ProjectRecord } from '../protocol/identity';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
 import type { DownFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, toWire, type Part } from '../protocol/parts';
@@ -174,6 +174,8 @@ export class Project extends DurableObject<Env> {
   /** A frame a machine posted, handed over by its `Machine` object; resolves once every reply is on its stream. */
   async fromMachine(ctx: MachineContext, frame: UpFrame): Promise<void> {
     this.remember(ctx.org, ctx.project);
+    // A lease whose time ran out lapses before anything the machine sent is served, whether or not its alarm ran yet.
+    this.sweepLeases();
     if (frame.t === 'hello') await this.hello(ctx, frame);
     else if (!this.isOpen(ctx)) this.refuseMachine(ctx, { reason: 'not-open', message: 'send hello for this project on this stream first' });
     else if (frame.t === 'events') await this.upload(ctx, frame.events);
@@ -185,23 +187,32 @@ export class Project extends DurableObject<Env> {
   }
 
   /** The daemon answered a heartbeat on the stream this lease belongs to: the machine stays online, or is online again
-   * after a lapse. A renewal from any other generation, or one that arrives after its stream closed, is ignored. */
+   * after a lapse. A lease whose time ran out lapses first, its stream's work ended, even when its alarm has not run:
+   * a renewal never carries that work over. A renewal from any other generation, or one that arrives after its stream
+   * closed, is ignored. */
   renew(ctx: MachineContext): void {
     this.remember(ctx.org, ctx.project);
+    this.sweepLeases();
     const lease = this.plane.lease(ctx.machine);
     if (!lease || lease.generation !== ctx.generation || lease.closed) return;
     const wasOnline = this.isFresh(lease);
     this.plane.putLease({ ...lease, expires: Date.now() + ctx.leaseMs, online: true });
-    if (!wasOnline) this.machinesChanged();
+    if (!wasOnline) this.cameOnline(ctx.machine);
     void this.schedule();
   }
 
-  /** The stream this lease belongs to closed: the machine is offline at once. A close of any other generation is
-   * ignored. */
+  /** The stream this lease belongs to closed: the machine is offline at once. A close of an older generation is
+   * ignored. A close of a newer one than the lease (its first `hello` here still waits on the Registry, or never came)
+   * ends the older stream's lease and leaves the closed generation's own, so that `hello` opens nothing. */
   closed(ctx: MachineContext): void {
     this.remember(ctx.org, ctx.project);
     const lease = this.plane.lease(ctx.machine);
-    if (!lease || lease.generation !== ctx.generation || lease.closed) return;
+    if (lease && (lease.generation > ctx.generation || (lease.generation === ctx.generation && lease.closed))) return;
+    if (!lease || lease.generation < ctx.generation) {
+      if (lease?.online) this.lapse(lease);
+      this.plane.putLease({ machine: ctx.machine, generation: ctx.generation, expires: 0, online: false, closed: true });
+      return;
+    }
     if (lease.online) this.lapse({ ...lease, closed: true });
     else this.plane.putLease({ ...lease, closed: true });
   }
@@ -227,7 +238,7 @@ export class Project extends DurableObject<Env> {
       !Array.isArray(have) &&
       Object.values(have).every((seq) => Number.isSafeInteger(seq) && (seq as number) >= 0);
     if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'hello is {project, name, have: {writer: seq}}' });
-    const record = await this.registry().registerProject(ctx.project, frame.name, ctx.machine);
+    const record = await this.register(ctx.project, frame.name, ctx.machine);
     // A newer stream of this machine may have opened the project while the registry answered: it keeps its place.
     this.ctx.storage.sql.exec(
       'INSERT INTO machines (name, generation) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET generation = excluded.generation WHERE excluded.generation > machines.generation',
@@ -339,6 +350,9 @@ export class Project extends DurableObject<Env> {
       return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'presence is {record: object | null, bridge}' });
     }
     this.plane.putPresence(ctx.machine, message.session, message);
+    // Kept either way; shown only while this stream's lease is fresh. A lapsed machine's presence is not current, and
+    // it is shown when the lease is renewed.
+    if (!this.streamOnline(ctx)) return;
     this.broadcast({ t: 'session', message });
     this.reportSummary();
   }
@@ -578,7 +592,8 @@ export class Project extends DurableObject<Env> {
     // A second `hello` on a stream that already closed (it was on its way) opens nothing.
     if (old?.generation === ctx.generation && old.closed) return;
     this.plane.putLease({ machine: ctx.machine, generation: ctx.generation, expires: Date.now() + ctx.leaseMs, online: true, closed: false });
-    if (!wasOnline || old.generation !== ctx.generation) this.machinesChanged();
+    if (!wasOnline) this.cameOnline(ctx.machine);
+    else if (old.generation !== ctx.generation) this.machinesChanged();
     void this.schedule();
   }
 
@@ -602,6 +617,19 @@ export class Project extends DurableObject<Env> {
 
   private isFresh(lease: Lease): boolean {
     return lease.online && lease.expires > Date.now();
+  }
+
+  /** Whether the lease is fresh and belongs to this stream. */
+  private streamOnline(ctx: MachineContext): boolean {
+    const lease = this.plane.lease(ctx.machine);
+    return lease !== undefined && lease.generation === ctx.generation && this.isFresh(lease);
+  }
+
+  /** A machine back online: browsers learn it, and see its sessions' presence as it was kept meanwhile. */
+  private cameOnline(machine: string): void {
+    this.machinesChanged();
+    for (const kept of this.plane.presence()) if (kept.machine === machine) this.broadcast({ t: 'session', message: kept.message });
+    this.reportSummary();
   }
 
   private isOnline(machine: string): boolean {
@@ -844,6 +872,11 @@ export class Project extends DurableObject<Env> {
   private isOpen(ctx: MachineContext): boolean {
     const row = this.ctx.storage.sql.exec<{ generation: number }>('SELECT generation FROM machines WHERE name = ?', ctx.machine).toArray()[0];
     return row?.generation === ctx.generation;
+  }
+
+  /** The project registered in the org's Registry (the suites' Worker holds it here to race a close against it). */
+  protected register(project: string, name: string, machine: string): Promise<ProjectRecord> {
+    return this.registry().registerProject(project, name, machine);
   }
 
   private registry() {
