@@ -83,3 +83,12 @@ export function aliasFaces(root: HTMLElement, aliases: FaceAliases): void {
     if (next !== value) node.style.setProperty('font-family', next);
   }
 }
+
+/**
+ * Fix wave 3: the state's design-system overrides with each font token (`--ds-font-*`: the Theme's Body and Display
+ * faces, which may name a deck-uploaded family) mapped through the same private names, so text reading the token draws
+ * the upload the preview declared.
+ */
+export function aliasOverrides(overrides: Readonly<Record<string, string>>, aliases: FaceAliases): Record<string, string> {
+  return Object.fromEntries(Object.entries(overrides).map(([name, value]) => [name, name.startsWith('--ds-font-') ? aliasFamilyList(value, aliases) : value]));
+}

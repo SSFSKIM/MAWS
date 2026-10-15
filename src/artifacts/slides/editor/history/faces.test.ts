@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { newDoc, transact } from '../../../yjs';
 import * as Y from '../../../yjs/slides';
-import { aliasFaces, aliasFamilyList, previewFaces } from './faces';
+import { aliasFaces, aliasFamilyList, aliasOverrides, previewFaces } from './faces';
 
 function deckWithFaces(faces: Record<string, { family: string; src: string }>) {
   const doc = newDoc();
@@ -47,5 +47,14 @@ describe('the preview’s faces (R2)', () => {
     aliasFaces(root, aliases);
     expect(root.style.getPropertyValue('font-family')).toContain('deck-face-x');
     expect(p.style.getPropertyValue('font-family')).toContain('deck-face-y');
+  });
+
+  it('maps the font-token overrides (the Theme’s Body and Display faces) through the same private names (fix wave 3)', () => {
+    const aliases = new Map([['brand', 'deck-face-x']]);
+    expect(aliasOverrides({ '--ds-font-body': '"Brand", sans-serif', '--ds-font-display': 'Georgia, serif', '--ds-color-bg': '#ffffff' }, aliases)).toEqual({
+      '--ds-font-body': '"deck-face-x", sans-serif',
+      '--ds-font-display': 'Georgia, serif',
+      '--ds-color-bg': '#ffffff',
+    });
   });
 });

@@ -15,7 +15,7 @@ import { useDeckView } from '../deck-view';
 import { SLIDE_H, SLIDE_W, SlideView } from '../SlideView';
 import { measure } from '../transform/measure';
 import { slideOrderOf, type DeckHistoryController, type DeckPreview } from './controller';
-import { aliasFaces, type FaceAliases, type PreviewFaces } from './faces';
+import { aliasFaces, aliasOverrides, type FaceAliases, type PreviewFaces } from './faces';
 import type { Doc } from '../../../yjs';
 import { HISTORY_COPY as C, keyLabel } from './copy';
 import './history.css';
@@ -54,10 +54,12 @@ export function historyAssets(preview: Pick<DeckPreview, 'revision' | 'earlierRe
 export function HistoryPreview({ controller, preview, liveSystem, assets, faces, zoom, thumbnailWidth, onDrawn }: Props) {
   const view = useDeckView(preview.shown);
   const system = preview.system ?? liveSystem;
+  // fix wave 3: the font tokens the Theme overrode with a deck-uploaded family name the family's private name here
+  const overrides = useMemo(() => aliasOverrides(view.overrides, faces.shown), [view.overrides, faces.shown]);
   // fix wave 1 (R3): whether the system the version draws in has its style yet (the scope shares this view's lease)
   const systemReady = useDesignSystem(system).status !== 'loading';
   const scope = (children: ReactNode) => (
-    <DesignSystemScope system={system} medium="deck" overrides={view.overrides} className="deck-ds-scope">
+    <DesignSystemScope system={system} medium="deck" overrides={overrides} className="deck-ds-scope">
       {children}
     </DesignSystemScope>
   );

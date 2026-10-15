@@ -8,19 +8,22 @@ import { applyV2, attributionMap, contentIdsOf, newDoc, onUpdate, stateV2, trans
 import { flushLayout } from '../../canvas';
 import { changeStops, deckChanges, openDeckDiff } from '../../history';
 import { importSlide, setStyle, writeDeckKeys } from '../../model';
+import { setDeckOverride } from '../../writers';
+import * as Y from '../../../yjs/slides';
 import { loadSlide } from '../../parse';
 import type { DeckHistoryController, DeckPreview } from './controller';
 import { HistoryPreview } from './HistoryPreview';
 
 afterEach(cleanup);
 
-function previewOf(): { preview: DeckPreview; destroy(): void } {
+function previewOf(setup: (doc: Doc) => void = () => {}): { preview: DeckPreview; destroy(): void } {
   const host = newDoc();
   const l = loadSlide('<section id="s"><p id="box" style="position:absolute; left:100px; top:100px; width:200px; height:100px; font-size:32px">Box</p></section>');
   if (!l.ok) throw new Error('fixture');
   transact(host, () => {
     writeDeckKeys(host, { v: 4, title: 'T', order: ['s'] });
     importSlide(host, l.slide, 'a0');
+    setup(host);
   });
   const before = stateV2(host);
   const maps: ReturnType<typeof attributionMap>[] = [];
@@ -95,3 +98,26 @@ describe('the preview’s change marks (R3)', () => {
     }
   });
 });
+
+// Fix wave 3: the Theme's Body or Display face set to a deck-uploaded family writes that family into the scope's
+// `--ds-font-*` override; in the preview the upload is declared only under its private name, so the override must name it.
+describe('the preview’s font-token overrides (fix wave 3)', () => {
+  it('maps a Body override naming an uploaded family to the state’s private name in the scope’s style', async () => {
+    const { preview, destroy } = previewOf((doc) => {
+      Y.setDeckEntry(doc, 'faces', 'lab', { family: 'Face Lab', src: 'assets/lab.woff2' });
+      setDeckOverride(doc, '--ds-font-body', '"Face Lab", sans-serif');
+    });
+    try {
+      const aliases = new Map([['face lab', 'deck-face-test']]);
+      render(<HistoryPreview controller={controller} preview={{ ...preview, system: { builtin: 'maws' } }} liveSystem={null} assets={{ shown: () => null, earlier: () => null }} faces={{ shown: aliases, earlier: new Map() }} zoom={1} thumbnailWidth={240} />);
+      await tick();
+      const scope = document.querySelector<HTMLElement>('[data-history-stage] [data-ds-scope]')?.getAttribute('data-ds-scope');
+      const style = [...document.head.querySelectorAll('style')].map((el) => el.textContent ?? '').find((text) => scope && text.includes(scope)) ?? '';
+      expect(style).toMatch(/--ds-font-body:\s*"deck-face-test", sans-serif/);
+      expect(style).not.toContain('"Face Lab"');
+    } finally {
+      destroy();
+    }
+  });
+});
+
