@@ -4,11 +4,13 @@
 // so a token change or a system switch restyles every slide by reference; the editor's chrome reads the app's tokens.
 // Shared by the panel's record view and the `artifact` main tab (the shell, src/renderer/src/tools/presentation/).
 // M5: the transform layer on the stage, the toolbar's Insert and arrange controls, the inspector beside the stage.
+// M6: the Text style menu in the toolbar, New slide from layout in the filmstrip, and the panels the header's Theme and
+// Check open beside the stage (menus/).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
-import { DesignSystemScope, type DesignSystemRef } from '../../design-system/apply';
+import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { AssetUrl, SlideCanvas } from '../canvas';
 import { CANVAS_CSS } from '../canvas';
-import type { DeckFace } from '../deck';
+import { DECK_LIMITS, type DeckFace } from '../deck';
 import { insertElements, newElement, type NewKind } from '../writers-elements';
 import { DECK_COPY as C } from './copy';
 import { ElementBar } from './ElementBar';
@@ -17,6 +19,10 @@ import { Inspector } from './Inspector';
 import { measureInHost } from './transform/Overlay';
 import { useDeckView } from './deck-view';
 import { Filmstrip } from './Filmstrip';
+import { CheckPanel } from './menus/Check';
+import { insertLayoutSlide, LayoutsMenu } from './menus/Layouts';
+import { TextStyleMenu } from './menus/TextStyle';
+import { ThemePanel, type DeckThemeChoice } from './menus/Theme';
 import { Notes } from './Notes';
 import { ZOOM_STEPS, type DeckSession, type Zoom } from './session';
 import { SLIDE_H, SLIDE_W } from './SlideView';
@@ -43,6 +49,8 @@ export interface DeckEditorProps {
   /** Fix wave 1: the deck's artifact (named on copies) and how a paste brings another deck's pictures over. */
   artifactId?: string;
   importAsset?: ImportAsset;
+  /** M6: the Theme panel's design systems and how the deck names one (the shell's: the artifact's `designSystemId`). */
+  theme?: DeckThemeChoice;
 }
 
 const NOTICE_MS = 6_000;
@@ -72,7 +80,7 @@ function faceRules(faces: Readonly<Record<string, DeckFace>>, assetUrl: AssetUrl
     .join('\n');
 }
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -168,6 +176,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     [editable, slide, session, doc],
   );
 
+  const tokens = useDesignSystem(system).view?.tokens ?? null; // M6: the Text style menu's role faces
   const faces = faceRules(view.faces, assetUrl);
   return (
     <div className="deck-editor" data-deck-editor data-compact={compact || undefined} onKeyDown={onKeyDown}>
@@ -185,13 +194,23 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
           inspectorOpen={inspectorOpen}
           onToggleInspector={() => setInspectorOpen((open) => !open)}
         />
+        <TextStyleMenu session={session} slideId={slide?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
         <span role="status" className="deck-notice" data-deck-notice>
           {notice}
         </span>
       </Toolbar>
       <div className="deck-editor-body">
         {scope(
-          <Filmstrip session={session} view={view} current={slide?.id ?? null} assetUrl={assetUrl} width={compact ? 120 : SLIDE_W / 8} readOnly={readOnly} onDrawn={onThumbnailsDrawn} />,
+          <Filmstrip
+            session={session}
+            view={view}
+            current={slide?.id ?? null}
+            assetUrl={assetUrl}
+            width={compact ? 120 : SLIDE_W / 8}
+            readOnly={readOnly}
+            onDrawn={onThumbnailsDrawn}
+            fromLayout={<LayoutsMenu system={system} disabled={readOnly || view.slides.length >= DECK_LIMITS.slides} scope={scope} onPick={(layout) => insertLayoutSlide(session, layout, slide?.id ?? order.at(-1) ?? null)} />}
+          />,
         )}
         <div className="deck-editor-main">
           <Stage
@@ -211,6 +230,8 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
           />
           {slide && <Notes key={slide.id} session={session} slideId={slide.id} token={slide.token} readOnly={readOnly || slide.held !== null} />}
         </div>
+        {state.rail === 'theme' && scope(<ThemePanel session={session} system={system} theme={theme} overrides={view.overrides} faces={view.faces} readOnly={readOnly} />)}
+        {state.rail === 'check' && <CheckPanel session={session} system={system} />}
         {inspectorOpen &&
           slide &&
           scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} />)}

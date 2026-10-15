@@ -3,17 +3,19 @@
 // the X32 header registered under the scope the surface gives, the stage registered as the tab's Mark-up surface while it
 // is on screen, the slides in the deck's governing design system (D's chain: the deck's own system, its Space's default,
 // the owner's, else the bundled floor), and `onShown` once the first slide is drawn while the body is visible.
+// M6: the header's Present, Theme and Check on the tab's deck session; the Theme panel's systems and switch.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { governingSystem } from '@artifacts/design-system/apply';
 import type { ArtifactHost } from '@artifacts/host';
 import { DeckEditor } from '@artifacts/slides/editor/DeckEditor';
+import type { DeckSession } from '@artifacts/slides/editor/session';
 import type { ArtifactEditorProps } from '../../artifacts/registry';
 import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
-import { useSettings } from '../../stores/settings';
+import { chooseDeckSystem, presentDeck } from './commands';
 import { deckExports } from './exports';
-import { deckHeader } from './header';
+import { useDeckSystem } from './governing';
+import { deckHeader, type DeckHeaderCommands } from './header';
 import type { DeckTabState } from './tab-state';
 
 export type DeckEditorBodyProps = ArtifactEditorProps<DeckTabState>;
@@ -25,17 +27,10 @@ export function DeckMain(props: DeckEditorBodyProps) {
   return <DeckBody {...props} compact={false} />;
 }
 
-// The system governing the deck. The house system (D's chain, one link before the floor) is the host's to name; the
-// renderer has no origin keys to find it by, so a deck with no system of its own, no Space default and no owner default
-// draws in the bundled floor, which the house system starts as (M6's Theme menu names the deck's system explicitly).
-function useGoverningSystem(placement: { designSystemId?: string; spaceId?: string } | null) {
-  const defaults = useSettings((s) => s.state?.settings.artifacts);
-  const systems = useLibraryList({ kind: 'design_system' }).value?.rows;
-  return useMemo(() => {
-    if (!placement) return null;
-    const live = systems ? new Set(systems.map((s) => s.id)) : null;
-    return governingSystem(placement, { owner: defaults?.defaultDesignSystem ?? null, spaces: defaults?.spaceDesignSystems ?? {}, house: null }, (id) => live === null || live.has(id));
-  }, [placement, defaults, systems]);
+const NO_SESSION = () => () => {};
+/** M6: the panel open beside the stage (the header shows it pressed); null before the deck opens. */
+function useRail(session: DeckSession | null) {
+  return useSyncExternalStore(session?.subscribe ?? NO_SESSION, () => session?.snapshot().rail ?? null);
 }
 
 function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckEditorBodyProps & { compact: boolean }) {
@@ -44,10 +39,23 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
   const title = row?.title ?? 'Presentation';
   useEffect(() => state.setTitle(title), [state, title]);
   const exports = useMemo(() => deckExports(artifactId), [artifactId]); // M9
-  useEditorHost(scope, deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports }));
+  // M6: the actions drive the tab's own session (X32's lifetime rule), Present from the slide it shows
+  const opened = snapshot.session;
+  const rail = useRail(opened);
+  const commands = useMemo<DeckHeaderCommands | undefined>(
+    () => (opened ? { present: () => void presentDeck(artifactId, opened.snapshot().currentSlide), toggleRail: (r) => opened.toggleRail(r) } : undefined),
+    [opened, artifactId],
+  );
+  useEditorHost(scope, deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: opened !== null }, commands));
 
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
-  const system = useGoverningSystem(placement);
+  const system = useDeckSystem(placement);
+  // M6: the Theme panel's systems (the library's live design systems) and the deck's own choice
+  const systemRows = useLibraryList({ kind: 'design_system' }).value?.rows;
+  const theme = useMemo(
+    () => ({ systems: (systemRows ?? []).map((s) => ({ id: s.id, name: s.title })), chosen: row?.designSystemId ?? null, choose: (id: string | null) => chooseDeckSystem(artifactId, id) }),
+    [systemRows, row?.designSystemId, artifactId],
+  );
   const assetUrl = useCallback((ref: string) => state.host.assetUrl(artifactId, ref), [state, artifactId]);
   // M5: a picked image uploaded into the artifact (Insert's image, the inspector's Replace), answered as its `assets/<name>`
   const uploadAsset = useCallback(async (file: File) => (await state.host.uploadAsset(artifactId, new Uint8Array(await file.arrayBuffer()), { name: file.name, mime: file.type })).ref, [state, artifactId]);
@@ -93,6 +101,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         uploadAsset={uploadAsset}
         artifactId={artifactId}
         importAsset={importAsset}
+        theme={theme}
       />
     </div>
   );

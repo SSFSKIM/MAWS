@@ -4,7 +4,7 @@
 // lift, arrows to move, Space to drop), and the slide gestures: new (blank, after the current slide), duplicate, hide,
 // delete. Hidden slides are dimmed; held slides badged with their reasons. Every gesture is one transaction and one
 // undo step (the session's `edit`).
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { DropdownMenu } from 'radix-ui';
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
@@ -28,9 +28,11 @@ export interface FilmstripProps {
   readOnly: boolean;
   /** Once, when every thumbnail of the first showing is drawn (how many). */
   onDrawn?: (thumbnails: number) => void;
+  /** M6: New slide from layout, beside New slide. */
+  fromLayout?: ReactNode;
 }
 
-export function Filmstrip({ session, view, current, assetUrl, width, readOnly, onDrawn }: FilmstripProps) {
+export function Filmstrip({ session, view, current, assetUrl, width, readOnly, onDrawn, fromLayout }: FilmstripProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const ids = view.slides.map((s) => s.id);
   const scale = width / SLIDE_W;
@@ -91,9 +93,12 @@ export function Filmstrip({ session, view, current, assetUrl, width, readOnly, o
         </SortableContext>
       </DndContext>
       {!readOnly && (
-        <button type="button" className="deck-button deck-new-slide" disabled={full} onClick={addBlank}>
-          {C.newSlide}
-        </button>
+        <div className="deck-new-slides">
+          <button type="button" className="deck-button deck-new-slide" disabled={full} onClick={addBlank}>
+            {C.newSlide}
+          </button>
+          {fromLayout}
+        </div>
       )}
       {!readOnly && full && <p className="deck-filmstrip-note">{C.deckFull(DECK_LIMITS.slides)}</p>}
     </nav>

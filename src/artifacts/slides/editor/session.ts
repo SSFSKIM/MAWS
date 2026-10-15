@@ -11,6 +11,8 @@ import { slideOrder } from '../model';
 
 export type Zoom = 'fit' | number;
 export const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2] as const;
+/** M6: the panel beside the stage that a header action opens (one at a time; the milestones after add theirs). */
+export type DeckRail = 'theme' | 'check';
 
 export interface DeckSessionState {
   currentSlide: string | null;
@@ -21,6 +23,8 @@ export interface DeckSessionState {
   selection: readonly string[];
   /** M5: the text element edited in place, if any (always one of the selection). */
   editingText: string | null;
+  /** M6: the panel the header's Theme or Check opened beside the stage, if any. */
+  rail: DeckRail | null;
 }
 
 export interface DeckSessionOptions {
@@ -66,7 +70,7 @@ export class DeckSession {
     private readonly options: DeckSessionOptions = {},
   ) {
     this.undo = createDeckUndo(doc, { editor: 'deck' });
-    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null };
+    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null, rail: null };
     this.timings = { openedAt };
     this.stopUndo = this.undo.subscribe(() => this.set({ canUndo: this.undo.canUndo(), canRedo: this.undo.canRedo() }));
     this.publish();
@@ -195,6 +199,10 @@ export class DeckSession {
   }
   setZoom(zoom: Zoom): void {
     this.set({ zoom });
+  }
+  /** M6: opens a panel beside the stage, or closes it when it is the one open. */
+  toggleRail(rail: DeckRail): void {
+    this.set({ rail: this.state.rail === rail ? null : rail });
   }
 
   /** The slide to show when the current one is gone: the one now at its place, else the last. */

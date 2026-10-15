@@ -52,6 +52,7 @@ import * as spaces from './schema/spaces';
 // P3-A end
 // P3-L start (M1)
 import * as library from './schema/library';
+import * as presentations from './schema/presentations'; // P3-C M6
 // P3-L end
 
 export {
@@ -144,6 +145,7 @@ export const commands = {
   ...artifacts.commands, // P3-A M4
   ...spaces.commands, // P3-A M4
   ...library.commands, // P3-L M1
+  ...presentations.commands, // P3-C M6
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -185,6 +187,7 @@ export const events = {
   ...artifacts.events, // P3-A M4
   ...spaces.events, // P3-A M4
   ...library.events, // P3-L M1
+  ...presentations.events, // P3-C M6
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;
