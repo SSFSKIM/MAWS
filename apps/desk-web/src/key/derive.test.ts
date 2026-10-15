@@ -59,8 +59,8 @@ describe('wrappingKeyFromPassphrase', () => {
 
   it('reads a passphrase as its NFC form, so one typed on another keyboard derives the same key', () => {
     // 'é' composed (U+00E9) and decomposed (e + U+0301) are the same text, and the same input to the derivation.
-    expect(hex(passphraseInput('café au lait'))).toBe(hex(passphraseInput('café au lait')));
-    expect(passphraseProblem('café café c')).toMatch(/at least 12/); // 13 code units, 11 characters
+    expect(hex(passphraseInput('caf\u00e9 au lait'))).toBe(hex(passphraseInput('cafe\u0301 au lait')));
+    expect(passphraseProblem('cafe\u0301 cafe\u0301 c')).toMatch(/at least 12/); // 13 code units, 11 characters
   });
 });
 

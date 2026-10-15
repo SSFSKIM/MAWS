@@ -17,7 +17,7 @@ export type NewMethod = { kind: 'passkey'; orgName: string; email: string } | { 
 /** A method the org has, to open a copy with: one of its passkeys, or its passphrase. */
 export type OrgMethod = { kind: 'passkey' } | { kind: 'passphrase'; passphrase: string; progress?: Progress };
 
-export type KeyMethodFailure = 'no-key' | 'no-method' | 'wrong-secret' | 'not-org-key' | 'other-key-held' | 'unknown-derivation';
+export type KeyMethodFailure = 'no-key' | 'no-method' | 'wrong-secret' | 'not-org-key' | 'other-key-held' | 'unknown-derivation' | 'locked';
 
 export class KeyMethodError extends Error {
   constructor(
@@ -27,6 +27,14 @@ export class KeyMethodError extends Error {
     super(message);
   }
 }
+
+/**
+ * Whether the operation still stands — the key it acts for not locked, nor superseded — asked once the prompt and the
+ * derivation are over, right before anything goes to the hub: a Lock wins over every change begun before it.
+ */
+export type StillWanted = () => boolean;
+
+const lockedMeanwhile = () => new KeyMethodError('locked', 'The org key was locked meanwhile, so nothing was changed.');
 
 /** A new method, its wrapping key derived and held (non-extractable) until a copy is locked under it. */
 export type PreparedMethod = WrapMethod & { kdf: JsonObject; wrapping: CryptoKey };
@@ -49,13 +57,16 @@ async function copyRequest(org: string, method: PreparedMethod, label: string, r
 
 /**
  * The org's first setup: draws the org key at random, locks its first copy under `method`, and returns it held. The hub
- * refuses it `not-key-holder` when the org already has a key (set up elsewhere, perhaps a moment before).
+ * refuses it `not-key-holder` when the org already has a key (set up elsewhere, perhaps a moment before). Nothing is
+ * posted once `stillWanted` says the setup was superseded.
  */
-export async function setUpOrgKey(org: string, method: PreparedMethod, label: string): Promise<OrgKey> {
+export async function setUpOrgKey(org: string, method: PreparedMethod, label: string, stillWanted: StillWanted): Promise<OrgKey> {
   const raw = crypto.getRandomValues(new Uint8Array(32));
   try {
     const held = await holdKeyBytes(Uint8Array.from(raw));
-    await addWrappedKey(await copyRequest(org, method, label, raw, held));
+    const request = await copyRequest(org, method, label, raw, held);
+    if (!stillWanted()) throw lockedMeanwhile();
+    await addWrappedKey(request);
     return held;
   } finally {
     raw.fill(0);
@@ -123,11 +134,14 @@ export async function openOrgKeyBytes(org: string, keys: WrappedKeys, method: Or
   }
 }
 
-/** Adds a method: the bytes opened with `confirm` (a method the org has), locked under `method`, then wiped. */
-export async function addMethod(org: string, keys: WrappedKeys, method: PreparedMethod, label: string, confirm: OrgMethod, held: OrgKey): Promise<WrappedKeyRecord> {
+/** Adds a method: the bytes opened with `confirm` (a method the org has), locked under `method`, then wiped. Nothing is
+ * posted once `stillWanted` says `held` was locked while the confirmation ran. */
+export async function addMethod(org: string, keys: WrappedKeys, method: PreparedMethod, label: string, confirm: OrgMethod, held: OrgKey, stillWanted: StillWanted): Promise<WrappedKeyRecord> {
   const raw = await openOrgKeyBytes(org, keys, confirm, held);
   try {
-    return await addWrappedKey(await copyRequest(org, method, label, raw, held));
+    const request = await copyRequest(org, method, label, raw, held);
+    if (!stillWanted()) throw lockedMeanwhile();
+    return await addWrappedKey(request);
   } finally {
     raw.fill(0);
   }

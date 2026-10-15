@@ -20,24 +20,28 @@ export function UnlockForm({ me, onUnlocked }: { me: Me; onUnlocked?: () => void
   const queries = useQueryClient();
   const [keep, setKeep] = useState<Keep>('session');
   const [error, setError] = useState<string | null>(null);
+  /** An attempt is running: where the key is kept is fixed at its start, so the control stays as it was until it ends. */
+  const [running, setRunning] = useState(false);
 
   /** Begun before the method's prompt and derivation: a Lock pressed meanwhile wins, even after this form is gone. */
-  async function attempt(work: () => Promise<OrgKey>, step: 'set-up' | 'unlock', method: NewMethod | OrgMethod) {
+  async function attempt(work: (stillWanted: () => boolean) => Promise<OrgKey>, step: 'set-up' | 'unlock', method: NewMethod | OrgMethod) {
     setError(null);
+    setRunning(true);
     const unlocking = beginUnlock(org);
     try {
-      if (!(await unlocking.finish(await work(), keep))) return;
+      if (!(await unlocking.finish(await work(unlocking.current), keep))) return;
       rememberMethod(org, method.kind);
       if (step === 'set-up') useSecondMethodPrompt.setState({ due: true });
       onUnlocked?.();
     } catch (failure) {
       setError(explainKeyFailure(failure, step));
     } finally {
+      setRunning(false);
       if (step === 'set-up') void queries.invalidateQueries({ queryKey: WRAPPED_KEYS_QUERY });
     }
   }
 
-  const setUp = (method: NewMethod) => attempt(async () => setUpOrgKey(org, await prepareMethod(org, method), methodLabel(method.kind)), 'set-up', method);
+  const setUp = (method: NewMethod) => attempt(async (stillWanted) => setUpOrgKey(org, await prepareMethod(org, method), methodLabel(method.kind), stillWanted), 'set-up', method);
   const unlock = (wrapped: WrappedKeys) => (method: OrgMethod) => attempt(() => unlockOrgKey(org, wrapped, method), 'unlock', method);
 
   return (
@@ -61,7 +65,7 @@ export function UnlockForm({ me, onUnlocked }: { me: Me; onUnlocked?: () => void
       )}
 
       <label className="flex items-center gap-2 text-ui-sm">
-        <input type="checkbox" checked={keep === 'device'} onChange={(event) => setKeep(event.target.checked ? 'device' : 'session')} />
+        <input type="checkbox" checked={keep === 'device'} onChange={(event) => setKeep(event.target.checked ? 'device' : 'session')} disabled={running} />
         Keep unlocked on this device
         <span className="text-fg-muted">(otherwise it is forgotten when this tab closes)</span>
       </label>

@@ -8,7 +8,7 @@ import { useState } from 'react';
 import type { OrgKey, WrappedKeyRecord, WrappedKeys } from 'desk-hub/protocol';
 import type { Me } from '../../hub/me';
 import { checkFingerprint } from '../../key/derive';
-import { lock, useKeyHolder } from '../../key/holder';
+import { lock, stillHolds, useKeyHolder } from '../../key/holder';
 import { addMethod, prepareMethod, rememberedMethod, removeMethod, type NewMethod, type OrgMethod, type PreparedMethod } from '../../key/unlock';
 import { listWrappedKeys, WRAPPED_KEYS_QUERY } from '../../key/wrapped-keys';
 import { buttonQuiet, buttonSecondary, Dialog } from '../common/Dialog';
@@ -178,7 +178,8 @@ function AddMethod({ me, keys, held, onDone }: { me: Me; keys: WrappedKeys; held
     if (!prepared) return;
     setError(null);
     try {
-      await addMethod(org, keys, prepared.method, methodLabel(prepared.kind), method, held);
+      // A Lock pressed while the confirmation ran wins: no copy goes out for a key this tab no longer holds.
+      await addMethod(org, keys, prepared.method, methodLabel(prepared.kind), method, held, () => stillHolds(held));
       onDone();
     } catch (failure) {
       setError(explainKeyFailure(failure, 'change'));

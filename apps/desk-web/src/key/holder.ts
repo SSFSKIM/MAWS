@@ -58,7 +58,14 @@ export async function loadDeviceKey(org: string, store: KeyStore = idbKeyStore()
   useKeyHolder.setState(key ? { state: 'unlocked', key, kept: 'device', fingerprint } : { state: 'locked', key: null, kept: null, fingerprint: null });
 }
 
+/** Whether `key` is still the one this tab holds: false once a Lock (or another unlock) replaced it. */
+export function stillHolds(key: OrgKey): boolean {
+  return useKeyHolder.getState().key === key;
+}
+
 export type UnlockAttempt = {
+  /** Whether this unlock is still the newest operation: false once a Lock or another unlock began after it. */
+  current(): boolean;
   /** Holds the org key — opened from its copy, or bytes just drawn (wiped once held) — kept where the owner chose. False
    * when a newer unlock or a Lock began after this one: nothing of it is published, and its write, if not yet run, is
    * skipped. */
@@ -71,6 +78,7 @@ export function beginUnlock(org: string, store: KeyStore = idbKeyStore()): Unloc
   const token = ++op;
   const newest = () => token === op;
   return {
+    current: newest,
     async finish(opened, keep) {
       if (!newest()) {
         if (opened instanceof Uint8Array) opened.fill(0);

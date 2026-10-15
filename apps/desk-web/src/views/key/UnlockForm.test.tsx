@@ -17,20 +17,24 @@ import { importWrappingKey } from '../../key/wrap';
 import { useSecondMethodPrompt } from './second-method';
 import { UnlockForm } from './UnlockForm';
 
-const device = vi.hoisted(() => ({ store: null as KeyStore | null, opened: null as ((key: OrgKey) => void) | null }));
+const device = vi.hoisted(() => ({ store: null as KeyStore | null, opened: null as ((key: OrgKey) => void) | null, preparing: null as Promise<void> | null }));
 vi.mock('../../key/org-key', async (original) => ({ ...(await original<typeof import('../../key/org-key')>()), idbKeyStore: () => device.store! }));
 // The method's work (seconds of Argon2id, or a passkey prompt) is held open until the test ends it; a new method's
 // wrapping key comes without one.
 vi.mock('../../key/unlock', async (original) => ({
   ...(await original<typeof import('../../key/unlock')>()),
   unlockOrgKey: () => new Promise<OrgKey>((resolve) => (device.opened = resolve)),
-  prepareMethod: async () => ({ method: 'passphrase', credential: null, kdf: { name: 'test' }, wrapping: await importWrappingKey(new Uint8Array(32)) }),
+  prepareMethod: async () => {
+    await device.preparing;
+    return { method: 'passphrase', credential: null, kdf: { name: 'test' }, wrapping: await importWrappingKey(new Uint8Array(32)) };
+  },
 }));
 
 let hub: OrgKeysDouble;
 beforeEach(() => {
   device.store = memoryKeyStore();
   device.opened = null;
+  device.preparing = null;
   hub = new OrgKeysDouble();
   vi.stubGlobal('fetch', hub.fetch(ME.member));
   useKeyHolder.setState({ state: 'locked', key: null, kept: null, fingerprint: null, forgetError: null });
@@ -47,7 +51,7 @@ const PASSPHRASE = 'correct horse battery staple';
 /** The org's key set up by another browser: a passphrase copy at the double. */
 async function setUpElsewhere() {
   const { setUpOrgKey } = await vi.importActual<typeof import('../../key/unlock')>('../../key/unlock');
-  await setUpOrgKey('elsewhere', { method: 'passphrase', credential: null, kdf: { name: 'test' }, wrapping: await importWrappingKey(new Uint8Array(32)) }, 'elsewhere');
+  await setUpOrgKey('elsewhere', { method: 'passphrase', credential: null, kdf: { name: 'test' }, wrapping: await importWrappingKey(new Uint8Array(32)) }, 'elsewhere', () => true);
 }
 
 async function startPassphraseUnlock(keep: boolean) {
@@ -88,6 +92,32 @@ describe('UnlockForm', () => {
     const opened = await holdKeyBytes(Uint8Array.from(VECTOR_KEY));
     await act(async () => device.opened!(opened));
     await vi.waitFor(() => expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', key: opened }));
+  });
+
+  it('freezes where the key is kept while an unlock runs: the choice made when it began is the one kept', async () => {
+    await setUpElsewhere();
+    render(withQueries(<UnlockForm me={ME} />));
+    await startPassphraseUnlock(true);
+    const keep = screen.getByLabelText(/Keep unlocked on this device/) as HTMLInputElement;
+    expect(keep.disabled).toBe(true);
+    await act(async () => device.opened!(await holdKeyBytes(Uint8Array.from(VECTOR_KEY))));
+    await vi.waitFor(() => expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', kept: 'device' }));
+    expect(await device.store!.load(ME.org.id)).not.toBeNull();
+  });
+
+  it('freezes where the key is kept while a first setup runs', async () => {
+    let release!: () => void;
+    device.preparing = new Promise<void>((resolve) => (release = resolve));
+    render(withQueries(<UnlockForm me={ME} />));
+    const keep = (await screen.findByLabelText(/Keep unlocked on this device/)) as HTMLInputElement;
+    fireEvent.click(keep);
+    fireEvent.change(await screen.findByLabelText(/Or a passphrase/), { target: { value: PASSPHRASE } });
+    fireEvent.change(screen.getByLabelText(/The passphrase again/), { target: { value: PASSPHRASE } });
+    fireEvent.submit(screen.getByRole('form', { name: 'New passphrase' }));
+    await vi.waitFor(() => expect(keep.disabled).toBe(true));
+    await act(async () => release());
+    await vi.waitFor(() => expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', kept: 'device' }));
+    expect(keep.disabled).toBe(false);
   });
 
   it("sets up an org with no key, and prompts for a second method", async () => {

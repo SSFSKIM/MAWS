@@ -26,7 +26,8 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 const passphrase = (text: string) => ({ kind: 'passphrase', passphrase: text }) as const;
-const setUp = async () => setUpOrgKey(ORG, await prepareMethod(ORG, passphrase(FIRST)), 'first');
+const setUp = async () => setUpOrgKey(ORG, await prepareMethod(ORG, passphrase(FIRST)), 'first', () => true);
+const current = () => true;
 const rejection = async (promise: Promise<unknown>) => promise.then(() => null, (error: unknown) => error);
 
 describe('setUpOrgKey', () => {
@@ -36,6 +37,12 @@ describe('setUpOrgKey', () => {
     const { key_check, keys } = await listWrappedKeys();
     expect(key_check).toBe(await keyCheck(held));
     expect(keys).toMatchObject([{ method: 'passphrase', label: 'first', credential: null, check: key_check, kdf: passphraseKdf(ORG, PASSPHRASE_COST) }]);
+  });
+
+  it('posts nothing when the setup was superseded (a Lock) before its copy went out', async () => {
+    const error = await rejection(setUpOrgKey(ORG, await prepareMethod(ORG, passphrase(FIRST)), 'first', () => false));
+    expect(error).toMatchObject({ reason: 'locked' });
+    expect(await listWrappedKeys()).toEqual({ key_check: null, keys: [] });
   });
 
   it('draws another key each time: two orgs set up alike share nothing', async () => {
@@ -95,24 +102,34 @@ describe('unlockOrgKey', () => {
 describe('addMethod', () => {
   it("locks another copy of the held key, confirmed with a method the org has; either opens the same key", async () => {
     const held = await setUp();
-    const record = await addMethod(ORG, await listWrappedKeys(), await prepareMethod(ORG, passphrase(SECOND)), 'second', passphrase(FIRST), held);
+    const record = await addMethod(ORG, await listWrappedKeys(), await prepareMethod(ORG, passphrase(SECOND)), 'second', passphrase(FIRST), held, current);
     expect(record).toMatchObject({ method: 'passphrase', label: 'second', check: await keyCheck(held) });
     const keys = await listWrappedKeys();
     expect(keys.keys).toHaveLength(2);
     expect(await keyCheck(await unlockOrgKey(ORG, keys, passphrase(SECOND)))).toBe(await keyCheck(held));
   });
 
+  it('posts nothing once the held key was locked while the confirmation opened its bytes', async () => {
+    const held = await setUp();
+    let asked = 0;
+    const locked = () => (asked++, false); // a Lock pressed while the confirmation ran
+    const error = await rejection(addMethod(ORG, await listWrappedKeys(), await prepareMethod(ORG, passphrase(SECOND)), 'second', passphrase(FIRST), held, locked));
+    expect(error).toMatchObject({ reason: 'locked' });
+    expect(asked).toBeGreaterThan(0);
+    expect((await listWrappedKeys()).keys).toHaveLength(1);
+  });
+
   it("refuses, before posting, when this browser's key isn't the org's", async () => {
     await setUp();
     const other = await holdKeyBytes(crypto.getRandomValues(new Uint8Array(32)));
-    const error = await rejection(addMethod(ORG, await listWrappedKeys(), await prepareMethod(ORG, passphrase(SECOND)), 'second', passphrase(FIRST), other));
+    const error = await rejection(addMethod(ORG, await listWrappedKeys(), await prepareMethod(ORG, passphrase(SECOND)), 'second', passphrase(FIRST), other, current));
     expect(error).toMatchObject({ reason: 'other-key-held' });
     expect((await listWrappedKeys()).keys).toHaveLength(1);
   });
 
   it('refuses a wrong confirmation', async () => {
     const held = await setUp();
-    const error = await rejection(addMethod(ORG, await listWrappedKeys(), await prepareMethod(ORG, passphrase(SECOND)), 'second', passphrase(SECOND), held));
+    const error = await rejection(addMethod(ORG, await listWrappedKeys(), await prepareMethod(ORG, passphrase(SECOND)), 'second', passphrase(SECOND), held, current));
     expect(error).toMatchObject({ reason: 'wrong-secret' });
   });
 });
@@ -129,7 +146,7 @@ describe('openOrgKeyBytes', () => {
 describe('removeMethod', () => {
   it("removes a copy with the held key's proof, never the last, and refuses a browser holding another key", async () => {
     const held = await setUp();
-    await addMethod(ORG, await listWrappedKeys(), await prepareMethod(ORG, passphrase(SECOND)), 'second', passphrase(FIRST), held);
+    await addMethod(ORG, await listWrappedKeys(), await prepareMethod(ORG, passphrase(SECOND)), 'second', passphrase(FIRST), held, current);
     const [first, second] = (await listWrappedKeys()).keys;
 
     const other = await holdKeyBytes(crypto.getRandomValues(new Uint8Array(32)));
