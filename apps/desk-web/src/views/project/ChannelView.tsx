@@ -1,6 +1,7 @@
 // The center column: the selected channel, drawn only from verified log events and verified requests (§4). The group
 // chat and a direct channel are one stream (`buildStream`); a direct channel's header carries the session's actions —
-// Retire while it is a member, Resume once it ended — each drawn disabled with §5's reason when the session cannot,
+// Retire while it is a member, Resume once it ended (never once retired: it says who retired it) — each drawn
+// disabled with §5's reason when the session cannot,
 // and says when the machine is offline: the conversation stays, presence and depth are unavailable. A direct channel's
 // actions and composer are keyed by their session, so a draft, an RPC's status, or a Retire confirmation never follows
 // the owner into another session's channel.
@@ -11,8 +12,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from 'zustand';
 import type { LogEvent } from 'desk-hub/protocol';
-import { buildStream, placedRequest, type PlacedRequest } from '../../conversation/stream';
-import { capabilities, kindOf } from '../../conversation/capabilities';
+import { buildStream, byWhom, placedRequest, type PlacedRequest } from '../../conversation/stream';
+import { capabilities, kindOf, retiredBy } from '../../conversation/capabilities';
 import { landedItem, landingReady, landingStatus } from '../../conversation/landing';
 import { refused } from '../../log/project-log';
 import { useLanding } from '../../pwa/service-worker';
@@ -108,11 +109,22 @@ function useLanded(channel: Channel, items: ReturnType<typeof buildStream>) {
   return { item, notice: status.kind === 'shown' ? null : status };
 }
 
-/** The phone's composer for an ended session: Resume, at thumb height (a send to it would only be recorded). */
+/** "Retired by <who>", from the log's `retired`. */
+const retiredText = (by: string, member: string) => (by ? `Retired by ${byWhom(by, member)}` : 'Retired');
+
+/** The phone's composer for an ended session: Resume, at thumb height (a send to it would only be recorded); for a
+ * retired one, who retired it. */
 function ResumeBar({ session }: { session: DeskSession }) {
   const { connection, member } = useDesk();
   const [rpc, setRpc] = useState<string | null>(null);
   const can = capabilities(session).resume;
+  const retired = retiredBy(session);
+  if (retired !== null)
+    return (
+      <p className="m-0 shrink-0 border-t border-border px-4 py-3 text-ui-sm text-fg-muted" data-testid="retired-by">
+        {retiredText(retired, member)}
+      </p>
+    );
   return (
     <div className="flex shrink-0 flex-col gap-1.5 border-t border-border px-4 py-3" data-testid="resume-bar">
       <button
@@ -137,7 +149,8 @@ function SessionActions({ session, phone }: { session: DeskSession; phone: boole
   const [opened, setOpened] = useState(false);
   const can = capabilities(session);
   const ended = session.group === 'ended';
-  if (phone && ended) return null; // Resume replaces the composer
+  const retired = retiredBy(session);
+  if (phone && ended) return null; // Resume (or who retired it) replaces the composer
   if (phone && !opened)
     return (
       <button type="button" className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-hover" aria-label={`${session.alias}: Retire, and what opens on a computer`} onClick={() => setOpened(true)}>
@@ -150,7 +163,12 @@ function SessionActions({ session, phone }: { session: DeskSession; phone: boole
     <span className={['ml-auto flex min-w-0 items-center gap-2', phone ? 'w-full flex-wrap' : ''].join(' ')}>
       {phone && <span className="w-full text-ui-sm text-fg-muted">{session.alias}'s transcript, subagents and diff open on a computer.</span>}
       <RpcStatus nonce={rpc} />
-      {ended ? (
+      {retired !== null ? (
+        // Retired is the owner's taking it out of the project: its machine refuses Resume, so none is offered.
+        <span className="shrink-0 text-ui-sm text-fg-muted" data-testid="retired-by">
+          {retiredText(retired, member)}
+        </span>
+      ) : ended ? (
         <button type="button" className={button} disabled={!can.resume.can} title={can.resume.reason ?? undefined} onClick={async () => setRpc(await connection.rpc(member, session.machine, 'resume', { session: session.session }))}>
           Resume
         </button>

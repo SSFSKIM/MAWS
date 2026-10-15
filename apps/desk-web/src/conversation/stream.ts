@@ -61,7 +61,7 @@ export const writerSession = (writer: string): string | null => {
 const MEMBER_ID = /^[0-9a-f]{32}$/;
 
 /** Who `by` names: you, another member of the org (by its id: the browser holds no member list), or what sminos wrote. */
-function byWhom(by: string, member: string | null): string {
+export function byWhom(by: string, member: string | null): string {
   if (member !== null && by === member) return 'you';
   if (MEMBER_ID.test(by)) return `another member (${by.slice(0, 8)})`;
   return by;

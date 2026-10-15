@@ -213,37 +213,45 @@ test("controls a session cannot use are drawn disabled with §5's reason, by kin
   await expect(composer.getByTestId('composer-note')).toHaveText('starts a turn');
 });
 
-test('an ended session keeps its channel with Resume, a send to it shows as recorded, and retire and spawn go out as RPCs', async ({ page, hub }) => {
+test('a retired session keeps its history with no Resume; an ended one offers Resume, a send to it shows as recorded, and retire and spawn go out as RPCs', async ({ page, hub }) => {
   await stageProject(hub);
   hub.setMachines(PROJECT, [
     { machine: 'mini', online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [{ path: '/Users/new/MAWS', branch: 'main' }] },
     { machine: 'SK.local', online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [] },
   ]);
+  // Retired: taken out of the project by the owner, which its machine refuses to Resume.
   await open(page, hub, S.gone);
+  const header = page.getByTestId('channel-header');
   await expect(center(page)).toContainText('doperpowers-1e joined on SK.local');
   await expect(center(page)).toContainText('doperpowers-1e retired by human');
+  await expect(header.getByTestId('retired-by')).toHaveText('Retired by human');
+  await expect(header.getByRole('button', { name: 'Resume' })).toHaveCount(0);
+
+  // Ended: no live process, never retired.
+  presence(hub, 'mini', S.rests, null);
+  await nav(page).locator(`[data-session="${S.rests}"]`).click();
   await expect(page.getByTestId('composer-note')).toHaveText('recorded, not delivered: a closed terminal session is reopened only by Resume');
-  const box = page.getByRole('textbox', { name: 'Message doperpowers-1e' });
+  const box = page.getByRole('textbox', { name: 'Message cua_repl' });
   await box.fill('a note for when you are back');
   await box.press('Enter');
   await expect.poll(() => hub.logOf(PROJECT).some((e) => e.event.text === 'a note for when you are back')).toBe(true);
   const note = hub.logOf(PROJECT).find((e) => e.event.text === 'a note for when you are back')!.event;
-  await hub.deliver(PROJECT, 'SK.local', { event: { writer: note.writer, seq: note.seq }, session: S.gone, outcome: 'recorded', reason: 'not live' });
-  await expect(center(page).getByTestId('deliveries')).toContainText('doperpowers-1e: recorded, not delivered');
+  await hub.deliver(PROJECT, 'mini', { event: { writer: note.writer, seq: note.seq }, session: S.rests, outcome: 'recorded', reason: 'not live' });
+  await expect(center(page).getByTestId('deliveries')).toContainText('cua_repl: recorded, not delivered');
 
-  await page.getByTestId('channel-header').getByRole('button', { name: 'Resume' }).click();
+  await header.getByRole('button', { name: 'Resume' }).click();
   const resume = await lastRpc(hub, 1);
-  expect(resume).toMatchObject({ rpc: 'resume', machine: 'SK.local', args: { session: S.gone } });
-  hub.answerRpc(PROJECT, resume.nonce, { state: 'done', result: { session: S.gone } });
-  await expect(page.getByTestId('channel-header')).toContainText('Resumed; it rejoins in a moment');
+  expect(resume).toMatchObject({ rpc: 'resume', machine: 'mini', args: { session: S.rests } });
+  hub.answerRpc(PROJECT, resume.nonce, { state: 'done', result: { session: S.rests } });
+  await expect(header).toContainText('Resumed; it rejoins in a moment');
   // The message stayed owed: Resume brought the session back, and the newer outcome replaces the recorded one.
-  await hub.deliver(PROJECT, 'SK.local', { event: { writer: note.writer, seq: note.seq }, session: S.gone, outcome: 'delivered', reason: '' });
-  await expect(center(page).getByTestId('deliveries')).toContainText('doperpowers-1e: delivered');
+  await hub.deliver(PROJECT, 'mini', { event: { writer: note.writer, seq: note.seq }, session: S.rests, outcome: 'delivered', reason: '' });
+  await expect(center(page).getByTestId('deliveries')).toContainText('cua_repl: delivered');
 
-  await nav(page).locator(`[data-session="${S.rests}"]`).click();
-  await page.getByTestId('channel-header').getByRole('button', { name: 'Retire…' }).click();
-  await page.getByTestId('channel-header').getByRole('button', { name: 'Retire', exact: true }).click();
-  expect((await lastRpc(hub, 2)).args).toEqual({ session: S.rests });
+  await nav(page).locator(`[data-session="${S.works}"]`).click();
+  await header.getByRole('button', { name: 'Retire…' }).click();
+  await header.getByRole('button', { name: 'Retire', exact: true }).click();
+  expect((await lastRpc(hub, 2)).args).toEqual({ session: S.works });
 
   await nav(page).getByRole('button', { name: '+ Session' }).click();
   const dialog = page.getByRole('dialog', { name: 'New session' });

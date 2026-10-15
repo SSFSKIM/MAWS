@@ -89,13 +89,18 @@ test('@layout the grid in two columns; a project opens on its channel list, a ch
   await expect(page.getByTestId('grid')).toBeVisible();
 });
 
-test('@layout an ended session shows Resume in place of the composer', async ({ page, hub }) => {
+test('@layout an ended session shows Resume in place of the composer, and a retired one who retired it', async ({ page, hub }) => {
   await stageProject(hub);
+  hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session: S.rests, kind: 'presence', sub: null, n: null, body: { record: null, bridge: true } });
   await seedKey(page, hub);
-  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.gone}`);
-  await expect(page.getByTestId('resume-bar').getByRole('button', { name: 'Resume doperpowers-1e' })).toBeVisible();
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.rests}`);
+  await expect(page.getByTestId('resume-bar').getByRole('button', { name: 'Resume cua_repl' })).toBeVisible();
   await expect(page.getByTestId('composer')).toHaveCount(0);
   await fitsTheWidth(page);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.gone}`);
+  await expect(page.getByTestId('retired-by')).toHaveText('Retired by human');
+  await expect(page.getByTestId('resume-bar')).toHaveCount(0);
+  await expect(page.getByTestId('composer')).toHaveCount(0);
 });
 
 test('@layout request cards fit the phone: a question answerable in place, a permission prompt with Allow and Deny', async ({ page, hub }) => {

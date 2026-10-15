@@ -14,7 +14,18 @@ export type CapabilityInput = {
   seat: string;
   machineOnline: boolean | null;
   presence: SessionPresence | null;
+  /** The log's latest `retired`, while it stands (DX8's `DeskSession.ended`). */
+  ended?: { by: string; reason: string } | null;
 };
+
+/**
+ * Who retired the session, from the log's `retired`, when it was retired — the owner's deliberate act of taking it out
+ * of the project, which its machine refuses to Resume (DC7's M4) — and not merely ended (a `retired` whose reason is
+ * `ended`, sminos's record of a session that ended); null otherwise.
+ */
+export function retiredBy(s: Pick<CapabilityInput, 'member' | 'ended'>): string | null {
+  return !s.member && s.ended && s.ended.reason !== 'ended' ? s.ended.by : null;
+}
 
 export type SessionKind = 'bridged' | 'seat' | 'terminal' | 'not-running' | 'unknown' | 'offline';
 
@@ -53,6 +64,9 @@ export function capabilities(s: CapabilityInput): Record<Verb, Capability> {
     }
     case 'not-running': {
       const stopped = no(`${s.alias} is not running`);
+      if (retiredBy(s) !== null) {
+        return { send: yes('recorded, not delivered: it is retired'), steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no('retired: a retired session is not resumed') };
+      }
       const send = yes(s.seat ? 'resumes the seat to read it' : 'recorded, not delivered: a closed terminal session is reopened only by Resume');
       return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: yes() };
     }

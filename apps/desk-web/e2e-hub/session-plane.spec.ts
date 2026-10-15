@@ -314,7 +314,9 @@ test("G2: §5's controls by the session's kind as the machine's presence says it
   await header.getByRole('button', { name: 'Retire…' }).click();
   await header.getByRole('button', { name: 'Retire', exact: true }).click();
   await expect(center(page)).toContainText('fakerec retired by you', { timeout: 15_000 });
-  await expect(header.getByRole('button', { name: 'Resume' })).toBeVisible();
+  // Retired is the owner taking it out of the project: its history stays, and no Resume is offered.
+  await expect(header.getByTestId('retired-by')).toHaveText('Retired by you');
+  await expect(header.getByRole('button', { name: 'Resume' })).toHaveCount(0);
 
   // Without the bridge: a terminal session and a `--bg` seat, both working.
   const terminal = recording();
