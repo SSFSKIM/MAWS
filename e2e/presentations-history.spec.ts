@@ -21,7 +21,9 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, w
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { newChatIn, openProject } from './support/sidebar';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -50,9 +52,12 @@ const seam = <K extends keyof Seam['__maws_presentations']>(page: Page, name: K,
 
 let launch: MawsLaunch | null = null;
 let channel: string | null = null; // fix wave 1 (R4): the host's history seam's directory
+let repo: ScratchRepo | null = null; // fix wave 2: a chat shown, so the panel takes the deck beside a main tab
 test.afterEach(async () => {
   await launch?.cleanup();
   launch = null;
+  repo?.dispose();
+  repo = null;
   if (channel) rmSync(channel, { recursive: true, force: true });
   channel = null;
 });
@@ -298,6 +303,89 @@ test('See N new changes: an agent session’s write between two views is offered
   await expect(mark).toHaveAttribute('title', /Claude/); // the agent, by the session's title or "Claude"
   await expect(tab.locator('[data-history-notes] ins')).toContainText('briefly');
   await expect(bar.getByRole('button', { name: 'Restore this version' })).toHaveCount(0); // the live deck: nothing to restore
+});
+
+// Fix wave 2 (R2): one deck in the panel (live) and in a main tab (a version's preview) at once, the family its text asks
+// for mapped to one uploaded face in the version and to another live: each surface draws its own face. Two real faces
+// of different widths (KaTeX's Main and Typewriter, shipped with the app's dependencies), told apart by the drawn width
+// of the same text in slide px.
+const KATEX = (file: string) => [...readFileSync(join(REPO_ROOT, 'node_modules/katex/dist/fonts', file))];
+const FACE_SLIDE = `<section id="f1" style="background:#ffffff; padding:128px"><p id="probe" style="position:absolute; left:128px; top:300px; font-size:96px; font-family:'Face Lab', serif">iiiiiiiiiiiiiiii</p></section>`;
+const faceDeck = (ref: string) => ({
+  'project/deck.json': JSON.stringify({ v: 4, createdOnFiles: { v: 1, at: '2026-10-15T09:00:00Z' }, title: 'Face lab', cover: 'f1', order: ['f1'], faces: { lab: { family: 'Face Lab', src: ref } } }),
+  'project/slides/f1.html': FACE_SLIDE,
+});
+/** The probe's drawn width in slide px on a surface's stage (its zoom divided out). */
+async function probeWidth(where: Locator): Promise<number> {
+  const frame = await where.locator('[data-stage-slide]').first().boundingBox();
+  const probe = await where.locator('[data-stage-slide] [data-eid="probe"]').first().boundingBox();
+  return probe!.width / (frame!.width / 1920);
+}
+/** A width once it has stopped changing (a face loads after the first layout). */
+async function settledWidth(where: Locator): Promise<number> {
+  let last = -1;
+  await expect.poll(async () => {
+    const now = Math.round(await probeWidth(where));
+    const same = now === last;
+    last = now;
+    return same;
+  }, { timeout: 15_000, intervals: [300] }).toBe(true);
+  return last;
+}
+
+test('a live editor and a version’s preview of one deck in one window each draw their own upload for the same family', async () => {
+  test.setTimeout(180_000);
+  repo = await ScratchRepo.create({ sentinels: false });
+  const page = await ready();
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'presentation', title: 'Face lab' });
+  const id = artifact.id;
+  const upload = (name: string, file: string) =>
+    page.evaluate(
+      async ([artifactId, n, bytes]) => {
+        const result = (await (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<{ ok: boolean; value: { ref: string } }> } }).maws.invoke('artifacts.uploadAsset', { artifactId, name: n, mime: 'font/woff2', bytes: new Uint8Array(bytes as number[]) })) as { ok: boolean; value: { ref: string } };
+        return result.value.ref;
+      },
+      [id, name, KATEX(file)] as const,
+    );
+  const serifRef = await upload('lab-main.woff2', 'KaTeX_Main-Regular.woff2');
+  const monoRef = await upload('lab-mono.woff2', 'KaTeX_Typewriter-Regular.woff2');
+  await seam(page, 'seed', id, faceDeck(serifRef));
+  await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Serif face' });
+
+  // the deck in the panel's Artifacts tool beside a chat, pinned, then opened in a main tab too
+  const project = await ok<{ name: string }>(page, 'session.projects.add', { directory: repo.root });
+  await openProject(page, project.name);
+  await newChatIn(page, project.name);
+  const panel = page.locator('[data-region="panel"]');
+  await panel.getByRole('button', { name: 'Add a tool' }).click();
+  await page.getByRole('menuitem', { name: 'Artifacts', exact: true }).click();
+  await panel.getByRole('button', { name: 'All', exact: true }).click();
+  await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
+  const inPanel = panel.locator(`[data-deck-artifact="${id}"]`);
+  await expect(inPanel.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
+  await panel.getByRole('button', { name: /^Pin / }).first().click();
+  await panel.getByRole('button', { name: 'Open in tab' }).click();
+  const inMain = page.locator(`[data-region="main"] [data-deck-artifact="${id}"]`);
+  await expect(inMain.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
+  await panel.getByRole('tab', { name: 'Artifacts' }).click();
+  await expect(inPanel.locator('[data-deck-editor]')).toBeVisible();
+
+  // the serif face's width, live; then the deck re-mapped to the monospace face: both live surfaces follow
+  const serif = await settledWidth(inMain);
+  await seam(page, 'seed', id, faceDeck(monoRef));
+  await expect.poll(async () => Math.abs((await probeWidth(inPanel)) - serif), { timeout: 15_000 }).toBeGreaterThan(serif * 0.2);
+  const mono = await settledWidth(inPanel);
+
+  // the main tab previews the version while the panel stays live: each draws its own upload for 'Face Lab'
+  await headerAction(page, 'Version history');
+  await inMain.getByRole('complementary', { name: 'Version history' }).getByRole('button', { name: /^Version Serif face by You/ }).click();
+  await expect(inMain.getByRole('toolbar', { name: 'Version preview' })).toBeVisible();
+  const preview = await settledWidth(inMain.locator('[data-history-stage]'));
+  const live = await settledWidth(inPanel);
+  console.log(`[deck history e2e] 'Face Lab' drawn widths in slide px: serif ${serif}, monospace ${mono}; at once: the preview ${preview}, the live panel ${live}`);
+  expect(Math.abs(preview - serif)).toBeLessThanOrEqual(serif * 0.02);
+  expect(Math.abs(live - mono)).toBeLessThanOrEqual(mono * 0.02);
+  expect(Math.abs(preview - live)).toBeGreaterThan(serif * 0.2);
 });
 
 // M8's bound on S7a's heavy deck: the soak's 3-month-old version and its live state, written into a deck through A's
