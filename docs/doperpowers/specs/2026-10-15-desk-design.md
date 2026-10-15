@@ -2433,22 +2433,23 @@ type Rpc<N> = {
 
 | `rpc` | `args` | result (`done`) |
 | --- | --- | --- |
-| `steer` | `{session, text}` | `{row}` — the uuid of the appended user row; refused `idle` when no turn is running |
+| `steer` | `{session, text}` | `{row}` — the uuid of the appended user row, or null when the session has no bridge (the steer went as a `--bg` seat's `reply` or as a send, §5, which append no row the machine can name); refused `idle` when no turn is running |
 | `interrupt` | `{session}` | `{turnId, stopped, running}` — the aborted turn (null when idle), the background tasks stopped, and those whose stop failed; a non-empty `running` is an incomplete interrupt, drawn as such |
 | `answer` | `{session, digest, answers}` — `answers` maps each question's text to the chosen label (several joined by `", "`) | `{}` |
 | `decide` | `{session, digest, decision: "allow" \| "deny", message?}` | `{}` |
 | `model` | `{session, model?, effort?}` (at least one) — `model` an id, a family alias the session maps, or `"default"` (§5) | `{model, effort}` now in force, null for the session's own |
 | `compact` | `{session}` | `{at: "now" \| "turn-end"}` — answered at once; the compaction's outcome follows as the session's `compact` events (DX5), carried on the session plane by DC7 |
-| `spawn` | `{checkout, worktree?, brief, model?, effort?, permission_mode?}` | `{session, alias}` |
-| `retire` | `{session}` | `{}` |
+| `spawn` | `{checkout, worktree?, brief, model?, effort?, permission_mode?}` | `{session, alias}`; the log's record of the spawn carries the RPC's `member` as `by` |
+| `retire` | `{session}` | `{}`; the log's `retired` carries the RPC's `member` as `by` (acceptance 7), never sminos's operator `""` |
 | `resume` | `{session}` | `{session}` — the same id |
 
 `digest` is `{session, request, tool, input_sha256}` (DX1), `request` as the `raised` named it, opaque; `input_sha256` is
 over the `raised`'s `input` as sent, the capped input when it is `truncated`. An outcome is
 `{state: "done", result}` or `{state: "failed", error: {code, message, winner?, by?, terminalOnly?}}` (desk-hub's
 `RpcError`): a refused `decide` or `answer` carries `winner` and `by` as DX4's `settled` names them, or `by` alone when
-the bridge knows who answered first but not yet how it settles, and `terminalOnly: true` when the window closed;
-nothing else sets them. The hub's record of an RPC adds `forwarded`
+the bridge knows who answered first but not yet how it settles, and `terminalOnly: true` when the window closed.
+They come only from the bridge's own record: its 409s, or the `settled` record its pending snapshot reports when the
+daemon's digest check finds the request already settled (the common case). The hub's record of an RPC adds `forwarded`
 (written to the machine's stream, no result yet) and `uncertain` (the machine's lease lapsed, or its stream closed,
 after forwarding and before a result).
 
@@ -3121,6 +3122,17 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: Three DX6 rulings from DC7's M3. A steer to a session with no
+  bridge answers `{row: null}`, since a `--bg` seat's `reply` and a send
+  append no row the machine can name. Spawn and retire record the RPC's
+  `member` as `by`, as acceptance 7 asks, not sminos's operator `""`: the
+  RPC is signed by that member. The who-won fields may also come from the
+  daemon's digest check, which reads the bridge's own `settled` record
+  for a request already settled; that is where the common case is
+  caught, and it is the same source as the 409. Rejected: a steer result
+  without `row` for that path, and the operator as `by`. Flags DC5 (a
+  steer's `row` can be null), DC7.
+  Date/Author: 2026-10-15, design session (DC7's M3).
 - Decision: A refused decision says who won, as fields (DC3's M4,
   MAWS `c547aaa5`). DX6's failed outcome gains `winner?`, `by?` and
   `terminalOnly?` beside `code` and `message`, so the web's card shows
