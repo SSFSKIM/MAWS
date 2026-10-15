@@ -3354,6 +3354,13 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: Resume restores a session that ended, never one that was
+  retired (DC7's M4): a retired session's Resume is refused `unsupported`,
+  and its channel keeps its history with no Resume, naming who retired it.
+  Retiring is the owner's deliberate act of taking a session out of the
+  project. Reversible by the owner. Rejected: Resume as an un-retire,
+  which would make Retire a pause. Flags DC5, DC7.
+  Date/Author: 2026-10-15, design session (DC7's M4).
 - Decision: A raised request names the transcript call it belongs to
   (`toolUseId`, DX4 and DX5), where that differs from `request`. The ask
   mod's blocking question, the way every interactive session asks, is

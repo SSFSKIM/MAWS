@@ -10,6 +10,13 @@ beforeAll(async () => {
 });
 afterAll(() => hub?.close());
 
+describe('the build', () => {
+  it('names the build that answered on every response the Worker makes, `dev` when the deploy named none', async () => {
+    expect((await hub.fetch('/api/me')).headers.get('X-Desk-Build')).toBe('dev');
+    expect((await hub.fetch('/api/me', { assertion: await hub.human(ADMIN) })).headers.get('X-Desk-Build')).toBe('dev');
+  });
+});
+
 describe('the Worker admits only what Access signed and the Registry knows', () => {
   it('refuses a request without an assertion', async () => {
     const response = await hub.fetch('/api/me');
