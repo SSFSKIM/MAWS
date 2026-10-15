@@ -68,7 +68,8 @@ export class Dx4Reader {
         return;
       }
       case 'step-end':
-        for (const [id] of this.partial) if (id.startsWith(`${msgKey(message.body)}#`)) this.partial.delete(id);
+        // A block of the step without a block-row never gets one: dropped. A paired block waits for its row.
+        for (const [id, block] of this.partial) if (id.startsWith(`${msgKey(message.body)}#`) && block.settledBy === null) this.partial.delete(id);
         return;
       case 'end':
         this.ended = { reason: message.body.reason, n };

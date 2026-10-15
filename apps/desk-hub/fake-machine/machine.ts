@@ -98,7 +98,8 @@ export class FakeMachine {
   readonly rejected: Array<{ event: { writer: string; seq: number } | null; reason: RejectionReason }> = [];
   /** Each RPC received, with its outcome and whether this machine ran its effect. */
   readonly rpcs: RpcRecord[] = [];
-  /** POSTs the hub refused (a stale generation after a drop, say): kept, not thrown. */
+  /** What went wrong without stopping the machine, kept rather than thrown: a POST the hub refused (a stale generation
+   * after a drop, say), a replay step that failed. */
   readonly postErrors: Error[] = [];
   readonly sessions = new Map<string, SessionDepth>();
   private readonly link: Link;
@@ -137,8 +138,8 @@ export class FakeMachine {
     this.timeline.sort((a, b) => a.step.at - b.step.at);
     // A steer the machine ran before a crash left its row in the transcript (DX6's trace).
     for (const trace of Object.values(this.memory.trace)) {
-      if (trace.rpc === 'steer') this.sessions.get(trace.session)?.appendRow(null, trace.row as Row);
-      else if (trace.rpc === 'spawn' && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where));
+      if (trace.rpc === 'steer' && trace.row && trace.session) this.sessions.get(trace.session)?.appendRow(null, trace.row as Row);
+      else if (trace.rpc === 'spawn' && trace.session && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where));
     }
   }
 
@@ -296,7 +297,8 @@ export class FakeMachine {
   private advance(): Promise<void> {
     const at = this.timeline[this.cursor++];
     if (!at) return this.chain;
-    this.chain = this.chain.then(() => this.apply(at.session, at.step));
+    // A step that fails is kept in `postErrors`, and the replay goes on.
+    this.chain = this.chain.then(() => this.apply(at.session, at.step)).catch((error: unknown) => void this.postErrors.push(error as Error));
     return this.chain;
   }
 
@@ -316,6 +318,8 @@ export class FakeMachine {
       }
       case 'log':
         return this.writeRecorded(depth, step.id, step.event);
+      case 'delivery':
+        return this.deliverRecorded(depth, step);
       case 'turn-end':
         depth.apply(step);
         if (step.agentId === null) await this.compactAtTurnEnd(depth.id);
@@ -442,8 +446,29 @@ export class FakeMachine {
     await this.write(`recording:${depth.id}:${id}`, `${this.name}/${writer.slice(writer.indexOf('/') + 1)}`, fields, this.options.retime === false ? String(recorded.ts) : undefined);
   }
 
-  /** Appends an event to one of this machine's feeds, sealed with a nonce derived from it, and uploads it. */
-  async write(src: string, writer: string, fields: JsonObject, ts?: string): Promise<LogEvent> {
+  /** A recorded delivery outcome, naming the event as this machine wrote it. */
+  private async deliverRecorded(depth: SessionDepth, step: Extract<Step, { k: 'delivery' }>): Promise<void> {
+    await this.writeLock;
+    const written = this.memory.written[`${this.project}:recording:${depth.id}:${step.log}`];
+    if (!written) throw new Error(`the recording delivers ${step.log}, which this machine never wrote`);
+    const delivery = await seal(this.key, 'delivery', this.project, { event: { writer: written.writer, seq: written.seq }, session: step.session, outcome: step.outcome, reason: step.reason });
+    this.sendSessionWide({ project: this.project, machine: this.name, session: step.session, kind: 'delivery', sub: null, n: null, body: delivery });
+    await this.flush();
+  }
+
+  /**
+   * Appends an event to one of this machine's feeds, sealed with a nonce derived from it, and uploads it; written once
+   * per `src`. Writes run one at a time, whoever asks (the replay, an RPC's effect, a test), so each takes the next seq.
+   */
+  write(src: string, writer: string, fields: JsonObject, ts?: string): Promise<LogEvent> {
+    const run = this.writeLock.then(() => this.writeNow(src, writer, fields, ts));
+    this.writeLock = run.catch(() => {});
+    return run;
+  }
+
+  private writeLock: Promise<unknown> = Promise.resolve();
+
+  private async writeNow(src: string, writer: string, fields: JsonObject, ts?: string): Promise<LogEvent> {
     const key = `${this.project}:${src}`;
     const known = this.memory.written[key];
     if (known) return this.feed().find((e) => e.writer === known.writer && e.seq === known.seq)!;
@@ -533,7 +558,7 @@ export class FakeMachine {
   }
 
   private handleRpc(rpc: Rpc): Promise<void> {
-    this.rpcChain = this.rpcChain.then(() => this.runRpc(rpc)).catch((error: unknown) => void this.postErrors.push(error as Error));
+    this.rpcChain = this.rpcChain.then(() => this.runRpc(rpc));
     return this.rpcChain;
   }
 
@@ -552,6 +577,8 @@ export class FakeMachine {
     if (rpc.project !== this.project) return answer(fail('unknown-project', `${this.name} serves no project ${rpc.project}`));
     if (!(await verifyRpc(this.key, rpc, this.project))) return answer(fail('bad-code', 'the RPC’s code does not verify'));
     if (rpc.machine !== this.name) return answer(fail('wrong-machine', `this is ${this.name}, not ${rpc.machine}`));
+    const malformed = argumentProblem(rpc);
+    if (malformed) return answer(fail('bad-shape', malformed));
     const session = (rpc.args as { session?: string }).session;
     if (SESSION_RPCS.has(rpc.rpc) && (typeof session !== 'string' || !this.sessions.has(session))) return answer(fail('no-session', `no session ${session} on ${this.name}`));
     // The ledger answers a nonce it knows, before freshness, and never runs it again.
@@ -559,7 +586,7 @@ export class FakeMachine {
     if (entry) {
       if (!entry.outcome) {
         const trace = this.memory.trace[rpc.nonce];
-        entry.outcome = trace?.rpc === 'steer' ? done({ row: trace.row.uuid }) : trace?.rpc === 'spawn' ? done({ session: trace.session, alias: trace.alias }) : fail('interrupted', 'the machine stopped between running it and recording its outcome');
+        entry.outcome = trace ? done(trace.result) : fail('interrupted', 'the machine stopped between running it and recording its outcome');
         this.remember();
       }
       return answer(entry.outcome);
@@ -568,9 +595,15 @@ export class FakeMachine {
     if (this.options.readOnly) return answer(fail('read-only', `${this.name} is read-only`));
     this.memory.ledger[rpc.nonce] = { rpc: rpc.rpc, session: session ?? null, claimed: Date.now(), outcome: null };
     this.remember();
-    const scripted = await (this.options.script?.[rpc.rpc] as ((r: Rpc, m: FakeMachine) => RpcOutcome | undefined | Promise<RpcOutcome | undefined>) | undefined)?.(rpc, this);
-    const after: Array<() => Promise<void>> = [];
-    const outcome = scripted ?? (await this.execute(rpc, record, after));
+    // Every effect is complete (and its trace kept) when this returns; only progress notices follow the result.
+    const notices: Array<() => Promise<void>> = [];
+    let outcome: RpcOutcome;
+    try {
+      const script = this.options.script?.[rpc.rpc] as ((r: Rpc, m: FakeMachine) => RpcOutcome | undefined | Promise<RpcOutcome | undefined>) | undefined;
+      outcome = (await script?.(rpc, this)) ?? (await this.execute(rpc, record, notices));
+    } catch (error) {
+      outcome = fail('failed', error instanceof Error ? error.message : String(error));
+    }
     if (this.crashArmed?.(rpc)) {
       this.crashArmed = null;
       this.crashed = true;
@@ -581,17 +614,22 @@ export class FakeMachine {
     this.memory.ledger[rpc.nonce].outcome = outcome;
     this.remember();
     await answer(outcome);
-    for (const then of after) await then();
+    for (const notice of notices) await notice();
+  }
+
+  /** Keeps what an effect left behind, in the step that made it: how a claim without an outcome is reconciled. */
+  private traced(rpc: Rpc, record: RpcRecord, session: string | null, result: JsonObject, row?: Row): RpcOutcome {
+    this.memory.trace[rpc.nonce] = { rpc: rpc.rpc, session, result, ...(row && { row }) };
+    this.remember();
+    record.executed = true;
+    return done(result);
   }
 
   /** The default effects: what a bridged session would do, on the replay's state. */
-  private async execute(rpc: Rpc, record: RpcRecord, after: Array<() => Promise<void>>): Promise<RpcOutcome> {
+  private async execute(rpc: Rpc, record: RpcRecord, notices: Array<() => Promise<void>>): Promise<RpcOutcome> {
     const member = rpc.member;
     if (this.options.bridge === false) {
-      if (rpc.rpc === 'steer') {
-        record.executed = true;
-        return done({ row: null });
-      }
+      if (rpc.rpc === 'steer') return this.traced(rpc, record, rpc.args.session, { row: null });
       if (['interrupt', 'decide', 'answer', 'model', 'compact'].includes(rpc.rpc)) return fail('unsupported', 'the session has no bridge');
     }
     switch (rpc.rpc) {
@@ -599,16 +637,13 @@ export class FakeMachine {
         const depth = this.sessions.get(rpc.args.session)!;
         if (depth.mainTurn === null) return fail('idle', 'no turn is running to steer: send it instead');
         const row = userRow(depth.id, rpc.args.text);
-        this.memory.trace[rpc.nonce] = { rpc: 'steer', session: depth.id, row };
-        this.remember();
+        const outcome = this.traced(rpc, record, depth.id, { row: row.uuid }, row);
         depth.appendRow(null, row);
-        record.executed = true;
-        return done({ row: row.uuid });
+        return outcome;
       }
       case 'interrupt': {
         const depth = this.sessions.get(rpc.args.session)!;
-        record.executed = true;
-        return done({ turnId: depth.mainTurn, stopped: [], running: [] });
+        return this.traced(rpc, record, depth.id, { turnId: depth.mainTurn, stopped: [], running: [] });
       }
       case 'decide':
       case 'answer': {
@@ -622,72 +657,61 @@ export class FakeMachine {
         if (digest.session !== raised.session || digest.tool !== raised.tool || digest.input_sha256 !== (await inputSha256(raised.input))) {
           return fail('digest-mismatch', 'the request as drawn is not the one pending');
         }
+        const misfit = decisionMisfit(rpc as Rpc<'decide' | 'answer'>, raised);
+        if (misfit) return misfit;
         if (raised.deadline && Date.now() > Date.parse(raised.deadline) - 200) {
           return fail('not-pending', 'the window closed; the terminal answers it', { terminalOnly: true });
         }
         const outcome: Settled['outcome'] = rpc.rpc === 'answer' ? 'answered' : rpc.args.decision;
-        record.executed = true;
-        after.push(() => this.settle(digest.request, { winner: 'web', outcome, by: member }));
-        return done({});
+        await this.settle(digest.request, { winner: 'web', outcome, by: member });
+        return this.traced(rpc, record, raised.session, {});
       }
       case 'model': {
         const pick = (v: string | undefined, now: string | null) => (v === undefined ? now : v === 'default' ? null : v);
         const now = this.models.get(rpc.args.session) ?? { model: null, effort: null };
         const chosen = { model: pick(rpc.args.model, now.model), effort: pick(rpc.args.effort, now.effort) };
         this.models.set(rpc.args.session, chosen);
-        record.executed = true;
-        return done(chosen);
+        return this.traced(rpc, record, rpc.args.session, chosen);
       }
       case 'compact': {
         const depth = this.sessions.get(rpc.args.session)!;
-        record.executed = true;
         if (depth.mainTurn !== null) {
           this.compactsAtTurnEnd.push({ session: depth.id, nonce: rpc.nonce });
-          return done({ at: 'turn-end' });
+          return this.traced(rpc, record, depth.id, { at: 'turn-end' });
         }
-        after.push(() => this.compact(depth.id, rpc.nonce));
-        return done({ at: 'now' });
+        // The compaction's progress is a notice after the answer, as the bridge's `compact` events are.
+        notices.push(() => this.compact(depth.id, rpc.nonce));
+        return this.traced(rpc, record, depth.id, { at: 'now' });
       }
       case 'spawn': {
         const checkouts = this.presence().checkouts;
         if (!checkouts.some((c) => c.path === rpc.args.checkout)) return fail('unknown-checkout', `${rpc.args.checkout} is not a known checkout here`);
         const session = randomUUID();
         const alias = `fake-${session.slice(0, 4)}`;
-        this.memory.trace[rpc.nonce] = { rpc: 'spawn', session, alias };
-        this.remember();
         const depth = new SessionDepth(session, null, (m) => this.queue({ t: 'session', message: m }), { project: this.project, machine: this.name });
         this.sessions.set(session, depth);
-        record.executed = true;
-        after.push(async () => {
-          await this.write(`rpc:${rpc.nonce}:joined`, `${this.name}/${session}`, {
-            kind: 'joined', session, alias, name_source: 'seat', machine: this.name, cwd: rpc.args.checkout, worktree: rpc.args.worktree ?? '', role: rpc.args.brief, seat: alias, by: member,
-          });
-          this.sendPresence(depth);
-          await this.flush();
+        await this.write(`rpc:${rpc.nonce}:joined`, `${this.name}/${session}`, {
+          kind: 'joined', session, alias, name_source: 'seat', machine: this.name, cwd: rpc.args.checkout, worktree: rpc.args.worktree ?? '', role: rpc.args.brief, seat: alias, by: member,
         });
-        return done({ session, alias });
+        this.sendPresence(depth);
+        await this.flush();
+        return this.traced(rpc, record, session, { session, alias });
       }
       case 'retire': {
         const depth = this.sessions.get(rpc.args.session)!;
-        record.executed = true;
-        after.push(async () => {
-          await this.write(`rpc:${rpc.nonce}:retired`, `${this.name}/${depth.id}`, { kind: 'retired', session: depth.id, by: member, reason: 'retire' });
-          depth.presence = null;
-          this.sendPresence(depth);
-          await this.flush();
-        });
-        return done({});
+        await this.write(`rpc:${rpc.nonce}:retired`, `${this.name}/${depth.id}`, { kind: 'retired', session: depth.id, by: member, reason: 'retire' });
+        depth.presence = null;
+        this.sendPresence(depth);
+        await this.flush();
+        return this.traced(rpc, record, depth.id, {});
       }
       case 'resume': {
         const depth = this.sessions.get(rpc.args.session)!;
         if (depth.presence !== null) return fail('session-live', `${depth.id} is live on ${this.name}`);
         depth.presence = { status: 'idle', waitingFor: null, needs: null };
-        record.executed = true;
-        after.push(async () => {
-          this.sendPresence(depth);
-          await this.flush();
-        });
-        return done({ session: depth.id });
+        this.sendPresence(depth);
+        await this.flush();
+        return this.traced(rpc, record, depth.id, { session: depth.id });
       }
     }
   }
@@ -721,7 +745,7 @@ export class FakeMachine {
         this.have = null;
         return;
       case 'events':
-        if (frame.project === this.project) this.chain = this.chain.then(() => this.import(frame.events));
+        if (frame.project === this.project) this.chain = this.chain.then(() => this.import(frame.events)).catch((error: unknown) => void this.postErrors.push(error as Error));
         return;
       case 'resend':
         if (frame.project === this.project) this.uploadFrom({}, { writer: frame.writer, from: frame.from });
@@ -780,3 +804,57 @@ function userRow(session: string, text: string): Row {
   return { type: 'user', uuid: randomUUID(), sessionId: session, timestamp: new Date().toISOString(), isSidechain: false, message: { role: 'user', content: [{ type: 'text', text }] } } as Row;
 }
 
+
+/** What is wrong with an RPC's arguments for its name, or null: checked before anything is claimed. */
+function argumentProblem(rpc: Rpc): string | null {
+  const a = rpc.args as unknown as Record<string, unknown> | null;
+  if (typeof a !== 'object' || a === null || Array.isArray(a)) return 'args is an object';
+  const str = (k: string) => typeof a[k] === 'string';
+  const optStr = (k: string) => a[k] === undefined || typeof a[k] === 'string';
+  const needs = (ok: boolean, what: string) => (ok ? null : `${rpc.rpc}'s args are ${what}`);
+  const digest = a.digest as Record<string, unknown> | undefined;
+  const digestOk = typeof digest === 'object' && digest !== null && ['session', 'request', 'tool', 'input_sha256'].every((k) => typeof digest[k] === 'string');
+  switch (rpc.rpc) {
+    case 'steer':
+      return needs(str('session') && str('text'), '{session, text}');
+    case 'interrupt':
+    case 'compact':
+    case 'retire':
+    case 'resume':
+      return needs(str('session'), '{session}');
+    case 'decide':
+      return needs(str('session') && digestOk && (a.decision === 'allow' || a.decision === 'deny') && optStr('message'), '{session, digest, decision: allow | deny, message?}');
+    case 'answer': {
+      const answers = a.answers as Record<string, unknown> | undefined;
+      const answersOk = typeof answers === 'object' && answers !== null && !Array.isArray(answers) && Object.values(answers).every((v) => typeof v === 'string');
+      return needs(str('session') && digestOk && answersOk, '{session, digest, answers: {question: label}}');
+    }
+    case 'model':
+      return needs(str('session') && optStr('model') && optStr('effort') && (a.model !== undefined || a.effort !== undefined), '{session, model?, effort?} with at least one');
+    case 'spawn':
+      return needs(str('checkout') && str('brief') && ['worktree', 'model', 'effort', 'permission_mode'].every(optStr), '{checkout, brief, worktree?, model?, effort?, permission_mode?}');
+    default:
+      return `no RPC ${String((rpc as { rpc: unknown }).rpc)}`;
+  }
+}
+
+const QUESTION_TOOLS = new Set(['AskUserQuestion', 'mcp__doperpowers__AskUserQuestion']);
+
+/**
+ * Whether a decision or an answer fits the request it names, as the bridge's decision route checks it (DX5): a question
+ * is answered (`answer`, its answers keyed by its questions) or denied, and an async one is never denied; a permission
+ * prompt is allowed or denied (`decide`). A misfit fails `unsupported` (that request cannot take that action), and
+ * answers not keyed by its questions fail `bad-shape`.
+ */
+function decisionMisfit(rpc: Rpc<'decide' | 'answer'>, raised: Raised): RpcOutcome | null {
+  const question = QUESTION_TOOLS.has(raised.tool) || raised.async === true;
+  if (!question) return rpc.rpc === 'answer' ? fail('unsupported', 'a permission prompt is allowed or denied, not answered') : null;
+  if (rpc.rpc === 'decide' && rpc.args.decision === 'allow') return fail('unsupported', 'a question is answered with its answers, not allowed');
+  if (rpc.rpc === 'decide' && raised.async) return fail('unsupported', 'an async question is answered or withdrawn, never denied');
+  if (rpc.rpc === 'answer') {
+    const asked = ((raised.input.questions as Array<{ question?: unknown }> | undefined) ?? []).map((q) => String(q.question));
+    const given = Object.keys(rpc.args.answers);
+    if (given.length !== asked.length || !given.every((q) => asked.includes(q))) return fail('bad-shape', `the answers are keyed by the request's questions: ${asked.join(' | ')}`);
+  }
+  return null;
+}
