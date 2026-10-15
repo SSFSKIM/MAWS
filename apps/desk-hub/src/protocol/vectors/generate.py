@@ -14,8 +14,12 @@ The rule, for every authenticated shape: the code is HMAC-SHA256, keyed with the
 where the canonical JSON is RFC 8785 (JCS) and the covered object is the shape without the code's value: a shape whose
 `mac` is {nonce, value} is covered with `mac` reduced to {nonce}; a log event of a `hub/` writer leaves out `writer`,
 `seq`, and `ts` too, which the hub assigns after the browser computed the code; an RPC, whose nonce is its own
-top-level field, carries the value alone as `mac` and is covered without it. Every vector here holds integers only,
-the only numbers these shapes carry.
+top-level field, carries the value alone as `mac` and is covered without it.
+
+Numbers follow RFC 8785 §3.2.2.3: every number, integral or not, is the IEEE-754 double nearest it, written as
+ECMAScript's Number::toString writes that double (`es_number` below). A tool input in `raised` is arbitrary JSON, so
+fractions, exponents, and integers past 2^53 all occur; a Python implementation converts every int and float with
+float() and formats the result, never str(int).
 """
 
 import base64
@@ -23,6 +27,7 @@ import hashlib
 import hmac
 import json
 import os
+from decimal import Decimal
 
 DOMAINS = {
     "log": "smns-hub-log-v1",
@@ -37,17 +42,49 @@ def b64url(raw):
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
+def es_number(value):
+    """ECMAScript's Number::toString of the IEEE-754 double nearest `value` (RFC 8785 §3.2.2.3).
+
+    float() takes an int to its nearest double (2**53 + 1 becomes 2**53; past about 1.8e308 it raises OverflowError).
+    repr() of a float is the shortest decimal string that reads back as the same double, as ECMAScript's digits are;
+    only the layout differs, and ECMAScript's is applied here: plain digits while the decimal exponent n of the
+    leading digit position is between -6 and 21, otherwise d[.ddd]e+N / e-N."""
+    x = float(value)
+    if x != x or x in (float("inf"), float("-inf")):
+        raise TypeError("not a JSON number: %r" % (value,))
+    if x == 0:
+        return "0"  # negative zero too
+    if x < 0:
+        return "-" + es_number(-x)
+    _, digit_tuple, exponent = Decimal(repr(x)).as_tuple()
+    digits = list(digit_tuple)
+    while len(digits) > 1 and digits[-1] == 0:
+        digits.pop()
+        exponent += 1
+    s = "".join(str(d) for d in digits)
+    k = len(s)
+    n = k + exponent  # the value is 0.s * 10**n
+    if k <= n <= 21:
+        return s + "0" * (n - k)
+    if 0 < n <= 21:
+        return s[:n] + "." + s[n:]
+    if -6 < n <= 0:
+        return "0." + "0" * (-n) + s
+    e = n - 1
+    return (s if k == 1 else s[0] + "." + s[1:]) + "e" + ("+" if e >= 0 else "-") + str(abs(e))
+
+
 def jcs(value):
-    """RFC 8785 for the values these shapes carry: keys ordered by their UTF-16 code units (not by code point, which
-    Python's sort_keys uses), strings as ECMAScript's JSON.stringify writes them, integers only."""
+    """RFC 8785: keys ordered by their UTF-16 code units (not by code point, which Python's sort_keys uses), strings as
+    ECMAScript's JSON.stringify writes them, numbers by es_number. A string with a lone surrogate fails at encoding."""
     if value is None:
         return "null"
     if value is True:
         return "true"
     if value is False:
         return "false"
-    if isinstance(value, int):
-        return str(value)
+    if isinstance(value, (int, float)):
+        return es_number(value)
     if isinstance(value, str):
         return json.dumps(value, ensure_ascii=False)
     if isinstance(value, list):
@@ -89,6 +126,32 @@ MEMBER = "4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c"
 SESSION = "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b"
 REQUEST = "toolu_01QmZ7wq3V8nEXAMPLE"
 BASH_INPUT = {"command": "pnpm e2e", "description": "Run the e2e suite"}
+# A tool input as a session might send one: a fraction, an exponent past the plain range, an integer past 2**53.
+FRACTION_INPUT = {"command": "python3 -c 'import time; time.sleep(0.5)'", "timeout": 0.5, "budget": 1e21, "id": 2**53 + 1}
+
+# (JSON text, its canonical form by ECMAScript's rules — written out here, not computed — and why it is a case).
+NUMBERS = [
+    ("0.5", "0.5", "a fraction"),
+    ("-0", "0", "negative zero, as an integer literal"),
+    ("-0.0", "0", "negative zero, as a fraction literal"),
+    ("100", "100", "an integer"),
+    ("1e20", "100000000000000000000", "the largest power of ten written plainly"),
+    ("1e21", "1e+21", "the smallest power of ten written with an exponent"),
+    ("123456789012345680000", "123456789012345680000", "a large integral value, plainly"),
+    ("1.2345678901234568e21", "1.2345678901234568e+21", "a large integral value, past the plain range"),
+    ("1e-6", "0.000001", "the smallest power of ten written plainly"),
+    ("1e-7", "1e-7", "the largest power of ten below 1 written with an exponent"),
+    ("-1.5e-7", "-1.5e-7", "a negative fraction with an exponent"),
+    ("9007199254740992", "9007199254740992", "2^53, the last integer every double holds"),
+    ("9007199254740993", "9007199254740992", "2^53 + 1, which no double holds: it becomes 2^53"),
+    ("333333333.33333329", "333333333.3333333", "RFC 8785's sample: the shortest digits that round-trip"),
+    ("4.50", "4.5", "RFC 8785's sample: trailing zeros go"),
+    ("2e-3", "0.002", "RFC 8785's sample"),
+    ("1E30", "1e+30", "RFC 8785's sample"),
+    ("0.000000000000000000000000001", "1e-27", "RFC 8785's sample"),
+    ("5e-324", "5e-324", "the smallest subnormal"),
+    ("1.7976931348623157e308", "1.7976931348623157e+308", "the largest double"),
+]
 
 
 def nonce(n):
@@ -193,6 +256,12 @@ CASES = [
         {"request": REQUEST, "session": SESSION, "tool": "Bash", "input": BASH_INPUT, "mac": {"nonce": nonce(6)}},
     ),
     (
+        "raised-fraction",
+        "raised",
+        PROJECT,
+        {"request": "toolu_01FracTi0nEXAMPLE", "session": SESSION, "tool": "Bash", "input": FRACTION_INPUT, "mac": {"nonce": nonce(11)}},
+    ),
+    (
         "settled",
         "settled",
         PROJECT,
@@ -269,9 +338,18 @@ def main():
     negative("rpc-nonce-changed", "rpc-decide", "an RPC replayed under another nonce", lambda e: e.update(nonce=nonce(10)))
     negative("raised-as-settled", "raised", "a code for one shape offered as another's", lambda e: None, as_kind="settled")
 
+    numbers = []
+    for text, canonical, why in NUMBERS:
+        assert es_number(json.loads(text)) == canonical, (text, es_number(json.loads(text)), canonical)
+        numbers.append({"json": text, "canonical": canonical, "why": why})
+
     out = {
         "about": "DX1's authentication-code vectors, written by generate.py beside this file; see its docstring for the rule.",
-        "digest": {"input": BASH_INPUT, "canonical": jcs(BASH_INPUT), "input_sha256": input_sha256(BASH_INPUT)},
+        "numbers": numbers,
+        "digests": [
+            {"name": name, "input": value, "canonical": jcs(value), "input_sha256": input_sha256(value)}
+            for name, value in (("bash-input", BASH_INPUT), ("input-with-fraction", FRACTION_INPUT))
+        ],
         "vectors": vectors,
         "negatives": negatives,
     }

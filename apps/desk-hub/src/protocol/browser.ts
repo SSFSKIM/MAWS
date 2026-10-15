@@ -30,8 +30,12 @@ export type ProjectDown =
   | { t: 'caught-up'; offset: number }
   | { t: 'human-ack'; nonce: string; offset: number; writer: string; seq: number }
   | { t: 'session'; message: SessionMessage }
-  /** The project's pending set, on connect and whenever a machine's republish replaces its part of it. */
-  | { t: 'pending'; requests: Array<{ machine: string; raised: Raised }> }
+  /**
+   * The project's pending set: on connect, and again whenever it changes (a raise, a settlement, a machine's
+   * republish, a `deadline` passing). `terminal_only` is the hub's, by its own clock: the request's `deadline` passed,
+   * so it stays pending but only the terminal can answer it, and the web draws it as waiting in the terminal.
+   */
+  | { t: 'pending'; requests: PendingRequest[] }
   /** The latest outcome per event and recipient, on connect; later ones arrive as `session` messages. */
   | { t: 'deliveries'; deliveries: Delivery[] }
   | { t: 'machines'; machines: Array<{ machine: string } & MachinePresence> }
@@ -39,6 +43,8 @@ export type ProjectDown =
   /** A refusal the hub reports to the project's browsers (the audit record of what it refused), or to the sender. */
   | { t: 'refused'; refusal: Refusal & { nonce?: string; machine?: string } }
   | Part;
+
+export type PendingRequest = { machine: string; raised: Raised; terminal_only: boolean };
 
 /** The grid's row for one project. */
 export type ProjectSummary = {

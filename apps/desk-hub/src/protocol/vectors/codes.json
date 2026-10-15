@@ -1,13 +1,129 @@
 {
   "about": "DX1's authentication-code vectors, written by generate.py beside this file; see its docstring for the rule.",
-  "digest": {
-    "input": {
-      "command": "pnpm e2e",
-      "description": "Run the e2e suite"
+  "numbers": [
+    {
+      "json": "0.5",
+      "canonical": "0.5",
+      "why": "a fraction"
     },
-    "canonical": "{\"command\":\"pnpm e2e\",\"description\":\"Run the e2e suite\"}",
-    "input_sha256": "8294a36b488d0be1f3033e6f1c6d7c22eccefd6717f1d6552f6604feef65024e"
-  },
+    {
+      "json": "-0",
+      "canonical": "0",
+      "why": "negative zero, as an integer literal"
+    },
+    {
+      "json": "-0.0",
+      "canonical": "0",
+      "why": "negative zero, as a fraction literal"
+    },
+    {
+      "json": "100",
+      "canonical": "100",
+      "why": "an integer"
+    },
+    {
+      "json": "1e20",
+      "canonical": "100000000000000000000",
+      "why": "the largest power of ten written plainly"
+    },
+    {
+      "json": "1e21",
+      "canonical": "1e+21",
+      "why": "the smallest power of ten written with an exponent"
+    },
+    {
+      "json": "123456789012345680000",
+      "canonical": "123456789012345680000",
+      "why": "a large integral value, plainly"
+    },
+    {
+      "json": "1.2345678901234568e21",
+      "canonical": "1.2345678901234568e+21",
+      "why": "a large integral value, past the plain range"
+    },
+    {
+      "json": "1e-6",
+      "canonical": "0.000001",
+      "why": "the smallest power of ten written plainly"
+    },
+    {
+      "json": "1e-7",
+      "canonical": "1e-7",
+      "why": "the largest power of ten below 1 written with an exponent"
+    },
+    {
+      "json": "-1.5e-7",
+      "canonical": "-1.5e-7",
+      "why": "a negative fraction with an exponent"
+    },
+    {
+      "json": "9007199254740992",
+      "canonical": "9007199254740992",
+      "why": "2^53, the last integer every double holds"
+    },
+    {
+      "json": "9007199254740993",
+      "canonical": "9007199254740992",
+      "why": "2^53 + 1, which no double holds: it becomes 2^53"
+    },
+    {
+      "json": "333333333.33333329",
+      "canonical": "333333333.3333333",
+      "why": "RFC 8785's sample: the shortest digits that round-trip"
+    },
+    {
+      "json": "4.50",
+      "canonical": "4.5",
+      "why": "RFC 8785's sample: trailing zeros go"
+    },
+    {
+      "json": "2e-3",
+      "canonical": "0.002",
+      "why": "RFC 8785's sample"
+    },
+    {
+      "json": "1E30",
+      "canonical": "1e+30",
+      "why": "RFC 8785's sample"
+    },
+    {
+      "json": "0.000000000000000000000000001",
+      "canonical": "1e-27",
+      "why": "RFC 8785's sample"
+    },
+    {
+      "json": "5e-324",
+      "canonical": "5e-324",
+      "why": "the smallest subnormal"
+    },
+    {
+      "json": "1.7976931348623157e308",
+      "canonical": "1.7976931348623157e+308",
+      "why": "the largest double"
+    }
+  ],
+  "digests": [
+    {
+      "name": "bash-input",
+      "input": {
+        "command": "pnpm e2e",
+        "description": "Run the e2e suite"
+      },
+      "canonical": "{\"command\":\"pnpm e2e\",\"description\":\"Run the e2e suite\"}",
+      "input_sha256": "8294a36b488d0be1f3033e6f1c6d7c22eccefd6717f1d6552f6604feef65024e"
+    },
+    {
+      "name": "input-with-fraction",
+      "input": {
+        "command": "python3 -c 'import time; time.sleep(0.5)'",
+        "timeout": 0.5,
+        "budget": 1e+21,
+        "id": 9007199254740993
+      },
+      "canonical": "{\"budget\":1e+21,\"command\":\"python3 -c 'import time; time.sleep(0.5)'\",\"id\":9007199254740992,\"timeout\":0.5}",
+      "input_sha256": "5866483371fad05cc4e773dbcb9e2c6e11506ce7c80c5d680942b1e92daee06b"
+    }
+  ],
   "vectors": [
     {
       "name": "say-ascii",
@@ -180,6 +296,30 @@
       "covered": "smns-hub-raised-v1\n6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\n{\"input\":{\"command\":\"pnpm e2e\",\"description\":\"Run the e2e suite\"},\"mac\":{\"nonce\":\"BgYGBgYGBgYGBgYGBgYGBg\"},\"request\":\"toolu_01QmZ7wq3V8nEXAMPLE\",\"session\":\"67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b\",\"tool\":\"Bash\"}",
       "covered_hex": "736d6e732d6875622d7261697365642d76310a36663163306138652d336232642d346335652d396637302d3861316232633364346535660a7b22696e707574223a7b22636f6d6d616e64223a22706e706d20653265222c226465736372697074696f6e223a2252756e2074686520653265207375697465227d2c226d6163223a7b226e6f6e6365223a2242675947426759474267594742675947426759474267227d2c2272657175657374223a22746f6f6c755f3031516d5a3777713356386e4558414d504c45222c2273657373696f6e223a2236373634366131622d326635652d346331642d386133622d396330643165326633613462222c22746f6f6c223a2242617368227d",
       "code": "EOZ2HgjEWZHiuKlv6wZ5CYduHZtbNIMEmqdXDrEo48M"
+    },
+    {
+      "name": "raised-fraction",
+      "domain": "smns-hub-raised-v1",
+      "org_key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+      "project": "6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f",
+      "input": {
+        "request": "toolu_01FracTi0nEXAMPLE",
+        "session": "67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b",
+        "tool": "Bash",
+        "input": {
+          "command": "python3 -c 'import time; time.sleep(0.5)'",
+          "timeout": 0.5,
+          "budget": 1e+21,
+          "id": 9007199254740993
+        },
+        "mac": {
+          "nonce": "CwsLCwsLCwsLCwsLCwsLCw",
+          "value": "pVCnkJvM-Mtsc_48DN0yt1oG_XxdU_iLe4bVg6Rij2c"
+        }
+      },
+      "covered": "smns-hub-raised-v1\n6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f\n{\"input\":{\"budget\":1e+21,\"command\":\"python3 -c 'import time; time.sleep(0.5)'\",\"id\":9007199254740992,\"timeout\":0.5},\"mac\":{\"nonce\":\"CwsLCwsLCwsLCwsLCwsLCw\"},\"request\":\"toolu_01FracTi0nEXAMPLE\",\"session\":\"67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b\",\"tool\":\"Bash\"}",
+      "covered_hex": "736d6e732d6875622d7261697365642d76310a36663163306138652d336232642d346335652d396637302d3861316232633364346535660a7b22696e707574223a7b22627564676574223a31652b32312c22636f6d6d616e64223a22707974686f6e33202d632027696d706f72742074696d653b2074696d652e736c65657028302e352927222c226964223a393030373139393235343734303939322c2274696d656f7574223a302e357d2c226d6163223a7b226e6f6e6365223a224377734c4377734c4377734c4377734c4377734c4377227d2c2272657175657374223a22746f6f6c755f3031467261635469306e4558414d504c45222c2273657373696f6e223a2236373634366131622d326635652d346331642d386133622d396330643165326633613462222c22746f6f6c223a2242617368227d",
+      "code": "pVCnkJvM-Mtsc_48DN0yt1oG_XxdU_iLe4bVg6Rij2c"
     },
     {
       "name": "settled",

@@ -11,19 +11,27 @@ export type Raised = {
   session: string;
   tool: string;
   input: JsonObject;
-  /** A background subagent's prompt: when the web's window closes and the prompt is the terminal's alone (§2). */
+  /**
+   * A background subagent's prompt: when the web's window closes (§2's 3 s). After it nothing is settled: the request
+   * stays pending, answerable only in the terminal, until the terminal's answer settles it. The web reads that state
+   * from DX3's `pending` (`terminal_only`, the hub's clock), never by comparing this time with its own.
+   */
   deadline?: string;
   mac: Mac;
 };
 
+/** `withdrawn`: the request ended with no answer used (the turn aborted, the session ended, the call settled another way). */
 export type SettledOutcome = 'allow' | 'deny' | 'answered' | 'withdrawn';
 
-/** Exactly one per `raised`; `winner` is the side whose answer the engine used. */
+/**
+ * Exactly one per `raised`; `winner` is the side whose answer the engine used (DC2's semantics): `web` with `by` the
+ * member id; `terminal` with `by` `"terminal"`; `other` with `by` `"cli"` for a local CLI answer, or `"bridge"` with
+ * `outcome` `withdrawn` when no answer was used.
+ */
 export type Settled = {
   request: string;
   winner: 'web' | 'terminal' | 'other';
   outcome: SettledOutcome;
-  /** The member id when the web won; otherwise the side's own label. */
   by: string;
   mac: Mac;
 };
@@ -91,22 +99,32 @@ export type SessionKind = keyof SessionBodies;
 
 /** The kinds that belong to a subscription (`sub` and `n` set); the rest are published to every browser of the project. */
 export const SUBSCRIPTION_KINDS = ['snapshot', 'row', 'chunk', 'rows', 'subagents', 'diff', 'end'] as const satisfies readonly SessionKind[];
+export type SubscriptionKind = (typeof SUBSCRIPTION_KINDS)[number];
 
 /** The kinds the hub interprets; it relays every other kind without reading its body. */
 export const INTERPRETED_KINDS = ['presence', 'machine', 'raised', 'settled', 'delivery'] as const satisfies readonly SessionKind[];
 
+type Envelope<K extends SessionKind, Session extends string | null, Sub extends string | null, N extends number | null> = {
+  project: string;
+  machine: string;
+  session: Session;
+  kind: K;
+  sub: Sub;
+  n: N;
+  body: SessionBodies[K];
+};
+
 /**
- * The envelope. `session` is null for `machine`; `sub` and `n` are null outside a subscription. Within one `sub`, `n`
- * is 0 for the snapshot and counts the live messages from 1: a gap makes the browser subscribe again.
+ * The envelope, discriminated by `kind`. A subscription's kinds carry `session`, `sub`, and `n` (0 for the snapshot,
+ * then the live messages from 1: a gap makes the browser subscribe again); `presence`, `raised`, `settled`, and
+ * `delivery` carry `session` with `sub` and `n` null; `machine` carries all three null.
  */
 export type SessionMessage<K extends SessionKind = SessionKind> = {
-  [P in K]: {
-    project: string;
-    machine: string;
-    session: string | null;
-    kind: P;
-    sub: string | null;
-    n: number | null;
-    body: SessionBodies[P];
-  };
+  [P in K]: P extends 'snapshot'
+    ? Envelope<P, string, string, 0>
+    : P extends SubscriptionKind
+      ? Envelope<P, string, string, number>
+      : P extends 'machine'
+        ? Envelope<P, null, null, null>
+        : Envelope<P, string, null, null>;
 }[K];

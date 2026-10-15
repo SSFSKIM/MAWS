@@ -1,13 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import vectorsFile from '../../src/protocol/vectors/codes.json';
 import { base64urlDecode } from '../../src/protocol/base64url';
+import { canonicalize } from '../../src/protocol/canonical';
 import { coveredBytes, DOMAINS, importOrgKey, inputSha256, newNonce, seal, sealRpc, verify, verifyRpc, type ShapeKind } from '../../src/protocol/codes';
+import type { JsonValue } from '../../src/protocol/json';
 import type { HumanDraft, LogEvent } from '../../src/protocol/log';
 import type { Rpc, RpcDraft } from '../../src/protocol/rpc';
 
 type Vector = { name: string; domain: string; org_key: string; project: string; input: Record<string, unknown>; covered: string; covered_hex: string; code: string };
 type Negative = { name: string; of: string; why: string; domain: string; org_key: string; project: string; input: Record<string, unknown> };
-const { vectors, negatives, digest } = vectorsFile as unknown as { vectors: Vector[]; negatives: Negative[]; digest: { input: Record<string, string>; input_sha256: string } };
+type NumberVector = { json: string; canonical: string; why: string };
+type DigestVector = { name: string; input: JsonValue; canonical: string; input_sha256: string };
+const { vectors, negatives, numbers, digests } = vectorsFile as unknown as {
+  vectors: Vector[];
+  negatives: Negative[];
+  numbers: NumberVector[];
+  digests: DigestVector[];
+};
 
 const kindOf = (domain: string): ShapeKind => {
   const found = (Object.entries(DOMAINS) as Array<[ShapeKind, string]>).find(([, d]) => d === domain);
@@ -23,7 +32,8 @@ const verifyAny = async (kind: ShapeKind, keyB64: string, project: string, input
 
 describe('the committed vectors (written by generate.py, an independent implementation)', () => {
   it('cover every case the plan names', () => {
-    expect(vectors.map((v) => v.name)).toEqual(['say-ascii', 'message-unicode', 'hub-human', 'nested-object', 'rpc-decide', 'raised', 'settled', 'delivery']);
+    expect(vectors.map((v) => v.name)).toEqual(['say-ascii', 'message-unicode', 'hub-human', 'nested-object', 'rpc-decide', 'raised', 'raised-fraction', 'settled', 'delivery']);
+    expect(digests.map((d) => d.name)).toEqual(['bash-input', 'input-with-fraction']);
     expect(negatives.map((v) => v.name)).toEqual(expect.arrayContaining(['hub-human-fresh-nonce', 'say-text-changed', 'hub-human-other-project']));
   });
 
@@ -59,8 +69,21 @@ describe('the committed vectors (written by generate.py, an independent implemen
     });
   });
 
-  it('digests a tool input as the lowercase hex SHA-256 of its canonical JSON', async () => {
-    expect(await inputSha256(digest.input)).toBe(digest.input_sha256);
+  describe.each(digests)('digest $name', (d) => {
+    it('digests a tool input as the lowercase hex SHA-256 of its canonical JSON', async () => {
+      expect(canonicalize(d.input)).toBe(d.canonical);
+      expect(await inputSha256(d.input)).toBe(d.input_sha256);
+    });
+  });
+
+  describe('numbers, as IEEE-754 doubles in ECMAScript form', () => {
+    it('cover a fraction, negative zero, both exponent thresholds and their neighbours, a large integral value, and an integer past 2^53', () => {
+      expect(numbers.map((n) => n.json)).toEqual(expect.arrayContaining(['0.5', '-0', '1e21', '1e20', '1e-7', '1e-6', '9007199254740993']));
+    });
+
+    it.each(numbers)('$json canonicalizes to $canonical ($why)', (n) => {
+      expect(canonicalize(JSON.parse(n.json))).toBe(n.canonical);
+    });
   });
 });
 
