@@ -21,3 +21,5 @@ export const PROJECTS_PATH = '/__test/projects';
 export const MEMBER_PATH = '/__test/member';
 /** Where the suites' `Project` says how many calls from machines it took, and how many frames they carried. */
 export const PROJECT_CALLS_PATH = '/__test/calls';
+/** Where the suites' `Registry` rewrites its org's stored record (`{id, name}`), as a deploy's previous version made it. */
+export const ORG_ROW_PATH = '/__test/org-row';

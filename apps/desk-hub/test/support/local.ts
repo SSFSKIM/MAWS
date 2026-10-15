@@ -12,7 +12,7 @@ import { inject } from 'vitest';
 import { startProxy, type Proxy } from '../../local/proxy.ts';
 import { AccessStandin, IDENTITY_HEADER } from '../../local/standin.ts';
 import { generateVapidKey } from '../../src/push/web-push';
-import { ABORT_REASON, MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_CALLS_PATH, PROJECT_HOLD_PATH, PROJECT_VISIBLE_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, PROJECTS_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
+import { ABORT_REASON, MACHINE_ABORT_PATH, MEMBER_PATH, ORG_ROW_PATH, PROJECT_CALLS_PATH, PROJECT_HOLD_PATH, PROJECT_VISIBLE_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, PROJECTS_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
 
 const require = createRequire(import.meta.url);
 const { unstable_getMiniflareWorkerOptions } = require('wrangler') as typeof import('wrangler');
@@ -161,6 +161,10 @@ export async function startLocalHub() {
     /** Which instance of a project's object answers; a different one after an eviction or a hibernation. */
     async projectLife(project: string): Promise<string> {
       return seam('PROJECT', project, PROJECT_LIFE_PATH);
+    },
+    /** Rewrites the org's stored record, as an object still on a deploy's previous version would have made it. */
+    async rewriteOrgRow(row: { id: string; name: string }) {
+      await seam('REGISTRY', ORG, ORG_ROW_PATH, row);
     },
     /** How many calls machines made to a project's object, and how many frames they carried. */
     async projectCalls(project: string): Promise<{ calls: number; frames: number }> {
