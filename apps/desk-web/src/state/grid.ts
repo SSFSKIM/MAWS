@@ -5,9 +5,10 @@ import type { ProjectSummary } from 'desk-hub/protocol';
 import { GridClient } from '../hub/grid-client';
 import type { ConnectionStatus } from '../hub/socket';
 
-export type GridState = { projects: ProjectSummary[]; loaded: boolean; status: ConnectionStatus };
+/** `asOf`: when the hub last sent the grid or a change to it; while reconnecting, the counts shown are that old. */
+export type GridState = { projects: ProjectSummary[]; loaded: boolean; status: ConnectionStatus; asOf: number | null };
 
-export const useGrid = create<GridState>()(() => ({ projects: [], loaded: false, status: 'connecting' }));
+export const useGrid = create<GridState>()(() => ({ projects: [], loaded: false, status: 'connecting', asOf: null }));
 
 let client: GridClient | null = null;
 
@@ -15,7 +16,7 @@ export function startGrid(base: string): () => void {
   client?.stop();
   const own = new GridClient({
     base,
-    projects: (projects) => useGrid.setState({ projects, loaded: true }),
+    projects: (projects) => useGrid.setState({ projects, loaded: true, asOf: Date.now() }),
     status: (status) => useGrid.setState({ status }),
   });
   client = own;

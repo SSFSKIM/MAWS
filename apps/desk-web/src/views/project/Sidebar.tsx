@@ -27,9 +27,11 @@ export function Sidebar(props: {
         <span className="truncate font-medium">{name}</span>
       </button>
       {locked ? (
-        <p className="mx-2.5 mt-4 text-ui-sm text-fg-muted" data-testid="sidebar-locked">
-          Locked
-        </p>
+        // Locked, the sidebar stays empty: no channels, no sessions, and no counts from the hub (the owner's ruling).
+        <div className="mx-2.5 mt-4" data-testid="sidebar-locked">
+          <p className="m-0 text-ui-sm font-medium text-fg">Locked</p>
+          <p className="m-0 mt-1 text-ui-sm leading-4 text-fg-muted">Channels and sessions appear once this browser can read {name}'s log.</p>
+        </div>
       ) : (
         groups &&
         GROUPS.filter((g) => groups[g].length > 0).map((group) => (

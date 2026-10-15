@@ -30,7 +30,7 @@ afterEach(async () => {
   await double.close();
 });
 
-function client(options: { held?: () => number; frameLimit?: number } = {}) {
+function client(options: { held?: () => number; frameLimit?: number; resubscribeDelay?: (attempt: number) => number } = {}) {
   const got: Array<{ offset: number; event: LogEvent }> = [];
   const statuses: ConnectionStatus[] = [];
   const caughtUp: number[] = [];
@@ -41,6 +41,7 @@ function client(options: { held?: () => number; frameLimit?: number } = {}) {
     project: PROJECT,
     delay: () => 20,
     frameLimit: options.frameLimit,
+    resubscribeDelay: options.resubscribeDelay,
     handlers: {
       held,
       log: (entries) => got.push(...entries),
@@ -207,6 +208,25 @@ describe('the session plane', () => {
     expect(sessions[0].kind).toBe('presence');
   });
 
+  it("asks a main transcript's diff and passes usage through; an agent's subscription sends no diff", async () => {
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    const { log, listener } = recorder();
+    const main = c.subscribe({ machine: MACHINE, session: SESSION, agentId: null }, listener);
+    const agent = c.subscribe({ machine: MACHINE, session: SESSION, agentId: 'a1' }, recorder().listener);
+    await until(() => double.subscriptions(PROJECT).length === 2);
+    const { sub } = double.subscriptions(PROJECT).find((s) => s.agentId === null)!;
+    double.sendSub(PROJECT, sub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: null, bridge: true }, streaming: [], usage: null });
+    double.diffs.set(SESSION, { base: 'main', text: 'diff --git a/x b/x' });
+    main.diff();
+    agent.diff();
+    await until(() => log.length === 2);
+    double.sendSub(PROJECT, sub, 'usage', { context: { tokens: 1000, window: 200000, percent: 0.5 }, cost: { usd: 0.12 } });
+    await until(() => log.length === 3);
+    expect(log).toEqual(['snapshot', 'diff:1', 'usage:2']);
+    expect(double.up.filter((u) => u.frame.t === 'diff')).toEqual([{ project: PROJECT, frame: { t: 'diff', sub } }]);
+  });
+
   it('subscribes again after a gap in n, under a fresh sub', async () => {
     const { c, caughtUp } = client();
     await until(() => caughtUp.length === 1);
@@ -272,6 +292,40 @@ describe('the session plane', () => {
     c.subscribe({ machine: MACHINE, session: SESSION, agentId: 'a1' }, listener);
     await until(() => double.subscriptions(PROJECT).length === 1);
     expect(double.subscriptions(PROJECT)[0]).toMatchObject({ machine: MACHINE, session: SESSION, agentId: 'a1' });
+  });
+
+  it('takes an end that comes first, at n 0, before any snapshot, as the end of the subscription', async () => {
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    const { log, listener } = recorder();
+    c.subscribe({ machine: MACHINE, session: SESSION, agentId: null }, listener);
+    await until(() => double.subscriptions(PROJECT).length === 1);
+    const sub = double.subscriptions(PROJECT)[0].sub;
+    double.sendSession(PROJECT, { project: PROJECT, machine: MACHINE, session: SESSION, kind: 'end', sub, n: 0, body: { reason: 'session-ended' } } as SessionMessage);
+    await until(() => log.length === 1);
+    expect(log).toEqual(['end:session-ended']);
+  });
+
+  it('subscribes again after a discontinuity at n 0 only after a backoff, so a bridge still starting cannot loop it', async () => {
+    const delays: number[] = [];
+    const { c, caughtUp } = client({ resubscribeDelay: (attempt) => (delays.push(attempt), 150) });
+    await until(() => caughtUp.length === 1);
+    const { log, listener } = recorder();
+    c.subscribe({ machine: MACHINE, session: SESSION, agentId: null }, listener);
+    await until(() => double.subscriptions(PROJECT).length === 1);
+    const subscribes = () => double.up.filter((u) => u.frame.t === 'subscribe').length;
+    const endFirst = (sub: string) => double.sendSession(PROJECT, { project: PROJECT, machine: MACHINE, session: SESSION, kind: 'end', sub, n: 0, body: { reason: 'discontinuity' } } as SessionMessage);
+    endFirst(double.subscriptions(PROJECT)[0].sub);
+    await new Promise((r) => setTimeout(r, 60));
+    expect(subscribes()).toBe(1); // not at once
+    await until(() => subscribes() === 2);
+    endFirst((double.up.filter((u) => u.frame.t === 'subscribe').at(-1)!.frame as { sub: string }).sub);
+    await until(() => subscribes() === 3);
+    expect(delays).toEqual([0, 1]); // each consecutive one backs off further
+    const third = (double.up.filter((u) => u.frame.t === 'subscribe').at(-1)!.frame as { sub: string }).sub;
+    double.sendSession(PROJECT, snapshot(third));
+    await until(() => log.includes('snapshot'));
+    expect(log).toEqual(['reset', 'reset', 'snapshot']);
   });
 
   it('recovers from the hub ending a subscription for a discontinuity, under a fresh sub', async () => {

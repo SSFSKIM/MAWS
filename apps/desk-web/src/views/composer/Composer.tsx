@@ -170,8 +170,8 @@ function Compaction({ session }: { session: string }) {
   let text: string;
   if (compaction.phase === 'start') text = 'Compacting…';
   else if (compaction.error) text = `Compaction failed: ${compaction.error}`;
-  else if (compaction.skip) text = 'Compaction skipped by a hook';
-  else if (compaction.tokensBefore !== undefined && compaction.tokensAfter !== undefined) text = `Compacted: ${compaction.tokensBefore.toLocaleString()} → ${compaction.tokensAfter.toLocaleString()} tokens`;
+  else if (compaction.skip) text = `Compaction skipped by a hook: ${compaction.skip}`;
+  else if (typeof compaction.tokensBefore === 'number' && typeof compaction.tokensAfter === 'number') text = `Compacted: ${compaction.tokensBefore.toLocaleString()} → ${compaction.tokensAfter.toLocaleString()} tokens`;
   else text = 'Compacted';
   return (
     <span className={`text-ui-sm ${compaction.error ? 'text-danger' : 'text-fg-muted'}`} data-testid="compaction">

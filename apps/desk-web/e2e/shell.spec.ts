@@ -23,6 +23,22 @@ test('the grid lists the org\'s projects and follows each change within 2 second
   await expect(page.getByTestId('grid').locator('li').first()).toContainText('MAWS'); // waiting sorts first
 });
 
+test('the grid draws its empty and reconnecting states as the approved mockup does', async ({ page, hub }) => {
+  await page.goto(hub.url);
+  await expect(page.getByTestId('grid-empty')).toContainText('No projects yet');
+  await page.getByRole('button', { name: 'Enroll a machine' }).click();
+  await expect(page.getByRole('dialog', { name: 'Machines' })).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  hub.setGrid([summary()]);
+  await expect(page.locator(`[data-project="${PROJECT}"]`)).toBeVisible();
+  hub.admit = 'not-a-member'; // every reconnection is refused: the grid holds its last counts
+  hub.dropConnections();
+  await expect(page.getByTestId('grid-stale')).toContainText('Counts as of');
+  await expect(page.locator(`[data-project="${PROJECT}"]`)).toBeVisible();
+  await expect(page.getByTestId('grid-status')).toContainText('Reconnecting');
+});
+
 test('a project opens into its channels, the selected channel, and the depth slot', async ({ page, hub }) => {
   await stageProject(hub);
   await seedKey(page, hub);

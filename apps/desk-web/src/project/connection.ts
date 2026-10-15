@@ -28,7 +28,6 @@ import {
 import type { LogRecord } from '../log/record';
 import { ProjectLog } from '../log/project-log';
 import { HumanRefused, ProjectClient, type ConnectionStatus } from '../hub/project-client';
-import { asCompactMessage } from '../hub/protocol-ahead';
 import { Conversation, type RequestRecord } from './conversation';
 
 export type LiveState = {
@@ -216,10 +215,11 @@ export class ProjectConnection {
       case 'delivery':
         this.conversation.delivery(message.machine, message.body as Delivery);
         return;
-      default: {
-        const compact = asCompactMessage(message);
-        if (compact) this.conversation.compact(compact.session, compact.body);
-      }
+      case 'compact':
+        this.conversation.compact(message.session, message.body);
+        return;
+      default:
+        return;
     }
   }
 

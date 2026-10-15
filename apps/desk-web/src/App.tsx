@@ -54,7 +54,7 @@ function Desk({ me }: { me: Me }) {
   return (
     <div className="grid h-full grid-rows-[var(--toolbar-h)_minmax(0,1fr)]">
       <TopBar me={me} open={setPanel} />
-      {route.view === 'grid' ? <GridView /> : <ProjectView key={route.project} me={me} project={route.project} channel={route.channel} />}
+      {route.view === 'grid' ? <GridView onEnroll={() => setPanel('machines')} /> : <ProjectView key={route.project} me={me} project={route.project} channel={route.channel} />}
       {panel === 'key' && <KeyDialog me={me} onClose={close} />}
       {panel === 'machines' && <MachinesDialog me={me} onClose={close} />}
     </div>

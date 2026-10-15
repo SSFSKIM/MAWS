@@ -134,6 +134,11 @@ export class HubDouble {
     for (const socket of state.sockets) if (socket.resumed) this.sendRaw(socket.ws, { t: 'log', events: state.log });
   }
 
+  /** The project's log as stored, offsets beside events. */
+  logOf(project: string): Array<{ offset: number; event: LogEvent }> {
+    return this.project(project).log;
+  }
+
   head(project: string): number {
     return this.project(project).log.at(-1)?.offset ?? 0;
   }
@@ -212,10 +217,13 @@ export class HubDouble {
     return delivery;
   }
 
-  /** A session's compaction (DX4 `compact`, composite 71e32c68), which `desk-hub/protocol` does not type yet. */
-  sendCompact(project: string, machine: string, session: string, body: Record<string, unknown>): void {
-    this.broadcast(project, { t: 'session', message: { project, machine, session, kind: 'compact', sub: null, n: null, body } as unknown as SessionMessage });
+  /** A session's compaction (DX4 `compact`), outside any subscription. */
+  sendCompact(project: string, machine: string, session: string, body: SessionBodies['compact']): void {
+    this.broadcast(project, { t: 'session', message: { project, machine, session, kind: 'compact', sub: null, n: null, body } });
   }
+
+  /** What a browser's `diff` on a main-transcript subscription is answered with, per session (DX3; DC6 draws it). */
+  readonly diffs = new Map<string, SessionBodies['diff']>();
 
   /** The RPCs browsers sent on a project, oldest first, retries included. */
   rpcs(project: string): Rpc[] {
@@ -416,6 +424,12 @@ export class HubDouble {
       case 'unsubscribe':
         state.subs.delete(frame.sub);
         return;
+      case 'diff': {
+        // Answered as DX4 `diff` on that sub; a main-transcript subscription's only, as DX3 has it.
+        const target = this.subscriptions(project).find((s) => s.sub === frame.sub);
+        if (target && target.agentId === null && state.subs.has(frame.sub)) this.sendSub(project, frame.sub, 'diff', this.diffs.get(target.session) ?? { base: 'main', text: '' });
+        return;
+      }
       default:
         return;
     }

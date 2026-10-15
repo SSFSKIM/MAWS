@@ -4,8 +4,9 @@
 // settlements, and deliveries carry codes (DX1, DX4) and are drawn only once they verify under the org key; one that
 // fails is kept out and reported. Every verdict holds only under the key it was reached with.
 import { createStore, type StoreApi } from 'zustand/vanilla';
-import { verify, type Delivery, type OrgKey, type PendingRequest, type Raised, type Recipient, type Rpc, type RpcOutcome, type Settled } from 'desk-hub/protocol';
-import type { CompactBody } from '../hub/protocol-ahead';
+import { verify, type Delivery, type OrgKey, type PendingRequest, type Raised, type Recipient, type Rpc, type RpcOutcome, type SessionBodies, type Settled } from 'desk-hub/protocol';
+
+export type CompactBody = SessionBodies['compact'];
 
 export type RequestRecord = {
   request: string;

@@ -77,7 +77,7 @@ export function SpawnDialog({ onClose, onOpen }: { onClose: () => void; onOpen: 
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            Worktree <span className="text-ui-sm text-fg-muted">optional: a new worktree under the checkout, by name</span>
+            Worktree <span className="text-ui-sm text-fg-muted">optional</span>
             <input className={textInput} value={worktree} onChange={(e) => setWorktree(e.target.value)} />
           </label>
           <label className="flex flex-col gap-1">

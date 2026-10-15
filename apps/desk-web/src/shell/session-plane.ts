@@ -6,7 +6,10 @@ import type { SessionBodies, SessionMessage, SubscriptionKind } from 'desk-hub/p
 /** One transcript: a session's main thread (`agentId` null) or one of its subagents. */
 export type SessionTarget = { machine: string; session: string; agentId: string | null };
 
-/** The messages a subscription delivers to its listener: everything of DX4's subscription kinds but `end`. */
+/**
+ * The messages a subscription delivers to its listener: everything of DX4's subscription kinds but `end` — `usage`
+ * (context use and cost, main-transcript subscriptions only) passed through like the rest.
+ */
 export type SubscriptionMessage = SessionMessage<Exclude<SubscriptionKind, 'end'>>;
 
 export interface SubscriptionListener {
@@ -24,6 +27,11 @@ export interface SubscriptionListener {
 export interface Subscription {
   /** Older rows before row `before`, newest first; they arrive as a `rows` message. */
   rows(before: string, limit: number): void;
+  /**
+   * The session's working-tree diff against its base branch, computed on request and answered as a `diff` message; a
+   * main-transcript subscription's only (`agentId` null), and nothing is sent on an agent's.
+   */
+  diff(): void;
   /** Ends the subscription; the listener hears nothing more. */
   close(): void;
 }

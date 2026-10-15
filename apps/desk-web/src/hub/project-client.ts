@@ -18,7 +18,7 @@ import {
   SUBSCRIPTION_KINDS,
 } from 'desk-hub/protocol';
 import type { SessionPlane, SessionTarget, Subscription, SubscriptionListener, SubscriptionMessage } from '../shell/session-plane';
-import { HubSocket, type ConnectionStatus } from './socket';
+import { backoff, HubSocket, type ConnectionStatus } from './socket';
 
 export type { ConnectionStatus } from './socket';
 
@@ -60,9 +60,22 @@ export type ProjectClientOptions = {
   handlers: ProjectHandlers;
   delay?: (attempt: number) => number;
   frameLimit?: number;
+  /**
+   * The wait before subscribing again after an `end {discontinuity}` that came first, at `n` 0 (the bridge could not
+   * take a snapshot yet), by how many came in a row from 0; the socket's backoff by default.
+   */
+  resubscribeDelay?: (attempt: number) => number;
 };
 
-type OpenSubscription = { target: SessionTarget; listener: SubscriptionListener; sub: string | null; next: number };
+type OpenSubscription = {
+  target: SessionTarget;
+  listener: SubscriptionListener;
+  sub: string | null;
+  next: number;
+  /** Discontinuities at `n` 0 in a row: the backoff's attempt. A snapshot resets it. */
+  failedStarts: number;
+  retry: ReturnType<typeof setTimeout> | null;
+};
 
 const IN_SUB = new Set<string>(SUBSCRIPTION_KINDS);
 
@@ -126,14 +139,19 @@ export class ProjectClient implements SessionPlane {
   }
 
   subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription {
-    const open: OpenSubscription = { target, listener, sub: null, next: 0 };
+    const open: OpenSubscription = { target, listener, sub: null, next: 0, failedStarts: 0, retry: null };
     this.subs.add(open);
     if (this.welcomed) this.sendSubscribe(open);
     return {
       rows: (before, limit) => {
         if (open.sub && this.subs.has(open)) this.socket.send({ t: 'rows', sub: open.sub, before, limit });
       },
+      diff: () => {
+        if (open.sub && this.subs.has(open) && open.target.agentId === null) this.socket.send({ t: 'diff', sub: open.sub });
+      },
       close: () => {
+        if (open.retry) clearTimeout(open.retry);
+        open.retry = null;
         if (!this.subs.delete(open)) return;
         if (open.sub && this.welcomed) this.socket.send({ t: 'unsubscribe', sub: open.sub });
       },
@@ -144,6 +162,8 @@ export class ProjectClient implements SessionPlane {
     if (!this.welcomed) return;
     this.welcomed = false;
     for (const open of this.subs) {
+      if (open.retry) clearTimeout(open.retry); // the next welcome subscribes every open one again
+      open.retry = null;
       if (open.sub === null) continue;
       open.sub = null;
       open.listener.reset();
@@ -235,12 +255,25 @@ export class ProjectClient implements SessionPlane {
       return;
     }
     open.next++;
+    if (message.kind === 'snapshot') open.failedStarts = 0;
     if (message.kind === 'end') {
+      // An `end` may come first, at n 0, when the sub ended before a snapshot could be taken (DX4, composite cd2667d8).
       const body = message.body as SessionBodies['end'];
       if (body.reason === 'discontinuity') {
-        // The bridge's stream lost events (DX4): the live part no longer follows the snapshot. Take a fresh one.
+        // The bridge's stream lost events (DX4): the live part no longer follows the snapshot. Take a fresh one — at
+        // once after a snapshot, and after a growing wait when none could be taken, so a bridge still starting is not
+        // asked again and again.
         open.listener.reset();
-        this.sendSubscribe(open);
+        if (message.n !== 0) {
+          this.sendSubscribe(open);
+          return;
+        }
+        open.sub = null;
+        const wait = (this.options.resubscribeDelay ?? backoff)(open.failedStarts++);
+        open.retry = setTimeout(() => {
+          open.retry = null;
+          if (this.subs.has(open) && this.welcomed && open.sub === null) this.sendSubscribe(open);
+        }, wait);
         return;
       }
       this.subs.delete(open);
