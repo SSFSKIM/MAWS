@@ -61,31 +61,62 @@ function forward(request: Request, url: string, identity: Record<string, string>
   return forwarded;
 }
 
+/** How much of a body the Worker answered without reading it is read and dropped before the answer goes out. */
+const DRAIN_LIMIT = 1024 * 1024;
+
+/**
+ * Reads and drops what is left of a body the Worker answered without reading (a refusal before the body: too large, no
+ * assertion, not a member), up to `DRAIN_LIMIT`. Behind Cloudflare's edge the client always gets the answer; on a bare
+ * workerd, a connection closed with request bytes unread is reset, and on Linux the reset can overtake the answer (the
+ * local stand-in's proxy saw `write ECONNRESET` and answered 502 in 4 of 200 oversized bodies on the CI runner). A body
+ * already taken (read, or forwarded to an object) is left alone.
+ */
+async function drain(request: Request): Promise<void> {
+  if (!request.body || request.bodyUsed || request.body.locked) return;
+  try {
+    const reader = request.body.getReader();
+    for (let read = 0; read <= DRAIN_LIMIT; ) {
+      const { done, value } = await reader.read();
+      if (done) return;
+      read += value.byteLength;
+    }
+    await reader.cancel();
+  } catch {
+    // a body locked by a forward, or a client gone: nothing to drain
+  }
+}
+
 export default {
   async fetch(request, env): Promise<Response> {
-    const config = hubConfig(env);
-    if (!config) return json(503, { error: 'not-configured' });
-    const registry = env.REGISTRY.get(env.REGISTRY.idFromName(config.org.id));
-    const url = new URL(request.url);
-    if (url.pathname === REDEEM_PATH) {
-      return request.method === 'POST' ? answer(await registry.redeem(await body(request))) : json(405, { error: 'method-not-allowed' });
-    }
-    let principal: Principal | null;
-    try {
-      const identity = await verifyAccessAssertion(request.headers.get('Cf-Access-Jwt-Assertion'), {
-        issuer: config.issuer,
-        audience: config.audience,
-        keys: keysAt(config.certsUrl),
-      });
-      principal = await registry.resolve(identity);
-      if (!principal) return json(403, { error: identity.kind === 'human' ? 'not-a-member' : 'not-enrolled' });
-    } catch (error) {
-      if (error instanceof AccessError) return json(error.reason === 'missing' ? 401 : 403, { error: error.reason });
-      throw error;
-    }
-    return principal.kind === 'member' ? member(request, url, env, registry, principal) : machine(request, url, env, principal);
+    const response = await route(request, env);
+    await drain(request);
+    return response;
   },
 } satisfies ExportedHandler<Env>;
+
+async function route(request: Request, env: Env): Promise<Response> {
+  const config = hubConfig(env);
+  if (!config) return json(503, { error: 'not-configured' });
+  const registry = env.REGISTRY.get(env.REGISTRY.idFromName(config.org.id));
+  const url = new URL(request.url);
+  if (url.pathname === REDEEM_PATH) {
+    return request.method === 'POST' ? answer(await registry.redeem(await body(request))) : json(405, { error: 'method-not-allowed' });
+  }
+  let principal: Principal | null;
+  try {
+    const identity = await verifyAccessAssertion(request.headers.get('Cf-Access-Jwt-Assertion'), {
+      issuer: config.issuer,
+      audience: config.audience,
+      keys: keysAt(config.certsUrl),
+    });
+    principal = await registry.resolve(identity);
+    if (!principal) return json(403, { error: identity.kind === 'human' ? 'not-a-member' : 'not-enrolled' });
+  } catch (error) {
+    if (error instanceof AccessError) return json(error.reason === 'missing' ? 401 : 403, { error: error.reason });
+    throw error;
+  }
+  return principal.kind === 'member' ? member(request, url, env, registry, principal) : machine(request, url, env, principal);
+}
 
 async function member(request: Request, url: URL, env: Env, registry: DurableObjectStub<Registry>, principal: Extract<Principal, { kind: 'member' }>): Promise<Response> {
   const { pathname } = url;
