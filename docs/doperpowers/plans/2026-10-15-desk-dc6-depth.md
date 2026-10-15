@@ -334,6 +334,24 @@ registrations through `connectDepth()`.
   for `<message>` marks; the `transcript` slot's marks are confirmed
   before M3.
   Date/Author: 2026-10-15, composite's writer.
+- Decision (M1 fix wave 1): Late subagent metadata rebuilds the
+  transcript only when it resolves an Agent call a mapping already looked
+  up and missed (not at every `subagents`, which usually precedes its
+  call's row). A reset fires one shared signal every registered source
+  hears; MAWS's store ignores one from an attachment it has released, so
+  the attached source is always reached. The lint rule forbids
+  `window.maws` and `globalThis.maws` in `apps/desk-web/src`, tests
+  included. `step-end` tombstones its request until the next snapshot or
+  reset, so a later chunk is ignored. Live thinking is its label alone
+  everywhere (DC2: live chunks carry no text); a settled thinking block
+  with no text draws no row in MAWS (`derive.ts:356–358`), so the label
+  goes when the row settles — accepted as built (composite `62750d48`).
+  `step-end` is read through a local stand-in (`depth/stream/step-end.ts`
+  and a cast in `DeskTranscript.subscribe`) until DC5's client passes it
+  through (its M3 fix wave, `SUBSCRIPTION_KINDS`) and DC3's type
+  (`d75f2924`) is merged; then the stand-in and cast go and a browser spec
+  covers it. Until then the double's unit coverage carries it.
+  Date/Author: 2026-10-15, M1 executor; rulings by the composite's writer.
 - Decision (M3): The `transcript` slot draws through MAWS's to-human
   Presenter, so the unfolded working record reads as the folded view does;
   depth on the right stays raw. It draws an **exclusive range**: DC5 mounts
