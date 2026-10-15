@@ -44,6 +44,19 @@ describe("a streaming answer's marks", () => {
     expect(parts[0].text).toContain('echo <message>');
   });
 
+  it('a fence closed on the last line is not opened again: the span closes after it', () => {
+    const text = '<message>\nRun this:\n\n```sh\necho hi\n```';
+    const parts = parse(liveMarkdown(text));
+    expect(parts.map((part) => part.kind)).toEqual(['to-human']);
+    expect(parts[0].text).toContain('echo hi');
+    expect(liveMarkdown(text)).not.toContain('<message>\nRun this:\n\n```sh\necho hi\n```\n```');
+  });
+
+  it('an inline code span at the very end is not a fence', () => {
+    const text = '<message>Use ```x``` here';
+    expect(parse(liveMarkdown(text)).map((part) => [part.kind, part.text])).toEqual([['to-human', 'Use ```x``` here']]);
+  });
+
   it('text with no marks is drawn as it is', () => {
     expect(liveMarkdown('Plain words <b>and a tag</b>.')).toBe('Plain words <b>and a tag</b>.');
   });

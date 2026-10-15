@@ -4,8 +4,10 @@
 // - a `<message>` span, `<row uuid>#<span index>`: the index counts the row's marked spans from 0, as `sminos record`
 //   numbers the `message` events it exports from that row (doperpowers' `host_events`). Only the bounding span is left
 //   out: unmarked text of the same row before it (a `to`) or after it (a `from`) is working record and is drawn;
-// - a question, its call id: the row holding that `tool_use` is the question, and its `tool_result` rows (the answer,
-//   which the channel draws) belong to it too.
+// - a question, its call id (`toolUseId ?? request`, composite 43a27604: the transcript's own call): the row holding
+//   that `tool_use` is the question, and its `tool_result` (the answer, which the channel draws) belongs to it too. Only
+//   the question's own call and result are left out: other work between the call and its answer (a parallel tool's
+//   call and result) is working record and is drawn.
 //
 // A null bound is open: the transcript's start, or its end (a live session's last fold, which rows arriving later
 // extend). A bound no held row names is `missing`; the slot pages older rows in while one may still be found, and
@@ -33,17 +35,23 @@ const blockOf = (block: unknown): JsonObject | null => (typeof block === 'object
 const callsIn = (row: JsonObject, call: string) => row.type === 'assistant' && contentOf(row).some((b) => blockOf(b)?.type === 'tool_use' && blockOf(b)?.id === call);
 const answers = (row: JsonObject, call: string) => row.type === 'user' && contentOf(row).some((b) => blockOf(b)?.type === 'tool_result' && blockOf(b)?.tool_use_id === call);
 
-/** Where a bound's item lies: the index of its row, and for a span the part of the row's text beside it. */
-function locate<R extends JsonObject & { uuid: string }>(rows: readonly R[], bound: Bound): { at: number; last: number } | null {
-  if ('row' in bound) {
-    const at = rows.findIndex((row) => row.uuid === bound.row);
-    return at < 0 ? null : { at, last: at };
+/** The index of the row holding a bound's item; -1 when no held row does. */
+const locate = (rows: readonly (JsonObject & { uuid: string })[], bound: Bound): number =>
+  'row' in bound ? rows.findIndex((row) => row.uuid === bound.row) : rows.findIndex((row) => callsIn(row, bound.call));
+
+// Each row without a question's answer, so the same row is the same object: a live row then continues what is drawn.
+const unanswered = new WeakMap<JsonObject, Map<string, JsonObject | null>>();
+
+/** The row without the question `call`'s `tool_result` blocks (the row itself when it has none); null when nothing is left. */
+function withoutAnswer<R extends JsonObject>(row: R, call: string): R | null {
+  if (!answers(row, call)) return row;
+  let byCall = unanswered.get(row);
+  if (!byCall) unanswered.set(row, (byCall = new Map()));
+  if (!byCall.has(call)) {
+    const rest = contentOf(row).filter((b) => !(blockOf(b)?.type === 'tool_result' && blockOf(b)?.tool_use_id === call));
+    byCall.set(call, rest.length === 0 ? null : { ...row, message: { ...(row.message as JsonObject), content: rest } });
   }
-  const at = rows.findIndex((row) => callsIn(row, bound.call));
-  if (at < 0) return null;
-  let last = at;
-  for (let i = at + 1; i < rows.length; i++) if (answers(rows[i], bound.call)) last = i;
-  return { at, last };
+  return byCall.get(call) as R | null;
 }
 
 // The grammar's mark names, `to-human` written as `<message>` (its name since contract 2).
@@ -94,28 +102,43 @@ function cut<R extends JsonObject>(row: R, after: number | null, before: number 
 export function rowsInRange<R extends JsonObject & { uuid: string }>(rows: readonly R[], range: Range): RangeView<R> {
   const from = range.from === null ? null : boundOf(range.from);
   const to = range.to === null ? null : boundOf(range.to);
-  const start = from === null ? null : locate(rows, from);
-  const end = to === null ? null : locate(rows, to);
-  const view: RangeView<R> = { rows: [], from: from === null ? 'open' : start ? 'found' : 'missing', to: to === null ? 'open' : end ? 'found' : 'missing' };
-  const first = start === null ? 0 : start.last + 1;
-  const stop = end === null ? rows.length : end.at;
-  const spanFrom = from !== null && 'row' in from && start ? from.span : null;
-  const spanTo = to !== null && 'row' in to && end ? to.span : null;
-  if (start && end && end.at < start.at) return view;
-  if (start && end && start.at === end.at && spanFrom !== null && spanTo !== null) {
+  const at = from === null ? -1 : locate(rows, from);
+  const end = to === null ? -1 : locate(rows, to);
+  const start = at < 0 ? null : at;
+  const stop = end < 0 ? null : end;
+  const view: RangeView<R> = { rows: [], from: from === null ? 'open' : start !== null ? 'found' : 'missing', to: to === null ? 'open' : stop !== null ? 'found' : 'missing' };
+  const spanFrom = from !== null && 'row' in from && start !== null ? from.span : null;
+  const spanTo = to !== null && 'row' in to && stop !== null ? to.span : null;
+  const answered = from !== null && 'call' in from && start !== null ? from.call : null;
+  if (start !== null && stop !== null && stop < start) return view;
+  if (start !== null && start === stop && spanFrom !== null && spanTo !== null) {
     // Both bounds in one row: what lies between its two spans.
-    const between = cutRow(rows[start.at], spanFrom, spanTo);
+    const between = cutRow(rows[start], spanFrom, spanTo);
     if (between) view.rows.push(between);
     return view;
   }
   if (spanFrom !== null) {
-    const after = cutRow(rows[start!.at], spanFrom, null);
+    const after = cutRow(rows[start!], spanFrom, null);
     if (after) view.rows.push(after);
   }
-  view.rows.push(...rows.slice(first, Math.max(first, stop)));
+  const first = start === null ? 0 : start + 1;
+  for (const row of rows.slice(first, Math.max(first, stop ?? rows.length))) {
+    const kept = answered === null ? row : withoutAnswer(row, answered);
+    if (kept) view.rows.push(kept);
+  }
   if (spanTo !== null) {
-    const before = cutRow(rows[end!.at], null, spanTo);
+    const before = cutRow(rows[stop!], null, spanTo);
     if (before) view.rows.push(before);
   }
   return view;
+}
+
+/**
+ * The bounds a fold says it could not find, once no older page can help: its start when the transcript has no older
+ * rows; its end too once its start is held, since the end follows the start (older pages are not asked for then).
+ */
+export function unresolvedBounds(state: { phase: string; more: boolean; bounds: { from: BoundState; to: BoundState } | null }): { start: boolean; end: boolean } {
+  const { bounds } = state;
+  if (state.phase !== 'live' || bounds === null) return { start: false, end: false };
+  return { start: bounds.from === 'missing' && !state.more, end: bounds.to === 'missing' && (!state.more || bounds.from === 'found') };
 }

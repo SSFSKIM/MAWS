@@ -33,8 +33,21 @@ export function liveMarkdown(text: string): string {
   if (open.length === 0) return body;
 
   // A fence still open runs to the end of the text, and a closing tag inside it would be code: close the fence first.
-  const last = regions.at(-1);
-  const fence = last !== undefined && last[1] === body.length ? /^(`{3,}|~{3,})/.exec(body.slice(last[0])) : null;
-  const closed = `${body}${fence ? `\n${fence[1]}` : ''}\n${open.reverse().map((name) => `</${name}>`).join('')}`;
+  const fence = openFence(body, regions.at(-1));
+  const closed = `${body}${fence ? `\n${fence}` : ''}\n${open.reverse().map((name) => `</${name}>`).join('')}`;
   return kinds(parse(closed)) === kinds(parseLive(text)) ? closed : body;
+}
+
+/**
+ * The fence run of a fenced block still open at the end of the text, or null. A code region reaching the end may also
+ * be a fence closed on the text's last line, or an inline span: neither is open.
+ */
+function openFence(text: string, region: readonly [number, number] | undefined): string | null {
+  if (region === undefined || region[1] !== text.length) return null;
+  const [first, ...rest] = text.slice(region[0]).split('\n');
+  const opening = /^(`{3,}|~{3,})(.*)$/.exec(first);
+  if (!opening || (opening[1][0] === '`' && opening[2].includes('`'))) return null; // an inline span, not a fence
+  const run = opening[1];
+  const closing = new RegExp(`^[ \\t]*\\${run[0]}{${run.length},}[ \\t]*$`);
+  return rest.some((line) => closing.test(line)) ? null : run;
 }

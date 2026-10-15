@@ -2,7 +2,7 @@
 // items, at span granularity.
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
-import { rowsInRange } from './range';
+import { rowsInRange, unresolvedBounds } from './range';
 
 type R = JsonObject & { uuid: string };
 const text = (uuid: string, body: string): R => ({ type: 'assistant', uuid, message: { role: 'assistant', content: [{ type: 'text', text: body }] } });
@@ -70,5 +70,43 @@ describe('the rows a fold draws', () => {
     expect(view).toMatchObject({ from: 'missing', to: 'found' });
     expect(view.rows.map((row) => row.uuid)).toEqual(['q', 'qa', 'a3']);
     expect(rowsInRange(ROWS, { from: 'a1#0', to: 'toolu_elsewhere' })).toMatchObject({ from: 'found', to: 'missing' });
+  });
+
+  it('a question bound leaves out only its own call and answer: a parallel tool’s call and result between them are drawn', () => {
+    const rows = [
+      text('m1', '<message>Asking now.</message>'),
+      call('q', 'toolu_q'),
+      { type: 'assistant', uuid: 'read', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_read', name: 'Read', input: {} }] } } as R,
+      result('read-result', 'toolu_read'),
+      { type: 'user', uuid: 'both', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_q', content: 'blue' }, { type: 'tool_result', tool_use_id: 'toolu_other', content: 'kept' }] } } as R,
+      result('qa', 'toolu_q'),
+      text('a1', 'Working after the answer.'),
+      text('m2', '<message>Done.</message>'),
+    ];
+    const view = rowsInRange(rows, { from: 'toolu_q', to: 'm2#0' });
+    expect(view.rows.map((row) => row.uuid)).toEqual(['read', 'read-result', 'both', 'a1']);
+    // A row carrying the answer beside another result keeps the other.
+    expect(JSON.stringify(view.rows[2])).not.toContain('toolu_q');
+    expect(JSON.stringify(view.rows[2])).toContain('toolu_other');
+    // The same rows are the same objects next time (a live row continues what is drawn).
+    expect(rowsInRange(rows, { from: 'toolu_q', to: 'm2#0' }).rows[2]).toBe(view.rows[2]);
+    // Bounded at its end by the question: everything before its call.
+    expect(rowsInRange(rows, { from: 'm1#0', to: 'toolu_q' }).rows.map((row) => row.uuid)).toEqual([]);
+  });
+});
+
+describe('the bounds a fold says it could not find', () => {
+  const live = (bounds: { from: 'open' | 'found' | 'missing'; to: 'open' | 'found' | 'missing' }, more: boolean) => unresolvedBounds({ phase: 'live', more, bounds });
+
+  it('its end, once its start is held, though older rows exist (no older page can help)', () => {
+    expect(live({ from: 'found', to: 'missing' }, true)).toEqual({ start: false, end: true });
+  });
+
+  it('its start only once the transcript has no older rows; an open start’s missing end likewise', () => {
+    expect(live({ from: 'missing', to: 'found' }, true)).toEqual({ start: false, end: false });
+    expect(live({ from: 'missing', to: 'missing' }, false)).toEqual({ start: true, end: true });
+    expect(live({ from: 'open', to: 'missing' }, true)).toEqual({ start: false, end: false });
+    expect(live({ from: 'open', to: 'missing' }, false)).toEqual({ start: false, end: true });
+    expect(unresolvedBounds({ phase: 'loading', more: false, bounds: { from: 'missing', to: 'missing' } })).toEqual({ start: false, end: false });
   });
 });
