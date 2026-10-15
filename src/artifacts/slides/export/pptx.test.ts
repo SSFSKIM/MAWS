@@ -55,7 +55,7 @@ describe('the PPTX mapping', () => {
     expect(title.options).toMatchObject({ objectName: 'title', x: inches(128), y: inches(128), w: inches(1664), h: inches(106), fit: 'none', margin: [0, 0, 0, 0], wrap: false }); // one line in the app: never wrapped
     expect(title.text.map((r) => [r.text, r.options?.fontSize, r.options?.bold, r.options?.color, r.options?.fontFace, r.options?.lineSpacing])).toEqual([
       ['Quarterly ', 48, true, '123456', 'Helvetica Neue', 52.8],
-      ['review', 48, true, '123456', 'Helvetica Neue', 52.8],
+      ['review', 48, true, '123456', 'Helvetica Neue', undefined], // the paragraph's properties on its first run
     ]);
     // the fitted size is the size written
     const sub = named(cover!.objects, 'sub');
@@ -75,7 +75,7 @@ describe('the PPTX mapping', () => {
     const points_ = named(body!.objects, 'points');
     expect(points_.kind === 'text' && points_.text.map((r) => [r.text, r.options?.bullet, r.options?.breakLine, r.options?.hyperlink?.url, r.options?.underline])).toEqual([
       ['One ', { indent: 22.5 }, undefined, undefined, undefined],
-      ['link', { indent: 22.5 }, true, 'https://example.com/', { style: 'sng' }],
+      ['link', undefined, true, 'https://example.com/', { style: 'sng' }],
       ['Two', { indent: 22.5 }, undefined, undefined, undefined],
     ]);
     expect(points_.kind === 'text' && [points_.options.margin, points_.options.wrap]).toEqual([[0, 0, 0, 0], true]);
@@ -103,6 +103,27 @@ describe('the PPTX mapping', () => {
     expect(named(second!.objects, 'badge')).toMatchObject({ options: { shadow: { type: 'outer', blur: 12, offset: 4, angle: 90, color: '000000', opacity: 0.25 } } });
   });
 
+  // fix wave 1 (finding 1): an element drawn under a scale (its own or its ancestors') exports at the size it is seen
+  it('writes a scaled element’s text, insets, line spacing and paint at their drawn size', () => {
+    const cover = MEASURED.slides[0]!;
+    const title = cover.elements.find((e) => e.id === 'title')!;
+    const scaled = {
+      ...title,
+      scale: [2, 1.5] as [number, number],
+      paint: { ...title.paint, fill: 'rgb(255, 0, 0)', borders: Array(4).fill({ width: 2, style: 'solid', color: 'rgb(0, 0, 0)' }) as typeof title.paint.borders, radius: 8 },
+      text: { ...title.text!, padding: [10, 20, 10, 20] as [number, number, number, number], paragraphs: title.text!.paragraphs.map((p) => ({ ...p, lineHeight: 40, runs: p.runs.map((r) => ({ ...r, size: 32, letterSpacing: 1 })) })) },
+    };
+    const [first] = pptxSlides(deck(), { slides: [{ ...cover, elements: [scaled] }] }, { variant: 'named', pictures: new Map(), asset });
+    const out = named(first!.objects, 'title');
+    if (out.kind !== 'text') throw new Error('a text box');
+    // 32 px × √(2 × 1.5) ≈ 55.4 px seen → 27.7 pt; letter spacing × 2 (across); line height × 1.5 (down)
+    expect(out.text[0]!.options).toMatchObject({ fontSize: points(32 * Math.sqrt(3)), charSpacing: points(2), lineSpacing: points(60) });
+    // insets: left and right × 2, top and bottom × 1.5 (pptxgenjs's order l, r, b, t); the line and corner at the seen size
+    expect(out.options.margin).toEqual([points(40), points(40), points(15), points(15)]);
+    expect(out.options.line).toMatchObject({ width: points(2 * Math.sqrt(3)) });
+    expect(out.options.rectRadius).toBeCloseTo(inches(8 * Math.sqrt(3)), 6);
+  });
+
   // fix wave 1 (finding 3): a region stretched into a box of another aspect scales each axis on its own
   it('crops a region stretched into a box of another aspect to the region on both axes', async () => {
     const cover = MEASURED.slides[0]!;
@@ -124,6 +145,19 @@ describe('the PPTX mapping', () => {
     expect(slides.map((s) => s.objects.map((o) => [o.kind, o.name]))).toEqual([[['image', 'cover']], [['image', 'body']], [['image', 'gone']]]);
     expect(slides[0]!.notes).toBe('Open with the numbers.');
     expect(slides[0]!.objects[0]).toMatchObject({ options: { x: 0, y: 0, w: inches(1920), h: 7.5 } });
+  });
+
+  // fix wave 1 (found by the LibreOffice compare): pptxgenjs writes a paragraph's properties for every run that carries
+  // them; a second `a:pPr` inside one `a:p` is invalid DrawingML, so only a paragraph's first run carries them
+  it('writes each paragraph’s properties once, however many runs it has', async () => {
+    const slides = pptxSlides(deck(), MEASURED, { variant: 'named', pictures: new Map(), asset });
+    const zip = await JSZip.loadAsync(await writePptx(slides, { title: 'x' }));
+    for (const n of [1, 2, 3]) {
+      const xml = await zip.file(`ppt/slides/slide${n}.xml`)!.async('string');
+      const paragraphs = xml.split('<a:p>').slice(1).map((p) => p.slice(0, p.indexOf('</a:p>')));
+      expect(paragraphs.length).toBeGreaterThan(0);
+      for (const p of paragraphs) expect(p.split('<a:pPr').length - 1, `slide ${n}: ${p.slice(0, 120)}`).toBeLessThanOrEqual(1);
+    }
   });
 
   it('writes the file: shapes named by element ids, notes, the hidden slide, transitions, the theme, the SVG fallback', async () => {

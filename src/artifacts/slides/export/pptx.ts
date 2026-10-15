@@ -182,7 +182,8 @@ function runsOf(text: MeasuredText, variant: PptxFontVariant, opacity: number, l
       out.push({
         text: run.text,
         options: {
-          ...para,
+          // the paragraph's properties on its first run (`onePPr` keeps that one; pptxgenjs writes one per run)
+          ...(r === 0 && para),
           fontFace: faceFor(run.font, variant),
           fontSize: points(run.size),
           bold: run.bold,
@@ -320,8 +321,10 @@ function connectorObject(el: MeasuredElement): PptxObject[] {
   const stroke = el.shape?.stroke;
   const width = stroke?.width ?? 2;
   const color = parseColor(el.color);
-  const local = connectorPoints(el.attrs, el.box.w, el.box.h, width);
-  const pts = local.map(([x, y]): [number, number] => [el.box.x + x, el.box.y + y]);
+  // its coordinates are its host's own px: routed in the undrawn box, then drawn at the host's scale
+  const [sx, sy] = el.connectorScale ?? [1, 1];
+  const local = connectorPoints(el.attrs, el.box.w / sx, el.box.h / sy, width / Math.sqrt(sx * sy));
+  const pts = local.map(([x, y]): [number, number] => [el.box.x + x * sx, el.box.y + y * sy]);
   const heads = connectorHeads(el.attrs);
   const line: PptxGenJS.ShapeLineProps = {
     width: points(width),
@@ -392,7 +395,36 @@ function tableObject(el: MeasuredElement, variant: PptxFontVariant): PptxObject[
   return [{ kind: 'table', name: el.id, rows: tableRows, options: { ...at(el.box), objectName: el.id, colW: columns, rowH: rows.map((r) => inches(r.box.h)), autoPage: false } }];
 }
 
-function elementObjects(el: MeasuredElement, ir: ElementIR | undefined, picture: string | undefined, options: PptxMapOptions): PptxObject[] {
+/**
+ * An element's metrics at the size it is drawn (fix wave 1): its own CSS px times the scale its transforms and its
+ * ancestors' draw it at. Sizes along a line scale across (`sx`), line heights and vertical insets down (`sy`), a font
+ * size, a border, a radius and a blur by the mean (√(sx·sy)); its box is drawn size already.
+ */
+export function atDrawnSize(el: MeasuredElement): MeasuredElement {
+  if (!el.scale) return el;
+  const [sx, sy] = el.scale;
+  const k = Math.sqrt(sx * sy);
+  const border = (b: MeasuredBorder | null) => (b ? { ...b, width: b.width * k } : null);
+  const borders = (list: MeasuredPaint['borders']) => list.map(border) as MeasuredPaint['borders'];
+  const shadow = (s: MeasuredPaint['shadow'] | undefined) => (s ? { ...s, x: s.x * sx, y: s.y * sy, blur: s.blur * k } : (s ?? null));
+  const text = (t: MeasuredText): MeasuredText => ({
+    ...t,
+    padding: [t.padding[0] * sy, t.padding[1] * sx, t.padding[2] * sy, t.padding[3] * sx],
+    paragraphs: t.paragraphs.map((p) => ({ ...p, lineHeight: p.lineHeight * sy, runs: p.runs.map((r) => ({ ...r, size: r.size * k, letterSpacing: r.letterSpacing * sx })) })),
+  });
+  return {
+    ...el,
+    scale: undefined,
+    paint: { ...el.paint, borders: borders(el.paint.borders), radius: el.paint.radius * k, shadow: shadow(el.paint.shadow) },
+    ...(el.text && { text: text(el.text) }),
+    ...(el.shape && { shape: { ...el.shape, stroke: border(el.shape.stroke), shadow: shadow(el.shape.shadow) } }),
+    ...(el.rows && { rows: el.rows.map((row) => ({ ...row, cells: row.cells.map((cell) => ({ ...cell, borders: borders(cell.borders), text: text(cell.text) })) })) }),
+    ...(el.tag === 'x-connector' && { connectorScale: [sx, sy] as [number, number] }),
+  };
+}
+
+function elementObjects(drawn: MeasuredElement, ir: ElementIR | undefined, picture: string | undefined, options: PptxMapOptions): PptxObject[] {
+  const el = atDrawnSize(drawn);
   switch (el.tag) {
     case 'img':
       return imageObject(el, ir, options);
@@ -460,6 +492,17 @@ function base64(text: string): string {
   return btoa(binary);
 }
 
+/**
+ * Each paragraph with one `a:pPr`, its first: pptxgenjs writes one before every run (its zero indent at least), and a
+ * second `a:pPr` inside an `a:p` is invalid DrawingML (PowerPoint offers to repair the file).
+ */
+export function onePPr(xml: string): string {
+  return xml.replace(/<a:p>([\s\S]*?)<\/a:p>/g, (_, body: string) => {
+    let seen = false;
+    return `<a:p>${body.replace(/<a:pPr\b[^>]*?(?:\/>|>[\s\S]*?<\/a:pPr>)/g, (ppr) => (seen ? '' : ((seen = true), ppr)))}</a:p>`;
+  });
+}
+
 const TRANSITION_XML: Record<'fade' | 'push', string> = {
   fade: '<p:transition spd="med"><p:fade/></p:transition>',
   push: '<p:transition spd="med"><p:push dir="l"/></p:transition>',
@@ -496,6 +539,7 @@ export async function writePptx(slides: readonly PptxSlide[], options: PptxWrite
     const path = `ppt/slides/slide${i + 1}.xml`;
     let xml = await zip.file(path)?.async('string');
     if (xml === undefined) continue;
+    xml = onePPr(xml);
     if (s.transition) xml = xml.replace('</p:clrMapOvr>', `</p:clrMapOvr>${TRANSITION_XML[s.transition]}`);
     zip.file(path, xml);
     const fallbacks = s.objects.filter((o): o is Extract<PptxObject, { kind: 'image' }> => o.kind === 'image' && o.fallback !== undefined);

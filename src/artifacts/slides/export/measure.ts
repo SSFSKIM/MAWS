@@ -99,6 +99,13 @@ export interface MeasuredElement {
   box: MeasuredBox;
   /** Degrees clockwise. */
   rotate: number;
+  /**
+   * The scale its transforms and its ancestors' draw it at, across and down (absent at 1): its box is drawn size, but
+   * its text, insets, borders, radii, shadows and connector coordinates are its own CSS px, scaled by the mapping.
+   */
+  scale?: [number, number];
+  /** The mapping's own: a connector's scale, kept for its coordinates once its metrics are at drawn size. */
+  connectorScale?: [number, number];
   paint: MeasuredPaint;
   /** The computed text colour (an x-icon's and an x-connector's stroke). */
   color: string;
@@ -191,7 +198,7 @@ interface DomGlobals {
     body: DomElement & { appendChild(node: DomElement): void };
   };
   getComputedStyle(element: DomElement): DomStyle;
-  DOMMatrixReadOnly: new (transform: string) => { a: number; b: number };
+  DOMMatrixReadOnly: new (transform: string) => { a: number; b: number; c: number; d: number };
   XMLSerializer: new () => { serializeToString(node: DomElement): string };
 }
 
@@ -243,33 +250,37 @@ export async function measureDeckPage(args: MeasureArgs): Promise<MeasuredDeck> 
   }
 
   // ---- geometry ----
-  const angleOf = (el: DomElement): { angle: number; scale: number } => {
+  // An element's own linear transform (a, b, c, d), identity when it has none.
+  const linearOf = (el: DomElement): [number, number, number, number] => {
     const t = css(el, 'transform');
-    if (!t || t === 'none') return { angle: 0, scale: 1 };
+    if (!t || t === 'none') return [1, 0, 0, 1];
     const m = new g.DOMMatrixReadOnly(t);
-    return { angle: (Math.atan2(m.b, m.a) * 180) / Math.PI, scale: Math.hypot(m.a, m.b) };
+    return [m.a, m.b, m.c, m.d];
   };
   const rectIn = (rect: Pick<DomRect, 'left' | 'top' | 'width' | 'height'>, slide: DomElement): MeasuredBox => {
     const origin = slide.getBoundingClientRect();
     return { x: rect.left - origin.left, y: rect.top - origin.top, w: rect.width, h: rect.height };
   };
   // The box before rotation: the drawn box's centre with the layout size scaled (a rotation about the centre, CSS's
-  // default origin, keeps the centre where it was).
-  const boxOf = (el: DomElement, slide: DomElement): { box: MeasuredBox; rotate: number } => {
+  // default origin, keeps the centre where it was). The element's and its ancestors' transforms compose (outermost
+  // first): their rotation is the box's, their scale on each axis (fix wave 1) the factor its contents are drawn at.
+  const boxOf = (el: DomElement, slide: DomElement): { box: MeasuredBox; rotate: number; scale: [number, number] } => {
     const drawn = rectIn(el.getBoundingClientRect(), slide);
-    let angle = 0;
-    let scale = 1;
+    let [a, b, c, d] = [1, 0, 0, 1];
     for (let at: DomElement | null = el; at && at !== slide; at = at.parentElement) {
-      const own = angleOf(at);
-      angle += own.angle;
-      scale *= own.scale;
+      const [p, q, r, s] = linearOf(at); // world = own ancestors' ∘ … ∘ this one's
+      [a, b, c, d] = [p * a + r * b, q * a + s * b, p * c + r * d, q * c + s * d];
     }
+    const sx = Math.hypot(a, b);
+    const sy = sx > 0 ? Math.abs(a * d - b * c) / sx : 0;
+    const angle = (Math.atan2(b, a) * 180) / Math.PI;
     const rotate = (((Math.round(angle * 100) / 100) % 360) + 360) % 360;
-    if (rotate === 0 && Math.abs(scale - 1) < 1e-6) return { box: drawn, rotate: 0 };
-    const w = (el.offsetWidth ?? el.clientWidth) * scale;
-    const h = (el.offsetHeight ?? el.clientHeight) * scale;
+    const scale: [number, number] = [Math.round(sx * 1e6) / 1e6, Math.round(sy * 1e6) / 1e6];
+    if (rotate === 0 && scale[0] === 1 && scale[1] === 1) return { box: drawn, rotate: 0, scale };
+    const w = (el.offsetWidth ?? el.clientWidth) * sx;
+    const h = (el.offsetHeight ?? el.clientHeight) * sy;
     const [cx, cy] = [drawn.x + drawn.w / 2, drawn.y + drawn.h / 2];
-    return { box: { x: cx - w / 2, y: cy - h / 2, w, h }, rotate };
+    return { box: { x: cx - w / 2, y: cy - h / 2, w, h }, rotate, scale };
   };
   const bordersOf = (el: DomElement): MeasuredPaint['borders'] =>
     (['top', 'right', 'bottom', 'left'] as const).map((side) => {
@@ -375,10 +386,13 @@ export async function measureDeckPage(args: MeasureArgs): Promise<MeasuredDeck> 
     return rects;
   };
   // Whether a block's text sits on one line: its line boxes share one band (a taller run on the line still overlaps it).
+  // Lines are told by their centres, not by overlap: under a line height below the face's content height (1.05 at
+  // 120 px) the boxes of two lines overlap, while a taller run on one line sits within half a line of its centre.
   const oneLine = (rects: DomRect[]): boolean => {
     if (rects.length <= 1) return true;
-    const bottom = Math.min(...rects.map((r) => r.bottom));
-    return rects.every((r) => r.top < bottom - 1);
+    const centre = (r: DomRect) => (r.top + r.bottom) / 2;
+    const half = Math.min(...rects.map((r) => r.height)) / 2;
+    return rects.every((r) => Math.abs(centre(r) - centre(rects[0]!)) < half);
   };
   const textOf = (el: DomElement): MeasuredText => {
     const tag = el.tagName.toLowerCase();
@@ -458,11 +472,11 @@ export async function measureDeckPage(args: MeasureArgs): Promise<MeasuredDeck> 
       const tag = el.tagName.toLowerCase();
       if (tag === 'tr' || tag === 'th' || tag === 'td') continue; // read with their table
       if (css(el, 'display') === 'none') continue;
-      const { box, rotate } = boxOf(el, slide);
+      const { box, rotate, scale } = boxOf(el, slide);
       const attrs: Record<string, string> = {};
       for (const a of Array.from(el.attributes)) if (!['style', 'src', 'data-eid', 'data-layer', 'data-fit-box'].includes(a.name)) attrs[a.name] = a.value;
       const color = css(el, 'color');
-      const measured: MeasuredElement = { id: el.getAttribute('data-eid') ?? '', tag, box, rotate, paint: paintOf(el, slide), color, attrs };
+      const measured: MeasuredElement = { id: el.getAttribute('data-eid') ?? '', tag, box, rotate, ...(scale[0] !== 1 || scale[1] !== 1 ? { scale } : {}), paint: paintOf(el, slide), color, attrs };
       if (textTags.has(tag)) measured.text = textOf(el);
       const fit = fits.get(el);
       if (fit) measured.fit = fit;

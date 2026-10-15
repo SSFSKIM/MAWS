@@ -18,7 +18,7 @@ vi.mock('electron', () => ({ BrowserWindow: class {} }));
 
 import { ExporterRegistry, runExport, type ExportRequest, type ExportSources } from '../artifacts/export';
 import { readZip } from '../design-systems/read-zip.test-support';
-import { deckSystem, registerPresentationExporters, type PresentationExportDeps } from './export';
+import { deckSystem, registerPresentationExporters, STAGE, type PresentationExportDeps } from './export';
 
 const DECK = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
 const OWN = '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e';
@@ -71,6 +71,13 @@ describe('the presentation’s exporters', () => {
     expect(registry.get('presentation', 'docx')).toBeUndefined();
     off();
     expect(registry.get('presentation', 'pptx')).toBeUndefined();
+  });
+});
+
+// fix wave 1: the window's staging script is sent as text; each of its forms parses
+describe('the staging script for a picture', () => {
+  it('parses for every mode, with any id', () => {
+    for (const mode of ['slide', 'background', 'self', 'tree'] as const) expect(() => new Function(`return ${STAGE('c"1', mode === 'slide' ? null : `e'2`, mode)}`), mode).not.toThrow();
   });
 });
 

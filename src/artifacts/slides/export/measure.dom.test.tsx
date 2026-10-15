@@ -67,6 +67,26 @@ describe('measureDeckPage', () => {
     expect(els.get('chart')!.attrs['data-layer']).toBeUndefined();
   });
 
+  // fix wave 1 (found by the LibreOffice compare): with a line height under the face's content height (1.05 at 120 px)
+  // two lines' boxes overlap; they are still two lines
+  it('tells two lines whose boxes overlap from one line', async () => {
+    const line = (top: number, h: number) => ({ left: 0, right: 100, width: 100, top, bottom: top + h, height: h });
+    const rectsOf: Record<string, unknown[]> = { 'Quarterly ': [line(0, 156), line(126, 156)], review: [line(10, 140)] };
+    const original = document.createRange.bind(document);
+    const measured = await measuredFixture(() => {
+      document.createRange = (() => {
+        let node: Node | null = null;
+        return { selectNodeContents: (n: Node) => void (node = n), getClientRects: () => rectsOf[node?.textContent ?? ''] ?? [] };
+      }) as unknown as typeof document.createRange;
+    }).finally(() => {
+      document.createRange = original;
+    });
+    const title = measured.slides[0]!.elements.find((e) => e.id === 'title')!;
+    expect(title.text!.oneLine).toBe(false);
+    const sub = measured.slides[0]!.elements.find((e) => e.id === 'sub')!;
+    expect(sub.text!.oneLine).toBe(true); // no rects at all: one line
+  });
+
   it('reads an x-shape’s own shadow, which the canvas’s outline casts', async () => {
     const measured = await measuredFixture(() => document.querySelector<HTMLElement>('[data-eid="badge"]')!.style.setProperty('box-shadow', '0 8px 24px #00000040'));
     const badge = measured.slides[1]!.elements.find((e) => e.id === 'badge')!;

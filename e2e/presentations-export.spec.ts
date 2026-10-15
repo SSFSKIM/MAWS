@@ -241,6 +241,59 @@ test('every format through the export service: PPTX in three variants, PDF, stan
   expect(pngSize(readFileSync((await exportAs(page, id, 'png', { width: 960 })).path))).toEqual([960, 540]);
 });
 
+// fix wave 1 (findings 1 and 2): what transforms draw. Text under its own scale or an ancestor's exports at the size it is
+// seen; a picture the window takes of a translated, a scaled, or a rotated group's member holds the element alone, whole
+// and unturned (the PPTX places and turns it).
+const GREEN = '<rect width="200" height="100" fill="#00ff00"></rect>';
+const TRANSFORMED = (): Record<string, string> => ({
+  'project/deck.json': JSON.stringify({ v: 4, title: 'Transforms', cover: 's1', order: ['s1'] }),
+  'project/slides/s1.html': `<section id="s1" style="background:#ffffff">
+<svg id="moved" viewBox="0 0 200 100" style="position:absolute; left:50%; top:100px; width:200px; height:100px; transform:translateX(-50%)">${GREEN}</svg>
+<svg id="grown" viewBox="0 0 200 100" style="position:absolute; left:200px; top:400px; width:200px; height:100px; transform:scale(1.5)">${GREEN}</svg>
+<div id="grp" data-group="" style="position:absolute; left:600px; top:500px; width:300px; height:200px; transform:rotate(30deg)"><svg id="member" viewBox="0 0 200 100" style="position:absolute; left:50px; top:50px; width:200px; height:100px">${GREEN}</svg></div>
+<p id="big" style="position:absolute; left:1200px; top:100px; width:300px; font-size:32px; transform:scale(2)">Big</p>
+<div id="zoom" style="position:absolute; left:1200px; top:600px; width:300px; height:100px; transform:scale(1.5)"><p id="small" style="font-size:32px">Inner</p></div>
+</section>`,
+});
+
+test('transforms: scaled text at its drawn size; pictures of translated, scaled and grouped-and-rotated elements whole', async () => {
+  test.setTimeout(180_000);
+  const page = await ready();
+  const { id, held } = await seedDeck(page, 'Transforms', TRANSFORMED());
+  expect(held).toEqual([]);
+  const zip = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'pptx')).path));
+  const xml = await slideXml(zip, 1);
+  const shape = (name: string) => xml.split(/<p:(?:sp|pic)>/).find((part) => part.includes(`name="${name}"`))!;
+  // text: 32 px under scale(2) is seen at 64 px (32 pt); under an ancestor's scale(1.5) at 48 px (24 pt)
+  expect(/ sz="(\d+)"/.exec(shape('big'))![1]).toBe('3200');
+  expect(offsetOf(xml, 'big')![2]).toBe(600 * EMU);
+  expect(/ sz="(\d+)"/.exec(shape('small'))![1]).toBe('2400');
+  // pictures: placed at the drawn box (the translated one centred on 960; the scaled one 300 × 150; the member turned 30°)
+  expect(offsetOf(xml, 'moved')).toEqual([860 * EMU, 100 * EMU, 200 * EMU, 100 * EMU]);
+  expect(offsetOf(xml, 'grown')!.slice(2)).toEqual([300 * EMU, 150 * EMU]);
+  expect(shape('member')).toContain('rot="1800000"');
+  // and each picture (the SVG's PNG fallback the window drew) is the element alone, green to its corners
+  const rels = await zip.file('ppt/slides/_rels/slide1.xml.rels')!.async('string');
+  for (const name of ['moved', 'grown', 'member']) {
+    const rId = /<a:blip r:embed="(rId\d+)"/.exec(shape(name))![1];
+    const target = new RegExp(`Id="${rId}"[^>]*Target="\\.\\./media/([^"]+)"`).exec(rels)![1]!;
+    const png = await zip.file(`ppt/media/${target}`)!.async('base64');
+    const samples = await launch!.app.evaluate(({ nativeImage }, b64) => {
+      const image = nativeImage.createFromBuffer(Buffer.from(b64, 'base64'));
+      const { width, height } = image.getSize();
+      const bitmap = image.toBitmap(); // BGRA
+      const at = (x: number, y: number) => {
+        const i = (Math.round(y) * width + Math.round(x)) * 4;
+        return [bitmap[i + 2]!, bitmap[i + 1]!, bitmap[i]!, bitmap[i + 3]!];
+      };
+      return { width, height, points: [at(3, 3), at(width - 4, 3), at(width / 2, height / 2), at(3, height - 4), at(width - 4, height - 4)] };
+    }, png);
+    expect(samples.width, name).toBeGreaterThanOrEqual(198);
+    for (const [r, g, b, a] of samples.points) expect([r, g > 230, b, a > 230], `${name} is green to its corners`).toEqual([expect.any(Number), true, expect.any(Number), true]);
+    for (const [r, , b] of samples.points) expect(r + b, name).toBeLessThan(30);
+  }
+});
+
 // S7b's 100-slide deck inside the export's 55 s budget, in the variants that take the most from the window (the load
 // average beside each time, as the scale gate records its bounds)
 test('the 100-slide deck exports to PPTX, named and as pictures, and to PDF within the budget', async () => {
@@ -346,68 +399,144 @@ function wordsOf(pdf: string): Word[][] {
     return [...page.matchAll(/<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)<\/word>/g)].map((m) => ({ text: m[5]!, x0: Number(m[1]) * k, y0: Number(m[2]) * k, x1: Number(m[3]) * k, y1: Number(m[4]) * k }));
   });
 }
-// pdftotext writes a ligature as its one character
-const unligature = (text: string) => text.replace(/\uFB00/g, 'ff').replace(/\uFB01/g, 'fi').replace(/\uFB02/g, 'fl').replace(/\uFB03/g, 'ffi').replace(/\uFB04/g, 'ffl').replace(/\s+/g, '');
-/** The LibreOffice words that belong to a text: centre within its extent grown by `slack` px, text found in its text. */
-function wordsBox(page: Word[], ink: [number, number, number, number], text: string, slack: number): [number, number, number, number] | null {
-  const flat = unligature(text);
-  const hits = page.filter((w) => w.text && flat.includes(unligature(w.text)) && (w.x0 + w.x1) / 2 >= ink[0] - slack && (w.x0 + w.x1) / 2 <= ink[2] + slack && (w.y0 + w.y1) / 2 >= ink[1] - slack && (w.y0 + w.y1) / 2 <= ink[3] + slack);
-  if (!hits.length) return null;
-  return [Math.min(...hits.map((w) => w.x0)), Math.min(...hits.map((w) => w.y0)), Math.max(...hits.map((w) => w.x1)), Math.max(...hits.map((w) => w.y1))];
-}
-
-/** Each slide's text elements as the app lays them out: the union of their line boxes (slide px) and their text. */
-type AppText = { id: string; ink: [number, number, number, number]; text: string; face: string; drawn: string; weight: number; numeric: string };
-async function appTexts(launched: MawsLaunch, htmlPath: string): Promise<Record<string, AppText[]>> {
-  return launched.app.evaluate(async ({ BrowserWindow }, path) => {
-    const win = new BrowserWindow({ show: false, width: 1920, height: 1080, webPreferences: { sandbox: true, partition: 'maws-e2e-standalone' } });
-    try {
-      await win.loadFile(path);
-      return (await win.webContents.executeJavaScript(`(async () => {
-        await document.fonts.ready;
-        document.body.classList.remove('viewer'); // every slide at its size, one under another
-        // which family of a stack the Mac draws: the first whose glyphs differ from a generic's (the usual detection);
-        // a CSS generic, or a system alias, is drawn as itself
-        const ctx = document.createElement('canvas').getContext('2d');
-        const SAMPLE = 'mmmmmmmmmmlli1WQ@#';
-        const width = (font) => { ctx.font = '72px ' + font; return ctx.measureText(SAMPLE).width; };
-        const installed = (family) => ['monospace', 'serif', 'sans-serif'].some((generic) => width('"' + family + '", ' + generic) !== width(generic));
-        const GENERIC = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-[a-z-]+|-apple-system|blinkmacsystemfont)$/i;
-        const stack = (value) => value.split(',').map((f) => f.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
-        const out = {};
-        for (const slide of document.querySelectorAll('section.maws-slide')) {
-          const o = slide.getBoundingClientRect();
-          out[slide.dataset.slide] = [...slide.querySelectorAll('h1[data-eid], h2[data-eid], h3[data-eid], p[data-eid], ul[data-eid], ol[data-eid]')].flatMap((el) => {
-            if (getComputedStyle(el).transform !== 'none') return [];
-            // the line boxes of its text nodes (an element's own box is not its text)
-            const rects = [];
-            const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
-            for (let node = walker.nextNode(); node; node = walker.nextNode()) {
-              if (!node.textContent.trim()) continue;
-              const range = document.createRange();
-              range.selectNodeContents(node);
-              rects.push(...[...range.getClientRects()].filter((r) => r.width > 0 && r.height > 0));
-            }
-            const text = el.textContent.trim();
-            if (!rects.length || !text) return [];
-            const ink = [Math.min(...rects.map((r) => r.left)) - o.left, Math.min(...rects.map((r) => r.top)) - o.top, Math.max(...rects.map((r) => r.right)) - o.left, Math.max(...rects.map((r) => r.bottom)) - o.top];
-            const families = stack(getComputedStyle(el).fontFamily);
-            const face = families.find((f) => !GENERIC.test(f)) ?? families[0] ?? '';
-            const drawn = families.find((f) => GENERIC.test(f) || installed(f)) ?? '';
-            return [{ id: el.dataset.eid, ink, text, face, drawn, weight: Number(getComputedStyle(el).fontWeight), numeric: getComputedStyle(el).fontVariantNumeric }];
-          });
+// pdftotext writes a ligature as its one character; a text compares without its spaces
+const normalized = (text: string) => text.replace(/\uFB00/g, 'ff').replace(/\uFB01/g, 'fi').replace(/\uFB02/g, 'fl').replace(/\uFB03/g, 'ffi').replace(/\uFB04/g, 'ffl').replace(/\s+/g, '');
+type Extent = [number, number, number, number];
+// a list's marker LibreOffice draws as a word of its own (a bullet, or a number and its stop)
+const MARKER = /^(?:[\u2022\u25CF\u25E6\u25AA\u2023\u2219\u00B7\u2013-]|\d+[.)])$/;
+const sortedChars = (text: string) => [...text].sort().join('');
+/**
+ * The LibreOffice words of one text box. LibreOffice draws a box's text as one run of words in the page's stream, so its
+ * whole text is a contiguous run whose words, each part of the box's text, together hold exactly the box's characters
+ * (a glyph a fallback face draws may come out of order; a list's markers are passed over), wherever its lines broke. Of
+ * the runs that qualify, the one starting nearest the app's text; null when no run holds the whole text.
+ */
+function wordsOfBox(page: Word[], ink: Extent, text: string): { joined: string; box: Extent } | null {
+  const flat = normalized(text);
+  const want = sortedChars(flat);
+  let best: { joined: string; box: Extent; distance: number } | null = null;
+  for (let i = 0; i < page.length; i++) {
+    let acc = '';
+    const run: Word[] = [];
+    for (let j = i; j < page.length; j++) {
+      const w = normalized(page[j]!.text);
+      if (!w || (MARKER.test(w) && !flat.includes(w))) continue;
+      if (!flat.includes(w) || acc.length + w.length > flat.length) break;
+      acc += w;
+      run.push(page[j]!);
+      if (acc.length === flat.length) {
+        if (sortedChars(acc) === want) {
+          const box: Extent = [Math.min(...run.map((r) => r.x0)), Math.min(...run.map((r) => r.y0)), Math.max(...run.map((r) => r.x1)), Math.max(...run.map((r) => r.y1))];
+          const distance = Math.hypot(box[0] - ink[0], box[1] - ink[1]);
+          if (!best || distance < best.distance) best = { joined: acc, box, distance };
         }
-        return out;
-      })()`)) as Record<string, AppText[]>;
-    } finally {
-      win.destroy();
+        break;
+      }
     }
-  }, htmlPath);
+  }
+  return best && { joined: best.joined, box: best.box };
 }
 
-test('the PPTX under LibreOffice draws each corpus slide as the app does', async () => {
+/** One text box as the app's own canvas draws it: the union of its line boxes in slide px, its text and its face. */
+type CanvasText = { id: string; ink: Extent; text: string; rotated: boolean; face: string; drawn: string; weight: number; numeric: string };
+
+/**
+ * The app's own render of each slide (Decision Log 23): the deck in a main tab, each slide brought to the stage, its
+ * `SlideCanvas` (the `.maws-slide` the stage scales) captured from the window at 480 × 270 and its text boxes read, in
+ * slide px, from the same canvas.
+ */
+async function canvasRenders(page: Page, title: string, artifactId: string, ids: readonly string[]): Promise<Map<string, { pixels: { rgb: Buffer }; texts: CanvasText[] }>> {
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  await page.locator('[data-library]').getByRole('article', { name: title, exact: true }).click();
+  const tab = page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`);
+  await expect(tab.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
+  const out = new Map<string, { pixels: { rgb: Buffer }; texts: CanvasText[] }>();
+  for (const id of ids) {
+    await tab.locator(`[data-slide-thumb="${id}"]`).click();
+    const canvas = tab.locator(`[data-stage-slide="${id}"] .maws-slide`);
+    await expect(canvas).toBeVisible();
+    await page.mouse.move(0, 0); // no hover outline on the stage
+    const read = await canvas.evaluate(async (slide) => {
+      await document.fonts.ready;
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const o = slide.getBoundingClientRect();
+      const k = o.width / 1920;
+      const ctx = document.createElement('canvas').getContext('2d')!;
+      const SAMPLE = 'mmmmmmmmmmlli1WQ@#';
+      const width = (font: string) => {
+        ctx.font = `72px ${font}`;
+        return ctx.measureText(SAMPLE).width;
+      };
+      const installed = (family: string) => ['monospace', 'serif', 'sans-serif'].some((generic) => width(`"${family}", ${generic}`) !== width(generic));
+      const GENERIC = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-[a-z-]+|-apple-system|blinkmacsystemfont)$/i;
+      const stack = (value: string) => value.split(',').map((f) => f.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+      const turned = (el: Element) => {
+        for (let at: Element | null = el; at && at !== slide; at = at.parentElement) {
+          const t = getComputedStyle(at).transform;
+          if (t && t !== 'none') {
+            const m = new DOMMatrixReadOnly(t);
+            if (Math.abs(m.b) > 1e-6 || Math.abs(m.c) > 1e-6) return true;
+          }
+        }
+        return false;
+      };
+      const texts = Array.from(slide.querySelectorAll('h1[data-eid], h2[data-eid], h3[data-eid], p[data-eid], ul[data-eid], ol[data-eid], th[data-eid], td[data-eid]')).flatMap((el) => {
+        const rects: DOMRect[] = [];
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (!node.textContent?.trim()) continue;
+          const range = document.createRange();
+          range.selectNodeContents(node);
+          rects.push(...Array.from(range.getClientRects()).filter((r) => r.width > 0 && r.height > 0));
+        }
+        const text = (el.textContent ?? '').trim();
+        if (!rects.length || !text) return [];
+        const ink = [Math.min(...rects.map((r) => r.left)), Math.min(...rects.map((r) => r.top)), Math.max(...rects.map((r) => r.right)), Math.max(...rects.map((r) => r.bottom))].map((v, i) => (v - (i % 2 ? o.top : o.left)) / k);
+        const families = stack(getComputedStyle(el).fontFamily);
+        return [
+          {
+            id: (el as HTMLElement).dataset.eid ?? '',
+            ink,
+            text,
+            rotated: turned(el),
+            face: families.find((f) => !GENERIC.test(f)) ?? families[0] ?? '',
+            drawn: families.find((f) => GENERIC.test(f) || installed(f)) ?? '',
+            weight: Number(getComputedStyle(el).fontWeight),
+            numeric: getComputedStyle(el).fontVariantNumeric,
+          },
+        ];
+      });
+      return { rect: { x: o.left, y: o.top, width: o.width, height: o.height }, texts };
+    });
+    const pixels = await launch!.app.evaluate(async ({ BrowserWindow }, rect) => {
+      const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
+      const image = (await win.webContents.capturePage({ x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) })).resize({ width: 480, height: 270, quality: 'best' });
+      const bitmap = image.toBitmap(); // BGRA
+      const out: number[] = new Array(480 * 270 * 3);
+      for (let i = 0, j = 0; i < bitmap.length; i += 4, j += 3) [out[j], out[j + 1], out[j + 2]] = [bitmap[i + 2]!, bitmap[i + 1]!, bitmap[i]!];
+      return out;
+    }, read.rect);
+    out.set(id, { pixels: { rgb: Buffer.from(pixels) }, texts: read.texts as CanvasText[] });
+  }
+  return out;
+}
+
+/** The faces a PDF embeds, by family (its subset prefix and style suffix dropped, spaces removed, lower case). */
+function facesIn(pdf: string): Set<string> {
+  const out = execFileSync(join(POPPLER, 'pdffonts'), [pdf], { encoding: 'utf8' });
+  return new Set(
+    out
+      .split('\n')
+      .slice(2)
+      .map((line) => line.split(/\s+/)[0] ?? '')
+      .filter(Boolean)
+      .map((name) => name.replace(/^[A-Z]{6}\+/, '').replace(/[-,].*$/, '').toLowerCase()),
+  );
+}
+
+test('the PPTX under LibreOffice draws each corpus slide as the app’s own canvas does', async () => {
   test.skip(SOFFICE === null, 'LibreOffice (soffice) is not installed here: the render-and-compare is the documented manual check and a tracker row (H3)');
-  test.setTimeout(420_000);
+  test.setTimeout(600_000);
   scratch = mkdtempSync(join(tmpdir(), 'maws-e2e-deck-lo-'));
   const page = await ready();
   // the corpus (Claude's examples, the default systems' layouts, S6's bench shapes; src/artifacts/slides/fixtures/corpus.ts
@@ -430,45 +559,50 @@ test('the PPTX under LibreOffice draws each corpus slide as the app does', async
   const { id, held } = await seedDeck(page, 'Corpus', files);
   expect(held).toEqual([]);
   const pptx = (await exportAs(page, id, 'pptx')).path;
-  const appPdf = (await exportAs(page, id, 'pdf')).path;
-  const texts = await appTexts(launch!, (await exportAs(page, id, 'html')).path);
   // LibreOffice with a profile of its own, never the owner's
   execFileSync(SOFFICE!, [`-env:UserInstallation=file://${join(scratch, 'lo-profile')}`, '--headless', '--convert-to', 'pdf', '--outdir', scratch, pptx], { timeout: 240_000, stdio: 'ignore' });
   const loPdf = join(scratch, `${/([^/]+)\.pptx$/.exec(pptx)![1]}.pdf`);
   expect(existsSync(loPdf)).toBe(true);
   expect(execFileSync(join(POPPLER, 'pdfinfo'), [loPdf], { encoding: 'utf8' })).toMatch(new RegExp(`Pages:\\s+${ids.length}\\n`));
+  const renders = await canvasRenders(page, 'Corpus', id, ids);
 
   const loWords = wordsOf(loPdf);
+  const loFaces = facesIn(loPdf);
   const report: string[] = [];
   const failures: string[] = [];
-  let compared = 0;
-  let sameFace = 0;
+  let [compared, fourEdges, rotated] = [0, 0, 0];
   for (const [i, slide] of corpus.entries()) {
-    const diff = meanDifference(rasterize(appPdf, i + 1, 480, 270), rasterize(loPdf, i + 1, 480, 270));
+    const render = renders.get(ids[i]!)!;
+    const diff = meanDifference(render.pixels, rasterize(loPdf, i + 1, 480, 270));
     report.push(`${slide.name}: ${diff.toFixed(3)}`);
     if (diff > 0.08) failures.push(`${slide.name}: mean difference ${diff.toFixed(3)} > 0.08`);
-    // each text element: LibreOffice's words' box against the app's measured text box. Where the PPTX names the face the
-    // app drew, in a weight it can say (regular or bold), every edge within 24 px; where it names another (the stack's
-    // first face is not on this Mac, the app drew the system face, which Office cannot name, a medium or semibold
-    // weight drawn regular or bold, or tabular figures, which Office cannot ask for), the text's width is that face's, so
-    // its start (left, top) is held
-    for (const text of texts[ids[i]!] ?? []) {
-      const lo = wordsBox(loWords[i]!, text.ink, text.text, 24);
-      const same = text.face === text.drawn && (text.weight === 400 || text.weight === 700) && text.numeric === 'normal';
+    // each text box (table cells too): its whole text present; its four edges within 24 px where LibreOffice has the
+    // face and weight the app drew (regular or bold, no tabular figures), its left and top elsewhere (a substituted
+    // face changes advance widths, not placement); a rotated box judged by its centre
+    for (const text of render.texts) {
       compared++;
-      if (same) sameFace++;
+      const lo = wordsOfBox(loWords[i]!, text.ink, text.text);
       if (!lo) {
-        failures.push(`${slide.name} ${text.id}: LibreOffice drew none of “${text.text.slice(0, 40)}” near the app's text`);
+        failures.push(`${slide.name} ${text.id}: LibreOffice drew no run of words holding the box's whole text “${normalized(text.text).slice(0, 60)}” (LibreOffice near it: ${loWords[i]!.filter((w) => w.y1 > text.ink[1] - 200 && w.y0 < text.ink[3] + 200).map((w) => `${w.text}@${w.x0.toFixed(0)},${w.y0.toFixed(0)}`).join(" ")})`);
         continue;
       }
+      if (text.rotated) {
+        rotated++;
+        const centre = (b: Extent) => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
+        const off = Math.max(...centre(text.ink).map((v, k) => Math.abs(v - centre(lo.box)[k]!)));
+        if (off > 24) failures.push(`${slide.name} ${text.id}: its centre is ${off.toFixed(1)} px from the canvas's`);
+        continue;
+      }
+      const same = text.face === text.drawn && loFaces.has(text.face.replace(/\s+/g, '').toLowerCase()) && (text.weight === 400 || text.weight === 700) && text.numeric === 'normal';
+      if (same) fourEdges++;
       const edges = same ? [0, 1, 2, 3] : [0, 1];
-      const off = Math.max(...edges.map((k) => Math.abs(text.ink[k]! - lo[k]!)));
-      if (off > 24) failures.push(`${slide.name} ${text.id}: its words' box is ${off.toFixed(1)} px from the app's text (app ${text.ink.map((v) => v.toFixed(0)).join(',')}, LibreOffice ${lo.map((v) => v.toFixed(0)).join(',')}, face ${text.face} ${text.weight}, drawn ${text.drawn})`);
+      const off = Math.max(...edges.map((k) => Math.abs(text.ink[k]! - lo.box[k]!)));
+      if (off > 24) failures.push(`${slide.name} ${text.id}: its words' box is ${off.toFixed(1)} px from the canvas's (canvas ${text.ink.map((v) => v.toFixed(0)).join(',')}, LibreOffice ${lo.box.map((v) => v.toFixed(0)).join(',')}, face ${text.face} ${text.weight}, drawn ${text.drawn})`);
     }
   }
   expect(compared).toBeGreaterThan(50);
   mkdirSync(test.info().outputDir, { recursive: true });
   writeFileSync(join(test.info().outputDir, 'libreoffice-compare.txt'), `${report.join('\n')}\n`);
-  console.log(`[libreoffice compare] ${compared} text elements (${sameFace} in the face and weight the app drew); mean difference per slide: ${report.join(', ')}`);
+  console.log(`[libreoffice compare] ${compared} text boxes (${fourEdges} on four edges, ${rotated} by their centre); mean difference per slide: ${report.join(', ')}`);
   expect(failures).toEqual([]);
 });

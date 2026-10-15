@@ -182,24 +182,37 @@ export interface DeckWindow {
 
 const MEASURE_ARGS: MeasureArgs = { textTags: [...TEXT_TAGS] };
 
-// The page's state for one picture: only the job's slide shown at the top, and (for an element) everything but the
-// element hidden, its own rotation undone (the mapping rotates the picture), its text transparent when only its paint is
-// wanted. Answers after two frames, so the capture sees it painted.
-const STAGE = (slideId: string, elementId: string | null, mode: PictureJob['mode']) => `(() => {
+// The page's state for one picture (fix wave 1): only the job's slide shown at the top; for an element, everything but
+// the element hidden, and the transforms of the element and of every ancestor up to the slide neutralized, so the
+// element stands alone, whole and unturned at its own layout box (a translate no longer moves it, a scale no longer
+// sizes it, a group's rotation no longer turns it; the mapping places and turns the picture at the measured box). Its
+// text is transparent when only its paint is wanted. Answers, after two frames, the rect to capture: the element's box
+// as now drawn (the whole slide for `slide` and `background`).
+export const STAGE = (slideId: string, elementId: string | null, mode: PictureJob['mode']) => `(() => {
   const slide = ${JSON.stringify(slideId)}, eid = ${JSON.stringify(elementId)}, mode = ${JSON.stringify(mode)};
   document.body.setAttribute('data-shown', '');
-  for (const f of document.querySelectorAll('.maws-frame')) { if (f.getAttribute('data-frame') === slide) f.setAttribute('data-shown', ''); else f.removeAttribute('data-shown'); }
+  let frame = null;
+  for (const f of document.querySelectorAll('.maws-frame')) { if (f.getAttribute('data-frame') === slide) { f.setAttribute('data-shown', ''); frame = f; } else f.removeAttribute('data-shown'); }
+  for (const flat of document.querySelectorAll('[data-maws-flat]')) flat.removeAttribute('data-maws-flat');
   let st = document.getElementById('maws-stage');
   if (!st) { st = document.createElement('style'); st.id = 'maws-stage'; document.head.appendChild(st); }
   const on = '.maws-frame[data-shown] ';
   const el = eid ? on + '[data-eid="' + CSS.escape(eid) + '"]' : '';
+  const target = eid && frame ? frame.querySelector('[data-eid="' + CSS.escape(eid) + '"]') : null;
+  if (target && (mode === 'self' || mode === 'tree')) for (let at = target; at && !at.classList.contains('maws-slide'); at = at.parentElement) at.setAttribute('data-maws-flat', '');
   st.textContent = mode === 'slide' ? '' : mode === 'background'
     ? on + '.maws-slide * { visibility: hidden !important; }'
     : on + '.maws-slide { background: transparent !important; box-shadow: none !important; }\\n' + on + '.maws-slide * { visibility: hidden !important; opacity: 1 !important; }\\n'
-      + el + ' { visibility: visible !important; transform: none !important; opacity: 1 !important;' + (mode === 'self' ? ' color: transparent !important;' : '') + ' }\\n'
+      + on + '[data-maws-flat] { transform: none !important; }\\n'
+      + el + ' { visibility: visible !important; opacity: 1 !important;' + (mode === 'self' ? ' color: transparent !important;' : '') + ' }\\n'
       + (mode === 'tree' ? el + ' * { visibility: visible !important; }' : '');
   scrollTo(0, 0);
-  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))));
+  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (!target || mode === 'slide' || mode === 'background') return resolve({ x: 0, y: 0, w: ${SLIDE_W}, h: ${SLIDE_H} });
+    const r = target.getBoundingClientRect();
+    const o = frame.getBoundingClientRect();
+    resolve({ x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height });
+  })));
 })()`;
 
 /** A hidden export window for the length of `use`, destroyed when it ends or `signal` aborts. */
@@ -232,10 +245,10 @@ export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: 
       measure: async () => (await live().webContents.executeJavaScript(`(${String(measureDeckPage)})(${JSON.stringify(MEASURE_ARGS)})`, true)) as MeasuredDeck,
       capture: async (job, size) => {
         const w = live();
-        await w.webContents.executeJavaScript(STAGE(job.slideId, job.elementId, job.mode), true);
-        const x = Math.max(0, Math.floor(job.box.x));
-        const y = Math.max(0, Math.floor(job.box.y));
-        const rect = { x, y, width: Math.max(1, Math.min(SLIDE_W - x, Math.ceil(job.box.x + job.box.w) - x)), height: Math.max(1, Math.min(SLIDE_H - y, Math.ceil(job.box.y + job.box.h) - y)) };
+        const box = (await w.webContents.executeJavaScript(STAGE(job.slideId, job.elementId, job.mode), true)) as { x: number; y: number; w: number; h: number };
+        const x = Math.max(0, Math.floor(box.x));
+        const y = Math.max(0, Math.floor(box.y));
+        const rect = { x, y, width: Math.max(1, Math.min(SLIDE_W - x, Math.ceil(box.x + box.w) - x)), height: Math.max(1, Math.min(SLIDE_H - y, Math.ceil(box.y + box.h) - y)) };
         let image = await w.webContents.capturePage(rect);
         if (size?.width !== undefined) image = image.resize({ width: size.width, ...(size.height !== undefined && { height: size.height }), quality: 'best' });
         return image.toPNG();
