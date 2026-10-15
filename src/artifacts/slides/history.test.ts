@@ -344,6 +344,39 @@ describe('fix wave 1 (R1): a node a restore re-created, edited after the restore
   });
 });
 
+describe('fix wave 2 (R1’s leftovers): text edits after a restore (the re-review’s inputs)', () => {
+  // A slide deleted after the version and brought back by a restore as it was, then a session edits its text.
+  function restored(w: ReturnType<typeof world>) {
+    w.land('human', (doc) => Y.deleteSlide(doc, 'a')); // + 2 min
+    w.land('human:restore', (doc) => transact(doc, () => importSlide(doc, slideIR('a', '<h1 id="title" style="font-size:72px">Initial title</h1>'), 'a0'))); // + 3 min
+  }
+
+  it('credits a later rich-text edit on a restored slide to the later session', () => {
+    const w = world(['a']);
+    w.land('human', (doc) => setText(doc, 'a', 'title', [{ type: 'p', inline: [{ text: 'Initial title', marks: {} }] }])); // + 2 min: the version's text
+    const v = w.mark();
+    restored(w); // + 3, + 4 min
+    w.land('session:x', (doc) => setText(doc, 'a', 'title', [{ type: 'p', inline: [{ text: 'Later title', marks: {} }] }])); // + 5 min
+    const key = changesOf(w, v).slides[0]?.elements.find((e) => e.id === 'title')?.keys.find((k) => k.key === 'text');
+    expect([key?.by, key?.at]).toEqual(['session:x', T0 + 5 * MIN]);
+  });
+
+  it('credits a later deletion in a restored slide’s notes to the later session, and only what the restore changed to the restorer', () => {
+    const w = world(['a']);
+    w.land('human', (doc) => setNotes(doc, 'a', 'Keep these notes.')); // + 2 min: the version's notes
+    const v = w.mark();
+    w.land('human', (doc) => Y.deleteSlide(doc, 'a')); // + 3 min
+    w.land('human:restore', (doc) => transact(doc, () => importSlide(doc, { ...slideIR('a'), notes: 'Keep these notes!' }, 'a0'))); // + 4 min
+    w.land('session:x', (doc) => setNotes(doc, 'a', 'Keep notes!')); // + 5 min
+    const parts = changesOf(w, v).slides[0]!.notes.flatMap((r) => r.parts);
+    expect(parts.filter((p) => p.kind === 'del').map((p) => [p.text, p.by, p.at])).toEqual([
+      ['these ', 'session:x', T0 + 5 * MIN],
+      ['.', 'human:restore', T0 + 4 * MIN],
+    ]);
+    expect(parts.filter((p) => p.kind === 'ins').map((p) => [p.text, p.by])).toEqual([['!', 'human:restore']]);
+  });
+});
+
 describe('Show editors of a live element (D11)', () => {
   it('lists who set the element’s keys and typed its text, the latest time each, from provenance', () => {
     const w = world(['a']);

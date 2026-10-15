@@ -17,7 +17,7 @@
 // so every change is a whole slide added or removed and 0 changed elements is the truth; the one kept slide was a
 // restore's, re-created under its id, which S7a's walk skipped and `walkSlide` reads (history.test.ts states it).
 import diff from 'fast-diff';
-import { applyV2, deletedBy, type ContentMap, type Doc, type Node as YType } from '../yjs';
+import { applyV2, deletedBy, insertedBy, type ContentMap, type Doc, type Node as YType } from '../yjs';
 import { ContentType, createDiffRenderer, newDocGcOff, type DiffRenderer } from '../yjs/document';
 import { DECK_ROOT, SLIDES_ROOT } from '../yjs/slides';
 import { slideOrder } from './model';
@@ -383,8 +383,8 @@ function replacedSlide(id: string, op: Op, prev: Doc, next: Doc, attributions: C
   const rank = (e: ElementChange) => (order.indexOf(e.id) < 0 ? Number.MAX_SAFE_INTEGER : order.indexOf(e.id));
   elements.sort((a, b) => rank(a) - rank(b) || (a.id < b.id ? -1 : 1));
   const slideKeys = replacedKeys(slideNode(prev, id)!, slideNode(next, id)!, d, node).filter((k) => !SLIDE_PARTS.has(k.key));
-  const notesDelta = isDelta(d?.attrs?.notes?.value) ? d.attrs.notes.value : null;
-  const { runs: notes, pieces } = rediffNotes(notesText(prev, id), readNotesDelta(notesDelta).pieces, node);
+  const notesNode = (slideNode(next, id)?.getAttr('notes') as YType | undefined) ?? null;
+  const { runs: notes, pieces } = rediffNotes(notesText(prev, id), notesNode, attributions, node);
   if (slideKeys.length === 0 && elements.length === 0 && notes.length === 0) return null;
   const touches = [...slideKeys, ...elements, ...notes.flatMap((r) => r.parts)];
   return { id, kind: 'changed', keys: slideKeys, elements, notes, notesPieces: notes.length ? pieces : null, ...latestOf(touches) };
@@ -398,29 +398,44 @@ function replacedSlide(id: string, op: Op, prev: Doc, next: Doc, attributions: C
 function leafTouch(d: Delta | undefined, key: string, fallback: Touch): Touch {
   const op = d?.attrs?.[key];
   if (!op) return fallback;
-  if (op.attribution) {
-    const t = touchOf(op.attribution);
-    return { by: t.by, at: t.at };
-  }
-  return latestIn(op.value) ?? fallback;
+  // fix wave 2: a nested node (an element's text) inserted by the restore and edited since is its latest edit's
+  const own = op.attribution ? touchOf(op.attribution) : null;
+  const inner = latestIn(op.value);
+  const t = inner && own ? later({ by: own.by, at: own.at }, inner) : (inner ?? own);
+  return t ? { by: t.by, at: t.at } : fallback;
 }
 
 /** The keys a node new under a kept id differs in from the earlier node, each credited by its leaf. */
 const replacedKeys = (a: YType, b: YType, d: Delta | undefined, fallback: Touch): KeyChange[] => differingKeys(a, b).map((k) => ({ ...k, ...leafTouch(d, k.key, fallback) }));
 
 /**
- * Fix wave 1 (R1): the notes of a slide node new under a kept id, compared with the earlier notes as text: what differs
- * is a change, an insert credited to whoever wrote those characters in the new node (the restore, or a later writer),
- * a deletion to the node's writer (the earlier text went with the earlier node). Touching changes are one run.
+ * Fix wave 1 (R1), fix wave 2: the notes of a slide node new under a kept id, compared with the earlier notes as text,
+ * each change credited from the new node's own items. A character still there is an insert by whoever wrote it (the
+ * restore, or a later writer); earlier text the new node lacks is a deletion by whoever deleted the new node's
+ * characters at that place (the renderer draws none of them: inserted and deleted within the window), and, beyond
+ * those, by the node's writer (the text went with the earlier node). Touching changes are one run.
  */
-function rediffNotes(earlier: string, later: readonly NotesPiece[], node: Touch): { runs: NotesRun[]; pieces: NotesPiece[] } {
-  const chars: Touch[] = [];
-  for (const piece of later) if (piece.kind !== 'del') for (let i = 0; i < piece.text.length; i++) chars.push({ by: piece.by ?? node.by, at: piece.at ?? node.at });
-  const text = later.filter((p) => p.kind !== 'del').map((p) => p.text).join('');
+function rediffNotes(earlier: string, notes: YType | null, attributions: ContentMap, node: Touch): { runs: NotesRun[]; pieces: NotesPiece[] } {
+  const alive: { ch: string; by: string | null; at: number | null }[] = [];
+  const gaps = new Map<number, Touch[]>(); // alive characters before → the deleted characters there, one touch each
+  for (let item = notes?._start ?? null; item !== null; item = item.right) {
+    if (item.content instanceof ContentType) continue;
+    for (let i = 0; i < item.length; i++) {
+      const id = { client: item.id.client, clock: item.id.clock + i };
+      if (item.deleted) {
+        const who = deletedBy(attributions, id);
+        const list = gaps.get(alive.length) ?? [];
+        list.push({ by: who?.actor ?? node.by, at: who?.at ?? node.at });
+        gaps.set(alive.length, list);
+      } else {
+        const who = insertedBy(attributions, id);
+        alive.push({ ch: String((item.content.getContent() as unknown[]).join('')[i] ?? ''), by: who?.actor ?? node.by, at: who?.at ?? node.at });
+      }
+    }
+  }
   const runs: NotesRun[] = [];
   const pieces: NotesPiece[] = [];
   let open: NotesRun | null = null;
-  let at = 0;
   const part = (p: NotesPart) => {
     if (!open) runs.push((open = { parts: [] }));
     const last = open.parts.at(-1);
@@ -430,15 +445,23 @@ function rediffNotes(earlier: string, later: readonly NotesPiece[], node: Touch)
     if (shown && shown.kind === p.kind && shown.by === p.by && shown.at === p.at && shown.run === runs.length - 1) shown.text += p.text;
     else pieces.push({ ...p, run: runs.length - 1 });
   };
-  for (const [op, chunk] of diff(earlier, text)) {
+  let at = 0;
+  for (const [op, chunk] of diff(earlier, alive.map((c) => c.ch).join(''))) {
     if (op === diff.EQUAL) {
       open = null;
-      pieces.push({ kind: 'same', text: chunk, by: null, at: null, run: null });
+      const last = pieces.at(-1);
+      if (last?.kind === 'same') last.text += chunk;
+      else pieces.push({ kind: 'same', text: chunk, by: null, at: null, run: null });
       at += chunk.length;
-    } else if (op === diff.DELETE) part({ kind: 'del', text: chunk, by: node.by, at: node.at });
-    else {
-      for (let i = 0; i < chunk.length; i++) part({ kind: 'ins', text: chunk[i]!, ...chars[at + i]! });
+    } else if (op === diff.INSERT) {
+      for (let i = 0; i < chunk.length; i++) part({ kind: 'ins', text: chunk[i]!, by: alive[at + i]!.by, at: alive[at + i]!.at });
       at += chunk.length;
+    } else {
+      const deleted = gaps.get(at) ?? [];
+      for (let i = 0; i < chunk.length; i++) {
+        const who = deleted.shift() ?? node;
+        part({ kind: 'del', text: chunk[i]!, by: who.by, at: who.at });
+      }
     }
   }
   return { runs, pieces };
