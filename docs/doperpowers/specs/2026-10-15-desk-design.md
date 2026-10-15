@@ -2262,7 +2262,7 @@ types are in `identity.ts` (`EnrollmentRequest`, `EnrollmentIssued`, `RedeemRequ
 | `GET /api/projects` | a member | `200 {projects: ProjectRecord[]}` | |
 | `PUT /api/projects/<id>/archive` `{machine}` | an admin | `200 {project: ProjectRecord}`; `machine` an enrolled machine's name, or null to clear | `403 not-admin`, `400 bad-shape`, `404 unknown-project`, `409 unknown-machine` |
 | `GET /api/org/keys` | a member | `200 {key_check, keys: WrappedKeyRecord[]}`: `key_check` the org's, null while it has no key | |
-| `POST /api/org/keys` `{method, label, credential, kdf, iv, wrapped, check, auth}` | an admin holding the org key | `201 {key: WrappedKeyRecord}`; the first one sets the org's `key_check` and `key_auth` | `403 not-admin`, `403 not-key-holder` (the org has a key and SHA-256 of `auth` is not its `key_auth`), `400 bad-shape` (`kdf` above 1 KiB, a field of the wrong length, a `credential` on a passphrase or none on a passkey), `409 different-key` (its `check` is not the org's: it wraps another key), `409 credential-taken` (a wrapped key for that passkey exists) |
+| `POST /api/org/keys` `{method, label, credential, kdf, iv, wrapped, check, auth}` | an admin holding the org key | `201 {key: WrappedKeyRecord}`; the first one sets the org's `key_check` and `key_auth` | `403 not-admin`, `403 not-key-holder` (the org has a key and SHA-256 of `auth` is not its `key_auth`), `400 bad-shape` (`kdf` above 1 KiB, a field of the wrong length, a `credential` on a passphrase or none on a passkey), `409 different-key` (`auth` matches but its `check` is not the org's), `409 credential-taken` (a wrapped key for that passkey exists) |
 | `DELETE /api/org/keys/<id>` `{auth}` | an admin holding the org key | `200 {removed: <id>}` | `403 not-admin`, `403 not-key-holder`, `404 unknown-key`, `409 last-key` (the org's only wrapped key is never removed: add another first) |
 
 Redemption recovers from every loss: a lost answer is recovered by redeeming again with the same token and name, which
@@ -2299,8 +2299,9 @@ LF `method` LF `credential` (empty for a passphrase), and posts it. To unlock, a
 asks for a passkey among their credentials or for the passphrase, and unwraps straight into a non-extractable HMAC key;
 a failed tag is a wrong passphrase or another passkey, and an unwrapped key whose `check` is not the org's
 `key_check` is refused. Adding a method, and building an enrollment code, unwrap the key once more as raw bytes and
-wipe them after. `key_check` keeps one org from ever holding two keys: a second first-time setup racing the first is
-refused `different-key`. It reveals nothing a code made with the key does not. **Changing the org's wrapped keys
+wipe them after. `key_check` and `key_auth` keep one org from ever holding two keys: a second first-time setup racing the first
+carries another `auth` and is refused `not-key-holder`, which the hub checks before anything else, so a caller without
+the key learns nothing of the records; `different-key` is left for a holder of the key whose record's `check` is wrong. It reveals nothing a code made with the key does not. **Changing the org's wrapped keys
 takes the key, not only an Access session:** `auth` is HMAC-SHA256(org key, UTF-8 `smns-desk-key-auth-v1`), 32 bytes,
 base64url, which a browser holding the key computes even from its non-extractable copy. The first wrapped key sets
 `key_auth` = SHA-256(`auth`) with `key_check`, in one step; every later add or removal must carry the `auth` whose
@@ -2308,7 +2309,7 @@ hash it is, or is refused `not-key-holder`. `key_check` is public and proves not
 session could post a record carrying the public check over junk bytes and then delete every real one, leaving the
 org's browsers no way to their key. A hub that is itself compromised can still delete records, as it can withhold
 events: that is availability, not authority. An admin session that sets up a key before the owner does makes an org
-the owner cannot unlock (the owner's setup is refused `different-key`), and gains no authority with it, since no
+the owner cannot unlock (the owner's setup is refused `not-key-holder`), and gains no authority with it, since no
 machine holds that key; the owner sets up the key right after deploying. The hub can test passphrase guesses
 offline against a wrapped key at the derivation's cost per guess, as it could against any code; the memory-hard cost
 and the passphrase's length are the defense. Removing a method does not take the key from a browser that kept it;
