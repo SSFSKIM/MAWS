@@ -380,6 +380,13 @@ registrations through `connectDepth()`.
   `raised` now carries optional `agentId` and `truncated`; depth draws no
   pending requests, but would place one on the subagent named by `agentId`.
   Date/Author: 2026-10-15, controller, on the composite's writer's notice.
+- Decision: DX5 is final (composite at MAWS `361bee24`, DC2 closed): a
+  `turn` start may carry `recovered: true` with `text: null`. Depth draws
+  no turn start's text — DX4 relays no `turn` event, and the prompt row it
+  draws is the transcript's own user row — so this changes nothing today.
+  M3 re-checks after merging `smns-erb`; if a turn start ever reaches
+  depth, a null text draws no prompt row.
+  Date/Author: 2026-10-15, controller.
 - Decision (M3): The `transcript` slot draws through MAWS's to-human
   Presenter, so the unfolded working record reads as the folded view does;
   depth on the right stays raw. It draws an **exclusive range**: DC5 mounts
