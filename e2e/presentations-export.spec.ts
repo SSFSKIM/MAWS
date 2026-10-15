@@ -26,6 +26,7 @@ import { expect, test, type Page } from '@playwright/test';
 import JSZip from 'jszip';
 import { benchDeckFiles, benchShapes } from '../src/artifacts/slides/fixtures/bench';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { normalized, wordsAlong, wordsOfBox, type Extent, type Word } from './support/text-run';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 const invoke = <T>(page: Page, name: string, input?: unknown) =>
@@ -403,13 +404,6 @@ function meanDifference(a: { rgb: Buffer }, b: { rgb: Buffer }): number {
   for (let i = 0; i < n; i++) sum += Math.abs(a.rgb[i]! - b.rgb[i]!);
   return sum / n / 255;
 }
-interface Word {
-  text: string;
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
-}
 /** Each page's words with their boxes in slide px (a page is the slide's 1920 px across). */
 function wordsOf(pdf: string): Word[][] {
   const out = execFileSync(join(POPPLER, 'pdftotext'), ['-bbox', pdf, '-'], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
@@ -419,46 +413,9 @@ function wordsOf(pdf: string): Word[][] {
     return [...page.matchAll(/<word xMin="([\d.]+)" yMin="([\d.]+)" xMax="([\d.]+)" yMax="([\d.]+)">([^<]*)<\/word>/g)].map((m) => ({ text: m[5]!, x0: Number(m[1]) * k, y0: Number(m[2]) * k, x1: Number(m[3]) * k, y1: Number(m[4]) * k }));
   });
 }
-// pdftotext writes a ligature as its one character; a text compares without its spaces
-const normalized = (text: string) => text.replace(/\uFB00/g, 'ff').replace(/\uFB01/g, 'fi').replace(/\uFB02/g, 'fl').replace(/\uFB03/g, 'ffi').replace(/\uFB04/g, 'ffl').replace(/\s+/g, '');
-type Extent = [number, number, number, number];
-// a list's marker LibreOffice draws as a word of its own (a bullet, or a number and its stop)
-const MARKER = /^(?:[\u2022\u25CF\u25E6\u25AA\u2023\u2219\u00B7\u2013-]|\d+[.)])$/;
-const sortedChars = (text: string) => [...text].sort().join('');
-/**
- * The LibreOffice words of one text box. LibreOffice draws a box's text as one run of words in the page's stream, so its
- * whole text is a contiguous run whose words, each part of the box's text, together hold exactly the box's characters
- * (a glyph a fallback face draws may come out of order; a list's markers are passed over), wherever its lines broke. Of
- * the runs that qualify, the one starting nearest the app's text; null when no run holds the whole text.
- */
-function wordsOfBox(page: Word[], ink: Extent, text: string): { joined: string; box: Extent } | null {
-  const flat = normalized(text);
-  const want = sortedChars(flat);
-  let best: { joined: string; box: Extent; distance: number } | null = null;
-  for (let i = 0; i < page.length; i++) {
-    let acc = '';
-    const run: Word[] = [];
-    for (let j = i; j < page.length; j++) {
-      const w = normalized(page[j]!.text);
-      if (!w || (MARKER.test(w) && !flat.includes(w))) continue;
-      if (!flat.includes(w) || acc.length + w.length > flat.length) break;
-      acc += w;
-      run.push(page[j]!);
-      if (acc.length === flat.length) {
-        if (sortedChars(acc) === want) {
-          const box: Extent = [Math.min(...run.map((r) => r.x0)), Math.min(...run.map((r) => r.y0)), Math.max(...run.map((r) => r.x1)), Math.max(...run.map((r) => r.y1))];
-          const distance = Math.hypot(box[0] - ink[0], box[1] - ink[1]);
-          if (!best || distance < best.distance) best = { joined: acc, box, distance };
-        }
-        break;
-      }
-    }
-  }
-  return best && { joined: best.joined, box: best.box };
-}
 
 /** One text box as the app's own canvas draws it: the union of its line boxes in slide px, its text and its face. */
-type CanvasText = { id: string; ink: Extent; text: string; rotated: boolean; face: string; drawn: string; weight: number; numeric: string };
+type CanvasText = { id: string; ink: Extent; text: string; rotated: number; face: string; drawn: string; weight: number; numeric: string };
 
 /**
  * The app's own render of each slide (Decision Log 23): the deck in a main tab, each slide brought to the stage, its
@@ -490,15 +447,17 @@ async function canvasRenders(page: Page, title: string, artifactId: string, ids:
       const installed = (family: string) => ['monospace', 'serif', 'sans-serif'].some((generic) => width(`"${family}", ${generic}`) !== width(generic));
       const GENERIC = /^(serif|sans-serif|monospace|cursive|fantasy|system-ui|ui-[a-z-]+|-apple-system|blinkmacsystemfont)$/i;
       const stack = (value: string) => value.split(',').map((f) => f.trim().replace(/^["']|["']$/g, '')).filter(Boolean);
+      // the angle its own and its ancestors' transforms turn it by (degrees; 0 unturned)
       const turned = (el: Element) => {
+        let angle = 0;
         for (let at: Element | null = el; at && at !== slide; at = at.parentElement) {
           const t = getComputedStyle(at).transform;
           if (t && t !== 'none') {
             const m = new DOMMatrixReadOnly(t);
-            if (Math.abs(m.b) > 1e-6 || Math.abs(m.c) > 1e-6) return true;
+            angle += (Math.atan2(m.b, m.a) * 180) / Math.PI;
           }
         }
-        return false;
+        return Math.abs(angle) < 0.01 ? 0 : angle;
       };
       const texts = Array.from(slide.querySelectorAll('h1[data-eid], h2[data-eid], h3[data-eid], p[data-eid], ul[data-eid], ol[data-eid], th[data-eid], td[data-eid]')).flatMap((el) => {
         const rects: DOMRect[] = [];
@@ -609,7 +568,8 @@ test('the PPTX under LibreOffice draws each corpus slide as the app’s own canv
     // face changes advance widths, not placement); a rotated box judged by its centre
     for (const text of render.texts) {
       compared++;
-      const lo = wordsOfBox(loWords[i]!, text.ink, text.text);
+      // a turned box's pieces read along its angle; any other box's words, a run in the stream (support/text-run.ts)
+      const lo = text.rotated ? wordsAlong(loWords[i]!, text.ink, text.text, text.rotated) : wordsOfBox(loWords[i]!, text.ink, text.text);
       if (!lo) {
         failures.push(`${slide.name} ${text.id}: LibreOffice drew no run of words holding the box's whole text “${normalized(text.text).slice(0, 60)}” (LibreOffice near it: ${loWords[i]!.filter((w) => w.y1 > text.ink[1] - 200 && w.y0 < text.ink[3] + 200).map((w) => `${w.text}@${w.x0.toFixed(0)},${w.y0.toFixed(0)}`).join(" ")})`);
         continue;
@@ -628,6 +588,7 @@ test('the PPTX under LibreOffice draws each corpus slide as the app’s own canv
       if (off > 24) failures.push(`${slide.name} ${text.id}: its words' box is ${off.toFixed(1)} px from the canvas's (canvas ${text.ink.map((v) => v.toFixed(0)).join(',')}, LibreOffice ${lo.box.map((v) => v.toFixed(0)).join(',')}, face ${text.face} ${text.weight}, drawn ${text.drawn})`);
     }
   }
+  expect(failures).toEqual([]);
   expect(compared).toBeGreaterThan(50);
   expect(rotated).toBeGreaterThan(0);
   mkdirSync(test.info().outputDir, { recursive: true });
