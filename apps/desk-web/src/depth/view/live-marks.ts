@@ -3,9 +3,10 @@
 // through the grammar's strict `parse`, where a mark still open is unbalanced and its tag literal; the grammar's
 // `parseLive` reads it open, but only a stored row's path reaches the Presenter. So the column hands the row the text
 // a stored row of the same words would be once its marks close: a tag still arriving dropped (as `parseLive` drops
-// it), a fence still open closed, and each mark still open closed after it. The result is checked against
-// `parseLive` — the same marks in the same order — and a text where they differ (a reading this does not reproduce)
-// is drawn as it was written. Tags in code stay literal, as the grammar has them.
+// one, and `<message>`'s too, which its list predates), a fence still open closed, and each mark still open closed
+// after it. The result is checked against `parseLive` — the same marks in the same order — and a text where they
+// differ (a reading this does not reproduce) is drawn as it was written. Tags in code stay literal, as the grammar has
+// them.
 import { codeRegions, insideCode, parse, parseLive } from '@shared/owner/to-human-parser';
 
 const MARK = /<(\/?)(message|to-human|essential|need-input|insight)>/g;
