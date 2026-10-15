@@ -483,6 +483,18 @@ registrations through `connectDepth()`.
   clears; browser suites stay on the Linux lane; no effort on the slot
   wrapper. Refines the Linux-lane entry above.
   Date/Author: 2026-10-15, the owner via the composite's writer.
+- Decision (final review): After an `end` other than a discontinuity, a
+  transcript is taken up again at once when its session goes from
+  unreachable to reachable, and otherwise, while reachable, by a bounded
+  exponential backoff (1 s doubling to 60 s, reset by a snapshot); while
+  unreachable it is never retried. Reason: retrying on every phase change
+  looped without bound on terminal errors (final review), and retrying
+  only on an observed transition stranded a transcript when the hub
+  replaces a machine online-to-online — `startLease()` ends the old
+  generation's subs with `machine-offline` and publishes the replacement
+  online with no offline presence between (re-check). Refines M1's
+  "subscribes again when `DeskSession` shows the session reachable".
+  Date/Author: 2026-10-15, controller.
 - Decision: DC6's PR is based on `smns-erb-web` (ready for review, not a
   draft); the desk lands on `master` child by child — DC3 (with the
   composite), DC5, DC6 — merged only by the composite's writer, who
