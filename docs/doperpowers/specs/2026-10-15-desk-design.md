@@ -1151,7 +1151,11 @@ DC3's later milestones extend. DX5 is DC2's; DX8 is DC5's.
 
 Conventions throughout: hub-owned multi-word fields are snake_case (as smns's log and DX6's `input_sha256`); fields
 that pass through from the engine keep the engine's camelCase (`turnId`, `agentId`, `upTo`, `waitingFor`). Times are
-ISO 8601 UTC with milliseconds. A nonce is 128 random bits, base64url without padding (22 characters).
+ISO 8601 UTC with milliseconds. A nonce is 128 bits, base64url without padding (22 characters), never repeated under
+one org key: random from a browser and for every RPC; for a machine's own log events, random or derived as the first
+16 bytes of HMAC-SHA256 with the org key over `smns-hub-nonce-v1\n<project id>\n<JCS of the event without mac>` (DX1's
+framing under a domain of its own), so that an upload resent after a lost answer carries the same bytes. A verifier
+cannot tell the two apart and needs not to.
 
 ### DX1 — The authentication code and its vectors (owner: this document; written by DC3 at G1)
 **The rule, for every shape that carries a code** (DX1 log events; DX4 `raised`, `settled`, `delivery`; DX6 RPCs).
@@ -1517,8 +1521,9 @@ browsers that follow the log and to every other machine that opened the project 
 **Upward refusals.** A daemon that refuses an event the hub sent it — its code fails (which includes a `hub/` event
 whose position fails DX1's shape check, and an event transplanted from another project), its nonce was seen, or it is
 not a log event the daemon can read — keeps it out of its log and reports `rejected` with the project, `reason`
-(`bad-code`, `seen-nonce`, or `bad-shape`), an optional `message`, and the event named by what it carried, never by
-anything the daemon makes up:
+(`bad-code`, `seen-nonce`, `bad-shape`, or `conflict`: its code verifies, but the daemon already holds a different
+event at that `(writer, seq)`, which in a `hub/` feed means the hub re-sequenced one), an optional `message`, and the
+event named by what it carried, never by anything the daemon makes up:
 - `event` is `{writer, seq}` exactly as they arrived when `writer` was a string and `seq` a number, however wrong
   otherwise (a `hub/` writer failing its shape is reported as it came, control characters and all), and **null** when
   either was missing or of another type — written out as null, not left out;
@@ -1529,6 +1534,13 @@ still reported (`event: null`, no `nonce`), so its refusal shows, and `message` 
 report in the project's audit record and shows it to the project's browsers (DX3 `rejected`), apart from its own
 refusals of uploads (`refused`). This is how a forgery placed at the hub shows in the web (the composite's acceptance
 8).
+
+**A refused position is spent on that daemon.** The daemon records the `(writer, seq)` of an event it refused, and its
+`hello` vector moves past it, so the hub does not send it again and the writer's later events are imported across the
+hole. Without this, one forged web `human` (the hub stores what a member's browser sends, since it cannot verify)
+would block every later message from that member on every daemon. A spent position in a `hub/` feed is a refused web
+event the project's browsers see as `rejected`; in a machine's feed it can only come from a hub that lied. sminos's
+readers keep a per-writer high-water mark and tolerate the hole.
 
 **The log handshake, per project.** The daemon sends `hello` with its vector; the hub answers `have` with its own and
 then streams, as `events`, every writer's suffix the machine lacks. The daemon uploads, as `events`, the suffix of
@@ -2595,6 +2607,24 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: Three DX1/DX2 rules from DC4's M3. (1) A machine may derive
+  the nonce of its own log events from the org key and the event, under a
+  domain of its own, instead of drawing it at random. Local events are
+  stored without a code, by processes that hold no key, and an upload
+  resent after a lost answer must carry the same bytes or the hub refuses
+  it as `conflict`. A verifier cannot tell a derived nonce from a random
+  one. Rejected: storing each sealed nonce in the uplink's state before
+  uploading, a write-ahead the derived form makes unnecessary. (2) The
+  upward refusal gains the reason `conflict`, for an authentic event at a
+  position that already holds a different one; calling it `bad-code`
+  mislabeled an authentic event. (3) A refused position is spent on the
+  daemon that refused it: its vector moves past it, and later events of
+  that writer flow. Otherwise one forged web `human`, which the hub stores
+  because it cannot verify, blocks that member everywhere. A hub that
+  lies gains nothing from this it lacked already, since it could always
+  withhold an event. Flags DC3 (DX1 and DX2 in the module), DC4, DC5 (a
+  browser's nonces stay random).
+  Date/Author: 2026-10-15, design session (DC4's M3).
 - Decision: DX2, DX3, and DX7 replaced whole by DC3's M2 (MAWS
   `4de85ff9`, interfaces reviewed clean), DX1 gaining the reviewed
   paragraph on canonical base64url (which replaces the interim sentences
