@@ -1,9 +1,8 @@
 // The stand-in's front door: an HTTP server that does to each request what Access does in front of the deployed hub,
 // then passes it to the hub (`wrangler dev`, or the suites' Miniflare) and streams the answer back — SSE and WebSocket
 // upgrades included. Its own paths (/standin/…) it answers itself. Node only; run by the local command and the suites.
-// Each request to the hub gets a connection of its own (`agent: false`), so no request can lose its socket to another's
-// teardown: with Node's keep-alive agent a finished request's socket serves the next one (a 502 was seen once on the CI
-// runner, on a request that needed nothing beyond the hub).
+// Each request to the hub gets a connection of its own (`agent: false`), so requests share nothing: a conservative
+// choice after a 502 of unknown cause was seen once on the CI runner, on a request that needed nothing beyond the hub.
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import type { AccessStandin } from './standin.ts';

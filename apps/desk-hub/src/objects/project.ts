@@ -1,8 +1,9 @@
 // One project: its log (DX2's sync with machines, DX3's resume for browsers) and its audit record, held by a Durable
 // Object on SQLite. Browsers hold WebSockets accepted with the Hibernation API, each carrying its member and whether it
 // follows the log in its attachment, so a woken object knows whose it is. Machines reach it through their `Machine`
-// objects (`fromMachine`), and it reaches them back the same way, one ordered queue per machine. Of the session plane it
-// holds each session's latest presence, for the browsers that connect later; the rest of it and the pending set are M3's.
+// objects (`fromMachine`), and it reaches them back the same way, one ordered queue per machine stream. Of the session
+// plane it holds each session's latest presence, for the browsers that connect later; the rest of it and the pending
+// set are M3's.
 import { DurableObject } from 'cloudflare:workers';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import type { AuditEntry, ProjectDown } from '../protocol/browser';
@@ -28,7 +29,8 @@ const encoder = new TextEncoder();
 
 export class Project extends DurableObject<Env> {
   private readonly log: LogStore;
-  /** One promise chain per machine, so every frame this object sends a machine arrives in the order it was queued. */
+  /** One promise chain per machine stream (`<machine>#<generation>`), so every frame this object sends a stream arrives
+   * in the order it was queued; a chain that failed rejects for the POST waiting on it, and the next frame still goes. */
   private readonly queues = new Map<string, Promise<void>>();
   /** Part sets a socket is sending (lost with a hibernation, as the socket's half-sent frame would be). */
   private readonly parts = new Map<WebSocket, PartAssembler>();
@@ -65,30 +67,37 @@ export class Project extends DurableObject<Env> {
     else if (frame.t === 'rejected') this.rejected(ctx, frame);
     else if (frame.t === 'session' && (frame.message as { kind?: unknown } | undefined)?.kind === 'presence') this.presence(ctx, frame.message);
     // `rpc-result`, `pending`, and the session plane's other messages are M3's.
-    await this.queues.get(ctx.machine);
+    await this.queues.get(queueKey(ctx));
   }
 
+  /** A frame on the wire: at most 1 MiB, measured before it is read; a part joins its set, and a whole set is one
+   * logical frame, which may be larger. */
   async webSocketMessage(socket: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    const bytes = typeof message === 'string' ? (message.length > FRAME_LIMIT ? message.length : encoder.encode(message).length) : message.byteLength;
+    if (bytes > FRAME_LIMIT) return this.refuseBrowser(socket, { reason: 'too-large', message: 'a frame is at most 1 MiB on the wire; send a larger one as parts' });
     let frame: { t?: unknown; [key: string]: unknown };
     try {
       frame = JSON.parse(typeof message === 'string' ? message : new TextDecoder().decode(message));
     } catch {
       return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'a frame is JSON' });
     }
-    if (frame?.t === 'part') {
-      let assembler = this.parts.get(socket);
-      if (!assembler) this.parts.set(socket, (assembler = new PartAssembler()));
-      try {
-        const whole = assembler.add(frame as unknown as Part);
-        if (whole !== undefined) await this.webSocketMessage(socket, JSON.stringify(whole));
-      } catch {
-        this.refuseBrowser(socket, { reason: 'bad-shape', message: 'a malformed part' });
-      }
-      return;
+    if (frame?.t !== 'part') return this.dispatch(socket, frame);
+    let assembler = this.parts.get(socket);
+    if (!assembler) this.parts.set(socket, (assembler = new PartAssembler()));
+    let whole: unknown;
+    try {
+      whole = assembler.add(frame as unknown as Part);
+    } catch {
+      return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'a malformed part' });
     }
+    if (whole !== undefined) this.dispatch(socket, whole as { t?: unknown; [key: string]: unknown });
+  }
+
+  /** A whole logical frame from a browser. */
+  private dispatch(socket: WebSocket, frame: { t?: unknown; [key: string]: unknown } | null): void {
     if (frame?.t === 'resume') return this.resume(socket, frame.after);
     if (frame?.t === 'human') return this.human(socket, frame.event);
-    // `rpc`, `subscribe`, `unsubscribe`, `rows`, and `visibility` are the session plane's (M3).
+    // `rpc`, `subscribe`, `unsubscribe`, `rows`, `diff`, and `visibility` are the session plane's (M3).
   }
 
   async webSocketClose(socket: WebSocket): Promise<void> {
@@ -110,7 +119,13 @@ export class Project extends DurableObject<Env> {
       Object.values(have).every((seq) => Number.isSafeInteger(seq) && (seq as number) >= 0);
     if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'hello is {project, name, have: {writer: seq}}' });
     const record = await this.registry().registerProject(ctx.project, frame.name, ctx.machine);
-    this.ctx.storage.sql.exec('INSERT OR REPLACE INTO machines (name, generation) VALUES (?, ?)', ctx.machine, ctx.generation);
+    // A newer stream of this machine may have opened the project while the registry answered: it keeps its place.
+    this.ctx.storage.sql.exec(
+      'INSERT INTO machines (name, generation) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET generation = excluded.generation WHERE excluded.generation > machines.generation',
+      ctx.machine,
+      ctx.generation,
+    );
+    if (!this.isOpen(ctx)) return;
     this.toMachine(ctx, { t: 'have', project: ctx.project, have: this.log.vector(), archive: record.archive_machine === ctx.machine });
     for (const events of this.log.beyond(have as Vector)) this.toMachine(ctx, { t: 'events', project: ctx.project, events });
   }
@@ -130,6 +145,10 @@ export class Project extends DurableObject<Env> {
       const problem = eventShapeError(event);
       const position = positionOf(event);
       if (problem) {
+        if (position.writer !== undefined) {
+          if (stopped.has(position.writer)) continue;
+          stopped.add(position.writer);
+        }
         this.refuseMachine(ctx, { reason: problem === 'an event is at most 1 MiB' ? 'too-large' : 'bad-shape', ...position, message: problem });
         continue;
       }
@@ -265,19 +284,36 @@ export class Project extends DurableObject<Env> {
     }
   }
 
-  /** Queues a frame for a machine behind everything queued for it before; a machine whose stream is gone (or newer than
-   * the one it opened this project on) leaves the fan-out until its next `hello`. */
+  /**
+   * Queues a frame for a machine's stream behind everything queued for it before. A stream that is gone (or older than
+   * the machine's current one) leaves the fan-out until the machine's next `hello`. A send that fails otherwise leaves
+   * it too, and its stream is ended, so the machine reconnects and its `hello` heals what it missed; the failure
+   * rejects the chain for the POST that waits on it, which answers it as an error.
+   */
   private toMachine(ctx: MachineContext, frame: DownFrame): void {
+    const key = queueKey(ctx);
+    for (const other of this.queues.keys()) if (other.startsWith(`${ctx.machine}#`) && other !== key) this.queues.delete(other);
     const machine = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${ctx.org}:${ctx.machine}`));
-    const previous = this.queues.get(ctx.machine) ?? Promise.resolve();
-    const next = previous
+    const next = (this.queues.get(key) ?? Promise.resolve())
+      .catch(() => {})
       .then(async () => {
-        if ((await machine.send(frame, ctx.generation)) === 'offline') {
-          this.ctx.storage.sql.exec('DELETE FROM machines WHERE name = ? AND generation = ?', ctx.machine, ctx.generation);
+        let sent: 'written' | 'offline';
+        try {
+          sent = await machine.send(frame, ctx.generation);
+        } catch (error) {
+          this.leaveFanOut(ctx);
+          void machine.close(ctx.generation).catch(() => {});
+          throw error;
         }
-      })
-      .catch(() => {});
-    this.queues.set(ctx.machine, next);
+        if (sent === 'offline') this.leaveFanOut(ctx);
+      });
+    // Handled here, so a failure no POST waits for is not an unhandled rejection; a POST that waits still sees it.
+    next.catch(() => {});
+    this.queues.set(key, next);
+  }
+
+  private leaveFanOut(ctx: MachineContext): void {
+    this.ctx.storage.sql.exec('DELETE FROM machines WHERE name = ? AND generation = ?', ctx.machine, ctx.generation);
   }
 
   private isOpen(ctx: MachineContext): boolean {
@@ -303,6 +339,8 @@ export class Project extends DurableObject<Env> {
     return this.ctx.storage.kv.get<string>('project') ?? '';
   }
 }
+
+const queueKey = (ctx: MachineContext) => `${ctx.machine}#${ctx.generation}`;
 
 /** The position an event names, when it names one, for a refusal to report. */
 function positionOf(event: unknown): { writer?: string; seq?: number } {

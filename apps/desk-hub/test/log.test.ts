@@ -2,13 +2,14 @@
 // The hub holds no org key, so machines' events here carry codes it never checks; a browser's `human` is sealed for
 // real, since its position must pass DX1's check once the hub assigns it. The hub does check that every code is spelled
 // canonically (DX1), so the machines' codes here are random 32 bytes in canonical base64url.
-import { get as httpGet } from 'node:http';
+import { get as httpGet, request as httpRequest } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { ProjectDown } from '../src/protocol/browser';
 import { base64urlEncode } from '../src/protocol/base64url';
 import { importOrgKey, newNonce, seal, verify } from '../src/protocol/codes';
 import { isHubPosition, withoutPosition, type HumanDraft, type LogEvent } from '../src/protocol/log';
-import type { DownFrame } from '../src/protocol/machine';
+import { GENERATION_HEADER, type DownFrame } from '../src/protocol/machine';
+import { FRAME_LIMIT, toWire } from '../src/protocol/parts';
 import type { SessionMessage } from '../src/protocol/session';
 import { BrowserClient, enroll, MachineClient, sorted } from './support/clients';
 import { ADMIN, credentials, startLocalHub, type LocalHub } from './support/local';
@@ -284,6 +285,19 @@ describe('refusals', () => {
     await a.close();
   });
 
+  it('stops a writer at a malformed event that names it: the rest of its batch is neither stored nor asked for again', async () => {
+    const project = newProject();
+    const a = await machine('stopped');
+    await a.sync(project);
+    const [first, second, third] = [say(a, project, 1), say(a, project, 2), say(a, project, 3)];
+    const from = a.frames.length;
+    await a.postOk([{ t: 'events', project, events: [first, { ...second, mac: undefined } as never, third] }]);
+    expect(await a.next((f) => f.t === 'refused', 'refused', from)).toMatchObject({ refusal: { reason: 'bad-shape', writer: first.writer, seq: 2 } });
+    expect((await hubCounts(project)).counts).toEqual({ [first.writer]: 1 });
+    expect(a.frames.slice(from).filter((f) => f.t === 'refused' || f.t === 'resend')).toHaveLength(1);
+    await a.close();
+  });
+
   it('refuses a POST for an older stream, and events for a project its stream has not opened', async () => {
     const project = newProject();
     const a = await machine('fenced');
@@ -296,6 +310,38 @@ describe('refusals', () => {
     expect(await a.next((f) => f.t === 'refused', 'refused', from)).toMatchObject({ refusal: { reason: 'not-open' } });
     expect((await a.post([{ t: 'hello', project, name: 'demo', have: {} }, 'not json' as never])).status).toBe(400);
     await a.close();
+  });
+
+  it('refuses a POST its stream outlived: one in flight when a newer stream opened changes nothing for the newer one', async () => {
+    const project = newProject();
+    const m = await machine('fenced');
+    const text = JSON.stringify({ t: 'hello', project, name: 'demo', have: {} });
+    let finish!: () => void;
+    const stale = new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const headers = { ...credentials(m.creds), 'content-type': 'application/x-ndjson', 'content-length': String(Buffer.byteLength(text)), [GENERATION_HEADER]: String(m.generation) };
+      const request = httpRequest(`${hub.url}/machine/frames`, { method: 'POST', headers }, (response) => {
+        let body = '';
+        response.on('data', (chunk) => (body += chunk));
+        response.on('end', () => resolve({ status: response.statusCode ?? 0, body }));
+      });
+      request.on('error', reject);
+      // Half the body now, the rest once the newer stream has opened the project.
+      request.write(text.slice(0, 10));
+      finish = () => request.end(text.slice(10));
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    await m.connect();
+    expect(m.generation).toBe(2);
+    await m.sync(project);
+    finish();
+    const answer = await stale;
+    expect(answer.status).toBe(409);
+    expect(JSON.parse(answer.body)).toMatchObject({ error: 'stale-generation' });
+    const from = m.frames.length;
+    await m.postOk([{ t: 'events', project, events: [say(m, project, 1)] }]);
+    expect((await hubCounts(project)).counts).toEqual({ [`${m.name}/${SESSION}`]: 1 });
+    expect(m.frames.slice(from).filter((f) => f.t === 'refused')).toEqual([]);
+    await m.close();
   });
 
   it("records a daemon's report of an event it refused and shows it to the project's browsers", async () => {
@@ -400,6 +446,20 @@ describe('browsers', () => {
     expect(refused.refusal).toMatchObject({ reason: 'conflict', writer: `hub/${memberId}`, seq: 1, nonce: mac.nonce });
     expect((await hubCounts(project)).counts).toEqual(sorted({ [`hub/${memberId}`]: 2, [`${a.name}/${SESSION}`]: 1 }));
     second.close();
+    await a.close();
+  });
+  it('refuses a socket frame over 1 MiB on the wire before reading it, and joins a larger frame sent as parts', async () => {
+    const project = newProject();
+    const a = await machine('bounded');
+    await a.sync(project);
+    const browser = await BrowserClient.open(hub, ADMIN, project);
+    const large = { t: 'resume', after: 0, padding: 'x'.repeat(FRAME_LIMIT) };
+    browser.send(large as never);
+    expect(await browser.next((f) => f.t === 'refused', 'refused')).toMatchObject({ refusal: { reason: 'too-large', member: memberId } });
+    expect(browser.frames.some((f) => f.t === 'caught-up')).toBe(false);
+    for (const line of toWire(large)) browser.send(JSON.parse(line));
+    await browser.next((f) => f.t === 'caught-up', 'caught-up');
+    browser.close();
     await a.close();
   });
 });
