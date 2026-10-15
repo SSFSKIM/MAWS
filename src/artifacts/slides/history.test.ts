@@ -252,6 +252,34 @@ describe('S7a’s pitfall 10: the heavy deck’s per-element count reading 0 aft
     expect(changes.count).toBe(3);
   });
 
+  it('reads a slide or an element a restore brought back and someone deleted again as removed, by its last deleter', () => {
+    // 8 of the 99 slides the heavy deck's month-two version lost went this way, and the renderer draws none of them
+    const w = world(['a', 'b']);
+    const v = w.mark();
+    w.land('human', (doc) => {
+      Y.deleteSlide(doc, 'a');
+      deleteElementTree(doc, 'b', 'body');
+    });
+    w.land('human:restore', (doc) =>
+      transact(doc, () => {
+        importSlide(doc, slideIR('a'), 'a0');
+        const restored = slideIR('b').children.find((e) => e.id === 'body')!;
+        insertElements(doc, 'b', [restored]);
+      }),
+    );
+    w.land('session:x', (doc) => {
+      Y.deleteSlide(doc, 'a');
+      deleteElementTree(doc, 'b', 'body');
+    });
+    const changes = changesOf(w, v);
+    expect(changes.slides.map((s) => [s.id, s.kind, s.by])).toEqual([
+      ['a', 'removed', 'session:x'],
+      ['b', 'changed', 'session:x'],
+    ]);
+    expect(changes.slides[1]!.elements.map((e) => [e.id, e.kind, e.by])).toEqual([['body', 'removed', 'session:x']]);
+    expect(changes.count).toBe(2);
+  });
+
   it('leaks nothing from a provenance row straddling the version (the store’s hour and day rows reach back to the import)', () => {
     const w = world(['a', 'b']);
     w.land('human', (doc) => setNotes(doc, 'a', 'Notes of a, early'));

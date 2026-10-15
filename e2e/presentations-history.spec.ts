@@ -206,6 +206,8 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
   });
 
   await test.step('Show editors on the selected element names who edited it', async () => {
+    await headerAction(page, 'Version history'); // the rail closed: under 720 px of editor it is a sheet over the stage
+    await expect(tab.locator('[data-deck-rail="history"]')).toHaveCount(0);
     const live = tab.locator('[data-stage-slide] [data-eid="title"]');
     await live.click();
     await expect(tab.locator('[data-overlay] [data-selected="title"]')).toBeVisible();
@@ -217,6 +219,7 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
   });
 
   await test.step('Restore brings the slides and the deck’s properties back as a new restore version, with the banner', async () => {
+    await headerAction(page, 'Version history');
     await rail.getByRole('button', { name: /^Version Draft by You/ }).click();
     await bar.getByRole('button', { name: 'Restore this version' }).click();
     await tab.getByRole('alertdialog', { name: 'Restore this version?' }).getByRole('button', { name: 'Restore' }).click();

@@ -16,7 +16,7 @@
 // reproduced on S7a's soak: by month two today's heavy deck keeps 1 slide id of the version's 100 (none at month three),
 // so every change is a whole slide added or removed and 0 changed elements is the truth; the one kept slide was a
 // restore's, re-created under its id, which S7a's walk skipped and `walkSlide` reads (history.test.ts states it).
-import { applyV2, type ContentMap, type Doc, type Node as YType } from '../yjs';
+import { applyV2, deletedBy, type ContentMap, type Doc, type Node as YType } from '../yjs';
 import { ContentType, createDiffRenderer, newDocGcOff, type DiffRenderer } from '../yjs/document';
 import { DECK_ROOT, SLIDES_ROOT } from '../yjs/slides';
 import { slideOrder } from './model';
@@ -26,6 +26,8 @@ export interface DeckDiff {
   prevDoc: Doc;
   nextDoc: Doc;
   renderer: DiffRenderer;
+  /** The provenance the renderer draws with (who removed what the renderer does not draw: `lastDeletion`). */
+  attributions: ContentMap;
   destroy(): void;
 }
 
@@ -43,6 +45,7 @@ export function openDeckDiff({ prevState, nextState, attributions }: { prevState
     prevDoc,
     nextDoc,
     renderer,
+    attributions,
     destroy: () => {
       renderer.destroy();
       prevDoc.destroy();
@@ -194,7 +197,7 @@ const NONE = new Set<string>();
  * what it brings back as new items) is compared key by key with the earlier one: S7a's walk read such a node's
  * attribution as an insert and skipped its elements (its pitfall 10, with the heavy profile's slide churn; history.test.ts).
  */
-function walkSlide(id: string, op: Op, prev: Doc, next: Doc): SlideChange | null {
+function walkSlide(id: string, op: Op, prev: Doc, next: Doc, attributions: ContentMap): SlideChange | null {
   const d = isDelta(op.value) ? op.value : {};
   const keys = changedKeys(d, SLIDE_PARTS);
   const elements: ElementChange[] = [];
@@ -205,6 +208,11 @@ function walkSlide(id: string, op: Op, prev: Doc, next: Doc): SlideChange | null
   for (const [eid, eop] of Object.entries((isDelta(elementsOp?.value) ? elementsOp.value.attrs : undefined) ?? {})) {
     const change = walkElement(eid, eop, before, after);
     if (change) elements.push(change);
+  }
+  // removed in a way the renderer does not draw (brought back by a restore, then deleted again)
+  for (const eid of attrIds(before)) {
+    if (hasLive(after, eid) || elements.some((e) => e.id === eid)) continue;
+    elements.push({ id: eid, kind: 'removed', keys: [], ...lastDeletion(after, eid, attributions) });
   }
   const rank = (e: ElementChange) => {
     const at = shownOrder.indexOf(e.id);
@@ -310,7 +318,7 @@ const isNode = (v: unknown): boolean => typeof v === 'object' && v !== null && t
 // ---- the whole deck
 
 /** The per-slide change set of a diff: the deck's keys, then the slides in the shown deck's order. */
-export function deckChanges(diff: Pick<DeckDiff, 'prevDoc' | 'nextDoc' | 'renderer'>): DeckChanges {
+export function deckChanges(diff: Pick<DeckDiff, 'prevDoc' | 'nextDoc' | 'renderer' | 'attributions'>): DeckChanges {
   const { prevDoc, nextDoc, renderer } = diff;
   const slidesDelta = nextDoc.get(SLIDES_ROOT).toDeltaDeep({ renderer }).toJSON() as Delta;
   const deckDelta = nextDoc.get(DECK_ROOT).toDeltaDeep({ renderer }).toJSON() as Delta;
@@ -327,8 +335,13 @@ export function deckChanges(diff: Pick<DeckDiff, 'prevDoc' | 'nextDoc' | 'render
       continue;
     }
     if (!after.has(id)) continue;
-    const change = op.attribution ? replacedSlide(id, op, prevDoc, nextDoc) : walkSlide(id, op, prevDoc, nextDoc);
+    const change = op.attribution ? replacedSlide(id, op, prevDoc, nextDoc) : walkSlide(id, op, prevDoc, nextDoc, diff.attributions);
     if (change) changed.push(change);
+  }
+  // removed in a way the renderer does not draw (brought back by a restore, then deleted again)
+  for (const id of before) {
+    if (after.has(id) || changed.some((s) => s.id === id)) continue;
+    changed.push({ id, kind: 'removed', keys: [], elements: [], notes: [], notesPieces: null, ...lastDeletion(nextDoc.get(SLIDES_ROOT), id, diff.attributions) });
   }
   const slides = inShownOrder(changed, slideOrder(prevDoc), slideOrder(nextDoc));
   const deck = deckKeys.length ? { keys: deckKeys } : null;
@@ -368,6 +381,16 @@ function replacedSlide(id: string, op: Op, prev: Doc, next: Doc): SlideChange | 
   const notes: NotesRun[] = notesBefore === notesAfter ? [] : [{ parts }];
   if (slideKeys.length === 0 && elements.length === 0 && notes.length === 0) return null;
   return { id, kind: 'changed', keys: slideKeys, elements, notes, notesPieces: notes.length ? parts.map((part) => ({ ...part, run: 0 })) : null, by: t.by, at: t.at };
+}
+
+/**
+ * Who removed what the later state no longer holds, from its key's last item there: a key whose value was brought
+ * back and deleted again within the window reads as deleted by the second deleter, and the renderer draws neither.
+ */
+function lastDeletion(container: YType | null, key: string, attributions: ContentMap): Touch {
+  const item = container?._map.get(key);
+  const who = item?.deleted ? deletedBy(attributions, item.id) : null;
+  return { by: who?.actor ?? null, at: who?.at ?? null };
 }
 
 const slideNode = (doc: Doc, id: string): YType | null => (doc.get(SLIDES_ROOT).getAttr(id) as YType | undefined) ?? null;
