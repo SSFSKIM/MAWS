@@ -421,6 +421,14 @@ registrations through `connectDepth()`.
   otherwise debt. DC3 gets, as minor items, `SessionDepth` not exported and
   `diff()`'s hard-coded base `main`.
   Date/Author: 2026-10-15, M3 executor; rulings by the composite's writer.
+- Decision (M3): A question's range bound is `toolUseId ?? request`
+  (composite `43a27604`): DX4/DX5 `raised` gains `toolUseId?`, the outer
+  call's transcript id when it differs from `request`, and DC5 passes the
+  bound that way; DC7's bridge emits it and stops posting the ask
+  dialog's own tool/call and tool/result. Depth special-cases none of the
+  dialog's `toolu_plugin_…` events; the open-bound note stays until DC3's
+  fake carries the field, then the acceptance proves the bound against it.
+  Date/Author: 2026-10-15, composite's writer.
 - Decision: DX5 is final (composite at MAWS `361bee24`, DC2 closed): a
   `turn` start may carry `recovered: true` with `text: null`. Depth draws
   no turn start's text — DX4 relays no `turn` event, and the prompt row it
