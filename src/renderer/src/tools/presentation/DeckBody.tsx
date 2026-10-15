@@ -57,7 +57,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
 
   // M7: comments go to the session the main area shows (its Side thread, or its conversation); none shown, none offered
   const appSessionId = useLayout((s) => shownSession(s.main));
-  const comments = useDocumentComments({ artifactId, appSessionId: appSessionId ?? NO_APP_SESSION, title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold });
+  const comments = useDocumentComments({ artifactId, appSessionId: appSessionId ?? NO_APP_SESSION, title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, artifactKind: 'presentation' });
 
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
   const system = useDeckSystem(placement);
