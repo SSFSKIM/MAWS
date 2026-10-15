@@ -94,6 +94,8 @@ export class SlideCanvas {
   private readonly embedUrl: EmbedUrl | undefined;
   private laidOut = false;
   private readonly layoutWaiters: (() => void)[] = [];
+  /** P3-C M7 fix wave 1: told after every completed layout pass (the comment pins and card follow geometry with it). */
+  private readonly layoutListeners = new Set<() => void>();
   /** Text elements a text box is editing in place: their text is the text box's to draw until it ends (M5). */
   private readonly editing = new Set<string>();
   /** DOM writes this canvas made, by kind (the "minimal patching" claim's measure). */
@@ -153,6 +155,15 @@ export class SlideCanvas {
       this.writes.text++;
       schedule(this);
     }
+  }
+
+  /**
+   * P3-C M7 fix wave 1: calls `listener` after every completed layout pass: a change record of the slide's, faces
+   * arriving, or the design system's scope restyling it (geometry that moves with no deck write). Returns the removal.
+   */
+  onLayout(listener: () => void): () => void {
+    this.layoutListeners.add(listener);
+    return () => this.layoutListeners.delete(listener);
   }
 
   /** Resolves once the slide has been laid out and drawn (its first layout pass). */
@@ -354,6 +365,7 @@ export class SlideCanvas {
       this.laidOut = true;
       this.layoutWaiters.splice(0).forEach((resolve) => resolve());
     }
+    this.layoutListeners.forEach((listener) => listener()); // M7 fix wave 1
   }
 
   /** This canvas's layout pass, now. */

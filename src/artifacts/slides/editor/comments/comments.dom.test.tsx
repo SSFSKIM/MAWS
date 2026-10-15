@@ -49,11 +49,13 @@ function surface() {
 }
 
 /** Every stage node a box from its own px style (pinned ones), else the slide's top-left; read live, so a move moves it. */
+/** A token's effect on geometry with no deck write (fix wave 1): added to every element's left. */
+const token = { shift: 0 };
 function fakeLayout(container: HTMLElement): void {
   const root = container.querySelector<HTMLElement>('[data-stage-slide] .maws-slide')!;
   const px = (n: HTMLElement, k: string) => Number.parseFloat(n.style.getPropertyValue(k)) || 0;
   for (const n of root.querySelectorAll<HTMLElement>('[data-eid]')) {
-    Object.defineProperty(n, 'offsetLeft', { configurable: true, get: () => px(n, 'left') });
+    Object.defineProperty(n, 'offsetLeft', { configurable: true, get: () => px(n, 'left') + token.shift });
     Object.defineProperty(n, 'offsetTop', { configurable: true, get: () => px(n, 'top') });
     Object.defineProperty(n, 'offsetWidth', { configurable: true, get: () => px(n, 'width') });
     Object.defineProperty(n, 'offsetHeight', { configurable: true, get: () => px(n, 'height') });
@@ -202,5 +204,33 @@ describe('comments on a deck’s elements (D9)', () => {
     act(() => deleteElementTree(doc, 's1', 'body'));
     await settle();
     expect(container.querySelector('[data-comment-pin]')).toBeNull();
+  });
+
+  // fix wave 1: geometry a token moves, with no deck write (a design system's change re-lays the slide out)
+  it('a pin and the card follow a layout pass with no deck write', async () => {
+    const { session, container, surface: s } = mount();
+    fakeLayout(container);
+    act(() => session.setZoom(0.5));
+    act(() => session.select(['body']));
+    fireEvent.click(screen.getByRole('button', { name: 'Comment' }));
+    await settle();
+    const pin = () => container.querySelector<HTMLElement>('[data-comment-pin="body"]')!;
+    expect(Number.parseFloat(pin().style.left)).toBe((300 + 400) * 0.5);
+    const key = s.reach.current!.layoutKey;
+    token.shift = 100;
+    try {
+      // a design system's scope style rewritten: every canvas lays out again in the next frame
+      const style = document.createElement('style');
+      style.setAttribute('data-ds-scope-style', '');
+      await act(async () => {
+        document.head.appendChild(style);
+        await new Promise((resolve) => setTimeout(resolve, 80));
+      });
+      expect(Number.parseFloat(pin().style.left)).toBe((300 + 100 + 400) * 0.5);
+      expect(s.reach.current!.layoutKey).not.toBe(key); // the card asks where its element is again
+      style.remove();
+    } finally {
+      token.shift = 0;
+    }
   });
 });

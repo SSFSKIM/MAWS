@@ -4,7 +4,8 @@
 // frame; nothing when its slide is not the one shown, so the card stays where it was), which thread is active, and the
 // thread writes its card makes (Resolve, Reopen, the sent comment recorded as the thread's message, an unsent draft
 // withdrawn), each under the comments' origin. The layout key moves with the deck, the zoom, the slide shown, a scroll
-// and a resize, so the card re-pins to its element. ⌥⌘M comments the selected element.
+// a resize and (fix wave 1) every layout pass of the stage's canvas, so the card re-pins to its element even when a
+// token or a face moves it with no deck write. ⌥⌘M comments the selected element.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { CommentOverlayProps, DocumentComments, PassageRect } from '../../../document/editor/comments/surface';
 import type { SlideCanvas } from '../../canvas';
@@ -45,6 +46,8 @@ export function CommentFrame({ api, surface, canvas, scale, children }: Props) {
       pending.current = null;
     };
   }, [moved]);
+  // fix wave 1: the stage's layout passes move elements with no deck write (a token, a face): the card locates again
+  useEffect(() => canvas?.onLayout(moved), [canvas, moved]);
 
   const reach = useMemo<Omit<CommentOverlayProps, 'layoutKey'>>(() => {
     const doc = session.doc;

@@ -3,7 +3,7 @@
 // is drawn (its measured bounds, in screen px at the zoom), so a pin follows its element through a move, a resize, a
 // restyle, a re-order of slides and a republish, all of which keep the id it is anchored by. A pin opens the threads
 // rail on the element's latest open thread. Orphans have no element to pin to; the rail lists them.
-import { useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type CSSProperties } from 'react';
 import type { SlideCanvas } from '../../canvas';
 import type { Box } from '../../geometry';
 import type { DeckThreadState } from '../../threads';
@@ -35,6 +35,9 @@ function Pins({ api, canvas, slideId, scale, version }: Props & { api: DeckComme
     return out;
   }, [threads, slideId]);
   const [boxes, setBoxes] = useState<Map<string, Box>>(new Map());
+  // fix wave 1: measured again after every layout pass too, so a token or a face that moves an element moves its pin
+  const [laidOut, setLaidOut] = useState(0);
+  useEffect(() => canvas.onLayout(() => setLaidOut((n) => n + 1)), [canvas]);
   useLayoutEffect(() => {
     const next = new Map<string, Box>();
     for (const id of byElement.keys()) {
@@ -42,7 +45,7 @@ function Pins({ api, canvas, slideId, scale, version }: Props & { api: DeckComme
       if (m) next.set(id, m.bounds);
     }
     setBoxes(next);
-  }, [canvas, byElement, scale, version]);
+  }, [canvas, byElement, scale, version, laidOut]);
   return (
     <>
       {[...byElement].map(([elementId, list]) => {
