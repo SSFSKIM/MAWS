@@ -4,7 +4,20 @@ Status: **in progress, handed back early.** The harness required this
 controller to hand back while M1's fix wave was still running. Nothing is
 blocked. To recover, read the ledger and the spec's living sections.
 
-## Where things stand
+## Update (later the same day)
+
+- **M1 is ticked** (c8666c61) after review. Original range
+  `46382c26..ba48dcda`; fix wave 1 `29fa876a..f6d42944` (99512e8a,
+  492d4b56, f6d42944). The re-review was clean and the reviewer's lifecycle
+  probes pass. Gate: Linux lane 38765771164, plus the unit re-run
+  38768825770.
+- **M2 (subagents)** is running on executor `ae69d92d0395c1474`, base
+  c8666c61. Its report goes to `task-2-report.md`.
+- **Before M3:** merge `smns-erb-web` at or after 2af4fbc6 and `smns-erb` at
+  or after b7fc7ebd, delete the `step-end` stand-in and its cast, and add
+  the `step-end` browser spec (Decision Log, c58e366a).
+
+## Where things stood at the first hand-back
 
 - Spec: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md`. The parent is
   pinned to composite `8f7e09d3`. Later composite changes (`d349a87a`,
