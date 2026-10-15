@@ -69,6 +69,44 @@ describe('requests', () => {
   });
 });
 
+describe("decisions the tab did not see (DX3's `decided`, replayed after caught-up)", () => {
+  const msg = (text: string) => ({ writer: `mini/${S1}`, kind: 'message', from: 'maws-45', to: 'host', text, src: text });
+
+  it('draws a request settled before the tab connected as settled, placed after the log as it stood when it was decided', async () => {
+    await hub.append(PROJECT, msg('before'), '2026-01-01T00:00:00.000Z');
+    await hub.raise(PROJECT, 'mini', bash);
+    await hub.settle(PROJECT, 'mini', S1, { request: 'toolu_1', winner: 'web', outcome: 'allow', by: M });
+    await hub.append(PROJECT, msg('after'), '2099-01-01T00:00:00.000Z');
+    const c = await connect();
+    await until(() => conv(c).requests.toolu_1?.settled != null);
+    expect(conv(c).requests.toolu_1).toMatchObject({ machine: 'mini', pending: false, at: 1, settled: { winner: 'web', outcome: 'allow', by: M } });
+  });
+
+  it('keeps where a request it saw live was placed, and takes the decision as its settlement', async () => {
+    const c = await connect();
+    await hub.raise(PROJECT, 'mini', bash);
+    await until(() => conv(c).requests.toolu_1 !== undefined);
+    await hub.append(PROJECT, msg('later'));
+    await until(() => c.log.held() === 1);
+    hub.dropConnections(); // the reconnect replays the decision
+    await hub.settle(PROJECT, 'mini', S1, { request: 'toolu_1', winner: 'terminal', outcome: 'deny', by: 'terminal' });
+    await until(() => conv(c).requests.toolu_1.settled !== null);
+    expect(conv(c).requests.toolu_1).toMatchObject({ at: 0, settled: { winner: 'terminal' } });
+  });
+
+  it('never draws a decision whose request or settlement fails its code', async () => {
+    const raised = await hub.raise(PROJECT, 'mini', bash);
+    const settled = await hub.settle(PROJECT, 'mini', S1, { request: 'toolu_1', winner: 'web', outcome: 'allow', by: M });
+    hub.decide(PROJECT, { machine: 'mini', session: S1, settled: { ...settled, request: 'toolu_2' }, raised: { ...raised, request: 'toolu_2' } });
+    hub.decide(PROJECT, { machine: 'mini', session: S1, settled: { ...settled, request: 'toolu_3', outcome: 'deny' }, raised: null });
+    const c = await connect();
+    await until(() => conv(c).requests.toolu_1?.settled != null && conv(c).unverified.length === 1);
+    expect(conv(c).requests.toolu_2).toBeUndefined();
+    expect(conv(c).requests.toolu_3).toBeUndefined();
+    expect(conv(c).unverified).toEqual([{ what: 'request', machine: 'mini', id: 'toolu_2' }]);
+  });
+});
+
 describe('deliveries', () => {
   it('keeps each verified outcome per event and recipient, and the hub sends them again on connect', async () => {
     const c = await connect();
@@ -187,7 +225,7 @@ describe('a web human', () => {
     const c = await connect();
     const nonce = await c.say('0'.repeat(32), '*', 'not me', false);
     await until(() => conv(c).outbox[nonce]?.state === 'refused');
-    expect(conv(c).outbox[nonce].reason).toContain('bad-shape');
+    expect(conv(c).outbox[nonce].reason).toContain('writer-not-yours');
   });
 });
 

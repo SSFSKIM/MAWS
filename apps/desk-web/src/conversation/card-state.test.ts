@@ -26,10 +26,14 @@ describe('cardState', () => {
     expect(cardState(record(), rpc('done', { state: 'done', result: {} }), can)).toEqual({ kind: 'sent' });
   });
 
-  it('draws a late decision refused naming its winner as settled by that winner', () => {
-    const late = rpc('failed', { state: 'failed', error: { code: 'not-pending', message: 'answered in the terminal', winner: 'terminal' } as never });
+  it('draws a late decision refused naming who decided as settled by them, reading `by` (which may come without `winner`)', () => {
+    const late = rpc('failed', { state: 'failed', error: { code: 'not-pending', message: 'answered in the terminal', winner: 'terminal', by: 'terminal' } });
     expect(cardState(record(), late, can)).toEqual({ kind: 'settled', winner: 'terminal', outcome: null, by: 'terminal' });
-    const nearDeadline = rpc('failed', { state: 'failed', error: { code: 'not-pending', message: '', terminalOnly: true } as never });
+    const byAlone = rpc('failed', { state: 'failed', error: { code: 'not-pending', message: 'already settled', by: 'a1b2c3d4e5f60718293a4b5c6d7e8f90' } });
+    expect(cardState(record(), byAlone, can)).toEqual({ kind: 'settled', winner: null, outcome: null, by: 'a1b2c3d4e5f60718293a4b5c6d7e8f90' });
+    const winnerAlone = rpc('failed', { state: 'failed', error: { code: 'not-pending', message: '', winner: 'web' } });
+    expect(cardState(record(), winnerAlone, can)).toEqual({ kind: 'settled', winner: 'web', outcome: null, by: '' });
+    const nearDeadline = rpc('failed', { state: 'failed', error: { code: 'not-pending', message: '', terminalOnly: true } });
     expect(cardState(record(), nearDeadline, can)).toEqual({ kind: 'terminal', why: 'window' });
   });
 

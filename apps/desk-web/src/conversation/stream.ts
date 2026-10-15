@@ -46,12 +46,22 @@ export const writerSession = (writer: string): string | null => {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) ? id : null;
 };
 
-function systemText(event: LogEvent, alias: (id: unknown) => string): string | null {
+/** A web member's id (DX7: 128 bits as 32 lowercase hex), which `retired` and spawn's `joined` record as `by`. */
+const MEMBER_ID = /^[0-9a-f]{32}$/;
+
+/** Who `by` names: you, another member of the org (by its id: the browser holds no member list), or what sminos wrote. */
+function byWhom(by: string, member: string | null): string {
+  if (member !== null && by === member) return 'you';
+  if (MEMBER_ID.test(by)) return `another member (${by.slice(0, 8)})`;
+  return by;
+}
+
+function systemText(event: LogEvent, alias: (id: unknown) => string, member: string | null): string | null {
   switch (event.kind) {
     case 'joined':
       return `${alias(event.session)} joined on ${str(event.machine)}`;
     case 'retired':
-      return `${alias(event.session)} ${event.reason === 'ended' ? 'ended' : 'retired'}${str(event.by) ? ` by ${str(event.by)}` : ''}`;
+      return `${alias(event.session)} ${event.reason === 'ended' ? 'ended' : 'retired'}${str(event.by) ? ` by ${byWhom(str(event.by), member)}` : ''}`;
     case 'renamed':
       return `${alias(event.session)} is now ${str(event.alias)}`;
     case 'in-charge':
@@ -89,8 +99,17 @@ function inChannel(event: LogEvent, channel: Channel): boolean {
 
 const RUNNING = new Set(['busy', 'idle', 'waiting']);
 
-/** `live`: the direct channel's session is running now, so its working record goes on past its last item. */
-export function buildStream(channel: Channel, entries: readonly Entry[], aliases: ReadonlyMap<string, string>, requests: readonly PlacedRequest[], options: { live?: boolean } = {}): StreamItem[] {
+/**
+ * `live`: the direct channel's session is running now, so its working record goes on past its last item. `member`: the
+ * signed-in member, named "you" where an event records it as `by`.
+ */
+export function buildStream(
+  channel: Channel,
+  entries: readonly Entry[],
+  aliases: ReadonlyMap<string, string>,
+  requests: readonly PlacedRequest[],
+  options: { live?: boolean; member?: string } = {},
+): StreamItem[] {
   const alias = (id: unknown) => (typeof id === 'string' ? (aliases.get(id) ?? id.slice(0, 8)) : '');
   const shown = entries.filter((e) => inChannel(e.event, channel));
   // A question's answer, wherever its channel draws it (a direct channel does not draw `answered` on its own).
@@ -180,7 +199,7 @@ export function buildStream(channel: Channel, entries: readonly Entry[], aliases
       }
       default: {
         if (event.kind === 'joined') running.set(str(event.session), true);
-        const text = systemText(event, alias);
+        const text = systemText(event, alias, options.member ?? null);
         if (text !== null) push({ kind: 'system', key, offset, event, text });
       }
     }

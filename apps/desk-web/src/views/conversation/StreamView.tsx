@@ -13,7 +13,6 @@ import type { StreamItem } from '../../conversation/stream';
 import { deliveryKey, type OutboxItem } from '../../project/conversation';
 import { useSlot } from '../../shell/slots';
 import { DELIVERY_TEXT } from '../../conversation/words';
-import { outcomeOf } from '../../hub/protocol-ahead';
 import { useNarrow } from '../../shell/viewport';
 import { RequestCard } from '../requests/RequestCard';
 import { useDesk } from './desk-context';
@@ -139,7 +138,7 @@ function Deliveries({ event, to, wake }: { event: LogEvent; to: '*' | Recipient[
       {to.map((r) => {
         // The latest outcome per recipient: a `recorded` one turns `delivered` when Resume brings the session back.
         const delivery = outcomes?.[r.session];
-        const outcome = delivery ? outcomeOf(delivery) : undefined;
+        const outcome = delivery?.outcome;
         const tone = outcome === 'delivered' ? 'text-fg-muted' : outcome === 'uncertain' ? 'text-fg-muted italic' : outcome ? 'text-warning' : 'text-fg-faint';
         return (
           <li key={r.session} data-recipient={r.session} data-outcome={outcome ?? 'pending'} className={tone}>

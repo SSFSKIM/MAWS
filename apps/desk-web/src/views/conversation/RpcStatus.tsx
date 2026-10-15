@@ -2,7 +2,7 @@
 // or `uncertain` — the machine's lease lapsed after the hub forwarded it, so it may or may not have happened — with a
 // Retry that sends the same sealed RPC again, nonce and all, which the machine answers from its ledger if it ran.
 import { useStore } from 'zustand';
-import { failureOf, resultOf } from '../../hub/protocol-ahead';
+import { failureOf, resultOf } from '../../conversation/outcome';
 import { failureText, resultText } from '../../conversation/words';
 import { useDesk } from './desk-context';
 

@@ -18,7 +18,6 @@ import { QuestionBody } from '../../../../../src/renderer/src/request-card/varia
 import { capabilities } from '../../conversation/capabilities';
 import { cardState, isAsyncQuestion, isQuestion, type CardState } from '../../conversation/card-state';
 import { settledText } from '../../conversation/words';
-import { raisedAgent, raisedTruncated } from '../../hub/protocol-ahead';
 import type { RequestRecord, RpcEntry } from '../../project/conversation';
 import { useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
@@ -67,7 +66,7 @@ export function RequestCard({ request, embedded = false }: { request: string; em
   const rpc = latestRpc(rpcs, request);
   const state = cardState(record, rpc, capability, session?.machineOnline ?? null);
   const who = session?.alias ?? record.raised.session.slice(0, 8);
-  const agent = raisedAgent(record.raised);
+  const agent = record.raised.agentId ?? null;
   const verb = question ? 'asks' : `wants to ${toolVerb(asPermission(record.raised))}`;
   // A subagent's request names the subagent asking, as the session's.
   const what = agent ? (embedded ? `its subagent ${agent} ${verb}` : `${verb}, through its subagent ${agent}`) : verb;
@@ -98,7 +97,7 @@ export function RequestCard({ request, embedded = false }: { request: string; em
       ) : (
         <PermissionCard record={record} state={state} member={member} />
       )}
-      {raisedTruncated(record.raised) && (
+      {record.raised.truncated === true && (
         <p className="m-0 text-ui-sm text-warning" data-testid="truncated">
           The input shown was capped: the full input was too large to send. A decision binds to what is shown here.
         </p>
