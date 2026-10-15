@@ -12,7 +12,7 @@ import { createPresentationAdapter } from '@artifacts/slides/adapter';
 import { DECK_PATH, slidePath } from '@artifacts/slides/deck';
 import { deckFiles, deleteElementTree, moveInto, readFlat, setStyle } from '@artifacts/slides/model';
 import { publishDeck } from '@artifacts/slides/publish';
-import { addThread, elementQuote, reply, resolve, threadStates } from '@artifacts/slides/threads'; // M7
+import { addThread, discardThread, elementQuote, reply, resolve, threadStates } from '@artifacts/slides/threads'; // M7
 import { applyV1, applyV2, diffV1, newDoc, stateVector, type Doc } from '@artifacts/yjs';
 import * as Y from '@artifacts/yjs/slides';
 import type { Actor } from '@shared/artifacts/actor';
@@ -170,5 +170,16 @@ describe('the presentation adapter on the document service', () => {
       { threadId: 't1', status: 'open', quote: 'One', appSessionId: null },
       { threadId: 't2', status: 'open', quote: 'Title', appSessionId: 'app-2' },
     ]);
+  });
+
+  it('a restore leaves a draft withdrawn since the version withdrawn, and a reply posted since on it stays (M7)', async () => {
+    const deck = await store.create({ kind: 'presentation', title: 'T' }, human);
+    await service.writeAs(deck.id, agent, (doc) => void publishDeck(doc, deckFiles(doc), { [slidePath('s1')]: SLIDE }, false));
+    const at = (await store.createVersion(deck.id, { kind: 'named', actor: human, label: 'v1' }))!;
+    await service.writeAs(deck.id, human, (doc) => addThread(doc, { threadId: 'draft', slideId: 's1', elementId: 'e1', quote: 'One', by: human, at: 1 }));
+    await service.writeAs(deck.id, human, (doc) => void discardThread(doc, 'draft'));
+    await service.writeAs(deck.id, human, (doc) => addThread(doc, { threadId: 'kept', slideId: 's1', elementId: 'title', quote: 'Title', by: human, at: 2, body: 'Bigger' }));
+    await store.restore(deck.id, at, human);
+    expect(threadStates(replicaOf(deck.id)).map((t) => [t.id, t.messages.map((m) => m.body)])).toEqual([['kept', ['Bigger']]]);
   });
 });
