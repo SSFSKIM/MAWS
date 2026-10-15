@@ -589,11 +589,16 @@ fork.
   still lets the hub forge peer messages, which drive delivery and resume
   just as `human` does (`_owed`, `push_event`, `push_member` in
   `sminos.py`)]**
-  - *The org key* is a 256-bit secret derived in the browser from the
-    owner's passkey through the WebAuthn PRF extension (HKDF over the PRF
-    output with the org id), or from a passphrase where PRF is unavailable;
-    any browser holding the passkey derives the same key. It reaches each
-    machine only inside the enrollment code, by the owner's hand.
+  - *The org key* is a 256-bit secret drawn at random in the owner's
+    browser when the org's first unlock method is set up. The hub keeps it
+    only wrapped, once per unlock method, each copy under a key derived
+    from the owner's passkey through the WebAuthn PRF extension, or from a
+    passphrase where PRF is unavailable (DX7's wrapped keys); a browser
+    holding any one method unwraps the same org key, and adding a method
+    takes one already held. **[owner, 2026-10-15: one random key, locked
+    per method, so a passkey and a passphrase open the same key.]** It
+    reaches each machine only inside the enrollment code, by the owner's
+    hand.
   - *What carries a code:* every log event on the hub, from any writer (the
     daemon adds the code when it uploads its machine's events; the browser
     when it writes a `human`); every RPC; every pending request and its
@@ -669,7 +674,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 4. **WebAuthn PRF and Access on the phone** (DC5): PRF support in the
    owner's browsers with an iCloud Keychain passkey, and inside an iOS
    home-screen app, whose storage is separate from Safari's, so the key is
-   derived again there; Cloudflare Access sign-in inside the standalone app
+   unwrapped again there; Cloudflare Access sign-in inside the standalone app
    (the identity provider's redirect leaves the app's scope, so the Access
    cookie must land in the standalone context); Access session lifetime
    against a push tapped hours later. The passphrase path covers missing
@@ -865,11 +870,13 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
     outcome per recipient, including after a reload; when the fake machine
     disconnects, its sessions' presence and depth show as unavailable while
     the conversation stays.
-  - **G3 (the key):** the org key derives from a passkey through PRF in the
-    owner's browsers, or from a passphrase; the enrollment code it produces
-    enrolls a machine through DC4.
+  - **G3 (the key):** the org key is drawn at random once and kept at the
+    hub wrapped per unlock method (DX7); a passkey through PRF or a
+    passphrase unwraps the same key in any of the owner's browsers, a
+    method is added only by a browser that already holds the key, and the
+    enrollment code it produces enrolls a machine through DC4.
   - **G4 (the phone):** installed to an iPhone's home screen, the app signs
-    in through Access, derives the org key, and draws the grid, the group
+    in through Access, unwraps the org key, and draws the grid, the group
     chat, a direct channel, and request cards in mobile layouts; a question
     raised by the fake machine pushes a notification that opens its card,
     and the answer from the phone reaches the fake machine authenticated.
@@ -2175,7 +2182,7 @@ once the machine is back. Results reach the hub as DX2 `rpc-result` frames, repu
 **Left for M3:** forwarding, the record per nonce, `uncertain` on a lapsed lease, `rpc-ack`. The policy (DC7) is
 unchanged by these shapes.
 
-### DX7 — Identity (owner DC3; G1, amended; enrollment built at M2)
+### DX7 — Identity (owner DC3; G1, amended; enrollment built at M2; wrapped keys at M3)
 
 **Access.** Members sign in through Access; the Worker verifies `Cf-Access-Jwt-Assertion` on every request (RS256
 against the team's certificate endpoint, the application's AUD, the team's issuer, `exp` and `nbf`) and names a
@@ -2193,7 +2200,18 @@ signs in first.
 **Records** (`identity.ts`):
 
 ```ts
-type OrgRecord = { id: string; name: string; created: string };
+type OrgRecord = { id: string; name: string; created: string; key_check: string | null };  // set by the first wrapped key
+type WrappedKeyRecord = {
+  id: string;                    // the hub's: 128 random bits as 32 lowercase hex
+  method: 'passkey' | 'passphrase';
+  label: string;                 // the owner's name for it, 1 to 100 characters
+  credential: string | null;     // a passkey's WebAuthn credential id, base64url; null for a passphrase
+  kdf: JsonObject;               // how the browser derives the wrapping key; the browser's (DC5's), stored verbatim
+  iv: string;                    // 12 bytes, base64url
+  wrapped: string;               // AES-256-GCM of the 32-byte org key with its tag: 48 bytes, base64url
+  check: string;                 // HMAC-SHA256(org key, "smns-desk-key-check-v1"), 32 bytes, base64url
+  created_by: MemberId; created: string;
+};
 type MemberRecord = { id: MemberId; email: string; role: 'admin' | 'member'; created: string };
 type MachineRecord = {
   name: string;
@@ -2242,6 +2260,9 @@ types are in `identity.ts` (`EnrollmentRequest`, `EnrollmentIssued`, `RedeemRequ
 | `DELETE /api/machines/<name>` | an admin | `200 {revoked: <name>}`: the service token deleted, the record gone, the machine's stream ended, the name released, any archive designation of it cleared | `403 not-admin`, `404 unknown-machine` |
 | `GET /api/projects` | a member | `200 {projects: ProjectRecord[]}` | |
 | `PUT /api/projects/<id>/archive` `{machine}` | an admin | `200 {project: ProjectRecord}`; `machine` an enrolled machine's name, or null to clear | `403 not-admin`, `400 bad-shape`, `404 unknown-project`, `409 unknown-machine` |
+| `GET /api/org/keys` | a member | `200 {key_check, keys: WrappedKeyRecord[]}`: `key_check` the org's, null while it has no key | |
+| `POST /api/org/keys` `{method, label, credential, kdf, iv, wrapped, check}` | an admin | `201 {key: WrappedKeyRecord}`; the first one sets the org's `key_check` | `403 not-admin`, `400 bad-shape` (`kdf` above 1 KiB, a field of the wrong length, a `credential` on a passphrase or none on a passkey), `409 different-key` (its `check` is not the org's: it wraps another key), `409 credential-taken` (a wrapped key for that passkey exists) |
+| `DELETE /api/org/keys/<id>` | an admin | `200 {removed: <id>}` | `403 not-admin`, `404 unknown-key`, `409 last-key` (the org's only wrapped key is never removed: add another first) |
 
 Redemption recovers from every loss: a lost answer is recovered by redeeming again with the same token and name, which
 rotates the credential; an answer that never came back from Cloudflare (a lost mint) leaves a token named
@@ -2268,6 +2289,20 @@ and an empty field. (`encodeEnrollmentCode`, `decodeEnrollmentCode`.)
 **Archive designation:** `ProjectRecord.archive_machine`, an active machine's name, which DX2's `have.archive` tells
 that machine at its next `hello`; revoking the machine clears it. Only the archive machine may upload `legacy/` feeds.
 **Push subscriptions:** `PushSubscriptionRecord`, one per member device.
+
+**Wrapped keys** (§6; the hub stores them and never sees the org key). The browser draws the org key at random when the
+org's first method is set up, and for each unlock method derives a wrapping key (a passkey: from its PRF output; a
+passphrase: memory-hard; the derivations and their parameters are the browser's, carried in `kdf`), encrypts the org
+key under it with AES-256-GCM, a fresh 12-byte `iv`, and as additional data the UTF-8 of `smns-desk-wrap-v1` LF org id
+LF `method` LF `credential` (empty for a passphrase), and posts it. To unlock, a browser fetches the org's wrapped keys,
+asks for a passkey among their credentials or for the passphrase, and unwraps straight into a non-extractable HMAC key;
+a failed tag is a wrong passphrase or another passkey, and an unwrapped key whose `check` is not the org's
+`key_check` is refused. Adding a method, and building an enrollment code, unwrap the key once more as raw bytes and
+wipe them after. `key_check` keeps one org from ever holding two keys: a second first-time setup racing the first is
+refused `different-key`. It reveals nothing a code made with the key does not. The hub can test passphrase guesses
+offline against a wrapped key at the derivation's cost per guess, as it could against any code; the memory-hard cost
+and the passphrase's length are the defense. Removing a method does not take the key from a browser that kept it;
+changing the org key itself means enrolling every machine again and is out of phase 1.
 
 **Built at M2** (proved by `test/enrollment.test.ts` through the stand-in: a name already enrolled refused, case
 aside; a confirmed token redeemed again refused; a revoked machine's connection refused, at once and with its token
@@ -2713,6 +2748,25 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The org key is one random key, wrapped once per unlock method
+  (owner, 2026-10-15: "Random key, locked per method"). As §6 first read,
+  a passkey (PRF, then HKDF) and a passphrase (Argon2id) derived two
+  different keys, and an org can use only one: unlocking a phone with the
+  passphrase after setting up with the passkey would have broken every
+  code. Now the browser draws the key at random once; the hub keeps it
+  wrapped under each method's derived key (DX7's `/api/org/keys`), and any
+  method opens the same key. A wrong passphrase now fails the unwrap
+  instead of producing a different key. `key_check` stops a second
+  first-time setup from minting a second key. Rejected: one unlock path
+  recorded per org, which leaves a passkey-only org with no way into a
+  browser without PRF, and a passphrase-only org without passkeys. DC5's
+  derivations (its plan's Decision Log) become the wrapping keys' and are
+  carried in each record's `kdf`, so their cost can rise without a new
+  contract. Recommended to the owner in the web: set up a second method
+  right after the first, since losing every method loses the key (the
+  enrolled machines still hold it, but nothing reads it back). Flags DC3
+  (the endpoints, in M3), DC5 (M2's open item closes on this).
+  Date/Author: 2026-10-15, owner; contract by the design session.
 - Decision: The web's look (owner, 2026-10-15), from DC5's mockups
   (MAWS `smns-erb-web`, `mockups/desk/01-grid.html`, `02-project.html`).
   The project grid uses card B, tiles, with its empty, loading, and
