@@ -1,20 +1,28 @@
 // The design system governing a deck in the renderer (P3-C; docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D10,
-// Decision Log 19 and 27): D's chain over the deck's row, the owner's defaults (settings slot 14) and the library's live
-// systems, shared by the editor's body and the presenter's route. The house system (one link before the floor) is the
-// host's to name; until D's `useGoverningSystem` is merged here (Decision Log 19a, 27(2)) the chain passes `house: null`,
-// so a deck with no system of its own, no Space default and no owner default draws in the bundled floor, which the
-// house system starts as. At that merge this is the one place the deck takes D's hook.
+// Decision Log 19, 27 (2) and 28): D's chain through D's `useGoverningSystem`, in the shape of D's `useSystemFor` for B's
+// documents: the deck's own system, else its Space's default, else the owner's (settings 14), else the house system the
+// window follows, else the bundled floor; a system the library no longer lists is skipped, as a deleted one is on the
+// host. Shared by the editor's body and the presenter's route; the deck's own hook, never a call into B's file.
 import { useMemo } from 'react';
-import { governingSystem } from '@artifacts/design-system/apply';
+import { useGoverningSystem } from '@artifacts/design-system/apply';
 import { useLibraryList } from '../../library/store';
 import { useSettings } from '../../stores/settings';
 
+const NO_SPACES: Record<string, string> = {};
+const UNPLACED = {};
+const FLOOR = { builtin: 'maws' as const };
+
+/** The system governing a deck so placed, followed (a hook); null while the deck's row is not read. */
 export function useDeckSystem(placement: { designSystemId?: string; spaceId?: string } | null) {
   const defaults = useSettings((s) => s.state?.settings.artifacts);
   const systems = useLibraryList({ kind: 'design_system' }).value?.rows;
-  return useMemo(() => {
-    if (!placement) return null;
-    const live = systems ? new Set(systems.map((s) => s.id)) : null;
-    return governingSystem(placement, { owner: defaults?.defaultDesignSystem ?? null, spaces: defaults?.spaceDesignSystems ?? {}, house: null }, (id) => live === null || live.has(id));
-  }, [placement, defaults, systems]);
+  // Until the library answers, every named system is taken as live: a deck's own system draws at once.
+  const listed = useMemo(() => systems && new Set(systems.map((system) => system.id)), [systems]);
+  const live = listed && ((id: string) => listed.has(id));
+  const governing = useGoverningSystem(placement ?? UNPLACED, { owner: defaults?.defaultDesignSystem ?? null, spaces: defaults?.spaceDesignSystems ?? NO_SPACES }, live);
+  // One value while the system it names stays the same, so the scope and the canvases keep theirs (the chain answers a
+  // live id or the floor, never a pin).
+  const id = 'builtin' in governing ? null : governing.id;
+  const system = useMemo(() => (id === null ? FLOOR : { id }), [id]);
+  return placement ? system : null;
 }

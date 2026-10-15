@@ -8,7 +8,7 @@ import { useId, useState, type ReactNode } from 'react';
 import { useDesignSystem, type DesignSystemRef, type TokenOverrides } from '../../../design-system/apply';
 import { toSrgb, rgbToHex } from '../../../design-system/color';
 import { parseCssColor, parseFontStack } from '../../../design-system/css-read';
-import { literalValues } from '../../../design-system/literals';
+import { literalValues } from '../../../design-system/resolve-vars';
 import type { DeckFace } from '../../deck';
 import { setDeckOverride } from '../../writers';
 import type { DeckSession } from '../session';

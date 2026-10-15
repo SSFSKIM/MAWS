@@ -4,7 +4,7 @@
 // reading that member's system value.
 import { describe, expect, it } from 'vitest';
 import { tokenProperties } from '../design-system/css';
-import { literalValues } from '../design-system/literals';
+import { literalValues } from '../design-system/resolve-vars';
 import { builtinView } from '../design-system/view';
 import { deckTokenValues } from './mirror';
 

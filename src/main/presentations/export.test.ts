@@ -1,12 +1,14 @@
 // The presentation's exporters in A's export registry (P3-C M9; docs/doperpowers/plans/2026-10-12-p3-c-presentations.md
-// D12; X31): the five formats registered; the design system a deck exports in (a version's pin, else D's default chain
-// over the live store); the `claude` zip through A's `runExport`; the `embedded` PPTX variant refused with its reason.
+// D12; X31): the five formats registered; the design system a deck exports in (D's `designSystems.governing`: a version's
+// pin, else the host's chain, else the floor; Decision Log 27 (2)) with D's export helpers bound to it; the `claude` zip through A's `runExport`; the `embedded` PPTX variant refused with its reason.
 // The window's formats (html, pdf, png, pptx) run in `e2e/presentations-export.spec.ts` on the product build.
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeSystem } from '@artifacts/design-system/model';
+import { officeThemeXml } from '@artifacts/design-system/office';
+import { resolveDsVars } from '@artifacts/design-system/resolve-vars';
 import { loadSlide } from '@artifacts/slides/parse';
 import { FIXTURE_FILES, fixtureDoc } from '@artifacts/slides/export/deck.test-support';
 import { DEFAULT_SYSTEMS } from '@artifacts/types/design_system/defaults';
@@ -23,9 +25,6 @@ import { deckSystem, registerPresentationExporters, STAGE, type PresentationExpo
 const DECK = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
 const OWN = '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e';
 const HOUSE = '3c4d5e6f-7a8b-4c9d-8e1f-2a3b4c5d6e7f';
-const SPACE_SYSTEM = '4d5e6f7a-8b9c-4d0e-9f2a-3b4c5d6e7f80';
-const SPACE = '5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a81';
-const OLDER = '6f7a8b9c-0d1e-4f2a-9b3c-4d5e6f7a8b92';
 
 function systemState(key: string, name: string): Uint8Array {
   const source = DEFAULT_SYSTEMS.find((system) => system.key === key)!;
@@ -39,26 +38,24 @@ function systemState(key: string, name: string): Uint8Array {
 interface World {
   rows: Record<string, { kind: string; createdAt: number; designSystemId?: string; spaceId?: string }>;
   states: Record<string, Uint8Array>;
-  versions?: { id: number; seq: number; designSystemRef?: { id: string; versionSeq: number } }[];
-  owner?: string | null;
-  spaces?: Record<string, string>;
+  /** What the host's `designSystems.governing` answers, per version id (`live` for none). */
+  governing?: Record<string, { id: string; versionSeq?: number } | { builtin: 'maws' }>;
 }
 
-function depsOf(world: World): PresentationExportDeps & { asked: string[] } {
-  const asked: string[] = [];
+function depsOf(world: World): PresentationExportDeps & { asked: [string, unknown][] } {
+  const asked: [string, unknown][] = [];
   const ok = (value: unknown) => ({ ok: true as const, value });
   const call = async (name: CommandName, input: unknown): Promise<never> => {
-    asked.push(name);
-    const { artifactId, seq } = input as { artifactId: string; seq?: number };
+    asked.push([name, input]);
+    const { artifactId, seq, versionId } = input as { artifactId: string; seq?: number; versionId?: number };
     const row = (id: string) => (world.rows[id] ? { id, title: id, revision: 1, ...world.rows[id] } : null);
+    if (name === 'designSystems.governing') return ok({ system: world.governing?.[versionId === undefined ? 'live' : String(versionId)] ?? { builtin: 'maws' } }) as never;
     if (name === 'artifacts.get') return ok({ artifact: row(artifactId) }) as never;
-    if (name === 'artifacts.list') return ok({ artifacts: Object.keys(world.rows).filter((id) => world.rows[id]!.kind === 'design_system').map(row) }) as never;
     if (name === 'artifacts.state') return ok({ revision: 1, bytes: world.states[artifactId] }) as never;
     if (name === 'artifacts.versionState') return ok({ bytes: world.states[`${artifactId}@${seq}`] }) as never;
-    if (name === 'artifacts.versions') return ok({ versions: world.versions ?? [] }) as never;
     return { ok: false, error: { code: 'not_found', message: `no ${name}` } } as never;
   };
-  return { call, defaults: () => ({ owner: world.owner ?? null, spaces: world.spaces ?? {} }), env: {}, asked };
+  return { call, env: {}, asked };
 }
 
 const deckRow = (extra: Partial<World['rows'][string]> = {}) => ({ [DECK]: { kind: 'presentation', createdAt: 5, ...extra } });
@@ -85,31 +82,32 @@ describe('the system a deck exports in', () => {
   const house = systemState('maws', 'House');
   const official = systemState('official', 'Official');
 
-  it('is the deck’s own system when it is live', async () => {
-    const system = await deckSystem({ artifactId: DECK }, depsOf({ rows: { ...deckRow({ designSystemId: OWN }), [OWN]: { kind: 'design_system', createdAt: 1 } }, states: { [OWN]: official } }));
+  it('is the system the host names as governing the live deck, read at its live state, with D’s export helpers bound', async () => {
+    const deps = depsOf({ rows: {}, states: { [OWN]: official }, governing: { live: { id: OWN } } });
+    const system = await deckSystem({ artifactId: DECK }, deps);
     expect([system.id, system.name]).toEqual([OWN, 'Official']);
+    expect(system.tokens.tokens.size).toBeGreaterThan(0);
+    expect([system.resolveDsVars, system.officeThemeXml]).toEqual([resolveDsVars, officeThemeXml]);
+    // main resolves no chain of its own: one governing read and the system's state
+    expect(deps.asked).toEqual([['designSystems.governing', { artifactId: DECK }], ['artifacts.state', { artifactId: OWN }]]);
   });
 
-  it('falls to the Space’s default, then the owner’s, past a deleted id', async () => {
-    const rows = { ...deckRow({ designSystemId: 'deleted', spaceId: SPACE }), [SPACE_SYSTEM]: { kind: 'design_system', createdAt: 2 }, [OWN]: { kind: 'design_system', createdAt: 1 } };
-    const states = { [SPACE_SYSTEM]: official, [OWN]: house };
-    expect((await deckSystem({ artifactId: DECK }, depsOf({ rows, states, spaces: { [SPACE]: SPACE_SYSTEM }, owner: OWN }))).id).toBe(SPACE_SYSTEM);
-    expect((await deckSystem({ artifactId: DECK }, depsOf({ rows, states, spaces: {}, owner: OWN }))).id).toBe(OWN);
-  });
-
-  it('is the house system (the earliest live system from `maws`) with no link set, else the bundled floor', async () => {
-    const rows = { ...deckRow(), [OLDER]: { kind: 'design_system', createdAt: 1 }, [HOUSE]: { kind: 'design_system', createdAt: 2 } };
-    expect((await deckSystem({ artifactId: DECK }, depsOf({ rows, states: { [OLDER]: official, [HOUSE]: house } }))).id).toBe(HOUSE);
-    const floor = await deckSystem({ artifactId: DECK }, depsOf({ rows: deckRow(), states: {} }));
-    expect(floor.id).toBeNull();
-    expect(floor.tokens.tokens.size).toBeGreaterThan(0);
-  });
-
-  it('is a version’s pin when the export names a pinned version', async () => {
-    const deps = depsOf({ rows: { ...deckRow({ designSystemId: OWN }), [OWN]: { kind: 'design_system', createdAt: 1 } }, states: { [OWN]: house, [`${OWN}@3`]: official }, versions: [{ id: 9, seq: 4, designSystemRef: { id: OWN, versionSeq: 3 } }] });
+  it('is a version’s pin when the export names a version, read at the pinned state', async () => {
+    const deps = depsOf({ rows: {}, states: { [OWN]: house, [`${OWN}@3`]: official }, governing: { live: { id: OWN }, 9: { id: OWN, versionSeq: 3 } } });
     const system = await deckSystem({ artifactId: DECK, versionId: 9 }, deps);
     expect(system.name).toBe('Official');
-    expect(deps.asked).toContain('artifacts.versionState');
+    expect(deps.asked).toEqual([['designSystems.governing', { artifactId: DECK, versionId: 9 }], ['artifacts.versionState', { artifactId: OWN, seq: 3 }]]);
+  });
+
+  it('is the bundled floor when the host names it, or when the named system holds no system yet', async () => {
+    const floor = await deckSystem({ artifactId: DECK }, depsOf({ rows: {}, states: {} }));
+    expect(floor.id).toBeNull();
+    expect(floor.tokens.tokens.size).toBeGreaterThan(0);
+    const empty = newDoc();
+    const unseeded = stateV2(empty);
+    empty.destroy();
+    const cut = await deckSystem({ artifactId: DECK }, depsOf({ rows: {}, states: { [HOUSE]: unseeded }, governing: { live: { id: HOUSE } } }));
+    expect([cut.id, cut.name]).toEqual([null, floor.name]);
   });
 });
 

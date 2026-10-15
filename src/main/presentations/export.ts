@@ -1,9 +1,9 @@
 // The presentation kind's exporters in A's export registry (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, M9,
 // D12; parent §4.5, §4.8, Decision Log 17; X31): `presentation` × `html`, `pdf`, `pptx`, `claude` and `png`, reached by
 // the agent's `artifact_export` and the editor's and the library's Export alike. Each reads the deck's state as the
-// export took it (the live revision or a version's), the design system governing it (the version's pin, else D's default
-// chain over the live store: the deck's own system, its Space's default, the owner's, the house system, the bundled
-// floor) with the deck's overrides, and the uploaded assets it names; the portable halves under
+// export took it (the live revision or a version's), the design system governing it as the engine host names it (D's
+// `designSystems.governing`: the version's pin, else the host's chain, else the bundled floor; Decision Log 27 (2), as
+// D binds B's document exporters) with the deck's overrides, and the uploaded assets it names; the portable halves under
 // `src/artifacts/slides/export/` write the page, the mapping and the zip.
 //
 // Every format but `claude` renders: the deck's standalone page is loaded in a hidden 1920×1080 window on the capture
@@ -24,10 +24,12 @@ import { pathToFileURL } from 'node:url';
 import type { BrowserWindow } from 'electron';
 import { fontFaceCss, systemFaces } from '@artifacts/design-system/assets';
 import { DOCUMENT_CSS_PATH } from '@artifacts/design-system/canon';
-import { readOrigin, readSystem } from '@artifacts/design-system/model';
+import { readSystem } from '@artifacts/design-system/model';
 import { officeThemeXml } from '@artifacts/design-system/office';
+import { resolveDsVars } from '@artifacts/design-system/resolve-vars';
 import type { TokenSet } from '@artifacts/design-system/tokens';
 import { builtinView } from '@artifacts/design-system/view';
+import type { DesignSystemExport } from '@artifacts/document/export/design-system';
 import { claudeDeckFiles } from '@artifacts/slides/export/claude';
 import { MeasureNeeded } from '@artifacts/slides/export/lower';
 import { measureDeckPage, type MeasureArgs, type MeasuredDeck } from '@artifacts/slides/export/measure';
@@ -36,7 +38,6 @@ import { deckAssetRefs, deckFacesCss, deckPage, exportDeckOf, type ExportDeck, t
 import { TEXT_TAGS } from '@artifacts/slides/ir';
 import { shrinkScale } from '@artifacts/slides/render-rules';
 import { deckTokenValues } from '@artifacts/slides/mirror';
-import { HOUSE_KEY } from '@artifacts/types/design_system/defaults';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { mimeOf } from '@shared/files/mime';
@@ -46,10 +47,8 @@ import { restrictRequests, type SeamEnv } from '../artifacts/policies';
 import { zipFiles } from '../design-systems/zip';
 
 export interface PresentationExportDeps {
-  /** The engine host's commands (the deck's row and versions, the design systems' rows, states and assets). */
+  /** The engine host's commands (the governing system, its state and assets). */
   call<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>;
-  /** The owner's design-system defaults (settings slot 14): the chain's Space and owner links. */
-  defaults(): { owner: string | null; spaces: Record<string, string> };
   env: SeamEnv;
 }
 
@@ -64,65 +63,44 @@ async function required<N extends CommandName>(deps: PresentationExportDeps, nam
 
 // ---- the design system ----
 
-export interface DeckSystem {
+/** D's export helpers bound to the governing system (as D hands B's document exporters theirs), with what the deck reads
+ * beside them: the system's id for its faces' files. */
+export interface DeckSystem extends DesignSystemExport<TokenSet> {
   /** The system's id, null for the bundled floor. */
   id: string | null;
-  name: string;
-  tokens: TokenSet;
   /** `components/document.css`, whose `@font-face` blocks are the system's faces. */
   documentCss: string | undefined;
 }
 
+function floor(): DeckSystem {
+  const view = builtinView();
+  return { id: null, name: view.name || 'MAWS', tokens: view.tokens, documentCss: undefined, resolveDsVars, officeThemeXml };
+}
+
+/** The system in `bytes`; the floor when it holds no system yet (a seeding cut short), as the editor draws it. */
 function systemOf(id: string, bytes: Uint8Array): DeckSystem {
   const doc = newDoc();
   try {
     applyV2(doc, bytes);
     const state = readSystem(doc);
-    return { id, name: state.meta?.name ?? 'Design system', tokens: state.tokens, documentCss: state.files[DOCUMENT_CSS_PATH] };
+    if (!state.meta) return floor();
+    return { id, name: state.meta.name, tokens: state.tokens, documentCss: state.files[DOCUMENT_CSS_PATH], resolveDsVars, officeThemeXml };
   } finally {
     doc.destroy();
   }
 }
 
-function floor(): DeckSystem {
-  const view = builtinView();
-  return { id: null, name: view.name || 'MAWS', tokens: view.tokens, documentCss: undefined };
-}
-
 /**
- * The system a deck exports in: a version's pin (X29) when the request names a version that has one, else the live
- * chain (D's `governingSystem` order, as `src/engine-host/design-systems/chain.ts` resolves it over the store): the deck's
- * own system, its Space's default, the owner's default, the house system (the earliest-created live system whose origin
- * key is `maws`), else the bundled floor. A missing or deleted id falls through.
+ * The system a deck exports in, as the engine host names it (D's main-only `designSystems.governing`, the read D's
+ * `governingSystemExport` makes for B's document exporters): a version's pin (X29) when the request names a version, the
+ * floor for a version written with none, else the live deck's through the host's chain; then that system's state, live
+ * or at the pin's seq. Main resolves no chain of its own.
  */
 export async function deckSystem(request: Pick<ExportRequest, 'artifactId' | 'versionId'>, deps: PresentationExportDeps): Promise<DeckSystem> {
-  if (request.versionId !== undefined) {
-    const { versions } = await required(deps, 'artifacts.versions', { artifactId: request.artifactId });
-    const pin = versions.find((v) => v.id === request.versionId)?.designSystemRef;
-    if (pin) return systemOf(pin.id, (await required(deps, 'artifacts.versionState', { artifactId: pin.id, seq: pin.versionSeq })).bytes);
-  }
-  const { artifact } = await required(deps, 'artifacts.get', { artifactId: request.artifactId });
-  const live = async (id: string) => {
-    const found = await deps.call('artifacts.get', { artifactId: id });
-    return found.ok && found.value.artifact?.kind === 'design_system';
-  };
-  const { owner, spaces } = deps.defaults();
-  const space = artifact?.spaceId != null && Object.hasOwn(spaces, artifact.spaceId) ? spaces[artifact.spaceId] : undefined;
-  for (const id of [artifact?.designSystemId, space, owner]) {
-    if (id && (await live(id))) return systemOf(id, (await required(deps, 'artifacts.state', { artifactId: id })).bytes);
-  }
-  const { artifacts: systems } = await required(deps, 'artifacts.list', { filter: { kind: 'design_system' } });
-  for (const system of [...systems].sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))) {
-    const { bytes } = await required(deps, 'artifacts.state', { artifactId: system.id });
-    const doc: Doc = newDoc();
-    try {
-      applyV2(doc, bytes);
-      if (readOrigin(doc)?.key === HOUSE_KEY) return systemOf(system.id, bytes);
-    } finally {
-      doc.destroy();
-    }
-  }
-  return floor();
+  const { system } = await required(deps, 'designSystems.governing', { artifactId: request.artifactId, ...(request.versionId !== undefined && { versionId: request.versionId }) });
+  if ('builtin' in system) return floor();
+  const { bytes } = system.versionSeq === undefined ? await required(deps, 'artifacts.state', { artifactId: system.id }) : await required(deps, 'artifacts.versionState', { artifactId: system.id, seq: system.versionSeq });
+  return systemOf(system.id, bytes);
 }
 
 const dataUrl = (bytes: Uint8Array, mime: string) => `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`;
@@ -360,7 +338,7 @@ const pptx: Run = async (request, context, prepared, deps) => {
     return { measured, pictures };
   });
   const slides = pptxSlides(prepared.deck, measured, { variant, pictures, asset: prepared.page.asset });
-  const themeXml = officeThemeXml(prepared.system.tokens, prepared.system.name, prepared.deck.overrides);
+  const themeXml = prepared.system.officeThemeXml(prepared.system.tokens, prepared.system.name, prepared.deck.overrides);
   await context.writeFile(request.path, await writePptx(slides, { title: prepared.deck.title, themeXml }));
 };
 

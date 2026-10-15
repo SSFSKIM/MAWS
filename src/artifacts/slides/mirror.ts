@@ -6,7 +6,7 @@
 // the engine host's presentation module gives it the governing system's tokens.
 import type { Artifact } from '@shared/artifacts/entity';
 import { tokenProperties } from '../design-system/css';
-import { overrideLiterals } from '../design-system/literals';
+import { overrideLiterals } from '../design-system/resolve-vars';
 import type { TokenSet } from '../design-system/tokens';
 import type { TokenOverrides } from '../design-system/view';
 import { mirrorSlug, type MirrorWriter } from '../library/mirror';
