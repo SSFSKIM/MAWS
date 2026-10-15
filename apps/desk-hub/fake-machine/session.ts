@@ -75,6 +75,8 @@ export class SessionDepth {
     private readonly send: (message: SessionMessage) => void,
     private readonly where: { project: string; machine: string },
     readonly bridge = true,
+    /** The branch its working-tree diff is taken against (DX4 `diff`'s `base`). */
+    readonly diffBase = 'main',
   ) {
     this.rows.set('main', []);
   }
@@ -315,6 +317,6 @@ export class SessionDepth {
   diff(sub: string): void {
     const s = this.subs.get(sub);
     if (!s || s.agentId !== null) return;
-    this.deliver(sub, s, { kind: 'diff', body: { base: 'main', text: this.diffText } });
+    this.deliver(sub, s, { kind: 'diff', body: { base: this.diffBase, text: this.diffText } });
   }
 }

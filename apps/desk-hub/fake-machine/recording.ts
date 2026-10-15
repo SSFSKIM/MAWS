@@ -150,6 +150,7 @@ function sideSteps(e: JsonObject, at: number): Step[] {
       if (typeof e.agentId === 'string' && e.agentId) draft.agentId = e.agentId;
       if (e.truncated === true) draft.truncated = true;
       if (e.async === true) draft.async = true;
+      if (typeof e.toolUseId === 'string' && e.toolUseId && e.toolUseId !== e.request) draft.toolUseId = e.toolUseId;
       const deadline = isoOf(e.deadline);
       if (deadline) draft.deadline = deadline;
       return [{ at, k: 'raised', draft: draft as Omit<Raised, 'mac' | 'session'> }];

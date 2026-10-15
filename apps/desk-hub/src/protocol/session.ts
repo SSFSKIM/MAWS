@@ -21,6 +21,12 @@ export type Raised = {
   /** The bridge capped the input it shows. */
   truncated?: true;
   /**
+   * The transcript's tool-use id of the call this request belongs to, present only when it differs from `request`: the
+   * ask mod's blocking question is raised under the engine dialog's `toolu_plugin_…` id while the transcript holds the
+   * outer call's `toolu_01…`. The code covers it like every other field.
+   */
+  toolUseId?: string;
+  /**
    * A background subagent's prompt: when the web's window closes (§2's 3 s). After it nothing is settled: the request
    * stays pending, answerable only in the terminal, until the terminal's answer settles it. The web reads that state
    * from DX3's `pending` (`terminal_only`, the hub's clock), never by comparing this time with its own.

@@ -115,6 +115,8 @@ describe('the fake machine replaying the recording', () => {
     // The requests, sealed with the org key, and the audit record's decisions from the settlements: the web won both.
     const raised = sessionMessages(w.b, 'raised');
     expect(raised.map((m) => m.kind === 'raised' && m.body.tool)).toEqual(['Bash', 'AskUserQuestion']);
+    // The ask mod's question names its transcript call, which differs from the dialog's id it was raised under.
+    expect(raised.map((m) => m.kind === 'raised' && m.body.toolUseId)).toEqual([undefined, 'toolu_01YLTbS83Smb5RvQKJwQtK2S']);
     for (const m of raised) expect(await verify(await KEY, 'raised', project, m.body as object)).toBe(true);
     const decided = ofType(w.b, 'decided').map((f) => f.decision);
     expect(decided.map((d) => [d.settled.winner, d.settled.outcome, d.settled.by])).toEqual([
@@ -267,7 +269,7 @@ describe('the fake machine replaying the recording', () => {
   it('answers model, compact (now, or at the turn’s end), spawn, retire, and resume, and serves the diff', async () => {
     const project = newProject();
     const recording = loadRecording(TWO_SUBAGENTS);
-    const fm = await fakeMachine(project, { recording });
+    const fm = await fakeMachine(project, { recording, diffBase: (session) => (session === recording.session ? 'develop' : undefined) });
     const w = await browser(project);
     w.b.send({ t: 'resume', after: 0 });
     const main = await w.subscribe(fm.name, recording.session, null);
@@ -294,7 +296,7 @@ describe('the fake machine replaying the recording', () => {
     w.b.send({ t: 'diff', sub: main.sub });
     await until(() => (w.pump(), main.reader.kinds.includes('diff')), 'the diff');
     const diff = w.b.frames.find((f) => f.t === 'session' && f.message.kind === 'diff');
-    expect(diff?.t === 'session' && diff.message.body).toEqual({ base: 'main', text: recording.diff });
+    expect(diff?.t === 'session' && diff.message.body).toEqual({ base: 'develop', text: recording.diff });
 
     expect((await call('spawn', { checkout: '/nowhere', brief: 'x' })).outcome).toMatchObject({ state: 'failed', error: { code: 'unknown-checkout' } });
     const spawned = await call('spawn', { checkout: recording.cwd, brief: 'review the diff' });
