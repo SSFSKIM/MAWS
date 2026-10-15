@@ -2,11 +2,13 @@
 // delivers, `@all` wakes every live member — the grammar's refusals shown before anything is sent. In a direct channel
 // it has the terminal's three verbs — Send (a `human` addressed to the session, queued until it is idle), Steer (into
 // the running turn, offered only while one runs), Interrupt — and beside them model and effort, and compact. What a
-// session cannot do is drawn disabled with §5's reason; how what it can do will land is said under it.
+// session cannot do is drawn disabled with §5's reason; how what it can do will land is said under it. On a phone,
+// model and compact sit behind More, so the verbs that move a turn keep the row.
 import { useState, type KeyboardEvent } from 'react';
 import { useStore } from 'zustand';
 import { address } from '../../conversation/address';
 import { capabilities, turnRunning, type Capability } from '../../conversation/capabilities';
+import { useNarrow } from '../../shell/viewport';
 import type { DeskSession } from '../../shell/sessions';
 import { useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
@@ -69,6 +71,8 @@ export function SessionComposer({ session }: { session: DeskSession }) {
   const [text, setText] = useState('');
   const [rpc, setRpc] = useState<string | null>(null);
   const [modelOpen, setModelOpen] = useState(false);
+  const narrow = useNarrow();
+  const [more, setMore] = useState(false);
   const can = capabilities(session);
   const running = turnRunning(session) && session.machineOnline !== false;
   const target = { session: session.session, alias: session.alias };
@@ -102,9 +106,18 @@ export function SessionComposer({ session }: { session: DeskSession }) {
         <VerbButton label="Send" capability={can.send} onClick={send} primary={!(running && can.steer.can)} />
         {running && <VerbButton label="Steer" capability={can.steer} onClick={steer} primary={can.steer.can} />}
         {running && <VerbButton label="Interrupt" capability={can.interrupt} onClick={() => void issue(connection.rpc(member, session.machine, 'interrupt', { session: session.session }))} />}
-        <span className="mx-1 h-4 w-px bg-border" aria-hidden />
-        <VerbButton label="Model" capability={can.model} onClick={() => setModelOpen((o) => !o)} />
-        <VerbButton label="Compact" capability={can.compact} onClick={() => void issue(connection.rpc(member, session.machine, 'compact', { session: session.session }))} />
+        {narrow && (
+          <button type="button" className={BUTTON} aria-expanded={more} onClick={() => setMore((m) => !m)} data-verb="more">
+            More
+          </button>
+        )}
+        {(!narrow || more) && (
+          <>
+            <span className="mx-1 h-4 w-px bg-border" aria-hidden />
+            <VerbButton label="Model" capability={can.model} onClick={() => setModelOpen((o) => !o)} />
+            <VerbButton label="Compact" capability={can.compact} onClick={() => void issue(connection.rpc(member, session.machine, 'compact', { session: session.session }))} />
+          </>
+        )}
         <Compaction session={session.session} />
         <RpcStatus nonce={rpc} className="ml-auto" />
       </div>

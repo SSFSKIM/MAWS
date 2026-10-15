@@ -2,8 +2,9 @@
 // each recipient's delivery outcome (DX4), a question with its choices — answerable in place while its request is
 // pending — and its answer, lifecycle as system lines, agent-to-agent traffic folded into one row per run (a run of one
 // drawn whole on one line), a direct channel's working record folded (unfolded, DC6's transcript slot), the requests
-// in place, and this tab's sends on their way to the log.
-import { useState } from 'react';
+// in place, and this tab's sends on their way to the log. The item a tapped notification landed on is marked and
+// scrolled to once it is drawn. On a phone the working record stays folded: the transcript is desktop-only (§4).
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { LogEvent, Recipient } from 'desk-hub/protocol';
 import { TranscriptActionsProvider, type TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
@@ -13,6 +14,7 @@ import { deliveryKey, type OutboxItem } from '../../project/conversation';
 import { useSlot } from '../../shell/slots';
 import { DELIVERY_TEXT } from '../../conversation/words';
 import { outcomeOf } from '../../hub/protocol-ahead';
+import { useNarrow } from '../../shell/viewport';
 import { RequestCard } from '../requests/RequestCard';
 import { useDesk } from './desk-context';
 
@@ -22,12 +24,20 @@ const time = (ts: string) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-export function StreamView({ items, outbox }: { items: StreamItem[]; outbox: OutboxItem[] }) {
+export function StreamView({ items, outbox, landed = null }: { items: StreamItem[]; outbox: OutboxItem[]; landed?: string | null }) {
+  const landedRow = useRef<HTMLLIElement>(null);
+  useEffect(() => landedRow.current?.scrollIntoView({ block: 'center' }), [landed]);
   return (
     <ol className="m-0 min-h-0 flex-1 list-none overflow-y-auto px-4 py-3" data-testid="channel-events">
       {items.length === 0 && outbox.length === 0 && <li className="text-ui-sm text-fg-muted">Nothing here yet.</li>}
       {items.map((item) => (
-        <li key={item.key} data-item={item.kind} {...('offset' in item && item.kind !== 'work' ? { 'data-offset': item.offset } : {})}>
+        <li
+          key={item.key}
+          ref={item.key === landed ? landedRow : undefined}
+          data-item={item.kind}
+          {...('offset' in item && item.kind !== 'work' ? { 'data-offset': item.offset } : {})}
+          {...(item.key === landed ? { 'data-landed': '', className: '-mx-2 rounded-md bg-bg-waiting px-2 outline-1 outline-warning outline-solid' } : {})}
+        >
           <Item item={item} />
         </li>
       ))}
@@ -210,6 +220,13 @@ function WorkingRecord({ session, range }: { session: string; range: { from: str
   const [open, setOpen] = useState(false);
   const Transcript = useSlot('transcript');
   const desk = sessions.get(session);
+  const narrow = useNarrow();
+  if (narrow)
+    return (
+      <p className="m-0 py-1 text-ui-sm text-fg-faint" data-testid="working-record">
+        [ working record ] · on the desktop
+      </p>
+    );
   return (
     <div className="py-1 text-ui-sm text-fg-muted">
       <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="rounded-sm border border-border px-2 py-0.5 hover:bg-bg-hover hover:text-fg" data-testid="working-record">

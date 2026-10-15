@@ -1,0 +1,70 @@
+// A Web Push as the desk's service worker reads it (§4, DX7's `PushNotice`): only what points to a card — the project,
+// the session and its alias, the kind, and the request's id or the message's `{writer, seq}`. The worker holds no org
+// key, so it can check nothing it draws: the notification says who wants what and opens the app at the card, which
+// verifies the code and the digest as everywhere else. It carries no Allow or Deny (§6).
+//
+// The service worker's own module, and the one place the push's shape and the landing URL's grammar live: the app
+// reads the landing back with `landingOf`. It imports nothing at run time (the protocol's type only), so the worker's
+// bundle holds nothing that could reach the key; `sw-imports.test.ts` keeps it so.
+import type { PushNotice } from 'desk-hub/protocol';
+
+/** Where a tapped notification lands, read back from the URL's query by the app. */
+export type Landing = { kind: 'request'; request: string } | { kind: 'event'; writer: string; seq: number };
+
+/** What `showNotification` is called with. */
+export type NoticeDisplay = { title: string; options: NotificationOptions & { body: string; tag?: string; data: { url: string } } };
+
+const KINDS = new Set(['question', 'permission', 'message']);
+const isText = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
+const isSeq = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 1;
+
+/** The notice, or null for a payload that does not point to a card. */
+export function parseNotice(value: unknown): PushNotice | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const n = value as Record<string, unknown>;
+  if (n.v !== 1 || !isText(n.project) || !isText(n.session) || !KINDS.has(n.kind as string)) return null;
+  if (n.alias !== null && typeof n.alias !== 'string') return null;
+  const base = { v: 1 as const, project: n.project, session: n.session, alias: n.alias };
+  if (n.kind === 'message') {
+    const event = n.event as Record<string, unknown> | undefined;
+    if (typeof event !== 'object' || event === null || !isText(event.writer) || !isSeq(event.seq)) return null;
+    return { ...base, kind: 'message', event: { writer: event.writer, seq: event.seq } };
+  }
+  if (!isText(n.request)) return null;
+  return { ...base, kind: n.kind as 'question' | 'permission', request: n.request };
+}
+
+/** The app's URL for the notice's card: the session's direct channel, with the request or message to open. */
+export function noticeUrl(notice: PushNotice): string {
+  const path = `/p/${encodeURIComponent(notice.project)}/s/${encodeURIComponent(notice.session)}`;
+  const query = notice.event ? new URLSearchParams({ writer: notice.event.writer, seq: String(notice.event.seq) }) : new URLSearchParams({ request: notice.request ?? '' });
+  return `${path}?${query}`;
+}
+
+/** The card a landing URL's query names, or null. */
+export function landingOf(search: string): Landing | null {
+  const query = new URLSearchParams(search);
+  const request = query.get('request');
+  if (isText(request)) return { kind: 'request', request };
+  const writer = query.get('writer');
+  const seq = Number(query.get('seq') ?? NaN);
+  if (isText(writer) && isSeq(seq)) return { kind: 'event', writer, seq };
+  return null;
+}
+
+const ALIAS_MAX = 48;
+const named = (alias: string | null) => (alias === null || alias === '' ? 'A session' : alias.length > ALIAS_MAX ? `${alias.slice(0, ALIAS_MAX)}…` : alias);
+
+const WORDS: Record<PushNotice['kind'], { title: string; body: string }> = {
+  question: { title: 'has a question', body: 'Open the desk to answer it.' },
+  permission: { title: 'asks for your permission', body: 'Open the desk to allow or deny it.' },
+  message: { title: 'sent you a message', body: 'Open the desk to read it.' },
+};
+
+/** The notification for a notice; for null (a payload the worker cannot read), a plain prompt to open the desk. */
+export function describeNotice(notice: PushNotice | null): NoticeDisplay {
+  if (notice === null) return { title: 'The desk', options: { body: 'Something needs you. Open the desk to see it.', data: { url: '/' } } };
+  const words = WORDS[notice.kind];
+  const card = notice.event ? `event/${notice.event.writer}/${notice.event.seq}` : `request/${notice.request}`;
+  return { title: `${named(notice.alias)} ${words.title}`, options: { body: words.body, tag: `${notice.project}/${card}`, data: { url: noticeUrl(notice) } } };
+}

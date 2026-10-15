@@ -4,13 +4,13 @@
 import { useEffect } from 'react';
 import { idbLogRecord, type LogRecord } from '../log/record';
 import { useKeyHolder } from '../key/holder';
+import { hubBase } from '../hub/base';
 import { ProjectConnection } from './connection';
 
 type Held = { connection: ProjectConnection; refs: number; closing: ReturnType<typeof setTimeout> | null };
 const open = new Map<string, Held>();
 let record: LogRecord | null = null;
 
-export const hubBase = () => `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
 
 function held(project: string): Held {
   let h = open.get(project);

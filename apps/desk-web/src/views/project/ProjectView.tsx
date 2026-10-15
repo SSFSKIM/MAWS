@@ -1,7 +1,8 @@
 // A project (§4): the channels on the left, the selected channel in the center, the selected session's depth on the
-// right (DX8's `depth` slot, DC6's). Nothing from the log is drawn until it verifies; locked, nothing is drawn at all,
+// right (DX8's `depth` slot, DC6's). On a phone, one column: the selected channel, with the channel list a tap away
+// over it, and no depth (desktop-only, so its chunk never loads there). Nothing from the log is drawn until it verifies; locked, nothing is drawn at all,
 // and the view says why. Events, requests, settlements, and deliveries whose code fails are reported, never drawn.
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useStore } from 'zustand';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
@@ -11,6 +12,7 @@ import type { AuditItem, ProjectConnection } from '../../project/connection';
 import { useDeskLayout, type Channel } from '../../shell/layout';
 import { useDeskSessions } from '../../shell/sessions';
 import { useSlot } from '../../shell/slots';
+import { useNarrow } from '../../shell/viewport';
 import { useGrid } from '../../state/grid';
 import { UnlockForm } from '../key/UnlockForm';
 import { DeskContext } from '../conversation/desk-context';
@@ -34,6 +36,8 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
   const unverified = useStore(connection.conversation.store, (s) => s.unverified);
   const { sessions, groups } = useDeskSessions(connection);
   const [spawning, setSpawning] = useState(false);
+  const narrow = useNarrow();
+  const [channelsOpen, setChannelsOpen] = useState(false);
   const desk = { connection, member: me.member.id, sessions };
   const Depth = useSlot('depth');
   const locked = keyState !== 'unlocked';
@@ -49,17 +53,23 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
       connection.client.setVisible(false);
     };
   }, [connection]);
-  const select = (next: Channel) => navigate({ view: 'project', project: connection.project, channel: next });
+  const select = (next: Channel) => {
+    setChannelsOpen(false);
+    navigate({ view: 'project', project: connection.project, channel: next });
+  };
+  const showDepth = depth.open && !narrow;
+  const sidebar = <Sidebar name={name} channel={channel} groups={locked ? null : groups} locked={locked} onSelect={select} onSpawn={() => setSpawning(true)} />;
 
   return (
     <DeskContext.Provider value={desk}>
     <div
       className="grid h-full min-h-0"
-      style={{ gridTemplateColumns: `var(--sidebar-w) minmax(0, 1fr)${depth.open ? ` ${depth.width}px` : ''}` }}
+      style={{ gridTemplateColumns: narrow ? 'minmax(0, 1fr)' : `var(--sidebar-w) minmax(0, 1fr)${showDepth ? ` ${depth.width}px` : ''}` }}
       data-testid="project-view"
       data-connection={status}
+      data-layout={narrow ? 'phone' : 'desktop'}
     >
-      <Sidebar name={name} channel={channel} groups={locked ? null : groups} locked={locked} onSelect={select} onSpawn={() => setSpawning(true)} />
+      {narrow ? channelsOpen && <ChannelSheet onClose={() => setChannelsOpen(false)}>{sidebar}</ChannelSheet> : sidebar}
       <div className="flex min-h-0 min-w-0 flex-col">
         {status === 'connecting' && (
           <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-fg-muted" role="status">
@@ -82,10 +92,10 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
         {locked ? (
           <Locked me={me} name={name} loading={keyState === 'loading'} />
         ) : (
-          <ChannelView name={name} channel={channel} session={selected} events={drawable(logState)} />
+          <ChannelView name={name} channel={channel} session={selected} events={drawable(logState)} onChannels={narrow ? () => setChannelsOpen(true) : undefined} waiting={groups.waiting.length} />
         )}
       </div>
-      {depth.open && (
+      {showDepth && (
         <aside className="min-h-0 overflow-y-auto border-l border-border bg-bg-raised" aria-label="Session depth">
           {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render (as MAWS's panes) */}
           <Depth project={connection.project} session={locked ? null : selected} plane={connection.client} />
@@ -102,6 +112,21 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
       )}
     </div>
     </DeskContext.Provider>
+  );
+}
+
+/** The phone's channel list, over the channel it was opened from. */
+function ChannelSheet({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="fixed inset-x-0 top-[calc(var(--toolbar-h)+env(safe-area-inset-top))] bottom-0 z-40 flex flex-col bg-bg-raised" role="dialog" aria-modal="true" aria-label="Channels" data-testid="channel-sheet">
+      <div className="flex h-11 shrink-0 items-center border-b border-border px-3">
+        <span className="text-ui font-semibold">Channels</span>
+        <button type="button" onClick={onClose} className="ml-auto flex h-9 items-center rounded-sm px-2 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg">
+          Close
+        </button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)] [&>nav]:flex-1 [&>nav]:border-r-0">{children}</div>
+    </div>
   );
 }
 

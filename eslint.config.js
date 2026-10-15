@@ -178,6 +178,6 @@ module.exports = defineConfig(
       ],
     },
   },
-  { files: ['apps/desk-web/{test,e2e}/**/*.ts', 'apps/desk-web/*.config.ts'], languageOptions: { globals: globals.node } },
+  { files: ['apps/desk-web/{test,e2e}/**/*.ts', 'apps/desk-web/*.config.ts', 'apps/desk-web/scripts/**/*.mjs'], languageOptions: { globals: globals.node } },
   // DC5 end
 );

@@ -4,12 +4,18 @@
 // and says when the machine is offline: the conversation stays, presence and depth are unavailable. A direct channel's
 // actions and composer are keyed by their session, so a draft, an RPC's status, or a Retire confirmation never follows
 // the owner into another session's channel.
-import { useMemo, useState } from 'react';
+//
+// A channel a tapped notification opened lands on its card (`useLanding`): the card is marked once it is drawn, and
+// until then, or when it will not be, the channel says why. On a phone the header carries the way to the channel list.
+import { useEffect, useMemo, useState } from 'react';
 import { useStore } from 'zustand';
 import type { LogEvent } from 'desk-hub/protocol';
 import { buildStream, type PlacedRequest } from '../../conversation/stream';
 import { capabilities, kindOf } from '../../conversation/capabilities';
 import { isQuestion } from '../../conversation/card-state';
+import { landedItem, landingStatus } from '../../conversation/landing';
+import { refused } from '../../log/project-log';
+import { useLanding } from '../../pwa/service-worker';
 import type { Channel } from '../../shell/layout';
 import type { DeskSession } from '../../shell/sessions';
 import { GroupComposer, SessionComposer } from '../composer/Composer';
@@ -17,8 +23,16 @@ import { useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
 import { StreamView } from '../conversation/StreamView';
 
-export function ChannelView(props: { name: string; channel: Channel; session: DeskSession | null; events: Array<{ offset: number; event: LogEvent }> }) {
-  const { name, channel, session, events } = props;
+export function ChannelView(props: {
+  name: string;
+  channel: Channel;
+  session: DeskSession | null;
+  events: Array<{ offset: number; event: LogEvent }>;
+  /** A phone's way to the channel list, with how many sessions wait on the owner. */
+  onChannels?: () => void;
+  waiting?: number;
+}) {
+  const { name, channel, session, events, onChannels, waiting = 0 } = props;
   const { connection, sessions } = useDesk();
   const requests = useStore(connection.conversation.store, (s) => s.requests);
   const outboxAll = useStore(connection.conversation.store, (s) => s.outbox);
@@ -29,9 +43,16 @@ export function ChannelView(props: { name: string; channel: Channel; session: De
     return buildStream(channel, events, aliases, placed, { live });
   }, [channel, events, sessions, requests, session]);
   const outbox = Object.values(outboxAll).filter((o) => channel.kind === 'group' || (o.to !== '*' && o.to.some((r) => r.session === channel.session)));
+  const landed = useLanded(channel, items);
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg" aria-label="Channel">
-      <header className="flex h-[44px] shrink-0 items-center gap-2 border-b border-border px-4" data-testid="channel-header">
+      <header className={['flex shrink-0 items-center gap-2 border-b border-border', onChannels ? 'min-h-[44px] flex-wrap px-3 py-1.5' : 'h-[44px] px-4'].join(' ')} data-testid="channel-header">
+        {onChannels && (
+          <button type="button" onClick={onChannels} className="flex h-8 shrink-0 items-center gap-1.5 rounded-sm border border-border px-2 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg" data-testid="channels">
+            Channels
+            {waiting > 0 && <span className="rounded-sm bg-bg-waiting px-1 font-semibold text-warning">{waiting}</span>}
+          </button>
+        )}
         {channel.kind === 'group' ? (
           <span className="text-ui font-semibold">
             <span className="text-fg-muted">#</span> {name}
@@ -50,10 +71,43 @@ export function ChannelView(props: { name: string; channel: Channel; session: De
           {session.machine} is offline: {session.alias}'s presence and depth are unavailable until it reconnects; everything it sent stays here.
         </div>
       )}
-      <StreamView items={items} outbox={outbox} />
+      {landed.notice && (
+        <div className="flex items-center gap-2 border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm" role="status" data-testid="landing" data-landing={landed.notice.kind}>
+          <span className={landed.notice.kind === 'unverified' ? 'text-danger' : 'text-fg-muted'}>{landed.notice.text}</span>
+          {landed.notice.kind !== 'checking' && (
+            <button type="button" className="ml-auto rounded-sm px-1 text-fg-muted hover:bg-bg-hover hover:text-fg" onClick={() => useLanding.getState().clear()}>
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
+      <StreamView items={items} outbox={outbox} landed={landed.item} />
       {channel.kind === 'group' ? <GroupComposer name={name} /> : session && <SessionComposer key={session.session} session={session} />}
     </section>
   );
+}
+
+/** The card a tapped notification named, if this channel is the one it opened: its item, or why it is not drawn. */
+function useLanded(channel: Channel, items: ReturnType<typeof buildStream>) {
+  const { connection } = useDesk();
+  const landed = useLanding((s) => s.landed);
+  const here = landed !== null && landed.project === connection.project && channel.kind === 'session' && channel.session === landed.session;
+  // Leaving the channel a notification opened ends the landing; coming back is an ordinary visit.
+  useEffect(() => {
+    if (landed && !here) useLanding.getState().clear();
+  }, [landed, here]);
+  const caughtUp = useStore(connection.live, (s) => s.caughtUp);
+  const unverified = useStore(connection.conversation.store, (s) => s.unverified);
+  const failed = useStore(connection.log.store, (s) => s);
+  if (!landed || !here) return { item: null, notice: null };
+  const item = landedItem(landed.landing, items);
+  const { landing } = landed;
+  const bad =
+    landing.kind === 'request'
+      ? unverified.some((u) => u.what === 'request' && u.id === landing.request)
+      : refused(failed).some((e) => e.event?.writer === landing.writer && e.event?.seq === landing.seq);
+  const status = landingStatus({ landing, found: item !== null, caughtUp, unverified: bad });
+  return { item, notice: status.kind === 'shown' ? null : status };
 }
 
 function SessionActions({ session }: { session: DeskSession }) {

@@ -19,6 +19,16 @@
   --text-label: 10px;
 }
 
+/* The phone (§4): iOS zooms the page into any field whose text is under 16 px when it takes focus, so on a phone's
+   width the desk's fields type at 16 px. */
+@media (max-width: 767px) {
+  textarea,
+  input,
+  select {
+    font-size: 16px;
+  }
+}
+
 @theme inline {
   --text-numeral: var(--text-numeral);
   --text-label: var(--text-label);

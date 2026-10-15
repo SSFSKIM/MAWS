@@ -2,7 +2,8 @@
 // browser side, for the web app's suites while DC3's local hub and fake machine are still to land. It speaks
 // `desk-hub/protocol`'s types and nothing of its own: `/api/me`, DX7's wrapped keys (./org-keys.ts), the project
 // socket (`ProjectUp` / `ProjectDown`), and the registry socket (`GridDown`); it numbers stored events with project offsets, seals what it appends with the org
-// key the way a machine's daemon would (DX1), and serves a built app from a directory with the single-page fallback the
+// key the way a machine's daemon would (DX1), serves DX7's Web Push endpoints (./push.ts; it sends no pushes: the browser
+// suites deliver one to the service worker directly), and serves a built app from a directory with the single-page fallback the
 // Worker's static assets will have. Every discontinuity a test needs is a method: drop every socket (a deploy), send
 // a frame in parts, hold acknowledgements, store an event whose code fails. For the conversation (the plan's M3) it also
 // stands in for what DC3's M3 routes and its fake machine (M4) produces: requests raised and settled, deliveries, the
@@ -12,6 +13,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { extname, join, normalize } from 'node:path';
+import { createGzip } from 'node:zlib';
 import {
   hubWriter,
   importOrgKey,
@@ -43,6 +45,7 @@ import {
 } from 'desk-hub/protocol';
 import { WebSocketServer, type WebSocket } from 'ws';
 import { OrgKeysDouble } from './org-keys';
+import { PushDouble } from './push';
 import type { DeliveryAhead, RaisedAhead } from '../../src/hub/protocol-ahead';
 
 /** The org as the double holds it before any key is set up (`/api/me` answers its current `key_check`). */
@@ -87,6 +90,8 @@ export class HubDouble {
   admit: 'member' | 'not-a-member';
   /** DX7's wrapped keys (`/api/org/keys`), with the hub's rules: `not-key-holder`, `different-key`, `last-key`. */
   readonly orgKeys = new OrgKeysDouble();
+  /** DX7's Web Push endpoints: the VAPID key and the member's subscriptions. */
+  readonly push = new PushDouble();
   private readonly projects = new Map<string, ProjectState>();
   private readonly gridSockets = new Set<WebSocket>();
   private grid: ProjectSummary[] = [];
@@ -498,24 +503,30 @@ export class HubDouble {
       json(res, 200, { org: { ...DOUBLE_ORG, key_check: this.orgKeys.key_check }, member: DOUBLE_MEMBER });
       return;
     }
-    const keys = await this.orgKeys.handle(DOUBLE_MEMBER, req.method ?? 'GET', path, await readJson(req));
-    if (keys) {
-      json(res, keys.status, keys.body);
+    const body = await readJson(req);
+    const answer = (await this.orgKeys.handle(DOUBLE_MEMBER, req.method ?? 'GET', path, body)) ?? (await this.push.handle(DOUBLE_MEMBER, req.method ?? 'GET', path, body));
+    if (answer) {
+      json(res, answer.status, answer.body);
       return;
     }
     if (path.startsWith('/api/') || !this.options.staticDir) {
       json(res, 404, { error: 'not-found' });
       return;
     }
-    this.serveStatic(this.options.staticDir, path, res);
+    this.serveStatic(this.options.staticDir, path, req, res);
   }
 
-  private serveStatic(dir: string, path: string, res: ServerResponse): void {
+  /** The built app, compressed as the Worker's static assets are when the browser accepts it (gzip here). */
+  private serveStatic(dir: string, path: string, req: IncomingMessage, res: ServerResponse): void {
     const file = normalize(join(dir, decodeURIComponent(path)));
     const inside = file.startsWith(normalize(dir)) && existsSync(file) && statSync(file).isFile();
     const target = inside ? file : join(dir, 'index.html');
-    res.writeHead(200, { 'Content-Type': CONTENT_TYPES[extname(target)] ?? 'application/octet-stream' });
-    createReadStream(target).pipe(res);
+    const type = CONTENT_TYPES[extname(target)] ?? 'application/octet-stream';
+    const gzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? '')) && !type.startsWith('image/png');
+    res.writeHead(200, { 'Content-Type': type, ...(gzip && { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' }) });
+    const body = createReadStream(target);
+    if (gzip) body.pipe(createGzip()).pipe(res);
+    else body.pipe(res);
   }
 }
 
@@ -526,6 +537,8 @@ const CONTENT_TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.json': 'application/json',
   '.woff2': 'font/woff2',
+  '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json',
 };
 
 async function readJson(req: IncomingMessage): Promise<unknown> {

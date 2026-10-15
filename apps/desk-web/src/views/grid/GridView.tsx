@@ -21,7 +21,7 @@ export function GridView({ onEnroll }: { onEnroll: () => void }) {
           <strong className="font-medium text-fg">Counts as of {asOf === null ? 'the last connection' : time(asOf)}.</strong> They may have changed since; the grid updates as soon as the hub answers.
         </div>
       )}
-      <div className="mx-auto max-w-[1120px] px-6 py-6">
+      <div className="mx-auto max-w-[1120px] px-4 py-4 md:px-6 md:py-6">
         {!loaded ? (
           <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3 p-0" aria-busy="true" aria-label="Loading projects" data-testid="grid-loading">
             {[0, 1, 2, 3, 4].map((i) => (

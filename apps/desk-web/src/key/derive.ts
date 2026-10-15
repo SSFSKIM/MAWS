@@ -3,7 +3,6 @@
 // one copy of it (./wrap.ts), from the passkey's PRF output or from a passphrase. What goes in is fixed here — a change
 // opens no existing copy — and pinned with OpenSSL-computed values in derive.test.ts. Each copy carries its derivation
 // in its `kdf` (DX7), so a passphrase's cost can rise later and older copies still open.
-import { argon2idAsync } from '@noble/hashes/argon2';
 import { base64urlDecode, importOrgKey, keyCheck, type JsonObject, type OrgKey } from 'desk-hub/protocol';
 import { heldOrgKey } from './org-key';
 
@@ -80,6 +79,8 @@ export async function wrappingKeyFromPassphrase(passphrase: string, org: string,
   if (problem) throw new TypeError(problem);
   const password = passphraseInput(passphrase);
   try {
+    // Loaded when a passphrase is first used, so the app's first load (the phone's included) does not carry it.
+    const { argon2idAsync } = await import('@noble/hashes/argon2');
     return await argon2idAsync(password, utf8(passphraseSalt(org)), { ...cost, dkLen: 32, version: 0x13, onProgress: progress });
   } finally {
     password.fill(0);
