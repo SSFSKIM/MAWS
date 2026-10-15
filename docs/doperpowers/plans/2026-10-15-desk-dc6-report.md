@@ -1,101 +1,56 @@
-# DC6 (the web: session depth): controller's interim report (2026-10-15)
+# DC6 (the web: session depth): controller's report (2026-10-15)
 
-Status: **in progress, handed back early.** The harness required this
-controller to hand back while M1's fix wave was still running. Nothing is
-blocked. To recover, read the ledger and the spec's living sections.
+**Status: done.** PR https://github.com/SSFSKIM/MAWS/pull/12 targets `smns-erb-web`, is ready for review, and is stacked on DC5. The composite's writer retargets it to `master` once DC5's PR merges.
 
-## Update (later the same day)
+- **Spec:** `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md`. All three milestones are ticked. The spec's Decision Log, Surprises & Discoveries, and Outcomes & Retrospective are current.
+- **Parent:** the composite at MAWS `8f7e09d3` and the later commits folded into the Decision Log, up to `43a27604`/`0473e509`.
+- **Ledger:** `.doperpowers/sde/2026-10-15-desk-dc6-depth/progress.md` (gitignored). The executor and review reports sit in the same directory.
 
-- **M1 is ticked** (c8666c61) after review. Original range
-  `46382c26..ba48dcda`; fix wave 1 `29fa876a..f6d42944` (99512e8a,
-  492d4b56, f6d42944). The re-review was clean and the reviewer's lifecycle
-  probes pass. Gate: Linux lane 38765771164, plus the unit re-run
-  38768825770.
-- **M2 (subagents)** is running on executor `ae69d92d0395c1474`, base
-  c8666c61. Its report goes to `task-2-report.md`.
-- **Before M3:** merge `smns-erb-web` at or after 2af4fbc6 and `smns-erb` at
-  or after b7fc7ebd, delete the `step-end` stand-in and its cast, and add
-  the `step-end` browser spec (Decision Log, c58e366a).
+## What was built
 
-## Update 3
+`connectDepth()` (`apps/desk-web/src/depth/connect.ts`) registers two DX8 slots.
 
-- **M2 ticked** (b5de65f4) after two `keep-place` fix waves: 7e741316, then
-  dbedd79e and f6f288c9. The last re-review was clean, and gate run
-  38793456785 is green. The screenshots m1-depth.png and m2-depth.png went
-  to the composite's writer for the owner.
-- **M3 is running** on executor `a4bea4ef57e6e8b70`, base b5de65f4. It has
-  merged `smns-erb-web` (a9abd794) and `smns-erb` (722dbbfd). Two items were
-  added after the screenshots (Decision Log, 642843e4):
-  - depth draws `<message>` marks;
-  - a turn woken by a task notification is labelled as the session's own
-    turn.
+- **`depth`** has four tabs:
+  - **Transcript:** MAWS's transcript view over a `TranscriptSource` built on `SessionPlane`. Streaming settles per block in the adapter's own layer, older pages arrive by chronological rebuild with the reader's place kept, and `<message>` marks are drawn.
+  - **Subagents:** a desk tree over MAWS's `tools/agents/model/*`, with each agent on its own subscription.
+  - **Diff:** `Subscription.diff()`, drawn through `splitPatch` and `ReviewView`.
+  - **Info:** from `DeskSession`, the transcript's model, and DX4 `usage`.
+- **`transcript`** draws one fold of a direct channel's working record over an exclusive `range`, through the to-human Presenter. DC5's WorkingRecord already mounts it.
 
-## Update 2
+## Commit range
 
-- **M2 (subagents)** is built: 7ac8c095, plus fb674567 and c86352d8, which
-  fix M1's paging. The gate was green on the Linux lane (run 38781403428).
-  The screenshot is at `.doperpowers/sde/2026-10-15-desk-dc6-depth/m2-depth.png`.
-- **M2's task review** approved the subagent work and found two Important
-  issues in `view/keep-place.ts` (`review-2.md`):
-  - a live row uses up the pending scroll restore while an older page is
-    still loading;
-  - the fallback for a page longer than overscan loses the reader's offset.
-- **Fix wave 1** is running on the M2 executor, from fix-base d7da475f.
-- **MAWS's own paging:** not established. MAWS loads full history at once.
-  Nothing is logged as debt.
+- **Whole range:** `6ada9f12..9bf09d6e` on `smns-erb-depth`.
+- **Merges:** DC5's work arrives through `df8c8776` and `a9abd794`, `948fd575` (`smns-erb-web`), and DC3's through `4e464576`, `722dbbfd`, `481d05b3`, and `8d9814df` (`smns-erb`).
+- **DC6's own commits:** the first-parent, non-merge commits of that range.
+  - **M1:** `ba2896bc`..`ba48dcda`, then fix wave `99512e8a`, `492d4b56`, `f6d42944`.
+  - **M2:** `7ac8c095`, `fb674567`, `c86352d8`, then fix waves `7e741316`, `dbedd79e`, `f6f288c9`.
+  - **M3:** `7a1a9911`..`1eb05c84`, then fix wave `78206d52`, `e4c9a4c3`, `4f3c58f4`.
+  - **Final fix waves:** `64481c89`, `82b812e4`.
 
-## Where things stood at the first hand-back
+## Reviews
 
-- Spec: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md`. The parent is
-  pinned to composite `8f7e09d3`. Later composite changes (`d349a87a`,
-  `2ae6ac3a`, `cd2667d8`, `1cf94bd2`, `34ee27ca`, `24448038`, `2038124c`,
-  `10b2d830`) are folded into its Decision Log and Surprises.
-- Ledger: `.doperpowers/sde/2026-10-15-desk-dc6-depth/progress.md`
-  (gitignored), which holds the bases, heads and agent handles.
-- **M1:** built, `46382c26..ba48dcda`. The commits are ba2896bc, de64a655 and
-  616fe5ee, plus ba48dcda after the merges of `smns-erb` (4e464576) and
-  `smns-erb-web` (df8c8776, which brings DC5's renderer cut 5bd20087). The
-  gate was green on the Linux lane in run 38757357541.
-  - Task review 1 found two Important issues (`review-1.md` in the
-    workspace). Live subagent metadata never reaches the backfill context
-    that already exists. A reset that arrives during a rebuild reaches an
-    unattached source, so stale rows are kept.
-  - Fix wave 1 is **running** on the M1 executor (fix-base 29fa876a). It
-    carries both findings and the writer's three additions: a lint rule
-    forbidding `window.maws` in `apps/desk-web/src`; DX4 `step-end`, which
-    drops the unsettled partial text of its step and has a test for a late
-    `block-row`; and omitted thinking drawn as the collapsed indicator.
-  - M1 is not ticked yet.
-- **M2 (subagents)** and **M3** (diff, `usage`-based session info, the
-  `transcript` slot's exclusive range through the Presenter, and the
-  acceptance against DC3's fake machine) have not been dispatched.
+- **Task reviews:** M1, M2, and M3 each came back clean after their fix waves. Their findings are in `review-1.md`, `review-2.md`, and `review-3.md` in the workspace.
+- **Final whole-branch review:** a `high` review (doperpowers:review-code, reviewer-high).
+  - It found one P2: a tight resubscribe loop on terminal errors.
+  - The first fix stranded a transcript when the hub replaces a machine online-to-online.
+  - The second fix (`82b812e4`) re-checked clean, with all four of the reviewer's lifecycle probes passing.
 
-## Next steps for whoever resumes
+## Evidence
 
-1. Wait for the M1 executor's fix report and append `fix-head` to the
-   ledger.
-2. Re-review by resuming the reviewer on the package
-   `review-package <spec> 29fa876a <fix-head>`. The range also holds plan-doc
-   commits.
-3. Tick M1, then dispatch M2 and M3 in order.
-4. Run the final `high` review through `doperpowers:review-code`, write the
-   Outcomes, and open the PR.
+- **Gate:** green on the Linux lane, run 38818748087 on `82b812e4` (static, unit, e2e:desk-web with 67 browser tests, including 8 acceptance specs against DC3's fake machine).
+- **Unit tests:** `pnpm --filter desk-web exec vitest run src/depth` passes 94/94 across 13 files.
 
-## Messages already sent to the composite's writer
+## Environmental friction routed around
 
-- The pre-flight checkpoint.
-- M1's checkpoint: the screenshot at
-  `.doperpowers/sde/2026-10-15-desk-dc6-depth/m1-depth.png`, the no-cut route,
-  the Tailwind `@source` lines in DC5's `app.css`, and the contract items
-  (the orphaned partial, which became `step-end`; omitted thinking; marks in
-  depth; the enrollment flake).
+- **Linux lane instead of the local load rule.** The harness refused `/tmp/maws-review/with-slot.sh`, and the Mac's load stayed at 25 to 290, so `waitload20.sh` never cleared. Following the composite writer's ruling, heavy suites ran on the gate's Linux lane, and the M2 screenshot was taken there.
+- **A restart killed one watcher.** The parent session restarted once, mid final fix wave. The executor read its gate run back with `gh run view` instead of re-dispatching it.
+- **The worktree-isolation guard refused variable-bearing and `xargs`-fed git commands.** I split them into literal commands.
 
-## Known costs and minor findings carried
+## Owner actions
 
-- The depth chunk is large because it carries xterm and mermaid. Vite warns
-  of chunks over 500 kB (mermaid is 1,634.88 kB). This goes to DC5's M4,
-  which measures load on the phone.
+None outstanding. The bases `smns-erb-web` and `smns-erb` were pushed by the composite's writer.
 
 ## Residue
 
-None yet.
+- **The gate returns no desk-web browser traces.** It uploads only the repo root's `test-results/`, so a failing desk-web trace never comes back from the Linux lane. Adding `apps/desk-web/test-results/` to `.github/workflows/gate.yml`'s artifact upload fixes it.
+- **desk-hub's `enrollment.test.ts` flakes on the Linux lane.** It has failed twice, with 502 against 404 and 502 against 400, and passed on rerun both times. It is DC3's, and is already reported to the composite's writer.
