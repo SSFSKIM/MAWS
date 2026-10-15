@@ -9,7 +9,7 @@
 // the deck's files back, and reports each open tab's open-to-drawn timings (Acceptance 7's cold open).
 import type { ArtifactHost, DocumentHandle } from '@artifacts/host';
 import { DECK_PATH, slideIdOf } from '@artifacts/slides/deck';
-import { deckFiles, readFlat, setNotes, setStyle, setText, slideFile, slideOrder, zOrder } from '@artifacts/slides/model';
+import { deckFiles, readFlat, setAttrs, setNotes, setStyle, setText, slideFile, slideOrder, zOrder } from '@artifacts/slides/model';
 import { publishDeck } from '@artifacts/slides/publish';
 import { loadSlide } from '@artifacts/slides/parse';
 import type { SlideIR } from '@artifacts/slides/ir';
@@ -25,7 +25,9 @@ export type DeckSeamEdit =
   | { op: 'setNotes'; slideId: string; text: string }
   | { op: 'setOverride'; name: string; value: string | null }
   // M5: text put before an element's first line (a remote edit landing in a text box being edited)
-  | { op: 'prependText'; slideId: string; elementId: string; text: string };
+  | { op: 'prependText'; slideId: string; elementId: string; text: string }
+  // fix wave 1: attributes as another replica sets them (a picture's crop)
+  | { op: 'setAttrs'; slideId: string; elementId: string; attrs: Record<string, string | null> };
 
 /** Per-move times of a drag (ms): pointer move → the editor's transaction → the next frame (S7b's measure). */
 export interface DragStats {
@@ -48,6 +50,8 @@ export interface PresentationsSeam {
   timings(artifactId: string): { surface: string; timings: DeckTimings }[];
   /** M5: measures the drags on the deck's open tab from now until `stop`. */
   dragProbe: { start(artifactId: string): void; stop(): DragStats };
+  /** Fix wave 1: another replica selecting elements (its awareness), until cleared. */
+  presence: { show(artifactId: string, slideId: string, elementIds: string[]): Promise<void>; clear(): Promise<void> };
   /** M5: an agent republishing one slide every `intervalMs` (the second slide on), until stopped; answers how many. */
   agent: { start(artifactId: string, intervalMs: number): Promise<void>; stop(): Promise<number> };
 }
@@ -100,7 +104,8 @@ export function installPresentationsSeam(win: Window, host: () => ArtifactHost):
           const blocks = readFlat(doc, edit.slideId).find((e) => e.id === edit.elementId)?.text ?? [{ type: 'p' as const, inline: [] }];
           const [first, ...rest] = blocks;
           setText(doc, edit.slideId, edit.elementId, [{ ...first!, inline: [{ text: edit.text, marks: {} }, ...first!.inline] }, ...rest], 'e2e');
-        } else setDeckOverride(doc, edit.name, edit.value, 'e2e');
+        } else if (edit.op === 'setAttrs') setAttrs(doc, edit.slideId, edit.elementId, edit.attrs, 'e2e');
+        else setDeckOverride(doc, edit.name, edit.value, 'e2e');
       }),
     files: (artifactId) => withReplica(artifactId, ({ doc }) => deckFiles(doc)),
     slide: (artifactId, slideId) =>
@@ -118,6 +123,7 @@ export function installPresentationsSeam(win: Window, host: () => ArtifactHost):
           return session ? [{ surface: tab.surface, timings: { ...session.timings } }] : [];
         }),
     dragProbe: dragProbe(win),
+    presence: remotePresence(host),
     agent: agentRepublishing(host),
   };
 }
@@ -202,6 +208,23 @@ function agentRepublishing(host: () => ArtifactHost): PresentationsSeam['agent']
       await acknowledged(handle);
       handle.close();
       return count;
+    },
+  };
+}
+
+// Another replica's selection, as its editor publishes it (DeckSession's presence): a replica of its own, held open
+// with its awareness set, until cleared.
+function remotePresence(host: () => ArtifactHost): PresentationsSeam['presence'] {
+  let held: DocumentHandle | null = null;
+  return {
+    async show(artifactId, slideId, elementIds) {
+      held ??= await host().open(artifactId);
+      held.awareness.setLocalState({ name: 'Claude', color: '--author-3', deck: { slideId, elementIds } });
+    },
+    async clear() {
+      held?.awareness.setLocalState(null);
+      held?.close();
+      held = null;
     },
   };
 }

@@ -263,10 +263,15 @@ describe('the canvas at M5', () => {
     const c = mount(doc);
     const img = c.node('pic')!;
     expect(img.style.getPropertyValue('object-view-box')).toBe('inset(25% 37.5% 25% 12.5%)');
+    expect(img.style.getPropertyValue('object-position')).toBe('25% 50%'); // the focus, at zoom 1 too (fix wave 1)
     setAttrs(doc, 's1', 'pic', { 'data-crop': '4 0% 100%' });
     expect(img.style.getPropertyValue('object-view-box')).toBe('inset(75% 75% 0% 0%)');
+    expect(img.style.getPropertyValue('object-position')).toBe('0% 100%');
+    setAttrs(doc, 's1', 'pic', { 'data-crop': '1 0% 50%' });
+    expect(img.style.getPropertyValue('object-position')).toBe('0% 50%');
     setAttrs(doc, 's1', 'pic', { 'data-crop': null });
     expect(img.style.getPropertyValue('object-view-box')).toBe('');
+    expect(img.style.getPropertyValue('object-position')).toBe('');
   });
 
   it('draws a non-rect shape’s outer shadows on its outline', () => {

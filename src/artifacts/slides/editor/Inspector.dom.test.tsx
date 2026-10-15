@@ -5,7 +5,7 @@
 // as one undo step.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { newDoc, transact, type Doc } from '../../yjs';
+import { newDoc, onUpdate, transact, type Doc } from '../../yjs';
 import { importSlide, readSlide, slideFile, writeDeckKeys, ROOT } from '../model';
 import { loadSlide } from '../parse';
 import { restyle, siteOf } from '../writers-elements';
@@ -294,7 +294,11 @@ describe('the inspector', () => {
     const { doc, session } = mount(['box', 'box2']);
     expect(box('Fill colour').value).toBe('');
     expect(box('Fill colour').placeholder).toBe('Mixed');
+    let updates = 0;
+    const off = onUpdate(doc, () => updates++);
     type('Fill colour', 'red');
+    off();
+    expect(updates).toBe(1); // one gesture, one transaction (fix wave 1)
     expect([styleOf(doc, 'box').background, styleOf(doc, 'box2').background]).toEqual(['red', 'red']);
     act(() => session.undoStep());
     expect([styleOf(doc, 'box').background, styleOf(doc, 'box2').background]).toEqual(['#eeeeee', '#dddddd']);
@@ -317,5 +321,23 @@ describe('the inspector', () => {
     expect(box('Fill colour').value).toBe('#eeeeee');
     act(() => void restyle(doc, 'a', 'box', { background: '#123456' }, 'remote'));
     expect(box('Fill colour').value).toBe('#123456');
+  });
+});
+
+describe('fix wave 1: a shadow the canvas cannot draw is never offered', () => {
+  it('inset and spread are offered on a box, and held off on a shape that is not a rect, with the reason', async () => {
+    const { setAttrsOf } = await import('../writers-elements');
+    const { doc } = mount(['box']);
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Shadow' }));
+    expect((screen.getByRole('checkbox', { name: 'Inset shadow' }) as HTMLInputElement).disabled).toBe(false);
+    enter('Shadow spread', '4');
+    expect(styleOf(doc, 'box')['box-shadow']).toMatch(/^0px 8px 24px 4px /);
+    cleanup();
+    const shape = mount(['shape']);
+    act(() => setAttrsOf(shape.doc, 'a', { shape: { kind: 'ellipse' } }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Shadow' }));
+    expect((screen.getByRole('checkbox', { name: 'Inset shadow' }) as HTMLInputElement).disabled).toBe(true);
+    expect(box('Shadow spread').disabled).toBe(true);
+    expect(screen.getByText(/drawn from its outline/)).toBeTruthy();
   });
 });

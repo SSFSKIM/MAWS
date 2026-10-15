@@ -83,7 +83,9 @@ export class DeckTabState {
       return;
     }
     if (this.disposed) return void handle.close();
-    const session = new DeckSession(handle.doc, this.openedAt, { holdRemote: (on) => handle.holdRemote(on) }); // M5: the text box's composition hold
+    // M5: the text box's composition hold; fix wave 1: the selection published to other replicas beside who this is
+    const { name, color } = this.deps.host.identity();
+    const session = new DeckSession(handle.doc, this.openedAt, { holdRemote: (on) => handle.holdRemote(on), presence: { awareness: handle.awareness, name, color } });
     session.timings.syncedAt = performance.now();
     this.stops.push(
       handle.subscribe((document) => this.follow(handle, document)),

@@ -57,6 +57,22 @@ const ENUMS: Record<string, readonly string[]> = {
 const BUILD_EFFECTS = ['fade', 'rise', 'drop', 'left', 'right', 'scale', 'pop'];
 const COORDS = ['x1', 'y1', 'x2', 'y2'];
 
+/**
+ * What text counts toward a slide's limits (`SLIDE_LIMITS.textChars` and `.marks`): its characters (a line break none)
+ * and its runs that carry a mark. The loader's count, shared with the text box (M5 fix wave 1).
+ */
+export function textCost(blocks: readonly TextBlock[]): { chars: number; marks: number } {
+  let chars = 0;
+  let marks = 0;
+  for (const b of blocks)
+    for (const r of b.inline)
+      if ('text' in r) {
+        chars += [...r.text].length; // code points, as the loader reads them
+        if (Object.keys(r.marks).length) marks++;
+      }
+  return { chars, marks };
+}
+
 /** 32-bit FNV-1a, base36, 4 characters: the `<hash>` of a minted id. */
 export function hash4(s: string): string {
   let h = 0x811c9dc5;
@@ -466,12 +482,13 @@ class Loader {
         inline.push({ br: true });
         continue;
       }
-      this.textChars++;
       const last = inline[inline.length - 1];
       if (last && 'text' in last && sameMarks(last.marks, c.marks)) last.text += c.ch;
       else inline.push({ text: c.ch, marks: canonMarks(c.marks) });
     }
-    this.markCount += inline.filter((r) => 'text' in r && Object.keys(r.marks).length).length;
+    const cost = textCost([{ type, inline }]);
+    this.textChars += cost.chars;
+    this.markCount += cost.marks;
     return { type, inline };
   }
 

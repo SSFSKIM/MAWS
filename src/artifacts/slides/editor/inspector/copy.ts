@@ -49,6 +49,9 @@ export const INSPECTOR_COPY = {
   shadowY: 'Shadow Y',
   shadowBlur: 'Shadow blur',
   shadowColour: 'Shadow colour',
+  shadowSpread: 'Shadow spread',
+  shadowInset: 'Inset shadow',
+  outlineShadow: 'This shape’s shadow is drawn from its outline, which casts no inset shadow and no spread.',
   // text
   font: 'Font',
   fontSize: 'Font size',

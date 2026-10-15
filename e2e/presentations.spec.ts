@@ -14,6 +14,9 @@
 //   kept; rotate; nudge; a flow child re-ordered by drag and detached; z-order; group and ungroup; duplicate and delete.
 // - M5, the inspector, Insert, text in place (marks, a Korean composition while a remote edit lands in the same box) and
 //   copy and paste across two decks.
+// - M5 fix wave 1: an element drawn scaled picked, handled and resized where it is painted; a turned group ungrouped
+//   with each child kept where it was painted; another replica's selection outlined; a crop's focus read from pixels;
+//   a picture copied across decks drawn from the second deck's own store.
 // - M5, the scale gate's drag (Acceptance 7): a drag's move-to-frame p95 on the 100-slide deck while an agent
 //   republishes, measured through the seam, the 1-minute load average beside it.
 import { loadavg } from 'node:os';
@@ -40,8 +43,11 @@ interface Seam {
         | { op: 'zOrder'; slideId: string; elementId: string; to: 'front' | 'back' }
         | { op: 'setNotes'; slideId: string; text: string }
         | { op: 'setOverride'; name: string; value: string | null }
-        | { op: 'prependText'; slideId: string; elementId: string; text: string },
+        | { op: 'prependText'; slideId: string; elementId: string; text: string }
+        | { op: 'setStyle'; slideId: string; elementId: string; props: Record<string, string | null> }
+        | { op: 'setAttrs'; slideId: string; elementId: string; attrs: Record<string, string | null> },
     ): Promise<void>;
+    presence: { show(artifactId: string, slideId: string, elementIds: string[]): Promise<void>; clear(): Promise<void> };
     dragProbe: { start(artifactId: string): void; stop(): { moves: number; withTransaction: number; inputToTxMs: Stat; inputToFrameMs: Stat; longTasks: number } };
     agent: { start(artifactId: string, intervalMs: number): Promise<void>; stop(): Promise<number> };
     order(artifactId: string): Promise<string[]>;
@@ -320,7 +326,7 @@ test('the scale gate’s open: a 100-slide deck cold in a main tab, stage and 10
 
 // ---- M5: the transform layer ----------------------------------------------------------------------------------------
 
-const LAB_JSON = JSON.stringify({ v: 4, title: 'Layout lab', cover: 'lab', order: ['lab', 'text'] });
+const LAB_JSON = JSON.stringify({ v: 4, title: 'Layout lab', cover: 'lab', order: ['lab', 'text', 'xf'] });
 const LAB: Record<string, string> = {
   'project/deck.json': LAB_JSON,
   'project/slides/lab.html': `<section id="lab" style="background:#ffffff; padding:128px; display:flex; flex-direction:column; gap:32px">
@@ -331,6 +337,11 @@ const LAB: Record<string, string> = {
 <x-shape id="c" kind="ellipse" style="position:absolute; left:1300px; top:640px; width:200px; height:200px; background:#0000ff"></x-shape>
 </section>`,
   'project/slides/text.html': `<section id="text" style="background:#ffffff; padding:128px"><p id="note" style="position:absolute; left:300px; top:300px; width:1000px; font-size:48px">Edit me</p></section>`,
+  // fix wave 1: an element drawn scaled, and a group drawn turned (its children measured as drawn)
+  'project/slides/xf.html': `<section id="xf" style="background:#ffffff">
+<div id="sc" style="position:absolute; left:300px; top:300px; width:200px; height:100px; transform:scale(2); background:#ff00ff"></div>
+<div id="g" data-group="" style="position:absolute; left:1000px; top:300px; width:400px; height:100px; transform:rotate(90deg)"><div id="k1" style="position:absolute; left:0px; top:0px; width:100px; height:100px; background:#00aa00"></div><div id="k2" style="position:absolute; left:300px; top:0px; width:100px; height:100px; background:#0000aa"></div></div>
+</section>`,
 };
 
 /** The stage's frame and the screen point of a slide px on it. */
@@ -443,6 +454,41 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
   await page.keyboard.press('Delete');
   await expect.poll(async () => (await slideOf(page, id, 'lab')).children.filter((c) => c.tag === 'x-shape').length).toBe(1);
 
+  // fix wave 1: transforms measured as drawn. A scaled element is picked where it is painted, its handles sit on its
+  // painted corners, and a resize keeps its painted top-left where it was
+  await tab.locator('[data-slide-thumb="xf"] .deck-thumb-button').click();
+  const xf = await stageAt(tab);
+  const painted = (eid: string) => tab.locator(`[data-stage-slide="xf"] [data-eid="${eid}"]`).boundingBox().then((b) => b!);
+  await page.mouse.click(xf.at(220, 270).x, xf.at(220, 270).y); // inside the painted box (200..600), outside its layout (300..500)
+  await expect(tab.locator('[data-overlay] [data-selected="sc"]')).toBeVisible();
+  const before = await painted('sc');
+  const se = (await tab.locator('[data-overlay] [data-handle="se"]').boundingBox())!;
+  expect(Math.abs(se.x + se.width / 2 - (before.x + before.width))).toBeLessThan(2);
+  expect(Math.abs(se.y + se.height / 2 - (before.y + before.height))).toBeLessThan(2);
+  await drag(page, { x: se.x + se.width / 2, y: se.y + se.height / 2 }, { x: se.x + se.width / 2 + 40, y: se.y + se.height / 2 + 20 }, { during: async () => {} });
+  const after = await painted('sc');
+  expect(Math.abs(after.x - before.x)).toBeLessThan(2);
+  expect(Math.abs(after.y - before.y)).toBeLessThan(2);
+  expect(after.width - before.width).toBeGreaterThan(30);
+  // a turned group: picked where its children are painted; ungrouped, each child stays where it was painted
+  const k1 = await painted('k1');
+  const k2 = await painted('k2');
+  await page.mouse.click(k1.x + k1.width / 2, k1.y + k1.height / 2);
+  await expect(tab.locator('[data-overlay] [data-selected="g"]')).toBeVisible();
+  await page.keyboard.press('Meta+Shift+g');
+  await expect.poll(async () => (await slideOf(page, id, 'xf')).children.some((c) => c.id === 'g')).toBe(false);
+  for (const [eid, was] of [['k1', k1], ['k2', k2]] as const) {
+    const now = await painted(eid);
+    expect([Math.round(now.x - was.x), Math.round(now.y - was.y), Math.round(now.width - was.width), Math.round(now.height - was.height)]).toEqual([0, 0, 0, 0]);
+  }
+  expect((await elementOf(page, id, 'xf', 'k1'))?.style.transform).toBe('rotate(90deg)');
+  // another replica's selection, outlined in its colour with its name
+  await page.evaluate(([a]) => (window as unknown as Seam).__maws_presentations.presence.show(a!, 'xf', ['sc']), [id] as const);
+  await expect(tab.locator('[data-overlay] [data-remote-selected="sc"]')).toHaveCount(1);
+  await expect(tab.locator('[data-overlay] .deck-remote-name')).toHaveText('Claude');
+  await page.evaluate(() => (window as unknown as Seam).__maws_presentations.presence.clear());
+  await expect(tab.locator('[data-overlay] [data-remote-selected]')).toHaveCount(0);
+
   expect(launch!.consoleErrors()).toEqual([]);
 });
 
@@ -478,6 +524,8 @@ test('the scale gate’s drag: move to frame p95 within 16 ms on the 100-slide d
 
 // ---- M5: the inspector, Insert, text in place, the clipboard ---------------------------------------------------------
 
+// a 4 × 1 picture: two red pixels, then two blue (fix wave 1's crop)
+const STRIPE_4X1 = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAABCAIAAAB2XpiaAAAAEElEQVR4nGP4z8AARGDiPwAZ8wP9mthzMQAAAABJRU5ErkJggg==', 'base64');
 const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const SECOND: Record<string, string> = {
   'project/deck.json': JSON.stringify({ v: 4, title: 'Second deck', cover: 'one', order: ['one'] }),
@@ -549,6 +597,21 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   expect(made.filter((t) => t === 'x-connector').length).toBe(2); // the line and the connector
   expect((await slideOf(page, id, 'lab')).children.find((c) => c.tag === 'img')?.attrs.src).toMatch(/^assets\/pixel/);
 
+  // fix wave 1: a crop's focus places the picture: a 4 × 1 stripe (red, then blue) in a square box, covered, shows its
+  // red end with the focus at 0 % and its blue end at 100 %, at zoom 1
+  await tab.locator('[data-insert-image]').setInputFiles({ name: 'stripe.png', mimeType: 'image/png', buffer: STRIPE_4X1 });
+  await expect.poll(async () => (await slideOf(page, id, 'lab')).children.filter((c) => c.tag === 'img').length).toBe(2);
+  const stripe = (await slideOf(page, id, 'lab')).children.find((c) => c.tag === 'img' && c.attrs.src?.startsWith('assets/stripe'))!;
+  await editDeck(page, id, { op: 'setStyle', slideId: 'lab', elementId: stripe.id, props: { left: '1500px', top: '700px', width: '300px', height: '300px' } }); // clear of the heading the clipboard step picks
+  const pic = tab.locator(`[data-stage-slide="lab"] [data-eid="${stripe.id}"]`);
+  for (const [focus, rgb] of [
+    ['0%', [255, 0, 0]],
+    ['100%', [0, 0, 255]],
+  ] as const) {
+    await editDeck(page, id, { op: 'setAttrs', slideId: 'lab', elementId: stripe.id, attrs: { 'data-crop': `1 ${focus} 50%` } });
+    await expect.poll(async () => pixel(app, ...((b) => [b.x + b.width / 2, b.y + b.height / 2] as const)((await pic.boundingBox())!)), { message: `the crop's focus at ${focus}` }).toEqual(rgb);
+  }
+
   // text in place: typed, a word made bold, then a Korean composition while another replica edits the same box
   await tab.locator('[data-slide-thumb="text"] .deck-thumb-button').click();
   const note = (await tab.locator('[data-stage-slide="text"] [data-eid="note"]').boundingBox())!;
@@ -600,7 +663,7 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
   // copy in one deck, paste into another: the dialect on the Mac's pasteboard, loaded on the way in
   await tab.locator('[data-slide-thumb="lab"] .deck-thumb-button').click();
   const otherTab = page.locator(`[data-region="main"] [data-artifact-tab="${other}"]`);
-  await withNativeClipboard(app, ['Heading'], async () => {
+  await withNativeClipboard(app, ['Heading', ''], async () => {
     const headNow = (await tab.locator('[data-stage-slide] [data-eid="head"]').boundingBox())!;
     await page.mouse.click(headNow.x + 30, headNow.y + headNow.height / 2);
     await page.keyboard.press('Meta+c');
@@ -609,6 +672,16 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
     await page.mouse.click(second.at(1800, 1000).x, second.at(1800, 1000).y);
     await page.keyboard.press('Meta+v');
     await expect.poll(async () => plain(findIn((await slideOf(page, other, 'one')).children, 'head'))).toBe('Heading');
+    // fix wave 1: a picture copied across decks brings its asset: the stripe drawn from the second deck's own store
+    await openFromLibrary(page, 'Inspector lab', id);
+    const stripeNow = (await tab.locator(`[data-stage-slide="lab"] [data-eid="${stripe.id}"]`).boundingBox())!;
+    await page.mouse.click(stripeNow.x + stripeNow.width / 2, stripeNow.y + stripeNow.height / 2);
+    await page.keyboard.press('Meta+c');
+    await openFromLibrary(page, 'Second deck', other);
+    await page.mouse.click(second.at(1800, 1000).x, second.at(1800, 1000).y);
+    await page.keyboard.press('Meta+v');
+    await expect.poll(async () => (await slideOf(page, other, 'one')).children.find((c) => c.tag === 'img')?.attrs.src ?? '').toMatch(/^assets\/stripe.*\.png$/);
+    await expect.poll(() => otherTab.locator('[data-stage-slide] img[data-eid]').evaluate((n) => (n as HTMLImageElement).naturalWidth)).toBe(4);
   });
   expect((await elementOf(page, other, 'one', 'head'))?.style['font-size']).toBe('72px'); // its style came with it
 

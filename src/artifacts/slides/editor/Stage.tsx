@@ -10,6 +10,7 @@ import { DECK_COPY as C } from './copy';
 import type { DeckSession } from './session';
 import { SlideView } from './SlideView';
 import { TextBox } from './TextBox';
+import type { ImportAsset } from './transform/clipboard';
 import { Overlay } from './transform/Overlay';
 
 export interface StageProps {
@@ -26,11 +27,14 @@ export interface StageProps {
   canvas: SlideCanvas | null;
   readOnly: boolean;
   onNotice?: (text: string) => void;
+  /** The deck's artifact and the clipboard's way to bring another deck's pictures over (fix wave 1). */
+  artifactId?: string;
+  importAsset?: ImportAsset;
   /** The DesignSystemScope the slide draws in. */
   scope: (children: ReactNode) => ReactNode;
 }
 
-export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanvas, canvas, readOnly, onNotice, scope }: StageProps) {
+export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanvas, canvas, readOnly, onNotice, artifactId, importAsset, scope }: StageProps) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const setFrame = useCallback(
     (element: HTMLDivElement | null) => {
@@ -67,6 +71,8 @@ export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanv
                     surface={viewport}
                     frame={frameRef}
                     onNotice={onNotice}
+                    artifactId={artifactId}
+                    importAsset={importAsset}
                     renderText={(elementId, stageCanvas) => <TextBox session={session} canvas={stageCanvas} slideId={slide.id} elementId={elementId} readOnly={readOnly || slide.held !== null} />}
                   />,
                 )}

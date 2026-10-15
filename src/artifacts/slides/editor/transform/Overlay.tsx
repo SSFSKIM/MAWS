@@ -4,18 +4,18 @@
 // the marquee and a flow child's insertion bar. It takes the stage's pointer presses (click, shift-click, ⌘-click,
 // double-click, marquee, drags), its keys (Escape, Tab, Enter, Delete, arrows, ⌘D, ⌘G, ⇧⌘G, ⌘] and ⌘[, ⌘A) and the
 // clipboard while the stage has focus. Gestures are gestures.ts's; which element a press picks is selection.ts's.
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode, type RefObject } from 'react';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import type { SlideCanvas } from '../../canvas';
-import { HANDLES, rotatedBounds, union, type Box, type Guide, type Handle, type Pt } from '../../geometry';
+import { apply, applyLinear, HANDLES, union, type Box, type Guide, type Handle, type Pt } from '../../geometry';
 import { isPinned } from '../../ir';
 import { ROOT } from '../../model';
 import type { ElementWrites } from '../../writers-elements';
 import { writeElements } from '../../writers-elements';
 import { DECK_COPY as C } from '../copy';
 import type { DeckSession } from '../session';
-import { copySelection, pasteClipboard } from './clipboard';
+import { copySelection, pasteClipboard, type ClipboardContext, type ImportAsset } from './clipboard';
 import { selectionCommands } from './commands';
-import { handlesOf, nudge, startEndpoint, startFlowMove, startMarquee, startMove, startResize, startRotate, type Frame, type Gesture, type GestureContext, type Mods } from './gestures';
+import { handlesOf, nudge, startEndpoint, startFlowMove, startMarquee, startMove, startResize, startRotate, type Frame, type Gesture, type Mods } from './gestures';
 import { hitIds, measure, measureAll, type Measured } from './measure';
 import { allPinned, drill, escapeUp, isText, pick, selectAll, slideTree, tabNext } from './selection';
 import { useDocVersion } from './use-doc-version';
@@ -32,6 +32,9 @@ export interface OverlayProps {
   frame: RefObject<HTMLDivElement | null>;
   /** A refusal or a note to show the owner (a paste that did not load, a group past the limit). */
   onNotice?: (text: string) => void;
+  /** The deck's artifact, named on what is copied, and how a paste brings another deck's pictures over (fix wave 1). */
+  artifactId?: string;
+  importAsset?: ImportAsset;
   /** The text box for a text element edited in place, drawn inside the overlay (made anew when its node is). */
   renderText?: (elementId: string, canvas: SlideCanvas) => ReactNode;
 }
@@ -57,7 +60,7 @@ interface Pending {
   pointerId: number;
 }
 
-export function Overlay({ session, canvas, slideId, scale, readOnly, surface, frame, onNotice, renderText }: OverlayProps) {
+export function Overlay({ session, canvas, slideId, scale, readOnly, surface, frame, onNotice, renderText, artifactId, importAsset }: OverlayProps) {
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
   const version = useDocVersion(session);
   const selection = state.selection;
@@ -67,17 +70,18 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
   const gesture = useRef<Gesture | null>(null);
   const pending = useRef<Pending | null>(null);
 
-  // the selection's boxes, measured again whenever the slide, the selection or the zoom changes; a selected element
-  // another replica removed leaves the selection (and a text edit of it ends)
+  const remote = useRemoteSelections(session, slideId);
+  // the selection's boxes (and other replicas' on this slide), measured again whenever the slide, a selection or the
+  // zoom changes; a selected element another replica removed leaves the selection (and a text edit of it ends)
   useLayoutEffect(() => {
     if (canvas) {
       const live = selection.filter((id) => canvas.node(id) !== undefined);
       if (live.length !== selection.length) session.select(live);
     }
-    setMeasured(canvas ? measureAll(canvas, selection, scale) : new Map());
-  }, [canvas, selection, scale, version, slideId, session]);
+    setMeasured(canvas ? measureAll(canvas, new Set([...selection, ...remote.flatMap((r) => r.elementIds)]), scale) : new Map());
+  }, [canvas, selection, remote, scale, version, slideId, session]);
 
-  const ctx = useCallback((): GestureContext | null => (canvas ? { session, slideId, canvas, scale } : null), [canvas, session, slideId, scale]);
+  const ctx = useCallback((): ClipboardContext | null => (canvas ? { session, slideId, canvas, scale, artifactId, importAsset } : null), [canvas, session, slideId, scale, artifactId, importAsset]);
 
   const slidePoint = useCallback(
     (client: Pt): Pt => {
@@ -283,9 +287,10 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       if (doc.activeElement !== el || readOnly) return;
       const c = ctx();
       if (!c) return;
-      const result = pasteClipboard(e, c, session.snapshot().selection);
-      if (result && 'ids' in result) session.select(result.ids);
-      else if (result) onNotice?.(result.reason);
+      void pasteClipboard(e, c, session.snapshot().selection).then((result) => {
+        if (result && 'ids' in result) session.select(result.ids);
+        else if (result) onNotice?.(result.reason);
+      });
     };
     // Chromium enables its Copy, Cut and Paste commands on a focus that holds no text selection only when the page takes
     // them (a cancelled `beforecopy`, `beforecut`, `beforepaste`): the stage takes them while it has focus
@@ -319,30 +324,52 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
   const showHandles = !readOnly && single !== null && editing === null && shown === null;
   const handles = single && tree ? handlesOf(tree, single.id) : [];
   const s = (n: number) => n * scale;
-  const boxStyle = (b: Box, rotation = 0) => ({ left: s(b.x), top: s(b.y), width: s(b.w), height: s(b.h), transform: rotation ? `rotate(${rotation}deg)` : undefined });
-  const all = items.length > 1 ? union(items.map((m) => rotatedBounds(m.box, m.rotation))) : null;
-  const rotatable = single !== null && !single.points && tree?.element(single.id)?.tag !== 'x-connector' && !['tr', 'th', 'td'].includes(tree?.element(single.id)?.tag ?? '');
+  const at = (p: Pt) => ({ left: s(p.x), top: s(p.y) });
+  const boxStyle = (b: Box) => ({ left: s(b.x), top: s(b.y), width: s(b.w), height: s(b.h) });
+  const outline = (m: Measured) => (m.route ?? m.corners).map((q) => `${s(q.x)},${s(q.y)}`).join(' ');
+  const all = items.length > 1 ? union(items.map((m) => m.bounds)) : null;
+  const tag = single ? tree?.element(single.id)?.tag : undefined;
+  const rotatable = single !== null && !single.points && tag !== 'x-connector' && !['tr', 'th', 'td'].includes(tag ?? '');
+  // the rotation handle: above the middle of the top edge, along the element's own up, 22 screen px off
+  const rotateAt = (m: Measured) => {
+    const top = apply(m.matrix, { x: m.w / 2, y: 0 });
+    const up = applyLinear(m.matrix, { x: 0, y: -1 });
+    const len = Math.hypot(up.x, up.y) || 1;
+    return { left: s(top.x) + (up.x / len) * ROTATE_OFFSET, top: s(top.y) + (up.y / len) * ROTATE_OFFSET };
+  };
 
   return (
     <div className="deck-overlay" data-overlay>
-      {items.map((m) =>
-        m.points ? (
-          <svg key={m.id} className="deck-sel-line" data-selected={m.id} style={{ left: 0, top: 0, width: s(1920), height: s(1080) }}>
-            <polyline points={(m.route ?? m.points).map((q) => `${s(q.x)},${s(q.y)}`).join(' ')} />
-          </svg>
-        ) : (
-          <div key={m.id} className="deck-sel" data-selected={m.id} data-editing={editing === m.id || undefined} style={boxStyle(m.box, m.rotation)}>
-            {showHandles &&
-              single === m &&
-              HANDLES.filter((h) => handles.includes(h)).map((h) => <span key={h} className="deck-handle" data-handle={h} data-at={h} aria-label={C.resizeHandle(h)} />)}
-            {showHandles && single === m && rotatable && <span className="deck-handle deck-rotate" data-handle="rotate" aria-label={C.rotateHandle} />}
-          </div>
-        ),
-      )}
+      <svg className="deck-overlay-lines" width={s(1920)} height={s(1080)} aria-hidden>
+        {remote.flatMap((r) =>
+          r.elementIds.flatMap((id) => {
+            const m = measured.get(id);
+            return m ? [<polygon key={`${r.clientId}:${id}`} className="deck-remote-sel" data-remote-selected={id} aria-label={r.name} style={{ '--remote-color': authorColor(r.color) } as CSSProperties} points={outline(m)} />] : [];
+          }),
+        )}
+        {items.map((m) =>
+          m.points ? (
+            <polyline key={m.id} className="deck-sel-line" data-selected={m.id} points={outline(m)} />
+          ) : (
+            <polygon key={m.id} className="deck-sel" data-selected={m.id} data-editing={editing === m.id || undefined} points={outline(m)} />
+          ),
+        )}
+        {all && <rect className="deck-sel-all" x={s(all.x)} y={s(all.y)} width={s(all.w)} height={s(all.h)} />}
+      </svg>
+      {remote.map((r) => {
+        const first = r.elementIds.map((id) => measured.get(id)).find((m) => m !== undefined);
+        return first ? (
+          <span key={r.clientId} className="deck-remote-name" style={{ ...at(first.bounds), '--remote-color': authorColor(r.color) } as CSSProperties}>
+            {r.name}
+          </span>
+        ) : null;
+      })}
       {showHandles &&
-        single?.points &&
-        single.points.map((q, i) => <span key={i} className="deck-handle deck-end" data-handle={`end${i}`} aria-label={C.endHandle(i)} style={{ left: s(q.x), top: s(q.y) }} />)}
-      {all && <div className="deck-sel-all" style={boxStyle(all)} />}
+        single &&
+        !single.points &&
+        HANDLES.filter((h) => handles.includes(h)).map((h) => <span key={h} className="deck-handle" data-handle={h} data-at={h} aria-label={C.resizeHandle(h)} style={at(apply(single.matrix, { x: HANDLE_AT[h][0] * single.w, y: HANDLE_AT[h][1] * single.h }))} />)}
+      {showHandles && single && rotatable && <span className="deck-handle deck-rotate" data-handle="rotate" aria-label={C.rotateHandle} style={rotateAt(single)} />}
+      {showHandles && single?.points && single.points.map((q, i) => <span key={i} className="deck-handle deck-end" data-handle={`end${i}`} aria-label={C.endHandle(i)} style={at(q)} />)}
       {shown?.guides.map((g: Guide, i) =>
         g.axis === 'x' ? (
           <div key={i} className="deck-guide" data-guide={g.kind} style={{ left: s(g.at), top: s(g.from), width: 0, height: s(g.to - g.from) }} />
@@ -358,9 +385,59 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
   );
 }
 
-/** The selection's box in its host for the inspector (its measured layout, slide px). */
+const ROTATE_OFFSET = 22; // screen px between the top edge and the rotation handle
+/** Where each handle sits on the element's own box, as fractions of its width and height. */
+const HANDLE_AT: Record<Handle, [number, number]> = { nw: [0, 0], n: [0.5, 0], ne: [1, 0], e: [1, 0.5], se: [1, 1], s: [0.5, 1], sw: [0, 1], w: [0, 0.5] };
+
+/** The selection's box in its host for the inspector (its measured layout, the host's px). */
 export function measureInHost(canvas: SlideCanvas | null, id: string, scale: number): Box | null {
   if (!canvas) return null;
-  const m = measure(canvas, id, scale);
-  return m ? { x: m.layout.x - m.hostOrigin.x, y: m.layout.y - m.hostOrigin.y, w: m.layout.w, h: m.layout.h } : null;
+  return measure(canvas, id, scale)?.inHost ?? null;
+}
+
+// ---- other replicas' selections (fix wave 1; D8's overlay)
+
+export interface RemoteSelection {
+  clientId: number;
+  name: string;
+  color: string;
+  elementIds: readonly string[];
+}
+
+// B's author palette (`--author-1..8`) is not on this branch's base yet: each reads with a fallback until it lands
+const AUTHOR_FALLBACKS = ['#c9663f', '#2b7a78', '#7c5cd6', '#3b6fd1', '#b86a1a', '#1f8f55', '#c93b3b', '#6a7179'];
+/** An awareness colour (an author colour's custom property, `--author-N`) as CSS; anything else draws in the first. */
+export function authorColor(name: string): string {
+  const n = /^--author-([1-8])$/.exec(name)?.[1];
+  const i = n ? Number(n) - 1 : 0;
+  return `var(--author-${i + 1}, ${AUTHOR_FALLBACKS[i]})`;
+}
+
+/** The other replicas' selections on `slideId`, from the session's awareness (the same array while nothing changed). */
+export function useRemoteSelections(session: DeckSession, slideId: string): readonly RemoteSelection[] {
+  const cache = useRef<{ key: string; value: readonly RemoteSelection[] }>({ key: '[]', value: [] });
+  const read = useCallback((): readonly RemoteSelection[] => {
+    const awareness = session.awareness;
+    if (!awareness) return cache.current.value;
+    const out: RemoteSelection[] = [];
+    for (const [clientId, state] of awareness.getStates() as Map<number, Record<string, unknown>>) {
+      if (clientId === awareness.clientID) continue;
+      const deck = state.deck as { slideId?: unknown; elementIds?: unknown } | null | undefined;
+      if (!deck || deck.slideId !== slideId || !Array.isArray(deck.elementIds) || deck.elementIds.length === 0) continue;
+      out.push({ clientId, name: typeof state.name === 'string' ? state.name : '', color: typeof state.color === 'string' ? state.color : '', elementIds: deck.elementIds.filter((id): id is string => typeof id === 'string') });
+    }
+    const key = JSON.stringify(out);
+    if (key !== cache.current.key) cache.current = { key, value: out };
+    return cache.current.value;
+  }, [session, slideId]);
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const awareness = session.awareness;
+      if (!awareness) return () => {};
+      awareness.on('change', listener);
+      return () => awareness.off('change', listener);
+    },
+    [session],
+  );
+  return useSyncExternalStore(subscribe, read);
 }

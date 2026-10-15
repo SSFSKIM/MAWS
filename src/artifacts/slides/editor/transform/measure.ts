@@ -1,39 +1,38 @@
-// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8 "Transform layer"; M5): what the transform layer
-// reads from the drawn slide. Every box is in slide px (the 1920×1080 canvas, from the slide's top-left), before the
-// element's own rotation: CSS offsets ignore transforms, so the stage's zoom never enters a measure. An element's host
-// is its containing block (the section, or the positioned div a pinned element is placed in), and its offsets are
-// written relative to the host's padding box, as CSS reads `left`/`top`.
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8 "Transform layer"; M5, fix wave 1): what the transform
+// layer reads from the drawn slide, in slide px (the 1920×1080 canvas, from the slide's top-left; the stage's zoom never
+// enters a measure). Each element's place is one affine map from its own box (border-box px) to the slide: its layout
+// position (offsets, which ignore transforms) and every transform on it and on its ancestors, each about its own origin,
+// so a scaled, skewed or turned element, or a child of a turned group, is measured as it is drawn. Its host is its
+// containing block (the section, or the positioned element a pinned one is placed in), whose own map takes the host's
+// px (`left`/`top`, connector coordinates) to the slide; gestures read pointer moves back through its inverse.
 import type { SlideCanvas } from '../../canvas';
 import { connectorRoute } from '../../glyphs';
-import { rotatedBounds, rotationOf, translateOf, type Box, type Pt } from '../../geometry';
+import { apply, boundsOf, cornersOf, IDENTITY, multiply, shift, transformMatrix, type Affine, type Box, type Pt } from '../../geometry';
 import { ROOT } from '../../model';
 
 export interface Measured {
   id: string;
-  /** The layout box before transforms, slide px. */
-  layout: Box;
-  /** The box as drawn before its rotation: the layout box moved by its translate. */
-  box: Box;
-  rotation: number;
-  /** The rotated bounds of `box`. */
+  /** The element's own box, px (before any transform). */
+  w: number;
+  h: number;
+  /** Its layout position in its host's px (left/top as CSS reads them, untransformed) and its size. */
+  inHost: Box;
+  /** Its box's px → slide px: layout and every transform on it and its ancestors. */
+  matrix: Affine;
+  /** Its host's px (from the host's padding box) → slide px. */
+  hostMatrix: Affine;
+  /** Its four corners on the slide, top-left first, clockwise; and their bounds. */
+  corners: Pt[];
   bounds: Box;
-  /** The element's containing block: ROOT (the section) or a positioned element's id. */
+  /** ROOT (the section) or the id of the positioned element it is placed in. */
   host: string;
-  /** The host's padding-box origin, slide px: `left`/`top` are measured from it. */
-  hostOrigin: Pt;
-  /** A pinned connector's ends in slide px, and its drawn route through them. */
+  /** A pinned connector: its ends on the slide, and its drawn route through them. */
   points?: [Pt, Pt];
   route?: Pt[];
 }
 
-/** Sums offsets up to the slide: the layout box of an HTML element in slide px (null when it is not laid out). */
-function layoutOf(n: HTMLElement, root: HTMLElement, scale: number): Box | null {
-  if (!(n instanceof n.ownerDocument.defaultView!.HTMLElement)) {
-    // an svg (no offsets): its drawn rect, unscaled
-    const r = (n as Element).getBoundingClientRect();
-    const o = root.getBoundingClientRect();
-    return { x: (r.left - o.left) / scale, y: (r.top - o.top) / scale, w: r.width / scale, h: r.height / scale };
-  }
+/** The untransformed layout offset of an HTML element from the slide's top-left (offsets summed); null when not laid out. */
+function layoutAt(n: HTMLElement, root: HTMLElement): Pt | null {
   let x = 0;
   let y = 0;
   let cur: HTMLElement | null = n;
@@ -47,8 +46,40 @@ function layoutOf(n: HTMLElement, root: HTMLElement, scale: number): Box | null 
     }
     cur = parent;
   }
-  if (cur !== root) return null;
-  return { x, y, w: n.offsetWidth, h: n.offsetHeight };
+  return cur === root ? { x, y } : null;
+}
+
+/** An element's own transform as a matrix about its origin, in its box's px. */
+function ownTransform(n: HTMLElement): Affine | null {
+  const view = n.ownerDocument.defaultView!;
+  const computed = view.getComputedStyle(n);
+  const value = computed.transform && computed.transform !== 'none' ? computed.transform : n.style.getPropertyValue('transform');
+  if (!value || value === 'none') return null;
+  const [w, h] = [n.offsetWidth, n.offsetHeight];
+  // a browser answers matrix(…); without one (a test's DOM) the inline value is read as the dialect writes it
+  const three = /^matrix3d\(([^)]*)\)$/.exec(value);
+  const m = three ? (() => {
+    const v = three[1]!.split(',').map(Number);
+    return { a: v[0]!, b: v[1]!, c: v[4]!, d: v[5]!, e: v[12]!, f: v[13]! };
+  })() : transformMatrix(value, w, h);
+  const origin = /^(-?[\d.]+)px (-?[\d.]+)px/.exec(computed.transformOrigin ?? '');
+  const o = origin ? { x: Number(origin[1]), y: Number(origin[2]) } : { x: w / 2, y: h / 2 };
+  return multiply(shift(o.x, o.y), multiply(m, shift(-o.x, -o.y)));
+}
+
+/** An HTML element's box px → slide px: its layout offset, then every transform from itself out to the slide. */
+function matrixOf(n: HTMLElement, root: HTMLElement): Affine | null {
+  const at = layoutAt(n, root);
+  if (!at) return null;
+  let m = shift(at.x, at.y);
+  for (let a: HTMLElement | null = n; a && a !== root; a = a.parentElement) {
+    const own = ownTransform(a);
+    if (!own) continue;
+    const pos = layoutAt(a, root);
+    if (!pos) return null;
+    m = multiply(multiply(shift(pos.x, pos.y), multiply(own, shift(-pos.x, -pos.y))), m);
+  }
+  return m;
 }
 
 /** The nearest positioned ancestor inside the slide (what `position:absolute` places against), else the slide. */
@@ -56,6 +87,14 @@ export function hostNodeOf(n: HTMLElement, root: HTMLElement): HTMLElement {
   const view = n.ownerDocument.defaultView!;
   for (let p = n.parentElement; p && p !== root; p = p.parentElement) if (view.getComputedStyle(p).position !== 'static') return p;
   return root;
+}
+
+/** A container's (or the slide's) box px → slide px, and its padding box's. */
+export function containerMatrix(canvas: SlideCanvas, id: string): { box: Affine; padding: Affine } | null {
+  const n = id === ROOT ? canvas.root : canvas.node(id);
+  if (!n) return null;
+  const box = n === canvas.root ? IDENTITY : matrixOf(n, canvas.root);
+  return box ? { box, padding: multiply(box, shift(n.clientLeft, n.clientTop)) } : null;
 }
 
 const coord = (v: string | null, size: number): number => (v === null ? 0 : v.trim().endsWith('%') ? (Number.parseFloat(v) / 100) * size : Number.parseFloat(v) || 0);
@@ -66,26 +105,44 @@ export function measure(canvas: SlideCanvas, id: string, scale: number): Measure
   const root = canvas.root;
   if (!n || !root.contains(n)) return null;
   const hostNode = hostNodeOf(n, root);
-  const hostLayout = hostNode === root ? { x: 0, y: 0, w: root.offsetWidth || 1920, h: root.offsetHeight || 1080 } : layoutOf(hostNode, root, scale);
-  if (!hostLayout) return null;
-  const hostOrigin = { x: hostLayout.x + hostNode.clientLeft, y: hostLayout.y + hostNode.clientTop };
+  const hostBox = hostNode === root ? IDENTITY : matrixOf(hostNode, root);
+  if (!hostBox) return null;
+  const hostMatrix = multiply(hostBox, shift(hostNode.clientLeft, hostNode.clientTop));
   const host = hostNode === root ? ROOT : (hostNode.dataset.eid ?? ROOT);
+  const hostAt = hostNode === root ? { x: 0, y: 0 } : layoutAt(hostNode, root);
   if (n.tagName === 'X-CONNECTOR' && n.hasAttribute('x1')) {
     // a pinned connector spans its host: its box is its line's
     const [w, h] = [hostNode.clientWidth, hostNode.clientHeight];
-    const pts = connectorRoute(n.getAttribute('route') ?? undefined, coord(n.getAttribute('x1'), w), coord(n.getAttribute('y1'), h), coord(n.getAttribute('x2'), w), coord(n.getAttribute('y2'), h)).map(([x, y]) => ({ x: hostOrigin.x + x, y: hostOrigin.y + y }));
-    const xs = pts.map((p) => p.x);
-    const ys = pts.map((p) => p.y);
-    const box = { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
-    return { id, layout: box, box, rotation: 0, bounds: box, host, hostOrigin, points: [pts[0]!, pts[pts.length - 1]!], route: pts };
+    const local = connectorRoute(n.getAttribute('route') ?? undefined, coord(n.getAttribute('x1'), w), coord(n.getAttribute('y1'), h), coord(n.getAttribute('x2'), w), coord(n.getAttribute('y2'), h));
+    const route = local.map(([x, y]) => apply(hostMatrix, { x, y }));
+    const bounds = boundsOf(route);
+    const corners = [
+      { x: bounds.x, y: bounds.y },
+      { x: bounds.x + bounds.w, y: bounds.y },
+      { x: bounds.x + bounds.w, y: bounds.y + bounds.h },
+      { x: bounds.x, y: bounds.y + bounds.h },
+    ];
+    return { id, w: bounds.w, h: bounds.h, inHost: bounds, matrix: shift(bounds.x, bounds.y), hostMatrix, corners, bounds, host, points: [route[0]!, route[route.length - 1]!], route };
   }
-  const layout = layoutOf(n, root, scale);
-  if (!layout) return null;
-  const transform = n.style.getPropertyValue('transform') || undefined;
-  const rotation = rotationOf(transform);
-  const [dx, dy] = translateOf(transform, layout.w, layout.h);
-  const box = { x: layout.x + dx, y: layout.y + dy, w: layout.w, h: layout.h };
-  return { id, layout, box, rotation, bounds: rotatedBounds(box, rotation), host, hostOrigin };
+  let matrix: Affine | null;
+  let w: number;
+  let h: number;
+  if (n instanceof n.ownerDocument.defaultView!.HTMLElement) {
+    matrix = matrixOf(n, root);
+    [w, h] = [n.offsetWidth, n.offsetHeight];
+  } else {
+    // an svg (no offsets): its drawn rect, unscaled
+    const r = (n as Element).getBoundingClientRect();
+    const o = root.getBoundingClientRect();
+    matrix = shift((r.left - o.left) / scale, (r.top - o.top) / scale);
+    [w, h] = [r.width / scale, r.height / scale];
+  }
+  if (!matrix || !hostAt) return null;
+  const at = n instanceof n.ownerDocument.defaultView!.HTMLElement ? layoutAt(n, root) : { x: matrix.e, y: matrix.f };
+  if (!at) return null;
+  const inHost = { x: at.x - hostAt.x - hostNode.clientLeft, y: at.y - hostAt.y - hostNode.clientTop, w, h };
+  const corners = cornersOf(matrix, w, h);
+  return { id, w, h, inHost, matrix, hostMatrix, corners, bounds: boundsOf(corners), host };
 }
 
 /** Every drawn element of the canvas by id. */
@@ -105,6 +162,16 @@ export function flowDirection(canvas: SlideCanvas, parent: string): 'row' | 'col
   const s = n.ownerDocument.defaultView!.getComputedStyle(n);
   if (s.display === 'grid') return 'row';
   return s.flexDirection.startsWith('row') ? 'row' : 'column';
+}
+
+/** A child's layout box in its parent's own px (untransformed), for the flow's slots. */
+export function boxInParent(canvas: SlideCanvas, parent: string, id: string): Box | null {
+  const n = canvas.node(id);
+  const p = parent === ROOT ? canvas.root : canvas.node(parent);
+  if (!n || !p) return null;
+  const at = layoutAt(n, canvas.root);
+  const pAt = p === canvas.root ? { x: 0, y: 0 } : layoutAt(p, canvas.root);
+  return at && pAt ? { x: at.x - pAt.x, y: at.y - pAt.y, w: n.offsetWidth, h: n.offsetHeight } : null;
 }
 
 /**

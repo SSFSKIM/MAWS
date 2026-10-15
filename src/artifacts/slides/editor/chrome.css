@@ -292,40 +292,57 @@
   outline-offset: -2px;
 }
 
-/* M5: the transform layer's overlay, in screen px over the scaled slide (handles keep their size at any zoom) */
+/* M5: the transform layer's overlay, in screen px over the scaled slide (handles keep their size at any zoom). The
+   outlines are polygons through each element's corners as drawn (turned, scaled or skewed; fix wave 1). */
 .deck-overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-.deck-sel,
-.deck-sel-all,
+.deck-overlay-lines {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+}
 .deck-marquee,
 .deck-ghost,
 .deck-insertion,
-.deck-guide,
-.deck-sel-line {
+.deck-guide {
   position: absolute;
   box-sizing: border-box;
 }
-.deck-sel {
-  outline: 1.5px solid var(--accent);
-  outline-offset: 0;
-}
-.deck-sel[data-editing] {
-  outline-style: dashed;
-}
-.deck-sel-all {
-  outline: 1px dashed var(--accent);
-}
-.deck-sel-line {
-  overflow: visible;
-}
-.deck-sel-line polyline {
+.deck-sel,
+.deck-sel-line,
+.deck-sel-all,
+.deck-remote-sel {
   fill: none;
   stroke: var(--accent);
   stroke-width: 1.5px;
+}
+.deck-sel[data-editing],
+.deck-sel-line,
+.deck-sel-all {
   stroke-dasharray: 4 3;
+}
+.deck-sel-all {
+  stroke-width: 1px;
+}
+/* another replica's selection, in its author colour (B's `--author-N`, read with a fallback) */
+.deck-remote-sel {
+  stroke: var(--remote-color);
+  stroke-width: 2px;
+}
+.deck-remote-name {
+  position: absolute;
+  transform: translateY(-100%);
+  padding: 0 4px;
+  border-radius: var(--radius-sm) var(--radius-sm) var(--radius-sm) 0;
+  background: var(--remote-color);
+  color: var(--bg-raised);
+  font-size: var(--text-ui-sm);
+  line-height: 16px;
+  white-space: nowrap;
 }
 .deck-handle {
   position: absolute;
@@ -338,49 +355,23 @@
   background: var(--bg-raised);
   pointer-events: auto;
 }
-.deck-handle[data-at='nw'] {
-  left: 0;
-  top: 0;
-  cursor: nwse-resize;
-}
-.deck-handle[data-at='n'] {
-  left: 50%;
-  top: 0;
-  cursor: ns-resize;
-}
-.deck-handle[data-at='ne'] {
-  left: 100%;
-  top: 0;
-  cursor: nesw-resize;
-}
-.deck-handle[data-at='e'] {
-  left: 100%;
-  top: 50%;
-  cursor: ew-resize;
-}
+.deck-handle[data-at='nw'],
 .deck-handle[data-at='se'] {
-  left: 100%;
-  top: 100%;
   cursor: nwse-resize;
 }
-.deck-handle[data-at='s'] {
-  left: 50%;
-  top: 100%;
-  cursor: ns-resize;
-}
+.deck-handle[data-at='ne'],
 .deck-handle[data-at='sw'] {
-  left: 0;
-  top: 100%;
   cursor: nesw-resize;
 }
+.deck-handle[data-at='n'],
+.deck-handle[data-at='s'] {
+  cursor: ns-resize;
+}
+.deck-handle[data-at='e'],
 .deck-handle[data-at='w'] {
-  left: 0;
-  top: 50%;
   cursor: ew-resize;
 }
 .deck-rotate {
-  left: 50%;
-  top: -22px;
   border-radius: 50%;
   cursor: grab;
 }

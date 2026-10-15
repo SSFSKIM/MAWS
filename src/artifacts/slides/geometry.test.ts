@@ -5,6 +5,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   angleFromPointer,
+  apply,
+  invert,
+  linear,
+  placement,
+  transformOf,
   corners,
   flowInsertIndex,
   hitTest,
@@ -211,5 +216,38 @@ describe('flow insertion', () => {
     expect(flowInsertIndex(boxes, { x: 50, y: 900 }, 'column')).toBe(3);
     const row = [box(0, 0, 100, 50), box(200, 0, 100, 50)];
     expect(flowInsertIndex(row, { x: 260, y: 0 }, 'row')).toBe(2);
+  });
+});
+
+describe('fix wave 1: resize shrinks and never goes below its minimum', () => {
+  it('Shift on a corner follows the larger relative change, shrinking too', () => {
+    expect(resizeBox(box(100, 100, 200, 100), 'se', { x: -100, y: 0 }, { keepAspect: true, min: 8 })).toEqual(box(100, 100, 100, 50));
+  });
+  it('the aspect and the minimum together: the box stops at the minimum on its smaller side, keeping its shape', () => {
+    expect(resizeBox(box(100, 100, 200, 100), 'se', { x: -400, y: 0 }, { keepAspect: true, min: 8 })).toEqual(box(100, 100, 16, 8));
+  });
+  it('a snap that would cross the minimum is dropped', () => {
+    const s = snapResize(box(130, 100, 8, 100), 'e', { lines: slideLines(), siblings: [] }, 12, 8);
+    expect(s.box.w).toBe(8);
+    expect(s.guides).toEqual([]);
+  });
+});
+
+describe('fix wave 1: transforms as matrices', () => {
+  it('composes the dialect’s transform about the box’s centre, scale and skew included', () => {
+    const m = placement({ x: 100, y: 100, w: 100, h: 50 }, 'scale(2)');
+    expect(apply(m, { x: 0, y: 0 })).toEqual({ x: 50, y: 75 });
+    expect(apply(m, { x: 100, y: 50 })).toEqual({ x: 250, y: 175 });
+    const t = placement({ x: 0, y: 0, w: 100, h: 100 }, 'translate(-50%, -50%) rotate(90deg)');
+    const p = apply(t, { x: 100, y: 0 });
+    expect([Math.round(p.x), Math.round(p.y)]).toEqual([50, 50]);
+    expect(apply(invert(m), apply(m, { x: 7, y: 9 }))).toEqual({ x: 7, y: 9 });
+  });
+  it('writes a linear part back as rotate, scale and skew within the dialect’s ranges, or refuses', () => {
+    expect(transformOf(linear(placement({ x: 0, y: 0, w: 10, h: 10 }, 'rotate(30deg) scale(1.5)')))).toBe('rotate(30deg) scale(1.5)');
+    expect(transformOf(linear(placement({ x: 0, y: 0, w: 10, h: 10 }, 'skewX(20deg)')))).toBe('skewX(20deg)');
+    expect(transformOf(linear(placement({ x: 0, y: 0, w: 10, h: 10 }, '')))).toBeNull();
+    expect(() => transformOf({ a: 3, b: 0, c: 0, d: 3, e: 0, f: 0 })).toThrow(/scale/);
+    expect(() => transformOf({ a: 1, b: 0, c: 0, d: 2, e: 0, f: 0 })).toThrow(/scale/);
   });
 });

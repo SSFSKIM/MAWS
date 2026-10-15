@@ -4,7 +4,8 @@
 //
 // A gesture is one transaction and one undo step: `edit` cuts the undo step before and after its write; a drag or a
 // burst of typing (`continuing`) keeps writing into the step it started until something else cuts it.
-import type { Doc } from '../../yjs';
+import type { Awareness } from '@y/protocols/awareness';
+import { transact, type Doc } from '../../yjs';
 import { createDeckUndo, type DeckUndo } from '../../yjs/slides-undo';
 import { slideOrder } from '../model';
 
@@ -25,6 +26,18 @@ export interface DeckSessionState {
 export interface DeckSessionOptions {
   /** The replica's composition hold (A's provider, parent Decision Log 33 to 35): set while an IME composes. */
   holdRemote?: (on: boolean) => void;
+  /**
+   * Fix wave 1: the replica's awareness, and who this replica is (`name`, `color` an author colour's custom property,
+   * `--author-N`). The session publishes its slide and selection there (`deck`), and the stage outlines the other
+   * replicas' selections from it.
+   */
+  presence?: { awareness: Awareness; name: string; color: string };
+}
+
+/** What a replica publishes of its deck editor in awareness, beside its name and colour. */
+export interface DeckPresence {
+  slideId: string | null;
+  elementIds: readonly string[];
 }
 
 const NONE: readonly string[] = Object.freeze([]);
@@ -56,6 +69,24 @@ export class DeckSession {
     this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null };
     this.timings = { openedAt };
     this.stopUndo = this.undo.subscribe(() => this.set({ canUndo: this.undo.canUndo(), canRedo: this.undo.canRedo() }));
+    this.publish();
+  }
+
+  /** The awareness other replicas' selections are read from (null without one). */
+  get awareness(): Awareness | null {
+    return this.options.presence?.awareness ?? null;
+  }
+
+  // this replica's slide and selection, in its awareness beside its name and colour
+  private published = '';
+  private publish(): void {
+    const presence = this.options.presence;
+    if (!presence) return;
+    const deck: DeckPresence = { slideId: this.state.currentSlide, elementIds: this.state.selection };
+    const key = JSON.stringify(deck);
+    if (key === this.published) return;
+    this.published = key;
+    presence.awareness.setLocalState({ ...(presence.awareness.getLocalState() ?? {}), name: presence.name, color: presence.color, deck });
   }
 
   get origin(): object {
@@ -72,22 +103,37 @@ export class DeckSession {
     const next = { ...this.state, ...patch };
     if ((Object.keys(patch) as (keyof DeckSessionState)[]).every((k) => next[k] === this.state[k])) return;
     this.state = next;
+    this.publish();
     for (const listener of [...this.listeners]) listener();
   }
 
-  /** One gesture: its own undo step, written with the editor's origin (the writer takes it as its last argument). */
+  /**
+   * One gesture: its own undo step and one transaction (fix wave 1: the writers it calls nest in it), written with the
+   * editor's origin (the writer takes it as its last argument).
+   */
   edit(write: (origin: object) => void): void {
+    this.step(() => transact(this.doc, () => write(this.origin), this.origin));
+  }
+
+  /**
+   * A step of its own around writes another writer makes with its own origin (the text box's binding, whose writes must
+   * keep it): the undo cut before and after, no transaction of the editor's.
+   */
+  step(run: () => void): void {
     this.typingIn = null;
     this.undo.cut();
-    write(this.origin);
-    this.undo.cut();
+    try {
+      run();
+    } finally {
+      this.undo.cut();
+    }
   }
 
   /** A write that continues the current step while the same field keeps being typed in (a pause or another field cuts). */
   typing(target: string, write: (origin: object) => void, now: number = performance.now()): void {
     if (this.typingIn === null || this.typingIn.target !== target || now - this.typingIn.at > TYPING_PAUSE_MS) this.undo.cut();
     this.typingIn = { target, at: now };
-    write(this.origin);
+    transact(this.doc, () => write(this.origin), this.origin);
   }
 
   /** Typing that another writer (the text box's binding) writes: cuts the undo step as `typing` would, writes nothing. */
@@ -161,6 +207,8 @@ export class DeckSession {
   }
 
   dispose(): void {
+    const presence = this.options.presence;
+    if (presence && presence.awareness.getLocalState()) presence.awareness.setLocalStateField('deck', null);
     this.stopUndo();
     this.undo.destroy();
     this.listeners.clear();

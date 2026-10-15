@@ -69,18 +69,22 @@ export function setImageSource(img: HTMLImageElement, src: string | undefined, a
 /**
  * P3-C M5 (Decision Log 18): a picture's crop, `data-crop="ZOOM X% Y%"` (Claude's: zoom 1 to 50, the focus point as
  * an object-position), drawn as the picture's view box: 1/ZOOM of the image on each axis, placed so the focus point sits
- * where object-position puts it; the element's object-fit then fills its box with that region.
+ * where object-position puts it; the element's object-fit then fills its box with that region, placed by the focus
+ * as its object-position (CSS has no object-position of its own in the dialect, so the canvas owns it).
  */
 export function applyCrop(n: HTMLElement, crop: string | undefined): void {
   const m = crop === undefined ? null : /^(\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)% (-?\d+(?:\.\d+)?)%$/.exec(crop);
   if (!m) {
     n.style.removeProperty('object-view-box');
+    n.style.removeProperty('object-position');
     return;
   }
   const rest = 1 - 1 / Math.max(1, Number(m[1]));
   const [fx, fy] = [Number(m[2]), Number(m[3])];
   const pct = (v: number) => `${Math.round(v * 1000) / 1000}%`;
   n.style.setProperty('object-view-box', `inset(${pct(rest * fy)} ${pct(rest * (100 - fx))} ${pct(rest * (100 - fy))} ${pct(rest * fx)})`);
+  // the focus also places the region in the box (fix wave 1): at zoom 1 it is all object-fit's cover crop has to go by
+  n.style.setProperty('object-position', `${pct(fx)} ${pct(fy)}`);
 }
 
 function renderIcon(document: Document, n: HTMLElement, name: string | undefined): void {

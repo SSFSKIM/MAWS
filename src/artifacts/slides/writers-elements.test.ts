@@ -244,3 +244,72 @@ describe('table rows and columns', () => {
     expect(() => tableRow(doc, 's', 'tb', { remove: table.children[1]!.id }, 'ed')).toThrow(/last row/);
   });
 });
+
+// ---------------------------------------------------------------- fix wave 1 (the M5 task review's reproductions)
+
+describe('fix wave 1: refusals write nothing, and nothing written is held', () => {
+  const pin = (i: number) => `<div id="d${i}" style="position:absolute; left:${100 + i * 20}px; top:200px; width:10px; height:10px; background:#ff0000"></div>`;
+  const two = new Map([
+    ['d0', { x: 100, y: 200, w: 10, h: 10 }],
+    ['d1', { x: 120, y: 200, w: 10, h: 10 }],
+  ]);
+  const section = (body: string) => deckWith(`<section id="s" style="background:#ffffff">${body}</section>`);
+  /** The refusal leaves the slide's file and the replica untouched. */
+  function refuses(doc: Doc, write: () => unknown, reason: RegExp) {
+    const before = slideFile(doc, 's');
+    let n = 0;
+    const off = onUpdate(doc, () => n++);
+    expect(write).toThrow(reason);
+    off();
+    expect(n).toBe(0);
+    expect(slideFile(doc, 's')).toBe(before);
+  }
+
+  it('a group refused for a member in % writes nothing', () => {
+    const doc = section(`${pin(0)}<x-connector id="percent" x1="10%" y1="20%" x2="50%" y2="80%"></x-connector>`);
+    refuses(doc, () => groupElements(doc, 's', ['d0', 'percent'], new Map([...two, ['percent', { x: 192, y: 216, w: 768, h: 648 }]]), 'ed'), /cannot move between hosts/);
+  });
+
+  it('an ungroup refused past the destination’s 24 pinned children writes nothing', () => {
+    const doc = section(Array.from({ length: 24 }, (_, i) => pin(i)).join(''));
+    const g = groupElements(doc, 's', ['d0', 'd1'], two, 'ed');
+    insertElements(doc, 's', [newElement('shape:rect', { x: 900, y: 500 })], {}, 'ed');
+    refuses(doc, () => ungroup(doc, 's', g, 'ed'), /25 pinned children/);
+  });
+
+  it('a group that would put an x-embed below the section is refused', () => {
+    const doc = section(`${pin(0)}<x-embed id="embed" style="position:absolute; left:400px; top:300px; width:200px; height:200px"><p>Live</p></x-embed>`);
+    refuses(doc, () => groupElements(doc, 's', ['d0', 'embed'], new Map([...two, ['embed', { x: 400, y: 300, w: 200, h: 200 }]]), 'ed'), /x-embed/);
+  });
+
+  it('a group past 200 elements is refused', () => {
+    const doc = section(pin(0) + pin(1) + Array.from({ length: 198 }, (_, i) => `<p id="p${i}">x</p>`).join(''));
+    refuses(doc, () => groupElements(doc, 's', ['d0', 'd1'], two, 'ed'), /201 elements/);
+  });
+
+  it('an insert or a duplicate past the slide’s 20,000 characters is refused', () => {
+    const doc = section(`<p id="p">${'a'.repeat(19999)}</p>`);
+    refuses(doc, () => insertElements(doc, 's', [newElement('text', { x: 900, y: 500 })], {}, 'ed'), /characters of text/);
+    const d2 = section(`<p id="p">${'b'.repeat(10001)}</p>`);
+    refuses(d2, () => duplicateWithin(d2, 's', ['p'], 24, 'ed'), /characters of text/);
+  });
+
+  it('ungrouping a turned group keeps each child where it is drawn: the rotation folds into the child', () => {
+    const doc = section(pin(0) + pin(1));
+    const g = groupElements(doc, 's', ['d0', 'd1'], two, 'ed');
+    setStyles(doc, 's', { [g]: { transform: 'rotate(90deg)' } }, 'ed');
+    // the group is 30 × 10 at (100, 200), centre (115, 205); d0's centre (105, 205) turns to (115, 195)
+    ungroup(doc, 's', g, 'ed');
+    expect(styleOf(doc, 'd0')).toMatchObject({ left: '110px', top: '190px', transform: 'rotate(90deg)' });
+    expect(styleOf(doc, 'd1')).toMatchObject({ left: '110px', top: '210px', transform: 'rotate(90deg)' });
+    expect(reload(doc).diagnostics).toEqual([]);
+  });
+
+  it('an ungroup whose children’s pose the dialect cannot write (scale past 2) is refused', () => {
+    const doc = section(pin(0) + pin(1));
+    setStyles(doc, 's', { d0: { transform: 'scale(2)' } }, 'ed');
+    const g = groupElements(doc, 's', ['d0', 'd1'], two, 'ed');
+    setStyles(doc, 's', { [g]: { transform: 'scale(1.5)' } }, 'ed');
+    refuses(doc, () => ungroup(doc, 's', g, 'ed'), /scale/);
+  });
+});

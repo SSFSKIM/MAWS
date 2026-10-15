@@ -11,7 +11,10 @@
 import { Editor, Extension } from '@tiptap/core';
 import { Plugin, TextSelection } from '@tiptap/pm/state';
 import { useEffect, useLayoutEffect, useReducer, useRef, useState, type FormEvent, type KeyboardEvent, type Ref, type SyntheticEvent } from 'react';
-import { isBindingTransaction } from '../../yjs';
+import type { Node as PmNode } from '@tiptap/pm/model';
+import { isBindingTransaction, onUpdate, type Doc } from '../../yjs';
+import { readFlat } from '../model';
+import { SLIDE_LIMITS, textCost } from '../parse';
 import { bindSlideText } from '../../yjs/slide-text';
 import type { SlideCanvas } from '../canvas';
 import type { DeckSession } from './session';
@@ -33,6 +36,8 @@ export const TEXTBOX_COPY = {
   hexColour: 'Hex colour',
   applyColour: 'Apply colour',
   hexOnly: 'Enter a colour as #rrggbb',
+  tooMuchText: (max: number, would: number) => `A slide holds at most ${max.toLocaleString('en-US')} characters of text; this would make ${would.toLocaleString('en-US')}.`,
+  tooManyMarks: (max: number, would: number) => `A slide holds at most ${max} formatted runs of text; this would make ${would}.`,
 } as const;
 const C = TEXTBOX_COPY;
 
@@ -62,6 +67,8 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
   const [mounted, setMounted] = useState<{ editor: Editor; node: HTMLElement } | null>(null);
   const bar = useRef<HTMLDivElement>(null);
   const [, redraw] = useReducer((n: number) => n + 1, 0);
+  // fix wave 1: an edit the slide's text budget refuses, shown until the next edit that fits
+  const [refused, setRefused] = useState<string | null>(null);
 
   useEffect(() => {
     const node = canvas.beginTextEdit(elementId);
@@ -72,11 +79,12 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
       return;
     }
     const untrack = readOnly ? () => {} : session.trackOrigin(binding.origin);
+    const budget = textBudget(session.doc, slideId, elementId, binding.origin);
     const target = `text:${elementId}`;
     // a format change is one step: cut before the binding writes it and after
     const gesture: Gesture = (command) => {
       let ran = false;
-      session.edit(() => (ran = command()));
+      session.step(() => (ran = command()));
       return ran;
     };
     const undo = () => (session.undoStep(), true);
@@ -115,9 +123,14 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
           addProseMirrorPlugins: () => [
             ...binding.plugins,
             new Plugin({
-              // before the binding writes the owner's change: one burst of typing in this box is one undo step
+              // before the binding writes the owner's change: a change past the slide's text budget is refused (the
+              // loader would hold the slide), and one burst of typing in this box is one undo step
               filterTransaction: (tr) => {
-                if (tr.docChanged && !isBindingTransaction(tr)) session.noteTyping(target);
+                if (!tr.docChanged || isBindingTransaction(tr)) return true;
+                const over = budget.over(tr.doc);
+                setRefused(over);
+                if (over) return false;
+                session.noteTyping(target);
                 return true;
               },
             }),
@@ -173,6 +186,7 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
       dom.removeEventListener('compositionend', onCompositionEnd);
       editor.destroy();
       untrack();
+      budget.dispose();
       hold(false);
       canvas.endTextEdit(elementId);
     };
@@ -193,12 +207,47 @@ export function TextBox({ session, canvas, slideId, elementId, readOnly = false 
   });
 
   if (!mounted || readOnly) return null;
-  return <MarkBar ref={bar} editor={mounted.editor} node={mounted.node} session={session} />;
+  return <MarkBar ref={bar} editor={mounted.editor} node={mounted.node} session={session} refused={refused} />;
+}
+
+/**
+ * The slide's text budget for one text box (fix wave 1): the loader holds a slide past `SLIDE_LIMITS.textChars`
+ * characters or `.marks` marked runs, counted as the loader counts them (`textCost`). The rest of the slide's text is
+ * read once and again only after another writer's change (this box's own writes cannot change it).
+ */
+function textBudget(doc: Doc, slideId: string, elementId: string, own: unknown) {
+  let rest: { chars: number; marks: number } | null = null;
+  const off = onUpdate(doc, (_update, origin) => {
+    if (origin !== own) rest = null;
+  });
+  const others = () => {
+    if (rest) return rest;
+    const blocks = readFlat(doc, slideId).flatMap((e) => (e.id === elementId ? [] : (e.text ?? [])));
+    rest = textCost(blocks);
+    return rest;
+  };
+  return {
+    /** The reason `next` (the box's document after a change) would take the slide past its budget, or null. */
+    over(next: PmNode): string | null {
+      let chars = 0;
+      let marks = 0;
+      next.descendants((n) => {
+        if (!n.isText) return;
+        chars += [...(n.text ?? '')].length;
+        if (n.marks.length) marks++;
+      });
+      const r = others();
+      if (r.chars + chars > SLIDE_LIMITS.textChars) return C.tooMuchText(SLIDE_LIMITS.textChars, r.chars + chars);
+      if (r.marks + marks > SLIDE_LIMITS.marks) return C.tooManyMarks(SLIDE_LIMITS.marks, r.marks + marks);
+      return null;
+    },
+    dispose: off,
+  };
 }
 
 type Panel = 'link' | 'colour' | null;
 
-function MarkBar({ ref, editor, node, session }: { ref: Ref<HTMLDivElement>; editor: Editor; node: HTMLElement; session: DeckSession }) {
+function MarkBar({ ref, editor, node, session, refused }: { ref: Ref<HTMLDivElement>; editor: Editor; node: HTMLElement; session: DeckSession; refused: string | null }) {
   const [panel, setPanel] = useState<Panel>(null);
   const [value, setValue] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -207,7 +256,7 @@ function MarkBar({ ref, editor, node, session }: { ref: Ref<HTMLDivElement>; edi
   const inLink = editor.isActive('a');
 
   const run = (command: (chain: ReturnType<Editor['chain']>) => ReturnType<Editor['chain']>) => {
-    session.edit(() => void command(editor.chain().focus()).run());
+    session.step(() => void command(editor.chain().focus()).run());
   };
   const open = (next: Panel) => {
     setPanel(panel === next ? null : next);
@@ -305,6 +354,11 @@ function MarkBar({ ref, editor, node, session }: { ref: Ref<HTMLDivElement>; edi
             </p>
           )}
         </form>
+      )}
+      {refused && (
+        <p role="alert" className="deck-markbar-error" data-text-refused>
+          {refused}
+        </p>
       )}
     </div>
   );

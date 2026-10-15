@@ -4,7 +4,7 @@
 // gesture (one transaction or one undo step) with the editor's origin; what the slide's limits refuse comes back as a
 // reason to show.
 import type { Box } from '../../geometry';
-import { CELL_TAGS, CONTAINER_TAGS, TEXT_TAGS, isPinned } from '../../ir';
+import { CELL_TAGS, TEXT_TAGS, isPinned } from '../../ir';
 import { deleteElementTree, ROOT, zOrder } from '../../model';
 import { detachWithin, duplicateWithin, groupElements, ungroup } from '../../writers-elements';
 import type { GestureContext } from './gestures';
@@ -91,9 +91,11 @@ export function selectionCommands(ctx: GestureContext, selection: readonly strin
     },
     z(to) {
       if (!canEdit || !allPinned(tree, ids)) return;
-      // several at once: apply bottom-up for front/forward and top-down for back/backward, keeping their own order
+      // several at once, keeping their own order: to the front and one step back bottom-up (each lands above, or
+      // steps under the one moved before it); to the back and one step forward top-down (fix wave 1: two neighbours
+      // stepping forward bottom-up only swapped and swapped back)
       const ordered = sameParent ? paintOrder(ids) : ids;
-      const run = to === 'front' || to === 'forward' ? ordered : [...ordered].reverse();
+      const run = to === 'front' || to === 'backward' ? ordered : [...ordered].reverse();
       session.edit((origin) => run.forEach((id) => zOrder(doc, slideId, id, to, origin)));
     },
     group() {
@@ -101,7 +103,7 @@ export function selectionCommands(ctx: GestureContext, selection: readonly strin
       const boxes = new Map<string, Box>();
       for (const id of ids) {
         const m = measure(ctx.canvas, id, ctx.scale);
-        if (m) boxes.set(id, { x: m.layout.x - m.hostOrigin.x, y: m.layout.y - m.hostOrigin.y, w: m.layout.w, h: m.layout.h });
+        if (m) boxes.set(id, m.inHost);
       }
       let group = '';
       const refused = attempt(() => session.edit((origin) => (group = groupElements(doc, slideId, ids, boxes, origin))));
@@ -110,11 +112,11 @@ export function selectionCommands(ctx: GestureContext, selection: readonly strin
     },
     ungroup() {
       if (ids.length !== 1 || !isGroup(tree, ids[0]!)) return null;
-      const g = measure(ctx.canvas, ids[0]!, ctx.scale);
+      // each child's box in the group's px (the group is its host)
       const boxes = new Map<string, Box>();
       for (const c of tree.childrenOf(ids[0]!)) {
         const m = measure(ctx.canvas, c, ctx.scale);
-        if (m && g) boxes.set(c, { x: m.layout.x - g.hostOrigin.x, y: m.layout.y - g.hostOrigin.y, w: m.layout.w, h: m.layout.h });
+        if (m) boxes.set(c, m.inHost);
       }
       let kids: string[] = [];
       const refused = attempt(() => session.edit((origin) => (kids = ungroup(doc, slideId, ids[0]!, origin, boxes.size ? boxes : undefined))));
@@ -125,7 +127,7 @@ export function selectionCommands(ctx: GestureContext, selection: readonly strin
       if (!canDetach || !one) return null;
       const m = measure(ctx.canvas, one.id, ctx.scale);
       if (!m) return null;
-      const box = { left: m.layout.x - m.hostOrigin.x, top: m.layout.y - m.hostOrigin.y, width: m.layout.w, ...(TEXT_TAGS.has(one.tag) && !CONTAINER_TAGS.has(one.tag) ? {} : { height: m.layout.h }) };
+      const box = { left: m.inHost.x, top: m.inHost.y, width: m.w, ...(TEXT_TAGS.has(one.tag) ? {} : { height: m.h }) };
       return attempt(() => session.edit((origin) => detachWithin(doc, slideId, one.id, box, origin)));
     },
   };

@@ -5,18 +5,21 @@
 //
 // - restyle: properties checked against the dialect's line, applies-to and limits, all or nothing.
 // - setStyles: a gesture's frame (left/top/width/height/transform px from the transform layer) over several elements.
-// - group / ungroup: pinned siblings into a pinned `div data-group` at their bounds, their offsets kept, and back.
+// - group / ungroup: pinned siblings into a pinned `div data-group` at their bounds, their offsets kept, and back, each
+//   child where it is drawn (a turned group's transform folded into its children's).
+// - Fix wave 1: every structural writer builds a plan the dialect's own loader judges (`commit`) before one transaction
+//   writes it: a refusal writes nothing, and nothing written is held.
 // - insertElements / newElement / copyElements / pasteElements: new content, the clipboard's dialect HTML, ids
 //   re-minted where they would collide on the slide.
 // - tableRow / tableColumn: a table's rows and columns added and removed.
 import { transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
 import { checkStyle, type StyleSite } from './css';
-import { pinToLeftTop, px, rotatedBounds, rotationOf, union, type Box, type Pt } from './geometry';
+import { apply, boundsOf, cornersOf, isIdentityLinear, linear, multiply, pinToLeftTop, placement, px, transformMatrix, transformOf, union, type Box, type Pt } from './geometry';
 import { CELL_TAGS, CONTAINER_TAGS, isPinned, type ElementIR, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
-import { cellMinter, childLists, detach, duplicateElements, elementMinter, flatten, groupOf, readFlat, readSlide, resolveParents, ROOT, toScalars, type FlatElement } from './model';
-import { ANY, OVER, rekey, UNDER } from './order';
-import { loadSlide, SLIDE_LIMITS } from './parse';
+import { cellMinter, childLists, elementMinter, flatten, fromScalars, groupOf, readFlat, readSlide, resolveParents, ROOT, toScalars, type FlatElement } from './model';
+import { ANY, keyAfter, OVER, rekey, UNDER } from './order';
+import { loadSlide } from './parse';
 import { serializeSlide } from './serialize';
 
 // ---------------------------------------------------------------- restyle
@@ -107,80 +110,198 @@ export function setAttrsOf(doc: Doc, slideId: string, writes: Record<string, Rec
   writeElements(doc, slideId, Object.fromEntries(Object.entries(writes).map(([id, attrs]) => [id, { attrs }])), origin);
 }
 
-// ---------------------------------------------------------------- limits
+// ---------------------------------------------------------------- plans: checked by the loader, then written once
 
-/** The slide's room for `adding` elements (cells apart) and `pinned` more pinned children of `parent`; throws past them. */
-function needRoom(els: FlatElement[], eff: Map<string, string>, parent: string, adding: { elements: number; cells: number; pinned: number }): void {
-  const cells = els.filter((e) => CELL_TAGS.has(e.tag)).length;
-  const elements = els.length - cells;
-  if (elements + adding.elements > SLIDE_LIMITS.elements) throw new Error(`a slide holds at most ${SLIDE_LIMITS.elements} elements`);
-  if (cells + adding.cells > SLIDE_LIMITS.cells) throw new Error(`a slide holds at most ${SLIDE_LIMITS.cells} table cells`);
-  const pinned = els.filter((e) => eff.get(e.id) === parent && isPinned(e.tag, e.style, e.attrs)).length;
-  if (adding.pinned > 0 && pinned + adding.pinned > SLIDE_LIMITS.pinnedPerHost) throw new Error(`a slide or group holds at most ${SLIDE_LIMITS.pinnedPerHost} pinned elements; split them across groups`);
+/**
+ * A gesture's changes to one slide's elements (fix wave 1): records created (descendants included), model keys set
+ * (`style:left`, `attr:x1`, `parent`, `z`, `order`; null deletes) and elements removed. A structural writer builds its
+ * plan, `commit` asks the dialect's own loader whether the slide it makes would load (every limit the loader holds a slide
+ * for: elements, cells, text and marks, pinned children per host, nesting, embeds, tables), and only then writes it, as
+ * one transaction. A refusal throws before anything is written.
+ */
+export interface Plan {
+  create: FlatElement[];
+  set: Map<string, Record<string, Y.Json | null>>;
+  remove: Set<string>;
 }
+const newPlan = (): Plan => ({ create: [], set: new Map(), remove: new Set() });
+function put(plan: Plan, id: string, key: string, value: Y.Json | null): void {
+  if (!plan.set.has(id)) plan.set.set(id, {});
+  plan.set.get(id)![key] = value;
+}
+const putStyle = (plan: Plan, id: string, writes: Record<string, string | null>) => Object.entries(writes).forEach(([k, v]) => put(plan, id, `style:${k}`, v));
 
-/** The subtree of each id as the model resolves it now (the ids and their descendants). */
-function subtreeOf(els: FlatElement[], eff: Map<string, string>, ids: readonly string[]): FlatElement[] {
-  const inside = new Set(ids);
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const e of els)
-      if (!inside.has(e.id) && inside.has(eff.get(e.id)!)) {
-        inside.add(e.id);
-        grew = true;
+/** The slide as the plan would leave it, read by the model's rules (readSlide's). */
+function projected(doc: Doc, slideId: string, plan: Plan): SlideIR {
+  const base = readSlide(doc, slideId);
+  const els = readFlat(doc, slideId, true)
+    .filter((e) => !plan.remove.has(e.id))
+    .map((e) => {
+      const keys = plan.set.get(e.id);
+      if (!keys) return e;
+      const scalars = toScalars(e);
+      for (const [k, v] of Object.entries(keys)) {
+        if (v === null) delete scalars[k];
+        else scalars[k] = v;
       }
-  }
-  return els.filter((e) => inside.has(e.id));
+      const next = fromScalars(e.id, scalars);
+      if (e.text) next.text = e.text;
+      return next;
+    });
+  els.push(...plan.create);
+  const lists = childLists(els);
+  const build = (p: string): ElementIR[] =>
+    (lists.get(p) ?? []).map((e) => {
+      const el: ElementIR = { id: e.id, tag: e.tag, attrs: e.attrs, style: e.style, children: CONTAINER_TAGS.has(e.tag) ? build(e.id) : [] };
+      if (e.text) el.text = e.text;
+      if (e.raw !== undefined) el.raw = e.raw;
+      return el;
+    });
+  return { ...base, children: build(ROOT) };
 }
 
 /**
- * ⌘D (D8): model.ts's `duplicateElements` within the slide's limits (each copy beside its original, a pinned copy
- * `offset` px on and at the front). Throws past them. Returns each original's copy.
+ * Throws the loader's reasons when the slide the plan makes would be held, or would lose (with a warning) anything the
+ * plan wrote; the loader is the one judge of the dialect's limits, so no rule is kept twice.
  */
-export function duplicateWithin(doc: Doc, slideId: string, ids: string[], offset: number, origin?: unknown): Map<string, string> {
-  const els = readFlat(doc, slideId, false);
-  const eff = resolveParents(els);
-  const copies = subtreeOf(els, eff, ids);
-  const pinnedBy = new Map<string, number>();
-  for (const id of ids) {
-    const e = els.find((x) => x.id === id);
-    if (e && isPinned(e.tag, e.style, e.attrs)) pinnedBy.set(eff.get(id)!, (pinnedBy.get(eff.get(id)!) ?? 0) + 1);
-  }
-  const count = { elements: copies.filter((e) => !CELL_TAGS.has(e.tag)).length, cells: copies.filter((e) => CELL_TAGS.has(e.tag)).length };
-  needRoom(els, eff, '\u0000', { ...count, pinned: 0 });
-  for (const [parent, pinned] of pinnedBy) needRoom(els, eff, parent, { elements: 0, cells: 0, pinned });
-  return duplicateElements(doc, slideId, ids, { offset }, origin);
+export function preflight(doc: Doc, slideId: string, plan: Plan): void {
+  const loaded = loadSlide(serializeSlide(projected(doc, slideId, plan)), { fileId: slideId });
+  if (!loaded.ok) throw new Error(`the slide would not load: ${loaded.held.reasons.join('; ')}`);
+  const touched = new Set([...plan.create.map((e) => e.id), ...plan.set.keys()]);
+  const lost = loaded.diagnostics.find((d) => d.severity === 'warning' && d.element !== undefined && touched.has(d.element));
+  if (lost) throw new Error(lost.message);
 }
 
-/** "Detach" (D8) within the host's 24 pinned children: model.ts's `detach` at the box the editor measured. */
+/** Checks the plan, then writes it as one transaction with `origin`. */
+export function commit(doc: Doc, slideId: string, plan: Plan, origin?: unknown): void {
+  preflight(doc, slideId, plan);
+  transact(
+    doc,
+    () => {
+      for (const id of plan.remove) if (Y.hasElement(doc, slideId, id)) Y.deleteElement(doc, slideId, id);
+      for (const e of plan.create) Y.createElement(doc, slideId, e.id, toScalars(e), e.text);
+      for (const [id, keys] of plan.set)
+        for (const [k, v] of Object.entries(keys)) {
+          if (!Y.hasElement(doc, slideId, id)) continue;
+          if (v === null) Y.deleteElementKey(doc, slideId, id, k);
+          else Y.setElementKey(doc, slideId, id, k, v);
+        }
+    },
+    origin,
+  );
+}
+
+/**
+ * ⌘D (D8): a copy of each element (and its descendants) under fresh ids, a flow copy right after its original, a pinned
+ * copy at the front of its stack `offset` px on (when its left and top are px); refused, unwritten, past the slide's
+ * limits. Returns each original's copy.
+ */
+export function duplicateWithin(doc: Doc, slideId: string, ids: string[], offset: number, origin?: unknown): Map<string, string> {
+  const els = readFlat(doc, slideId, true);
+  const eff = resolveParents(els);
+  const byId = new Map(els.map((e) => [e.id, e]));
+  const picked = new Set(ids);
+  const inside = (id: string) => {
+    for (let p = eff.get(id); p !== undefined && p !== ROOT; p = eff.get(p)) if (picked.has(p)) return true;
+    return false;
+  };
+  const roots = ids.filter((id) => byId.has(id) && !inside(id));
+  const mint = elementMinter(doc, slideId, byId.keys());
+  const mintCell = cellMinter(doc, byId.keys());
+  const lists = childLists(els, eff);
+  const plan = newPlan();
+  const copies = new Map<string, string>();
+  // per parent: the flow order with each copy after its original, and the pinned copies on top
+  const byParent = new Map<string, string[]>();
+  for (const root of roots) {
+    const p = eff.get(root)!;
+    if (!byParent.has(p)) byParent.set(p, []);
+    byParent.get(p)!.push(root);
+  }
+  for (const [parent, mine] of byParent) {
+    const sibs = lists.get(parent) ?? [];
+    const flow = sibs.filter((e) => groupOf(e) === 'flow');
+    const over = sibs.filter((e) => groupOf(e) === 'over');
+    const flowDesired = flow.flatMap((e) => (mine.includes(e.id) ? [e.id, `\u0000${e.id}`] : [e.id]));
+    const orderKeys = rekey(flowDesired, new Map(flow.filter((e) => e.order !== undefined).map((e) => [e.id, e.order!])), ANY);
+    const pinnedMine = sibs.filter((e) => mine.includes(e.id) && groupOf(e) !== 'flow').map((e) => `\u0000${e.id}`);
+    const zKeys = rekey([...over.map((e) => e.id), ...pinnedMine], new Map(over.filter((e) => e.z !== undefined).map((e) => [e.id, e.z!])), OVER);
+    for (const [id, k] of orderKeys) if (!id.startsWith('\u0000')) put(plan, id, 'order', k);
+    for (const [id, k] of zKeys) if (!id.startsWith('\u0000')) put(plan, id, 'z', k);
+    for (const root of mine) {
+      const me = byId.get(root)!;
+      const copyTree = (src: FlatElement, newParent: string, placement: { order?: string; z?: string }, top: boolean) => {
+        const id = CELL_TAGS.has(src.tag) ? mintCell(newParent) : mint(src.id);
+        copies.set(src.id, id);
+        const style = { ...src.style };
+        if (top && groupOf(src) !== 'flow' && offset)
+          for (const k of ['left', 'top'] as const) {
+            const m = /^(-?\d+(?:\.\d+)?)px$/.exec(style[k] ?? '');
+            if (m) style[k] = px(Number(m[1]) + offset);
+          }
+        const copy: FlatElement = { ...src, id, parent: newParent, style };
+        delete copy.order;
+        delete copy.z;
+        Object.assign(copy, placement);
+        plan.create.push(copy);
+        for (const child of lists.get(src.id) ?? []) copyTree(child, id, child.order !== undefined ? { order: child.order } : child.z !== undefined ? { z: child.z } : {}, false);
+      };
+      copyTree(me, parent, groupOf(me) === 'flow' ? { order: orderKeys.get(`\u0000${root}`)! } : { z: zKeys.get(`\u0000${root}`)! }, true);
+    }
+  }
+  commit(doc, slideId, plan, origin);
+  return new Map(roots.map((r) => [r, copies.get(r)!]));
+}
+
+/** "Detach" (D8): a flow child pinned over the flow layer at the box the editor measured; refused past the host's limit. */
 export function detachWithin(doc: Doc, slideId: string, id: string, box: { left: number; top: number; width?: number; height?: number }, origin?: unknown): void {
   const els = readFlat(doc, slideId, false);
   const eff = resolveParents(els);
-  needRoom(els, eff, eff.get(id) ?? ROOT, { elements: 0, cells: 0, pinned: 1 });
-  detach(doc, slideId, id, box, origin);
+  const me = els.find((e) => e.id === id);
+  if (!me || groupOf(me) !== 'flow') throw new Error(`${slideId}/${id} is not a flow element`);
+  const over = (childLists(els, eff).get(eff.get(id)!) ?? []).filter((e) => groupOf(e) === 'over');
+  const plan = newPlan();
+  putStyle(plan, id, { position: 'absolute', left: px(box.left), top: px(box.top), ...(box.width !== undefined && { width: px(box.width) }), ...(box.height !== undefined && { height: px(box.height) }) });
+  put(plan, id, 'order', null);
+  put(
+    plan,
+    id,
+    'z',
+    keyAfter(
+      over.map((e) => e.z),
+      OVER,
+    ),
+  );
+  commit(doc, slideId, plan, origin);
 }
 
 // ---------------------------------------------------------------- group and ungroup
 
 const PX = /^(-?\d+(?:\.\d+)?)(px)?$/;
-/** A connector's coordinate moved by `d` px (bare px or Npx); a % coordinate cannot move with its host and throws. */
-function shiftCoord(v: string, d: number): string {
-  const m = PX.exec(v.trim());
+/** A connector's coordinate as a number of px; a % coordinate cannot move with its host and throws. */
+function coordOf(v: string | undefined): number {
+  const m = PX.exec((v ?? '0').trim());
   if (!m) throw new Error('a connector placed in % of its host cannot move between hosts; give it px coordinates first');
-  const n = Math.round((Number(m[1]) + d) * 100) / 100;
-  return m[2] ? `${n}px` : String(n);
+  return Number(m[1]);
 }
-const COORDS = ['x1', 'y1', 'x2', 'y2'] as const;
+const num = (n: number) => String(Math.round(n * 100) / 100);
+const COORDS = [
+  ['x1', 'y1'],
+  ['x2', 'y2'],
+] as const;
+const pxOf = (v: string | undefined): number | null => {
+  const m = /^(-?\d+(?:\.\d+)?)px$/.exec(v ?? '');
+  return m ? Number(m[1]) : null;
+};
 
 /**
- * Groups pinned siblings (D8): a pinned `div data-group` at the bounds of their boxes (`boxes`: each member's layout box
- * in its host, px, as the editor measured it), its members re-parented into it with their offsets kept (a right/bottom
- * pin placed by its box), in their paint order; the group takes the topmost member's place. Returns the group's id.
+ * Groups pinned siblings (D8): a pinned `div data-group` at the bounds of their boxes as drawn (`boxes`: each member's
+ * layout box in its host, px, as the editor measured it; each member's own transform counted), its members re-parented
+ * into it with their offsets kept (a right/bottom pin placed by its box), in their paint order; the group takes the
+ * topmost member's place. Refused, unwritten, when the slide it makes would not load. Returns the group's id.
  */
 export function groupElements(doc: Doc, slideId: string, ids: string[], boxes: ReadonlyMap<string, Box>, origin?: unknown): string {
   if (ids.length < 2) throw new Error('a group needs at least two elements');
-  if (ids.length > SLIDE_LIMITS.pinnedPerHost) throw new Error(`a group holds at most ${SLIDE_LIMITS.pinnedPerHost} pinned elements`);
   const els = readFlat(doc, slideId, false);
   const eff = resolveParents(els);
   const byId = new Map(els.map((e) => [e.id, e]));
@@ -193,55 +314,48 @@ export function groupElements(doc: Doc, slideId: string, ids: string[], boxes: R
   });
   const parent = eff.get(members[0]!.id)!;
   if (members.some((m) => eff.get(m.id) !== parent)) throw new Error('grouped elements share one parent');
-  // paint order: the parent's under list, then its over list
   const stack = (childLists(els, eff).get(parent) ?? []).filter((e) => groupOf(e) !== 'flow');
   const inStack = members.slice().sort((a, b) => stack.indexOf(a) - stack.indexOf(b));
   const top = inStack[inStack.length - 1]!;
-  const area = union(members.map((m) => rotatedBounds(boxes.get(m.id)!, rotationOf(m.style.transform))))!;
+  const drawn = (m: FlatElement): Box => {
+    if (m.tag === 'x-connector' && m.attrs.x1 !== undefined) {
+      const pts = COORDS.map(([x, y]) => ({ x: coordOf(m.attrs[x]), y: coordOf(m.attrs[y]) }));
+      return boundsOf(pts);
+    }
+    return boundsOf(cornersOf(placement(boxes.get(m.id)!, m.style.transform), boxes.get(m.id)!.w, boxes.get(m.id)!.h));
+  };
+  const area = union(members.map(drawn))!;
   const groupId = elementMinter(doc, slideId, byId.keys())('group');
   const innerKeys = rekey(
     inStack.map((m) => m.id),
     new Map(),
     OVER,
   );
-  transact(
-    doc,
-    () => {
-      Y.createElement(doc, slideId, groupId, {
-        tag: 'div',
-        parent,
-        z: top.z!,
-        'style:position': 'absolute',
-        'style:left': px(area.x),
-        'style:top': px(area.y),
-        'style:width': px(area.w),
-        'style:height': px(area.h),
-        'attr:data-group': '',
-      });
-      for (const m of inStack) {
-        const b = boxes.get(m.id)!;
-        Y.setElementKey(doc, slideId, m.id, 'parent', groupId);
-        Y.setElementKey(doc, slideId, m.id, 'z', innerKeys.get(m.id)!);
-        if (m.tag === 'x-connector' && m.attrs.x1 !== undefined) {
-          for (const c of COORDS) Y.setElementKey(doc, slideId, m.id, `attr:${c}`, shiftCoord(m.attrs[c] ?? '0', -(c.startsWith('x') ? area.x : area.y)));
-          continue;
-        }
-        const writes = { ...pinToLeftTop(m.style, b), left: px(b.x - area.x), top: px(b.y - area.y) };
-        for (const [k, v] of Object.entries(writes)) {
-          if (v === null) Y.deleteElementKey(doc, slideId, m.id, `style:${k}`);
-          else Y.setElementKey(doc, slideId, m.id, `style:${k}`, v);
-        }
+  const plan = newPlan();
+  plan.create.push({ id: groupId, tag: 'div', parent, z: top.z!, style: { position: 'absolute', left: px(area.x), top: px(area.y), width: px(area.w), height: px(area.h) }, attrs: { 'data-group': '' } });
+  for (const m of inStack) {
+    put(plan, m.id, 'parent', groupId);
+    put(plan, m.id, 'z', innerKeys.get(m.id)!);
+    if (m.tag === 'x-connector' && m.attrs.x1 !== undefined) {
+      for (const [x, y] of COORDS) {
+        put(plan, m.id, `attr:${x}`, num(coordOf(m.attrs[x]) - area.x));
+        put(plan, m.id, `attr:${y}`, num(coordOf(m.attrs[y]) - area.y));
       }
-    },
-    origin,
-  );
+      continue;
+    }
+    const b = boxes.get(m.id)!;
+    putStyle(plan, m.id, { ...pinToLeftTop(m.style, b), left: px(b.x - area.x), top: px(b.y - area.y) });
+  }
+  commit(doc, slideId, plan, origin);
   return groupId;
 }
 
 /**
  * Ungroups a `div data-group` whose children are all pinned: they move to the group's parent at the group's place in the
- * paint order, their offsets plus the group's (px; with `boxes`, each child's measured box in the group's host places
- * it). The group goes. Returns the children in paint order. A turned group's rotation is not carried to its children.
+ * paint order, each where it is drawn: the group's offset added and, for a turned, scaled or skewed group, the group's
+ * transform folded into the child's own (rotate, scale and skew within the dialect's ranges). `boxes` (each child's
+ * layout box in the group, as measured) places a child not pinned by left/top px. Refused, unwritten, when a pose has no
+ * form in the dialect or the slide it makes would not load. Returns the children in paint order.
  */
 export function ungroup(doc: Doc, slideId: string, groupId: string, origin?: unknown, boxes?: ReadonlyMap<string, Box>): string[] {
   const els = readFlat(doc, slideId, false);
@@ -252,41 +366,48 @@ export function ungroup(doc: Doc, slideId: string, groupId: string, origin?: unk
   const kids = lists.get(groupId) ?? [];
   if (kids.some((k) => groupOf(k) === 'flow')) throw new Error('a group with flow content does not ungroup');
   const parent = eff.get(groupId)!;
-  const gx = Number.parseFloat(g.style.left ?? '0') || 0;
-  const gy = Number.parseFloat(g.style.top ?? '0') || 0;
-  if (!boxes && (!PX.test(g.style.left ?? '0px') || !PX.test(g.style.top ?? '0px'))) throw new Error('the group is not placed by left/top px');
+  const [gx, gy] = [pxOf(g.style.left ?? '0px'), pxOf(g.style.top ?? '0px')];
+  if (gx === null || gy === null) throw new Error('the group is not placed by left/top px');
+  const turned = g.style.transform !== undefined && !isIdentityLinear(transformMatrix(g.style.transform, 1, 1));
+  const [gw, gh] = [pxOf(g.style.width), pxOf(g.style.height)];
+  if (turned && (gw === null || gh === null || g.style.transform!.includes('var('))) throw new Error('a turned group ungroups only with a px size and no token in its transform');
+  const G = placement({ x: gx, y: gy, w: gw ?? 0, h: gh ?? 0 }, turned ? g.style.transform : undefined);
   const side = groupOf(g);
   const list = (lists.get(parent) ?? []).filter((e) => groupOf(e) === side);
   const desired = list.flatMap((e) => (e.id === groupId ? kids.map((k) => k.id) : [e.id]));
   const current = new Map(list.filter((e) => e.id !== groupId && e.z !== undefined).map((e) => [e.id, e.z!]));
   const keys = rekey(desired, current, side === 'under' ? UNDER : OVER);
-  transact(
-    doc,
-    () => {
-      for (const k of kids) {
-        Y.setElementKey(doc, slideId, k.id, 'parent', parent);
-        Y.setElementKey(doc, slideId, k.id, 'z', keys.get(k.id) ?? k.z!);
-        if (k.tag === 'x-connector' && k.attrs.x1 !== undefined) {
-          for (const c of COORDS) Y.setElementKey(doc, slideId, k.id, `attr:${c}`, shiftCoord(k.attrs[c] ?? '0', c.startsWith('x') ? gx : gy));
-          continue;
-        }
-        const b = boxes?.get(k.id);
-        let writes: Record<string, string | null>;
-        if (b) writes = { ...pinToLeftTop(k.style, b), left: px(b.x), top: px(b.y) };
-        else {
-          if (!PX.test(k.style.left ?? '0px') || !PX.test(k.style.top ?? '0px') || k.style.right !== undefined || k.style.bottom !== undefined) throw new Error(`${k.id} is not placed by left/top px`);
-          writes = { left: px((Number.parseFloat(k.style.left ?? '0') || 0) + gx), top: px((Number.parseFloat(k.style.top ?? '0') || 0) + gy) };
-        }
-        for (const [key, v] of Object.entries(writes)) {
-          if (v === null) Y.deleteElementKey(doc, slideId, k.id, `style:${key}`);
-          else Y.setElementKey(doc, slideId, k.id, `style:${key}`, v);
-        }
+  const plan = newPlan();
+  plan.remove.add(groupId);
+  for (const k of kids) {
+    put(plan, k.id, 'parent', parent);
+    put(plan, k.id, 'z', keys.get(k.id) ?? k.z!);
+    if (k.tag === 'x-connector' && k.attrs.x1 !== undefined) {
+      for (const [x, y] of COORDS) {
+        const p = apply(G, { x: coordOf(k.attrs[x]), y: coordOf(k.attrs[y]) });
+        put(plan, k.id, `attr:${x}`, num(p.x));
+        put(plan, k.id, `attr:${y}`, num(p.y));
       }
-      for (const [id, z] of keys) if (id !== groupId && !kids.some((k) => k.id === id)) Y.setElementKey(doc, slideId, id, 'z', z);
-      Y.deleteElement(doc, slideId, groupId);
-    },
-    origin,
-  );
+      continue;
+    }
+    const own = { x: pxOf(k.style.left), y: pxOf(k.style.top), w: pxOf(k.style.width), h: pxOf(k.style.height) };
+    const measured = boxes?.get(k.id);
+    const box: Box | null = measured ?? (own.x !== null && own.y !== null && k.style.right === undefined && k.style.bottom === undefined ? { x: own.x, y: own.y, w: own.w ?? 0, h: own.h ?? 0 } : null);
+    if (!box) throw new Error(`${k.id} is not placed by left/top px`);
+    if (!turned) {
+      putStyle(plan, k.id, { ...pinToLeftTop(k.style, box), left: px(box.x + gx), top: px(box.y + gy) });
+      continue;
+    }
+    if (k.style.transform?.includes('var(')) throw new Error(`${k.id}'s transform holds a token; it cannot fold the group's`);
+    if (own.w === null && !measured) throw new Error(`${k.id} has no size to turn about`);
+    const world = multiply(G, placement(box, k.style.transform));
+    const transform = transformOf(linear(world));
+    if (k.tag === 'x-shape' && transform !== null && !/^rotate\([^)]*\)$/.test(transform)) throw new Error('an x-shape takes rotate only; this group’s scale or skew has no form on it');
+    const centre = apply(world, { x: box.w / 2, y: box.h / 2 });
+    putStyle(plan, k.id, { ...pinToLeftTop(k.style, box), left: px(centre.x - box.w / 2), top: px(centre.y - box.h / 2), transform });
+  }
+  for (const [id, z] of keys) if (id !== groupId && !kids.some((k) => k.id === id)) put(plan, id, 'z', z);
+  commit(doc, slideId, plan, origin);
   return kids.map((k) => k.id);
 }
 
@@ -346,8 +467,8 @@ export interface InsertOptions {
 
 /**
  * Inserts elements (with their descendants) into a slide in one transaction: pinned ones at the front of `parent`'s
- * stack, flow ones after `after` (else last). An id the slide already holds is re-minted (deep). Throws past the slide's
- * limits. Returns the top-level elements' ids in order.
+ * stack, flow ones after `after` (else last). An id the slide already holds is re-minted (deep). Refused, unwritten,
+ * when the slide it makes would not load. Returns the top-level elements' ids in order.
  */
 export function insertElements(doc: Doc, slideId: string, elements: ElementIR[], options: InsertOptions = {}, origin?: unknown): string[] {
   const parent = options.parent ?? ROOT;
@@ -355,11 +476,6 @@ export function insertElements(doc: Doc, slideId: string, elements: ElementIR[],
   const eff = resolveParents(els);
   if (parent !== ROOT && !els.some((e) => e.id === parent && CONTAINER_TAGS.has(e.tag))) throw new Error(`${parent} is not a container on ${slideId}`);
   const all = elements.flatMap((e) => [...walk(e)]);
-  needRoom(els, eff, parent, {
-    elements: all.filter((e) => !CELL_TAGS.has(e.tag)).length,
-    cells: all.filter((e) => CELL_TAGS.has(e.tag)).length,
-    pinned: elements.filter((e) => isPinned(e.tag, e.style, e.attrs)).length,
-  });
   // ids the slide holds are re-minted (cells mint their own ids below)
   const taken = new Set(els.map((e) => e.id));
   const mint = elementMinter(doc, slideId, [...taken, ...all.map((e) => e.id)]);
@@ -382,25 +498,21 @@ export function insertElements(doc: Doc, slideId: string, elements: ElementIR[],
   const at = afterAt >= 0 ? afterAt + 1 : flow.length;
   const flowDesired = [...flow.slice(0, at), ...flowRoots, ...flow.slice(at)];
   const orderKeys = rekey(flowDesired, new Map(lists.filter((e) => groupOf(e) === 'flow' && e.order !== undefined).map((e) => [e.id, e.order!])), ANY);
-  transact(
-    doc,
-    () => {
-      for (const f of flat) {
-        const e: FlatElement = { ...f };
-        if (roots.has(f.id)) {
-          e.parent = parent;
-          delete e.order;
-          delete e.z;
-          if (isPinned(e.tag, e.style, e.attrs)) e.z = zKeys.get(f.id)!;
-          else e.order = orderKeys.get(f.id)!;
-        }
-        Y.createElement(doc, slideId, e.id, toScalars(e), f.text);
-      }
-      for (const [id, k] of zKeys) if (!roots.has(id)) Y.setElementKey(doc, slideId, id, 'z', k);
-      for (const [id, k] of orderKeys) if (!roots.has(id)) Y.setElementKey(doc, slideId, id, 'order', k);
-    },
-    origin,
-  );
+  const plan = newPlan();
+  for (const f of flat) {
+    const e: FlatElement = { ...f };
+    if (roots.has(f.id)) {
+      e.parent = parent;
+      delete e.order;
+      delete e.z;
+      if (isPinned(e.tag, e.style, e.attrs)) e.z = zKeys.get(f.id)!;
+      else e.order = orderKeys.get(f.id)!;
+    }
+    plan.create.push(e);
+  }
+  for (const [id, k] of zKeys) if (!roots.has(id)) put(plan, id, 'z', k);
+  for (const [id, k] of orderKeys) if (!roots.has(id)) put(plan, id, 'order', k);
+  commit(doc, slideId, plan, origin);
   return renamed.map((e) => e.id);
 }
 
@@ -472,18 +584,17 @@ function tableOf(doc: Doc, slideId: string, tableId: string) {
 /** Adds an empty row after `add` (its cells as many as that row's, `td`), or removes the row `remove` (never the last). */
 export function tableRow(doc: Doc, slideId: string, tableId: string, op: { add: string } | { remove: string }, origin?: unknown): string | null {
   const { els, rows, cellsOf } = tableOf(doc, slideId, tableId);
+  const plan = newPlan();
   if ('remove' in op) {
     if (!rows.some((r) => r.id === op.remove)) throw new Error(`${op.remove} is not a row of ${tableId}`);
     if (rows.length <= 1) throw new Error('a table keeps its last row');
-    const doomed = [op.remove, ...cellsOf(op.remove).map((c) => c.id)];
-    transact(doc, () => doomed.forEach((id) => Y.deleteElement(doc, slideId, id)), origin);
+    for (const id of [op.remove, ...cellsOf(op.remove).map((c) => c.id)]) plan.remove.add(id);
+    commit(doc, slideId, plan, origin);
     return null;
   }
   const ref = rows.find((r) => r.id === op.add);
   if (!ref) throw new Error(`${op.add} is not a row of ${tableId}`);
-  if (rows.length >= SLIDE_LIMITS.tableRows) throw new Error(`a table holds at most ${SLIDE_LIMITS.tableRows} rows`);
   const width = cellsOf(ref.id).length;
-  needRoom(els, new Map(), '\u0000', { elements: 1, cells: width, pinned: 0 });
   const rowId = elementMinter(doc, slideId, els.map((e) => e.id))('row');
   const mintCell = cellMinter(doc, els.map((e) => e.id));
   const ids = rows.map((r) => r.id);
@@ -494,15 +605,10 @@ export function tableRow(doc: Doc, slideId: string, tableId: string, op: { add: 
     new Map(),
     ANY,
   );
-  transact(
-    doc,
-    () => {
-      Y.createElement(doc, slideId, rowId, { tag: 'tr', parent: tableId, order: keys.get(rowId)! });
-      for (let i = 0; i < width; i++) Y.createElement(doc, slideId, mintCell(rowId), { tag: 'td', parent: rowId, order: cellKeys.get(String(i))! }, EMPTY_CELL);
-      for (const [id, k] of keys) if (id !== rowId) Y.setElementKey(doc, slideId, id, 'order', k);
-    },
-    origin,
-  );
+  plan.create.push({ id: rowId, tag: 'tr', parent: tableId, order: keys.get(rowId)!, style: {}, attrs: {} });
+  for (let i = 0; i < width; i++) plan.create.push({ id: mintCell(rowId), tag: 'td', parent: rowId, order: cellKeys.get(String(i))!, style: {}, attrs: {}, text: EMPTY_CELL });
+  for (const [id, k] of keys) if (id !== rowId) put(plan, id, 'order', k);
+  commit(doc, slideId, plan, origin);
   return rowId;
 }
 
@@ -510,33 +616,29 @@ export function tableRow(doc: Doc, slideId: string, tableId: string, op: { add: 
 export function tableColumn(doc: Doc, slideId: string, tableId: string, op: { add: number } | { remove: number }, origin?: unknown): void {
   const { els, rows, cellsOf } = tableOf(doc, slideId, tableId);
   const width = Math.max(0, ...rows.map((r) => cellsOf(r.id).length));
+  const plan = newPlan();
   if ('remove' in op) {
     if (width <= 1) throw new Error('a table keeps its last column');
-    const doomed = rows.flatMap((r) => cellsOf(r.id)[op.remove]?.id ?? []);
-    transact(doc, () => doomed.forEach((id) => Y.deleteElement(doc, slideId, id)), origin);
+    for (const r of rows) {
+      const cell = cellsOf(r.id)[op.remove];
+      if (cell) plan.remove.add(cell.id);
+    }
+    commit(doc, slideId, plan, origin);
     return;
   }
-  if (width >= SLIDE_LIMITS.tableColumns) throw new Error(`a table holds at most ${SLIDE_LIMITS.tableColumns} columns`);
-  needRoom(els, new Map(), '\u0000', { elements: 0, cells: rows.length, pinned: 0 });
   const mintCell = cellMinter(doc, els.map((e) => e.id));
-  transact(
-    doc,
-    () => {
-      for (const r of rows) {
-        const cells = cellsOf(r.id);
-        const at = Math.min(op.add + 1, cells.length);
-        const tag: Tag = cells[Math.min(op.add, cells.length - 1)]?.tag ?? 'td';
-        const placeholder = '\u0000new';
-        const keys = rekey(
-          [...cells.slice(0, at).map((c) => c.id), placeholder, ...cells.slice(at).map((c) => c.id)],
-          new Map(cells.filter((c) => c.order !== undefined).map((c) => [c.id, c.order!])),
-          ANY,
-        );
-        Y.createElement(doc, slideId, mintCell(r.id), { tag, parent: r.id, order: keys.get(placeholder)! }, EMPTY_CELL);
-        for (const [id, k] of keys) if (id !== placeholder) Y.setElementKey(doc, slideId, id, 'order', k);
-      }
-    },
-    origin,
-  );
+  for (const r of rows) {
+    const cells = cellsOf(r.id);
+    const at = Math.min(op.add + 1, cells.length);
+    const tag: Tag = cells[Math.min(op.add, cells.length - 1)]?.tag ?? 'td';
+    const placeholder = '\u0000new';
+    const keys = rekey(
+      [...cells.slice(0, at).map((c) => c.id), placeholder, ...cells.slice(at).map((c) => c.id)],
+      new Map(cells.filter((c) => c.order !== undefined).map((c) => [c.id, c.order!])),
+      ANY,
+    );
+    plan.create.push({ id: mintCell(r.id), tag, parent: r.id, order: keys.get(placeholder)!, style: {}, attrs: {}, text: EMPTY_CELL });
+    for (const [id, k] of keys) if (id !== placeholder) put(plan, id, 'order', k);
+  }
+  commit(doc, slideId, plan, origin);
 }
-

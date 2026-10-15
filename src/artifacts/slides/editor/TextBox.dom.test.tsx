@@ -279,3 +279,26 @@ describe('the text box', () => {
     expect(loadSlide(slideFile(doc, 's1')).diagnostics).toEqual([]);
   });
 });
+
+describe('fix wave 1: the text box stays within the slide’s text budget', () => {
+  it('refuses typing past 20,000 characters on the slide, visibly, writing nothing', () => {
+    const doc = newDoc();
+    const l = loadSlide(`<section id="s1"><p id="long" style="font-size:16px">${'a'.repeat(19995)}</p><h2 id="title" style="font-size:64px">Plan</h2></section>`);
+    if (!l.ok) throw new Error('fixture');
+    transact(doc, () => {
+      writeDeckKeys(doc, { v: 4, title: 'T', order: ['s1'] });
+      importSlide(doc, l.slide, 'a0');
+    });
+    const { editor } = mount('title', { doc });
+    let updates = 0;
+    const off = onUpdate(doc, () => updates++);
+    act(() => void editor.chain().setTextSelection(end(editor)).insertContent('ab').run());
+    off();
+    expect(updates).toBe(0);
+    expect(text(doc, 'title')[0]!.inline).toEqual([{ text: 'Plan', marks: {} }]);
+    expect(screen.getByRole('alert').textContent).toMatch(/20,000 characters/);
+    expect(loadSlide(slideFile(doc, 's1')).ok).toBe(true);
+    act(() => void editor.chain().setTextSelection(end(editor)).insertContent('b').run()); // one more fits
+    expect(text(doc, 'title')[0]!.inline).toEqual([{ text: 'Planb', marks: {} }]);
+  });
+});

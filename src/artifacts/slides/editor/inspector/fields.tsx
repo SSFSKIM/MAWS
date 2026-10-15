@@ -81,10 +81,12 @@ export interface NumberFieldProps {
   step?: number;
   /** null: the field emptied (remove the value where that means something). */
   onCommit: (n: number | null, how: Write) => readonly string[];
+  /** Held off for what the selection cannot show (fix wave 1). */
+  disabled?: boolean;
 }
 
-export function NumberField({ label, caption, value, mixed = false, hint = '', unit, step = 1, onCommit }: NumberFieldProps) {
-  const { readOnly } = useInspector();
+export function NumberField({ label, caption, value, mixed = false, hint = '', unit, step = 1, onCommit, disabled = false }: NumberFieldProps) {
+  const readOnly = useInspector().readOnly || disabled;
   const id = useId();
   const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -11,7 +11,9 @@ import { loadSlide } from '../../parse';
 import { DeckEditor } from '../DeckEditor';
 import { DeckSession } from '../session';
 import { startFlowMove, startMove, startResize, startRotate, type GestureContext } from './gestures';
-import { CLIPBOARD_TYPE } from './clipboard';
+import { CLIPBOARD_TYPE, copySelection, pasteClipboard } from './clipboard';
+import { selectionCommands } from './commands';
+import { measure } from './measure';
 
 const SLIDE = `<section id="s" style="background:#ffffff">
 <h2 id="title" style="font-size:64px">Title</h2>
@@ -33,12 +35,21 @@ function deck(html = SLIDE): Doc {
 
 /** Gives every node the layout box its own px style says (and flow children a column from y = 0). */
 function fakeLayout(canvas: SlideCanvas, flow: Record<string, [number, number, number, number]> = {}): void {
+  layoutRoot(canvas.root, flow);
+}
+function layoutRoot(root: HTMLElement, flow: Record<string, [number, number, number, number]> = {}): void {
+  const canvas = { root };
+  // offsets are taken from the nearest positioned element (a group), else the slide
+  const hostOf = (n: HTMLElement) => {
+    for (let p = n.parentElement; p && p !== canvas.root; p = p.parentElement) if (p.style.position === 'absolute' || p.style.position === 'relative') return p;
+    return canvas.root;
+  };
   const define = (n: HTMLElement, x: number, y: number, w: number, h: number) => {
     Object.defineProperty(n, 'offsetLeft', { configurable: true, get: () => x });
     Object.defineProperty(n, 'offsetTop', { configurable: true, get: () => y });
     Object.defineProperty(n, 'offsetWidth', { configurable: true, get: () => w });
     Object.defineProperty(n, 'offsetHeight', { configurable: true, get: () => h });
-    Object.defineProperty(n, 'offsetParent', { configurable: true, get: () => canvas.root });
+    Object.defineProperty(n, 'offsetParent', { configurable: true, get: () => hostOf(n) });
   };
   for (const n of canvas.root.querySelectorAll<HTMLElement>('[data-eid]')) {
     const id = n.dataset.eid!;
@@ -197,7 +208,7 @@ describe('the stage’s keys and clipboard', () => {
     expect((screen.getByRole('button', { name: 'Bring to front' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('copies the selection as the dialect and pastes it beside itself', () => {
+  it('copies the selection as the dialect and pastes it beside itself', async () => {
     const { doc, session } = mount();
     act(() => session.select(['a']));
     const data = new Map<string, string>();
@@ -205,13 +216,114 @@ describe('the stage’s keys and clipboard', () => {
     const copy = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
     Object.defineProperty(copy, 'clipboardData', { value: clipboardData });
     act(() => void document.dispatchEvent(copy));
-    expect(data.get(CLIPBOARD_TYPE)).toMatch(/^<section id="clipboard">\s*<div id="a"/);
+    expect((JSON.parse(data.get(CLIPBOARD_TYPE)!) as { html: string }).html).toMatch(/^<section id="clipboard">\s*<div id="a"/);
     expect(data.get('text/plain')).toBe('');
     const paste = new Event('paste', { bubbles: true, cancelable: true }) as ClipboardEvent;
     Object.defineProperty(paste, 'clipboardData', { value: clipboardData });
-    act(() => void document.dispatchEvent(paste));
+    await act(async () => void document.dispatchEvent(paste));
     const pasted = session.snapshot().selection[0]!;
     expect(pasted).not.toBe('a');
     expect(styleOf(doc, pasted)).toMatchObject({ left: '324px', top: '324px', background: '#ff0000' });
+  });
+});
+
+// ---------------------------------------------------------------- fix wave 1 (the M5 task review's reproductions)
+
+describe('fix wave 1: one gesture one transaction, z-order of neighbours, measures through transforms', () => {
+  const PINS = `<section id="s" style="background:#ffffff"><p id="p" style="font-size:32px">Flow</p>
+<div id="d0" style="position:absolute; left:100px; top:300px; width:100px; height:100px; background:#ff0000"></div>
+<div id="d1" style="position:absolute; left:300px; top:300px; width:100px; height:100px; background:#00ff00"></div>
+<div id="d2" style="position:absolute; left:500px; top:300px; width:100px; height:100px; background:#0000ff"></div></section>`;
+  const order = (doc: Doc) => childLists(readFlat(doc, 's', false)).get(ROOT)!.map((e) => e.id);
+  const count = (doc: Doc, run: () => void) => {
+    let n = 0;
+    const off = onUpdate(doc, () => n++);
+    run();
+    off();
+    return n;
+  };
+
+  it('an edit restyling several elements is one transaction', async () => {
+    const { restyle } = await import('../../writers-elements');
+    const doc = deck(PINS);
+    const session = new DeckSession(doc, 0);
+    expect(
+      count(doc, () =>
+        session.edit((o) => {
+          restyle(doc, 's', 'd0', { background: '#000000' }, o);
+          restyle(doc, 's', 'd1', { background: '#000000' }, o);
+        }),
+      ),
+    ).toBe(1);
+  });
+
+  it('forward and backward move neighbouring selected elements together, one transaction', () => {
+    const doc = deck(PINS);
+    const ctx = gestureContext(doc);
+    expect(count(doc, () => selectionCommands(ctx, ['d0', 'd1'], false).z('forward'))).toBe(1);
+    expect(order(doc)).toEqual(['p', 'd2', 'd0', 'd1']);
+    selectionCommands(ctx, ['d0', 'd1'], false).z('backward');
+    expect(order(doc)).toEqual(['p', 'd0', 'd1', 'd2']);
+  });
+
+  it('measures an element’s scale and its group’s rotation as drawn', () => {
+    const doc = deck(`<section id="s" style="background:#ffffff">
+<div id="sc" style="position:absolute; left:300px; top:300px; width:100px; height:100px; transform:scale(2); background:#ff0000"></div>
+<div id="g" data-group="" style="position:absolute; left:100px; top:100px; width:200px; height:100px; transform:rotate(90deg)">
+<div id="k" style="position:absolute; left:0px; top:0px; width:100px; height:100px; background:#00ff00"></div></div></section>`);
+    const ctx = gestureContext(doc);
+    const sc = measure(ctx.canvas, 'sc', 1)!;
+    expect(sc.bounds).toEqual({ x: 250, y: 250, w: 200, h: 200 });
+    // the group turns about its centre (200, 150): k's box (100..200, 100..200) is drawn at (150..250, 50..150)
+    const k = measure(ctx.canvas, 'k', 1)!;
+    expect(k.bounds).toEqual({ x: 150, y: 50, w: 100, h: 100 });
+  });
+});
+
+describe('fix wave 1: the clipboard carries its assets across decks', () => {
+  it('a copied picture’s asset is imported into the deck it is pasted in, its ref rewritten', async () => {
+    const from = deck(`<section id="s" style="background:#ffffff"><img id="pic" alt="" src="assets/cat.png" style="position:absolute; left:0px; top:0px; width:100px; height:100px"></section>`);
+    const to = deck(`<section id="s" style="background:#ffffff"></section>`);
+    const data = new Map<string, string>();
+    const clipboardData = { setData: (t: string, v: string) => data.set(t, v), getData: (t: string) => data.get(t) ?? '' };
+    const fromCtx = { ...gestureContext(from), artifactId: 'deck-a' };
+    const copy = new Event('copy', { cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(copy, 'clipboardData', { value: clipboardData });
+    copySelection(copy, fromCtx, ['pic'], false, () => {});
+    const payload = JSON.parse(data.get(CLIPBOARD_TYPE)!) as { artifactId: string; assets: string[] };
+    expect(payload).toMatchObject({ artifactId: 'deck-a', assets: ['assets/cat.png'] });
+    const imported: [string, string][] = [];
+    const toCtx = { ...gestureContext(to), artifactId: 'deck-b', importAsset: async (source: string, ref: string) => (imported.push([source, ref]), 'assets/cat-1.png') };
+    const paste = new Event('paste', { cancelable: true }) as ClipboardEvent;
+    Object.defineProperty(paste, 'clipboardData', { value: clipboardData });
+    const result = await pasteClipboard(paste, toCtx, []);
+    expect(imported).toEqual([['deck-a', 'assets/cat.png']]);
+    expect(result).toEqual({ ids: ['pic'] });
+    expect(readFlat(to, 's', false).find((e) => e.id === 'pic')!.attrs.src).toBe('assets/cat-1.png');
+  });
+});
+
+describe('fix wave 1: other replicas’ selections', () => {
+  it('outlines what another replica has selected on this slide, in its colour', async () => {
+    const { Awareness } = await import('@y/protocols/awareness');
+    const doc = deck();
+    const other = newDoc();
+    const mine = new Awareness(doc);
+    const theirs = new Awareness(other);
+    const session = new DeckSession(doc, 0, { presence: { awareness: mine, name: 'You', color: '--author-1' } });
+    const { container } = render(<DeckEditor session={session} assetUrl={() => null} system={null} readOnly={false} />);
+    layoutRoot(container.querySelector('[data-stage-slide] .maws-slide') as HTMLElement);
+    theirs.setLocalState({ name: 'Claude', color: '--author-3', deck: { slideId: 's', elementIds: ['a'] } });
+    // the two awarenesses are joined by hand: their state applied to mine
+    const { encodeAwarenessUpdate, applyAwarenessUpdate } = await import('@y/protocols/awareness');
+    act(() => applyAwarenessUpdate(mine, encodeAwarenessUpdate(theirs, [other.clientID]), 'remote'));
+    const outline = container.querySelector('[data-remote-selected="a"]') as HTMLElement;
+    expect(outline).not.toBeNull();
+    expect(outline.style.getPropertyValue('--remote-color')).toBe('var(--author-3, #7c5cd6)');
+    expect(outline.getAttribute('aria-label')).toBe('Claude');
+    act(() => session.select(['b']));
+    expect(mine.getLocalState()).toMatchObject({ name: 'You', color: '--author-1', deck: { slideId: 's', elementIds: ['b'] } });
+    mine.destroy();
+    theirs.destroy();
   });
 });

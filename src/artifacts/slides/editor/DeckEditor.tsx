@@ -12,6 +12,7 @@ import type { DeckFace } from '../deck';
 import { insertElements, newElement, type NewKind } from '../writers-elements';
 import { DECK_COPY as C } from './copy';
 import { ElementBar } from './ElementBar';
+import type { ImportAsset } from './transform/clipboard';
 import { Inspector } from './Inspector';
 import { measureInHost } from './transform/Overlay';
 import { useDeckView } from './deck-view';
@@ -39,6 +40,9 @@ export interface DeckEditorProps {
   onThumbnailsDrawn?: (thumbnails: number) => void;
   /** M5: uploads a picked image into the artifact and answers its `assets/<name>` ref (Insert's image, the inspector's Replace). */
   uploadAsset?: (file: File) => Promise<string>;
+  /** Fix wave 1: the deck's artifact (named on copies) and how a paste brings another deck's pictures over. */
+  artifactId?: string;
+  importAsset?: ImportAsset;
 }
 
 const NOTICE_MS = 6_000;
@@ -68,7 +72,7 @@ function faceRules(faces: Readonly<Record<string, DeckFace>>, assetUrl: AssetUrl
     .join('\n');
 }
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -201,6 +205,8 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
             canvas={stageCanvas}
             readOnly={!editable}
             onNotice={setNotice}
+            artifactId={artifactId}
+            importAsset={importAsset}
             scope={scope}
           />
           {slide && <Notes key={slide.id} session={session} slideId={slide.id} token={slide.token} readOnly={readOnly || slide.held !== null} />}

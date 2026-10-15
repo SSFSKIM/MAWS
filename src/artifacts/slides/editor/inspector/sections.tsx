@@ -249,8 +249,10 @@ export function ShadowSection() {
       const now = parseShadow(p.style['box-shadow']);
       return { 'box-shadow': shadowValue({ ...(now.first ?? SHADOW_DEFAULT), ...part }, now.first ? now.rest : []) };
     }, how);
-  const len = (label: string, key: 'x' | 'y' | 'blur') => (
-    <NumberField label={label} caption={label} unit="px" value={first?.[key] ?? null} mixed={value.mixed} onCommit={(n, how) => (n === null ? [] : write({ [key]: n }, how))} />
+  // a shape other than a rect draws its shadow from its outline (drop-shadow, fix wave 1): it has no inset and no spread
+  const outline = picked.some((p) => p.tag === 'x-shape' && p.attrs.kind !== 'rect');
+  const len = (label: string, key: 'x' | 'y' | 'blur' | 'spread', disabled = false) => (
+    <NumberField label={label} caption={label} unit="px" value={first?.[key] ?? null} mixed={value.mixed} disabled={disabled} onCommit={(n, how) => (n === null && key !== 'spread' ? [] : write({ [key]: n }, how))} />
   );
   return (
     <Section title={C.shadow}>
@@ -272,6 +274,14 @@ export function ShadowSection() {
             {len(C.shadowY, 'y')}
             {len(C.shadowBlur, 'blur')}
           </div>
+          <div className="deck-inspector-triple">
+            {len(C.shadowSpread, 'spread', outline)}
+            <label className="deck-inspector-check">
+              <input type="checkbox" aria-label={C.shadowInset} checked={!outline && (first?.inset ?? false)} disabled={readOnly || outline || value.mixed} onChange={() => write({ inset: !(first?.inset ?? false) }, 'edit')} />
+              <span>{C.shadowInset}</span>
+            </label>
+          </div>
+          {outline && <p className="deck-inspector-note">{C.outlineShadow}</p>}
           <ColourField label={C.shadowColour} value={first?.color} mixed={value.mixed} onCommit={(v, how) => (v === null ? [] : write({ color: v }, how))} />
         </>
       )}

@@ -1,6 +1,7 @@
 // P3-C M4 fix wave 1 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8 "Shell"; X32's lifetime rule): a deck
 // tab's state lives with the tab, not its body. Its close guard answers with no body mounted, its disposal waits for the
 // host's acknowledgement of every edit before closing the replica, and a restore it did not witness clears its undo.
+import { Awareness } from '@y/protocols/awareness';
 import { describe, expect, it, vi } from 'vitest';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import type { Restored } from '@artifacts/provider/port';
@@ -11,7 +12,7 @@ import { DeckTabState } from './tab-state';
 
 class FakeHandle implements DocumentHandle {
   readonly doc = newDoc();
-  readonly awareness = {} as DocumentHandle['awareness'];
+  readonly awareness = new Awareness(this.doc);
   closed = false;
   private current: DocumentState = { phase: 'live', synced: true, unsaved: 0, revision: 1, readOnly: false };
   private readonly listeners = new Set<(state: DocumentState) => void>();
@@ -49,13 +50,21 @@ class FakeHandle implements DocumentHandle {
 
 async function opened(confirmDiscard = vi.fn(async () => false), saveWaitMs = 30) {
   const handle = new FakeHandle();
-  const host = { open: vi.fn(async () => handle), assetUrl: () => '' } as unknown as ArtifactHost;
+  const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'You', color: '--author-2' }) } as unknown as ArtifactHost;
   const state = new DeckTabState({ artifactId: 'deck-1', kind: 'presentation', surface: 'main' }, { host, log: () => {}, confirmDiscard, saveWaitMs, savingShownMs: 10 });
   await vi.waitFor(() => expect(state.snapshot().session).not.toBeNull());
   return { handle, state, confirmDiscard };
 }
 
 describe('a deck tab’s state (X32’s lifetime rule)', () => {
+  it('publishes its slide and selection in the replica’s awareness, beside who this is (fix wave 1)', async () => {
+    const { handle, state } = await opened();
+    state.snapshot().session!.select(['p']);
+    expect(handle.awareness.getLocalState()).toMatchObject({ name: 'You', color: '--author-2', deck: { slideId: 'a', elementIds: ['p'] } });
+    state.dispose();
+    expect(handle.awareness.getLocalState()).toMatchObject({ deck: null });
+  });
+
   it('its close guard answers with no body mounted: at once when saved, after the host’s ack when it comes in time', async () => {
     const { handle, state, confirmDiscard } = await opened();
     await expect(state.closeGuard()).resolves.toBe(true);

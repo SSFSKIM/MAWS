@@ -189,13 +189,12 @@ export interface ResizeOptions {
 }
 
 /**
- * The box after dragging `handle` by `delta` (slide px, on the slide's axes). The edges the handle names move; the
- * opposite ones stay where they are on the slide (the centre, with `fromCentre`), also when the box is turned.
+ * The size a resize asks for, in the element's own axes: the handle's edges move by `d`; Shift keeps the aspect, the
+ * larger *relative* change leading (so a drag that shrinks one side shrinks the box); Alt doubles about the centre; the
+ * minimum is applied with the aspect, the box keeping its shape at its smallest.
  */
-export function resizeBox(start: Box, handle: Handle, delta: Pt, options: ResizeOptions): Box {
-  const rot = options.rotation ?? 0;
+function resizedSize(start: Box, handle: Handle, d: Pt, options: ResizeOptions): { w: number; h: number; sx: number; sy: number } {
   const min = options.min ?? 1;
-  const d = turn(delta, -rot);
   const sx = handle.includes('e') ? 1 : handle.includes('w') ? -1 : 0;
   const sy = handle.includes('s') ? 1 : handle.includes('n') ? -1 : 0;
   const k = options.fromCentre ? 2 : 1;
@@ -204,26 +203,168 @@ export function resizeBox(start: Box, handle: Handle, delta: Pt, options: Resize
   if (options.keepAspect && start.w > 0 && start.h > 0) {
     const ratio = start.w / start.h;
     if (sx !== 0 && sy !== 0) {
-      // a corner: the larger relative change leads
-      if (Math.abs(w / start.w) >= Math.abs(h / start.h)) h = w / ratio;
+      if (Math.abs(w / start.w - 1) >= Math.abs(h / start.h - 1)) h = w / ratio;
       else w = h * ratio;
     } else if (sx !== 0) h = w / ratio;
     else w = h * ratio;
+    // at the minimum the box keeps its shape: its smaller side stops there
+    if (w < min || h < min) [w, h] = ratio >= 1 ? [min * ratio, min] : [min, min / ratio];
   }
-  w = Math.max(min, w);
-  h = Math.max(min, h);
-  // the new box in the old box's own frame, origin at its top-left: what is held stays
-  let lx: number;
-  let ly: number;
-  if (options.fromCentre) [lx, ly] = [(start.w - w) / 2, (start.h - h) / 2];
-  else {
-    lx = sx === -1 ? start.w - w : sx === 1 ? 0 : (start.w - w) / 2;
-    ly = sy === -1 ? start.h - h : sy === 1 ? 0 : (start.h - h) / 2;
+  return { w: Math.max(min, w), h: Math.max(min, h), sx, sy };
+}
+
+/**
+ * The box after dragging `handle` by `delta` (slide px, on the slide's axes). The edges the handle names move; the
+ * opposite ones stay where they are on the slide (the centre, with `fromCentre`), also when the box is turned.
+ */
+export function resizeBox(start: Box, handle: Handle, delta: Pt, options: ResizeOptions): Box {
+  const rot = options.rotation ?? 0;
+  return resizePlaced(start, rot ? `rotate(${rot}deg)` : undefined, handle, delta, options);
+}
+
+/**
+ * A resize of an element placed in its host at `start` (its left, top, width and height, px) under its own `transform`
+ * (any of the dialect's: translate, rotate, scale, skew), dragged by `delta` in the host's px. The pointer's movement is
+ * read along the element's own axes; the point opposite the handle (the centre, with `fromCentre`) stays where it is
+ * drawn. Answers the new left, top, width and height.
+ */
+export function resizePlaced(start: Box, transform: string | undefined, handle: Handle, delta: Pt, options: ResizeOptions): Box {
+  const before = placement(start, transform);
+  const d = applyLinear(invert(linear(before)), delta);
+  const { w, h, sx, sy } = resizedSize(start, handle, d, options);
+  const u = options.fromCentre ? 0.5 : sx === -1 ? 1 : sx === 1 ? 0 : 0.5;
+  const v = options.fromCentre ? 0.5 : sy === -1 ? 1 : sy === 1 ? 0 : 0.5;
+  const held = apply(before, { x: u * start.w, y: v * start.h });
+  const at = apply(placement({ x: 0, y: 0, w, h }, transform), { x: u * w, y: v * h });
+  return { x: round2(held.x - at.x), y: round2(held.y - at.y), w: round2(w), h: round2(h) };
+}
+
+// ---------------------------------------------------------------- matrices (fix wave 1)
+
+/** A 2D affine map as CSS writes one (`matrix(a, b, c, d, e, f)`): x' = a·x + c·y + e, y' = b·x + d·y + f. */
+export interface Affine {
+  a: number;
+  b: number;
+  c: number;
+  d: number;
+  e: number;
+  f: number;
+}
+export const IDENTITY: Affine = { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+export const shift = (x: number, y: number): Affine => ({ ...IDENTITY, e: x, f: y });
+/** `m` after `n` (n applied first). */
+export function multiply(m: Affine, n: Affine): Affine {
+  return { a: m.a * n.a + m.c * n.b, b: m.b * n.a + m.d * n.b, c: m.a * n.c + m.c * n.d, d: m.b * n.c + m.d * n.d, e: m.a * n.e + m.c * n.f + m.e, f: m.b * n.e + m.d * n.f + m.f };
+}
+export function invert(m: Affine): Affine {
+  const det = m.a * m.d - m.b * m.c || 1e-12;
+  return { a: m.d / det, b: -m.b / det, c: -m.c / det, d: m.a / det, e: (m.c * m.f - m.d * m.e) / det, f: (m.b * m.e - m.a * m.f) / det };
+}
+// float noise around whole numbers read back as the whole number (a turned box's corners land on px)
+const clean = (n: number) => (Math.abs(n - Math.round(n)) < 1e-9 ? Math.round(n) : n);
+export const apply = (m: Affine, p: Pt): Pt => ({ x: clean(m.a * p.x + m.c * p.y + m.e), y: clean(m.b * p.x + m.d * p.y + m.f) });
+export const applyLinear = (m: Affine, p: Pt): Pt => ({ x: clean(m.a * p.x + m.c * p.y), y: clean(m.b * p.x + m.d * p.y) });
+export const linear = (m: Affine): Affine => ({ ...m, e: 0, f: 0 });
+export const isIdentityLinear = (m: Affine, eps = 1e-6): boolean => Math.abs(m.a - 1) < eps && Math.abs(m.d - 1) < eps && Math.abs(m.b) < eps && Math.abs(m.c) < eps;
+
+const rad = (deg: number) => (deg * Math.PI) / 180;
+/** The dialect's transform (and CSS's 2D functions) as one matrix, % of a `w` × `h` box; an unread value is identity. */
+export function transformMatrix(value: string | undefined, w: number, h: number): Affine {
+  let m = IDENTITY;
+  for (const f of fnsOf(value)) {
+    const args = f.args.split(',').map((a) => a.trim());
+    let n: Affine = IDENTITY;
+    switch (f.name) {
+      case 'translate':
+        n = shift(lengthOf(args[0], w), lengthOf(args[1], h));
+        break;
+      case 'translateX':
+        n = shift(lengthOf(args[0], w), 0);
+        break;
+      case 'translateY':
+        n = shift(0, lengthOf(args[0], h));
+        break;
+      case 'rotate': {
+        const t = rad(angleDeg(args[0] ?? '0'));
+        n = { a: Math.cos(t), b: Math.sin(t), c: -Math.sin(t), d: Math.cos(t), e: 0, f: 0 };
+        break;
+      }
+      case 'scale': {
+        const sx = Number.parseFloat(args[0] ?? '1');
+        const sy = args[1] === undefined ? sx : Number.parseFloat(args[1]);
+        n = { ...IDENTITY, a: Number.isFinite(sx) ? sx : 1, d: Number.isFinite(sy) ? sy : 1 };
+        break;
+      }
+      case 'skew':
+        n = { ...IDENTITY, c: Math.tan(rad(angleDeg(args[0] ?? '0'))), b: Math.tan(rad(angleDeg(args[1] ?? '0'))) };
+        break;
+      case 'skewX':
+        n = { ...IDENTITY, c: Math.tan(rad(angleDeg(args[0] ?? '0'))) };
+        break;
+      case 'skewY':
+        n = { ...IDENTITY, b: Math.tan(rad(angleDeg(args[0] ?? '0'))) };
+        break;
+      case 'matrix': {
+        const v = args.map(Number);
+        if (v.length === 6 && v.every((x) => Number.isFinite(x))) n = { a: v[0]!, b: v[1]!, c: v[2]!, d: v[3]!, e: v[4]!, f: v[5]! };
+        break;
+      }
+    }
+    m = multiply(m, n);
   }
-  // the new centre on the slide, then its layout box about it (CSS turns about the centre)
-  const shift = turn({ x: lx + w / 2 - start.w / 2, y: ly + h / 2 - start.h / 2 }, rot);
-  const c = centreOf(start);
-  return { x: round2(c.x + shift.x - w / 2), y: round2(c.y + shift.y - h / 2), w: round2(w), h: round2(h) };
+  return m;
+}
+
+/** Where a box placed at left/top in its host is drawn under its transform (about its centre): local px → host px. */
+export function placement(box: Box, transform: string | undefined): Affine {
+  const o = { x: box.w / 2, y: box.h / 2 };
+  return multiply(shift(box.x + o.x, box.y + o.y), multiply(transformMatrix(transform, box.w, box.h), shift(-o.x, -o.y)));
+}
+
+/** The corners of a `w` × `h` box under `m`, top-left first, clockwise. */
+export const cornersOf = (m: Affine, w: number, h: number): Pt[] => [apply(m, { x: 0, y: 0 }), apply(m, { x: w, y: 0 }), apply(m, { x: w, y: h }), apply(m, { x: 0, y: h })];
+export function boundsOf(points: readonly Pt[]): Box {
+  const xs = points.map((p) => p.x);
+  const ys = points.map((p) => p.y);
+  const [x, y] = [Math.min(...xs), Math.min(...ys)];
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+const EPS = 1e-6;
+const fmt = (n: number, places: number) => String(Math.round(n * 10 ** places) / 10 ** places);
+/**
+ * A linear map written back in the dialect's form (rotate, then a uniform scale 0.5 to 2, then skew within ±60°), or
+ * null for the identity. A map the dialect cannot write (mirrored, an uneven scale it has no skew for, out of range)
+ * throws with the reason.
+ */
+export function transformOf(m: Affine): string | null {
+  const { a, b, c, d } = m;
+  if (a * d - b * c <= EPS) throw new Error('a mirrored or flattened pose has no rotate, scale or skew form in the dialect');
+  // the rotation that leaves a uniform scale times a skew (equal diagonal); a similarity's own angle when any would do
+  let theta = Math.abs(a - d) < EPS && Math.abs(b + c) < EPS ? Math.atan2(b, a) : Math.atan2(d - a, c + b);
+  const unturn = (t: number) => {
+    const [co, si] = [Math.cos(t), Math.sin(t)];
+    return { k11: co * a + si * b, k12: co * c + si * d, k21: -si * a + co * b };
+  };
+  let k = unturn(theta);
+  if (k.k11 < 0) {
+    theta += Math.PI;
+    k = unturn(theta);
+  }
+  const s = k.k11;
+  if (s < 0.5 - EPS || s > 2 + EPS) throw new Error(`a scale of ${fmt(s, 3)} is outside the dialect's 0.5 to 2`);
+  const ax = (Math.atan(k.k12 / s) * 180) / Math.PI;
+  const ay = (Math.atan(k.k21 / s) * 180) / Math.PI;
+  if (Math.abs(ax) > 60 + EPS || Math.abs(ay) > 60 + EPS) throw new Error('a skew past ±60° is outside the dialect');
+  const parts: string[] = [];
+  const deg = normalizeDeg((theta * 180) / Math.PI);
+  if (Math.abs(deg) > 1e-4) parts.push(`rotate(${fmt(deg, 2)}deg)`);
+  if (Math.abs(s - 1) > 1e-4) parts.push(`scale(${fmt(s, 4)})`);
+  const [hx, hy] = [Math.abs(ax) > 1e-4, Math.abs(ay) > 1e-4];
+  if (hx && hy) parts.push(`skew(${fmt(ax, 2)}deg, ${fmt(ay, 2)}deg)`);
+  else if (hx) parts.push(`skewX(${fmt(ax, 2)}deg)`);
+  else if (hy) parts.push(`skewY(${fmt(ay, 2)}deg)`);
+  return parts.length ? parts.join(' ') : null;
 }
 
 // ---------------------------------------------------------------- rotate
@@ -364,13 +505,16 @@ export function snapMove(b: Box, ctx: SnapContext, threshold: number): { x: numb
 }
 
 /** A resized box's dragged edges snapped (the held edges stay), for an unturned box. */
-export function snapResize(b: Box, handle: Handle, ctx: SnapContext, threshold: number): { box: Box; guides: Guide[] } {
+export function snapResize(b: Box, handle: Handle, ctx: SnapContext, threshold: number, min = 1): { box: Box; guides: Guide[] } {
   const out = { ...b };
   const guides: Guide[] = [];
   for (const axis of ['x', 'y'] as const) {
     const end = axis === 'x' ? (handle.includes('e') ? 'end' : handle.includes('w') ? 'start' : null) : handle.includes('s') ? 'end' : handle.includes('n') ? 'start' : null;
     if (!end) continue;
-    const hit = best(candidates(b, axis, ctx, [end], false), threshold)[0];
+    const size = axis === 'x' ? out.w : out.h;
+    // a snap that would take the box below its minimum is not offered
+    const fits = (c: Candidate) => size + (end === 'end' ? c.offset : -c.offset) >= min;
+    const hit = best(candidates(b, axis, ctx, [end], false).filter(fits), threshold)[0];
     if (!hit) continue;
     if (axis === 'x') {
       if (end === 'end') out.w = round2(out.w + hit.offset);
