@@ -144,16 +144,19 @@ test('older rows page in when the reader reaches the top, and the reader stays w
   player.advance(3);
   await expect.poll(async () => ((await streamingRows(depth).last().textContent()) ?? '').length).toBeGreaterThan(streamed.length);
   await page.waitForTimeout(300);
+  // The reader is away from the end (past the list's 80 px threshold), so the list does not pin them there.
+  expect(await scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeGreaterThan(80);
   const before = await geometry(depth);
   expect(player.releaseRows()).toBe(1);
   await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeGreaterThan(0); // older rows went above the reader
   await page.waitForTimeout(300); // the virtualiser measures the rows it had only estimated
   const after = await geometry(depth);
-  // MAWS's list keeps the reader's place by its end (chat mode): the anchor moves only by what changed beneath it —
-  // here a subagent's hand-back row, which reads its agent's name once the older page holds the call that started it.
-  const below = (rows: Array<{ id: string; height: number }>) => rows.slice(rows.findIndex((r) => r.id === anchorId) + 1).reduce((sum, r) => sum + r.height, 0);
+  // The row the reader was looking at stays where it was, whatever changed beneath it (here a subagent's hand-back row,
+  // which reads its agent's name once the older page holds the call that started it). The rows above it at the top —
+  // the oldest turn's time and divider — are renamed by the page, so the list's own anchor cannot hold this; the
+  // depth pane's does (`view/keep-place.ts`).
   const at = (rows: Array<{ id: string; y: number }>) => rows.find((r) => r.id === anchorId)!.y;
-  expect(Math.abs(at(after) - at(before) + (below(after) - below(before)))).toBeLessThan(4);
+  expect(Math.abs(at(after) - at(before))).toBeLessThan(4);
   player.advance(player.script.length);
   await expect.poll(() => occurrences(depth, ANSWER)).toBe(1);
   await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
