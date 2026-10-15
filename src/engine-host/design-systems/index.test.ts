@@ -202,6 +202,57 @@ describe('designSystems.house (Decision Log 61)', () => {
   });
 });
 
+// The export service's read (the P3 spec's Decision Log 61, part 2): which system governs a document main exports, so B's
+// exporters draw what the editor draws. The live artifact's through the chain; a version's by its pin.
+describe('designSystems.governing (Decision Log 61)', () => {
+  const refusalOf = async (input: unknown) => {
+    const error = await call('designSystems.governing', input as never).then(
+      () => null,
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(HostCommandError);
+    return (error as HostCommandError).ipcError;
+  };
+
+  it('answers the live artifact’s system down the chain, and a version’s pin however the artifact moved since', async () => {
+    await systems.seeded;
+    const [house, classroom, official] = [byKey(HOUSE_KEY), byKey('classroom'), byKey('official')];
+    const space = (await store().createSpace({ name: 'Teaching' })).id;
+    const doc = await store().create({ kind: 'document', title: 'Lab notes', spaceId: space }, AGENT);
+    expect(await call('designSystems.governing', { artifactId: doc.id })).toEqual({ system: { id: house } });
+    await store().setDefaults({ owner: official, spaces: {} });
+    expect(await call('designSystems.governing', { artifactId: doc.id })).toEqual({ system: { id: official } });
+    await store().setDefaults({ owner: official, spaces: { [space]: classroom } });
+    expect(await call('designSystems.governing', { artifactId: doc.id })).toEqual({ system: { id: classroom } });
+    // a version pins the system that governed it, at that system's state then
+    const versionId = (await store().createVersion(doc.id, { kind: 'named', actor: HUMAN, label: 'v1' }))!;
+    const pin = store().listVersions(doc.id).find((v) => v.id === versionId)!.designSystemRef!;
+    expect(pin).toEqual({ id: classroom, versionSeq: expect.any(Number) });
+    expect(await call('designSystems.governing', { artifactId: doc.id, versionId })).toEqual({ system: pin });
+    // the document chooses its own system: the live answer follows, the version's stays its pin
+    await store().update(doc.id, { designSystemId: official });
+    expect(await call('designSystems.governing', { artifactId: doc.id })).toEqual({ system: { id: official } });
+    expect(await call('designSystems.governing', { artifactId: doc.id, versionId })).toEqual({ system: pin });
+  });
+
+  it('answers the floor when no system is left, and for a version written with none', async () => {
+    await systems.seeded;
+    for (const { id } of live()) await store().delete(id);
+    const doc = await store().create({ kind: 'document', title: 'Note' }, AGENT);
+    expect(await call('designSystems.governing', { artifactId: doc.id })).toEqual({ system: { builtin: 'maws' } });
+    const versionId = (await store().createVersion(doc.id, { kind: 'named', actor: HUMAN, label: 'v1' }))!;
+    expect(await call('designSystems.governing', { artifactId: doc.id, versionId })).toEqual({ system: { builtin: 'maws' } });
+  });
+
+  it('refuses an artifact or a version that is not there, naming it', async () => {
+    await systems.seeded;
+    const missing = '99999999-9999-4999-8999-999999999999';
+    expect(await refusalOf({ artifactId: missing })).toMatchObject({ code: 'invalid_input', issues: { reason: 'notFound' } });
+    const doc = await store().create({ kind: 'document', title: 'Note' }, AGENT);
+    expect(await refusalOf({ artifactId: doc.id, versionId: 999 })).toMatchObject({ code: 'invalid_input', message: expect.stringContaining('999'), issues: { reason: 'notFound' } });
+  });
+});
+
 // D's chain registered in A's store (X23, A's M7): what A's pin and A's tools ask the store, D's chain answers, with the
 // house link and a deleted default's fall-through that A's own chain lacks.
 describe('the chain registered in A’s store (X23; Acceptance 12)', () => {

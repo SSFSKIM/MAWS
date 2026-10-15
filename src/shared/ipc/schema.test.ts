@@ -1831,11 +1831,27 @@ describe('ipc schema validates both directions', () => {
   // P3-L end
   // P3-D start: the house system's id for the renderer (the P3 spec's Decision Log 61; the ledger's X28)
   describe('P3-D entries', () => {
-    it('owns designSystems.house in the engine host, bridged to windows, with no event', () => {
-      expect(Object.fromEntries(Object.entries(designSystems.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'designSystems.house': 'engine-host' });
+    it('owns designSystems.house (bridged to windows) and designSystems.governing (main’s alone) in the engine host, with no event', () => {
+      expect(Object.fromEntries(Object.entries(designSystems.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'designSystems.house': 'engine-host', 'designSystems.governing': 'engine-host' });
       expect([...NAMES.designSystems.commands]).toEqual(['designSystems.house']);
       expect(MAIN_ONLY_COMMANDS).not.toContain('designSystems.house');
+      // the export service's read (the P3 spec's Decision Log 61 (d): a window resolves the chain itself, never asks)
+      expect(MAIN_ONLY_COMMANDS).toContain('designSystems.governing');
+      expect([...NAMES.designSystems.commands]).not.toContain('designSystems.governing');
       expect(Object.keys(designSystems.events)).toEqual([]);
+    });
+
+    it('designSystems.governing takes an artifact and maybe a version, and answers a live ref, a pin or the floor', () => {
+      const ID = '22222222-2222-4222-8222-222222222222';
+      expect(validateCommandInput('designSystems.governing', { artifactId: ID }).ok).toBe(true);
+      expect(validateCommandInput('designSystems.governing', { artifactId: ID, versionId: 3 }).ok).toBe(true);
+      expect(validateCommandInput('designSystems.governing', { artifactId: ID, versionId: 0 }).ok).toBe(false);
+      expect(validateCommandInput('designSystems.governing', {}).ok).toBe(false);
+      expect(validateCommandOutput('designSystems.governing', { system: { id: ID } }).ok).toBe(true);
+      expect(validateCommandOutput('designSystems.governing', { system: { id: ID, versionSeq: 0 } }).ok).toBe(true);
+      expect(validateCommandOutput('designSystems.governing', { system: { builtin: 'maws' } }).ok).toBe(true);
+      expect(validateCommandOutput('designSystems.governing', { system: { id: 'maws' } }).ok).toBe(false);
+      expect(validateCommandOutput('designSystems.governing', { system: null }).ok).toBe(false);
     });
 
     it('designSystems.house takes nothing and answers a system id or null', () => {
