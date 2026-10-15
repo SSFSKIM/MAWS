@@ -38,9 +38,9 @@ runs:
         APT: ${{ inputs.apt }}
       run: |
         read -ra packages <<<"$APT"
-        # Korean text, and the faces the UI tokens name after the Mac's own (Inter after SF Pro, JetBrains Mono after
-        # SF Mono), so text sets in metrics close to the Mac's.
-        if [[ $E2E == true ]]; then packages+=(xvfb fonts-noto-cjk fonts-inter fonts-jetbrains-mono); fi
+        # Korean text; the faces the UI tokens name after the Mac's own (Inter after SF Pro, JetBrains Mono after SF Mono),
+        # so text sets in metrics close to the Mac's; zsh, the Mac's login shell, which the e2e jobs name in SHELL.
+        if [[ $E2E == true ]]; then packages+=(xvfb fonts-noto-cjk fonts-inter fonts-jetbrains-mono zsh); fi
         if [[ $LIBREOFFICE == true ]]; then packages+=(libreoffice-writer libreoffice-impress); fi
         sudo apt-get update -q
         sudo apt-get install -yq --no-install-recommends "${packages[@]}"
@@ -50,5 +50,10 @@ runs:
     - if: runner.os == 'Linux' && inputs.e2e == 'true'
       shell: bash
       run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+    # The recorded fixtures name paths under macOS's /private/tmp (where /tmp resolves there), which the e2e scenes
+    # recreate; a real directory, so a path under it keeps its recorded realpath.
+    - if: runner.os == 'Linux' && inputs.e2e == 'true'
+      shell: bash
+      run: sudo install -d -m 1777 /private/tmp
     - shell: bash
       run: pnpm install --frozen-lockfile

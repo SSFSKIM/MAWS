@@ -105,6 +105,7 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.e2e) }}
     env:
       MAWS_E2E_QUIET: '1'
+      SHELL: /bin/zsh # the Mac's login shell, which the app's terminals and its login-shell capture start (setup installs it)
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
