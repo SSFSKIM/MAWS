@@ -352,6 +352,16 @@ registrations through `connectDepth()`.
   (`d75f2924`) is merged; then the stand-in and cast go and a browser spec
   covers it. Until then the double's unit coverage carries it.
   Date/Author: 2026-10-15, M1 executor; rulings by the composite's writer.
+- Decision: The siblings' `step-end` sides are ready (DC5's M3 ticked at
+  `2af4fbc6` on `smns-erb-web`, with the client's passthrough and DX8's
+  `transcript` slot type; DC3's protocol type at `b7fc7ebd` on `smns-erb`
+  with the `6fa2252d` amendments). Between M2 and M3, never under a running
+  executor, the branch merges both at or after those commits, deletes
+  `depth/stream/step-end.ts` and the cast in `DeskTranscript.subscribe`,
+  and adds the `step-end` browser spec; M3's executor does this first.
+  `raised` now carries optional `agentId` and `truncated`; depth draws no
+  pending requests, but would place one on the subagent named by `agentId`.
+  Date/Author: 2026-10-15, controller, on the composite's writer's notice.
 - Decision (M3): The `transcript` slot draws through MAWS's to-human
   Presenter, so the unfolded working record reads as the folded view does;
   depth on the right stays raw. It draws an **exclusive range**: DC5 mounts
