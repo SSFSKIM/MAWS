@@ -565,7 +565,10 @@ fork.
 - **Humans** sign in through Access in front of the Worker. The registry
   holds one org with the owner as its admin.
 - **Machines** enroll with a one-time code the browser generates and the
-  owner runs as `sminos hub enroll <code>` on the machine. The code carries
+  owner pastes into `sminos hub enroll` on the machine, which reads it from
+  a hidden prompt or from stdin and refuses it as an argument: the code
+  carries the org key, and an argument stays in the process listing and the
+  shell's history. The code carries
   the hub's URL, a one-time token the hub exchanges for the machine's
   Access service token, the machine name to claim (§3), and the org key
   (below). The hub sees the token, never the key. Token and key live under
@@ -812,7 +815,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
   it: the daemon becomes concurrent, enrolls, syncs hub projects' logs with
   authentication codes, and writes the archive.
 - **Acceptance:**
-  - **G1 (enroll):** `sminos hub enroll <code>` enrolls a machine under its
+  - **G1 (enroll):** `sminos hub enroll`, given the code at its prompt or on stdin, enrolls a machine under its
     claimed name and stores the token and the org key; `sminos project init
     --hub` writes the `hub` field; a second installation with the same host
     name is refused at enrollment and told how to pick another name.
@@ -2075,8 +2078,8 @@ rotates the credential; an answer that never came back from Cloudflare (a lost m
 minted under it. A pending enrollment lasts `ttl_s` from its latest redemption; the machine confirms it by any
 authenticated request. The hub never sees the org key: the browser builds the enrollment code from the token.
 
-**The enrollment code**, built in the browser so the hub never sees the org key, and run on the machine as `sminos
-hub enroll <code>`: the text `smns-enroll-v1.` followed by the base64url (no padding) of the UTF-8 JSON object
+**The enrollment code**, built in the browser so the hub never sees the org key, and pasted on the machine into
+`sminos hub enroll` (read from a hidden prompt or stdin, never an argument, §6): the text `smns-enroll-v1.` followed by the base64url (no padding) of the UTF-8 JSON object
 `{hub, org, token, machine, key}` — `hub` the hub's origin (`https`, or `http` on a loopback host for the local
 runtime), `org` the org id, `token` the one-time token, `machine` the name to claim, `key` the org key as base64url
 (32 bytes). A decoder refuses another prefix, a damaged body, a key that is not 256 bits, a name that is not admitted,
@@ -2453,6 +2456,19 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The enrollment code is never a command-line argument. It
+  carries the org key in reversible base64url, and `sminos hub enroll
+  <code>` left it in the process listing for the command's life (up to
+  three 30 s attempts) and in the shell's history (DC4's M2 review).
+  `sminos hub enroll` reads the code from a hidden prompt, or from stdin
+  when piped, and refuses it as an argument, saying how to run it; the
+  web's enrollment screen says "run `sminos hub enroll` on the machine and
+  paste this code", with the code to copy, never one command line with the
+  code inline. Rejected: keeping the argument form with a warning (the
+  harm is done by the time the warning prints) and an environment variable
+  (it reaches child processes and the shell's history just the same).
+  Flags DC4, DC5.
+  Date/Author: 2026-10-15, design session (DC4's M2 review).
 - Decision: Context use and cost reach the web as DX4 `usage`, on the main
   transcript's subscription (in its snapshot, then after each main turn),
   passed through from the bridge's DX5 `usage` event, which already
