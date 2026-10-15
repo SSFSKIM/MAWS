@@ -429,6 +429,11 @@ registrations through `connectDepth()`.
   dialog's `toolu_plugin_…` events; the open-bound note stays until DC3's
   fake carries the field, then the acceptance proves the bound against it.
   Date/Author: 2026-10-15, composite's writer.
+- 2026-10-15: DC3's MAWS `4b5d0a67` gives the fake's recorded ask question
+  `toolUseId` (`toolu_01YLTbS83Smb5RvQKJwQtK2S`), exports `SessionDepth`
+  from `fake-machine/index.ts`, and adds `FakeMachineOptions.diffBase`;
+  M3's fix wave merges it, drops the deep import, and proves the question
+  bound against the fake with no open-bound note for it.
 - Decision: DX5 is final (composite at MAWS `361bee24`, DC2 closed): a
   `turn` start may carry `recovered: true` with `text: null`. Depth draws
   no turn start's text — DX4 relays no `turn` event, and the prompt row it
