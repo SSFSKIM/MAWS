@@ -1,11 +1,13 @@
 // The session plane of one recorded session, served through DC5's DX3 double (the DC6 plan's Decision Log, "The
 // double's fixture"): it answers each `subscribe` the browser sends for the session's main transcript with the snapshot
 // at the playhead, plays the live script (chunks, `block-row`, rows, synthesized from the recording) to every open
-// subscription as the suite advances it, and answers `rows` with older pages. The double itself is used as it stands:
-// the player reads the frames it records (`hub.up`) and sends through `hub.sendSession`.
+// subscription as the suite advances it, and answers `rows` with older pages. Each subagent's transcript is a track of
+// its own (`agent(id)`), with its own script, playhead, and subscriptions, as DX3 scopes a subscription by `agentId`.
+// The double itself is used as it stands: the player reads the frames it records (`hub.up`) and sends through
+// `hub.sendSession`.
 import type { JsonObject, SessionBodies, SessionMessage, SubagentMeta } from 'desk-hub/protocol';
 import type { HubDouble } from '../test/double/hub-double';
-import { readRecording, rowsBefore, scriptOf, snapshotAt, type LiveItem, type ScriptOptions } from '../test/double/session-stream';
+import { readRecording, rowsBefore, scriptOf, snapshotAt, withTextAnswer, type LiveItem, type ScriptOptions } from '../test/double/session-stream';
 
 type Open = { sub: string; n: number };
 
@@ -17,6 +19,11 @@ export type PlayerOptions = ScriptOptions & {
   extraRows?: JsonObject[];
   /** The newest rows a snapshot carries at most; older ones are paged in. */
   limit?: number;
+  /**
+   * The main transcript's tree grows as the agents start (a `subagents` message as each `Agent` call is written; the
+   * snapshot holds the agents started by the playhead). Without it every snapshot carries the whole tree.
+   */
+  growTree?: boolean;
 };
 
 export class DepthPlayer {
@@ -36,6 +43,7 @@ export class DepthPlayer {
   private cursor = 0;
   private readonly timer: ReturnType<typeof setInterval>;
   private readonly subagents: SubagentMeta[];
+  private readonly agents = new Map<string, AgentTrack>();
 
   constructor(
     private readonly hub: HubDouble,
@@ -43,12 +51,20 @@ export class DepthPlayer {
   ) {
     const recording = readRecording();
     this.subagents = recording.subagents.map(({ agentId, meta }) => ({ agentId, meta }));
-    this.script = scriptOf([...(options.extraRows ?? []), ...recording.session], null, options);
+    this.script = scriptOf([...(options.extraRows ?? []), ...recording.session], null, { ...options, subagents: options.growTree ? this.subagents : undefined });
+    for (const { agentId, rows } of recording.subagents) this.agents.set(agentId, new AgentTrack(hub, options, agentId, scriptOf(withTextAnswer(rows), agentId, { piece: options.piece })));
     this.timer = setInterval(() => this.poll(), 5);
   }
 
   stop(): void {
     clearInterval(this.timer);
+  }
+
+  /** One subagent's track: its own script, playhead, and subscriptions. */
+  agent(agentId: string): AgentTrack {
+    const track = this.agents.get(agentId);
+    if (!track) throw new Error(`no recorded subagent ${agentId}`);
+    return track;
   }
 
   /** Plays the next `count` items to every open subscription. */
@@ -88,8 +104,11 @@ export class DepthPlayer {
       const { project, frame } = this.hub.up[this.cursor++];
       if (project !== this.options.project) continue;
       if (frame.t === 'subscribe' && frame.session === this.options.session && frame.agentId === null) this.subscribed(frame.sub);
-      else if (frame.t === 'unsubscribe') this.closeSub(frame.sub);
-      else if (frame.t === 'rows') this.rows(frame.sub, frame.before, frame.limit);
+      else if (frame.t === 'subscribe' && frame.session === this.options.session && frame.agentId !== null) this.agents.get(frame.agentId)?.subscribed(frame.sub);
+      else if (frame.t === 'unsubscribe') {
+        this.closeSub(frame.sub);
+        for (const track of this.agents.values()) track.closeSub(frame.sub);
+      } else if (frame.t === 'rows') this.rows(frame.sub, frame.before, frame.limit);
     }
   }
 
@@ -145,6 +164,75 @@ export class DepthPlayer {
   }
 
   /** `step-end` included: the shell's client relays it once DC3's protocol carries the kind; until then no script here plays it. */
+  private send(open: Open, kind: SessionMessage['kind'] | 'step-end', body: unknown): void {
+    const n = kind === 'snapshot' ? 0 : ++open.n;
+    const { project, machine, session } = this.options;
+    this.hub.sendSession(project, { project, machine, session, kind, sub: open.sub, n, body } as SessionMessage);
+  }
+}
+
+/**
+ * One subagent's transcript as its own subscriptions see it (DX3: a `subscribe` naming that `agentId`): its script
+ * (the agent's rows, its answer written as text too, so its stream has text to draw), its playhead, and its open
+ * subscriptions, each answered with the snapshot at the playhead. Its tree is its own: none nested.
+ */
+export class AgentTrack {
+  playhead = 0;
+  /** The next subscription's snapshot is taken this many items back: they are sent again after it. */
+  overlapNext = 0;
+  /** How many `subscribe`s this track has answered. */
+  answered = 0;
+  private readonly open: Open[] = [];
+
+  constructor(
+    private readonly hub: HubDouble,
+    private readonly options: PlayerOptions,
+    readonly agentId: string,
+    readonly script: LiveItem[],
+  ) {}
+
+  /** Plays the next `count` items to this track's open subscriptions. */
+  advance(count = 1): void {
+    const items = this.script.slice(this.playhead, this.playhead + count);
+    this.playhead += items.length;
+    for (const open of this.open) for (const item of items) this.send(open, item.kind, item.body);
+  }
+
+  /** Plays up to (not including) the first item `match` accepts at or after the playhead. */
+  advanceTo(match: (item: LiveItem) => boolean): void {
+    const at = this.script.findIndex((item, i) => i >= this.playhead && match(item));
+    this.advance((at < 0 ? this.script.length : at) - this.playhead);
+  }
+
+  /** Moves the playhead without sending: what a hub restart lost in flight. */
+  skip(count: number): void {
+    this.playhead = Math.min(this.script.length, this.playhead + count);
+  }
+
+  /** Ends this track's open subscriptions with `reason`; no other transcript's are touched. */
+  end(reason: SessionBodies['end']['reason']): void {
+    for (const open of this.open.splice(0)) this.send(open, 'end', { reason });
+  }
+
+  subscriptions(): number {
+    return this.open.length;
+  }
+
+  subscribed(sub: string): void {
+    this.answered += 1;
+    const open: Open = { sub, n: 0 };
+    this.open.push(open);
+    const cut = Math.max(0, this.playhead - this.overlapNext);
+    this.overlapNext = 0;
+    this.send(open, 'snapshot', snapshotAt(this.script, this.playhead, { subagents: [] }));
+    for (const item of this.script.slice(cut, this.playhead)) this.send(open, item.kind, item.body);
+  }
+
+  closeSub(sub: string): void {
+    const at = this.open.findIndex((open) => open.sub === sub);
+    if (at >= 0) this.open.splice(at, 1);
+  }
+
   private send(open: Open, kind: SessionMessage['kind'] | 'step-end', body: unknown): void {
     const n = kind === 'snapshot' ? 0 : ++open.n;
     const { project, machine, session } = this.options;

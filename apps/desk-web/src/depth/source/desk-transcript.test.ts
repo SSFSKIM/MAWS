@@ -6,8 +6,9 @@ import type { SessionBodies, SubagentMeta } from 'desk-hub/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
+import { FakePlane, mount, settle } from '../../../test/double/fake-plane';
 import { readRecording, rowsBefore, scriptOf, snapshotAt, STRAY, type LiveItem } from '../../../test/double/session-stream';
-import type { SessionPlane, SessionTarget, Subscription, SubscriptionListener, SubscriptionMessage } from '../../shell/session-plane';
+import type { SessionTarget } from '../../shell/session-plane';
 import type { StepEnd } from '../stream/step-end';
 import { DeskTranscript, freshSource, subagentLookupOf } from './desk-transcript';
 
@@ -15,62 +16,6 @@ const PROJECT = 'proj';
 const TARGET: SessionTarget = { machine: 'mini', session: 'sess-1', agentId: null };
 const recording = readRecording();
 const metas: SubagentMeta[] = recording.subagents.map(({ agentId, meta }) => ({ agentId, meta }));
-
-type Held = { target: SessionTarget; listener: SubscriptionListener; asked: Array<{ before: string; limit: number }>; closed: boolean; n: number };
-
-class FakePlane implements SessionPlane {
-  readonly subs: Held[] = [];
-  subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription {
-    const held: Held = { target, listener, asked: [], closed: false, n: 0 };
-    this.subs.push(held);
-    return { rows: (before, limit) => void held.asked.push({ before, limit }), close: () => void (held.closed = true) };
-  }
-  get current(): Held {
-    return this.subs.at(-1)!;
-  }
-  send<K extends SubscriptionMessage['kind'] | 'step-end'>(kind: K, body: K extends keyof SessionBodies ? SessionBodies[K] : StepEnd): void {
-    const held = this.current;
-    const n = kind === 'snapshot' ? 0 : ++held.n;
-    // `step-end` reaches the listener as the shell's client will relay it once DC3's protocol carries the kind.
-    held.listener.message({ project: PROJECT, machine: TARGET.machine, session: TARGET.session, kind, sub: 'sub', n, body } as SubscriptionMessage);
-  }
-  snapshot(script: LiveItem[], cut: number, limit?: number): void {
-    this.current.n = 0;
-    this.send('snapshot', snapshotAt(script, cut, { subagents: metas, limit }));
-  }
-  play(items: LiveItem[]): void {
-    for (const item of items) this.send(item.kind, item.body as never);
-  }
-}
-
-const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
-
-/**
- * What the view does: keeps the controller's current source attached to the store under its key. MAWS's `Transcript`
- * attaches a new source in an effect, after the render that read it, so a swap here waits a task too: messages that
- * arrive in between reach a controller whose new source is not attached yet.
- */
-function mount(controller: DeskTranscript, store: ReturnType<typeof createTranscriptStore>) {
-  let source = controller.state.getState().source;
-  void store.getState().attach(controller.key, source, { agentId: null });
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const off = controller.state.subscribe((s) => {
-    if (s.source === source || timer !== null) return;
-    timer = setTimeout(() => {
-      timer = null;
-      const next = controller.state.getState().source;
-      if (next === source) return;
-      store.getState().detach(controller.key);
-      source = next;
-      void store.getState().attach(controller.key, source, { agentId: null });
-    }, 0);
-  });
-  return () => {
-    off();
-    if (timer !== null) clearTimeout(timer);
-    store.getState().detach(controller.key);
-  };
-}
 
 /** The rows a fresh load of these transcript rows draws: a new store over one snapshot of them. */
 async function freshRows(rows: readonly SessionBodies['row']['row'][]): Promise<Row[]> {
@@ -128,7 +73,7 @@ describe('the main transcript through the session plane', () => {
   }
 
   beforeEach(() => {
-    plane = new FakePlane();
+    plane = new FakePlane(PROJECT, metas);
     store = createTranscriptStore();
     controller = new DeskTranscript({ plane, project: PROJECT, target: TARGET, store });
     controller.open();

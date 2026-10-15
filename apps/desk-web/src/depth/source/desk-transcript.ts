@@ -19,6 +19,11 @@
 // installing), so its partial text and its row are never drawn together and nothing streamed goes missing between.
 // A step's `step-end` drops its blocks no `block-row` named: an aborted response's partial text goes with its request.
 //
+// The subagent tree. The same rows, mapped once more under a context of the tree's own (so it never waits for the view
+// to attach a source), feed MAWS's task graph beside the subscription's `subagents` metas (`agents/task-feed.ts`): it
+// is rebuilt whenever the transcript is, and follows each row and each `subagents` message in between. A main-thread
+// subscription carries the session's tree; a subagent's, that agent's own.
+//
 // Disruptions (DX8). A `reset` (a gap, a dropped socket, a hub restart, the bridge's own discontinuity) drops what was
 // drawn: the layer is cleared, the source resets MAWS's store key, and its next snapshot waits for the fresh one the
 // client subscribes for. Any other `end` keeps what was drawn and says why; `resubscribe` takes a fresh snapshot,
@@ -30,8 +35,10 @@ import type { JsonObject, SessionBodies, SubagentMeta } from 'desk-hub/protocol'
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { createBackfillContext, recordToEvents, type BackfillContext, type SubagentLookup } from '../../../../../src/engine-host/fs/backfill';
 import type { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
+import { emptyGraph, type TaskGraph } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
 import type { TranscriptSource } from '../../../../../src/renderer/src/transcript/source/types';
 import { transcriptKey, type SessionPlane, type SessionTarget, type Subscription } from '../../shell/session-plane';
+import { taskGraphOf, withEvents, withMetas } from '../agents/task-feed';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
 import type { DepthMessage } from '../stream/step-end';
 
@@ -53,6 +60,8 @@ export type DepthTranscriptState = {
   /** Older rows exist before the oldest held one. */
   more: boolean;
   loadingOlder: boolean;
+  /** The subagent tree this subscription knows: MAWS's task graph over its metas and its held rows. */
+  tasks: TaskGraph;
 };
 
 export type DeskTranscriptOptions = {
@@ -91,12 +100,12 @@ function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
 const contextFor = (target: SessionTarget, subagents: SubagentLookup): BackfillContext =>
   createBackfillContext({ sessionId: target.session as SessionId, agent: target.agentId === null ? null : { agentId: target.agentId as AgentId, parentToolUseId: null }, subagents });
 
-/** A source over a fixed list of rows, oldest first, as a fresh load of them draws: the suites' reference. */
-export function freshSource(rows: readonly JsonObject[], session: string, subagents: SubagentLookup): TranscriptSource {
+/** A source over a fixed list of one transcript's rows, oldest first, as a fresh load of them draws: the suites' reference. */
+export function freshSource(rows: readonly JsonObject[], session: string, subagents: SubagentLookup, agentId: string | null = null): TranscriptSource {
   return {
     subscribe: () => () => {},
     snapshot: async () => {
-      const ctx = contextFor({ machine: '', session, agentId: null }, subagents);
+      const ctx = contextFor({ machine: '', session, agentId }, subagents);
       return rows.flatMap((row) => eventsOf(row, ctx));
     },
   };
@@ -170,7 +179,10 @@ export class DeskTranscript {
   private readonly uuids = new Set<string>();
   /** Held rows whose mapping gave no event under the row's own uuid: in the store as soon as they are mapped. */
   private readonly silent = new Set<string>();
+  private metas: readonly SubagentMeta[] = [];
   private subagents: SubagentLookup = subagentLookupOf([]);
+  /** The tree's own backfill context, continued by each row after the held ones; null until a snapshot. */
+  private treeContext: BackfillContext | null = null;
   /**
    * Agent tool calls a held row's mapping looked up before their subagent's metadata was in: metadata naming one
    * rebuilds the transcript, so the rows mapped without it are attributed as a fresh load attributes them.
@@ -199,7 +211,7 @@ export class DeskTranscript {
     this.page = options.page ?? PAGE;
     this.key = transcriptKey(options.project, options.target);
     this.source = new RowsSource(this);
-    this.state = createStore<DepthTranscriptState>(() => ({ source: this.source, phase: 'loading', ended: null, streaming: [], more: false, loadingOlder: false }));
+    this.state = createStore<DepthTranscriptState>(() => ({ source: this.source, phase: 'loading', ended: null, streaming: [], more: false, loadingOlder: false, tasks: emptyGraph() }));
   }
 
   open(): void {
@@ -280,6 +292,7 @@ export class DeskTranscript {
   }
 
   private snapshot(body: SessionBodies['snapshot']): void {
+    this.metas = body.subagents;
     this.subagents = subagentLookupOf(body.subagents);
     this.unresolved.clear();
     const fresh = [...body.rows].reverse().filter(hasUuid);
@@ -290,7 +303,10 @@ export class DeskTranscript {
       if (at >= 0) more = this.state.getState().more;
       this.setRows(at >= 0 ? [...this.rows.slice(0, at), ...fresh] : fresh);
       this.rebuild();
-    } else this.setRows(fresh);
+    } else {
+      this.setRows(fresh);
+      this.retree();
+    }
     this.layer.load(body.streaming);
     this.served = true;
     this.snapshotted.resolve();
@@ -328,15 +344,17 @@ export class DeskTranscript {
     this.uuids.add(row.uuid);
     this.rows.push(row);
     this.source.live(row);
+    if (this.treeContext !== null) this.state.setState({ tasks: withEvents(this.state.getState().tasks, eventsOf(row, this.treeContext)) });
     this.publish();
   }
 
   private metadata(subagents: readonly SubagentMeta[]): void {
+    this.metas = subagents;
     this.subagents = subagentLookupOf(subagents);
     const resolved = [...this.unresolved].filter((toolUseId) => this.subagents.byToolUseId(toolUseId) !== null);
-    if (resolved.length === 0) return;
     for (const toolUseId of resolved) this.unresolved.delete(toolUseId);
-    if (this.served) this.rebuild();
+    if (resolved.length > 0 && this.served) this.rebuild();
+    else this.state.setState({ tasks: withMetas(this.state.getState().tasks, subagents) });
   }
 
   private older(body: SessionBodies['rows']): void {
@@ -353,15 +371,25 @@ export class DeskTranscript {
     this.served = false;
     this.snapshotted = deferred();
     this.unresolved.clear();
-    this.state.setState({ phase: 'reconnecting', ended: null, more: false, loadingOlder: false, streaming: [] });
+    this.metas = [];
+    this.treeContext = null;
+    this.state.setState({ phase: 'reconnecting', ended: null, more: false, loadingOlder: false, streaming: [], tasks: emptyGraph() });
     this.source.reset();
     for (const listener of [...this.resets]) listener(); // MAWS's store empties the key and hydrates it again
   }
 
-  /** The held rows under a new source: MAWS's store rebuilds the key from all of them, staged. */
+  /** The held rows under a new source: MAWS's store rebuilds the key from all of them, staged; the tree with them. */
   private rebuild(): void {
     this.source = new RowsSource(this);
     this.state.setState({ source: this.source });
+    this.retree();
+  }
+
+  /** The tree from the held rows and the metas, under a fresh context of its own that later rows continue. */
+  private retree(): void {
+    const ctx = this.newContext();
+    this.treeContext = ctx;
+    this.state.setState({ tasks: taskGraphOf(this.metas, this.rows.flatMap((row) => eventsOf(row, ctx))) });
   }
 
   private setRows(rows: Row[]): void {

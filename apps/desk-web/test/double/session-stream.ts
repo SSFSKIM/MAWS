@@ -1,8 +1,9 @@
 // The session plane's live part, synthesized from a recorded transcript (the DC6 plan's Decision Log, "The double's
 // fixture"): a plain recording carries no bridge stream, so each assistant row's content block is played as DX5
 // `turn.step` chunks in the engine's own shapes, then the block's `block-row`, then the row (DX4's order), and every
-// other row is played as it is; with `stepEnds`, each model request closes with its `step-end`. A cut anywhere in that
-// script gives the snapshot a producer would take there: the rows already written (newest first) and, per model
+// other row is played as it is; with `stepEnds`, each model request closes with its `step-end`; with `subagents`, the
+// main transcript's tree grows by a `subagents` message as each agent is started. A cut anywhere in that script gives
+// the snapshot a producer would take there: the rows already written (newest first), the tree so far, and, per model
 // request still streaming (not ended), the blocks without a `block-row` yet with the text of their chunks up to the
 // cut and its `upTo`. Used by the unit suites and by the browser suites' double.
 import { readdirSync, readFileSync } from 'node:fs';
@@ -33,11 +34,34 @@ export function readRecording(dir = RECORDING_DIR): Recording {
   return { session: jsonl(join(dir, 'session.jsonl')), subagents };
 }
 
+/**
+ * A subagent's rows with its answer also written as text. The recorded agents answered only through their hand-back's
+ * tool call, whose input streams but is never drawn, so each hand-back gets a text block before it in the same
+ * response — the hand-back's own message, as block `apiBlockIndex` with the call one after it — and a subagent's
+ * stream has text to draw and settle. Synthesized here, like the fixture's thinking (its README), never committed as
+ * the recording.
+ */
+export function withTextAnswer(rows: JsonObject[]): JsonObject[] {
+  return rows.flatMap((row) => {
+    const [block] = contentOf(row);
+    if (row.type !== 'assistant' || block?.type !== 'tool_use' || block.name !== 'SubagentHandback') return [row];
+    const text = String((block.input as JsonObject | undefined)?.message ?? '');
+    const index = typeof row.apiBlockIndex === 'number' ? row.apiBlockIndex : 0;
+    const uuid = `${String(row.uuid)}-text`;
+    const message = row.message as JsonObject;
+    return [
+      { ...row, uuid, apiBlockIndex: index, message: { ...message, content: [{ type: 'text', text }] } },
+      { ...row, parentUuid: uuid, apiBlockIndex: index + 1 },
+    ];
+  });
+}
+
 export type LiveItem =
   | { kind: 'row'; body: SessionBodies['row'] }
   | { kind: 'chunk'; body: SessionBodies['chunk'] }
   | { kind: 'block-row'; body: SessionBodies['block-row'] }
-  | { kind: 'step-end'; body: StepEnd };
+  | { kind: 'step-end'; body: StepEnd }
+  | { kind: 'subagents'; body: SessionBodies['subagents'] };
 
 export type ScriptOptions = {
   /** Characters per text, thinking, or input chunk. */
@@ -59,6 +83,13 @@ export type ScriptOptions = {
    * row, and its response's later rows never written. Its step ends there (with `stepEnds`).
    */
   cutOff?: number;
+  /**
+   * The session's subagents (each `subagents/*.meta.json`): the tree as a main-transcript subscription carries it, one
+   * `subagents` message with every agent started so far played as each `Agent` call's block is written (after its
+   * `block-row`, before its row: the engine writes the meta as it spawns the agent, while the transcript row waits for
+   * its 100 ms flush).
+   */
+  subagents?: SubagentMeta[];
 };
 
 /** The text a straggler chunk carries, so a suite can say it is never drawn. */
@@ -107,6 +138,7 @@ export function scriptOf(rows: JsonObject[], agentId: string | null, options: Sc
   let blockRows = 0;
   let late: LiveItem | null = null; // a row held back until the next block of its response has begun
   let aborted: string | null = null; // the response cut off by `cutOff`: its later rows were never written
+  const started: SubagentMeta[] = []; // the tree so far
   const flushLate = () => {
     if (late) items.push(late);
     late = null;
@@ -151,6 +183,11 @@ export function scriptOf(rows: JsonObject[], agentId: string | null, options: Sc
       if (chunks.length > 0 && blockRows++ === options.strayAfterBlockRow) {
         items.push({ kind: 'chunk', body: { turnId, agentId, step, chunkIndex: chunkIndex++, chunk: { kind: 'text', index, text: STRAY } } });
       }
+      const spawned = (options.subagents ?? []).filter(({ meta }) => contentOf(row).some((block) => block.type === 'tool_use' && block.id === meta.toolUseId));
+      if (spawned.length > 0) {
+        started.push(...spawned);
+        items.push({ kind: 'subagents', body: { subagents: [...started] } });
+      }
       const item: LiveItem = { kind: 'row', body: { row, agentId } };
       if (options.lateRows) {
         flushLate();
@@ -177,7 +214,8 @@ const blockKind = (chunk: JsonObject): 'text' | 'thinking' | 'tool' | null =>
 
 /**
  * The snapshot a producer takes after the first `cut` items of the script: every row played so far, newest first
- * (`limit` of them at most, `more` saying whether older ones exist), and each request still streaming with its blocks
+ * (`limit` of them at most, `more` saying whether older ones exist), the subagent tree as of the cut when the script
+ * grows one (else `extra.subagents`), and each request still streaming with its blocks
  * that have no `block-row` yet, their text through the cut and `upTo` the index of the last chunk it includes.
  */
 export function snapshotAt(script: LiveItem[], cut: number, extra: { subagents?: SubagentMeta[]; presence?: SessionPresence; limit?: number } = {}): SessionBodies['snapshot'] {
@@ -205,6 +243,9 @@ export function snapshotAt(script: LiveItem[], cut: number, extra: { subagents?:
     block.upTo = chunkIndex;
     message.upTo = chunkIndex; // the request's watermark (DX4 at composite 8f7e09d3); a block's own is informational
   }
+  const trees = played.filter((item): item is Extract<LiveItem, { kind: 'subagents' }> => item.kind === 'subagents');
+  const scripted = script.some((item) => item.kind === 'subagents'); // a script that grows the tree: the tree as of the cut
+  const subagents = scripted ? (trees.at(-1)?.body.subagents ?? []) : (extra.subagents ?? []);
   const streaming = [...messages.entries()]
     .filter(([key]) => !ended.has(key)) // a step that ended keeps no block: the named ones have their rows, the rest never will
     .map(([, m]) => m)
@@ -213,7 +254,7 @@ export function snapshotAt(script: LiveItem[], cut: number, extra: { subagents?:
   return {
     rows: rows.slice(-limit).reverse(),
     more: rows.length > limit,
-    subagents: extra.subagents ?? [],
+    subagents,
     presence: extra.presence ?? { record: { status: 'busy' }, bridge: true },
     streaming,
   };
