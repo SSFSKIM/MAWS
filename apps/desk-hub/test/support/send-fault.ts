@@ -3,6 +3,8 @@
 export const SEND_FAULT_PATH = '/__test/send-fault';
 /** Where the suites' `Machine` takes a shortened heartbeat and lease (`?heartbeatMs=&leaseMs=`), before its stream opens. */
 export const TIMING_PATH = '/__test/timing';
+/** Where the suites' `Machine` is terminated: `ctx.abort()`, which ends the instance and its stream unannounced. */
+export const MACHINE_ABORT_PATH = '/__test/abort';
 /** Where the suites' `Project` says which instance it is. */
 export const PROJECT_LIFE_PATH = '/__test/life';
 /** Where the suites' `Project` takes a renewal or close of a lease, as its `Machine` would send one. */

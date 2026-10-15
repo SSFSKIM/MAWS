@@ -40,7 +40,8 @@ const wrappedKey = (extra: Record<string, unknown> = {}) => ({
 });
 
 const post = (who: string, body: unknown) => hub.fetchAs(who, '/api/org/keys', { body });
-const remove = (who: string, id: string, body: unknown = { auth: AUTH }) => hub.fetchAs(who, `/api/org/keys/${id}`, { method: 'DELETE', body });
+/** `body` undefined sends none: the caller names the auth it sends, so a test of a missing one cannot get the key's. */
+const remove = (who: string, id: string, body: unknown) => hub.fetchAs(who, `/api/org/keys/${id}`, { method: 'DELETE', body });
 const list = async (who = ADMIN) => (await (await hub.fetchAs(who, '/api/org/keys')).json()) as WrappedKeys;
 const textOf = async (response: Response) => {
   const text = await response.text();
@@ -136,7 +137,7 @@ describe('wrapped org keys', () => {
     const added = await post(MEMBER, wrappedKey());
     expect(added.status).toBe(403);
     expect(await textOf(added)).toMatchObject({ error: 'not-admin' });
-    const removed = await remove(MEMBER, keys[0].id);
+    const removed = await remove(MEMBER, keys[0].id, { auth: AUTH });
     expect(removed.status).toBe(403);
     expect(await textOf(removed)).toMatchObject({ error: 'not-admin' });
     expect((await list()).keys).toHaveLength(keys.length);
@@ -145,11 +146,11 @@ describe('wrapped org keys', () => {
   it('with the key, removes a key, but never the last; an unknown one is 404', async () => {
     const { keys, key_check } = await list();
     expect(keys.length).toBeGreaterThan(1);
-    for (const key of keys.slice(1)) expect(await textOf(await remove(ADMIN, key.id))).toEqual({ removed: key.id });
-    const last = await remove(ADMIN, keys[0].id);
+    for (const key of keys.slice(1)) expect(await textOf(await remove(ADMIN, key.id, { auth: AUTH }))).toEqual({ removed: key.id });
+    const last = await remove(ADMIN, keys[0].id, { auth: AUTH });
     expect(last.status).toBe(409);
     expect(await textOf(last)).toMatchObject({ error: 'last-key' });
-    const unknown = await remove(ADMIN, '0'.repeat(32));
+    const unknown = await remove(ADMIN, '0'.repeat(32), { auth: AUTH });
     expect(unknown.status).toBe(404);
     expect(await textOf(unknown)).toMatchObject({ error: 'unknown-key' });
     // The check stays the org's: a key added again must wrap the same key.

@@ -1,7 +1,8 @@
 // The session plane (DC3.G3) on the local runtime: RPCs, subscriptions, the pending set, the audit record of decisions,
 // delivery outcomes, presence and machine leases, and Web Push — machines speaking DX2 and browsers DX3 through the
-// stand-in. Real hibernation and eviction are forced through Miniflare's `unsafeEvictDurableObject` (workerd's
-// `workerd:unsafe` evict), which drops the object's memory and keeps its sockets open when asked to hibernate them.
+// stand-in. Real hibernation is forced through Miniflare's `unsafeEvictDurableObject` (workerd's `workerd:unsafe`
+// evict), which drops a `Project`'s memory and keeps its sockets open; a `Machine` holding a stream is an active
+// reference workerd will not evict, so its termination is `ctx.abort()` through a suite seam.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { GridDown, ProjectDown } from '../src/protocol/browser';
 import { importOrgKey, newNonce, seal, sealRpc } from '../src/protocol/codes';
@@ -26,6 +27,11 @@ const SECOND = '0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59';
 
 let projects = 0;
 const newProject = () => `7a1c0a8e-3b2d-4c5e-9f70-${(++projects).toString(16).padStart(12, '0')}`;
+
+/** For a test that closes its machine's stream: Miniflare reports a client's disconnect as the request's abort only
+ * when the next write to the stream fails (deployed, it arrives at once: M1's probe), so the stream beats often enough
+ * for the close to land within a test's wait. The lease keeps the deployed length: it is the close that ends it. */
+const CLOSES = { heartbeatMs: 250, leaseMs: 45_000 };
 
 let machines = 0;
 /** An enrolled, connected machine that has opened `project`; `timing` shortens its heartbeat and lease first. */
@@ -114,7 +120,7 @@ describe('RPCs', () => {
 
   it('fail at once, and are not forwarded, to a machine without a connection, when stale, or when another member signs them', async () => {
     const project = newProject();
-    const m = await machine(project);
+    const m = await machine(project, CLOSES);
     const b = await browser(project);
     const offline = await rpc(project, 'nowhere', 'interrupt', { session: SESSION });
     b.send({ t: 'rpc', rpc: offline });
@@ -142,7 +148,7 @@ describe('RPCs', () => {
 
   it('become uncertain when the machine drops after forwarding, and resolve from the result republished after it reconnects', async () => {
     const project = newProject();
-    const m = await machine(project);
+    const m = await machine(project, CLOSES);
     const b = await browser(project);
     const call = await rpc(project, m.name, 'spawn', { checkout: '/src/maws', brief: 'one session' });
     b.send({ t: 'rpc', rpc: call });
@@ -162,7 +168,7 @@ describe('RPCs', () => {
 
   it('a retry of an uncertain RPC is forwarded again once its machine is back (the daemon’s ledger answers it)', async () => {
     const project = newProject();
-    const m = await machine(project);
+    const m = await machine(project, CLOSES);
     const b = await browser(project);
     const call = await rpc(project, m.name, 'steer', { session: SESSION, text: 'once' });
     b.send({ t: 'rpc', rpc: call });
@@ -217,7 +223,10 @@ describe('subscriptions', () => {
 
     // The browser goes: its subs end at the machine.
     b.close();
-    const gone = await waitFor(() => m.frames.filter((f) => f.t === 'unsubscribe').map((f) => (f as { sub: string }).sub));
+    const gone = await waitFor(() => {
+      const subs = m.frames.filter((f) => f.t === 'unsubscribe').map((f) => (f as { sub: string }).sub);
+      return subs.length >= 2 ? subs : undefined;
+    });
     expect(new Set(gone)).toEqual(new Set([sub, agentSub]));
     other.close();
     await m.close();
@@ -253,7 +262,7 @@ describe('subscriptions', () => {
 
   it("end at the browser with the next n when the machine's stream closes, and a subscribe to an offline machine ends at once", async () => {
     const project = newProject();
-    const m = await machine(project);
+    const m = await machine(project, CLOSES);
     const b = await browser(project);
     const sub = newNonce();
     b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub });
@@ -393,7 +402,7 @@ describe('presence and machine leases', () => {
     // The daemon is kept from reconnecting (this client never does on its own) and answers no heartbeat.
     m.autoAck = false;
     const at = Date.now();
-    await hub.evict('Machine', `${ORG}:${m.name}`);
+    await hub.terminate(m.name);
     await b.next((f) => f.t === 'rpc-state' && f.state === 'uncertain', 'uncertain', 0, 6000);
     await b.next((f) => f.t === 'session' && f.message.kind === 'end' && f.message.sub === sub, 'the sub ended', 0, 6000);
     await b.next((f) => f.t === 'machines' && f.machines.some((x) => x.machine === m.name && !x.online), 'offline', 0, 6000);
@@ -435,7 +444,7 @@ describe('presence and machine leases', () => {
 describe('real hibernation and eviction while sockets stay open', () => {
   it('presence, the pending set, and an established subscription survive; frames keep their n; a visible browser still suppresses the push', async () => {
     const project = newProject();
-    const m = await machine(project);
+    const m = await machine(project, CLOSES);
     const ua = await userAgent(`https://push.test/hibernation-${project}`);
     expect((await hub.fetchAs(ADMIN, '/api/push/subscriptions', { method: 'PUT', body: { endpoint: ua.endpoint, keys: ua.keys } })).status).toBe(200);
     const b = await browser(project);
@@ -569,7 +578,7 @@ describe('Web Push', () => {
 describe('the grid', () => {
   it("streams each project's summary: machines online, sessions working and waiting", async () => {
     const project = newProject();
-    const m = await machine(project);
+    const m = await machine(project, CLOSES);
     const grid = await GridClient.open(hub, ADMIN);
     const first = grid.frames[0];
     expect(first.t === 'grid' && first.projects.map((p) => p.id)).toContain(project);

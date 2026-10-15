@@ -2,6 +2,8 @@
 // through an object's own fetch at a `/__test/…` path, which only Miniflare reaches (`LocalHub`), never the Worker:
 //   - a `Machine` armed to throw on its next send of one frame kind, as a failed RPC from a `Project` would;
 //   - a `Machine` whose heartbeat and lease are shortened, so a lease can lapse within a test;
+//   - a `Machine` the suite terminates (`ctx.abort()`), as a crash or a runtime's reset would: no `closed` reaches its
+//     projects, only the lease's lapse;
 //   - a `Project` that says which instance answers (a woken object is a new one), and takes a lease's renewal or close
 //     for any generation, as a late one from an older stream would arrive;
 //   - a `Registry` that takes a member, so a suite has a member who is not an admin.
@@ -9,7 +11,7 @@ import { Machine as DeployedMachine, type Timing } from '../../src/objects/machi
 import { Project as DeployedProject } from '../../src/objects/project';
 import { Registry as DeployedRegistry } from '../../src/objects/registry';
 import type { DownFrame } from '../../src/protocol/machine';
-import { MEMBER_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
+import { MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
 
 export { default } from '../../src/worker';
 
@@ -36,6 +38,7 @@ export class Machine extends DeployedMachine {
       this.ctx.storage.kv.put('timing', { heartbeatMs: Number(url.searchParams.get('heartbeatMs')), leaseMs: Number(url.searchParams.get('leaseMs')) });
       return new Response('timed');
     }
+    if (url.pathname === MACHINE_ABORT_PATH) this.ctx.abort('terminated by the suite');
     return super.fetch(request);
   }
 

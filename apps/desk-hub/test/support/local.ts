@@ -12,7 +12,7 @@ import { inject } from 'vitest';
 import { startProxy, type Proxy } from '../../local/proxy.ts';
 import { AccessStandin, IDENTITY_HEADER } from '../../local/standin.ts';
 import { generateVapidKey } from '../../src/push/web-push';
-import { MEMBER_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
+import { MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
 
 const require = createRequire(import.meta.url);
 const { unstable_getMiniflareWorkerOptions } = require('wrangler') as typeof import('wrangler');
@@ -161,6 +161,18 @@ export async function startLocalHub() {
      */
     async evict(className: 'Project' | 'Machine' | 'Registry', name: string, webSockets: 'close' | 'hibernate' = 'close') {
       await mf.unsafeEvictDurableObject('desk-hub', className, { name, webSockets });
+    },
+    /** Terminates a machine's object (`ctx.abort()`): its memory and its stream end, and nothing tells its projects.
+     * `evict` cannot do this to a `Machine` with an open stream, which workerd holds as an active reference. */
+    async terminate(machine: string) {
+      await seam('MACHINE', machine, MACHINE_ABORT_PATH).then(
+        () => {
+          throw new Error('the Machine object outlived its abort');
+        },
+        (error: unknown) => {
+          if (String(error).includes('outlived')) throw error;
+        },
+      );
     },
     /** Stops the runtime and starts it again on its stored state, as a redeploy does: every object restarts and every
      * connection drops. */
