@@ -7,7 +7,7 @@
 // (the bar) reach each change, the stage moving to its slide. Nothing here writes: the docs are the controller's,
 // throwaway, and no transform layer, text box or notes field is mounted.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { DesignSystemScope, type DesignSystemRef } from '../../../design-system/apply';
+import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../../design-system/apply';
 import type { AssetUrl, SlideCanvas } from '../../canvas';
 import type { ChangeStop, ElementChange, NotesPiece, SlideChange } from '../../history';
 import { readNotes } from '../../../yjs/slides';
@@ -50,6 +50,8 @@ export function historyAssets(preview: Pick<DeckPreview, 'revision' | 'earlierRe
 export function HistoryPreview({ controller, preview, liveSystem, assets, zoom, thumbnailWidth, onDrawn }: Props) {
   const view = useDeckView(preview.shown);
   const system = preview.system ?? liveSystem;
+  // fix wave 1 (R3): whether the system the version draws in has its style yet (the scope shares this view's lease)
+  const systemReady = useDesignSystem(system).status !== 'loading';
   const scope = (children: ReactNode) => (
     <DesignSystemScope system={system} medium="deck" overrides={view.overrides} className="deck-ds-scope">
       {children}
@@ -70,7 +72,7 @@ export function HistoryPreview({ controller, preview, liveSystem, assets, zoom, 
         )}
         {preview.showChanges && change?.kind === 'removed' && <p className="deck-history-slide-note">{C.deletedSlide}</p>}
         {preview.showChanges && change?.kind === 'added' && <p className="deck-history-slide-note">{C.addedSlide}</p>}
-        <HistoryStage controller={controller} preview={preview} change={change} focus={focus} assets={assets} zoom={zoom} scope={scope} onDrawn={onDrawn} />
+        <HistoryStage controller={controller} preview={preview} change={change} focus={focus} assets={assets} zoom={zoom} scope={scope} systemReady={systemReady} onDrawn={onDrawn} />
         {slideId !== null && <NotesDiff controller={controller} preview={preview} slideId={slideId} change={change} focus={focus} />}
       </div>
     </>
@@ -128,7 +130,7 @@ interface Mark {
   title: string;
 }
 
-function HistoryStage({ controller, preview, change, focus, assets, zoom, scope, onDrawn }: { controller: DeckHistoryController; preview: DeckPreview; change: SlideChange | undefined; focus: ChangeStop | null; assets: PreviewAssets; zoom: 'fit' | number; scope: (children: ReactNode) => ReactNode; onDrawn?: () => void }) {
+function HistoryStage({ controller, preview, change, focus, assets, zoom, scope, systemReady, onDrawn }: { controller: DeckHistoryController; preview: DeckPreview; change: SlideChange | undefined; focus: ChangeStop | null; assets: PreviewAssets; zoom: 'fit' | number; scope: (children: ReactNode) => ReactNode; systemReady: boolean; onDrawn?: () => void }) {
   const slideId = preview.slideId;
   const requestedAt = preview.requestedAt;
   const removed = change?.kind === 'removed';
@@ -163,14 +165,15 @@ function HistoryStage({ controller, preview, change, focus, assets, zoom, scope,
     }
   }, [ghosts, removedIds]);
 
-  // the marks: each changed or new element outlined where it is drawn, each deleted one where it was
+  // the marks: each changed or new element outlined where it is drawn, each deleted one where it was; measured again at
+  // every layout pass of either canvas (fix wave 1, R3: the pinned system's style arriving, a face loading or a picture
+  // changing the flow moves elements after the first pass)
   const [marks, setMarks] = useState<Mark[]>([]);
   const drawnFor = useRef<number | null>(null); // the preview (its request time) whose drawing was reported
   useEffect(() => {
     if (!canvas) return;
     let live = true;
-    const wait = [canvas.whenLaidOut(), ...(ghosts && removedIds.length > 0 ? [ghosts.whenLaidOut()] : [])];
-    void Promise.all(wait).then(() => {
+    const measureMarks = () => {
       if (!live) return;
       const next: Mark[] = [];
       for (const e of elements) {
@@ -181,16 +184,21 @@ function HistoryStage({ controller, preview, change, focus, assets, zoom, scope,
         const what = e.kind === 'changed' ? e.keys.map((k) => keyLabel(k.key)).join(', ') : e.kind === 'added' ? C.newBadge : C.deletedBadge;
         next.push({ id: e.id, kind: e.kind, box: m.bounds, color: author?.color ?? null, title: author ? `${what} — ${C.by(author.name, author.when(e.at))}` : what });
       }
-      setMarks(next);
-      if (drawnFor.current !== requestedAt) {
+      setMarks((shown) => (sameMarks(shown, next) ? shown : next));
+      // the preview's time: its first measure once the system it draws in has its style (the canvas lays out again
+      // when a scope's style arrives, so a later pass reports it when the system was still loading)
+      if (systemReady && drawnFor.current !== requestedAt) {
         drawnFor.current = requestedAt;
         onDrawn?.();
       }
-    });
+    };
+    const offs = [canvas.onLayout(measureMarks), ...(ghosts ? [ghosts.onLayout(measureMarks)] : [])];
+    void Promise.all([canvas.whenLaidOut(), ...(ghosts && removedIds.length > 0 ? [ghosts.whenLaidOut()] : [])]).then(measureMarks);
     return () => {
       live = false;
+      for (const off of offs) off();
     };
-  }, [canvas, ghosts, removedIds, scale, elements, controller, onDrawn, requestedAt]);
+  }, [canvas, ghosts, removedIds, scale, elements, controller, onDrawn, requestedAt, systemReady]);
 
   // ↑ ↓ reaching an element scrolls it into view
   const focusedMark = useRef<HTMLDivElement | null>(null);
@@ -269,3 +277,6 @@ function NotesSpan({ piece, color, focused }: { piece: NotesPiece; color: string
     </del>
   );
 }
+
+const sameMarks = (a: readonly Mark[], b: readonly Mark[]): boolean =>
+  a.length === b.length && a.every((m, i) => m.id === b[i]!.id && m.kind === b[i]!.kind && m.color === b[i]!.color && m.title === b[i]!.title && m.box.x === b[i]!.box.x && m.box.y === b[i]!.box.y && m.box.w === b[i]!.box.w && m.box.h === b[i]!.box.h);
