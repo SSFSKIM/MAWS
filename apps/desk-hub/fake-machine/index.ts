@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 export { FakeMachine, type FakeMachineOptions, type RpcRecord, type RpcScript } from './machine';
 export { emptyMemory, type LedgerEntry, type Memory } from './memory';
 export { loadRecording, type LoadOptions, type Recording, type Row, type Step } from './recording';
-export { SNAPSHOT_ROW_BUDGET, type SnapshotOptions } from './session';
+export { SessionDepth, SNAPSHOT_ROW_BUDGET, type SnapshotOptions } from './session';
 export type { Credentials } from './link';
 
 /** The recording committed beside the tool: a haiku session with two subagents, a permission prompt and a question

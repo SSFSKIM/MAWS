@@ -76,6 +76,8 @@ export type FakeMachineOptions = {
   /** Reconnects by itself, with backoff, whenever the stream ends (as the daemon does; a redeploy ends every stream).
    * Off by default: a suite drops and reconnects when it chooses. */
   reconnect?: boolean;
+  /** The branch each session's working-tree diff is against (DX4 `diff`'s `base`); `main` when this gives none. */
+  diffBase?: (session: string) => string | undefined;
 };
 
 /** What happened to an RPC this machine received, for a test to read. */
@@ -131,7 +133,7 @@ export class FakeMachine {
     this.link = new Link(options.hub, options.credentials, (frame) => this.receive(frame), () => this.closed());
     const where = { project: this.project, machine: this.name };
     for (const recording of options.recordings ?? []) {
-      const depth = new SessionDepth(recording.session, recording, (m) => this.queue({ t: 'session', message: m }), where, options.bridge !== false);
+      const depth = new SessionDepth(recording.session, recording, (m) => this.queue({ t: 'session', message: m }), where, options.bridge !== false, this.diffBase(recording.session));
       this.sessions.set(recording.session, depth);
       for (const step of recording.steps) this.timeline.push({ session: depth, step });
     }
@@ -139,7 +141,7 @@ export class FakeMachine {
     // A steer the machine ran before a crash left its row in the transcript (DX6's trace).
     for (const trace of Object.values(this.memory.trace)) {
       if (trace.rpc === 'steer' && trace.row && trace.session) this.sessions.get(trace.session)?.appendRow(null, trace.row as Row);
-      else if (trace.rpc === 'spawn' && trace.session && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where));
+      else if (trace.rpc === 'spawn' && trace.session && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where, true, this.diffBase(trace.session)));
     }
   }
 
@@ -157,6 +159,10 @@ export class FakeMachine {
     if (response.status !== 200) throw new Error(`the enrollment was refused: ${response.status} ${await response.text()}`);
     const redeemed = (await response.json()) as Redeemed;
     return { hub: decoded.hub, machine: redeemed.machine, credentials: { clientId: redeemed.client_id, clientSecret: redeemed.client_secret }, orgKey: base64urlDecode(decoded.key) };
+  }
+
+  private diffBase(session: string): string {
+    return this.options.diffBase?.(session) ?? 'main';
   }
 
   // The connection.
@@ -692,7 +698,7 @@ export class FakeMachine {
         if (!checkouts.some((c) => c.path === rpc.args.checkout)) return fail('unknown-checkout', `${rpc.args.checkout} is not a known checkout here`);
         const session = randomUUID();
         const alias = `fake-${session.slice(0, 4)}`;
-        const depth = new SessionDepth(session, null, (m) => this.queue({ t: 'session', message: m }), { project: this.project, machine: this.name });
+        const depth = new SessionDepth(session, null, (m) => this.queue({ t: 'session', message: m }), { project: this.project, machine: this.name }, true, this.diffBase(session));
         this.sessions.set(session, depth);
         await this.write(`rpc:${rpc.nonce}:joined`, `${this.name}/${session}`, {
           kind: 'joined', session, alias, name_source: 'seat', machine: this.name, cwd: rpc.args.checkout, worktree: rpc.args.worktree ?? '', role: rpc.args.brief, seat: alias, by: member,

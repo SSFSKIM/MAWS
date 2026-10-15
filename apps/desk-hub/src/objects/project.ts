@@ -977,6 +977,7 @@ function raisedShapeError(raised: unknown): string | null {
   if (raised.async !== undefined && raised.async !== true) return 'async is true when present';
   if (raised.agentId !== undefined && !isName(raised.agentId)) return 'agentId names the subagent that asked, when present';
   if (raised.truncated !== undefined && raised.truncated !== true) return 'truncated is true when present';
+  if (raised.toolUseId !== undefined && !isName(raised.toolUseId, 512)) return "toolUseId names the transcript's tool call, when present";
   if (!isMac(raised.mac)) return 'mac is {nonce, value}: 16 and 32 bytes, each in canonical base64url';
   return null;
 }
