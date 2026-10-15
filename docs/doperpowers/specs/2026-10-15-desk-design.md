@@ -1754,9 +1754,10 @@ body.
 mod sees no API message id, so a streaming block is settled by row uuid. A `block-row` touches two parties at two
 moments, kept apart:
 - **The producer** (the bridge's endpoint; the fake machine) removes the block from its snapshot state when it applies
-  the block's `block-row`, under the same lock that takes snapshots and adds subscribers. So a snapshot's `streaming`
-  holds only blocks without a `block-row` yet, and never a block whose `block-row` was already sent to that
-  subscriber.
+  the block's `block-row`, or its step's end, under the same lock that takes snapshots and adds subscribers. So a
+  snapshot's `streaming` holds only blocks of a live step without a `block-row` yet, and never a block whose
+  `block-row` or `step-end` was already sent to that subscriber: an aborted block reaches no later subscriber, which
+  would have no `step-end` coming to drop it.
 - **The browser** keeps drawing the block's partial text after the `block-row` until the `row` whose `uuid` it named
   arrives; that row settles the block, and the browser drops the partial text then. Chunks for a settled block are
   ignored. A block whose step ended (`step-end`) without a `block-row` for it — a response aborted mid-block — is
