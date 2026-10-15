@@ -74,6 +74,10 @@ jobs:
     if: needs.plan.outputs.static == 'true'
     runs-on: *runner
     timeout-minutes: 30
+    env:
+      # tsc over the web project ran out of Node's default heap on the 2-core runner once the artifact kinds landed
+      # (Decision Log 17); the runner has 7 GB.
+      NODE_OPTIONS: --max-old-space-size=5120
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
