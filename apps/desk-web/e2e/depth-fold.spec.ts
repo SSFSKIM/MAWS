@@ -119,8 +119,8 @@ test("a live session's last fold draws the rows that arrive after its last item"
   const last = await unfold(page, folds, 4);
   await expect.poll(() => player.subscriptions()).toBe(2); // the depth column's and the fold's own
   await expect(last).not.toContainText('Both subagents reported back.');
-  await expect(last).not.toContainText('Continued for');
-  player.advance(player.script.length); // the second subagent's notification opens a turn of its own
-  await expect(last).toContainText('Continued for');
+  await expect(last).not.toContainText('Working');
+  player.advance(player.script.length); // the second subagent's notification opens a turn of the session's own
+  await expect(last).toContainText('Working');
   await expect(last).not.toContainText('Both subagents reported back.');
 });

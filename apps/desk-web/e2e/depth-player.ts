@@ -1,8 +1,9 @@
 // The session plane of one recorded session, served through DC5's DX3 double (the DC6 plan's Decision Log, "The
 // double's fixture"): it answers each `subscribe` the browser sends for the session's main transcript with the snapshot
 // at the playhead, plays the live script (chunks, `block-row`, rows, synthesized from the recording) to every open
-// subscription as the suite advances it, and answers `rows` with older pages and `diff` with the session's diff. The
-// main transcript's snapshot carries the session's last `usage`, and `sendUsage` plays one after a turn. Each subagent's transcript is a track of
+// subscription as the suite advances it, and answers `rows` with older pages. The double answers `diff` itself (with
+// `diff`, below), numbering it on the subscription, so every message here goes through the double's own numbering
+// (`sendSub`). The main transcript's snapshot carries the session's last `usage`, and `sendUsage` plays one after a turn. Each subagent's transcript is a track of
 // its own (`agent(id)`), with its own script, playhead, and subscriptions, as DX3 scopes a subscription by `agentId`.
 // The double itself is used as it stands: the player reads the frames it records (`hub.up`) and sends through
 // `hub.sendSession`.
@@ -10,7 +11,7 @@ import type { JsonObject, SessionBodies, SessionMessage, SubagentMeta } from 'de
 import type { HubDouble } from '../test/double/hub-double';
 import { readRecording, rowsBefore, scriptOf, snapshotAt, withTextAnswer, type LiveItem, type ScriptOptions } from '../test/double/session-stream';
 
-type Open = { sub: string; n: number };
+type Open = { sub: string };
 
 export type PlayerOptions = ScriptOptions & {
   project: string;
@@ -41,8 +42,6 @@ export class DepthPlayer {
   endBeforeSnapshot = 0;
   /** What a main-transcript snapshot carries as `usage` (null: no bridge, or none yet). */
   usage: SessionBodies['usage'] | null = null;
-  /** What a `diff` request is answered with. */
-  diff: SessionBodies['diff'] = { base: 'main', text: '' };
   /** How many `diff` requests the browser sent. */
   diffsAsked = 0;
   private held: Array<() => void> = [];
@@ -65,6 +64,11 @@ export class DepthPlayer {
 
   stop(): void {
     clearInterval(this.timer);
+  }
+
+  /** What the double answers a `diff` request on this session with. */
+  set diff(diff: SessionBodies['diff']) {
+    this.hub.diffs.set(this.options.session, diff);
   }
 
   /** One subagent's track: its own script, playhead, and subscriptions. */
@@ -116,7 +120,7 @@ export class DepthPlayer {
         this.closeSub(frame.sub);
         for (const track of this.agents.values()) track.closeSub(frame.sub);
       } else if (frame.t === 'rows') this.rows(frame.sub, frame.before, frame.limit);
-      else if (frame.t === 'diff') this.answerDiff(frame.sub);
+      else if (frame.t === 'diff') this.diffsAsked += 1;
     }
   }
 
@@ -142,7 +146,7 @@ export class DepthPlayer {
   }
 
   private answer(sub: string): void {
-    const open: Open = { sub, n: 0 };
+    const open: Open = { sub };
     this.open.push(open);
     const cut = Math.max(0, this.playhead - this.overlapNext);
     this.overlapNext = 0;
@@ -159,12 +163,6 @@ export class DepthPlayer {
   sendUsage(usage: SessionBodies['usage']): void {
     this.usage = usage;
     for (const open of this.open) this.send(open, 'usage', usage);
-  }
-
-  private answerDiff(sub: string): void {
-    this.diffsAsked += 1;
-    const open = this.open.find((o) => o.sub === sub);
-    if (open) this.send(open, 'diff', this.diff);
   }
 
   /** Answers the `rows` requests held so far; how many there were. */
@@ -184,9 +182,17 @@ export class DepthPlayer {
   }
 
   private send(open: Open, kind: SessionMessage['kind'], body: unknown): void {
-    const n = kind === 'snapshot' ? 0 : ++open.n;
-    const { project, machine, session } = this.options;
-    this.hub.sendSession(project, { project, machine, session, kind, sub: open.sub, n, body } as SessionMessage);
+    sendInSub(this.hub, this.options.project, open.sub, kind, body);
+  }
+}
+
+/** A message on a subscription, numbered by the double (which answers `diff` on it too); none once the sub is gone. */
+function sendInSub(hub: HubDouble, project: string, sub: string, kind: SessionMessage['kind'], body: unknown): void {
+  if (!hub.subscriptions(project).some((s) => s.sub === sub)) return;
+  try {
+    hub.sendSub(project, sub, kind as never, body as never);
+  } catch {
+    // the double forgot the sub (it ended): nothing to number it under
   }
 }
 
@@ -239,7 +245,7 @@ export class AgentTrack {
 
   subscribed(sub: string): void {
     this.answered += 1;
-    const open: Open = { sub, n: 0 };
+    const open: Open = { sub };
     this.open.push(open);
     const cut = Math.max(0, this.playhead - this.overlapNext);
     this.overlapNext = 0;
@@ -253,8 +259,6 @@ export class AgentTrack {
   }
 
   private send(open: Open, kind: SessionMessage['kind'], body: unknown): void {
-    const n = kind === 'snapshot' ? 0 : ++open.n;
-    const { project, machine, session } = this.options;
-    this.hub.sendSession(project, { project, machine, session, kind, sub: open.sub, n, body } as SessionMessage);
+    sendInSub(this.hub, this.options.project, open.sub, kind, body);
   }
 }

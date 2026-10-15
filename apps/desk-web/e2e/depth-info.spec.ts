@@ -105,6 +105,7 @@ test('session info: where it runs, its model, and context and cost from usage â€
 test("a <message> draws as MAWS's to-human span while it streams and once settled; a hand-back's turn reads Continued", async ({ page, hub }) => {
   const { player, depth } = await openDepth(page, hub);
   player.advanceTo((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text' && String(item.body.chunk.text).startsWith('<message>'));
+  player.advance(1);
   const stream = depth.locator('[data-row-id^="desk-stream:"]');
   while (!(await stream.last().textContent())?.includes('Both subagents rep')) {
     player.advance(1);

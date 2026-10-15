@@ -171,15 +171,16 @@ for (const [disruption, disrupt] of [
     const chunk = fm.playThrough(textChunk(agentId));
     const head = chunk?.k === 'chunk' ? String(chunk.chunk.text) : '';
     await expect(streamingRows(detail).last()).toContainText(head);
+    const answer = `${head}${fm.recording.steps.flatMap((s) => (s.k === 'chunk' && s.agentId === agentId && s.chunk.kind === 'text' ? [String(s.chunk.text)] : [])).slice(1).join('')}`;
+    const before = await occurrences(detail, answer); // the agent's prompt quotes the answer it asks for
 
     await disrupt(fm, agentId);
     await expect.poll(() => fm.subscriptions(agentId)).toBe(1);
     fm.playThrough((s) => s.k === 'row' && s.agentId === agentId && JSON.stringify(s.row).includes('done.'));
-    const answer = `${head}${fm.recording.steps.flatMap((s) => (s.k === 'chunk' && s.agentId === agentId && s.chunk.kind === 'text' ? [String(s.chunk.text)] : [])).slice(1).join('')}`;
     await expect(streamingRows(detail)).toHaveCount(0);
-    await expect.poll(() => occurrences(detail, answer)).toBe(1);
+    await expect.poll(() => occurrences(detail, answer)).toBe(before + 1);
     fm.playThrough();
     await expect(streamingRows(detail)).toHaveCount(0);
-    expect(await occurrences(detail, answer)).toBe(1);
+    expect(await occurrences(detail, answer)).toBe(before + 1);
   });
 }

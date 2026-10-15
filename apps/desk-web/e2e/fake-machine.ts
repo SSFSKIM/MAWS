@@ -8,7 +8,9 @@
 // What does not fit `interfaces-M4` as written (reported to DC3 through the DC6 plan): `FakeMachine` speaks DX2 to a
 // hub, and the desk's gated browser lane has none (DC5's local-hub suite is outside the gate, and its first setup is a
 // one-time ceremony per hub state), so this drives the producer without the network; `desk-hub/fake-machine` exports
-// `SessionDepth` only as types, so it is imported by path below.
+// `SessionDepth` only as types, so it is imported by path below. The double answers a `diff` request itself, numbered
+// on the subscription, so the producer's subscription messages are renumbered by the double (`sendSub`) and the
+// double is handed the recording's diff to answer with, as the producer's `diff` would.
 import type { SessionMessage } from 'desk-hub/protocol';
 import { loadRecording, TWO_SUBAGENTS, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
 import { SessionDepth } from '../../desk-hub/fake-machine/session';
@@ -28,7 +30,8 @@ export class FakeMachineReplay {
     private readonly hub: HubDouble,
     readonly where: { project: string; machine: string },
   ) {
-    this.depth = new SessionDepth(this.recording.session, this.recording, (message) => this.hub.sendSession(where.project, message), where);
+    this.depth = new SessionDepth(this.recording.session, this.recording, (message) => this.relay(message), where);
+    this.hub.diffs.set(this.recording.session, { base: 'main', text: this.depth.diffText });
     this.timer = setInterval(() => this.poll(), 5);
   }
 
@@ -91,6 +94,13 @@ export class FakeMachineReplay {
     return this.hub.subscriptions(this.where.project).filter((s) => s.session === this.session && s.agentId === agentId && this.depth.holds(s.sub)).length;
   }
 
+  /** What the hub relays: a subscription's messages in the order the producer sent them, numbered by the double. */
+  private relay(message: SessionMessage): void {
+    if (message.sub === null) return this.hub.sendSession(this.where.project, message);
+    if (!this.hub.subscriptions(this.where.project).some((s) => s.sub === message.sub)) return;
+    this.hub.sendSub(this.where.project, message.sub, message.kind as never, message.body as never);
+  }
+
   private apply(step: Step): void {
     this.depth.apply(step);
     if (step.k === 'presence') {
@@ -109,7 +119,6 @@ export class FakeMachineReplay {
         void this.depth.subscribe(frame.sub, frame.agentId, raced?.options ?? {});
       } else if (frame.t === 'unsubscribe') this.depth.end(frame.sub, 'unsubscribed');
       else if (frame.t === 'rows') this.depth.page(frame.sub, frame.before, frame.limit);
-      else if (frame.t === 'diff') this.depth.diff(frame.sub);
     }
   }
 }
