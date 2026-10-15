@@ -290,11 +290,14 @@ export class DeskTranscript {
     this.subscribe();
   }
 
-  /** Asks for the page of rows before the oldest held one, when older rows exist and none is on its way. */
+  /**
+   * Asks for the page of rows before the oldest held one, when older rows exist and none is on its way. A range whose
+   * start is held draws nothing older, so asks for none.
+   */
   loadOlder(): void {
-    const { more, loadingOlder } = this.state.getState();
+    const { more, loadingOlder, bounds } = this.state.getState();
     const oldest = this.rows[0];
-    if (!more || loadingOlder || !this.subscription || !oldest) return;
+    if (!more || loadingOlder || !this.subscription || !oldest || bounds?.from === 'found') return;
     this.state.setState({ loadingOlder: true });
     this.subscription.rows(oldest.uuid, this.page);
   }
