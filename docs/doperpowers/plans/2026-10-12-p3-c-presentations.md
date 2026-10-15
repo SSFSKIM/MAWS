@@ -222,7 +222,7 @@ M1 → M2 → M3. M4 consumes M2's model (not M3). M5 and M6 consume M4. M7 cons
 
 #### M10 — Acceptance
 
-The live run `e2e/presentations-live.spec.ts` (`e2e:presentations-live`, `MAWS_LIVE=1`, `MAWS_LIVE_MAX_USD` at most 1; L's and D's live-run form: the installed engine unmodified, a scratch config home, Haiku, the A-15 digest unchanged) for Acceptance 2; the corpus re-run (Acceptance 1); the scale gate (Acceptance 7) at load below 10; the full suite, every e2e group the branch touches one at a time, build and the bundle guard; the owner's PowerPoint and Keynote check written into P3-F's sitting sheet lines. Then the whole-branch `reviewer-high` review and its fix wave, Outcomes, the hand-back.
+The live run `e2e/presentations-live.spec.ts` (which also asks the agent for an `artifact_export` of the deck as PPTX, proving the engine route end to end; `e2e:tools` replays no export) (`e2e:presentations-live`, `MAWS_LIVE=1`, `MAWS_LIVE_MAX_USD` at most 1; L's and D's live-run form: the installed engine unmodified, a scratch config home, Haiku, the A-15 digest unchanged) for Acceptance 2; the corpus re-run (Acceptance 1); the scale gate (Acceptance 7) at load below 10; the full suite, every e2e group the branch touches one at a time, build and the bundle guard; the owner's PowerPoint and Keynote check written into P3-F's sitting sheet lines. Then the whole-branch `reviewer-high` review and its fix wave, Outcomes, the hand-back.
 
 ### Concrete Steps
 
