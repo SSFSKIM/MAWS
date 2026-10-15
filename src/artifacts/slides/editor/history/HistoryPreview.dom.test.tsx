@@ -68,7 +68,7 @@ describe('the preview’s change marks (R3)', () => {
     const { preview, destroy } = previewOf();
     try {
       const drawn: number[] = [];
-      const { container } = render(<HistoryPreview controller={controller} preview={preview} liveSystem={null} assets={{ shown: () => null, earlier: () => null }} zoom={1} thumbnailWidth={240} onDrawn={() => drawn.push(1)} />);
+      const { container } = render(<HistoryPreview controller={controller} preview={preview} liveSystem={null} assets={{ shown: () => null, earlier: () => null }} faces={{ shown: new Map(), earlier: new Map() }} zoom={1} thumbnailWidth={240} onDrawn={() => drawn.push(1)} />);
       const box = () => container.querySelector<HTMLElement>('[data-history-stage] [data-eid="box"]')!;
       place(box(), 100, 100);
       await act(async () => flushLayout());

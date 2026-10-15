@@ -32,7 +32,7 @@ import { ShowEditorsMenu } from '../../document/editor/history/ShowEditors';
 import type { ShownEditor } from '../../document/editor/history/controller';
 import { DeckHistoryRail } from './history/DeckHistoryRail';
 import { HistoryBar } from './history/HistoryBar';
-import { previewFaceRules } from './history/faces';
+import { previewFaces } from './history/faces';
 import { historyAssets, HistoryPreview } from './history/HistoryPreview';
 import { HISTORY_COPY } from './history/copy';
 import { useDeckHistoryController, useDeckHistorySnapshot, type DeckHistorySource } from './history/use-deck-history';
@@ -210,7 +210,11 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   const shownRevision = preview?.revision ?? null;
   const earlierRevision = preview?.earlierRevision ?? null;
   const previewAssets = useMemo(() => historyAssets({ revision: shownRevision, earlierRevision }, assetUrl, assetUrlAt), [shownRevision, earlierRevision, assetUrl, assetUrlAt]);
-  const faces = preview ? previewFaceRules(preview, previewAssets) : faceRules(view.faces, assetUrl);
+  // fix wave 2: under private names per state, so a live editor of this deck elsewhere in the window keeps its own
+  const shownDoc = preview?.shown ?? null;
+  const earlierDoc = preview?.earlier ?? null;
+  const versionFaces = useMemo(() => (shownDoc && earlierDoc ? previewFaces({ shown: shownDoc, earlier: earlierDoc }, previewAssets) : null), [shownDoc, earlierDoc, previewAssets]);
+  const faces = versionFaces ? versionFaces.css : faceRules(view.faces, assetUrl);
   const historyRail = history && historySnapshot && historyOpen && <DeckHistoryRail controller={history} snapshot={historySnapshot} sessionTitle={sessionTitle} onClose={() => session.toggleRail('history')} />;
   // one tree in both modes, so B's rail keeps its place (and its open folds) while a version shows
   const live = (
@@ -311,7 +315,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
           </Toolbar>
       )}
       <div className="deck-editor-body">
-        {preview ? <HistoryPreview controller={history!} preview={preview} liveSystem={system} assets={previewAssets} zoom={state.zoom} thumbnailWidth={compact ? 120 : SLIDE_W / 8} onDrawn={previewDrawn} /> : live}
+        {preview ? <HistoryPreview controller={history!} preview={preview} liveSystem={system} assets={previewAssets} faces={versionFaces!} zoom={state.zoom} thumbnailWidth={compact ? 120 : SLIDE_W / 8} onDrawn={previewDrawn} /> : live}
         {historyRail}
         {!preview &&
           inspectorOpen &&
