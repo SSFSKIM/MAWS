@@ -23,6 +23,8 @@ export class ProjectLog {
   readonly store: StoreApi<ProjectLogState> = createStore<ProjectLogState>(() => ({ entries: [], locked: true, loaded: false }));
   private key: OrgKey | null = null;
   private last = 0;
+  /** Counts the log's replacements and key changes: a verification reached under an older generation is discarded. */
+  private generation = 0;
   private work: Promise<void> = Promise.resolve();
 
   constructor(
@@ -42,9 +44,15 @@ export class ProjectLog {
     return this.last;
   }
 
+  /**
+   * A verdict holds only under the key that reached it: on any change every entry is checked again, and a pass still
+   * running under the old key commits nothing.
+   */
   setKey(key: OrgKey | null): void {
+    if (key === this.key) return;
     this.key = key;
-    this.store.setState({ locked: key === null });
+    this.generation++;
+    this.store.setState((s) => ({ locked: key === null, entries: s.entries.map((e) => (e.verdict === 'pending' ? e : { ...e, verdict: 'pending' as const })) }));
     this.verify();
   }
 
@@ -65,6 +73,7 @@ export class ProjectLog {
   welcome(head: number): void {
     if (head >= this.last) return;
     this.last = 0;
+    this.generation++;
     this.store.setState({ entries: [] });
     this.queue(() => this.record.clear(this.project));
   }
@@ -92,15 +101,17 @@ export class ProjectLog {
     this.queue(async () => {
       const key = this.key;
       if (!key) return;
+      const generation = this.generation;
       const pending = this.store.getState().entries.filter((e) => e.verdict === 'pending');
       if (pending.length === 0) return;
-      const verdicts = new Map<number, Verdict>();
+      // Each verdict belongs to the exact entry it was reached on (the object held), never to an offset alone.
+      const verdicts = new Map<HeldEntry, Verdict>();
       for (const entry of pending) {
         const verdict = await verifyLogEvent(key, this.project, entry.event);
-        verdicts.set(entry.offset, verdict.ok ? 'ok' : verdict.reason);
+        verdicts.set(entry, verdict.ok ? 'ok' : verdict.reason);
       }
-      if (this.key !== key) return; // the key changed meanwhile; its own pass decides
-      this.store.setState((s) => ({ entries: s.entries.map((e) => (e.verdict === 'pending' && verdicts.has(e.offset) ? { ...e, verdict: verdicts.get(e.offset)! } : e)) }));
+      if (generation !== this.generation) return; // the log was replaced or the key changed: that pass decides
+      this.store.setState((s) => ({ entries: s.entries.map((e) => (verdicts.has(e) ? { ...e, verdict: verdicts.get(e)! } : e)) }));
     });
   }
 }

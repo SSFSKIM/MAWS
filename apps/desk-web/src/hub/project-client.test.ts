@@ -132,6 +132,18 @@ describe('what goes up', () => {
     expect(double.head(PROJECT)).toBe(1); // the double stores a nonce once, as the hub must
   });
 
+  it('ends a human send the hub refused, and never sends it again', async () => {
+    const key = await importOrgKey(VECTOR_KEY);
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    const event = await seal(key, 'log', PROJECT, { ...draft('as someone else'), member: '0'.repeat(32) });
+    await expect(c.sendHuman(event)).rejects.toMatchObject({ refusal: { reason: 'bad-shape', nonce: event.mac.nonce } });
+    double.dropConnections();
+    await until(() => caughtUp.length === 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(double.up.filter((u) => u.frame.t === 'human')).toHaveLength(1);
+  });
+
   it('keeps an RPC until the hub reports a state for it', async () => {
     const { c, caughtUp } = client();
     await until(() => caughtUp.length === 1);

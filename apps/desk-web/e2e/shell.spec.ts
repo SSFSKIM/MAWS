@@ -71,7 +71,7 @@ test('a project opens into its channels, the selected channel, and the depth slo
 test('without a key the browser is locked and draws nothing from the log', async ({ page, hub }) => {
   await stageProject(hub);
   await page.goto(`${hub.url}/p/${PROJECT}`);
-  await expect(page.getByTestId('locked')).toContainText('This browser is locked');
+  await expect(page.getByTestId('locked')).toContainText("This browser can't check who wrote MAWS's log until it holds your org key");
   await expect(page.getByTestId('sidebar-locked')).toBeVisible();
   await expect(page.getByTestId('project-view')).not.toContainText('maws-45');
   await expect(page.getByTestId('project-view')).not.toContainText('the migration is merged');

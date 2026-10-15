@@ -25,6 +25,14 @@ export type { ConnectionStatus } from './socket';
 export type Welcome = Extract<ProjectDown, { t: 'welcome' }>;
 export type RpcStateFrame = Extract<ProjectDown, { t: 'rpc-state' }>;
 export type HumanAck = { offset: number; writer: string; seq: number };
+export type HubRefusal = Extract<ProjectDown, { t: 'refused' }>['refusal'];
+
+/** A web `human` the hub refused (its `refused` named the send's nonce): it is not stored and is never sent again. */
+export class HumanRefused extends Error {
+  constructor(readonly refusal: HubRefusal) {
+    super(`the hub refused the message: ${refusal.reason}${refusal.message ? `, ${refusal.message}` : ''}`);
+  }
+}
 
 export type ProjectHandlers = {
   /** The offset of the last event the browser holds for the project; the client resumes after it. */
@@ -39,7 +47,7 @@ export type ProjectHandlers = {
   deliveries?(deliveries: Delivery[]): void;
   machines?(machines: Array<{ machine: string } & MachinePresence>): void;
   /** The hub's own refusals, as its audit record has them. */
-  refused?(refusal: Extract<ProjectDown, { t: 'refused' }>['refusal']): void;
+  refused?(refusal: HubRefusal): void;
   /** A daemon's report of an event it refused (DX2's `rejected`), as the audit record has it. */
   rejected?(rejection: Extract<ProjectDown, { t: 'rejected' }>['rejection']): void;
   status?(status: ConnectionStatus): void;
@@ -62,7 +70,7 @@ export class ProjectClient implements SessionPlane {
   private readonly socket: HubSocket<ProjectDown, ProjectUp>;
   private welcomed = false;
   private visible: boolean | null = null;
-  private readonly humans = new Map<string, { event: HumanEvent; resolve: (ack: HumanAck) => void }>();
+  private readonly humans = new Map<string, { event: HumanEvent; resolve: (ack: HumanAck) => void; reject: (error: HumanRefused) => void }>();
   private readonly rpcs = new Map<string, Rpc>();
   private readonly rpcListeners = new Set<(frame: RpcStateFrame) => void>();
   private readonly subs = new Set<OpenSubscription>();
@@ -89,10 +97,13 @@ export class ProjectClient implements SessionPlane {
     this.socket.stop();
   }
 
-  /** Sends a sealed web `human`; resolves when the hub has stored it, sending it again after each reconnect until then. */
+  /**
+   * Sends a sealed web `human`. Resolves when the hub has stored it (`human-ack`), sending it again after each reconnect
+   * until then; rejects with `HumanRefused` when the hub refuses it, after which it is never sent again.
+   */
   sendHuman(event: HumanEvent): Promise<HumanAck> {
-    return new Promise((resolve) => {
-      this.humans.set(event.mac.nonce, { event, resolve });
+    return new Promise((resolve, reject) => {
+      this.humans.set(event.mac.nonce, { event, resolve, reject });
       if (this.welcomed) this.socket.send({ t: 'human', event });
     });
   }
@@ -195,9 +206,16 @@ export class ProjectClient implements SessionPlane {
       case 'machines':
         handlers.machines?.(frame.machines);
         return;
-      case 'refused':
+      case 'refused': {
+        const nonce = frame.refusal.nonce;
+        const waiting = nonce === undefined ? undefined : this.humans.get(nonce);
+        if (waiting) {
+          this.humans.delete(nonce!);
+          waiting.reject(new HumanRefused(frame.refusal));
+        }
         handlers.refused?.(frame.refusal);
         return;
+      }
       case 'rejected':
         handlers.rejected?.(frame.rejection);
         return;

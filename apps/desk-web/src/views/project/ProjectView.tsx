@@ -66,7 +66,7 @@ function OpenProject({ connection, name, channel }: { connection: ProjectConnect
         )}
         {audit.length > 0 && <AuditNotice audit={audit} />}
         {locked ? (
-          <Locked loading={keyState === 'loading'} />
+          <Locked name={name} loading={keyState === 'loading'} />
         ) : (
           <ChannelView name={name} channel={channel} session={selected} events={drawable(logState)} sessions={sessions} />
         )}
@@ -81,15 +81,13 @@ function OpenProject({ connection, name, channel }: { connection: ProjectConnect
   );
 }
 
-function Locked({ loading }: { loading: boolean }) {
+function Locked({ name, loading }: { name: string; loading: boolean }) {
   return (
     <div className="flex flex-1 items-center justify-center p-6" data-testid="locked">
       {loading ? null : (
         <div className="max-w-[440px] text-center">
-          <h2 className="m-0 text-ui font-semibold">This browser is locked</h2>
-          <p className="text-ui-sm leading-5 text-fg-muted">
-            It holds no key for the org. Every event in a project's log is checked with that key before it is shown, so nothing from the log is drawn until the browser is unlocked.
-          </p>
+          <h2 className="m-0 text-ui font-semibold">{name} is locked in this browser</h2>
+          <p className="text-ui-sm leading-5 text-fg-muted">This browser can't check who wrote {name}'s log until it holds your org key, so nothing is shown.</p>
         </div>
       )}
     </div>

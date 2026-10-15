@@ -1,6 +1,6 @@
 // A project's log as the browser keeps it: by offset, in its own record, so a reload resumes where the record ends;
 // verified before anything reads it as drawable, and locked — nothing drawable — while the browser holds no key.
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { importOrgKey, seal, type LogEvent } from 'desk-hub/protocol';
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
 import { memoryLogRecord } from './record';
@@ -10,6 +10,26 @@ const key = () => importOrgKey(VECTOR_KEY);
 const sealed = async (seq: number, text: string): Promise<LogEvent> =>
   (await seal(await key(), 'log', PROJECT, { ts: '2026-10-15T08:00:00.000Z', writer: 'mini/human', seq, kind: 'say', from: 'human', to: '*', text })) as unknown as LogEvent;
 const settled = (log: ProjectLog) => log.settled();
+const otherKey = () => importOrgKey(Uint8Array.from({ length: 32 }, (_, i) => 255 - i));
+const sealedUnder = async (k: Awaited<ReturnType<typeof key>>, seq: number, text: string): Promise<LogEvent> =>
+  (await seal(k, 'log', PROJECT, { ts: '2026-10-15T08:00:00.000Z', writer: 'mini/human', seq, kind: 'say', from: 'human', to: '*', text })) as unknown as LogEvent;
+
+/** Holds every WebCrypto verification until `release()`, so a test can act while one is in flight. */
+function gateVerify() {
+  const original = crypto.subtle.verify.bind(crypto.subtle);
+  let release!: () => void;
+  const gate = new Promise<void>((r) => (release = r));
+  let entered!: () => void;
+  const inFlight = new Promise<void>((r) => (entered = r));
+  vi.spyOn(crypto.subtle, 'verify').mockImplementation(async (...args: Parameters<SubtleCrypto['verify']>) => {
+    entered();
+    await gate;
+    return original(...args);
+  });
+  return { inFlight, release };
+}
+
+afterEach(() => vi.restoreAllMocks());
 
 describe('ProjectLog', () => {
   it('loads its record, holds its last offset, and verifies what it holds', async () => {
@@ -81,5 +101,57 @@ describe('ProjectLog', () => {
     await settled(log);
     expect(log.held()).toBe(0);
     expect(await record.load(PROJECT)).toEqual([]);
+  });
+
+  it('discards a verification in flight when the log is replaced, so an old verdict never lands on a new entry', async () => {
+    const record = memoryLogRecord();
+    await record.append(PROJECT, [{ offset: 1, event: await sealed(1, 'old, genuine') }]);
+    const log = new ProjectLog(PROJECT, record);
+    await log.load();
+    const gate = gateVerify();
+    log.setKey(await key());
+    await gate.inFlight; // the old entry's verification has started
+    log.welcome(0); // the hub holds another log
+    const forged = { ...(await sealed(1, 'genuine')), text: 'replaced, forged' };
+    log.receive([{ offset: 1, event: forged }]);
+    gate.release();
+    await settled(log);
+    expect(log.drawable()).toEqual([]);
+    expect(log.refused().map((e) => [e.offset, e.verdict])).toEqual([[1, 'bad-code']]);
+  });
+
+  it('checks every entry again under a new key: what only the old key verified is no longer drawn, and the reverse', async () => {
+    const k1 = await key();
+    const k2 = await otherKey();
+    const log = new ProjectLog(PROJECT, memoryLogRecord());
+    await log.load();
+    log.receive([
+      { offset: 1, event: await sealedUnder(k1, 1, 'under the first key') },
+      { offset: 2, event: await sealedUnder(k2, 2, 'under the second key') },
+    ]);
+    log.setKey(k1);
+    await settled(log);
+    expect(log.drawable().map((e) => e.offset)).toEqual([1]);
+    log.setKey(null);
+    log.setKey(k2);
+    await settled(log);
+    expect(log.drawable().map((e) => e.offset)).toEqual([2]);
+    expect(log.refused().map((e) => e.offset)).toEqual([1]);
+  });
+
+  it('never commits a verdict reached under a key that has since been replaced', async () => {
+    const k1 = await key();
+    const k2 = await otherKey();
+    const log = new ProjectLog(PROJECT, memoryLogRecord());
+    await log.load();
+    log.receive([{ offset: 1, event: await sealedUnder(k1, 1, 'under the first key') }]);
+    const gate = gateVerify();
+    log.setKey(k1);
+    await gate.inFlight;
+    log.setKey(k2);
+    gate.release();
+    await settled(log);
+    expect(log.drawable()).toEqual([]);
+    expect(log.refused().map((e) => e.offset)).toEqual([1]);
   });
 });
