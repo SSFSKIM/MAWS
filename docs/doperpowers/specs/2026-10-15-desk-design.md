@@ -2472,7 +2472,11 @@ ledger, before freshness, and before anything else. It never relies on the hub's
 
 **Error codes.** The hub's: `machine-offline` (no fresh lease: fails at once, nothing queued), `stale` (older than 60
 seconds), `not-member` (`member` is not the signed-in member), `bad-shape`. The daemon's, before it executes:
-`bad-code`, `wrong-machine`, `unknown-project`, `read-only`, `digest-mismatch`, `not-pending` (the request is no longer pending), `unknown-checkout`,
+`bad-code`, `wrong-machine`, `unknown-project`, `read-only`, `bad-shape` (arguments malformed, or a decision that does not
+fit its request: a deny on an async question, an `answer` to a permission prompt, an allow on a question without its
+answers, answers keyed by anything but the request's own questions; caught with the digest check, from the pending
+request the bridge reports, and the bridge's own 400 for the same misfit, should one get past, is `bad-shape` too, after
+the claim), `digest-mismatch`, `not-pending` (the request is no longer pending), `unknown-checkout`,
 `above-ceiling`, `no-session`, `unsupported` (the session's kind cannot, per §5's table), `session-live` (a Resume of
 a session live on its machine: a session's transcript lives on the machine that ran it, so "live anywhere" means any
 process of this machine holding the session, terminal or `--bg`), `idle` (a steer while no turn is running: the web offers Send instead). After a claim: `copy-started` (a Resume raced the owner reopening the session; the copy is
@@ -3122,6 +3126,18 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A decision that does not fit its request is `bad-shape`,
+  refused by the daemon before the claim (DC3's M4 fake machine, DC7's
+  M3). The daemon's digest check already reads the pending request from
+  the bridge, its input and whether it is async, so it applies the
+  bridge's own rule there and a misfit never reaches the ledger; the
+  bridge's 400 stays as a backstop and maps to `bad-shape` as well. DX6
+  lists `bad-shape` among the daemon's codes, which its shape check
+  already used. Rejected: `unsupported`, which says the session's kind
+  cannot, and `failed` carrying the bridge's text after a claim. Flags DC3
+  (the fake answers `bad-shape` before the claim), DC5 (no card offers a
+  misfit, but a test must not pin `unsupported`), DC7.
+  Date/Author: 2026-10-15, design session (DC3's M4, DC7's M3).
 - Decision: Three DX6 rulings from DC7's M3. A steer to a session with no
   bridge answers `{row: null}`, since a `--bg` seat's `reply` and a send
   append no row the machine can name. Spawn and retire record the RPC's

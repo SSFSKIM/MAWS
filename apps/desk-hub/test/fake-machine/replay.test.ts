@@ -9,7 +9,7 @@ import type { ProjectDown } from '../../src/protocol/browser';
 import { importOrgKey, inputSha256, newNonce, seal, sealRpc, verify } from '../../src/protocol/codes';
 import type { HumanDraft } from '../../src/protocol/log';
 import type { Rpc, RpcDraft } from '../../src/protocol/rpc';
-import type { SessionMessage } from '../../src/protocol/session';
+import type { Delivery, SessionMessage } from '../../src/protocol/session';
 import { BrowserClient, enroll } from '../support/clients';
 import { Dx4Reader } from '../support/dx4-reader';
 import { ADMIN, startLocalHub, type LocalHub } from '../support/local';
@@ -133,16 +133,32 @@ describe('the fake machine replaying the recording', () => {
     expect(sessionMessages(w.b, 'presence').at(-1)?.body).toEqual({ record: { status: 'idle', waitingFor: null, needs: null }, bridge: true });
     expect(main.reader.kinds).toContain('usage');
 
-    // A web human to the session: delivered, the outcome kept for a browser that connects later.
+    // The recording's delivery outcomes (synthesized: a peer session's two says to the recorded one, delivered, then
+    // uncertain), each naming the say as the fake machine rewrote it, and sealed.
+    await until(() => sessionMessages(w.b, 'delivery').length === 2, 'the recorded deliveries');
+    const says = w.b.logged.filter((e) => e.event.kind === 'say').map((e) => e.event);
+    expect(says).toHaveLength(2);
+    for (const say of says) expect(say.writer.startsWith(`${fm.name}/`)).toBe(true);
+    const recorded = sessionMessages(w.b, 'delivery').map((m) => m.body as Delivery);
+    expect(recorded.map((d) => [d.event, d.session, d.outcome])).toEqual([
+      [{ writer: says[0].writer, seq: says[0].seq }, recording.session, 'delivered'],
+      [{ writer: says[1].writer, seq: says[1].seq }, recording.session, 'uncertain'],
+    ]);
+    for (const d of recorded) expect(await verify(await KEY, 'delivery', project, d)).toBe(true);
+
+    // A web human to the session: delivered, and the text is in the transcript.
     const draft: HumanDraft = { kind: 'human', from: 'human', member, to: [{ session: recording.session, alias: 'fakerec' }], text: 'thanks', created: new Date().toISOString() };
     w.b.send({ t: 'human', event: await seal(await KEY, 'log', project, draft) });
-    await until(() => sessionMessages(w.b, 'delivery').length === 1, 'the delivery');
-    const delivery = sessionMessages(w.b, 'delivery')[0];
+    await until(() => sessionMessages(w.b, 'delivery').length === 3, 'the delivery');
+    const delivery = sessionMessages(w.b, 'delivery')[2];
     expect(delivery.body).toMatchObject({ session: recording.session, outcome: 'delivered' });
     expect(await verify(await KEY, 'delivery', project, delivery.body as object)).toBe(true);
     await until(() => (w.pump(), main.reader.rows.some((r) => JSON.stringify(r).includes('"thanks"'))), "the human's prompt in the transcript");
+    // A browser that connects later (a reload) gets every outcome, the recorded ones included.
     const later = await BrowserClient.open(hub, ADMIN, project);
-    expect((await later.next((f) => f.t === 'deliveries', 'deliveries')) as Extract<ProjectDown, { t: 'deliveries' }>).toMatchObject({ deliveries: [{ outcome: 'delivered' }] });
+    const kept = ((await later.next((f) => f.t === 'deliveries', 'deliveries')) as Extract<ProjectDown, { t: 'deliveries' }>).deliveries;
+    expect(kept.map((d) => d.outcome).sort()).toEqual(['delivered', 'delivered', 'uncertain']);
+    expect(kept).toEqual(expect.arrayContaining(recorded));
     later.close();
     w.close();
     await fm.close();
@@ -196,7 +212,7 @@ describe('the fake machine replaying the recording', () => {
     w.b.send({ t: 'rpc', rpc: steer });
     const result = (await w.b.next((f) => f.t === 'rpc-state' && f.nonce === steer.nonce && f.state === 'done', 'done', from, 10_000)) as Extract<ProjectDown, { t: 'rpc-state' }>;
     const trace = memory.trace[steer.nonce];
-    if (trace?.rpc !== 'steer') throw new Error('the steer left no trace');
+    if (trace?.rpc !== 'steer' || !trace.row) throw new Error('the steer left no trace');
     const row = trace.row.uuid;
     expect(result.outcome).toEqual({ state: 'done', result: { row } });
     expect(again.rpcs).toMatchObject([{ nonce: steer.nonce, executed: false, outcome: { state: 'done' } }]);
