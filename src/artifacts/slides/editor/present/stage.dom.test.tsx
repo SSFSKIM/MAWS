@@ -149,14 +149,16 @@ describe('a first entry', () => {
 // Where an element's centre and its screen box start: its own motion (a translate in its parent's frame, a scale about its
 // own centre in that frame) then each moving ancestor's, all mapped to the screen through each one's parent frame, as
 // the browser composes them; written apart from `magicMotions` so the test checks the composition, not the code.
-type Motions = Map<string, { dx: number; dy: number; sx: number; sy: number }>;
+type Motions = ReadonlyMap<string, { dx: number; dy: number; sx: number; sy: number } | 'fade'>;
 const lin = (m: Affine, x: number, y: number) => ({ x: m.a * x + m.c * y, y: m.b * x + m.d * y });
 const solve = (m: Affine, x: number, y: number) => {
   const det = m.a * m.d - m.b * m.c;
   return { x: (m.d * x - m.c * y) / det, y: (-m.b * x + m.a * y) / det };
 };
 function moveOf(item: MagicItem, m: Motions, p: { x: number; y: number }) {
-  const own = m.get(item.id)!;
+  const got = m.get(item.id)!;
+  if (got === 'fade') return p; // drawn where it is, fading in
+  const own = got;
   const c = { x: item.to.x + item.to.w / 2, y: item.to.y + item.to.h / 2 };
   const local = solve(item.parent, p.x - c.x, p.y - c.y); // into the parent's frame, about the centre
   const scaled = lin(item.parent, local.x * own.sx, local.y * own.sy);
@@ -173,6 +175,12 @@ function startOf(items: readonly MagicItem[], m: Motions, id: string): MotionRec
   const [x0, x1] = [Math.min(tl.x, br.x), Math.max(tl.x, br.x)];
   const [y0, y1] = [Math.min(tl.y, br.y), Math.max(tl.y, br.y)];
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+/** An element's own motion, which the case expects it to take (not the fade route). */
+function movedBy(m: Motions, id: string) {
+  const got = m.get(id);
+  if (got === undefined || got === 'fade') throw new Error(`${id} takes no motion of its own`);
+  return got;
 }
 const near = (a: MotionRect, b: MotionRect) => expect([a.x, a.y, a.w, a.h].map((v) => Math.round(v * 1000) / 1000)).toEqual([b.x, b.y, b.w, b.h]);
 const scaled = (k: number): Affine => ({ a: k, b: 0, c: 0, d: k, e: 0, f: 0 });
@@ -193,7 +201,7 @@ describe('a magic move’s motions', () => {
       { id: 'deep', ancestor: 'inner', parent: scaled(scale), from: { x: 125, y: 62, w: 10, h: 10 }, to: { x: 470, y: 310, w: 20, h: 20 } },
     ];
     const motions = magicMotions(items);
-    const still = motions.get('still')!;
+    const still = movedBy(motions, 'still');
     expect([still.dx, still.dy, still.sx, still.sy].map((v) => Math.round(v * 1e6) / 1e6 + 0)).toEqual([0, 0, 1, 1]);
     for (const item of items) near(startOf(items, motions, item.id), item.from);
   });
@@ -216,7 +224,7 @@ describe('a magic move’s motions', () => {
       { id: 'kid', ancestor: 'g', parent: turned(90, 1), from: kidFrom, to: kidTo },
     ];
     const motions = magicMotions(items);
-    const kid = motions.get('kid')!;
+    const kid = movedBy(motions, 'kid');
     // in the group's own frame the child only moves back by its own 50 px
     expect([kid.dx, kid.dy, kid.sx, kid.sy].map((v) => Math.round(v * 1e6) / 1e6 + 0)).toEqual([-50, 0, 1, 1]);
     near(startOf(items, motions, 'kid'), kidFrom);
@@ -227,5 +235,28 @@ describe('a magic move’s motions', () => {
     ];
     const m2 = magicMotions(half);
     for (const item of half) near(startOf(half, m2, item.id), item.from);
+  });
+
+  // fix wave 3: CSS's `scale` is diagonal in the parent's frame; a resize that is not, under a parent turned off the axes,
+  // cannot start where it was, so that element fades instead (its descendants keep their own motions)
+  it('fades an element whose start needs an off-diagonal scale under a 30°-turned parent; a uniform resize still moves', () => {
+    const group = { id: 'g', ancestor: null, parent: scaled(1), from: { x: 0, y: 0, w: 400, h: 400 }, to: { x: 0, y: 0, w: 400, h: 400 } };
+    const squashed: MagicItem[] = [
+      group,
+      // twice as wide, the same height: in a 30°-turned frame that scale has an off-diagonal part
+      { id: 'kid', ancestor: 'g', parent: turned(30, 1), from: { x: 100, y: 100, w: 100, h: 100 }, to: { x: 100, y: 100, w: 200, h: 100 } },
+      // its own child moves by a plain translation, in the same turned frame
+      { id: 'dot', ancestor: 'kid', parent: turned(30, 1), from: { x: 110, y: 110, w: 10, h: 10 }, to: { x: 130, y: 110, w: 10, h: 10 } },
+    ];
+    const motions = magicMotions(squashed);
+    expect(motions.get('kid')).toBe('fade');
+    // the faded element stays where it is drawn: its descendant's motion composes with its ancestors' alone
+    expect(motions.get('dot')).not.toBe('fade');
+    near(startOf(squashed.filter((i) => i.id !== 'kid').map((i) => (i.id === 'dot' ? { ...i, ancestor: 'g' } : i)), motions, 'dot'), squashed[2]!.from);
+    // a uniform resize in the same frame is a scalar: it moves and starts where it was
+    const uniform: MagicItem[] = [group, { id: 'kid', ancestor: 'g', parent: turned(30, 1), from: { x: 100, y: 100, w: 100, h: 100 }, to: { x: 80, y: 90, w: 200, h: 200 } }];
+    const moved = magicMotions(uniform);
+    expect(moved.get('kid')).not.toBe('fade');
+    near(startOf(uniform, moved, 'kid'), uniform[1]!.from);
   });
 });

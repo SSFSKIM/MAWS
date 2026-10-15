@@ -275,15 +275,23 @@ export class ShowStage {
       return { id: f.id, ancestor, parent: frameOf(f.node.parentElement), from: f.from, to: f.to };
     });
     const motions = magicMotions(items);
+    const moving = new Set<HTMLElement>();
+    const faded = new Set<HTMLElement>();
     for (const f of found) {
       const m = motions.get(f.id)!;
+      // fix wave 3: a start CSS's `scale` cannot draw fades in where it is, as the unmatched content does
+      if (m === 'fade') {
+        faded.add(f.node);
+        this.track(f.node.animate([{ opacity: 0 }, { opacity: 1 }], options));
+        continue;
+      }
+      moving.add(f.node);
       this.track(f.node.animate([{ translate: `${m.dx}px ${m.dy}px`, scale: `${m.sx} ${m.sy}` }, { translate: '0px 0px', scale: '1 1' }], options));
     }
-    const moving = new Set(found.map((f) => f.node));
     // everything else on the arriving slide (that holds no moving element) fades in
     const fade = (el: Element) => {
       for (const child of Array.from(el.children) as HTMLElement[]) {
-        if (child.tagName === 'STYLE' || moving.has(child)) continue;
+        if (child.tagName === 'STYLE' || moving.has(child) || faded.has(child)) continue;
         if ([...moving].some((m) => child.contains(m))) fade(child);
         else this.track(child.animate([{ opacity: 0 }, { opacity: 1 }], options));
       }
@@ -311,7 +319,10 @@ export interface MagicItem {
   from: MotionRect;
   to: MotionRect;
 }
-/** An element's own starting motion: `translate` in its parent's frame (px), `scale` about its own centre in that frame. */
+/**
+ * An element's own starting motion: `translate` in its parent's frame (px), `scale` about its own centre in that frame;
+ * or `'fade'` when its start needs a scale CSS's diagonal `scale` cannot draw (fix wave 3).
+ */
 export interface Motion {
   dx: number;
   dy: number;
@@ -324,12 +335,16 @@ export interface Motion {
  * parent's own frame). On screen, the ancestors' start maps a point of the arriving layout by F (an affine); the element
  * itself maps a point x by c + P·d + P·G·P⁻¹·(x − c) about its centre c, P its parent frame's map onto the screen, d its
  * translate and G its scale. The composite takes its centre to its earlier one when d = P⁻¹·(F⁻¹(from centre) − c), and
- * its size to its earlier one when G = P⁻¹·F⁻¹·D·P, D the ratio of its boxes on screen (CSS's `scale` is diagonal: G's
- * diagonal is taken, exact for a parent turned by a multiple of 90° or not turned).
+ * its size to its earlier one when G = P⁻¹·F⁻¹·D·P, D the ratio of its boxes on screen. CSS's `scale` is diagonal: when G
+ * is not (beyond `OFF_DIAGONAL`), the element takes the fade route instead (fix wave 3; general affine morphing is out of
+ * scope).
  */
-export function magicMotions(items: readonly MagicItem[]): Map<string, Motion> {
+/** How far off the diagonal a start's scale may be, relative to its diagonal, and still be drawn by `scale`. */
+export const OFF_DIAGONAL = 1e-3;
+
+export function magicMotions(items: readonly MagicItem[]): Map<string, Motion | 'fade'> {
   const composite = new Map<string, Affine>();
-  const out = new Map<string, Motion>();
+  const out = new Map<string, Motion | 'fade'>();
   for (const item of items) {
     const f = (item.ancestor !== null && composite.get(item.ancestor)) || IDENTITY;
     const p = linear(item.parent);
@@ -340,6 +355,13 @@ export function magicMotions(items: readonly MagicItem[]): Map<string, Motion> {
     const d = applyLinear(pInv, { x: back.x - c.x, y: back.y - c.y });
     const ratio: Affine = { ...IDENTITY, a: item.from.w / item.to.w, d: item.from.h / item.to.h };
     const full = multiply(pInv, multiply(linear(fInv), multiply(ratio, p)));
+    // fix wave 3: a resize that is not diagonal in the parent's frame (a non-uniform one under a parent turned off the
+    // axes) cannot be started by `scale`: the element fades in where it is, and its descendants move by its ancestors'
+    if (Math.abs(full.b) + Math.abs(full.c) > OFF_DIAGONAL * (Math.abs(full.a) + Math.abs(full.d))) {
+      composite.set(item.id, f);
+      out.set(item.id, 'fade');
+      continue;
+    }
     const g: Affine = { ...IDENTITY, a: full.a, d: full.d };
     // this element's own start on screen, its descendants' F
     const own = multiply(shift(c.x, c.y), multiply(shift(applyLinear(p, d).x, applyLinear(p, d).y), multiply(p, multiply(g, multiply(pInv, shift(-c.x, -c.y))))));
