@@ -14,6 +14,9 @@ import type { TranscriptListHandle } from '../../../../../src/renderer/src/trans
 
 /** Rows keyed by their turn (which a rebuild can rename) or drawn by the stream (which a row replaces). */
 const VOLATILE = /^(time|divider|desk-stream):/;
+/** What only a reader does to the scroller (the list's own scrolling raises none of it): their move ends a correction. */
+const INTENT = ['wheel', 'touchstart', 'pointerdown'] as const;
+const NAVIGATION_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
 /** Frames the offset must hold, after an index jump, before the place is the list's again; and the most it waits. */
 const STEADY_FRAMES = 5;
 const MAX_FRAMES = 120;
@@ -61,11 +64,26 @@ export function useKeepPlaceThroughOlderRows(list: RefObject<TranscriptListHandl
     const scrolled = () => {
       if (correcting.current === null) place.current = placeOf(scroller);
     };
+    // A reader who wheels, touches, presses on the list or its scrollbar, or pages with the keys takes their place back:
+    // a correction still running stops, and their scroll is their place. The list's own scrolling (its jump, its
+    // realignments while it measures) raises no such event, so it never stops one.
+    const yieldToReader = () => {
+      if (correcting.current === null) return;
+      cancelAnimationFrame(correcting.current);
+      correcting.current = null;
+    };
+    const keyed = (event: KeyboardEvent) => {
+      if (NAVIGATION_KEYS.has(event.key)) yieldToReader();
+    };
     scrolled();
     scroller.addEventListener('scroll', scrolled, { passive: true });
+    for (const kind of INTENT) scroller.addEventListener(kind, yieldToReader, { passive: true });
+    scroller.addEventListener('keydown', keyed);
     return () => {
       scroller.removeEventListener('scroll', scrolled);
-      if (correcting.current !== null) cancelAnimationFrame(correcting.current);
+      for (const kind of INTENT) scroller.removeEventListener(kind, yieldToReader);
+      scroller.removeEventListener('keydown', keyed);
+      yieldToReader();
     };
   }, [list]);
 

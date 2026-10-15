@@ -42,7 +42,7 @@ function scene() {
   const list = { current: handle };
   const initial = rowsOf('time:turn:e1', KEPT);
   const view = renderHook(({ rows, loading }: { rows: Row[]; loading: boolean }) => useKeepPlaceThroughOlderRows(list, rows, loading), { initialProps: { rows: initial, loading: false } });
-  return { view, initial, row, handle, at: () => y, moveTo: (to: number) => void (y = to) };
+  return { view, initial, row, scroller, handle, at: () => y, moveTo: (to: number) => void (y = to) };
 }
 
 describe('the reader’s place through an older page', () => {
@@ -81,6 +81,32 @@ describe('the reader’s place through an older page', () => {
     const page = [...rowsOf(...Array.from({ length: 100 }, (_, i) => `user:older-${i}`), KEPT)];
     s.view.rerender({ rows: page, loading: false });
     expect(s.handle.scrollToIndex).toHaveBeenCalledWith(100, 'start');
+    await frames(12);
+    expect(s.at()).toBe(100);
+  });
+
+  it('a reader who scrolls while the offset is being finished keeps the place they scrolled to', async () => {
+    const s = scene();
+    s.view.rerender({ rows: s.initial, loading: true });
+    s.row.remove();
+    s.view.rerender({ rows: rowsOf(...Array.from({ length: 100 }, (_, i) => `user:older-${i}`), KEPT), loading: false });
+    await frames(5); // drawn, realigned by the list, put back each time: the loop now waits for the offset to hold
+    expect(s.at()).toBe(100);
+    s.scroller.dispatchEvent(new WheelEvent('wheel', { deltaY: -40 }));
+    s.moveTo(140); // the wheel's scroll moves the kept row down by 40 px
+    s.scroller.dispatchEvent(new Event('scroll'));
+    await frames(12);
+    expect(s.at()).toBe(140);
+  });
+
+  it('the list’s own scroll events, which no reader raised, do not stop the correction', async () => {
+    const s = scene();
+    s.view.rerender({ rows: s.initial, loading: true });
+    s.row.remove();
+    s.view.rerender({ rows: rowsOf(...Array.from({ length: 100 }, (_, i) => `user:older-${i}`), KEPT), loading: false });
+    await frames(5);
+    s.moveTo(60); // the list scrolls again as it measures: a scroll event with no reader's input before it
+    s.scroller.dispatchEvent(new Event('scroll'));
     await frames(12);
     expect(s.at()).toBe(100);
   });
