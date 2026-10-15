@@ -495,15 +495,15 @@ export class Project extends DurableObject<Env> {
     const problem = rpcShapeError(rpc, this.projectId);
     if (problem) return fail('bad-shape', problem);
     if (rpc.member !== member) return fail('not-member', 'an RPC is issued by the member signed in');
+    // Leases first: a lapse this request is the first to find changes the record it is answered from.
+    this.sweepLeases();
     const record = this.plane.rpc(nonce);
     if (record) {
       if (record.member !== member || canonicalize(record.rpc) !== canonicalize(rpc)) return fail('bad-shape', 'this nonce was sent with another RPC');
-      this.sweepLeases();
       if (record.state === 'uncertain' && this.isOnline(record.machine)) return this.forward(record.rpc, member);
       return this.toSocket(socket, rpcStateFrame(record));
     }
     if (!(Date.now() - Date.parse(rpc.created) <= RPC_FRESHNESS_MS)) return fail('stale', 'older than 60 seconds: issue it again');
-    this.sweepLeases();
     if (!this.isOnline(rpc.machine)) return fail('machine-offline', `${rpc.machine} is offline`);
     this.forward(rpc, member);
   }

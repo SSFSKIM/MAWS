@@ -167,6 +167,28 @@ describe('RPCs', () => {
     await m.close();
   });
 
+  it('a retry that is the first to find its lease expired answers uncertain, never the record from before', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const call = await rpc(project, m.name, 'steer', { session: SESSION, text: 'once' });
+    b.send({ t: 'rpc', rpc: call });
+    await m.next((f) => f.t === 'rpc', 'the rpc');
+    await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce && f.state === 'forwarded', 'forwarded');
+    // The lease runs out within a millisecond; its alarm comes 50 ms on at the soonest, and the retry before it.
+    await hub.lease(project, { op: 'renew', machine: m.name, generation: m.generation, leaseMs: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const from = b.frames.length;
+    b.send({ t: 'rpc', rpc: call });
+    await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce, 'the retry answered', from);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const states = ofType(b, 'rpc-state', from).filter((f) => f.nonce === call.nonce).map((f) => f.state);
+    expect(states.length).toBeGreaterThan(0);
+    expect(states.every((state) => state === 'uncertain')).toBe(true);
+    b.close();
+    await m.close();
+  });
+
   it('a retry of an uncertain RPC is forwarded again once its machine is back (the daemon’s ledger answers it)', async () => {
     const project = newProject();
     const m = await machine(project, CLOSES);

@@ -3,6 +3,7 @@
 // assertion is enrollment's redemption (`/machine/enroll`), which Access does not guard either: its one-time token
 // does. Every path it answers is under `/api/*` or `/machine/*`, the routes wrangler.jsonc runs it first for; the web
 // app's assets answer the rest.
+import { drain } from './drain';
 import { hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
 import type { Principal, Registry, Result } from './objects/registry';
@@ -61,35 +62,10 @@ function forward(request: Request, url: string, identity: Record<string, string>
   return forwarded;
 }
 
-/** How much of a body the Worker answered without reading it is read and dropped before the answer goes out. */
-const DRAIN_LIMIT = 1024 * 1024;
-
-/**
- * Reads and drops what is left of a body the Worker answered without reading (a refusal before the body: too large, no
- * assertion, not a member), up to `DRAIN_LIMIT`. Behind Cloudflare's edge the client always gets the answer; on a bare
- * workerd, a connection closed with request bytes unread is reset, and on Linux the reset can overtake the answer (the
- * local stand-in's proxy saw `write ECONNRESET` and answered 502 in 4 of 200 oversized bodies on the CI runner). A body
- * already taken (read, or forwarded to an object) is left alone.
- */
-async function drain(request: Request): Promise<void> {
-  if (!request.body || request.bodyUsed || request.body.locked) return;
-  try {
-    const reader = request.body.getReader();
-    for (let read = 0; read <= DRAIN_LIMIT; ) {
-      const { done, value } = await reader.read();
-      if (done) return;
-      read += value.byteLength;
-    }
-    await reader.cancel();
-  } catch {
-    // a body locked by a forward, or a client gone: nothing to drain
-  }
-}
-
 export default {
   async fetch(request, env): Promise<Response> {
     const response = await route(request, env);
-    await drain(request);
+    if (request.body && !request.bodyUsed) await drain(request.body);
     return response;
   },
 } satisfies ExportedHandler<Env>;
