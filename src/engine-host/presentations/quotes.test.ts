@@ -19,7 +19,7 @@ let world: DocumentWorld;
 let presentations: Presentations;
 beforeEach(() => {
   world = openDocumentWorld();
-  presentations = registerPresentations({ documents: world, chain: null });
+  presentations = registerPresentations({ documents: world, chain: null, refresh: () => {} });
 });
 afterEach(() => {
   presentations.close();
