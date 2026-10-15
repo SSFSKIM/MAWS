@@ -2312,6 +2312,19 @@ a hub that connects into machines (§2).
   dependency: it is stdlib Python, and the standard library has no Ed25519.
   Evidence: `skills/sminos/scripts/sminos_daemon.py` imports only the
   standard library; `hashlib`/`hmac` give HMAC-SHA256 only.
+- Observation: a `--bg` job starts in permission mode `auto` when no flag
+  is given (engine 2.1.300): the classifier decides each call, and a plain
+  Bash call raises no permission request. A background job raises requests
+  only when it is launched in a prompting mode, or for a call `auto`
+  escalates, so the scene of answering a background job's permission
+  prompts from the phone is rarer by default than §4 pictured; questions
+  are unaffected.
+  Evidence: DC2's M3 live runs (doperpowers `3a33efcd`, 2026-10-15).
+- Observation: a `$.http.fetch` started inside a hook's dispatch dies
+  when that hook is aborted (Esc or an interrupt), even through a `$`
+  captured earlier. A mod that must keep posting through an abort posts
+  from a loop it started at `session.start`, as the bridge now does.
+  Evidence: DC2's M3 (doperpowers `3a33efcd`, 2026-10-15).
 
 ## Decision Log
 
@@ -2456,6 +2469,21 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The bridge raises a pending request after the session's
+  settings hooks have run, not before. This costs up to about 0.4 s before
+  the web sees it. Raising first would publish requests that a settings
+  hook then decides itself, which would need a fourth `by` and a
+  withdrawal the web has to draw. A request's id is the call's
+  `tool_use_id` where the engine gives one (an ask-mod question carries
+  its `toolu_plugin_…` raise id; otherwise a synthetic `request-…`), and
+  every consumer treats it as opaque, the DX6 digest included. Async
+  questions are raised with `async: true`; they are answered or withdrawn,
+  never denied. A decision that arrives after another has won, or within
+  200 ms of a background request's deadline, is answered 409 naming the
+  winner (`terminalOnly` for the deadline). The DX5 M3 extension that
+  carries these is folded when DC2's M3 review is clean. Flags DC3, DC5,
+  DC7.
+  Date/Author: 2026-10-15, design session (DC2's M3).
 - Decision: The enrollment code is never a command-line argument. It
   carries the org key in reversible base64url, and `sminos hub enroll
   <code>` left it in the process listing for the command's life (up to
