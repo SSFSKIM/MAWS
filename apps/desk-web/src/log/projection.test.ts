@@ -28,6 +28,13 @@ describe('projectSessions', () => {
     expect(sessions.get(S2)).toMatchObject({ alias: 'cua-bench', machine: 'SK.local', member: false, ended: { by: 'human', reason: 'retire' } });
   });
 
+  it('reads the seat a joined names: a --bg job sminos spawned, against a terminal session', () => {
+    const seat = ev(`mini/${S2}`, 'joined', { session: S2, alias: 'maws-fe', name_source: 'seat', machine: 'mini', cwd: '/w/maws', worktree: '', role: '', seat: 'maws-fe', by: 'maws-45' });
+    const sessions = projectSessions([joined(S1, 'maws-45', 'mini'), seat]);
+    expect(sessions.get(S1)?.seat).toBe('');
+    expect(sessions.get(S2)?.seat).toBe('maws-fe');
+  });
+
   it('takes the later ts when two writers set the in-charge line, and a rejoin ends the retirement', () => {
     const sessions = projectSessions([
       joined(S1, 'maws-45', 'mini'),
@@ -52,7 +59,7 @@ describe('projectSessions', () => {
 });
 
 describe('groupOf', () => {
-  const base: ProjectedSession = { session: S1, alias: 'a', machine: 'mini', cwd: null, worktree: null, member: true, ended: null, charge: null, status: null, state: null, joinedAt: 1 };
+  const base: ProjectedSession = { session: S1, alias: 'a', machine: 'mini', cwd: null, worktree: null, seat: '', member: true, ended: null, charge: null, status: null, state: null, joinedAt: 1 };
 
   it('puts a retired session under ended, whatever its presence says', () => {
     expect(groupOf({ ...base, member: false, ended: { by: '', reason: 'ended' } }, { presence: { record: { status: 'busy' }, bridge: true }, machineOnline: true, pending: 0 })).toBe('ended');

@@ -76,6 +76,34 @@ All of these are in the plan's Decision Log and Surprises & Discoveries:
     root lint covers the hub;
   - the tech-debt tracker logs uncapped reassembled part sets.
 
+## Update (fourth interim hand-back)
+
+- M2 is reviewed clean and ticked (71083dd4). Its last fix was b9e101ca:
+  a failed reply keeps its stream's queue failed, and a test-only seam
+  injects the failure.
+- M3 is executing with executor `a5e8645019cdbbc28`. Its commits:
+  - 068f14f3: the contract types, sent to the composite's writer;
+  - f167ca64: M3 itself;
+  - f22e0839: the wrapped org keys with `auth`, sent.
+
+  The workerd suites have not run locally, because the Mac's load stayed
+  at 40–190 for hours. The gate on f22e0839 stands in for them and is
+  running now. interfaces-M3.md and M3's report are not written yet.
+- M3's Decisions in the plan list every contract item folded since
+  dispatch (through 6a7cdde0).
+
+## Update (M4 executing)
+
+- M3 is reviewed clean and ticked (b3542038). Its code is final at
+  dabd37e8, and the gate is green on 54a9c171 (run 38783679574).
+- M4 is executing with executor `a7f6c1e8c479535c7` from base b3542038.
+  Two of its commits have landed and their shas have gone to the
+  composite's writer:
+  - c547aaa5: the late-decision `winner`, `by`, and `terminalOnly` types;
+  - 01ba7519: the steer result `{row: string | null}`.
+  The `rpc-result` pass-through is built and uncommitted. It goes into
+  the M4 commit.
+
 ## Next, on resume
 
 1. Read M2's report at

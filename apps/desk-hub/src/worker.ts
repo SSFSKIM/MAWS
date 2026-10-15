@@ -3,10 +3,11 @@
 // assertion is enrollment's redemption (`/machine/enroll`), which Access does not guard either: its one-time token
 // does. Every path it answers is under `/api/*` or `/machine/*`, the routes wrangler.jsonc runs it first for; the web
 // app's assets answer the rest.
+import { drain } from './drain';
 import { hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
 import type { Principal, Registry, Result } from './objects/registry';
-import { REDEEM_PATH } from './protocol/identity';
+import { ORG_KEYS_PATH, PUSH_KEY_PATH, PUSH_SUBSCRIPTIONS_PATH, REDEEM_PATH } from './protocol/identity';
 import { POST_LIMIT } from './protocol/machine';
 
 export { Machine } from './objects/machine';
@@ -17,6 +18,7 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const PROJECT_SOCKET = new RegExp(`^/api/projects/(${UUID})/socket$`);
 const PROJECT_ARCHIVE = new RegExp(`^/api/projects/(${UUID})/archive$`);
 const MACHINE_PATH = /^\/api\/machines\/([^/]+)$/;
+const ORG_KEY_PATH = /^\/api\/org\/keys\/([^/]+)$/;
 /** A JSON body of an endpoint other than the machine's POST is small. */
 const BODY_LIMIT = 64 * 1024;
 
@@ -62,29 +64,35 @@ function forward(request: Request, url: string, identity: Record<string, string>
 
 export default {
   async fetch(request, env): Promise<Response> {
-    const config = hubConfig(env);
-    if (!config) return json(503, { error: 'not-configured' });
-    const registry = env.REGISTRY.get(env.REGISTRY.idFromName(config.org.id));
-    const url = new URL(request.url);
-    if (url.pathname === REDEEM_PATH) {
-      return request.method === 'POST' ? answer(await registry.redeem(await body(request))) : json(405, { error: 'method-not-allowed' });
-    }
-    let principal: Principal | null;
-    try {
-      const identity = await verifyAccessAssertion(request.headers.get('Cf-Access-Jwt-Assertion'), {
-        issuer: config.issuer,
-        audience: config.audience,
-        keys: keysAt(config.certsUrl),
-      });
-      principal = await registry.resolve(identity);
-      if (!principal) return json(403, { error: identity.kind === 'human' ? 'not-a-member' : 'not-enrolled' });
-    } catch (error) {
-      if (error instanceof AccessError) return json(error.reason === 'missing' ? 401 : 403, { error: error.reason });
-      throw error;
-    }
-    return principal.kind === 'member' ? member(request, url, env, registry, principal) : machine(request, url, env, principal);
+    const response = await route(request, env);
+    if (request.body && !request.bodyUsed) await drain(request.body);
+    return response;
   },
 } satisfies ExportedHandler<Env>;
+
+async function route(request: Request, env: Env): Promise<Response> {
+  const config = hubConfig(env);
+  if (!config) return json(503, { error: 'not-configured' });
+  const registry = env.REGISTRY.get(env.REGISTRY.idFromName(config.org.id));
+  const url = new URL(request.url);
+  if (url.pathname === REDEEM_PATH) {
+    return request.method === 'POST' ? answer(await registry.redeem(await body(request))) : json(405, { error: 'method-not-allowed' });
+  }
+  let principal: Principal | null;
+  try {
+    const identity = await verifyAccessAssertion(request.headers.get('Cf-Access-Jwt-Assertion'), {
+      issuer: config.issuer,
+      audience: config.audience,
+      keys: keysAt(config.certsUrl),
+    });
+    principal = await registry.resolve(identity);
+    if (!principal) return json(403, { error: identity.kind === 'human' ? 'not-a-member' : 'not-enrolled' });
+  } catch (error) {
+    if (error instanceof AccessError) return json(error.reason === 'missing' ? 401 : 403, { error: error.reason });
+    throw error;
+  }
+  return principal.kind === 'member' ? member(request, url, env, registry, principal) : machine(request, url, env, principal);
+}
 
 async function member(request: Request, url: URL, env: Env, registry: DurableObjectStub<Registry>, principal: Extract<Principal, { kind: 'member' }>): Promise<Response> {
   const { pathname } = url;
@@ -98,6 +106,19 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (revoke && method === 'DELETE') return answer(await registry.revoke(you, decodeURIComponent(revoke[1])));
   const archive = PROJECT_ARCHIVE.exec(pathname);
   if (archive && method === 'PUT') return answer(await registry.designateArchive(you, archive[1], await body(request)));
+  if (pathname === ORG_KEYS_PATH && method === 'GET') return json(200, await registry.orgKeys());
+  if (pathname === ORG_KEYS_PATH && method === 'POST') return answer(await registry.addOrgKey(you, await body(request)), 201);
+  const orgKey = ORG_KEY_PATH.exec(pathname);
+  if (orgKey && method === 'DELETE') return answer(await registry.removeOrgKey(you, orgKey[1], await body(request)));
+  if (pathname === PUSH_KEY_PATH && method === 'GET') return json(200, await registry.pushKey());
+  if (pathname === PUSH_SUBSCRIPTIONS_PATH) {
+    if (method === 'GET') return json(200, await registry.pushSubscriptions(you));
+    if (method === 'PUT') return answer(await registry.keepPushSubscription(you, await body(request)));
+    if (method === 'DELETE') return answer(await registry.deletePushSubscription(you, await body(request)));
+  }
+  if (pathname === '/api/registry/socket' && method === 'GET') {
+    return registry.fetch(forward(request, 'https://registry/grid', { [MEMBER_HEADER]: you.id, [ORG_HEADER]: principal.org.id }));
+  }
   const socket = PROJECT_SOCKET.exec(pathname);
   if (socket && method === 'GET') {
     const project = socket[1];

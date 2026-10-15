@@ -1,14 +1,19 @@
 // The DX3 protocol double (the DC5 plan's Decision Log, "Building ahead of the hub"): a local stand-in for the hub's
 // browser side, for the web app's suites while DC3's local hub and fake machine are still to land. It speaks
-// `desk-hub/protocol`'s types and nothing of its own: `/api/me`, the project socket (`ProjectUp` / `ProjectDown`), and
-// the registry socket (`GridDown`); it numbers stored events with project offsets, seals what it appends with the org
-// key the way a machine's daemon would (DX1), and serves a built app from a directory with the single-page fallback the
+// `desk-hub/protocol`'s types and nothing of its own: `/api/me`, DX7's wrapped keys (./org-keys.ts), the project
+// socket (`ProjectUp` / `ProjectDown`), and the registry socket (`GridDown`); it numbers stored events with project offsets, seals what it appends with the org
+// key the way a machine's daemon would (DX1), serves DX7's Web Push endpoints (./push.ts; it sends no pushes: the browser
+// suites deliver one to the service worker directly), and serves a built app from a directory with the single-page fallback the
 // Worker's static assets will have. Every discontinuity a test needs is a method: drop every socket (a deploy), send
-// a frame in parts, hold acknowledgements, store an event whose code fails.
+// a frame in parts, hold acknowledgements, store an event whose code fails. For the conversation (the plan's M3) it also
+// stands in for what DC3's M3 routes and its fake machine (M4) produces: requests raised and settled, deliveries, the
+// RPC record per nonce (a retry answered from it, an offline machine failing at once, a dropped machine leaving its
+// forwarded RPCs `uncertain`), subscriptions numbered and ended, and a session's compaction messages.
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { extname, join, normalize } from 'node:path';
+import { createGzip } from 'node:zlib';
 import {
   hubWriter,
   importOrgKey,
@@ -32,10 +37,19 @@ import {
   type Delivery,
   type Refusal,
   type Rejection,
+  type Raised,
+  type Settled,
+  type RpcState,
+  type SessionBodies,
+  type SubscriptionKind,
 } from 'desk-hub/protocol';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { OrgKeysDouble } from './org-keys';
+import { PushDouble } from './push';
+import type { DeliveryAhead, RaisedAhead } from '../../src/hub/protocol-ahead';
 
-export const DOUBLE_ORG: OrgRecord = { id: 'org-double', name: 'Double org', created: '2026-10-15T00:00:00.000Z' };
+/** The org as the double holds it before any key is set up (`/api/me` answers its current `key_check`). */
+export const DOUBLE_ORG: OrgRecord = { id: 'org-double', name: 'Double org', created: '2026-10-15T00:00:00.000Z', key_check: null };
 export const DOUBLE_MEMBER: MemberRecord = { id: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', email: 'owner@example.com', role: 'admin', created: '2026-10-15T00:00:00.000Z' };
 
 /** The fields a machine writes beyond `ts`, `writer`, `seq`, and `mac`. */
@@ -51,6 +65,10 @@ type ProjectState = {
   deliveries: Delivery[];
   /** Each session's latest presence, sent to a socket when it connects (an assumption about DX3; see sendSession). */
   presence: Map<string, SessionMessage>;
+  /** The hub's record per RPC nonce: the RPC, its state, and its outcome once one came. */
+  rpcs: Map<string, { rpc: Rpc; state: RpcState; outcome?: RpcOutcome }>;
+  /** Each open subscription's machine and the `n` of its next message. */
+  subs: Map<string, { machine: string; next: number }>;
 };
 
 export type DoubleOptions = {
@@ -70,6 +88,10 @@ export class HubDouble {
   /** Answer each `human` with `human-ack` (true), or hold the acknowledgement as a hub that dropped mid-write would. */
   ackHumans = true;
   admit: 'member' | 'not-a-member';
+  /** DX7's wrapped keys (`/api/org/keys`), with the hub's rules: `not-key-holder`, `different-key`, `last-key`. */
+  readonly orgKeys = new OrgKeysDouble();
+  /** DX7's Web Push endpoints: the VAPID key and the member's subscriptions. */
+  readonly push = new PushDouble();
   private readonly projects = new Map<string, ProjectState>();
   private readonly gridSockets = new Set<WebSocket>();
   private grid: ProjectSummary[] = [];
@@ -89,7 +111,7 @@ export class HubDouble {
     const server = createServer();
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const double = new HubDouble(server, key, options);
-    server.on('request', (req, res) => double.http(req, res));
+    server.on('request', (req, res) => void double.http(req, res));
     server.on('upgrade', (req, socket, head) => double.upgrade(req, socket as never, head));
     return double;
   }
@@ -122,6 +144,11 @@ export class HubDouble {
     for (const socket of state.sockets) if (socket.resumed) this.sendRaw(socket.ws, { t: 'log', events: state.log });
   }
 
+  /** The project's log as stored, offsets beside events. */
+  logOf(project: string): Array<{ offset: number; event: LogEvent }> {
+    return this.project(project).log;
+  }
+
   head(project: string): number {
     return this.project(project).log.at(-1)?.offset ?? 0;
   }
@@ -152,6 +179,101 @@ export class HubDouble {
   setPending(project: string, requests: PendingRequest[]): void {
     this.project(project).pending = requests;
     this.broadcast(project, { t: 'pending', requests });
+  }
+
+  /**
+   * A request the bridge raised on a machine, sealed with the org key as the machine would: a `raised` message to every
+   * browser, and the pending set again. `terminalOnly` stands for the hub's own clock having passed its deadline.
+   */
+  async raise(project: string, machine: string, draft: Omit<RaisedAhead, 'mac'>, options: { terminalOnly?: boolean } = {}): Promise<Raised> {
+    const raised = await seal(this.key, 'raised', project, draft);
+    this.raiseRaw(project, machine, raised, options);
+    return raised;
+  }
+
+  /** A raised request exactly as given, code and all (an altered or forged one). */
+  raiseRaw(project: string, machine: string, raised: Raised, options: { terminalOnly?: boolean } = {}): void {
+    const state = this.project(project);
+    this.sendSession(project, { project, machine, session: raised.session, kind: 'raised', sub: null, n: null, body: raised });
+    this.setPending(project, [...state.pending.filter((p) => p.raised.request !== raised.request), { machine, raised, terminal_only: options.terminalOnly === true }]);
+  }
+
+  /** The hub's clock passed a background request's deadline: it stays pending, answerable only in the terminal. */
+  markTerminalOnly(project: string, request: string): void {
+    const state = this.project(project);
+    this.setPending(project, state.pending.map((p) => (p.raised.request === request ? { ...p, terminal_only: true } : p)));
+  }
+
+  /** The bridge settled a request: a `settled` message to every browser, and the pending set without it. */
+  async settle(project: string, machine: string, session: string, draft: Omit<Settled, 'mac'>): Promise<Settled> {
+    const settled = await seal(this.key, 'settled', project, draft);
+    const state = this.project(project);
+    this.sendSession(project, { project, machine, session, kind: 'settled', sub: null, n: null, body: settled });
+    this.setPending(project, state.pending.filter((p) => p.raised.request !== draft.request));
+    return settled;
+  }
+
+  /** A machine's `deliver_next` settled an event for a recipient: kept as the latest per event and recipient, and sent on. */
+  async deliver(project: string, machine: string, draft: Omit<DeliveryAhead, 'mac'>): Promise<Delivery> {
+    return this.deliverRaw(project, machine, (await seal(this.key, 'delivery', project, draft)) as unknown as Delivery);
+  }
+
+  /** A delivery exactly as given, code and all. */
+  deliverRaw(project: string, machine: string, delivery: Delivery): Delivery {
+    const state = this.project(project);
+    const same = (d: Delivery) => d.event.writer === delivery.event.writer && d.event.seq === delivery.event.seq && d.session === delivery.session;
+    state.deliveries = [...state.deliveries.filter((d) => !same(d)), delivery];
+    this.sendSession(project, { project, machine, session: delivery.session, kind: 'delivery', sub: null, n: null, body: delivery });
+    return delivery;
+  }
+
+  /** A session's compaction (DX4 `compact`), outside any subscription. */
+  sendCompact(project: string, machine: string, session: string, body: SessionBodies['compact']): void {
+    this.broadcast(project, { t: 'session', message: { project, machine, session, kind: 'compact', sub: null, n: null, body } });
+  }
+
+  /** What a browser's `diff` on a main-transcript subscription is answered with, per session (DX3; DC6 draws it). */
+  readonly diffs = new Map<string, SessionBodies['diff']>();
+
+  /** The RPCs browsers sent on a project, oldest first, retries included. */
+  rpcs(project: string): Rpc[] {
+    return this.up.filter((u) => u.project === project && u.frame.t === 'rpc').map((u) => (u.frame as { rpc: Rpc }).rpc);
+  }
+
+  /** The machine's result for an RPC, or `uncertain` (its lease lapsed first): recorded per nonce and sent on. */
+  answerRpc(project: string, nonce: string, outcome: RpcOutcome | 'uncertain'): void {
+    const record = this.project(project).rpcs.get(nonce);
+    if (!record) throw new Error(`no RPC ${nonce}`);
+    if (outcome === 'uncertain') record.state = 'uncertain';
+    else Object.assign(record, { state: outcome.state, outcome });
+    this.sendRpcState(project, nonce, outcome);
+  }
+
+  /** A message on an open subscription, numbered after the last one it carried (the snapshot is n 0). */
+  sendSub<K extends SubscriptionKind>(project: string, sub: string, kind: K, body: SessionBodies[K]): void {
+    const open = this.project(project).subs.get(sub);
+    const target = this.subscriptions(project).find((s) => s.sub === sub);
+    if (!open || !target) throw new Error(`no subscription ${sub}`);
+    const n = open.next++;
+    this.broadcast(project, { t: 'session', message: { project, machine: target.machine, session: target.session, kind, sub, n, body } as SessionMessage });
+    if (kind === 'end') this.project(project).subs.delete(sub);
+  }
+
+  /**
+   * A machine whose lease lapsed, as the hub sees it: offline in `machines`, each subscription it served ended
+   * `machine-offline`, and each RPC forwarded to it without a result `uncertain`.
+   */
+  dropMachine(project: string, machine: string): void {
+    const state = this.project(project);
+    this.setMachines(project, state.machines.map((m) => (m.machine === machine ? { ...m, online: false } : m)));
+    for (const [sub, open] of [...state.subs]) if (open.machine === machine) this.sendSub(project, sub, 'end', { reason: 'machine-offline' });
+    for (const [nonce, record] of state.rpcs) if (record.rpc.machine === machine && record.state === 'forwarded') this.answerRpc(project, nonce, 'uncertain');
+  }
+
+  /** The machine's lease is fresh again. */
+  restoreMachine(project: string, machine: string): void {
+    const state = this.project(project);
+    this.setMachines(project, state.machines.map((m) => (m.machine === machine ? { ...m, online: true } : m)));
   }
 
   sendRpcState(project: string, nonce: string, outcome: RpcOutcome | 'forwarded' | 'uncertain'): void {
@@ -223,7 +345,7 @@ export class HubDouble {
   private project(id: string): ProjectState {
     let state = this.projects.get(id);
     if (!state) {
-      state = { log: [], seqs: new Map(), sockets: new Set(), machines: [], pending: [], deliveries: [], presence: new Map() };
+      state = { log: [], seqs: new Map(), sockets: new Set(), machines: [], pending: [], deliveries: [], presence: new Map(), rpcs: new Map(), subs: new Map() };
       this.projects.set(id, state);
     }
     return state;
@@ -241,8 +363,14 @@ export class HubDouble {
     for (const socket of this.project(project).sockets) this.sendRaw(socket.ws, frame);
   }
 
+  /** Text frames sent on registry sockets: a grid over the frame bound goes down in DX2 `part`s (composite fa7f8e8d). */
+  gridTexts = 0;
+
   private sendRaw(ws: WebSocket, frame: ProjectDown | GridDown): void {
-    for (const text of toWire(frame, this.options.frameLimit)) ws.send(text);
+    for (const text of toWire(frame, this.options.frameLimit)) {
+      if (this.gridSockets.has(ws)) this.gridTexts++;
+      ws.send(text);
+    }
   }
 
   private *allSockets(): Iterable<WebSocket> {
@@ -305,7 +433,19 @@ export class HubDouble {
       case 'human':
         return this.receiveHuman(project, socket, frame.event);
       case 'rpc':
-        return this.receiveRpc(socket, frame.rpc);
+        return this.receiveRpc(project, socket, frame.rpc);
+      case 'subscribe':
+        state.subs.set(frame.sub, { machine: frame.machine, next: 0 });
+        return;
+      case 'unsubscribe':
+        state.subs.delete(frame.sub);
+        return;
+      case 'diff': {
+        // Answered as DX4 `diff` on that sub; a main-transcript subscription's only, as DX3 has it.
+        const target = this.subscriptions(project).find((s) => s.sub === frame.sub);
+        if (target && target.agentId === null && state.subs.has(frame.sub)) this.sendSub(project, frame.sub, 'diff', this.diffs.get(target.session) ?? { base: 'main', text: '' });
+        return;
+      }
       default:
         return;
     }
@@ -327,30 +467,66 @@ export class HubDouble {
     if (this.ackHumans) this.sendRaw(socket.ws, { t: 'human-ack', nonce: event.mac.nonce, offset: entry.offset, writer, seq: entry.event.seq });
   }
 
-  private receiveRpc(socket: ProjectSocket, rpc: Rpc): void {
+  /**
+   * DX6 at the hub: a nonce it holds a result for is answered from its record; an RPC to a machine without a fresh lease
+   * fails at once, `machine-offline`, nothing queued; anything else is forwarded (again, for a retry of a `forwarded`
+   * or `uncertain` one), and the test answers it with `answerRpc`.
+   */
+  private receiveRpc(project: string, socket: ProjectSocket, rpc: Rpc): void {
+    const state = this.project(project);
+    const known = state.rpcs.get(rpc.nonce);
+    if (known?.outcome) {
+      this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: known.outcome.state, outcome: known.outcome });
+      return;
+    }
+    if (known && state.machines.find((m) => m.machine === rpc.machine)?.online === false) {
+      this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: known.state });
+      return;
+    }
+    if (state.machines.find((m) => m.machine === rpc.machine)?.online === false) {
+      const outcome: RpcOutcome = { state: 'failed', error: { code: 'machine-offline', message: `${rpc.machine} is offline` } };
+      state.rpcs.set(rpc.nonce, { rpc, state: 'failed', outcome });
+      this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: 'failed', outcome });
+      return;
+    }
+    state.rpcs.set(rpc.nonce, { rpc, state: 'forwarded' });
     this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: 'forwarded' });
   }
 
-  private http(req: IncomingMessage, res: ServerResponse): void {
+  private async http(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const path = new URL(req.url ?? '/', this.url).pathname;
+    if (path.startsWith('/api/') && this.admit !== 'member') {
+      json(res, 403, { error: 'not-a-member' });
+      return;
+    }
     if (path === '/api/me') {
-      if (this.admit === 'member') json(res, 200, { org: DOUBLE_ORG, member: DOUBLE_MEMBER });
-      else json(res, 403, { error: 'not-a-member' });
+      json(res, 200, { org: { ...DOUBLE_ORG, key_check: this.orgKeys.key_check }, member: DOUBLE_MEMBER });
+      return;
+    }
+    const body = await readJson(req);
+    const answer = (await this.orgKeys.handle(DOUBLE_MEMBER, req.method ?? 'GET', path, body)) ?? (await this.push.handle(DOUBLE_MEMBER, req.method ?? 'GET', path, body));
+    if (answer) {
+      json(res, answer.status, answer.body);
       return;
     }
     if (path.startsWith('/api/') || !this.options.staticDir) {
       json(res, 404, { error: 'not-found' });
       return;
     }
-    this.serveStatic(this.options.staticDir, path, res);
+    this.serveStatic(this.options.staticDir, path, req, res);
   }
 
-  private serveStatic(dir: string, path: string, res: ServerResponse): void {
+  /** The built app, compressed as the Worker's static assets are when the browser accepts it (gzip here). */
+  private serveStatic(dir: string, path: string, req: IncomingMessage, res: ServerResponse): void {
     const file = normalize(join(dir, decodeURIComponent(path)));
     const inside = file.startsWith(normalize(dir)) && existsSync(file) && statSync(file).isFile();
     const target = inside ? file : join(dir, 'index.html');
-    res.writeHead(200, { 'Content-Type': CONTENT_TYPES[extname(target)] ?? 'application/octet-stream' });
-    createReadStream(target).pipe(res);
+    const type = CONTENT_TYPES[extname(target)] ?? 'application/octet-stream';
+    const gzip = /\bgzip\b/.test(String(req.headers['accept-encoding'] ?? '')) && !type.startsWith('image/png');
+    res.writeHead(200, { 'Content-Type': type, ...(gzip && { 'Content-Encoding': 'gzip', Vary: 'Accept-Encoding' }) });
+    const body = createReadStream(target);
+    if (gzip) body.pipe(createGzip()).pipe(res);
+    else body.pipe(res);
   }
 }
 
@@ -361,7 +537,20 @@ const CONTENT_TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.json': 'application/json',
   '.woff2': 'font/woff2',
+  '.png': 'image/png',
+  '.webmanifest': 'application/manifest+json',
 };
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  if (chunks.length === 0) return undefined;
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+  } catch {
+    return undefined;
+  }
+}
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });

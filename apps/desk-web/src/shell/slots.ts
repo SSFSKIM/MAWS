@@ -19,6 +19,13 @@ export type TranscriptSlotProps = {
   project: string;
   session: DeskSession;
   plane: SessionPlane;
+  /**
+   * The stretch of working record this fold stands for: each end the `src` of a bounding exchange item (a `<message>`
+   * span's `<row uuid>#<span index>`; a question's call id), or null for an open end. The slot draws only what lies
+   * strictly between, at span granularity — a bounding message's marked span excluded, unmarked text in its row drawn —
+   * through the to-human Presenter; the shell passes the bounds and trims nothing.
+   */
+  range: { from: string | null; to: string | null };
 };
 
 export interface Slots {

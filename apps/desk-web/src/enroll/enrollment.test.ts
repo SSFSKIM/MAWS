@@ -4,7 +4,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { base64urlEncode, decodeEnrollmentCode } from 'desk-hub/protocol';
 import { VECTOR_KEY } from '../../test/vectors';
-import { createEnrollment, enrollmentCode, HubRequestError, machineNameProblem } from './enrollment';
+import { HubRequestError } from '../hub/http';
+import { createEnrollment, enrollmentCode, machineNameProblem } from './enrollment';
 
 afterEach(() => vi.unstubAllGlobals());
 

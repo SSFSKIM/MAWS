@@ -1,46 +1,93 @@
-// One project: its log (DX2's sync with machines, DX3's resume for browsers) and its audit record, held by a Durable
-// Object on SQLite. Browsers hold WebSockets accepted with the Hibernation API, each carrying its member and whether it
-// follows the log in its attachment, so a woken object knows whose it is. Machines reach it through their `Machine`
-// objects (`fromMachine`), and it reaches them back the same way, one ordered queue per machine stream. Of the session
-// plane it holds each session's latest presence, for the browsers that connect later; the rest of it and the pending
-// set are M3's.
+// One project: its log (DX2's sync with machines, DX3's resume for browsers), its audit record, and its session plane
+// (DX4, DX6), held by a Durable Object on SQLite. Browsers hold WebSockets accepted with the Hibernation API, each
+// tagged with its own id and carrying its member, visibility, log mark, and subscriptions' numbering in its attachment;
+// the routes from a subscription to its socket are in storage. So a woken object routes again before it handles
+// anything: hibernation is the common path (M1's probe). Machines reach it through their `Machine` objects
+// (`fromMachine`, `renew`, `closed`), and it reaches them back the same way, one ordered queue per machine stream.
+//
+// What the session plane keeps survives an eviction while sockets stay open (§2): machines' leases and presence,
+// sessions' presence, the pending set, delivery outcomes, RPC records, and subscription routes (session-store.ts).
+// A machine is online while its lease is fresh; when the lease lapses or its stream closes, the machine's
+// subscriptions end at the browsers and its forwarded RPCs without a result become `uncertain`.
 import { DurableObject } from 'cloudflare:workers';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
-import type { AuditEntry, ProjectDown } from '../protocol/browser';
-import { isMemberId } from '../protocol/identity';
-import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, LEGACY_WRITER_PREFIX, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
+import { isBase64urlOf } from '../protocol/base64url';
+import type { AuditEntry, PendingRequest, ProjectDown, PushNotice } from '../protocol/browser';
+import { canonicalize } from '../protocol/canonical';
+import { isMemberId, type ProjectRecord } from '../protocol/identity';
+import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
 import type { DownFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
-import type { SessionMessage } from '../protocol/session';
 import { FRAME_LIMIT, PartAssembler, toWire, type Part } from '../protocol/parts';
-import { eventShapeError, LogStore, sameEvent, type AuditRow, type Stored } from './log-store';
+import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
+import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
+import { BATCH_BYTES, eventShapeError, LogStore, sameEvent, type AuditRow, type Stored } from './log-store';
+import { pendingKey, SessionStore, type Lease, type Route, type RpcRecord } from './session-store';
 
 /** A `.smns` project id (a lowercase uuid). */
 export const PROJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-export type SocketAttachment = { member: string; visible: boolean; subs: string[]; /** resumed: receives the log live */ log: boolean };
+/**
+ * A browser socket's attachment (at most 2,048 bytes serialized): its id, which is also its hibernation tag, the member
+ * the Worker admitted, whether its tab shows the project, whether it follows the log, and for each of its
+ * subscriptions the `n` the browser expects next (one past the last relayed), so an `end` the hub writes itself carries
+ * the right `n` after a hibernation too.
+ */
+/** `visibleAt`: when the socket last said it is visible (ms), or null while it says it is not; it counts as visible for
+ * `VISIBLE_MS` after (DX3: a visible tab re-sends `visibility` every 30 s). */
+export type SocketAttachment = { id: string; member: string; visibleAt: number | null; log: boolean; subs: Record<string, number> };
 
-/** Who sent a machine's frame: its org, the project it names, the machine, and the stream the POST belongs to. */
-export type MachineContext = { org: string; project: string; machine: string; generation: number };
+/** How long a socket's last `visibility {visible: true}` holds its member's pushes back. */
+export const VISIBLE_MS = 90_000;
+
+/** Who sent a machine's frame: its org, the project it names, the machine, the stream the POST belongs to, and how long
+ * a renewal on that stream keeps the machine online. */
+export type MachineContext = { org: string; project: string; machine: string; generation: number; leaseMs: number };
 
 /** How many audit entries a browser that resumes is shown after `caught-up`. */
 const AUDIT_REPLAY = 100;
+/** Subscriptions one socket may hold: their numbering rides in its attachment, which holds 2,048 bytes. */
+const MAX_SUBS = 32;
+/** A `<message>` pushes when it is this fresh: a machine's first sync uploads its whole backlog, which must not. */
+const PUSH_FRESH_MS = 10 * 60 * 1000;
 const REJECTION_REASONS = new Set<string>(['bad-code', 'seen-nonce', 'bad-shape', 'conflict']);
+const IN_SUB = new Set<string>(SUBSCRIPTION_KINDS);
+const SESSION_WIDE = new Set<string>(SESSION_WIDE_KINDS);
+const SETTLED_WINNERS = new Set(['web', 'terminal', 'other']);
+const SETTLED_OUTCOMES = new Set(['allow', 'deny', 'answered', 'withdrawn']);
+const DELIVERY_OUTCOMES = new Set(['delivered', 'recorded', 'refused-read-only', 'uncertain', 'failed']);
 const encoder = new TextEncoder();
+
+const newSocketId = () => Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(16).padStart(2, '0')).join('');
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+const isName = (v: unknown, max = 200): v is string => typeof v === 'string' && v !== '' && v.length <= max;
 
 export class Project extends DurableObject<Env> {
   private readonly log: LogStore;
+  private readonly plane: SessionStore;
   /** One promise chain per machine stream (`<machine>#<generation>`), so every frame this object sends a stream arrives
    * in the order it was queued; a chain that failed stays failed, its stream ended (`toMachine`). */
   private readonly queues = new Map<string, Promise<void>>();
   /** Part sets a socket is sending (lost with a hibernation, as the socket's half-sent frame would be). */
   private readonly parts = new Map<WebSocket, PartAssembler>();
+  /** Every subscription's route, rebuilt from storage whenever the object starts, woken or restarted. */
+  private readonly routes = new Map<string, Route>();
+  /** When this instance was constructed: the suites tell a woken object from the one before it by this. */
+  protected readonly life = `${Date.now()}-${Math.random()}`;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.log = new LogStore(ctx.storage);
+    this.plane = new SessionStore(ctx.storage);
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS machines (name TEXT PRIMARY KEY, generation INTEGER NOT NULL)');
-    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS presence (machine TEXT NOT NULL, session TEXT NOT NULL, message TEXT NOT NULL, PRIMARY KEY (machine, session))');
+    // A route whose socket is gone (a restart drops every connection, and a socket's close may not have reached a
+    // restarted object) is dropped; its machine's stream went with the restart too.
+    for (const route of this.plane.routes()) {
+      if (ctx.getWebSockets(route.socket).length > 0) this.routes.set(route.sub, route);
+      else this.plane.deleteRoute(route.sub);
+    }
   }
+
+  // ---- Browsers ------------------------------------------------------------------------------------------------
 
   /** A browser's socket. The Worker sends one only for a project the registry holds. */
   async fetch(request: Request): Promise<Response> {
@@ -49,25 +96,19 @@ export class Project extends DurableObject<Env> {
     if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected a WebSocket', { status: 426 });
     const member = request.headers.get(MEMBER_HEADER) ?? '';
     this.remember(request.headers.get(ORG_HEADER) ?? '', request.headers.get(PROJECT_HEADER) ?? '');
+    this.sweepLeases();
+    const id = newSocketId();
     const [client, server] = Object.values(new WebSocketPair());
-    this.ctx.acceptWebSocket(server);
-    server.serializeAttachment({ member, visible: false, subs: [], log: false } satisfies SocketAttachment);
+    this.ctx.acceptWebSocket(server, [id]);
+    server.serializeAttachment({ id, member, visibleAt: null, log: false, subs: {} } satisfies SocketAttachment);
     this.toSocket(server, { t: 'welcome', project: this.projectId, member, head: this.log.head() });
-    for (const { message } of this.ctx.storage.sql.exec<{ message: string }>('SELECT message FROM presence')) {
-      this.toSocket(server, { t: 'session', message: JSON.parse(message) as SessionMessage });
-    }
+    this.toSocket(server, this.machinesFrame());
+    // Each session's latest presence, but never a lapsed machine's as current: its sessions' presence is unknown.
+    for (const { machine, message } of this.plane.presence()) if (this.isOnline(machine)) this.toSocket(server, { t: 'session', message });
+    this.toSocket(server, this.pendingFrame());
+    for (const deliveries of batched(this.plane.deliveries())) this.toSocket(server, { t: 'deliveries', deliveries });
+    if (this.plane.deliveries().length === 0) this.toSocket(server, { t: 'deliveries', deliveries: [] });
     return new Response(null, { status: 101, webSocket: client });
-  }
-
-  /** A frame a machine posted, handed over by its `Machine` object; resolves once every reply is on its stream. */
-  async fromMachine(ctx: MachineContext, frame: UpFrame): Promise<void> {
-    this.remember(ctx.org, ctx.project);
-    if (frame.t === 'hello') await this.hello(ctx, frame);
-    else if (frame.t === 'events') await this.upload(ctx, frame.events);
-    else if (frame.t === 'rejected') this.rejected(ctx, frame);
-    else if (frame.t === 'session' && (frame.message as { kind?: unknown } | undefined)?.kind === 'presence') this.presence(ctx, frame.message);
-    // `rpc-result`, `pending`, and the session plane's other messages are M3's.
-    await this.queues.get(queueKey(ctx));
   }
 
   /** A frame on the wire: at most 1 MiB, measured before it is read; a part joins its set, and a whole set is one
@@ -95,18 +136,102 @@ export class Project extends DurableObject<Env> {
 
   /** A whole logical frame from a browser. */
   private dispatch(socket: WebSocket, frame: { t?: unknown; [key: string]: unknown } | null): void {
-    if (frame?.t === 'resume') return this.resume(socket, frame.after);
-    if (frame?.t === 'human') return this.human(socket, frame.event);
-    // `rpc`, `subscribe`, `unsubscribe`, `rows`, `diff`, and `visibility` are the session plane's (M3).
+    switch (frame?.t) {
+      case 'resume':
+        return this.resume(socket, frame.after);
+      case 'human':
+        return this.human(socket, frame.event);
+      case 'rpc':
+        return this.rpc(socket, frame.rpc);
+      case 'subscribe':
+        return this.subscribe(socket, frame);
+      case 'unsubscribe':
+        return this.unsubscribe(socket, frame.sub);
+      case 'rows':
+        return this.rows(socket, frame);
+      case 'diff':
+        return this.diff(socket, frame.sub);
+      case 'visibility':
+        if (typeof frame.visible !== 'boolean') return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'visibility is {visible: boolean}' });
+        return this.attach(socket, (a) => ({ ...a, visibleAt: frame.visible ? Date.now() : null }));
+      default:
+        return this.refuseBrowser(socket, { reason: 'bad-shape', message: `no frame ${JSON.stringify(frame?.t)}` });
+    }
   }
 
+  /** A browser that goes takes its subscriptions with it, at the machines too. */
   async webSocketClose(socket: WebSocket): Promise<void> {
     this.parts.delete(socket);
+    const { id } = this.attachment(socket);
+    for (const route of [...this.routes.values()]) {
+      if (route.socket !== id) continue;
+      this.dropRoute(route);
+      if (this.leaseServes(route)) void this.toMachine(route.machine, route.generation, { t: 'unsubscribe', project: this.projectId, sub: route.sub });
+    }
+  }
+
+  async webSocketError(socket: WebSocket): Promise<void> {
+    await this.webSocketClose(socket);
+  }
+
+  // ---- Machines ------------------------------------------------------------------------------------------------
+
+  /** A frame a machine posted, handed over by its `Machine` object; resolves once every reply is on its stream. */
+  async fromMachine(ctx: MachineContext, frame: UpFrame): Promise<void> {
+    this.remember(ctx.org, ctx.project);
+    // A lease whose time ran out lapses before anything the machine sent is served, whether or not its alarm ran yet.
+    this.sweepLeases();
+    if (frame.t === 'hello') await this.hello(ctx, frame);
+    else if (!this.isOpen(ctx)) this.refuseMachine(ctx, { reason: 'not-open', message: 'send hello for this project on this stream first' });
+    else if (frame.t === 'events') await this.upload(ctx, frame.events);
+    else if (frame.t === 'rejected') this.rejected(ctx, frame);
+    else if (frame.t === 'rpc-result') this.rpcResult(ctx, frame);
+    else if (frame.t === 'pending') this.pendingSet(ctx, frame.raised);
+    else if (frame.t === 'session') this.session(ctx, frame.message);
+    await this.queues.get(queueKey(ctx.machine, ctx.generation));
+  }
+
+  /** The daemon answered a heartbeat on the stream this lease belongs to: the machine stays online, or is online again
+   * after a lapse. A lease whose time ran out lapses first, its stream's work ended, even when its alarm has not run:
+   * a renewal never carries that work over. A renewal from any other generation, or one that arrives after its stream
+   * closed, is ignored. */
+  renew(ctx: MachineContext): void {
+    this.remember(ctx.org, ctx.project);
+    this.sweepLeases();
+    const lease = this.plane.lease(ctx.machine);
+    if (!lease || lease.generation !== ctx.generation || lease.closed) return;
+    const wasOnline = this.isFresh(lease);
+    this.plane.putLease({ ...lease, expires: Date.now() + ctx.leaseMs, online: true });
+    if (!wasOnline) this.cameOnline(ctx.machine);
+    void this.schedule();
+  }
+
+  /** The stream this lease belongs to closed: the machine is offline at once. A close of an older generation is
+   * ignored. A close of a newer one than the lease (its first `hello` here still waits on the Registry, or never came)
+   * ends the older stream's lease and leaves the closed generation's own, so that `hello` opens nothing. */
+  closed(ctx: MachineContext): void {
+    this.remember(ctx.org, ctx.project);
+    const lease = this.plane.lease(ctx.machine);
+    if (lease && (lease.generation > ctx.generation || (lease.generation === ctx.generation && lease.closed))) return;
+    if (!lease || lease.generation < ctx.generation) {
+      if (lease?.online) this.lapse(lease);
+      this.plane.putLease({ machine: ctx.machine, generation: ctx.generation, expires: 0, online: false, closed: true });
+      return;
+    }
+    if (lease.online) this.lapse({ ...lease, closed: true });
+    else this.plane.putLease({ ...lease, closed: true });
+  }
+
+  /** Leases that lapsed with no close, and background requests whose window closed. */
+  async alarm(): Promise<void> {
+    this.sweepLeases();
+    if (this.plane.flipDeadlines(Date.now()) > 0) this.pendingChanged();
+    await this.schedule();
   }
 
   // The log handshake (DX2): the hub's vector and whether this machine writes the archive, then every writer's suffix
   // the machine lacks. The machine joins the fan-out in the same step the backlog is read, so an event stored after it
-  // goes out live behind the backlog, and none falls between.
+  // goes out live behind the backlog, and none falls between. The `hello` also starts the machine's lease here.
   private async hello(ctx: MachineContext, frame: Extract<UpFrame, { t: 'hello' }>): Promise<void> {
     const have = frame.have as unknown;
     const valid =
@@ -118,7 +243,7 @@ export class Project extends DurableObject<Env> {
       !Array.isArray(have) &&
       Object.values(have).every((seq) => Number.isSafeInteger(seq) && (seq as number) >= 0);
     if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'hello is {project, name, have: {writer: seq}}' });
-    const record = await this.registry().registerProject(ctx.project, frame.name, ctx.machine);
+    const record = await this.register(ctx.project, frame.name, ctx.machine);
     // A newer stream of this machine may have opened the project while the registry answered: it keeps its place.
     this.ctx.storage.sql.exec(
       'INSERT INTO machines (name, generation) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET generation = excluded.generation WHERE excluded.generation > machines.generation',
@@ -126,15 +251,15 @@ export class Project extends DurableObject<Env> {
       ctx.generation,
     );
     if (!this.isOpen(ctx)) return;
-    this.toMachine(ctx, { t: 'have', project: ctx.project, have: this.log.vector(), archive: record.archive_machine === ctx.machine });
-    for (const events of this.log.beyond(have as Vector)) this.toMachine(ctx, { t: 'events', project: ctx.project, events });
+    this.startLease(ctx);
+    this.toMachine(ctx.machine, ctx.generation, { t: 'have', project: ctx.project, have: this.log.vector(), archive: record.archive_machine === ctx.machine });
+    for (const events of this.log.beyond(have as Vector)) this.toMachine(ctx.machine, ctx.generation, { t: 'events', project: ctx.project, events });
   }
 
   // A machine's upload: each event stored once at the next seq of its writer, a copy of a stored one passed over, a
   // gap answered by `resend`, and a writer the machine may not write, or a different payload at a stored position,
   // refused, reported, and recorded. A writer stops at its first refusal or gap in a batch.
   private async upload(ctx: MachineContext, events: unknown): Promise<void> {
-    if (!this.isOpen(ctx)) return this.refuseMachine(ctx, { reason: 'not-open', message: 'send hello for this project on this stream first' });
     if (!Array.isArray(events)) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'events is a list' });
     const archive = events.some((e) => typeof e?.writer === 'string' && e.writer.startsWith(LEGACY_WRITER_PREFIX))
       ? (await this.registry().project(ctx.project))?.archive_machine
@@ -170,15 +295,20 @@ export class Project extends DurableObject<Env> {
         accepted.push(this.log.append(event));
       } else {
         stopped.add(writer);
-        this.toMachine(ctx, { t: 'resend', project: ctx.project, writer, from: last + 1 });
+        this.toMachine(ctx.machine, ctx.generation, { t: 'resend', project: ctx.project, writer, from: last + 1 });
       }
     }
     this.fanOut(accepted, ctx.machine);
+    const now = Date.now();
+    for (const { event } of accepted) {
+      if (event.kind !== 'message' || !(now - Date.parse(event.ts) <= PUSH_FRESH_MS)) continue;
+      const session = event.writer.slice(event.writer.indexOf('/') + 1);
+      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: 'message', event: { writer: event.writer, seq: event.seq } }, this.waitingSessions().size);
+    }
   }
 
   /** A daemon's report of an event it refused: recorded in the audit record and shown to every browser. */
   private rejected(ctx: MachineContext, frame: Extract<UpFrame, { t: 'rejected' }>): void {
-    if (!this.isOpen(ctx)) return this.refuseMachine(ctx, { reason: 'not-open', message: 'send hello for this project on this stream first' });
     const event = frame.event as unknown;
     const valid =
       REJECTION_REASONS.has(frame.reason) &&
@@ -196,22 +326,435 @@ export class Project extends DurableObject<Env> {
     this.broadcast(this.audited(this.log.record('rejected', rejection)));
   }
 
-  /** A session's presence: the latest kept per session, for browsers that connect later, and sent to every browser. */
-  private presence(ctx: MachineContext, message: unknown): void {
-    if (!this.isOpen(ctx)) return this.refuseMachine(ctx, { reason: 'not-open', message: 'send hello for this project on this stream first' });
-    const problem = presenceShapeError(message, ctx);
-    if (problem) return this.refuseMachine(ctx, { reason: 'bad-shape', message: problem });
-    const { session, body } = message as Extract<SessionMessage, { kind: 'presence' }>;
-    const kept: SessionMessage = { project: ctx.project, machine: ctx.machine, session, kind: 'presence', sub: null, n: null, body };
-    this.ctx.storage.sql.exec('INSERT OR REPLACE INTO presence (machine, session, message) VALUES (?, ?, ?)', ctx.machine, session, JSON.stringify(kept));
+  // ---- The session plane, from machines ------------------------------------------------------------------------
+
+  /** A DX4 message: the kinds the hub interprets are kept, the others relayed, a subscription's to its browser alone. */
+  private session(ctx: MachineContext, message: unknown): void {
+    const m = message as Record<string, unknown>;
+    if (!isObject(m) || m.project !== ctx.project || m.machine !== ctx.machine) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'a session message names this project and this machine' });
+    const kind = m.kind as SessionKind;
+    if (kind === 'machine') return this.machinePresence(ctx, m);
+    if (!isName(m.session)) return this.refuseMachine(ctx, { reason: 'bad-shape', message: `${String(kind)} names a session` });
+    if (IN_SUB.has(kind)) return this.relay(ctx, m);
+    if (!SESSION_WIDE.has(kind)) return this.refuseMachine(ctx, { reason: 'bad-shape', message: `no session message ${JSON.stringify(kind)}` });
+    if (m.sub !== null || m.n !== null) return this.refuseMachine(ctx, { reason: 'bad-shape', message: `${kind} goes to every browser: sub and n are null` });
+    const session = m.session as string;
+    const kept = { project: ctx.project, machine: ctx.machine, session, kind, sub: null, n: null, body: m.body } as SessionMessage;
+    if (kind === 'presence') return this.presence(ctx, kept as SessionMessage<'presence'>);
+    if (kind === 'raised') return this.raised(ctx, kept as SessionMessage<'raised'>);
+    if (kind === 'settled') return this.settled(ctx, kept as SessionMessage<'settled'>);
+    if (kind === 'delivery') return this.delivery(ctx, kept as SessionMessage<'delivery'>);
+    if (!isObject(m.body)) return this.refuseMachine(ctx, { reason: 'bad-shape', message: `${kind}'s body is an object` });
     this.broadcast({ t: 'session', message: kept });
   }
+
+  /** A session's presence: the latest kept per session, for browsers that connect later, and sent to every browser. */
+  private presence(ctx: MachineContext, message: SessionMessage<'presence'>): void {
+    const body = message.body as unknown as Record<string, unknown> | null;
+    if (!isObject(body) || typeof body.bridge !== 'boolean' || !(body.record === null || isObject(body.record))) {
+      return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'presence is {record: object | null, bridge}' });
+    }
+    this.plane.putPresence(ctx.machine, message.session, message);
+    // Kept either way; shown only while this stream's lease is fresh. A lapsed machine's presence is not current, and
+    // it is shown when the lease is renewed.
+    if (!this.streamOnline(ctx)) return;
+    this.broadcast({ t: 'session', message });
+    this.reportSummary();
+  }
+
+  /** The machine's own presence (DX4 `machine`): its policy and checkouts; `online` is the hub's, from the lease. */
+  private machinePresence(ctx: MachineContext, m: Record<string, unknown>): void {
+    const body = m.body as Record<string, unknown>;
+    const policy = isObject(body) ? (body.policy as Record<string, unknown>) : undefined;
+    const valid =
+      m.session === null &&
+      m.sub === null &&
+      m.n === null &&
+      isObject(policy) &&
+      typeof policy.read_only === 'boolean' &&
+      typeof policy.ceiling === 'string' &&
+      Array.isArray(body.checkouts) &&
+      body.checkouts.every((c) => isObject(c) && typeof c.path === 'string' && typeof c.branch === 'string');
+    if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'machine is {online, policy: {read_only, ceiling}, checkouts: [{path, branch}]} with session, sub, and n null' });
+    this.plane.putMachinePresence(ctx.machine, { online: true, policy: { read_only: policy.read_only as boolean, ceiling: policy.ceiling as string }, checkouts: body.checkouts as MachinePresence['checkouts'] });
+    this.machinesChanged();
+  }
+
+  /** A request raised: pending until settled, to every browser, and pushed to the members who are not looking. */
+  private raised(ctx: MachineContext, message: SessionMessage<'raised'>): void {
+    const problem = raisedShapeError(message.body);
+    if (problem || message.body.session !== message.session) return this.refuseMachine(ctx, { reason: 'bad-shape', message: problem ?? 'raised names the session its envelope names' });
+    const fresh = this.plane.raise(ctx.machine, message.body, deadlineOf(message.body));
+    this.broadcast({ t: 'session', message });
+    this.pendingChanged();
+    if (fresh) this.pushRaised(ctx.machine, message.body);
+    void this.schedule();
+  }
+
+  /** The machine's complete pending set: a request it no longer holds is dropped, a new one raised. */
+  private pendingSet(ctx: MachineContext, raised: unknown): void {
+    if (!Array.isArray(raised)) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'pending is {project, raised: [raised]}' });
+    for (const r of raised) {
+      const problem = raisedShapeError(r);
+      if (problem) return this.refuseMachine(ctx, { reason: 'bad-shape', message: problem });
+    }
+    const before = JSON.stringify(this.plane.pending());
+    this.plane.dropPendingExcept(ctx.machine, new Set((raised as Raised[]).map((r) => pendingKey(r.session, r.request))));
+    const fresh = (raised as Raised[]).filter((r) => this.plane.raise(ctx.machine, r, deadlineOf(r)));
+    if (JSON.stringify(this.plane.pending()) !== before) this.pendingChanged();
+    for (const r of fresh) this.pushRaised(ctx.machine, r);
+    void this.schedule();
+  }
+
+  /** A settlement: the request leaves the pending set, and the audit record keeps who won, from the bridge's word. */
+  private settled(ctx: MachineContext, message: SessionMessage<'settled'>): void {
+    const s = message.body as unknown as Record<string, unknown>;
+    const valid =
+      isObject(s) &&
+      isName(s.request, 512) &&
+      SETTLED_WINNERS.has(s.winner as string) &&
+      SETTLED_OUTCOMES.has(s.outcome as string) &&
+      isName(s.by, 200) &&
+      isMac(s.mac);
+    if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'settled is {request, winner, outcome, by, mac}' });
+    const settled = message.body as Settled;
+    // Once per request: a daemon that restarted between sending a settlement and recording it sends it again, and the
+    // hub takes it without a second broadcast or decision. The ids are in storage, so this holds across an eviction.
+    if (!this.plane.markSettled(ctx.machine, message.session, settled.request, Date.now())) return;
+    const raised = this.plane.settle(ctx.machine, message.session, settled.request);
+    this.broadcast({ t: 'session', message });
+    this.broadcast(this.audited(this.log.record('decided', { machine: ctx.machine, session: message.session, settled, raised: raised ?? null })));
+    if (raised) this.pendingChanged();
+  }
+
+  /** A delivery outcome: the latest per event and recipient kept, and sent to every browser. */
+  private delivery(ctx: MachineContext, message: SessionMessage<'delivery'>): void {
+    const d = message.body as unknown as Record<string, unknown>;
+    const event = isObject(d) ? d.event : undefined;
+    const valid =
+      isObject(d) &&
+      isObject(event) &&
+      typeof event.writer === 'string' &&
+      Number.isSafeInteger(event.seq) &&
+      d.session === message.session &&
+      DELIVERY_OUTCOMES.has(d.outcome as string) &&
+      typeof d.reason === 'string' &&
+      isMac(d.mac);
+    if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'delivery is {event: {writer, seq}, session, outcome, reason, mac}' });
+    this.plane.putDelivery(ctx.machine, message.body as Delivery);
+    this.broadcast({ t: 'session', message });
+  }
+
+  /** A subscription's message, to the one browser that holds the sub; a message for a sub nobody holds unsubscribes it
+   * at the machine. Relayed as the machine numbered it. */
+  private relay(ctx: MachineContext, m: Record<string, unknown>): void {
+    const sub = m.sub;
+    const n = m.n;
+    if (typeof sub !== 'string' || !Number.isSafeInteger(n) || (n as number) < 0 || !isObject(m.body)) {
+      return this.refuseMachine(ctx, { reason: 'bad-shape', message: `${String(m.kind)} belongs to a subscription: sub, n, and a body` });
+    }
+    const route = this.routes.get(sub);
+    const socket = route && route.machine === ctx.machine && route.session === m.session ? this.socketById(route.socket) : undefined;
+    if (!route || !socket) {
+      if (route && route.machine === ctx.machine) this.dropRoute(route);
+      if (m.kind !== 'end') this.toMachine(ctx.machine, ctx.generation, { t: 'unsubscribe', project: ctx.project, sub });
+      return;
+    }
+    const message = { project: ctx.project, machine: ctx.machine, session: route.session, kind: m.kind, sub, n, body: m.body } as SessionMessage;
+    this.toSocket(socket, { t: 'session', message });
+    if (m.kind === 'end') return this.dropRoute(route, socket);
+    this.attach(socket, (a) => (sub in a.subs ? { ...a, subs: { ...a.subs, [sub]: (n as number) + 1 } } : a));
+  }
+
+  /** An RPC's result from the daemon's ledger: kept, shown to its member, and acknowledged so it is not sent again. */
+  private rpcResult(ctx: MachineContext, frame: Extract<UpFrame, { t: 'rpc-result' }>): void {
+    const outcome = frame.outcome as unknown as Record<string, unknown>;
+    const error = isObject(outcome) ? (outcome.error as Record<string, unknown>) : undefined;
+    const valid =
+      isBase64urlOf(frame.nonce, 16) &&
+      isObject(outcome) &&
+      ((outcome.state === 'done' && isObject(outcome.result)) ||
+        (outcome.state === 'failed' &&
+          isObject(error) &&
+          typeof error.code === 'string' &&
+          typeof error.message === 'string' &&
+          // A late decision names the side that won (DX6): kept and relayed as sent, refused only of the wrong type.
+          (error.winner === undefined || SETTLED_WINNERS.has(error.winner as string)) &&
+          (error.by === undefined || typeof error.by === 'string') &&
+          (error.terminalOnly === undefined || error.terminalOnly === true)));
+    if (!valid) {
+      return this.refuseMachine(ctx, {
+        reason: 'bad-shape',
+        message: 'rpc-result is {project, nonce, outcome: {state: done, result} | {state: failed, error: {code, message, winner?, by?, terminalOnly?: true}}}',
+      });
+    }
+    const record = this.plane.rpc(frame.nonce);
+    if (record && record.machine === ctx.machine && (record.state === 'forwarded' || record.state === 'uncertain')) {
+      const done = frame.outcome as RpcOutcome;
+      this.updateRpc({ ...record, state: done.state, outcome: done });
+    }
+    this.toMachine(ctx.machine, ctx.generation, { t: 'rpc-ack', project: ctx.project, nonce: frame.nonce });
+  }
+
+  // ---- The session plane, from browsers ------------------------------------------------------------------------
+
+  /**
+   * A browser's RPC. Fails at once, never queued and never recorded, when it is malformed, not the signed-in member's,
+   * older than 60 seconds, or for a machine without a fresh lease; otherwise it is recorded by its nonce and forwarded
+   * to the machine's stream. A nonce the record holds is answered from it — or, when `uncertain` and its machine is
+   * back, forwarded again for the daemon's ledger to answer — and never forwarded beside its first.
+   */
+  private rpc(socket: WebSocket, value: unknown): void {
+    const { member } = this.attachment(socket);
+    const rpc = value as Rpc;
+    const nonce = isObject(rpc) && isBase64urlOf(rpc.nonce, 16) ? rpc.nonce : undefined;
+    if (!nonce) return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'an RPC carries its nonce: 128 bits, canonical base64url' });
+    const fail = (code: RpcErrorCode, message: string) => this.toSocket(socket, { t: 'rpc-state', nonce, state: 'failed', outcome: { state: 'failed', error: { code, message } } });
+    const problem = rpcShapeError(rpc, this.projectId);
+    if (problem) return fail('bad-shape', problem);
+    if (rpc.member !== member) return fail('not-member', 'an RPC is issued by the member signed in');
+    // Leases first: a lapse this request is the first to find changes the record it is answered from.
+    this.sweepLeases();
+    const record = this.plane.rpc(nonce);
+    if (record) {
+      if (record.member !== member || canonicalize(record.rpc) !== canonicalize(rpc)) return fail('bad-shape', 'this nonce was sent with another RPC');
+      if (record.state === 'uncertain' && this.isOnline(record.machine)) return this.forward(record.rpc, member);
+      return this.toSocket(socket, rpcStateFrame(record));
+    }
+    if (!(Date.now() - Date.parse(rpc.created) <= RPC_FRESHNESS_MS)) return fail('stale', 'older than 60 seconds: issue it again');
+    if (!this.isOnline(rpc.machine)) return fail('machine-offline', `${rpc.machine} is offline`);
+    this.forward(rpc, member);
+  }
+
+  private forward(rpc: Rpc, member: string): void {
+    const { generation } = this.plane.lease(rpc.machine)!;
+    const record: RpcRecord = { nonce: rpc.nonce, machine: rpc.machine, member, rpc, state: 'forwarded', outcome: null, generation };
+    this.updateRpc(record);
+    const unsent = (state: 'failed' | 'uncertain') => {
+      const now = this.plane.rpc(rpc.nonce);
+      if (now?.state !== 'forwarded' || now.generation !== generation) return;
+      const outcome: RpcOutcome | null = state === 'failed' ? { state: 'failed', error: { code: 'machine-offline', message: `${rpc.machine} is offline` } } : null;
+      this.updateRpc({ ...now, state, outcome });
+    };
+    this.toMachine(rpc.machine, generation, { t: 'rpc', rpc }).then(
+      (sent) => sent === 'offline' && unsent('failed'),
+      () => unsent('uncertain'),
+    );
+  }
+
+  private updateRpc(record: RpcRecord): void {
+    this.plane.putRpc(record, Date.now());
+    const frame = rpcStateFrame(record);
+    for (const socket of this.ctx.getWebSockets()) if (this.attachment(socket).member === record.member) this.toSocket(socket, frame);
+  }
+
+  /** A browser's subscription, routed to its socket and carried to the machine; one the hub cannot serve ends at once. */
+  private subscribe(socket: WebSocket, frame: Record<string, unknown>): void {
+    const { machine, session, agentId, sub } = frame;
+    if (!isBase64urlOf(sub, 16) || !isName(machine, 63) || !isName(session) || !(agentId === null || isName(agentId))) {
+      return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'subscribe is {machine, session, agentId: string | null, sub: 128 bits base64url}' });
+    }
+    const attachment = this.attachment(socket);
+    const end = (reason: 'machine-offline' | 'error', message?: string) =>
+      this.toSocket(socket, { t: 'session', message: { project: this.projectId, machine: machine as string, session: session as string, kind: 'end', sub: sub as string, n: 0, body: { reason, ...(message ? { message } : {}) } } });
+    if (this.routes.has(sub as string)) return end('error', 'this sub is in use: pick a fresh one');
+    if (Object.keys(attachment.subs).length >= MAX_SUBS) return end('error', `a socket holds at most ${MAX_SUBS} subscriptions`);
+    this.sweepLeases();
+    const lease = this.plane.lease(machine as string);
+    if (!lease || !this.isFresh(lease)) return end('machine-offline');
+    const route: Route = { sub: sub as string, socket: attachment.id, machine: machine as string, session: session as string, agentId: agentId as string | null, generation: lease.generation };
+    this.plane.putRoute(route);
+    this.routes.set(route.sub, route);
+    this.attach(socket, (a) => ({ ...a, subs: { ...a.subs, [route.sub]: 0 } }));
+    this.toMachine(route.machine, route.generation, { t: 'subscribe', project: this.projectId, session: route.session, agentId: route.agentId, sub: route.sub }).then(
+      (sent) => sent === 'offline' && this.endSub(route, 'machine-offline'),
+      () => this.endSub(route, 'machine-offline'),
+    );
+  }
+
+  private unsubscribe(socket: WebSocket, sub: unknown): void {
+    const route = this.ownRoute(socket, sub);
+    if (!route) return;
+    this.dropRoute(route, socket);
+    if (this.leaseServes(route)) this.toMachine(route.machine, route.generation, { t: 'unsubscribe', project: this.projectId, sub: route.sub });
+  }
+
+  private rows(socket: WebSocket, frame: Record<string, unknown>): void {
+    const { before, limit } = frame;
+    if (typeof before !== 'string' || !Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 1000) {
+      return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'rows is {sub, before: row uuid, limit: 1 to 1000}' });
+    }
+    const route = this.ownRoute(socket, frame.sub);
+    if (!route || !this.leaseServes(route)) return;
+    this.toMachine(route.machine, route.generation, { t: 'rows', project: this.projectId, session: route.session, agentId: route.agentId, sub: route.sub, before, limit: limit as number });
+  }
+
+  private diff(socket: WebSocket, sub: unknown): void {
+    const route = this.ownRoute(socket, sub);
+    if (!route) return;
+    if (route.agentId !== null) return this.refuseBrowser(socket, { reason: 'bad-shape', message: "diff is a main-transcript subscription's (agentId null)" });
+    if (this.leaseServes(route)) this.toMachine(route.machine, route.generation, { t: 'diff', project: this.projectId, session: route.session, sub: route.sub });
+  }
+
+  /** The route of a sub this socket holds; a sub it does not (one that just ended, say) is passed over quietly. */
+  private ownRoute(socket: WebSocket, sub: unknown): Route | undefined {
+    const route = typeof sub === 'string' ? this.routes.get(sub) : undefined;
+    return route && route.socket === this.attachment(socket).id ? route : undefined;
+  }
+
+  // ---- Leases ----------------------------------------------------------------------------------------------------
+
+  private startLease(ctx: MachineContext): void {
+    const old = this.plane.lease(ctx.machine);
+    if (old && old.generation > ctx.generation) return;
+    // The older stream's subscriptions and unanswered RPCs went with it.
+    if (old && old.generation < ctx.generation) this.endStreamWork(ctx.machine, old.generation);
+    const wasOnline = old !== undefined && this.isFresh(old);
+    // A second `hello` on a stream that already closed (it was on its way) opens nothing.
+    if (old?.generation === ctx.generation && old.closed) return;
+    this.plane.putLease({ machine: ctx.machine, generation: ctx.generation, expires: Date.now() + ctx.leaseMs, online: true, closed: false });
+    if (!wasOnline) this.cameOnline(ctx.machine);
+    else if (old.generation !== ctx.generation) this.machinesChanged();
+    void this.schedule();
+  }
+
+  private lapse(lease: Lease): void {
+    this.plane.putLease({ ...lease, online: false });
+    this.endStreamWork(lease.machine, lease.generation);
+    this.machinesChanged();
+  }
+
+  /** What a machine's stream carried ends with it: its subscriptions end at their browsers, and its forwarded RPCs
+   * without a result become `uncertain`. */
+  private endStreamWork(machine: string, generation: number): void {
+    for (const route of [...this.routes.values()]) if (route.machine === machine && route.generation <= generation) this.endSub(route, 'machine-offline');
+    for (const record of this.plane.forwarded(machine, generation)) this.updateRpc({ ...record, state: 'uncertain', outcome: null });
+  }
+
+  /** Lapses every lease whose time is up (checked on read, and by the alarm). */
+  private sweepLeases(): void {
+    for (const lease of this.plane.lapsed(Date.now())) this.lapse(lease);
+  }
+
+  private isFresh(lease: Lease): boolean {
+    return lease.online && lease.expires > Date.now();
+  }
+
+  /** Whether the lease is fresh and belongs to this stream. */
+  private streamOnline(ctx: MachineContext): boolean {
+    const lease = this.plane.lease(ctx.machine);
+    return lease !== undefined && lease.generation === ctx.generation && this.isFresh(lease);
+  }
+
+  /** A machine back online: browsers learn it, and see its sessions' presence as it was kept meanwhile. */
+  private cameOnline(machine: string): void {
+    this.machinesChanged();
+    for (const kept of this.plane.presence()) if (kept.machine === machine) this.broadcast({ t: 'session', message: kept.message });
+    this.reportSummary();
+  }
+
+  private isOnline(machine: string): boolean {
+    const lease = this.plane.lease(machine);
+    return lease !== undefined && this.isFresh(lease);
+  }
+
+  /** Whether the stream a route was set up on is still the machine's live one. */
+  private leaseServes(route: Route): boolean {
+    const lease = this.plane.lease(route.machine);
+    return lease !== undefined && lease.generation === route.generation && this.isFresh(lease);
+  }
+
+  /** The alarm at the next lease expiry or request deadline. */
+  private async schedule(): Promise<void> {
+    const now = Date.now();
+    const next = [...this.plane.leases().filter((l) => l.online).map((l) => l.expires), this.plane.nextDeadline(now) ?? Infinity];
+    const at = Math.max(Math.min(...next), now + 50);
+    if (at === Infinity) return;
+    const current = await this.ctx.storage.getAlarm();
+    if (current === null || current > at || current <= now) await this.ctx.storage.setAlarm(at);
+  }
+
+  // ---- What browsers are sent ------------------------------------------------------------------------------------
+
+  private machinesFrame(): ProjectDown {
+    return {
+      t: 'machines',
+      machines: this.plane.machinePresence().map(({ machine, body }) => ({ machine, ...body, online: this.isOnline(machine) })),
+    };
+  }
+
+  private machinesChanged(): void {
+    this.broadcast(this.machinesFrame());
+    this.reportSummary();
+  }
+
+  private pendingFrame(): ProjectDown {
+    const now = Date.now();
+    const requests: PendingRequest[] = this.plane.pending().map(({ machine, raised, deadline }) => ({ machine, raised, terminal_only: deadline !== null && deadline <= now }));
+    return { t: 'pending', requests };
+  }
+
+  private pendingChanged(): void {
+    this.broadcast(this.pendingFrame());
+  }
+
+  /** The project's line on the org's grid, sent to the registry when it changes. */
+  private reportSummary(): void {
+    const leased = this.plane.leases();
+    const machines = new Set([...leased.map((l) => l.machine), ...this.plane.machinePresence().map((p) => p.machine)]);
+    const online = new Set(leased.filter((l) => this.isFresh(l)).map((l) => l.machine));
+    let working = 0;
+    for (const { machine, message } of this.plane.presence()) {
+      const status = message.body.record?.status;
+      if (online.has(machine) && (status === 'busy' || status === 'shell')) working++;
+    }
+    const summary = { machines: machines.size, machines_online: online.size, working, waiting: this.waitingSessions().size };
+    const text = JSON.stringify(summary);
+    if (this.ctx.storage.kv.get('summary') === text) return;
+    this.ctx.storage.kv.put('summary', text);
+    void this.registry()
+      .summary(this.projectId, summary)
+      .catch(() => this.ctx.storage.kv.delete('summary'));
+  }
+
+  /** The sessions of online machines whose presence says waiting, as `machine/session`: the grid's `waiting`. */
+  private waitingSessions(): Set<string> {
+    const waiting = new Set<string>();
+    for (const { machine, message } of this.plane.presence()) {
+      if (this.isOnline(machine) && message.body.record?.status === 'waiting') waiting.add(`${machine}/${message.session}`);
+    }
+    return waiting;
+  }
+
+  // ---- Web Push ----------------------------------------------------------------------------------------------------
+
+  private pushRaised(machine: string, raised: Raised): void {
+    const question = raised.async === true || raised.tool === 'AskUserQuestion' || raised.tool.endsWith('__AskUserQuestion');
+    const alias = this.log.latestOf(`${machine}/${raised.session}`)?.from;
+    // The badge counts the session this request waits on, whether or not its presence says so yet.
+    const waiting = this.waitingSessions().add(`${machine}/${raised.session}`);
+    this.push({ v: 1, project: this.projectId, session: raised.session, alias: typeof alias === 'string' ? alias : null, kind: question ? 'question' : 'permission', request: raised.request }, waiting.size);
+  }
+
+  /** To every member with no browser showing the project (a socket's visibility rides in its attachment). `waiting` is
+   * this project's count as of this push; the Registry adds the other projects' to it for the badge. */
+  private push(notice: Omit<PushNotice, 'name' | 'waiting'>, waiting: number): void {
+    const looking = new Set<string>();
+    for (const socket of this.ctx.getWebSockets()) {
+      const attachment = this.attachment(socket);
+      if (attachment.visibleAt !== null && Date.now() - attachment.visibleAt < this.visibleMs()) looking.add(attachment.member);
+    }
+    void this.registry()
+      .push(notice, [...looking], waiting)
+      .catch(() => {});
+  }
+
+  // ---- Browsers' sockets ---------------------------------------------------------------------------------------
 
   /** A browser resumes after an offset: the backlog, `caught-up`, then the log live; and the audit record's latest. */
   private resume(socket: WebSocket, after: unknown): void {
     if (!Number.isSafeInteger(after) || (after as number) < 0) return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'resume is {after: offset}' });
-    const attachment = socket.deserializeAttachment() as SocketAttachment;
-    socket.serializeAttachment({ ...attachment, log: true } satisfies SocketAttachment);
+    this.attach(socket, (a) => ({ ...a, log: true }));
     for (const events of this.log.after(after as number)) this.toSocket(socket, { t: 'log', events });
     this.toSocket(socket, { t: 'caught-up', offset: this.log.head() });
     for (const row of this.log.audit(AUDIT_REPLAY)) this.toSocket(socket, this.audited(row));
@@ -221,7 +764,7 @@ export class Project extends DurableObject<Env> {
   // hub (writer `hub/<member>`, the next seq, the time) that DX1's check admits. A nonce the member's feed holds is
   // the same send again: answered from the stored event, never stored twice.
   private human(socket: WebSocket, event: unknown): void {
-    const { member } = socket.deserializeAttachment() as SocketAttachment;
+    const { member } = this.attachment(socket);
     const draft = event as Record<string, unknown> & { member?: unknown; mac?: { nonce?: unknown; value?: unknown } };
     const nonce = typeof draft?.mac?.nonce === 'string' ? draft.mac.nonce : undefined;
     const problem = humanShapeError(event);
@@ -246,34 +789,34 @@ export class Project extends DurableObject<Env> {
   private fanOut(accepted: Stored[], except?: string): void {
     if (accepted.length === 0) return;
     for (const socket of this.ctx.getWebSockets()) {
-      if ((socket.deserializeAttachment() as SocketAttachment | null)?.log) this.toSocket(socket, { t: 'log', events: accepted });
+      if (this.attachment(socket).log) this.toSocket(socket, { t: 'log', events: accepted });
     }
     const events = accepted.map((s) => s.event);
     for (const { name, generation } of this.ctx.storage.sql.exec<{ name: string; generation: number }>('SELECT name, generation FROM machines')) {
-      if (name !== except) this.toMachine({ org: this.orgId, project: this.projectId, machine: name, generation }, { t: 'events', project: this.projectId, events });
+      if (name !== except) this.toMachine(name, generation, { t: 'events', project: this.projectId, events });
     }
   }
 
   private refuseMachine(ctx: MachineContext, refusal: Refusal): void {
-    this.toMachine(ctx, { t: 'refused', project: ctx.project, refusal });
+    this.toMachine(ctx.machine, ctx.generation, { t: 'refused', project: ctx.project, refusal });
     this.broadcast(this.audited(this.log.record('refused', { ...refusal, machine: ctx.machine })));
   }
 
   private refuseBrowser(socket: WebSocket, refusal: Refusal & { nonce?: string }): void {
-    const { member } = socket.deserializeAttachment() as SocketAttachment;
-    const frame = this.audited(this.log.record('refused', { ...refusal, member }));
-    this.broadcast(frame);
+    const { member } = this.attachment(socket);
+    this.broadcast(this.audited(this.log.record('refused', { ...refusal, member })));
   }
 
   private audited(row: AuditRow): ProjectDown {
     const entry = { ...row.entry, id: row.id, at: row.at } as AuditEntry & Record<string, unknown>;
-    return row.kind === 'rejected' ? ({ t: 'rejected', rejection: entry } as ProjectDown) : ({ t: 'refused', refusal: entry } as ProjectDown);
+    if (row.kind === 'rejected') return { t: 'rejected', rejection: entry } as ProjectDown;
+    if (row.kind === 'decided') return { t: 'decided', decision: entry } as ProjectDown;
+    return { t: 'refused', refusal: entry } as ProjectDown;
   }
 
-  /** An audit entry to every browser of the project, following the log or not (each entry's `id` lets a browser that
-   * sees it again in a replay keep one). */
-  private broadcast(frame: ProjectDown, except?: WebSocket): void {
-    for (const socket of this.ctx.getWebSockets()) if (socket !== except) this.toSocket(socket, frame);
+  /** A frame to every browser of the project, following the log or not. */
+  private broadcast(frame: ProjectDown): void {
+    for (const socket of this.ctx.getWebSockets()) this.toSocket(socket, frame);
   }
 
   private toSocket(socket: WebSocket, frame: ProjectDown): void {
@@ -284,42 +827,91 @@ export class Project extends DurableObject<Env> {
     }
   }
 
-  /**
-   * Queues a frame for a machine's stream behind everything queued for it before. A stream that is gone (or older than
-   * the machine's current one) leaves the fan-out until the machine's next `hello`. A send that fails otherwise leaves
-   * it too, and its stream is ended, so the machine reconnects and its `hello` heals what it missed. The chain stays
-   * failed from then on: nothing more is sent on that stream, and every POST waiting on the chain (one whose first
-   * reply failed, though later replies were queued behind it, included) answers the failure, until the machine's next
-   * stream starts a chain of its own.
-   */
-  private toMachine(ctx: MachineContext, frame: DownFrame): void {
-    const key = queueKey(ctx);
-    for (const other of this.queues.keys()) if (other.startsWith(`${ctx.machine}#`) && other !== key) this.queues.delete(other);
-    const machine = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${ctx.org}:${ctx.machine}`));
-    const next = (this.queues.get(key) ?? Promise.resolve())
-      .then(async () => {
-        let sent: 'written' | 'offline';
-        try {
-          sent = await machine.send(frame, ctx.generation);
-        } catch (error) {
-          this.leaveFanOut(ctx);
-          void machine.close(ctx.generation).catch(() => {});
-          throw error;
-        }
-        if (sent === 'offline') this.leaveFanOut(ctx);
-      });
-    // Handled here, so a failure no POST waits for is not an unhandled rejection; a POST that waits still sees it.
-    next.catch(() => {});
-    this.queues.set(key, next);
+  private attachment(socket: WebSocket): SocketAttachment {
+    return socket.deserializeAttachment() as SocketAttachment;
   }
 
-  private leaveFanOut(ctx: MachineContext): void {
-    this.ctx.storage.sql.exec('DELETE FROM machines WHERE name = ? AND generation = ?', ctx.machine, ctx.generation);
+  private attach(socket: WebSocket, change: (attachment: SocketAttachment) => SocketAttachment): void {
+    socket.serializeAttachment(change(this.attachment(socket)));
+  }
+
+  private socketById(id: string): WebSocket | undefined {
+    return this.ctx.getWebSockets(id)[0];
+  }
+
+  /** Ends a subscription the hub can no longer serve: an `end` with the next `n` the browser expects. */
+  private endSub(route: Route, reason: 'machine-offline'): void {
+    const socket = this.socketById(route.socket);
+    if (socket && this.routes.get(route.sub) === route) {
+      const n = this.attachment(socket).subs[route.sub] ?? 0;
+      this.toSocket(socket, { t: 'session', message: { project: this.projectId, machine: route.machine, session: route.session, kind: 'end', sub: route.sub, n, body: { reason } } });
+    }
+    this.dropRoute(route, socket);
+  }
+
+  private dropRoute(route: Route, socket = this.socketById(route.socket)): void {
+    if (this.routes.get(route.sub) === route) this.routes.delete(route.sub);
+    this.plane.deleteRoute(route.sub);
+    if (socket) {
+      this.attach(socket, (a) => {
+        const subs = { ...a.subs };
+        delete subs[route.sub];
+        return { ...a, subs };
+      });
+    }
+  }
+
+  // ---- Machines' streams -------------------------------------------------------------------------------------
+
+  /**
+   * Queues a frame for a machine's stream behind everything queued for it before, and resolves with what became of it.
+   * A stream that is gone (or older than the machine's current one) leaves the fan-out until the machine's next
+   * `hello`. A send that fails otherwise leaves it too, and its stream is ended, so the machine reconnects and its
+   * `hello` heals what it missed. The chain stays failed from then on: nothing more is sent on that stream, and every
+   * POST waiting on the chain (one whose first reply failed, though later replies were queued behind it, included)
+   * answers the failure, until the machine's next stream starts a chain of its own.
+   */
+  private toMachine(name: string, generation: number, frame: DownFrame): Promise<'written' | 'offline'> {
+    const key = queueKey(name, generation);
+    for (const other of this.queues.keys()) if (other.startsWith(`${name}#`) && other !== key) this.queues.delete(other);
+    const machine = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${this.orgId}:${name}`));
+    const sent = (this.queues.get(key) ?? Promise.resolve()).then(async () => {
+      let result: 'written' | 'offline';
+      try {
+        result = await machine.send(frame, generation);
+      } catch (error) {
+        this.leaveFanOut(name, generation);
+        void machine.close(generation).catch(() => {});
+        throw error;
+      }
+      if (result === 'offline') this.leaveFanOut(name, generation);
+      return result;
+    });
+    const tail = sent.then(() => undefined);
+    // Handled here, so a failure no caller waits for is not an unhandled rejection; a POST that waits still sees it.
+    sent.catch(() => {});
+    tail.catch(() => {});
+    this.queues.set(key, tail);
+    return sent;
+  }
+
+  private leaveFanOut(name: string, generation: number): void {
+    this.ctx.storage.sql.exec('DELETE FROM machines WHERE name = ? AND generation = ?', name, generation);
   }
 
   private isOpen(ctx: MachineContext): boolean {
     const row = this.ctx.storage.sql.exec<{ generation: number }>('SELECT generation FROM machines WHERE name = ?', ctx.machine).toArray()[0];
     return row?.generation === ctx.generation;
+  }
+
+  /** How long a socket's `visibility` holds pushes back (the suites' Worker shortens it). */
+  protected visibleMs(): number {
+    return VISIBLE_MS;
+  }
+
+  /** The project registered in the org's Registry (the suites' Worker holds it here to race a close against it). */
+  protected register(project: string, name: string, machine: string): Promise<ProjectRecord> {
+    return this.registry().registerProject(project, name, machine);
   }
 
   private registry() {
@@ -341,7 +933,34 @@ export class Project extends DurableObject<Env> {
   }
 }
 
-const queueKey = (ctx: MachineContext) => `${ctx.machine}#${ctx.generation}`;
+const queueKey = (machine: string, generation: number) => `${machine}#${generation}`;
+
+const rpcStateFrame = (record: RpcRecord): ProjectDown => ({ t: 'rpc-state', nonce: record.nonce, state: record.state, ...(record.outcome ? { outcome: record.outcome } : {}) });
+
+/** A `mac` the hub can carry: `{nonce, value}`, 16 and 32 bytes, each in canonical base64url (DX1). */
+const isMac = (mac: unknown) => isObject(mac) && isBase64urlOf(mac.nonce, 16) && isBase64urlOf(mac.value, 32);
+
+/** When a background request's web window closes, in epoch ms; null for a request without one. */
+const deadlineOf = (raised: Raised): number | null => (raised.deadline === undefined ? null : Date.parse(raised.deadline));
+
+/** Deliveries in frames of about BATCH_BYTES. */
+function batched(deliveries: Delivery[]): Delivery[][] {
+  const out: Delivery[][] = [];
+  let batch: Delivery[] = [];
+  let bytes = 0;
+  for (const d of deliveries) {
+    const size = JSON.stringify(d).length;
+    if (batch.length > 0 && bytes + size > BATCH_BYTES) {
+      out.push(batch);
+      batch = [];
+      bytes = 0;
+    }
+    batch.push(d);
+    bytes += size;
+  }
+  if (batch.length > 0) out.push(batch);
+  return out;
+}
 
 /** The position an event names, when it names one, for a refusal to report. */
 function positionOf(event: unknown): { writer?: string; seq?: number } {
@@ -349,16 +968,31 @@ function positionOf(event: unknown): { writer?: string; seq?: number } {
   return { ...(typeof e.writer === 'string' ? { writer: e.writer } : {}), ...(typeof e.seq === 'number' ? { seq: e.seq } : {}) };
 }
 
-/** Why a machine's `presence` is not one for this project and machine (DX4: `sub` and `n` null, body
- * `{record: object | null, bridge: boolean}`), or null. */
-function presenceShapeError(message: unknown, ctx: MachineContext): string | null {
-  const m = message as Record<string, unknown>;
-  if (m.project !== ctx.project || m.machine !== ctx.machine) return 'presence names this project and this machine';
-  if (typeof m.session !== 'string' || m.session === '' || m.session.length > 200) return 'presence names a session';
-  if (m.sub !== null || m.n !== null) return 'presence has sub and n null';
-  const body = m.body as Record<string, unknown> | null | undefined;
-  const isObject = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v);
-  if (!isObject(body) || typeof body!.bridge !== 'boolean' || !(body!.record === null || isObject(body!.record))) return 'presence is {record: object | null, bridge}';
+/** Why a `raised` is not one the hub can keep (DX4), or null. Its code is the bridge's: the hub keeps it as received. */
+function raisedShapeError(raised: unknown): string | null {
+  if (!isObject(raised)) return 'raised is an object';
+  if (!isName(raised.request, 512) || !isName(raised.session) || !isName(raised.tool, 512)) return 'raised names its request, session, and tool';
+  if (!isObject(raised.input)) return "raised carries the tool's input, an object";
+  if (raised.deadline !== undefined && !isIsoMillis(raised.deadline)) return 'a deadline is ISO 8601 UTC with milliseconds';
+  if (raised.async !== undefined && raised.async !== true) return 'async is true when present';
+  if (raised.agentId !== undefined && !isName(raised.agentId)) return 'agentId names the subagent that asked, when present';
+  if (raised.truncated !== undefined && raised.truncated !== true) return 'truncated is true when present';
+  if (!isMac(raised.mac)) return 'mac is {nonce, value}: 16 and 32 bytes, each in canonical base64url';
+  return null;
+}
+
+/** Why a browser's RPC is not one the hub can forward (DX6), or null. The daemon checks its code and its arguments. */
+function rpcShapeError(rpc: Record<string, unknown>, project: string): string | null {
+  if (!(RPC_NAMES as readonly string[]).includes(rpc.rpc as string)) return `no RPC ${JSON.stringify(rpc.rpc)}`;
+  if (rpc.project !== project) return 'an RPC names the project of the socket it is sent on';
+  if (!isName(rpc.machine, 63) || typeof rpc.member !== 'string' || !isIsoMillis(rpc.created)) return 'an RPC names its machine, member, and created time';
+  if (!isObject(rpc.args)) return "an RPC's args are an object";
+  if (!isBase64urlOf(rpc.mac, 32)) return "an RPC's mac is 32 bytes in canonical base64url";
+  try {
+    canonicalize(rpc);
+  } catch (error) {
+    return `not canonical JSON: ${(error as Error).message}`;
+  }
   return null;
 }
 

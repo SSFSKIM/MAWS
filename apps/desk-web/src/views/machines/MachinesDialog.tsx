@@ -1,16 +1,19 @@
-// The org's machines, and enrolling one (§6, DX7; the DC5 plan's M2). The owner names the machine and confirms it;
-// the browser derives the org key again (the held key cannot be read), checks it is the held one, asks the hub for a
-// one-time token, and shows the enrollment code once. Closing the dialog discards the code: nothing keeps it.
+// The org's machines, and enrolling one (§6, DX7; the DC5 plan's M2). The owner names the machine and confirms it
+// with one of the org key's methods; the browser opens the key's copy once more as bytes (the held key cannot be
+// read), checks they are the held key, asks the hub for a one-time token, builds the code, and wipes the bytes; the
+// code is shown once. Closing the dialog discards it: nothing keeps it.
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState, type FormEvent } from 'react';
 import type { MachineRecord } from 'desk-hub/protocol';
-import { createEnrollment, ENROLL_COMMAND, enrollmentCode, HubRequestError, listMachines, machineNameProblem } from '../../enroll/enrollment';
+import { createEnrollment, ENROLL_COMMAND, enrollmentCode, listMachines, machineNameProblem } from '../../enroll/enrollment';
+import { HubRequestError } from '../../hub/http';
 import type { Me } from '../../hub/me';
-import { passphraseProblem } from '../../key/derive';
 import { useKeyHolder } from '../../key/holder';
-import { PasskeyError } from '../../key/passkey';
-import { deriveHeldKey, KeyMismatch, rememberedMethod, type KeySource } from '../../key/unlock';
+import { openOrgKeyBytes, rememberedMethod, type OrgMethod } from '../../key/unlock';
+import { listWrappedKeys, WRAPPED_KEYS_QUERY } from '../../key/wrapped-keys';
 import { buttonPrimary, buttonQuiet, buttonSecondary, Dialog, textInput } from '../common/Dialog';
+import { explainKeyFailure } from '../key/explain';
+import { OrgMethodForm } from '../key/OrgMethodForm';
 
 type Step = { kind: 'list' } | { kind: 'name' } | { kind: 'confirm'; machine: string } | { kind: 'code'; machine: string; code: string; expires: string };
 
@@ -105,20 +108,17 @@ function NameStep(props: { machines: MachineRecord[]; onCancel: () => void; onNa
 function ConfirmStep(props: { me: Me; machine: string; onCancel: () => void; onCode: (code: string, expires: string) => void }) {
   const { me, machine, onCancel, onCode } = props;
   const held = useKeyHolder((s) => s.key);
-  const [passphrase, setPassphrase] = useState('');
-  const [busy, setBusy] = useState<KeySource['kind'] | null>(null);
-  const [progress, setProgress] = useState(0);
+  const keys = useQuery({ queryKey: WRAPPED_KEYS_QUERY, queryFn: listWrappedKeys });
   const [error, setError] = useState<string | null>(null);
-  const viaPassphrase = rememberedMethod(me.org.id) === 'passphrase';
 
-  async function confirm(source: KeySource) {
-    if (!held) return setError('The org key is locked. Unlock it first.');
-    setBusy(source.kind);
+  async function confirm(method: OrgMethod) {
+    if (!held || !keys.data) return setError('The org key is locked. Unlock it first.');
     setError(null);
     let key: Uint8Array | null = null;
     try {
-      key = await deriveHeldKey(me.org.id, source, held);
-      // Locked while it derived: the owner took the key out of this browser, so no code carries it out either.
+      // The held key cannot be read: its copy is opened once more, checked to be the held key, and wiped once built in.
+      key = await openOrgKeyBytes(me.org.id, keys.data, method, held);
+      // Locked while it opened: the owner took the key out of this browser, so no code carries it out either.
       if (useKeyHolder.getState().key !== held) return setError('The org key was locked meanwhile. Unlock it to enroll.');
       const { enrollment, token } = await createEnrollment();
       const code = enrollmentCode({ hub: location.origin, org: me.org.id, token, machine, key });
@@ -127,16 +127,8 @@ function ConfirmStep(props: { me: Me; machine: string; onCancel: () => void; onC
       setError(explain(failure));
     } finally {
       key?.fill(0);
-      setBusy(null);
     }
   }
-
-  const submitPassphrase = (event: FormEvent) => {
-    event.preventDefault();
-    const problem = passphraseProblem(passphrase);
-    if (problem) return setError(problem);
-    void confirm({ kind: 'passphrase', passphrase, progress: setProgress });
-  };
 
   return (
     <div className="flex flex-col gap-3" data-testid="enroll-confirm">
@@ -144,28 +136,21 @@ function ConfirmStep(props: { me: Me; machine: string; onCancel: () => void; onC
         Enroll <strong data-testid="confirm-machine">{machine}</strong>?
       </p>
       <p className="m-0 text-ui-sm leading-5 text-fg-muted">
-        The code you get next enrolls one machine named {machine}, works once, and carries your org key: paste it only into that machine's terminal. Confirm with the passkey or
-        passphrase that unlocked this browser.
+        The code you get next enrolls one machine named {machine}, works once, and carries your org key: paste it only into that machine's terminal. Confirm with one of the org
+        key's methods.
       </p>
-      <div className="flex flex-wrap items-center gap-2">
-        <button type="button" className={viaPassphrase ? buttonSecondary : buttonPrimary} disabled={busy !== null} onClick={() => void confirm({ kind: 'passkey' })}>
-          {busy === 'passkey' ? 'Waiting for your passkey…' : 'Confirm with passkey'}
-        </button>
-        <button type="button" className={buttonQuiet} onClick={onCancel} disabled={busy !== null}>
+      {keys.data ? (
+        <OrgMethodForm keys={keys.data} passkeyText="Confirm with passkey" passphraseText="Confirm" preferred={rememberedMethod(me.org.id)} onMethod={confirm} />
+      ) : keys.isError ? (
+        <p className="m-0 text-ui-sm text-danger" role="alert">
+          The hub did not list the org key's methods: {keys.error.message}
+        </p>
+      ) : null}
+      <div>
+        <button type="button" className={buttonQuiet} onClick={onCancel}>
           Cancel
         </button>
       </div>
-      <form className="flex gap-2" onSubmit={submitPassphrase} aria-label="Confirm with passphrase">
-        <input type="password" aria-label="Passphrase" placeholder="or your passphrase" autoComplete="current-password" className={textInput} value={passphrase} onChange={(event) => setPassphrase(event.target.value)} disabled={busy !== null} />
-        <button type="submit" className={viaPassphrase ? buttonPrimary : buttonSecondary} disabled={busy !== null || passphrase === ''}>
-          Confirm
-        </button>
-      </form>
-      {busy === 'passphrase' && (
-        <p className="m-0 text-ui-sm text-fg-muted" role="status">
-          Deriving the key… {Math.round(progress * 100)}%
-        </p>
-      )}
       {error && (
         <p className="m-0 text-ui-sm text-danger" role="alert">
           {error}
@@ -176,13 +161,9 @@ function ConfirmStep(props: { me: Me; machine: string; onCancel: () => void; onC
 }
 
 function explain(failure: unknown): string {
-  if (failure instanceof KeyMismatch) return `${failure.message} Check the passphrase, or pick the passkey this browser unlocked with.`;
-  if (failure instanceof PasskeyError || failure instanceof TypeError) return failure.message;
-  if (failure instanceof HubRequestError) {
-    if (failure.code === 'not-admin') return 'Only an admin of the org enrolls machines.';
-    return `The hub refused the enrollment (${failure.code}${failure.message !== failure.code ? `: ${failure.message}` : ''}).`;
-  }
-  return `Enrollment failed: ${String(failure)}`;
+  if (failure instanceof HubRequestError && failure.code === 'not-admin') return 'Only an admin of the org enrolls machines.';
+  if (failure instanceof HubRequestError) return `The hub refused the enrollment (${failure.code}${failure.message !== failure.code ? `: ${failure.message}` : ''}).`;
+  return explainKeyFailure(failure, 'enroll');
 }
 
 function CodeStep(props: { machine: string; code: string; expires: string; onDone: () => void }) {

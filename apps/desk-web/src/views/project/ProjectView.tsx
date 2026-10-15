@@ -1,7 +1,9 @@
 // A project (§4): the channels on the left, the selected channel in the center, the selected session's depth on the
-// right (DX8's `depth` slot, DC6's). Nothing from the log is drawn until it verifies; locked, nothing is drawn at all,
-// and the view says why. Events whose code fails are reported, never drawn.
-import { useEffect } from 'react';
+// right (DX8's `depth` slot, DC6's). On a phone, one column at a time (the owner's verdict on
+// mockups/desk/05-phone.html, 3A): the project opens on its channel list, a channel is pushed over it and back
+// returns to the list (`usePhoneProject`); no depth (desktop-only, so its chunk never loads there) and no "+ Session". Nothing from the log is drawn until it verifies; locked, nothing is drawn at all,
+// and the view says why. Events, requests, settlements, and deliveries whose code fails are reported, never drawn.
+import { useEffect, useState } from 'react';
 import { useStore } from 'zustand';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
@@ -11,10 +13,14 @@ import type { AuditItem, ProjectConnection } from '../../project/connection';
 import { useDeskLayout, type Channel } from '../../shell/layout';
 import { useDeskSessions } from '../../shell/sessions';
 import { useSlot } from '../../shell/slots';
+import { phoneShowsList, usePhoneProject } from '../../shell/phone';
+import { useNarrow } from '../../shell/viewport';
 import { useGrid } from '../../state/grid';
 import { UnlockForm } from '../key/UnlockForm';
+import { DeskContext } from '../conversation/desk-context';
 import { ChannelView } from './ChannelView';
 import { Sidebar } from './Sidebar';
+import { SpawnDialog } from './SpawnDialog';
 
 export function ProjectView({ me, project, channel }: { me: Me; project: string; channel: Channel }) {
   const connection = useProjectConnection(project);
@@ -29,32 +35,53 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
   const logState = useStore(connection.log.store);
   const status = useStore(connection.live, (s) => s.status);
   const audit = useStore(connection.live, (s) => s.audit);
+  const unverified = useStore(connection.conversation.store, (s) => s.unverified);
   const { sessions, groups } = useDeskSessions(connection);
+  const [spawning, setSpawning] = useState(false);
+  const narrow = useNarrow();
+  const groupChatOpen = usePhoneProject((s) => s.groupChatOpen);
+  const desk = { connection, member: me.member.id, sessions };
   const Depth = useSlot('depth');
   const locked = keyState !== 'unlocked';
+  // Locked, the phone shows the unlock first: the list would be empty anyway.
+  const listed = narrow && !locked && phoneShowsList(channel, groupChatOpen);
   const failed = refused(logState);
   const selected = channel.kind === 'session' ? (sessions.get(channel.session) ?? null) : null;
-  // A visible tab of the project holds back its member's pushes (DX3's `visibility`).
+  // A visible tab of the project holds back its member's pushes (DX3's `visibility`): one the owner can read, so not
+  // while it is locked, and not once the page is hidden or closing (an installed app swiped away gets `pagehide`).
   useEffect(() => {
-    const report = () => connection.client.setVisible(document.visibilityState === 'visible');
+    const report = () => connection.client.setVisible(document.visibilityState === 'visible' && !locked);
+    const hide = () => connection.client.setVisible(false);
     report();
     document.addEventListener('visibilitychange', report);
+    addEventListener('pagehide', hide);
     return () => {
       document.removeEventListener('visibilitychange', report);
+      removeEventListener('pagehide', hide);
       connection.client.setVisible(false);
     };
-  }, [connection]);
-  const select = (next: Channel) => navigate({ view: 'project', project: connection.project, channel: next });
+  }, [connection, locked]);
+  const select = (next: Channel) => {
+    // On a phone the group chat shares the project's route with the list: choosing it from the list opens it in place.
+    if (narrow && next.kind === 'group' && channel.kind === 'group') usePhoneProject.setState({ groupChatOpen: true });
+    else navigate({ view: 'project', project: connection.project, channel: next });
+  };
+  const showDepth = depth.open && !narrow;
+  const sidebar = (
+    <Sidebar name={name} channel={channel} groups={locked ? null : groups} locked={locked} onSelect={select} onSpawn={narrow ? undefined : () => setSpawning(true)} phone={narrow} />
+  );
 
   return (
+    <DeskContext.Provider value={desk}>
     <div
       className="grid h-full min-h-0"
-      style={{ gridTemplateColumns: `var(--sidebar-w) minmax(0, 1fr)${depth.open ? ` ${depth.width}px` : ''}` }}
+      style={{ gridTemplateColumns: narrow ? 'minmax(0, 1fr)' : `var(--sidebar-w) minmax(0, 1fr)${showDepth ? ` ${depth.width}px` : ''}` }}
       data-testid="project-view"
       data-connection={status}
+      data-layout={narrow ? 'phone' : 'desktop'}
     >
-      <Sidebar name={name} channel={channel} groups={locked ? null : groups} locked={locked} onSelect={select} />
-      <div className="flex min-h-0 min-w-0 flex-col">
+      {(!narrow || listed) && sidebar}
+      <div className={['min-h-0 min-w-0 flex-col', listed ? 'hidden' : 'flex'].join(' ')}>
         {status === 'connecting' && (
           <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-fg-muted" role="status">
             Connecting to the hub…
@@ -66,20 +93,36 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
             {failed.map((e) => `${typeof e.event?.writer === 'string' ? e.event.writer : '?'}:${typeof e.event?.seq === 'number' ? e.event.seq : '?'} (${e.verdict === 'bad-code' ? 'its code does not match' : 'not an event'})`).join(', ')}
           </div>
         )}
+        {!locked && unverified.length > 0 && (
+          <div className="border-b border-border px-4 py-1.5 text-ui-sm text-danger" role="alert" data-testid="refused-requests">
+            {unverified.length === 1 ? 'One' : unverified.length} {unverified.length === 1 ? 'item' : 'items'} from the session plane failed verification and {unverified.length === 1 ? 'is' : 'are'} not shown:{' '}
+            {unverified.map((u) => `${u.what === 'request' ? 'a request' : u.what === 'settlement' ? 'a settlement' : 'a delivery'} ${u.id}${u.machine ? ` from ${u.machine}` : ''}`).join(', ')}
+          </div>
+        )}
         {audit.length > 0 && <AuditNotice audit={audit} />}
         {locked ? (
           <Locked me={me} name={name} loading={keyState === 'loading'} />
         ) : (
-          <ChannelView name={name} channel={channel} session={selected} events={drawable(logState)} sessions={sessions} />
+          !listed && <ChannelView name={name} channel={channel} session={selected} events={drawable(logState)} />
         )}
       </div>
-      {depth.open && (
+      {showDepth && (
         <aside className="min-h-0 overflow-y-auto border-l border-border bg-bg-raised" aria-label="Session depth">
           {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render (as MAWS's panes) */}
           <Depth project={connection.project} session={locked ? null : selected} plane={connection.client} />
         </aside>
       )}
+      {spawning && !locked && (
+        <SpawnDialog
+          onClose={() => setSpawning(false)}
+          onOpen={(session) => {
+            setSpawning(false);
+            select({ kind: 'session', session });
+          }}
+        />
+      )}
     </div>
+    </DeskContext.Provider>
   );
 }
 

@@ -371,6 +371,31 @@ describe('refusals', () => {
     await a.close();
   });
 
+  it('a repeated hello on an open stream: a fresh have with the current archive flag, the backlog past its vector, one membership', async () => {
+    const project = newProject();
+    const writer = await machine('rewriter');
+    const reader = await machine('rehello');
+    await writer.sync(project);
+    await reader.sync(project);
+    await writer.postOk([{ t: 'events', project, events: [1, 2, 3].map((seq) => say(writer, project, seq)) }]);
+    const feed = `${writer.name}/${SESSION}`;
+    await reader.reaches(project, { [feed]: 3 });
+    expect((await hub.fetchAs(ADMIN, `/api/projects/${project}/archive`, { method: 'PUT', body: { machine: reader.name } })).status).toBe(200);
+
+    const from = reader.frames.length;
+    await reader.postOk([{ t: 'hello', project, name: 'demo', have: { [feed]: 1 } }]);
+    expect(await reader.next((f) => f.t === 'have', 'the fresh have', from)).toEqual({ t: 'have', project, have: { [feed]: 3 }, archive: true });
+    await reader.next((f) => f.t === 'events' && f.events.some((e) => e.seq === 3), 'the backlog', from);
+    // A live event after the repeat arrives once: the machine is in the fan-out once.
+    await writer.postOk([{ t: 'events', project, events: [say(writer, project, 4)] }]);
+    await reader.next((f) => f.t === 'events' && f.events.some((e) => e.seq === 4), 'the live event', from);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const sent = reader.frames.slice(from).flatMap((f) => (f.t === 'events' ? f.events.map((e) => e.seq) : []));
+    expect(sent).toEqual([2, 3, 4]);
+    await writer.close();
+    await reader.close();
+  });
+
   it('never fills a hole: a daemon whose vector moved past a refused seq is not sent that seq again', async () => {
     const project = newProject();
     const writer = await machine('holder');

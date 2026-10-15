@@ -1,127 +1,95 @@
-// Unlocking the org key in this browser (§6; the DC5 plan's M2): from the owner's passkey through PRF, or from the
-// passphrase where PRF is unavailable, kept for this tab or on this device as the owner chooses. Making the org's
-// passkey is a separate, deliberate step: it is done once per org.
-import { useEffect, useState, type FormEvent } from 'react';
+// Unlocking the org key in this browser (§6; DX7's wrapped keys; the DC5 plan's M2b), kept for this tab or on this
+// device as the owner chooses. An org with no key yet is set up here, once: the browser draws the key at random and
+// locks its first copy with a passkey or a passphrase. An org with a key is unlocked with any of its methods.
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
+import type { OrgKey, WrappedKeys } from 'desk-hub/protocol';
 import type { Me } from '../../hub/me';
-import { passphraseProblem } from '../../key/derive';
 import { beginUnlock, type Keep } from '../../key/holder';
-import { PasskeyError, prfSupported } from '../../key/passkey';
-import { deriveOrgKey, rememberedMethod, rememberMethod, type KeySource } from '../../key/unlock';
-import { buttonPrimary, buttonQuiet, buttonSecondary, textInput } from '../common/Dialog';
-
-type Busy = KeySource['kind'] | null;
+import { prepareMethod, rememberedMethod, rememberMethod, setUpOrgKey, unlockOrgKey, type NewMethod, type OrgMethod } from '../../key/unlock';
+import { listWrappedKeys, WRAPPED_KEYS_QUERY } from '../../key/wrapped-keys';
+import { explainKeyFailure } from './explain';
+import { methodLabel } from './labels';
+import { NewMethodForm } from './NewMethodForm';
+import { OrgMethodForm } from './OrgMethodForm';
+import { isInstalledApp } from '../../pwa/installed';
+import { useSecondMethodPrompt } from './second-method';
 
 export function UnlockForm({ me, onUnlocked }: { me: Me; onUnlocked?: () => void }) {
   const org = me.org.id;
-  const [keep, setKeep] = useState<Keep>('session');
-  const [passphrase, setPassphrase] = useState('');
-  const [busy, setBusy] = useState<Busy>(null);
-  const [progress, setProgress] = useState(0);
+  const keys = useQuery({ queryKey: WRAPPED_KEYS_QUERY, queryFn: listWrappedKeys });
+  const queries = useQueryClient();
+  // The installed app keeps the key on the device unless the owner unticks it; a browser tab forgets it with the tab.
+  const [keep, setKeep] = useState<Keep>(() => (isInstalledApp() ? 'device' : 'session'));
   const [error, setError] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [prf, setPrf] = useState<boolean | null>(null);
-  const remembered = rememberedMethod(org);
-  useEffect(() => void prfSupported().then(setPrf), []);
+  /** An attempt is running: where the key is kept is fixed at its start, so the control stays as it was until it ends. */
+  const [running, setRunning] = useState(false);
 
-  async function run(source: KeySource) {
-    setBusy(source.kind);
+  /** Begun before the method's prompt and derivation: a Lock pressed meanwhile wins, even after this form is gone. */
+  async function attempt(work: (stillWanted: () => boolean) => Promise<OrgKey>, step: 'set-up' | 'unlock', method: NewMethod | OrgMethod) {
     setError(null);
-    setProgress(0);
-    // Begun before the derivation, which takes seconds: a Lock pressed meanwhile wins, even after this form is gone.
-    const attempt = beginUnlock(org);
+    setRunning(true);
+    const unlocking = beginUnlock(org);
     try {
-      const raw = await deriveOrgKey(org, source);
-      if (!(await attempt.finish(raw, keep))) return;
-      rememberMethod(org, source.kind === 'passphrase' ? 'passphrase' : 'passkey');
-      setPassphrase('');
+      if (!(await unlocking.finish(await work(unlocking.current), keep))) return;
+      rememberMethod(org, method.kind);
+      if (step === 'set-up') useSecondMethodPrompt.setState({ due: true });
       onUnlocked?.();
     } catch (failure) {
-      setError(failure instanceof PasskeyError || failure instanceof TypeError ? failure.message : `Unlocking failed: ${String(failure)}`);
+      setError(explainKeyFailure(failure, step));
     } finally {
-      setBusy(null);
+      setRunning(false);
+      if (step === 'set-up') void queries.invalidateQueries({ queryKey: WRAPPED_KEYS_QUERY });
     }
   }
 
-  const submitPassphrase = (event: FormEvent) => {
-    event.preventDefault();
-    const problem = passphraseProblem(passphrase);
-    if (problem) return setError(problem);
-    void run({ kind: 'passphrase', passphrase, progress: setProgress });
-  };
+  const setUp = (method: NewMethod) => attempt(async (stillWanted) => setUpOrgKey(org, await prepareMethod(org, method), methodLabel(method.kind), stillWanted), 'set-up', method);
+  const unlock = (wrapped: WrappedKeys) => (method: OrgMethod) => attempt(() => unlockOrgKey(org, wrapped, method), 'unlock', method);
 
   return (
     <div className="flex flex-col gap-4 text-left" data-testid="unlock">
-      <p className="m-0 text-ui-sm leading-5 text-fg-muted">
-        Your org key checks who wrote each project's log and signs what you send. It is derived here, from your passkey or your passphrase, and leaves this browser only inside a
-        machine's enrollment code.
-      </p>
-
-      <section className="flex flex-col gap-2">
-        <button type="button" className={buttonPrimary} disabled={busy !== null || prf === false} onClick={() => void run({ kind: 'passkey' })}>
-          {busy === 'passkey' ? 'Waiting for your passkey…' : 'Unlock with passkey'}
-        </button>
-        {prf === false && <p className="m-0 text-ui-sm text-fg-muted">This browser cannot derive the key from a passkey. Use the passphrase.</p>}
-      </section>
-
-      <form className="flex flex-col gap-2" onSubmit={submitPassphrase} aria-label="Passphrase">
-        <label className="text-ui-sm text-fg-muted" htmlFor="desk-passphrase">
-          Or your passphrase{remembered === 'passphrase' ? ' (this browser used it last)' : ''}
-        </label>
-        <div className="flex gap-2">
-          <input
-            id="desk-passphrase"
-            type="password"
-            autoComplete="current-password"
-            className={textInput}
-            value={passphrase}
-            onChange={(event) => setPassphrase(event.target.value)}
-            disabled={busy !== null}
-          />
-          <button type="submit" className={buttonSecondary} disabled={busy !== null || passphrase === ''}>
-            Unlock
-          </button>
-        </div>
-        {busy === 'passphrase' && (
-          <p className="m-0 text-ui-sm text-fg-muted" role="status">
-            Deriving the key… {Math.round(progress * 100)}%
+      {keys.isPending ? (
+        <p className="m-0 text-ui-sm text-fg-muted">Reading the org key's methods…</p>
+      ) : keys.isError ? (
+        <p className="m-0 text-ui-sm text-danger" role="alert">
+          The hub did not list the org key's methods: {keys.error.message}
+        </p>
+      ) : keys.data.key_check === null ? (
+        <SetUp me={me} onMethod={setUp} />
+      ) : (
+        <>
+          <p className="m-0 text-ui-sm leading-5 text-fg-muted">
+            Your org key checks who wrote each project's log and signs what you send. The hub keeps it locked, one copy per method; it is opened here, and leaves this browser
+            only inside a machine's enrollment code.
           </p>
-        )}
-      </form>
+          <OrgMethodForm keys={keys.data} passkeyText="Unlock with passkey" passphraseText="Unlock" preferred={rememberedMethod(org)} onMethod={unlock(keys.data)} />
+        </>
+      )}
 
       <label className="flex items-center gap-2 text-ui-sm">
-        <input type="checkbox" checked={keep === 'device'} onChange={(event) => setKeep(event.target.checked ? 'device' : 'session')} disabled={busy !== null} />
+        <input type="checkbox" checked={keep === 'device'} onChange={(event) => setKeep(event.target.checked ? 'device' : 'session')} disabled={running} />
         Keep unlocked on this device
         <span className="text-fg-muted">(otherwise it is forgotten when this tab closes)</span>
       </label>
 
       {error && (
-        <p className="m-0 text-ui-sm text-danger" role="alert">
+        <p className="m-0 text-ui-sm text-danger" role="alert" data-testid="key-error">
           {error}
         </p>
       )}
+    </div>
+  );
+}
 
-      <footer className="border-t border-border pt-3 text-ui-sm text-fg-muted">
-        {creating ? (
-          <div className="flex flex-col gap-2" data-testid="create-passkey">
-            <p className="m-0 leading-5">
-              Make the org's passkey once, in one browser; your other browsers use it through your passwords. Another passkey derives another key, which machines enrolled with
-              this one refuse. With a passphrase instead, the first one you use is the org's.
-            </p>
-            <div className="flex gap-2">
-              <button type="button" className={buttonSecondary} disabled={busy !== null} onClick={() => void run({ kind: 'new-passkey', orgName: me.org.name, email: me.member.email })}>
-                {busy === 'new-passkey' ? 'Waiting for your passkey…' : 'Create the org passkey'}
-              </button>
-              <button type="button" className={buttonQuiet} onClick={() => setCreating(false)}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : (
-          <button type="button" className={buttonQuiet} onClick={() => setCreating(true)} disabled={prf === false}>
-            First time? Create the org's passkey
-          </button>
-        )}
-      </footer>
+function SetUp({ me, onMethod }: { me: Me; onMethod: (method: NewMethod) => Promise<void> }) {
+  if (me.member.role !== 'admin') return <p className="m-0 text-ui-sm leading-5 text-fg-muted">The org has no key yet. An admin of the org sets it up.</p>;
+  return (
+    <div className="flex flex-col gap-3" data-testid="set-up">
+      <p className="m-0 text-ui-sm leading-5 text-fg-muted">
+        This org has no key yet. Set it up once, here: this browser draws it at random and locks a copy with a passkey or a passphrase. The hub keeps only locked copies; the key
+        leaves this browser only inside a machine's enrollment code.
+      </p>
+      <NewMethodForm me={me} passkeyText="Set up with a passkey" passphraseText="Set up" onMethod={onMethod} />
     </div>
   );
 }

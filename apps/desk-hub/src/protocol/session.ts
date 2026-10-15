@@ -13,7 +13,13 @@ export type Raised = {
   request: string;
   session: string;
   tool: string;
+  /** The tool's input as the bridge shows it; capped when `truncated`, and the DX6 digest is over this capped input on
+   * both sides. */
   input: JsonObject;
+  /** The subagent that asked; absent for the main thread. */
+  agentId?: string;
+  /** The bridge capped the input it shows. */
+  truncated?: true;
   /**
    * A background subagent's prompt: when the web's window closes (§2's 3 s). After it nothing is settled: the request
    * stays pending, answerable only in the terminal, until the terminal's answer settles it. The web reads that state
@@ -41,11 +47,16 @@ export type Settled = {
   mac: Mac;
 };
 
-/** One per log event and recipient, when `deliver_next` settles the event on the recipient's machine. */
+/**
+ * One per log event and recipient, when `deliver_next` settles the event on the recipient's machine; the hub keeps the
+ * latest per key. One exception: an event owed to a closed terminal session is reported `recorded` without being
+ * settled, and when Resume brings the session back and it is delivered, a `delivered` follows for the same key.
+ * `uncertain`: a push whose frame was taken but never answered, settled and drawn as possibly delivered.
+ */
 export type Delivery = {
   event: { writer: string; seq: number };
   session: string;
-  outcome: 'delivered' | 'recorded' | 'refused-read-only' | 'failed';
+  outcome: 'delivered' | 'recorded' | 'refused-read-only' | 'uncertain' | 'failed';
   reason: string;
   mac: Mac;
 };
@@ -100,6 +111,13 @@ export type StreamingBlock = {
  */
 export type BlockRow = { uuid: string; turnId: string; agentId: string | null; step: number; index: number };
 
+/**
+ * That model request ended — finished, aborted, or cut off by its turn's end — from DX5's `step end` or `turn complete`.
+ * Sent after every `block-row` of the step, so a block of it still without one never gets one: the browser drops its
+ * partial text, and no partial text outlives its request. The hub relays it uninterpreted.
+ */
+export type StepEnd = { turnId: string; agentId: string | null; step: number };
+
 export type SessionPresence = {
   /** `status`, `waitingFor`, and `needs` of `~/.claude/sessions/<pid>.json` verbatim; null when no process is live. */
   record: JsonObject | null;
@@ -137,6 +155,7 @@ export type SessionBodies = {
    * message from 0 (DX5's chunk event). */
   chunk: { turnId: string; agentId: string | null; step: number; chunkIndex: number; chunk: JsonObject };
   'block-row': BlockRow;
+  'step-end': StepEnd;
   /** Older rows of the sub's transcript, newest first, answering a browser's `rows` request. */
   rows: { rows: JsonObject[]; before: string; more: boolean };
   subagents: { subagents: SubagentMeta[] };
@@ -176,7 +195,7 @@ export type SubagentMeta = { agentId: string; meta: JsonObject };
 export type SessionKind = keyof SessionBodies;
 
 /** The kinds that belong to a subscription (`sub` and `n` set); the rest are published to every browser of the project. */
-export const SUBSCRIPTION_KINDS = ['snapshot', 'row', 'chunk', 'block-row', 'rows', 'subagents', 'diff', 'usage', 'end'] as const satisfies readonly SessionKind[];
+export const SUBSCRIPTION_KINDS = ['snapshot', 'row', 'chunk', 'block-row', 'step-end', 'rows', 'subagents', 'diff', 'usage', 'end'] as const satisfies readonly SessionKind[];
 export type SubscriptionKind = (typeof SUBSCRIPTION_KINDS)[number];
 
 /** The kinds the hub interprets; it relays every other kind without reading its body. */
@@ -196,9 +215,10 @@ type Envelope<K extends SessionKind, Session extends string | null, Sub extends 
 export const SESSION_WIDE_KINDS = ['presence', 'compact', 'raised', 'settled', 'delivery'] as const satisfies readonly SessionKind[];
 
 /**
- * The envelope, discriminated by `kind`. A subscription's kinds carry `session`, `sub`, and `n` (0 for the snapshot,
- * then the live messages from 1: a gap makes the browser subscribe again); `presence`, `compact`, `raised`, `settled`,
- * and `delivery` carry `session` with `sub` and `n` null; `machine` carries all three null.
+ * The envelope, discriminated by `kind`. A subscription's kinds carry `session`, `sub`, and `n`: 0 for the snapshot,
+ * then n = 1, 2, … (`end` may come first, at n 0: a subscription ended before its snapshot could be taken, with the
+ * reason it would carry later); a gap makes the browser subscribe again. `presence`, `compact`, `raised`, `settled`, and
+ * `delivery` carry `session` with `sub` and `n` null; `machine` carries all three null.
  */
 export type SessionMessage<K extends SessionKind = SessionKind> = {
   [P in K]: P extends 'snapshot'

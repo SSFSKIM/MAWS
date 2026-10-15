@@ -23,7 +23,8 @@ const encoder = new TextEncoder();
 const hasControl = (text: string) => [...text].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
 
 export type Stored = { offset: number; event: LogEvent };
-export type AuditKind = 'refused' | 'rejected';
+/** The hub's own refusals, daemons' rejections, and decisions on pending requests (from `settled`). */
+export type AuditKind = 'refused' | 'rejected' | 'decided';
 export type AuditRow = { id: number; at: string; kind: AuditKind; entry: Record<string, unknown> };
 
 /**
@@ -79,6 +80,12 @@ export class LogStore {
   at(writer: string, seq: number): Stored | undefined {
     const row = this.sql.exec<{ offset: number; body: string }>('SELECT offset, body FROM events WHERE writer = ? AND seq = ?', writer, seq).toArray()[0];
     return row && { offset: row.offset, event: JSON.parse(row.body) as LogEvent };
+  }
+
+  /** A writer's latest event (a session's feed names the session's alias in `from`). */
+  latestOf(writer: string): LogEvent | undefined {
+    const row = this.sql.exec<{ body: string }>('SELECT body FROM events WHERE writer = ? ORDER BY seq DESC LIMIT 1', writer).toArray()[0];
+    return row && (JSON.parse(row.body) as LogEvent);
   }
 
   /** A `hub/` event by its writer and `mac.nonce` (a web `human` sent again). */

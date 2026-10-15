@@ -15,6 +15,8 @@ export type ProjectedSession = {
   machine: string;
   cwd: string | null;
   worktree: string | null;
+  /** The seat its latest `joined` names (a `--bg` job sminos spawned); `''` for a session it did not spawn. */
+  seat: string;
   /** Whether the latest membership event is `joined`. */
   member: boolean;
   /** The latest `retired`, while it stands. */
@@ -44,6 +46,7 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
         machine: writerMachine(event.writer) ?? '',
         cwd: null,
         worktree: null,
+        seat: '',
         member: false,
         ended: null,
         charge: null,
@@ -63,6 +66,7 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
         d.machine = str(event.machine) ?? d.machine;
         d.cwd = str(event.cwd);
         d.worktree = str(event.worktree) || null;
+        d.seat = str(event.seat) ?? '';
         d.member = true;
         d.ended = null;
         d.joinedAt = offset;
@@ -104,8 +108,8 @@ export function projectSessions(entries: ReadonlyArray<{ offset: number; event: 
   }
   const sessions = new Map<string, ProjectedSession>();
   for (const [id, d] of drafts) {
-    const { session, alias, machine, cwd, worktree, member, ended, charge, status, state, joinedAt } = d;
-    sessions.set(id, { session, alias, machine, cwd, worktree, member, ended, charge, status, state, joinedAt });
+    const { session, alias, machine, cwd, worktree, seat, member, ended, charge, status, state, joinedAt } = d;
+    sessions.set(id, { session, alias, machine, cwd, worktree, seat, member, ended, charge, status, state, joinedAt });
   }
   return sessions;
 }

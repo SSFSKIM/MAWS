@@ -10,32 +10,14 @@ import {
   machineNameKey,
   type EnrollmentIssued,
   type EnrollmentRequest,
-  type HubError,
   type MachineRecord,
 } from 'desk-hub/protocol';
-
-/** A hub endpoint's refusal, by DX7's error code. */
-export class HubRequestError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message?: string,
-  ) {
-    super(message ?? code);
-  }
-}
-
-async function hubJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, { credentials: 'same-origin', redirect: 'manual', ...init });
-  if (response.ok) return (await response.json()) as T;
-  const body = (await response.json().catch(() => null)) as HubError | null;
-  throw new HubRequestError(response.status, body?.error ?? `http-${response.status}`, body?.message);
-}
+import { hubJson, withJson } from '../hub/http';
 
 /** A one-time token for one machine, live `ttl_s` seconds (the hub's default, 900, when not given). */
 export function createEnrollment(ttl_s?: number): Promise<EnrollmentIssued> {
   const request: EnrollmentRequest = ttl_s === undefined ? {} : { ttl_s };
-  return hubJson('/api/enrollments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request) });
+  return hubJson('/api/enrollments', withJson('POST', request));
 }
 
 export async function listMachines(): Promise<MachineRecord[]> {

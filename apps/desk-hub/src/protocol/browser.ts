@@ -5,7 +5,7 @@ import type { HumanEvent, LogEvent } from './log';
 import type { Refusal, Rejection } from './machine';
 import type { Part } from './parts';
 import type { Rpc, RpcOutcome, RpcState } from './rpc';
-import type { Delivery, MachinePresence, Raised, SessionMessage } from './session';
+import type { Delivery, MachinePresence, Raised, SessionMessage, Settled } from './session';
 
 /** Browser → hub over a project socket. */
 export type ProjectUp =
@@ -50,7 +50,16 @@ export type ProjectDown =
   | { t: 'refused'; refusal: AuditEntry & Refusal & { nonce?: string; machine?: string; member?: string } }
   /** A daemon's report of an event it refused (DX2 `rejected`), recorded in the audit record and shown to every browser. */
   | { t: 'rejected'; rejection: AuditEntry & Rejection & { machine: string } }
+  /** A decision on a pending request, recorded in the audit record from the bridge's `settled`, and shown to every browser. */
+  | { t: 'decided'; decision: AuditEntry & Decision }
   | Part;
+
+/**
+ * Who decided a pending request, and how, as the audit record keeps it: the bridge's `settled` verbatim (its code
+ * verifies: the side the engine used, never the web's attempt), the machine and session it came from, and the `raised`
+ * it settled, verbatim, or null when the hub no longer held it.
+ */
+export type Decision = { machine: string; session: string; settled: Settled; raised: Raised | null };
 
 /**
  * An entry of the project's audit record: `id` its place in the record (rising; a browser that sees an entry twice
@@ -70,5 +79,26 @@ export type ProjectSummary = {
   waiting: number;
 };
 
-/** Hub → browser over the registry socket. */
-export type GridDown = { t: 'grid'; projects: ProjectSummary[] } | { t: 'summary'; project: ProjectSummary };
+/** Hub → browser over the registry socket. A frame above `FRAME_LIMIT` (a grid of many projects) comes as numbered parts,
+ * joined as on a project socket. */
+export type GridDown = { t: 'grid'; projects: ProjectSummary[] } | { t: 'summary'; project: ProjectSummary } | Part;
+
+/**
+ * What a push carries (encrypted for the device, RFC 8291): only what points to a card, since the service worker holds
+ * no org key and so cannot check anything it would draw. `alias` is the session's, from its feed's latest `from` (null
+ * when the hub holds none); `request` names a raised request, `event` a `<message>`.
+ */
+export type PushNotice = {
+  v: 1;
+  project: string;
+  /** The project's name, as the grid shows it. */
+  name: string;
+  session: string;
+  alias: string | null;
+  kind: 'question' | 'permission' | 'message';
+  request?: string;
+  event?: { writer: string; seq: number };
+  /** The org's waiting count with this push's own event counted: the sum of the grid's `ProjectSummary.waiting`, for
+   * the app icon's badge. */
+  waiting: number;
+};

@@ -179,7 +179,7 @@ module.exports = defineConfig(
       ],
     },
   },
-  { files: ['apps/desk-web/{test,e2e}/**/*.ts', 'apps/desk-web/*.config.ts'], languageOptions: { globals: globals.node } },
+  { files: ['apps/desk-web/{test,e2e}/**/*.ts', 'apps/desk-web/*.config.ts', 'apps/desk-web/scripts/**/*.mjs'], languageOptions: { globals: globals.node } },
   // DC5 end
   // DC6 start: the browser has no MAWS preload, so nothing under apps/desk-web/src/ reaches for its bridge; MAWS's own
   // sources (src/) are outside this glob and keep theirs.

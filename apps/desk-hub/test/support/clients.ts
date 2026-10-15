@@ -86,7 +86,12 @@ export class MachineClient {
   private receive(frame: DownFrame) {
     this.frames.push(frame);
     if (frame.t === 'events') for (const event of frame.events) this.store(frame.project, event);
+    // The daemon answers every heartbeat: the only traffic that keeps its lease.
+    if (frame.t === 'hb' && this.autoAck) void this.post([{ t: 'hb-ack', generation: this.generation, at: frame.at }]).then((r) => r.arrayBuffer()).catch(() => {});
   }
+
+  /** Whether heartbeats are answered (a suspended daemon's are not). */
+  autoAck = true;
 
   /** Inserts into the mirror, idempotent on (writer, seq), as the daemon's import is. */
   store(project: string, event: LogEvent) {

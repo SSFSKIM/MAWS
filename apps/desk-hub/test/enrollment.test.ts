@@ -1,5 +1,6 @@
 // Enrollment (DX7) on the local runtime, through the stand-in for Access and its service-token API: a durable state
 // machine in the Registry that recovers from every lost answer and failure the plan names.
+import { request as httpRequest } from 'node:http';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { serviceTokenName } from '../src/protocol/identity';
 import { enroll, enrollmentToken, MachineClient } from './support/clients';
@@ -61,6 +62,30 @@ describe('a machine enrolls', () => {
     const over = await hub.fetchAs(ADMIN, '/api/enrollments', { body: { padding: '한'.repeat(30_000) } });
     expect(over.status).toBe(400);
     expect(await over.json()).toMatchObject({ error: 'bad-shape' });
+  });
+
+  it('refuses an oversized body that stalls after its first byte within its drain deadline, not when the client gives up', async () => {
+    const url = new URL('/api/enrollments', hub.url);
+    const at = Date.now();
+    const status = await new Promise<number>((resolve, reject) => {
+      const request = httpRequest(
+        { host: url.hostname, port: url.port, path: url.pathname, method: 'POST', headers: { 'x-desk-standin-user': ADMIN, 'content-type': 'application/json', 'content-length': 100_000 } },
+        (response) => {
+          response.resume();
+          resolve(response.statusCode ?? 0);
+          request.destroy();
+        },
+      );
+      request.on('error', (error) => (Date.now() - at > 9000 ? reject(error) : undefined));
+      // One byte of the promised 100,000, and the client stays open.
+      request.write('{');
+      setTimeout(() => {
+        request.destroy();
+        reject(new Error('no answer while the body stalled'));
+      }, 10_000);
+    });
+    expect(status).toBe(400);
+    expect(Date.now() - at).toBeLessThan(5000);
   });
 
   it('refuses a token it never issued, and a body that is not a redemption', async () => {

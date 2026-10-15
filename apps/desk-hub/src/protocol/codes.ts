@@ -143,6 +143,17 @@ export async function verifyRpc(key: OrgKey, rpc: Rpc, project: string): Promise
   return check(key, 'rpc', project, rpc, (rpc as { mac?: unknown }).mac, (rpc as { nonce?: unknown }).nonce);
 }
 
+/** A wrapped key's `check` (DX7): HMAC-SHA256 of the org key over `smns-desk-key-check-v1`, base64url. Public. */
+export async function keyCheck(key: OrgKey): Promise<string> {
+  return sign(key, utf8('smns-desk-key-check-v1'));
+}
+
+/** The proof of holding the org key that changing its wrapped keys takes (DX7): HMAC-SHA256 of the key over
+ * `smns-desk-key-auth-v1`, base64url. Never stored by the hub, which keeps only its SHA-256. */
+export async function keyAuth(key: OrgKey): Promise<string> {
+  return sign(key, utf8('smns-desk-key-auth-v1'));
+}
+
 /** The digest's `input_sha256`: the lowercase hex SHA-256 of the tool input's canonical JSON. */
 export async function inputSha256(input: JsonValue): Promise<string> {
   const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', utf8(canonicalize(input))));

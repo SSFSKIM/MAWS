@@ -130,9 +130,10 @@ jobs:
           libreoffice: ${{ matrix.libreoffice }}
       - if: matrix.build
         run: .github/scripts/gate-run.sh 'built in|error' pnpm build
-      # DC5: the desk's browser suites drive Playwright's own Chromium on Linux; a Mac drives its installed Chrome.
+      # DC5: the desk's browser suites drive Playwright's own Chromium on Linux; a Mac drives its installed Chrome. The
+      # phone's layout cases run again in Playwright's WebKit, on Linux only (apps/desk-web/playwright.config.ts).
       - if: matrix.group == 'desk-web' && runner.os == 'Linux'
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium webkit
       - env:
           SCRIPT: ${{ matrix.script }}
         run: |

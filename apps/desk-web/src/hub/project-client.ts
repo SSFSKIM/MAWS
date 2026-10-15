@@ -18,7 +18,10 @@ import {
   SUBSCRIPTION_KINDS,
 } from 'desk-hub/protocol';
 import type { SessionPlane, SessionTarget, Subscription, SubscriptionListener, SubscriptionMessage } from '../shell/session-plane';
-import { HubSocket, type ConnectionStatus } from './socket';
+import { backoff, HubSocket, type ConnectionStatus } from './socket';
+
+/** How often a visible tab says so again: a third of the 90 s the hub counts a socket as visible after the last. */
+const VISIBLE_REPEAT_MS = 30_000;
 
 export type { ConnectionStatus } from './socket';
 
@@ -60,9 +63,22 @@ export type ProjectClientOptions = {
   handlers: ProjectHandlers;
   delay?: (attempt: number) => number;
   frameLimit?: number;
+  /**
+   * The wait before subscribing again after an `end {discontinuity}` that came first, at `n` 0 (the bridge could not
+   * take a snapshot yet), by how many came in a row from 0; the socket's backoff by default.
+   */
+  resubscribeDelay?: (attempt: number) => number;
 };
 
-type OpenSubscription = { target: SessionTarget; listener: SubscriptionListener; sub: string | null; next: number };
+type OpenSubscription = {
+  target: SessionTarget;
+  listener: SubscriptionListener;
+  sub: string | null;
+  next: number;
+  /** Discontinuities at `n` 0 in a row: the backoff's attempt. A snapshot resets it. */
+  failedStarts: number;
+  retry: ReturnType<typeof setTimeout> | null;
+};
 
 const IN_SUB = new Set<string>(SUBSCRIPTION_KINDS);
 
@@ -70,6 +86,7 @@ export class ProjectClient implements SessionPlane {
   private readonly socket: HubSocket<ProjectDown, ProjectUp>;
   private welcomed = false;
   private visible: boolean | null = null;
+  private repeat: ReturnType<typeof setInterval> | null = null;
   private readonly humans = new Map<string, { event: HumanEvent; resolve: (ack: HumanAck) => void; reject: (error: HumanRefused) => void }>();
   private readonly rpcs = new Map<string, Rpc>();
   private readonly rpcListeners = new Set<(frame: RpcStateFrame) => void>();
@@ -94,6 +111,8 @@ export class ProjectClient implements SessionPlane {
   }
 
   stop(): void {
+    if (this.repeat !== null) clearInterval(this.repeat);
+    this.repeat = null;
     this.socket.stop();
   }
 
@@ -108,7 +127,7 @@ export class ProjectClient implements SessionPlane {
     });
   }
 
-  /** Sends a sealed RPC, again after each reconnect, until the hub reports a state for its nonce. */
+  /** Sends a sealed RPC, again after each reconnect, until the hub reports its result (`done` or `failed`). */
   sendRpc(rpc: Rpc): void {
     this.rpcs.set(rpc.nonce, rpc);
     if (this.welcomed) this.socket.send({ t: 'rpc', rpc });
@@ -119,21 +138,32 @@ export class ProjectClient implements SessionPlane {
     return () => this.rpcListeners.delete(listener);
   }
 
-  /** Whether this tab shows the project; the hub holds back the member's pushes while one does. */
+  /**
+   * Whether this tab shows the project; the hub holds back the member's pushes while one does. `visible` is repeated
+   * every 30 s while it holds, because the hub counts a socket as visible only for 90 s after the last (composite
+   * ad82c3b2): a phone put to sleep before its hidden report got out stops holding pushes back on its own.
+   */
   setVisible(visible: boolean): void {
     this.visible = visible;
     if (this.welcomed) this.socket.send({ t: 'visibility', visible });
+    if (this.repeat !== null) clearInterval(this.repeat);
+    this.repeat = visible ? setInterval(() => this.welcomed && this.socket.send({ t: 'visibility', visible: true }), VISIBLE_REPEAT_MS) : null;
   }
 
   subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription {
-    const open: OpenSubscription = { target, listener, sub: null, next: 0 };
+    const open: OpenSubscription = { target, listener, sub: null, next: 0, failedStarts: 0, retry: null };
     this.subs.add(open);
     if (this.welcomed) this.sendSubscribe(open);
     return {
       rows: (before, limit) => {
         if (open.sub && this.subs.has(open)) this.socket.send({ t: 'rows', sub: open.sub, before, limit });
       },
+      diff: () => {
+        if (open.sub && this.subs.has(open) && open.target.agentId === null) this.socket.send({ t: 'diff', sub: open.sub });
+      },
       close: () => {
+        if (open.retry) clearTimeout(open.retry);
+        open.retry = null;
         if (!this.subs.delete(open)) return;
         if (open.sub && this.welcomed) this.socket.send({ t: 'unsubscribe', sub: open.sub });
       },
@@ -144,6 +174,8 @@ export class ProjectClient implements SessionPlane {
     if (!this.welcomed) return;
     this.welcomed = false;
     for (const open of this.subs) {
+      if (open.retry) clearTimeout(open.retry); // the next welcome subscribes every open one again
+      open.retry = null;
       if (open.sub === null) continue;
       open.sub = null;
       open.listener.reset();
@@ -190,7 +222,9 @@ export class ProjectClient implements SessionPlane {
         return;
       }
       case 'rpc-state':
-        this.rpcs.delete(frame.nonce);
+        // `forwarded` is interim and `uncertain` not final: the RPC is kept (and sent again after a reconnect, which the
+        // hub answers from its record) until a result, so the one the daemon republishes has something to land on.
+        if (frame.state === 'done' || frame.state === 'failed') this.rpcs.delete(frame.nonce);
         for (const listener of this.rpcListeners) listener(frame);
         return;
       case 'session':
@@ -235,12 +269,25 @@ export class ProjectClient implements SessionPlane {
       return;
     }
     open.next++;
+    if (message.kind === 'snapshot') open.failedStarts = 0;
     if (message.kind === 'end') {
+      // An `end` may come first, at n 0, when the sub ended before a snapshot could be taken (DX4, composite cd2667d8).
       const body = message.body as SessionBodies['end'];
       if (body.reason === 'discontinuity') {
-        // The bridge's stream lost events (DX4): the live part no longer follows the snapshot. Take a fresh one.
+        // The bridge's stream lost events (DX4): the live part no longer follows the snapshot. Take a fresh one — at
+        // once after a snapshot, and after a growing wait when none could be taken, so a bridge still starting is not
+        // asked again and again.
         open.listener.reset();
-        this.sendSubscribe(open);
+        if (message.n !== 0) {
+          this.sendSubscribe(open);
+          return;
+        }
+        open.sub = null;
+        const wait = (this.options.resubscribeDelay ?? backoff)(open.failedStarts++);
+        open.retry = setTimeout(() => {
+          open.retry = null;
+          if (this.subs.has(open) && this.welcomed && open.sub === null) this.sendSubscribe(open);
+        }, wait);
         return;
       }
       this.subs.delete(open);

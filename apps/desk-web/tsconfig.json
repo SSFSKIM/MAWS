@@ -17,6 +17,8 @@
     "noEmit": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
+    // MAWS's renderer modules the desk imports as they stand (the renderer survey) name src/shared as `@shared`, and
+    // the depth column's (DC6) reach src/artifacts as `@artifacts`.
     "paths": { "@shared/*": ["../../src/shared/*"], "@artifacts/*": ["../../src/artifacts/*"] }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "../../src/renderer/src/env.d.ts"],
