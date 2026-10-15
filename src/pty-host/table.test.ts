@@ -101,8 +101,13 @@ afterEach(async () => {
 // before a line feed.
 const asOutput = (s: string) => s.replace(/\r+\n/g, '\n');
 
+// macOS: the pty master delivers a program's last bytes before EOF there; on Linux the master can answer EIO at the
+// child's exit with bytes still buffered, which node-pty drops, so a flood's exact output through exit holds only on
+// macOS (the 2-core runner lost the tail of each flood case once; gate-offload Decision Log 20). The Mac lane runs both.
+const floodThroughExit = it.skipIf(process.platform !== 'darwin');
+
 describe('pty host flow control pauses and resumes', () => {
-  it('pauses a flood nobody acknowledges near the high watermark, and acks let it finish', async () => {
+  floodThroughExit('pauses a flood nobody acknowledges near the high watermark, and acks let it finish', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 5000000'] }));
     // The second is the flood's, not the process start's (the iutf8 wrapper and a loaded machine delay the first byte).
@@ -149,7 +154,7 @@ describe('pty host flow control pauses and resumes', () => {
 });
 
 describe('pty host ring buffer and attach offsets', () => {
-  it('loses nothing of seq 1 200000 with a renderer-like acker, offsets contiguous', async () => {
+  floodThroughExit('loses nothing of seq 1 200000 with a renderer-like acker, offsets contiguous', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'seq 1 200000'] }));
     h.ackers.add(ptyId);
