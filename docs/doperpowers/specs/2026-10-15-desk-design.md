@@ -1708,7 +1708,7 @@ type Envelope<K, Session, Sub, N> = {
 // Discriminated by kind; each kind's invariants are in its type:
 type SessionMessage =
   | Envelope<'snapshot', string, string, 0>                                                       // a sub's first message
-  | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, … (`end` may come first, at n 0)
+  | Envelope<'row' | 'chunk' | 'block-row' | 'step-end' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, … (`end` may come first, at n 0)
   | Envelope<'presence' | 'raised' | 'settled' | 'delivery' | 'compact', string, null, null>     // to every browser, outside subs
   | Envelope<'machine', null, null, null>;                                                         // names no session
 ```
@@ -1733,6 +1733,7 @@ and `streaming` are that agent's own.
 | `row` | yes | `{row, agentId}`: a transcript row verbatim; `agentId` the subagent whose transcript holds it, or null |
 | `chunk` | yes | `{turnId, agentId, step, chunkIndex, chunk}`: DX5's chunk event, the `turn.step` chunk object verbatim under `chunk` (nested, since it has an index field of its own), `chunkIndex` its index in its message from 0 |
 | `block-row` | yes | `{uuid, turnId, agentId, step, index}`: the engine wrote the row `uuid` for content block `index` of that step; sent before the row itself arrives |
+| `step-end` | yes | `{turnId, agentId, step}`: that model request ended — finished, aborted, or cut off by its turn's end — from DX5's `step end` or `turn complete`; sent after every `block-row` of the step, so a block of it still without one never gets one, and the browser drops its partial text |
 | `rows` | yes | `{rows, before, more}`: older rows of the sub's transcript, newest first, answering a `rows` request |
 | `subagents` | yes | `{subagents: [{agentId, meta}]}`, each `meta` a `subagents/*.meta.json` verbatim |
 | `diff` | yes | `{base, text}`: unified diff of the working tree against the base branch |
@@ -1758,7 +1759,8 @@ moments, kept apart:
   subscriber.
 - **The browser** keeps drawing the block's partial text after the `block-row` until the `row` whose `uuid` it named
   arrives; that row settles the block, and the browser drops the partial text then. Chunks for a settled block are
-  ignored.
+  ignored. A block whose step ended (`step-end`) without a `block-row` for it — a response aborted mid-block — is
+  dropped then, so no partial text outlives its request.
 
 Together with the daemon dropping tailed rows the snapshot already holds (by uuid) and chunks at or below their
 entry's `upTo`, the snapshot and the live part neither overlap nor leave a gap. A row no `block-row` named (a server
@@ -2763,6 +2765,31 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DX4 gains `step-end` in subscriptions (DC6's M1). A response
+  aborted before its blocks were written left partial text with nothing
+  to settle it: a subscription carried no step boundary, so the text stood
+  until the next snapshot. The daemon relays DX5's `step end` (and a
+  `turn complete` that cuts a step off) as `step-end`, after every
+  `block-row` of that step, and the browser drops the step's blocks that
+  have none. DC2 confirms that DX5 delivers a step's `block-row` notices
+  before its `step end`, or holds the step's end until they are posted.
+  Rejected: waiting for the next snapshot, which a long-lived subscription
+  may not see for hours. And streamed thinking follows the row: where the
+  engine records thinking as omitted (`thinkingDisplay: "omitted"`, seen on
+  2.1.300), depth draws live thinking as the same collapsed indicator, not
+  text that would vanish when its row settles; DC2 confirms what live
+  `thinking` chunks carry. Flags DC2, DC3 (the kind), DC5, DC6, DC7.
+  Date/Author: 2026-10-15, design session (DC6's M1).
+- Decision: The look of agent traffic and of requests (owner, 2026-10-15),
+  from DC5's mockups `03-agent-traffic.html` and `04-request-cards.html`.
+  A run of messages between sessions folds to one ledger line in the group
+  chat (option A: a muted row with the count, who took part, and when,
+  opened on a click), so only what sessions send the owner and what the
+  owner posts read at full weight. A permission prompt or a question is
+  drawn as the session's own message, its card the message's body (option
+  A), shrinking to one line when it settles. Rejected: B and C in both.
+  Flags DC5.
+  Date/Author: 2026-10-15, owner.
 - Decision: DX8's `DeskSession` gains `seat` (DC5's M3, additive). §5's
   table differs between a `--bg` seat and a terminal session, and presence
   alone does not tell them apart without a bridge; the log's `joined`
