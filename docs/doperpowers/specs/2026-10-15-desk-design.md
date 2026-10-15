@@ -1488,7 +1488,7 @@ silent for three periods as dead and reconnects with backoff. A client closing t
 | `rpc` | `rpc` | an RPC for this machine (DX6) |
 | `rpc-ack` | `project`, `nonce` | the hub recorded this result; stop republishing it |
 | `subscribe` | `project`, `session`, `agentId`, `sub` | serve a DX4 subscription scoped to one transcript: the session's main one (`agentId` null) or one subagent's |
-| `unsubscribe` | `project`, `sub` | end it |
+| `unsubscribe` | `project`, `sub` | end it; the machine answers `end {reason: "unsubscribed"}`, which the hub, having dropped the sub's route first, discards |
 | `rows` | `project`, `session`, `agentId`, `sub`, `before`, `limit` | older rows of the sub's transcript, before row `before` |
 | `diff` | `project`, `session`, `sub` | the browser's DX3 `diff` on a main-transcript sub: answer with DX4 `diff` on that sub (M3) |
 | `part` | `id`, `index`, `count`, `data` | a slice of a larger frame (below) |
@@ -1708,7 +1708,7 @@ type Envelope<K, Session, Sub, N> = {
 // Discriminated by kind; each kind's invariants are in its type:
 type SessionMessage =
   | Envelope<'snapshot', string, string, 0>                                                       // a sub's first message
-  | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, … (`end` may come first, at n 0)
+  | Envelope<'row' | 'chunk' | 'block-row' | 'step-end' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, … (`end` may come first, at n 0)
   | Envelope<'presence' | 'raised' | 'settled' | 'delivery' | 'compact', string, null, null>     // to every browser, outside subs
   | Envelope<'machine', null, null, null>;                                                         // names no session
 ```
@@ -1733,6 +1733,7 @@ and `streaming` are that agent's own.
 | `row` | yes | `{row, agentId}`: a transcript row verbatim; `agentId` the subagent whose transcript holds it, or null |
 | `chunk` | yes | `{turnId, agentId, step, chunkIndex, chunk}`: DX5's chunk event, the `turn.step` chunk object verbatim under `chunk` (nested, since it has an index field of its own), `chunkIndex` its index in its message from 0 |
 | `block-row` | yes | `{uuid, turnId, agentId, step, index}`: the engine wrote the row `uuid` for content block `index` of that step; sent before the row itself arrives |
+| `step-end` | yes | `{turnId, agentId, step}`: that model request ended — finished, aborted, or cut off by its turn's end — from DX5's `step end` or `turn complete`; sent after every `block-row` of the step, so a block of it still without one never gets one, and the browser drops its partial text |
 | `rows` | yes | `{rows, before, more}`: older rows of the sub's transcript, newest first, answering a `rows` request |
 | `subagents` | yes | `{subagents: [{agentId, meta}]}`, each `meta` a `subagents/*.meta.json` verbatim |
 | `diff` | yes | `{base, text}`: unified diff of the working tree against the base branch |
@@ -1753,12 +1754,16 @@ body.
 mod sees no API message id, so a streaming block is settled by row uuid. A `block-row` touches two parties at two
 moments, kept apart:
 - **The producer** (the bridge's endpoint; the fake machine) removes the block from its snapshot state when it applies
-  the block's `block-row`, under the same lock that takes snapshots and adds subscribers. So a snapshot's `streaming`
-  holds only blocks without a `block-row` yet, and never a block whose `block-row` was already sent to that
-  subscriber.
+  the block's `block-row`, or its step's end, under the same lock that takes snapshots and adds subscribers. So a
+  snapshot's `streaming` holds only blocks of a live step without a `block-row` yet, and never a block whose
+  `block-row` or `step-end` was already sent to that subscriber: an aborted block reaches no later subscriber, which
+  would have no `step-end` coming to drop it.
 - **The browser** keeps drawing the block's partial text after the `block-row` until the `row` whose `uuid` it named
   arrives; that row settles the block, and the browser drops the partial text then. Chunks for a settled block are
-  ignored.
+  ignored. A block whose step ended (`step-end`) without a `block-row` for it — a response aborted mid-block — is
+  dropped then, so no partial text outlives its request. The bridge holds a step's end until that step's notices are
+  posted, for at most 1 s; a `block-row` that still comes after its step's `step-end` names a block already dropped,
+  and the browser ignores it and draws its row as any other.
 
 Together with the daemon dropping tailed rows the snapshot already holds (by uuid) and chunks at or below their
 entry's `upTo`, the snapshot and the live part neither overlap nor leave a gap. A row no `block-row` named (a server
@@ -2326,7 +2331,7 @@ Cloudflare's API and Access.
 
 **One command**, from the MAWS worktree root:
 
-    pnpm --filter desk-hub local                     # options: -- --port <n> --user <email>
+    pnpm --filter desk-hub local                     # options: --port <n> --user <email> (no `--`: pnpm passes it through)
 
 It starts `wrangler dev` (the Worker and its Durable Objects on workerd, on `127.0.0.1:<port + 1>`) and, in front of
 it, the stand-in for Access on `http://127.0.0.1:8747` (`--port`; it refuses a port something already answers on —
@@ -2401,7 +2406,7 @@ from `App.tsx`.
 
 ```ts
 type SessionTarget = { machine: string; session: string; agentId: string | null }; // agentId null: the main thread
-type SubscriptionMessage = SessionMessage<'snapshot' | 'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage'>;
+type SubscriptionMessage = SessionMessage<'snapshot' | 'row' | 'chunk' | 'block-row' | 'step-end' | 'rows' | 'subagents' | 'diff' | 'usage'>;
 interface SubscriptionListener {
   message(message: SubscriptionMessage): void; // snapshot (n 0) first, then n = 1, 2, … with no gap
   reset(): void;                                // a discontinuity the client recovers from: drop what was delivered
@@ -2763,6 +2768,63 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DC2's live walk of M4 settles the facts the step-end and
+  thinking decisions waited on (2.1.300, a terminal session and a `--bg`
+  job, load average about 220). A response row can be appended after its
+  step's `turn.step` resolves (a withheld refusal or max-output row, the
+  tail closing an open block, a hook answering without a request), so the
+  bridge holds a step's `step end` until the step's `block-row` notices
+  are posted: at most 1 s, released early by the loop's next request, the
+  turn's end, or the subagent's stop; the walk saw no `block-row` after
+  its step's end. Live `thinking` chunks carry empty text and no
+  signature, so depth's collapsed indicator is the only drawing there is.
+  Notice order is the engine's append order, which can put a row ahead of
+  its own `parentUuid` chain within one same-millisecond batch (a first
+  prompt's attachments); DX5's release rule absorbs it (the passed-over
+  row released unnamed, its late `row-seen` ignored, nothing lost or
+  repeated), and what the daemon may rely on is that a response row's
+  `block-row` never follows a notice for a row written after it on disk.
+  The worst flush-to-notice lag was 0.68 s, so the 2 s window stands; the
+  module loads before a `--bg` job's first prompt row, so the seed rule
+  stays narrowed to loops older than the module. Rejected: capping no
+  hold, which would let a lost notice stall a step's end forever. DX5's
+  text is refreshed from DC2's plan when M4 lands. Flags DC6, DC7.
+  Date/Author: 2026-10-15, design session (DC2's M4 walk).
+- Decision: A browser never receives the `end {reason: "unsubscribed"}`
+  its own `unsubscribe` causes (DC7's M1, run against DC3's local hub).
+  The hub drops the sub's route before it forwards the `unsubscribe`, so
+  the machine's answer reaches no browser; the client's `close()` already
+  ends a sub silently, so nothing waits for it. The real hub's order is
+  the contract; a stand-in that delivers the `end` differs harmlessly.
+  Rejected: holding the route until the machine answers, which keeps a
+  dead sub's traffic flowing to a browser that has let it go. Flags DC3,
+  DC5, DC7.
+  Date/Author: 2026-10-15, design session (DC7's M1).
+- Decision: DX4 gains `step-end` in subscriptions (DC6's M1). A response
+  aborted before its blocks were written left partial text with nothing
+  to settle it: a subscription carried no step boundary, so the text stood
+  until the next snapshot. The daemon relays DX5's `step end` (and a
+  `turn complete` that cuts a step off) as `step-end`, after every
+  `block-row` of that step, and the browser drops the step's blocks that
+  have none. DC2 confirms that DX5 delivers a step's `block-row` notices
+  before its `step end`, or holds the step's end until they are posted.
+  Rejected: waiting for the next snapshot, which a long-lived subscription
+  may not see for hours. And streamed thinking follows the row: where the
+  engine records thinking as omitted (`thinkingDisplay: "omitted"`, seen on
+  2.1.300), depth draws live thinking as the same collapsed indicator, not
+  text that would vanish when its row settles; DC2 confirms what live
+  `thinking` chunks carry. Flags DC2, DC3 (the kind), DC5, DC6, DC7.
+  Date/Author: 2026-10-15, design session (DC6's M1).
+- Decision: The look of agent traffic and of requests (owner, 2026-10-15),
+  from DC5's mockups `03-agent-traffic.html` and `04-request-cards.html`.
+  A run of messages between sessions folds to one ledger line in the group
+  chat (option A: a muted row with the count, who took part, and when,
+  opened on a click), so only what sessions send the owner and what the
+  owner posts read at full weight. A permission prompt or a question is
+  drawn as the session's own message, its card the message's body (option
+  A), shrinking to one line when it settles. Rejected: B and C in both.
+  Flags DC5.
+  Date/Author: 2026-10-15, owner.
 - Decision: DX8's `DeskSession` gains `seat` (DC5's M3, additive). §5's
   table differs between a `--bg` seat and a terminal session, and presence
   alone does not tell them apart without a bridge; the log's `joined`

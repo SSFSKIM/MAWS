@@ -100,6 +100,13 @@ export type StreamingBlock = {
  */
 export type BlockRow = { uuid: string; turnId: string; agentId: string | null; step: number; index: number };
 
+/**
+ * That model request ended — finished, aborted, or cut off by its turn's end — from DX5's `step end` or `turn complete`.
+ * Sent after every `block-row` of the step, so a block of it still without one never gets one: the browser drops its
+ * partial text, and no partial text outlives its request. The hub relays it uninterpreted.
+ */
+export type StepEnd = { turnId: string; agentId: string | null; step: number };
+
 export type SessionPresence = {
   /** `status`, `waitingFor`, and `needs` of `~/.claude/sessions/<pid>.json` verbatim; null when no process is live. */
   record: JsonObject | null;
@@ -137,6 +144,7 @@ export type SessionBodies = {
    * message from 0 (DX5's chunk event). */
   chunk: { turnId: string; agentId: string | null; step: number; chunkIndex: number; chunk: JsonObject };
   'block-row': BlockRow;
+  'step-end': StepEnd;
   /** Older rows of the sub's transcript, newest first, answering a browser's `rows` request. */
   rows: { rows: JsonObject[]; before: string; more: boolean };
   subagents: { subagents: SubagentMeta[] };
@@ -176,7 +184,7 @@ export type SubagentMeta = { agentId: string; meta: JsonObject };
 export type SessionKind = keyof SessionBodies;
 
 /** The kinds that belong to a subscription (`sub` and `n` set); the rest are published to every browser of the project. */
-export const SUBSCRIPTION_KINDS = ['snapshot', 'row', 'chunk', 'block-row', 'rows', 'subagents', 'diff', 'usage', 'end'] as const satisfies readonly SessionKind[];
+export const SUBSCRIPTION_KINDS = ['snapshot', 'row', 'chunk', 'block-row', 'step-end', 'rows', 'subagents', 'diff', 'usage', 'end'] as const satisfies readonly SessionKind[];
 export type SubscriptionKind = (typeof SUBSCRIPTION_KINDS)[number];
 
 /** The kinds the hub interprets; it relays every other kind without reading its body. */
