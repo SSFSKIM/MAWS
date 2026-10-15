@@ -2,7 +2,7 @@
 // HMAC key: the page can sign and verify with it but never read it, and it is never sent to the hub, logged, or put in
 // the service worker. It is loaded from the device's IndexedDB when the owner chose to keep it there (M2 derives and
 // stores it); with none stored the browser is locked, and the project view draws nothing from the log.
-import type { OrgKey } from 'desk-hub/protocol';
+import { orgKeyFromCryptoKey, type OrgKey } from 'desk-hub/protocol';
 import { committed, DESK_DB, done, openDesk } from '../store/idb';
 
 export interface KeyStore {
@@ -12,17 +12,12 @@ export interface KeyStore {
 }
 
 /**
- * A stored CryptoKey as the protocol module's OrgKey. `desk-hub/protocol` makes an OrgKey only from raw bytes
- * (`importOrgKey`), and a key derived in the browser never exists as bytes, so the brand is applied here, after the
- * checks that make it the org key: HMAC with SHA-256, 256 bits, signing and verifying, and not extractable.
+ * A CryptoKey as the org key this browser may hold: the module's checks (`orgKeyFromCryptoKey`: HMAC with SHA-256, 256
+ * bits, signing and verifying), and — the holder's own concern — never extractable, so no page script can read it.
  */
-export function asOrgKey(key: CryptoKey): OrgKey {
-  const algorithm = key.algorithm as Partial<HmacKeyAlgorithm>;
-  if (algorithm.name !== 'HMAC' || algorithm.hash?.name !== 'SHA-256') throw new TypeError('the org key is an HMAC-SHA-256 key');
-  if (algorithm.length !== 256) throw new TypeError('the org key is 256 bits');
-  if (!key.usages.includes('sign') || !key.usages.includes('verify')) throw new TypeError('the org key can sign and verify');
+export function heldOrgKey(key: CryptoKey): OrgKey {
   if (key.extractable) throw new TypeError('the org key is never extractable');
-  return { hmac: key } as OrgKey;
+  return orgKeyFromCryptoKey(key);
 }
 
 /** The org's key from the device's record, or null — locked — when none is stored or what is stored is not one. */
@@ -30,7 +25,7 @@ export async function loadOrgKey(store: KeyStore, org: string): Promise<OrgKey |
   const key = await store.load(org);
   if (!key) return null;
   try {
-    return asOrgKey(key);
+    return heldOrgKey(key);
   } catch {
     return null;
   }

@@ -3,27 +3,27 @@
 import { describe, expect, it } from 'vitest';
 import { verify } from 'desk-hub/protocol';
 import { LOG_VECTORS, VECTOR_KEY } from '../../test/vectors';
-import { asOrgKey, loadOrgKey, memoryKeyStore } from './org-key';
+import { heldOrgKey, loadOrgKey, memoryKeyStore } from './org-key';
 
 const hmac = (extractable: boolean, hash = 'SHA-256', usages: KeyUsage[] = ['sign', 'verify'], raw: Uint8Array = VECTOR_KEY) =>
   crypto.subtle.importKey('raw', Uint8Array.from(raw), { name: 'HMAC', hash }, extractable, usages);
 
-describe('asOrgKey', () => {
+describe('heldOrgKey', () => {
   it('admits a non-extractable HMAC-SHA-256 key, which verifies the vectors', async () => {
-    const key = asOrgKey(await hmac(false));
+    const key = heldOrgKey(await hmac(false));
     for (const v of LOG_VECTORS) expect(await verify(key, 'log', v.project, v.event), v.name).toBe(true);
   });
 
   it('refuses a key that could leave the browser', async () => {
-    await expect(hmac(true).then(asOrgKey)).rejects.toThrow(/extractable/);
+    await expect(hmac(true).then(heldOrgKey)).rejects.toThrow(/extractable/);
   });
 
   it('refuses another algorithm, another hash, a short key, or a key that cannot sign and verify', async () => {
-    await expect(hmac(false, 'SHA-1').then(asOrgKey)).rejects.toThrow(/HMAC-SHA-256/);
-    await expect(hmac(false, 'SHA-256', ['verify']).then(asOrgKey)).rejects.toThrow(/sign and verify/);
-    await expect(hmac(false, 'SHA-256', ['sign', 'verify'], VECTOR_KEY.slice(0, 16)).then(asOrgKey)).rejects.toThrow(/256 bits/);
+    await expect(hmac(false, 'SHA-1').then(heldOrgKey)).rejects.toThrow(/HMAC-SHA-256/);
+    await expect(hmac(false, 'SHA-256', ['verify']).then(heldOrgKey)).rejects.toThrow(/signs and verifies/);
+    await expect(hmac(false, 'SHA-256', ['sign', 'verify'], VECTOR_KEY.slice(0, 16)).then(heldOrgKey)).rejects.toThrow(/256 bits/);
     const aes = await crypto.subtle.importKey('raw', Uint8Array.from(VECTOR_KEY), { name: 'AES-GCM' }, false, ['encrypt']);
-    expect(() => asOrgKey(aes)).toThrow(/HMAC-SHA-256/);
+    expect(() => heldOrgKey(aes)).toThrow(/HMAC-SHA-256/);
   });
 });
 

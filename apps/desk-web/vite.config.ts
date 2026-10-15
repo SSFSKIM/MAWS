@@ -13,5 +13,6 @@ export default defineConfig({
   // The depth column (DC6) imports MAWS's transcript and backfill, which reach MAWS's shared modules by these aliases.
   resolve: { alias: { '@shared': resolve(import.meta.dirname, '../../src/shared'), '@artifacts': resolve(import.meta.dirname, '../../src/artifacts') } },
   build: { outDir: 'dist', emptyOutDir: true },
-  server: { proxy: { '/api': { target: hub, ws: true, changeOrigin: true } } },
+  // /machine too: an enrollment code made in dev names this origin as the hub, and the machine redeems it here.
+  server: { proxy: { '/api': { target: hub, ws: true, changeOrigin: true }, '/machine': { target: hub, changeOrigin: true } } },
 });

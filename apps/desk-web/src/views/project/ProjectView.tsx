@@ -3,6 +3,7 @@
 // and the view says why. Events whose code fails are reported, never drawn.
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
+import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
 import { drawable, refused } from '../../log/project-log';
 import { useProjectConnection } from '../../project/registry';
@@ -11,16 +12,17 @@ import { useDeskLayout, type Channel } from '../../shell/layout';
 import { useDeskSessions } from '../../shell/sessions';
 import { useSlot } from '../../shell/slots';
 import { useGrid } from '../../state/grid';
+import { UnlockForm } from '../key/UnlockForm';
 import { ChannelView } from './ChannelView';
 import { Sidebar } from './Sidebar';
 
-export function ProjectView({ project, channel }: { project: string; channel: Channel }) {
+export function ProjectView({ me, project, channel }: { me: Me; project: string; channel: Channel }) {
   const connection = useProjectConnection(project);
   const name = useGrid((s) => s.projects.find((p) => p.id === project)?.name) ?? project.slice(0, 8);
-  return <OpenProject connection={connection} name={name} channel={channel} />;
+  return <OpenProject me={me} connection={connection} name={name} channel={channel} />;
 }
 
-function OpenProject({ connection, name, channel }: { connection: ProjectConnection; name: string; channel: Channel }) {
+function OpenProject({ me, connection, name, channel }: { me: Me; connection: ProjectConnection; name: string; channel: Channel }) {
   const navigate = useDeskLayout((s) => s.navigate);
   const depth = useDeskLayout((s) => s.depth);
   const keyState = useKeyHolder((s) => s.state);
@@ -66,7 +68,7 @@ function OpenProject({ connection, name, channel }: { connection: ProjectConnect
         )}
         {audit.length > 0 && <AuditNotice audit={audit} />}
         {locked ? (
-          <Locked name={name} loading={keyState === 'loading'} />
+          <Locked me={me} name={name} loading={keyState === 'loading'} />
         ) : (
           <ChannelView name={name} channel={channel} session={selected} events={drawable(logState)} sessions={sessions} />
         )}
@@ -81,13 +83,14 @@ function OpenProject({ connection, name, channel }: { connection: ProjectConnect
   );
 }
 
-function Locked({ name, loading }: { name: string; loading: boolean }) {
+function Locked({ me, name, loading }: { me: Me; name: string; loading: boolean }) {
   return (
-    <div className="flex flex-1 items-center justify-center p-6" data-testid="locked">
+    <div className="flex flex-1 items-start justify-center overflow-y-auto p-6 pt-[10vh]" data-testid="locked">
       {loading ? null : (
-        <div className="max-w-[440px] text-center">
-          <h2 className="m-0 text-ui font-semibold">{name} is locked in this browser</h2>
-          <p className="text-ui-sm leading-5 text-fg-muted">This browser can't check who wrote {name}'s log until it holds your org key, so nothing is shown.</p>
+        <div className="max-w-[440px]">
+          <h2 className="m-0 text-center text-ui font-semibold">{name} is locked in this browser</h2>
+          <p className="text-center text-ui-sm leading-5 text-fg-muted">This browser can't check who wrote {name}'s log until it holds your org key, so nothing is shown.</p>
+          <UnlockForm me={me} />
         </div>
       )}
     </div>

@@ -14,7 +14,7 @@ import { ticks, useTranscriptStore } from '../stores/transcript';
 import { resetShellStores } from '../test-support/shell-stores';
 import { builder } from './model/test-events';
 import { connectTranscript, ShellTranscript } from './shell';
-import { DEFAULT_ACTIONS } from './view/context';
+import { DEFAULT_ACTIONS } from './view/default-actions';
 import { registeredActions } from './view/registry';
 import { currentSet } from '../stores/layout-model';
 

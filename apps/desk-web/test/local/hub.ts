@@ -1,0 +1,67 @@
+// DC3's local hub, as the browser suites meet it: `pnpm --filter desk-hub local` (wrangler dev with the Worker, its
+// Durable Objects, and the web app's built assets, behind the stand-in for Access), started on a free port and stopped
+// with its whole process group. A request with no identity is the org's admin, owner@example.com, as the command's
+// default. Its state lives in apps/desk-hub/.wrangler and outlives a run, so each suite works under fresh project ids
+// and machine names.
+import { spawn, type ChildProcess } from 'node:child_process';
+import { createServer } from 'node:net';
+import { resolve } from 'node:path';
+
+const ROOT = resolve(import.meta.dirname, '../../../..');
+
+async function free(port: number): Promise<boolean> {
+  return new Promise((done) => {
+    const server = createServer();
+    server.once('error', () => done(false));
+    server.listen(port, '127.0.0.1', () => server.close(() => done(true)));
+  });
+}
+
+/** A port whose successor is also free (the command takes both). */
+async function freePair(): Promise<number> {
+  for (;;) {
+    const port = 20_000 + Math.floor(Math.random() * 20_000);
+    if ((await free(port)) && (await free(port + 1))) return port;
+  }
+}
+
+export class LocalHub {
+  private constructor(
+    readonly url: string,
+    private readonly child: ChildProcess,
+    private readonly output: string[],
+  ) {}
+
+  /** The hub's origin as `localhost` (WebAuthn admits `localhost` as a relying party; an IP address it refuses). */
+  get localhost(): string {
+    return this.url.replace('127.0.0.1', 'localhost');
+  }
+
+  static async start(): Promise<LocalHub> {
+    const port = await freePair();
+    const output: string[] = [];
+    const child = spawn('pnpm', ['--filter', 'desk-hub', 'local', '--port', String(port)], { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    for (const stream of [child.stdout!, child.stderr!]) stream.on('data', (chunk: Buffer) => output.push(chunk.toString()));
+    const hub = new LocalHub(`http://127.0.0.1:${port}`, child, output);
+    const deadline = Date.now() + 120_000;
+    for (;;) {
+      if (child.exitCode !== null) throw new Error(`the local hub exited (${child.exitCode}):\n${output.join('')}`);
+      const me = await fetch(`${hub.url}/api/me`).catch(() => null);
+      if (me?.status === 200) return hub;
+      if (Date.now() > deadline) {
+        await hub.stop();
+        throw new Error(`the local hub did not answer /api/me within 120 s:\n${output.join('')}`);
+      }
+      await new Promise((done) => setTimeout(done, 500));
+    }
+  }
+
+  async stop(): Promise<void> {
+    if (this.child.exitCode !== null || this.child.pid === undefined) return;
+    const exited = new Promise((done) => this.child.once('exit', done));
+    process.kill(-this.child.pid, 'SIGTERM');
+    const timeout = setTimeout(() => this.child.pid !== undefined && process.kill(-this.child.pid, 'SIGKILL'), 10_000);
+    await exited;
+    clearTimeout(timeout);
+  }
+}
