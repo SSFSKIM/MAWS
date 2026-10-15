@@ -45,7 +45,7 @@ A publish or read answer may carry two more fields:
 
 The user comments on an element of a slide. Each thread is pinned to that element by its id, so it follows the element when it moves, is restyled, or when you republish the slide with the id kept. `artifact_comments` lists the threads (`status: "open"` by default, orphaned ones included; `"resolved"` or `"all"`), each naming the element by `slideId` and `elementId`, quoting its text, and carrying its messages. An orphaned thread's element was deleted, and its quote is the element's last text.
 
-A comment the user sends you arrives as a message beginning `Comment on "<deck title>, slide <n>: <slide title>" (element "<the element's text>" on slide <n> of presentation <deck id>, thread <id>):`. Read the slide, make the change with `artifact_publish` when the comment asks for one, then answer in the thread with `artifact_reply`, where the user reads it. Resolve a thread with `artifact_resolve` only when the user asked you to or it is your own; the person who commented usually resolves it.
+A comment the user sends you arrives as a message beginning `Comment on "<deck title>, slide <n>: <slide title>" (element "<the element's text>" in presentation <deck id>, thread <id>):`. Read the slide, make the change with `artifact_publish` when the comment asks for one, then answer in the thread with `artifact_reply`, where the user reads it. Resolve a thread with `artifact_resolve` only when the user asked you to or it is your own; the person who commented usually resolves it.
 
 ## Working with a design system
 

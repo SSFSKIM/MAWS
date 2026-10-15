@@ -39,19 +39,15 @@ function leadParts(anchor: Anchor): string[] {
   }
 }
 
-// P3-C start (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, M7 fix wave 1; Decision Log 33, 35): what an
+// P3-C start (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, M7 fix wave 1; Decision Log 33, 35, 36): what an
 // artifact comment is on, by the commented artifact's kind (`artifactKind`; absent, a document's, as before). B's
-// document entry is its wording to the byte; a deck's names the element, the slide its label carries (the deck writes
-// "<title>, slide N: <slide title>" when the comment is made) and the presentation. A kind with no entry reads as a
-// document's.
+// document entry is its wording to the byte; a deck's names the element and the presentation, no slide number (the
+// lead is a function of the anchor alone and the anchor carries none: the architect's ruling, Decision Log 36). A kind
+// with no entry reads as a document's.
 type CommentLead = (anchor: Anchor) => string;
-const slideOfLabel = (label: string): string => {
-  const n = /, slide (\d+)(?::.*)?$/.exec(label)?.[1];
-  return n === undefined ? '' : ` on slide ${n}`;
-};
 const ARTIFACT_COMMENT_LEADS: { document: CommentLead } & Partial<Record<ArtifactKind, CommentLead>> = {
   document: (anchor) => `passage "${anchor.locator}"${anchor.artifactId !== undefined ? ` in document ${anchor.artifactId}` : ''}`,
-  presentation: (anchor) => `element "${anchor.locator}"${slideOfLabel(anchor.label)}${anchor.artifactId !== undefined ? ` of presentation ${anchor.artifactId}` : ''}`,
+  presentation: (anchor) => `element "${anchor.locator}"${anchor.artifactId !== undefined ? ` in presentation ${anchor.artifactId}` : ''}`,
 };
 // P3-C end
 
