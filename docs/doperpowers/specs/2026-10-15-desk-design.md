@@ -2428,11 +2428,15 @@ passed through as DX4 has it.
 
 **The session** (`sessions.ts`): `DeskSession` is what the log says of a
 session joined with what the session plane says now —
-`{project, session, alias, machine, cwd, worktree, member, ended: {by,
+`{project, session, alias, machine, cwd, worktree, member, seat, ended: {by,
 reason} | null, charge, status, state: {word, ts} | null, joinedAt, group:
 "waiting" | "working" | "idle" | "ended", presence: SessionPresence |
 null, machineOnline: boolean | null}`. `presence` is null until the hub
-sends one and while the machine is offline. Model, context use, and cost
+sends one and while the machine is offline. `seat` is the seat its latest
+`joined` names, empty for a session the human opened; with `presence` it
+gives the session's kind for §5's table: a live record with the bridge is
+bridged; without it, a non-empty `seat` is a `--bg` seat and an empty one a
+terminal session; a null record is not running. Model, context use, and cost
 are not on it: the model comes from the transcript, and context use and
 cost from the main subscription's `usage` (DX4), both DC6's. Inside an open project
 `useDeskSessions(connection)` and `useDeskSession(connection, id)` serve
@@ -2759,6 +2763,11 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DX8's `DeskSession` gains `seat` (DC5's M3, additive). §5's
+  table differs between a `--bg` seat and a terminal session, and presence
+  alone does not tell them apart without a bridge; the log's `joined`
+  event already names the seat. Flags DC6.
+  Date/Author: 2026-10-15, design session (DC5's M3).
 - Decision: Changing the org's wrapped keys needs proof of the key, not
   only an Access session (the wrapped-key contract's adversarial review,
   P1). The public `key_check` let a stolen admin session post a junk
