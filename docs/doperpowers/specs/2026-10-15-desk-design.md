@@ -1602,7 +1602,10 @@ round.
 **The session plane, up.** Every frame below needs the project opened on the current stream (`not-open` otherwise),
 and one the hub cannot read is refused `bad-shape` down the stream and recorded in the audit record, as an upload's is.
 - `rpc-result {project, nonce, outcome}`: `outcome` is DX6's `{state: "done", result: object}` or `{state: "failed",
-  error: {code, message, winner?, by?, terminalOnly?}}`. The hub answers every well-formed one with `rpc-ack {project, nonce}`, so the daemon stops
+  error: {code, message, winner?, by?, terminalOnly?}}`. The hub passes a failed outcome's `error` through unchanged
+  (live and from its record on a retry of the nonce), refusing `bad-shape` only a wrong type of those three (`winner`
+  not one of `web`, `terminal`, `other`; `by` not a string; `terminalOnly` not exactly `true`); fields beyond them are
+  kept as received. The hub answers every well-formed one with `rpc-ack {project, nonce}`, so the daemon stops
   republishing it; it applies the outcome only to an RPC it forwarded to this machine and that has no result yet
   (`forwarded` or `uncertain`), and a result for any other nonce (unknown, another machine's, already resolved) is
   acknowledged and changes nothing.
@@ -1830,7 +1833,7 @@ and `streaming` are that agent's own.
 | `end` | yes | `{reason: "unsubscribed" \| "machine-offline" \| "session-ended" \| "discontinuity" \| "error", message?}` |
 | `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
 | `machine` | no (`session` null) | `{online, policy: {read_only, ceiling}, checkouts: [{path, branch}]}`; `online` is the hub's, from the lease (a producer sends true) |
-| `raised` | no | `{request, session, tool, input, agentId?, truncated?, deadline?, async?, mac}`: `request` the call's tool-use id where the engine gives one (`toolu_…`; an ask-mod question's `toolu_plugin_…`), otherwise a synthetic `request-…`, opaque to every consumer, the DX6 digest included; `deadline` ISO 8601 UTC with milliseconds (the producer converts DX5's epoch milliseconds); `async: true` for the ask mod's async question, answered or withdrawn, never denied; `agentId` the subagent that asked (absent for the main thread), a non-empty string; `truncated: true` when the bridge capped the input it shows, and the DX6 digest is over that capped input on both sides. The code covers every field, and the hub keeps and relays them as received; another form of `agentId`, `truncated`, `deadline`, or `async` is refused `bad-shape` |
+| `raised` | no | `{request, session, tool, input, agentId?, truncated?, deadline?, async?, toolUseId?, mac}`: `request` the call's tool-use id where the engine gives one (`toolu_…`; an ask-mod question's `toolu_plugin_…`), otherwise a synthetic `request-…`, opaque to every consumer, the DX6 digest included; `toolUseId` the transcript's tool-use id of the call the request belongs to, a non-empty string of at most 512 characters (else `bad-shape`), present only where it differs from `request` (the ask mod's blocking question, whose `request` is the engine dialog it opens inside its own call, a call no transcript row names), so `toolUseId ?? request` is always the id a transcript row carries, or a synthetic id no row carries; `deadline` ISO 8601 UTC with milliseconds (the producer converts DX5's epoch milliseconds); `async: true` for the ask mod's async question, answered or withdrawn, never denied; `agentId` the subagent that asked (absent for the main thread), a non-empty string; `truncated: true` when the bridge capped the input it shows, and the DX6 digest is over that capped input on both sides. The code covers every field, and the hub keeps and relays them as received; another form of `agentId`, `truncated`, `deadline`, or `async` is refused `bad-shape` |
 | `settled` | no | `{request, winner: "web" \| "terminal" \| "other", outcome, by, mac}`; taken once per request: the hub removes the request and records its decision from the first, and a `settled` for a request it already settled (a daemon that restarted between sending and recording it) is accepted without a second broadcast or decision; the settled ids are in storage, kept a month, so this holds across an eviction |
 | `delivery` | no | `{event: {writer, seq}, session, outcome: "delivered" \| "recorded" \| "refused-read-only" \| "uncertain" \| "failed", reason, mac}`; a `recorded` for a closed terminal session can be followed by `delivered` for the same key after Resume; `uncertain` is a push whose frame was taken but never answered |
 | `compact` | no | `{rpc, phase: "start" \| "end", tokensBefore?, tokensAfter?, skip?, error?}`: a compaction's progress, from the bridge's DX5 `compact` events; `rpc` the nonce of the DX6 `compact` that asked for it, or null for one the session started itself; on `end`, `tokensBefore` and `tokensAfter` (null when the engine recorded none), or `skip` (a hook vetoed it), or `error` (the engine refused it) |
@@ -2195,7 +2198,7 @@ and M2 left them. Changed rows are marked **[M3]**; rows fix wave 1 changed are 
 
 | `type` / `phase` | Built | Fields |
 | --- | --- | --- |
-| `raised` | M3 **[M3]** (was reserved) | `request` (the call's tool-use id; `toolu_plugin_…` for the ask mod's dialog; `request-<base36>-<n>` for a call no check named), `tool`, `input` (strings capped, fw1), `agentId`, `deadline?` (epoch ms, only for a background subagent: raise + 3000), `async?: true` (an ask mod async question, tool `mcp__doperpowers__AskUserQuestion`), `truncated?`. DX4's pending request. Raised only when the settings hooks beneath did not decide. A person-only prompt raises nothing |
+| `raised` | M3 **[M3]** (was reserved) | `request` (the call's tool-use id; `toolu_plugin_…` for the ask mod's dialog; `request-<base36>-<n>` for a call no check named), `tool`, `input` (strings capped, fw1), `agentId`, `deadline?` (epoch ms, only for a background subagent: raise + 3000), `async?: true` (an ask mod async question, tool `mcp__doperpowers__AskUserQuestion`), `truncated?`, **`toolUseId?`** (added after DC2's close, by DC7: the outer `mcp__doperpowers__AskUserQuestion` call's tool-use id when `request` is the ask mod's dialog, whose own `tool/call` and `tool/result` are not posted either, since no transcript row holds them). DX4's pending request. Raised only when the settings hooks beneath did not decide. A person-only prompt raises nothing |
 | `settled` | M3 **[M3]** (was reserved), **[fw1]** | `request, winner, outcome, by`. `outcome` ∈ `allow \| deny \| answered \| withdrawn`. `winner` ∈ `terminal \| other \| web`. `by` is `terminal` when the terminal's answer was used, `cli` when the CLI's was (winner `other`), the member id when the web's was (winner `web`), and `bridge` for `withdrawn` (winner `other`). A passed deadline settles nothing: the request stays pending, answerable only in the terminal, until the terminal's answer settles it as `terminal` with its real outcome. Exactly one per `raised`. **[fw1] Evidence, all tied to the call's own id:** (1) the engine's `tool_decision` record for the call, which arrives at decision time: source `hook` with the bridge's handed-out decision of the same behavior means the decider; `user_temporary`, `user_permanent` or `user_reject` means the terminal, with the record's real outcome (accept is `allow`/`answered`, reject is `deny`); anything else (`user_abort`, `config`, a hook's decision the bridge did not hand out) means `withdrawn` by `bridge`. A request the bridge's interrupt aborted is `withdrawn` whatever the record says. (2) With no record within 1 s of a real call's result row, the call's transcript (its subagent's own for a subagent) once the result row is in it: a `hook_permission_decision` mark carrying the call's `toolUseID` means the hook's answer was used (then as (1) with source `hook`); none means the terminal's, with the outcome the result shows. (3) Neither available (the ask mod's dialog keeps no rows; the transcript unreadable or the result never written within about 2 s): `withdrawn` by `bridge`. A turn's end and the session's end withdraw as before. An async question answered through a dialog a press opened settles with that dialog's request: `answered` by its `by` (or `withdrawn` when the dialog's was) |
 | `block-row` | M3 **[M3]** | `uuid, turnId, agentId, step, index`: the transcript row `uuid` holds block `index` of that message. Posted from `session.append` for each response row, paired by the row's block type and the order of the step's block starts (a tool row by its call id), never by position. The child removes the block from `streaming` under the lock; later chunks of that block are ignored. A row whose block never streamed (a server tool) names none |
 | `chunk` | M1, **[M3]** | Unchanged on the wire. The child now folds each chunk into its **block** (`chunk.index`) |
@@ -2724,6 +2727,231 @@ directory is created empty when missing, since wrangler refuses a missing one.
 restartable over its stored state and the Worker's calls to the service-token API open to faults; DC4 and DC5 may
 copy that harness's shape.
 
+### The fake machine (owner DC3; built at M4; for DC5, DC6, and M5's measured run)
+
+An enrolled machine without a Mac. It speaks DX2 with the org key, as DC4's daemon and DC7's controls will, and
+replays recorded sessions under DX4. The web children can then build and test against the real protocol. It is
+a library, `desk-hub/fake-machine` (`apps/desk-hub/fake-machine/`), and a command. It runs in Node (fetch, WebCrypto,
+`node:fs` for recordings). A browser never imports it.
+
+**The recording.** A directory, one session:
+
+| file | what it holds |
+| --- | --- |
+| `transcript.jsonl` | the session's transcript rows, the lines carrying a `uuid`, verbatim |
+| `subagents/agent-<id>.jsonl`, `agent-<id>.meta.json` | each subagent's rows, and its `meta.json` verbatim |
+| `events.jsonl` | the bridge's own stream (DX5 `GET /events`, what `sminos watch --json` prints), each line with `_ms`, its arrival in ms |
+| `presence.jsonl` | `{_ms, record}` each time the session record's `status`, `waitingFor`, `needs` changed (optional) |
+| `log/*.jsonl` | the log events its machine wrote: `joined`, the bridge-exported `message`, … (optional) |
+| `deliveries.jsonl` | `{_ms, event: {writer, seq}, session, outcome, reason}`: DX4's `delivery` without its code, each time the daemon settled delivering an event under `log/`, named by its recorded position, to a session (optional) |
+| `diff.patch` | the working tree's diff against its base branch (optional) |
+| `recorded.json` | `{session, cwd, member}`: `member` is the placeholder that the recording's web answers name in `by` |
+
+Chunks come from the bridge when `events.jsonl` has them. A recording without `chunk` lines, or without the file,
+has them synthesized from its transcript, so the format admits both. In a synthesized recording:
+- each response row's block streams in 12-character chunks of DX5's shapes (`text`, `thinking`, `tool` then
+  `input`);
+- then come its `block-row` and the row, and the step's `step-end` after its last row;
+- the requests and `usage` in a partial `events.jsonl` are kept.
+
+`loadRecording(dir, {session?})` reads a recording into one timeline of steps. In a real recording each row is
+placed right after its notice (`block-row` or `row-seen`), and a row passed over is released with the next one, as
+DX5's consumer rule says. `session` renames the session everywhere, rows included, so two fake machines can replay
+one recording into one project.
+
+**The committed recording**, `recordings/two-subagents` (`TWO_SUBAGENTS`), is a real haiku session on Claude Code
+2.1.300 with DC2's bridge loaded. `fake-machine/record.py` recorded it in isolation:
+- a temporary HOME, `CLAUDE_CONFIG_DIR`, and `SMINOS_HOME`;
+- a copy of doperpowers' plugin loaded with `--plugin-dir`;
+- a tmux server of its own, and no `--bg` job.
+
+The session does the following:
+- it starts two subagents, which ran in the background;
+- it writes `recorded.txt` through Bash after a permission prompt, allowed from the web;
+- it asks with AskUserQuestion (the ask mod's `toolu_plugin_…` request), answered `blue` from the web;
+- it sends a `<message>` (a `message` log event);
+- in a second prompt, its turn is interrupted mid-response, so a step ends aborted.
+
+Both settlements are `winner: "web"` with `by` the placeholder `000…0`.
+
+Two parts of the recording are synthesized, as `recorded.json`'s `synthesized` says, because no outside-origin
+event reached the recorded session:
+- a peer session on the same machine (`log/SK.local.5e0c1f2a-….jsonl`), which joins and then says two things to the
+  recorded session;
+- `deliveries.jsonl`, holding the outcomes of delivering those two says: `delivered`, then `uncertain`.
+
+The stream holds 256 chunks, 14
+`block-row`s, 48 `row-seen`s, nine steps, and three `usage` events. The transcript is every line with a `uuid`,
+verbatim, except that each `prompt_snapshot` attachment is cut to its first 200 characters. That attachment holds the
+engine's whole system prompt and tool definitions, over 100 KB of the engine's own text. To record another session:
+
+    apps/desk-hub/fake-machine/record.py --doperpowers <checkout with DC2's bridge> --out <dir>   # gateway keys in the environment
+
+**The library.**
+
+```ts
+import { FakeMachine, loadRecording, TWO_SUBAGENTS, emptyMemory } from 'desk-hub/fake-machine';
+
+// The web app's own enrollment code (what the owner pastes at `sminos hub enroll`):
+const { hub, machine, credentials, orgKey } = await FakeMachine.redeem(code);
+// or, in DC3's suites, a service token from `enroll(hub, ADMIN, name)` and any 32-byte key.
+const fm = new FakeMachine({
+  hub, machine, credentials, orgKey,
+  project: '<.smns project id>', projectName: 'demo',
+  recordings: [loadRecording(TWO_SUBAGENTS)],
+  member: '<the member id the recording's web answers should name>',
+});
+await fm.connect();                  // hello, its events the hub lacks, pending, unacked results, presence
+await fm.play({ speed: 0 });         // 1 = the recorded pace; `until: (step, session) => boolean` pauses after a step
+```
+
+`FakeMachineOptions`:
+
+| option | meaning |
+| --- | --- |
+| `hub`, `machine`, `credentials`, `orgKey` | where it connects, its enrolled name, its service token, and the org key (32 bytes or an imported `OrgKey`) |
+| `project`, `projectName?` | the one project it opens; the name registers the project at its first `hello` |
+| `recordings?` | one session each |
+| `member?` | replaces the recording's placeholder in a recorded settlement's `by` |
+| `memory?`, `onMemory?` | what outlives a run, for a restart (below) |
+| `decisions?` | `recorded` (default): a recorded settlement settles as recorded. `wait`: the replay holds at it until the web answers (an RPC) or `answerInTerminal` does. A request the web answered first is settled by the web either way, and its recorded settlement passed over |
+| `readOnly?`, `ceiling?`, `checkouts?` | its policy and the `machine` presence it reports. `checkouts` defaults to each recording's `cwd` on `main`. Read-only refuses every RPC `read-only` and delivers nothing from outside (`refused-read-only`) |
+| `bridge?` | `false`: its sessions have no bridge. Presence says so. Rows alone stream (no `chunk`, `block-row`, `step-end`, or `usage`). A steer answers `{row: null}`. Interrupt, decide, answer, model, and compact fail `unsupported` |
+| `retime?` | log events take `ts` when first written (default), so a `message` pushes as a fresh one would; `false` keeps the recorded times |
+| `snapshot?` | `(session, sub, agentId) => SnapshotOptions`: per-subscription race hooks (below) |
+| `script?` | `{[rpc]: (rpc, machine) => outcome \| undefined}`: answers an RPC in place of the default effect (undefined falls through) |
+| `delivery?` | `(event, session) => {outcome, reason}`: the DX4 outcome of delivering an outside event (default `delivered`) |
+| `reconnect?` | reconnects with backoff (0.5 s, doubling to 10 s) whenever the stream ends, as a daemon does. The command sets it; suites drop and reconnect when they choose |
+
+What it does, as DX2 and DX4 have it:
+- **The log plane.** Each recorded log event is written under the fake machine's own writer (`<machine>/<feed>`,
+  its `machine` field renamed). It is sealed with a nonce derived from the event (DX1), uploaded when the replay
+  reaches it, and written once (`memory.written`). After every (re)connect it sends the following:
+  - `hello` with its vector;
+  - its own events beyond the hub's `have`, and what a `resend` asks for;
+  - `pending` with its complete set;
+  - every `rpc-result` the hub has not acknowledged;
+  - the DX4 `machine` presence and each session's `presence`.
+
+  Events the hub sends are imported as a daemon does. Each is verified. A bad code, a seen nonce, or a different
+  payload at a held position is refused and reported up as `rejected` (`bad-code`, `seen-nonce`, `conflict`), and
+  the position is spent: the vector moves past it. A newly imported `human` or `say` from outside, addressed to one
+  of its sessions or to `*`, gets one sealed `delivery` per recipient. When the outcome is `delivered`, the text also
+  appears in the session's transcript as a user row. A recorded delivery outcome (`deliveries.jsonl`) is sealed and
+  published when the replay reaches it. It names the event as this machine rewrote it (its writer and the seq it
+  took), so it lines up with the browser's log and its `deliveries` on reconnect.
+
+  Writes to its own feeds run one at a time, whoever asks: the replay, an RPC's effect, or `write`. Each takes the
+  next seq, and the write-once check is part of the same step.
+- **Requests.** A recorded `raised` is sealed and published (`deadline`, when present, is re-timed to 3 s from now).
+  A recorded `settled` is sealed and published, following `decisions` above. A `decide` or `answer` RPC that does
+  not fit the pending request it names is malformed: it fails `bad-shape` before any claim (composite `dd908dfa`),
+  with the bridge's own words:
+  - a deny on an async question: "an async question waits for an answer; it cannot be denied";
+  - an `answer` to a permission prompt: "a permission is allowed or denied as asked: updatedInput carries a
+    question's answers only";
+  - an allow on a question: "a question is allowed with its answers: updatedInput.answers, keyed by the question";
+  - answers not keyed by exactly the request's questions.
+
+  A native question can still be denied. A claimed `decide` or `answer` is then checked against the pending
+  request, in this order:
+  - a digest other than `{session, request, tool, input_sha256}` of the `raised` as published fails
+    `digest-mismatch`;
+  - a request no longer pending fails `not-pending`, with the settlement's `winner` and `by` (item 1);
+  - a decision inside the last 200 ms of a deadline fails `not-pending` with `terminalOnly: true`;
+  - otherwise it answers `done {}` and settles `winner: "web"` with `by` the RPC's member, the outcome `allow`,
+    `deny`, or `answered`.
+
+  `answerInTerminal(request, outcome?)` settles one as the terminal's.
+- **Subscriptions** follow DX4's producer rules (`fake-machine/session.ts`):
+  - subscribe before snapshot: the bridge's state and the subscriber joining the stream are taken in one step, the
+    rows are read up to the cut taken with them, and what arrived meanwhile follows the snapshot. Rows the snapshot
+    holds (by uuid) are dropped, and so are chunks at or below their message's `upTo`;
+  - the message-level `upTo` is the watermark;
+  - a block leaves the snapshot state at its `block-row`, and its whole message at its step's end, aborted or not;
+  - `step-end` follows every `block-row` of its step, and a step still open at its turn's end gets one then;
+  - a main-scope subscription carries every agent's chunks, `block-row`s, and `step-end`s, the subagent tree, and
+    `usage`, and its own transcript's rows. A subagent's `block-row` there settles at once, since that subscription
+    never carries the subagent's rows. An agent-scope subscription carries that agent's alone;
+  - `usage` is the bridge's, after each main turn, on main-scope subscriptions, and in their snapshot;
+  - a snapshot carries rows newest first up to `SNAPSHOT_ROW_BUDGET` (256 KiB of JSON, or `budget`). Older rows come
+    as `rows` pages, and `diff` answers with the recording's `diff.patch` on a main-scope subscription;
+  - `end`:
+    - `unsubscribed` when the hub says `unsubscribe`;
+    - `session-ended` at `n` 0 for a session it does not hold;
+    - `error` at `n` 0 for a subagent it does not hold yet. A browser subscribes to an agent once the tree shows it;
+    - at `n` 0 for the next subscribe after `refuseNextSubscribe(reason, message?)`, as for a bridge not ready yet;
+    - `discontinuity` at the next `n` for every open subscription after `discontinuity(session?)`, as the end of
+      the bridge's own subscription, or a gap in it, does.
+- **RPCs** go through a ledger of its own, in DX6's order:
+  - the project, then the code (`bad-code`), the machine (`wrong-machine`), the arguments' shape (`bad-shape`, for
+    a field missing or of the wrong type), and the session (`no-session`, for the session RPCs). Nothing is claimed
+    for a refusal here;
+  - the ledger: a nonce it knows is answered from it and never run again;
+  - freshness (`stale` past 60 s), then read-only, then a decision or an answer that does not fit its request
+    (`bad-shape`, above);
+  - the claim (`memory.ledger[nonce]`, outcome null) before any effect;
+  - the effect, complete with its trace (`memory.trace[nonce]`: the result, and for a steer its row). This covers a
+    decision's settlement and a spawn's or a retire's log event. An effect or a script that throws ends as
+    `failed: failed`, its message the error's;
+  - the outcome recorded before the result goes out, and republished until `rpc-ack`. Only progress notices follow
+    the result: a compaction's `compact` events.
+
+  A claim left without an outcome is answered from its trace. Without one, which happens only for a scripted RPC, it
+  is answered `failed: interrupted`. The default effects:
+  - `steer`: appends a user row to the running main turn and answers its uuid (`idle` with no main turn);
+  - `interrupt`: answers `{turnId: <the main turn running, or null>, stopped: [], running: []}`;
+  - `model`: answers what is now in force for that session, `"default"` giving null;
+  - `compact`: answers `{at: "now"}` with the compaction's `start` and `end` at once, or `{at: "turn-end"}` with them
+    at the main turn's end. `rpc` names the RPC's nonce, and the counts are the last `usage`'s tokens and a fifth of
+    them;
+  - `spawn`: a new empty session, its `joined` (`role` the brief, `by` the member), and its presence. A checkout
+    that is not one of `checkouts` fails `unknown-checkout`;
+  - `retire`: `retired` with `by`, and presence null;
+  - `resume`: `session-live` while the session's presence is live, else presence idle again.
+- **Faults on command:**
+  - `drop()` and `reconnect()` end the stream, as a daemon losing its network does; the hub ends its subscriptions
+    and marks forwarded RPCs `uncertain`;
+  - `answerHeartbeats = false` is a suspended daemon, whose lease lapses within 45 s;
+  - `crashAfterEffect(match?)`: the next RPC it admits stops the machine after its effect (the request settled,
+    the log event written) and before its outcome is recorded. A `FakeMachine` constructed with the same `memory` (and `fm.credentials`) then answers a retry of the
+    nonce from the trace, without running it again;
+  - `raceNextSnapshot({advance?, overlap?})`: while the next subscription's snapshot is built, `advance` more steps
+    of the replay are applied, and they reach the subscriber after the snapshot. With `overlap`, the live part is
+    also handed what the snapshot already holds, as a transcript tail that started before the read would hand it:
+    its newest row, and each streaming message's last chunk. The row ids and the watermark must drop them. A
+    `snapshot` option gives the same hooks per subscription (`duringSnapshot`, `overlap`, `budget`).
+- **For a test to read:**
+  - `frames` (every frame down), `refusals` (the hub's `refused`), `rejected` (what it refused on import);
+  - `rpcs` (`{nonce, rpc, outcome, executed}` each: `executed` says this instance ran the effect);
+  - `postErrors` (also any replay step that failed), `sessions` (each `SessionDepth`: its `rows` by transcript, `presence`, `mainTurn`);
+  - `pendingRequests()`, `vector()`, `memory`, `isCrashed`, `next` (the next step), and `played`.
+
+  `step(n)` applies the next `n` steps whatever their times. `write(src, writer, fields)` appends an event of
+  one's own to one of its feeds, written once per `src`.
+
+**The command**, from the MAWS worktree root (no `--`: pnpm passes the arguments through). It bundles itself with
+esbuild, since Node's type stripping cannot load the protocol module's extensionless imports.
+
+    pnpm --filter desk-hub fake-machine enroll --state <file>      # the code on stdin, never an argument (it carries the org key)
+    pnpm --filter desk-hub fake-machine run --state <file> --project <uuid> [--name <n>] [--recording <dir>]… \
+        [--session <uuid>|new] [--speed <x>] [--loop] [--decisions recorded|wait] [--member <id>] [--read-only] [--keep-times]
+
+`enroll` redeems the code at the hub it names. It keeps the hub, the machine's service token, the org key, and the
+memory in the state file (0600). `run` replays and then stays connected, serving subscriptions and answering RPCs,
+until Ctrl-C. It reconnects by itself and keeps its ledger in the state file, so a run after a crash answers a
+retried nonce from it. `--loop` replays again as a fresh session each round. Against the local hub, the web app's
+"Enroll a machine" gives the code. Against M5's deployment, the same code works.
+
+**What it does not do:**
+- Interrupt answers with the running turn, but the replay goes on as recorded. The recording's own last turn is a
+  real interrupted one.
+- A decision from the web settles the request as the web's, but the transcript stays the recorded one. A deny still
+  shows the recorded tool result.
+- After a restart, a steer's trace row is put back at the head of the session's transcript, not where it ran.
+- It opens one project, writes no `legacy/` feed, and is never an archive machine.
+- `usage` comes from the recording alone.
+
 ### DX8 — The web shell's slots (owner DC5; G1)
 
 Folded from DC5's plan (MAWS `66eabe92`,
@@ -2753,7 +2981,7 @@ from `App.tsx`.
 transcript through the to-human Presenter, and each fold hands it
 `range: {from, to}`: each end is the `src` of the exchange item bounding the
 fold — a `<message>` span's `<transcript row uuid>#<span index>`, or a
-question's call id — or null for an open end (the first fold's `from`; a live
+question's call id (a raised question's `toolUseId ?? request`, DX4) — or null for an open end (the first fold's `from`; a live
 session's last fold, after its last item, has `to` null). The slot draws only
 what lies strictly between, at span granularity: a bounding message's marked
 span is excluded, and unmarked text in the same row is drawn. The shell passes
@@ -3126,6 +3354,48 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A raised request names the transcript call it belongs to
+  (`toolUseId`, DX4 and DX5), where that differs from `request`. The ask
+  mod's blocking question, the way every interactive session asks, is
+  raised by the bridge under the id of the engine dialog the mod opens
+  inside its own `mcp__doperpowers__AskUserQuestion` call; no transcript
+  row carries that id, so the web could neither bound a working-record
+  fold by the question nor tie its card to its row (DC6's M3, from DC3's
+  real recording: `toolu_plugin_…` raised, `toolu_01…` in the
+  transcript). The bridge already pairs the two, since the raised input
+  is the outer call's; it now says so, and stops posting the dialog's own
+  `tool/call` and `tool/result`, which name a call no row holds.
+  `request` stays the id a decision answers. Rejected: raising under the
+  outer call's id and translating inside the bridge, which changes what
+  every settlement names; and matching by timing or question text in the
+  browser. Flags DC3 (the hub keeps and relays `toolUseId`), DC5 (bounds
+  and cards use `toolUseId ?? request`), DC6, DC7 (the bridge and the
+  relay).
+  Date/Author: 2026-10-15, design session (DC6's M3).
+- Decision: The real org is `ssfskim` (display name `SSFSKIM`), and its
+  admin, the one email Access allows, is supremekim17@gmail.com (owner,
+  2026-10-15). The id is written into every hub project's `.smns` and
+  every machine's service-token name, so it is fixed once a machine
+  enrolls. The hub is deployed at
+  `desk-hub.opencognita-platform.workers.dev` behind Access (team
+  `flat-wave-208c`); M5's proofs run under a throwaway org on the same
+  deployment, and the deployment is left with the real org and nothing
+  enrolled, so the owner sets the org key first. Rejected: `opencognita`,
+  after the Cloudflare account's subdomain. Flags DC3 (M5).
+  Date/Author: 2026-10-15, owner.
+- Decision: DC3's fake machine folded as its own Interfaces section
+  (MAWS `.doperpowers/sde/2026-10-15-desk-dc3-hub/
+  interfaces-M4-reviewed-c100ed17.md`, M4 reviewed clean and ticked at
+  `3b7c4315`), with DX2's `rpc-result` pass-through of a late decision's
+  fields (item 3; items 1 and 2 were folded at `bb8b8773` and
+  `21c32db7`). The recording is a real throwaway session through DC2's
+  bridge, with a synthesized peer session and two delivery outcomes,
+  since the real one had no outside-origin event. A decision's `settled`
+  reaches the browser before the RPC's `done`, and a spawn's `joined`, a
+  retire's `retired` and the presence change before their results.
+  Rejected: keeping the fake's API only in DC3's working files, which
+  DC5 and DC6 test against and recomposition must read. Flags DC5, DC6.
+  Date/Author: 2026-10-15, design session (DC3's M4).
 - Decision: A decision that does not fit its request is `bad-shape`,
   refused by the daemon before the claim (DC3's M4 fake machine, DC7's
   M3). The daemon's digest check already reads the pending request from

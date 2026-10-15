@@ -419,6 +419,33 @@ describe('the pending set, decisions, and deliveries', () => {
     await m.close();
   });
 
+  it("a raise naming its transcript call's toolUseId is kept, relayed, and republished with it intact, its code verifying", async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    // The ask mod's blocking question: raised under the dialog's id, its transcript call another.
+    const request = await raised(project, 'toolu_plugin_ask_1', { tool: 'AskUserQuestion', toolUseId: 'toolu_01YLTbS83Smb5RvQKJwQtK2S' });
+    expect(await verify(await KEY, 'raised', project, request)).toBe(true);
+    expect(await verify(await KEY, 'raised', project, { ...request, toolUseId: 'toolu_01other' })).toBe(false);
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', request) }]);
+    await waitFor(() => (lastPending(b)?.length === 1 ? true : undefined));
+    expect(lastPending(b)).toEqual([{ machine: m.name, raised: request, terminal_only: false }]);
+    expect(sessionKinds(b).find((x) => x.kind === 'raised')?.body).toEqual(request);
+    // Republished after a reconnect, and handed to a browser that connects later, it still carries the id.
+    await m.postOk([{ t: 'pending', project, raised: [request] }]);
+    const later = await browser(project);
+    expect(((await later.next((f) => f.t === 'pending', 'pending')) as Extract<ProjectDown, { t: 'pending' }>).requests).toEqual([{ machine: m.name, raised: request, terminal_only: false }]);
+    // An id in another form is refused.
+    for (const bad of [{ toolUseId: 7 }, { toolUseId: '' }]) {
+      const from = b.frames.length;
+      await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', { ...(await raised(project, `toolu_bad_${JSON.stringify(bad)}`)), ...bad }) }]);
+      expect(await b.next((f) => f.t === 'refused', JSON.stringify(bad), from)).toMatchObject({ refusal: { reason: 'bad-shape' } });
+    }
+    later.close();
+    b.close();
+    await m.close();
+  });
+
   it('a delivery recorded for a closed terminal session turns delivered after Resume; uncertain is kept as an outcome', async () => {
     const project = newProject();
     const m = await machine(project);
