@@ -6,6 +6,9 @@
 //                                        each line with `_ms`, its arrival in ms from the recording's start
 //   presence.jsonl                       optional: `{_ms, record}` each time the session record's status changed
 //   log/*.jsonl                          optional: the project's log events the session's machine wrote
+//   deliveries.jsonl                     optional: `{_ms, event: {writer, seq}, session, outcome, reason}` each time the
+//                                        machine's daemon settled delivering a log event (one under log/, named by its
+//                                        recorded position) to a session: DX4's `delivery` without its code
 //   diff.patch                           optional: the working tree's diff against its base branch
 //   recorded.json                        `{session, cwd, member}`: the session id, its working directory, and the member
 //                                        placeholder the recording's web answers name in `by`
@@ -17,7 +20,7 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { JsonObject } from '../src/protocol/json';
-import type { BlockRow, Raised, Settled, StepEnd, Usage } from '../src/protocol/session';
+import type { BlockRow, Delivery, Raised, Settled, StepEnd, Usage } from '../src/protocol/session';
 
 export type Row = JsonObject & { uuid: string };
 
@@ -39,6 +42,8 @@ export type Step = { at: number } & (
   | { k: 'settled'; draft: Omit<Settled, 'mac'> }
   /** A log event the session's machine wrote, as recorded (its writer and machine are the recording's). */
   | { k: 'log'; id: string; event: JsonObject }
+  /** The outcome of delivering the log event `log` (a `log` step's id) to `session`. */
+  | { k: 'delivery'; log: string; session: string; outcome: Delivery['outcome']; reason: string }
 );
 
 export type Recording = {
@@ -94,11 +99,21 @@ export function loadRecording(dir: string, options: LoadOptions = {}): Recording
   const clock = clockOf(events);
   let logIndex = 0;
   const logDir = join(dir, 'log');
+  const logAt = new Map<string, { id: string; at: number }>();
   for (const file of existsSync(logDir) ? readdirSync(logDir).sort() : []) {
     for (const event of lines(join(logDir, file))) {
       const ts = Date.parse(String(event.ts));
-      steps.push({ at: clock === null ? 0 : Math.max(0, ts - clock), k: 'log', id: `${basename(file)}:${logIndex++}`, event });
+      const step: Step = { at: clock === null ? 0 : Math.max(0, ts - clock), k: 'log', id: `${basename(file)}:${logIndex++}`, event };
+      logAt.set(`${String(event.writer)}#${String(event.seq)}`, { id: step.id, at: step.at });
+      steps.push(step);
     }
+  }
+  for (const d of lines(join(dir, 'deliveries.jsonl'))) {
+    const event = d.event as { writer?: unknown; seq?: unknown } | undefined;
+    const target = logAt.get(`${String(event?.writer)}#${String(event?.seq)}`);
+    if (!target) throw new Error(`${dir}: a delivery names ${JSON.stringify(event)}, which is not an event under log/`);
+    // Never before the event it delivers, whatever the clocks say.
+    steps.push({ at: Math.max(Number(d._ms ?? 0), target.at), k: 'delivery', log: target.id, session: String(d.session), outcome: d.outcome as Delivery['outcome'], reason: String(d.reason ?? '') });
   }
   // A stable sort keeps each source's own order among steps at the same time.
   steps.sort((a, b) => a.at - b.at);

@@ -4,7 +4,8 @@
 // acknowledged, and its mirror of each project's log. A plain JSON object, so a test hands the same one to the machine
 // that comes back after a crash, and the command keeps it in a file.
 import type { LogEvent } from '../src/protocol/log';
-import type { RpcOutcome } from '../src/protocol/rpc';
+import type { JsonObject } from '../src/protocol/json';
+import type { RpcName, RpcOutcome } from '../src/protocol/rpc';
 
 /** A ledger entry: `claimed` before the RPC had any effect, then its outcome before the result went out. */
 export type LedgerEntry = { rpc: string; session: string | null; claimed: number; outcome: RpcOutcome | null };
@@ -12,10 +13,12 @@ export type LedgerEntry = { rpc: string; session: string | null; claimed: number
 export type Memory = {
   ledger: Record<string, LedgerEntry>;
   /**
-   * What an effect left behind, by nonce, the way a real one leaves a trace: a steer's row is in the transcript, a
-   * spawned seat carries the nonce that started it. Written in the same step as the effect.
+   * What each effect left behind, by nonce, written in the step that made it, the way a real one leaves a trace (a
+   * steer's row is in the transcript, a spawned seat carries the nonce that started it): the RPC's result, and for a
+   * steer its row (put back in the transcript by the machine that comes back). A claim found without an outcome is
+   * answered from its trace, or `failed: interrupted` when it has none.
    */
-  trace: Record<string, { rpc: 'steer'; session: string; row: Record<string, unknown> } | { rpc: 'spawn'; session: string; alias: string }>;
+  trace: Record<string, { rpc: RpcName; session: string | null; result: JsonObject; row?: JsonObject }>;
   /** Results sent and not yet acknowledged with `rpc-ack`, republished after every reconnect. */
   unacked: Record<string, { project: string; outcome: RpcOutcome }>;
   /** Each project's log as this machine holds it: its own writers' events and every other it imported. */

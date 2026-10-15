@@ -36,7 +36,10 @@ function depthOf(recording: Recording) {
     await depth.subscribe(sub, agentId, options);
     return r;
   };
-  return { depth, play, reader, sent, steps: recording.steps, step: () => depth.apply(recording.steps[cursor++]) };
+  const stepTo = (index: number) => {
+    while (cursor < index) depth.apply(recording.steps[cursor++]);
+  };
+  return { depth, play, reader, sent, steps: recording.steps, step: () => depth.apply(recording.steps[cursor++]), stepTo };
 }
 
 const recording = loadRecording(TWO_SUBAGENTS);
@@ -115,6 +118,55 @@ describe('a subscription to the replay', () => {
     }
   });
 
+  it('taken while a subagent streams, with the replay racing its snapshot, ends with no gap and no duplicated text in that agent’s scope', async () => {
+    const agent = agents[1];
+    const agentChunks = recording.steps.flatMap((s, i) => (s.k === 'chunk' && s.agentId === agent && s.chunk.kind !== 'stop' ? [i] : []));
+    expect(agentChunks.length).toBeGreaterThan(1);
+    for (const at of agentChunks.slice(1)) {
+      const t = depthOf(recording);
+      t.play((s) => s.k === 'agent' && s.agentId === agent);
+      const reference = await t.reader('ref', agent);
+      t.stepTo(at);
+      const late = await t.reader('late', agent, { overlap: true, duringSnapshot: async () => void t.step() });
+      const snapshot = t.sent.find((m) => m.sub === 'late' && m.kind === 'snapshot');
+      expect(snapshot?.kind === 'snapshot' && snapshot.body.streaming.map((m) => m.agentId)).toEqual([agent]);
+      t.play();
+      expect(late.faults).toEqual([]);
+      expect(late.uuids).toEqual(reference.uuids);
+      for (const [id, text] of late.assembled) expect(text, id).toBe(reference.assembled.get(id));
+    }
+  });
+
+  it('drops an aborted block that never got a block-row at its step’s end, from the reader and from every later snapshot', async () => {
+    const turnId = 't-aborted';
+    const aborted: Recording = {
+      ...recording,
+      rows: { main: [], agents: {} },
+      steps: [
+        { at: 0, k: 'turn-start', turnId, agentId: null },
+        { at: 1, k: 'step-start', turnId, agentId: null, step: 0 },
+        { at: 2, k: 'chunk', turnId, agentId: null, step: 0, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: 'Hel' } },
+        { at: 3, k: 'chunk', turnId, agentId: null, step: 0, chunkIndex: 1, chunk: { kind: 'text', index: 0, text: 'lo' } },
+        { at: 4, k: 'step-end', body: { turnId, agentId: null, step: 0 } },
+        { at: 5, k: 'turn-end', turnId, agentId: null, reason: 'aborted' },
+      ],
+    };
+    const t = depthOf(aborted);
+    t.step();
+    t.step();
+    t.step();
+    const during = await t.reader('during', null);
+    expect([...during.partial.values()].map((b) => b.text)).toEqual(['Hel']);
+    t.play();
+    expect(during.partial.size).toBe(0);
+    expect(during.assembled.get(`${turnId}//0#0`)).toBe('Hello');
+    const after = await t.reader('after', null);
+    const snapshot = t.sent.find((m) => m.sub === 'after' && m.kind === 'snapshot');
+    expect(snapshot?.kind === 'snapshot' && snapshot.body.streaming).toEqual([]);
+    expect(during.faults).toEqual([]);
+    expect(after.faults).toEqual([]);
+  });
+
   it('drops a block from the snapshot at its block-row, and its whole message at its step’s end, aborted or not', async () => {
     const t = depthOf(recording);
     // The interrupted turn: stop right after its first text chunk, take a snapshot that shows it streaming.
@@ -158,6 +210,23 @@ describe('a subscription to the replay', () => {
     expect(r.ended).toEqual({ reason: 'discontinuity', n: 2 });
     const none = await t.reader('none', 'a-missing-agent');
     expect(none.ended).toEqual({ reason: 'error', n: 0 });
+  });
+});
+
+describe('the reader the suites check the stream with', () => {
+  it('keeps a paired block drawn past its step’s end until the row its block-row named arrives', () => {
+    const r = new Dx4Reader(null);
+    const env = { project: where.project, machine: where.machine, session: 's', sub: 'x' } as const;
+    const m = { turnId: 't', agentId: null, step: 0 };
+    r.read({ ...env, kind: 'snapshot', n: 0, body: { rows: [], more: false, subagents: [], presence: { record: null, bridge: true }, streaming: [] } });
+    r.read({ ...env, kind: 'chunk', n: 1, body: { ...m, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: 'Hi' } } });
+    r.read({ ...env, kind: 'chunk', n: 2, body: { ...m, chunkIndex: 1, chunk: { kind: 'text', index: 1, text: 'cut' } } });
+    r.read({ ...env, kind: 'block-row', n: 3, body: { ...m, uuid: 'u0', index: 0 } });
+    r.read({ ...env, kind: 'step-end', n: 4, body: m });
+    expect([...r.partial.keys()]).toEqual(['t//0#0']); // the unpaired block 1 is dropped; block 0 waits for its row
+    r.read({ ...env, kind: 'row', n: 5, body: { row: { uuid: 'u0', type: 'assistant' }, agentId: null } });
+    expect(r.partial.size).toBe(0);
+    expect(r.faults).toEqual([]);
   });
 });
 
