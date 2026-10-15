@@ -202,9 +202,10 @@ describe('subscriptions', () => {
     const snapshot = envelope(m, project, 'snapshot', { rows: [], more: false, subagents: [], presence: presence('busy'), streaming: [], usage: null }, SESSION, sub, 0);
     const row = envelope(m, project, 'row', { row: { uuid: 'r1', type: 'assistant' }, agentId: null }, SESSION, sub, 1);
     const blockRow = envelope(m, project, 'block-row', { uuid: 'r2', turnId: 't', agentId: null, step: 0, index: 0 }, SESSION, sub, 2);
-    await m.postOk([{ t: 'session', message: snapshot }, { t: 'session', message: row }, { t: 'session', message: blockRow }]);
-    await b.next((f) => f.t === 'session' && f.message.kind === 'block-row', 'block-row');
-    expect(sessionKinds(b).filter((x) => x.sub === sub)).toEqual([snapshot, row, blockRow]);
+    const stepEnd = envelope(m, project, 'step-end', { turnId: 't', agentId: null, step: 0 }, SESSION, sub, 3);
+    await m.postOk([{ t: 'session', message: snapshot }, { t: 'session', message: row }, { t: 'session', message: blockRow }, { t: 'session', message: stepEnd }]);
+    await b.next((f) => f.t === 'session' && f.message.kind === 'step-end', 'step-end');
+    expect(sessionKinds(b).filter((x) => x.sub === sub)).toEqual([snapshot, row, blockRow, stepEnd]);
     expect(sessionKinds(other).filter((x) => x.sub === sub)).toEqual([]);
 
     b.send({ t: 'rows', sub, before: 'r1', limit: 20 });
