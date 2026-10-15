@@ -1,11 +1,11 @@
 // X10, the anchor (P1 spec §10 X10; E3 execution document, Interfaces "X10" and Design §2): what a message is about.
-// One shape for every producer: E5's file line, E6's PR line, E4's browser element, E2's artifact element, and `none`
-// for an anchorless comment (a `/btw` exchange promoted to a side thread). The field caps are the security caps of
+// One shape for every producer: E5's file line, E6's PR line, E4's browser element, E2's artifact element, P3-B's
+// document comment, and `none` for an anchorless comment (a `/btw` exchange promoted to a side thread). The field caps are the security caps of
 // Design §9, so the renderer and main validate with the one schema; `screenshot` is a MAWS-private file main reads
 // (never written into the text the agent receives).
 import * as z from 'zod';
 
-export const ANCHOR_KINDS = ['browser-element', 'artifact-element', 'file-line', 'pr-line', 'none'] as const;
+export const ANCHOR_KINDS = ['browser-element', 'artifact-element', 'file-line', 'pr-line', 'none', 'artifact-comment' /* P3-B */] as const;
 export type AnchorKind = (typeof ANCHOR_KINDS)[number];
 
 // `path` carries the anchor's path cap: it is the one path main opens (E3 M1's review)
@@ -66,6 +66,12 @@ export const AnchorSchema = z.strictObject({
   a11y: z.string().max(2000).regex(ONE_LINE).optional(), // the role-and-name path, a human label
   box: AnchorBoxSchema.optional(),
   // E4d end
+  // P3-B start: artifact-comment (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9; the P3 ledger's X26 row, the
+  // X10 amendment): a comment on a document's passage, its thread kept in the document; `locator` the quoted passage,
+  // `label` the document's title and tab
+  artifactId: z.string().min(1).max(200).regex(ONE_LINE).optional(),
+  threadId: z.string().min(1).max(200).regex(ONE_LINE).optional(),
+  // P3-B end
 });
 export type Anchor = z.infer<typeof AnchorSchema>;
 export type FileLineAnchor = Anchor & { kind: 'file-line'; path: string; line: number }; // E5's shape, now the union's member

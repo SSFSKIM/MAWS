@@ -53,6 +53,7 @@ import {
   newSuggestionDoc,
   newStructClients,
   onUpdate,
+  overlayMap,
   stateV2,
   stateVector,
   transact,
@@ -220,7 +221,10 @@ export class DocumentService {
     this.now = options.now ?? Date.now;
     this.log = options.log ?? ((line) => console.warn(`[documents] ${line}`));
     this.defer = options.defer ?? ((run) => setImmediate(run));
-    this.kindOf = options.kindOf ?? (() => null);
+    // P3-B (parent Decision Log 57): a suggestion doc is its artifact's kind, so the kind's hooks run on it; only the
+    // artifact has an entity row. The doc keeps its own key (`hostDoc.id`, the hooks' `artifactId`).
+    const kindOf = options.kindOf ?? (() => null);
+    this.kindOf = (key) => kindOf(mainOf(key) ?? key);
     this.headTailRows = options.headTailRows ?? HEAD_TAIL_ROWS;
     this.headTailBytes = options.headTailBytes ?? HEAD_TAIL_BYTES;
     this.replicaIdleMs = options.replicaIdleMs ?? REPLICA_IDLE_MS;
@@ -281,7 +285,14 @@ export class DocumentService {
 
   // Every attribution of the artifact merged: who inserted and deleted what, when (Decision Log 5). For an open doc the
   // merge is cached and extended with each row since; the rows in the open batch are included.
+  // P3-B (parent Decision Log 57): a suggestion doc's answer is its main doc's laid beneath its own rows (its own winning
+  // on an id both hold), since it holds the main doc's content, whose rows are the main doc's.
   provenance(artifactId: string): ContentMap {
+    const main = mainOf(artifactId);
+    return main === null ? this.ownProvenance(artifactId) : overlayMap(this.ownProvenance(main), this.ownProvenance(artifactId));
+  }
+
+  private ownProvenance(artifactId: string): ContentMap {
     const hostDoc = this.docs.get(artifactId);
     if (!hostDoc) return mergeMaps(this.storage.provenance(artifactId).map(decodeMap));
     const cache = hostDoc.provenance;

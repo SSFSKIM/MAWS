@@ -30,6 +30,8 @@ import { registerArtifacts } from './documents/register'; // M4
 // P3-L start
 import { registerLibrary } from './library'; // M2
 // P3-L end
+import { registerDocumentKind } from './documents/kinds/document'; // P3-B
+import { documentPerfSeamRequested, startDocumentPerfSeam } from './documents/kinds/document-perf'; // P3-B M9: the scale gate's seam (e2e only)
 
 const HOST_VERSION = __MAWS_VERSION__;
 
@@ -66,6 +68,8 @@ const register: HostRegister = (on, emit, client) => {
   // on the way out (utility: main's quit; detached: the exit order and host.stopAll). M4: `artifacts.*`, `spaces.*` and
   // the document ports main posts on the parent port; a store that failed to open answers `unavailable`.
   documents = openDocuments(userData);
+  if (documents) registerDocumentKind(documents.store); // P3-B: the document kind's hooks on every document update
+  if (documents && documentPerfSeamRequested(process.env)) startDocumentPerfSeam(documents.store, join(userData, 'document-perf')); // P3-B M9: the scale gate's seam, MAWS_E2E=1 and MAWS_DOCUMENT_PERF=1 only
   const artifacts = registerArtifacts(on, emit, client, { documents, env: process.env });
   const store = documents?.store ?? null; // M6: the artifact tools' store (a session's tools answer `unavailable` without one)
   // P3-L: main's library reads, the linked-directory mirror and (M6b) the X12 import at store open

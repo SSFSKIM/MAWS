@@ -30,6 +30,11 @@ const ROUTES: Record<string, () => ReactNode> = {
   // C11 end
 };
 
+// P3-B start: the document editor page (harness/document/), two editors over one in-memory host document
+import { DocumentHarness } from './document/DocumentHarness';
+ROUTES.document = () => <DocumentHarness />;
+// P3-B end
+
 // C9 block begin: the terminal probe page (harness/terminal/), routed as `#probe`; its `#panel` stand-in was folded
 // into C8a's page (ruling O2)
 import { Probe } from './terminal/Probe';

@@ -20,9 +20,10 @@ import type { CardRect, CommentContext } from '../../tools/code/anchor/anchor';
 // as `version`, with `revision` null: only a read of the artifact's versions names the revision (`placeOfNumber`).
 export type CardTarget =
   | { kind: 'browser'; pageUrl: string }
-  | { kind: 'artifact-page'; artifactId: string; revision: ArtifactUrlRevision | null; version?: number };
+  | { kind: 'artifact-page'; artifactId: string; revision: ArtifactUrlRevision | null; version?: number }
+  | { kind: 'artifact'; artifactId: string; threadId: string }; // P3-B (docs/doperpowers/plans/2026-10-12-p3-b-documents.md D9): a comment thread of a document artifact
 export type CardPhase = { kind: 'composing' } | { kind: 'thread'; child: AppSessionId; echo: string | null };
-export type CardHostKind = 'browser' | 'artifact-page';
+export type CardHostKind = 'browser' | 'artifact-page' | 'artifact' /* P3-B */;
 export type CardHostMode = 'panel' | 'tab';
 
 export interface OpenCard {
@@ -52,6 +53,8 @@ export const useCommentCard = create<{ open: OpenCard | null; shownThread: Shown
 let serials = 0;
 
 export function targetOf(anchor: Anchor): CardTarget | null {
+  // P3-B: a document comment names its artifact and thread, no page
+  if (anchor.kind === 'artifact-comment') return anchor.artifactId !== undefined && anchor.threadId !== undefined ? { kind: 'artifact', artifactId: anchor.artifactId, threadId: anchor.threadId } : null;
   if (anchor.pageUrl === undefined) return null;
   if (anchor.kind === 'browser-element') return { kind: 'browser', pageUrl: anchor.pageUrl }; // P2-E2
   if (anchor.kind !== 'artifact-element') return null;

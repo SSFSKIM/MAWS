@@ -117,6 +117,9 @@ import { registerByteViewers } from './tools/artifacts/viewers/register';
 import { Library } from './library/Library';
 import { connectLibrary } from './library/store';
 // P3-L end
+// P3-B start
+import { registerDocumentEditor } from './tools/document';
+// P3-B end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -282,6 +285,9 @@ export function App() {
   useEffect(() => registerSlot('artifactsLibrary', Library), []); // the Artifacts tab's library, in P3-G's slot
   useEffect(() => registerByteViewers(), []); // M5b: the html and file viewers on maws-artifact:, and their frames' console
   // P3-L end
+  // P3-B start: the document kind's editor in L's registry (the panel's Artifacts tool and an `artifact` main tab)
+  useEffect(() => registerDocumentEditor(), []);
+  // P3-B end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

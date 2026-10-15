@@ -846,6 +846,75 @@ describe('DocumentService: suggestions, fix wave 1', () => {
   });
 });
 
+// P3-B start (parent Decision Log 57; P3-B Decision Log 48): a suggestion doc takes its artifact's kind and inherits the
+// main doc's provenance.
+describe('DocumentService: a suggestion doc’s kind and provenance (parent Decision Log 57)', () => {
+  const ids = (node: Node, from: number, to: number) =>
+    Array.from({ length: to - from }, (_, i) => idAt(node, from + i)!).map(({ client, clock }) => [client, clock] as [number, number]);
+
+  it('runs its artifact’s kind hooks on the suggestion doc, told the suggestion key, though only the artifact has an entity row', async () => {
+    const calls: string[] = [];
+    const asked: string[] = [];
+    const adapter: KindAdapter = {
+      kind: 'document',
+      beforeApply: (_live, _incoming, info) => (calls.push(`beforeApply ${info.artifactId}`), null),
+      afterUpdate: (_doc, info) => void calls.push(`afterUpdate ${info.artifactId}`),
+    };
+    make({ adapters: [adapter], kindOf: (artifactId) => (asked.push(artifactId), artifactId === 'a1' ? 'document' : null) }, true); // as storage answers
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'The plan.'));
+    const key = service.suggestionDoc('a1');
+    calls.length = 0;
+    await service.writeAs(key, agent, (doc) => doc.get('t').insert(8, ' and more'));
+    expect(calls).toEqual([`afterUpdate ${key}`]);
+    const proposer = raw(key, agent);
+    proposer.edit((doc) => doc.get('t').insert(0, 'Draft: '));
+    await until(() => calls.length === 3);
+    expect(calls.slice(1)).toEqual([`beforeApply ${key}`, `afterUpdate ${key}`]);
+    expect(asked).not.toContain(key); // the artifact's own row is asked, never a row under the suggestion key
+  });
+
+  it('answers the main doc’s provenance beneath its own rows, so a retype proposed over human text stays the human’s, and its own row wins on a shared id', async () => {
+    let retype: { from: [number, number][]; to: [number, number][] } | null = null;
+    const adapter: KindAdapter = {
+      kind: 'document',
+      afterUpdate: (_doc, info) => (info.artifactId === 'a1:suggest' && retype ? { provenance: [{ kind: 'retype', ...retype }] } : undefined),
+    };
+    make({ adapters: [adapter], kindOf: () => 'document' }, true);
+    await service.writeAs('a1', human, (doc) => doc.get('t').insert(0, 'zero one two'));
+    const humanAt = now - (now % MIN);
+    const key = service.suggestionDoc('a1');
+    const t = () => service.live(key).get('t');
+    const [z, o] = [idAt(t(), 0)!, idAt(t(), 5)!]; // "zero", "one"
+    const original = ids(t(), 9, 12); // "two"
+    now += 5 * MIN;
+    const agentAt = now - (now % MIN);
+    await service.writeAs(key, agent, (doc) => {
+      const text = doc.get('t');
+      text.delete(9, 3); // the agent retypes "two" (a delete and re-insert the kind reports as a retype)
+      text.insert(9, 'two');
+      retype = { from: original, to: ids(text, 9, 12) };
+    });
+    const [retyped] = retype!.to.map(([client, clock]) => ({ client, clock }));
+    expect(insertedBy(service.provenance(key), retyped)).toEqual({ actor: 'human', at: humanAt });
+    expect(carriedBy(service.provenance(key), retyped)).toBe('retype');
+    expect(insertedBy(service.provenance(key), z)?.actor).toBe('human'); // the main doc's text, its rows beneath
+
+    retype = null;
+    await service.writeAs(key, agent, (doc) => doc.get('t').delete(5, 3)); // the agent proposes "one" deleted
+    now += 5 * MIN;
+    await service.writeAs('a1', human, (doc) => doc.get('t').delete(0, 8)); // then the human deletes "zero one" in the main doc
+    const map = service.provenance(key);
+    expect(deletedBy(map, o)).toEqual({ actor: 'session:app-1', at: agentAt }); // the suggestion's own row wins on "one"
+    expect(deletedBy(map, z)?.actor).toBe('human'); // the main doc's row elsewhere
+    expect(deletedBy(service.provenance('a1'), o)?.actor).toBe('human'); // the main doc's own answer is unchanged
+    reopen({ adapters: [adapter], kindOf: () => 'document' }, true);
+    expect(service.loaded(key)).toBeNull();
+    expect(deletedBy(service.provenance(key), o)?.actor).toBe('session:app-1'); // the same answer with neither doc loaded
+    expect(insertedBy(service.provenance(key), retyped)?.actor).toBe('human');
+  });
+});
+// P3-B end
+
 describe('DocumentService: the idle unload (Decision Log 29b)', () => {
   beforeEach(() => vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }));
   afterEach(() => vi.useRealTimers());
