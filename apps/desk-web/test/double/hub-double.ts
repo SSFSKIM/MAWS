@@ -1,7 +1,7 @@
 // The DX3 protocol double (the DC5 plan's Decision Log, "Building ahead of the hub"): a local stand-in for the hub's
 // browser side, for the web app's suites while DC3's local hub and fake machine are still to land. It speaks
-// `desk-hub/protocol`'s types and nothing of its own: `/api/me`, the project socket (`ProjectUp` / `ProjectDown`), and
-// the registry socket (`GridDown`); it numbers stored events with project offsets, seals what it appends with the org
+// `desk-hub/protocol`'s types and nothing of its own: `/api/me`, DX7's wrapped keys (./org-keys.ts), the project
+// socket (`ProjectUp` / `ProjectDown`), and the registry socket (`GridDown`); it numbers stored events with project offsets, seals what it appends with the org
 // key the way a machine's daemon would (DX1), and serves a built app from a directory with the single-page fallback the
 // Worker's static assets will have. Every discontinuity a test needs is a method: drop every socket (a deploy), send
 // a frame in parts, hold acknowledgements, store an event whose code fails. For the conversation (the plan's M3) it also
@@ -42,8 +42,10 @@ import {
   type SubscriptionKind,
 } from 'desk-hub/protocol';
 import { WebSocketServer, type WebSocket } from 'ws';
+import { OrgKeysDouble } from './org-keys';
 
-export const DOUBLE_ORG: OrgRecord = { id: 'org-double', name: 'Double org', created: '2026-10-15T00:00:00.000Z' };
+/** The org as the double holds it before any key is set up (`/api/me` answers its current `key_check`). */
+export const DOUBLE_ORG: OrgRecord = { id: 'org-double', name: 'Double org', created: '2026-10-15T00:00:00.000Z', key_check: null };
 export const DOUBLE_MEMBER: MemberRecord = { id: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', email: 'owner@example.com', role: 'admin', created: '2026-10-15T00:00:00.000Z' };
 
 /** The fields a machine writes beyond `ts`, `writer`, `seq`, and `mac`. */
@@ -82,6 +84,8 @@ export class HubDouble {
   /** Answer each `human` with `human-ack` (true), or hold the acknowledgement as a hub that dropped mid-write would. */
   ackHumans = true;
   admit: 'member' | 'not-a-member';
+  /** DX7's wrapped keys (`/api/org/keys`), with the hub's rules: `not-key-holder`, `different-key`, `last-key`. */
+  readonly orgKeys = new OrgKeysDouble();
   private readonly projects = new Map<string, ProjectState>();
   private readonly gridSockets = new Set<WebSocket>();
   private grid: ProjectSummary[] = [];
@@ -101,7 +105,7 @@ export class HubDouble {
     const server = createServer();
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const double = new HubDouble(server, key, options);
-    server.on('request', (req, res) => double.http(req, res));
+    server.on('request', (req, res) => void double.http(req, res));
     server.on('upgrade', (req, socket, head) => double.upgrade(req, socket as never, head));
     return double;
   }
@@ -473,11 +477,19 @@ export class HubDouble {
     this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: 'forwarded' });
   }
 
-  private http(req: IncomingMessage, res: ServerResponse): void {
+  private async http(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const path = new URL(req.url ?? '/', this.url).pathname;
+    if (path.startsWith('/api/') && this.admit !== 'member') {
+      json(res, 403, { error: 'not-a-member' });
+      return;
+    }
     if (path === '/api/me') {
-      if (this.admit === 'member') json(res, 200, { org: DOUBLE_ORG, member: DOUBLE_MEMBER });
-      else json(res, 403, { error: 'not-a-member' });
+      json(res, 200, { org: { ...DOUBLE_ORG, key_check: this.orgKeys.key_check }, member: DOUBLE_MEMBER });
+      return;
+    }
+    const keys = await this.orgKeys.handle(DOUBLE_MEMBER, req.method ?? 'GET', path, await readJson(req));
+    if (keys) {
+      json(res, keys.status, keys.body);
       return;
     }
     if (path.startsWith('/api/') || !this.options.staticDir) {
@@ -504,6 +516,17 @@ const CONTENT_TYPES: Record<string, string> = {
   '.json': 'application/json',
   '.woff2': 'font/woff2',
 };
+
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  if (chunks.length === 0) return undefined;
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown;
+  } catch {
+    return undefined;
+  }
+}
 
 function json(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json' });

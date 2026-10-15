@@ -50,6 +50,14 @@ describe('unlock', () => {
     expect(await store.load('org')).toBeNull();
   });
 
+  it('holds a key opened from its copy as it is, kept where the owner chose', async () => {
+    const store = memoryKeyStore();
+    const opened = await holdKeyBytes(vector());
+    expect(await beginUnlock('org', store).finish(opened, 'device')).toBe(true);
+    expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', key: opened, kept: 'device', fingerprint: await keyFingerprint(opened) });
+    expect(await store.load('org')).toBe(opened.hmac);
+  });
+
   it('kept on the device: a later load finds it', async () => {
     const store = memoryKeyStore();
     await unlock('org', vector(), 'device', store);

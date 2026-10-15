@@ -1,16 +1,23 @@
 // The web app against DC3's local hub (`pnpm --filter desk-hub local`): the Worker serving the built app behind the
-// stand-in for Access, DX7's enrollment, and DX3's project socket over the real log plane. M1's proof as far as DC3's
-// M2 carries it (sign-in, the Worker serving the app, resume across a reload, a web `human` acknowledged) and M2's:
-// a passkey-derived key in an enrollment code the browser made, which enrolls a machine whose events the browser then
-// verifies with the same key. The machine is a DX7/DX2 test client (test/local/machine.ts) until DC4's uplink lands;
-// the grid's counts wait on DC3's M3 (the registry's socket).
+// stand-in for Access, DX7's enrollment and wrapped keys, and DX3's project socket over the real log plane. M1's proof as
+// far as DC3's M2 carries it (sign-in, the Worker serving the app, resume across a reload, a web `human` acknowledged)
+// and M2's with its M2b ruling: the org key drawn at random at first setup and kept at the hub wrapped once per method,
+// every method opening the same key, a method added and removed, the hub's `not-key-holder` in both its meanings, and
+// an enrollment code the browser made with that key, which enrolls a machine whose events the browser then verifies.
+// The machine is a DX7/DX2 test client (test/local/machine.ts) until DC4's uplink lands; the grid's counts wait on
+// DC3's M3 (the registry's socket).
 //
-// One browser page for the suite: its virtual authenticator holds the org's passkey from the enrollment on.
+// The local hub's state outlives a run (apps/desk-hub/.wrangler), and an org has one key ever: first setup is proved on
+// a hub whose org has none. It adds the suite's passphrase, which a later run unlocks with instead.
+//
+// One browser page for the suite: its virtual authenticator holds the org's passkey from the setup on.
 import { randomUUID } from 'node:crypto';
-import { expect, test, type BrowserContext, type Page, type WebSocket } from '@playwright/test';
-import { seal, verify, type DownFrame, type HumanDraft, type LogEvent, type ProjectDown, type ProjectUp } from 'desk-hub/protocol';
+import { expect, test, type BrowserContext, type CDPSession, type Locator, type Page, type WebSocket } from '@playwright/test';
+import { keyCheck, seal, verify, type DownFrame, type HumanDraft, type LogEvent, type ProjectDown, type ProjectUp, type WrappedKeys } from 'desk-hub/protocol';
+import { checkFingerprint } from '../src/key/derive';
 import { ProjectClient } from '../src/hub/project-client';
-import { virtualAuthenticator } from '../e2e/authenticator';
+import { clearOrigin, virtualAuthenticator } from '../e2e/authenticator';
+import { seedKey } from '../e2e/fixtures';
 import { LocalHub } from '../test/local/hub';
 import { TestMachine } from '../test/local/machine';
 
@@ -19,10 +26,15 @@ test.describe.configure({ mode: 'serial' });
 const PROJECT = randomUUID();
 const SESSION = randomUUID();
 const MACHINE = `e2e-${randomUUID().slice(0, 8)}`;
+/** The passphrase this suite's first setup adds; a run against a hub whose org already has a key unlocks with it. */
+const SUITE_PASSPHRASE = 'desk local hub suite passphrase';
 
 let hub: LocalHub;
 let context: BrowserContext;
 let page: Page;
+let authenticator: CDPSession;
+/** Whether this run set the org key up, with the page's passkey. */
+let setUpHere = false;
 let machine: TestMachine | undefined;
 
 test.beforeAll(async ({ browser }) => {
@@ -31,7 +43,7 @@ test.beforeAll(async ({ browser }) => {
   context = await browser.newContext();
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: hub.localhost });
   page = await context.newPage();
-  await virtualAuthenticator(page);
+  authenticator = await virtualAuthenticator(page);
 });
 
 test.afterAll(async () => {
@@ -53,6 +65,32 @@ function watchSockets(target: Page) {
   return { sent, received, stop: () => target.off('websocket', watch) };
 }
 
+/** The org's wrapped keys, as any member reads them (DX7). */
+async function orgKeys(): Promise<WrappedKeys> {
+  return (await (await fetch(`${hub.url}/api/org/keys`)).json()) as WrappedKeys;
+}
+
+const keyDialog = (target: Page) => target.getByRole('dialog', { name: 'Org key' });
+
+async function openKeyDialog(target: Page): Promise<Locator> {
+  await target.getByTestId('key-state').click();
+  return keyDialog(target);
+}
+
+async function unlockWithPassphrase(scope: Locator, passphrase: string, keep: boolean) {
+  if (keep) await scope.getByLabel('Keep unlocked on this device').check();
+  const form = scope.getByRole('form', { name: 'Passphrase' });
+  await form.getByLabel(/passphrase/).fill(passphrase);
+  await form.getByRole('button', { name: 'Unlock', exact: true }).click();
+}
+
+async function newPassphrase(scope: Locator, passphrase: string, submit: string) {
+  const form = scope.getByRole('form', { name: 'New passphrase' });
+  await form.getByLabel(/Or a passphrase/).fill(passphrase);
+  await form.getByLabel('The passphrase again').fill(passphrase);
+  await form.getByRole('button', { name: submit, exact: true }).click();
+}
+
 test('signed in through the stand-in, the Worker serves the built app at every path of the app', async ({ browser }) => {
   const response = await page.goto(hub.localhost);
   expect(response?.headers()['content-type']).toContain('text/html');
@@ -72,16 +110,71 @@ test('signed in through the stand-in, the Worker serves the built app at every p
   await stranger.close();
 });
 
-test('the passkey unlocks the key, and the code the browser builds enrolls a machine, shown once', async () => {
+test('first setup: the passkey locks a random key, a passphrase is added, and a second setup is told a key was set up elsewhere', async ({ browser }) => {
+  test.setTimeout(120_000);
+  test.skip((await orgKeys()).key_check !== null, "the local hub's org already has a key (apps/desk-hub/.wrangler/state from an earlier run); first setup is proved on a fresh state");
+
+  const late = await (await browser.newContext()).newPage(); // another browser, its setup form open first
+  await late.goto(hub.localhost);
+  await expect((await openKeyDialog(late)).getByTestId('set-up')).toBeVisible();
+
+  await page.goto(hub.localhost);
+  const dialog = await openKeyDialog(page);
+  await dialog.getByLabel('Keep unlocked on this device').check();
+  await dialog.getByRole('button', { name: 'Set up with a passkey' }).click();
+  await expect(dialog.getByTestId('unlocked')).toContainText('Unlocked on this device');
+  setUpHere = true;
+  const fingerprint = (await dialog.getByTestId('fingerprint').textContent())!;
+  const set = await orgKeys();
+  expect(checkFingerprint(set.key_check!)).toBe(fingerprint);
+  expect(set.keys).toMatchObject([{ method: 'passkey', check: set.key_check }]);
+
+  // The prompt for a second method, right away: the new one first, then one the org has.
+  await expect(dialog.getByTestId('one-method')).toBeVisible();
+  await dialog.getByRole('button', { name: 'Add a method' }).click();
+  const add = dialog.getByTestId('add-method');
+  await newPassphrase(add, SUITE_PASSPHRASE, 'Add');
+  await add.getByRole('button', { name: 'Confirm with passkey' }).click({ timeout: 60_000 });
+  await expect(dialog.getByTestId('one-method')).toHaveCount(0, { timeout: 30_000 });
+  expect((await orgKeys()).keys.map((k) => k.method)).toEqual(['passkey', 'passphrase']);
+  await page.keyboard.press('Escape');
+
+  // The other browser's setup came second: one org, one key.
+  await newPassphrase(keyDialog(late), 'another org key entirely', 'Set up');
+  await expect(keyDialog(late).getByTestId('key-error')).toHaveText('A key was already set up for this org elsewhere. Unlock with one of its methods.', { timeout: 30_000 });
+  await expect(keyDialog(late).getByRole('form', { name: 'Passphrase' })).toBeVisible();
+  expect((await orgKeys()).keys).toHaveLength(2);
+  await late.context().close();
+});
+
+test("every method opens the org's key: the passphrase in another browser, the passkey in a browser emptied of everything", async ({ browser }) => {
+  test.setTimeout(120_000);
+  const fingerprint = checkFingerprint((await orgKeys()).key_check!);
+
+  const other = await (await browser.newContext()).newPage();
+  await other.goto(hub.localhost);
+  await unlockWithPassphrase(await openKeyDialog(other), SUITE_PASSPHRASE, false);
+  await expect(other.getByTestId('fingerprint')).toHaveText(fingerprint, { timeout: 30_000 });
+  await other.context().close();
+
+  // This page: locked, emptied of everything it held, and unlocked again with its passkey (or, on a hub an earlier run
+  // set up, with the suite's passphrase), kept on the device for the tests that follow.
+  await page.goto(hub.localhost);
+  if ((await page.getByTestId('key-state').textContent()) === 'Unlocked') await (await openKeyDialog(page)).getByRole('button', { name: 'Lock' }).click();
+  await clearOrigin(authenticator, hub.localhost);
+  await page.reload();
+  const dialog = await openKeyDialog(page);
+  await dialog.getByLabel('Keep unlocked on this device').check();
+  if (setUpHere) await dialog.getByRole('button', { name: 'Unlock with passkey' }).click();
+  else await unlockWithPassphrase(dialog, SUITE_PASSPHRASE, false);
+  await expect(page.getByTestId('fingerprint')).toHaveText(fingerprint, { timeout: 30_000 });
+  await page.keyboard.press('Escape');
+});
+
+test('the code the browser builds, confirmed by opening the key once more, enrolls a machine, shown once', async () => {
   test.setTimeout(60_000);
   await page.goto(hub.localhost);
-  await page.getByTestId('key-state').click();
-  const keyDialog = page.getByRole('dialog', { name: 'Org key' });
-  await keyDialog.getByLabel('Keep unlocked on this device').check();
-  await keyDialog.getByRole('button', { name: "First time? Create the org's passkey" }).click();
-  await keyDialog.getByRole('button', { name: 'Create the org passkey' }).click();
-  await expect(keyDialog.getByTestId('unlocked')).toContainText('Unlocked on this device');
-  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('key-state')).toHaveText('Unlocked');
 
   await page.getByRole('button', { name: 'Machines' }).click();
   const dialog = page.getByRole('dialog', { name: 'Machines' });
@@ -92,10 +185,16 @@ test('the passkey unlocks the key, and the code the browser builds enrolls a mac
   await dialog.getByLabel(/machine's name/).fill(MACHINE);
   await dialog.getByRole('button', { name: 'Continue' }).click();
   await expect(dialog.getByTestId('confirm-machine')).toHaveText(MACHINE);
-  await dialog.getByRole('button', { name: 'Confirm with passkey' }).click();
+  if (setUpHere) {
+    await dialog.getByRole('button', { name: 'Confirm with passkey' }).click();
+  } else {
+    const confirm = dialog.getByRole('form', { name: 'Passphrase' });
+    await confirm.getByLabel(/passphrase/).fill(SUITE_PASSPHRASE);
+    await confirm.getByRole('button', { name: 'Confirm', exact: true }).click();
+  }
   // The code alone, never inside a command line (the process listing and the shell's history would keep the key).
   const shown = dialog.getByTestId('enroll-code');
-  await expect(shown).toContainText('run sminos hub enroll, then paste this code');
+  await expect(shown).toContainText('run sminos hub enroll, then paste this code', { timeout: 30_000 });
   const code = (await dialog.getByTestId('enrollment-code').textContent())!;
   expect(code).toMatch(/^smns-enroll-v1\.[A-Za-z0-9_-]+$/);
   await expect(shown).not.toContainText(`sminos hub enroll ${code}`);
@@ -109,6 +208,8 @@ test('the passkey unlocks the key, and the code the browser builds enrolls a mac
   machine = await TestMachine.enroll(code);
   expect(machine.code).toMatchObject({ hub: hub.localhost, org: 'local', machine: MACHINE });
   expect(machine.redeemed).toMatchObject({ org: 'local', machine: MACHINE });
+  // The key the code carries is the org's.
+  expect(checkFingerprint(await keyCheck(machine.key))).toBe(checkFingerprint((await orgKeys()).key_check!));
   const reopen = async () => {
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'Machines' }).click();
@@ -129,7 +230,7 @@ test('the passkey unlocks the key, and the code the browser builds enrolls a mac
   await page.keyboard.press('Escape');
 });
 
-test("the machine's log is drawn, verified with the passkey's key, and a reload resumes after the recorded offset", async () => {
+test("the machine's log is drawn, verified with the org key, and a reload resumes after the recorded offset", async () => {
   const m = machine!;
   await m.hello(PROJECT, 'desk-e2e');
   await m.write(PROJECT, SESSION, [
@@ -177,4 +278,37 @@ test('a web human sent through the hub client is acknowledged, stored under hub/
   } finally {
     client.stop();
   }
+});
+
+test('a method is removed with the held key, and a browser holding another key is refused its change', async ({ browser }) => {
+  test.setTimeout(120_000);
+  // A spare passphrase, added and then removed by this page, which holds the org's key.
+  await page.goto(hub.localhost);
+  const dialog = await openKeyDialog(page);
+  const before = (await orgKeys()).keys.map((k) => k.id);
+  await dialog.getByRole('button', { name: 'Add a method' }).click();
+  const add = dialog.getByTestId('add-method');
+  await newPassphrase(add, 'a spare passphrase to remove', 'Add');
+  const confirm = add.getByRole('form', { name: 'Passphrase' });
+  await confirm.getByLabel(/passphrase/).fill(SUITE_PASSPHRASE);
+  await confirm.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await expect(add).toHaveCount(0, { timeout: 60_000 });
+  const spare = (await orgKeys()).keys.find((k) => !before.includes(k.id))!;
+  await dialog.getByRole('button', { name: `Remove ${spare.label}` }).click();
+  await dialog.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect.poll(async () => (await orgKeys()).keys.map((k) => k.id)).toEqual(before);
+  await page.keyboard.press('Escape');
+
+  // Another browser holding another key: told so by the fingerprints, and refused by the hub (`not-key-holder`).
+  const stranger = await (await browser.newContext()).newPage();
+  await seedKey(stranger, { url: hub.localhost }, 'local', crypto.getRandomValues(new Uint8Array(32)));
+  await stranger.goto(hub.localhost);
+  const theirs = await openKeyDialog(stranger);
+  await expect(theirs.getByTestId('other-key')).toContainText("This browser holds another key than the org's");
+  const target = (await orgKeys()).keys[0];
+  await theirs.getByRole('button', { name: `Remove ${target.label}` }).click();
+  await theirs.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(theirs.getByTestId('key-error')).toHaveText("This browser's key isn't the org's, so the hub refused the change. Lock it, and unlock with one of the org's methods.");
+  expect((await orgKeys()).keys.map((k) => k.id)).toEqual(before);
+  await stranger.context().close();
 });

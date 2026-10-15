@@ -9,6 +9,7 @@ import { followHistory, useDeskLayout } from './shell/layout';
 import { startGrid, useGrid } from './state/grid';
 import { GridView } from './views/grid/GridView';
 import { KeyDialog } from './views/key/KeyDialog';
+import { useSecondMethodPrompt } from './views/key/second-method';
 import { MachinesDialog } from './views/machines/MachinesDialog';
 import { ProjectView } from './views/project/ProjectView';
 
@@ -47,7 +48,12 @@ type Panel = 'key' | 'machines' | null;
 function Desk({ me }: { me: Me }) {
   const route = useDeskLayout((s) => s.route);
   const [panel, setPanel] = useState<Panel>(null);
-  const close = useCallback(() => setPanel(null), []);
+  // Right after the org key's first setup the key dialog opens on its prompt to add a second method.
+  const secondMethodDue = useSecondMethodPrompt((s) => s.due);
+  const close = useCallback(() => {
+    setPanel(null);
+    useSecondMethodPrompt.setState({ due: false });
+  }, []);
   useEffect(() => followHistory(), []);
   useEffect(() => startGrid(hubBase()), []);
   useEffect(() => void loadDeviceKey(me.org.id), [me.org.id]);
@@ -55,7 +61,7 @@ function Desk({ me }: { me: Me }) {
     <div className="grid h-full grid-rows-[var(--toolbar-h)_minmax(0,1fr)]">
       <TopBar me={me} open={setPanel} />
       {route.view === 'grid' ? <GridView onEnroll={() => setPanel('machines')} /> : <ProjectView key={route.project} me={me} project={route.project} channel={route.channel} />}
-      {panel === 'key' && <KeyDialog me={me} onClose={close} />}
+      {(panel === 'key' || (secondMethodDue && panel === null)) && <KeyDialog me={me} onClose={close} />}
       {panel === 'machines' && <MachinesDialog me={me} onClose={close} />}
     </div>
   );

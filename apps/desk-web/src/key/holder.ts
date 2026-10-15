@@ -1,5 +1,6 @@
 // The tab's key state: `loading` until the device's record is read, then `unlocked` with the org key or `locked`
-// without one. The owner unlocks with the passkey or the passphrase (./unlock.ts) and chooses how long the key is kept:
+// without one. The owner unlocks with one of the org key's methods, or sets the key up (./unlock.ts), and chooses how
+// long the key is kept:
 // this tab's life (`session`, memory only) or the device's IndexedDB (`device`, still non-extractable). Locking forgets
 // it from both.
 //
@@ -58,22 +59,24 @@ export async function loadDeviceKey(org: string, store: KeyStore = idbKeyStore()
 }
 
 export type UnlockAttempt = {
-  /** Holds freshly derived bytes as the org key (wiping them), kept where the owner chose. False when a newer unlock or
-   * a Lock began after this one: nothing of it is published, and its write, if not yet run, is skipped. */
-  finish(raw: Uint8Array, keep: Keep): Promise<boolean>;
+  /** Holds the org key — opened from its copy, or bytes just drawn (wiped once held) — kept where the owner chose. False
+   * when a newer unlock or a Lock began after this one: nothing of it is published, and its write, if not yet run, is
+   * skipped. */
+  finish(opened: OrgKey | Uint8Array, keep: Keep): Promise<boolean>;
 };
 
-/** Begins an unlock now, before the derivation, so whatever begins after it — a Lock, another unlock — wins over it. */
+/** Begins an unlock now, before the method's prompt and derivation, so whatever begins after it — a Lock, another
+ * unlock — wins over it. */
 export function beginUnlock(org: string, store: KeyStore = idbKeyStore()): UnlockAttempt {
   const token = ++op;
   const newest = () => token === op;
   return {
-    async finish(raw, keep) {
+    async finish(opened, keep) {
       if (!newest()) {
-        raw.fill(0);
+        if (opened instanceof Uint8Array) opened.fill(0);
         return false;
       }
-      const key = await holdKeyBytes(raw);
+      const key = opened instanceof Uint8Array ? await holdKeyBytes(opened) : opened;
       if (!newest()) return false;
       await serially(async () => {
         if (!newest()) return;

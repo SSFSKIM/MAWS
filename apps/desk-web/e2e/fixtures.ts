@@ -22,10 +22,11 @@ export const test = base.extend<{ hub: HubDouble }>({
 export { expect };
 
 /**
- * Stores the vector key as a non-extractable HMAC key under the double's org, from a page of the app's origin that does
- * not run the app (an /api path), so the app reads it on its next load as it reads a key the owner kept.
+ * Stores a key (the vector key, by default) as a non-extractable HMAC key under an org (the double's), from a page of
+ * the app's origin that does not run the app (an /api path), so the app reads it on its next load as it reads a key the
+ * owner kept.
  */
-export async function seedKey(page: Page, hub: HubDouble): Promise<void> {
+export async function seedKey(page: Page, hub: Pick<HubDouble, 'url'>, org: string = DOUBLE_ORG.id, raw: Uint8Array = VECTOR_KEY): Promise<void> {
   await page.goto(`${hub.url}/api/seed`);
   await page.evaluate(
     async ({ db, org, raw }) => {
@@ -47,6 +48,6 @@ export async function seedKey(page: Page, hub: HubDouble): Promise<void> {
       });
       conn.close();
     },
-    { db: DESK_DB, org: DOUBLE_ORG.id, raw: [...VECTOR_KEY] },
+    { db: DESK_DB, org, raw: [...raw] },
   );
 }
