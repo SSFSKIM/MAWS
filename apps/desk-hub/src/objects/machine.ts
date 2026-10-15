@@ -1,15 +1,25 @@
-// One enrolled machine's connection (DX2): the SSE stream down, which the machine opens outbound and this object holds.
-// Each stream gets the next connection generation; a newer stream ends the older one. A `Project` reaches the machine
-// only through `send`, which writes to the stream or answers "offline" at once. The lease that tells projects the
-// machine is online (renewed on the heartbeat, fenced by generation) is M3's.
+// One enrolled machine's connection (DX2): the SSE stream down, which the machine opens outbound and this object holds,
+// and the machine's POSTs up, which it hands, frame by frame and in order, to the projects they name. Each stream gets
+// the next connection generation; a newer stream ends the older one, and a POST belongs to the stream it names. A
+// `Project` reaches the machine only through `send`, which writes to the stream or answers "offline" at once. The lease
+// that tells projects the machine is online (renewed by the daemon's `hb-ack`, fenced by generation) is M3's.
 import { DurableObject } from 'cloudflare:workers';
 import { MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
-import { HEARTBEAT_MS, type DownFrame } from '../protocol/machine';
-import { toWire } from '../protocol/parts';
+import { GENERATION_HEADER, HEARTBEAT_MS, POST_LIMIT, type DownFrame, type UpFrame } from '../protocol/machine';
+import { FRAME_LIMIT, PartAssembler, toWire, type Part } from '../protocol/parts';
+import { PROJECT_ID } from './project';
 
-type Stream = { generation: number; writer: WritableStreamDefaultWriter<Uint8Array>; heartbeat: ReturnType<typeof setInterval> };
+type Stream = {
+  generation: number;
+  writer: WritableStreamDefaultWriter<Uint8Array>;
+  heartbeat: ReturnType<typeof setInterval>;
+  /** Part sets of frames posted on this stream, which may span POSTs. */
+  parts: PartAssembler;
+};
 
 const encoder = new TextEncoder();
+const utf8Length = (text: string) => encoder.encode(text).length;
+const json = (status: number, body: unknown) => Response.json(body, { status });
 
 /** One SSE event per wire frame: `event: <t>` (`part` for a part) and the frame's JSON, which holds no line break. */
 function sse(frame: DownFrame): Uint8Array {
@@ -18,12 +28,36 @@ function sse(frame: DownFrame): Uint8Array {
   return encoder.encode(lines.map((line) => `event: ${event}\ndata: ${line}\n\n`).join(''));
 }
 
+/** The project a frame up is addressed to, or null for one that names none (`hb-ack`). */
+function projectOf(frame: UpFrame): unknown {
+  if (frame.t === 'session') return (frame.message as { project?: unknown } | undefined)?.project;
+  return 'project' in frame ? frame.project : null;
+}
+
 export class Machine extends DurableObject<Env> {
   private stream: Stream | undefined;
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname !== '/stream' || request.method !== 'GET') return new Response('not found', { status: 404 });
+    if (url.pathname === '/stream' && request.method === 'GET') return this.open(request);
+    if (url.pathname === '/frames' && request.method === 'POST') return this.frames(request);
+    return new Response('not found', { status: 404 });
+  }
+
+  /** Writes a frame to the machine's current stream; "offline" when it has none, or when `generation` names an older
+   * one (a project's frame for a stream the machine has since replaced). */
+  async send(frame: DownFrame, generation?: number): Promise<'written' | 'offline'> {
+    const stream = this.stream;
+    if (!stream || (generation !== undefined && generation !== stream.generation)) return 'offline';
+    return (await this.write(stream, frame)) ? 'written' : 'offline';
+  }
+
+  /** The machine was revoked: its stream ends now (the Worker refuses its credential from here on). */
+  revoke(): void {
+    this.end(this.stream);
+  }
+
+  private open(request: Request): Response {
     const org = request.headers.get(ORG_HEADER) ?? '';
     const machine = request.headers.get(MACHINE_HEADER) ?? '';
     const generation = (this.ctx.storage.kv.get<number>('generation') ?? 0) + 1;
@@ -35,6 +69,7 @@ export class Machine extends DurableObject<Env> {
       generation,
       writer: writable.getWriter(),
       heartbeat: setInterval(() => void this.write(stream, { t: 'hb', at: new Date().toISOString() }), HEARTBEAT_MS),
+      parts: new PartAssembler(),
     };
     this.stream = stream;
     // The client's close reaches the object as the request's abort (compatibility flag enable_request_signal).
@@ -43,11 +78,69 @@ export class Machine extends DurableObject<Env> {
     return new Response(readable, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' } });
   }
 
-  /** Writes a frame to the machine's current stream; "offline" when it has none. */
-  async send(frame: DownFrame): Promise<'written' | 'offline'> {
+  /**
+   * A POST of NDJSON frames. Refused whole, with nothing applied, when it is not for the current stream, too large, or
+   * holds a line that is not a frame; otherwise each frame goes to its project in order, and the answer comes once
+   * every reply the projects owe (`have`, the backlog, `resend`, `refused`) is written down the stream.
+   */
+  private async frames(request: Request): Promise<Response> {
+    const org = request.headers.get(ORG_HEADER) ?? '';
+    const machine = request.headers.get(MACHINE_HEADER) ?? '';
     const stream = this.stream;
-    if (!stream) return 'offline';
-    return (await this.write(stream, frame)) ? 'written' : 'offline';
+    if (!stream || request.headers.get(GENERATION_HEADER) !== String(stream.generation)) {
+      return json(409, { error: 'stale-generation', message: 'the POST names no current stream of this machine; open the stream and use its generation' });
+    }
+    if (Number(request.headers.get('Content-Length') ?? 0) > POST_LIMIT) return json(413, { error: 'too-large' });
+    const text = await request.text();
+    if (utf8Length(text) > POST_LIMIT) return json(413, { error: 'too-large' });
+
+    const frames: UpFrame[] = [];
+    const lines = text.split('\n');
+    for (let line = 0; line < lines.length; line++) {
+      if (lines[line].trim() === '') continue;
+      if (utf8Length(lines[line]) > FRAME_LIMIT) return json(413, { error: 'too-large', line });
+      let frame: unknown;
+      try {
+        frame = JSON.parse(lines[line]);
+      } catch {
+        frame = undefined;
+      }
+      if (typeof frame !== 'object' || frame === null || Array.isArray(frame) || typeof (frame as { t?: unknown }).t !== 'string') {
+        return json(400, { error: 'bad-shape', line });
+      }
+      frames.push(frame as UpFrame);
+    }
+
+    let applied = 0;
+    for (const posted of frames) {
+      let frame: UpFrame | undefined = posted;
+      if (posted.t === 'part') {
+        try {
+          frame = stream.parts.add(posted as Part) as UpFrame | undefined;
+        } catch {
+          return json(400, { error: 'bad-shape', message: 'a malformed part' });
+        }
+        if (frame === undefined) {
+          applied++;
+          continue;
+        }
+      }
+      const project = projectOf(frame);
+      if (project === null) {
+        // `hb-ack`: the lease it renews is M3's.
+        applied++;
+        continue;
+      }
+      if (typeof project !== 'string' || !PROJECT_ID.test(project)) {
+        await this.send({ t: 'refused', project: String(project), refusal: { reason: 'bad-shape', message: 'the frame names no .smns project id' } }, stream.generation);
+        applied++;
+        continue;
+      }
+      const target = this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${project}`));
+      await target.fromMachine({ org, project, machine, generation: stream.generation }, frame);
+      applied++;
+    }
+    return json(200, { ok: true, frames: applied });
   }
 
   private async write(stream: Stream, frame: DownFrame): Promise<boolean> {

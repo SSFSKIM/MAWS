@@ -26,7 +26,8 @@ export type Refusal = {
     | 'gap' // a seq not one past the writer's last; answered by `resend`
     | 'bad-shape'
     | 'too-large'
-    | 'stale-generation';
+    | 'stale-generation'
+    | 'not-open'; // events (or a rejection) for a project this stream has not opened with `hello`
   writer?: string;
   seq?: number;
   message: string;

@@ -80,6 +80,15 @@ export function isHubPosition(event: { writer?: unknown; seq?: unknown; ts?: unk
   );
 }
 
+/** A `hub/` event as the browser sealed it: the stored event without the `writer`, `seq`, and `ts` the hub assigned. */
+export function withoutPosition<T extends object>(event: T): Omit<T, 'writer' | 'seq' | 'ts'> {
+  const out = { ...event } as Record<string, unknown>;
+  delete out.writer;
+  delete out.seq;
+  delete out.ts;
+  return out as Omit<T, 'writer' | 'seq' | 'ts'>;
+}
+
 /** The machine a writer belongs to (`<machine>/<session uuid>` or `<machine>/human`), or null for `hub/` and `legacy/`. */
 export function writerMachine(writer: string): string | null {
   if (isHubWriter(writer) || writer.startsWith(LEGACY_WRITER_PREFIX)) return null;

@@ -1,6 +1,6 @@
 // vitest's global setup: bundles the Worker once per run, as wrangler does (ES modules, the workerd conditions,
 // `cloudflare:*` left to the runtime), for test/support/hub.ts to load into Miniflare.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { build } from 'esbuild';
@@ -13,6 +13,8 @@ declare module 'vitest' {
 }
 
 export default async function setup(project: TestProject) {
+  // wrangler refuses a configured assets directory that does not exist; the web app (DC5) may not be built.
+  mkdirSync(resolve(import.meta.dirname, '../../../desk-web/dist'), { recursive: true });
   const dir = mkdtempSync(join(tmpdir(), 'desk-hub-test-'));
   const outfile = join(dir, 'worker.js');
   await build({
