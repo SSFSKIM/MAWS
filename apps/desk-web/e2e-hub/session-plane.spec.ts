@@ -164,6 +164,15 @@ test('G2: the pending set is decided and answered from the web through the routi
   const [question] = fm.pendingRequests();
   const asked = center(page).locator(`[data-request="${question.request}"]`);
   await expect(asked).toContainText('Which color should we use?');
+  // The ask mod's blocking question is raised under the engine dialog's id; the transcript holds the outer call, which
+  // `toolUseId` names (DX4): the working record's folds end and begin at that call's row, never at the dialog's id.
+  const call = question.toolUseId!;
+  expect(call).not.toBe(question.request);
+  expect(rec.rows.main.some((row) => JSON.stringify(row).includes(`"id":"${call}"`))).toBe(true);
+  const folds = center(page).getByTestId('working-record');
+  await expect(folds.and(page.locator(`[data-to="${call}"]`))).toHaveCount(1);
+  await expect(folds.and(page.locator(`[data-from="${call}"]`))).toHaveCount(1);
+  await expect(page.locator(`[data-to="${question.request}"], [data-from="${question.request}"]`)).toHaveCount(0);
   await asked.getByRole('radio', { name: 'blue' }).click();
   await asked.getByRole('button', { name: 'Submit' }).click();
   await expect(asked.getByTestId('settled')).toHaveText('Answered from the web by you', { timeout: 15_000 });
@@ -310,7 +319,7 @@ test("G2: §5's controls by the session's kind as the machine's presence says it
   // Without the bridge: a terminal session and a `--bg` seat, both working.
   const terminal = recording();
   const seat = recording();
-  const joined = seat.steps.find((s): s is Extract<Step, { k: 'log' }> => s.k === 'log' && s.event.kind === 'joined')!;
+  const joined = seat.steps.find((s): s is Extract<Step, { k: 'log' }> => s.k === 'log' && s.event.kind === 'joined' && s.event.session === seat.session)!;
   Object.assign(joined.event, { alias: 'fakeseat', seat: 'fakeseat', name_source: 'seat' });
   const bare = await fakeMachine({ recordings: [terminal, seat], bridge: false });
   await bare.play({ speed: 0, until: () => [...bare.sessions.values()].every((s) => s.presence?.status === 'busy') });

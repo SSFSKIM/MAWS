@@ -4,7 +4,7 @@
 // where they were first seen; an async question's request is its `question` event's.
 import { describe, expect, it } from 'vitest';
 import type { LogEvent } from 'desk-hub/protocol';
-import { buildStream, type StreamItem } from './stream';
+import { buildStream, placedRequest, type StreamItem } from './stream';
 
 const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b'; // maws-45 @mini
 const S2 = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a'; // maws-fe @SK.local
@@ -124,6 +124,24 @@ describe('a direct channel', () => {
       { from: 'r1#0', to: 'toolu_native' },
       { from: 'toolu_native', to: null },
     ]);
+  });
+
+  it("bounds it by the transcript's call id, a raised question's `toolUseId ?? request`, never the dialog's id", () => {
+    const raised = (request: string, toolUseId?: string) => ({ request, session: S1, tool: 'AskUserQuestion', input: {}, mac: { nonce: 'n', value: 'v' }, ...(toolUseId && { toolUseId }) });
+    const bounds = (record: Parameters<typeof placedRequest>[0]) =>
+      buildStream({ kind: 'session', session: S1 }, log().slice(0, 2), aliases, [placedRequest(record)], { live: true })
+        .filter((i) => i.kind === 'work')
+        .map((i) => (i as { range: unknown }).range);
+    // The ask mod's blocking question: raised under the engine dialog's id, its transcript call the outer one.
+    expect(bounds({ request: 'toolu_plugin_q', raised: raised('toolu_plugin_q', 'toolu_01outer'), at: 2 })).toEqual([
+      { from: null, to: 'r1#0' },
+      { from: 'r1#0', to: 'toolu_01outer' },
+      { from: 'toolu_01outer', to: null },
+    ]);
+    // A native question names its own call.
+    expect(bounds({ request: 'toolu_native', raised: raised('toolu_native'), at: 2 })[1]).toEqual({ from: 'r1#0', to: 'toolu_native' });
+    // Decisions still go to `request`: the placed request keeps it.
+    expect(placedRequest({ request: 'toolu_plugin_q', raised: raised('toolu_plugin_q', 'toolu_01outer'), at: 2 })).toMatchObject({ request: 'toolu_plugin_q', call: 'toolu_01outer', question: true });
   });
 
   it('makes one bound of a question that is pending and in the log, and none of a permission prompt', () => {

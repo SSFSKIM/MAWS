@@ -228,7 +228,7 @@ function WorkingRecord({ session, range }: { session: string; range: { from: str
     );
   return (
     <div className="py-1 text-ui-sm text-fg-muted">
-      <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="rounded-sm border border-border px-2 py-0.5 hover:bg-bg-hover hover:text-fg" data-testid="working-record">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="rounded-sm border border-border px-2 py-0.5 hover:bg-bg-hover hover:text-fg" data-testid="working-record" data-from={range.from ?? ''} data-to={range.to ?? ''}>
         [ working record ]
       </button>
       {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
