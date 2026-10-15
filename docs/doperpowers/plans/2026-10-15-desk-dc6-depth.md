@@ -400,5 +400,13 @@ registrations through `connectDepth()`.
   the next reset or snapshot: DX4 carries no step end on a subscription.
   desk-hub's `enrollment.test.ts` failed once (502 vs 404), passed on
   rerun.
+- 2026-10-15, DC2's live walk (composite `2038124c`, `10b2d830`): live
+  `thinking` chunks carry `text: ""` and no signature on 2.1.300, so the
+  collapsed indicator is the only drawing of live thinking. The bridge
+  holds a step's end up to 1 s for its notices, so a `block-row` can
+  rarely follow its step's `step-end`: it names a block already dropped,
+  is ignored, and its row draws like any other. Producers remove a block
+  from `streaming` at its step's end as at its `block-row`, so a snapshot
+  never carries an aborted block.
 
 ## Outcomes & Retrospective
