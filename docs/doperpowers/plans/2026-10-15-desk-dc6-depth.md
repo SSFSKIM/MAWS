@@ -387,6 +387,18 @@ registrations through `connectDepth()`.
   `raised` now carries optional `agentId` and `truncated`; depth draws no
   pending requests, but would place one on the subagent named by `agentId`.
   Date/Author: 2026-10-15, controller, on the composite's writer's notice.
+- Decision (M3): Depth draws `<message>` marks, superseding "depth stays
+  raw": a marked span's body draws without its tags under a light "to
+  you" label, parsed by the same grammar the `transcript` slot uses
+  through the to-human Presenter (MAWS's port of doperpowers'
+  `sminos_marks.py` / `to-human.tsx`), tags in inline code and fences
+  literal, the old aliases read as `<message>`. A turn a subagent's
+  completion notification starts is the session's own, labelled as MAWS
+  labels a task-notification turn or "Continued for Ns", never "Peer
+  session worked". Reason: the terminal never shows raw marks, and the
+  M1 screenshot showed both. A MAWS renderer change for either goes to the
+  composite's writer; a desk-side seam is preferred.
+  Date/Author: 2026-10-15, composite's writer (from the M1 screenshot).
 - Decision: DX5 is final (composite at MAWS `361bee24`, DC2 closed): a
   `turn` start may carry `recovered: true` with `text: null`. Depth draws
   no turn start's text — DX4 relays no `turn` event, and the prompt row it
