@@ -8,8 +8,8 @@
     "./protocol": "./src/protocol/index.ts"
   },
   "scripts": {
-    "dev": "wrangler dev",
-    "build": "WRANGLER_SEND_METRICS=false wrangler deploy --dry-run --outdir dist",
+    "local": "node --experimental-strip-types --disable-warning=ExperimentalWarning local/run.ts",
+    "build": "node -e \"require('node:fs').mkdirSync('../desk-web/dist', { recursive: true })\" && WRANGLER_SEND_METRICS=false wrangler deploy --dry-run --outdir dist",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.protocol.json && tsc --noEmit -p tsconfig.test.json",
     "test": "vitest run"
   },

@@ -23,6 +23,9 @@ export const DEPLOY_VARS = {
   ACCESS_ISSUER: ISSUER,
   ACCESS_AUD: AUDIENCE,
   ACCESS_CERTS_URL: CERTS_URL,
+  CF_API_URL: 'https://api.cloudflare.test/client/v4',
+  CF_ACCOUNT_ID: 'acct-test',
+  CF_API_TOKEN: 'api-token-test',
 };
 
 export type Hub = Awaited<ReturnType<typeof startHub>>;

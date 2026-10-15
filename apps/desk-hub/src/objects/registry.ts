@@ -1,11 +1,41 @@
-// The org's registry (DX7): one per org. It holds the org, its members, and its machines, and answers who an Access
-// identity is to the hub. M2 adds enrollment, projects, and the archive designation; M3 push subscriptions and the grid.
+// The org's registry (DX7): one per org. It holds the org, its members, its machines, its projects, and the
+// enrollments that create machines, and answers who an Access identity is to the hub. M3 adds push subscriptions and
+// the grid.
+//
+// Enrollment is a durable state machine. Redeeming a token reserves the machine's name and records the intent to mint
+// (a machine row without a client id) before Cloudflare's API is called; the service token is named
+// `desk-<org>-<machine>`, so a token whose create answer was lost is found by name and deleted before anything else is
+// minted under it. A second redemption while pending rotates the credential. A pending enrollment that expires, and a
+// revoked machine, leave their token's name in `orphans`, swept until the API confirms the deletion. A mint in flight
+// is the one thing held only in memory (`busy`): an object restart ends the mint with it, and the name makes whatever
+// it left behind findable.
 import { DurableObject } from 'cloudflare:workers';
-import type { Env, OrgConfig } from '../env';
+import { hubConfig, type Env, type HubConfig } from '../env';
 import type { AccessIdentity } from '../identity/access';
-import type { MachineRecord, MemberRecord, OrgRecord } from '../protocol/identity';
+import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
+import { base64urlEncode } from '../protocol/base64url';
+import {
+  ENROLLMENT_TTL_S,
+  isMachineName,
+  machineNameKey,
+  MAX_ENROLLMENT_TTL_S,
+  serviceTokenName,
+  type EnrollmentIssued,
+  type EnrollmentRecord,
+  type MachineRecord,
+  type MemberRecord,
+  type OrgRecord,
+  type ProjectRecord,
+  type Redeemed,
+} from '../protocol/identity';
 
 export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord };
+
+/** An answer for the Worker to send: a value, or an HTTP status with DX7's `{error, message?}`. */
+export type Result<T> = { ok: true; value: T } | { ok: false; status: number; error: string; message?: string };
+
+const ok = <T>(value: T): Result<T> => ({ ok: true, value });
+const fail = (status: number, error: string, message?: string): Result<never> => ({ ok: false, status, error, ...(message ? { message } : {}) });
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS org (id TEXT PRIMARY KEY, name TEXT NOT NULL, created TEXT NOT NULL);
@@ -14,44 +44,306 @@ CREATE TABLE IF NOT EXISTS members (
 CREATE TABLE IF NOT EXISTS machines (
   name TEXT PRIMARY KEY, name_key TEXT NOT NULL UNIQUE, client_id TEXT UNIQUE, token_name TEXT NOT NULL,
   state TEXT NOT NULL, enrollment TEXT NOT NULL, created TEXT NOT NULL, confirmed TEXT);
+CREATE TABLE IF NOT EXISTS enrollments (
+  id TEXT PRIMARY KEY, token_hash TEXT NOT NULL UNIQUE, created_by TEXT NOT NULL, created TEXT NOT NULL,
+  expires TEXT NOT NULL, ttl_s INTEGER NOT NULL, state TEXT NOT NULL, machine TEXT);
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, registered_by TEXT NOT NULL, created TEXT NOT NULL, archive_machine TEXT);
+CREATE TABLE IF NOT EXISTS orphans (token_name TEXT PRIMARY KEY, since TEXT NOT NULL);
 `;
 
-/** 128 random bits as lowercase hex (DX7's member id). */
-function newMemberId(): string {
-  return Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
-}
+const MACHINE_COLUMNS = 'name, client_id, token_name, state, enrollment, created, confirmed';
+const ENROLLMENT_COLUMNS = 'id, created_by, created, expires, state, machine, ttl_s';
+const PROJECT_COLUMNS = 'id, name, registered_by, created, archive_machine';
+/** How soon a failed orphan deletion is tried again. */
+const ORPHAN_RETRY_MS = 60_000;
+
+const hex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+/** 128 random bits as lowercase hex (DX7's member id; also an enrollment's id). */
+const newId = () => hex(crypto.getRandomValues(new Uint8Array(16)));
+const sha256 = async (text: string) => hex(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))));
+const iso = (ms: number) => new Date(ms).toISOString();
+const lapsed = (enrollment: { expires: string }, now = Date.now()) => Date.parse(enrollment.expires) <= now;
+
+type EnrollmentRow = EnrollmentRecord & { ttl_s: number };
 
 export class Registry extends DurableObject<Env> {
+  /** Enrollments whose mint is in flight in this object's life. */
+  private readonly busy = new Set<string>();
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(SCHEMA);
   }
 
-  /** Who an identity Access admitted is to the hub: a member, an enrolled machine, or null for no one. */
-  resolve(config: OrgConfig, identity: AccessIdentity): Principal | null {
-    const org = this.ensureOrg(config);
-    const sql = this.ctx.storage.sql;
+  private get config(): HubConfig {
+    const config = hubConfig(this.env);
+    // The Worker reaches no object before its configuration is complete.
+    if (!config) throw new Error('the hub is not configured');
+    return config;
+  }
+
+  private get sql() {
+    return this.ctx.storage.sql;
+  }
+
+  /** Who an identity Access admitted is to the hub: a member, an enrolled machine, or null for no one. A pending
+   * machine's first authenticated request confirms its enrollment. */
+  resolve(identity: AccessIdentity): Principal | null {
+    const org = this.ensureOrg();
     if (identity.kind === 'human') {
-      const member = sql.exec<MemberRecord>('SELECT id, email, role, created FROM members WHERE email = ?', identity.email.toLowerCase()).toArray()[0];
+      const member = this.sql.exec<MemberRecord>('SELECT id, email, role, created FROM members WHERE email = ?', identity.email.toLowerCase()).toArray()[0];
       return member ? { kind: 'member', org, member } : null;
     }
     // Access's service-auth policy admits any service token of the account: only a client id this registry enrolled is
     // a machine.
-    const machine = sql
-      .exec<MachineRecord>('SELECT name, client_id, token_name, state, enrollment, created, confirmed FROM machines WHERE client_id = ?', identity.clientId)
-      .toArray()[0];
-    return machine ? { kind: 'machine', org, machine } : null;
+    const machine = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE client_id = ?`, identity.clientId).toArray()[0];
+    if (!machine) return null;
+    if (machine.state === 'pending') {
+      const enrollment = this.enrollmentById(machine.enrollment);
+      if (!enrollment || enrollment.state !== 'pending' || lapsed(enrollment)) return null;
+      const confirmed = iso(Date.now());
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec("UPDATE machines SET state = 'active', confirmed = ? WHERE name = ?", confirmed, machine.name);
+        this.sql.exec("UPDATE enrollments SET state = 'confirmed' WHERE id = ?", enrollment.id);
+      });
+      return { kind: 'machine', org, machine: { ...machine, state: 'active', confirmed } };
+    }
+    return { kind: 'machine', org, machine };
+  }
+
+  /** A one-time token for an admin to build an enrollment code from; the hub keeps only its hash. */
+  async createEnrollment(member: MemberRecord, body: unknown): Promise<Result<EnrollmentIssued>> {
+    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const ttl = typeof body === 'object' && body !== null ? ((body as { ttl_s?: unknown }).ttl_s ?? ENROLLMENT_TTL_S) : undefined;
+    if (typeof ttl !== 'number' || !Number.isInteger(ttl) || ttl < 1 || ttl > MAX_ENROLLMENT_TTL_S) {
+      return fail(400, 'bad-shape', `the body is {ttl_s?}, a whole number of seconds from 1 to ${MAX_ENROLLMENT_TTL_S}`);
+    }
+    const token = base64urlEncode(crypto.getRandomValues(new Uint8Array(32)));
+    const hash = await sha256(token);
+    const now = Date.now();
+    const enrollment: EnrollmentRecord = { id: newId(), created_by: member.id, created: iso(now), expires: iso(now + ttl * 1000), state: 'open', machine: null };
+    this.sql.exec(
+      "INSERT INTO enrollments (id, token_hash, created_by, created, expires, ttl_s, state, machine) VALUES (?, ?, ?, ?, ?, ?, 'open', NULL)",
+      enrollment.id,
+      hash,
+      enrollment.created_by,
+      enrollment.created,
+      enrollment.expires,
+      ttl,
+    );
+    await this.scheduleAlarm();
+    return ok({ enrollment, token });
+  }
+
+  /** Redeems a one-time token for the machine's own service token (the path Access does not guard). */
+  async redeem(body: unknown): Promise<Result<Redeemed>> {
+    const { token, machine } = (typeof body === 'object' && body !== null ? body : {}) as { token?: unknown; machine?: unknown };
+    if (typeof token !== 'string' || token === '' || typeof machine !== 'string') return fail(400, 'bad-shape', 'the body is {token, machine}');
+    if (!isMachineName(machine)) return fail(400, 'bad-name', `"${machine}" is not an admitted machine name`);
+    await this.sweep();
+    const hash = await sha256(token);
+
+    // From here to the first await below, nothing else runs in this object: the checks and the reservation are one step.
+    let enrollment = this.sql.exec<EnrollmentRow>(`SELECT ${ENROLLMENT_COLUMNS} FROM enrollments WHERE token_hash = ?`, hash).toArray()[0];
+    if (!enrollment) return fail(404, 'unknown-token');
+    if (this.busy.has(enrollment.id)) return fail(409, 'busy', 'a redemption of this token is in flight; try again');
+    if ((enrollment.state === 'open' || enrollment.state === 'pending') && lapsed(enrollment)) {
+      this.expire(enrollment);
+      enrollment = this.enrollmentById(enrollment.id)!;
+    }
+    if (enrollment.state === 'expired') return fail(410, 'expired', 'this token has expired; ask for a new one');
+    if (enrollment.state === 'confirmed') return fail(409, 'confirmed', 'this token enrolled its machine, which has connected; ask for a new one');
+    if (enrollment.state === 'pending' && enrollment.machine !== machine) {
+      return fail(409, 'token-used', `this token is bound to the machine "${enrollment.machine}"`);
+    }
+
+    const org = this.ensureOrg();
+    const tokenName = serviceTokenName(org.id, machine);
+    const expires = iso(Date.now() + enrollment.ttl_s * 1000);
+    const id = enrollment.id;
+    if (enrollment.state === 'open') {
+      const taken = this.sql.exec<{ name: string }>('SELECT name FROM machines WHERE name_key = ?', machineNameKey(machine)).toArray()[0];
+      if (taken) {
+        return fail(409, 'name-taken', `a machine named "${taken.name}" is enrolled in this org; pick another name and redeem this token under it`);
+      }
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec("UPDATE enrollments SET state = 'pending', machine = ?, expires = ? WHERE id = ?", machine, expires, id);
+        this.sql.exec(
+          "INSERT INTO machines (name, name_key, client_id, token_name, state, enrollment, created, confirmed) VALUES (?, ?, NULL, ?, 'pending', ?, ?, NULL)",
+          machine,
+          machineNameKey(machine),
+          tokenName,
+          id,
+          iso(Date.now()),
+        );
+        // This redemption deletes every token of the name before it mints, which is what an orphan of it waited for.
+        this.sql.exec('DELETE FROM orphans WHERE token_name = ?', tokenName);
+      });
+    } else {
+      // A rotation: the credential minted before stops at the hub at once, before Cloudflare deletes it.
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec('UPDATE enrollments SET expires = ? WHERE id = ?', expires, id);
+        this.sql.exec('UPDATE machines SET client_id = NULL WHERE name = ?', machine);
+      });
+    }
+    this.busy.add(id);
+
+    try {
+      const api = serviceTokens(this.config.api);
+      await api.deleteNamed(tokenName);
+      const minted = await api.create(tokenName);
+      // A revocation may have run while the API answered; then the token is no machine's.
+      const held = this.sql.exec<{ enrollment: string }>('SELECT enrollment FROM machines WHERE name = ?', machine).toArray()[0];
+      if (this.enrollmentById(id)?.state !== 'pending' || held?.enrollment !== id) {
+        await api.delete(minted.id).catch(() => this.orphan(tokenName));
+        return fail(410, 'expired', 'the enrollment ended while its token was minted');
+      }
+      this.sql.exec('UPDATE machines SET client_id = ? WHERE name = ?', minted.client_id, machine);
+      return ok({ org: org.id, machine, client_id: minted.client_id, client_secret: minted.client_secret });
+    } catch (error) {
+      if (error instanceof ServiceTokenApiError) return fail(502, 'mint-failed', `${error.message}; redeem again`);
+      throw error;
+    } finally {
+      this.busy.delete(id);
+      await this.scheduleAlarm();
+    }
+  }
+
+  /** Revokes a machine: its record goes at once (the hub refuses it from then), its stream ends, its service token is
+   * deleted (retried until Cloudflare confirms), its name is released, and an archive designation of it is cleared. */
+  async revoke(member: MemberRecord, name: string): Promise<Result<{ revoked: string }>> {
+    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const org = this.ensureOrg();
+    const machine = this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines WHERE name_key = ?`, machineNameKey(name)).toArray()[0];
+    if (!machine) return fail(404, 'unknown-machine');
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec('DELETE FROM machines WHERE name = ?', machine.name);
+      this.sql.exec("UPDATE enrollments SET state = 'expired' WHERE id = ? AND state IN ('open', 'pending')", machine.enrollment);
+      this.sql.exec('UPDATE projects SET archive_machine = NULL WHERE archive_machine = ?', machine.name);
+      this.orphan(machine.token_name);
+    });
+    await this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org.id}:${machine.name}`)).revoke();
+    await this.sweepOrphans();
+    await this.scheduleAlarm();
+    return ok({ revoked: machine.name });
+  }
+
+  machines(): MachineRecord[] {
+    return this.sql.exec<MachineRecord>(`SELECT ${MACHINE_COLUMNS} FROM machines ORDER BY name`).toArray();
+  }
+
+  projects(): ProjectRecord[] {
+    return this.sql.exec<ProjectRecord>(`SELECT ${PROJECT_COLUMNS} FROM projects ORDER BY created, id`).toArray();
+  }
+
+  project(id: string): ProjectRecord | null {
+    return this.sql.exec<ProjectRecord>(`SELECT ${PROJECT_COLUMNS} FROM projects WHERE id = ?`, id).toArray()[0] ?? null;
+  }
+
+  /** A machine's `hello` for a project the registry does not hold registers it, under the name from its `.smns`. */
+  registerProject(id: string, name: string, machine: string): ProjectRecord {
+    this.sql.exec('INSERT OR IGNORE INTO projects (id, name, registered_by, created, archive_machine) VALUES (?, ?, ?, ?, NULL)', id, name, machine, iso(Date.now()));
+    return this.project(id)!;
+  }
+
+  /** Names the one machine that writes the project's git archive (DX2's `have.archive` tells it at its next `hello`), or
+   * clears it. */
+  designateArchive(member: MemberRecord, id: string, body: unknown): Result<{ project: ProjectRecord }> {
+    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const machine = typeof body === 'object' && body !== null ? (body as { machine?: unknown }).machine : undefined;
+    if (!(machine === null || typeof machine === 'string')) return fail(400, 'bad-shape', 'the body is {machine}, a name or null');
+    if (!this.project(id)) return fail(404, 'unknown-project');
+    let name: string | null = null;
+    if (machine !== null) {
+      const found = this.sql.exec<{ name: string }>("SELECT name FROM machines WHERE name_key = ? AND state = 'active'", machineNameKey(machine)).toArray()[0];
+      if (!found) return fail(409, 'unknown-machine', `no enrolled machine is named "${machine}"`);
+      name = found.name;
+    }
+    this.sql.exec('UPDATE projects SET archive_machine = ? WHERE id = ?', name, id);
+    return ok({ project: this.project(id)! });
+  }
+
+  /** Expired enrollments and orphaned tokens, swept when their time comes. */
+  async alarm(): Promise<void> {
+    await this.sweep();
+  }
+
+  private enrollmentById(id: string): EnrollmentRow | undefined {
+    return this.sql.exec<EnrollmentRow>(`SELECT ${ENROLLMENT_COLUMNS} FROM enrollments WHERE id = ?`, id).toArray()[0];
+  }
+
+  /** Ends an open or pending enrollment whose time is up: a pending one's machine record goes, its name is released,
+   * and its token is left for the orphan sweep. */
+  private expire(enrollment: EnrollmentRecord): void {
+    this.ctx.storage.transactionSync(() => {
+      const machine = this.sql
+        .exec<{ name: string; token_name: string }>("SELECT name, token_name FROM machines WHERE enrollment = ? AND state = 'pending'", enrollment.id)
+        .toArray()[0];
+      if (machine) {
+        this.sql.exec('DELETE FROM machines WHERE name = ?', machine.name);
+        this.orphan(machine.token_name);
+      }
+      this.sql.exec("UPDATE enrollments SET state = 'expired' WHERE id = ?", enrollment.id);
+    });
+  }
+
+  private orphan(tokenName: string): void {
+    this.sql.exec('INSERT OR REPLACE INTO orphans (token_name, since) VALUES (?, ?)', tokenName, iso(Date.now()));
+  }
+
+  private async sweep(): Promise<void> {
+    const now = Date.now();
+    const live = this.sql.exec<EnrollmentRow>(`SELECT ${ENROLLMENT_COLUMNS} FROM enrollments WHERE state IN ('open', 'pending')`).toArray();
+    for (const enrollment of live) if (lapsed(enrollment, now) && !this.busy.has(enrollment.id)) this.expire(enrollment);
+    await this.sweepOrphans();
+    await this.scheduleAlarm();
+  }
+
+  /** Deletes orphaned tokens by name. A name some machine holds again is that machine's: its redemption deletes every
+   * token of the name before it mints, so the orphan's row just goes. */
+  private async sweepOrphans(): Promise<void> {
+    const orphans = this.sql.exec<{ token_name: string }>('SELECT token_name FROM orphans').toArray();
+    if (orphans.length === 0) return;
+    const api = serviceTokens(this.config.api);
+    for (const { token_name } of orphans) {
+      const held = this.sql.exec('SELECT 1 FROM machines WHERE token_name = ?', token_name).toArray().length > 0;
+      if (!held) {
+        try {
+          await api.deleteNamed(token_name);
+        } catch (error) {
+          if (error instanceof ServiceTokenApiError) continue;
+          throw error;
+        }
+      }
+      this.sql.exec('DELETE FROM orphans WHERE token_name = ?', token_name);
+    }
+  }
+
+  /** The alarm at the next expiry, or sooner when an orphan waits for a retry; never in the past, so an enrollment kept
+   * open by a mint in flight does not spin it. */
+  private async scheduleAlarm(): Promise<void> {
+    const now = Date.now();
+    const next = this.sql
+      .exec<{ expires: string }>("SELECT expires FROM enrollments WHERE state IN ('open', 'pending')")
+      .toArray()
+      .map((e) => Date.parse(e.expires));
+    if (this.sql.exec('SELECT 1 FROM orphans LIMIT 1').toArray().length > 0) next.push(now + ORPHAN_RETRY_MS);
+    if (next.length === 0) return;
+    const at = Math.max(Math.min(...next), now + 250);
+    const current = await this.ctx.storage.getAlarm();
+    if (current === null || current > at || current <= now) await this.ctx.storage.setAlarm(at);
   }
 
   /** The org, created from the deploy configuration the first time it is needed, with its admin as the first member. */
-  private ensureOrg(config: OrgConfig): OrgRecord {
-    const sql = this.ctx.storage.sql;
-    const existing = sql.exec<OrgRecord>('SELECT id, name, created FROM org').toArray()[0];
+  private ensureOrg(): OrgRecord {
+    const existing = this.sql.exec<OrgRecord>('SELECT id, name, created FROM org').toArray()[0];
     if (existing) return existing;
-    const created = new Date().toISOString();
+    const { org: config } = this.config;
+    const created = iso(Date.now());
     this.ctx.storage.transactionSync(() => {
-      sql.exec('INSERT INTO org (id, name, created) VALUES (?, ?, ?)', config.id, config.name, created);
-      sql.exec('INSERT INTO members (id, email, role, created) VALUES (?, ?, ?, ?)', newMemberId(), config.adminEmail.toLowerCase(), 'admin', created);
+      this.sql.exec('INSERT INTO org (id, name, created) VALUES (?, ?, ?)', config.id, config.name, created);
+      this.sql.exec('INSERT INTO members (id, email, role, created) VALUES (?, ?, ?, ?)', newId(), config.adminEmail.toLowerCase(), 'admin', created);
     });
     return { id: config.id, name: config.name, created };
   }

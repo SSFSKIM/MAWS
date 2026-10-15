@@ -1,10 +1,12 @@
 {
-  // The suites, which run under Node (vitest) and reach the Worker through Miniflare; they import the protocol module
-  // and the identity verifier, which are runtime-neutral, and never the Worker's own modules.
+  // The suites and the local command (local/: the stand-in for Access and its proxy), which run under Node and reach
+  // the Worker over HTTP; they import the protocol module and the identity verifier, which are runtime-neutral, and
+  // never the Worker's own modules. local/ imports with `.ts` extensions, so Node runs it with its own type stripping.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "lib": ["ES2023", "DOM"],
-    "types": ["node"]
+    "types": ["node"],
+    "allowImportingTsExtensions": true
   },
-  "include": ["test/**/*.ts", "vitest.config.ts", "src/protocol/**/*.ts", "src/identity/**/*.ts"]
+  "include": ["test/**/*.ts", "local/**/*.ts", "vitest.config.ts", "src/protocol/**/*.ts", "src/identity/access.ts"]
 }

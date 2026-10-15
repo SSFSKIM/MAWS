@@ -52,8 +52,18 @@ describe('the Worker admits only what Access signed and the Registry knows', () 
 });
 
 describe("a project's socket", () => {
+  it('is refused for a project the registry does not hold', async () => {
+    const response = await hub.fetch(`/api/projects/${PROJECT}/socket`, { assertion: await hub.human(ADMIN), headers: { Upgrade: 'websocket' } });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'unknown-project' });
+  });
+
   it('reaches the Project object for that project, carrying the member the Worker verified and not one the client named', async () => {
     const me = (await (await hub.fetch('/api/me', { assertion: await hub.human(ADMIN) })).json()) as { member: { id: string } };
+    // A machine's hello registers a project (the log suite does it over the wire); here the registry is told directly.
+    const registries = await hub.mf.getDurableObjectNamespace('REGISTRY');
+    const registry = registries.get(registries.idFromName(ORG)) as unknown as { registerProject(id: string, name: string, machine: string): Promise<unknown> };
+    await registry.registerProject(PROJECT, 'demo', 'mini');
     const response = await hub.fetch(`/api/projects/${PROJECT}/socket`, {
       assertion: await hub.human(ADMIN),
       headers: { Upgrade: 'websocket', 'X-Desk-Member': 'f'.repeat(32) },

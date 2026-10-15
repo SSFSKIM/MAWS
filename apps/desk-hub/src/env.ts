@@ -15,19 +15,39 @@ export interface Env {
   ACCESS_ISSUER: string;
   ACCESS_AUD: string;
   ACCESS_CERTS_URL: string;
+  /** Cloudflare's API (`https://api.cloudflare.com/client/v4`; locally, the stand-in's), the account whose Access
+   * service tokens are machines' credentials, and a token scoped to service tokens alone (a secret). */
+  CF_API_URL: string;
+  CF_ACCOUNT_ID: string;
+  CF_API_TOKEN: string;
 }
 
 export type OrgConfig = { id: string; name: string; adminEmail: string };
 
+export type ApiConfig = { url: string; account: string; token: string };
+
+export type HubConfig = { org: OrgConfig; issuer: string; audience: string; certsUrl: string; api: ApiConfig };
+
 /** The deploy configuration, or null when any of it is missing (the Worker then refuses everything). */
-export function hubConfig(env: Env): { org: OrgConfig; issuer: string; audience: string; certsUrl: string } | null {
-  const values = [env.ORG_ID, env.ORG_NAME, env.ORG_ADMIN_EMAIL, env.ACCESS_ISSUER, env.ACCESS_AUD, env.ACCESS_CERTS_URL];
+export function hubConfig(env: Env): HubConfig | null {
+  const values = [
+    env.ORG_ID,
+    env.ORG_NAME,
+    env.ORG_ADMIN_EMAIL,
+    env.ACCESS_ISSUER,
+    env.ACCESS_AUD,
+    env.ACCESS_CERTS_URL,
+    env.CF_API_URL,
+    env.CF_ACCOUNT_ID,
+    env.CF_API_TOKEN,
+  ];
   if (values.some((value) => typeof value !== 'string' || value === '')) return null;
   return {
     org: { id: env.ORG_ID, name: env.ORG_NAME, adminEmail: env.ORG_ADMIN_EMAIL },
     issuer: env.ACCESS_ISSUER,
     audience: env.ACCESS_AUD,
     certsUrl: env.ACCESS_CERTS_URL,
+    api: { url: env.CF_API_URL, account: env.CF_ACCOUNT_ID, token: env.CF_API_TOKEN },
   };
 }
 

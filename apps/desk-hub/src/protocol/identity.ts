@@ -78,6 +78,39 @@ export const serviceTokenName = (org: string, machine: string) => `desk-${org}-$
 
 // The enrollment code: built in the browser (the hub never sees the org key), carried by the owner's hand, and run on
 // the machine as `sminos hub enroll <code>`. Text form: `smns-enroll-v1.` + base64url of the UTF-8 JSON object.
+
+// Enrollment's endpoints (DX7). Every error is `{error, message?}`.
+
+/** `POST /api/enrollments` (an admin): asks for a one-time token, live `ttl_s` seconds (1 to 3600; 900 by default). */
+export type EnrollmentRequest = { ttl_s?: number };
+export const ENROLLMENT_TTL_S = 900;
+export const MAX_ENROLLMENT_TTL_S = 3600;
+/** The token, 256 random bits as base64url, is shown this once; the hub keeps only its hash. */
+export type EnrollmentIssued = { enrollment: EnrollmentRecord; token: string };
+
+/** The one path Access does not guard (its Bypass policy); the one-time token guards it. Under the Worker's `/machine/*`
+ * routes, so the Worker answers it before the web app's assets. */
+export const REDEEM_PATH = '/machine/enroll';
+/** `POST /machine/enroll`. Redeeming again with the same token and name while pending rotates the credential. */
+export type RedeemRequest = { token: string; machine: string };
+/** The machine's Access service token; the secret is shown this once. */
+export type Redeemed = { org: string; machine: string; client_id: string; client_secret: string };
+export type RedeemError =
+  | 'bad-shape'
+  | 'bad-name' // not an admitted machine name
+  | 'unknown-token'
+  | 'expired'
+  | 'confirmed' // the token's machine already connected: the token is spent
+  | 'token-used' // the token is bound to another machine name
+  | 'name-taken' // another machine holds the name; nothing is bound, so the same token may be redeemed under another name
+  | 'busy' // a redemption of this token is in flight: retry
+  | 'mint-failed'; // Cloudflare's API failed: retry the same redemption
+
+/** `PUT /api/projects/<id>/archive` (an admin): the machine that writes the project's git archive, or null. */
+export type ArchiveRequest = { machine: string | null };
+
+export type HubError = { error: string; message?: string };
+
 export type EnrollmentCode = {
   /** The hub's origin, https (http only on a loopback host, for the local runtime). */
   hub: string;

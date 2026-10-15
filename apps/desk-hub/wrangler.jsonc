@@ -9,6 +9,14 @@
   // A Durable Object sees a client close its SSE stream through the request's signal (the M1 probe).
   "compatibility_flags": ["enable_request_signal"],
   "workers_dev": true,
+  // The web app (apps/desk-web, DC5), served as static assets; every path the Worker answers runs it first, the
+  // enrollment redeem (`/machine/enroll`) included. scripts/assets-dir.mjs makes the directory when desk-web has not
+  // been built, since wrangler refuses a missing one.
+  "assets": {
+    "directory": "../desk-web/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/machine/*"]
+  },
   "durable_objects": {
     "bindings": [
       { "name": "PROJECT", "class_name": "Project" },
@@ -25,6 +33,9 @@
     "ORG_ADMIN_EMAIL": "",
     "ACCESS_ISSUER": "",
     "ACCESS_AUD": "",
-    "ACCESS_CERTS_URL": ""
+    "ACCESS_CERTS_URL": "",
+    "CF_API_URL": "",
+    "CF_ACCOUNT_ID": ""
   }
+  // CF_API_TOKEN is a secret (`wrangler secret put CF_API_TOKEN`, M5); the local command passes the stand-in's.
 }
