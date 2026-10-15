@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 
 // The desk's web app, built to dist/ for the hub's Worker to serve as static assets (single-page fallback; the Worker
@@ -9,6 +10,8 @@ const hub = process.env.DESK_HUB_URL ?? 'http://127.0.0.1:8787';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // MAWS's renderer modules the desk imports as they stand (the renderer survey) name src/shared as `@shared`.
+  resolve: { alias: { '@shared': resolve(import.meta.dirname, '../../src/shared') } },
   build: { outDir: 'dist', emptyOutDir: true },
   // /machine too: an enrollment code made in dev names this origin as the hub, and the machine redeems it here.
   server: { proxy: { '/api': { target: hub, ws: true, changeOrigin: true }, '/machine': { target: hub, changeOrigin: true } } },

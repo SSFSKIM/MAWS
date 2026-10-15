@@ -1,5 +1,5 @@
 // The project's left column (§4): `# <project>`, then its sessions as direct channels grouped waiting on you /
-// working / idle / ended, each with its machine and its in-charge line.
+// working / idle / ended, each with its machine and its in-charge line; "+ Session" below them.
 import type { Channel } from '../../shell/layout';
 import type { DeskSession } from '../../shell/sessions';
 import { GROUPS, type SessionGroup } from '../../log/projection';
@@ -12,8 +12,9 @@ export function Sidebar(props: {
   groups: Record<SessionGroup, DeskSession[]> | null;
   locked: boolean;
   onSelect(channel: Channel): void;
+  onSpawn(): void;
 }) {
-  const { name, channel, groups, locked, onSelect } = props;
+  const { name, channel, groups, locked, onSelect, onSpawn } = props;
   return (
     <nav className="flex min-h-0 flex-col overflow-y-auto border-r border-border bg-bg-raised px-2.5 py-2.5" aria-label="Channels">
       <button
@@ -41,6 +42,11 @@ export function Sidebar(props: {
             ))}
           </section>
         ))
+      )}
+      {!locked && (
+        <button type="button" onClick={onSpawn} className="mt-3 flex h-[30px] items-center rounded-sm px-2.5 text-left text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg">
+          + Session
+        </button>
       )}
     </nav>
   );

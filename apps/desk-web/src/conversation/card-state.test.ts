@@ -1,0 +1,59 @@
+// What a request card draws: open (with Allow / Deny or the answer), in flight, uncertain (with Retry), failed with its
+// reason, settled by its winner (a late decision refused naming the winner draws as that settlement, not as an error),
+// waiting in the terminal, or shown but not answerable while the machine is offline.
+import { describe, expect, it } from 'vitest';
+import type { Raised, Settled } from 'desk-hub/protocol';
+import type { RequestRecord, RpcEntry } from '../project/conversation';
+import { cardState, isAsyncQuestion, isQuestion } from './card-state';
+
+const raised: Raised = { request: 'toolu_1', session: 's', tool: 'Bash', input: { command: 'pnpm e2e' }, mac: { nonce: 'n', value: 'v' } };
+const record = (over: Partial<RequestRecord> = {}): RequestRecord => ({ request: 'toolu_1', machine: 'mini', raised, at: 0, pending: true, terminalOnly: false, settled: null, ...over });
+const rpc = (state: RpcEntry['state'], outcome?: RpcEntry['outcome']): RpcEntry => ({ nonce: 'r', rpc: {} as RpcEntry['rpc'], state, outcome });
+const settled = (winner: Settled['winner'], outcome: Settled['outcome'], by: string): Settled => ({ request: 'toolu_1', winner, outcome, by, mac: { nonce: 'n', value: 'v' } });
+const can = { can: true, reason: null };
+
+describe('cardState', () => {
+  it('is open while pending and answerable, and marks a background subagent\'s window', () => {
+    expect(cardState(record(), null, can)).toEqual({ kind: 'open', window: false });
+    expect(cardState(record({ raised: { ...raised, deadline: '2026-10-15T08:00:03.000Z' } }), null, can)).toEqual({ kind: 'open', window: true });
+  });
+
+  it('follows the RPC it sent: in flight, uncertain, failed with its reason, sent', () => {
+    expect(cardState(record(), rpc('sending'), can)).toEqual({ kind: 'sending' });
+    expect(cardState(record(), rpc('forwarded'), can)).toEqual({ kind: 'sending' });
+    expect(cardState(record(), rpc('uncertain'), can)).toEqual({ kind: 'uncertain' });
+    expect(cardState(record(), rpc('failed', { state: 'failed', error: { code: 'digest-mismatch', message: '' } }), can)).toEqual({ kind: 'failed', code: 'digest-mismatch', message: '' });
+    expect(cardState(record(), rpc('done', { state: 'done', result: {} }), can)).toEqual({ kind: 'sent' });
+  });
+
+  it('draws a late decision refused naming its winner as settled by that winner', () => {
+    const late = rpc('failed', { state: 'failed', error: { code: 'not-pending', message: 'answered in the terminal', winner: 'terminal' } as never });
+    expect(cardState(record(), late, can)).toEqual({ kind: 'settled', winner: 'terminal', outcome: null, by: 'terminal' });
+    const nearDeadline = rpc('failed', { state: 'failed', error: { code: 'not-pending', message: '', terminalOnly: true } as never });
+    expect(cardState(record(), nearDeadline, can)).toEqual({ kind: 'terminal', why: 'window' });
+  });
+
+  it('is settled once a verified settlement came, whatever else holds', () => {
+    expect(cardState(record({ pending: false, settled: settled('web', 'deny', 'm') }), rpc('done'), can)).toEqual({ kind: 'settled', winner: 'web', outcome: 'deny', by: 'm' });
+  });
+
+  it('waits in the terminal when the hub says only it can answer, or the session has no bridge', () => {
+    expect(cardState(record({ terminalOnly: true }), null, can)).toEqual({ kind: 'terminal', why: 'window' });
+    expect(cardState(record(), null, { can: false, reason: 'terminal only: maws-45 runs without the bridge' })).toEqual({ kind: 'terminal', why: 'terminal only: maws-45 runs without the bridge' });
+  });
+
+  it('is shown, not answerable, while the machine is offline; closed once it left the set unsettled', () => {
+    expect(cardState(record(), null, { can: false, reason: 'mini is offline: shown, not answerable' }, false)).toEqual({ kind: 'offline' });
+    expect(cardState(record({ pending: false }), null, can)).toEqual({ kind: 'closed' });
+  });
+});
+
+describe('the kind of request', () => {
+  it('tells a question from a permission prompt, and an async question (`raised.async`) from a native one', () => {
+    expect(isQuestion('AskUserQuestion')).toBe(true);
+    expect(isQuestion('mcp__doperpowers__AskUserQuestion')).toBe(true);
+    expect(isQuestion('Bash')).toBe(false);
+    expect(isAsyncQuestion({ ...raised, tool: 'mcp__doperpowers__AskUserQuestion', input: { questions: [] }, async: true } as Raised)).toBe(true);
+    expect(isAsyncQuestion({ ...raised, tool: 'AskUserQuestion', input: { questions: [] } })).toBe(false);
+  });
+});

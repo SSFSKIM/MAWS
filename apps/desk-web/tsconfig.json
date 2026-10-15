@@ -13,7 +13,9 @@
     "isolatedModules": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    // MAWS's renderer modules the desk imports as they stand (the renderer survey) name src/shared as `@shared`.
+    "paths": { "@shared/*": ["../../src/shared/*"] }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]

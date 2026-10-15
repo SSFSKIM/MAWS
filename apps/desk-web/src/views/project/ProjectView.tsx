@@ -1,7 +1,7 @@
 // A project (§4): the channels on the left, the selected channel in the center, the selected session's depth on the
 // right (DX8's `depth` slot, DC6's). Nothing from the log is drawn until it verifies; locked, nothing is drawn at all,
-// and the view says why. Events whose code fails are reported, never drawn.
-import { useEffect } from 'react';
+// and the view says why. Events, requests, settlements, and deliveries whose code fails are reported, never drawn.
+import { useEffect, useState } from 'react';
 import { useStore } from 'zustand';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
@@ -13,8 +13,10 @@ import { useDeskSessions } from '../../shell/sessions';
 import { useSlot } from '../../shell/slots';
 import { useGrid } from '../../state/grid';
 import { UnlockForm } from '../key/UnlockForm';
+import { DeskContext } from '../conversation/desk-context';
 import { ChannelView } from './ChannelView';
 import { Sidebar } from './Sidebar';
+import { SpawnDialog } from './SpawnDialog';
 
 export function ProjectView({ me, project, channel }: { me: Me; project: string; channel: Channel }) {
   const connection = useProjectConnection(project);
@@ -29,7 +31,10 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
   const logState = useStore(connection.log.store);
   const status = useStore(connection.live, (s) => s.status);
   const audit = useStore(connection.live, (s) => s.audit);
+  const unverified = useStore(connection.conversation.store, (s) => s.unverified);
   const { sessions, groups } = useDeskSessions(connection);
+  const [spawning, setSpawning] = useState(false);
+  const desk = { connection, member: me.member.id, sessions };
   const Depth = useSlot('depth');
   const locked = keyState !== 'unlocked';
   const failed = refused(logState);
@@ -47,13 +52,14 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
   const select = (next: Channel) => navigate({ view: 'project', project: connection.project, channel: next });
 
   return (
+    <DeskContext.Provider value={desk}>
     <div
       className="grid h-full min-h-0"
       style={{ gridTemplateColumns: `var(--sidebar-w) minmax(0, 1fr)${depth.open ? ` ${depth.width}px` : ''}` }}
       data-testid="project-view"
       data-connection={status}
     >
-      <Sidebar name={name} channel={channel} groups={locked ? null : groups} locked={locked} onSelect={select} />
+      <Sidebar name={name} channel={channel} groups={locked ? null : groups} locked={locked} onSelect={select} onSpawn={() => setSpawning(true)} />
       <div className="flex min-h-0 min-w-0 flex-col">
         {status === 'connecting' && (
           <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-fg-muted" role="status">
@@ -66,11 +72,17 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
             {failed.map((e) => `${typeof e.event?.writer === 'string' ? e.event.writer : '?'}:${typeof e.event?.seq === 'number' ? e.event.seq : '?'} (${e.verdict === 'bad-code' ? 'its code does not match' : 'not an event'})`).join(', ')}
           </div>
         )}
+        {!locked && unverified.length > 0 && (
+          <div className="border-b border-border px-4 py-1.5 text-ui-sm text-danger" role="alert" data-testid="refused-requests">
+            {unverified.length === 1 ? 'One' : unverified.length} {unverified.length === 1 ? 'item' : 'items'} from the session plane failed verification and {unverified.length === 1 ? 'is' : 'are'} not shown:{' '}
+            {unverified.map((u) => `${u.what === 'request' ? 'a request' : u.what === 'settlement' ? 'a settlement' : 'a delivery'} ${u.id}${u.machine ? ` from ${u.machine}` : ''}`).join(', ')}
+          </div>
+        )}
         {audit.length > 0 && <AuditNotice audit={audit} />}
         {locked ? (
           <Locked me={me} name={name} loading={keyState === 'loading'} />
         ) : (
-          <ChannelView name={name} channel={channel} session={selected} events={drawable(logState)} sessions={sessions} />
+          <ChannelView name={name} channel={channel} session={selected} events={drawable(logState)} />
         )}
       </div>
       {depth.open && (
@@ -79,7 +91,17 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
           <Depth project={connection.project} session={locked ? null : selected} plane={connection.client} />
         </aside>
       )}
+      {spawning && !locked && (
+        <SpawnDialog
+          onClose={() => setSpawning(false)}
+          onOpen={(session) => {
+            setSpawning(false);
+            select({ kind: 'session', session });
+          }}
+        />
+      )}
     </div>
+    </DeskContext.Provider>
   );
 }
 

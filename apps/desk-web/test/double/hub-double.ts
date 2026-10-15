@@ -4,7 +4,10 @@
 // the registry socket (`GridDown`); it numbers stored events with project offsets, seals what it appends with the org
 // key the way a machine's daemon would (DX1), and serves a built app from a directory with the single-page fallback the
 // Worker's static assets will have. Every discontinuity a test needs is a method: drop every socket (a deploy), send
-// a frame in parts, hold acknowledgements, store an event whose code fails.
+// a frame in parts, hold acknowledgements, store an event whose code fails. For the conversation (the plan's M3) it also
+// stands in for what DC3's M3 routes and its fake machine (M4) produces: requests raised and settled, deliveries, the
+// RPC record per nonce (a retry answered from it, an offline machine failing at once, a dropped machine leaving its
+// forwarded RPCs `uncertain`), subscriptions numbered and ended, and a session's compaction messages.
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -32,6 +35,11 @@ import {
   type Delivery,
   type Refusal,
   type Rejection,
+  type Raised,
+  type Settled,
+  type RpcState,
+  type SessionBodies,
+  type SubscriptionKind,
 } from 'desk-hub/protocol';
 import { WebSocketServer, type WebSocket } from 'ws';
 
@@ -51,6 +59,10 @@ type ProjectState = {
   deliveries: Delivery[];
   /** Each session's latest presence, sent to a socket when it connects (an assumption about DX3; see sendSession). */
   presence: Map<string, SessionMessage>;
+  /** The hub's record per RPC nonce: the RPC, its state, and its outcome once one came. */
+  rpcs: Map<string, { rpc: Rpc; state: RpcState; outcome?: RpcOutcome }>;
+  /** Each open subscription's machine and the `n` of its next message. */
+  subs: Map<string, { machine: string; next: number }>;
 };
 
 export type DoubleOptions = {
@@ -154,6 +166,98 @@ export class HubDouble {
     this.broadcast(project, { t: 'pending', requests });
   }
 
+  /**
+   * A request the bridge raised on a machine, sealed with the org key as the machine would: a `raised` message to every
+   * browser, and the pending set again. `terminalOnly` stands for the hub's own clock having passed its deadline.
+   */
+  async raise(project: string, machine: string, draft: Omit<Raised, 'mac'>, options: { terminalOnly?: boolean } = {}): Promise<Raised> {
+    const raised = await seal(this.key, 'raised', project, draft);
+    this.raiseRaw(project, machine, raised, options);
+    return raised;
+  }
+
+  /** A raised request exactly as given, code and all (an altered or forged one). */
+  raiseRaw(project: string, machine: string, raised: Raised, options: { terminalOnly?: boolean } = {}): void {
+    const state = this.project(project);
+    this.sendSession(project, { project, machine, session: raised.session, kind: 'raised', sub: null, n: null, body: raised });
+    this.setPending(project, [...state.pending.filter((p) => p.raised.request !== raised.request), { machine, raised, terminal_only: options.terminalOnly === true }]);
+  }
+
+  /** The hub's clock passed a background request's deadline: it stays pending, answerable only in the terminal. */
+  markTerminalOnly(project: string, request: string): void {
+    const state = this.project(project);
+    this.setPending(project, state.pending.map((p) => (p.raised.request === request ? { ...p, terminal_only: true } : p)));
+  }
+
+  /** The bridge settled a request: a `settled` message to every browser, and the pending set without it. */
+  async settle(project: string, machine: string, session: string, draft: Omit<Settled, 'mac'>): Promise<Settled> {
+    const settled = await seal(this.key, 'settled', project, draft);
+    const state = this.project(project);
+    this.sendSession(project, { project, machine, session, kind: 'settled', sub: null, n: null, body: settled });
+    this.setPending(project, state.pending.filter((p) => p.raised.request !== draft.request));
+    return settled;
+  }
+
+  /** A machine's `deliver_next` settled an event for a recipient: kept as the latest per event and recipient, and sent on. */
+  async deliver(project: string, machine: string, draft: Omit<Delivery, 'mac'>): Promise<Delivery> {
+    return this.deliverRaw(project, machine, await seal(this.key, 'delivery', project, draft));
+  }
+
+  /** A delivery exactly as given, code and all. */
+  deliverRaw(project: string, machine: string, delivery: Delivery): Delivery {
+    const state = this.project(project);
+    const same = (d: Delivery) => d.event.writer === delivery.event.writer && d.event.seq === delivery.event.seq && d.session === delivery.session;
+    state.deliveries = [...state.deliveries.filter((d) => !same(d)), delivery];
+    this.sendSession(project, { project, machine, session: delivery.session, kind: 'delivery', sub: null, n: null, body: delivery });
+    return delivery;
+  }
+
+  /** A session's compaction (DX4 `compact`, composite 71e32c68), which `desk-hub/protocol` does not type yet. */
+  sendCompact(project: string, machine: string, session: string, body: Record<string, unknown>): void {
+    this.broadcast(project, { t: 'session', message: { project, machine, session, kind: 'compact', sub: null, n: null, body } as unknown as SessionMessage });
+  }
+
+  /** The RPCs browsers sent on a project, oldest first, retries included. */
+  rpcs(project: string): Rpc[] {
+    return this.up.filter((u) => u.project === project && u.frame.t === 'rpc').map((u) => (u.frame as { rpc: Rpc }).rpc);
+  }
+
+  /** The machine's result for an RPC, or `uncertain` (its lease lapsed first): recorded per nonce and sent on. */
+  answerRpc(project: string, nonce: string, outcome: RpcOutcome | 'uncertain'): void {
+    const record = this.project(project).rpcs.get(nonce);
+    if (!record) throw new Error(`no RPC ${nonce}`);
+    if (outcome === 'uncertain') record.state = 'uncertain';
+    else Object.assign(record, { state: outcome.state, outcome });
+    this.sendRpcState(project, nonce, outcome);
+  }
+
+  /** A message on an open subscription, numbered after the last one it carried (the snapshot is n 0). */
+  sendSub<K extends SubscriptionKind>(project: string, sub: string, kind: K, body: SessionBodies[K]): void {
+    const open = this.project(project).subs.get(sub);
+    const target = this.subscriptions(project).find((s) => s.sub === sub);
+    if (!open || !target) throw new Error(`no subscription ${sub}`);
+    const n = open.next++;
+    this.broadcast(project, { t: 'session', message: { project, machine: target.machine, session: target.session, kind, sub, n, body } as SessionMessage });
+    if (kind === 'end') this.project(project).subs.delete(sub);
+  }
+
+  /**
+   * A machine whose lease lapsed, as the hub sees it: offline in `machines`, each subscription it served ended
+   * `machine-offline`, and each RPC forwarded to it without a result `uncertain`.
+   */
+  dropMachine(project: string, machine: string): void {
+    const state = this.project(project);
+    this.setMachines(project, state.machines.map((m) => (m.machine === machine ? { ...m, online: false } : m)));
+    for (const [sub, open] of [...state.subs]) if (open.machine === machine) this.sendSub(project, sub, 'end', { reason: 'machine-offline' });
+    for (const [nonce, record] of state.rpcs) if (record.rpc.machine === machine && record.state === 'forwarded') this.answerRpc(project, nonce, 'uncertain');
+  }
+
+  /** The machine's lease is fresh again. */
+  restoreMachine(project: string, machine: string): void {
+    const state = this.project(project);
+    this.setMachines(project, state.machines.map((m) => (m.machine === machine ? { ...m, online: true } : m)));
+  }
+
   sendRpcState(project: string, nonce: string, outcome: RpcOutcome | 'forwarded' | 'uncertain'): void {
     const frame: ProjectDown = typeof outcome === 'string' ? { t: 'rpc-state', nonce, state: outcome } : { t: 'rpc-state', nonce, state: outcome.state, outcome };
     this.broadcast(project, frame);
@@ -223,7 +327,7 @@ export class HubDouble {
   private project(id: string): ProjectState {
     let state = this.projects.get(id);
     if (!state) {
-      state = { log: [], seqs: new Map(), sockets: new Set(), machines: [], pending: [], deliveries: [], presence: new Map() };
+      state = { log: [], seqs: new Map(), sockets: new Set(), machines: [], pending: [], deliveries: [], presence: new Map(), rpcs: new Map(), subs: new Map() };
       this.projects.set(id, state);
     }
     return state;
@@ -305,7 +409,13 @@ export class HubDouble {
       case 'human':
         return this.receiveHuman(project, socket, frame.event);
       case 'rpc':
-        return this.receiveRpc(socket, frame.rpc);
+        return this.receiveRpc(project, socket, frame.rpc);
+      case 'subscribe':
+        state.subs.set(frame.sub, { machine: frame.machine, next: 0 });
+        return;
+      case 'unsubscribe':
+        state.subs.delete(frame.sub);
+        return;
       default:
         return;
     }
@@ -327,7 +437,25 @@ export class HubDouble {
     if (this.ackHumans) this.sendRaw(socket.ws, { t: 'human-ack', nonce: event.mac.nonce, offset: entry.offset, writer, seq: entry.event.seq });
   }
 
-  private receiveRpc(socket: ProjectSocket, rpc: Rpc): void {
+  /**
+   * DX6 at the hub: a nonce it holds a result for is answered from its record; an RPC to a machine without a fresh lease
+   * fails at once, `machine-offline`, nothing queued; anything else is forwarded (again, for a retry of a `forwarded`
+   * or `uncertain` one), and the test answers it with `answerRpc`.
+   */
+  private receiveRpc(project: string, socket: ProjectSocket, rpc: Rpc): void {
+    const state = this.project(project);
+    const known = state.rpcs.get(rpc.nonce);
+    if (known?.outcome) {
+      this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: known.outcome.state, outcome: known.outcome });
+      return;
+    }
+    if (state.machines.find((m) => m.machine === rpc.machine)?.online === false) {
+      const outcome: RpcOutcome = { state: 'failed', error: { code: 'machine-offline', message: `${rpc.machine} is offline` } };
+      state.rpcs.set(rpc.nonce, { rpc, state: 'failed', outcome });
+      this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: 'failed', outcome });
+      return;
+    }
+    state.rpcs.set(rpc.nonce, { rpc, state: 'forwarded' });
     this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: 'forwarded' });
   }
 

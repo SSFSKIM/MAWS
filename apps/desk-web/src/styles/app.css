@@ -2,6 +2,13 @@
    app.css, whose palette is the X7 tokens and nothing else), plus the few tokens the desk adds, below. Components use
    tokens only. */
 @import "../../../../src/renderer/src/styles/app.css";
+/* Markdown's prose styles (`transcript-prose`), and Streamdown's own, as MAWS's transcript loads them. */
+@import "../../../../src/renderer/src/transcript/view/transcript.css";
+@import "streamdown/styles.css";
+
+/* The MAWS directories the desk imports components from, as they stand: their utility classes are generated here. */
+@source "../../../../src/renderer/src/request-card";
+@source "../../../../src/renderer/src/transcript/view/markdown";
 
 /* The desk's own tokens (values advisory, as X7's): what MAWS's set has no name for. */
 :root {

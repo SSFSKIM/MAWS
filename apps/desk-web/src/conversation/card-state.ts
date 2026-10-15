@@ -1,0 +1,53 @@
+// What a request card draws (§4, §5, DX4, DX6, and DC2's M3 as relayed): open — answerable, with a background
+// subagent's short window marked while it lasts; in flight while its RPC is sent or forwarded; `uncertain` with a Retry
+// of the same nonce; failed with its reason (another decision may follow); sent and waiting for the settlement;
+// settled by its winner — and a late decision the bridge refused naming the winner is that settlement, not an error;
+// waiting in the terminal when the hub marks it `terminal_only` or the session has no bridge; shown but not answerable
+// while the machine is offline; closed when it left the pending set with no settlement this tab saw.
+import type { Raised, Settled } from 'desk-hub/protocol';
+import { failureOf } from '../hub/protocol-ahead';
+import type { RequestRecord, RpcEntry } from '../project/conversation';
+import type { Capability } from './capabilities';
+
+export type CardState =
+  | { kind: 'open'; window: boolean }
+  | { kind: 'sending' }
+  | { kind: 'uncertain' }
+  | { kind: 'failed'; code: string; message: string }
+  | { kind: 'sent' }
+  | { kind: 'settled'; winner: Settled['winner'] | string; outcome: Settled['outcome'] | null; by: string }
+  | { kind: 'terminal'; why: 'window' | string }
+  | { kind: 'offline' }
+  | { kind: 'closed' };
+
+export const isQuestion = (tool: string) => tool === 'AskUserQuestion' || tool.endsWith('__AskUserQuestion');
+
+/** An async question (the ask mod's, raised with `async`) is answer-only: no Deny is drawn, and the bridge refuses one. */
+export const isAsyncQuestion = (raised: Raised) => isQuestion(raised.tool) && (raised as { async?: unknown }).async === true;
+
+/**
+ * `capability` is the session's for this request's verb (`answer` or `decide`); `machineOnline` the machine's lease.
+ */
+export function cardState(record: RequestRecord, rpc: RpcEntry | null, capability: Capability, machineOnline: boolean | null = true): CardState {
+  if (record.settled) return { kind: 'settled', winner: record.settled.winner, outcome: record.settled.outcome, by: record.settled.by };
+  const failure = failureOf(rpc?.outcome);
+  if (failure?.terminalOnly) return { kind: 'terminal', why: 'window' };
+  if (failure?.winner) return { kind: 'settled', winner: failure.winner, outcome: null, by: failure.winner === 'terminal' ? 'terminal' : failure.winner };
+  if (!record.pending) return { kind: 'closed' };
+  if (machineOnline === false) return { kind: 'offline' };
+  if (record.terminalOnly) return { kind: 'terminal', why: 'window' };
+  if (!capability.can) return { kind: 'terminal', why: capability.reason ?? 'terminal only' };
+  switch (rpc?.state) {
+    case 'sending':
+    case 'forwarded':
+      return { kind: 'sending' };
+    case 'uncertain':
+      return { kind: 'uncertain' };
+    case 'failed':
+      return { kind: 'failed', code: failure?.code ?? 'failed', message: failure?.message ?? '' };
+    case 'done':
+      return { kind: 'sent' };
+    default:
+      return { kind: 'open', window: record.raised.deadline !== undefined };
+  }
+}
