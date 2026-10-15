@@ -176,7 +176,7 @@ test('the code the browser builds, confirmed by opening the key once more, enrol
   await page.goto(hub.localhost);
   await expect(page.getByTestId('key-state')).toHaveText('Unlocked');
 
-  await page.getByRole('button', { name: 'Machines' }).click();
+  await page.getByRole('button', { name: 'Machines', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: 'Machines' });
   await dialog.getByRole('button', { name: 'Enroll a machine' }).click();
   await dialog.getByLabel(/machine's name/).fill('hub');
@@ -212,7 +212,7 @@ test('the code the browser builds, confirmed by opening the key once more, enrol
   expect(checkFingerprint(await keyCheck(machine.key))).toBe(checkFingerprint((await orgKeys()).key_check!));
   const reopen = async () => {
     await page.keyboard.press('Escape');
-    await page.getByRole('button', { name: 'Machines' }).click();
+    await page.getByRole('button', { name: 'Machines', exact: true }).click();
   };
   await reopen();
   await expect(dialog.locator(`[data-machine="${MACHINE}"]`)).toContainText('enrolling');

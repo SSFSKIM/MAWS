@@ -107,6 +107,7 @@ function Methods({ me, held, fingerprint }: { me: Me; held: OrgKey; fingerprint:
         </p>
       )}
       {admin &&
+        key_check !== null &&
         (adding ? (
           <AddMethod
             me={me}
