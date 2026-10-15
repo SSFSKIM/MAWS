@@ -49,6 +49,7 @@ import * as spaces from './names/spaces';
 // P3-L start (M1)
 import * as library from './names/library';
 // P3-L end
+import * as designSystems from './names/design-systems'; // P3-D (the P3 spec's Decision Log 61)
 
 export const NAMESPACES = [
   'session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings',
@@ -80,6 +81,7 @@ export const NAMESPACES = [
   // P2-C end
   'artifacts', 'spaces', // P3-A M4
   'library', // P3-L M1
+  'designSystems', // P3-D (Decision Log 61)
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
@@ -98,12 +100,13 @@ export const NAMES = {
   ownerChannel, // P2-C M4 (2026-10-09)
   artifacts, spaces, // P3-A M4
   library, // P3-L M1
+  designSystems, // P3-D (Decision Log 61)
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 
 type Names = typeof NAMES;
 export type BridgedCommandName = { [N in Namespace]: Names[N]['commands'][number] }[Namespace];
-export type MainOnlyCommandName = (typeof engine.mainOnlyCommands)[number] | (typeof host.mainOnlyCommands)[number] /* E10: host's */ | (typeof artifacts.mainOnlyCommands)[number] /* P3-A M4 */ | (typeof library.mainOnlyCommands)[number]; // P3-L M1
-export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = [...engine.mainOnlyCommands, ...host.mainOnlyCommands, ...artifacts.mainOnlyCommands /* P3-A M4 */, ...library.mainOnlyCommands /* P3-L M1 */];
+export type MainOnlyCommandName = (typeof engine.mainOnlyCommands)[number] | (typeof host.mainOnlyCommands)[number] /* E10: host's */ | (typeof artifacts.mainOnlyCommands)[number] /* P3-A M4 */ | (typeof library.mainOnlyCommands)[number] /* P3-L M1 */ | (typeof designSystems.mainOnlyCommands)[number]; // P3-D
+export const MAIN_ONLY_COMMANDS: readonly MainOnlyCommandName[] = [...engine.mainOnlyCommands, ...host.mainOnlyCommands, ...artifacts.mainOnlyCommands /* P3-A M4 */, ...library.mainOnlyCommands /* P3-L M1 */, ...designSystems.mainOnlyCommands /* P3-D */];
 export type BridgedEventName = { [N in Namespace]: Names[N]['events'][number] }[Namespace];
 
 // Pure, so a bundle that takes only `NAMESPACES` or a channel (the renderer and main, through `./schema.ts`) drops

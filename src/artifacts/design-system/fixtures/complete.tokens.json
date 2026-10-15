@@ -1,0 +1,151 @@
+{
+  "$description": "Test system: every role in the object forms, aliases, extra tokens and both MAWS extensions.",
+  "$extensions": {
+    "com.example.tool": { "z": 1, "a": [2, 1] },
+    "dev.maws.office": {
+      "theme": {
+        "dk1": "{color.text.$root}",
+        "lt1": "{color.bg.$root}",
+        "dk2": { "colorSpace": "srgb", "components": [0.1725, 0.1686, 0.1569], "hex": "#2c2b28" },
+        "lt2": { "colorSpace": "srgb", "components": [0.949, 0.9373, 0.9137], "hex": "#f2efe9" },
+        "accent1": "{color.accent.$root}",
+        "accent2": "{color.status.info}",
+        "accent3": "{color.status.ok}",
+        "accent4": "{color.status.warn}",
+        "accent5": "{color.status.error}",
+        "accent6": "{color.highlight}",
+        "hlink": "{color.accent.$root}",
+        "folHlink": { "colorSpace": "srgb", "components": [0.4196, 0.4157, 0.4], "hex": "#6b6a66" }
+      },
+      "fonts": {
+        "major": { "latin": "Georgia", "ea": "Batang" },
+        "minor": { "latin": "Inter", "ea": "Malgun Gothic", "cs": "Arial" }
+      }
+    }
+  },
+  "color": {
+    "$type": "color",
+    "bg": {
+      "$root": { "$value": { "colorSpace": "srgb", "components": [0.9804, 0.9765, 0.9647], "hex": "#faf9f6" } },
+      "raised": { "$value": { "colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff" } }
+    },
+    "text": {
+      "$root": { "$value": { "colorSpace": "srgb", "components": [0.1216, 0.1176, 0.1059], "hex": "#1f1e1b" } },
+      "muted": { "$value": { "colorSpace": "srgb", "components": [0.1216, 0.1176, 0.1059], "alpha": 0.62, "hex": "#1f1e1b" } }
+    },
+    "accent": {
+      "$root": { "$value": { "colorSpace": "srgb", "components": [0.7882, 0.4, 0.2471], "hex": "#c9663f" } },
+      "text": { "$value": "{color.bg.raised}", "$description": "Text on an accent ground." }
+    },
+    "border": { "$value": { "colorSpace": "srgb", "components": [0.0784, 0.0706, 0.0549], "alpha": 0.1, "hex": "#14120e" } },
+    "status": {
+      "ok": { "$value": { "colorSpace": "srgb", "components": [0.1216, 0.5608, 0.3333], "hex": "#1f8f55" } },
+      "warn": { "$value": { "colorSpace": "srgb", "components": [0.7216, 0.4157, 0.102], "hex": "#b86a1a" } },
+      "error": { "$value": { "colorSpace": "srgb", "components": [0.7882, 0.2314, 0.2314], "hex": "#c93b3b" } },
+      "info": { "$value": { "colorSpace": "srgb", "components": [0.2314, 0.4353, 0.8196], "hex": "#3b6fd1" } }
+    },
+    "highlight": {
+      "$value": { "colorSpace": "oklch", "components": [0.86, 0.12, 90] },
+      "$deprecated": "Use color.accent for emphasis."
+    }
+  },
+  "font": {
+    "$type": "fontFamily",
+    "display": { "$value": ["Iowan Old Style", "Georgia", "serif"] },
+    "body": { "$value": ["Inter", "Apple SD Gothic Neo", "sans-serif"] },
+    "mono": { "$value": "JetBrains Mono" }
+  },
+  "type": {
+    "$type": "typography",
+    "title": {
+      "$value": { "fontFamily": "{font.display}", "fontSize": { "value": 40, "unit": "px" }, "fontWeight": 700, "lineHeight": 1.15, "letterSpacing": { "value": -0.5, "unit": "px" } },
+      "$extensions": { "dev.maws.deck": { "fontSize": { "value": 96, "unit": "px" }, "lineHeight": 1.05 } }
+    },
+    "subtitle": {
+      "$value": { "fontFamily": "{font.body}", "fontSize": { "value": 22, "unit": "px" }, "fontWeight": 400, "lineHeight": 1.35, "letterSpacing": { "value": 0, "unit": "px" } },
+      "$extensions": { "dev.maws.deck": { "fontSize": { "value": 48, "unit": "px" } } }
+    },
+    "h1": { "$value": { "fontFamily": "{font.display}", "fontSize": { "value": 32, "unit": "px" }, "fontWeight": "semi-bold", "lineHeight": 1.2, "letterSpacing": { "value": 0, "unit": "px" } } },
+    "h2": { "$value": { "fontFamily": "{font.display}", "fontSize": { "value": 24, "unit": "px" }, "fontWeight": 600, "lineHeight": 1.25, "letterSpacing": { "value": 0, "unit": "px" } } },
+    "h3": { "$value": { "fontFamily": "{font.body}", "fontSize": { "value": 18, "unit": "px" }, "fontWeight": 600, "lineHeight": 1.3, "letterSpacing": { "value": 0, "unit": "px" } } },
+    "body": { "$value": { "fontFamily": "{font.body}", "fontSize": { "value": 1, "unit": "rem" }, "fontWeight": "regular", "lineHeight": 1.6, "letterSpacing": "{space.0}" } },
+    "caption": { "$value": { "fontFamily": "{font.body}", "fontSize": { "value": 13, "unit": "px" }, "fontWeight": 400, "lineHeight": 1.4, "letterSpacing": { "value": 0.2, "unit": "px" } } },
+    "quote": { "$value": { "fontFamily": ["Iowan Old Style", "serif"], "fontSize": { "value": 20, "unit": "px" }, "fontWeight": 400, "lineHeight": 1.5, "letterSpacing": { "value": 0, "unit": "px" } } },
+    "label": { "$value": { "fontFamily": "{font.mono}", "fontSize": { "value": 12, "unit": "px" }, "fontWeight": 500, "lineHeight": 1.3, "letterSpacing": { "value": 0.5, "unit": "px" } } }
+  },
+  "space": {
+    "$type": "dimension",
+    "0": { "$value": { "value": 0, "unit": "px" } },
+    "1": { "$value": { "value": 4, "unit": "px" } },
+    "2": { "$value": { "value": 8, "unit": "px" } },
+    "3": { "$value": { "value": 12, "unit": "px" } },
+    "4": { "$value": { "value": 16, "unit": "px" } },
+    "5": { "$value": { "value": 24, "unit": "px" } },
+    "6": { "$value": { "value": 32, "unit": "px" } },
+    "7": { "$value": { "value": 48, "unit": "px" } },
+    "8": { "$value": { "value": 4, "unit": "rem" } }
+  },
+  "radius": {
+    "$type": "dimension",
+    "sm": { "$value": { "value": 6, "unit": "px" } },
+    "md": { "$value": { "value": 10, "unit": "px" } },
+    "lg": { "$value": { "value": 14, "unit": "px" } },
+    "full": { "$value": { "value": 9999, "unit": "px" } }
+  },
+  "shadow": {
+    "$type": "shadow",
+    "sm": {
+      "$value": {
+        "color": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.08, "hex": "#000000" },
+        "offsetX": { "value": 0, "unit": "px" },
+        "offsetY": { "value": 1, "unit": "px" },
+        "blur": { "value": 2, "unit": "px" },
+        "spread": { "value": 0, "unit": "px" }
+      }
+    },
+    "md": {
+      "$value": {
+        "color": "{color.border}",
+        "offsetX": { "value": 0, "unit": "px" },
+        "offsetY": "{space.1}",
+        "blur": { "value": 12, "unit": "px" },
+        "spread": { "value": 0, "unit": "px" }
+      }
+    },
+    "lg": {
+      "$value": [
+        {
+          "color": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.04, "hex": "#000000" },
+          "offsetX": { "value": 0, "unit": "px" },
+          "offsetY": { "value": 0, "unit": "px" },
+          "blur": { "value": 0, "unit": "px" },
+          "spread": { "value": 1, "unit": "px" },
+          "inset": true
+        },
+        {
+          "color": { "colorSpace": "srgb", "components": [0, 0, 0], "alpha": 0.1, "hex": "#000000" },
+          "offsetX": { "value": 0, "unit": "px" },
+          "offsetY": { "value": 8, "unit": "px" },
+          "blur": { "value": 24, "unit": "px" },
+          "spread": { "value": 0, "unit": "px" }
+        }
+      ]
+    }
+  },
+  "motion": {
+    "fast": { "$type": "duration", "$value": { "value": 120, "unit": "ms" } },
+    "ease": { "$type": "cubicBezier", "$value": [0.2, 0, 0, 1] },
+    "enter": { "$type": "transition", "$value": { "duration": "{motion.fast}", "delay": { "value": 0, "unit": "ms" }, "timingFunction": "{motion.ease}" } }
+  },
+  "line": {
+    "hairline": { "$type": "border", "$value": { "color": "{color.border}", "width": { "value": 1, "unit": "px" }, "style": "solid" } },
+    "focus": { "$type": "strokeStyle", "$value": { "dashArray": [{ "value": 4, "unit": "px" }, "{space.1}"], "lineCap": "round" } },
+    "ramp": {
+      "$type": "gradient",
+      "$value": [
+        { "color": "{color.accent.$root}", "position": 0 },
+        { "color": { "colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff" }, "position": 1.5 }
+      ]
+    }
+  }
+}

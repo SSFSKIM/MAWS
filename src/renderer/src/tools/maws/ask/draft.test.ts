@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import type { AskQuestion } from '@shared/maws/tools';
 import { askAnswersProblem } from '@shared/maws/ask';
 import {
-  addPaths, draftStatus, EMPTY_DRAFT, pickOption, removePath, setDecide, setNote, setOther, setRepository, setSkip, setText, skippedCount, toAnswer, toAnswers, toggleOption, type Draft,
+  addPaths, draftStatus, EMPTY_DRAFT, pickOption, removePath, setDecide, setDesignSystem, setNote, setOther, setRepository, setSkip, setText, skippedCount, toAnswer, toAnswers, toggleOption, type Draft,
 } from './draft';
 
 const single: AskQuestion = { id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Green' }, { label: 'Blue' }] };
@@ -166,3 +166,34 @@ describe('the note', () => {
     expect(askAnswersProblem([single, text], toAnswers([single, text], drafts))).toBeNull();
   });
 });
+
+// P3-D start: a design_system question (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D13)
+describe('P3-D: a design_system draft', () => {
+  const ID = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
+  const system: AskQuestion = { id: 's1', question: 'Which design system?', modality: 'design_system' };
+
+  it('a picked system answers its id and name; "Build one with me" answers create', () => {
+    const picked = setDesignSystem(EMPTY_DRAFT, { id: ID, name: 'MAWS' });
+    expect(draftStatus(system, picked)).toBe('answered');
+    expect(toAnswer(system, picked)).toEqual({ id: 's1', question: 'Which design system?', status: 'answered', designSystemId: ID, name: 'MAWS' });
+    const build = setDesignSystem(picked, 'create');
+    expect(toAnswer(system, build)).toEqual({ id: 's1', question: 'Which design system?', status: 'answered', create: true });
+    for (const draft of [picked, build]) expect(askAnswersProblem([system], [toAnswer(system, draft)])).toBeNull();
+  });
+
+  it('nothing picked is skipped, and Decide for me and Skip set the pick aside as for every modality', () => {
+    expect(draftStatus(system, EMPTY_DRAFT)).toBe('empty');
+    expect(toAnswer(system, EMPTY_DRAFT)).toEqual({ id: 's1', question: 'Which design system?', status: 'skipped' });
+    const picked = setDesignSystem(EMPTY_DRAFT, { id: ID, name: 'MAWS' });
+    const decided = setDecide(picked, true);
+    expect(toAnswer(system, decided)).toEqual({ id: 's1', question: 'Which design system?', status: 'decide_for_me' });
+    expect(toAnswer(system, setDecide(decided, false)).designSystemId).toBe(ID); // the pick comes back
+    expect(setDesignSystem(decided, 'create').decide).toBe(false); // picking is answering
+  });
+
+  it('create is never answered for a question that does not allow it', () => {
+    const closed: AskQuestion = { ...system, allowCreate: false };
+    expect(draftStatus(closed, setDesignSystem(EMPTY_DRAFT, 'create'))).toBe('empty');
+  });
+});
+// P3-D end

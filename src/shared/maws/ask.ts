@@ -34,7 +34,8 @@ export function withQuestionIds(questions: readonly AskQuestion[]): AskQuestion[
 // Why `answers` cannot answer an ask holding `questions` (ids filled), or null when they can: one answer per question;
 // a skipped or delegated answer carries no value; an answered one carries the value its modality names (a string for
 // text and repository, a list for choice, file and folder; at most one label for a single-select choice); `otherText`
-// only on a choice, `name` only on a repository.
+// only on a choice, `name` only on a repository or a design system. P3-D: a design_system answer carries no value but
+// one of `designSystemId` (with the system's `name`, optional) and `create` (only when the question allows it).
 export function askAnswersProblem(questions: readonly AskQuestion[], answers: readonly AskAnswer[]): string | null {
   const byId = new Map(questions.map((question, index) => [askQuestionId(question, index), question]));
   const seen = new Set<string>();
@@ -44,11 +45,23 @@ export function askAnswersProblem(questions: readonly AskQuestion[], answers: re
     if (seen.has(answer.id)) return `question ${answer.id} is answered twice`;
     seen.add(answer.id);
     if (answer.otherText !== undefined && question.modality !== 'choice') return `question ${answer.id} carries otherText, which only a choice answer has`;
-    if (answer.name !== undefined && question.modality !== 'repository') return `question ${answer.id} carries name, which only a repository answer has`;
+    if (answer.name !== undefined && question.modality !== 'repository' && question.modality !== 'design_system') return `question ${answer.id} carries name, which only a repository or design_system answer has`;
+    // P3-D start
+    for (const field of ['designSystemId', 'create'] as const) {
+      if (answer[field] !== undefined && question.modality !== 'design_system') return `question ${answer.id} carries ${field}, which only a design_system answer has`;
+    }
+    // P3-D end
     if (answer.status !== 'answered') {
-      if (answer.value !== undefined || answer.otherText !== undefined || answer.name !== undefined) return `question ${answer.id} is ${answer.status} and carries a value`;
+      if (answer.value !== undefined || answer.otherText !== undefined || answer.name !== undefined || answer.designSystemId !== undefined || answer.create !== undefined) return `question ${answer.id} is ${answer.status} and carries a value`;
       continue;
     }
+    // P3-D start
+    if (question.modality === 'design_system') {
+      const problem = designSystemAnswerProblem(question, answer);
+      if (problem !== null) return problem;
+      continue;
+    }
+    // P3-D end
     if (answer.value === undefined) return `question ${answer.id} is answered with no value`;
     const wantsString = question.modality === 'text' || question.modality === 'repository';
     if (wantsString !== (typeof answer.value === 'string')) return `question ${answer.id} (${question.modality}) needs a ${wantsString ? 'string' : 'list'} value`;
@@ -57,6 +70,17 @@ export function askAnswersProblem(questions: readonly AskQuestion[], answers: re
   for (const id of byId.keys()) if (!seen.has(id)) return `no answer for question ${id}`;
   return null;
 }
+
+// P3-D start: an answered design_system question's fields (the status and the other modalities' fields checked above).
+function designSystemAnswerProblem(question: AskQuestion, answer: AskAnswer): string | null {
+  if (answer.value !== undefined) return `question ${answer.id} (design_system) carries a value; it is answered with designSystemId or create`;
+  if (answer.designSystemId !== undefined && answer.create !== undefined) return `question ${answer.id} is answered with both a designSystemId and create`;
+  if (answer.designSystemId === undefined && answer.create === undefined) return `question ${answer.id} is answered with neither a designSystemId nor create`;
+  if (answer.create !== undefined && question.allowCreate === false) return `question ${answer.id} does not allow create`;
+  if (answer.name !== undefined && answer.designSystemId === undefined) return `question ${answer.id} carries name without a designSystemId`;
+  return null;
+}
+// P3-D end
 
 const STEER_TAG = /^\[MAWS ask ([^\]\s]+)\] /;
 const BLOCK_OPEN = '\n```json\n';
@@ -72,7 +96,8 @@ function resultBlock(text: string): string | null {
 }
 
 // One answer as the steer's line reads it: the labels (and what was typed under Other), the text in quotes, the paths
-// one per line indented three spaces (so the text starts with a newline), `<name> (<directory>)`, or the two non-answers.
+// one per line indented three spaces (so the text starts with a newline), `<name> (<directory>)`, a design system's
+// `<name> (<id>)` or the build request (P3-D), or the two non-answers.
 function answerText(question: AskQuestion, answer: AskAnswer | undefined): string {
   if (answer === undefined || answer.status === 'skipped') return 'skipped';
   if (answer.status === 'decide_for_me') return 'decide for me';
@@ -87,6 +112,9 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined): strin
       return values.map((path) => `\n   ${path}`).join('');
     case 'repository':
       return answer.name !== undefined ? `${answer.name} (${values.join(', ')})` : values.join(', ');
+    case 'design_system': // P3-D
+      if (answer.create === true) return 'build a new one with me';
+      return answer.name !== undefined ? `${answer.name} (${answer.designSystemId ?? ''})` : (answer.designSystemId ?? '');
   }
 }
 

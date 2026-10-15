@@ -3,6 +3,7 @@
 // Node's builtins and `zod`. Reads the built chunk under `out/main` when a build is present and is skipped otherwise;
 // the E10 gates run it after `pnpm build`, which makes it mandatory there.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { builtinModules } from 'node:module';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -31,6 +32,7 @@ describe.skipIf(chunk === null)('the built engine-host chunk', () => {
   it('requires only Node builtins and zod', () => {
     const required = [...new Set([...chunk!.matchAll(/\brequire\(\s*["']([^"']+)["']\s*\)/g)].map((match) => match[1]))];
     expect(required.length).toBeGreaterThan(0);
-    expect(required.filter((name) => !name.startsWith('node:') && name !== 'zod')).toEqual([]);
+    // P3-D: a builtin's bare name too (electron-vite's `?asset` imports emit `require("path")`)
+    expect(required.filter((name) => !name.startsWith('node:') && !builtinModules.includes(name) && name !== 'zod')).toEqual([]);
   });
 });

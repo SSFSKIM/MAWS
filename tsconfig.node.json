@@ -52,6 +52,14 @@
     "e2e/support/document-seed.ts"
   ],
   // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6), typechecked by
-  // tsconfig.web.json
-  "exclude": ["src/artifacts/document/editor/**/*", "src/artifacts/document/import/html*", "src/artifacts/document/import/docx*"]
+  // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise.
+  "exclude": [
+    "src/artifacts/document/editor/**/*",
+    "src/artifacts/document/import/html*",
+    "src/artifacts/document/import/docx*",
+    "src/artifacts/design-system/apply.ts", // P3-D
+    "src/artifacts/design-system/scope-style.ts", // P3-D
+    "src/artifacts/design-system/page/**/*", // P3-D
+    "src/artifacts/design-system/**/*.test.tsx" // P3-D
+  ]
 }

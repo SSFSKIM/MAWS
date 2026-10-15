@@ -32,7 +32,7 @@ import * as maws from './schema/maws';
 import * as side from './schema/side';
 // E3 end
 // C11 start
-import { SETTINGS_DEFAULTS_V13 } from '../settings/defaults';
+import { SETTINGS_DEFAULTS_V14 } from '../settings/defaults';
 // C11 end
 // E9 start
 import * as voice from './schema/voice';
@@ -61,9 +61,10 @@ import * as spaces from './schema/spaces';
 import { ARTIFACT_REFUSALS, artifactRefusalOf } from './schema/artifacts';
 // P3-A end
 import * as library from './schema/library'; // P3-L M1
+import * as designSystems from './schema/design-systems'; // P3-D (the P3 spec's Decision Log 61)
 
 // One entry per namespace, checked against NAMESPACES at compile time and at run time.
-const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */ } satisfies Record<
+const modules = { session, engine, fs, git, pty, layout, attention, settings, files /* C8c */, plugins, marketplaces /* E8 */, voice /* E9 */, maws /* E1 */, scm /* E6 */, side /* E3 */, host /* E10 */, browser /* E4a */, mods /* P2-C */, ownerChannel /* P2-C M4 */, artifacts, spaces /* P3-A M4 */, library /* P3-L M1 */, designSystems /* P3-D */ } satisfies Record<
   Namespace,
   { commands: object; events: object }
 >;
@@ -337,7 +338,7 @@ describe('ipc schema validates both directions', () => {
   });
 
   describe('command output (renderer, on receipt)', () => {
-    const state = { settings: { ...SETTINGS_DEFAULTS_V13, theme: 'system' }, resolvedTheme: 'dark' };
+    const state = { settings: { ...SETTINGS_DEFAULTS_V14, theme: 'system' }, resolvedTheme: 'dark' };
 
     it('accepts a settings state and returns it unchanged', () => {
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
@@ -372,7 +373,7 @@ describe('ipc schema validates both directions', () => {
     it('accepts well-formed events unchanged', () => {
       const exit = { ptyId: 'p1', exitCode: null, signal: null };
       expect(validateEventPayload('pty.exit', exit)).toEqual({ ok: true, value: exit });
-      const changed = { settings: { ...SETTINGS_DEFAULTS_V13, theme: 'light' }, resolvedTheme: 'light' };
+      const changed = { settings: { ...SETTINGS_DEFAULTS_V14, theme: 'light' }, resolvedTheme: 'light' };
       expect(validateEventPayload('settings.changed', changed)).toEqual({ ok: true, value: changed });
     });
 
@@ -599,13 +600,13 @@ describe('ipc schema validates both directions', () => {
       // added since; E2's `deliverables` was too, until P3-L's cutover removed it).
       const before = ['session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings'];
       for (const name of Object.keys(owners)) expect(before, name).toContain(name.split('.')[0]);
-      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */]);
+      expect(NAMESPACES.filter((ns) => !before.includes(ns))).toEqual(['files', 'plugins', 'marketplaces', 'voice', 'maws', 'scm', 'side', 'host', 'browser', 'mods' /* P2-C */, 'ownerChannel' /* P2-C M4 */, 'artifacts', 'spaces' /* P3-A M4 */, 'library' /* P3-L M1 */, 'designSystems' /* P3-D */]);
       for (const [name, owner] of Object.entries(owners)) expect(commands[name as keyof typeof owners].owner, name).toBe(owner);
       for (const name of Object.keys(owners)) expect(Object.hasOwn(events, name), name).toBe(false);
     });
 
     it('settings.get and settings.changed carry the whole version 3 state', () => {
-      const state = { settings: { ...SETTINGS_DEFAULTS_V13, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
+      const state = { settings: { ...SETTINGS_DEFAULTS_V14, gateway: { defaultRoute: 'direct', relayUnreachable: 'wait', offerDirect: false } }, resolvedTheme: 'light' };
       expect(validateCommandOutput('settings.get', state)).toEqual({ ok: true, value: state });
       expect(validateEventPayload('settings.changed', state).ok).toBe(true);
       expect(validateEventPayload('settings.changed', { ...state, settings: { ...state.settings, version: 2 } }).ok).toBe(false);
@@ -1828,4 +1829,39 @@ describe('ipc schema validates both directions', () => {
     });
   });
   // P3-L end
+  // P3-D start: the house system's id for the renderer (the P3 spec's Decision Log 61; the ledger's X28)
+  describe('P3-D entries', () => {
+    it('owns designSystems.house (bridged to windows) and designSystems.governing (main’s alone) in the engine host, with no event', () => {
+      expect(Object.fromEntries(Object.entries(designSystems.commands).map(([name, spec]) => [name, spec.owner]))).toEqual({ 'designSystems.house': 'engine-host', 'designSystems.governing': 'engine-host' });
+      expect([...NAMES.designSystems.commands]).toEqual(['designSystems.house']);
+      expect(MAIN_ONLY_COMMANDS).not.toContain('designSystems.house');
+      // the export service's read (the P3 spec's Decision Log 61 (d): a window resolves the chain itself, never asks)
+      expect(MAIN_ONLY_COMMANDS).toContain('designSystems.governing');
+      expect([...NAMES.designSystems.commands]).not.toContain('designSystems.governing');
+      expect(Object.keys(designSystems.events)).toEqual([]);
+    });
+
+    it('designSystems.governing takes an artifact and maybe a version, and answers a live ref, a pin or the floor', () => {
+      const ID = '22222222-2222-4222-8222-222222222222';
+      expect(validateCommandInput('designSystems.governing', { artifactId: ID }).ok).toBe(true);
+      expect(validateCommandInput('designSystems.governing', { artifactId: ID, versionId: 3 }).ok).toBe(true);
+      expect(validateCommandInput('designSystems.governing', { artifactId: ID, versionId: 0 }).ok).toBe(false);
+      expect(validateCommandInput('designSystems.governing', {}).ok).toBe(false);
+      expect(validateCommandOutput('designSystems.governing', { system: { id: ID } }).ok).toBe(true);
+      expect(validateCommandOutput('designSystems.governing', { system: { id: ID, versionSeq: 0 } }).ok).toBe(true);
+      expect(validateCommandOutput('designSystems.governing', { system: { builtin: 'maws' } }).ok).toBe(true);
+      expect(validateCommandOutput('designSystems.governing', { system: { id: 'maws' } }).ok).toBe(false);
+      expect(validateCommandOutput('designSystems.governing', { system: null }).ok).toBe(false);
+    });
+
+    it('designSystems.house takes nothing and answers a system id or null', () => {
+      expect(validateCommandInput('designSystems.house', undefined).ok).toBe(true);
+      expect(validateCommandInput('designSystems.house', { kind: 'design_system' }).ok).toBe(false);
+      expect(validateCommandOutput('designSystems.house', { houseId: '22222222-2222-4222-8222-222222222222' }).ok).toBe(true);
+      expect(validateCommandOutput('designSystems.house', { houseId: null }).ok).toBe(true);
+      expect(validateCommandOutput('designSystems.house', { houseId: 'maws' }).ok, 'an id, never the builtin key').toBe(false);
+      expect(validateCommandOutput('designSystems.house', {}).ok).toBe(false);
+    });
+  });
+  // P3-D end
 });

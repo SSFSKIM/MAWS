@@ -7,7 +7,7 @@ import type { ImportedProfile } from '@shared/browser/profiles';
 import type { BrowserImportInspection } from '@shared/ipc/schema/browser';
 import type { EventName, EventPayload, MawsBridge, Settings } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
-import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
 import { DONE_REPORT } from '../../../../test/support/import-reports';
 import { settingsBridge, type SettingsBridge } from './settings-bridge';
 
@@ -83,7 +83,7 @@ export interface ImportBridge extends SettingsBridge {
 
 // Main's answers for the import's commands, each replaceable by a case; events reach the listeners only when they pass
 // the event's schema, as the real client checks them.
-export function importBridge(initial: Settings = SETTINGS_DEFAULTS_V13): ImportBridge {
+export function importBridge(initial: Settings = SETTINGS_DEFAULTS_V14): ImportBridge {
   const b = settingsBridge(initial);
   Object.assign(b.answers, {
     'browser.import.list': () => ({ profiles: [], fileBroken: false, running: null }),

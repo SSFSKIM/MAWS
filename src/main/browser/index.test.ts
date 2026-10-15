@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { DEFAULT_PARTITION } from '@shared/browser/tab';
-import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
 
 const prepared = vi.hoisted(() => [] as string[]); // what each opened partition was given, in order
 
@@ -123,7 +123,7 @@ function fakeIndex(known: string[], unavailable: string | null = null) {
 }
 
 function start(index: never, more: Partial<Parameters<typeof startBrowser>[0]> = {}) {
-  return startBrowser({ userData, settings: () => SETTINGS_DEFAULTS_V13.browser, index, register: () => {}, emit: () => {}, env: {}, ...more });
+  return startBrowser({ userData, settings: () => SETTINGS_DEFAULTS_V14.browser, index, register: () => {}, emit: () => {}, env: {}, ...more });
 }
 
 describe('startBrowser (E4a Design §2, G4)', () => {
@@ -204,7 +204,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
     const handlers = new Map<string, (input: unknown) => unknown>();
     const browser = start(fakeIndex([A]).index, {
       profiles,
-      settings: () => ({ ...SETTINGS_DEFAULTS_V13.browser, profile: 'Profile 1' }),
+      settings: () => ({ ...SETTINGS_DEFAULTS_V14.browser, profile: 'Profile 1' }),
       register: ((name: string, handler: (input: unknown) => unknown) => void handlers.set(name, handler)) as never,
     });
     expect(handlers.get('browser.profiles.list')!(undefined)).toEqual({ profiles: [{ profileDir: 'Profile 1', name: 'Work', gaiaName: null, userName: null, avatar: { kind: 'initials', letter: 'W' } }] }); // cua #90
@@ -214,7 +214,7 @@ describe('startBrowser (E4a Design §2, G4)', () => {
   });
 
   it('reads the profile when a tab opens, so a change applies to tabs opened afterwards (Design §9)', () => {
-    let settings = SETTINGS_DEFAULTS_V13.browser;
+    let settings = SETTINGS_DEFAULTS_V14.browser;
     const profiles = () => [{ profileDir: 'Profile 1', name: 'Work', partition: 'persist:maws-chrome-Profile 1', importedAt: 't', storageDirName: 'x' }];
     const browser = start(fakeIndex([A]).index, { profiles, settings: () => settings });
     const before = browser.store.open({ appSessionId: A, url: null, select: true }).tab;

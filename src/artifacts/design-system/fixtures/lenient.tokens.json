@@ -1,0 +1,49 @@
+{
+  "color": {
+    "$type": "color",
+    "bg": { "$root": { "$value": "#FAF9F6" }, "raised": { "$value": "#fff" } },
+    "text": { "$root": { "$value": "#1f1e1b" }, "muted": { "$value": "#1f1e1b9e" } },
+    "accent": { "$root": { "$value": "#c9663f" }, "text": { "$ref": "#/color/bg/raised/$value" } },
+    "border": { "$value": "#14120e1a" },
+    "status": {
+      "ok": { "$value": "#1f8f55" },
+      "warn": { "$value": { "colorSpace": "srgb", "components": [0.7216, 0.4157, 0.102] } },
+      "error": { "$value": { "colorSpace": "srgb", "components": [0.7882, 0.2314, 0.2314], "hex": "#000000" } },
+      "info": { "$value": { "colorSpace": "srgb", "components": [{ "$ref": "#/color/status/error/$value/components/1" }, 0.4353, 0.8196] } }
+    }
+  },
+  "font": {
+    "$type": "fontFamily",
+    "display": { "$value": "'Iowan Old Style', Georgia, serif" },
+    "body": { "$value": "Inter, \"Apple SD Gothic Neo\", sans-serif" },
+    "mono": { "$value": "Menlo" }
+  },
+  "type": {
+    "$type": "typography",
+    "title": { "$value": { "fontFamily": "{font.display}", "fontSize": 40, "fontWeight": "bold", "lineHeight": 1.15 } },
+    "subtitle": { "$value": { "fontFamily": "{font.body}", "fontSize": "22px", "fontWeight": 400, "lineHeight": 1.35 } },
+    "h1": { "$value": { "fontFamily": "{font.display}", "fontSize": 32, "fontWeight": 600, "lineHeight": 1.2 } },
+    "h2": { "$value": { "fontFamily": "{font.display}", "fontSize": 24, "fontWeight": 600, "lineHeight": 1.25 } },
+    "h3": { "$value": { "fontFamily": "{font.body}", "fontSize": 18, "fontWeight": 600, "lineHeight": 1.3 } },
+    "body": { "$value": { "fontFamily": "{font.body}", "fontSize": "1rem", "fontWeight": 400, "lineHeight": 1.6, "letterSpacing": 0 } },
+    "caption": { "$value": { "fontFamily": "{font.body}", "fontSize": 13, "fontWeight": 400, "lineHeight": 1.4 } },
+    "quote": { "$value": { "fontFamily": "{font.display}", "fontSize": 20, "fontWeight": 400, "lineHeight": 1.5 } }
+  },
+  "space": {
+    "$type": "dimension",
+    "1": { "$value": 4 }, "2": { "$value": "8px" }, "3": { "$value": 12 }, "4": { "$value": 16 },
+    "5": { "$value": 24 }, "6": { "$value": 32 }, "7": { "$value": 48 }, "8": { "$value": "4rem" }
+  },
+  "corner": {
+    "$type": "dimension",
+    "sm": { "$value": 6 }, "md": { "$value": 10 }, "lg": { "$value": 14 }, "full": { "$value": 9999 }
+  },
+  "radius": { "$extends": "{corner}", "lg": { "$value": 20 } },
+  "shadow": {
+    "$type": "shadow",
+    "sm": { "$value": { "color": "#00000014", "offsetX": 0, "offsetY": 1, "blur": 2, "spread": 0 } },
+    "md": { "$value": { "color": "#0000001a", "offsetX": 0, "offsetY": 4, "blur": 12, "spread": 0 } },
+    "lg": { "$value": [{ "color": "#0000001a", "offsetX": 0, "offsetY": 8, "blur": 24, "spread": 0 }] }
+  },
+  "motion": { "fast": { "$type": "duration", "$value": "120ms" }, "slow": { "$type": "duration", "$value": 400 } }
+}

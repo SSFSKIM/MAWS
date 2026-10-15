@@ -76,6 +76,7 @@ export default defineConfig({
           environment: 'node',
           include: ['src/{shared,main,preload,engine-host,pty-host}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS],
           exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts', ...TIMING_NODE_TESTS], // C3: live cases run only in the `live` project; their support's own tests run here
+          css: { include: [/\/design_system\/defaults\/.+\.css/] }, // P3-D: the defaults' `document.css` as text (`?raw`) for the host's and main's tests, as in `artifacts`
           // The compile-time suites (`identifiers are not interchangeable`) run through tsc on the node tsconfig.
           typecheck: { enabled: true, include: ['src/**/*.test-d.ts'], tsconfig: './tsconfig.node.json' },
         },
@@ -96,7 +97,8 @@ export default defineConfig({
       // Node; its code imports no Node or Electron module (eslint.config.js), so it runs here as it will in a renderer.
       // P3-B M6: `css` reads the editor's stylesheets as text, so the HTML export (run in main, tested here under Node)
       // inlines theme.css rather than the blank vitest gives a `.css?raw` import outside `css.include`.
-      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'], exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS], css: { include: [/\/document\/editor\/.+\.css/] } } }, // P3-B: exclude, css
+      // P3-D M5: a design system's `document.css` is bundled as text (`?raw`); vitest empties unprocessed CSS, raw included.
+      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'], exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS], css: { include: [/\/document\/editor\/.+\.css/, /\/design_system\/defaults\/.+\.css/ /* P3-D */] } } }, // P3-B: exclude, css
       // P3-A end
       // P3-B start: the document kind's suites that need a DOM (a real Tiptap editor: UniqueID through split and paste,
       // the editor, comments, history) run under happy-dom; its model, markdown and writer stay in `artifacts` (Node).
@@ -137,6 +139,10 @@ export default defineConfig({
             // E4a start: the Browser tool and its pane render from the browser store and a placement controller held in refs
             'src/renderer/src/tools/browser/**/*.test.tsx',
             // E4a end
+            'src/artifacts/design-system/**/*.test.tsx', // P3-D M4: the apply API and the Design System page, under happy-dom as built
+            // P3-D (the P3 spec's Decision Log 61): B's page bound to D's scope as built, where the compiler would memoize a hook
+            // B called inside a memo
+            'src/renderer/src/artifacts/design-system/documents.test.tsx',
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },

@@ -1,0 +1,227 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>공문 Official stance specimen</title>
+<style>
+:root{
+  --ds-color-bg:#ffffff;--ds-color-bg-raised:#f1f2f3;--ds-color-text:#141516;--ds-color-text-muted:#555a60;
+  --ds-color-accent:#141516;--ds-color-accent-text:#ffffff;--ds-color-border:#b4b8be;
+  --ds-color-status-ok:#2d6e46;--ds-color-status-warn:#8f5b00;--ds-color-status-error:#a8282b;--ds-color-status-info:#2f5d8a;
+  --ds-font-display:"SF Pro Display", "Apple SD Gothic Neo", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  --ds-font-body:Charter, "AppleMyungjo", Cambria, "Batang", serif;
+  --ds-font-mono:ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ds-type-title-size:26px;--ds-type-title-line:1.35;--ds-type-title-weight:700;
+  --ds-type-subtitle-size:15px;--ds-type-subtitle-line:1.55;--ds-type-subtitle-weight:500;
+  --ds-type-h1-size:19px;--ds-type-h1-line:1.45;--ds-type-h1-weight:700;
+  --ds-type-h2-size:17px;--ds-type-h2-line:1.5;--ds-type-h2-weight:700;
+  --ds-type-h3-size:15px;--ds-type-h3-line:1.6;--ds-type-h3-weight:700;
+  --ds-type-body-size:15px;--ds-type-body-line:1.8;--ds-type-body-weight:400;
+  --ds-type-caption-size:12px;--ds-type-caption-line:1.55;--ds-type-caption-weight:400;
+  --ds-type-quote-size:15px;--ds-type-quote-line:1.8;--ds-type-quote-weight:400;
+  --ds-space-1:4px;--ds-space-2:8px;--ds-space-3:12px;--ds-space-4:16px;--ds-space-5:20px;--ds-space-6:28px;--ds-space-7:40px;--ds-space-8:56px;
+  --ds-radius-sm:2px;--ds-radius-md:4px;--ds-radius-lg:6px;--ds-radius-full:9999px;
+  --ds-shadow-sm:0 0 0 1px rgba(20,21,22,0.06), 0 1px 2px rgba(20,21,22,0.08);--ds-shadow-md:0 0 0 1px rgba(20,21,22,0.06), 0 4px 12px rgba(20,21,22,0.10);--ds-shadow-lg:0 0 0 1px rgba(20,21,22,0.06), 0 16px 40px rgba(20,21,22,0.16);
+}
+/* The deck surface: the same role names, the deck column's values, on a 1920x1080 canvas. */
+.deck{
+  --ds-type-title-size:76px;--ds-type-title-line:1.25;--ds-type-title-weight:700;
+  --ds-type-subtitle-size:36px;--ds-type-subtitle-line:1.45;--ds-type-subtitle-weight:500;
+  --ds-type-h1-size:56px;--ds-type-h1-line:1.3;--ds-type-h1-weight:700;
+  --ds-type-h2-size:44px;--ds-type-h2-line:1.35;--ds-type-h2-weight:700;
+  --ds-type-h3-size:36px;--ds-type-h3-line:1.4;--ds-type-h3-weight:700;
+  --ds-type-body-size:36px;--ds-type-body-line:1.55;--ds-type-body-weight:400;
+  --ds-type-caption-size:26px;--ds-type-caption-line:1.45;--ds-type-caption-weight:400;
+  --ds-type-quote-size:40px;--ds-type-quote-line:1.5;--ds-type-quote-weight:500;
+  --ds-space-1:10px;--ds-space-2:20px;--ds-space-3:30px;--ds-space-4:40px;--ds-space-5:50px;--ds-space-6:70px;--ds-space-7:100px;--ds-space-8:140px;
+  --ds-radius-sm:4px;--ds-radius-md:8px;--ds-radius-lg:12px;
+  --ds-font-body:"SF Pro Display", "Apple SD Gothic Neo", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+}
+
+*{box-sizing:border-box}
+html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{margin:0;background:var(--ds-color-bg);color:var(--ds-color-text);font-family:var(--ds-font-body);
+  font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight);
+  word-break:keep-all;overflow-wrap:break-word;line-break:strict}
+.t-title{font-size:var(--ds-type-title-size);line-height:var(--ds-type-title-line);font-weight:var(--ds-type-title-weight);margin:0}
+.t-subtitle{font-size:var(--ds-type-subtitle-size);line-height:var(--ds-type-subtitle-line);font-weight:var(--ds-type-subtitle-weight);margin:0}
+.t-h1{font-size:var(--ds-type-h1-size);line-height:var(--ds-type-h1-line);font-weight:var(--ds-type-h1-weight);margin:0}
+.t-h2{font-size:var(--ds-type-h2-size);line-height:var(--ds-type-h2-line);font-weight:var(--ds-type-h2-weight);margin:0}
+.t-h3{font-size:var(--ds-type-h3-size);line-height:var(--ds-type-h3-line);font-weight:var(--ds-type-h3-weight);margin:0}
+.t-body{font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight);margin:0}
+.t-caption{font-size:var(--ds-type-caption-size);line-height:var(--ds-type-caption-line);font-weight:var(--ds-type-caption-weight);margin:0}
+.t-quote{font-size:var(--ds-type-quote-size);line-height:var(--ds-type-quote-line);font-weight:var(--ds-type-quote-weight);margin:0}
+.t-title,.t-subtitle,.t-h1,.t-h2,.t-h3{font-family:var(--ds-font-display)}
+.t-body,.t-caption,.t-quote{font-family:var(--ds-font-body)}
+.t-subtitle,.t-caption{color:var(--ds-color-text-muted)}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--ds-font-mono);font-size:12px;line-height:1.5;letter-spacing:0}
+.muted{color:var(--ds-color-text-muted)}
+.wrap{width:1152px;margin:0 auto;padding:64px 0 96px}
+.spec-head{display:grid;gap:8px;padding-bottom:32px;border-bottom:1px solid var(--ds-color-border)}
+.spec-head .key{font-family:var(--ds-font-mono);font-size:12px;color:var(--ds-color-text-muted)}
+.axis{font-size:13px;line-height:1.6;color:var(--ds-color-text-muted);max-width:980px}
+.sec{margin-top:56px}
+.sec-label{font-family:var(--ds-font-display);font-size:13px;line-height:1.4;font-weight:600;color:var(--ds-color-text-muted);margin:0 0 16px}
+/* palette */
+.swatches{display:grid;grid-template-columns:repeat(7,1fr);gap:16px}
+.swatches.status{grid-template-columns:repeat(4,1fr);margin-top:16px}
+.sw .chip{height:72px;border-radius:var(--ds-radius-md);border:1px solid var(--ds-color-border);display:flex;align-items:flex-end;padding:8px 10px;font-family:var(--ds-font-display);font-weight:700;font-size:20px;line-height:1}
+.sw .role{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.4;margin-top:8px;color:var(--ds-color-text)}
+.sw .hex{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.4;color:var(--ds-color-text-muted)}
+.sw .cr{font-size:12.5px;line-height:1.45;margin-top:2px}
+/* type roles */
+.roles{display:grid;grid-template-columns:96px 1fr 236px;border-top:1px solid var(--ds-color-border)}
+.roles>div{padding:14px 0;border-bottom:1px solid var(--ds-color-border);align-self:stretch}
+.roles .rn{font-family:var(--ds-font-mono);font-size:12px;color:var(--ds-color-text-muted);padding-top:18px}
+.roles .rs{padding-right:24px}
+.roles .rv{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.6;color:var(--ds-color-text-muted);padding-top:18px}
+/* scales */
+.scales{display:grid;grid-template-columns:repeat(3,1fr);gap:32px;align-items:start}
+.bar{height:12px;background:var(--ds-color-text);border-radius:2px;opacity:.85}
+.srow{display:grid;grid-template-columns:44px 1fr;align-items:center;gap:8px;font-family:var(--ds-font-mono);font-size:11.5px;color:var(--ds-color-text-muted);margin-bottom:6px}
+.rbox{width:64px;height:48px;border:1.5px solid var(--ds-color-text);background:var(--ds-color-bg-raised)}
+.rlist{display:flex;gap:14px;align-items:flex-end}
+.rlist figure,.slist figure{margin:0;text-align:center;font-family:var(--ds-font-mono);font-size:11.5px;color:var(--ds-color-text-muted)}
+.slist{display:flex;gap:18px}
+.stile{width:84px;height:56px;background:var(--ds-color-bg-raised);border-radius:var(--ds-radius-md);margin-bottom:8px}
+/* document + notes */
+.docrow{display:grid;grid-template-columns:794px 1fr;gap:48px;align-items:start}
+.sheet{width:794px;padding:56px 64px 64px}
+.notes{display:grid;gap:14px;font-size:13.5px;line-height:1.6}
+.notes h4{font-family:var(--ds-font-display);font-size:14px;line-height:1.4;font-weight:700;margin:0}
+.notes p{margin:0}
+/* slide */
+.slide-frame{width:1152px;height:648px;overflow:hidden;border-radius:var(--ds-radius-md);border:1px solid var(--ds-color-border)}
+.deck{width:1920px;height:1080px;transform:scale(.6);transform-origin:0 0;position:relative;overflow:hidden;
+  font-family:var(--ds-font-body);font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight)}
+.deck-meta{display:flex;justify-content:space-between;margin-top:12px;font-size:12.5px;color:var(--ds-color-text-muted)}
+
+
+.sheet{background:var(--ds-color-bg);border:1px solid var(--ds-color-border);box-shadow:var(--ds-shadow-sm);border-radius:var(--ds-radius-sm)}
+.o-top{display:flex;justify-content:space-between;padding-bottom:var(--ds-space-2);border-bottom:2px solid var(--ds-color-text)}
+.o-top .t-caption{margin:0;font-family:var(--ds-font-display)}
+.t-caption{font-family:var(--ds-font-display)}
+.o-title{text-align:center;margin-top:var(--ds-space-6)}
+.o-center{text-align:center}
+.sheet .t-body{margin:0}
+.sheet strong,.sheet b{font-family:var(--ds-font-display)}
+.o-table{width:100%;border-collapse:collapse;margin-top:var(--ds-space-3);border-top:2px solid var(--ds-color-text);border-bottom:2px solid var(--ds-color-text)}
+.o-table th{width:96px;background:var(--ds-color-bg-raised);font-family:var(--ds-font-display);font-weight:700;font-size:14px;text-align:center;border-right:1px solid var(--ds-color-border);white-space:nowrap}
+.o-table th,.o-table td{padding:9px 14px;border-bottom:1px solid var(--ds-color-border);font-size:15px;line-height:1.6}
+.o-table tr:last-child th,.o-table tr:last-child td{border-bottom:0}
+.o-list{margin:var(--ds-space-2) 0 0;padding-left:1.2em}
+.o-issuer{text-align:center;font-family:var(--ds-font-display);font-weight:700;font-size:24px;letter-spacing:.42em;margin:var(--ds-space-3) 0 0;padding-left:.42em}
+.o-issuer .t-caption{letter-spacing:0;margin-left:4px;font-weight:400;color:var(--ds-color-text-muted)}
+.o-cut{margin:var(--ds-space-7) -64px var(--ds-space-6);border-top:1.5px dashed var(--ds-color-border);text-align:center;line-height:0}
+.o-cut .t-caption{background:var(--ds-color-bg);padding:0 12px;position:relative;top:0}
+.o-form{margin-top:var(--ds-space-4)!important}
+.box{display:inline-block;width:16px;height:16px;border:1.5px solid var(--ds-color-text);vertical-align:-2px;margin-right:4px}
+.o-due{display:flex;align-items:center;gap:var(--ds-space-3);margin:var(--ds-space-6) 0 0}
+.inv{background:var(--ds-color-accent);color:var(--ds-color-accent-text);font-family:var(--ds-font-display);font-weight:700;font-size:15px;padding:6px 12px;border-radius:var(--ds-radius-sm)}
+.deck{background:var(--ds-color-bg)}
+.deck-meta,.axis,.sw .cr,.notes p{font-family:var(--ds-font-display)}
+.o-cut .t-caption{position:relative;top:-1px}
+.s-wrap{padding:var(--ds-space-6) var(--ds-space-7) 0}
+.s-top{display:flex;justify-content:space-between;padding-bottom:var(--ds-space-2);border-bottom:4px solid var(--ds-color-text)}
+.s-top .t-caption{margin:0}
+.s-table{width:100%;border-collapse:collapse;margin-top:var(--ds-space-5);border-bottom:4px solid var(--ds-color-text)}
+.s-table th{font-family:var(--ds-font-display);font-weight:700;font-size:var(--ds-type-caption-size);text-align:left;background:var(--ds-color-bg-raised);padding:14px 24px;border-top:4px solid var(--ds-color-text);border-bottom:2px solid var(--ds-color-border)}
+.s-table td{padding:12px 24px;border-bottom:2px solid var(--ds-color-border);line-height:1.35}
+.s-table tr:last-child td{border-bottom:0}
+.st-warn{color:var(--ds-color-status-warn);font-weight:600}.st-err{color:var(--ds-color-status-error);font-weight:600}
+.s-band{display:flex;gap:var(--ds-space-4);align-items:baseline;margin-top:var(--ds-space-5);background:var(--ds-color-accent);color:var(--ds-color-accent-text);padding:var(--ds-space-3) var(--ds-space-4);border-radius:var(--ds-radius-sm);font-weight:500}
+.s-band-k{flex:none;font-weight:800}
+
+</style></head><body><main class="wrap">
+<header class="spec-head">
+  <div class="key">stance-official · proposal for the owner · 2026-10-12</div>
+  <h1 class="t-title">공문 Official</h1>
+  <p class="t-subtitle">흰 A4에 먹 하나: 본문은 명조, 제목과 표는 고딕, 색은 직인에게 남겨 두고 읽는 사람이 해야 할 일은 반전된 먹 띠로 표시합니다. One ink on white A4: myeongjo to read, gothic to find, and the one red left to the school’s seal; the reader’s required action is set reversed out of ink.</p>
+  <p class="axis">density standard, leaning dense (a parent or colleague reads closely, a report is tabular) · criticality transactional (consent, money, deadlines) · energy quiet · type characterful serif body (myeongjo) with gothic headings · material printed · colour restrained · accent none: a monochrome language, the accent token holds the ink and is used reversed · ground light · temperature neutral.</p>
+</header>
+
+<section class="sec"><h2 class="sec-label">Palette (contrast measured on the surface the colour sits on)</h2>
+<div class="swatches">
+<div class="sw"><div class="chip" style="background:#ffffff"></div><div class="role">--ds-color-bg</div><div class="hex">#ffffff</div><div class="cr">ground</div></div>
+<div class="sw"><div class="chip" style="background:#f1f2f3"></div><div class="role">--ds-color-bg-raised</div><div class="hex">#f1f2f3</div><div class="cr">sheet, panel</div></div>
+<div class="sw"><div class="chip" style="background:#141516;border-color:#141516"></div><div class="role">--ds-color-text</div><div class="hex">#141516</div><div class="cr">18.3 : 1 on bg</div></div>
+<div class="sw"><div class="chip" style="background:#555a60;border-color:#555a60"></div><div class="role">--ds-color-text-muted</div><div class="hex">#555a60</div><div class="cr">7.0 : 1 on bg</div></div>
+<div class="sw"><div class="chip" style="background:#141516;border-color:#141516;color:#ffffff">가 Aa</div><div class="role">--ds-color-accent</div><div class="hex">#141516</div><div class="cr">18.3 : 1 on bg (the ink)</div></div>
+<div class="sw"><div class="chip" style="background:#ffffff"></div><div class="role">--ds-color-accent-text</div><div class="hex">#ffffff</div><div class="cr">18.3 : 1 on accent</div></div>
+<div class="sw"><div class="chip" style="background:#ffffff;border:2px solid #b4b8be"></div><div class="role">--ds-color-border</div><div class="hex">#b4b8be</div><div class="cr">2.0 : 1 · table hairlines</div></div>
+</div>
+<div class="swatches status">
+<div class="sw"><div class="chip" style="background:#2d6e46;border-color:#2d6e46"></div><div class="role">--ds-color-status-ok</div><div class="hex">#2d6e46</div><div class="cr">6.1 : 1 · ○ + word</div></div>
+<div class="sw"><div class="chip" style="background:#8f5b00;border-color:#8f5b00"></div><div class="role">--ds-color-status-warn</div><div class="hex">#8f5b00</div><div class="cr">5.7 : 1 · △ + word</div></div>
+<div class="sw"><div class="chip" style="background:#a8282b;border-color:#a8282b"></div><div class="role">--ds-color-status-error</div><div class="hex">#a8282b</div><div class="cr">7.0 : 1 · × + word</div></div>
+<div class="sw"><div class="chip" style="background:#2f5d8a;border-color:#2f5d8a"></div><div class="role">--ds-color-status-info</div><div class="hex">#2f5d8a</div><div class="cr">6.9 : 1</div></div>
+</div></section>
+
+<section class="sec"><h2 class="sec-label">Type roles: face · document px/line/weight · deck px on 1920×1080</h2>
+<div class="roles"><div class="rn">title</div><div class="rs"><p class="t-title">3학년 현장체험학습 안내 <span class="muted" style="font-weight:500">Field trip notice</span></p></div><div class="rv">SD Gothic Neo (gothic)<br>doc&nbsp; 26/1.35/700<br>deck 76/1.25/700</div><div class="rn">subtitle</div><div class="rs"><p class="t-subtitle">가정통신문 제2026-87호 · 발행 2026. 10. 12.(월) · 3학년부</p></div><div class="rv">SD Gothic Neo<br>doc&nbsp; 15/1.55/500<br>deck 36/1.45/500</div><div class="rn">h1</div><div class="rs"><p class="t-h1">1. 운영 개요 Overview</p></div><div class="rv">SD Gothic Neo<br>doc&nbsp; 19/1.45/700<br>deck 56/1.3/700</div><div class="rn">h2</div><div class="rs"><p class="t-h2">가. 준비물 및 유의 사항</p></div><div class="rv">SD Gothic Neo<br>doc&nbsp; 17/1.5/700<br>deck 44/1.35/700</div><div class="rn">h3</div><div class="rs"><p class="t-h3">회신 기한 및 제출처</p></div><div class="rv">SD Gothic Neo<br>doc&nbsp; 15/1.6/700<br>deck 36/1.4/700</div><div class="rn">body</div><div class="rs"><p class="t-body">학부모님, 안녕하십니까? 우리 학교 3학년은 교과 연계 체험학습으로 국립과천과학관을 방문하고자 합니다. Charter sets the Latin and figures: 14,500원, 2026. 11. 6.</p></div><div class="rv">paper: Charter + AppleMyungjo · deck: gothic<br>doc&nbsp; 15/1.8/400<br>deck 36/1.55/400</div><div class="rn">caption</div><div class="rs"><p class="t-caption">※ 비용은 2026. 10. 8. 학교운영위원회 심의를 거쳐 확정되었습니다.</p></div><div class="rv">SD Gothic Neo<br>doc&nbsp; 12/1.55/400<br>deck 26/1.45/400</div><div class="rn">quote</div><div class="rs"><p class="t-quote" style="padding-left:0">안전한 체험학습을 위해 가정에서도 출발 전 유의 사항을 함께 읽어 주십시오.</p></div><div class="rv">paper: myeongjo · deck: gothic<br>doc&nbsp; 15/1.8/400<br>deck 40/1.5/500</div></div></section>
+
+<section class="sec"><h2 class="sec-label">Space · radius · shadow (document values; the deck doubles radius and multiplies space ×2.5)</h2>
+<div class="scales">
+<div><div class="srow"><span>1 · 4</span><div class="bar" style="width:8px"></div></div><div class="srow"><span>2 · 8</span><div class="bar" style="width:16px"></div></div><div class="srow"><span>3 · 12</span><div class="bar" style="width:24px"></div></div><div class="srow"><span>4 · 16</span><div class="bar" style="width:32px"></div></div><div class="srow"><span>5 · 20</span><div class="bar" style="width:40px"></div></div><div class="srow"><span>6 · 28</span><div class="bar" style="width:56px"></div></div><div class="srow"><span>7 · 40</span><div class="bar" style="width:80px"></div></div><div class="srow"><span>8 · 56</span><div class="bar" style="width:112px"></div></div></div>
+<div class="rlist"><figure><div class="rbox" style="border-radius:var(--ds-radius-sm)"></div>sm 2</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-md)"></div>md 4</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-lg)"></div>lg 6</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-full)"></div>full 9999</figure></div>
+<div class="slist"><figure><div class="stile" style="box-shadow:var(--ds-shadow-sm)"></div>sm</figure><figure><div class="stile" style="box-shadow:var(--ds-shadow-md)"></div>md</figure><figure><div class="stile" style="box-shadow:var(--ds-shadow-lg)"></div>lg</figure></div>
+</div>
+<p class="t-caption" style="margin-top:12px">Print carries no shadow and no tint but the 10 % table-head grey. sm frames the A4 sheet on screen; md and lg are for MAWS’s menus and dialogs over the document.</p></section>
+
+<section class="sec"><h2 class="sec-label">Document fragment: 가정통신문 with a tear-off consent slip (A4, printed and sent home, also posted to the parent app)</h2>
+<div class="docrow"><article class="sheet">
+<div class="o-top"><span class="t-caption">가정통신문 제2026-87호</span><span class="t-caption">한빛초등학교 · 교무실 02-2607-3104 · 담당 3학년부 김서윤</span></div>
+<h1 class="t-title o-title">3학년 현장체험학습 안내 및 참가 동의서 제출</h1>
+<p class="t-body" style="margin-top:var(--ds-space-6)">학부모님, 안녕하십니까? 하늘이 높고 맑은 계절에 가정마다 건강과 기쁨이 가득하시기를 바랍니다. 우리 학교 3학년은 과학 교과와 연계한 체험학습으로 국립과천과학관을 방문하고자 하오니, 아래 내용을 확인하시고 참가 동의서를 제출하여 주시기 바랍니다.</p>
+<p class="t-h3 o-center" style="margin-top:var(--ds-space-5);letter-spacing:1.2em;padding-left:1.2em">아래</p>
+<table class="o-table num">
+<tr><th>일 시</th><td>2026. 11. 6.(금) 08:50 학교 출발 ~ 15:10 학교 도착</td></tr>
+<tr><th>장 소</th><td>국립과천과학관 (경기도 과천시 상하벌로 110)</td></tr>
+<tr><th>대 상</th><td>3학년 5개 반 학생 138명, 인솔 교사 7명</td></tr>
+<tr><th>교 통</th><td>전세버스 5대 (학급별 1대, 차량마다 안전요원 1명 동승)</td></tr>
+<tr><th>비 용</th><td>1인 14,500원 (차량비 12,500원, 상설전시관 입장료 2,000원)</td></tr>
+<tr><th>납 부</th><td>2026. 10. 28.(수) 스쿨뱅킹 자동 출금</td></tr>
+</table>
+<h2 class="t-h2" style="margin-top:var(--ds-space-6)">가. 준비물 및 유의 사항</h2>
+<ul class="o-list t-body">
+<li>도시락과 물, 간식은 한 가지만 준비합니다.</li>
+<li>걷기 편한 운동화와 활동하기 좋은 옷을 입고 옵니다.</li>
+<li>멀미를 하는 학생은 10. 30.(금)까지 담임 선생님께 알려 주십시오.</li>
+</ul>
+<p class="t-body o-center" style="margin-top:var(--ds-space-7)">2026. 10. 12.</p>
+<p class="o-issuer">한빛초등학교장<span class="t-caption">(직인 생략)</span></p>
+
+<div class="o-cut"><span class="t-caption">자르는 선</span></div>
+
+<h2 class="t-h1 o-center">현장체험학습 참가 동의서</h2>
+<p class="t-body o-form">3학년 (&emsp;&ensp;)반 (&emsp;&ensp;)번 &emsp;학생 이름 (&emsp;&emsp;&emsp;&emsp;&emsp;)</p>
+<p class="t-body o-form"><span class="box"></span> 참가에 동의합니다 &emsp;&emsp;<span class="box"></span> 동의하지 않습니다 (사유: &emsp;&emsp;&emsp;&emsp;&emsp;&emsp;)</p>
+<p class="t-body o-form">보호자 이름 (&emsp;&emsp;&emsp;&emsp;&emsp;) &emsp;서명 (&emsp;&emsp;&emsp;&emsp;&emsp;)</p>
+<p class="o-due"><span class="inv">회신 기한 10. 23.(금)</span><span class="t-body">담임 선생님께 제출해 주십시오.</span></p>
+</article><aside class="notes">
+<h4>Why there is no accent hue</h4>
+<p>The only colour a Korean official document carries is the 직인, the school’s red seal. This system leaves that red to the seal and draws none of its own, so nothing on the page can be mistaken for the school’s authority. Everything survives the staff-room laser printer.</p>
+<h4>What the accent token does</h4>
+<p>It holds the ink and is used reversed: white on ink marks the one thing the reader must do (회신 기한) or decide (결정 필요). One per page.</p>
+<h4>Myeongjo to read, gothic to find</h4>
+<p>Body in myeongjo, as HWP-era school paperwork is read; titles, table heads, captions and emphasis in gothic. On a projected deck the body switches to gothic, because thin myeongjo strokes wash out on a projector.</p>
+<h4>Status</h4>
+<p>Symbol and word first, colour second: ○ 완료, △ 진행, × 미제출.</p></aside></div></section>
+
+<section class="sec"><h2 class="sec-label">Slide: 교직원 회의 자료, projected in the staff room</h2>
+<div class="slide-frame"><div class="deck">
+<div class="s-wrap">
+  <div class="s-top"><span class="t-caption">3학년 협의회 · 2026. 10. 21.(수) · 3학년 연구실</span><span class="t-caption num">4 / 9</span></div>
+  <h1 class="t-h1" style="margin-top:var(--ds-space-3)">현장체험학습 안전 계획(안)</h1>
+  <table class="s-table num">
+    <thead><tr><th>차량</th><th>학급</th><th>인원</th><th>인솔 교사</th><th>사전 교육</th></tr></thead>
+    <tbody>
+    <tr><td>1호차</td><td>3-1</td><td>28명</td><td>김서윤</td><td>○ 완료</td></tr>
+    <tr><td>2호차</td><td>3-2</td><td>27명</td><td>이은지, 한수진(보건)</td><td>○ 완료</td></tr>
+    <tr><td>3호차</td><td>3-3</td><td>28명</td><td>박정훈</td><td><span class="st-warn">△ 10. 27. 예정</span></td></tr>
+    <tr><td>4호차</td><td>3-4</td><td>27명</td><td>최민아, 오세훈(전담)</td><td>○ 완료</td></tr>
+    <tr><td>5호차</td><td>3-5</td><td>28명</td><td>정다은</td><td><span class="st-err">× 미실시</span></td></tr>
+    </tbody>
+  </table>
+  <div class="s-band"><span class="s-band-k">결정 필요</span><span>비가 오면 실외 일정을 취소하고 상설전시관만 관람할지 오늘 정합니다.</span></div>
+</div></div></div>
+<div class="deck-meta"><span>Drawn on the 1920×1080 canvas at 60 %. Deck values in pt for PowerPoint: px ÷ 2.</span><span>body 36 px = 18 pt · caption 26 px = 13 pt</span></div>
+</section>
+</main></body></html>

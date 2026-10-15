@@ -10,7 +10,7 @@ import type { BrowserProfileListItem, ImportedProfile } from '@shared/browser/pr
 import { DEFAULT_PARTITION, profilePartition } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
 import { useLayout } from '../../../stores/layout';
 import { browserTab, T2 } from '../../../test-support/browser';
 import { RECORD } from '../../../test-support/browser-import';
@@ -44,7 +44,7 @@ beforeEach(() => {
       case 'browser.bookmarks.sync':
         return ok({ syncedAt: new Date().toISOString(), count: 46 });
       case 'settings.set':
-        return ok({ settings: SETTINGS_DEFAULTS_V13, resolvedTheme: 'light' });
+        return ok({ settings: SETTINGS_DEFAULTS_V14, resolvedTheme: 'light' });
       default:
         return ok();
     }

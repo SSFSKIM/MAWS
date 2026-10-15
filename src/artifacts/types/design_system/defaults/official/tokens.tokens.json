@@ -1,0 +1,253 @@
+{
+  "$description": "Official: one ink on white Letter paper, a serif to read and a sans to find, ruled tables and no hue; the reader’s one required action is set reversed out of the ink.",
+  "$extensions": {
+    "dev.maws.office": {
+      "fonts": {
+        "major": { "ea": "Malgun Gothic", "latin": "Segoe UI" },
+        "minor": { "ea": "Batang", "latin": "Cambria" }
+      }
+    },
+    "dev.maws.page": { "margin": { "unit": "px", "value": 72 }, "size": "letter" }
+  },
+  "color": {
+    "$type": "color",
+    "bg": {
+      "$root": {
+        "$value": { "colorSpace": "srgb", "components": [1, 1, 1], "hex": "#ffffff" }
+      },
+      "raised": {
+        "$value": { "colorSpace": "srgb", "components": [0.9451, 0.949, 0.9529], "hex": "#f1f2f3" },
+        "$description": "The table head column and the one panel tint; survives a photocopy."
+      }
+    },
+    "text": {
+      "$root": {
+        "$value": { "colorSpace": "srgb", "components": [0.0784, 0.0824, 0.0863], "hex": "#141516" }
+      },
+      "muted": {
+        "$value": { "colorSpace": "srgb", "components": [0.3333, 0.3529, 0.3765], "hex": "#555a60" }
+      }
+    },
+    "accent": {
+      "$root": {
+        "$value": "{color.text.$root}",
+        "$description": "The ink itself: a monochrome system. Used reversed, for the one required action."
+      },
+      "text": {
+        "$value": "{color.bg.$root}"
+      }
+    },
+    "border": {
+      "$value": { "colorSpace": "srgb", "components": [0.7059, 0.7216, 0.7451], "hex": "#b4b8be" },
+      "$description": "Table hairlines; 2.0 : 1, never a control’s only edge."
+    },
+    "status": {
+      "ok": {
+        "$value": { "colorSpace": "srgb", "components": [0.1765, 0.4314, 0.2745], "hex": "#2d6e46" }
+      },
+      "warn": {
+        "$value": { "colorSpace": "srgb", "components": [0.5608, 0.3569, 0], "hex": "#8f5b00" }
+      },
+      "error": {
+        "$value": { "colorSpace": "srgb", "components": [0.6588, 0.1569, 0.1686], "hex": "#a8282b" }
+      },
+      "info": {
+        "$value": { "colorSpace": "srgb", "components": [0.1843, 0.3647, 0.5412], "hex": "#2f5d8a" }
+      }
+    }
+  },
+  "font": {
+    "$type": "fontFamily",
+    "display": {
+      "$value": ["SF Pro Display", "Apple SD Gothic Neo", "-apple-system", "Segoe UI", "Malgun Gothic", "sans-serif"]
+    },
+    "body": {
+      "$value": ["Charter", "Noto Serif KR", "Cambria", "Batang", "serif"]
+    },
+    "mono": {
+      "$value": ["ui-monospace", "SF Mono", "Menlo", "Consolas", "monospace"]
+    }
+  },
+  "type": {
+    "$type": "typography",
+    "title": {
+      "$value": {
+        "fontFamily": "{font.display}",
+        "fontSize": { "value": 26, "unit": "px" },
+        "fontWeight": 700,
+        "lineHeight": 1.3,
+        "letterSpacing": { "value": 0, "unit": "px" }
+      },
+      "$extensions": { "dev.maws.deck": { "fontSize": { "unit": "px", "value": 76 }, "lineHeight": 1.25 } }
+    },
+    "subtitle": {
+      "$value": {
+        "fontFamily": "{font.display}",
+        "fontSize": { "value": 15, "unit": "px" },
+        "fontWeight": 500,
+        "lineHeight": 1.55,
+        "letterSpacing": { "value": 0, "unit": "px" }
+      },
+      "$extensions": { "dev.maws.deck": { "fontSize": { "unit": "px", "value": 36 }, "lineHeight": 1.45 } }
+    },
+    "h1": {
+      "$value": {
+        "fontFamily": "{font.display}",
+        "fontSize": { "value": 19, "unit": "px" },
+        "fontWeight": 700,
+        "lineHeight": 1.4,
+        "letterSpacing": { "value": 0, "unit": "px" }
+      },
+      "$extensions": { "dev.maws.deck": { "fontSize": { "unit": "px", "value": 56 }, "lineHeight": 1.3 } }
+    },
+    "h2": {
+      "$value": {
+        "fontFamily": "{font.display}",
+        "fontSize": { "value": 17, "unit": "px" },
+        "fontWeight": 700,
+        "lineHeight": 1.45,
+        "letterSpacing": { "value": 0, "unit": "px" }
+      },
+      "$extensions": { "dev.maws.deck": { "fontSize": { "unit": "px", "value": 44 }, "lineHeight": 1.35 } }
+    },
+    "h3": {
+      "$value": {
+        "fontFamily": "{font.display}",
+        "fontSize": { "value": 15, "unit": "px" },
+        "fontWeight": 700,
+        "lineHeight": 1.55,
+        "letterSpacing": { "value": 0, "unit": "px" }
+      },
+      "$extensions": { "dev.maws.deck": { "fontSize": { "unit": "px", "value": 36 }, "lineHeight": 1.4 } }
+    },
+    "body": {
+      "$value": {
+        "fontFamily": "{font.body}",
+        "fontSize": { "value": 15, "unit": "px" },
+        "fontWeight": 400,
+        "lineHeight": 1.7,
+        "letterSpacing": { "value": 0, "unit": "px" }
+      },
+      "$extensions": { "dev.maws.deck": { "fontSize": { "unit": "px", "value": 36 }, "lineHeight": 1.55 } }
+    },
+    "caption": {
+      "$value": {
+        "fontFamily": "{font.display}",
+        "fontSize": { "value": 12, "unit": "px" },
+        "fontWeight": 400,
+        "lineHeight": 1.5,
+        "letterSpacing": { "value": 0, "unit": "px" }
+      },
+      "$extensions": { "dev.maws.deck": { "fontSize": { "unit": "px", "value": 26 }, "lineHeight": 1.45 } }
+    },
+    "quote": {
+      "$value": {
+        "fontFamily": "{font.body}",
+        "fontSize": { "value": 15, "unit": "px" },
+        "fontWeight": 400,
+        "lineHeight": 1.7,
+        "letterSpacing": { "value": 0, "unit": "px" }
+      },
+      "$extensions": { "dev.maws.deck": { "fontSize": { "unit": "px", "value": 40 }, "lineHeight": 1.5 } }
+    }
+  },
+  "space": {
+    "$type": "dimension",
+    "1": {
+      "$value": { "value": 4, "unit": "px" }
+    },
+    "2": {
+      "$value": { "value": 8, "unit": "px" }
+    },
+    "3": {
+      "$value": { "value": 12, "unit": "px" }
+    },
+    "4": {
+      "$value": { "value": 16, "unit": "px" }
+    },
+    "5": {
+      "$value": { "value": 20, "unit": "px" }
+    },
+    "6": {
+      "$value": { "value": 28, "unit": "px" }
+    },
+    "7": {
+      "$value": { "value": 40, "unit": "px" }
+    },
+    "8": {
+      "$value": { "value": 56, "unit": "px" }
+    }
+  },
+  "radius": {
+    "$type": "dimension",
+    "sm": {
+      "$value": { "value": 2, "unit": "px" }
+    },
+    "md": {
+      "$value": { "value": 4, "unit": "px" }
+    },
+    "lg": {
+      "$value": { "value": 6, "unit": "px" }
+    },
+    "full": {
+      "$value": { "value": 9999, "unit": "px" }
+    }
+  },
+  "shadow": {
+    "$type": "shadow",
+    "sm": {
+      "$value": [
+        {
+          "color": { "colorSpace": "srgb", "components": [0.0784, 0.0824, 0.0863], "alpha": 0.06, "hex": "#141516" },
+          "offsetX": { "value": 0, "unit": "px" },
+          "offsetY": { "value": 0, "unit": "px" },
+          "blur": { "value": 0, "unit": "px" },
+          "spread": { "value": 1, "unit": "px" }
+        },
+        {
+          "color": { "colorSpace": "srgb", "components": [0.0784, 0.0824, 0.0863], "alpha": 0.08, "hex": "#141516" },
+          "offsetX": { "value": 0, "unit": "px" },
+          "offsetY": { "value": 1, "unit": "px" },
+          "blur": { "value": 2, "unit": "px" },
+          "spread": { "value": 0, "unit": "px" }
+        }
+      ]
+    },
+    "md": {
+      "$value": [
+        {
+          "color": { "colorSpace": "srgb", "components": [0.0784, 0.0824, 0.0863], "alpha": 0.06, "hex": "#141516" },
+          "offsetX": { "value": 0, "unit": "px" },
+          "offsetY": { "value": 0, "unit": "px" },
+          "blur": { "value": 0, "unit": "px" },
+          "spread": { "value": 1, "unit": "px" }
+        },
+        {
+          "color": { "colorSpace": "srgb", "components": [0.0784, 0.0824, 0.0863], "alpha": 0.1, "hex": "#141516" },
+          "offsetX": { "value": 0, "unit": "px" },
+          "offsetY": { "value": 4, "unit": "px" },
+          "blur": { "value": 12, "unit": "px" },
+          "spread": { "value": 0, "unit": "px" }
+        }
+      ]
+    },
+    "lg": {
+      "$value": [
+        {
+          "color": { "colorSpace": "srgb", "components": [0.0784, 0.0824, 0.0863], "alpha": 0.06, "hex": "#141516" },
+          "offsetX": { "value": 0, "unit": "px" },
+          "offsetY": { "value": 0, "unit": "px" },
+          "blur": { "value": 0, "unit": "px" },
+          "spread": { "value": 1, "unit": "px" }
+        },
+        {
+          "color": { "colorSpace": "srgb", "components": [0.0784, 0.0824, 0.0863], "alpha": 0.16, "hex": "#141516" },
+          "offsetX": { "value": 0, "unit": "px" },
+          "offsetY": { "value": 16, "unit": "px" },
+          "blur": { "value": 40, "unit": "px" },
+          "spread": { "value": 0, "unit": "px" }
+        }
+      ]
+    }
+  }
+}

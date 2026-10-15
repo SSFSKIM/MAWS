@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { SETTINGS_DEFAULTS_V13 } from '@shared/settings/defaults';
+import { SETTINGS_DEFAULTS_V14 } from '@shared/settings/defaults';
 import { useNotices } from '../../stores/notices';
 import { useSettings } from '../../stores/settings';
 import { VOICE } from '../../settings-tab/copy';
@@ -40,7 +40,7 @@ function renderBoth() {
 beforeEach(() => {
   resetDictationStore();
   invoke.mockClear();
-  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V13, resolvedTheme: 'light' } });
+  useSettings.setState({ state: { settings: SETTINGS_DEFAULTS_V14, resolvedTheme: 'light' } });
 });
 afterEach(() => {
   cleanup();
@@ -98,9 +98,9 @@ describe('the microphone control', () => {
   it('says a click dictates, and names a bound chord in its title, an override included', () => {
     const { a } = renderBoth();
     expect(a.getByRole('button', { name: 'Dictate' }).title).toBe('Click to dictate · on this Mac'); // unbound by default
-    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V13, keymap: { 'composer.dictate': 'Alt+Space' } }, resolvedTheme: 'light' } }));
+    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V14, keymap: { 'composer.dictate': 'Alt+Space' } }, resolvedTheme: 'light' } }));
     expect(a.getByRole('button', { name: 'Dictate' }).title).toBe('Click to dictate · on this Mac · or hold ⌥Space');
-    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V13, keymap: { 'composer.dictate': 'Cmd+D' } }, resolvedTheme: 'light' } }));
+    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V14, keymap: { 'composer.dictate': 'Cmd+D' } }, resolvedTheme: 'light' } }));
     expect(a.getByRole('button', { name: 'Dictate' }).title).toBe('Click to dictate · on this Mac · or hold ⌘D');
   });
 

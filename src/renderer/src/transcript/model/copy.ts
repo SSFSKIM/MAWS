@@ -400,6 +400,7 @@ export const ASK = {
   viewAnswers: 'View answers',
   notAnswered: 'Not answered',
   decideForMe: 'Decide for me',
+  buildDesignSystem: 'Build one with me', // P3-D: a design_system question answered `create`
 } as const;
 
 // The capsule's state line, the same in the capsule's chip and in Copy (scale-review C scalpel-1#2): a refused ask its
@@ -410,13 +411,16 @@ export function askStateCopy(row: { state: keyof typeof ASK.state | 'error'; err
 }
 
 // One answer as the answered capsule's line reads it: the labels (and what was typed under Other), the text, the paths,
-// `<name> (<directory>)` for a repository, or the two non-answers; then the user's note (P2-C3), whatever the status.
+// `<name> (<directory>)` for a repository, a design system by its name or the build request (P3-D), or the two
+// non-answers; then the user's note (P2-C3), whatever the status.
 export function askAnswerCopy(answer: AskAnswer | undefined): string {
   if (answer === undefined) return ASK.notAnswered;
   const note = answer.note !== undefined ? `Note: ${answer.note}` : '';
   const join = (...parts: string[]) => parts.filter((part) => part !== '').join(' · ');
   if (answer.status === 'skipped') return join(QUESTION.skipped, note);
   if (answer.status === 'decide_for_me') return join(ASK.decideForMe, note);
+  if (answer.create === true) return join(ASK.buildDesignSystem, note); // P3-D
+  if (answer.designSystemId !== undefined) return join(answer.name ?? answer.designSystemId, note); // P3-D
   const values = answer.value === undefined ? [] : Array.isArray(answer.value) ? answer.value : [answer.value];
   const value = answer.name !== undefined ? `${answer.name} (${values.join(', ')})` : values.join(', ');
   return join(value, answer.otherText !== undefined ? `Other: ${answer.otherText}` : '', note);

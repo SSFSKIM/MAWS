@@ -120,11 +120,21 @@ import { connectLibrary } from './library/store';
 // P3-B start
 import { registerDocumentEditor } from './tools/document';
 // P3-B end
+// P3-D start
+import { DOCUMENT_DESIGN_SYSTEM } from './artifacts/design-system/documents';
+import { registerDesignSystemEditor } from './artifacts/design-system/editor';
+import { DesignSystemHostProvider } from './artifacts/design-system/provider';
+import { provideDocumentDesignSystem } from './tools/document/design-system';
+// P3-D end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
 registerSetupIntentHook(useSetupIntent);
 // C10 end
+// P3-D start: D's apply API for B's document page (the P3 spec's Decision Log 61): the page calls its `systemFor` as a hook,
+// so it is provided at module load, before any page renders, and fixed for the page's life (C7's rule, as C10's above)
+provideDocumentDesignSystem(DOCUMENT_DESIGN_SYSTEM);
+// P3-D end
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);
@@ -288,6 +298,10 @@ export function App() {
   // P3-B start: the document kind's editor in L's registry (the panel's Artifacts tool and an `artifact` main tab)
   useEffect(() => registerDocumentEditor(), []);
   // P3-B end
+  // P3-D start: the Design System page as the `design_system` kind's editor in L's registry (the library's tab and the
+  // panel's Artifacts tool mount it)
+  useEffect(() => registerDesignSystemEditor(), []);
+  // P3-D end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
@@ -296,6 +310,9 @@ export function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      {/* P3-D start: every design-system consumer reaches the store through the window's ArtifactHost */}
+      <DesignSystemHostProvider>
+      {/* P3-D end */}
       <Shell />
       {/* C7 start: the one app-level ⌘. and ⌘L, resolving the focused pane's session */}
       <ComposerAppKeys />
@@ -322,6 +339,9 @@ export function App() {
       {/* E3 end */}
       {/* cua #90: the profile popover's Re-import this profile…, the removal's then the import's sheet */}
       <ProfileSheets />
+      {/* P3-D start */}
+      </DesignSystemHostProvider>
+      {/* P3-D end */}
     </QueryClientProvider>
   );
 }

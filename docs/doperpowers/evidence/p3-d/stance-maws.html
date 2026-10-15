@@ -1,0 +1,209 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><title>MAWS stance specimen</title>
+<style>
+:root{
+  --ds-color-bg:#faf9f6;--ds-color-bg-raised:#ffffff;--ds-color-text:#1f1e1b;--ds-color-text-muted:#72716e;
+  --ds-color-accent:#c9663f;--ds-color-accent-text:#ffffff;--ds-color-border:#e3e2df;
+  --ds-color-status-ok:#1f8f55;--ds-color-status-warn:#b86a1a;--ds-color-status-error:#c93b3b;--ds-color-status-info:#3b6fd1;
+  --ds-font-display:"SF Pro Display", "Apple SD Gothic Neo", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  --ds-font-body:"SF Pro Text", "Apple SD Gothic Neo", -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+  --ds-font-mono:ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --ds-type-title-size:34px;--ds-type-title-line:1.3;--ds-type-title-weight:700;
+  --ds-type-subtitle-size:19px;--ds-type-subtitle-line:1.55;--ds-type-subtitle-weight:500;
+  --ds-type-h1-size:26px;--ds-type-h1-line:1.35;--ds-type-h1-weight:700;
+  --ds-type-h2-size:21px;--ds-type-h2-line:1.45;--ds-type-h2-weight:700;
+  --ds-type-h3-size:17px;--ds-type-h3-line:1.55;--ds-type-h3-weight:600;
+  --ds-type-body-size:16px;--ds-type-body-line:1.7;--ds-type-body-weight:400;
+  --ds-type-caption-size:13px;--ds-type-caption-line:1.55;--ds-type-caption-weight:400;
+  --ds-type-quote-size:17px;--ds-type-quote-line:1.75;--ds-type-quote-weight:400;
+  --ds-space-1:4px;--ds-space-2:8px;--ds-space-3:12px;--ds-space-4:16px;--ds-space-5:24px;--ds-space-6:32px;--ds-space-7:48px;--ds-space-8:64px;
+  --ds-radius-sm:6px;--ds-radius-md:10px;--ds-radius-lg:14px;--ds-radius-full:9999px;
+  --ds-shadow-sm:0 0 0 1px rgba(0,0,0,0.04), 0 2px 6px rgba(0,0,0,0.08);--ds-shadow-md:0 0 0 1px rgba(0,0,0,0.04), 0 2px 8px rgba(0,0,0,0.04), 0 4px 80px 8px rgba(0,0,0,0.024);--ds-shadow-lg:0 0 0 1px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.10), 0 24px 64px rgba(0,0,0,0.08);
+}
+/* The deck surface: the same role names, the deck column's values, on a 1920x1080 canvas. */
+.deck{
+  --ds-type-title-size:96px;--ds-type-title-line:1.2;--ds-type-title-weight:700;
+  --ds-type-subtitle-size:44px;--ds-type-subtitle-line:1.4;--ds-type-subtitle-weight:500;
+  --ds-type-h1-size:72px;--ds-type-h1-line:1.25;--ds-type-h1-weight:700;
+  --ds-type-h2-size:56px;--ds-type-h2-line:1.3;--ds-type-h2-weight:700;
+  --ds-type-h3-size:44px;--ds-type-h3-line:1.35;--ds-type-h3-weight:600;
+  --ds-type-body-size:40px;--ds-type-body-line:1.5;--ds-type-body-weight:400;
+  --ds-type-caption-size:28px;--ds-type-caption-line:1.45;--ds-type-caption-weight:400;
+  --ds-type-quote-size:48px;--ds-type-quote-line:1.45;--ds-type-quote-weight:500;
+  --ds-space-1:10px;--ds-space-2:20px;--ds-space-3:30px;--ds-space-4:40px;--ds-space-5:60px;--ds-space-6:80px;--ds-space-7:120px;--ds-space-8:160px;
+  --ds-radius-sm:12px;--ds-radius-md:20px;--ds-radius-lg:28px;
+  
+}
+
+*{box-sizing:border-box}
+html{-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{margin:0;background:var(--ds-color-bg);color:var(--ds-color-text);font-family:var(--ds-font-body);
+  font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight);
+  word-break:keep-all;overflow-wrap:break-word;line-break:strict}
+.t-title{font-size:var(--ds-type-title-size);line-height:var(--ds-type-title-line);font-weight:var(--ds-type-title-weight);margin:0}
+.t-subtitle{font-size:var(--ds-type-subtitle-size);line-height:var(--ds-type-subtitle-line);font-weight:var(--ds-type-subtitle-weight);margin:0}
+.t-h1{font-size:var(--ds-type-h1-size);line-height:var(--ds-type-h1-line);font-weight:var(--ds-type-h1-weight);margin:0}
+.t-h2{font-size:var(--ds-type-h2-size);line-height:var(--ds-type-h2-line);font-weight:var(--ds-type-h2-weight);margin:0}
+.t-h3{font-size:var(--ds-type-h3-size);line-height:var(--ds-type-h3-line);font-weight:var(--ds-type-h3-weight);margin:0}
+.t-body{font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight);margin:0}
+.t-caption{font-size:var(--ds-type-caption-size);line-height:var(--ds-type-caption-line);font-weight:var(--ds-type-caption-weight);margin:0}
+.t-quote{font-size:var(--ds-type-quote-size);line-height:var(--ds-type-quote-line);font-weight:var(--ds-type-quote-weight);margin:0}
+.t-title,.t-subtitle,.t-h1,.t-h2,.t-h3{font-family:var(--ds-font-display)}
+.t-body,.t-caption,.t-quote{font-family:var(--ds-font-body)}
+.t-subtitle,.t-caption{color:var(--ds-color-text-muted)}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--ds-font-mono);font-size:12px;line-height:1.5;letter-spacing:0}
+.muted{color:var(--ds-color-text-muted)}
+.wrap{width:1152px;margin:0 auto;padding:64px 0 96px}
+.spec-head{display:grid;gap:8px;padding-bottom:32px;border-bottom:1px solid var(--ds-color-border)}
+.spec-head .key{font-family:var(--ds-font-mono);font-size:12px;color:var(--ds-color-text-muted)}
+.axis{font-size:13px;line-height:1.6;color:var(--ds-color-text-muted);max-width:980px}
+.sec{margin-top:56px}
+.sec-label{font-family:var(--ds-font-display);font-size:13px;line-height:1.4;font-weight:600;color:var(--ds-color-text-muted);margin:0 0 16px}
+/* palette */
+.swatches{display:grid;grid-template-columns:repeat(7,1fr);gap:16px}
+.swatches.status{grid-template-columns:repeat(4,1fr);margin-top:16px}
+.sw .chip{height:72px;border-radius:var(--ds-radius-md);border:1px solid var(--ds-color-border);display:flex;align-items:flex-end;padding:8px 10px;font-family:var(--ds-font-display);font-weight:700;font-size:20px;line-height:1}
+.sw .role{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.4;margin-top:8px;color:var(--ds-color-text)}
+.sw .hex{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.4;color:var(--ds-color-text-muted)}
+.sw .cr{font-size:12.5px;line-height:1.45;margin-top:2px}
+/* type roles */
+.roles{display:grid;grid-template-columns:96px 1fr 236px;border-top:1px solid var(--ds-color-border)}
+.roles>div{padding:14px 0;border-bottom:1px solid var(--ds-color-border);align-self:stretch}
+.roles .rn{font-family:var(--ds-font-mono);font-size:12px;color:var(--ds-color-text-muted);padding-top:18px}
+.roles .rs{padding-right:24px}
+.roles .rv{font-family:var(--ds-font-mono);font-size:11.5px;line-height:1.6;color:var(--ds-color-text-muted);padding-top:18px}
+/* scales */
+.scales{display:grid;grid-template-columns:repeat(3,1fr);gap:32px;align-items:start}
+.bar{height:12px;background:var(--ds-color-text);border-radius:2px;opacity:.85}
+.srow{display:grid;grid-template-columns:44px 1fr;align-items:center;gap:8px;font-family:var(--ds-font-mono);font-size:11.5px;color:var(--ds-color-text-muted);margin-bottom:6px}
+.rbox{width:64px;height:48px;border:1.5px solid var(--ds-color-text);background:var(--ds-color-bg-raised)}
+.rlist{display:flex;gap:14px;align-items:flex-end}
+.rlist figure,.slist figure{margin:0;text-align:center;font-family:var(--ds-font-mono);font-size:11.5px;color:var(--ds-color-text-muted)}
+.slist{display:flex;gap:18px}
+.stile{width:84px;height:56px;background:var(--ds-color-bg-raised);border-radius:var(--ds-radius-md);margin-bottom:8px}
+/* document + notes */
+.docrow{display:grid;grid-template-columns:794px 1fr;gap:48px;align-items:start}
+.sheet{width:794px;padding:56px 64px 64px}
+.notes{display:grid;gap:14px;font-size:13.5px;line-height:1.6}
+.notes h4{font-family:var(--ds-font-display);font-size:14px;line-height:1.4;font-weight:700;margin:0}
+.notes p{margin:0}
+/* slide */
+.slide-frame{width:1152px;height:648px;overflow:hidden;border-radius:var(--ds-radius-md);border:1px solid var(--ds-color-border)}
+.deck{width:1920px;height:1080px;transform:scale(.6);transform-origin:0 0;position:relative;overflow:hidden;
+  font-family:var(--ds-font-body);font-size:var(--ds-type-body-size);line-height:var(--ds-type-body-line);font-weight:var(--ds-type-body-weight)}
+.deck-meta{display:flex;justify-content:space-between;margin-top:12px;font-size:12.5px;color:var(--ds-color-text-muted)}
+
+
+.sheet{background:var(--ds-color-bg-raised);border-radius:var(--ds-radius-lg);box-shadow:var(--ds-shadow-sm)}
+.todo{display:flex;gap:var(--ds-space-3);align-items:baseline;margin-top:var(--ds-space-5);padding:var(--ds-space-4) var(--ds-space-5);background:var(--ds-color-bg);border-radius:var(--ds-radius-md)}
+.todo .t-body{margin:0}
+.todo-mark{flex:none;width:8px;height:8px;border-radius:var(--ds-radius-full);background:var(--ds-color-accent);transform:translateY(-2px)}
+.act{text-decoration:underline;text-decoration-color:var(--ds-color-accent);text-decoration-thickness:2px;text-underline-offset:4px}
+.flow{width:100%;border-collapse:collapse;margin-top:var(--ds-space-3);font-size:15px;line-height:1.6}
+.flow th{font-family:var(--ds-font-display);font-weight:600;font-size:13px;color:var(--ds-color-text-muted);text-align:left;padding:var(--ds-space-2) var(--ds-space-3) var(--ds-space-2) 0;border-bottom:1px solid var(--ds-color-text)}
+.flow td{padding:var(--ds-space-3) var(--ds-space-3) var(--ds-space-3) 0;border-bottom:1px solid var(--ds-color-border);vertical-align:top}
+.flow td:first-child{white-space:nowrap;font-weight:600;width:64px}.flow td:nth-child(2){white-space:nowrap;width:52px;color:var(--ds-color-text-muted)}
+blockquote.t-quote{margin:var(--ds-space-2) 0 0;padding:var(--ds-space-1) 0 0 var(--ds-space-5);color:var(--ds-color-text-muted)}
+.deck{background:var(--ds-color-bg)}
+.s-wrap{padding:var(--ds-space-7) var(--ds-space-8) 0}
+.s-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--ds-space-5);margin-top:var(--ds-space-7)}
+.s-card{background:var(--ds-color-bg-raised);border-radius:var(--ds-radius-lg);box-shadow:var(--ds-shadow-sm);padding:var(--ds-space-5) var(--ds-space-6)}
+.s-diff{padding:var(--ds-space-5) var(--ds-space-6)}
+.s-card .t-caption,.s-diff .t-caption{margin:0}
+.s-fig{font-family:var(--ds-font-display);font-size:120px;line-height:1.1;font-weight:700;margin:var(--ds-space-2) 0 0;letter-spacing:-0.02em;white-space:nowrap}
+.s-fig small{font-size:56px;font-weight:600;margin-left:12px;letter-spacing:0}
+.s-acc{color:var(--ds-color-accent)}
+.s-foot{position:absolute;left:0;right:0;bottom:0;display:flex;justify-content:space-between;align-items:center;padding:0 var(--ds-space-8) var(--ds-space-6)}
+.s-foot .t-caption{margin:0}
+.ticks{display:flex;gap:12px}.ticks i{display:block;width:56px;height:6px;border-radius:3px;background:var(--ds-color-border)}.ticks i.on{background:var(--ds-color-accent)}
+
+</style></head><body><main class="wrap">
+<header class="spec-head">
+  <div class="key">stance-maws · proposal for the owner · 2026-10-12</div>
+  <h1 class="t-title">MAWS</h1>
+  <p class="t-subtitle">앱과 같은 따뜻한 바탕 위에 흰 지면을 얹고, 테라코타는 읽는 사람이 해야 할 한 가지에만 씁니다. The app’s warm ground and white sheet, carried into documents and decks; terracotta marks the reader’s one action.</p>
+  <p class="axis">Adopted from MAWS’s app tokens: density standard · criticality transactional · energy composed · type neutral sans (system: SF Pro + Apple SD Gothic Neo) · material tonal · colour restrained · accent directional (the reader’s one action) · ground light · temperature warm-neutral.</p>
+</header>
+
+<section class="sec"><h2 class="sec-label">Palette (contrast measured on the surface the colour sits on)</h2>
+<div class="swatches">
+<div class="sw"><div class="chip" style="background:#faf9f6"></div><div class="role">--ds-color-bg</div><div class="hex">#faf9f6</div><div class="cr">ground</div></div>
+<div class="sw"><div class="chip" style="background:#ffffff"></div><div class="role">--ds-color-bg-raised</div><div class="hex">#ffffff</div><div class="cr">sheet, panel</div></div>
+<div class="sw"><div class="chip" style="background:#1f1e1b;border-color:#1f1e1b"></div><div class="role">--ds-color-text</div><div class="hex">#1f1e1b</div><div class="cr">15.8 : 1 on bg</div></div>
+<div class="sw"><div class="chip" style="background:#72716e;border-color:#72716e"></div><div class="role">--ds-color-text-muted</div><div class="hex">#72716e</div><div class="cr">4.6 : 1 on bg (ink at 62 %)</div></div>
+<div class="sw"><div class="chip" style="background:#c9663f;border-color:#c9663f;color:#ffffff">가 Aa</div><div class="role">--ds-color-accent</div><div class="hex">#c9663f</div><div class="cr">3.7 : 1 on bg · large text and marks only</div></div>
+<div class="sw"><div class="chip" style="background:#ffffff"></div><div class="role">--ds-color-accent-text</div><div class="hex">#ffffff</div><div class="cr">3.9 : 1 on accent · large or bold ≥ 19 px</div></div>
+<div class="sw"><div class="chip" style="background:#faf9f6;border:2px solid #e3e2df"></div><div class="role">--ds-color-border</div><div class="hex">#e3e2df</div><div class="cr">1.2 : 1 · hairline only</div></div>
+</div>
+<div class="swatches status">
+<div class="sw"><div class="chip" style="background:#1f8f55;border-color:#1f8f55"></div><div class="role">--ds-color-status-ok</div><div class="hex">#1f8f55</div><div class="cr">3.9 : 1 · mark + word</div></div>
+<div class="sw"><div class="chip" style="background:#b86a1a;border-color:#b86a1a"></div><div class="role">--ds-color-status-warn</div><div class="hex">#b86a1a</div><div class="cr">3.9 : 1 · mark + word</div></div>
+<div class="sw"><div class="chip" style="background:#c93b3b;border-color:#c93b3b"></div><div class="role">--ds-color-status-error</div><div class="hex">#c93b3b</div><div class="cr">4.8 : 1</div></div>
+<div class="sw"><div class="chip" style="background:#3b6fd1;border-color:#3b6fd1"></div><div class="role">--ds-color-status-info</div><div class="hex">#3b6fd1</div><div class="cr">4.6 : 1</div></div>
+</div></section>
+
+<section class="sec"><h2 class="sec-label">Type roles: face · document px/line/weight · deck px on 1920×1080</h2>
+<div class="roles"><div class="rn">title</div><div class="rs"><p class="t-title">공기도 무게가 있을까요? <span class="muted" style="font-weight:500">Does air weigh anything?</span></p></div><div class="rv">SF Pro Display + SD Gothic Neo<br>doc&nbsp; 34/1.3/700<br>deck 96/1.2/700</div><div class="rn">subtitle</div><div class="rs"><p class="t-subtitle">3학년 2반 과학 · 물질의 상태 5/10차시 · 2026. 10. 19.(월) 3교시</p></div><div class="rv">SF Pro Display + SD Gothic Neo<br>doc&nbsp; 19/1.55/500<br>deck 44/1.4/500</div><div class="rn">h1</div><div class="rs"><p class="t-h1">학습 목표 Learning goal</p></div><div class="rv">SF Pro Display + SD Gothic Neo<br>doc&nbsp; 26/1.35/700<br>deck 72/1.25/700</div><div class="rn">h2</div><div class="rs"><p class="t-h2">수업 흐름 Lesson flow</p></div><div class="rv">SF Pro Display + SD Gothic Neo<br>doc&nbsp; 21/1.45/700<br>deck 56/1.3/700</div><div class="rn">h3</div><div class="rs"><p class="t-h3">활동 2: 공기 넣고 무게 재기</p></div><div class="rv">SF Pro Display + SD Gothic Neo<br>doc&nbsp; 17/1.55/600<br>deck 44/1.35/600</div><div class="rn">body</div><div class="rs"><p class="t-body">공기를 넣기 전과 넣은 후의 무게를 비교하여, 공기가 공간을 차지하고 무게가 있다는 것을 설명할 수 있다. Students compare the ball’s mass before and after pumping in air.</p></div><div class="rv">SF Pro Text + SD Gothic Neo<br>doc&nbsp; 16/1.7/400<br>deck 40/1.5/400</div><div class="rn">caption</div><div class="rs"><p class="t-caption">전자저울은 0.1 g 단위, 과학실 3번 장. Scales read to 0.1 g; cabinet 3.</p></div><div class="rv">SF Pro Text + SD Gothic Neo<br>doc&nbsp; 13/1.55/400<br>deck 28/1.45/400</div><div class="rn">quote</div><div class="rs"><p class="t-quote" style="padding-left:0">“공기는 안 보이니까 무게도 없을 것 같아요.” 지난 차시, 3모둠 이하준</p></div><div class="rv">SF Pro Text + SD Gothic Neo<br>doc&nbsp; 17/1.75/400<br>deck 48/1.45/500</div></div></section>
+
+<section class="sec"><h2 class="sec-label">Space · radius · shadow (document values; the deck doubles radius and multiplies space ×2.5)</h2>
+<div class="scales">
+<div><div class="srow"><span>1 · 4</span><div class="bar" style="width:8px"></div></div><div class="srow"><span>2 · 8</span><div class="bar" style="width:16px"></div></div><div class="srow"><span>3 · 12</span><div class="bar" style="width:24px"></div></div><div class="srow"><span>4 · 16</span><div class="bar" style="width:32px"></div></div><div class="srow"><span>5 · 24</span><div class="bar" style="width:48px"></div></div><div class="srow"><span>6 · 32</span><div class="bar" style="width:64px"></div></div><div class="srow"><span>7 · 48</span><div class="bar" style="width:96px"></div></div><div class="srow"><span>8 · 64</span><div class="bar" style="width:128px"></div></div></div>
+<div class="rlist"><figure><div class="rbox" style="border-radius:var(--ds-radius-sm)"></div>sm 6</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-md)"></div>md 10</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-lg)"></div>lg 14</figure><figure><div class="rbox" style="border-radius:var(--ds-radius-full)"></div>full 9999</figure></div>
+<div class="slist"><figure><div class="stile" style="box-shadow:var(--ds-shadow-sm)"></div>sm</figure><figure><div class="stile" style="box-shadow:var(--ds-shadow-md)"></div>md</figure><figure><div class="stile" style="box-shadow:var(--ds-shadow-lg)"></div>lg</figure></div>
+</div>
+<p class="t-caption" style="margin-top:12px">The app’s strip, composer and float shadows. On screen sm lifts the white sheet off the warm ground; print drops every shadow, because paper is the sheet.</p></section>
+
+<section class="sec"><h2 class="sec-label">Document fragment: a teacher’s lesson plan (수업 계획), the house default for working documents</h2>
+<div class="docrow"><article class="sheet">
+<p class="t-caption">한빛초등학교 3학년 2반 · 과학 · 지도 김서윤</p>
+<h1 class="t-title" style="margin-top:var(--ds-space-2)">공기도 무게가 있을까요?</h1>
+<p class="t-subtitle" style="margin-top:var(--ds-space-1)">물질의 상태 5/10차시 · 2026. 10. 19.(월) 3교시 · 과학실</p>
+
+<h2 class="t-h1" style="margin-top:var(--ds-space-7)">학습 목표</h2>
+<p class="t-body" style="margin-top:var(--ds-space-2)">공기를 넣기 전과 넣은 후의 무게를 비교하여, 공기가 공간을 차지하고 무게가 있다는 것을 설명할 수 있다.</p>
+
+<div class="todo">
+  <span class="todo-mark" aria-hidden="true"></span>
+  <p class="t-body"><strong>할 일</strong> &nbsp;<span class="act">10월 16일(금)까지 과학실 전자저울 6대 대여 신청</span> · 담당 박정훈 선생님, 내선 214</p>
+</div>
+
+<h2 class="t-h2" style="margin-top:var(--ds-space-6)">수업 흐름</h2>
+<table class="flow num">
+  <thead><tr><th>단계</th><th>시간</th><th>활동</th></tr></thead>
+  <tbody>
+  <tr><td>도입</td><td>5분</td><td>막대 양 끝에 풍선 두 개를 달고, 한쪽만 터뜨려 기울어지는 모습 보이기</td></tr>
+  <tr><td>활동 1</td><td>10분</td><td>예상하기: 공기를 넣으면 공의 무게는 어떻게 될까?</td></tr>
+  <tr><td>활동 2</td><td>15분</td><td>모둠별로 공기 주입기를 20번 누르고 다시 무게 재기</td></tr>
+  <tr><td>정리</td><td>10분</td><td>모둠 결과 발표, 여섯 모둠의 공통점 찾기</td></tr>
+  </tbody>
+</table>
+
+<h3 class="t-h3" style="margin-top:var(--ds-space-6)">지난 차시에서 남은 생각</h3>
+<blockquote class="t-quote">“공기는 안 보이니까 무게도 없을 것 같아요.”<br><span class="t-caption">3모둠 이하준, 10월 14일(수)</span></blockquote>
+<p class="t-caption" style="margin-top:var(--ds-space-5)">준비물(모둠별): 전자저울 1대, 축구공 1개, 공기 주입기 1개, 기록지 1장</p>
+</article><aside class="notes">
+<h4>What terracotta may do in a document</h4>
+<p>Mark the reader’s one action: a 2 px underline under the action phrase, or the small disc beside “할 일”. One per page.</p>
+<p>Set text only at large sizes (24 px, or 19 px bold) because it measures 3.7 : 1 on the ground. A body-size action stays in ink and takes the underline.</p>
+<p>On a slide it may set one figure or one phrase at deck sizes, and mark where the talk is in the footer.</p>
+<h4>What it may not do</h4>
+<p>Headings, table heads, rules, panels and status. Status uses the four status colours with a word beside them, never colour alone.</p>
+<h4>Print</h4>
+<p>The ground prints white and shadows drop. The page reads correctly in black and white: the underline turns grey and still points.</p></aside></div></section>
+
+<section class="sec"><h2 class="sec-label">Slide: the same lesson, for the classroom screen</h2>
+<div class="slide-frame"><div class="deck">
+<div class="s-wrap">
+  <p class="t-caption">물질의 상태 · 5/10차시</p>
+  <h1 class="t-h1" style="margin-top:var(--ds-space-2)">공을 다시 재 보니</h1>
+  <div class="s-grid num">
+    <div class="s-card"><p class="t-caption">공기 넣기 전</p><p class="s-fig">412.6<small>g</small></p></div>
+    <div class="s-card"><p class="t-caption">주입기 20번 누른 뒤</p><p class="s-fig">414.9<small>g</small></p></div>
+    <div class="s-diff"><p class="t-caption">차이</p><p class="s-fig s-acc">+2.3<small>g</small></p></div>
+  </div>
+  <p class="t-body" style="margin-top:var(--ds-space-5);max-width:1400px">여섯 모둠 모두 무게가 늘었어요. 늘어난 만큼이 우리가 넣은 공기의 무게예요.</p>
+</div>
+<footer class="s-foot"><span class="t-caption">한빛초 3학년 2반 과학</span><span class="ticks"><i></i><i></i><i class="on"></i><i></i></span><span class="t-caption num">7 / 12</span></footer></div></div>
+<div class="deck-meta"><span>Drawn on the 1920×1080 canvas at 60 %. Deck values in pt for PowerPoint: px ÷ 2.</span><span>body 40 px = 20 pt · caption 28 px = 14 pt</span></div>
+</section>
+</main></body></html>

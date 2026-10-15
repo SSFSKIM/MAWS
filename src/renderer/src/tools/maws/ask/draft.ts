@@ -5,6 +5,8 @@
 // An empty draft at Submit is skipped; a draft with Other chosen and nothing typed is incomplete, the one state that
 // holds Submit back. P2-C3 (the P2 spec's Decision Log 34): a note sits beside the answer, whatever its status; no edit
 // of the answer or the toggles touches it, nor it them, and it travels trimmed, only when something is written.
+// P3-D: a design_system question's draft is the system picked (its id and name) or "Build one with me" (`create`),
+// which a question with `allowCreate: false` never answers.
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 
 export interface Draft {
@@ -13,12 +15,16 @@ export interface Draft {
   text: string; // text
   paths: string[]; // file and folder: absolute paths
   repository: string | null; // repository: the project's directory
+  designSystem: DesignSystemPick | null; // P3-D: design_system
   decide: boolean;
   skip: boolean;
   note: string | null; // the note beside the answer; null while its field is not opened
 }
 
-export const EMPTY_DRAFT: Draft = { selected: [], otherText: null, text: '', paths: [], repository: null, decide: false, skip: false, note: null };
+// P3-D: a system by its artifact id and name, or the request to build a new one with the agent.
+export type DesignSystemPick = { id: string; name: string } | 'create';
+
+export const EMPTY_DRAFT: Draft = { selected: [], otherText: null, text: '', paths: [], repository: null, designSystem: null, decide: false, skip: false, note: null };
 
 export type DraftStatus = 'answered' | 'decide' | 'skipped' | 'empty' | 'incomplete';
 
@@ -61,6 +67,8 @@ export const removePath = (draft: Draft, path: string): Draft => answering(draft
 
 export const setRepository = (draft: Draft, directory: string | null): Draft => answering(draft, { repository: directory });
 
+export const setDesignSystem = (draft: Draft, pick: DesignSystemPick | null): Draft => answering(draft, { designSystem: pick }); // P3-D
+
 export const setDecide = (draft: Draft, on: boolean): Draft => ({ ...draft, decide: on, skip: on ? false : draft.skip });
 export const setSkip = (draft: Draft, on: boolean): Draft => ({ ...draft, skip: on, decide: on ? false : draft.decide });
 
@@ -81,6 +89,8 @@ export function draftStatus(question: AskQuestion, draft: Draft): DraftStatus {
       return draft.paths.length > 0 ? 'answered' : 'empty';
     case 'repository':
       return draft.repository !== null ? 'answered' : 'empty';
+    case 'design_system': // P3-D
+      return draft.designSystem === null || (draft.designSystem === 'create' && question.allowCreate === false) ? 'empty' : 'answered';
   }
 }
 
@@ -112,6 +122,10 @@ function answerOf(question: AskQuestion, draft: Draft, projects: readonly Projec
     case 'repository': {
       const name = projects.find((project) => project.directory === draft.repository)?.name;
       return { ...base, status: 'answered', value: draft.repository!, ...(name !== undefined && { name }) };
+    }
+    case 'design_system': { // P3-D
+      const pick = draft.designSystem!;
+      return pick === 'create' ? { ...base, status: 'answered', create: true } : { ...base, status: 'answered', designSystemId: pick.id, name: pick.name };
     }
   }
 }

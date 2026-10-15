@@ -8,7 +8,7 @@ import { askSteerText } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
-import { artifactHeading, deliveryHeading } from './copy'; // E11
+import { artifactHeading, askAnswerCopy, deliveryHeading } from './copy'; // E11; P3-D askAnswerCopy
 import { isPersistentRow, rowsOf, withAllExpanded } from './derive';
 import { rowId } from './keys';
 import { applyEvents, createState } from './reduce';
@@ -358,3 +358,15 @@ describe('the recorded maws fixtures', () => {
     ]);
   });
 });
+
+// P3-D start: a design_system answer on the capsule's line (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D13)
+describe('P3-D: a design_system answer in the capsule', () => {
+  it('reads the chosen system by its name (its id when the answer has none), or the build request', () => {
+    const ID = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
+    const base = { id: 's1', question: 'Which design system?', status: 'answered' } as const;
+    expect(askAnswerCopy({ ...base, designSystemId: ID, name: 'MAWS' })).toBe('MAWS');
+    expect(askAnswerCopy({ ...base, designSystemId: ID })).toBe(ID);
+    expect(askAnswerCopy({ ...base, create: true })).toBe('Build one with me');
+  });
+});
+// P3-D end

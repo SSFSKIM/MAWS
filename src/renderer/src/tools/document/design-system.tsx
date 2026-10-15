@@ -24,7 +24,10 @@ export interface DesignSystemScopeProps {
 export interface DocumentDesignSystem {
   /** D's `<DesignSystemScope>`. */
   Scope: ComponentType<DesignSystemScopeProps>;
-  /** The system governing an artifact: D's `governingSystem(a, defaults, live)`. */
+  /**
+   * The system governing an artifact: D's `governingSystem(a, defaults, live)`. P3-D: a hook, called in the page's render
+   * (`useSystemFor`), since D's follows the owner's defaults, the house system and the live systems.
+   */
   systemFor(artifact: { designSystemId?: string; spaceId?: string }): GoverningSystem;
 }
 
@@ -39,6 +42,16 @@ export function provideDocumentDesignSystem(system: DocumentDesignSystem): () =>
 }
 
 export const documentDesignSystem = (): DocumentDesignSystem | null => provided;
+
+/**
+ * P3-D (the P3 spec's Decision Log 61): the provided `systemFor`, called as a hook in the page's render rather than inside
+ * a memo, so the page follows what D's reads; null while nothing is provided. The app provides once, at module load, so
+ * the hook is fixed for the page's life (C7's rule for a registered hook).
+ */
+export function useSystemFor(artifact: { designSystemId?: string; spaceId?: string }): GoverningSystem | null {
+  const system = provided;
+  return system ? system.systemFor(artifact) : null;
+}
 
 interface PageSystem {
   system: DocumentDesignSystem;

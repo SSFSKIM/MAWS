@@ -23,7 +23,7 @@ export const VIEWERS_COPY = {
   retry: 'Retry',
   // a File artifact no session links: its code body has no session to read it under
   // the Export menu (the header's, the library row's)
-  exportFormats: { pdf: 'PDF', png: 'PNG', docx: 'Word document', pptx: 'PowerPoint', md: 'Markdown', html: 'HTML' },
+  exportFormats: { pdf: 'PDF', png: 'PNG', docx: 'Word document', pptx: 'PowerPoint', md: 'Markdown', html: 'HTML', claude: 'For Claude (zip)' /* P3-D: a design system in Claude's shape */ },
   saveCopy: 'Save a copy…',
   exporting: (title: string, format: string) => `Exporting ${title} as ${format}…`,
   saved: (path: string) => `Saved to ${path}`,
