@@ -1686,7 +1686,8 @@ the web draws it as waiting in the terminal, without Allow or Deny. The web read
 `deadline` with its own clock; the hub sends `pending` again when the deadline passes (an alarm, M3).
 
 **Grid** (`GridDown`, registry socket): `grid {projects: [ProjectSummary]}` on connect, then `summary {project}` on
-change; `ProjectSummary` is `{id, name, machines, machines_online, working, waiting}`.
+change; `ProjectSummary` is `{id, name, machines, machines_online, working, waiting}`. A `grid` above the frame bound
+comes down as DX2 `part` frames, which the browser reassembles as it does on the project socket.
 
 **Built at M2:** the socket's admission (a registered project), `welcome.head`, `resume`, `log`, `caught-up`, `human`
 and `human-ack`, `refused` and `rejected` with the audit record and its replay, `session` frames carrying
@@ -2768,6 +2769,14 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The grid socket sends `part` frames down (DC3's M3 review).
+  The Registry sent every project's summary in one `grid` value, which an
+  org with enough projects pushes past the 1 MiB frame bound; it now
+  slices a large `grid` into DX2 `part` frames, as the project socket
+  already does. Rejected: paging the grid, which adds a request the
+  browser must make before it can draw anything. Flags DC5 (the grid
+  receiver reassembles parts).
+  Date/Author: 2026-10-15, design session (DC3's M3 review).
 - Decision: DC2's live walk of M4 settles the facts the step-end and
   thinking decisions waited on (2.1.300, a terminal session and a `--bg`
   job, load average about 220). A response row can be appended after its
