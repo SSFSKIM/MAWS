@@ -25,6 +25,9 @@ permissions:
   contents: read
 
 env:
+  # tsc over the web project, and vitest's type-check pass in the unit job, ran out of Node's default heap on the 2-core
+  # runner once the artifact kinds landed (Decision Log 17 and 19); the runner has 7 GB. A limit, not an allocation.
+  NODE_OPTIONS: --max-old-space-size=5120
   # §3.1's class-1 e2e groups, the default set on a macOS lane. A name whose script is not in package.json is skipped,
   # so a child's group joins the default set at the commit that adds its script.
   CLASS1_E2E: >-
@@ -74,10 +77,6 @@ jobs:
     if: needs.plan.outputs.static == 'true'
     runs-on: *runner
     timeout-minutes: 30
-    env:
-      # tsc over the web project ran out of Node's default heap on the 2-core runner once the artifact kinds landed
-      # (Decision Log 17); the runner has 7 GB.
-      NODE_OPTIONS: --max-old-space-size=5120
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
