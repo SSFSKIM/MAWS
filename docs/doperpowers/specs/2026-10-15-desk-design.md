@@ -1644,7 +1644,7 @@ and `streaming` are that agent's own.
 
 | `kind` | in a sub | body |
 | --- | --- | --- |
-| `snapshot` | yes (`n` 0) | `{rows, more, subagents, presence, streaming, usage}`: `usage` is the bridge's last `usage` (DX5) on a main-transcript subscription, null when the session has no bridge or none has come yet, and absent on a subagent's; rows of the sub's transcript newest first up to the last flushed row, as many as fit the frame budget; `more` whether older rows exist; `streaming`: the bridge's snapshot entries (DX5) passed through, one per model request still streaming, `{turnId, agentId, step, blocks: [{index, kind, text, upTo}]}` holding only its content blocks without a `block-row` yet, below (`step` the model request's ordinal in the turn; `index` the content block's, the same `index` its chunks carry; `kind` the block's type as the bridge names it; `upTo` the `chunkIndex` of the last chunk `text` includes, -1 for none) |
+| `snapshot` | yes (`n` 0) | `{rows, more, subagents, presence, streaming, usage}`: `usage` is the bridge's last `usage` (DX5) on a main-transcript subscription, null when the session has no bridge or none has come yet, and absent on a subagent's; rows of the sub's transcript newest first up to the last flushed row, as many as fit the frame budget; `more` whether older rows exist; `streaming`: the bridge's snapshot entries (DX5) passed through, one per model request still streaming, `{turnId, agentId, step, model?, upTo, blocks: [{index, kind, text, upTo, id?, name?}]}` holding only its content blocks without a `block-row` yet, below (`step` the model request's ordinal in the turn; `model` what the request was sent with, absent when its start was not seen; the entry's `upTo` the `chunkIndex` of the last chunk applied to the message, -1 for none, and **the watermark**: `chunkIndex` counts across the whole message, so a chunk at or below it is already in the text, whichever block it belongs to; `index` the content block's, the same `index` its chunks and its `block-row` carry; `kind` one of `text`, `thinking` (redacted thinking included), `tool`; `text` the partial text, a tool block's being its argument JSON streamed so far, unparsed until its row; a block's `upTo` informational only; `id` and `name` the call's `tool_use_id` and tool name, on a tool block only). An entry whose `blocks` is empty can remain until its step ends and is skipped |
 | `row` | yes | `{row, agentId}`: a transcript row verbatim; `agentId` the subagent whose transcript holds it, or null |
 | `chunk` | yes | `{turnId, agentId, step, chunkIndex, chunk}`: DX5's chunk event, the `turn.step` chunk object verbatim under `chunk` (nested, since it has an index field of its own), `chunkIndex` its index in its message from 0 |
 | `block-row` | yes | `{uuid, turnId, agentId, step, index}`: the engine wrote the row `uuid` for content block `index` of that step; sent before the row itself arrives |
@@ -1674,8 +1674,9 @@ moments, kept apart:
   arrives; that row settles the block, and the browser drops the partial text then. Chunks for a settled block are
   ignored.
 
-Together with the daemon dropping tailed rows the snapshot already holds (by uuid) and chunks at or below a block's
-`upTo`, the snapshot and the live part neither overlap nor leave a gap.
+Together with the daemon dropping tailed rows the snapshot already holds (by uuid) and chunks at or below their
+entry's `upTo`, the snapshot and the live part neither overlap nor leave a gap. A row no `block-row` named (a server
+tool's, whose block streamed as none of the three kinds) settles nothing and is simply drawn.
 
 **Discontinuity.** A gap in `n`, a hub restart, or a dropped connection makes the browser subscribe again for a fresh
 snapshot. A gap in the bridge's own stream (DX5's `gap`) ends every subscription it touches with `end {reason:
@@ -2469,6 +2470,15 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The snapshot's streaming entry follows what DC2's M3 built: a
+  message-level `upTo` is the watermark (a chunk at or below it is already
+  in the text, since `chunkIndex` counts across the message), with `model`
+  beside it, and each block's own `upTo` kept as information; blocks are
+  `text`, `thinking` or `tool`, a tool block carrying `id`, `name`, and
+  its argument JSON as text. A per-block watermark (DX4's earlier wording)
+  would also be sound, but it adds a rule a consumer can get wrong for no
+  gain. Flags DC3 (DX4's module and the fake machine), DC6.
+  Date/Author: 2026-10-15, design session (DC2's M3).
 - Decision: The bridge raises a pending request after the session's
   settings hooks have run, not before. This costs up to about 0.4 s before
   the web sees it. Raising first would publish requests that a settings
