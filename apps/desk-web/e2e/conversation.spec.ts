@@ -129,7 +129,8 @@ test('a direct channel: the exchange with the working record folded, and Send, S
   await nav(page).locator(`[data-session="${S.works}"]`).click();
   await expect(center(page)).toContainText('the store is split');
   await expect(center(page)).not.toContainText('the migration is merged');
-  await center(page).getByTestId('working-record').click();
+  await expect(center(page).getByTestId('working-record')).toHaveCount(2); // before its message, and open-ended after it while it runs
+  await center(page).getByTestId('working-record').first().click();
   await expect(center(page).locator('[data-slot="transcript"]')).toBeVisible(); // DC6's slot, its fallback until DC6 registers it
 
   const composer = page.getByTestId('composer');
