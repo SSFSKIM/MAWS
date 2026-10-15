@@ -103,8 +103,10 @@ export function SessionComposer({ session }: { session: DeskSession }) {
         placeholder={running && can.steer.can ? `Steer ${session.alias} (Enter), or Send to queue it` : `Message ${session.alias}`}
       />
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        {/* On a phone the primary leads the row (05-phone.html, 5A): Steer while a turn runs, never beside Interrupt. */}
+        {narrow && running && <VerbButton label="Steer" capability={can.steer} onClick={steer} primary={can.steer.can} />}
         <VerbButton label="Send" capability={can.send} onClick={send} primary={!(running && can.steer.can)} />
-        {running && <VerbButton label="Steer" capability={can.steer} onClick={steer} primary={can.steer.can} />}
+        {!narrow && running && <VerbButton label="Steer" capability={can.steer} onClick={steer} primary={can.steer.can} />}
         {running && <VerbButton label="Interrupt" capability={can.interrupt} onClick={() => void issue(connection.rpc(member, session.machine, 'interrupt', { session: session.session }))} />}
         {narrow && (
           <button type="button" className={BUTTON} aria-expanded={more} onClick={() => setMore((m) => !m)} data-verb="more">

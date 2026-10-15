@@ -10,8 +10,10 @@ import { fetchMe, SignInError, type Me } from './hub/me';
 import { loadDeviceKey, useKeyHolder } from './key/holder';
 import { hubBase } from './hub/base';
 import { browserPushEnv, resyncPush } from './push/device';
+import { orgWaiting, showBadge } from './pwa/badge';
 import { followLandings, registerServiceWorker } from './pwa/service-worker';
 import { followHistory, useDeskLayout } from './shell/layout';
+import { usePhoneProject } from './shell/phone';
 import { useNarrow } from './shell/viewport';
 import { startGrid, useGrid } from './state/grid';
 import { GridView } from './views/grid/GridView';
@@ -70,6 +72,13 @@ function Desk({ me }: { me: Me }) {
   // A device already subscribed hands its subscription to the hub again; a failure here is the Notifications panel's
   // to show when opened.
   useEffect(() => void resyncPush(browserPushEnv(registerServiceWorker())).catch(() => {}), []);
+  // The app icon's badge follows the grid while the app is open (a push sets it from its payload while it is not), so
+  // a request answered anywhere clears it.
+  const gridLoaded = useGrid((s) => s.loaded);
+  const waiting = useGrid((s) => orgWaiting(s.projects));
+  useEffect(() => {
+    if (gridLoaded) void showBadge(navigator as Parameters<typeof showBadge>[0], waiting);
+  }, [gridLoaded, waiting]);
   return (
     <div className="grid h-full grid-rows-[auto_minmax(0,1fr)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
       <TopBar me={me} open={setPanel} />
@@ -104,14 +113,27 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
   const narrow = useNarrow();
   const name = useGrid((s) => (route.view === 'project' ? s.projects.find((p) => p.id === route.project)?.name : undefined));
   const title = route.view === 'project' ? (name ?? route.project.slice(0, 8)) : null;
+  const groupChatOpen = usePhoneProject((s) => s.groupChatOpen);
   if (narrow) {
+    // A phone's stack (05-phone.html, 3A): a channel goes back to the project's list, the list to the projects.
+    const inChannel = route.view === 'project' && (route.channel.kind === 'session' || groupChatOpen);
+    const back = () => {
+      if (route.view !== 'project') return;
+      if (route.channel.kind === 'session') navigate({ view: 'project', project: route.project, channel: { kind: 'group' } });
+      else usePhoneProject.setState({ groupChatOpen: false });
+    };
+    const backButton = 'flex h-9 min-w-0 items-center rounded-sm px-1.5 text-ui text-fg-muted hover:bg-bg-hover';
     return (
       <header className="flex h-[var(--toolbar-h)] items-center gap-2 border-b border-border bg-bg-raised px-3" data-testid="top-bar">
         {title === null ? (
           <span className="px-1 text-ui-sm font-semibold tracking-[1.7px] text-fg-muted">DESK</span>
+        ) : inChannel ? (
+          <button type="button" onClick={back} className={backButton} aria-label={`Back to ${title}`}>
+            <span className="truncate">‹ {title}</span>
+          </button>
         ) : (
           <>
-            <button type="button" onClick={() => navigate({ view: 'grid' })} className="flex h-9 items-center rounded-sm px-1.5 text-ui text-fg-muted hover:bg-bg-hover" aria-label="Projects">
+            <button type="button" onClick={() => navigate({ view: 'grid' })} className={backButton} aria-label="Projects">
               ‹ Projects
             </button>
             <span className="min-w-0 truncate text-ui font-medium">{title}</span>

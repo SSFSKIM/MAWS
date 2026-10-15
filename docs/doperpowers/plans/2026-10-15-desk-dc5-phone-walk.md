@@ -94,22 +94,26 @@ later. The controller gives you the hub's URL (below: `https://<hub>`).
    - **Record P2.5:** did it show the grid straight away (the Access session carried into the app), or an Access
      sign-in page? If a sign-in page: sign in, and record whether the sign-in stayed inside the app or jumped to
      Safari, and whether you ended up back in the app signed in.
-6. In the app: **Menu** → **Org key**. It is locked (the installed app's storage is its own). Tick **Keep unlocked
-   on this device**, then **Unlock with passkey** → Face ID, choosing the passkey from step 1.
+6. In the app: **Menu** → **Org key**. It is locked (the installed app's storage is its own). **Keep unlocked on
+   this device** is already ticked in the installed app (record it if not); leave it, then **Unlock with passkey** →
+   Face ID, choosing the passkey from step 1.
    - **Record P2.6:** the fingerprint (the same as P2.1?), or the exact message if the passkey could not be used.
-7. In the same dialog: **Lock**, tick **Keep unlocked on this device** again, and unlock with the **passphrase**.
+7. In the same dialog: **Lock**, check **Keep unlocked on this device** is ticked, and unlock with the
+   **passphrase**.
    - **Record P2.7:** the fingerprint and the line "Deriving from the passphrase took N s on this device". This is
      the phone's cost of the passphrase, which nothing else can measure honestly.
 8. **Menu** → **Notifications** → **Turn on notifications** → **Allow** when iOS asks.
    - Expected: "On for this device." **Record P2.8:** what it said (or the error).
 9. Swipe the app away and lock the phone. Tell the controller you are ready; it raises a question from the fake
    machine in a project.
-   - Expected, within seconds: a notification "‹session› has a question — Open the desk to answer it." Press and
-     hold it: there is no Allow, Deny, or reply.
-   - **Record P2.9:** how long it took to arrive, and its exact text.
+   - Expected, within seconds: a notification "‹session› has a question for you", under it "‹project› · Opens at
+     the question", and the Desk icon's badge showing the org's waiting count. Press and hold it: there is no
+     Allow, Deny, or reply.
+   - **Record P2.9:** how long it took to arrive, its exact text, and the badge's number.
 10. Tap the notification.
     - Expected: the app opens on that session's channel; "Checking the request…" shows briefly, then the question's
-      card is drawn, marked. Answer it.
+      card is drawn, marked. Answer it. The badge drops by one once the grid has the answer; back (‹ project) shows
+      the project's channel list.
     - **Record P2.10:** what you saw, and whether the controller confirms the fake machine received the answer and
       verified it.
 11. Leave it for some hours (at least four; the next morning is better). Then tell the controller, and it raises

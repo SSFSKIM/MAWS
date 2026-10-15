@@ -224,7 +224,7 @@ function WorkingRecord({ session, range }: { session: string; range: { from: str
   if (narrow)
     return (
       <p className="m-0 py-1 text-ui-sm text-fg-faint" data-testid="working-record">
-        [ working record ] · on the desktop
+        Working record · on a computer
       </p>
     );
   return (

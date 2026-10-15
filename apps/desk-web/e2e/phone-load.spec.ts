@@ -81,9 +81,9 @@ test.describe('on a phone', () => {
     const before = net.load();
     const opened = Date.now();
     await page.locator(`[data-project="${PROJECT}"]`).click();
-    await expect(page.getByText('the migration is merged')).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('navigation', { name: 'Channels' }).locator(`[data-session="${S.asks}"]`)).toBeVisible({ timeout: 60_000 });
     const after = net.load();
-    report('phone: then open a project (group chat)', Date.now() - opened, { requests: after.requests - before.requests, bytes: after.bytes - before.bytes, urls: [] });
+    report('phone: then open a project (its channel list)', Date.now() - opened, { requests: after.requests - before.requests, bytes: after.bytes - before.bytes, urls: [] });
   });
 
   test("a push's tap, cold: from the notification's URL to its card drawn and verified", async ({ page, hub }) => {

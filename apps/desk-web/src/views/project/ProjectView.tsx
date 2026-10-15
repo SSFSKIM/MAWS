@@ -1,8 +1,9 @@
 // A project (§4): the channels on the left, the selected channel in the center, the selected session's depth on the
-// right (DX8's `depth` slot, DC6's). On a phone, one column: the selected channel, with the channel list a tap away
-// over it, and no depth (desktop-only, so its chunk never loads there). Nothing from the log is drawn until it verifies; locked, nothing is drawn at all,
+// right (DX8's `depth` slot, DC6's). On a phone, one column at a time (the owner's verdict on
+// mockups/desk/05-phone.html, 3A): the project opens on its channel list, a channel is pushed over it and back
+// returns to the list (`usePhoneProject`); no depth (desktop-only, so its chunk never loads there) and no "+ Session". Nothing from the log is drawn until it verifies; locked, nothing is drawn at all,
 // and the view says why. Events, requests, settlements, and deliveries whose code fails are reported, never drawn.
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { useStore } from 'zustand';
 import type { Me } from '../../hub/me';
 import { useKeyHolder } from '../../key/holder';
@@ -12,6 +13,7 @@ import type { AuditItem, ProjectConnection } from '../../project/connection';
 import { useDeskLayout, type Channel } from '../../shell/layout';
 import { useDeskSessions } from '../../shell/sessions';
 import { useSlot } from '../../shell/slots';
+import { phoneShowsList, usePhoneProject } from '../../shell/phone';
 import { useNarrow } from '../../shell/viewport';
 import { useGrid } from '../../state/grid';
 import { UnlockForm } from '../key/UnlockForm';
@@ -37,10 +39,12 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
   const { sessions, groups } = useDeskSessions(connection);
   const [spawning, setSpawning] = useState(false);
   const narrow = useNarrow();
-  const [channelsOpen, setChannelsOpen] = useState(false);
+  const groupChatOpen = usePhoneProject((s) => s.groupChatOpen);
   const desk = { connection, member: me.member.id, sessions };
   const Depth = useSlot('depth');
   const locked = keyState !== 'unlocked';
+  // Locked, the phone shows the unlock first: the list would be empty anyway.
+  const listed = narrow && !locked && phoneShowsList(channel, groupChatOpen);
   const failed = refused(logState);
   const selected = channel.kind === 'session' ? (sessions.get(channel.session) ?? null) : null;
   // A visible tab of the project holds back its member's pushes (DX3's `visibility`): one the owner can read, so not
@@ -58,11 +62,14 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
     };
   }, [connection, locked]);
   const select = (next: Channel) => {
-    setChannelsOpen(false);
-    navigate({ view: 'project', project: connection.project, channel: next });
+    // On a phone the group chat shares the project's route with the list: choosing it from the list opens it in place.
+    if (narrow && next.kind === 'group' && channel.kind === 'group') usePhoneProject.setState({ groupChatOpen: true });
+    else navigate({ view: 'project', project: connection.project, channel: next });
   };
   const showDepth = depth.open && !narrow;
-  const sidebar = <Sidebar name={name} channel={channel} groups={locked ? null : groups} locked={locked} onSelect={select} onSpawn={() => setSpawning(true)} />;
+  const sidebar = (
+    <Sidebar name={name} channel={channel} groups={locked ? null : groups} locked={locked} onSelect={select} onSpawn={narrow ? undefined : () => setSpawning(true)} phone={narrow} />
+  );
 
   return (
     <DeskContext.Provider value={desk}>
@@ -73,8 +80,8 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
       data-connection={status}
       data-layout={narrow ? 'phone' : 'desktop'}
     >
-      {narrow ? channelsOpen && <ChannelSheet onClose={() => setChannelsOpen(false)}>{sidebar}</ChannelSheet> : sidebar}
-      <div className="flex min-h-0 min-w-0 flex-col">
+      {(!narrow || listed) && sidebar}
+      <div className={['min-h-0 min-w-0 flex-col', listed ? 'hidden' : 'flex'].join(' ')}>
         {status === 'connecting' && (
           <div className="border-b border-border bg-bg-raised px-4 py-1.5 text-ui-sm text-fg-muted" role="status">
             Connecting to the hub…
@@ -96,7 +103,7 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
         {locked ? (
           <Locked me={me} name={name} loading={keyState === 'loading'} />
         ) : (
-          <ChannelView name={name} channel={channel} session={selected} events={drawable(logState)} onChannels={narrow ? () => setChannelsOpen(true) : undefined} waiting={groups.waiting.length} />
+          !listed && <ChannelView name={name} channel={channel} session={selected} events={drawable(logState)} />
         )}
       </div>
       {showDepth && (
@@ -116,21 +123,6 @@ function OpenProject({ me, connection, name, channel }: { me: Me; connection: Pr
       )}
     </div>
     </DeskContext.Provider>
-  );
-}
-
-/** The phone's channel list, over the channel it was opened from. */
-function ChannelSheet({ onClose, children }: { onClose: () => void; children: ReactNode }) {
-  return (
-    <div className="fixed inset-x-0 top-[calc(var(--toolbar-h)+env(safe-area-inset-top))] bottom-0 z-40 flex flex-col bg-bg-raised" role="dialog" aria-modal="true" aria-label="Channels" data-testid="channel-sheet">
-      <div className="flex h-11 shrink-0 items-center border-b border-border px-3">
-        <span className="text-ui font-semibold">Channels</span>
-        <button type="button" onClick={onClose} className="ml-auto flex h-9 items-center rounded-sm px-2 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg">
-          Close
-        </button>
-      </div>
-      <div className="flex min-h-0 flex-1 flex-col pb-[env(safe-area-inset-bottom)] [&>nav]:flex-1 [&>nav]:border-r-0">{children}</div>
-    </div>
   );
 }
 

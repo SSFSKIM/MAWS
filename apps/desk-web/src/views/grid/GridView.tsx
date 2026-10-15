@@ -1,7 +1,7 @@
 // The home: the grid of the org's projects (§4), live from the registry socket, in the states of the approved mockup
 // (mockups/desk/01-grid.html, card B): connecting on first load (tile shapes only — no zeros, which would claim nobody
 // is waiting), empty (enrolling a machine is the one next step), and reconnecting (the last counts held, dimmed, with
-// how old they are; tiles still open).
+// how old they are; tiles still open). On a phone, two columns of the same tiles (mockups/desk/05-phone.html, 2).
 import { useMemo } from 'react';
 import { useDeskLayout } from '../../shell/layout';
 import { sortForGrid, useGrid } from '../../state/grid';
@@ -23,7 +23,7 @@ export function GridView({ onEnroll }: { onEnroll: () => void }) {
       )}
       <div className="mx-auto max-w-[1120px] px-4 py-4 md:px-6 md:py-6">
         {!loaded ? (
-          <ul className="m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3 p-0" aria-busy="true" aria-label="Loading projects" data-testid="grid-loading">
+          <ul className="m-0 grid list-none grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] md:gap-3 p-0" aria-busy="true" aria-label="Loading projects" data-testid="grid-loading">
             {[0, 1, 2, 3, 4].map((i) => (
               <li key={i} className="flex h-[132px] flex-col justify-between rounded-lg border border-border bg-bg-raised p-3.5" aria-hidden>
                 <i className="block h-2.5 w-[58%] rounded-sm bg-bg-active" />
@@ -41,7 +41,7 @@ export function GridView({ onEnroll }: { onEnroll: () => void }) {
             <p className="mt-3 text-ui-sm text-fg-muted">Enrolling takes a minute on the Mac itself.</p>
           </div>
         ) : (
-          <ul className={['m-0 grid list-none grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3 p-0', stale ? 'opacity-60' : ''].join(' ')} data-testid="grid">
+          <ul className={['m-0 grid list-none grid-cols-2 gap-2 md:grid-cols-[repeat(auto-fill,minmax(240px,1fr))] md:gap-3 p-0', stale ? 'opacity-60' : ''].join(' ')} data-testid="grid">
             {sorted.map((project) => (
               <li key={project.id}>
                 <ProjectCard project={project} onOpen={() => navigate({ view: 'project', project: project.id, channel: { kind: 'group' } })} />

@@ -11,14 +11,14 @@ import type { BrowserContext, Page } from '@playwright/test';
 import { DOUBLE_MEMBER, type HubDouble } from '../test/double/hub-double';
 import { VECTOR_KEY } from '../test/vectors';
 import { expect, seedKey, test } from './fixtures';
-import { PROJECT, S, stageProject } from './scene';
+import { PROJECT, S, stageProject, summary } from './scene';
 
 test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, deviceScaleFactor: 3 });
 
 const center = (page: Page) => page.getByRole('region', { name: 'Channel' });
 const QUESTIONS = [{ question: 'Which column do we keep?', header: 'Column', options: [{ label: 'user_id', description: 'what the API reads' }, { label: 'owner_id', description: 'the new name' }], multiSelect: false }];
 const raiseQuestion = (hub: HubDouble, request = 'toolu_q1') => hub.raise(PROJECT, 'mini', { request, session: S.asks, tool: 'AskUserQuestion', input: { questions: QUESTIONS } });
-const notice = (request: string): PushNotice => ({ v: 1, project: PROJECT, session: S.asks, alias: 'maws-45', kind: 'question', request });
+const notice = (request: string, waiting = 1): PushNotice => ({ v: 1, project: PROJECT, name: 'MAWS', session: S.asks, alias: 'maws-45', kind: 'question', request, waiting });
 
 /** Nothing on the page is wider than the phone: no sideways scrolling anywhere. */
 async function fitsTheWidth(page: Page) {
@@ -29,38 +29,50 @@ async function fitsTheWidth(page: Page) {
   expect(overflow).toEqual([]);
 }
 
-test('@layout the grid draws in one column and a project opens on its group chat, the channel list a tap away and no depth', async ({ page, hub }) => {
+test('@layout the grid in two columns; a project opens on its channel list, a channel is pushed over it, and back returns', async ({ page, hub }) => {
   await stageProject(hub);
   await seedKey(page, hub);
   await page.goto(hub.url);
   const tiles = page.getByTestId('grid').locator('li');
   await expect(tiles).toHaveCount(2);
   const [first, second] = [await tiles.nth(0).boundingBox(), await tiles.nth(1).boundingBox()];
-  expect(second!.y).toBeGreaterThan(first!.y + first!.height - 1); // stacked, not side by side
-  expect(first!.width).toBeGreaterThan(300);
+  expect(Math.abs(second!.y - first!.y)).toBeLessThan(1); // side by side: two columns
+  expect(second!.x).toBeGreaterThan(first!.x + first!.width - 1);
   await expect(page.getByTestId('menu')).toBeVisible();
   await fitsTheWidth(page);
 
+  // The project opens on its channel list: the group chat first, then the sessions by group; no "+ Session" here.
   await page.locator(`[data-project="${PROJECT}"]`).click();
-  const view = page.getByTestId('project-view');
-  await expect(view).toHaveAttribute('data-layout', 'phone');
-  await expect(center(page)).toContainText('the migration is merged');
-  await expect(page.getByRole('navigation', { name: 'Channels' })).toHaveCount(0);
+  await expect(page.getByTestId('project-view')).toHaveAttribute('data-layout', 'phone');
+  const list = page.getByRole('navigation', { name: 'Channels' });
+  await expect(list.locator('[data-group="waiting"]')).toContainText('maws-45');
+  await expect(list).toContainText('group chat');
+  await expect(list.getByRole('button', { name: '+ Session' })).toHaveCount(0);
+  await expect(center(page)).toHaveCount(0);
   await expect(page.getByRole('complementary', { name: 'Session depth' })).toHaveCount(0); // depth stays desktop-only
-  await expect(page.getByTestId('channels')).toContainText('1'); // one session waits on the owner
-  await expect(page.getByRole('textbox', { name: 'Message #MAWS' })).toBeVisible();
   await fitsTheWidth(page);
 
-  await page.getByTestId('channels').click();
-  const sheet = page.getByTestId('channel-sheet');
-  await expect(sheet.locator('[data-group="waiting"]')).toContainText('maws-45');
-  await sheet.locator(`[data-session="${S.asks}"]`).click();
-  await expect(sheet).toHaveCount(0);
+  // The group chat, from the list, and back.
+  await list.getByRole('button', { name: /MAWS/ }).click();
+  await expect(center(page)).toContainText('the migration is merged');
+  await expect(page.getByRole('textbox', { name: 'Message #MAWS' })).toBeVisible();
+  await expect(list).toHaveCount(0);
+  await fitsTheWidth(page);
+  await page.getByRole('button', { name: 'Back to MAWS' }).click();
+  await expect(list.locator(`[data-session="${S.asks}"]`)).toBeVisible();
+
+  // A session's channel, pushed over the list.
+  await list.locator(`[data-session="${S.asks}"]`).click();
   await expect(page).toHaveURL(new RegExp(`/p/${PROJECT}/s/${S.asks}$`));
   await expect(page.getByTestId('channel-header')).toContainText('maws-45');
-  // The working record stays folded: the transcript is desktop-only.
-  await expect(center(page).getByTestId('working-record').first()).toContainText('on the desktop');
+  // The working record is a quiet line: the transcript is desktop-only, so nothing there opens.
+  await expect(center(page).getByTestId('working-record').first()).toContainText('Working record · on a computer');
   await expect(center(page).getByRole('button', { name: '[ working record ]' })).toHaveCount(0);
+  // Retire sits behind ⋯, with where depth opens.
+  await expect(page.getByRole('button', { name: 'Retire…' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'maws-45: Retire, and what opens on a computer' }).click();
+  await expect(page.getByTestId('channel-header')).toContainText("maws-45's transcript, subagents and diff open on a computer.");
+  await expect(page.getByRole('button', { name: 'Retire…' })).toBeVisible();
   // The verbs that move a turn keep the row; model and compact sit behind More.
   await expect(page.locator('[data-verb="send"]')).toBeVisible();
   await expect(page.locator('[data-verb="model"]')).toHaveCount(0);
@@ -69,8 +81,21 @@ test('@layout the grid draws in one column and a project opens on its group chat
   await expect(page.locator('[data-verb="compact"]')).toBeVisible();
   await fitsTheWidth(page);
 
+  // Back goes to the list, then to the projects.
+  await page.getByRole('button', { name: 'Back to MAWS' }).click();
+  await expect(page).toHaveURL(new RegExp(`/p/${PROJECT}$`));
+  await expect(list.locator(`[data-session="${S.asks}"]`)).toBeVisible();
   await page.getByRole('button', { name: 'Projects' }).click();
   await expect(page.getByTestId('grid')).toBeVisible();
+});
+
+test('@layout an ended session shows Resume in place of the composer', async ({ page, hub }) => {
+  await stageProject(hub);
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.gone}`);
+  await expect(page.getByTestId('resume-bar').getByRole('button', { name: 'Resume doperpowers-1e' })).toBeVisible();
+  await expect(page.getByTestId('composer')).toHaveCount(0);
+  await fitsTheWidth(page);
 });
 
 test('@layout request cards fit the phone: a question answerable in place, a permission prompt with Allow and Deny', async ({ page, hub }) => {
@@ -108,9 +133,17 @@ async function serviceWorker(context: BrowserContext, page: Page) {
   const [scope, registrationId] = [...registrations][0];
   const worker = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
   await worker.evaluate(() => {
-    const scope = self as unknown as { registration: { showNotification(title: string, options?: object): Promise<void> }; __shown: unknown[] };
+    const scope = self as unknown as {
+      registration: { showNotification(title: string, options?: object): Promise<void> };
+      navigator: { setAppBadge?(count: number): Promise<void> };
+      __shown: unknown[];
+      __badges: number[];
+    };
     const show = scope.registration.showNotification.bind(scope.registration);
     scope.__shown = [];
+    scope.__badges = [];
+    // The badge the worker asks for, whether or not this platform draws one.
+    Object.defineProperty(scope.navigator, 'setAppBadge', { configurable: true, value: async (count: number) => void scope.__badges.push(count) });
     scope.registration.showNotification = (title, options) => {
       scope.__shown.push({ title, options });
       return show(title, options).catch(() => {});
@@ -119,6 +152,7 @@ async function serviceWorker(context: BrowserContext, page: Page) {
   return {
     deliver: async (data: string) => void (await cdp.send('ServiceWorker.deliverPushMessage', { origin: new URL(scope).origin, registrationId, data })),
     shown: () => worker.evaluate(() => (self as unknown as { __shown: Shown[] }).__shown),
+    badges: () => worker.evaluate(() => (self as unknown as { __badges: number[] }).__badges),
   };
 }
 
@@ -132,18 +166,20 @@ test('a pushed question draws from its payload alone, with no Allow or Deny, and
   const worker = await serviceWorker(context, page);
 
   await raiseQuestion(hub);
-  await worker.deliver(JSON.stringify(notice('toolu_q1')));
+  await worker.deliver(JSON.stringify(notice('toolu_q1', 3)));
   await expect.poll(worker.shown).toHaveLength(1);
   const [notification] = await worker.shown();
-  expect(notification.title).toBe('maws-45 has a question');
-  expect(notification.options.body).toBe('Open the desk to answer it.');
+  expect(notification.title).toBe('maws-45 has a question for you');
+  expect(notification.options.body).toBe('MAWS · Opens at the question');
+  expect(await worker.badges()).toEqual([3]); // the org's waiting count, on the app icon
   expect(notification.options.actions).toBeUndefined(); // no Allow, no Deny: the worker holds no key to answer with
   const url = notification.options.data!.url!;
   expect(url).toBe(`/p/${PROJECT}/s/${S.asks}?request=toolu_q1`);
 
   // A payload it cannot read still draws a notification (a silent push costs the subscription on iOS), opening the grid.
   await worker.deliver('not json');
-  await expect.poll(async () => (await worker.shown()).map((n) => n.title)).toEqual(['maws-45 has a question', 'The desk']);
+  await expect.poll(async () => (await worker.shown()).map((n) => n.title)).toEqual(['maws-45 has a question for you', 'The desk']);
+  expect(await worker.badges()).toEqual([3]); // a push without a count leaves the badge as it was
 
   // A tap with no window open opens one at the card's URL (what `clients.openWindow` is handed): the card lands once
   // it verified, and the answer from the phone reaches the machine sealed, with the digest of what was drawn.
@@ -196,7 +232,7 @@ test("a project holds back its member's pushes only while the owner can read it:
   expect(visibility()).not.toContain(true); // locked, the owner reads nothing there
 
   await seedKey(page, hub);
-  await page.goto(`${hub.url}/p/${PROJECT}`);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
   await expect(center(page)).toContainText('the migration is merged');
   await expect.poll(() => visibility().at(-1)).toBe(true);
   await page.evaluate(() => {
@@ -204,4 +240,18 @@ test("a project holds back its member's pushes only while the owner can read it:
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await expect.poll(() => visibility().at(-1)).toBe(false); // the phone locked, or the app sent to the background
+});
+
+test('the app sets the icon badge from the grid while it is open, and clears it at 0', async ({ page, hub }) => {
+  await stageProject(hub); // MAWS waits on the owner once
+  await page.addInitScript(() => {
+    const calls: Array<number | 'clear'> = ((window as unknown as { __badges: Array<number | 'clear'> }).__badges = []);
+    Object.defineProperty(navigator, 'setAppBadge', { configurable: true, value: async (count: number) => void calls.push(count) });
+    Object.defineProperty(navigator, 'clearAppBadge', { configurable: true, value: async () => void calls.push('clear') });
+  });
+  await page.goto(hub.url);
+  const badges = () => page.evaluate(() => (window as unknown as { __badges: Array<number | 'clear'> }).__badges);
+  await expect.poll(badges).toEqual([1]);
+  hub.updateSummary(summary({ waiting: 0 })); // answered, anywhere
+  await expect.poll(badges).toEqual([1, 'clear']);
 });

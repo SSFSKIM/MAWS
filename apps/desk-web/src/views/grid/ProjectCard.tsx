@@ -1,6 +1,7 @@
 // A project on the grid (§4; mockups/desk/01-grid.html's tiles, pending the owner's verdict). Waiting on you is the
 // signal: only a project that waits on the owner carries a numeral and a tint. A project whose machines are all
-// offline reads as absent, not quiet.
+// offline reads as absent, not quiet. On a phone's two columns (05-phone.html, 2) a long name takes two lines and the
+// machine dots stand without their words.
 import type { ProjectSummary } from 'desk-hub/protocol';
 
 export function ProjectCard({ project, onOpen }: { project: ProjectSummary; onOpen(): void }) {
@@ -14,16 +15,16 @@ export function ProjectCard({ project, onOpen }: { project: ProjectSummary; onOp
       data-waiting={project.waiting}
       data-working={project.working}
       className={[
-        'flex min-h-[132px] w-full flex-col gap-3 rounded-md border p-4 text-left transition-colors',
+        'flex min-h-[122px] w-full flex-col gap-3 rounded-md border p-3 text-left transition-colors md:min-h-[132px] md:p-4',
         offline ? 'border-dashed border-border-strong bg-transparent' : waiting ? 'border-warning bg-bg-waiting' : 'border-border bg-bg-raised hover:bg-bg-hover',
       ].join(' ')}
     >
       <div className="flex min-w-0 items-baseline gap-2">
-        <span className="truncate text-ui font-semibold text-fg" title={project.name}>
+        <span className="line-clamp-2 text-ui font-semibold break-words text-fg md:line-clamp-none md:truncate" title={project.name}>
           {project.name}
         </span>
       </div>
-      <div className="flex flex-1 items-end gap-4">
+      <div className="flex flex-1 flex-wrap items-end gap-x-4 gap-y-1">
         {waiting ? (
           <div className="flex items-baseline gap-2" data-testid="waiting">
             <span className="text-numeral leading-none font-semibold text-warning tabular-nums">{project.waiting}</span>
@@ -52,7 +53,7 @@ function Machines({ online, total }: { online: number; total: number }) {
           <span key={i} className={['h-1.5 w-1.5 rounded-full', i < online ? 'bg-success' : 'border border-fg-faint'].join(' ')} />
         ))}
       </span>
-      <span>{online === total ? `${total} ${total === 1 ? 'machine' : 'machines'}` : `${online} of ${total} machines online`}</span>
+      <span className="hidden md:inline">{online === total ? `${total} ${total === 1 ? 'machine' : 'machines'}` : `${online} of ${total} machines online`}</span>
     </div>
   );
 }

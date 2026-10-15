@@ -6,7 +6,8 @@
 // the owner into another session's channel.
 //
 // A channel a tapped notification opened lands on its card (`useLanding`): the card is marked once it is drawn, and
-// until then, or when it will not be, the channel says why. On a phone the header carries the way to the channel list.
+// until then, or when it will not be, the channel says why. On a phone (mockups/desk/05-phone.html, 5A) Retire sits
+// behind ⋯ with the note that depth opens on a computer, and an ended session shows Resume in place of the composer.
 import { useEffect, useMemo, useState } from 'react';
 import { useStore } from 'zustand';
 import type { LogEvent } from 'desk-hub/protocol';
@@ -16,6 +17,7 @@ import { isQuestion } from '../../conversation/card-state';
 import { landedItem, landingStatus } from '../../conversation/landing';
 import { refused } from '../../log/project-log';
 import { useLanding } from '../../pwa/service-worker';
+import { useNarrow } from '../../shell/viewport';
 import type { Channel } from '../../shell/layout';
 import type { DeskSession } from '../../shell/sessions';
 import { GroupComposer, SessionComposer } from '../composer/Composer';
@@ -28,11 +30,9 @@ export function ChannelView(props: {
   channel: Channel;
   session: DeskSession | null;
   events: Array<{ offset: number; event: LogEvent }>;
-  /** A phone's way to the channel list, with how many sessions wait on the owner. */
-  onChannels?: () => void;
-  waiting?: number;
 }) {
-  const { name, channel, session, events, onChannels, waiting = 0 } = props;
+  const { name, channel, session, events } = props;
+  const phone = useNarrow();
   const { connection, sessions } = useDesk();
   const requests = useStore(connection.conversation.store, (s) => s.requests);
   const outboxAll = useStore(connection.conversation.store, (s) => s.outbox);
@@ -46,13 +46,7 @@ export function ChannelView(props: {
   const landed = useLanded(channel, items);
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg" aria-label="Channel">
-      <header className={['flex shrink-0 items-center gap-2 border-b border-border', onChannels ? 'min-h-[44px] flex-wrap px-3 py-1.5' : 'h-[44px] px-4'].join(' ')} data-testid="channel-header">
-        {onChannels && (
-          <button type="button" onClick={onChannels} className="flex h-8 shrink-0 items-center gap-1.5 rounded-sm border border-border px-2 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg" data-testid="channels">
-            Channels
-            {waiting > 0 && <span className="rounded-sm bg-bg-waiting px-1 font-semibold text-warning">{waiting}</span>}
-          </button>
-        )}
+      <header className={['flex shrink-0 items-center gap-2 border-b border-border', phone ? 'min-h-[44px] flex-wrap px-3 py-1.5' : 'h-[44px] px-4'].join(' ')} data-testid="channel-header">
         {channel.kind === 'group' ? (
           <span className="text-ui font-semibold">
             <span className="text-fg-muted">#</span> {name}
@@ -62,7 +56,7 @@ export function ChannelView(props: {
             <span className="text-ui font-semibold">{session?.alias ?? channel.session.slice(0, 8)}</span>
             {session && <span className="text-ui-sm text-fg-muted">@{session.machine}</span>}
             {session?.charge && <span className="min-w-0 truncate text-ui-sm text-fg-muted">· {session.charge}</span>}
-            {session && <SessionActions key={session.session} session={session} />}
+            {session && <SessionActions key={session.session} session={session} phone={phone} />}
           </>
         )}
       </header>
@@ -82,7 +76,11 @@ export function ChannelView(props: {
         </div>
       )}
       <StreamView items={items} outbox={outbox} landed={landed.item} />
-      {channel.kind === 'group' ? <GroupComposer name={name} /> : session && <SessionComposer key={session.session} session={session} />}
+      {channel.kind === 'group' ? (
+        <GroupComposer name={name} />
+      ) : (
+        session && (phone && session.group === 'ended' ? <ResumeBar key={session.session} session={session} /> : <SessionComposer key={session.session} session={session} />)
+      )}
     </section>
   );
 }
@@ -110,16 +108,47 @@ function useLanded(channel: Channel, items: ReturnType<typeof buildStream>) {
   return { item, notice: status.kind === 'shown' ? null : status };
 }
 
-function SessionActions({ session }: { session: DeskSession }) {
+/** The phone's composer for an ended session: Resume, at thumb height (a send to it would only be recorded). */
+function ResumeBar({ session }: { session: DeskSession }) {
+  const { connection, member } = useDesk();
+  const [rpc, setRpc] = useState<string | null>(null);
+  const can = capabilities(session).resume;
+  return (
+    <div className="flex shrink-0 flex-col gap-1.5 border-t border-border px-4 py-3" data-testid="resume-bar">
+      <button
+        type="button"
+        className="h-11 rounded-md border border-fg bg-fg text-ui font-medium text-bg disabled:cursor-not-allowed disabled:border-fg-faint disabled:bg-fg-faint"
+        disabled={!can.can}
+        title={can.reason ?? undefined}
+        onClick={async () => setRpc(await connection.rpc(member, session.machine, 'resume', { session: session.session }))}
+      >
+        Resume {session.alias}
+      </button>
+      {can.reason && <p className="m-0 text-ui-sm text-fg-faint">{can.reason}</p>}
+      <RpcStatus nonce={rpc} />
+    </div>
+  );
+}
+
+function SessionActions({ session, phone }: { session: DeskSession; phone: boolean }) {
   const { connection, member } = useDesk();
   const [rpc, setRpc] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  const [opened, setOpened] = useState(false);
   const can = capabilities(session);
   const ended = session.group === 'ended';
+  if (phone && ended) return null; // Resume replaces the composer
+  if (phone && !opened)
+    return (
+      <button type="button" className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-sm text-fg-muted hover:bg-bg-hover" aria-label={`${session.alias}: Retire, and what opens on a computer`} onClick={() => setOpened(true)}>
+        ⋯
+      </button>
+    );
   const button = 'shrink-0 rounded-sm border border-border-strong px-2 py-0.5 text-ui-sm hover:bg-bg-hover disabled:cursor-not-allowed disabled:text-fg-faint disabled:hover:bg-transparent';
   return (
     // The header's own width bounds it: a confirmation's words truncate rather than run under the depth column.
-    <span className="ml-auto flex min-w-0 items-center gap-2">
+    <span className={['ml-auto flex min-w-0 items-center gap-2', phone ? 'w-full flex-wrap' : ''].join(' ')}>
+      {phone && <span className="w-full text-ui-sm text-fg-muted">{session.alias}'s transcript, subagents and diff open on a computer.</span>}
       <RpcStatus nonce={rpc} />
       {ended ? (
         <button type="button" className={button} disabled={!can.resume.can} title={can.resume.reason ?? undefined} onClick={async () => setRpc(await connection.rpc(member, session.machine, 'resume', { session: session.session }))}>
@@ -147,6 +176,11 @@ function SessionActions({ session }: { session: DeskSession }) {
       ) : (
         <button type="button" className={button} disabled={!can.retire.can} title={can.retire.reason ?? undefined} onClick={() => setConfirming(true)}>
           Retire…
+        </button>
+      )}
+      {phone && !confirming && (
+        <button type="button" className={button} onClick={() => setOpened(false)}>
+          Close
         </button>
       )}
     </span>

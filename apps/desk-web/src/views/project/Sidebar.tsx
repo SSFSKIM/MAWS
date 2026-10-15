@@ -1,5 +1,7 @@
 // The project's left column (§4): `# <project>`, then its sessions as direct channels grouped waiting on you /
-// working / idle / ended, each with its machine and its in-charge line; "+ Session" below them.
+// working / idle / ended, each with its machine and its in-charge line; "+ Session" below them. On a phone it is the
+// project's first screen (mockups/desk/05-phone.html, 3A): full width, rows sized for a thumb, the group chat named as
+// such, and no "+ Session" (starting a session stays off the phone in phase 1).
 import type { Channel } from '../../shell/layout';
 import type { DeskSession } from '../../shell/sessions';
 import { GROUPS, type SessionGroup } from '../../log/projection';
@@ -12,19 +14,24 @@ export function Sidebar(props: {
   groups: Record<SessionGroup, DeskSession[]> | null;
   locked: boolean;
   onSelect(channel: Channel): void;
-  onSpawn(): void;
+  /** "+ Session", where the view offers it (not on a phone). */
+  onSpawn?: () => void;
+  /** The phone's channel list: nothing is selected there, and rows are a thumb's height. */
+  phone?: boolean;
 }) {
-  const { name, channel, groups, locked, onSelect, onSpawn } = props;
+  const { name, channel, groups, locked, onSelect, onSpawn, phone = false } = props;
+  const current = (c: Channel) => !phone && (c.kind === 'group' ? channel.kind === 'group' : channel.kind === 'session' && channel.session === c.session);
   return (
-    <nav className="flex min-h-0 flex-col overflow-y-auto border-r border-border bg-bg-raised px-2.5 py-2.5" aria-label="Channels">
+    <nav className={['flex min-h-0 flex-col overflow-y-auto bg-bg-raised px-2.5 py-2.5', phone ? '' : 'border-r border-border'].join(' ')} aria-label="Channels" data-phone={phone || undefined}>
       <button
         type="button"
         onClick={() => onSelect({ kind: 'group' })}
-        aria-current={channel.kind === 'group' ? 'page' : undefined}
-        className={['flex h-[30px] items-center gap-1.5 rounded-sm px-2.5 text-left text-ui', channel.kind === 'group' ? 'bg-bg-active text-fg' : 'text-fg hover:bg-bg-hover'].join(' ')}
+        aria-current={current({ kind: 'group' }) ? 'page' : undefined}
+        className={['flex items-center gap-1.5 rounded-sm px-2.5 text-left text-ui', phone ? 'min-h-11' : 'h-[30px]', current({ kind: 'group' }) ? 'bg-bg-active text-fg' : 'text-fg hover:bg-bg-hover'].join(' ')}
       >
         <span className="text-fg-muted">#</span>
         <span className="truncate font-medium">{name}</span>
+        {phone && <span className="text-ui-sm text-fg-muted">group chat</span>}
       </button>
       {locked ? (
         // Locked, the sidebar stays empty: no channels, no sessions, and no counts from the hub (the owner's ruling).
@@ -40,12 +47,12 @@ export function Sidebar(props: {
               {HEADINGS[group]}
             </h3>
             {groups[group].map((session) => (
-              <SessionRow key={session.session} session={session} selected={channel.kind === 'session' && channel.session === session.session} onSelect={() => onSelect({ kind: 'session', session: session.session })} />
+              <SessionRow key={session.session} session={session} phone={phone} selected={current({ kind: 'session', session: session.session })} onSelect={() => onSelect({ kind: 'session', session: session.session })} />
             ))}
           </section>
         ))
       )}
-      {!locked && (
+      {!locked && onSpawn && (
         <button type="button" onClick={onSpawn} className="mt-3 flex h-[30px] items-center rounded-sm px-2.5 text-left text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg">
           + Session
         </button>
@@ -54,7 +61,7 @@ export function Sidebar(props: {
   );
 }
 
-function SessionRow({ session, selected, onSelect }: { session: DeskSession; selected: boolean; onSelect(): void }) {
+function SessionRow({ session, selected, phone, onSelect }: { session: DeskSession; selected: boolean; phone: boolean; onSelect(): void }) {
   const offline = session.machineOnline === false;
   return (
     <button
@@ -62,7 +69,7 @@ function SessionRow({ session, selected, onSelect }: { session: DeskSession; sel
       onClick={onSelect}
       aria-current={selected ? 'page' : undefined}
       data-session={session.session}
-      className={['block w-full rounded-sm px-2.5 py-1.5 text-left', selected ? 'bg-bg-active' : 'hover:bg-bg-hover', offline || session.group === 'ended' ? 'text-fg-muted' : 'text-fg'].join(' ')}
+      className={['block w-full rounded-sm px-2.5 text-left', phone ? 'py-2.5' : 'py-1.5', selected ? 'bg-bg-active' : 'hover:bg-bg-hover', offline || session.group === 'ended' ? 'text-fg-muted' : 'text-fg'].join(' ')}
     >
       <span className="flex min-w-0 items-baseline gap-1.5 text-ui-sm">
         <span className="truncate">{session.alias}</span>

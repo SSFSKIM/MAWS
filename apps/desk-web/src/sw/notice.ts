@@ -9,11 +9,11 @@
 import type { PushNotice } from 'desk-hub/protocol';
 
 /**
- * The notice as the worker reads it: the module's `PushNotice` and the org's waiting count for the app icon's badge
- * (`waiting`, the grid's sum with this push's own request counted) and the project's name as the grid shows it (`name`);
- * DC3 is adding both, so they are optional until then, and a value of the wrong shape is dropped.
+ * The notice as the worker reads it: the module's `PushNotice`, whose `name` (the project's, as the grid shows it) and
+ * `waiting` (the org's waiting count, this push's own request counted, for the app icon's badge) a hub before DC3's
+ * dabd37e8 does not send; either absent, or of the wrong shape, is dropped and the rest still drawn.
  */
-export type Notice = PushNotice & { waiting?: number; name?: string };
+export type Notice = Omit<PushNotice, 'name' | 'waiting'> & { name?: string; waiting?: number };
 
 /** Where a tapped notification lands, read back from the URL's query by the app. */
 export type Landing = { kind: 'request'; request: string } | { kind: 'event'; writer: string; seq: number };
@@ -44,7 +44,7 @@ export function parseNotice(value: unknown): Notice | null {
 }
 
 /** The app's URL for the notice's card: the session's direct channel, with the request or message to open. */
-export function noticeUrl(notice: PushNotice): string {
+export function noticeUrl(notice: Notice): string {
   const path = `/p/${encodeURIComponent(notice.project)}/s/${encodeURIComponent(notice.session)}`;
   const query = notice.event ? new URLSearchParams({ writer: notice.event.writer, seq: String(notice.event.seq) }) : new URLSearchParams({ request: notice.request ?? '' });
   return `${path}?${query}`;
@@ -72,7 +72,7 @@ const WORDS: Record<PushNotice['kind'], { title: string; body: (alias: string | 
 };
 
 /** The notification for a notice; for null (a payload the worker cannot read), a plain prompt to open the desk. */
-export function describeNotice(notice: PushNotice | null): NoticeDisplay {
+export function describeNotice(notice: Notice | null): NoticeDisplay {
   if (notice === null) return { title: 'The desk', options: { body: 'Something needs you. Open the desk to see it.', data: { url: '/' } } };
   const words = WORDS[notice.kind];
   const card = notice.event ? `event/${notice.event.writer}/${notice.event.seq}` : `request/${notice.request}`;

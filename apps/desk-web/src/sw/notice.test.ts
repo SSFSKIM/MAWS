@@ -1,12 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { PushNotice } from 'desk-hub/protocol';
-import { describeNotice, landingOf, noticeUrl, parseNotice } from './notice';
+import { describeNotice, landingOf, noticeUrl, parseNotice, type Notice } from './notice';
 
 const PROJECT = 'b6d0c2a4-5e1f-4a3b-9c8d-7e6f5a4b3c2d';
 const SESSION = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b';
-const question: PushNotice = { v: 1, project: PROJECT, session: SESSION, alias: 'maws-45', kind: 'question', request: 'toolu_01ABC' };
-const permission: PushNotice = { ...question, kind: 'permission', request: 'toolu_02DEF' };
-const message: PushNotice = { v: 1, project: PROJECT, session: SESSION, alias: 'maws-45', kind: 'message', event: { writer: `mini/${SESSION}`, seq: 42 } };
+const question: Notice = { v: 1, project: PROJECT, session: SESSION, alias: 'maws-45', kind: 'question', request: 'toolu_01ABC' };
+const permission: Notice = { ...question, kind: 'permission', request: 'toolu_02DEF' };
+const message: Notice = { v: 1, project: PROJECT, session: SESSION, alias: 'maws-45', kind: 'message', event: { writer: `mini/${SESSION}`, seq: 42 } };
 
 describe('parseNotice', () => {
   it('takes the three kinds the hub sends', () => {
@@ -65,7 +64,7 @@ describe('noticeUrl and landingOf', () => {
   });
 
   it('encodes ids that are not URL-safe and reads them back', () => {
-    const odd: PushNotice = { ...question, project: 'a/b c', session: 's?1', request: 'r&x=1#y' };
+    const odd: Notice = { ...question, project: 'a/b c', session: 's?1', request: 'r&x=1#y' };
     const parsed = new URL(noticeUrl(odd), 'https://desk.example');
     expect(parsed.pathname).toBe('/p/a%2Fb%20c/s/s%3F1');
     expect(landingOf(parsed.search)).toEqual({ kind: 'request', request: 'r&x=1#y' });

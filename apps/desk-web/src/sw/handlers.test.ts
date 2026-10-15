@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { PushNotice } from 'desk-hub/protocol';
 import { onNotificationClick, onPush, OPEN_MESSAGE, type WindowLike, type WorkerScope } from './handlers';
-import { noticeUrl } from './notice';
+import { noticeUrl, type Notice } from './notice';
 
-const notice: PushNotice = { v: 1, project: 'p1', session: 's1', alias: 'maws-45', kind: 'question', request: 'toolu_01' };
+const notice: Notice = { v: 1, project: 'p1', session: 's1', alias: 'maws-45', kind: 'question', request: 'toolu_01' };
 
 function scope(windows: WindowLike[] = [], badging = true) {
   const shown: Array<{ title: string; options: NotificationOptions }> = [];
