@@ -1,4 +1,4 @@
-import type { SessionBodies } from 'desk-hub/protocol';
+import type { SessionBodies, Streaming, StreamingBlock } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import { StreamingLayer } from './layer';
 
@@ -98,7 +98,9 @@ describe('the streaming layer', () => {
 
   it('reads the request’s watermark from the entry, whatever its blocks say, and a tool call as its arguments’ text', () => {
     const layer = new StreamingLayer();
-    const entry = { turnId: 't1', agentId: null, step: 0, model: 'm', upTo: 6, blocks: [{ index: 0, kind: 'text', text: 'Reading.', upTo: 2 }, { index: 1, kind: 'tool', id: 'toolu_1', name: 'Read', text: '{"file_pa', upTo: 5 }] };
+    const text: StreamingBlock = { index: 0, kind: 'text', text: 'Reading.', upTo: 2 };
+    const tool: StreamingBlock = { index: 1, kind: 'tool', id: 'toolu_1', name: 'Read', text: '{"file_pa', upTo: 5 };
+    const entry: Streaming = { turnId: 't1', agentId: null, step: 0, model: 'm', upTo: 6, blocks: [text, tool] };
     layer.load([entry, { turnId: 't1', agentId: null, step: 1, upTo: -1, blocks: [] }]);
     expect(layer.blocks(null).map((b) => [b.kind, b.text, b.toolName])).toEqual([
       ['text', 'Reading.', null],
