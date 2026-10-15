@@ -1,8 +1,7 @@
-// A log event is drawn only after its code verifies (§6, DX1) under the project the view serves. The code is the
-// protocol module's `verify`; this adds only the reading guard the projection needs (an object with a string writer
-// and kind, an integer seq, a mac), so a malformed event is refused as such instead of throwing in a view. The shape
-// checks DX1 adds for a `hub/` event's writer, seq, and ts belong to the module's verifier (the composite's G1
-// amendment) and arrive with it when smns-erb is merged in; until then a `hub/` event is verified by `verify` alone.
+// A log event is drawn only after it verifies (§6, DX1) under the project the view serves. Verification is the
+// protocol module's `verify`: the code, its canonical spelling, and for a `hub/` event the shape of the position the
+// code leaves out (writer, seq, ts). This adds only the reading guard the projection needs (an object with a string
+// writer and kind, an integer seq, a mac), so a malformed event is refused as such instead of throwing in a view.
 import { verify, type LogEvent, type OrgKey } from 'desk-hub/protocol';
 
 export type Verdict = { ok: true } | { ok: false; reason: 'bad-code' | 'malformed' };

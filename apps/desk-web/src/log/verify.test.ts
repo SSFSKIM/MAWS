@@ -14,7 +14,7 @@ describe('verifyLogEvent', () => {
     for (const v of LOG_VECTORS) expect(await verifyLogEvent(k, v.project, v.event), v.name).toEqual({ ok: true });
   });
 
-  it('fails every negative: an altered field, a fresh nonce, another project', async () => {
+  it('fails every negative: an altered field, a fresh nonce, another project, a hub/ position out of shape, a variant spelling', async () => {
     const k = await key();
     expect(LOG_NEGATIVES.length).toBeGreaterThan(0);
     for (const v of LOG_NEGATIVES) expect(await verifyLogEvent(k, v.project, v.event), v.name).toEqual({ ok: false, reason: 'bad-code' });

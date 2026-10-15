@@ -1,11 +1,12 @@
 // A project (§4): the channels on the left, the selected channel in the center, the selected session's depth on the
 // right (DX8's `depth` slot, DC6's). Nothing from the log is drawn until it verifies; locked, nothing is drawn at all,
 // and the view says why. Events whose code fails are reported, never drawn.
+import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import { useKeyHolder } from '../../key/holder';
 import { drawable, refused } from '../../log/project-log';
 import { useProjectConnection } from '../../project/registry';
-import type { ProjectConnection } from '../../project/connection';
+import type { AuditItem, ProjectConnection } from '../../project/connection';
 import { useDeskLayout, type Channel } from '../../shell/layout';
 import { useDeskSessions } from '../../shell/sessions';
 import { useSlot } from '../../shell/slots';
@@ -25,11 +26,22 @@ function OpenProject({ connection, name, channel }: { connection: ProjectConnect
   const keyState = useKeyHolder((s) => s.state);
   const logState = useStore(connection.log.store);
   const status = useStore(connection.live, (s) => s.status);
+  const audit = useStore(connection.live, (s) => s.audit);
   const { sessions, groups } = useDeskSessions(connection);
   const Depth = useSlot('depth');
   const locked = keyState !== 'unlocked';
   const failed = refused(logState);
   const selected = channel.kind === 'session' ? (sessions.get(channel.session) ?? null) : null;
+  // A visible tab of the project holds back its member's pushes (DX3's `visibility`).
+  useEffect(() => {
+    const report = () => connection.client.setVisible(document.visibilityState === 'visible');
+    report();
+    document.addEventListener('visibilitychange', report);
+    return () => {
+      document.removeEventListener('visibilitychange', report);
+      connection.client.setVisible(false);
+    };
+  }, [connection]);
   const select = (next: Channel) => navigate({ view: 'project', project: connection.project, channel: next });
 
   return (
@@ -52,6 +64,7 @@ function OpenProject({ connection, name, channel }: { connection: ProjectConnect
             {failed.map((e) => `${typeof e.event?.writer === 'string' ? e.event.writer : '?'}:${typeof e.event?.seq === 'number' ? e.event.seq : '?'} (${e.verdict === 'bad-code' ? 'its code does not match' : 'not an event'})`).join(', ')}
           </div>
         )}
+        {audit.length > 0 && <AuditNotice audit={audit} />}
         {locked ? (
           <Locked loading={keyState === 'loading'} />
         ) : (
@@ -80,5 +93,24 @@ function Locked({ loading }: { loading: boolean }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** The project's audit record: what the hub refused, and what a machine refused of what it was sent (§6: refused, reported). */
+function AuditNotice({ audit }: { audit: AuditItem[] }) {
+  const line = (item: AuditItem) => {
+    if (item.kind === 'refused') return `The hub refused ${item.entry.writer ? `${item.entry.writer}:${item.entry.seq ?? '?'}` : 'a request'} (${item.entry.reason}): ${item.entry.message}`;
+    const what = item.entry.event ? `${item.entry.event.writer}:${item.entry.event.seq}` : 'an event';
+    return `${item.entry.machine} refused ${what} (${item.entry.reason})${item.entry.message ? `: ${item.entry.message}` : ''}`;
+  };
+  return (
+    <details className="border-b border-border px-4 py-1.5 text-ui-sm text-danger" data-testid="audit">
+      <summary className="cursor-pointer">{audit.length === 1 ? 'One refusal' : `${audit.length} refusals`} in the project's audit record</summary>
+      <ul className="m-0 list-none p-0 text-fg-muted">
+        {audit.map((item) => (
+          <li key={item.entry.id}>{line(item)}</li>
+        ))}
+      </ul>
+    </details>
   );
 }

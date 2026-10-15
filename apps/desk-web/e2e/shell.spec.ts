@@ -45,6 +45,7 @@ test('a project opens into its channels, the selected channel, and the depth slo
   const center = page.getByRole('region', { name: 'Channel' });
   await expect(center).toContainText('the migration is merged');
   await expect(center).toContainText('doperpowers-1e retired by human');
+  await expect.poll(() => hub.up.some((u) => u.frame.t === 'visibility' && u.frame.visible)).toBe(true); // the tab shows the project
 
   await nav.locator(`[data-session="${S.asks}"]`).click();
   await expect(page).toHaveURL(new RegExp(`/p/${PROJECT}/s/${S.asks}$`));
@@ -86,6 +87,13 @@ test('an event whose code fails is not drawn, and the view reports it', async ({
   await expect(page.getByRole('region', { name: 'Channel' })).toContainText('the migration is merged');
   await expect(page.getByTestId('refused')).toContainText(`mini/${S.asks}:99`);
   await expect(page.getByTestId('project-view')).not.toContainText('rm -rf');
+
+  // A machine that refused an event it was sent: the hub's audit record reaches the view.
+  hub.reject(PROJECT, { machine: 'mini', event: { writer: 'SK.local/human', seq: 7 }, nonce: 'AQEBAQEBAQEBAQEBAQEBAQ', reason: 'seen-nonce', message: 'a nonce this machine has seen' });
+  const audit = page.getByTestId('audit');
+  await expect(audit).toContainText('One refusal');
+  await audit.locator('summary').click();
+  await expect(audit).toContainText('mini refused SK.local/human:7 (seen-nonce)');
 });
 
 test('a reload resumes after the offset the browser recorded, and draws what it recorded', async ({ page, hub }) => {

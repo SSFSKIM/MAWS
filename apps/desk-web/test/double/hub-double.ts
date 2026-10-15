@@ -31,6 +31,7 @@ import {
   type MachinePresence,
   type Delivery,
   type Refusal,
+  type Rejection,
 } from 'desk-hub/protocol';
 import { WebSocketServer, type WebSocket } from 'ws';
 
@@ -158,16 +159,28 @@ export class HubDouble {
     this.broadcast(project, frame);
   }
 
-  refuse(project: string, refusal: Refusal & { nonce?: string; machine?: string }): void {
-    this.broadcast(project, { t: 'refused', refusal });
+  /** A refusal of the hub's own, entered in the project's audit record and sent to its browsers. */
+  refuse(project: string, refusal: Refusal & { nonce?: string; machine?: string; member?: string }): void {
+    this.broadcast(project, { t: 'refused', refusal: { ...this.audit(), ...refusal } });
+  }
+
+  /** A daemon's report of an event it refused (DX2 `rejected`), entered in the audit record and sent on. */
+  reject(project: string, rejection: Rejection & { machine: string }): void {
+    this.broadcast(project, { t: 'rejected', rejection: { ...this.audit(), ...rejection } });
+  }
+
+  private auditId = 0;
+  private audit(): { id: number; at: string } {
+    this.auditId++;
+    return { id: this.auditId, at: new Date().toISOString() };
   }
 
   /** The subscriptions browsers hold open on a project, oldest first. */
-  subscriptions(project: string): Array<{ machine: string; session: string; sub: string }> {
-    const open = new Map<string, { machine: string; session: string; sub: string }>();
+  subscriptions(project: string): Array<{ machine: string; session: string; agentId: string | null; sub: string }> {
+    const open = new Map<string, { machine: string; session: string; agentId: string | null; sub: string }>();
     for (const { project: p, frame } of this.up) {
       if (p !== project) continue;
-      if (frame.t === 'subscribe') open.set(frame.sub, { machine: frame.machine, session: frame.session, sub: frame.sub });
+      if (frame.t === 'subscribe') open.set(frame.sub, { machine: frame.machine, session: frame.session, agentId: frame.agentId, sub: frame.sub });
       if (frame.t === 'unsubscribe') open.delete(frame.sub);
     }
     return [...open.values()];
@@ -300,7 +313,7 @@ export class HubDouble {
 
   private receiveHuman(project: string, socket: ProjectSocket, event: HumanEvent): void {
     if (event.member !== DOUBLE_MEMBER.id) {
-      this.sendRaw(socket.ws, { t: 'refused', refusal: { reason: 'bad-shape', message: 'member is not the signed-in member', nonce: event.mac.nonce } });
+      this.sendRaw(socket.ws, { t: 'refused', refusal: { ...this.audit(), reason: 'bad-shape', message: 'member is not the signed-in member', nonce: event.mac.nonce } });
       return;
     }
     const known = this.project(project).log.find((entry) => (entry.event.mac as { nonce?: string }).nonce === event.mac.nonce);

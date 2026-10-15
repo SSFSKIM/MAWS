@@ -253,13 +253,49 @@ describe('the session plane', () => {
     expect(other.log).toEqual([]);
   });
 
-  it('ends at once a subscription scoped to a subagent, until DX3 carries agentId', async () => {
+  it("scopes a subscription to one subagent's transcript", async () => {
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    const { listener } = recorder();
+    c.subscribe({ machine: MACHINE, session: SESSION, agentId: 'a1' }, listener);
+    await until(() => double.subscriptions(PROJECT).length === 1);
+    expect(double.subscriptions(PROJECT)[0]).toMatchObject({ machine: MACHINE, session: SESSION, agentId: 'a1' });
+  });
+
+  it('recovers from the hub ending a subscription for a discontinuity, under a fresh sub', async () => {
     const { c, caughtUp } = client();
     await until(() => caughtUp.length === 1);
     const { log, listener } = recorder();
-    c.subscribe({ machine: MACHINE, session: SESSION, agentId: 'a1' }, listener);
-    await until(() => log.length === 1);
-    expect(log).toEqual(['end:error']);
-    expect(double.subscriptions(PROJECT)).toEqual([]);
+    c.subscribe({ machine: MACHINE, session: SESSION, agentId: null }, listener);
+    await until(() => double.subscriptions(PROJECT).length === 1);
+    const first = double.subscriptions(PROJECT)[0].sub;
+    double.sendSession(PROJECT, snapshot(first));
+    double.sendSession(PROJECT, { project: PROJECT, machine: MACHINE, session: SESSION, kind: 'end', sub: first, n: 1, body: { reason: 'discontinuity' } });
+    await until(() => double.up.filter((u) => u.frame.t === 'subscribe').length === 2);
+    const second = (double.up.filter((u) => u.frame.t === 'subscribe').at(-1)!.frame as { sub: string }).sub;
+    expect(second).not.toBe(first);
+    double.sendSession(PROJECT, snapshot(second));
+    await until(() => log.length === 3);
+    expect(log).toEqual(['snapshot', 'reset', 'snapshot']);
+  });
+});
+
+describe('the audit record', () => {
+  it("hands on the hub's refusals and the daemons' rejections", async () => {
+    const refusals: unknown[] = [];
+    const rejections: unknown[] = [];
+    const c = new ProjectClient({
+      base: double.url.replace(/^http/, 'ws'),
+      project: PROJECT,
+      delay: () => 20,
+      handlers: { held: () => 0, refused: (r) => refusals.push(r), rejected: (r) => rejections.push(r) },
+    });
+    clients.push(c);
+    c.start();
+    await until(() => double.connected(PROJECT) === 1);
+    double.refuse(PROJECT, { reason: 'bad-shape', message: 'not an event' });
+    double.reject(PROJECT, { machine: 'mini', event: { writer: 'hub/x', seq: 3 }, reason: 'bad-code', message: 'its code does not match' });
+    await until(() => refusals.length === 1 && rejections.length === 1);
+    expect(rejections[0]).toMatchObject({ machine: 'mini', reason: 'bad-code', event: { writer: 'hub/x', seq: 3 } });
   });
 });

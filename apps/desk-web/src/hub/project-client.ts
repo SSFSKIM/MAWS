@@ -9,8 +9,8 @@ import {
   type PendingRequest,
   type ProjectDown,
   type ProjectUp,
-  type Refusal,
   type Rpc,
+  type SessionBodies,
   type SessionMessage,
   type LogEvent,
   type Delivery,
@@ -38,7 +38,10 @@ export type ProjectHandlers = {
   pending?(requests: PendingRequest[]): void;
   deliveries?(deliveries: Delivery[]): void;
   machines?(machines: Array<{ machine: string } & MachinePresence>): void;
-  refused?(refusal: Refusal & { nonce?: string; machine?: string }): void;
+  /** The hub's own refusals, as its audit record has them. */
+  refused?(refusal: Extract<ProjectDown, { t: 'refused' }>['refusal']): void;
+  /** A daemon's report of an event it refused (DX2's `rejected`), as the audit record has it. */
+  rejected?(rejection: Extract<ProjectDown, { t: 'rejected' }>['rejection']): void;
   status?(status: ConnectionStatus): void;
 };
 
@@ -113,12 +116,6 @@ export class ProjectClient implements SessionPlane {
 
   subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription {
     const open: OpenSubscription = { target, listener, sub: null, next: 0 };
-    if (target.agentId !== null) {
-      // DX3 as `desk-hub/protocol` has it subscribes to a session only; the agent-scoped subscription arrives with
-      // DC3's amendment (the composite's Decision Log), merged in from smns-erb.
-      queueMicrotask(() => listener.end({ reason: 'error', message: 'a subagent subscription waits for DX3 to carry agentId' }));
-      return { rows: () => {}, close: () => {} };
-    }
     this.subs.add(open);
     if (this.welcomed) this.sendSubscribe(open);
     return {
@@ -145,7 +142,8 @@ export class ProjectClient implements SessionPlane {
   private sendSubscribe(open: OpenSubscription): void {
     open.sub = newNonce();
     open.next = 0;
-    this.socket.send({ t: 'subscribe', machine: open.target.machine, session: open.target.session, sub: open.sub });
+    const { machine, session, agentId } = open.target;
+    this.socket.send({ t: 'subscribe', machine, session, agentId, sub: open.sub });
   }
 
   private receive(frame: ProjectDown): void {
@@ -200,6 +198,9 @@ export class ProjectClient implements SessionPlane {
       case 'refused':
         handlers.refused?.(frame.refusal);
         return;
+      case 'rejected':
+        handlers.rejected?.(frame.rejection);
+        return;
       default:
         return;
     }
@@ -217,8 +218,15 @@ export class ProjectClient implements SessionPlane {
     }
     open.next++;
     if (message.kind === 'end') {
+      const body = message.body as SessionBodies['end'];
+      if (body.reason === 'discontinuity') {
+        // The bridge's stream lost events (DX4): the live part no longer follows the snapshot. Take a fresh one.
+        open.listener.reset();
+        this.sendSubscribe(open);
+        return;
+      }
       this.subs.delete(open);
-      open.listener.end(message.body as { reason: 'unsubscribed' | 'machine-offline' | 'session-ended' | 'error'; message?: string });
+      open.listener.end(body);
       return;
     }
     open.listener.message(message as SubscriptionMessage);
