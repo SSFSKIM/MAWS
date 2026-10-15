@@ -12,6 +12,7 @@ import { createPresentationAdapter } from '@artifacts/slides/adapter';
 import { DECK_PATH, slidePath } from '@artifacts/slides/deck';
 import { deckFiles, deleteElementTree, moveInto, readFlat, setStyle } from '@artifacts/slides/model';
 import { publishDeck } from '@artifacts/slides/publish';
+import { addThread, elementQuote, reply, resolve, threadStates } from '@artifacts/slides/threads'; // M7
 import { applyV1, applyV2, diffV1, newDoc, stateVector, type Doc } from '@artifacts/yjs';
 import * as Y from '@artifacts/yjs/slides';
 import type { Actor } from '@shared/artifacts/actor';
@@ -126,5 +127,48 @@ describe('the presentation adapter on the document service', () => {
     expect(Y.threadScalars(live, 't1').status).toBe('open');
     expect(Y.threadMessages(live, 't2')).toEqual([{ by: 'other', text: 'On the new slide' }]); // its slide gone: an orphan for M7
     expect(store.listVersions(deck.id).map((v) => v.kind)).toEqual(['named', 'auto', 'restore']);
+  });
+
+  // M7 (D9): the threads mirror and the quote refresh on the real service, and a restore keeping a conversation
+  it('mirrors the deck’s threads into artifact_threads, refreshes a quote as the editing actor’s write, and a restore keeps a reply posted after the version', async () => {
+    const deck = await store.create({ kind: 'presentation', title: 'T' }, human);
+    await service.writeAs(deck.id, agent, (doc) => void publishDeck(doc, deckFiles(doc), { [slidePath('s1')]: SLIDE }, false));
+    await service.writeAs(deck.id, human, (doc) => addThread(doc, { threadId: 't1', slideId: 's1', elementId: 'e1', quote: elementQuote(doc, 's1', 'e1'), by: human, at: 1_000, body: 'Shorter?' }));
+    const rows = () => committed('SELECT threadId, status, quote, appSessionId FROM artifact_threads WHERE artifactId = ? ORDER BY threadId', deck.id);
+    expect(rows()).toEqual([{ threadId: 't1', status: 'open', quote: 'One', appSessionId: null }]);
+    const at = (await store.createVersion(deck.id, { kind: 'named', actor: human, label: 'v1' }))!;
+
+    // the agent rewrites the element's text: the refreshed quote lands in the agent's own write, and in the mirror
+    const before = committed('SELECT seq FROM artifact_updates WHERE artifactId = ?', deck.id).length;
+    await service.writeAs(deck.id, agent, (doc) => {
+      const read = deckFiles(doc);
+      publishDeck(doc, read, { [slidePath('s1')]: read[slidePath('s1')]!.replace('>One<', '>One, then two<') }, false);
+    });
+    expect(committed('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq', deck.id).slice(before).map((r) => r.actor)).toEqual(['session:app-1', 'session:app-1']);
+    expect(rows()).toEqual([{ threadId: 't1', status: 'open', quote: 'One, then two', appSessionId: null }]);
+
+    // the agent replies and resolves, then deletes the element; another session comments elsewhere
+    await service.writeAs(deck.id, agent, (doc) => {
+      reply(doc, 't1', { id: 't1:a', by: agent, at: 2_000, body: 'Shortened.' });
+      resolve(doc, 't1', agent, 2_001);
+    });
+    await service.writeAs(deck.id, human, (doc) => deleteElementTree(doc, 's1', 'e1'));
+    await service.writeAs(deck.id, other, (doc) => addThread(doc, { threadId: 't2', slideId: 's1', elementId: 'title', quote: 'Title', by: other, at: 3_000, body: 'Bigger' }));
+    expect(rows()).toEqual([
+      { threadId: 't1', status: 'resolved', quote: 'One, then two', appSessionId: null },
+      { threadId: 't2', status: 'open', quote: 'Title', appSessionId: 'app-2' },
+    ]);
+
+    await store.restore(deck.id, at, human);
+    const live = replicaOf(deck.id);
+    const [t1, t2] = threadStates(live);
+    // the element and the text are back as they were, the reply stays, the status reverts (Decision Log 32)
+    expect(t1).toMatchObject({ id: 't1', status: 'open', live: true, orphan: false, quote: 'One' });
+    expect(t1!.messages.map((m) => m.body)).toEqual(['Shorter?', 'Shortened.']);
+    expect(t2).toMatchObject({ id: 't2', live: true, messages: [{ body: 'Bigger' }] });
+    expect(rows()).toEqual([
+      { threadId: 't1', status: 'open', quote: 'One', appSessionId: null },
+      { threadId: 't2', status: 'open', quote: 'Title', appSessionId: 'app-2' },
+    ]);
   });
 });

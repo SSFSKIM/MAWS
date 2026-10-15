@@ -10,6 +10,7 @@ import { deckFiles, readFlat } from './model';
 import { loadSlide } from './parse';
 import { publishDeck } from './publish';
 import { serializeSlide } from './serialize';
+import { addThread, getThread, reply, resolve } from './threads'; // M7
 
 const adapter = createPresentationAdapter({ now: () => new Date(Date.UTC(2026, 9, 14, 9, 30, 15, 250)) });
 
@@ -74,5 +75,44 @@ describe('the presentation adapter', () => {
     ).toBe('Published 4 slides (2 changed, 1 added, 1 removed)');
     expect(summarizeDeckTurn([r([slidePath('a')])])).toBe('Published 1 slide (1 changed, 0 added, 0 removed)');
     expect(summarizeDeckTurn([r([DECK_PATH])])).toBe('Published the deck’s index');
+    // M7: a turn's thread answers (artifact_reply, artifact_resolve) as their lines, after the publishes'
+    const line = (text: string) => ({ status: 'replied', threadId: 't1', line: text });
+    expect(summarizeDeckTurn([r([slidePath('a')]), line('replied on c:t1'), line('resolved c:t1')])).toBe('Published 1 slide (1 changed, 0 added, 0 removed)\nreplied on c:t1\nresolved c:t1');
+    expect(summarizeDeckTurn([line('replied on c:t1')])).toBe('replied on c:t1');
+  });
+
+  // M7 (D9): the threads mirror and the quote refresh, from the hooks
+  it('mirrors the threads an update touched and refreshes the quote of a commented element whose text the update changed', () => {
+    const doc = newDoc();
+    publishDeck(doc, {}, { [slidePath('a')]: '<section id="a"><p id="p">Old</p><p id="q">Other</p></section>', [slidePath('b')]: '<section id="b"><p id="r">B</p></section>' }, false);
+    const human = { kind: 'human' } as const;
+    const session = { kind: 'session', appSessionId: 'app-1' } as never;
+    const updateOf = (write: () => void): Uint8Array => {
+      let update: Uint8Array | null = null;
+      const off = onUpdate(doc, (u) => (update = u));
+      write();
+      off();
+      return update!;
+    };
+    const after = (write: () => void) => adapter.afterUpdate!(doc, { artifactId: 'x', update: updateOf(write), actor: human });
+
+    expect(after(() => addThread(doc, { threadId: 't1', slideId: 'a', elementId: 'p', quote: 'Old', by: session, at: 10 }))).toEqual({
+      threads: { upsert: [{ threadId: 't1', status: 'open', quote: 'Old', createdAt: 10, updatedAt: 10, appSessionId: 'app-1' }] },
+    });
+    addThread(doc, { threadId: 't2', slideId: 'b', elementId: 'r', quote: 'B', by: human, at: 11 });
+    // the commented element's text changes: its quote follows, the thread's row with it; t2's slide was not touched
+    expect(after(() => transact(doc, () => Y.writeText(doc, 'a', 'p', [{ type: 'p', inline: [{ text: 'New', marks: {} }] }])))).toEqual({
+      threads: { upsert: [{ threadId: 't1', status: 'open', quote: 'New', createdAt: 10, updatedAt: 10, appSessionId: 'app-1' }] },
+    });
+    expect(getThread(doc, 't1')!.quote).toBe('New');
+    // an edit elsewhere on the slide mirrors nothing
+    expect(after(() => transact(doc, () => Y.writeText(doc, 'a', 'q', [{ type: 'p', inline: [{ text: 'Else', marks: {} }] }])))).toBeUndefined();
+    // a reply and a resolve: the row's times
+    expect(after(() => reply(doc, 't1', { id: 'm1', by: human, at: 20, body: 'hi' }))).toMatchObject({ threads: { upsert: [{ threadId: 't1', updatedAt: 20 }] } });
+    expect(after(() => resolve(doc, 't1', human, 30))).toMatchObject({ threads: { upsert: [{ threadId: 't1', status: 'resolved', resolvedAt: 30, updatedAt: 30 }] } });
+    // a thread withdrawn: its row removed
+    expect(after(() => transact(doc, () => Y.deleteThread(doc, 't2')))).toEqual({ threads: { remove: ['t2'] } });
+    // a restore's pass: every thread's row
+    expect(adapter.afterRestore!(doc, { artifactId: 'x', versionId: 1 })).toMatchObject({ threads: { upsert: [{ threadId: 't1' }] } });
   });
 });

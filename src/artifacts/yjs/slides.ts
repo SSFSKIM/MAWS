@@ -406,6 +406,47 @@ export function postMessage(doc: Doc, threadId: string, message: Json): void {
 export function threadMessages(doc: Doc, threadId: string): Json[] {
   return thread(doc, threadId).toArray() as Json[];
 }
+// M7 (D9): what the thread module reads and writes beyond these
+export function hasThread(doc: Doc, threadId: string): boolean {
+  return doc.get(THREADS_ROOT).getAttr(threadId) instanceof Y.Node;
+}
+export function deleteThread(doc: Doc, threadId: string): void {
+  doc.get(THREADS_ROOT).deleteAttr(threadId);
+}
+/** Calls `listener` after every transaction that changed the threads root or a thread in it; returns the unsubscribe. */
+export function observeThreads(doc: Doc, listener: () => void): () => void {
+  const root = doc.get(THREADS_ROOT);
+  const h = () => listener();
+  root.observeDeep(h as never);
+  return () => root.unobserveDeep(h as never);
+}
+/** The threads an update touched: created, removed, a key set, a message posted (each followed up to its thread). */
+export function touchedThreads(doc: Doc, update: Uint8Array): Set<string> {
+  const ids = Y.createContentIdsFromUpdate(update);
+  const root = doc.get(THREADS_ROOT);
+  const out = new Set<string>();
+  const visit = (set: Y.IdSet) =>
+    set.forEach((range, client) => {
+      const structs = doc.store.clients.get(client) as Struct[] | undefined;
+      if (!structs) return;
+      let i: number;
+      try {
+        i = Y.findIndexSS(structs, range.clock);
+      } catch {
+        return;
+      }
+      for (const end = range.clock + range.len; i < structs.length && structs[i]!.id.clock < end; i++) {
+        const struct = structs[i]!;
+        if (!(struct instanceof Y.Item)) continue;
+        const parent = struct.parent;
+        if (parent === root && struct.parentSub !== null) out.add(struct.parentSub);
+        else if (parent instanceof Y.Node && parent.parent === root && parent._item?.parentSub) out.add(parent._item.parentSub);
+      }
+    });
+  visit(ids.inserts);
+  visit(ids.deletes);
+  return out;
+}
 
 // ---------------------------------------------------------------- the host's hooks
 

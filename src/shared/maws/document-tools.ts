@@ -168,19 +168,21 @@ export const DOCUMENT_TOOLS = {
   artifact_comments: {
     title: 'List document comments',
     description:
-      "List a MAWS document's comment threads with their quoted passage, the block it is on and their messages; without this tool, read the comments footer of artifact_read. status: open (the default, including orphaned threads whose passage is gone), resolved or all.",
+      "List a MAWS document's comment threads with their quoted passage, the block it is on and their messages; without this tool, read the comments footer of artifact_read. status: open (the default, including orphaned threads whose passage is gone), resolved or all." +
+      // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D9): a deck's threads, by the commented element
+      " On a presentation, each thread names the commented element by slideId and elementId (in place of tab and block) and quotes its text; orphaned means the element was deleted.",
     input: ArtifactCommentsInputSchema,
     annotations: READ_ONLY,
   },
   artifact_reply: {
     title: 'Reply to a document comment',
-    description: "Post a reply as this session to a comment thread of a MAWS document; without this tool, answer in the conversation. To answer with an edit, give artifact_edit's answering instead.",
+    description: "Post a reply as this session to a comment thread of a MAWS document; without this tool, answer in the conversation. To answer with an edit, give artifact_edit's answering instead." + ' It works the same on a presentation’s comment threads.' /* P3-C (D9) */,
     input: ArtifactReplyInputSchema,
     annotations: WRITER,
   },
   artifact_resolve: {
     title: 'Resolve a document comment',
-    description: 'Resolve a comment thread of a MAWS document once it is addressed, or reopen it with reopen: true; without this tool, tell the user it is addressed.',
+    description: 'Resolve a comment thread of a MAWS document once it is addressed, or reopen it with reopen: true; without this tool, tell the user it is addressed.' + ' It works the same on a presentation’s comment threads.' /* P3-C (D9) */,
     input: ArtifactResolveInputSchema,
     annotations: WRITER,
   },

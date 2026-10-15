@@ -41,6 +41,12 @@ A publish or read answer may carry two more fields:
 - **Pictures** are uploaded files. Call `artifact_upload_asset` with the file (under the working directory), then use the `ref` it returns, `assets/<name>`, as the `src`. A URL or a `data:` URI holds the slide. Claude's `/_blob/<id>` and `project/ds/<folder>/<file>` are kept but draw as placeholders until you upload the file and use its `assets/` ref. A picture whose asset is missing draws as a placeholder and is named in `warnings`.
 - **Faces**: prefer the design system's (`var(--ds-font-display)`, `var(--ds-font-body)`). A face of your own goes in `deck.json`'s `faces`, at most four. An uploaded font file is `{"family", "src": "assets/<name>"}`. A Google Fonts `href` is named but never fetched, so it draws only when the Mac has the face installed, else as its generic. Upload the font file when the face matters.
 
+## Comments
+
+The user comments on an element of a slide. Each thread is pinned to that element by its id, so it follows the element when it moves, is restyled, or when you republish the slide with the id kept. `artifact_comments` lists the threads (`status: "open"` by default, orphaned ones included; `"resolved"` or `"all"`), each naming the element by `slideId` and `elementId`, quoting its text, and carrying its messages. An orphaned thread's element was deleted, and its quote is the element's last text.
+
+A comment the user sends you arrives as a message beginning `Comment on "<deck title>, slide <n>: <slide title>" (passage "<the element's text>" in document <deck id>, thread <id>):`. Read the slide, make the change with `artifact_publish` when the comment asks for one, then answer in the thread with `artifact_reply`, where the user reads it. Resolve a thread with `artifact_resolve` only when the user asked you to or it is your own; the person who commented usually resolves it.
+
 ## Working with a design system
 
 A design system governs every deck: the deck's own, else its Space's default, then the user's, then the house system. `artifact_create` returns the governing system's `DESIGN.md`, or `artifact_describe_type` does. Read it first: its hard don'ts bind the deck.
@@ -56,4 +62,5 @@ A design system governs every deck: the deck's own, else its Space's default, th
 - Every slide id is in `order`, `cover` names the first slide, and the slides read as the outline you planned.
 - Text stays at 24px or more, inside the 128px margins, and fits its box. A sized box shrinks its text to fit (to 60 % at most, then clips), so shorten text rather than rely on it.
 - Check the deck against the design system's hard don'ts and contrast rules, and say which you checked.
+- Answer the comments you were sent in their threads, and tell the user about any thread your publish left orphaned.
 - Tell the user what you made or changed, by slide.

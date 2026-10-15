@@ -2,15 +2,18 @@
 // `KindAdapter` (src/artifacts/host.ts): a new deck's first content, the files a read returns, the three-way publish,
 // the repair after every update and restore, what a restore keeps, and the turn's summary; M3 adds the files' paths
 // (A's `paths`, so a publish answers without reading the deck). Portable: the engine host registers it (M3), P4's
-// network store the same.
-import type { KindAdapter } from '../host';
+// network store the same. M7 (D9): the threads mirror (`artifact_threads`) of every thread an update touched, and the
+// quote of a commented element refreshed while it lives, both from `afterUpdate` and, over every thread, `afterRestore`.
+import type { Actor } from '@shared/artifacts/actor';
+import type { KindAdapter, ThreadChange, ThreadRow } from '../host';
 import { transact, type Doc } from '../yjs';
-import { conversationsSince, touchedSlides } from '../yjs/slides';
+import { conversationsSince, touchedSlides, touchedThreads } from '../yjs/slides';
 import { DECK_PATH, slideIdOf, type DeckJson } from './deck';
 import { deckFiles, deckPaths, importSlide, repair, writeDeckKeys } from './model';
 import { loadSlide } from './parse';
 import { publishDeck } from './publish';
 import { escAttr, escText } from './serialize';
+import { getThread, listThreads, refreshQuotes, type DeckThread } from './threads';
 
 export const COVER_ID = 'cover';
 
@@ -46,8 +49,21 @@ export function writeInitialDeck(doc: Doc, title: string, at: Date): void {
   });
 }
 
-/** "Published N slides (M changed, K added, J removed)" over a turn's publish answers (`changed`, `removed`, `added`). */
+/**
+ * "Published N slides (M changed, K added, J removed)" over a turn's publish answers (`changed`, `removed`, `added`),
+ * then the lines of its thread answers (`artifact_reply`, `artifact_resolve`; M7), one per line.
+ */
 export function summarizeDeckTurn(results: unknown[]): string {
+  const lines = results.flatMap((result) => {
+    const line = (result as { line?: unknown } | null)?.line;
+    return typeof line === 'string' ? [line] : [];
+  });
+  const publishes = results.filter((result) => typeof (result as { line?: unknown } | null)?.line !== 'string');
+  if (publishes.length === 0 && lines.length > 0) return lines.join('\n');
+  return [summarizePublishes(publishes), ...lines].join('\n');
+}
+
+function summarizePublishes(results: unknown[]): string {
   const added = new Set<string>();
   const changed = new Set<string>();
   const removed = new Set<string>();
@@ -77,6 +93,30 @@ export function summarizeDeckTurn(results: unknown[]): string {
   return `Published ${n} slide${n === 1 ? '' : 's'} (${changed.size} changed, ${added.size} added, ${removed.size} removed)`;
 }
 
+// One row of the threads mirror (B's shape, src/artifacts/document/adapter.ts): the library and the session panel list
+// threads from it without opening the deck.
+const threadRow = (thread: DeckThread): ThreadRow => ({
+  threadId: thread.id,
+  status: thread.status,
+  quote: thread.quote,
+  createdAt: thread.createdAt,
+  updatedAt: Math.max(thread.createdAt, thread.resolvedAt ?? 0, thread.reopenedAt ?? 0, ...thread.messages.map((message) => message.at)),
+  ...(thread.status === 'resolved' && thread.resolvedAt != null ? { resolvedAt: thread.resolvedAt } : {}),
+  ...(thread.createdBy.kind === 'session' ? { appSessionId: (thread.createdBy as Extract<Actor, { kind: 'session' }>).appSessionId } : {}),
+});
+
+function mirrorRows(doc: Doc, threadIds: Iterable<string>): ThreadChange | undefined {
+  const upsert: ThreadRow[] = [];
+  const remove: string[] = [];
+  for (const id of [...new Set(threadIds)].sort()) {
+    const thread = getThread(doc, id);
+    if (thread) upsert.push(threadRow(thread));
+    else remove.push(id);
+  }
+  if (upsert.length === 0 && remove.length === 0) return undefined;
+  return { ...(upsert.length ? { upsert } : {}), ...(remove.length ? { remove } : {}) };
+}
+
 export function createPresentationAdapter(options: { now?: () => Date } = {}): KindAdapter {
   const now = options.now ?? (() => new Date());
   return {
@@ -91,9 +131,18 @@ export function createPresentationAdapter(options: { now?: () => Date } = {}): K
       const touched = touchedSlides(live, update);
       if (touched === null) repair(live);
       else if (touched.size > 0) repair(live, { slides: touched });
+      // M7: the quotes of commented elements on the touched slides, then the mirror rows of every thread changed
+      const quoted = touched === null ? refreshQuotes(live) : touched.size > 0 ? refreshQuotes(live, { slides: touched }) : [];
+      const threads = mirrorRows(live, [...touchedThreads(live, update), ...quoted]);
+      return threads ? { threads } : undefined;
     },
     revertScope: (live, old) => ({ keep: conversationsSince(live, old) }),
-    afterRestore: (live) => void repair(live),
+    afterRestore: (live) => {
+      repair(live);
+      refreshQuotes(live); // M7
+      const upsert = listThreads(live).map(threadRow);
+      return upsert.length ? { threads: { upsert } } : undefined;
+    },
     summarizeTurn: summarizeDeckTurn,
   };
 }
