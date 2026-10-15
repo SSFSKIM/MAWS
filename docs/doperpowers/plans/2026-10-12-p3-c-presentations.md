@@ -18,7 +18,7 @@ The presentation kind of the co-work layer: Claude's slide dialect as the agent'
 - [ ] M6 — Design system, layouts and the presenter.
 - [ ] M7 — Comments on objects.
 - [ ] M8 — History per slide.
-- [ ] M9 — Export: PPTX, PDF, HTML, For Claude.
+- [ ] M9 — Export: PPTX, PDF, HTML, For Claude. **Reviewed clean 2026-10-15** after two fix waves (d2fdccd2..80ee1702; fixes 4b3bf66b..16d03554 and ee77a618, 1636a5cb): presentation × html, pdf, png, pptx (named, basic, pictures; `embedded` peeled, Decision Log 21), claude; the LibreOffice compare against the app's canvas per Decision Log 23 (144 text boxes whole and in order, mean pixel difference ≤ 0.037); For Claude lowering groups or refusing by name, refusing held slides; one copy of the drawing rules (`render-rules.ts`); full suite 13,510 passed; build and the bundle guard 2/2. **Ticks after D's landed tip is re-merged** (its main-side system resolution consumes D; the Constraints' merged-under-review rule). Minor debt: model-path group lowering ignores a group's border inset; the text matcher's punctuation exception is broader than symbol-only.
 - [ ] M10 — Acceptance.
 
 ## Terms
