@@ -152,8 +152,9 @@ and no duplicated text in the subagent.
 
 **At its end:** the diff view draws DX4's `diff {base, text}` through
 `splitPatch` and MAWS's `ReviewView`; session info shows machine, cwd,
-and worktree from `DeskSession`, and model, context use, and cost from the
-transcript, derived as MAWS derives them; the `transcript` slot renders a
+and worktree from `DeskSession`, the model from the transcript, and
+context use and cost from DX4 `usage` ("unavailable (no bridge)" when
+null; Decision Log, 2026-10-15); the `transcript` slot renders a
 direct channel's unfolded working record in the center (the main
 transcript through M1's adapter) for DC5's M3 to mount; and the whole
 acceptance passes against DC3's fake machine.
@@ -239,6 +240,46 @@ registrations through `connectDepth()`.
   and is scrubbed of paths, user names, and host names. DC3's M4 recording
   becomes the one that counts once it lands at M3.
   Date/Author: 2026-10-15, composite's writer via the controller.
+- Decision: M1 settles streaming without a message id in **the adapter's
+  own layer** over the transcript view: a block's partial text is dropped
+  from that layer when the row its `block-row` named lands in the store.
+  Lost: the provisional-id route needs an operation MAWS lacks
+  (`reduce.ts:544–560` keeps a provisional block with `messageUuid: null`,
+  `:817–835` pairs completion only within one API message id,
+  `backfill.ts:336–352` gives the completed row the real id so the
+  provisional text would stay beside it, and `derive.ts:331–355` drops only
+  by a non-null message uuid); a reducer change conflicts with DX8, which
+  imports the model and store as they stand. M1's proof adds several blocks
+  of one API message (thinking, text, and tool use of one response) and a
+  settling row that arrives late, after chunks of later blocks.
+  Date/Author: 2026-10-15, plan review via the composite's writer.
+- Decision: Older rows enter the chronological model by **rebuild**:
+  the adapter keeps the raw rows in order and, when an older page arrives,
+  rebuilds the store chronologically from them with a fresh backfill
+  context; live streaming carries on in the adapter's layer. Reason:
+  `TranscriptSource` (`source/types.ts:6–13`) has no prepend and the
+  reducer appends turns in arrival order with turn and tool-loop state in
+  its backfill context (`reduce.ts:278–284, 407–416, 469–479`,
+  `backfill.ts:27–46`), so a page applied on its own lands older turns
+  after newer ones and splits a tool call from its result. M1's proof adds
+  a page boundary splitting a turn and a tool call from its result while
+  live chunks arrive: order, tool ownership, de-duplication, and the
+  reader's scroll position kept.
+  Date/Author: 2026-10-15, plan review via the composite's writer.
+- Decision: M3's context use and cost come from **DX4 `usage`**
+  (composite `d349a87a`), not the transcript: MAWS reads them from its
+  main process's digest and `cost-state` records carry no uuid, so the row
+  mapper drops them. DX4 gains `usage {context: {tokens, window, percent},
+  cost}` (the bridge's DX5 `usage` after each main turn, on main-transcript
+  subscriptions only) and the snapshot gains `usage`, null with no bridge
+  or none yet, absent on a subagent's snapshot; DX8's `SubscriptionMessage`
+  adds `'usage'`. Session info draws context and cost from it and
+  "unavailable (no bridge)" when null. M3's proof adds browser checks for
+  the initial load, an update after a turn, and a reconnect. DC3 (module)
+  and DC5 (DX8 type) add their sides; until then, the double. This
+  supersedes M3's "model, context use, and cost from the transcript" for
+  context and cost; the model stays the transcript's.
+  Date/Author: 2026-10-15, plan review via the composite's writer.
 
 ## Surprises & Discoveries
 
