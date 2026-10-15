@@ -67,6 +67,7 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
   const gridStatus = useGrid((s) => s.status);
   const name = useGrid((s) => (route.view === 'project' ? s.projects.find((p) => p.id === route.project)?.name : undefined));
   const keyState = useKeyHolder((s) => s.state);
+  const keyNotForgotten = useKeyHolder((s) => s.forgetError !== null);
   return (
     <header className="flex items-center gap-3 border-b border-border bg-bg-raised px-4">
       <button type="button" onClick={() => navigate({ view: 'grid' })} className="rounded-sm px-1 text-ui-sm font-semibold tracking-[1.7px] text-fg-muted hover:bg-bg-hover">
@@ -89,6 +90,7 @@ function TopBar({ me, open }: { me: Me; open: (panel: Panel) => void }) {
         </button>
         <button type="button" onClick={() => open('key')} className="rounded-sm px-1 hover:bg-bg-hover hover:text-fg" data-testid="key-state" disabled={keyState === 'loading'}>
           {keyState === 'locked' ? 'Locked' : keyState === 'unlocked' ? 'Unlocked' : ''}
+          {keyNotForgotten && <span className="text-danger"> · key still stored</span>}
         </button>
         <span className="flex items-center gap-1.5" data-testid="grid-status">
           <span className={['h-1.5 w-1.5 rounded-full', gridStatus === 'open' ? 'bg-success' : 'bg-warning'].join(' ')} aria-hidden />

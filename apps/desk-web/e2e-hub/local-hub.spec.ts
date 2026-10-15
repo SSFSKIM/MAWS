@@ -119,7 +119,7 @@ test('the passkey unlocks the key, and the code the browser builds enrolls a mac
   // Its first authenticated connection confirms it.
   await machine.connect();
   await reopen();
-  await expect(dialog.locator(`[data-machine="${MACHINE}"]`)).toContainText('connected');
+  await expect(dialog.locator(`[data-machine="${MACHINE}"]`)).toContainText('enrolled');
 
   // The name is the machine's now.
   await dialog.getByRole('button', { name: 'Enroll a machine' }).click();

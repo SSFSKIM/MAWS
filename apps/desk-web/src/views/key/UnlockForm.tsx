@@ -4,7 +4,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import type { Me } from '../../hub/me';
 import { passphraseProblem } from '../../key/derive';
-import { unlock, type Keep } from '../../key/holder';
+import { beginUnlock, type Keep } from '../../key/holder';
 import { PasskeyError, prfSupported } from '../../key/passkey';
 import { deriveOrgKey, rememberedMethod, rememberMethod, type KeySource } from '../../key/unlock';
 import { buttonPrimary, buttonQuiet, buttonSecondary, textInput } from '../common/Dialog';
@@ -27,9 +27,11 @@ export function UnlockForm({ me, onUnlocked }: { me: Me; onUnlocked?: () => void
     setBusy(source.kind);
     setError(null);
     setProgress(0);
+    // Begun before the derivation, which takes seconds: a Lock pressed meanwhile wins, even after this form is gone.
+    const attempt = beginUnlock(org);
     try {
       const raw = await deriveOrgKey(org, source);
-      await unlock(org, raw, keep);
+      if (!(await attempt.finish(raw, keep))) return;
       rememberMethod(org, source.kind === 'passphrase' ? 'passphrase' : 'passkey');
       setPassphrase('');
       onUnlocked?.();

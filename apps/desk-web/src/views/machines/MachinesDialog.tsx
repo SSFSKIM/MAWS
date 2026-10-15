@@ -49,7 +49,7 @@ function MachineList(props: { me: Me; machines: MachineRecord[] | undefined; err
           {machines.map((m) => (
             <li key={m.name} className="flex items-baseline gap-2 border-b border-border py-1.5 text-ui last:border-b-0" data-machine={m.name}>
               <span className="font-medium">{m.name}</span>
-              <span className={m.state === 'active' ? 'text-ui-sm text-success' : 'text-ui-sm text-warning'}>{m.state === 'active' ? 'connected' : 'enrolling — waiting for its first connection'}</span>
+              <span className={m.state === 'active' ? 'text-ui-sm text-success' : 'text-ui-sm text-warning'}>{m.state === 'active' ? 'enrolled' : 'enrolling — waiting for its first connection'}</span>
             </li>
           ))}
         </ul>
@@ -118,6 +118,8 @@ function ConfirmStep(props: { me: Me; machine: string; onCancel: () => void; onC
     let key: Uint8Array | null = null;
     try {
       key = await deriveHeldKey(me.org.id, source, held);
+      // Locked while it derived: the owner took the key out of this browser, so no code carries it out either.
+      if (useKeyHolder.getState().key !== held) return setError('The org key was locked meanwhile. Unlock it to enroll.');
       const { enrollment, token } = await createEnrollment();
       const code = enrollmentCode({ hub: location.origin, org: me.org.id, token, machine, key });
       onCode(code, enrollment.expires);
