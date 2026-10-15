@@ -16,7 +16,7 @@ import { hubConfig, MEMBER_HEADER, type Env, type HubConfig } from '../env';
 import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
-import { base64urlEncode, isBase64urlOf } from '../protocol/base64url';
+import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../protocol/base64url';
 import type { GridDown, ProjectSummary, PushNotice } from '../protocol/browser';
 import {
   ENROLLMENT_TTL_S,
@@ -32,7 +32,9 @@ import {
   type ProjectRecord,
   type PushSubscriptionRecord,
   type Redeemed,
+  type WrappedKeyRemoved,
 } from '../protocol/identity';
+import { OrgKeys, type StoredKey } from './org-keys';
 
 export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord };
 
@@ -43,7 +45,7 @@ const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const fail = (status: number, error: string, message?: string): Result<never> => ({ ok: false, status, error, ...(message ? { message } : {}) });
 
 const SCHEMA = `
-CREATE TABLE IF NOT EXISTS org (id TEXT PRIMARY KEY, name TEXT NOT NULL, created TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS org (id TEXT PRIMARY KEY, name TEXT NOT NULL, created TEXT NOT NULL, key_check TEXT, key_auth TEXT);
 CREATE TABLE IF NOT EXISTS members (
   id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machines (
@@ -88,9 +90,15 @@ export class Registry extends DurableObject<Env> {
   /** Per service-token name, the tail of the API work queued under it (an object restart ends the work with it). */
   private readonly nameQueues = new Map<string, Promise<unknown>>();
 
+  private readonly keys: OrgKeys;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(SCHEMA);
+    // An org stored before wrapped keys (M2's local state) gains its key check and key auth, empty.
+    const columns = ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(org)').toArray().map((c) => c.name);
+    for (const column of ['key_check', 'key_auth']) if (!columns.includes(column)) ctx.storage.sql.exec(`ALTER TABLE org ADD COLUMN ${column} TEXT`);
+    this.keys = new OrgKeys(ctx.storage);
   }
 
   private get config(): HubConfig {
@@ -511,15 +519,52 @@ export class Registry extends DurableObject<Env> {
 
   /** The org, created from the deploy configuration the first time it is needed, with its admin as the first member. */
   private ensureOrg(): OrgRecord {
-    const existing = this.sql.exec<OrgRecord>('SELECT id, name, created FROM org').toArray()[0];
+    const existing = this.sql.exec<OrgRecord>('SELECT id, name, created, key_check FROM org').toArray()[0];
     if (existing) return existing;
     const { org: config } = this.config;
     const created = iso(Date.now());
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec('INSERT INTO org (id, name, created) VALUES (?, ?, ?)', config.id, config.name, created);
+      this.sql.exec('INSERT INTO org (id, name, created, key_check) VALUES (?, ?, ?, NULL)', config.id, config.name, created);
       this.sql.exec('INSERT INTO members (id, email, role, created) VALUES (?, ?, ?, ?)', newId(), config.adminEmail.toLowerCase(), 'admin', created);
     });
-    return { id: config.id, name: config.name, created };
+    return { id: config.id, name: config.name, created, key_check: null };
   }
 
+  // ---- The org key's wrapped copies (DX7) ----------------------------------------------------------------------
+
+  orgKeys(): { key_check: string | null; keys: StoredKey[] } {
+    return { key_check: this.ensureOrg().key_check, keys: this.keys.list() };
+  }
+
+  /** Adds a wrapped key; the first sets the org's `key_check` and `key_auth` in the same step as its insert. */
+  async addOrgKey(member: MemberRecord, body: unknown): Promise<Result<{ key: StoredKey }>> {
+    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const authHash = await this.authHash(body);
+    // From here to the insert, nothing else runs in this object: two first posts cannot both set the check.
+    const org = this.ensureOrg();
+    const keyAuth = this.keyAuth();
+    const setOrg = (check: string, auth: string) => this.sql.exec('UPDATE org SET key_check = ?, key_auth = ?', check, auth);
+    const added = this.keys.add(member, body, { keyCheck: org.key_check, keyAuth }, authHash, setOrg, newId(), iso(Date.now()));
+    return added.ok ? ok({ key: added.value }) : fail(added.status, added.error, added.message);
+  }
+
+  async removeOrgKey(member: MemberRecord, id: string, body: unknown): Promise<Result<WrappedKeyRemoved>> {
+    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const authHash = await this.authHash(body);
+    const removed = this.keys.remove(id, this.keyAuth(), authHash);
+    return removed.ok ? ok({ removed: removed.value }) : fail(removed.status, removed.error, removed.message);
+  }
+
+  /** SHA-256 of a body's `auth` (32 bytes, canonical base64url), base64url; null when it carries none. The org keeps only
+   * this digest (`key_auth`), and compares digests, never the `auth` itself. */
+  private async authHash(body: unknown): Promise<string | null> {
+    const auth = typeof body === 'object' && body !== null ? (body as { auth?: unknown }).auth : undefined;
+    if (!isBase64urlOf(auth, 32)) return null;
+    return base64urlEncode(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(base64urlDecode(auth as string)))));
+  }
+
+  /** The org's `key_auth`, never returned by any endpoint. */
+  private keyAuth(): string | null {
+    return this.sql.exec<{ key_auth: string | null }>('SELECT key_auth FROM org').toArray()[0]?.key_auth ?? null;
+  }
 }
