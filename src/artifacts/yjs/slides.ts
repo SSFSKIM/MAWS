@@ -494,6 +494,40 @@ export function touchedSlides(doc: Doc, update: Uint8Array): Set<string> | null 
   return unknown ? null : out;
 }
 
+/**
+ * P3-C M7 (Decision Log 31's ruling): the slides whose content an update not yet applied to `doc` deletes (its delete
+ * set looked up in `doc`, where that content still is), so the adapter reads the quotes of the elements it may take away
+ * before it lands. Empty when it deletes nothing in `slides`; null when that cannot be told.
+ */
+export function slidesDeletedIn(doc: Doc, update: Uint8Array): Set<string> | null {
+  const { deletes } = Y.createContentIdsFromUpdate(update);
+  const root = slidesNode(doc);
+  const out = new Set<string>();
+  let unknown = false;
+  deletes.forEach((range, client) => {
+    if (unknown) return;
+    const structs = doc.store.clients.get(client) as Struct[] | undefined;
+    if (!structs) return; // nothing of that client here: nothing of `doc` to delete
+    let i: number;
+    try {
+      i = Y.findIndexSS(structs, range.clock);
+    } catch {
+      return; // beyond what `doc` holds
+    }
+    for (const end = range.clock + range.len; i < structs.length && structs[i]!.id.clock < end; i++) {
+      const struct = structs[i]!;
+      if (!(struct instanceof Y.Item)) continue;
+      const id = slideOf(struct, root);
+      if (id === undefined) {
+        unknown = true;
+        return;
+      }
+      if (id !== null) out.add(id);
+    }
+  });
+  return unknown ? null : out;
+}
+
 /** The slide an item sits in: its id, null when it is outside `slides`, undefined when its parent is not loaded. */
 function slideOf(item: Y.Item, root: N): string | null | undefined {
   for (let it: Y.Item = item; ; ) {

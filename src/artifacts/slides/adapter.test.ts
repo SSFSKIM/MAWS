@@ -2,11 +2,11 @@
 // new deck's cover, the files a read returns, the scoped repair and the turn's summary. Its behaviour on A's real
 // document service is src/engine-host/presentations/adapter.test.ts.
 import { describe, expect, it } from 'vitest';
-import { diffV1, newDoc, onUpdate, transact } from '../yjs';
+import { applyV1, diffV1, newDoc, onUpdate, transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
 import { COVER_ID, coverSlide, createPresentationAdapter, summarizeDeckTurn } from './adapter';
 import { DECK_PATH, parseDeckJson, slidePath } from './deck';
-import { deckFiles, readFlat } from './model';
+import { deckFiles, deleteElementTree, deleteSlide, readFlat } from './model';
 import { loadSlide } from './parse';
 import { publishDeck } from './publish';
 import { serializeSlide } from './serialize';
@@ -81,8 +81,8 @@ describe('the presentation adapter', () => {
     expect(summarizeDeckTurn([line('replied on c:t1')])).toBe('replied on c:t1');
   });
 
-  // M7 (D9): the threads mirror and the quote refresh, from the hooks
-  it('mirrors the threads an update touched and refreshes the quote of a commented element whose text the update changed', () => {
+  // M7 (D9): the threads mirror from the hooks; the quote derived while the element lives (Decision Log 31)
+  it('mirrors the threads an update touched, and writes nothing to a thread when its element’s text changes', () => {
     const doc = newDoc();
     publishDeck(doc, {}, { [slidePath('a')]: '<section id="a"><p id="p">Old</p><p id="q">Other</p></section>', [slidePath('b')]: '<section id="b"><p id="r">B</p></section>' }, false);
     const human = { kind: 'human' } as const;
@@ -100,10 +100,9 @@ describe('the presentation adapter', () => {
       threads: { upsert: [{ threadId: 't1', status: 'open', quote: 'Old', createdAt: 10, updatedAt: 10, appSessionId: 'app-1' }] },
     });
     addThread(doc, { threadId: 't2', slideId: 'b', elementId: 'r', quote: 'B', by: human, at: 11 });
-    // the commented element's text changes: its quote follows, the thread's row with it; t2's slide was not touched
-    expect(after(() => transact(doc, () => Y.writeText(doc, 'a', 'p', [{ type: 'p', inline: [{ text: 'New', marks: {} }] }])))).toEqual({
-      threads: { upsert: [{ threadId: 't1', status: 'open', quote: 'New', createdAt: 10, updatedAt: 10, appSessionId: 'app-1' }] },
-    });
+    // the commented element's text changes: no thread write and no row (no host row per keystroke); readers derive it
+    expect(after(() => transact(doc, () => Y.writeText(doc, 'a', 'p', [{ type: 'p', inline: [{ text: 'New', marks: {} }] }])))).toBeUndefined();
+    expect(Y.threadScalars(doc, 't1').quote).toBe('Old');
     expect(getThread(doc, 't1')!.quote).toBe('New');
     // an edit elsewhere on the slide mirrors nothing
     expect(after(() => transact(doc, () => Y.writeText(doc, 'a', 'q', [{ type: 'p', inline: [{ text: 'Else', marks: {} }] }])))).toBeUndefined();
@@ -114,5 +113,69 @@ describe('the presentation adapter', () => {
     expect(after(() => transact(doc, () => Y.deleteThread(doc, 't2')))).toEqual({ threads: { remove: ['t2'] } });
     // a restore's pass: every thread's row
     expect(adapter.afterRestore!(doc, { artifactId: 'x', versionId: 1 })).toMatchObject({ threads: { upsert: [{ threadId: 't1' }] } });
+  });
+
+  // Decision Log 31's ruling: a thread's stored quote is written when its element is deleted, from the text it had just
+  // before, on every route a deletion takes: a replica's frame (`beforeApply`'s forwarding edit), the agent's publish
+  // (the adapter's `publish`) and a restore (`revertScope` reads it, `afterRestore` writes it)
+  describe('the quote stored at an element’s deletion', () => {
+    const human = { kind: 'human' } as const;
+    const SLIDE = '<section id="a"><p id="p">Old</p><p id="q">Other</p></section>';
+    function commented(): Doc {
+      const doc = newDoc();
+      publishDeck(doc, {}, { [slidePath('a')]: SLIDE }, false);
+      addThread(doc, { threadId: 't1', slideId: 'a', elementId: 'p', quote: 'Old', by: human, at: 10 });
+      transact(doc, () => Y.writeText(doc, 'a', 'p', [{ type: 'p', inline: [{ text: 'Last words', marks: {} }] }]));
+      return doc;
+    }
+    /** A replica of `live` that makes `edit`: the update it sends. */
+    function frameOf(live: Doc, edit: (replica: Doc) => void): Uint8Array {
+      const replica = newDoc();
+      applyV1(replica, diffV1(live));
+      let update: Uint8Array | null = null;
+      const off = onUpdate(replica, (u) => (update = u));
+      edit(replica);
+      off();
+      replica.destroy();
+      return update!;
+    }
+    const stored = (doc: Doc) => Y.threadScalars(doc, 't1').quote;
+
+    it('from a replica’s frame: the forwarding edit stores the pre-delete text; a frame that deletes nothing has none', () => {
+      const live = commented();
+      expect(adapter.beforeApply!(live, frameOf(live, (r) => reply(r, 't1', { id: 'm1', by: human, at: 20, body: 'hi' })), { artifactId: 'x', actor: human, step2: false })).toBeNull();
+      const restyle = frameOf(live, (r) => transact(r, () => Y.writeText(r, 'a', 'q', [{ type: 'p', inline: [{ text: 'Else', marks: {} }] }])));
+      const kept = adapter.beforeApply!(live, restyle, { artifactId: 'x', actor: human, step2: false });
+      applyV1(live, restyle);
+      kept?.(live);
+      expect(stored(live)).toBe('Old'); // the element lives: nothing stored
+      const deletion = frameOf(live, (r) => deleteElementTree(r, 'a', 'p'));
+      const forward = adapter.beforeApply!(live, deletion, { artifactId: 'x', actor: human, step2: false });
+      expect(forward).toBeTypeOf('function');
+      applyV1(live, deletion);
+      forward!(live);
+      expect(stored(live)).toBe('Last words');
+      expect(getThread(live, 't1')!.quote).toBe('Last words');
+    });
+
+    it('from the agent’s publish that removes the element, or its slide', () => {
+      const live = commented();
+      const files = deckFiles(live);
+      adapter.publish!(live, files, { [slidePath('a')]: '<section id="a"><p id="q">Other</p></section>' }, false);
+      expect(stored(live)).toBe('Last words');
+      const other = commented();
+      adapter.publish!(other, deckFiles(other), { [slidePath('a')]: null }, false);
+      expect(stored(other)).toBe('Last words');
+    });
+
+    it('from a restore that takes the element away', () => {
+      const live = commented();
+      const old = newDoc();
+      expect(adapter.revertScope!(live, old, { artifactId: 'x' })).toBeTruthy();
+      deleteSlide(live, 'a'); // what the restore's write does to the live deck
+      adapter.afterRestore!(live, { artifactId: 'x', versionId: 1 });
+      expect(stored(live)).toBe('Last words');
+      old.destroy();
+    });
   });
 });

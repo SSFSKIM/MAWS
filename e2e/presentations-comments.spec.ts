@@ -5,7 +5,9 @@
 // card with B's artifact target and anchor; Resolve on the card keeps the thread, the rail reopens it; its pin sits at
 // the element's top-right and follows it through a drag, a resize from another replica, a re-order of slides and an
 // agent's republish that rewrites its text (the quote following); deleting the element shows the thread orphaned with
-// that last text; Resolve and Reopen in the rail; the header counts the open threads. The agent's three tools are the
+// that last text; Resolve and Reopen in the rail; the header counts the open threads. Decision Log 31's narrow-panel
+// ruling: at the panel's default width (under 720 px of editor) a rail overlays the stage as a sheet from the right, so
+// the stage keeps its width. The agent's three tools are the
 // host's unit tests (src/engine-host/presentations/threads.test.ts), through the real tool server.
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
@@ -108,7 +110,24 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click();
   const deck = panel.locator(`[data-deck-artifact="${id}"]`);
   await expect(deck.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
-  // the panel widened to its widest (640 px): its default 380 px leaves no stage beside the filmstrip and the rail
+  const toolbar = deck.getByRole('toolbar', { name: 'Deck' });
+
+  // at the panel's default width a rail is a sheet over the stage, which keeps its width (Decision Log 31's ruling)
+  expect((await deck.locator('[data-deck-editor]').boundingBox())!.width).toBeLessThan(720);
+  const surface = deck.locator('[data-stage-surface]');
+  const before = (await surface.boundingBox())!;
+  await toolbar.getByRole('button', { name: /^Comments/ }).click();
+  const sheet = deck.locator('[data-deck-rail="comments"]');
+  await expect(sheet).toBeVisible();
+  expect(await sheet.evaluate((el) => getComputedStyle(el).position)).toBe('absolute');
+  const [over, under] = [(await sheet.boundingBox())!, (await surface.boundingBox())!];
+  expect(Math.abs(under.width - before.width)).toBeLessThan(1);
+  expect(over.x).toBeLessThan(under.x + under.width); // it lies over the stage's right side
+  expect(over.x + over.width).toBeGreaterThan(under.x + under.width - 1);
+  await toolbar.getByRole('button', { name: /^Comments/ }).click();
+  await expect(sheet).toHaveCount(0);
+
+  // the panel widened to its widest (640 px), so the gestures below have room on the stage
   const divider = panel.getByRole('separator', { name: 'Resize right panel' });
   const room = Number(await divider.getAttribute('aria-valuemax')) - Number(await divider.getAttribute('aria-valuenow'));
   const grip = (await divider.boundingBox())!;
@@ -117,7 +136,6 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await page.mouse.move(grip.x + grip.width / 2 - room, grip.y + grip.height / 2, { steps: 8 });
   await page.mouse.up();
   await expect.poll(async () => (await panel.boundingBox())!.width).toBeGreaterThanOrEqual(600);
-  const toolbar = deck.getByRole('toolbar', { name: 'Deck' });
 
   // the element selected by a click and commented: P2's card on B's artifact target, labelled with the slide
   const first = (await stageAt(deck)).at;
@@ -142,7 +160,7 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
 
   // the pin at the element's top-right
   await expect.poll(() => pinOffset(deck, 'body'), { message: 'the pin on the element’s corner' }).toBeLessThan(4);
-  const { at, scale } = await settledStage(deck); // the rail took room beside the stage: the fit zoom changed
+  const { at, scale } = await settledStage(deck); // the fit zoom after the panel's resize
   // a drag moves the element: the pin follows
   await drag(page, at(550, 560), at(850, 360));
   await expect.poll(async () => (await seam(page, 'files', id))['project/slides/s1.html']).toContain('left:600px');
@@ -157,15 +175,19 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await seam(page, 'seed', id, { ...files, 'project/deck.json': DECK_JSON(['s2', 's1']), 'project/slides/s1.html': files['project/slides/s1.html']!.replace('One path', 'Two paths') });
   expect(await seam(page, 'order', id)).toEqual(['s2', 's1']);
   await expect(thread.locator('.deck-thread-slide')).toHaveText('Slide 2');
-  await expect(thread.locator('.deck-thread-quote-text')).toHaveText('Two paths'); // the host refreshed the quote
+  await expect(thread.locator('.deck-thread-quote-text')).toHaveText('Two paths'); // the quote read from the element
   await expect(deck.locator('[data-stage-slide="s1"]')).toBeVisible(); // still the slide shown
   await expect.poll(() => pinOffset(deck, 'body')).toBeLessThan(4);
 
-  // the element deleted: the thread orphaned with the element's last text, no pin; still counted open
+  // the element deleted (the sheet closed so the stage takes the click, then opened again): the thread orphaned with the
+  // element's last text, stored by the host from the text just before the deletion; no pin; still counted open
+  await toolbar.getByRole('button', { name: /^Comments/ }).click();
+  await expect(rail).toHaveCount(0);
   const box = (await deck.locator('[data-stage-slide] [data-eid="body"]').boundingBox())!;
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
   await expect(deck.locator('[data-overlay] [data-selected="body"]')).toBeVisible();
   await page.keyboard.press('Delete');
+  await toolbar.getByRole('button', { name: /^Comments/ }).click();
   await expect(thread).toHaveAttribute('data-orphan', '');
   await expect(thread).toContainText('The commented element was deleted.');
   await expect(thread.locator('.deck-thread-quote-text')).toHaveText('Two paths');

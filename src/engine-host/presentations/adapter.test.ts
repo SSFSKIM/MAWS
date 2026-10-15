@@ -129,8 +129,9 @@ describe('the presentation adapter on the document service', () => {
     expect(store.listVersions(deck.id).map((v) => v.kind)).toEqual(['named', 'auto', 'restore']);
   });
 
-  // M7 (D9): the threads mirror and the quote refresh on the real service, and a restore keeping a conversation
-  it('mirrors the deck’s threads into artifact_threads, refreshes a quote as the editing actor’s write, and a restore keeps a reply posted after the version', async () => {
+  // M7 (D9): the threads mirror on the real service, the quote derived while the element lives and stored at its deletion
+  // (Decision Log 31's ruling), and a restore keeping a conversation
+  it('mirrors the deck’s threads into artifact_threads, writes no quote while the element lives, stores it when the agent’s publish deletes it, and a restore keeps a reply posted after the version', async () => {
     const deck = await store.create({ kind: 'presentation', title: 'T' }, human);
     await service.writeAs(deck.id, agent, (doc) => void publishDeck(doc, deckFiles(doc), { [slidePath('s1')]: SLIDE }, false));
     await service.writeAs(deck.id, human, (doc) => addThread(doc, { threadId: 't1', slideId: 's1', elementId: 'e1', quote: elementQuote(doc, 's1', 'e1'), by: human, at: 1_000, body: 'Shorter?' }));
@@ -138,21 +139,28 @@ describe('the presentation adapter on the document service', () => {
     expect(rows()).toEqual([{ threadId: 't1', status: 'open', quote: 'One', appSessionId: null }]);
     const at = (await store.createVersion(deck.id, { kind: 'named', actor: human, label: 'v1' }))!;
 
-    // the agent rewrites the element's text: the refreshed quote lands in the agent's own write, and in the mirror
+    // the agent rewrites the element's text: its own write alone, no thread row; a reader derives the quote
+    const kind = service.adapterFor('presentation')!;
     const before = committed('SELECT seq FROM artifact_updates WHERE artifactId = ?', deck.id).length;
     await service.writeAs(deck.id, agent, (doc) => {
       const read = deckFiles(doc);
-      publishDeck(doc, read, { [slidePath('s1')]: read[slidePath('s1')]!.replace('>One<', '>One, then two<') }, false);
+      kind.publish!(doc, read, { [slidePath('s1')]: read[slidePath('s1')]!.replace('>One<', '>One, then two<') }, false);
     });
-    expect(committed('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq', deck.id).slice(before).map((r) => r.actor)).toEqual(['session:app-1', 'session:app-1']);
-    expect(rows()).toEqual([{ threadId: 't1', status: 'open', quote: 'One, then two', appSessionId: null }]);
+    expect(committed('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq', deck.id).slice(before).map((r) => r.actor)).toEqual(['session:app-1']);
+    expect(rows()).toEqual([{ threadId: 't1', status: 'open', quote: 'One', appSessionId: null }]);
+    expect(threadStates(replicaOf(deck.id))[0]).toMatchObject({ quote: 'One, then two' });
 
-    // the agent replies and resolves, then deletes the element; another session comments elsewhere
+    // the agent replies and resolves (the row now carrying the quote read then), then its publish deletes the element,
+    // storing its last text; another session comments elsewhere
     await service.writeAs(deck.id, agent, (doc) => {
       reply(doc, 't1', { id: 't1:a', by: agent, at: 2_000, body: 'Shortened.' });
       resolve(doc, 't1', agent, 2_001);
     });
-    await service.writeAs(deck.id, human, (doc) => deleteElementTree(doc, 's1', 'e1'));
+    await service.writeAs(deck.id, agent, (doc) => {
+      const read = deckFiles(doc);
+      kind.publish!(doc, read, { [slidePath('s1')]: read[slidePath('s1')]!.replace(/<p id="e1"[^]*?<\/p>/, '') }, false);
+    });
+    expect(Y.threadScalars(replicaOf(deck.id), 't1').quote).toBe('One, then two');
     await service.writeAs(deck.id, other, (doc) => addThread(doc, { threadId: 't2', slideId: 's1', elementId: 'title', quote: 'Title', by: other, at: 3_000, body: 'Bigger' }));
     expect(rows()).toEqual([
       { threadId: 't1', status: 'resolved', quote: 'One, then two', appSessionId: null },

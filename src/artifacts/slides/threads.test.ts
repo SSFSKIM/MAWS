@@ -1,6 +1,7 @@
 // P3-C M7 (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D9): the deck's comment threads, anchored by ids to
 // an element. The anchor survives a move, a restyle, a slide re-order and a republish of the slide; a deleted element's
-// thread reads orphaned with the element's last text; resolve and reopen write the thread alone; a reply racing a
+// thread reads orphaned with the element's last text (derived from the element while it lives, stored at its deletion:
+// Decision Log 31's ruling); resolve and reopen write the thread alone; a reply racing a
 // resolve keeps both; an empty thread can be withdrawn, a spoken one never.
 import { describe, expect, it } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
@@ -9,7 +10,8 @@ import { applyV1, diffV1, newDoc, stateVector, type Doc } from '../yjs';
 import { DECK_PATH, slidePath } from './deck';
 import { deckFiles, deleteElementTree, moveSlide, setStyle, setText } from './model';
 import { publishDeck } from './publish';
-import { addThread, discardThread, elementQuote, getThread, listThreads, refreshQuotes, reopen, reply, resolve, slideTitle, threadStates } from './threads';
+import * as Y from '../yjs/slides';
+import { addThread, captureQuotes, discardThread, elementQuote, getThread, listThreads, reopen, reply, resolve, slideTitle, storeDeletedQuotes, threadStates } from './threads';
 
 const human: Actor = { kind: 'human' };
 const agent: Actor = { kind: 'session', appSessionId: 'app-1' as AppSessionId };
@@ -59,27 +61,36 @@ describe('a deck’s comment threads (D9)', () => {
     expect(state).toMatchObject({ live: true, orphan: false, slideId: 's1', elementId: 'body' });
   });
 
-  it('reads a thread whose element was deleted as orphaned, with the text the host last refreshed into its quote', () => {
+  // Decision Log 31's ruling (revising D9's "refreshed by the host while the element lives"): a living element's quote is
+  // derived from it by every reader, the stored quote written only at the thread's creation and at the element's deletion
+  it('reads a living element’s quote from the element, its stored quote untouched; a deleted element’s thread orphaned with the quote stored at its deletion', () => {
     const doc = deck();
     comment(doc, 't1', 's1', 'body');
+    const stored = () => Y.threadScalars(doc, 't1').quote;
     setText(doc, 's1', 'body', [{ type: 'p', inline: [{ text: 'One path, rewritten', marks: {} }] }]);
-    expect(refreshQuotes(doc)).toEqual(['t1']);
-    expect(refreshQuotes(doc)).toEqual([]); // written only when it drifted
+    expect(getThread(doc, 't1')!.quote).toBe('One path, rewritten');
+    expect(listThreads(doc)[0]!.quote).toBe('One path, rewritten');
+    expect(threadStates(doc)[0]).toMatchObject({ live: true, quote: 'One path, rewritten' });
+    expect(stored()).toBe('One path'); // nothing written while the element lives
+
+    const before = captureQuotes(doc); // what the adapter reads before an update that deletes
     deleteElementTree(doc, 's1', 'body');
-    expect(refreshQuotes(doc)).toEqual([]); // a dead element keeps its last quote
+    expect(storeDeletedQuotes(doc, before)).toEqual(['t1']);
+    expect(storeDeletedQuotes(doc, before)).toEqual([]); // written once
+    expect(stored()).toBe('One path, rewritten');
     expect(threadStates(doc)[0]).toMatchObject({ live: false, orphan: true, quote: 'One path, rewritten' });
     resolve(doc, 't1', human, 3000);
     expect(threadStates(doc)[0]).toMatchObject({ live: false, orphan: false, status: 'resolved' }); // resolved is never orphaned
   });
 
-  it('refreshes only the threads of the slides it is given', () => {
+  it('captures the quotes of the slides it is given, and stores nothing for an element that lives', () => {
     const doc = deck();
     comment(doc, 't1', 's1', 'body');
     comment(doc, 't2', 's2', 'lead');
-    setText(doc, 's1', 'body', [{ type: 'p', inline: [{ text: 'A', marks: {} }] }]);
     setText(doc, 's2', 'lead', [{ type: 'p', inline: [{ text: 'B', marks: {} }] }]);
-    expect(refreshQuotes(doc, { slides: ['s2'] })).toEqual(['t2']);
-    expect(getThread(doc, 't1')!.quote).toBe('One path');
+    expect([...captureQuotes(doc, { slides: ['s2'] })]).toEqual([['t2', 'B']]);
+    expect(storeDeletedQuotes(doc, captureQuotes(doc))).toEqual([]);
+    expect(Y.threadScalars(doc, 't2').quote).toBe('Second');
   });
 
   it('resolves and reopens by writing the thread alone, and a reply racing a resolve keeps both', () => {

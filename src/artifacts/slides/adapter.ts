@@ -2,18 +2,21 @@
 // `KindAdapter` (src/artifacts/host.ts): a new deck's first content, the files a read returns, the three-way publish,
 // the repair after every update and restore, what a restore keeps, and the turn's summary; M3 adds the files' paths
 // (A's `paths`, so a publish answers without reading the deck). Portable: the engine host registers it (M3), P4's
-// network store the same. M7 (D9): the threads mirror (`artifact_threads`) of every thread an update touched, and the
-// quote of a commented element refreshed while it lives, both from `afterUpdate` and, over every thread, `afterRestore`.
+// network store the same. M7 (D9): the threads mirror (`artifact_threads`) of every thread an update touched, from
+// `afterUpdate` and, over every thread, `afterRestore`; and (Decision Log 31's ruling) a commented element's last text
+// stored in its thread when the element is deleted, read just before the deletion on each of its routes: a replica's
+// frame (`beforeApply`'s forwarding edit), the agent's publish (`publish`) and a restore (`revertScope` reads, then
+// `afterRestore` writes). While the element lives its quote is derived by every reader, so no keystroke writes a thread.
 import type { Actor } from '@shared/artifacts/actor';
 import type { KindAdapter, ThreadChange, ThreadRow } from '../host';
 import { transact, type Doc } from '../yjs';
-import { conversationsSince, touchedSlides, touchedThreads } from '../yjs/slides';
+import { conversationsSince, slidesDeletedIn, touchedSlides, touchedThreads } from '../yjs/slides';
 import { DECK_PATH, slideIdOf, type DeckJson } from './deck';
 import { deckFiles, deckPaths, importSlide, repair, writeDeckKeys } from './model';
 import { loadSlide } from './parse';
 import { publishDeck } from './publish';
 import { escAttr, escText } from './serialize';
-import { getThread, listThreads, refreshQuotes, type DeckThread } from './threads';
+import { captureQuotes, getThread, listThreads, storeDeletedQuotes, type DeckThread } from './threads';
 
 export const COVER_ID = 'cover';
 
@@ -119,27 +122,48 @@ function mirrorRows(doc: Doc, threadIds: Iterable<string>): ThreadChange | undef
 
 export function createPresentationAdapter(options: { now?: () => Date } = {}): KindAdapter {
   const now = options.now ?? (() => new Date());
+  // Per artifact, the quotes a restore's `revertScope` read from the live deck just before its write, for its
+  // `afterRestore` (Decision Log 27 of A: a kind's per-artifact state); taken by the next restore of that artifact.
+  const beforeRestore = new Map<string, Map<string, string>>();
   return {
     kind: 'presentation',
     initial: (doc, { title }) => writeInitialDeck(doc, title, now()),
     readFiles: deckFiles,
     paths: deckPaths,
-    publish: publishDeck,
+    // The agent's publish: the commented elements' quotes read first, stored for those its removals take away.
+    publish: (live, base, sent, force) => {
+      const quotes = captureQuotes(live);
+      const outcome = publishDeck(live, base, sent, force);
+      if (quotes.size > 0) storeDeletedQuotes(live, quotes);
+      return outcome;
+    },
+    // A replica's frame that deletes content of a slide with threads: their quotes read before it lands, the forwarding
+    // edit storing those of the elements it took away. A frame that deletes nothing in the slides has none.
+    beforeApply: (live, incoming) => {
+      const slides = slidesDeletedIn(live, incoming);
+      if (slides !== null && slides.size === 0) return null;
+      const quotes = captureQuotes(live, slides === null ? {} : { slides });
+      return quotes.size === 0 ? null : (doc) => void storeDeletedQuotes(doc, quotes);
+    },
     // The repair lands as the triggering actor's write (the doc is that actor's host replica; X29 has no system actor),
     // scoped to the slides the update touched; a full scan when they cannot be told.
     afterUpdate: (live, { update }) => {
       const touched = touchedSlides(live, update);
       if (touched === null) repair(live);
       else if (touched.size > 0) repair(live, { slides: touched });
-      // M7: the quotes of commented elements on the touched slides, then the mirror rows of every thread changed
-      const quoted = touched === null ? refreshQuotes(live) : touched.size > 0 ? refreshQuotes(live, { slides: touched }) : [];
-      const threads = mirrorRows(live, [...touchedThreads(live, update), ...quoted]);
+      // M7: the mirror rows of every thread the update changed (a forwarding edit's stored quote among them)
+      const threads = mirrorRows(live, touchedThreads(live, update));
       return threads ? { threads } : undefined;
     },
-    revertScope: (live, old) => ({ keep: conversationsSince(live, old) }),
-    afterRestore: (live) => {
+    revertScope: (live, old, { artifactId }) => {
+      beforeRestore.set(artifactId, captureQuotes(live));
+      return { keep: conversationsSince(live, old) };
+    },
+    afterRestore: (live, { artifactId }) => {
       repair(live);
-      refreshQuotes(live); // M7
+      const quotes = beforeRestore.get(artifactId);
+      beforeRestore.delete(artifactId);
+      if (quotes) storeDeletedQuotes(live, quotes); // M7: the elements the restore took away keep their last text
       const upsert = listThreads(live).map(threadRow);
       return upsert.length ? { threads: { upsert } } : undefined;
     },

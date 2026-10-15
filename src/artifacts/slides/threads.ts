@@ -9,8 +9,10 @@
 //   }
 //
 // The anchor is ids only (`resolveAnchor`), so a move, a restyle, a slide re-order and a republish that keeps the id
-// keep it (S6). The quote is the element's text (or its tag and alt), refreshed by the host while the element lives
-// (`refreshQuotes`, the adapter's `afterUpdate`), so a deleted element's thread shows the last text it had. Orphaned is
+// keep it (S6). The quote is the element's text (or its tag and alt): every reader derives it from the element while the
+// element lives, and the stored quote is written only when the thread is made and when its element is deleted (the
+// adapter reads the text just before the deletion: `captureQuotes`, then `storeDeletedQuotes`), so a deleted element's
+// thread shows the last text it had and no keystroke writes a thread (Decision Log 31's ruling, revising D9). Orphaned is
 // never stored: open, and the anchor does not resolve, so undo, a restore and a paste that brings the id back un-orphan
 // it with no write. Resolve and reopen write the thread only. Yjs only through the seam (src/artifacts/yjs/slides.ts).
 import { customAlphabet } from 'nanoid';
@@ -72,17 +74,19 @@ function readThread(doc: Doc, id: string): DeckThread {
   };
 }
 
-export const getThread = (doc: Doc, id: string): DeckThread | null => (Y.hasThread(doc, id) ? readThread(doc, id) : null);
+/** A thread, its quote the element's own while the element lives (else the stored one). */
+export const getThread = (doc: Doc, id: string): DeckThread | null => (Y.hasThread(doc, id) ? withLiveQuotes(doc, [readThread(doc, id)])[0]! : null);
 
 /** A thread's status alone, or null when there is no such thread. */
 export const threadStatus = (doc: Doc, id: string): ThreadStatus | null => (Y.hasThread(doc, id) ? ((Y.threadScalars(doc, id).status as ThreadStatus | undefined) ?? 'open') : null);
 
-/** Every thread, oldest first (ties by id, so every replica lists them in one order). */
+/** Every thread, oldest first (ties by id, so every replica lists them in one order); quotes as `getThread`'s. */
 export function listThreads(doc: Doc): DeckThread[] {
-  return Y.threadIds(doc)
+  const threads = Y.threadIds(doc)
     .filter((id) => Y.hasThread(doc, id))
     .map((id) => readThread(doc, id))
     .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
+  return withLiveQuotes(doc, threads);
 }
 
 /** Calls `listener` after every transaction that changed the threads root or a thread in it; returns the unsubscribe. */
@@ -209,35 +213,61 @@ export function slideTitle(doc: Doc, slideId: string): string {
   return clip((heading ?? first ?? '').replace(/\s+/g, ' '));
 }
 
-/**
- * The host's quote refresh (D9; the adapter's `afterUpdate` and `afterRestore`): for every thread whose element lives
- * (on `slides` when given), the element's quote now; written in one transaction, only where it drifted. A thread whose
- * element is gone keeps the last quote it had. Returns the ids rewritten.
- */
-export function refreshQuotes(doc: Doc, options: { slides?: Iterable<string> } = {}, origin?: unknown): string[] {
-  const only = options.slides ? new Set(options.slides) : null;
-  const bySlide = new Map<string, { id: string; elementId: string; quote: string }[]>();
-  for (const id of Y.threadIds(doc)) {
-    if (!Y.hasThread(doc, id)) continue;
-    const s = Y.threadScalars(doc, id);
-    const slideId = String(s.slideId ?? '');
-    if ((only && !only.has(slideId)) || !Y.hasSlide(doc, slideId)) continue;
-    const list = bySlide.get(slideId) ?? [];
-    list.push({ id, elementId: String(s.elementId ?? ''), quote: String(s.quote ?? '') });
-    bySlide.set(slideId, list);
+// Each slide's elements read once for the threads anchored on it: the quote of every element that lives.
+function liveQuotesBySlide(doc: Doc, anchors: Iterable<{ id: string; slideId: string; elementId: string }>): Map<string, string> {
+  const bySlide = new Map<string, { id: string; elementId: string }[]>();
+  for (const a of anchors) {
+    if (!Y.hasSlide(doc, a.slideId)) continue;
+    const list = bySlide.get(a.slideId) ?? [];
+    list.push(a);
+    bySlide.set(a.slideId, list);
   }
-  const drifted: { id: string; quote: string }[] = [];
+  const quotes = new Map<string, string>();
   for (const [slideId, threads] of bySlide) {
     const flat = readFlat(doc, slideId);
     const byId = new Map(flat.map((e) => [e.id, e]));
     const lists = childLists(flat);
     for (const t of threads) {
       const e = byId.get(t.elementId);
-      if (!e) continue;
-      const quote = quoteOf(e, lists);
-      if (quote !== t.quote) drifted.push({ id: t.id, quote });
+      if (e) quotes.set(t.id, quoteOf(e, lists));
     }
   }
-  if (drifted.length > 0) transact(doc, () => drifted.forEach(({ id, quote }) => Y.setThreadKey(doc, id, 'quote', quote)), origin);
-  return drifted.map((d) => d.id).sort();
+  return quotes;
+}
+
+function withLiveQuotes(doc: Doc, threads: DeckThread[]): DeckThread[] {
+  const live = liveQuotesBySlide(doc, threads);
+  return threads.map((t) => (live.has(t.id) ? { ...t, quote: live.get(t.id)! } : t));
+}
+
+/**
+ * The quotes of the threads whose elements live (on `slides` when given), by thread id: what the adapter reads just
+ * before an update, a publish or a restore that may delete an element, for `storeDeletedQuotes` after it.
+ */
+export function captureQuotes(doc: Doc, options: { slides?: Iterable<string> } = {}): Map<string, string> {
+  const only = options.slides ? new Set(options.slides) : null;
+  const anchors: { id: string; slideId: string; elementId: string }[] = [];
+  for (const id of Y.threadIds(doc)) {
+    if (!Y.hasThread(doc, id)) continue;
+    const s = Y.threadScalars(doc, id);
+    const slideId = String(s.slideId ?? '');
+    if (!only || only.has(slideId)) anchors.push({ id, slideId, elementId: String(s.elementId ?? '') });
+  }
+  return liveQuotesBySlide(doc, anchors);
+}
+
+/**
+ * Stores, for every thread `captured` whose element is gone now, the quote it had just before (one transaction, only
+ * where the stored quote differs): the quote a deleted element's thread keeps. Returns the ids written.
+ */
+export function storeDeletedQuotes(doc: Doc, captured: ReadonlyMap<string, string>, origin?: unknown): string[] {
+  const written: { id: string; quote: string }[] = [];
+  for (const [id, quote] of captured) {
+    if (!Y.hasThread(doc, id)) continue;
+    const s = Y.threadScalars(doc, id);
+    if (resolveAnchor(doc, { slideId: String(s.slideId ?? ''), elementId: String(s.elementId ?? '') }).live) continue;
+    if (String(s.quote ?? '') !== quote) written.push({ id, quote });
+  }
+  if (written.length > 0) transact(doc, () => written.forEach(({ id, quote }) => Y.setThreadKey(doc, id, 'quote', quote)), origin);
+  return written.map((w) => w.id).sort();
 }
