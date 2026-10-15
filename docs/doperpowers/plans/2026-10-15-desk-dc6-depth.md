@@ -3,8 +3,8 @@
 > **Composite:** `docs/doperpowers/specs/2026-10-15-desk-design.md` (MAWS,
 > branch `smns-erb`; on this machine
 > `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/smns-erb/`), child
-> **DC6** (The web — session depth — plan). **Parent pin:** blob `552e7a77`
-> of that file (MAWS commit `05870451`; re-pinned at pre-flight from `9471766c`). The
+> **DC6** (The web — session depth — plan). **Parent pin:** composite
+> MAWS commit `8f7e09d3` (re-pinned 2026-10-15 from `9471766c` via `05870451`, `d349a87a`). The
 > child's section there is its design; this document carries only the
 > constraints and the milestones. Read the composite's Purpose, §2 (Web
 > client: the adapter), §3 (the session plane), §4 (the right column), and
@@ -291,5 +291,13 @@ registrations through `connectDepth()`.
   `name`, and its `text` is the argument JSON as it streams, not parsed
   while partial; the fixture holds one. In three live runs the nth
   response row of a step was block n; settling stays on `block-row`.
+- 2026-10-15, settled at composite `8f7e09d3` (DX4 aligned): the entry is
+  `{turnId, agentId, step, model?, upTo, blocks: [{index, kind, text,
+  upTo, id?, name?}]}`; the entry's `upTo` is the watermark (a block's is
+  informational); `kind` is `text`, `thinking` (redacted included), or
+  `tool` (with `id`, the tool_use_id, and `name`); `model` is absent when
+  the bridge missed the step's start; an entry with `blocks: []` may
+  persist until its step ends and is skipped; a server tool's row gets no
+  `block-row`, settles nothing, and is simply drawn.
 
 ## Outcomes & Retrospective
