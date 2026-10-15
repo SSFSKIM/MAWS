@@ -51,6 +51,7 @@ export function SpawnDialog({ onClose, onOpen }: { onClose: () => void; onOpen: 
           <label className="flex flex-col gap-1">
             Machine
             <select
+              aria-label="Machine"
               className={textInput}
               value={machine}
               onChange={(e) => {
@@ -67,7 +68,7 @@ export function SpawnDialog({ onClose, onOpen }: { onClose: () => void; onOpen: 
           </label>
           <label className="flex flex-col gap-1">
             Checkout
-            <select className={textInput} value={checkout} onChange={(e) => setCheckout(e.target.value)} disabled={checkouts.length === 0}>
+            <select aria-label="Checkout" className={textInput} value={checkout} onChange={(e) => setCheckout(e.target.value)} disabled={checkouts.length === 0}>
               {checkouts.length === 0 && <option value="">{machine} knows no checkout of this project</option>}
               {checkouts.map((c) => (
                 <option key={c.path} value={c.path}>
@@ -78,20 +79,20 @@ export function SpawnDialog({ onClose, onOpen }: { onClose: () => void; onOpen: 
           </label>
           <label className="flex flex-col gap-1">
             Worktree <span className="text-ui-sm text-fg-muted">optional</span>
-            <input className={textInput} value={worktree} onChange={(e) => setWorktree(e.target.value)} />
+            <input aria-label="Worktree" className={textInput} value={worktree} onChange={(e) => setWorktree(e.target.value)} />
           </label>
           <label className="flex flex-col gap-1">
             Brief <span className="text-ui-sm text-fg-muted">what it is in charge of; its first prompt</span>
-            <textarea className={textInput} rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} required />
+            <textarea aria-label="Brief" className={textInput} rows={3} value={brief} onChange={(e) => setBrief(e.target.value)} required />
           </label>
           <div className="flex flex-wrap gap-3">
             <label className="flex flex-col gap-1">
               Model
-              <input className={textInput} value={model} onChange={(e) => setModel(e.target.value)} placeholder="the machine's default" />
+              <input aria-label="Model" className={textInput} value={model} onChange={(e) => setModel(e.target.value)} placeholder="the machine's default" />
             </label>
             <label className="flex flex-col gap-1">
               Effort
-              <select className={textInput} value={effort} onChange={(e) => setEffort(e.target.value)}>
+              <select aria-label="Effort" className={textInput} value={effort} onChange={(e) => setEffort(e.target.value)}>
                 <option value="">default</option>
                 {EFFORTS.map((e) => (
                   <option key={e}>{e}</option>
@@ -100,7 +101,7 @@ export function SpawnDialog({ onClose, onOpen }: { onClose: () => void; onOpen: 
             </label>
             <label className="flex flex-col gap-1">
               Permission mode
-              <select className={textInput} value={mode} onChange={(e) => setMode(e.target.value)}>
+              <select aria-label="Permission mode" className={textInput} value={mode} onChange={(e) => setMode(e.target.value)}>
                 <option value="">the machine's ceiling</option>
                 {MODES.map((m) => (
                   <option key={m}>{m}</option>

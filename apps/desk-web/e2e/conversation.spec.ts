@@ -223,8 +223,8 @@ test('an ended session keeps its channel with Resume, a send to it shows as reco
 
   await nav(page).getByRole('button', { name: '+ Session' }).click();
   const dialog = page.getByRole('dialog', { name: 'New session' });
-  await dialog.getByLabel('Machine').selectOption('mini');
-  await dialog.getByLabel(/^Brief/).fill('owner artifacts page, part two');
+  await dialog.getByLabel('Machine', { exact: true }).selectOption('mini');
+  await dialog.getByLabel('Brief', { exact: true }).fill('owner artifacts page, part two');
   await dialog.getByRole('button', { name: 'Start' }).click();
   const spawn = await lastRpc(hub, 3);
   expect(spawn).toMatchObject({ rpc: 'spawn', machine: 'mini', args: { checkout: '/Users/new/MAWS', brief: 'owner artifacts page, part two' } });
