@@ -6,7 +6,8 @@
 // text (`String(measureDeckPage)`; the unit suite evaluates it alone). It
 // 1. waits for the page's faces and pictures,
 // 2. fits every sized text box the page marked (`data-fit-box`: shrink to 60 % or 8 px then clip, grow, none), as the
-//    canvas's fit pass does (canvas/fit.ts; a copy, since the window cannot import),
+//    canvas's fit pass does, its search the shared `shrinkScale` (render-rules.ts), whose source main sends beside this
+//    function's and which arrives as the second argument,
 // 3. reads every slide: its background, then each element in paint order (document order, the page writing a section's
 //    children under, flow, over), each with its box before rotation in slide px, its rotation, its paint, and for text
 //    its paragraphs of runs with their computed face, size, weight, style, colour and decoration; tables by rows of
@@ -205,7 +206,7 @@ interface DomGlobals {
 /**
  * Fits, then measures every slide of the page (see the header). Self-contained: evaluated alone in the export window.
  */
-export async function measureDeckPage(args: MeasureArgs): Promise<MeasuredDeck> {
+export async function measureDeckPage(args: MeasureArgs, shrinkScale: (base: number, overflowsAt: (px: number) => boolean) => number): Promise<MeasuredDeck> {
   const g = globalThis as unknown as DomGlobals;
   const doc = g.document;
   await doc.fonts?.ready; // absent where there is no font loading (a DOM without layout)
@@ -234,15 +235,10 @@ export async function measureDeckPage(args: MeasureArgs): Promise<MeasuredDeck> 
     if (!overflows(n)) continue;
     const base = num(css(n, 'font-size'));
     if (base <= 0) continue;
-    const floor = Math.min(1, Math.max(0.6, 8 / base));
-    let lo = floor;
-    let hi = 1;
-    for (let k = 0; k < 7; k++) {
-      const mid = (lo + hi) / 2;
-      n.style.setProperty('font-size', `${base * mid}px`);
-      if (overflows(n)) hi = mid;
-      else lo = mid;
-    }
+    const lo = shrinkScale(base, (px) => {
+      n.style.setProperty('font-size', `${px}px`);
+      return overflows(n);
+    });
     n.style.setProperty('font-size', `${base * lo}px`);
     const clipped = overflows(n);
     if (clipped) n.style.setProperty('overflow', 'hidden');

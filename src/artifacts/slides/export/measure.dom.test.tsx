@@ -7,6 +7,7 @@ import { builtinView } from '../../design-system/view';
 import { deckTokenValues } from '../mirror';
 import { TEXT_TAGS } from '../ir';
 import { fixtureDoc } from './deck.test-support';
+import { shrinkScale } from '../render-rules';
 import { measureDeckPage, type MeasuredDeck } from './measure';
 import { deckPage, exportDeckOf } from './standalone';
 
@@ -20,7 +21,8 @@ async function measuredFixture(prepare: () => void = () => {}): Promise<Measured
   prepare();
   // the function as main sends it: its source alone, evaluated where nothing of this module is in scope
   const alone = new Function(`return (${String(measureDeckPage)})`)() as typeof measureDeckPage;
-  return alone({ textTags: [...TEXT_TAGS] });
+  const search = new Function(`return (${String(shrinkScale)})`)() as typeof shrinkScale;
+  return alone({ textTags: [...TEXT_TAGS] }, search);
 }
 
 describe('measureDeckPage', () => {

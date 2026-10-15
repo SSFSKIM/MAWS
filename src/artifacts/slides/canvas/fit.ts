@@ -3,10 +3,7 @@
 // to 60 % of its size or 8 px, then clips; `grow` lets the box grow past its height; `none` leaves the text to overflow.
 // Display only: the model and the file keep the element's own size; the scale is undone before every measure.
 import { TEXT_TAGS, type Tag } from '../ir';
-
-const MIN_SCALE = 0.6;
-const MIN_PX = 8;
-const STEPS = 7; // the binary search's halvings: within 1 % of the fitting size
+import { shrinkScale } from '../render-rules'; // the search, shared with the export window (M9 fix wave 1)
 
 /** Whether an element takes the fit pass: a text element with a height of its own. */
 export const isSizedText = (tag: Tag, style: Readonly<Record<string, string>>): boolean => TEXT_TAGS.has(tag) && style.height !== undefined && style.height !== 'auto';
@@ -42,15 +39,10 @@ export function fitText(n: HTMLElement, style: Readonly<Record<string, string>>,
   const view = n.ownerDocument.defaultView;
   const base = Number.parseFloat(view?.getComputedStyle(n).fontSize ?? '') || 0;
   if (base <= 0) return 1;
-  const floor = Math.min(1, Math.max(MIN_SCALE, MIN_PX / base));
-  let lo = floor;
-  let hi = 1;
-  for (let k = 0; k < STEPS; k++) {
-    const mid = (lo + hi) / 2;
-    n.style.setProperty('font-size', `${base * mid}px`);
-    if (overflows(n)) hi = mid;
-    else lo = mid;
-  }
+  const lo = shrinkScale(base, (px) => {
+    n.style.setProperty('font-size', `${px}px`);
+    return overflows(n);
+  });
   n.style.setProperty('font-size', `${base * lo}px`);
   n.dataset.fitted = 'shrink';
   if (overflows(n)) n.style.setProperty('overflow', 'hidden'); // at the floor and still over: clipped

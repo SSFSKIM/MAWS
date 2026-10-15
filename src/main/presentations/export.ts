@@ -33,6 +33,7 @@ import { measureDeckPage, type MeasureArgs, type MeasuredDeck } from '@artifacts
 import { pictureJobs, pptxSlides, writePptx, type PictureJob } from '@artifacts/slides/export/pptx';
 import { deckAssetRefs, deckFacesCss, deckPage, exportDeckOf, type ExportDeck, type PageOptions } from '@artifacts/slides/export/standalone';
 import { TEXT_TAGS } from '@artifacts/slides/ir';
+import { shrinkScale } from '@artifacts/slides/render-rules';
 import { deckTokenValues } from '@artifacts/slides/mirror';
 import { HOUSE_KEY } from '@artifacts/types/design_system/defaults';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
@@ -242,7 +243,8 @@ export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: 
         await writeFile(file, html, 'utf8');
         await loadSettled(live(), url);
       },
-      measure: async () => (await live().webContents.executeJavaScript(`(${String(measureDeckPage)})(${JSON.stringify(MEASURE_ARGS)})`, true)) as MeasuredDeck,
+      // the measure and the fit's search it uses, each sent as its own source (render-rules.ts: the canvas's too)
+      measure: async () => (await live().webContents.executeJavaScript(`(${String(measureDeckPage)})(${JSON.stringify(MEASURE_ARGS)}, ${String(shrinkScale)})`, true)) as MeasuredDeck,
       capture: async (job, size) => {
         const w = live();
         const box = (await w.webContents.executeJavaScript(STAGE(job.slideId, job.elementId, job.mode), true)) as { x: number; y: number; w: number; h: number };

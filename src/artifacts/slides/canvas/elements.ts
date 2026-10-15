@@ -4,6 +4,7 @@
 import { connectorHeads, connectorRoute, dropShadows, headPolygon, ICON_GLYPHS, isStrokeOnly, shapePath, splitBorder, type Point } from '../glyphs';
 import { LIST_TAGS, TEXT_TAGS, type TextBlock } from '../ir';
 import type { FlatElement } from '../model';
+import { cropStyle, embedDocument } from '../render-rules';
 import { escAttr, serializeInline } from '../serialize';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -11,9 +12,8 @@ const SVG_NS = 'http://www.w3.org/2000/svg';
 /** What the canvas resolves an image's `src` through: an uploaded asset's URL (`assets/<name>`), else null. */
 export type AssetUrl = (ref: string) => string | null;
 
-// An x-embed runs in a sandboxed frame with no network: inline script and style only (D8, Claude's "no network").
-const EMBED_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:";
-export const embedDocument = (raw: string): string => `<!doctype html><meta http-equiv="Content-Security-Policy" content="${escAttr(EMBED_CSP)}"><style>html,body{margin:0;height:100%;overflow:hidden}</style>${raw}`;
+// An x-embed runs in a sandboxed frame with no network (render-rules.ts, shared with the export page).
+export { embedDocument } from '../render-rules';
 
 /** The element's node, its inline style and attributes as the model holds them (the section's `hidden` excepted). */
 export function createNode(document: Document, e: FlatElement, text: TextBlock[] | undefined, assetUrl: AssetUrl, thumbnail = false): HTMLElement {
@@ -73,18 +73,13 @@ export function setImageSource(img: HTMLImageElement, src: string | undefined, a
  * as its object-position (CSS has no object-position of its own in the dialect, so the canvas owns it).
  */
 export function applyCrop(n: HTMLElement, crop: string | undefined): void {
-  const m = crop === undefined ? null : /^(\d+(?:\.\d+)?) (-?\d+(?:\.\d+)?)% (-?\d+(?:\.\d+)?)%$/.exec(crop);
-  if (!m) {
+  const drawn = cropStyle(crop); // render-rules.ts: shared with the export page
+  if (!drawn) {
     n.style.removeProperty('object-view-box');
     n.style.removeProperty('object-position');
     return;
   }
-  const rest = 1 - 1 / Math.max(1, Number(m[1]));
-  const [fx, fy] = [Number(m[2]), Number(m[3])];
-  const pct = (v: number) => `${Math.round(v * 1000) / 1000}%`;
-  n.style.setProperty('object-view-box', `inset(${pct(rest * fy)} ${pct(rest * (100 - fx))} ${pct(rest * (100 - fy))} ${pct(rest * fx)})`);
-  // the focus also places the region in the box (fix wave 1): at zoom 1 it is all object-fit's cover crop has to go by
-  n.style.setProperty('object-position', `${pct(fx)} ${pct(fy)}`);
+  for (const [prop, value] of Object.entries(drawn)) n.style.setProperty(prop, value);
 }
 
 function renderIcon(document: Document, n: HTMLElement, name: string | undefined): void {

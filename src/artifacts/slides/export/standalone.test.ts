@@ -87,7 +87,7 @@ describe('the deck’s standalone page', () => {
     const measured = { slides: [{ id: 'cover', background: { fill: null, image: false }, elements: [{ ...MEASURED.slides[0]!.elements[2]! }] }] };
     const html = deckPage(deck, { mode: 'html', resolveVar: () => undefined, asset, facesCss: '', measured });
     // the canvas's region (M5's applyCrop): half the picture each way, the focus at 25% 50%; the element's fit untouched
-    expect(html).toContain('width:200px; height:100px; object-view-box:inset(25% 37.5% 25% 12.5%)');
+    expect(html).toContain('width:200px; height:100px; object-view-box:inset(25% 37.5% 25% 12.5%); object-position:25% 50%'); // the canvas's crop (render-rules.ts), view box and focus
     expect(html).not.toContain('object-fit:cover');
   });
 });

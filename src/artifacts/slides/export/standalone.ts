@@ -19,6 +19,7 @@ import { resolveVars } from '../css';
 import type { DeckFace } from '../deck';
 import { CONTAINER_TAGS, LIST_TAGS, TEXT_TAGS, type ElementIR, type SlideIR, type TextBlock } from '../ir';
 import { readDeckJson, readSlide, slideOrder } from '../model';
+import { cropStyle, embedDocument } from '../render-rules';
 import { canonicalOrder, escAttr, escText, partition, serializeInline } from '../serialize';
 import type { Doc } from '../../yjs';
 import { connectorSvg, iconSvg, shapeSvg } from './glyphs-svg';
@@ -100,9 +101,6 @@ export interface PageOptions {
   only?: readonly string[];
 }
 
-// An x-embed's page: inline script and style only, no network (the canvas's `embedDocument`).
-const EMBED_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:";
-const embedPage = (raw: string): string => `<!doctype html><meta http-equiv="Content-Security-Policy" content="${escAttr(EMBED_CSP)}"><style>html,body{margin:0;height:100%;overflow:hidden}</style>${raw}`;
 // The page's own policy: nothing but itself and `data:`.
 const PAGE_CSP = "default-src 'none'; img-src data:; font-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-src 'self' data: about:";
 
@@ -177,21 +175,7 @@ export function cropOf(value: string | undefined): { zoom: number; x: number; y:
   return m ? { zoom: Number(m[1]), x: Number(m[2]) / 100, y: Number(m[3]) / 100 } : null;
 }
 
-/**
- * A crop's view box as the canvas draws it (canvas/elements.ts `applyCrop`, M5): `object-view-box: inset(…)` in percent
- * of the picture, 1/ZOOM of it on each axis with the focus point placed as object-position places it; the element's own
- * object-fit then fills its box with that region. Null without a crop.
- */
-export function cropInset(value: string | undefined): string | null {
-  const crop = cropOf(value);
-  if (!crop) return null;
-  const rest = 1 - 1 / Math.max(1, crop.zoom);
-  const [fx, fy] = [crop.x * 100, crop.y * 100];
-  const pct = (v: number) => `${Math.round(v * 1000) / 1000}%`;
-  return `inset(${pct(rest * fy)} ${pct(rest * (100 - fx))} ${pct(rest * (100 - fy))} ${pct(rest * fx)})`;
-}
-
-/** A crop's view box in the picture's own pixels: `1/zoom` of it, placed at the focus point (`cropInset`'s region). */
+/** A crop's view box in the picture's own pixels: `1/zoom` of it, placed at the focus point (`cropStyle`'s region). */
 export function cropViewBox(natural: { w: number; h: number }, crop: { zoom: number; x: number; y: number }): { x: number; y: number; w: number; h: number } {
   const w = natural.w / crop.zoom;
   const h = natural.h / crop.zoom;
@@ -224,13 +208,12 @@ function elementHtml(el: ElementIR, w: Writer, under: boolean): string {
   if (el.tag === 'img') {
     const src = el.attrs.src?.startsWith('assets/') ? options.asset(el.attrs.src) : null;
     attrs.push(src ? `src="${escAttr(src)}"` : `data-placeholder="${escAttr(el.attrs.src ?? '')}"`);
-    const inset = cropInset(el.attrs['data-crop']);
-    if (inset) style['object-view-box'] = inset;
+    Object.assign(style, cropStyle(el.attrs['data-crop']) ?? {}); // the canvas's crop (render-rules.ts)
   } else if (el.tag === 'svg') inner = el.raw ?? '';
   else if (el.tag === 'x-icon') inner = iconSvg(el.attrs.name);
   else if (el.tag === 'x-embed') {
     const picture = w.pictures?.get(el.id);
-    inner = picture ? `<img alt="" src="${escAttr(picture)}">` : `<iframe sandbox="allow-scripts" tabindex="-1" srcdoc="${escAttr(embedPage(el.raw ?? ''))}"></iframe>`;
+    inner = picture ? `<img alt="" src="${escAttr(picture)}">` : `<iframe sandbox="allow-scripts" tabindex="-1" srcdoc="${escAttr(embedDocument(el.raw ?? ''))}"></iframe>`;
   } else if (el.tag === 'x-shape' && el.attrs.kind !== 'rect' && measured) inner = shapeSvg(style, el.attrs.kind ?? 'rect', measured.box.w, measured.box.h);
   else if (el.tag === 'x-connector' && measured) inner = connectorSvg(style, el.attrs, measured.box.w, measured.box.h);
   else if (el.text) inner = textHtml(el.tag, el.text, options.resolveVar);
