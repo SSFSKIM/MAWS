@@ -257,16 +257,28 @@ test('the app sets the icon badge from the grid while it is open, and clears it 
 });
 
 test('the installed app offers notifications once on the grid, and Not now keeps it gone', async ({ browserName, context, page, hub }) => {
-  // Playwright's WebKit has no Push API, where the banner rightly never shows; a headless browser's notification
-  // permission reads as refused until granted, and a phone's starts undecided (granted here, with no subscription).
+  // Playwright's WebKit has no Push API, where the banner rightly never shows. In Chromium the case stands in for what
+  // a headless browser may lack: a notification permission not yet refused (granted, with nothing subscribed) and a
+  // push service to ask for the current subscription (stubbed to none), as the unit suites do.
   test.skip(browserName !== 'chromium', 'the Push API');
   await stageProject(hub);
   await seedKey(page, hub);
   await context.grantPermissions(['notifications'], { origin: hub.url });
-  await page.addInitScript(() => Object.defineProperty(navigator, 'standalone', { configurable: true, value: true })); // iOS's home-screen app
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'standalone', { configurable: true, value: true }); // iOS's home-screen app
+    if (typeof PushManager !== 'undefined') PushManager.prototype.getSubscription = async () => null;
+  });
   await page.goto(hub.url);
   const banner = page.getByTestId('push-banner');
-  await expect(banner).toContainText('Get a notification when a session asks you something');
+  const browserPush = () =>
+    page.evaluate(async () => ({
+      pushManager: typeof PushManager,
+      permission: typeof Notification === 'undefined' ? 'none' : Notification.permission,
+      worker: 'serviceWorker' in navigator ? Boolean(await navigator.serviceWorker.getRegistration()) : 'none',
+    }));
+  await expect(banner, JSON.stringify(await browserPush().catch(String))).toContainText(
+    'Get a notification when a session asks you something',
+  );
   await banner.getByRole('button', { name: 'Not now' }).click();
   await expect(banner).toHaveCount(0);
   await page.reload();
