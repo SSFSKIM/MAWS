@@ -38,6 +38,18 @@ describe('parseNotice', () => {
   });
 });
 
+describe("the org's waiting count, for the app icon's badge", () => {
+  it('is read when the hub sends it, and absent when it does not', () => {
+    expect(parseNotice({ ...question, waiting: 4 })).toEqual({ ...question, waiting: 4 });
+    expect(parseNotice({ ...question, waiting: 0 })).toEqual({ ...question, waiting: 0 });
+    expect(parseNotice(question)).not.toHaveProperty('waiting');
+  });
+
+  it('is dropped, not the notice, when it is not a count', () => {
+    for (const waiting of [-1, 1.5, '3', null]) expect(parseNotice({ ...question, waiting })).toEqual(question);
+  });
+});
+
 describe('noticeUrl and landingOf', () => {
   it("opens a request's card in its session's channel", () => {
     const url = noticeUrl(question);
@@ -70,18 +82,27 @@ describe('noticeUrl and landingOf', () => {
 describe('describeNotice', () => {
   it('says who wants what, from the payload alone, and never offers an answer', () => {
     const q = describeNotice(question);
-    expect(q.title).toBe('maws-45 has a question');
-    expect(q.options.body).toBe('Open the desk to answer it.');
+    expect(q.title).toBe('maws-45 has a question for you');
+    expect(q.options.body).toBe('Opens at the question');
     expect(q.options.data).toEqual({ url: noticeUrl(question) });
     expect(q.options).not.toHaveProperty('actions');
-    expect(describeNotice(permission).title).toBe('maws-45 asks for your permission');
-    expect(describeNotice(permission).options.body).toBe('Open the desk to allow or deny it.');
+    expect(describeNotice(permission).title).toBe('maws-45 is waiting for your approval');
+    expect(describeNotice(permission).options.body).toBe('Opens at the request');
     expect(describeNotice(message).title).toBe('maws-45 sent you a message');
-    expect(describeNotice(message).options.body).toBe('Open the desk to read it.');
+    expect(describeNotice(message).options.body).toBe('Opens in maws-45’s channel');
+  });
+
+  it("puts the project's name before where the tap opens, when the hub sends it", () => {
+    expect(parseNotice({ ...question, name: 'MAWS' })).toEqual({ ...question, name: 'MAWS' });
+    expect(describeNotice({ ...question, name: 'MAWS' }).options.body).toBe('MAWS · Opens at the question');
+    expect(describeNotice({ ...permission, name: 'MAWS' }).options.body).toBe('MAWS · Opens at the request');
+    expect(describeNotice({ ...message, name: 'MAWS' }).options.body).toBe('MAWS · Opens in maws-45’s channel');
+    for (const name of ['', 7, null]) expect(parseNotice({ ...question, name })).toEqual(question);
   });
 
   it('names a session the hub has no alias for', () => {
-    expect(describeNotice({ ...question, alias: null }).title).toBe('A session has a question');
+    expect(describeNotice({ ...question, alias: null }).title).toBe('A session has a question for you');
+    expect(describeNotice({ ...message, alias: null }).options.body).toBe('Opens in its channel');
   });
 
   it('tags one notification per card, so a repeat replaces it', () => {
@@ -92,7 +113,7 @@ describe('describeNotice', () => {
   it('bounds an alias that is too long for a title', () => {
     const title = describeNotice({ ...question, alias: 'x'.repeat(200) }).title;
     expect(title.length).toBeLessThan(100);
-    expect(title).toMatch(/^x+… has a question$/);
+    expect(title).toMatch(/^x+… has a question for you$/);
   });
 
   it('draws a payload it cannot read as a plain prompt to open the desk', () => {

@@ -20,6 +20,9 @@ import {
 import type { SessionPlane, SessionTarget, Subscription, SubscriptionListener, SubscriptionMessage } from '../shell/session-plane';
 import { backoff, HubSocket, type ConnectionStatus } from './socket';
 
+/** How often a visible tab says so again: a third of the 90 s the hub counts a socket as visible after the last. */
+const VISIBLE_REPEAT_MS = 30_000;
+
 export type { ConnectionStatus } from './socket';
 
 export type Welcome = Extract<ProjectDown, { t: 'welcome' }>;
@@ -83,6 +86,7 @@ export class ProjectClient implements SessionPlane {
   private readonly socket: HubSocket<ProjectDown, ProjectUp>;
   private welcomed = false;
   private visible: boolean | null = null;
+  private repeat: ReturnType<typeof setInterval> | null = null;
   private readonly humans = new Map<string, { event: HumanEvent; resolve: (ack: HumanAck) => void; reject: (error: HumanRefused) => void }>();
   private readonly rpcs = new Map<string, Rpc>();
   private readonly rpcListeners = new Set<(frame: RpcStateFrame) => void>();
@@ -107,6 +111,8 @@ export class ProjectClient implements SessionPlane {
   }
 
   stop(): void {
+    if (this.repeat !== null) clearInterval(this.repeat);
+    this.repeat = null;
     this.socket.stop();
   }
 
@@ -132,10 +138,16 @@ export class ProjectClient implements SessionPlane {
     return () => this.rpcListeners.delete(listener);
   }
 
-  /** Whether this tab shows the project; the hub holds back the member's pushes while one does. */
+  /**
+   * Whether this tab shows the project; the hub holds back the member's pushes while one does. `visible` is repeated
+   * every 30 s while it holds, because the hub counts a socket as visible only for 90 s after the last (composite
+   * ad82c3b2): a phone put to sleep before its hidden report got out stops holding pushes back on its own.
+   */
   setVisible(visible: boolean): void {
     this.visible = visible;
     if (this.welcomed) this.socket.send({ t: 'visibility', visible });
+    if (this.repeat !== null) clearInterval(this.repeat);
+    this.repeat = visible ? setInterval(() => this.welcomed && this.socket.send({ t: 'visibility', visible: true }), VISIBLE_REPEAT_MS) : null;
   }
 
   subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription {

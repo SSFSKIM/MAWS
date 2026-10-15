@@ -5,10 +5,12 @@ import { noticeUrl } from './notice';
 
 const notice: PushNotice = { v: 1, project: 'p1', session: 's1', alias: 'maws-45', kind: 'question', request: 'toolu_01' };
 
-function scope(windows: WindowLike[] = []) {
+function scope(windows: WindowLike[] = [], badging = true) {
   const shown: Array<{ title: string; options: NotificationOptions }> = [];
   const opened: string[] = [];
+  const badges: number[] = [];
   const worker: WorkerScope = {
+    navigator: badging ? { setAppBadge: async (count: number) => void badges.push(count) } : {},
     registration: { showNotification: async (title, options) => void shown.push({ title, options: options ?? {} }) },
     clients: {
       matchAll: async () => windows,
@@ -18,7 +20,7 @@ function scope(windows: WindowLike[] = []) {
       },
     },
   };
-  return { worker, shown, opened };
+  return { worker, shown, opened, badges };
 }
 
 const windowAt = (url: string, visibility: DocumentVisibilityState = 'hidden', focused = false): WindowLike & { posted: unknown[]; focusCalls: number } => {
@@ -44,7 +46,7 @@ describe('onPush', () => {
     const { worker, shown } = scope();
     await onPush(worker, { json: () => notice });
     expect(shown).toHaveLength(1);
-    expect(shown[0].title).toBe('maws-45 has a question');
+    expect(shown[0].title).toBe('maws-45 has a question for you');
     expect(shown[0].options.data).toEqual({ url: noticeUrl(notice) });
   });
 
@@ -56,6 +58,36 @@ describe('onPush', () => {
       expect(shown[0].title).toBe('The desk');
       expect(shown[0].options.data).toEqual({ url: '/' });
     }
+  });
+});
+
+describe("the app icon's badge", () => {
+  it("is set to the org's waiting count the push carries", async () => {
+    const { worker, badges } = scope();
+    await onPush(worker, { json: () => ({ ...notice, waiting: 3 }) });
+    expect(badges).toEqual([3]);
+    await onPush(worker, { json: () => ({ ...notice, waiting: 0 }) });
+    expect(badges).toEqual([3, 0]);
+  });
+
+  it('is left alone when the push carries no count, or the platform has no badge', async () => {
+    const { worker, badges, shown } = scope();
+    await onPush(worker, { json: () => notice });
+    await onPush(worker, null);
+    expect(badges).toEqual([]);
+    const without = scope([], false);
+    await onPush(without.worker, { json: () => ({ ...notice, waiting: 2 }) });
+    expect(without.shown).toHaveLength(1);
+    expect(shown).toHaveLength(2);
+  });
+
+  it('never keeps the notification from showing when setting it fails', async () => {
+    const { worker, shown } = scope();
+    worker.navigator.setAppBadge = async () => {
+      throw new Error('not allowed');
+    };
+    await onPush(worker, { json: () => ({ ...notice, waiting: 1 }) });
+    expect(shown).toHaveLength(1);
   });
 });
 

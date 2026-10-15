@@ -1,7 +1,7 @@
 // The project socket's client against the DX3 double: resume after the offset held, parts joined, reconnection with
 // backoff and a fresh resume after every discontinuity, nothing assumed delivered that the hub did not acknowledge, and
 // the session plane's subscriptions (DX8) kept whole across gaps and dropped sockets.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newNonce, seal, importOrgKey, type HumanDraft, type LogEvent, type SessionMessage } from 'desk-hub/protocol';
 import { DOUBLE_MEMBER, HubDouble } from '../../test/double/hub-double';
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
@@ -388,5 +388,32 @@ describe('the audit record', () => {
     double.reject(PROJECT, { machine: 'mini', event: { writer: 'hub/x', seq: 3 }, reason: 'bad-code', message: 'its code does not match' });
     await until(() => refusals.length === 1 && rejections.length === 1);
     expect(rejections[0]).toMatchObject({ machine: 'mini', reason: 'bad-code', event: { writer: 'hub/x', seq: 3 } });
+  });
+});
+
+describe('visibility', () => {
+  it('repeats `visible` every 30 s while the project shows, since the hub counts it only 90 s after the last, and stops when hidden', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const { c, caughtUp } = client();
+      await until(() => caughtUp.length === 1);
+      const frames = () => double.up.filter((u) => u.frame.t === 'visibility').map((u) => (u.frame as { visible: boolean }).visible);
+      c.setVisible(true);
+      await until(() => frames().length === 1);
+      vi.advanceTimersByTime(29_000);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(frames()).toEqual([true]);
+      vi.advanceTimersByTime(1_000);
+      await until(() => frames().length === 2);
+      vi.advanceTimersByTime(30_000);
+      await until(() => frames().length === 3);
+      c.setVisible(false);
+      await until(() => frames().length === 4);
+      vi.advanceTimersByTime(120_000);
+      await new Promise((r) => setTimeout(r, 50));
+      expect(frames()).toEqual([true, true, true, false]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

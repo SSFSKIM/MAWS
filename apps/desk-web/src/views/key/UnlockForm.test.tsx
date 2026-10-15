@@ -105,6 +105,16 @@ describe('UnlockForm', () => {
     expect(await device.store!.load(ME.org.id)).not.toBeNull();
   });
 
+  it('starts with "Keep unlocked on this device" ticked in the installed app, and unticked in a browser tab', async () => {
+    await setUpElsewhere();
+    const tab = render(withQueries(<UnlockForm me={ME} />));
+    expect(((await screen.findByLabelText(/Keep unlocked on this device/)) as HTMLInputElement).checked).toBe(false);
+    tab.unmount();
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(display-mode: standalone)', addEventListener() {}, removeEventListener() {} }));
+    render(withQueries(<UnlockForm me={ME} />));
+    expect(((await screen.findByLabelText(/Keep unlocked on this device/)) as HTMLInputElement).checked).toBe(true);
+  });
+
   it('freezes where the key is kept while a first setup runs', async () => {
     let release!: () => void;
     device.preparing = new Promise<void>((resolve) => (release = resolve));

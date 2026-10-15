@@ -8,6 +8,13 @@
 // bundle holds nothing that could reach the key; `sw-imports.test.ts` keeps it so.
 import type { PushNotice } from 'desk-hub/protocol';
 
+/**
+ * The notice as the worker reads it: the module's `PushNotice` and the org's waiting count for the app icon's badge
+ * (`waiting`, the grid's sum with this push's own request counted) and the project's name as the grid shows it (`name`);
+ * DC3 is adding both, so they are optional until then, and a value of the wrong shape is dropped.
+ */
+export type Notice = PushNotice & { waiting?: number; name?: string };
+
 /** Where a tapped notification lands, read back from the URL's query by the app. */
 export type Landing = { kind: 'request'; request: string } | { kind: 'event'; writer: string; seq: number };
 
@@ -18,13 +25,15 @@ const KINDS = new Set(['question', 'permission', 'message']);
 const isText = (v: unknown): v is string => typeof v === 'string' && v.length > 0;
 const isSeq = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 1;
 
-/** The notice, or null for a payload that does not point to a card. */
-export function parseNotice(value: unknown): PushNotice | null {
+const isCount = (v: unknown): v is number => Number.isSafeInteger(v) && (v as number) >= 0;
+
+/** The notice, or null for a payload that does not point to a card. A `waiting` that is not a count is dropped. */
+export function parseNotice(value: unknown): Notice | null {
   if (typeof value !== 'object' || value === null) return null;
   const n = value as Record<string, unknown>;
   if (n.v !== 1 || !isText(n.project) || !isText(n.session) || !KINDS.has(n.kind as string)) return null;
   if (n.alias !== null && typeof n.alias !== 'string') return null;
-  const base = { v: 1 as const, project: n.project, session: n.session, alias: n.alias };
+  const base = { v: 1 as const, project: n.project, session: n.session, alias: n.alias, ...(isCount(n.waiting) && { waiting: n.waiting }), ...(isText(n.name) && { name: n.name }) };
   if (n.kind === 'message') {
     const event = n.event as Record<string, unknown> | undefined;
     if (typeof event !== 'object' || event === null || !isText(event.writer) || !isSeq(event.seq)) return null;
@@ -53,12 +62,13 @@ export function landingOf(search: string): Landing | null {
 }
 
 const ALIAS_MAX = 48;
-const named = (alias: string | null) => (alias === null || alias === '' ? 'A session' : alias.length > ALIAS_MAX ? `${alias.slice(0, ALIAS_MAX)}…` : alias);
+const bounded = (text: string) => (text.length > ALIAS_MAX ? `${text.slice(0, ALIAS_MAX)}…` : text);
+const named = (alias: string | null) => (alias === null || alias === '' ? 'A session' : bounded(alias));
 
-const WORDS: Record<PushNotice['kind'], { title: string; body: string }> = {
-  question: { title: 'has a question', body: 'Open the desk to answer it.' },
-  permission: { title: 'asks for your permission', body: 'Open the desk to allow or deny it.' },
-  message: { title: 'sent you a message', body: 'Open the desk to read it.' },
+const WORDS: Record<PushNotice['kind'], { title: string; body: (alias: string | null) => string }> = {
+  question: { title: 'has a question for you', body: () => 'Opens at the question' },
+  permission: { title: 'is waiting for your approval', body: () => 'Opens at the request' },
+  message: { title: 'sent you a message', body: (alias) => (alias ? `Opens in ${named(alias)}’s channel` : 'Opens in its channel') },
 };
 
 /** The notification for a notice; for null (a payload the worker cannot read), a plain prompt to open the desk. */
@@ -66,5 +76,5 @@ export function describeNotice(notice: PushNotice | null): NoticeDisplay {
   if (notice === null) return { title: 'The desk', options: { body: 'Something needs you. Open the desk to see it.', data: { url: '/' } } };
   const words = WORDS[notice.kind];
   const card = notice.event ? `event/${notice.event.writer}/${notice.event.seq}` : `request/${notice.request}`;
-  return { title: `${named(notice.alias)} ${words.title}`, options: { body: words.body, tag: `${notice.project}/${card}`, data: { url: noticeUrl(notice) } } };
+  return { title: `${named(notice.alias)} ${words.title}`, options: { body: `${notice.name ? `${bounded(notice.name)} · ` : ''}${words.body(notice.alias || null)}`, tag: `${notice.project}/${card}`, data: { url: noticeUrl(notice) } } };
 }

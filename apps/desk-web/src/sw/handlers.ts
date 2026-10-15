@@ -12,6 +12,8 @@ export type WindowLike = {
 };
 
 export type WorkerScope = {
+  /** The worker's navigator: the Badging API's `setAppBadge` where the platform has it (an installed app). */
+  navigator: { setAppBadge?(count: number): Promise<void> };
   registration: { showNotification(title: string, options?: NotificationOptions): Promise<void> };
   clients: {
     matchAll(options: { type: 'window'; includeUncontrolled: boolean }): Promise<readonly WindowLike[]>;
@@ -31,8 +33,18 @@ export type PushData = { json(): unknown } | null;
  * subscription (iOS revokes it after a few), and the hub only pushes when something needs the owner.
  */
 export async function onPush(scope: WorkerScope, data: PushData): Promise<void> {
-  const { title, options } = describeNotice(parseNotice(payloadOf(data)));
-  await scope.registration.showNotification(title, options);
+  const notice = parseNotice(payloadOf(data));
+  const { title, options } = describeNotice(notice);
+  await Promise.all([scope.registration.showNotification(title, options), badge(scope, notice?.waiting)]);
+}
+
+/**
+ * The app icon's badge, set to the org's waiting count when the push carries one (0 clears it); left as it is when
+ * the push carries none or the platform has no badge. A refusal is let go: the notification is what must show.
+ */
+async function badge(scope: WorkerScope, waiting: number | undefined): Promise<void> {
+  if (waiting === undefined || typeof scope.navigator.setAppBadge !== 'function') return;
+  await scope.navigator.setAppBadge(waiting).catch(() => {});
 }
 
 /** The push's JSON, or null for none or for data that is not JSON. */

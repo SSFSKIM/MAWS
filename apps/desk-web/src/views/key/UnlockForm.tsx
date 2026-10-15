@@ -12,13 +12,15 @@ import { explainKeyFailure } from './explain';
 import { methodLabel } from './labels';
 import { NewMethodForm } from './NewMethodForm';
 import { OrgMethodForm } from './OrgMethodForm';
+import { isInstalledApp } from '../../pwa/installed';
 import { useSecondMethodPrompt } from './second-method';
 
 export function UnlockForm({ me, onUnlocked }: { me: Me; onUnlocked?: () => void }) {
   const org = me.org.id;
   const keys = useQuery({ queryKey: WRAPPED_KEYS_QUERY, queryFn: listWrappedKeys });
   const queries = useQueryClient();
-  const [keep, setKeep] = useState<Keep>('session');
+  // The installed app keeps the key on the device unless the owner unticks it; a browser tab forgets it with the tab.
+  const [keep, setKeep] = useState<Keep>(() => (isInstalledApp() ? 'device' : 'session'));
   const [error, setError] = useState<string | null>(null);
   /** An attempt is running: where the key is kept is fixed at its start, so the control stays as it was until it ends. */
   const [running, setRunning] = useState(false);
