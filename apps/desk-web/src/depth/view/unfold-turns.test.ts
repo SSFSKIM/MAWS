@@ -43,5 +43,16 @@ describe("a fold's finished turns", () => {
     expect(store.getState().entries[controller.key].phase).toBe('live');
     expect(rest.every((id) => state().ui.expandedTurns.has(id as never))).toBe(true);
     expect(state().ui.expandedTurns.has(folded as never)).toBe(false);
+
+    // The reader opens it again: it is the fold's default once more, and the next reset reopens it with the rest.
+    store.getState().toggleTurn(controller.key, folded as never);
+    expect(state().ui.expandedTurns.has(folded as never)).toBe(true);
+    plane.current.listener.reset();
+    await settle();
+    plane.snapshot(script, script.length);
+    await settle();
+    await settle();
+    expect(store.getState().entries[controller.key].phase).toBe('live');
+    expect(finished().every((id) => state().ui.expandedTurns.has(id as never))).toBe(true);
   });
 });

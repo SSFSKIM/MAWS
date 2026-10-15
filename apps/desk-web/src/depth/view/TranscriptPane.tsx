@@ -2,7 +2,7 @@
 // subscription keeps it: MAWS's transcript view over the controller's source, the request still streaming beneath the
 // rows, older rows paged in at the top, and the subscription's disruptions said in place. Each transcript has its own
 // controller, store key, and subscription, so one's reset or end never touches another's view.
-import { useEffect, useMemo, useState, type RefObject } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useStore } from 'zustand';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
@@ -65,8 +65,19 @@ export function useDeskTranscript(controller: DeskTranscript, session: DeskSessi
     return () => useTranscriptStore.getState().setLive(controller.key, null);
   }, [controller.key, live]);
 
+  // After an end (other than a discontinuity, which the hub client recovers from itself) the transcript is taken up
+  // again only when the session becomes reachable again: it was unreachable at some moment since its last snapshot and
+  // is reachable now. An end while the session stays reachable (an agent's transcript the machine cannot serve) is not
+  // retried, or each failure would subscribe again at once, without end.
+  const unreachableSince = useRef(!live);
   useEffect(() => {
-    if (state.phase === 'ended' && live) controller.resubscribe();
+    if (!live) unreachableSince.current = true;
+  }, [live]);
+  useEffect(() => {
+    if (state.phase === 'live') unreachableSince.current = !live;
+    if (state.phase !== 'ended' || !live || !unreachableSince.current) return;
+    unreachableSince.current = false;
+    controller.resubscribe();
   }, [controller, state.phase, live]);
 
   return state;

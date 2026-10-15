@@ -32,9 +32,9 @@ async function allRowIds(scope: Locator): Promise<string[]> {
       el.scrollBy({ top: el.clientHeight * 0.8 });
       return false;
     });
-    if (atEnd) break;
+    if (atEnd) return ids;
   }
-  return ids;
+  throw new Error(`the transcript's end was not reached in 100 windows (${ids.length} rows taken)`);
 }
 /** How many times `text` occurs in the scope's drawn text: once when settled, never twice. */
 const occurrences = (scope: Locator, text: string) => scope.evaluate((el, t) => (el.textContent ?? '').split(t).length - 1, text);
