@@ -310,22 +310,23 @@ test('See N new changes: an agent session’s write between two views is offered
 // of different widths (KaTeX's Main and Typewriter, shipped with the app's dependencies), told apart by the drawn width
 // of the same text in slide px.
 const KATEX = (file: string) => [...readFileSync(join(REPO_ROOT, 'node_modules/katex/dist/fonts', file))];
-const FACE_SLIDE = `<section id="f1" style="background:#ffffff; padding:128px"><p id="probe" style="position:absolute; left:128px; top:300px; font-size:96px; font-family:'Face Lab', serif">iiiiiiiiiiiiiiii</p></section>`;
+// fix wave 3: `token` reads the family through the design system's body token, which the Theme's Body face overrides
+const FACE_SLIDE = `<section id="f1" style="background:#ffffff; padding:128px"><p id="probe" style="position:absolute; left:128px; top:300px; font-size:96px; font-family:'Face Lab', serif">iiiiiiiiiiiiiiii</p><p id="token" style="position:absolute; left:128px; top:600px; font-size:96px; font-family:var(--ds-font-body, serif)">iiiiiiiiiiiiiiii</p></section>`;
 const faceDeck = (ref: string) => ({
   'project/deck.json': JSON.stringify({ v: 4, createdOnFiles: { v: 1, at: '2026-10-15T09:00:00Z' }, title: 'Face lab', cover: 'f1', order: ['f1'], faces: { lab: { family: 'Face Lab', src: ref } } }),
   'project/slides/f1.html': FACE_SLIDE,
 });
-/** The probe's drawn width in slide px on a surface's stage (its zoom divided out). */
-async function probeWidth(where: Locator): Promise<number> {
+/** An element's drawn width in slide px on a surface's stage (its zoom divided out). */
+async function probeWidth(where: Locator, eid = 'probe'): Promise<number> {
   const frame = await where.locator('[data-stage-slide]').first().boundingBox();
-  const probe = await where.locator('[data-stage-slide] [data-eid="probe"]').first().boundingBox();
+  const probe = await where.locator(`[data-stage-slide] [data-eid="${eid}"]`).first().boundingBox();
   return probe!.width / (frame!.width / 1920);
 }
 /** A width once it has stopped changing (a face loads after the first layout). */
-async function settledWidth(where: Locator): Promise<number> {
+async function settledWidth(where: Locator, eid = 'probe'): Promise<number> {
   let last = -1;
   await expect.poll(async () => {
-    const now = Math.round(await probeWidth(where));
+    const now = Math.round(await probeWidth(where, eid));
     const same = now === last;
     last = now;
     return same;
@@ -350,7 +351,6 @@ test('a live editor and a version’s preview of one deck in one window each dra
   const serifRef = await upload('lab-main.woff2', 'KaTeX_Main-Regular.woff2');
   const monoRef = await upload('lab-mono.woff2', 'KaTeX_Typewriter-Regular.woff2');
   await seam(page, 'seed', id, faceDeck(serifRef));
-  await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Serif face' });
 
   // the deck in the panel's Artifacts tool beside a chat, pinned, then opened in a main tab too
   const project = await ok<{ name: string }>(page, 'session.projects.add', { directory: repo.root });
@@ -370,9 +370,20 @@ test('a live editor and a version’s preview of one deck in one window each dra
   await panel.getByRole('tab', { name: 'Artifacts' }).click();
   await expect(inPanel.locator('[data-deck-editor]')).toBeVisible();
 
+  // fix wave 3: the Theme's Body face set to the uploaded family, so text reading the body token asks for it too
+  await headerAction(page, 'Theme');
+  await inMain.locator('[data-deck-rail="theme"]').getByRole('combobox', { name: 'Body face', exact: true }).selectOption({ label: 'Face Lab' });
+  await expect.poll(async () => JSON.parse((await seam(page, 'files', id))['project/deck.json']!).dsOverrides?.['--ds-font-body'] ?? '').toContain('Face Lab');
+  await headerAction(page, 'Theme');
+  await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Serif face' });
+
   // the serif face's width, live; then the deck re-mapped to the monospace face: both live surfaces follow
   const serif = await settledWidth(inMain);
-  await seam(page, 'seed', id, faceDeck(monoRef));
+  expect(Math.abs((await settledWidth(inMain, 'token')) - serif)).toBeLessThanOrEqual(serif * 0.02); // the token draws the upload
+  const keepOverrides = JSON.parse((await seam(page, 'files', id))['project/deck.json']!).dsOverrides as Record<string, string>;
+  const mono_ = faceDeck(monoRef);
+  mono_['project/deck.json'] = JSON.stringify({ ...JSON.parse(mono_['project/deck.json']!), dsOverrides: keepOverrides });
+  await seam(page, 'seed', id, mono_);
   await expect.poll(async () => Math.abs((await probeWidth(inPanel)) - serif), { timeout: 15_000 }).toBeGreaterThan(serif * 0.2);
   const mono = await settledWidth(inPanel);
 
@@ -382,10 +393,14 @@ test('a live editor and a version’s preview of one deck in one window each dra
   await expect(inMain.getByRole('toolbar', { name: 'Version preview' })).toBeVisible();
   const preview = await settledWidth(inMain.locator('[data-history-stage]'));
   const live = await settledWidth(inPanel);
-  console.log(`[deck history e2e] 'Face Lab' drawn widths in slide px: serif ${serif}, monospace ${mono}; at once: the preview ${preview}, the live panel ${live}`);
+  const previewToken = await settledWidth(inMain.locator('[data-history-stage]'), 'token');
+  const liveToken = await settledWidth(inPanel, 'token');
+  console.log(`[deck history e2e] 'Face Lab' drawn widths in slide px: serif ${serif}, monospace ${mono}; at once: the preview ${preview} (through the body token ${previewToken}), the live panel ${live} (token ${liveToken})`);
   expect(Math.abs(preview - serif)).toBeLessThanOrEqual(serif * 0.02);
   expect(Math.abs(live - mono)).toBeLessThanOrEqual(mono * 0.02);
   expect(Math.abs(preview - live)).toBeGreaterThan(serif * 0.2);
+  expect(Math.abs(previewToken - serif)).toBeLessThanOrEqual(serif * 0.02); // fix wave 3: the Theme's Body face in the preview
+  expect(Math.abs(liveToken - mono)).toBeLessThanOrEqual(mono * 0.02);
 });
 
 // M8's bound on S7a's heavy deck: the soak's 3-month-old version and its live state, written into a deck through A's
