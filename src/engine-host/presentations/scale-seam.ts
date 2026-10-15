@@ -4,8 +4,9 @@
 // run through their real `call` with that session as the context, so a publish is A's `publishDoc` over the deck's
 // three-way publish on the host's live document, with the session's base, its op ledger and its replica: the path an
 // agent's publish takes in the host, less the engine's wire. Around each call the seam answers the host loop's longest
-// gap (B's 1 ms tick sampler, which catches a call blocking the loop at once) and the loop's busy time (event-loop
-// utilization's active time over the call): Acceptance 7's "a publish occupies the host loop".
+// gap (B's 1 ms tick sampler, which catches a call blocking the loop at once) and the loop's busy time over the call
+// (the sum of the sampler's gaps beyond its tick; event-loop utilization reads 0 in Electron's utility process):
+// Acceptance 7's "a publish occupies the host loop".
 //
 // Commands arrive as JSON files in `<dir>/in` and are answered in `<dir>/out` under the same name (B's file channel,
 // `serveCommandFiles`); no IPC name is added.
@@ -98,12 +99,11 @@ export class DeckScaleSeam {
     // is caught by the gap it leaves, which closes once the loop turns after it
     await turned(LOOP_TICK_MS * 3);
     this.loop.reset();
-    const utilization = performance.eventLoopUtilization();
     const started = performance.now();
     const result = await definition.call(input, ctx);
     const wallMs = performance.now() - started;
     await turned(LOOP_TICK_MS * 5);
-    const busyMs = performance.eventLoopUtilization(utilization).active;
+    const busyMs = this.loop.busy();
     const loop = this.loop.stats();
     const text = result.content[0]?.type === 'text' ? result.content[0].text : '';
     const isError = result.isError === true;

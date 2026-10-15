@@ -63,6 +63,12 @@ export class LoopSampler { // P3-C M10: exported for the deck's scale seam (src/
     return { max: sorted[sorted.length - 1]!, p99: sorted[Math.min(sorted.length - 1, Math.ceil(0.99 * sorted.length) - 1)]!, mean: sorted.reduce((sum, gap) => sum + gap, 0) / sorted.length };
   }
 
+  // P3-C M10: the loop's busy time since the reset, the sum of every gap's excess over the tick (a gap within twice the
+  // tick is the timer's own idle jitter, not work). Event-loop utilization reads 0 in Electron's utility process.
+  busy(): number {
+    return this.gaps.reduce((sum, gap) => (gap > 2 * LOOP_TICK_MS ? sum + gap - LOOP_TICK_MS : sum), 0);
+  }
+
   close(): void {
     clearInterval(this.timer);
   }

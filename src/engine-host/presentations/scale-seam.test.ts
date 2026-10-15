@@ -56,8 +56,8 @@ describe('the seam’s commands', () => {
       for (const answer of [read, published]) {
         expect(answer.wallMs).toBeGreaterThan(0);
         expect(answer.loop.max).toBeGreaterThan(0);
-        expect(answer.busyMs).toBeGreaterThan(0);
-        expect(answer.busyMs).toBeLessThanOrEqual(answer.wallMs + 20); // the loop's busy time within the call's span (and the turns around it)
+        expect(answer.busyMs).toBeGreaterThanOrEqual(answer.loop.max - 1); // the busy time holds the longest stretch
+        expect(answer.busyMs).toBeLessThanOrEqual(answer.wallMs + 20); // and lies within the call's span (and the turns around it)
       }
       // 'last' follows the session: its publish is now its base, so a second publish from 'last' is not stale
       const again = (await seam.run({ cmd: 'call', session: 'deck-agent', tool: 'artifact_publish', args: { artifact: id, baseRevision: 'last', files: { [SLIDE]: text.replace('font-size:64px', 'font-size:68px') } } })) as Published;
