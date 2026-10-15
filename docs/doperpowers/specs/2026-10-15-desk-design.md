@@ -3354,6 +3354,17 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The real org is `ssfskim` (display name `SSFSKIM`), and its
+  admin, the one email Access allows, is supremekim17@gmail.com (owner,
+  2026-10-15). The id is written into every hub project's `.smns` and
+  every machine's service-token name, so it is fixed once a machine
+  enrolls. The hub is deployed at
+  `desk-hub.opencognita-platform.workers.dev` behind Access (team
+  `flat-wave-208c`); M5's proofs run under a throwaway org on the same
+  deployment, and the deployment is left with the real org and nothing
+  enrolled, so the owner sets the org key first. Rejected: `opencognita`,
+  after the Cloudflare account's subdomain. Flags DC3 (M5).
+  Date/Author: 2026-10-15, owner.
 - Decision: DC3's fake machine folded as its own Interfaces section
   (MAWS `.doperpowers/sde/2026-10-15-desk-dc3-hub/
   interfaces-M4-reviewed-c100ed17.md`, M4 reviewed clean and ticked at
