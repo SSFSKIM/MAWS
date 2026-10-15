@@ -1174,7 +1174,10 @@ The covered object is the shape without the code's own value:
 
 `mac.value` (and an RPC's `mac`) is the 32-byte HMAC, base64url without padding (43 characters). A verifier compares
 in constant time, and treats a shape with no usable nonce, a value that is not base64url, or anything the canonical
-form refuses as failing.
+form refuses as failing. Base64url here is canonical (RFC 4648 §3.5): no padding, and the unused low bits of the last
+character zero, so each byte string has exactly one spelling; every decoder (the code's value, a nonce, the org key in
+an enrollment code) refuses any other spelling. Otherwise one code has four spellings a lenient decoder accepts, and
+a hub that stores a variant forwards an event that a strict daemon refuses.
 
 **What the code leaves out is checked by shape.** A `hub/` event's `writer`, `seq`, and `ts` are assigned by the hub
 after the browser computed the code, so the code does not cover them, and sminos's delivery writes the writer into
@@ -2261,6 +2264,14 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: Base64url is canonical everywhere DX1–DX7 use it: the unused low bits of the last character
+  must be zero, and decoders refuse any other spelling. DC4's Python module (M1) found that the hub's
+  decoder accepted all four spellings of a 43-character code while the Python one accepted only the
+  canonical spelling, so an event the hub stored under a variant would be refused by every daemon. The
+  rule is strict decoding, not normalization: re-encoding a variant would mean storing bytes other
+  than the ones the writer sent. DC3 aligns `base64url.ts` and adds a negative vector; DC4 already
+  refuses. Flags DC3, DC4, DC5.
+  Date/Author: 2026-10-15, design session (DC4's M1).
 - Decision: DX1–DX4 and DX7 re-folded from DC3's G1 amendment (MAWS
   `29294260`, reviewed clean after one fix wave), which builds the
   Interfaces review's fixes into the module. Two refinements: a daemon's
