@@ -19,7 +19,7 @@
 
 - [x] M1 — The main transcript in depth (2026-10-15, reviewed clean: 46382c26..ba48dcda, fix 29fa876a..f6d42944)
 - [x] M2 — Subagents (2026-10-15, reviewed clean: c8666c61..c86352d8, fixes d7da475f..7e741316 and affd704c..f6f288c9)
-- [ ] M3 — Diff, session info, the transcript slot, and the replayed acceptance
+- [x] M3 — Diff, session info, the transcript slot, and the replayed acceptance (2026-10-15, reviewed clean: b5de65f4..481d05b3, fix 8106c128..4f3c58f4)
 
 ## Constraints that bind every milestone
 
