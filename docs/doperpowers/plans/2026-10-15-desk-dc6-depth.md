@@ -334,6 +334,18 @@ registrations through `connectDepth()`.
   for `<message>` marks; the `transcript` slot's marks are confirmed
   before M3.
   Date/Author: 2026-10-15, composite's writer.
+- Decision (M3): The `transcript` slot draws through MAWS's to-human
+  Presenter, so the unfolded working record reads as the folded view does;
+  depth on the right stays raw. It draws an **exclusive range**: DC5 mounts
+  it between two `<message>` rows the direct channel already draws and
+  passes `{from, to}`, each a `src` (transcript row uuid plus span index)
+  or null for an open end; the slot draws what lies strictly between them,
+  leaving out each bounding message's marked span but drawing unmarked
+  text of the same row before or after it (working record). DC5 does not
+  trim the slot's output and writes the prop's exact shape into DX8 when
+  it mounts; the composite's writer relays it.
+  Date/Author: 2026-10-15, composite's writer (DC5's answer, the writer's
+  ruling).
 
 ## Surprises & Discoveries
 - 2026-10-15 (from DC2's M3, built, in review, via the composite's
