@@ -1698,7 +1698,7 @@ type Envelope<K, Session, Sub, N> = {
 // Discriminated by kind; each kind's invariants are in its type:
 type SessionMessage =
   | Envelope<'snapshot', string, string, 0>                                                       // a sub's first message
-  | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, …
+  | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, … (`end` may come first, at n 0)
   | Envelope<'presence' | 'raised' | 'settled' | 'delivery' | 'compact', string, null, null>     // to every browser, outside subs
   | Envelope<'machine', null, null, null>;                                                         // names no session
 ```
@@ -1706,10 +1706,15 @@ type SessionMessage =
 (`session.ts` writes it as a mapped type over the kinds, one `Envelope` per kind, so a `chunk` without a sub or a
 `machine` message with a session fails to typecheck.)
 
+**An `end` may be a sub's first message**, at `n` 0, when the subscription ends before its snapshot could be taken: an
+unknown session, a bridge not ready yet, a cut row that never reached disk (DX5). It carries the reason it would carry
+later; on `discontinuity` at `n` 0 the browser subscribes again after a short backoff rather than at once.
+
 **A subscription's scope** is one transcript, named when the browser subscribes (DX3) and carried to the machine
 (DX2): the session's main transcript (`agentId` null) or one subagent's. The snapshot's rows and every `rows` page
 come from that transcript alone. A main-scope sub also carries every agent's chunks and `block-row`s, and the
-subagent tree; an agent-scope sub carries that agent's rows, chunks, and `block-row`s, and its snapshot's `subagents`
+subagent tree; since it carries no subagent's rows, a subagent's `block-row` there settles that block at once, and the
+browser drops its partial text (the row is drawn by that agent's own sub). An agent-scope sub carries that agent's rows, chunks, and `block-row`s, and its snapshot's `subagents`
 and `streaming` are that agent's own.
 
 | `kind` | in a sub | body |
@@ -2705,6 +2710,31 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DX5's row order is disk order. DC2's M4 review broke the
+  agreed ordering live: a notice posted at hook entry can precede a row
+  the engine writes earlier (a session's first prompt was noticed before
+  its environment attachment but written after it), and a compaction's
+  rows, which no hook names, were emitted after the next prompt. So the
+  mod posts a row's notice once the engine has taken the row (after
+  `next()`), making notice order write order within a loop, and the
+  consumer emits each loop's rows strictly in disk order: a row past the
+  cut is released by its own notice, by a notice for a later row of the
+  same loop (a row passed over gets none), or after 2 s with neither;
+  every later row waits behind it. History waits for each loop's cut row
+  to reach disk (5 s, else a discontinuity), since a notice may now trail
+  the flush. A `block-row` for a row already released unnamed still ends
+  the subscription; a `row-seen` for one is ignored. History and live then
+  agree across a reconnect, both following the disk. Rejected: notices at
+  hook entry with a 2 s wait for unnamed rows, which emitted rows out of
+  order. Open: the live walk measures the largest flush-to-notice lag,
+  since a notice later than the window releases its row unnamed and its
+  `block-row` then ends the subscription; the window rises if the lag
+  nears it. DX5's text is refreshed from DC2's plan when M4 is reviewed.
+  With it, from DC7's M1: an `end` may be a sub's first message, at
+  `n` 0 (DX4), and a subagent's `block-row` in a main-scope sub settles
+  its block at once, since that sub never carries the row. Flags DC2,
+  DC3 (the `end` type), DC5, DC6, DC7.
+  Date/Author: 2026-10-15, design session (DC2's M4 review, DC7's M1).
 - Decision: DX4's and DX5's `usage` give the engine's shape exactly:
   `context: {tokens?, window, percent?}` and `cost: {usd} | null`. The
   bridge passes `$.session.usage()`'s `context` and `cost` through, so
