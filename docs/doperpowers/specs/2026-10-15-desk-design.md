@@ -1602,7 +1602,7 @@ round.
 **The session plane, up.** Every frame below needs the project opened on the current stream (`not-open` otherwise),
 and one the hub cannot read is refused `bad-shape` down the stream and recorded in the audit record, as an upload's is.
 - `rpc-result {project, nonce, outcome}`: `outcome` is DX6's `{state: "done", result: object}` or `{state: "failed",
-  error: {code, message}}`. The hub answers every well-formed one with `rpc-ack {project, nonce}`, so the daemon stops
+  error: {code, message, winner?, by?, terminalOnly?}}`. The hub answers every well-formed one with `rpc-ack {project, nonce}`, so the daemon stops
   republishing it; it applies the outcome only to an RPC it forwarded to this machine and that has no result yet
   (`forwarded` or `uncertain`), and a result for any other nonce (unknown, another machine's, already resolved) is
   acknowledged and changes nothing.
@@ -1871,8 +1871,9 @@ resumed from a hub buffer.
 aborted, the session ended, or the call settled another way — is `outcome: "withdrawn", winner: "other", by:
 "bridge"`. `"terminal"` and `"bridge"` are reserved: no member id is either. A decision that reaches the bridge after
 another side has won, or within 200 ms of a background request's deadline, is refused there (DX5's 409, naming the
-winner, or `terminalOnly`), and the RPC fails at the daemon (DX6's `not-pending` fits; the mapping is DC7's); the
-request's own `settled` says who won. The hub refuses no decision itself: the bridge alone knows.
+winner, or `terminalOnly`), and the RPC fails at the daemon (DX6's `not-pending` fits; the mapping is DC7's), its
+error carrying what the refusal knew: `winner` and `by` from an `already settled` 409's `settled`, `by` alone from a 409
+that names who answered first, `terminalOnly` from the closed window (DX6). The request's own `settled` says who won. The hub refuses no decision itself: the bridge alone knows.
 
 **The relay (the hub's part).** The hub reads a subscription message's envelope, never its body: it checks that the
 message names this project and machine, a session, a `sub` and a non-negative integer `n`, and passes it to the one
@@ -1897,9 +1898,9 @@ passed through as a sub's first message, and `step-end` relayed unread as `block
 `step-end` after every step's `block-row`s, aborted steps included, an `end`
 at `n` 0 for a subscribe it cannot serve, and a DX5 subscription the child ends (`end {discontinuity}`).
 
-### DX5 — Local bridge protocol (owner DC2; version 1 with its M2, M3 and M4 extensions, folded 2026-10-15)
+### DX5 — Local bridge protocol (owner DC2; version 1 with its M2, M3 and M4 extensions and its final review, folded 2026-10-15)
 
-Folded from DC2's plan (doperpowers `89c9f8da`,
+Folded from DC2's plan (doperpowers `0afc902f`, as merged in PR #195,
 `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md`): version 1 as
 built at DC2's M1 and amended by its review's fix waves; the M2 extension,
 reviewed clean after two fix waves (`75faba58`, `7842ae4e`); and the M3
@@ -1907,11 +1908,13 @@ extension (requests from outside and their settlement), reviewed clean
 after two fix waves (`10f913d5`, `4b13cb9e`); and the M4 extension (the
 live export, row order with notices and the seeded cut, the step-end hold,
 readiness, the fence), reviewed clean after two fix waves (`1d55316f`,
-`f0242560`). Rows marked [fw1] or [fw2] changed in the fix waves of the
-milestone that built them; rows marked [M2], [M3] or [M4] were built or
-changed there. Until DC2 closes, its plan's
-copy is the working text, and this one is refreshed from it. Paths in
-this subsection are doperpowers'.
+`f0242560`); and the whole branch's review, clean after two fix waves
+(`5003ca2e`, `27c46947`, rows marked **[final-review wave]** and the
+"Final-review wave 2" subsection). Rows marked [fw1] or [fw2] changed in
+the fix waves of the milestone that built them; rows marked [M2], [M3]
+or [M4] were built or changed there. DC2 has closed, so this copy is the
+contract: a later change to the bridge's protocol lands here first.
+Paths in this subsection are doperpowers'.
 
 Rows changed by fix wave 1 are marked **[fw1]**.
 
@@ -2014,7 +2017,7 @@ Every event is an object with `type` and `t` (the mod's clock, epoch ms). `agent
 | `tool` / `result` | M1 | `toolUseId, tool, agentId, isError, denied?, text?, truncated?` |
 | `agent` / `spawn` | M1 | `agentId, parentAgentId, subagentType, description, name, background, model, toolUseId` |
 | `agent` / `stop` | M1 | `agentId, agentType` |
-| `usage` | M1 | `context: {tokens?, window, percent?}, cost: {usd} \| null` — the engine's `$.session.usage()` context and cost as it returns them (`tokens` and `percent` absent before the first response; `cost` null without a ledger) — after each main turn |
+| `usage` | M1 | `context: {tokens?, window, percent?}, cost: {usd} \| null` — the engine's `$.session.usage()` context and cost as it returns them (tokens and percent absent before the first response; cost null without a ledger) — after each main turn |
 | `heartbeat` | M1 | `state` (as `ping`'s) — every 5 s |
 | `result` | M1 | `id, op, ok, result?, error?` — the mod's answer to a command |
 | `gap` | M1 | `dropped` — events that reached no child (a failed post, an overflowing queue). **[fw1]** Always followed at once by a `resync`; a live subscriber may also resubscribe |
@@ -2180,7 +2183,7 @@ and M2 left them. Changed rows are marked **[M3]**; rows fix wave 1 changed are 
 | `GET /requests` | M3 **[M3]** | — | 200 `{pending: [<raised>…], settled: [<settlement>…]}` (the snapshot's two lists) |
 | `GET /requests/<request>` | M3 **[M3]** | — | 200 the pending request's `raised` fields plus `session` (DC7's digest check); 404 `{error}` when not pending; 410 `{error: "settled", settled}` once settled |
 | `GET /requests/<request>/wait?ms=` | M3 **[M3]** **[fw1]** (the mod's) | — | Held up to `min(ms, 20000)`. 200 `{decision: {behavior, message?, updatedInput?}, by}`: a client's decision, handed out once. 410 `{reason: "terminal"}`: the terminal answered it (the session record left `waiting`); this only ends the poll and closes the request to new decisions, and settles nothing. 410 `{reason: "settled", settled}`: settled. 204: nothing yet (an unknown request is held too, since its `raised` may still be in flight). **[fw1]** `watch=1` is gone: once its hook stops polling, nothing watches a request; the engine's record settles it |
-| `POST /requests/<request>/decision` | M3 **[M3]** | `{behavior: "allow"\|"deny", message?, updatedInput?: {answers: {<question>: <answer>}}, by}`. `by` is `cli` or a member id (`terminal` and `bridge` are reserved). `updatedInput` only for a question, whose allow requires `answers` keyed by its questions. An async question cannot be denied | 200 `{accepted: true, request}`: the settlement follows on the stream. 400 `{error}`: malformed or not allowed. 404: not pending. 409 `{error: "already settled", settled}`. 409 `{error: "already answered by <by>; …"}`. 409 `{error: "the window … closed; the terminal answers it", terminalOnly: true}`: past a background deadline minus 200 ms. 409 `{error: "the terminal answered it; …"}`. For an async question, the child relays it as op `answer` (wait 5 s); the mod's refusal is a 409 carrying its error |
+| `POST /requests/<request>/decision` | M3 **[M3]** | `{behavior: "allow"\|"deny", message?, updatedInput?: {answers: {<question>: <answer>}}, by}`. `by` is `cli` or a member id (`terminal` and `bridge` are reserved). `updatedInput` only for a question, whose allow requires `answers` keyed by its questions. An async question cannot be denied | 200 `{accepted: true, request}`: the settlement follows on the stream. 400 `{error}`: malformed or not allowed. 404: not pending. 409 `{error: "already settled", settled}`. 409 `{error: "already answered by <by>; …", by}` (`by` added after DC2's close, below). 409 `{error: "the window … closed; the terminal answers it", terminalOnly: true}`: past a background deadline minus 200 ms. 409 `{error: "the terminal answered it; …", winner: "terminal", by: "terminal"}` (likewise). For an async question, the child relays it as op `answer` (wait 5 s); the mod's refusal is a 409 carrying its error |
 
 ##### The child's stdout: lines for the mod
 
@@ -2278,8 +2281,9 @@ listed stand as M1–M3 left them. Changed rows are marked **[M4]**.
 | `block-row` | M3, **[M4]** | `uuid, turnId, agentId, step, index` — **[M4]** also the response row's **notice**: emitted in the `session.append` hook once the append resolves (the row is written), so notice order is write order within a loop. The child moves the loop's cut to `uuid` in the same step that settles the block |
 | `row-seen` | **[M4]** | `uuid, agentId, door` — the notice of every other row the session keeps, once its append resolves: <ul><li>any door but `response` and `queue`;</li><li>a response row whose block never streamed, the rows of an excluded request (the seed, below) included: nothing of theirs ever streamed;</li><li>door `note` (a plugin's own append) only once kept, never when refused;</li><li>the bridge's own steer row from the append's returned uuid (door `note`), after it is written.</li></ul> None for door `queue`, and none for a `hook_success` with no text (raised but never written by 2.1.300). Rows a plugin's own calls write that pass no hook of the plugin's get none: a compaction the bridge runs, the engine's reload notice |
 | `step` (`phase: "end"`) | M1, **[M4, fix wave 1]** | unchanged fields. **Ordered after every `block-row` of its step**: the engine can append a response row after the request's result (it withholds a refusal or max-output row until the stream is done, and closes a block the stream left open), so the mod holds the end until each block that streamed has its row named, at most 1 s (`STEP_END_WAIT_MS`), and posts it before anything later of its loop (the next request, the turn's end, the subagent's stop). **[fix wave 2]** Once a step's end is out, whichever released it, the step's pairing is closed: a row of it that comes later is named by `row-seen`, never a `block-row` after its step's end. DX4's `step-end` relies on this order. **The child removes the step's whole message from `streaming` at its end, under the lock that applies events (as M1 said; M3's per-block settling did not change it), whether or not a `block-row` came for each block**, so a block aborted mid-response is in no later snapshot; a turn's `complete` removes its messages too |
+| `turn` (`phase: "start"`) | M1, **[final-review wave]** | may carry **`recovered: true`** with `text: null`: a main turn the module saw no `turn.start` of (it was reloaded while the turn ran), taken from the turn's next main-loop request (`turn.step`'s `turnId`, the id `turn.complete` and `$.turn.abort` use). The turn's own `complete` follows as usual |
 | `export` | **[M4]** | `records: [{type: "assistant"\|"user", uuid, message: {content}}]` — main-loop rows as the transcript keeps them: <ul><li>a text row that may hold a mark (its text blocks; not sent past 65,536 characters);</li><li>an async ask's call row with its result row.</li></ul> **Consumed by the child, never handed to subscribers.** The child appends their host events to the project's log with `sminos.export_live`: the Stop hook's writer, `host_events` and `(kind, src)` dedup (`message`: `<row uuid>#<span index>`; `question`: the call id). Membership on sight; one export at a time, in order, off the stream's lock |
-| `resync` | M1–M3, **[M4]** | gains **`cut`**: `{"main": <uuid>\|null, "<agentId>": <uuid>, …}`, each loop's last notice, seeded as below. `null` (or a loop it does not name): this loop had no rows before the module loaded, and none noticed since. The child replaces its cut with it. A loop it does not name is gone |
+| `resync` | M1–M3, **[M4]** | gains **`cut`**: `{"main": <uuid>\|null, "<agentId>": <uuid>, …}`, each loop's last notice, seeded as below. `null` (or a loop it does not name): this loop had no rows before the module loaded, and none noticed since. The child replaces its cut with it. A loop it does not name is gone. **[final-review wave]** also gains **`sessionInfo`** `{session, cwd, surface, isInteractive, model, version}`, what the session started as: the child takes it as its `sessionInfo` (an `ended` it already had stays), so a child whose `session` start was lost with the first post still has the export's `cwd` |
 
 ##### Subscription (`GET /events`)
 
@@ -2291,8 +2295,10 @@ listed stand as M1–M3 left them. Changed rows are marked **[M4]**.
     not. A post refused by the fence (409) is never applied.
   - Meanwhile `GET /events` is held with no response line at all, for at most 5 s
     (`SMINOS_BRIDGE_READY_WAIT`), then answered 503 `{"error": "the session's state has
-    not reached its bridge yet"}`. `GET /status` answers `ready: false`. `sminos watch` and
-    the control verbs retry a 503 within their reconnect window.
+    not reached its bridge yet"}`. `GET /status` answers `ready: false`. `sminos watch` retries a
+    503 within its reconnect window; **[final-review wave]** `decide`, `answer` and
+    `compact` retry it (every 0.1 s after each 5 s hold) until their first snapshot's
+    8 s window runs out.
   - That first resync always carries every loop's cut. At a module's first hello the mod
     adopts the hello's `seed` before it queues `[session start, resync]`. A replacement
     child gets the module's current cut (seeded at the first hello, moved by notices since).
@@ -2395,6 +2401,21 @@ the real child.
 The stale rule reads: a socket file refused 3 times, 0.1 s apart, is stale (a listener with
 a full backlog refuses too). The child's listen backlog is 128.
 
+#### Final-review wave 2 (unknown turn state after a load; supersedes rows above where they differ)
+
+- **The child's hello** gains `presence`: the session's engine record
+  (`<config>/sessions/<pid>.json`).
+- **Commands `steer`, `interrupt`, `compact`** gain the refusal `{ok: false, error: "turn
+  state unknown since the bridge reloaded; retry after the next model request"}`. It is
+  given while the mod cannot know whether a main turn runs (after a load into an existing
+  conversation, until a main turn starts, completes or is recovered from its next
+  request, or the session record says idle).
+- **`ping`'s and `heartbeat`'s `state`** gain `isTurnUnknown: true` while unknown (absent
+  otherwise).
+- **Verbs:** `sminos interrupt|steer|compact` exit 1 with that reason. Before this wave,
+  interrupt said "idle: nothing to interrupt" with exit 0, compact ran at once, and steer
+  was refused as idle.
+
 ### DX6 — RPC shapes (owner DC3; G1; the hub's record built at M3)
 
 ```ts
@@ -2412,19 +2433,23 @@ type Rpc<N> = {
 
 | `rpc` | `args` | result (`done`) |
 | --- | --- | --- |
-| `steer` | `{session, text}` | `{row}` — the uuid of the appended user row; refused `idle` when no turn is running |
+| `steer` | `{session, text}` | `{row}` — the uuid of the appended user row, or null when the session has no bridge (the steer went as a `--bg` seat's `reply` or as a send, §5, which append no row the machine can name); refused `idle` when no turn is running |
 | `interrupt` | `{session}` | `{turnId, stopped, running}` — the aborted turn (null when idle), the background tasks stopped, and those whose stop failed; a non-empty `running` is an incomplete interrupt, drawn as such |
 | `answer` | `{session, digest, answers}` — `answers` maps each question's text to the chosen label (several joined by `", "`) | `{}` |
 | `decide` | `{session, digest, decision: "allow" \| "deny", message?}` | `{}` |
 | `model` | `{session, model?, effort?}` (at least one) — `model` an id, a family alias the session maps, or `"default"` (§5) | `{model, effort}` now in force, null for the session's own |
 | `compact` | `{session}` | `{at: "now" \| "turn-end"}` — answered at once; the compaction's outcome follows as the session's `compact` events (DX5), carried on the session plane by DC7 |
-| `spawn` | `{checkout, worktree?, brief, model?, effort?, permission_mode?}` | `{session, alias}` |
-| `retire` | `{session}` | `{}` |
+| `spawn` | `{checkout, worktree?, brief, model?, effort?, permission_mode?}` | `{session, alias}`; the log's record of the spawn carries the RPC's `member` as `by` |
+| `retire` | `{session}` | `{}`; the log's `retired` carries the RPC's `member` as `by` (acceptance 7), never sminos's operator `""` |
 | `resume` | `{session}` | `{session}` — the same id |
 
 `digest` is `{session, request, tool, input_sha256}` (DX1), `request` as the `raised` named it, opaque; `input_sha256` is
 over the `raised`'s `input` as sent, the capped input when it is `truncated`. An outcome is
-`{state: "done", result}` or `{state: "failed", error: {code, message}}`; the hub's record of an RPC adds `forwarded`
+`{state: "done", result}` or `{state: "failed", error: {code, message, winner?, by?, terminalOnly?}}` (desk-hub's
+`RpcError`): a refused `decide` or `answer` carries `winner` and `by` as DX4's `settled` names them, or `by` alone when
+the bridge knows who answered first but not yet how it settles, and `terminalOnly: true` when the window closed.
+They come only from the bridge's own record: its 409s, or the `settled` record its pending snapshot reports when the
+daemon's digest check finds the request already settled (the common case). The hub's record of an RPC adds `forwarded`
 (written to the machine's stream, no result yet) and `uncertain` (the machine's lease lapsed, or its stream closed,
 after forwarding and before a result).
 
@@ -2864,9 +2889,9 @@ a hub that connects into machines (§2).
 | child | artifact | status |
 | --- | --- | --- |
 | DC1 bridge spike | findings: `docs/doperpowers/specs/2026-10-15-arkho-desk-c1-findings.md` | **landed 2026-10-15**: 11 items, every primitive promoted, six with a change folded into §2 and §5; probe kept at `/tmp/c1probe` |
-| DC2 bridge | plan: `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md` (doperpowers, branch `worktree-smns-erb`) | in-flight (dispatched 2026-10-15, parent pin 8acb3958) |
+| DC2 bridge | plan: `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md` (doperpowers, branch `worktree-smns-erb`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/195, merge `a6c90a13`, 7.155.0; report `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-report.md` |
 | DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | in-flight (dispatched 2026-10-15) |
-| DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
+| DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/194, merge `9e7d3d30`, 7.156.0 (main merged in at `2a864e49` after DC2); report `docs/doperpowers/plans/2026-10-15-desk-dc4-report.md` |
 | DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | in-flight (dispatched 2026-10-15, parent pin 9471766c) |
 | DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | in-flight (dispatched 2026-10-15, after DC4's M3 was reviewed clean) |
@@ -2960,7 +2985,8 @@ a hub that connects into machines (§2).
   technical-heavy) and, in the same round, a second
   `doperpowers:adversarial-reviewer` on the children and contracts for
   buildability. Each plan child names its own branch-review rung in its
-  execution document, xhigh for DC3, DC4, DC5, and DC7 by their size. Recomposition
+  execution document, xhigh for DC3 and DC5 by their size (DC2, DC4 and DC7 amended
+  below). Recomposition
   is a scale review: the two-Mac acceptance walk (Parent-Level Acceptance
   1–12) plus an xhigh panel per repository over the children's merged
   range.
@@ -3096,6 +3122,56 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: Three DX6 rulings from DC7's M3. A steer to a session with no
+  bridge answers `{row: null}`, since a `--bg` seat's `reply` and a send
+  append no row the machine can name. Spawn and retire record the RPC's
+  `member` as `by`, as acceptance 7 asks, not sminos's operator `""`: the
+  RPC is signed by that member. The who-won fields may also come from the
+  daemon's digest check, which reads the bridge's own `settled` record
+  for a request already settled; that is where the common case is
+  caught, and it is the same source as the 409. Rejected: a steer result
+  without `row` for that path, and the operator as `by`. Flags DC5 (a
+  steer's `row` can be null), DC7.
+  Date/Author: 2026-10-15, design session (DC7's M3).
+- Decision: A refused decision says who won, as fields (DC3's M4,
+  MAWS `c547aaa5`). DX6's failed outcome gains `winner?`, `by?` and
+  `terminalOnly?` beside `code` and `message`, so the web's card shows
+  "answered by …" without parsing a message or waiting for the
+  request's `settled`. DX5's two 409s that name the first answerer only
+  in their text gain it as fields: `by` on "already answered by", and
+  `winner: "terminal", by: "terminal"` on "the terminal answered it".
+  That is an additive change to the bridge (`sminos_bridge.py`'s
+  `decide`), which DC7 makes, since it maps these 409s to DX6.
+  Rejected: DC7 parsing `by` out of the error text, and leaving the card
+  to wait for `settled`, which arrives on another path and may be late.
+  Flags DC3 (the hub's shape check admits the fields), DC5 (the card
+  reads `failure.by`; `protocol-ahead.ts` goes), DC7 (the bridge's 409s
+  and the mapping).
+  Date/Author: 2026-10-15, design session (DC3's M4).
+- Decision: DX5 final from DC2's close (PR #195, plan `0afc902f`). The
+  whole-branch review's two fix waves add: a main turn the module never
+  saw start (a reload mid-turn) is taken back from its next request as a
+  `turn` start with `recovered: true` and `text: null`; `resync` carries
+  `sessionInfo`, so a child whose first post was lost still knows the
+  session; the child's hello carries `presence`; and until the mod knows
+  whether a main turn runs, `steer`, `interrupt` and `compact` are refused
+  with "turn state unknown since the bridge reloaded", `ping` and the
+  heartbeat say `isTurnUnknown`, and the verbs exit 1 with that reason
+  (before, interrupt answered a false idle). `decide`, `answer` and
+  `compact` retry a not-ready 503 within their first snapshot's 8 s.
+  Rejected: guessing idle after a reload, which let an interrupt report
+  success on a running turn. Flags DC6 (a recovered turn start has no
+  text), DC7 (the refusal is a machine-side RPC failure; the retry window).
+  Date/Author: 2026-10-15, design session (DC2's close).
+- Decision: DC2, DC4 and DC7 take their branch reviews at `high`, run by
+  their own controllers, and the doperpowers repository's xhigh panel
+  runs once, at recomposition, over their merged range. Their branches
+  stack (DC4 is built on DC2's tip, DC7 on DC4's), so a panel per child
+  would review the same commits two or three times, and a panel runs only
+  from the main session, which would serialize three children behind it.
+  DC3 and DC5 keep their xhigh panels, handed up. Rejected: an xhigh panel
+  per doperpowers child before its merge. Amends the verification entry.
+  Date/Author: 2026-10-15, design session (DC4's completion).
 - Decision: Three hub changes from DC5's M4 (the phone). Visibility
   expires: a visible socket repeats its `visibility` every 30 s and counts
   as visible for 90 s after the last, because a phone that sleeps before

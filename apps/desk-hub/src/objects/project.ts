@@ -473,8 +473,21 @@ export class Project extends DurableObject<Env> {
     const valid =
       isBase64urlOf(frame.nonce, 16) &&
       isObject(outcome) &&
-      ((outcome.state === 'done' && isObject(outcome.result)) || (outcome.state === 'failed' && isObject(error) && typeof error.code === 'string' && typeof error.message === 'string'));
-    if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'rpc-result is {project, nonce, outcome: {state: done, result} | {state: failed, error: {code, message}}}' });
+      ((outcome.state === 'done' && isObject(outcome.result)) ||
+        (outcome.state === 'failed' &&
+          isObject(error) &&
+          typeof error.code === 'string' &&
+          typeof error.message === 'string' &&
+          // A late decision names the side that won (DX6): kept and relayed as sent, refused only of the wrong type.
+          (error.winner === undefined || SETTLED_WINNERS.has(error.winner as string)) &&
+          (error.by === undefined || typeof error.by === 'string') &&
+          (error.terminalOnly === undefined || error.terminalOnly === true)));
+    if (!valid) {
+      return this.refuseMachine(ctx, {
+        reason: 'bad-shape',
+        message: 'rpc-result is {project, nonce, outcome: {state: done, result} | {state: failed, error: {code, message, winner?, by?, terminalOnly?: true}}}',
+      });
+    }
     const record = this.plane.rpc(frame.nonce);
     if (record && record.machine === ctx.machine && (record.state === 'forwarded' || record.state === 'uncertain')) {
       const done = frame.outcome as RpcOutcome;

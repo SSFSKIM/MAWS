@@ -92,6 +92,18 @@ All of these are in the plan's Decision Log and Surprises & Discoveries:
 - M3's Decisions in the plan list every contract item folded since
   dispatch (through 6a7cdde0).
 
+## Update (M4 executing)
+
+- M3 is reviewed clean and ticked (b3542038). Its code is final at
+  dabd37e8, and the gate is green on 54a9c171 (run 38783679574).
+- M4 is executing with executor `a7f6c1e8c479535c7` from base b3542038.
+  Two of its commits have landed and their shas have gone to the
+  composite's writer:
+  - c547aaa5: the late-decision `winner`, `by`, and `terminalOnly` types;
+  - 01ba7519: the steer result `{row: string | null}`.
+  The `rpc-result` pass-through is built and uncommitted. It goes into
+  the M4 commit.
+
 ## Next, on resume
 
 1. Read M2's report at
