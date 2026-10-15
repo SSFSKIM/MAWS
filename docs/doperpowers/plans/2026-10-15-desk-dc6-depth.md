@@ -570,3 +570,56 @@ registrations through `connectDepth()`.
   so a failing desk-web browser trace never comes back from the Linux lane.
 
 ## Outcomes & Retrospective
+
+**2026-10-15, at the branch's end (controller).** All three milestones are
+built and reviewed clean, and so is the branch's final `high` review.
+DC6's acceptance passes against DC3's fake machine, which replays its
+two-subagent recording through DC5's DX3 double in a real browser:
+- the transcript streams and settles into the rows a reload draws, compared
+  as data across MAWS's whole virtualized list;
+- the subagent tree matches the recording's metas;
+- the diff renders;
+- a reconnect mid-response, a hub restart, and a chunk during the snapshot
+  each end with no gap and no duplicated text, in the main thread and in a
+  subagent.
+
+The gate is green on the Linux lane (run 38815843041 on `64481c89`: static,
+unit, e2e:desk-web, 67 browser tests). `src/depth` passes 91/91.
+
+What DC6 produces is `connectDepth()`. It registers the `depth` slot (the
+Transcript, Subagents, Diff, and Info tabs) and the `transcript` slot,
+which DC5's working record mounts per fold with `range {from, to}`.
+
+What held:
+- **Settling streamed text in the adapter's own layer.** Each block's
+  partial text is dropped when the row named by its `block-row` is applied
+  in the store, a block of another transcript is dropped at once, and a
+  block with no `block-row` is dropped at `step-end`. Because of this,
+  MAWS's reducer and store are imported unchanged.
+- **Rebuilding chronologically for older pages.** No prepend was needed.
+- **Importing MAWS's transcript view with no edge cut,** guarded by the
+  `window.maws` lint rule.
+
+What moved under the plan:
+- The contracts moved while DC6 was building: the streaming entry's
+  message-level `upTo`, `step-end`, `usage`, the slot's range props, and
+  the question bound `toolUseId ?? request`. Each change reached the
+  executor while it was mid-build, and none forced a rewrite. Folding each
+  change into this document as it arrived kept the later executors on
+  current ground.
+- Paging cost three review rounds. MAWS's list anchors on rows whose ids
+  change when an older page brings a turn's prompt. Restoring the reader's
+  place took the restore being armed only when the page is answered, a
+  per-frame correction through an index jump, and the reader's own input
+  ending that correction.
+- The final review found a resubscribe loop on terminal errors. It was
+  fixed by taking an ended transcript up again only when its session
+  becomes reachable again.
+
+Left open:
+- **The depth chunk's weight.** xterm and mermaid ride along, and Vite
+  warns of chunks over 500 kB. DC5's M4 measures this on the phone.
+- **Desk-web browser traces never come back from the Linux lane,** because
+  the gate uploads only the repo root's `test-results/`.
+- **The real DX2 path** (recomposition's walk) and DC7's `step-end` and
+  `toolUseId` producers are outside this branch.
