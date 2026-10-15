@@ -2597,10 +2597,12 @@ a machine's first sync of an old backlog pushes nothing), each push once to ever
 of the org who has no browser socket showing the project (DX3 `visibility`, kept in the socket's attachment, so a
 hibernated object still holds it) — and to none of a member who has one. The payload, `PushNotice` in `browser.ts`,
 carries only what points to a card, since the service worker holds no org key and could check nothing it drew:
-`{v: 1, project, session, alias, kind, request?, event?}` — `kind` `question` (an `AskUserQuestion`, the ask mod's
-tool, or an `async` request), `permission` (any other request), or `message`; `request` the raised request's id, or
-`event` the message's `{writer, seq}`; `alias` the session's, from its feed's latest event's `from` (null when the
-hub holds none). A push service answering 404 or 410 has dropped the subscription, and the hub deletes it; any other
+`{v: 1, project, session, alias, kind, request?, event?, waiting}` — `kind` `question` (an `AskUserQuestion`, the ask
+mod's tool, or an `async` request), `permission` (any other request), or `message`; `request` the raised request's id,
+or `event` the message's `{writer, seq}`; `alias` the session's, from its feed's latest event's `from` (null when the
+hub holds none); `waiting` the org's waiting count once the push's own event is counted, the sum of the grid's
+`ProjectSummary.waiting` over the org's projects, which the service worker sets as the app icon's badge (the app sets
+it again from the grid whenever it is open, so an answered request clears). A push service answering 404 or 410 has dropped the subscription, and the hub deletes it; any other
 failure is passed over (the push is not retried).
 
 **Wrapped keys** (§6; the hub stores them and never sees the org key). The browser draws the org key at random when the
@@ -3090,6 +3092,20 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The phone as DC5's mockup `05-phone.html` draws it (owner,
+  2026-10-15, every recommendation taken). The phone is a stack (Projects,
+  a project, a channel, one full screen each, each with its own back);
+  a project opens on its session list, waiting first; the grid keeps card
+  B in two columns; a direct channel keeps Steer, Send and Interrupt in
+  reach and Model and Compact under More; depth and starting a session
+  stay on a computer in phase 1. A notification opens the session's
+  direct channel with its card lit. The app icon carries the org's
+  waiting count, so DX7's `PushNotice` gains `waiting`. The installed
+  app's "Keep unlocked on this device" starts checked. Rejected: the
+  project opening on its group chat (B), a group-chat landing for
+  notifications, no badge, and an unchecked default. Flags DC3
+  (`PushNotice.waiting`), DC5.
+  Date/Author: 2026-10-15, owner.
 - Decision: DX2, DX3, DX4, DX6 and DX7 replaced whole by DC3's M3
   interfaces (MAWS `.doperpowers/sde/2026-10-15-desk-dc3-hub/
   interfaces-M3-reviewed-a190a6d8.md`, 22 items, reviewed clean at
