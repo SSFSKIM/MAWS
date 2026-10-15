@@ -15,6 +15,27 @@ const MACHINE = 'fake';
 const ANSWER = 'You chose blue';
 const streamingRows = (scope: Locator) => scope.locator('[data-row-id^="desk-stream:"]');
 const rowIds = (scope: Locator) => scope.locator('[data-row-id]').evaluateAll((els) => els.map((el) => el.getAttribute('data-row-id')));
+
+/**
+ * Every row the transcript draws, in order: MAWS's list renders only the rows near its viewport, so the reader's
+ * scroller is walked from the top to the end and each window's rows taken once.
+ */
+async function allRowIds(scope: Locator): Promise<string[]> {
+  const scroller = scope.locator('[data-transcript-scroller]').first();
+  const ids: string[] = [];
+  await scroller.evaluate((el) => el.scrollTo({ top: 0 }));
+  for (let i = 0; i < 100; i++) {
+    await scope.page().waitForTimeout(60); // the list draws the window it scrolled to
+    for (const id of await rowIds(scope)) if (id !== null && !ids.includes(id)) ids.push(id);
+    const atEnd = await scroller.evaluate((el) => {
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 1) return true;
+      el.scrollBy({ top: el.clientHeight * 0.8 });
+      return false;
+    });
+    if (atEnd) break;
+  }
+  return ids;
+}
 /** How many times `text` occurs in the scope's drawn text: once when settled, never twice. */
 const occurrences = (scope: Locator, text: string) => scope.evaluate((el, t) => (el.textContent ?? '').split(t).length - 1, text);
 const textChunk = (agentId: string | null, startsWith = '') => (s: Step) => s.k === 'chunk' && s.agentId === agentId && s.chunk.kind === 'text' && String(s.chunk.text).startsWith(startsWith);
@@ -72,11 +93,11 @@ async function endsWhole(page: Page, replay: FakeMachineReplay, depth: Locator):
   replay.playThrough();
   await expect(streamingRows(depth)).toHaveCount(0);
   await expect.poll(() => occurrences(depth, ANSWER)).toBe(1);
-  const settled = await rowIds(depth);
+  const settled = await allRowIds(depth);
   await page.reload();
   await expect(depth).toContainText(ANSWER);
-  await expect.poll(() => rowIds(depth)).toEqual(settled);
   expect(await occurrences(depth, ANSWER)).toBe(1);
+  await expect.poll(() => allRowIds(depth), { timeout: 15_000 }).toEqual(settled);
 }
 
 test('the transcript streams and settles into the rows a reload shows; usage gives context use and cost', async ({ page, hub }) => {
