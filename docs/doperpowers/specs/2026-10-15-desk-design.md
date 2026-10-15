@@ -1760,7 +1760,9 @@ moments, kept apart:
 - **The browser** keeps drawing the block's partial text after the `block-row` until the `row` whose `uuid` it named
   arrives; that row settles the block, and the browser drops the partial text then. Chunks for a settled block are
   ignored. A block whose step ended (`step-end`) without a `block-row` for it — a response aborted mid-block — is
-  dropped then, so no partial text outlives its request.
+  dropped then, so no partial text outlives its request. The bridge holds a step's end until that step's notices are
+  posted, for at most 1 s; a `block-row` that still comes after its step's `step-end` names a block already dropped,
+  and the browser ignores it and draws its row as any other.
 
 Together with the daemon dropping tailed rows the snapshot already holds (by uuid) and chunks at or below their
 entry's `upTo`, the snapshot and the live part neither overlap nor leave a gap. A row no `block-row` named (a server
@@ -2765,6 +2767,28 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DC2's live walk of M4 settles the facts the step-end and
+  thinking decisions waited on (2.1.300, a terminal session and a `--bg`
+  job, load average about 220). A response row can be appended after its
+  step's `turn.step` resolves (a withheld refusal or max-output row, the
+  tail closing an open block, a hook answering without a request), so the
+  bridge holds a step's `step end` until the step's `block-row` notices
+  are posted: at most 1 s, released early by the loop's next request, the
+  turn's end, or the subagent's stop; the walk saw no `block-row` after
+  its step's end. Live `thinking` chunks carry empty text and no
+  signature, so depth's collapsed indicator is the only drawing there is.
+  Notice order is the engine's append order, which can put a row ahead of
+  its own `parentUuid` chain within one same-millisecond batch (a first
+  prompt's attachments); DX5's release rule absorbs it (the passed-over
+  row released unnamed, its late `row-seen` ignored, nothing lost or
+  repeated), and what the daemon may rely on is that a response row's
+  `block-row` never follows a notice for a row written after it on disk.
+  The worst flush-to-notice lag was 0.68 s, so the 2 s window stands; the
+  module loads before a `--bg` job's first prompt row, so the seed rule
+  stays narrowed to loops older than the module. Rejected: capping no
+  hold, which would let a lost notice stall a step's end forever. DX5's
+  text is refreshed from DC2's plan when M4 lands. Flags DC6, DC7.
+  Date/Author: 2026-10-15, design session (DC2's M4 walk).
 - Decision: A browser never receives the `end {reason: "unsubscribed"}`
   its own `unsubscribe` causes (DC7's M1, run against DC3's local hub).
   The hub drops the sub's route before it forwards the `unsubscribe`, so
