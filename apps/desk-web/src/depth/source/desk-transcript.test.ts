@@ -43,18 +43,29 @@ class FakePlane implements SessionPlane {
 
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-/** What the view does: keeps the controller's current source attached to the store under its key. */
+/**
+ * What the view does: keeps the controller's current source attached to the store under its key. MAWS's `Transcript`
+ * attaches a new source in an effect, after the render that read it, so a swap here waits a task too: messages that
+ * arrive in between reach a controller whose new source is not attached yet.
+ */
 function mount(controller: DeskTranscript, store: ReturnType<typeof createTranscriptStore>) {
   let source = controller.state.getState().source;
   void store.getState().attach(controller.key, source, { agentId: null });
+  let timer: ReturnType<typeof setTimeout> | null = null;
   const off = controller.state.subscribe((s) => {
-    if (s.source === source) return;
-    store.getState().detach(controller.key);
-    source = s.source;
-    void store.getState().attach(controller.key, source, { agentId: null });
+    if (s.source === source || timer !== null) return;
+    timer = setTimeout(() => {
+      timer = null;
+      const next = controller.state.getState().source;
+      if (next === source) return;
+      store.getState().detach(controller.key);
+      source = next;
+      void store.getState().attach(controller.key, source, { agentId: null });
+    }, 0);
   });
   return () => {
     off();
+    if (timer !== null) clearTimeout(timer);
     store.getState().detach(controller.key);
   };
 }
@@ -309,6 +320,49 @@ describe('the main transcript through the session plane', () => {
     plane.snapshot(script, script.length);
     await settle();
     expect(controller.state.getState().phase).toBe('live');
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+  });
+
+  it('subagent metadata delivered live reaches rows mapped after it, as a fresh load with it maps them', async () => {
+    const script = scriptOf(recording.session, null);
+    plane.current.n = 0;
+    plane.send('snapshot', snapshotAt(script, 0, { subagents: [] }));
+    await settle();
+    plane.send('subagents', { subagents: metas });
+    await step(script);
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+  });
+
+  it('subagent metadata arriving after the rows that name its agents reconciles them', async () => {
+    const script = scriptOf(recording.session, null);
+    plane.current.n = 0;
+    plane.send('snapshot', snapshotAt(script, 0, { subagents: [] }));
+    await settle();
+    await step(script);
+    plane.send('subagents', { subagents: metas });
+    await settle();
+    await settle();
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+  });
+
+  it('a reset between an older page and the attachment of its rebuilt source drops what was drawn', async () => {
+    const script = scriptOf(recording.session, null);
+    const cut = script.length - 4;
+    plane.snapshot(script, cut, 6);
+    await settle();
+    expect(store.getState().entries[controller.key].rows.length).toBeGreaterThan(0);
+    controller.loadOlder();
+    plane.send('rows', rowsBefore(script, cut, String(plane.current.asked[0].before), 100)); // a new source, not yet attached
+    plane.current.listener.reset(); // before the view's effect attaches it
+    expect(store.getState().entries[controller.key].rows).toEqual([]);
+    await settle();
+    await settle();
+    expect(store.getState().entries[controller.key].rows).toEqual([]); // still nothing stale once the new source attaches
+    expect(controller.state.getState().phase).toBe('reconnecting');
+    plane.snapshot(script, cut);
+    await settle();
+    await settle();
+    await step(script.slice(cut));
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
   });
 

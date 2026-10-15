@@ -111,7 +111,6 @@ class RowsSource implements TranscriptSource {
   readonly agentId?: AgentId;
   private listener: ((events: SessionEvent[]) => void) | null = null;
   private ctx: BackfillContext | null = null;
-  private readonly resets = new Set<() => void>();
 
   constructor(private readonly owner: DeskTranscript) {
     this.key = owner.key;
@@ -134,9 +133,12 @@ class RowsSource implements TranscriptSource {
     return events;
   }
 
+  /**
+   * The transcript's one reset signal, whichever source registers on it: a rebuild publishes a new source that the
+   * view attaches later (in an effect), and a reset in between must reach the one still attached.
+   */
   onReset(listener: () => void): () => void {
-    this.resets.add(listener);
-    return () => this.resets.delete(listener);
+    return this.owner.onReset(listener);
   }
 
   /** A row after the snapshot, under the snapshot's context; before it, the snapshot will hold the row. */
@@ -146,10 +148,9 @@ class RowsSource implements TranscriptSource {
     if (events.length > 0) this.listener?.(events);
   }
 
-  /** MAWS's store empties the key and hydrates it again: its next snapshot waits for the fresh one. */
+  /** Its live rows wait for its next snapshot, which waits for the fresh one. */
   reset(): void {
     this.ctx = null;
-    for (const listener of [...this.resets]) listener();
   }
 }
 
@@ -166,6 +167,20 @@ export class DeskTranscript {
   /** Held rows whose mapping gave no event under the row's own uuid: in the store as soon as they are mapped. */
   private readonly silent = new Set<string>();
   private subagents: SubagentLookup = subagentLookupOf([]);
+  /**
+   * Agent tool calls a held row's mapping looked up before their subagent's metadata was in: metadata naming one
+   * rebuilds the transcript, so the rows mapped without it are attributed as a fresh load attributes them.
+   */
+  private readonly unresolved = new Set<string>();
+  /** The backfill's lookup as every context holds it: the current metadata, noting what it could not resolve. */
+  private readonly lookup: SubagentLookup = {
+    byToolUseId: (toolUseId) => {
+      const found = this.subagents.byToolUseId(toolUseId);
+      if (found === null) this.unresolved.add(toolUseId);
+      return found;
+    },
+  };
+  private readonly resets = new Set<() => void>();
   private readonly layer = new StreamingLayer();
   private snapshotted: Deferred = deferred();
   /** A snapshot has been served since the transcript opened or last reset: a later one rebuilds from what is held. */
@@ -230,7 +245,12 @@ export class DeskTranscript {
   }
 
   newContext(): BackfillContext {
-    return contextFor(this.target, this.subagents);
+    return contextFor(this.target, this.lookup);
+  }
+
+  onReset(listener: () => void): () => void {
+    this.resets.add(listener);
+    return () => this.resets.delete(listener);
   }
 
   mapRow(row: Row, ctx: BackfillContext): SessionEvent[] {
@@ -254,6 +274,7 @@ export class DeskTranscript {
 
   private snapshot(body: SessionBodies['snapshot']): void {
     this.subagents = subagentLookupOf(body.subagents);
+    this.unresolved.clear();
     const fresh = [...body.rows].reverse().filter(hasUuid);
     let more = body.more;
     if (this.served) {
@@ -286,8 +307,7 @@ export class DeskTranscript {
       case 'rows':
         return this.older(message.body);
       case 'subagents':
-        this.subagents = subagentLookupOf(message.body.subagents);
-        return;
+        return this.metadata(message.body.subagents);
       default:
         return; // `diff` and `usage` are the diff view's and session info's (M3)
     }
@@ -299,6 +319,14 @@ export class DeskTranscript {
     this.rows.push(row);
     this.source.live(row);
     this.publish();
+  }
+
+  private metadata(subagents: readonly SubagentMeta[]): void {
+    this.subagents = subagentLookupOf(subagents);
+    const resolved = [...this.unresolved].filter((toolUseId) => this.subagents.byToolUseId(toolUseId) !== null);
+    if (resolved.length === 0) return;
+    for (const toolUseId of resolved) this.unresolved.delete(toolUseId);
+    if (this.served) this.rebuild();
   }
 
   private older(body: SessionBodies['rows']): void {
@@ -314,8 +342,10 @@ export class DeskTranscript {
     this.layer.clear();
     this.served = false;
     this.snapshotted = deferred();
+    this.unresolved.clear();
     this.state.setState({ phase: 'reconnecting', ended: null, more: false, loadingOlder: false, streaming: [] });
     this.source.reset();
+    for (const listener of [...this.resets]) listener(); // MAWS's store empties the key and hydrates it again
   }
 
   /** The held rows under a new source: MAWS's store rebuilds the key from all of them, staged. */
