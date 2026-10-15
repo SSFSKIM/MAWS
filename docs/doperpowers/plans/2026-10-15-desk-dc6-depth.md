@@ -3,8 +3,8 @@
 > **Composite:** `docs/doperpowers/specs/2026-10-15-desk-design.md` (MAWS,
 > branch `smns-erb`; on this machine
 > `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/smns-erb/`), child
-> **DC6** (The web — session depth — plan). **Parent pin:** blob `9471766c`
-> of that file (MAWS commit `52922154`), as it stood at dispatch. The
+> **DC6** (The web — session depth — plan). **Parent pin:** blob `552e7a77`
+> of that file (MAWS commit `05870451`; re-pinned at pre-flight from `9471766c`). The
 > child's section there is its design; this document carries only the
 > constraints and the milestones. Read the composite's Purpose, §2 (Web
 > client: the adapter), §3 (the session plane), §4 (the right column), and
@@ -204,6 +204,27 @@ registrations through `connectDepth()`.
   directly) and untrusted text in a page that holds the org key; it issues
   no writes, so it is narrower than DC5's key-holding surface.
   Date/Author: 2026-10-15, the composite's writer at dispatch.
+- Decision: Parent re-pinned to blob `552e7a77` (MAWS `05870451`). The one
+  change since `9471766c` is the diff request (DX3 `diff {sub}`, DX8
+  `Subscription.diff()`); M3 already plans for it. On this branch's base,
+  `desk-hub/protocol` has DX4's `diff` body and `diff` among the
+  subscription kinds but no DX3 `diff` up frame, and DC5's `Subscription`
+  has no `diff()`; M1 and M2 do not consume either.
+  Date/Author: 2026-10-15, controller (pre-flight).
+- Decision: The double's fixture. M1 records one throwaway `claude` session
+  in a scratch directory, made to run two subagents, and commits its main
+  transcript rows and its `subagents/*.jsonl` and `*.meta.json` (M2 reads
+  the same recording). A plain recording carries no bridge stream, so the
+  double synthesizes the live part from the recorded rows: each assistant
+  row's content block becomes DX5 `turn.step` chunks in DX5's shape,
+  followed by its `block-row` and then the row, with the snapshot's
+  `streaming` entries and `upTo` derived from the same split. Rationale:
+  the plan asks for no gap and no duplicated text across disruptions,
+  which needs a controllable stream; a synthesized one exercises the
+  adapter's every path, and DC3's fake machine (M4) replaces it at M3.
+  Paths and anything identifying in the recording are scrubbed to
+  placeholders before commit.
+  Date/Author: 2026-10-15, controller (pre-flight).
 
 ## Surprises & Discoveries
 
