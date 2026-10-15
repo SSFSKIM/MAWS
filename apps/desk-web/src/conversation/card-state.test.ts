@@ -21,7 +21,7 @@ describe('cardState', () => {
   it('follows the RPC it sent: in flight, uncertain, failed with its reason, sent', () => {
     expect(cardState(record(), rpc('sending'), can)).toEqual({ kind: 'sending' });
     expect(cardState(record(), rpc('forwarded'), can)).toEqual({ kind: 'sending' });
-    expect(cardState(record(), rpc('uncertain'), can)).toEqual({ kind: 'uncertain' });
+    expect(cardState(record(), rpc('uncertain'), can)).toEqual({ kind: 'uncertain', offline: false });
     expect(cardState(record(), rpc('failed', { state: 'failed', error: { code: 'digest-mismatch', message: '' } }), can)).toEqual({ kind: 'failed', code: 'digest-mismatch', message: '' });
     expect(cardState(record(), rpc('done', { state: 'done', result: {} }), can)).toEqual({ kind: 'sent' });
   });
@@ -40,6 +40,11 @@ describe('cardState', () => {
   it('waits in the terminal when the hub says only it can answer, or the session has no bridge', () => {
     expect(cardState(record({ terminalOnly: true }), null, can)).toEqual({ kind: 'terminal', why: 'window' });
     expect(cardState(record(), null, { can: false, reason: 'terminal only: maws-45 runs without the bridge' })).toEqual({ kind: 'terminal', why: 'terminal only: maws-45 runs without the bridge' });
+  });
+
+  it('keeps an uncertain decision uncertain, with its retry, while the machine is offline', () => {
+    const off = { can: false, reason: 'mini is offline: shown, not answerable' };
+    expect(cardState(record(), rpc('uncertain'), off, false)).toEqual({ kind: 'uncertain', offline: true });
   });
 
   it('is shown, not answerable, while the machine is offline; closed once it left the set unsettled', () => {

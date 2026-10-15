@@ -121,7 +121,7 @@ export class ProjectClient implements SessionPlane {
     });
   }
 
-  /** Sends a sealed RPC, again after each reconnect, until the hub reports a state for its nonce. */
+  /** Sends a sealed RPC, again after each reconnect, until the hub reports its result (`done` or `failed`). */
   sendRpc(rpc: Rpc): void {
     this.rpcs.set(rpc.nonce, rpc);
     if (this.welcomed) this.socket.send({ t: 'rpc', rpc });
@@ -210,7 +210,9 @@ export class ProjectClient implements SessionPlane {
         return;
       }
       case 'rpc-state':
-        this.rpcs.delete(frame.nonce);
+        // `forwarded` is interim and `uncertain` not final: the RPC is kept (and sent again after a reconnect, which the
+        // hub answers from its record) until a result, so the one the daemon republishes has something to land on.
+        if (frame.state === 'done' || frame.state === 'failed') this.rpcs.delete(frame.nonce);
         for (const listener of this.rpcListeners) listener(frame);
         return;
       case 'session':

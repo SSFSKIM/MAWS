@@ -12,7 +12,8 @@ import type { Capability } from './capabilities';
 export type CardState =
   | { kind: 'open'; window: boolean }
   | { kind: 'sending' }
-  | { kind: 'uncertain' }
+  /** `offline`: the machine is unavailable too; the retry still resends the original sealed RPC. */
+  | { kind: 'uncertain'; offline: boolean }
   | { kind: 'failed'; code: string; message: string }
   | { kind: 'sent' }
   | { kind: 'settled'; winner: Settled['winner'] | string; outcome: Settled['outcome'] | null; by: string }
@@ -34,6 +35,8 @@ export function cardState(record: RequestRecord, rpc: RpcEntry | null, capabilit
   if (failure?.terminalOnly) return { kind: 'terminal', why: 'window' };
   if (failure?.winner) return { kind: 'settled', winner: failure.winner, outcome: null, by: failure.winner === 'terminal' ? 'terminal' : failure.winner };
   if (!record.pending) return { kind: 'closed' };
+  // A decision whose result is unknown stays so whatever the machine does: its retry is the only way to learn it.
+  if (rpc?.state === 'uncertain') return { kind: 'uncertain', offline: machineOnline === false };
   if (machineOnline === false) return { kind: 'offline' };
   if (record.terminalOnly) return { kind: 'terminal', why: 'window' };
   if (!capability.can) return { kind: 'terminal', why: capability.reason ?? 'terminal only' };
@@ -41,8 +44,6 @@ export function cardState(record: RequestRecord, rpc: RpcEntry | null, capabilit
     case 'sending':
     case 'forwarded':
       return { kind: 'sending' };
-    case 'uncertain':
-      return { kind: 'uncertain' };
     case 'failed':
       return { kind: 'failed', code: failure?.code ?? 'failed', message: failure?.message ?? '' };
     case 'done':

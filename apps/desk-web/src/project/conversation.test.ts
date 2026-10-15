@@ -102,6 +102,30 @@ describe('RPCs', () => {
     await until(() => conv(c).rpcs[nonce].state === 'done');
   });
 
+  it('draws one settled outcome after forwarded, then uncertain, then the result the machine republished', async () => {
+    const c = await connect();
+    const nonce = await c.rpc(M, 'mini', 'interrupt', { session: S1 });
+    await until(() => conv(c).rpcs[nonce]?.state === 'forwarded');
+    hub.answerRpc(PROJECT, nonce, 'uncertain');
+    await until(() => conv(c).rpcs[nonce].state === 'uncertain');
+    hub.answerRpc(PROJECT, nonce, { state: 'done', result: { turnId: 't1', stopped: ['b1'], running: [] } });
+    await until(() => conv(c).rpcs[nonce].state === 'done');
+    expect(Object.keys(conv(c).rpcs)).toEqual([nonce]);
+    expect(conv(c).rpcs[nonce].outcome).toEqual({ state: 'done', result: { turnId: 't1', stopped: ['b1'], running: [] } });
+  });
+
+  it('keeps an uncertain RPC uncertain while its machine is offline, and a retry then waits for the machine', async () => {
+    const c = await connect();
+    const nonce = await c.rpc(M, 'mini', 'interrupt', { session: S1 });
+    await until(() => conv(c).rpcs[nonce]?.state === 'forwarded');
+    hub.dropMachine(PROJECT, 'mini');
+    await until(() => conv(c).rpcs[nonce].state === 'uncertain');
+    c.retryRpc(nonce);
+    await until(() => hub.rpcs(PROJECT).length === 2);
+    await until(() => conv(c).rpcs[nonce].state === 'uncertain'); // the hub holds it for the machine; not machine-offline
+    expect(conv(c).rpcs[nonce].outcome).toBeUndefined();
+  });
+
   it('fails at once for a machine that is offline', async () => {
     const c = await connect();
     hub.dropMachine(PROJECT, 'mini');

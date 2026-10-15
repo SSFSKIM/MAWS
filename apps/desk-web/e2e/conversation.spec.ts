@@ -64,6 +64,14 @@ test('the group chat draws the log as §4 says: messages, humans, lifecycle line
   await expect(center(page)).not.toContainText('**cleanly**');
   await expect(center(page)).toContainText('maws-45 joined on mini');
   await expect(center(page)).toContainText('doperpowers-1e retired by human');
+
+  // Status lines as set; liveness only where a session stops or runs again.
+  await hub.append(PROJECT, { writer: `mini/${S.rests}`, kind: 'status', session: S.rests, text: 'fixture 8/8' });
+  await hub.append(PROJECT, { writer: `mini/${S.rests}`, kind: 'state', session: S.rests, state: 'idle', machine: 'mini' });
+  await hub.append(PROJECT, { writer: `mini/${S.rests}`, kind: 'state', session: S.rests, state: 'stopped', machine: 'mini' });
+  await expect(center(page)).toContainText('cua_repl status: fixture 8/8');
+  await expect(center(page)).toContainText('cua_repl stopped on mini');
+  await expect(center(page)).not.toContainText('cua_repl idle');
 });
 
 test("posting follows sminos say's grammar, sealed by the member, and each recipient's delivery outcome survives a reload", async ({ page, hub }) => {
@@ -168,12 +176,15 @@ test("controls a session cannot use are drawn disabled with §5's reason, by kin
   presence(hub, 'mini', S.rests, 'busy', false); // a terminal session without the bridge
   await open(page, hub, S.rests);
   const composer = page.getByTestId('composer');
-  await expect(composer.getByRole('button', { name: 'Steer' })).toBeDisabled();
-  await expect(composer.getByRole('button', { name: 'Steer' })).toHaveAttribute('title', 'without the bridge a terminal session takes text only as a send');
   await expect(composer.getByRole('button', { name: 'Interrupt' })).toHaveAttribute('title', 'cua_repl runs without the bridge: interrupt it in its terminal');
   await expect(composer.getByRole('button', { name: 'Model' })).toBeDisabled();
   await expect(composer.getByRole('button', { name: 'Send' })).toBeEnabled();
-  await expect(composer.getByTestId('composer-note')).toContainText('read at its next tool round');
+  await expect(composer.getByTestId('composer-note')).toContainText('Steer is sent as a message: it arrives at its next tool round');
+  // §5: Steer falls back to a send — a log `human`, no RPC.
+  await page.getByRole('textbox', { name: 'Message cua_repl' }).fill('look at the failing case first');
+  await composer.getByRole('button', { name: 'Steer' }).click();
+  await expect.poll(() => humans(hub).map((h) => [h.to, h.text])).toEqual([[[{ session: S.rests, alias: 'cua_repl' }], 'look at the failing case first']]);
+  expect(hub.rpcs(PROJECT)).toEqual([]);
 
   // A --bg seat without the bridge: steer goes through its supervisor; interrupt and model stay the terminal's.
   const seat = 'a1b2c3d4-0000-4000-8000-00000000000a';
@@ -344,11 +355,21 @@ test("when a machine disconnects its sessions' presence and depth show as unavai
   await hub.raise(PROJECT, 'mini', BASH);
   const card = center(page).locator('[data-request="toolu_1"]');
   await expect(card.getByRole('button', { name: 'Allow' })).toBeVisible();
-  hub.dropMachine(PROJECT, 'mini');
+  await hub.raise(PROJECT, 'mini', { ...BASH, request: 'toolu_5' });
+  const decided = center(page).locator('[data-request="toolu_5"]');
+  await decided.getByRole('button', { name: 'Allow' }).click();
+  const decision = await lastRpc(hub, 1);
+  hub.dropMachine(PROJECT, 'mini'); // the decision was forwarded: it becomes uncertain
   await expect(page.getByTestId('machine-offline')).toContainText("mini is offline: maws-45's presence and depth are unavailable");
   await expect(center(page)).toContainText('the migration is merged');
   await expect(card.getByTestId('offline')).toContainText('mini is offline: shown, not answerable');
   await expect(card.getByRole('button', { name: 'Allow' })).toHaveCount(0);
+  // The decision stays uncertain, its Retry beside the machine being unavailable; no new decision is offered.
+  await expect(decided.locator('[data-rpc-state="uncertain"]')).toContainText('mini dropped before answering');
+  await expect(decided.getByTestId('offline')).toContainText('mini is offline: no new decision until it reconnects');
+  await expect(decided.getByRole('button', { name: 'Allow' })).toHaveCount(0);
+  await decided.getByRole('button', { name: 'Retry' }).click();
+  expect(await lastRpc(hub, 2)).toEqual(decision); // the original sealed RPC, byte for byte
   await expect(nav(page).locator(`[data-session="${S.asks}"]`)).toContainText('offline');
   const composer = page.getByTestId('composer');
   await expect(composer.getByRole('button', { name: 'Compact' })).toHaveAttribute('title', 'mini is offline');

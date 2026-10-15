@@ -6,6 +6,15 @@
 // folded before each of its messages (the unfolded transcript is DC6's slot). A request (a permission prompt or a
 // question that is not a log event) sits after the log entry the browser held when it first saw it; an async question's
 // request is drawn on its `question` event, whose `src` is the call's id.
+//
+// `status` lines are drawn as set. `state` events are the daemon's record of a session's liveness and recur as it
+// moves between busy, idle, and waiting, so only a change between running (busy, idle, waiting) and not running
+// (stopped, gone, vacant, retired) is drawn — a session that stopped, or runs again — and the sidebar's presence says
+// the rest. A session is taken as running from its `joined` (and before any event says otherwise).
+//
+// Each working-record fold carries its bounds for DX8's `transcript` slot: the `src` of the session's exchange item
+// before it and of the one after it (a `<message>` span's `<row uuid>#<span index>`; a question's call id), null for
+// an open end; a live session's channel ends with an open-ended fold after its last item.
 import type { LogEvent, Recipient } from 'desk-hub/protocol';
 import type { Channel } from '../shell/layout';
 
@@ -17,7 +26,7 @@ export type StreamItem =
   | { kind: 'question'; key: string; offset: number; event: LogEvent; session: string | null; from: string; text: string; choices: string[]; request: string; answered: { text: string; event: LogEvent } | null }
   | { kind: 'system'; key: string; offset: number; event: LogEvent; text: string }
   | { kind: 'agents'; key: string; says: Entry[] }
-  | { kind: 'work'; key: string; offset: number; session: string }
+  | { kind: 'work'; key: string; offset: number; session: string; range: { from: string | null; to: string | null } }
   | { kind: 'request'; key: string; request: string };
 
 /** A request as the stream places it: `at` is the offset of the last log entry the browser held when it first saw it. */
@@ -43,6 +52,8 @@ function systemText(event: LogEvent, alias: (id: unknown) => string): string | n
       return `${alias(event.session)} is now ${str(event.alias)}`;
     case 'in-charge':
       return `${alias(event.session)} is in charge of: ${str(event.text)}`;
+    case 'status':
+      return str(event.text) ? `${alias(event.session)} status: ${str(event.text)}` : `${alias(event.session)} cleared its status`;
     default:
       return null;
   }
@@ -64,13 +75,18 @@ function inChannel(event: LogEvent, channel: Channel): boolean {
     case 'retired':
     case 'renamed':
     case 'in-charge':
+    case 'status':
+    case 'state':
       return event.session === s;
     default:
       return false;
   }
 }
 
-export function buildStream(channel: Channel, entries: readonly Entry[], aliases: ReadonlyMap<string, string>, requests: readonly PlacedRequest[]): StreamItem[] {
+const RUNNING = new Set(['busy', 'idle', 'waiting']);
+
+/** `live`: the direct channel's session is running now, so its working record goes on past its last item. */
+export function buildStream(channel: Channel, entries: readonly Entry[], aliases: ReadonlyMap<string, string>, requests: readonly PlacedRequest[], options: { live?: boolean } = {}): StreamItem[] {
   const alias = (id: unknown) => (typeof id === 'string' ? (aliases.get(id) ?? id.slice(0, 8)) : '');
   const shown = entries.filter((e) => inChannel(e.event, channel));
   // A question's answer, wherever its channel draws it (a direct channel does not draw `answered` on its own).
@@ -99,9 +115,15 @@ export function buildStream(channel: Channel, entries: readonly Entry[], aliases
       next++;
     }
   };
-  const workBefore = (offset: number, session: string | null) => {
-    if (channel.kind === 'session' && session === channel.session) push({ kind: 'work', key: `work:${offset}`, offset, session });
+  /** The `src` of the channel's session's last exchange item: where the next working-record fold begins. */
+  let lastSrc: string | null = null;
+  const workBefore = (offset: number, session: string | null, src: string) => {
+    if (channel.kind !== 'session' || session !== channel.session) return;
+    push({ kind: 'work', key: `work:${offset}`, offset, session, range: { from: lastSrc, to: src || null } });
+    lastSrc = src || null;
   };
+  /** Whether each session is running, as its `joined` and `state` events say: only a change is drawn. */
+  const running = new Map<string, boolean>();
 
   for (const entry of shown) {
     const { offset, event } = entry;
@@ -116,14 +138,14 @@ export function buildStream(channel: Channel, entries: readonly Entry[], aliases
         break;
       case 'message': {
         const session = writerSession(event.writer);
-        workBefore(offset, session);
+        workBefore(offset, session, str(event.src));
         push({ kind: 'message', key, offset, event, session, from: str(event.from), text: str(event.text) });
         break;
       }
       case 'question': {
         const session = writerSession(event.writer);
         const answer = answers.get(str(event.src));
-        workBefore(offset, session);
+        workBefore(offset, session, str(event.src));
         push({
           kind: 'question',
           key,
@@ -141,7 +163,16 @@ export function buildStream(channel: Channel, entries: readonly Entry[], aliases
       case 'answered':
         if (!questionCalls.has(str(event.src))) push({ kind: 'system', key, offset, event, text: `${str(event.from)} was answered: ${str(event.text)}` });
         break;
+      case 'state': {
+        const session = str(event.session);
+        const now = RUNNING.has(str(event.state));
+        const was = running.get(session) ?? true;
+        running.set(session, now);
+        if (now !== was) push({ kind: 'system', key, offset, event, text: now ? `${alias(session)} is running again on ${str(event.machine)}` : `${alias(session)} ${str(event.state)} on ${str(event.machine)}` });
+        break;
+      }
       default: {
+        if (event.kind === 'joined') running.set(str(event.session), true);
         const text = systemText(event, alias);
         if (text !== null) push({ kind: 'system', key, offset, event, text });
       }
@@ -149,5 +180,6 @@ export function buildStream(channel: Channel, entries: readonly Entry[], aliases
   }
   placeUpTo(Infinity);
   flush();
+  if (channel.kind === 'session' && options.live) items.push({ kind: 'work', key: 'work:live', offset: Number.MAX_SAFE_INTEGER, session: channel.session, range: { from: lastSrc, to: null } });
   return items;
 }

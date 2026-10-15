@@ -30,7 +30,7 @@ export function GroupComposer({ name }: { name: string }) {
   const post = () => {
     if (!text.trim()) return;
     const addressable = [...sessions.values()].map((s) => ({ session: s.session, alias: s.alias, member: s.member, live: s.member && s.group !== 'ended' }));
-    const addressed = address(text, addressable);
+    const addressed = address(text, addressable, { id: connection.project, name });
     if (!addressed.ok) {
       setError(addressed.reason);
       return;
@@ -81,10 +81,12 @@ export function SessionComposer({ session }: { session: DeskSession }) {
   };
   const steer = () => {
     if (!text.trim() || !can.steer.can) return;
-    void issue(connection.rpc(member, session.machine, 'steer', { session: session.session, text }));
+    // §5: a terminal session without the bridge takes a steer as a send (a log `human`), read at its next tool round.
+    if (can.steer.path === 'send') void connection.say(member, [target], text, false);
+    else void issue(connection.rpc(member, session.machine, 'steer', { session: session.session, text }));
     setText('');
   };
-  const reasons = [can.send.note, !running ? null : can.steer.can ? null : can.steer.reason].filter(Boolean);
+  const reasons = [can.send.note, !running ? null : can.steer.can ? (can.steer.path === 'send' ? `Steer is ${can.steer.note}` : null) : can.steer.reason].filter(Boolean);
   return (
     <div className="shrink-0 border-t border-border px-4 py-3" data-testid="composer">
       <textarea

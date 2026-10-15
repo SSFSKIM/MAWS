@@ -1,12 +1,14 @@
 // The center column: the selected channel, drawn only from verified log events and verified requests (§4). The group
 // chat and a direct channel are one stream (`buildStream`); a direct channel's header carries the session's actions —
 // Retire while it is a member, Resume once it ended — each drawn disabled with §5's reason when the session cannot,
-// and says when the machine is offline: the conversation stays, presence and depth are unavailable.
+// and says when the machine is offline: the conversation stays, presence and depth are unavailable. A direct channel's
+// actions and composer are keyed by their session, so a draft, an RPC's status, or a Retire confirmation never follows
+// the owner into another session's channel.
 import { useMemo, useState } from 'react';
 import { useStore } from 'zustand';
 import type { LogEvent } from 'desk-hub/protocol';
 import { buildStream, type PlacedRequest } from '../../conversation/stream';
-import { capabilities } from '../../conversation/capabilities';
+import { capabilities, kindOf } from '../../conversation/capabilities';
 import type { Channel } from '../../shell/layout';
 import type { DeskSession } from '../../shell/sessions';
 import { GroupComposer, SessionComposer } from '../composer/Composer';
@@ -22,8 +24,9 @@ export function ChannelView(props: { name: string; channel: Channel; session: De
   const items = useMemo(() => {
     const aliases = new Map([...sessions.values()].map((s) => [s.session, s.alias]));
     const placed: PlacedRequest[] = Object.values(requests).map((r) => ({ request: r.request, session: r.raised.session, at: r.at }));
-    return buildStream(channel, events, aliases, placed);
-  }, [channel, events, sessions, requests]);
+    const live = session !== null && ['bridged', 'seat', 'terminal'].includes(kindOf(session));
+    return buildStream(channel, events, aliases, placed, { live });
+  }, [channel, events, sessions, requests, session]);
   const outbox = Object.values(outboxAll).filter((o) => channel.kind === 'group' || (o.to !== '*' && o.to.some((r) => r.session === channel.session)));
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg" aria-label="Channel">
@@ -37,7 +40,7 @@ export function ChannelView(props: { name: string; channel: Channel; session: De
             <span className="text-ui font-semibold">{session?.alias ?? channel.session.slice(0, 8)}</span>
             {session && <span className="text-ui-sm text-fg-muted">@{session.machine}</span>}
             {session?.charge && <span className="min-w-0 truncate text-ui-sm text-fg-muted">· {session.charge}</span>}
-            {session && <SessionActions session={session} />}
+            {session && <SessionActions key={session.session} session={session} />}
           </>
         )}
       </header>
@@ -47,7 +50,7 @@ export function ChannelView(props: { name: string; channel: Channel; session: De
         </div>
       )}
       <StreamView items={items} outbox={outbox} />
-      {channel.kind === 'group' ? <GroupComposer name={name} /> : session && <SessionComposer session={session} />}
+      {channel.kind === 'group' ? <GroupComposer name={name} /> : session && <SessionComposer key={session.session} session={session} />}
     </section>
   );
 }

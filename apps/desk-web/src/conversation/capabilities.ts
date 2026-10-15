@@ -21,7 +21,8 @@ export type SessionKind = 'bridged' | 'seat' | 'terminal' | 'not-running' | 'unk
 export const VERBS = ['send', 'steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume'] as const;
 export type Verb = (typeof VERBS)[number];
 
-export type Capability = { can: boolean; reason: string | null; note?: string };
+/** `path: 'send'`: the verb is carried by a log `human` (the send path), not by its RPC. */
+export type Capability = { can: boolean; reason: string | null; note?: string; path?: 'send' };
 
 export function kindOf(s: CapabilityInput): SessionKind {
   if (s.machineOnline === false) return 'offline';
@@ -91,7 +92,8 @@ export function capabilities(s: CapabilityInput): Record<Verb, Capability> {
       const bridge = no(`${s.alias} runs without the bridge`);
       return {
         send: yes('read at its next tool round'),
-        steer: no('without the bridge a terminal session takes text only as a send'),
+        // §5: a terminal session without the bridge takes a steer as a send, which it reads at its next tool round.
+        steer: running ? { can: true, reason: null, note: 'sent as a message: it arrives at its next tool round', path: 'send' } : no(`${s.alias} is idle: Send starts a turn`),
         interrupt: no(`${s.alias} runs without the bridge: interrupt it in its terminal`),
         answer: terminal,
         decide: terminal,

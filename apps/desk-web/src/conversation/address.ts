@@ -36,7 +36,8 @@ export function leadingTags(text: string): Tag[] {
 const short = (session: string) => session.slice(0, 8);
 const isAll = (tag: Tag) => tag.name === 'all' && !tag.project && !tag.short;
 
-export function address(text: string, sessions: readonly Addressable[]): Addressed {
+/** `project`: this project's id and name; a tag qualified with either is this project's, as sminos reads it. */
+export function address(text: string, sessions: readonly Addressable[], project?: { id: string; name: string }): Addressed {
   const tags = leadingTags(text);
   if (tags.length === 0) return { ok: true, to: '*', wake: false };
   if (tags.some(isAll)) {
@@ -45,7 +46,7 @@ export function address(text: string, sessions: readonly Addressable[]): Address
   }
   const to: Recipient[] = [];
   for (const tag of tags) {
-    if (tag.project) return { ok: false, reason: `the desk sends to this project only: ${tag.raw}` };
+    if (tag.project && tag.project !== project?.id && tag.project !== project?.name) return { ok: false, reason: `the desk sends to this project only: ${tag.raw}` };
     const answers = (s: Addressable) => (tag.short ? s.alias === tag.name && short(s.session).startsWith(tag.short) : [s.alias, short(s.session), s.session].includes(tag.name));
     const found = sessions.filter((s) => s.member && answers(s));
     if (found.length > 1) return { ok: false, reason: `ambiguous ${tag.raw} matches: ${found.map((s) => `${s.alias}#${short(s.session)}`).sort().join(', ')}` };

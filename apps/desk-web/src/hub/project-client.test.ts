@@ -145,18 +145,27 @@ describe('what goes up', () => {
     expect(double.up.filter((u) => u.frame.t === 'human')).toHaveLength(1);
   });
 
-  it('keeps an RPC until the hub reports a state for it', async () => {
+  it('keeps an RPC through `forwarded` and `uncertain`, sending it again after each reconnect, until done or failed', async () => {
     const { c, caughtUp } = client();
     await until(() => caughtUp.length === 1);
     const states: string[] = [];
     c.onRpcState((frame) => states.push(frame.state));
     const nonce = newNonce();
+    const sent = () => double.up.filter((u) => u.frame.t === 'rpc').length;
     c.sendRpc({ rpc: 'interrupt', project: PROJECT, machine: 'mini', member: DOUBLE_MEMBER.id, created: new Date().toISOString(), nonce, args: { session: 's' }, mac: 'x' });
     await until(() => states.includes('forwarded'));
-    double.dropConnections();
-    await until(() => caughtUp.length === 2);
+    double.dropConnections(); // forwarded is interim: it goes again
+    await until(() => caughtUp.length === 2 && sent() === 2);
+    double.answerRpc(PROJECT, nonce, 'uncertain');
+    await until(() => states.includes('uncertain'));
+    double.dropConnections(); // uncertain is not final either
+    await until(() => caughtUp.length === 3 && sent() === 3);
+    double.answerRpc(PROJECT, nonce, { state: 'done', result: { turnId: null, stopped: [], running: [] } });
+    await until(() => states.includes('done'));
+    double.dropConnections(); // done is final: never sent again
+    await until(() => caughtUp.length === 4);
     await new Promise((r) => setTimeout(r, 50));
-    expect(double.up.filter((u) => u.frame.t === 'rpc')).toHaveLength(1);
+    expect(sent()).toBe(3);
   });
 
   it('cuts a large frame into parts on the way up', async () => {
@@ -292,6 +301,22 @@ describe('the session plane', () => {
     c.subscribe({ machine: MACHINE, session: SESSION, agentId: 'a1' }, listener);
     await until(() => double.subscriptions(PROJECT).length === 1);
     expect(double.subscriptions(PROJECT)[0]).toMatchObject({ machine: MACHINE, session: SESSION, agentId: 'a1' });
+  });
+
+  it('passes a step-end through like any subscription kind, and waits for nothing after close()', async () => {
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    const { log, listener } = recorder();
+    const handle = c.subscribe({ machine: MACHINE, session: SESSION, agentId: null }, listener);
+    await until(() => double.subscriptions(PROJECT).length === 1);
+    const { sub } = double.subscriptions(PROJECT)[0];
+    double.sendSub(PROJECT, sub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: null, bridge: true }, streaming: [], usage: null });
+    double.sendSub(PROJECT, sub, 'step-end', { turnId: 't1', agentId: null, step: 1 });
+    await until(() => log.length === 2);
+    expect(log).toEqual(['snapshot', 'step-end:1']);
+    handle.close(); // a machine's `end {unsubscribed}` never reaches a browser (composite 0e7da91e): the sub is gone at once
+    await until(() => double.subscriptions(PROJECT).length === 0);
+    expect(log).toEqual(['snapshot', 'step-end:1']);
   });
 
   it('takes an end that comes first, at n 0, before any snapshot, as the end of the subscription', async () => {

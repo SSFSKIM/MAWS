@@ -6,6 +6,7 @@
 import { useState } from 'react';
 import { useStore } from 'zustand';
 import type { LogEvent, Recipient } from 'desk-hub/protocol';
+import { TranscriptActionsProvider, type TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import { Markdown } from '../../../../../src/renderer/src/transcript/view/markdown/Markdown';
 import type { StreamItem } from '../../conversation/stream';
 import { deliveryKey, type OutboxItem } from '../../project/conversation';
@@ -66,7 +67,7 @@ function Item({ item }: { item: StreamItem }) {
     case 'agents':
       return <AgentRun says={item.says} />;
     case 'work':
-      return <WorkingRecord session={item.session} />;
+      return <WorkingRecord session={item.session} range={item.range} />;
     case 'request':
       return <RequestItem request={item.request} />;
   }
@@ -98,10 +99,20 @@ function Said({ who, machine, ts, children }: { who: string; machine?: string; t
   );
 }
 
+/**
+ * What MAWS's Markdown does with a link here: a web link opens in a new tab with no opener and no referrer (the page
+ * never navigates away from the desk); a path chip names a file on the session's machine, which the browser cannot open.
+ */
+const BROWSER_ACTIONS: Partial<TranscriptActions> = {
+  openExternal: (url) => void window.open(url, '_blank', 'noopener,noreferrer'),
+};
+
 function Prose({ text }: { text: string }) {
   return (
     <div className="font-prose text-prose leading-[var(--lh-prose)]" data-testid="prose">
-      <Markdown markdown={text} live={false} />
+      <TranscriptActionsProvider actions={BROWSER_ACTIONS}>
+        <Markdown markdown={text} live={false} />
+      </TranscriptActionsProvider>
     </div>
   );
 }
@@ -190,7 +201,7 @@ function AgentRun({ says }: { says: Array<{ offset: number; event: LogEvent }> }
 }
 
 /** A direct channel's working record, folded as the to-human mod folds it; unfolded, DC6's live transcript. */
-function WorkingRecord({ session }: { session: string }) {
+function WorkingRecord({ session, range }: { session: string; range: { from: string | null; to: string | null } }) {
   const { connection, sessions } = useDesk();
   const [open, setOpen] = useState(false);
   const Transcript = useSlot('transcript');
@@ -201,7 +212,7 @@ function WorkingRecord({ session }: { session: string }) {
         [ working record ]
       </button>
       {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
-      {open && desk && <div className="mt-2"><Transcript project={connection.project} session={desk} plane={connection.client} /></div>}
+      {open && desk && <div className="mt-2"><Transcript project={connection.project} session={desk} plane={connection.client} range={range} /></div>}
     </div>
   );
 }

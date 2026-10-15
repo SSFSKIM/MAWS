@@ -56,3 +56,16 @@ it('replaces what it held with the grid a reconnect brings', async () => {
   await until(() => seen.length === 3 && statuses.filter((s) => s === 'open').length === 2);
   expect(seen.at(-1)!.map((p) => p.id)).toEqual(['c']);
 });
+
+it('joins a grid the hub sent in parts (composite fa7f8e8d) into one grid', async () => {
+  await double.close();
+  double = await HubDouble.start({ orgKey: VECTOR_KEY, frameLimit: 300 });
+  const many = Array.from({ length: 40 }, (_, i) => summary(`project-${i}`, i % 3));
+  double.setGrid(many);
+  const seen: ProjectSummary[][] = [];
+  client = new GridClient({ base: double.url.replace(/^http/, 'ws'), delay: () => 20, projects: (projects) => seen.push(projects) });
+  client.start();
+  await until(() => seen.length === 1);
+  expect(seen[0]).toEqual(many);
+  expect(double.gridTexts).toBeGreaterThan(1); // it went down as DX2 `part` frames
+});

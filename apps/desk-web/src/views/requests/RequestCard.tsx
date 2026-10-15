@@ -170,8 +170,18 @@ function StateLine({ state, machine, rpc, me }: { state: CardState; machine: str
   switch (state.kind) {
     case 'open':
       return null;
-    case 'sending':
     case 'uncertain':
+      return (
+        <>
+          {rpc && <RpcStatus nonce={rpc} />}
+          {state.offline && (
+            <p className="m-0 text-ui-sm text-warning" data-testid="offline">
+              {machine} is offline: no new decision until it reconnects
+            </p>
+          )}
+        </>
+      );
+    case 'sending':
     case 'failed':
     case 'sent':
       return rpc ? <RpcStatus nonce={rpc} /> : null;

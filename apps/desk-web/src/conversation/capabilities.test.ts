@@ -43,10 +43,12 @@ describe('capabilities', () => {
     expect(c.retire.can).toBe(true);
   });
 
-  it('a terminal session without the bridge: send only, read at its next tool round', () => {
+  it('a terminal session without the bridge: Steer falls back to a send, read at its next tool round', () => {
     const c = at({ presence: { record: { status: 'busy' }, bridge: false } });
     expect(c.send).toEqual({ can: true, reason: null, note: 'read at its next tool round' });
-    expect(c.steer).toEqual({ can: false, reason: 'without the bridge a terminal session takes text only as a send' });
+    expect(c.steer).toEqual({ can: true, reason: null, note: 'sent as a message: it arrives at its next tool round', path: 'send' });
+    const resting = at({ group: 'idle', presence: { record: { status: 'idle' }, bridge: false } });
+    expect(resting.steer).toEqual({ can: false, reason: 'maws-45 is idle: Send starts a turn' });
     expect(c.retire.note).toBe('records it retired; the process stays yours to close');
   });
 

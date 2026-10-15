@@ -357,8 +357,14 @@ export class HubDouble {
     for (const socket of this.project(project).sockets) this.sendRaw(socket.ws, frame);
   }
 
+  /** Text frames sent on registry sockets: a grid over the frame bound goes down in DX2 `part`s (composite fa7f8e8d). */
+  gridTexts = 0;
+
   private sendRaw(ws: WebSocket, frame: ProjectDown | GridDown): void {
-    for (const text of toWire(frame, this.options.frameLimit)) ws.send(text);
+    for (const text of toWire(frame, this.options.frameLimit)) {
+      if (this.gridSockets.has(ws)) this.gridTexts++;
+      ws.send(text);
+    }
   }
 
   private *allSockets(): Iterable<WebSocket> {
@@ -465,6 +471,10 @@ export class HubDouble {
     const known = state.rpcs.get(rpc.nonce);
     if (known?.outcome) {
       this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: known.outcome.state, outcome: known.outcome });
+      return;
+    }
+    if (known && state.machines.find((m) => m.machine === rpc.machine)?.online === false) {
+      this.sendRaw(socket.ws, { t: 'rpc-state', nonce: rpc.nonce, state: known.state });
       return;
     }
     if (state.machines.find((m) => m.machine === rpc.machine)?.online === false) {

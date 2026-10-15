@@ -56,11 +56,54 @@ describe('the group chat', () => {
   });
 });
 
+describe('status and state', () => {
+  function lifecycle() {
+    offset = 0;
+    return [
+      ev(`mini/${S1}`, 'joined', { session: S1, alias: 'maws-45', machine: 'mini', seat: '' }), // 1
+      ev(`mini/${S1}`, 'state', { session: S1, state: 'busy', machine: 'mini' }), // 2: running, as joined said
+      ev(`mini/${S1}`, 'status', { session: S1, text: 'fixture 8/8' }), // 3
+      ev(`mini/${S1}`, 'state', { session: S1, state: 'idle', machine: 'mini' }), // 4: still running
+      ev(`mini/${S1}`, 'state', { session: S1, state: 'stopped', machine: 'mini' }), // 5: stopped
+      ev(`mini/${S1}`, 'state', { session: S1, state: 'gone', machine: 'mini' }), // 6: still not running
+      ev(`SK.local/${S2}`, 'state', { session: S2, state: 'stopped', machine: 'SK.local' }), // 7: another session
+      ev(`mini/${S1}`, 'state', { session: S1, state: 'busy', machine: 'mini' }), // 8: running again
+      ev(`mini/${S1}`, 'status', { session: S1, text: '' }), // 9
+    ];
+  }
+
+  it('draws a status line, and a state only where the session starts or stops running, in the group chat', () => {
+    const items = buildStream({ kind: 'group' }, lifecycle(), aliases, []);
+    expect(shape(items)).toEqual(['system:1', 'system:3', 'system:5', 'system:7', 'system:8', 'system:9']);
+    const text = (o: number) => (items.find((i) => i.kind === 'system' && i.offset === o) as { text: string }).text;
+    expect(text(3)).toBe('maws-45 status: fixture 8/8');
+    expect(text(5)).toBe('maws-45 stopped on mini');
+    expect(text(7)).toBe('maws-fe stopped on SK.local');
+    expect(text(8)).toBe('maws-45 is running again on mini');
+    expect(text(9)).toBe('maws-45 cleared its status');
+  });
+
+  it("draws the same lines for the session's own channel, and none of another's", () => {
+    expect(shape(buildStream({ kind: 'session', session: S1 }, lifecycle(), aliases, []))).toEqual(['system:1', 'system:3', 'system:5', 'system:8', 'system:9']);
+  });
+});
+
 describe('a direct channel', () => {
   it("holds the session's exchange with the human and its own lifecycle, the working record folded before each of its messages", () => {
     const items = buildStream({ kind: 'session', session: S1 }, log(), aliases, [{ request: 'toolu_2', session: S1, at: 9 }, { request: 'toolu_x', session: S2, at: 9 }]);
     expect(shape(items)).toEqual(['system:1', 'work:2', 'message:2', 'agents:3,4', 'human:6', 'work:7', 'question:7', 'agents:8', 'request:toolu_2', 'system:10']);
     expect(items.find((i) => i.kind === 'question')).toMatchObject({ answered: { text: 'user_id' } });
+    // Each fold bounds the working record by the `src` of the session's exchange items around it (null for an open end).
+    expect(items.filter((i) => i.kind === 'work').map((i) => (i as { range: unknown }).range)).toEqual([
+      { from: null, to: 'r1#0' },
+      { from: 'r1#0', to: 'toolu_1' },
+    ]);
+  });
+
+  it('folds the working record after its last exchange item, open-ended, while the session is live', () => {
+    const items = buildStream({ kind: 'session', session: S1 }, log().slice(0, 9), aliases, [], { live: true });
+    expect(items.at(-1)).toMatchObject({ kind: 'work', range: { from: 'toolu_1', to: null } });
+    expect(buildStream({ kind: 'session', session: S1 }, log().slice(0, 9), aliases, []).at(-1)?.kind).not.toBe('work');
   });
 
   it("draws a human event addressed elsewhere nowhere in this channel, and an untagged one only in the group", () => {

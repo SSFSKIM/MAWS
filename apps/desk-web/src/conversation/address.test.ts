@@ -62,7 +62,10 @@ describe('address', () => {
     expect(address('@maws-45#67a hi', twins)).toMatchObject({ ok: true, to: [{ session: '67aaaaaa-0000-4000-8000-000000000000' }] });
   });
 
-  it('refuses a tag naming another project', () => {
-    expect(address('@arkho/maws-45 hi', members)).toEqual({ ok: false, reason: 'the desk sends to this project only: @arkho/maws-45' });
+  it('refuses a tag naming another project, and takes one naming this project', () => {
+    const project = { id: '6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f', name: 'MAWS' };
+    expect(address('@arkho/maws-45 hi', members, project)).toEqual({ ok: false, reason: 'the desk sends to this project only: @arkho/maws-45' });
+    expect(address('@MAWS/maws-45 hi', members, project)).toEqual({ ok: true, to: [{ session: S1, alias: 'maws-45' }], wake: false });
+    expect(address(`@${project.id}/maws-fe hi`, members, project)).toMatchObject({ ok: true, to: [{ session: S2 }] });
   });
 });
