@@ -32,7 +32,12 @@ export const PROJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
  * subscriptions the `n` the browser expects next (one past the last relayed), so an `end` the hub writes itself carries
  * the right `n` after a hibernation too.
  */
-export type SocketAttachment = { id: string; member: string; visible: boolean; log: boolean; subs: Record<string, number> };
+/** `visibleAt`: when the socket last said it is visible (ms), or null while it says it is not; it counts as visible for
+ * `VISIBLE_MS` after (DX3: a visible tab re-sends `visibility` every 30 s). */
+export type SocketAttachment = { id: string; member: string; visibleAt: number | null; log: boolean; subs: Record<string, number> };
+
+/** How long a socket's last `visibility {visible: true}` holds its member's pushes back. */
+export const VISIBLE_MS = 90_000;
 
 /** Who sent a machine's frame: its org, the project it names, the machine, the stream the POST belongs to, and how long
  * a renewal on that stream keeps the machine online. */
@@ -95,7 +100,7 @@ export class Project extends DurableObject<Env> {
     const id = newSocketId();
     const [client, server] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(server, [id]);
-    server.serializeAttachment({ id, member, visible: false, log: false, subs: {} } satisfies SocketAttachment);
+    server.serializeAttachment({ id, member, visibleAt: null, log: false, subs: {} } satisfies SocketAttachment);
     this.toSocket(server, { t: 'welcome', project: this.projectId, member, head: this.log.head() });
     this.toSocket(server, this.machinesFrame());
     // Each session's latest presence, but never a lapsed machine's as current: its sessions' presence is unknown.
@@ -148,7 +153,7 @@ export class Project extends DurableObject<Env> {
         return this.diff(socket, frame.sub);
       case 'visibility':
         if (typeof frame.visible !== 'boolean') return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'visibility is {visible: boolean}' });
-        return this.attach(socket, (a) => ({ ...a, visible: frame.visible as boolean }));
+        return this.attach(socket, (a) => ({ ...a, visibleAt: frame.visible ? Date.now() : null }));
       default:
         return this.refuseBrowser(socket, { reason: 'bad-shape', message: `no frame ${JSON.stringify(frame?.t)}` });
     }
@@ -298,7 +303,7 @@ export class Project extends DurableObject<Env> {
     for (const { event } of accepted) {
       if (event.kind !== 'message' || !(now - Date.parse(event.ts) <= PUSH_FRESH_MS)) continue;
       const session = event.writer.slice(event.writer.indexOf('/') + 1);
-      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: 'message', event: { writer: event.writer, seq: event.seq } });
+      this.push({ v: 1, project: this.projectId, session, alias: typeof event.from === 'string' ? event.from : null, kind: 'message', event: { writer: event.writer, seq: event.seq } }, this.waitingSessions().size);
     }
   }
 
@@ -413,6 +418,9 @@ export class Project extends DurableObject<Env> {
       isMac(s.mac);
     if (!valid) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'settled is {request, winner, outcome, by, mac}' });
     const settled = message.body as Settled;
+    // Once per request: a daemon that restarted between sending a settlement and recording it sends it again, and the
+    // hub takes it without a second broadcast or decision. The ids are in storage, so this holds across an eviction.
+    if (!this.plane.markSettled(ctx.machine, message.session, settled.request, Date.now())) return;
     const raised = this.plane.settle(ctx.machine, message.session, settled.request);
     this.broadcast({ t: 'session', message });
     this.broadcast(this.audited(this.log.record('decided', { machine: ctx.machine, session: message.session, settled, raised: raised ?? null })));
@@ -492,15 +500,15 @@ export class Project extends DurableObject<Env> {
     const problem = rpcShapeError(rpc, this.projectId);
     if (problem) return fail('bad-shape', problem);
     if (rpc.member !== member) return fail('not-member', 'an RPC is issued by the member signed in');
+    // Leases first: a lapse this request is the first to find changes the record it is answered from.
+    this.sweepLeases();
     const record = this.plane.rpc(nonce);
     if (record) {
       if (record.member !== member || canonicalize(record.rpc) !== canonicalize(rpc)) return fail('bad-shape', 'this nonce was sent with another RPC');
-      this.sweepLeases();
       if (record.state === 'uncertain' && this.isOnline(record.machine)) return this.forward(record.rpc, member);
       return this.toSocket(socket, rpcStateFrame(record));
     }
     if (!(Date.now() - Date.parse(rpc.created) <= RPC_FRESHNESS_MS)) return fail('stale', 'older than 60 seconds: issue it again');
-    this.sweepLeases();
     if (!this.isOnline(rpc.machine)) return fail('machine-offline', `${rpc.machine} is offline`);
     this.forward(rpc, member);
   }
@@ -683,14 +691,11 @@ export class Project extends DurableObject<Env> {
     const machines = new Set([...leased.map((l) => l.machine), ...this.plane.machinePresence().map((p) => p.machine)]);
     const online = new Set(leased.filter((l) => this.isFresh(l)).map((l) => l.machine));
     let working = 0;
-    let waiting = 0;
     for (const { machine, message } of this.plane.presence()) {
-      if (!online.has(machine)) continue;
       const status = message.body.record?.status;
-      if (status === 'busy' || status === 'shell') working++;
-      else if (status === 'waiting') waiting++;
+      if (online.has(machine) && (status === 'busy' || status === 'shell')) working++;
     }
-    const summary = { machines: machines.size, machines_online: online.size, working, waiting };
+    const summary = { machines: machines.size, machines_online: online.size, working, waiting: this.waitingSessions().size };
     const text = JSON.stringify(summary);
     if (this.ctx.storage.kv.get('summary') === text) return;
     this.ctx.storage.kv.put('summary', text);
@@ -699,23 +704,35 @@ export class Project extends DurableObject<Env> {
       .catch(() => this.ctx.storage.kv.delete('summary'));
   }
 
+  /** The sessions of online machines whose presence says waiting, as `machine/session`: the grid's `waiting`. */
+  private waitingSessions(): Set<string> {
+    const waiting = new Set<string>();
+    for (const { machine, message } of this.plane.presence()) {
+      if (this.isOnline(machine) && message.body.record?.status === 'waiting') waiting.add(`${machine}/${message.session}`);
+    }
+    return waiting;
+  }
+
   // ---- Web Push ----------------------------------------------------------------------------------------------------
 
   private pushRaised(machine: string, raised: Raised): void {
     const question = raised.async === true || raised.tool === 'AskUserQuestion' || raised.tool.endsWith('__AskUserQuestion');
     const alias = this.log.latestOf(`${machine}/${raised.session}`)?.from;
-    this.push({ v: 1, project: this.projectId, session: raised.session, alias: typeof alias === 'string' ? alias : null, kind: question ? 'question' : 'permission', request: raised.request });
+    // The badge counts the session this request waits on, whether or not its presence says so yet.
+    const waiting = this.waitingSessions().add(`${machine}/${raised.session}`);
+    this.push({ v: 1, project: this.projectId, session: raised.session, alias: typeof alias === 'string' ? alias : null, kind: question ? 'question' : 'permission', request: raised.request }, waiting.size);
   }
 
-  /** To every member with no browser showing the project (a socket's visibility rides in its attachment). */
-  private push(notice: PushNotice): void {
+  /** To every member with no browser showing the project (a socket's visibility rides in its attachment). `waiting` is
+   * this project's count as of this push; the Registry adds the other projects' to it for the badge. */
+  private push(notice: Omit<PushNotice, 'name' | 'waiting'>, waiting: number): void {
     const looking = new Set<string>();
     for (const socket of this.ctx.getWebSockets()) {
       const attachment = this.attachment(socket);
-      if (attachment.visible) looking.add(attachment.member);
+      if (attachment.visibleAt !== null && Date.now() - attachment.visibleAt < this.visibleMs()) looking.add(attachment.member);
     }
     void this.registry()
-      .push(notice, [...looking])
+      .push(notice, [...looking], waiting)
       .catch(() => {});
   }
 
@@ -872,6 +889,11 @@ export class Project extends DurableObject<Env> {
   private isOpen(ctx: MachineContext): boolean {
     const row = this.ctx.storage.sql.exec<{ generation: number }>('SELECT generation FROM machines WHERE name = ?', ctx.machine).toArray()[0];
     return row?.generation === ctx.generation;
+  }
+
+  /** How long a socket's `visibility` holds pushes back (the suites' Worker shortens it). */
+  protected visibleMs(): number {
+    return VISIBLE_MS;
   }
 
   /** The project registered in the org's Registry (the suites' Worker holds it here to race a close against it). */

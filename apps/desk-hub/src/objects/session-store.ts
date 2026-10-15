@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS rpcs (
   nonce TEXT PRIMARY KEY, machine TEXT NOT NULL, member TEXT NOT NULL, rpc TEXT NOT NULL, state TEXT NOT NULL,
   outcome TEXT, generation INTEGER NOT NULL, updated INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS rpcs_by_machine ON rpcs (machine, state);
+CREATE TABLE IF NOT EXISTS settled (
+  machine TEXT NOT NULL, session TEXT NOT NULL, request TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (machine, session, request));
 CREATE TABLE IF NOT EXISTS subs (
   sub TEXT PRIMARY KEY, socket TEXT NOT NULL, machine TEXT NOT NULL, session TEXT NOT NULL, agent_id TEXT,
   generation INTEGER NOT NULL);
@@ -27,6 +29,9 @@ CREATE TABLE IF NOT EXISTS subs (
 
 /** How long an RPC's record answers a retry of its nonce: a day, as the daemon's ledger keeps its entries. */
 const RPC_RECORD_MS = 24 * 3600 * 1000;
+
+/** How long a settled request's id is kept to recognize its `settled` sent again: a month, past any daemon's restart. */
+const SETTLED_MS = 30 * 24 * 3600 * 1000;
 
 /** `closed`: the stream it belongs to closed, so nothing of that generation renews it again (a lapse alone may be
  * renewed: a daemon back from a suspension on a stream that held). */
@@ -119,6 +124,14 @@ export class SessionStore {
     } else {
       this.sql.exec('INSERT INTO pending (machine, session, request, raised, deadline) VALUES (?, ?, ?, ?, ?)', machine, raised.session, raised.request, JSON.stringify(raised), deadline);
     }
+    return !known;
+  }
+
+  /** Marks a request settled; false when it already was, so its `settled` is one sent again. */
+  markSettled(machine: string, session: string, request: string, now: number): boolean {
+    this.sql.exec('DELETE FROM settled WHERE at < ?', now - SETTLED_MS);
+    const known = this.sql.exec('SELECT 1 FROM settled WHERE machine = ? AND session = ? AND request = ?', machine, session, request).toArray().length > 0;
+    if (!known) this.sql.exec('INSERT INTO settled (machine, session, request, at) VALUES (?, ?, ?, ?)', machine, session, request, now);
     return !known;
   }
 

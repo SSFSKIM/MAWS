@@ -12,7 +12,7 @@ import { inject } from 'vitest';
 import { startProxy, type Proxy } from '../../local/proxy.ts';
 import { AccessStandin, IDENTITY_HEADER } from '../../local/standin.ts';
 import { generateVapidKey } from '../../src/push/web-push';
-import { ABORT_REASON, MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_HOLD_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, PROJECTS_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
+import { ABORT_REASON, MACHINE_ABORT_PATH, MEMBER_PATH, PROJECT_HOLD_PATH, PROJECT_VISIBLE_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, PROJECTS_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
 
 const require = createRequire(import.meta.url);
 const { unstable_getMiniflareWorkerOptions } = require('wrangler') as typeof import('wrangler');
@@ -190,6 +190,10 @@ export async function startLocalHub() {
     /** Holds, or releases, a project's `hello`s at their registration. */
     async holdHellos(project: string, hold: boolean) {
       await seam('PROJECT', project, PROJECT_HOLD_PATH, { hold });
+    },
+    /** Shortens how long a socket's `visibility` holds a project's pushes back (90 s deployed). */
+    async visibleWindow(project: string, ms: number) {
+      await seam('PROJECT', project, PROJECT_VISIBLE_PATH, { ms });
     },
     /** Puts `count` projects straight into the Registry, with long names. */
     async addProjects(count: number, prefix: string) {

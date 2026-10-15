@@ -13,6 +13,8 @@ export const PROJECT_LIFE_PATH = '/__test/life';
 export const PROJECT_LEASE_PATH = '/__test/lease';
 /** Where the suites' `Project` holds a `hello` at its registration (`{hold: boolean}`), as a slow Registry would. */
 export const PROJECT_HOLD_PATH = '/__test/hold';
+/** Where the suites' `Project` takes a shorter window for a socket's `visibility` (`{ms}`), before the browser sends it. */
+export const PROJECT_VISIBLE_PATH = '/__test/visible-window';
 /** Where the suites' `Registry` takes projects straight into its table (`{count, prefix}`), for a grid of any size. */
 export const PROJECTS_PATH = '/__test/projects';
 /** Where the suites' `Registry` takes a member (`{email, role}`). */

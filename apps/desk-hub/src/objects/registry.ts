@@ -382,7 +382,12 @@ export class Registry extends DurableObject<Env> {
    * project). A push service that answers 404 or 410 has dropped the subscription, so the hub does too. Answers what
    * happened, for the suites and the logs.
    */
-  async push(notice: PushNotice, looking: string[]): Promise<{ sent: number; gone: number; failed: number }> {
+  /** Sends `notice` to the members not `looking`, with the project's `name` as the grid shows it, and `waiting` the org's: the pushing project's own count as of the
+   * push (its summary may not have reached here yet) and every other project's as last reported. */
+  async push(notice: Omit<PushNotice, 'name' | 'waiting'>, looking: string[], projectWaiting: number): Promise<{ sent: number; gone: number; failed: number }> {
+    const others = this.sql.exec<{ n: number | null }>('SELECT SUM(waiting) AS n FROM summaries WHERE project != ?', notice.project).one().n ?? 0;
+    const { v, project, ...rest } = notice;
+    const full: PushNotice = { v, project, name: this.project(project)?.name ?? '', ...rest, waiting: others + projectWaiting };
     const members = this.sql.exec<{ id: string }>('SELECT id FROM members').toArray().map((m) => m.id).filter((id) => !looking.includes(id));
     const targets = this.subscriptionsOf(members);
     if (targets.length === 0) return { sent: 0, gone: 0, failed: 0 };
@@ -391,7 +396,7 @@ export class Registry extends DurableObject<Env> {
     const outcomes = await Promise.all(
       targets.map(async (target): Promise<'sent' | 'gone' | 'failed'> => {
         try {
-          const response = await fetch(await pushRequest(vapid, subject, target, notice));
+          const response = await fetch(await pushRequest(vapid, subject, target, full));
           await response.arrayBuffer().catch(() => {});
           if (response.status === 404 || response.status === 410) {
             this.sql.exec('DELETE FROM push_subscriptions WHERE endpoint = ?', target.endpoint);

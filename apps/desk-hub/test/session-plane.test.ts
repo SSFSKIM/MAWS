@@ -167,6 +167,28 @@ describe('RPCs', () => {
     await m.close();
   });
 
+  it('a retry that is the first to find its lease expired answers uncertain, never the record from before', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const call = await rpc(project, m.name, 'steer', { session: SESSION, text: 'once' });
+    b.send({ t: 'rpc', rpc: call });
+    await m.next((f) => f.t === 'rpc', 'the rpc');
+    await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce && f.state === 'forwarded', 'forwarded');
+    // The lease runs out within a millisecond; its alarm comes 50 ms on at the soonest, and the retry before it.
+    await hub.lease(project, { op: 'renew', machine: m.name, generation: m.generation, leaseMs: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const from = b.frames.length;
+    b.send({ t: 'rpc', rpc: call });
+    await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce, 'the retry answered', from);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const states = ofType(b, 'rpc-state', from).filter((f) => f.nonce === call.nonce).map((f) => f.state);
+    expect(states.length).toBeGreaterThan(0);
+    expect(states.every((state) => state === 'uncertain')).toBe(true);
+    b.close();
+    await m.close();
+  });
+
   it('a retry of an uncertain RPC is forwarded again once its machine is back (the daemon’s ledger answers it)', async () => {
     const project = newProject();
     const m = await machine(project, CLOSES);
@@ -309,6 +331,42 @@ describe('the pending set, decisions, and deliveries', () => {
     late.send({ t: 'resume', after: 0 });
     await late.next((f) => f.t === 'caught-up', 'caught-up');
     expect(await late.next((f) => f.t === 'decided', 'replayed')).toMatchObject({ decision: { id: entry.decision.id, settled: decided } });
+    late.close();
+    b.close();
+    await m.close();
+  });
+
+  it.each([
+    ['in one life of the object', false],
+    ['across an eviction of the object between the two', true],
+  ])('a settlement sent again is accepted once: one broadcast, one decision in the record (%s)', async (_, evict) => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const request = await raised(project, 'toolu_twice');
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', request) }]);
+    await waitFor(() => (lastPending(b)?.length === 1 ? true : undefined));
+    const decided = await settled(project, 'toolu_twice', 'web', 'allow', memberId);
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'settled', decided) }]);
+    await b.next((f) => f.t === 'decided', 'decided');
+    if (evict) {
+      const before = await hub.projectLife(project);
+      await hub.evict('Project', `${ORG}:${project}`, 'hibernate');
+      expect(await hub.projectLife(project)).not.toBe(before);
+    }
+    // The daemon restarted between sending its settlement and recording that it did: it sends it again.
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'settled', decided) }]);
+    // A marker after it, so the browser has seen everything the second settlement could have caused.
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'presence', presence('busy')) }]);
+    await b.next((f) => f.t === 'session' && f.message.kind === 'presence', 'the marker');
+    expect(sessionKinds(b).filter((x) => x.kind === 'settled')).toHaveLength(1);
+    expect(ofType(b, 'decided')).toHaveLength(1);
+    const late = await browser(project);
+    late.send({ t: 'resume', after: 0 });
+    await late.next((f) => f.t === 'caught-up', 'caught-up');
+    await waitFor(() => (ofType(late, 'decided').length > 0 ? true : undefined));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(ofType(late, 'decided')).toHaveLength(1);
     late.close();
     b.close();
     await m.close();
@@ -615,6 +673,34 @@ describe('Web Push', () => {
     expect(await deleted.json()).toEqual({ deleted: true });
   });
 
+  it('a visible socket that has not refreshed its visibility within the window no longer holds pushes back', async () => {
+    const project = newProject();
+    const m = await machine(project);
+    // The window shortened to 400 ms for this project (90 s deployed), through a suite seam.
+    await hub.visibleWindow(project, 400);
+    const ua = await userAgent(`https://push.test/asleep-${project}`);
+    await hub.fetchAs(ADMIN, '/api/push/subscriptions', { method: 'PUT', body: { endpoint: ua.endpoint, keys: ua.keys } });
+    const mine = () => hub.pushes.filter((p) => p.endpoint === ua.endpoint);
+    const b = await browser(project);
+    b.send({ t: 'visibility', visible: true });
+    // Within the window: held back.
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', await raised(project, 'toolu_awake')) }]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(mine()).toEqual([]);
+    // The phone slept: no refresh came, and the window passed.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', await raised(project, 'toolu_asleep')) }]);
+    await waitFor(() => (mine().length === 1 ? true : undefined));
+    // A refresh holds them back again.
+    b.send({ t: 'visibility', visible: true });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'raised', await raised(project, 'toolu_refreshed')) }]);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(mine()).toHaveLength(1);
+    b.close();
+    await m.close();
+  });
+
   it('a raise and a <message> push once to each device of a member with no visible browser, and none when one is visible', async () => {
     const project = newProject();
     const m = await machine(project);
@@ -636,10 +722,12 @@ describe('Web Push', () => {
       expect(JSON.parse(new TextDecoder().decode(await decrypt(ua, push.body)))).toEqual({
         v: 1,
         project,
+        name: 'demo',
         session: SESSION,
         alias: 'maws-45',
         kind: 'question',
         request: 'toolu_push',
+        waiting: expect.any(Number),
       });
       expect((await vapidClaims(push.headers.authorization)).claims).toMatchObject({ aud: 'https://push.test', sub: `mailto:${ADMIN}` });
     }
@@ -653,10 +741,12 @@ describe('Web Push', () => {
     expect(JSON.parse(new TextDecoder().decode(await decrypt(phone, mine().filter((p) => p.endpoint === phone.endpoint)[1].body)))).toEqual({
       v: 1,
       project,
+      name: 'demo',
       session: SESSION,
       alias: 'maws-45',
       kind: 'message',
       event: { writer: message.writer, seq: 2 },
+      waiting: expect.any(Number),
     });
 
     // A visible browser of the member: nothing.

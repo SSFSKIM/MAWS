@@ -3,6 +3,7 @@
 // assertion is enrollment's redemption (`/machine/enroll`), which Access does not guard either: its one-time token
 // does. Every path it answers is under `/api/*` or `/machine/*`, the routes wrangler.jsonc runs it first for; the web
 // app's assets answer the rest.
+import { drain } from './drain';
 import { hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
 import type { Principal, Registry, Result } from './objects/registry';
@@ -63,29 +64,35 @@ function forward(request: Request, url: string, identity: Record<string, string>
 
 export default {
   async fetch(request, env): Promise<Response> {
-    const config = hubConfig(env);
-    if (!config) return json(503, { error: 'not-configured' });
-    const registry = env.REGISTRY.get(env.REGISTRY.idFromName(config.org.id));
-    const url = new URL(request.url);
-    if (url.pathname === REDEEM_PATH) {
-      return request.method === 'POST' ? answer(await registry.redeem(await body(request))) : json(405, { error: 'method-not-allowed' });
-    }
-    let principal: Principal | null;
-    try {
-      const identity = await verifyAccessAssertion(request.headers.get('Cf-Access-Jwt-Assertion'), {
-        issuer: config.issuer,
-        audience: config.audience,
-        keys: keysAt(config.certsUrl),
-      });
-      principal = await registry.resolve(identity);
-      if (!principal) return json(403, { error: identity.kind === 'human' ? 'not-a-member' : 'not-enrolled' });
-    } catch (error) {
-      if (error instanceof AccessError) return json(error.reason === 'missing' ? 401 : 403, { error: error.reason });
-      throw error;
-    }
-    return principal.kind === 'member' ? member(request, url, env, registry, principal) : machine(request, url, env, principal);
+    const response = await route(request, env);
+    if (request.body && !request.bodyUsed) await drain(request.body);
+    return response;
   },
 } satisfies ExportedHandler<Env>;
+
+async function route(request: Request, env: Env): Promise<Response> {
+  const config = hubConfig(env);
+  if (!config) return json(503, { error: 'not-configured' });
+  const registry = env.REGISTRY.get(env.REGISTRY.idFromName(config.org.id));
+  const url = new URL(request.url);
+  if (url.pathname === REDEEM_PATH) {
+    return request.method === 'POST' ? answer(await registry.redeem(await body(request))) : json(405, { error: 'method-not-allowed' });
+  }
+  let principal: Principal | null;
+  try {
+    const identity = await verifyAccessAssertion(request.headers.get('Cf-Access-Jwt-Assertion'), {
+      issuer: config.issuer,
+      audience: config.audience,
+      keys: keysAt(config.certsUrl),
+    });
+    principal = await registry.resolve(identity);
+    if (!principal) return json(403, { error: identity.kind === 'human' ? 'not-a-member' : 'not-enrolled' });
+  } catch (error) {
+    if (error instanceof AccessError) return json(error.reason === 'missing' ? 401 : 403, { error: error.reason });
+    throw error;
+  }
+  return principal.kind === 'member' ? member(request, url, env, registry, principal) : machine(request, url, env, principal);
+}
 
 async function member(request: Request, url: URL, env: Env, registry: DurableObjectStub<Registry>, principal: Extract<Principal, { kind: 'member' }>): Promise<Response> {
   const { pathname } = url;
