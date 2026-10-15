@@ -119,6 +119,33 @@ describe('RPCs', () => {
     await m.close();
   });
 
+  it("carry a late decision's winner, by, and terminalOnly to the browser unchanged, live and from the record on a retry; a wrong type is refused", async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const late = { state: 'failed', error: { code: 'not-pending', message: 'already answered in the terminal', winner: 'terminal', by: 'terminal', terminalOnly: true } } as const;
+    const call = await rpc(project, m.name, 'decide', { session: SESSION, decision: 'allow', digest: { session: SESSION, request: 'toolu_1', tool: 'Bash', input_sha256: '0'.repeat(64) } });
+    b.send({ t: 'rpc', rpc: call });
+    await m.next((f) => f.t === 'rpc', 'the rpc');
+    await m.postOk([{ t: 'rpc-result', project, nonce: call.nonce, outcome: late }]);
+    expect(await b.next((f) => f.t === 'rpc-state' && f.state === 'failed', 'failed')).toEqual({ t: 'rpc-state', nonce: call.nonce, state: 'failed', outcome: late });
+    const from = b.frames.length;
+    b.send({ t: 'rpc', rpc: call });
+    expect(await b.next((f) => f.t === 'rpc-state', 'the record', from)).toEqual({ t: 'rpc-state', nonce: call.nonce, state: 'failed', outcome: late });
+
+    // Each of the three, of the wrong type, is refused: the record keeps nothing of it.
+    for (const wrong of [{ winner: 'phone' }, { by: 7 }, { terminalOnly: 'yes' }]) {
+      const next = await rpc(project, m.name, 'decide', { session: SESSION, decision: 'deny', digest: { session: SESSION, request: 'toolu_2', tool: 'Bash', input_sha256: '0'.repeat(64) } });
+      b.send({ t: 'rpc', rpc: next });
+      await m.next((f) => f.t === 'rpc' && f.rpc.nonce === next.nonce, 'the rpc');
+      const at = m.frames.length;
+      await m.postOk([{ t: 'rpc-result', project, nonce: next.nonce, outcome: { state: 'failed', error: { code: 'not-pending', message: 'late', ...wrong } } } as never]);
+      expect(await m.next((f) => f.t === 'refused', 'refused', at)).toMatchObject({ refusal: { reason: 'bad-shape' } });
+    }
+    b.close();
+    await m.close();
+  });
+
   it('fail at once, and are not forwarded, to a machine without a connection, when stale, or when another member signs them', async () => {
     const project = newProject();
     const m = await machine(project, CLOSES);
