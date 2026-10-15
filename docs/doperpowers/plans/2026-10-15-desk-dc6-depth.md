@@ -318,6 +318,22 @@ registrations through `connectDepth()`.
   `engine-surface/`, `ui/`. The fixture's thinking text is a one-sentence
   stand-in (the engine recorded it omitted).
   Date/Author: 2026-10-15, M1 executor, folded by the controller.
+- Decision: The composite's writer's answers to M1 (composite `34ee27ca`,
+  `24448038`), added to M1 before it is ticked. The no-cut route stands,
+  guarded by a lint rule forbidding `window.maws` in `apps/desk-web/src`
+  (MAWS's own sources outside its scope), since MAWS's `env.d.ts` types it
+  there; the depth chunk's xterm and mermaid weight is a known cost, DC5's
+  M4 measures it on the phone. DX4 gains `step-end {turnId, agentId,
+  step}` in subscriptions (DX8's `SubscriptionMessage` carries it), sent
+  when a model request ends — finished, aborted, or cut by its turn's
+  end — after every `block-row` of that step; on it the adapter drops the
+  partial text of that step's blocks without a `block-row`; tested against
+  the double until DC3's type and DC7's producer land. Where the engine
+  records thinking omitted, live thinking draws as the same collapsed
+  indicator the settled row shows, not as streaming text. Depth stays raw
+  for `<message>` marks; the `transcript` slot's marks are confirmed
+  before M3.
+  Date/Author: 2026-10-15, composite's writer.
 
 ## Surprises & Discoveries
 - 2026-10-15 (from DC2's M3, built, in review, via the composite's
