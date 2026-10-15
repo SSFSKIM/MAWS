@@ -261,7 +261,9 @@ describe('pty host initial command runs under zsh and bash', () => {
     { shell: '/bin/zsh', login: '[[ -o login ]]', profile: '.zprofile' },
     { shell: '/bin/bash', login: 'shopt -q login_shell', profile: '.bash_profile' },
   ];
-  it.each(cases)('$shell starts as a login shell over the scratch home and runs the command it was spawned with', async ({ shell, login, profile }) => {
+  it.for(cases)('$shell starts as a login shell over the scratch home and runs the command it was spawned with', async ({ shell, login, profile }, { skip }) => {
+    // macOS: zsh starts under macOS's system startup files there (/etc/zprofile, and /etc/zshrc, which puts HISTFILE under ZDOTDIR); Ubuntu's /etc/zsh files differ.
+    skip(shell === '/bin/zsh' && process.platform !== 'darwin', 'macOS zsh startup files');
     const h = harness();
     const { ptyId } = await h.table.spawn(
       spawnInput({ shell, command: `printf 'MAWS_INIT_%s\\n' OK; ${login} && printf 'MAWS_LOGIN_%s|%s|%s\\n' YES "$${PROFILE_VARIABLE}" "$HISTFILE"` }),
