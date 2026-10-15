@@ -100,3 +100,15 @@ describe('@ completion in the group composer', () => {
     expect(screen.queryByRole('listbox', { name: 'Deliver to' })).toBeNull();
   });
 });
+
+describe('the session composer’s hint', () => {
+  it('names Enter as the steer only where Enter steers: on a desk, not on a phone', () => {
+    const working = { ...session(S2, 'maws-fe', 'working'), presence: { record: { status: 'working' }, bridge: true } };
+    mount(<SessionComposer session={working} />);
+    expect(screen.getByRole('textbox', { name: 'Message maws-fe' }).getAttribute('placeholder')).toBe('Steer maws-fe (Enter), or Send to queue it');
+    cleanup();
+    phone(true);
+    mount(<SessionComposer session={working} />);
+    expect(screen.getByRole('textbox', { name: 'Message maws-fe' }).getAttribute('placeholder')).toBe('Steer maws-fe, or Send to queue it');
+  });
+});

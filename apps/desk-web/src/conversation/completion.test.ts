@@ -43,4 +43,17 @@ describe('complete', () => {
       expect(addressed).toEqual({ ok: true, to: [{ session: candidate.session, alias: candidate.alias }], wake: false });
     }
   });
+
+  it('disambiguates a live member against every member a tag reaches, an ended one that has not retired included', () => {
+    const ended: Addressable[] = [
+      { session: S2, alias: 'maws-hub', member: true, live: true },
+      { session: S3, alias: 'maws-hub', member: true, live: false }, // ended, still a member: @maws-hub would be ambiguous
+      { session: S4, alias: 'maws-hub', member: false, live: false }, // retired: addresses no one, so no clash
+      { session: S1, alias: 'maws-45', member: true, live: true },
+    ];
+    expect(complete('maws', ended).map((c) => c.tag)).toEqual(['@maws-45', `@maws-hub#${S2.slice(0, 8)}`]);
+    for (const candidate of complete('', ended).filter((c) => c.session)) {
+      expect(address(`${candidate.tag} hi`, ended)).toEqual({ ok: true, to: [{ session: candidate.session, alias: candidate.alias }], wake: false });
+    }
+  });
 });

@@ -2,22 +2,13 @@
 // wants what; tapping it opens the card here, where it is verified before it is drawn — nothing is answered from the
 // notification itself (§6). iOS shows the permission prompt only from a tap, and only in the installed app.
 import { useEffect, useState } from 'react';
-import { HubRequestError } from '../../hub/http';
-import { usePushAtStart } from '../../push/at-start';
 import { browserPushEnv, disablePush, enablePush, pushState, retryPush, type PushState } from '../../push/device';
+import { failureBehind, recordPushOutcome, usePushOutcome } from '../../push/outcome';
 import { registerServiceWorker } from '../../pwa/service-worker';
 import { buttonPrimary, buttonSecondary, Dialog } from '../common/Dialog';
+import { explainPushFailure as explain } from './explain';
 
 const env = () => browserPushEnv(registerServiceWorker());
-
-function explain(error: unknown): string {
-  if (error instanceof HubRequestError) {
-    if (error.code === 'not-configured') return 'The hub cannot send notifications yet: it has no push key configured.';
-    if (error.code === 'too-many') return 'The hub already keeps notifications for 20 of your devices. Turn them off on one you no longer use, then try again.';
-    return `The hub refused this device's subscription (${error.code}).`;
-  }
-  return `This device could not subscribe: ${error instanceof Error ? error.message : String(error)}`;
-}
 
 export function NotificationsDialog({ onClose }: { onClose: () => void }) {
   const [state, setState] = useState<PushState | null>(null);
@@ -28,10 +19,12 @@ export function NotificationsDialog({ onClose }: { onClose: () => void }) {
     pushState(env()).then(
       (s) => {
         if (!live) return;
-        // The hub's own words for why it holds no subscription, when the start's attempt got them.
-        const atStart = usePushAtStart.getState().state;
-        const why = s.kind === 'unsynced' && s.error === null && atStart?.kind === 'unsynced' && atStart.endpoint === s.endpoint ? atStart.error : null;
-        setState(why && s.kind === 'unsynced' ? { ...s, error: why } : s);
+        // Why the last attempt (the start's, the banner's, or this panel's before) left the device as it is, when it
+        // saw a failure the state cannot carry: the hub's refusal of this endpoint, or of its push key.
+        const why = failureBehind(s, usePushOutcome.getState().outcome);
+        if (why !== null && s.kind === 'unsynced') return setState({ ...s, error: why });
+        if (why !== null) setError(explain(why));
+        setState(s);
       },
       (e: unknown) => live && setError(explain(e)),
     );
@@ -42,11 +35,11 @@ export function NotificationsDialog({ onClose }: { onClose: () => void }) {
   const act = (action: typeof enablePush) => {
     setBusy(true);
     setError(null);
-    action(env())
-      .then((s) => {
-        setState(s);
-        usePushAtStart.setState({ state: s });
-      }, (e: unknown) => setError(explain(e)))
+    void recordPushOutcome(action(env()))
+      .then((outcome) => {
+        if (outcome && 'state' in outcome) setState(outcome.state);
+        else if (outcome) setError(explain(outcome.error));
+      })
       .finally(() => setBusy(false));
   };
   return (

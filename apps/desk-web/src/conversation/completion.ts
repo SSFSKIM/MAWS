@@ -1,9 +1,9 @@
 // `@` completion for the group composer (mockups/desk/05-phone.html, 4c): aliases with short ids are hard to type on
 // glass, so typing an @ among the tags that open a post lists the project's live members matching what follows, and a
-// pick inserts the exact tag `sminos say` resolves — `@alias`, `@alias#short` where two members share the alias,
-// `@"alias"` for one with spaces — or `@all`. An @ later in the text is only text (address.ts), so nothing is offered
-// there.
-import { leadingTags, type Addressable } from './address';
+// pick inserts the exact tag `sminos say` resolves — `@alias`, `@alias#short` where it would reach another member too
+// (an ended session that has not retired is still one), `@"alias"` for one with spaces — or `@all`. An @ later in the
+// text is only text (address.ts), so nothing is offered there.
+import { address, leadingTags, type Addressable } from './address';
 
 export type Completion = { tag: string; alias: string; session: string | null };
 
@@ -29,14 +29,19 @@ export function complete(query: string, sessions: readonly Addressable[]): Compl
   const q = query.toLowerCase();
   const found: Completion[] = live
     .filter((s) => s.alias.toLowerCase().startsWith(q))
-    .map((s) => {
-      const shared = live.filter((o) => o.alias === s.alias).length > 1;
-      const name = /[\s"]/u.test(s.alias) ? `"${s.alias}"` : s.alias;
-      return { tag: `@${name}${shared ? `#${short(s.session)}` : ''}`, alias: s.alias, session: s.session };
-    })
+    .map((s) => ({ tag: tagFor(s, sessions), alias: s.alias, session: s.session }))
     .sort((a, b) => a.tag.localeCompare(b.tag));
   if ('all'.startsWith(q)) found.push({ tag: '@all', alias: 'all', session: null });
   return found;
+}
+
+/** The tag that addresses exactly `s` as posting resolves it, against every member: the alias alone when it reaches only
+ * `s`, else with `s`'s short id. */
+function tagFor(s: Addressable, sessions: readonly Addressable[]): string {
+  const name = /[\s"]/u.test(s.alias) ? `"${s.alias}"` : s.alias;
+  const plain = address(`@${name} `, sessions);
+  const alone = plain.ok && plain.to !== '*' && plain.to.length === 1 && plain.to[0].session === s.session;
+  return alone ? `@${name}` : `@${name}#${short(s.session)}`;
 }
 
 /** The text with the tag at `start` (typed up to `caret`) replaced by `tag` and a space, and where the caret goes. */

@@ -160,7 +160,7 @@ export function SessionComposer({ session }: { session: DeskSession }) {
         onChange={(e) => setText(e.target.value)}
         onKeyDown={submitOnEnter(running && can.steer.can ? steer : send, narrow)}
         className={BOX}
-        placeholder={running && can.steer.can ? `Steer ${session.alias} (Enter), or Send to queue it` : `Message ${session.alias}`}
+        placeholder={running && can.steer.can ? `Steer ${session.alias}${narrow ? '' : ' (Enter)'}, or Send to queue it` : `Message ${session.alias}`}
       />
       <div className="mt-1.5 flex flex-wrap items-center gap-2">
         {/* On a phone the primary leads the row (05-phone.html, 5A): Steer while a turn runs, never beside Interrupt. */}

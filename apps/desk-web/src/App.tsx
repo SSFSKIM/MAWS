@@ -9,7 +9,7 @@ import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { fetchMe, SignInError, type Me } from './hub/me';
 import { loadDeviceKey, useKeyHolder } from './key/holder';
 import { hubBase } from './hub/base';
-import { usePushAtStart } from './push/at-start';
+import { recordPushOutcome } from './push/outcome';
 import { browserPushEnv, resyncPush } from './push/device';
 import { orgWaiting, showBadge } from './pwa/badge';
 import { followLandings, registerServiceWorker } from './pwa/service-worker';
@@ -73,10 +73,7 @@ function Desk({ me }: { me: Me }) {
   // A device already subscribed hands its subscription to the hub again; what came of it is kept for the
   // Notifications panel, which shows a refusal and offers Retry.
   useEffect(() => {
-    resyncPush(browserPushEnv(registerServiceWorker())).then(
-      (state) => usePushAtStart.setState({ state }),
-      () => {},
-    );
+    void recordPushOutcome(resyncPush(browserPushEnv(registerServiceWorker())));
   }, []);
   // The app icon's badge follows the grid while the app is open (a push sets it from its payload while it is not), so
   // a request answered anywhere clears it.
