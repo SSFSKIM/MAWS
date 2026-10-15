@@ -42,6 +42,9 @@ export interface DeckPreview {
   versionId: number | null;
   /** When it was asked for (`performance.now()`), so the editor can time it once drawn. */
   requestedAt: number;
+  /** Fix wave 1 (R2): the revisions whose assets each state draws with (the version's seq; null for the live deck). */
+  revision: number | null;
+  earlierRevision: number | null;
 }
 
 export interface DeckPill {
@@ -337,6 +340,8 @@ export class DeckHistoryController {
           system: next ? (next.designSystemRef ?? { builtin: 'maws' }) : null,
           versionId: target.kind === 'version' ? target.versionId : null,
           requestedAt,
+          revision: next ? next.seq : null,
+          earlierRevision: prev ? prev.seq : null,
         },
       });
     } catch (error) {

@@ -26,7 +26,8 @@ interface Props {
   preview: DeckPreview;
   /** The live deck's system: what the live deck's own preview draws in. */
   liveSystem: DesignSystemRef | { builtin: 'maws' } | null;
-  assetUrl: AssetUrl;
+  /** Fix wave 1 (R2): each state's assets: the shown version's and the earlier one's (`historyAssets`). */
+  assets: PreviewAssets;
   /** The editor's zoom ('fit' or a scale). */
   zoom: 'fit' | number;
   thumbnailWidth: number;
@@ -34,7 +35,19 @@ interface Props {
   onDrawn?: () => void;
 }
 
-export function HistoryPreview({ controller, preview, liveSystem, assetUrl, zoom, thumbnailWidth, onDrawn }: Props) {
+/** The asset URLs each state of a preview draws with. */
+export interface PreviewAssets {
+  shown: AssetUrl;
+  earlier: AssetUrl;
+}
+
+/** Fix wave 1 (R2): a preview's assets at its states' revisions (the live deck's own when it shows the live deck). */
+export function historyAssets(preview: Pick<DeckPreview, 'revision' | 'earlierRevision'>, live: AssetUrl, at: ((ref: string, revision: number) => string | null) | undefined): PreviewAssets {
+  const pinned = (revision: number | null): AssetUrl => (revision === null || !at ? live : (ref) => at(ref, revision));
+  return { shown: pinned(preview.revision), earlier: pinned(preview.earlierRevision) };
+}
+
+export function HistoryPreview({ controller, preview, liveSystem, assets, zoom, thumbnailWidth, onDrawn }: Props) {
   const view = useDeckView(preview.shown);
   const system = preview.system ?? liveSystem;
   const scope = (children: ReactNode) => (
@@ -48,7 +61,7 @@ export function HistoryPreview({ controller, preview, liveSystem, assetUrl, zoom
   const change = slideId === null ? undefined : bySlide.get(slideId);
   return (
     <>
-      {scope(<HistoryFilmstrip controller={controller} preview={preview} bySlide={bySlide} assetUrl={assetUrl} width={thumbnailWidth} />)}
+      {scope(<HistoryFilmstrip controller={controller} preview={preview} bySlide={bySlide} assets={assets} width={thumbnailWidth} />)}
       <div className="deck-editor-main" data-history-preview={preview.target.kind}>
         {preview.showChanges && preview.changes.deck && (
           <p className="deck-history-deck" role="status" data-focused={focus?.part === 'deck' ? '' : undefined}>
@@ -57,7 +70,7 @@ export function HistoryPreview({ controller, preview, liveSystem, assetUrl, zoom
         )}
         {preview.showChanges && change?.kind === 'removed' && <p className="deck-history-slide-note">{C.deletedSlide}</p>}
         {preview.showChanges && change?.kind === 'added' && <p className="deck-history-slide-note">{C.addedSlide}</p>}
-        <HistoryStage controller={controller} preview={preview} change={change} focus={focus} assetUrl={assetUrl} zoom={zoom} scope={scope} onDrawn={onDrawn} />
+        <HistoryStage controller={controller} preview={preview} change={change} focus={focus} assets={assets} zoom={zoom} scope={scope} onDrawn={onDrawn} />
         {slideId !== null && <NotesDiff controller={controller} preview={preview} slideId={slideId} change={change} focus={focus} />}
       </div>
     </>
@@ -66,7 +79,7 @@ export function HistoryPreview({ controller, preview, liveSystem, assetUrl, zoom
 
 // ---- the filmstrip
 
-function HistoryFilmstrip({ controller, preview, bySlide, assetUrl, width }: { controller: DeckHistoryController; preview: DeckPreview; bySlide: Map<string, SlideChange>; assetUrl: AssetUrl; width: number }) {
+function HistoryFilmstrip({ controller, preview, bySlide, assets, width }: { controller: DeckHistoryController; preview: DeckPreview; bySlide: Map<string, SlideChange>; assets: PreviewAssets; width: number }) {
   // a deleted slide is shown at its earlier place only while the changes are
   const order = slideOrderOf(preview).filter((id) => preview.showChanges || bySlide.get(id)?.kind !== 'removed');
   const scale = width / SLIDE_W;
@@ -92,7 +105,7 @@ function HistoryFilmstrip({ controller, preview, bySlide, assetUrl, width }: { c
                   title={author ? C.by(author.name, author.when(change!.at)) : undefined}
                   onClick={() => controller.showSlide(id)}
                 >
-                  <SlideView doc={removed ? preview.earlier : preview.shown} slideId={id} token={removed ? preview.earlier : preview.shown} assetUrl={assetUrl} scale={scale} thumbnail />
+                  <SlideView doc={removed ? preview.earlier : preview.shown} slideId={id} token={removed ? preview.earlier : preview.shown} assetUrl={removed ? assets.earlier : assets.shown} scale={scale} thumbnail />
                   {change?.kind === 'added' && <span className="deck-thumb-badge deck-history-badge">{C.newBadge}</span>}
                   {change?.kind === 'removed' && <span className="deck-thumb-badge deck-history-badge">{C.deletedBadge}</span>}
                 </button>
@@ -115,7 +128,7 @@ interface Mark {
   title: string;
 }
 
-function HistoryStage({ controller, preview, change, focus, assetUrl, zoom, scope, onDrawn }: { controller: DeckHistoryController; preview: DeckPreview; change: SlideChange | undefined; focus: ChangeStop | null; assetUrl: AssetUrl; zoom: 'fit' | number; scope: (children: ReactNode) => ReactNode; onDrawn?: () => void }) {
+function HistoryStage({ controller, preview, change, focus, assets, zoom, scope, onDrawn }: { controller: DeckHistoryController; preview: DeckPreview; change: SlideChange | undefined; focus: ChangeStop | null; assets: PreviewAssets; zoom: 'fit' | number; scope: (children: ReactNode) => ReactNode; onDrawn?: () => void }) {
   const slideId = preview.slideId;
   const requestedAt = preview.requestedAt;
   const removed = change?.kind === 'removed';
@@ -192,10 +205,10 @@ function HistoryStage({ controller, preview, change, focus, assetUrl, zoom, scop
         {slideId !== null && (
           <div className="deck-stage-center">
             <div className="deck-stage-frame" data-stage-slide={slideId} data-history-slide={change?.kind ?? 'same'}>
-              {scope(<SlideView key={`${removed ? 'earlier' : 'shown'}:${slideId}`} doc={doc} slideId={slideId} token={doc} assetUrl={assetUrl} scale={scale} onCanvas={setCanvas} />)}
+              {scope(<SlideView key={`${removed ? 'earlier' : 'shown'}:${slideId}`} doc={doc} slideId={slideId} token={doc} assetUrl={removed ? assets.earlier : assets.shown} scale={scale} onCanvas={setCanvas} />)}
               {removedIds.length > 0 && (
                 <div className="deck-history-ghosts" aria-hidden>
-                  {scope(<SlideView key={`ghosts:${slideId}`} doc={preview.earlier} slideId={slideId} token={preview.earlier} assetUrl={assetUrl} scale={scale} onCanvas={setGhosts} />)}
+                  {scope(<SlideView key={`ghosts:${slideId}`} doc={preview.earlier} slideId={slideId} token={preview.earlier} assetUrl={assets.earlier} scale={scale} onCanvas={setGhosts} />)}
                 </div>
               )}
               <div className="deck-stage-overlay">

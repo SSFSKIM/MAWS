@@ -69,6 +69,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
     [systemRows, row?.designSystemId, artifactId],
   );
   const assetUrl = useCallback((ref: string) => state.host.assetUrl(artifactId, ref), [state, artifactId]);
+  const assetUrlAt = useCallback((ref: string, revision: number) => state.host.assetUrl(artifactId, ref, revision), [state, artifactId]); // M8 fix wave 1 (R2)
   // M5: a picked image uploaded into the artifact (Insert's image, the inspector's Replace), answered as its `assets/<name>`
   const uploadAsset = useCallback(async (file: File) => (await state.host.uploadAsset(artifactId, new Uint8Array(await file.arrayBuffer()), { name: file.name, mime: file.type })).ref, [state, artifactId]);
   // a picture pasted from another deck brings its asset into this one: a MAWS asset copied by the store, bytes and mime
@@ -121,6 +122,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         comments={appSessionId === null ? undefined : comments}
         history={history}
         sessionTitle={state.sessionTitle}
+        assetUrlAt={assetUrlAt}
         onPreviewDrawn={onPreviewDrawn}
       />
     </div>

@@ -32,7 +32,8 @@ import { ShowEditorsMenu } from '../../document/editor/history/ShowEditors';
 import type { ShownEditor } from '../../document/editor/history/controller';
 import { DeckHistoryRail } from './history/DeckHistoryRail';
 import { HistoryBar } from './history/HistoryBar';
-import { HistoryPreview } from './history/HistoryPreview';
+import { previewFaceRules } from './history/faces';
+import { historyAssets, HistoryPreview } from './history/HistoryPreview';
 import { HISTORY_COPY } from './history/copy';
 import { useDeckHistoryController, useDeckHistorySnapshot, type DeckHistorySource } from './history/use-deck-history';
 import { DeckCommentsProvider, useDeckComments } from './comments/controller';
@@ -76,6 +77,8 @@ export interface DeckEditorProps {
   history?: DeckHistorySource;
   /** M8: a session's title for the history's author chips. */
   sessionTitle?: (appSessionId: string) => string | undefined;
+  /** M8 fix wave 1 (R2): an asset's URL at a revision (a version's), for a preview drawn with the version's assets. */
+  assetUrlAt?: (ref: string, revision: number) => string | null;
   /** M8: once a version's preview has drawn its slide and its marks: ms since it was asked for (the e2e seam's). */
   onPreviewDrawn?: (ms: number) => void;
 }
@@ -85,7 +88,7 @@ const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers']
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, onPreviewDrawn }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt, onPreviewDrawn }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -202,7 +205,12 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   const openComments = useCallback(() => void (session.snapshot().rail !== 'comments' && session.toggleRail('comments')), [session]);
   const commentsApi = useDeckComments({ session, surface: comments, author: commentAuthor, readOnly, openRail: openComments });
 
-  const faces = faceRules(view.faces, assetUrl);
+  // M8 fix wave 1 (R2): while a version shows, its own faces at its own assets, never the live deck's mapping
+  // (kept across ↑ ↓ and slide changes, so the preview's canvases are not made anew: keyed by the two revisions)
+  const shownRevision = preview?.revision ?? null;
+  const earlierRevision = preview?.earlierRevision ?? null;
+  const previewAssets = useMemo(() => historyAssets({ revision: shownRevision, earlierRevision }, assetUrl, assetUrlAt), [shownRevision, earlierRevision, assetUrl, assetUrlAt]);
+  const faces = preview ? previewFaceRules(preview, previewAssets) : faceRules(view.faces, assetUrl);
   const historyRail = history && historySnapshot && historyOpen && <DeckHistoryRail controller={history} snapshot={historySnapshot} sessionTitle={sessionTitle} onClose={() => session.toggleRail('history')} />;
   // one tree in both modes, so B's rail keeps its place (and its open folds) while a version shows
   const live = (
@@ -303,7 +311,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
           </Toolbar>
       )}
       <div className="deck-editor-body">
-        {preview ? <HistoryPreview controller={history!} preview={preview} liveSystem={system} assetUrl={assetUrl} zoom={state.zoom} thumbnailWidth={compact ? 120 : SLIDE_W / 8} onDrawn={previewDrawn} /> : live}
+        {preview ? <HistoryPreview controller={history!} preview={preview} liveSystem={system} assets={previewAssets} zoom={state.zoom} thumbnailWidth={compact ? 120 : SLIDE_W / 8} onDrawn={previewDrawn} /> : live}
         {historyRail}
         {!preview &&
           inspectorOpen &&
