@@ -17,6 +17,19 @@ blocked. To recover, read the ledger and the spec's living sections.
   or after b7fc7ebd, delete the `step-end` stand-in and its cast, and add
   the `step-end` browser spec (Decision Log, c58e366a).
 
+## Update 3
+
+- **M2 ticked** (b5de65f4) after two `keep-place` fix waves: 7e741316, then
+  dbedd79e and f6f288c9. The last re-review was clean, and gate run
+  38793456785 is green. The screenshots m1-depth.png and m2-depth.png went
+  to the composite's writer for the owner.
+- **M3 is running** on executor `a4bea4ef57e6e8b70`, base b5de65f4. It has
+  merged `smns-erb-web` (a9abd794) and `smns-erb` (722dbbfd). Two items were
+  added after the screenshots (Decision Log, 642843e4):
+  - depth draws `<message>` marks;
+  - a turn woken by a task notification is labelled as the session's own
+    turn.
+
 ## Update 2
 
 - **M2 (subagents)** is built: 7ac8c095, plus fb674567 and c86352d8, which
