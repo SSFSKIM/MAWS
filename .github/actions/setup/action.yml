@@ -38,7 +38,9 @@ runs:
         APT: ${{ inputs.apt }}
       run: |
         read -ra packages <<<"$APT"
-        if [[ $E2E == true ]]; then packages+=(xvfb fonts-noto-cjk); fi
+        # Korean text, and the faces the UI tokens name after the Mac's own (Inter after SF Pro, JetBrains Mono after
+        # SF Mono), so text sets in metrics close to the Mac's.
+        if [[ $E2E == true ]]; then packages+=(xvfb fonts-noto-cjk fonts-inter fonts-jetbrains-mono); fi
         if [[ $LIBREOFFICE == true ]]; then packages+=(libreoffice-writer libreoffice-impress); fi
         sudo apt-get update -q
         sudo apt-get install -yq --no-install-recommends "${packages[@]}"
