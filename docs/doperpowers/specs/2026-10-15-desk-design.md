@@ -2467,7 +2467,7 @@ a hub that connects into machines (§2).
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | in-flight (dispatched 2026-10-15, parent pin 9471766c) |
-| DC7 machine's controls | — | not-dispatched |
+| DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, branch `worktree-smns-erb` at d1f12efa) | planned; in plan review; dispatch when DC4's M3 is reviewed clean |
 
 ## Surprises & Discoveries
 
