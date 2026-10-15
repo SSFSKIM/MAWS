@@ -36,7 +36,10 @@ const TIMING_NODE_TESTS = [
   'test/artifacts/portability.test.ts', // P3-A: loads the repository's whole ESLint config and lints through it
   'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
 ];
-const TIMING_RENDERER_TESTS = ['src/renderer/src/App.test.tsx'];
+const TIMING_RENDERER_TESTS = [
+  'src/renderer/src/App.test.tsx',
+  'src/renderer/src/sessions/resource.test.tsx', // a whole-tree mount switched across 20 sessions (gate offload, Decision Log 11)
+];
 
 // C3 start: the `live` project runs the engine-host suite against the pinned binary through the relay
 // (`MAWS_LIVE=1 pnpm test:live`); it exists only under MAWS_LIVE=1 so `pnpm test` and `pnpm verify` never see it.
