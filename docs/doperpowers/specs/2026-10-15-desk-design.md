@@ -1721,7 +1721,7 @@ and `streaming` are that agent's own.
 | `rows` | yes | `{rows, before, more}`: older rows of the sub's transcript, newest first, answering a `rows` request |
 | `subagents` | yes | `{subagents: [{agentId, meta}]}`, each `meta` a `subagents/*.meta.json` verbatim |
 | `diff` | yes | `{base, text}`: unified diff of the working tree against the base branch |
-| `usage` | yes | `{context: {tokens, window, percent}, cost}`: the bridge's `usage` event (DX5) verbatim, after each main turn, on main-transcript subscriptions only. It is the one source of a session's context use and cost on the web: the transcript's rows do not carry them (the engine's `cost-state` records have no `uuid` and are not rows here), so a session without a bridge shows both as unavailable |
+| `usage` | yes | `{context: {tokens?, window, percent?}, cost: {usd} \| null}`: the bridge's `usage` event (DX5) verbatim (`tokens` and `percent` absent until a response has reported the window's fill; `cost` null where the engine keeps no ledger), after each main turn, on main-transcript subscriptions only. It is the one source of a session's context use and cost on the web: the transcript's rows do not carry them (the engine's `cost-state` records have no `uuid` and are not rows here), so a session without a bridge shows both as unavailable |
 | `end` | yes | `{reason: "unsubscribed" \| "machine-offline" \| "session-ended" \| "discontinuity" \| "error", message?}` |
 | `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
 | `machine` | no (`session` null) | `{online, policy: {read_only, ceiling}, checkouts: [{path, branch}]}`; `online` is the hub's, from the lease (a producer sends true) |
@@ -1884,7 +1884,7 @@ Every event is an object with `type` and `t` (the mod's clock, epoch ms). `agent
 | `tool` / `result` | M1 | `toolUseId, tool, agentId, isError, denied?, text?, truncated?` |
 | `agent` / `spawn` | M1 | `agentId, parentAgentId, subagentType, description, name, background, model, toolUseId` |
 | `agent` / `stop` | M1 | `agentId, agentType` |
-| `usage` | M1 | `context: {tokens, window, percent}, cost` — after each main turn |
+| `usage` | M1 | `context: {tokens?, window, percent?}, cost: {usd} \| null` — the engine's `$.session.usage()` context and cost as it returns them (`tokens` and `percent` absent before the first response; `cost` null without a ledger) — after each main turn |
 | `heartbeat` | M1 | `state` (as `ping`'s) — every 5 s |
 | `result` | M1 | `id, op, ok, result?, error?` — the mod's answer to a command |
 | `gap` | M1 | `dropped` — events that reached no child (a failed post, an overflowing queue). **[fw1]** Always followed at once by a `resync`; a live subscriber may also resubscribe |
@@ -2705,6 +2705,14 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DX4's and DX5's `usage` give the engine's shape exactly:
+  `context: {tokens?, window, percent?}` and `cost: {usd} | null`. The
+  bridge passes `$.session.usage()`'s `context` and `cost` through, so
+  the engine decides the shape and DX4 repeats it verbatim; the earlier
+  text named the fields without their optionality or the `usd` object.
+  DC3's module types (MAWS `068f14f3`) carried it first. Flags DC2 (its
+  plan's DX5 copy), DC5, DC6.
+  Date/Author: 2026-10-15, design session (DC3's M3 contract types).
 - Decision: Five gaps found by the adversarial review of DC7's plan,
   closed in the contracts. (1) A valid code does not say which machine
   should act, since every machine holds the org key. So the daemon binds
