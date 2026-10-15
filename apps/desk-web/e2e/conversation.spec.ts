@@ -20,7 +20,8 @@ const nav = (page: Page) => page.getByRole('navigation', { name: 'Channels' });
 async function open(page: Page, hub: HubDouble, session?: string) {
   await seedKey(page, hub);
   await page.goto(`${hub.url}/p/${PROJECT}${session ? `/s/${session}` : ''}`);
-  await expect(center(page)).toContainText('the migration is merged');
+  await expect(nav(page).locator(`[data-session="${S.asks}"]`)).toBeVisible(); // unlocked, and the log verified
+  await expect(page.getByTestId('composer')).toBeVisible();
 }
 
 /** The web `human`s the browser sent, as it sealed them. */
@@ -144,7 +145,7 @@ test('a direct channel: the exchange with the working record folded, and Send, S
   await expect(composer.locator('[data-rpc-state="done"]')).toHaveClass(/text-warning/);
 
   await composer.getByRole('button', { name: 'Model' }).click();
-  await page.getByRole('textbox', { name: 'Model' }).fill('default');
+  await page.getByLabel('Model', { exact: true }).fill('default'); // an input with a datalist is a combobox
   await page.getByRole('combobox', { name: 'Effort' }).selectOption('high');
   await page.getByRole('button', { name: 'Apply' }).click();
   const model = await lastRpc(hub, 3);
