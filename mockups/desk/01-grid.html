@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The desk · Project grid</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../tokens-light.css" id="theme-light">
+<script>
+/* Light is the default (D-4). `?theme=dark` drops the light override so the dark tokens under :root apply. */
+if (new URLSearchParams(location.search).get('theme') === 'dark') { document.getElementById('theme-light').remove(); document.documentElement.style.colorScheme = 'dark'; }
+</script>
+<style>
+/* Adopted from the MAWS mockup kit: quiet, dense chrome; light by default; tokens only.
+   The desk's home. One question per glance: which project is waiting on me?
+   Waiting is the only status that earns a tint; working is a calm second voice;
+   offline is a shape change (dashed edge, no ground), never just a paler colour. */
+* { box-sizing: border-box; }
+body { padding: 40px 24px 72px; }
+main { width: 1120px; max-width: 100%; margin: 0 auto; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 21px; font-weight: 600; letter-spacing: -.45px; }
+h2 { font-size: 13px; font-weight: 550; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: var(--fg); background: transparent; border: 0; cursor: pointer; border-radius: var(--radius-sm); }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+code { font: 11px var(--font-mono); }
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.page-head { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+.eyebrow { display: flex; gap: 12px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); margin-bottom: 10px; }
+.eyebrow a { margin-left: auto; text-transform: none; letter-spacing: 0; text-decoration: underline; text-underline-offset: 3px; }
+.page-head p { margin-top: 9px; color: var(--fg-muted); line-height: 1.6; max-width: 80ch; }
+.page-head p strong { color: var(--fg); font-weight: 550; }
+.vignette { margin: 0 0 44px; }
+figure { margin: 0; }
+figcaption { display: flex; align-items: baseline; gap: 12px; margin-bottom: 5px; }
+figcaption .number { color: var(--fg-muted); font: 11px var(--font-mono); }
+figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11px; }
+.pick { font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 2px 6px; }
+.rationale { margin: 0 0 12px 32px; font-size: 11px; color: var(--fg-muted); line-height: 1.5; max-width: 96ch; }
+.frame { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+.frame.short { min-height: 300px; }
+.section-rule { display: flex; align-items: center; gap: 12px; margin: 56px 0 24px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); }
+.section-rule::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+
+/* Desk chrome: one bar, the wordmark, where you are, whether the hub is live. */
+.bar { height: var(--toolbar-h); display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--border); background: var(--bg-raised); }
+.wordmark { font-size: 12px; font-weight: 650; letter-spacing: 1.7px; color: var(--fg-muted); }
+.bar .where { font-weight: 550; }
+.bar .count { color: var(--fg-muted); font-size: 12px; }
+.conn { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--fg-muted); }
+.conn .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.conn.down { color: var(--fg); }
+.spinner { width: 11px; height: 11px; border: 1.5px solid var(--border-strong); border-top-color: var(--fg-muted); border-radius: 50%; animation: spin 1.3s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.stage { padding: 20px; }
+
+/* Shared atoms */
+.waitc { color: var(--warning); }
+.wash { background: color-mix(in srgb, var(--warning) 12%, transparent); }
+.pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; animation: pulse 1.6s ease-in-out infinite; flex-shrink: 0; }
+.machines { display: inline-flex; align-items: center; gap: 3px; color: var(--fg-muted); font-size: 11px; white-space: nowrap; }
+.machines i { width: 6px; height: 6px; border-radius: 50%; border: 1.25px solid var(--fg-muted); }
+.machines i.on { background: var(--fg-muted); }
+.machines .txt { margin-left: 4px; }
+.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* A: Rows. Codex density; counts as chips at the right edge. */
+.ga { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+.ca { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; grid-template-rows: auto auto; column-gap: 9px; row-gap: 3px; align-items: center; min-height: 56px; padding: 9px 12px 9px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); }
+.ca:hover { border-color: var(--border-strong); }
+.ca .glyph { grid-row: 1 / 3; text-align: center; font-size: 12px; }
+.ca .nm { font-weight: 550; font-size: 13px; }
+.ca .sub { grid-column: 2; font-size: 11px; }
+.ca .chips { grid-column: 3; grid-row: 1 / 3; display: flex; gap: 4px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 7px; border-radius: var(--radius-sm); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--fg-muted); border: 1px solid var(--border); }
+.chip.wait { color: var(--warning); border-color: transparent; font-weight: 600; }
+.ca.off, .cb.off { background: transparent; border-style: dashed; border-color: var(--border-strong); }
+.ca.off .nm, .cb.off .nm { color: var(--fg-muted); font-weight: 500; }
+
+/* B: Tiles. The waiting count is the numeral you read from across the room. */
+.gb { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.cb { display: flex; flex-direction: column; justify-content: space-between; height: 132px; padding: 13px 14px 12px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised); }
+.cb:hover { border-color: var(--border-strong); }
+.cb.waiting { background: color-mix(in srgb, var(--warning) 8%, var(--bg-raised)); border-color: color-mix(in srgb, var(--warning) 38%, transparent); }
+.cb .top { display: flex; align-items: center; gap: 8px; }
+.cb .nm { font-size: 13px; font-weight: 600; flex: 1; }
+.cb .foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.num { font-size: 42px; line-height: .9; font-weight: 600; letter-spacing: -1.5px; color: var(--warning); font-variant-numeric: tabular-nums; }
+.numlbl { display: block; margin-top: 6px; font-size: 11px; font-weight: 550; color: var(--warning); }
+.state { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
+.state.quiet { color: var(--fg-muted); }
+.state-sub { display: block; margin-top: 4px; font-size: 11px; color: var(--fg-muted); }
+.second { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--fg-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* C: Ledger. A real table; the whole row is the link. */
+.tablewrap { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--bg-raised); }
+.tc { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.tc th { height: 30px; padding: 0 12px; text-align: left; font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-muted); border-bottom: 1px solid var(--border); white-space: nowrap; }
+.tc td { height: 38px; padding: 0 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.tc tr:last-child td { border-bottom: 0; }
+.tc tbody tr { position: relative; }
+.tc tbody tr:hover { background: var(--bg-hover); }
+.tc tbody tr:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tc a::after { content: ''; position: absolute; inset: 0; }
+.tc a:focus-visible { outline: 0; }
+.tc .c-glyph { width: 40px; text-align: center; padding-right: 0; }
+.tc .c-name { max-width: 0; width: 52%; }
+.tc .c-name a { display: block; overflow: hidden; text-overflow: ellipsis; font-weight: 550; }
+.tc .num-col { text-align: right; width: 13%; }
+.pill { display: inline-block; min-width: 24px; padding: 2px 7px; border-radius: var(--radius-sm); text-align: center; font-weight: 650; color: var(--warning); }
+.dash { color: var(--fg-faint); }
+.tc tr.off td { color: var(--fg-muted); }
+.tag { font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 1px 5px; margin-left: 8px; color: var(--fg-muted); }
+
+/* Recommended variant's other states */
+.empty { display: grid; place-items: center; padding: 64px 20px 72px; text-align: center; }
+.empty > div > svg { width: 40px; height: 40px; color: var(--fg-faint); stroke-width: 1.2; margin-bottom: 14px; }
+.empty h3 { font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+.empty p { color: var(--fg-muted); line-height: 1.6; max-width: 46ch; margin: 0 auto 18px; }
+.btn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 14px; font-size: 12px; font-weight: 600; background: var(--fg); color: var(--bg); }
+.btn:hover { background: var(--fg-muted); }
+.hint { margin-top: 12px; font-size: 11px; color: var(--fg-muted); }
+.strip { display: flex; align-items: center; gap: 8px; padding: 8px 20px; font-size: 11px; color: var(--fg-muted); border-bottom: 1px solid var(--border); background: var(--bg-raised); }
+.strip strong { color: var(--fg); font-weight: 550; }
+.strip button { margin-left: auto; font-size: 11px; color: var(--fg-muted); padding: 3px 6px; }
+.strip button:hover { color: var(--fg); background: var(--bg-hover); }
+.stale .cb { opacity: .62; }
+.skel { height: 132px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised); padding: 14px; display: flex; flex-direction: column; justify-content: space-between; }
+.skel i { display: block; height: 10px; border-radius: 4px; background: var(--bg-active); }
+.skel i:first-child { width: 58%; }
+.skel i:last-child { width: 34%; height: 22px; }
+
+@media (max-width: 640px) {
+  body { padding: 24px 12px 48px; }
+  .gb { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .cb, .skel { height: 116px; padding: 11px 12px 10px; }
+  .num { font-size: 34px; }
+  .cb .second, .cb .machines .txt { display: none; }
+  .tc .c-mach { display: none; }
+  .rationale { margin-left: 0; }
+  figcaption .dimension { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; } }
+</style>
+</head>
+<body>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+<symbol id="mac" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="1.5"/><path d="M9 20h6M12 16v4"/><path d="M12 8v4M10 10h4"/></symbol>
+<symbol id="plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
+</defs></svg>
+<main>
+<header class="page-head">
+  <div class="eyebrow">The desk / Grid card / 01 <a href="?theme=dark" id="theme-link">View in dark</a></div>
+  <h1>Which project is waiting on you?</h1>
+  <p><strong>Recommendation: B, the tiles.</strong> It is the only variant where the answer reads from across the room: a project that needs you carries a large amber numeral on a tinted tile, and every other tile stays quiet, so the signal never competes with itself. A is the better pick if the desk lives in a narrow side pane next to other work; C wins once the org passes about twenty projects, where scanning a column beats scanning tiles. <strong>Sort, in all three:</strong> waiting (most first), then working (most first), then name; a project with every machine offline sorts last whatever its counts.</p>
+</header>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">A</span><h2>Rows: compact cards, counts as chips</h2><span class="dimension">8 projects · 1120 px</span></figcaption>
+  <p class="rationale">Codex density: two lines a card, three cards a row. Status lives in the left glyph (◐ waiting, ● working, ○ quiet, ⊘ offline) and the chips; the name is the loudest thing, which is the weakness: waiting is a small chip, legible up close, not from across the room.</p>
+  <div class="frame"><div class="bar"><span class="wordmark">DESK</span><span class="where">Projects</span><span class="count">8</span><span class="conn"><span class="dot"></span>Live</span></div><div class="stage"><div class="ga" data-variant="A"></div></div></div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">B</span><h2>Tiles: the waiting count is the numeral</h2><span class="pick">Recommended</span><span class="dimension">8 projects · 1120 px</span></figcaption>
+  <p class="rationale">Only waiting earns a numeral and a tint; a working project says “2 working” at body size; a quiet one says “Quiet”. Machines are dots, filled when online, with the words added when any are offline. Offline drops the tile's ground and dashes its edge, so it reads as absent, not idle.</p>
+  <div class="frame"><div class="bar"><span class="wordmark">DESK</span><span class="where">Projects</span><span class="count">8</span><span class="conn"><span class="dot"></span>Live</span></div><div class="stage"><div class="gb" data-variant="B"></div></div></div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">C</span><h2>Ledger: a dense table</h2><span class="dimension">8 projects · 1120 px</span></figcaption>
+  <p class="rationale">One row a project, numbers in aligned columns, the whole row a link. Strongest for many projects and for comparing; weakest at a distance, since every row has the same weight and the amber lives in one narrow column.</p>
+  <div class="frame"><div class="bar"><span class="wordmark">DESK</span><span class="where">Projects</span><span class="count">8</span><span class="conn"><span class="dot"></span>Live</span></div><div class="stage"><div class="tablewrap"><table class="tc"><thead><tr><th class="c-glyph"><span class="sr-only">Status</span></th><th>Project</th><th class="num-col">Waiting on you</th><th class="num-col">Working</th><th class="num-col c-mach">Machines</th></tr></thead><tbody data-variant="C"></tbody></table></div></div></div>
+</figure></section>
+
+<div class="section-rule">B, in its other states</div>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">B·1</span><h2>Empty: no projects yet</h2><span class="dimension">First run</span></figcaption>
+  <p class="rationale">A project exists on the desk once a machine serving it is enrolled, so the only next step offered is enrolling one.</p>
+  <div class="frame"><div class="bar"><span class="wordmark">DESK</span><span class="where">Projects</span><span class="count">0</span><span class="conn"><span class="dot"></span>Live</span></div>
+    <div class="empty"><div><svg><use href="#mac"/></svg><h3>No projects yet</h3><p>Projects appear here once a Mac running your Claude Code sessions is enrolled in the org. Each project it serves shows up as a tile.</p><button class="btn"><svg><use href="#plus"/></svg>Enroll a machine</button><p class="hint">Enrolling takes a minute on the Mac itself.</p></div></div>
+  </div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">B·2</span><h2>Connecting: first load</h2><span class="dimension">No data yet</span></figcaption>
+  <p class="rationale">Nothing to hold yet, so the tiles are shapes only; no zeros are drawn, since a zero would claim nobody is waiting.</p>
+  <div class="frame short"><div class="bar"><span class="wordmark">DESK</span><span class="where">Projects</span><span class="conn down"><span class="spinner" aria-hidden="true"></span>Connecting to the hub…</span></div>
+    <div class="stage"><div class="gb" aria-busy="true" aria-label="Loading projects"><div class="skel"><i></i><i></i></div><div class="skel"><i></i><i></i></div><div class="skel"><i></i><i></i></div><div class="skel"><i></i><i></i></div><div class="skel"><i></i><i></i></div></div></div>
+  </div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">B·3</span><h2>Reconnecting: last known counts, held</h2><span class="dimension">Hub link dropped</span></figcaption>
+  <p class="rationale">The grid keeps the last snapshot rather than blanking, dimmed and dated, so a waiting project stays findable; the strip says how old the numbers are. Tiles still open.</p>
+  <div class="frame"><div class="bar"><span class="wordmark">DESK</span><span class="where">Projects</span><span class="count">8</span><span class="conn down"><span class="spinner" aria-hidden="true"></span>Reconnecting… retry in 4 s</span></div>
+    <div class="strip" role="status"><strong>Counts as of 14:02.</strong> They may have changed since; the grid updates as soon as the hub answers.<button>Retry now</button></div>
+    <div class="stage stale"><div class="gb" data-variant="B"></div></div>
+  </div>
+</figure></section>
+</main>
+<script>
+const projects = [
+  { name: 'doperpowers', machines: 2, machines_online: 2, working: 3, waiting: 1 },
+  { name: 'arkho', machines: 2, machines_online: 1, working: 2, waiting: 0 },
+  { name: 'daily-journal', machines: 2, machines_online: 0, working: 0, waiting: 0 },
+  { name: 'MAWS', machines: 3, machines_online: 2, working: 3, waiting: 3 },
+  { name: 'afleet', machines: 1, machines_online: 1, working: 0, waiting: 0 },
+  { name: 'cua_repl', machines: 2, machines_online: 2, working: 1, waiting: 0 },
+  { name: '뉴런 교재', machines: 1, machines_online: 1, working: 1, waiting: 1 },
+  { name: 'claude-usage-menubar-and-reset-countdown-experiments', machines: 1, machines_online: 1, working: 1, waiting: 0 },
+];
+const offline = p => p.machines_online === 0;
+projects.sort((a, b) => offline(a) - offline(b) || b.waiting - a.waiting || b.working - a.working || a.name.localeCompare(b.name));
+
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const href = '02-project.html';
+function label(p) {
+  if (offline(p)) return `${p.name}: offline, 0 of ${p.machines} machines online`;
+  const parts = [p.waiting ? `${p.waiting} waiting on you` : 'nothing waiting', p.working ? `${p.working} working` : 'none working'];
+  return `${p.name}: ${parts.join(', ')}, ${p.machines_online} of ${p.machines} machines online`;
+}
+function dots(p, words) {
+  const d = Array.from({ length: p.machines }, (_, i) => `<i class="${i < p.machines_online ? 'on' : ''}"></i>`).join('');
+  const partial = p.machines_online < p.machines;
+  const txt = words === 'always' ? `${p.machines_online} of ${p.machines}` : partial ? (offline(p) ? `0 of ${p.machines} online` : `${p.machines_online} of ${p.machines} online`) : '';
+  return `<span class="machines" aria-hidden="true">${d}${txt ? `<span class="txt">${txt}</span>` : ''}</span>`;
+}
+
+function cardA(p) {
+  const glyph = offline(p) ? '<span class="dash">⊘</span>' : p.waiting ? '<span class="waitc">◐</span>' : p.working ? '<span class="g-working">●</span>' : '<span class="g-idle">○</span>';
+  const sub = offline(p) ? `<span class="machines">Offline · 0 of ${p.machines} machines</span>`
+    : `<span class="machines">${p.machines_online < p.machines ? `${p.machines_online} of ${p.machines} machines online` : `${p.machines} machine${p.machines > 1 ? 's' : ''}`}</span>`;
+  const chips = offline(p) ? '' : (p.waiting ? `<span class="chip wait wash">◐ ${p.waiting} waiting</span>` : '') + (p.working ? `<span class="chip"><span class="pulse"></span>${p.working}</span>` : (p.waiting ? '' : '<span class="chip">Quiet</span>'));
+  return `<a class="ca${offline(p) ? ' off' : ''}" href="${href}" aria-label="${esc(label(p))}"><span class="glyph" aria-hidden="true">${glyph}</span><span class="nm trunc" title="${esc(p.name)}">${esc(p.name)}</span><span class="sub" aria-hidden="true">${sub}</span><span class="chips" aria-hidden="true">${chips}</span></a>`;
+}
+
+function cardB(p) {
+  let foot;
+  if (offline(p)) foot = `<span><span class="state quiet">⊘ Offline</span><span class="state-sub">0 of ${p.machines} machines online</span></span>`;
+  else if (p.waiting) foot = `<span><span class="num">${p.waiting}</span><span class="numlbl">waiting on you</span></span>${p.working ? `<span class="second"><span class="pulse"></span>${p.working} working</span>` : ''}`;
+  else if (p.working) foot = `<span class="state"><span class="pulse"></span>${p.working} working</span>`;
+  else foot = `<span><span class="state quiet">Quiet</span><span class="state-sub">Nothing running</span></span>`;
+  const cls = offline(p) ? ' off' : p.waiting ? ' waiting' : '';
+  return `<a class="cb${cls}" href="${href}" aria-label="${esc(label(p))}"><span class="top" aria-hidden="true"><span class="nm trunc" title="${esc(p.name)}">${esc(p.name)}</span>${offline(p) ? '' : dots(p)}</span><span class="foot" aria-hidden="true">${foot}</span></a>`;
+}
+
+function rowC(p) {
+  const off = offline(p);
+  const glyph = off ? '<span class="dash">⊘</span>' : p.waiting ? '<span class="waitc">◐</span>' : p.working ? '<span class="g-working">●</span>' : '<span class="g-idle">○</span>';
+  const wait = off ? '<span class="dash">—</span>' : p.waiting ? `<span class="pill wash">${p.waiting}</span>` : '<span class="dash">0</span>';
+  const work = off ? '<span class="dash">—</span>' : p.working ? `${p.working}` : '<span class="dash">0</span>';
+  const mach = off ? `0 / ${p.machines}` : p.machines_online < p.machines ? `${p.machines_online} / ${p.machines} <span class="muted">· ${p.machines - p.machines_online} offline</span>` : `${p.machines} / ${p.machines}`;
+  return `<tr class="${off ? 'off' : ''}"><td class="c-glyph" aria-hidden="true">${glyph}</td><td class="c-name"><a href="${href}" aria-label="${esc(label(p))}" title="${esc(p.name)}">${esc(p.name)}${off ? '<span class="tag">Offline</span>' : ''}</a></td><td class="num-col">${wait}</td><td class="num-col">${work}</td><td class="num-col c-mach">${mach}</td></tr>`;
+}
+
+const render = { A: cardA, B: cardB, C: rowC };
+document.querySelectorAll('[data-variant]').forEach(el => { el.innerHTML = projects.map(render[el.dataset.variant]).join(''); });
+document.querySelectorAll('.stale a').forEach(a => a.setAttribute('aria-label', a.getAttribute('aria-label') + ' (as of 14:02)'));
+
+const dark = new URLSearchParams(location.search).get('theme') === 'dark';
+const tl = document.getElementById('theme-link');
+tl.href = dark ? '?' : '?theme=dark'; tl.textContent = dark ? 'View in light' : 'View in dark';
+</script>
+</body>
+</html>

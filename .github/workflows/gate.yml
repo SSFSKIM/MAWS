@@ -33,9 +33,10 @@ env:
   CLASS1_E2E: >-
     default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import
     settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
-    design-systems
-  # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default).
-  LINUX_E2E: library artifacts available tools agents
+    design-systems desk-web
+  # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default). desk-web
+  # (DC5): the desk's web app in a browser, against its DX3 double, which needs no Electron and no Mac.
+  LINUX_E2E: library artifacts available tools agents desk-web
   # The groups that render documents through LibreOffice (P3-B's DOCX-to-PDF case, P3-C's render-and-compare).
   LIBREOFFICE_E2E: document presentations
 
@@ -129,6 +130,9 @@ jobs:
           libreoffice: ${{ matrix.libreoffice }}
       - if: matrix.build
         run: .github/scripts/gate-run.sh 'built in|error' pnpm build
+      # DC5: the desk's browser suites drive Playwright's own Chromium on Linux; a Mac drives its installed Chrome.
+      - if: matrix.group == 'desk-web' && runner.os == 'Linux'
+        run: pnpm exec playwright install --with-deps chromium
       - env:
           SCRIPT: ${{ matrix.script }}
         run: |

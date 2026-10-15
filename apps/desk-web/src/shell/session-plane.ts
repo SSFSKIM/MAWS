@@ -1,0 +1,37 @@
+// DX8 — the session plane as the shell hands it to the depth panel (DC6): one DX4 subscription per transcript, kept
+// whole by the hub client. A consumer never sees a gap in `n`, a frame of a subscription it gave up, or a dropped
+// socket: the client turns each discontinuity into `reset` and subscribes again, and a fresh snapshot follows.
+import type { SessionBodies, SessionMessage, SubscriptionKind } from 'desk-hub/protocol';
+
+/** One transcript: a session's main thread (`agentId` null) or one of its subagents. */
+export type SessionTarget = { machine: string; session: string; agentId: string | null };
+
+/** The messages a subscription delivers to its listener: everything of DX4's subscription kinds but `end`. */
+export type SubscriptionMessage = SessionMessage<Exclude<SubscriptionKind, 'end'>>;
+
+export interface SubscriptionListener {
+  /** In order: `snapshot` (n 0) first, then n = 1, 2, … with no gap. */
+  message(message: SubscriptionMessage): void;
+  /**
+   * A discontinuity the client recovers from (a gap in `n`, a dropped socket, a hub restart): drop everything this
+   * subscription delivered; the client subscribes again, and a fresh snapshot follows once the hub answers.
+   */
+  reset(): void;
+  /** The hub ended the subscription, or the client cannot serve it; nothing follows. Subscribe again to resume. */
+  end(body: SessionBodies['end']): void;
+}
+
+export interface Subscription {
+  /** Older rows before row `before`, newest first; they arrive as a `rows` message. */
+  rows(before: string, limit: number): void;
+  /** Ends the subscription; the listener hears nothing more. */
+  close(): void;
+}
+
+export interface SessionPlane {
+  subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription;
+}
+
+/** The key a transcript is kept under in MAWS's transcript store (`useTranscriptStore`), one per transcript. */
+export const transcriptKey = (project: string, target: Pick<SessionTarget, 'session' | 'agentId'>): string =>
+  target.agentId === null ? `desk:${project}:${target.session}` : `desk:${project}:${target.session}:${target.agentId}`;

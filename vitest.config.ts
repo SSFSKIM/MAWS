@@ -151,6 +151,7 @@ export default defineConfig({
       // The desk's hub (apps/desk-hub, DC3 of docs/doperpowers/specs/2026-10-15-desk-design.md): its own config, under
       // this vitest, so `pnpm test` and the unit job's `--maxWorkers` reach it as they reach every project above.
       'apps/desk-hub/vitest.config.ts',
+      'apps/desk-web/vitest.config.ts', // DC5: the web app's client, log, and key, against the DX3 double
     ],
   },
 });

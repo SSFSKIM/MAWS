@@ -1,0 +1,58 @@
+// A project on the grid (§4; mockups/desk/01-grid.html's tiles, pending the owner's verdict). Waiting on you is the
+// signal: only a project that waits on the owner carries a numeral and a tint. A project whose machines are all
+// offline reads as absent, not quiet.
+import type { ProjectSummary } from 'desk-hub/protocol';
+
+export function ProjectCard({ project, onOpen }: { project: ProjectSummary; onOpen(): void }) {
+  const offline = project.machines_online === 0;
+  const waiting = !offline && project.waiting > 0;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      data-project={project.id}
+      data-waiting={project.waiting}
+      data-working={project.working}
+      className={[
+        'flex min-h-[132px] w-full flex-col gap-3 rounded-md border p-4 text-left transition-colors',
+        offline ? 'border-dashed border-border-strong bg-transparent' : waiting ? 'border-warning bg-bg-waiting' : 'border-border bg-bg-raised hover:bg-bg-hover',
+      ].join(' ')}
+    >
+      <div className="flex min-w-0 items-baseline gap-2">
+        <span className="truncate text-ui font-semibold text-fg" title={project.name}>
+          {project.name}
+        </span>
+      </div>
+      <div className="flex flex-1 items-end gap-4">
+        {waiting ? (
+          <div className="flex items-baseline gap-2" data-testid="waiting">
+            <span className="text-numeral leading-none font-semibold text-warning tabular-nums">{project.waiting}</span>
+            <span className="text-ui-sm text-warning">waiting on you</span>
+          </div>
+        ) : offline || project.working === 0 ? (
+          <span className="text-ui-sm text-fg-muted">{offline ? 'Offline' : 'Quiet'}</span>
+        ) : null}
+        {!offline && project.working > 0 && (
+          <span className="flex items-center gap-1.5 text-ui-sm text-fg" data-testid="working">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />
+            {project.working} working
+          </span>
+        )}
+      </div>
+      <Machines online={project.machines_online} total={project.machines} />
+    </button>
+  );
+}
+
+function Machines({ online, total }: { online: number; total: number }) {
+  return (
+    <div className="flex items-center gap-2 text-ui-sm text-fg-muted" data-testid="machines">
+      <span className="flex gap-1" aria-hidden>
+        {Array.from({ length: total }, (_, i) => (
+          <span key={i} className={['h-1.5 w-1.5 rounded-full', i < online ? 'bg-success' : 'border border-fg-faint'].join(' ')} />
+        ))}
+      </span>
+      <span>{online === total ? `${total} ${total === 1 ? 'machine' : 'machines'}` : `${online} of ${total} machines online`}</span>
+    </div>
+  );
+}
