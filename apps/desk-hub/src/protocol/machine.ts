@@ -64,11 +64,20 @@ export type DownFrame =
  */
 export type RejectionReason = 'bad-code' | 'seen-nonce' | 'bad-shape';
 
-/** A daemon's report of an event it refused; the hub keeps it in the project's audit record and shows it to browsers. */
+/**
+ * A daemon's report of an event it refused; the hub keeps it in the project's audit record and shows it to browsers.
+ * The event is named by what it carried, never by anything the daemon makes up: its position when it had one, its
+ * `mac.nonce` when it had one, either or both. An event that carried neither is still reported (`event` null, no
+ * `nonce`), so the refusal shows; `message` then says what it was.
+ */
 export type Rejection = {
-  /** The event's position as it arrived. */
-  event: { writer: string; seq: number };
-  /** Its `mac.nonce`, when it had one. */
+  /**
+   * The event's `writer` and `seq` exactly as they arrived, when `writer` was a string and `seq` a number (however
+   * wrong otherwise: a `hub/` writer that fails its shape is reported as it came); null when either was missing or of
+   * another type.
+   */
+  event: { writer: string; seq: number } | null;
+  /** Its `mac.nonce` exactly as it arrived, when that was a string. */
   nonce?: string;
   reason: RejectionReason;
   message?: string;

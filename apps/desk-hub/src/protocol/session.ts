@@ -47,15 +47,19 @@ export type Delivery = {
 
 /**
  * A model request still streaming, as the bridge's snapshot carries it (DX5's `streaming` entries, passed through):
- * identified by `(turnId, agentId, step)`, with its content blocks that no row has settled yet. One response is
- * several transcript rows, one per content block, so streaming is tracked per block.
+ * identified by `(turnId, agentId, step)`, with its content blocks still unsettled. One response is several transcript
+ * rows, one per content block, so streaming is tracked per block.
  */
 export type Streaming = JsonObject & {
   turnId: string;
   agentId: string | null;
   /** The model request's ordinal in the turn. */
   step: number;
-  /** Only unsettled blocks: a block leaves once a `block-row` named its row and the row arrived. */
+  /**
+   * Only blocks without a `block-row` yet. The producer (the bridge's endpoint; the fake machine) removes a block from
+   * its snapshot state when it applies the block's `block-row`, under the same lock that takes snapshots, so no
+   * snapshot holds a block whose `block-row` was already sent.
+   */
   blocks: StreamingBlock[];
 };
 
@@ -71,8 +75,11 @@ export type StreamingBlock = JsonObject & {
 
 /**
  * The row that settles a streaming block: sent when the engine writes the row for content block `index` of that step,
- * before the row itself arrives. A `row` whose `uuid` a `block-row` named settles that block's partial text; chunks for
- * a settled block are ignored. The hub relays it uninterpreted.
+ * before the row itself arrives. Two moments: the producer drops the block from its snapshot state when it applies the
+ * `block-row` (so later snapshots leave it out); the browser keeps drawing the block's partial text until the `row`
+ * whose `uuid` the `block-row` named arrives, which settles the block, and drops it then. Chunks for a settled block are
+ * ignored.
+ * The hub relays it uninterpreted.
  */
 export type BlockRow = { uuid: string; turnId: string; agentId: string | null; step: number; index: number };
 

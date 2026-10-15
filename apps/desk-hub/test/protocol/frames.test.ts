@@ -12,8 +12,16 @@ export const up: UpFrame[] = [
   { t: 'hb-ack', generation: 2, at: '2026-10-15T08:00:15.000Z' },
   { t: 'rejected', project, event, nonce: 'AwMDAwMDAwMDAwMDAwMDAw', reason: 'seen-nonce' },
   { t: 'rejected', project, event, reason: 'bad-code', message: 'the code does not verify' },
+  // A malformed event named by its nonce alone: no position is made up for it.
+  { t: 'rejected', project, event: null, nonce: 'AwMDAwMDAwMDAwMDAwMDAw', reason: 'bad-shape' },
+  // One that carried neither is still reported.
+  { t: 'rejected', project, event: null, reason: 'bad-shape', message: 'not a JSON object' },
   // @ts-expect-error a rejection names its reason from the set
   { t: 'rejected', project, event, reason: 'did-not-like-it' },
+  // @ts-expect-error a missing position is null, said outright, not left out
+  { t: 'rejected', project, nonce: 'AwMDAwMDAwMDAwMDAwMDAw', reason: 'bad-shape' },
+  // @ts-expect-error a position is the writer and seq as they arrived, both present
+  { t: 'rejected', project, event: { writer: 'hub/x' }, reason: 'bad-shape' },
   // @ts-expect-error an hb-ack names the stream's generation
   { t: 'hb-ack', at: '2026-10-15T08:00:15.000Z' },
 ];
@@ -41,12 +49,13 @@ export const browserDown: ProjectDown[] = [
     t: 'refused',
     refusal: { id: 8, at: '2026-10-15T08:00:17.000Z', machine: 'mini', reason: 'conflict', writer: 'mini/x', seq: 4, message: 'differs' },
   },
+  { t: 'rejected', rejection: { id: 9, at: '2026-10-15T08:00:18.000Z', machine: 'mini', event: null, nonce: 'AwMDAwMDAwMDAwMDAwMDAw', reason: 'bad-shape' } },
   // @ts-expect-error a rejection in the audit record names the machine that refused the event
   { t: 'rejected', rejection: { id: 7, at: '2026-10-15T08:00:16.000Z', event, reason: 'bad-code' } },
 ];
 
 describe("DX2's and DX3's frames", () => {
   it('are pinned by their types', () => {
-    expect(up.length + down.length + browserUp.length + browserDown.length).toBe(14);
+    expect(up.length + down.length + browserUp.length + browserDown.length).toBe(19);
   });
 });
