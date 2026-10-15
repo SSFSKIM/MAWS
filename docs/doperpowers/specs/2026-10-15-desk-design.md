@@ -2866,7 +2866,7 @@ a hub that connects into machines (§2).
 | DC1 bridge spike | findings: `docs/doperpowers/specs/2026-10-15-arkho-desk-c1-findings.md` | **landed 2026-10-15**: 11 items, every primitive promoted, six with a change folded into §2 and §5; probe kept at `/tmp/c1probe` |
 | DC2 bridge | plan: `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md` (doperpowers, branch `worktree-smns-erb`) | in-flight (dispatched 2026-10-15, parent pin 8acb3958) |
 | DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | in-flight (dispatched 2026-10-15) |
-| DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
+| DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | **done 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/194 (`origin/dc4-uplink`, 4dddfb4b..e687d6de, 7.155.0), merges after DC2's and re-bumps above it |
 | DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | in-flight (dispatched 2026-10-15, parent pin 9471766c) |
 | DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | in-flight (dispatched 2026-10-15, after DC4's M3 was reviewed clean) |
@@ -2960,7 +2960,8 @@ a hub that connects into machines (§2).
   technical-heavy) and, in the same round, a second
   `doperpowers:adversarial-reviewer` on the children and contracts for
   buildability. Each plan child names its own branch-review rung in its
-  execution document, xhigh for DC3, DC4, DC5, and DC7 by their size. Recomposition
+  execution document, xhigh for DC3 and DC5 by their size (DC2, DC4 and DC7 amended
+  below). Recomposition
   is a scale review: the two-Mac acceptance walk (Parent-Level Acceptance
   1–12) plus an xhigh panel per repository over the children's merged
   range.
@@ -3096,6 +3097,15 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DC2, DC4 and DC7 take their branch reviews at `high`, run by
+  their own controllers, and the doperpowers repository's xhigh panel
+  runs once, at recomposition, over their merged range. Their branches
+  stack (DC4 is built on DC2's tip, DC7 on DC4's), so a panel per child
+  would review the same commits two or three times, and a panel runs only
+  from the main session, which would serialize three children behind it.
+  DC3 and DC5 keep their xhigh panels, handed up. Rejected: an xhigh panel
+  per doperpowers child before its merge. Amends the verification entry.
+  Date/Author: 2026-10-15, design session (DC4's completion).
 - Decision: Three hub changes from DC5's M4 (the phone). Visibility
   expires: a visible socket repeats its `visibility` every 30 s and counts
   as visible for 90 s after the last, because a phone that sleeps before
