@@ -593,6 +593,12 @@ export class FakeMachine {
     }
     if (Date.now() - Date.parse(rpc.created) > RPC_FRESHNESS_MS) return answer(fail('stale', 'older than 60 seconds'));
     if (this.options.readOnly) return answer(fail('read-only', `${this.name} is read-only`));
+    // A decision or an answer that does not fit the request it names is malformed, refused before the claim.
+    if (rpc.rpc === 'decide' || rpc.rpc === 'answer') {
+      const held = this.pending.get(rpc.args.digest.request);
+      const misfit = held && decisionMisfit(rpc as Rpc<'decide' | 'answer'>, held.raised);
+      if (misfit) return answer(misfit);
+    }
     this.memory.ledger[rpc.nonce] = { rpc: rpc.rpc, session: session ?? null, claimed: Date.now(), outcome: null };
     this.remember();
     // Every effect is complete (and its trace kept) when this returns; only progress notices follow the result.
@@ -657,8 +663,6 @@ export class FakeMachine {
         if (digest.session !== raised.session || digest.tool !== raised.tool || digest.input_sha256 !== (await inputSha256(raised.input))) {
           return fail('digest-mismatch', 'the request as drawn is not the one pending');
         }
-        const misfit = decisionMisfit(rpc as Rpc<'decide' | 'answer'>, raised);
-        if (misfit) return misfit;
         if (raised.deadline && Date.now() > Date.parse(raised.deadline) - 200) {
           return fail('not-pending', 'the window closed; the terminal answers it', { terminalOnly: true });
         }
@@ -843,14 +847,14 @@ const QUESTION_TOOLS = new Set(['AskUserQuestion', 'mcp__doperpowers__AskUserQue
 /**
  * Whether a decision or an answer fits the request it names, as the bridge's decision route checks it (DX5): a question
  * is answered (`answer`, its answers keyed by its questions) or denied, and an async one is never denied; a permission
- * prompt is allowed or denied (`decide`). A misfit fails `unsupported` (that request cannot take that action), and
- * answers not keyed by its questions fail `bad-shape`.
+ * prompt is allowed or denied (`decide`). Every misfit fails `bad-shape` (composite dd908dfa), with the bridge's own
+ * words, and answers not keyed by exactly its questions too.
  */
 function decisionMisfit(rpc: Rpc<'decide' | 'answer'>, raised: Raised): RpcOutcome | null {
   const question = QUESTION_TOOLS.has(raised.tool) || raised.async === true;
-  if (!question) return rpc.rpc === 'answer' ? fail('unsupported', 'a permission prompt is allowed or denied, not answered') : null;
-  if (rpc.rpc === 'decide' && rpc.args.decision === 'allow') return fail('unsupported', 'a question is answered with its answers, not allowed');
-  if (rpc.rpc === 'decide' && raised.async) return fail('unsupported', 'an async question is answered or withdrawn, never denied');
+  if (!question) return rpc.rpc === 'answer' ? fail('bad-shape', 'a permission is allowed or denied as asked: updatedInput carries a question\'s answers only') : null;
+  if (rpc.rpc === 'decide' && rpc.args.decision === 'allow') return fail('bad-shape', 'a question is allowed with its answers: updatedInput.answers, keyed by the question');
+  if (rpc.rpc === 'decide' && raised.async) return fail('bad-shape', 'an async question waits for an answer; it cannot be denied');
   if (rpc.rpc === 'answer') {
     const asked = ((raised.input.questions as Array<{ question?: unknown }> | undefined) ?? []).map((q) => String(q.question));
     const given = Object.keys(rpc.args.answers);

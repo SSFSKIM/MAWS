@@ -89,17 +89,18 @@ describe("the fake machine's own writes", () => {
 });
 
 describe('decisions and answers', () => {
-  it('must fit the request: no deny for an async question, no answer for a permission, answers keyed by its questions', async () => {
+  it('must fit the request, refused bad-shape before any claim: no deny for an async question, no answer for a permission, no allow for a question, answers keyed by its questions', async () => {
     const { fm, b, raised, call, final, digest } = await setUp();
     const deny = await call('decide', { session: SESSION, decision: 'deny', digest: await digest(raised('toolu_plugin_async')) });
-    expect((await final(deny)).outcome).toMatchObject({ state: 'failed', error: { code: 'unsupported' } });
+    expect((await final(deny)).outcome).toMatchObject({ state: 'failed', error: { code: 'bad-shape' } });
     const answerPermission = await call('answer', { session: SESSION, digest: await digest(raised('toolu_bash')), answers: { x: 'y' } });
-    expect((await final(answerPermission)).outcome).toMatchObject({ state: 'failed', error: { code: 'unsupported' } });
+    expect((await final(answerPermission)).outcome).toMatchObject({ state: 'failed', error: { code: 'bad-shape' } });
     const allowQuestion = await call('decide', { session: SESSION, decision: 'allow', digest: await digest(raised('toolu_q')) });
-    expect((await final(allowQuestion)).outcome).toMatchObject({ state: 'failed', error: { code: 'unsupported' } });
+    expect((await final(allowQuestion)).outcome).toMatchObject({ state: 'failed', error: { code: 'bad-shape' } });
     const wrongKeys = await call('answer', { session: SESSION, digest: await digest(raised('toolu_q')), answers: { 'Not asked?': 'a' } });
     expect((await final(wrongKeys)).outcome).toMatchObject({ state: 'failed', error: { code: 'bad-shape' } });
-    // Nothing was settled by any of them.
+    // Each was refused before any claim, and nothing was settled by any of them.
+    for (const misfit of [deny, answerPermission, allowQuestion, wrongKeys]) expect(fm.memory.ledger[misfit.nonce]).toBeUndefined();
     expect(fm.pendingRequests().map((r) => r.request).sort()).toEqual(['toolu_bash', 'toolu_plugin_async', 'toolu_q']);
     // The fitting ones: the async question answered, a native question denied, the permission allowed.
     const answer = await call('answer', { session: SESSION, digest: await digest(raised('toolu_plugin_async')), answers: { 'Later?': 'yes' } });
