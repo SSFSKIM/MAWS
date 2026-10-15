@@ -12,7 +12,8 @@ import type { ElementIR } from '../ir';
 import { heldOf, readDeckJson, readSlide, slideOrder } from '../model';
 import { serializeSlide } from '../serialize';
 import type { Doc } from '../../yjs';
-import { lowerGroups } from './lower';
+import { lowerGroups, MeasureNeeded } from './lower';
+import type { MeasuredDeck, MeasuredElement } from './measure';
 import { literalStyle } from './standalone';
 
 /** Where an uploaded asset (`assets/<name>`) goes in the export: an installed system's path Claude's loader takes. */
@@ -32,10 +33,14 @@ export interface ClaudeDeckOptions {
   resolveVar: (name: string) => string | undefined;
   /** The bytes of each uploaded asset the deck names, by ref (one missing stays named, unpacked). */
   assets: ReadonlyMap<string, Uint8Array>;
+  /** The export window's measure, when lowering a group needs it (`MeasureNeeded`). */
+  measured?: MeasuredDeck;
 }
 
 /** The export's files, path → content (text, or an asset's bytes). */
-export function claudeDeckFiles(doc: Doc, { resolveVar, assets }: ClaudeDeckOptions): Record<string, string | Uint8Array> {
+export function claudeDeckFiles(doc: Doc, { resolveVar, assets, measured }: ClaudeDeckOptions): Record<string, string | Uint8Array> {
+  const bySlide = new Map((measured?.slides ?? []).map((s) => [s.id, new Map(s.elements.map((e) => [e.id, e]))]));
+  const measuredOf = (id: string) => (measured ? (bySlide.get(id) ?? new Map<string, MeasuredElement>()) : null);
   const held = slideOrder(doc).flatMap((id) => {
     const h = heldOf(doc, id);
     return h ? [`slide ${id} is held (${h.reasons.join('; ')})`] : [];
@@ -63,8 +68,17 @@ export function claudeDeckFiles(doc: Doc, { resolveVar, assets }: ClaudeDeckOpti
       }
     };
     walk(slide.children);
-    // MAWS's pinned groups lowered to Claude's form (lower.ts), over literal geometry
-    files[slidePath(id)] = serializeSlide({ ...slide, children: lowerGroups(rewrite(slide.children, moved, resolveVar)) }, { resolveVar });
+    // MAWS's pinned groups lowered to Claude's form (lower.ts), over literal geometry; a pose the dialect cannot write
+    // refuses the export, and a place the model cannot give asks for the window's measure (`MeasureNeeded`)
+    const ctx = { slideId: id, measured: measuredOf(id) };
+    let children: ElementIR[];
+    try {
+      children = lowerGroups(rewrite(slide.children, moved, resolveVar), null, ctx);
+    } catch (error) {
+      if (error instanceof MeasureNeeded) throw error;
+      throw new Error(`the presentation cannot be exported for Claude: ${(error as Error).message}`, { cause: error });
+    }
+    files[slidePath(id)] = serializeSlide({ ...slide, children }, { resolveVar });
   }
   for (const ref of [...used].sort()) {
     const bytes = assets.get(ref);

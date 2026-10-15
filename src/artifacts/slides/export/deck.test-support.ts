@@ -5,6 +5,7 @@
 import { newDoc, type Doc } from '../../yjs';
 import { heldSlides } from '../answer';
 import { publishDeck } from '../publish';
+import type { Affine } from '../geometry';
 import type { MeasuredDeck, MeasuredElement, MeasuredPaint, MeasuredRun } from './measure';
 
 export const FIXTURE_FILES: Record<string, string> = {
@@ -111,3 +112,20 @@ export const MEASURED: MeasuredDeck = {
     },
   ],
 };
+
+/** A measured element at a world placement: its unrotated drawn box and its composed linear transform. */
+export function measuredAt(id: string, tag: string, W: Affine, w: number, h: number): MeasuredElement {
+  const centre = { x: W.a * (w / 2) + W.c * (h / 2) + W.e, y: W.b * (w / 2) + W.d * (h / 2) + W.f };
+  const sx = Math.hypot(W.a, W.b);
+  const sy = Math.abs(W.a * W.d - W.b * W.c) / sx;
+  return {
+    id,
+    tag,
+    box: { x: centre.x - (w * sx) / 2, y: centre.y - (h * sy) / 2, w: w * sx, h: h * sy },
+    rotate: 0,
+    linear: [W.a, W.b, W.c, W.d],
+    paint: { fill: null, image: false, borders: [null, null, null, null], radius: 0, shadow: null, opacity: 1 },
+    color: 'rgb(0, 0, 0)',
+    attrs: {},
+  };
+}

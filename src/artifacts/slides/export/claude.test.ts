@@ -11,9 +11,10 @@ import { deckTokenValues } from '../mirror';
 import { loadSlide } from '../parse';
 import { BENCH_SLIDES, CLAUDE_SLIDES, LAYOUT_SLIDES } from '../fixtures/corpus';
 import { claudeAssetPath, claudeDeckFiles } from './claude';
-import { FIXTURE_FILES, fixtureDoc } from './deck.test-support';
+import { FIXTURE_FILES, fixtureDoc, measuredAt } from './deck.test-support';
+import { MeasureNeeded } from './lower';
 import { exportDeckOf } from './standalone';
-import { apply, cornersOf, multiply, placement, type Box } from '../geometry';
+import { apply, cornersOf, multiply, placement, shift, type Box } from '../geometry';
 import type { ElementIR } from '../ir';
 
 const LOGO = new Uint8Array([137, 80, 78, 71]);
@@ -122,3 +123,44 @@ describe('the For Claude export of groups', () => {
     expect(slide.children[0]!.style).toMatchObject({ background: '#eeeeee', transform: 'rotate(30deg) scale(1.2)' });
   });
 });
+
+// fix wave 2 (finding 2), through the loader (its transform names are its own lower case): a translation-only group keeps
+// its translation; a turned group's auto-sized and right-pinned members take their place from the window's measure, the
+// export asking for it when the model cannot say
+describe('the For Claude export of groups the model cannot place alone', () => {
+  const deckOf = (slide: string) => ({ 'project/deck.json': JSON.stringify({ v: 4, title: 'Groups', order: ['g2'] }), [slidePath('g2')]: slide });
+  const loaded = (files: Record<string, string | Uint8Array>) => {
+    const out = loadSlide(files[slidePath('g2')] as string, { fileId: 'g2' });
+    if (!out.ok) throw new Error(out.held.reasons.join('; '));
+    return out.slide;
+  };
+
+  it('keeps a translation-only group’s translation', () => {
+    const doc = fixtureDoc(deckOf('<section id="g2" style="background:#ffffff"><div id="moved" data-group="" style="position:absolute; left:100px; top:50px; transform:translate(30px, 40px)"><p id="m" style="position:absolute; left:10px; top:20px; font-size:32px">M</p></div></section>'));
+    const slide = loaded(claudeDeckFiles(doc, { resolveVar: () => undefined, assets: new Map() }));
+    expect(slide.children.map((c) => c.id)).toEqual(['m']);
+    expect(slide.children[0]!.style).toMatchObject({ left: '140px', top: '110px' });
+  });
+
+  it('asks for the measure for auto-sized and right-pinned members of a turned group, then keeps their poses', () => {
+    const doc = fixtureDoc(
+      deckOf(`<section id="g2" style="background:#ffffff"><div id="turned" data-group="" style="position:absolute; left:600px; top:300px; width:400px; height:200px; transform:rotate(30deg)">
+<p id="auto" style="position:absolute; left:20px; top:10px; font-size:32px">Auto</p>
+<div id="pinned" style="position:absolute; right:20px; bottom:30px; width:100px; height:50px; background:#ff0000"></div>
+</div></section>`),
+    );
+    expect(() => claudeDeckFiles(doc, { resolveVar: () => undefined, assets: new Map() })).toThrow(MeasureNeeded);
+    const G = placement({ x: 600, y: 300, w: 400, h: 200 }, 'rotate(30deg)');
+    const W = { auto: multiply(G, shift(20, 10)), pinned: multiply(G, shift(280, 120)) };
+    const measured = { slides: [{ id: 'g2', background: { fill: null, image: false }, elements: [measuredAt('turned', 'div', G, 400, 200), measuredAt('auto', 'p', W.auto, 90, 45), measuredAt('pinned', 'div', W.pinned, 100, 50)] }] };
+    const slide = loaded(claudeDeckFiles(doc, { resolveVar: () => undefined, assets: new Map(), measured }));
+    expect(slide.children.map((c) => c.id)).toEqual(['auto', 'pinned']);
+    const box = (k: ElementIR): Box => ({ x: parseFloat(k.style.left!), y: parseFloat(k.style.top!), w: parseFloat(k.style.width!), h: parseFloat(k.style.height!) });
+    const [auto, pinned] = slide.children as [ElementIR, ElementIR];
+    expect(near(cornersOf(placement(box(auto), auto.style.transform), 90, 45), cornersOf(W.auto, 90, 45))).toBe(true);
+    expect(near(cornersOf(placement(box(pinned), pinned.style.transform), 100, 50), cornersOf(W.pinned, 100, 50))).toBe(true);
+    expect(pinned.style.right).toBeUndefined();
+  });
+});
+
+const near = (a: { x: number; y: number }[], b: { x: number; y: number }[]) => a.every((p, i) => Math.hypot(p.x - b[i]!.x, p.y - b[i]!.y) < 0.6);

@@ -250,7 +250,8 @@ const TRANSFORMED = (): Record<string, string> => ({
   'project/slides/s1.html': `<section id="s1" style="background:#ffffff">
 <svg id="moved" viewBox="0 0 200 100" style="position:absolute; left:50%; top:100px; width:200px; height:100px; transform:translateX(-50%)">${GREEN}</svg>
 <svg id="grown" viewBox="0 0 200 100" style="position:absolute; left:200px; top:400px; width:200px; height:100px; transform:scale(1.5)">${GREEN}</svg>
-<div id="grp" data-group="" style="position:absolute; left:600px; top:500px; width:300px; height:200px; transform:rotate(30deg)"><svg id="member" viewBox="0 0 200 100" style="position:absolute; left:50px; top:50px; width:200px; height:100px">${GREEN}</svg></div>
+<div id="grp" data-group="" style="position:absolute; left:600px; top:500px; width:300px; height:200px; transform:rotate(30deg)"><svg id="member" viewBox="0 0 200 100" style="position:absolute; left:50px; top:50px; width:200px; height:100px">${GREEN}</svg><p id="label" style="position:absolute; left:20px; top:10px; font-size:28px">Label</p></div>
+<svg id="wide" viewBox="0 0 1664 100" style="position:absolute; left:50%; top:900px; width:1664px; height:100px; transform:translateX(-50%)"><rect width="832" height="100" fill="#ff0000"></rect><rect x="832" width="832" height="100" fill="#0000ff"></rect></svg>
 <p id="big" style="position:absolute; left:1200px; top:100px; width:300px; font-size:32px; transform:scale(2)">Big</p>
 <div id="zoom" style="position:absolute; left:1200px; top:600px; width:300px; height:100px; transform:scale(1.5)"><p id="small" style="font-size:32px">Inner</p></div>
 </section>`,
@@ -274,11 +275,13 @@ test('transforms: scaled text at its drawn size; pictures of translated, scaled 
   expect(shape('member')).toContain('rot="1800000"');
   // and each picture (the SVG's PNG fallback the window drew) is the element alone, green to its corners
   const rels = await zip.file('ppt/slides/_rels/slide1.xml.rels')!.async('string');
-  for (const name of ['moved', 'grown', 'member']) {
+  const pictureOf = async (name: string) => {
     const rId = /<a:blip r:embed="(rId\d+)"/.exec(shape(name))![1];
     const target = new RegExp(`Id="${rId}"[^>]*Target="\\.\\./media/([^"]+)"`).exec(rels)![1]!;
-    const png = await zip.file(`ppt/media/${target}`)!.async('base64');
-    const samples = await launch!.app.evaluate(({ nativeImage }, b64) => {
+    return zip.file(`ppt/media/${target}`)!.async('base64');
+  };
+  const sample = (png: string) =>
+    launch!.app.evaluate(({ nativeImage }, b64) => {
       const image = nativeImage.createFromBuffer(Buffer.from(b64, 'base64'));
       const { width, height } = image.getSize();
       const bitmap = image.toBitmap(); // BGRA
@@ -288,10 +291,27 @@ test('transforms: scaled text at its drawn size; pictures of translated, scaled 
       };
       return { width, height, points: [at(3, 3), at(width - 4, 3), at(width / 2, height / 2), at(3, height - 4), at(width - 4, height - 4)] };
     }, png);
+  for (const name of ['moved', 'grown', 'member']) {
+    const samples = await sample(await pictureOf(name));
     expect(samples.width, name).toBeGreaterThanOrEqual(198);
     for (const [r, g, b, a] of samples.points) expect([r, g > 230, b, a > 230], `${name} is green to its corners`).toEqual([expect.any(Number), true, expect.any(Number), true]);
     for (const [r, , b] of samples.points) expect(r + b, name).toBeLessThan(30);
   }
+  // fix wave 2 (finding 1): a centred element wider than the slide's right half is taken whole, red on its left, blue on
+  // its right (a picture of its right part alone, stretched, would be red to both edges or cut short)
+  const wide = await sample(await pictureOf('wide'));
+  expect(wide.width).toBeGreaterThanOrEqual(1660);
+  const [left, , , , right] = wide.points as [number[], number[], number[], number[], number[]];
+  expect([left[0]! > 200, left[2]! < 60], 'red at its left edge').toEqual([true, true]);
+  expect([right[2]! > 200, right[0]! < 60], 'blue at its right edge').toEqual([true, true]);
+
+  // fix wave 2 (finding 2): For Claude lowers the turned group; its auto-sized member is placed from the window's measure
+  const claude = await JSZip.loadAsync(readFileSync((await exportAs(page, id, 'claude')).path));
+  const lowered = await claude.file('project/slides/s1.html')!.async('string');
+  expect(lowered).not.toContain('id="grp"');
+  expect(lowered).toMatch(/<p id="label" style="[^"]*width:\d+(\.\d+)?px[^"]*transform:rotate\(30deg\)/);
+  const back = await seedDeck(page, 'Transforms read back', { 'project/deck.json': await claude.file('project/deck.json')!.async('string'), 'project/slides/s1.html': lowered });
+  expect(back.held).toEqual([]);
 });
 
 // S7b's 100-slide deck inside the export's 55 s budget, in the variants that take the most from the window (the load

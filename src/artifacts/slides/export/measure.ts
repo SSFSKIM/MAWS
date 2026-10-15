@@ -105,6 +105,8 @@ export interface MeasuredElement {
    * its text, insets, borders, radii, shadows and connector coordinates are its own CSS px, scaled by the mapping.
    */
   scale?: [number, number];
+  /** The composed linear transform of its own and its ancestors' (a, b, c, d), absent at identity: its drawn pose. */
+  linear?: [number, number, number, number];
   /** The mapping's own: a connector's scale, kept for its coordinates once its metrics are at drawn size. */
   connectorScale?: [number, number];
   paint: MeasuredPaint;
@@ -260,7 +262,7 @@ export async function measureDeckPage(args: MeasureArgs, shrinkScale: (base: num
   // The box before rotation: the drawn box's centre with the layout size scaled (a rotation about the centre, CSS's
   // default origin, keeps the centre where it was). The element's and its ancestors' transforms compose (outermost
   // first): their rotation is the box's, their scale on each axis (fix wave 1) the factor its contents are drawn at.
-  const boxOf = (el: DomElement, slide: DomElement): { box: MeasuredBox; rotate: number; scale: [number, number] } => {
+  const boxOf = (el: DomElement, slide: DomElement): { box: MeasuredBox; rotate: number; scale: [number, number]; linear: [number, number, number, number] } => {
     const drawn = rectIn(el.getBoundingClientRect(), slide);
     let [a, b, c, d] = [1, 0, 0, 1];
     for (let at: DomElement | null = el; at && at !== slide; at = at.parentElement) {
@@ -272,11 +274,12 @@ export async function measureDeckPage(args: MeasureArgs, shrinkScale: (base: num
     const angle = (Math.atan2(b, a) * 180) / Math.PI;
     const rotate = (((Math.round(angle * 100) / 100) % 360) + 360) % 360;
     const scale: [number, number] = [Math.round(sx * 1e6) / 1e6, Math.round(sy * 1e6) / 1e6];
-    if (rotate === 0 && scale[0] === 1 && scale[1] === 1) return { box: drawn, rotate: 0, scale };
+    const linear: [number, number, number, number] = [a, b, c, d];
+    if (rotate === 0 && scale[0] === 1 && scale[1] === 1 && Math.abs(b) < 1e-9 && Math.abs(c) < 1e-9) return { box: drawn, rotate: 0, scale, linear };
     const w = (el.offsetWidth ?? el.clientWidth) * sx;
     const h = (el.offsetHeight ?? el.clientHeight) * sy;
     const [cx, cy] = [drawn.x + drawn.w / 2, drawn.y + drawn.h / 2];
-    return { box: { x: cx - w / 2, y: cy - h / 2, w, h }, rotate, scale };
+    return { box: { x: cx - w / 2, y: cy - h / 2, w, h }, rotate, scale, linear };
   };
   const bordersOf = (el: DomElement): MeasuredPaint['borders'] =>
     (['top', 'right', 'bottom', 'left'] as const).map((side) => {
@@ -468,11 +471,11 @@ export async function measureDeckPage(args: MeasureArgs, shrinkScale: (base: num
       const tag = el.tagName.toLowerCase();
       if (tag === 'tr' || tag === 'th' || tag === 'td') continue; // read with their table
       if (css(el, 'display') === 'none') continue;
-      const { box, rotate, scale } = boxOf(el, slide);
+      const { box, rotate, scale, linear } = boxOf(el, slide);
       const attrs: Record<string, string> = {};
       for (const a of Array.from(el.attributes)) if (!['style', 'src', 'data-eid', 'data-layer', 'data-fit-box'].includes(a.name)) attrs[a.name] = a.value;
       const color = css(el, 'color');
-      const measured: MeasuredElement = { id: el.getAttribute('data-eid') ?? '', tag, box, rotate, ...(scale[0] !== 1 || scale[1] !== 1 ? { scale } : {}), paint: paintOf(el, slide), color, attrs };
+      const measured: MeasuredElement = { id: el.getAttribute('data-eid') ?? '', tag, box, rotate, ...(scale[0] !== 1 || scale[1] !== 1 ? { scale } : {}), ...(linear[0] !== 1 || linear[1] !== 0 || linear[2] !== 0 || linear[3] !== 1 ? { linear } : {}), paint: paintOf(el, slide), color, attrs };
       if (textTags.has(tag)) measured.text = textOf(el);
       const fit = fits.get(el);
       if (fit) measured.fit = fit;

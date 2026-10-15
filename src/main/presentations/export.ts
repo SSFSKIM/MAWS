@@ -29,6 +29,7 @@ import { officeThemeXml } from '@artifacts/design-system/office';
 import type { TokenSet } from '@artifacts/design-system/tokens';
 import { builtinView } from '@artifacts/design-system/view';
 import { claudeDeckFiles } from '@artifacts/slides/export/claude';
+import { MeasureNeeded } from '@artifacts/slides/export/lower';
 import { measureDeckPage, type MeasureArgs, type MeasuredDeck } from '@artifacts/slides/export/measure';
 import { pictureJobs, pptxSlides, writePptx, type PictureJob } from '@artifacts/slides/export/pptx';
 import { deckAssetRefs, deckFacesCss, deckPage, exportDeckOf, type ExportDeck, type PageOptions } from '@artifacts/slides/export/standalone';
@@ -39,7 +40,7 @@ import { HOUSE_KEY } from '@artifacts/types/design_system/defaults';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { mimeOf } from '@shared/files/mime';
-import { loadSettled, openCaptureWindow } from '../artifacts/capture';
+import { loadSettled, openCaptureWindow, settled } from '../artifacts/capture';
 import { printRequestAllowed, type Exporter, type ExportContext, type ExporterRegistry, type ExportRequest } from '../artifacts/export';
 import { restrictRequests, type SeamEnv } from '../artifacts/policies';
 import { zipFiles } from '../design-systems/zip';
@@ -183,37 +184,53 @@ export interface DeckWindow {
 
 const MEASURE_ARGS: MeasureArgs = { textTags: [...TEXT_TAGS] };
 
-// The page's state for one picture (fix wave 1): only the job's slide shown at the top; for an element, everything but
-// the element hidden, and the transforms of the element and of every ancestor up to the slide neutralized, so the
-// element stands alone, whole and unturned at its own layout box (a translate no longer moves it, a scale no longer
-// sizes it, a group's rotation no longer turns it; the mapping places and turns the picture at the measured box). Its
-// text is transparent when only its paint is wanted. Answers, after two frames, the rect to capture: the element's box
-// as now drawn (the whole slide for `slide` and `background`).
+// The page's state for one picture (fix waves 1 and 2): only the job's slide shown at the top; for an element, everything
+// but the element hidden, and the transforms of the element and of every ancestor up to the slide neutralized, so the
+// element stands alone, whole and unturned at its own layout box (a translate no longer moves it, a scale no longer sizes
+// it, a group's rotation no longer turns it; the mapping places and turns the picture at the measured box). Then it is
+// moved, by the `translate` property the dialect never writes, to the frame's top-left corner, its ancestors and the
+// slide no longer clipping it, so a wide element no transform keeps in view is taken whole (fix wave 2). Its text is
+// transparent when only its paint is wanted. Answers, after two frames, the rect to capture: the element's box as now
+// drawn (the whole slide for `slide` and `background`), which may be larger than the window.
 export const STAGE = (slideId: string, elementId: string | null, mode: PictureJob['mode']) => `(() => {
   const slide = ${JSON.stringify(slideId)}, eid = ${JSON.stringify(elementId)}, mode = ${JSON.stringify(mode)};
   document.body.setAttribute('data-shown', '');
   let frame = null;
   for (const f of document.querySelectorAll('.maws-frame')) { if (f.getAttribute('data-frame') === slide) { f.setAttribute('data-shown', ''); frame = f; } else f.removeAttribute('data-shown'); }
   for (const flat of document.querySelectorAll('[data-maws-flat]')) flat.removeAttribute('data-maws-flat');
+  for (const open of document.querySelectorAll('[data-maws-open]')) open.removeAttribute('data-maws-open');
+  for (const moved of document.querySelectorAll('[data-maws-moved]')) { moved.style.removeProperty('translate'); moved.removeAttribute('data-maws-moved'); }
   let st = document.getElementById('maws-stage');
   if (!st) { st = document.createElement('style'); st.id = 'maws-stage'; document.head.appendChild(st); }
   const on = '.maws-frame[data-shown] ';
   const el = eid ? on + '[data-eid="' + CSS.escape(eid) + '"]' : '';
   const target = eid && frame ? frame.querySelector('[data-eid="' + CSS.escape(eid) + '"]') : null;
-  if (target && (mode === 'self' || mode === 'tree')) for (let at = target; at && !at.classList.contains('maws-slide'); at = at.parentElement) at.setAttribute('data-maws-flat', '');
+  const isolated = target && (mode === 'self' || mode === 'tree');
+  if (isolated) {
+    for (let at = target; at && !at.classList.contains('maws-slide'); at = at.parentElement) at.setAttribute('data-maws-flat', '');
+    for (let at = target.parentElement; at && !at.classList.contains('maws-slide'); at = at.parentElement) at.setAttribute('data-maws-open', '');
+  }
   st.textContent = mode === 'slide' ? '' : mode === 'background'
     ? on + '.maws-slide * { visibility: hidden !important; }'
-    : on + '.maws-slide { background: transparent !important; box-shadow: none !important; }\\n' + on + '.maws-slide * { visibility: hidden !important; opacity: 1 !important; }\\n'
+    : on + '.maws-slide { background: transparent !important; box-shadow: none !important; overflow: visible !important; }\\n' + '.maws-frame[data-shown] { overflow: visible !important; }\\n' + on + '.maws-slide * { visibility: hidden !important; opacity: 1 !important; }\\n'
       + on + '[data-maws-flat] { transform: none !important; }\\n'
+      + on + '[data-maws-open] { overflow: visible !important; }\\n'
       + el + ' { visibility: visible !important; opacity: 1 !important;' + (mode === 'self' ? ' color: transparent !important;' : '') + ' }\\n'
       + (mode === 'tree' ? el + ' * { visibility: visible !important; }' : '');
   scrollTo(0, 0);
-  return new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => {
-    if (!target || mode === 'slide' || mode === 'background') return resolve({ x: 0, y: 0, w: ${SLIDE_W}, h: ${SLIDE_H} });
+  const frames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const rectOf = () => {
     const r = target.getBoundingClientRect();
     const o = frame.getBoundingClientRect();
-    resolve({ x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height });
-  })));
+    return { x: r.left - o.left, y: r.top - o.top, w: r.width, h: r.height };
+  };
+  return frames().then(() => {
+    if (!isolated) return { x: 0, y: 0, w: ${SLIDE_W}, h: ${SLIDE_H} };
+    const at = rectOf();
+    target.setAttribute('data-maws-moved', '');
+    target.style.setProperty('translate', (-at.x) + 'px ' + (-at.y) + 'px', 'important');
+    return frames().then(rectOf);
+  });
 })()`;
 
 /** A hidden export window for the length of `use`, destroyed when it ends or `signal` aborts. */
@@ -250,8 +267,16 @@ export async function withDeckWindow<T>(env: SeamEnv, signal: AbortSignal, use: 
         const box = (await w.webContents.executeJavaScript(STAGE(job.slideId, job.elementId, job.mode), true)) as { x: number; y: number; w: number; h: number };
         const x = Math.max(0, Math.floor(box.x));
         const y = Math.max(0, Math.floor(box.y));
-        const rect = { x, y, width: Math.max(1, Math.min(SLIDE_W - x, Math.ceil(box.x + box.w) - x)), height: Math.max(1, Math.min(SLIDE_H - y, Math.ceil(box.y + box.h) - y)) };
+        // an element larger than the slide: the window grows to hold it for this picture (fix wave 2)
+        const [vw, vh] = [Math.max(SLIDE_W, Math.ceil(box.x + box.w)), Math.max(SLIDE_H, Math.ceil(box.y + box.h))];
+        const grown = vw > SLIDE_W || vh > SLIDE_H;
+        if (grown) {
+          w.setContentSize(vw, vh);
+          await settled(w);
+        }
+        const rect = { x, y, width: Math.max(1, Math.min(vw - x, Math.ceil(box.x + box.w) - x)), height: Math.max(1, Math.min(vh - y, Math.ceil(box.y + box.h) - y)) };
         let image = await w.webContents.capturePage(rect);
+        if (grown) w.setContentSize(SLIDE_W, SLIDE_H);
         if (size?.width !== undefined) image = image.resize({ width: size.width, ...(size.height !== undefined && { height: size.height }), quality: 'best' });
         return image.toPNG();
       },
@@ -339,9 +364,20 @@ const pptx: Run = async (request, context, prepared, deps) => {
   await context.writeFile(request.path, await writePptx(slides, { title: prepared.deck.title, themeXml }));
 };
 
-const claude: Run = async (request, context, prepared) => {
+// No window unless a group's member is placed so the model cannot say where (auto-sized, %, right or bottom): then the
+// deck is measured and lowered again from the measure.
+const claude: Run = async (request, context, prepared, deps) => {
   const assets = new Map([...prepared.assets].map(([ref, a]) => [ref, a.bytes]));
-  await context.writeFile(request.path, zipFiles(claudeDeckFiles(prepared.doc, { resolveVar: prepared.resolveVar, assets })));
+  const options = { resolveVar: prepared.resolveVar, assets };
+  let files: Record<string, string | Uint8Array>;
+  try {
+    files = claudeDeckFiles(prepared.doc, options);
+  } catch (error) {
+    if (!(error instanceof MeasureNeeded)) throw error;
+    const measured = await withDeckWindow(deps.env, context.signal, (win) => measurePass(win, prepared));
+    files = claudeDeckFiles(prepared.doc, { ...options, measured });
+  }
+  await context.writeFile(request.path, zipFiles(files));
 };
 
 const RUNS = { html, pdf, png, pptx, claude } as const;
