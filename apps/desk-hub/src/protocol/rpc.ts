@@ -7,7 +7,7 @@ export const RPC_FRESHNESS_MS = 60_000;
 export type Digest = { session: string; request: string; tool: string; input_sha256: string };
 
 export type RpcArgs = {
-  /** A user row appended to the running turn, read at the loop's next model request. */
+  /** A user row appended to the running turn, read at the loop's next model request; refused `idle` when no turn runs. */
   steer: { session: string; text: string };
   /** Abort the main loop's turn and stop any Bash the abort moved to the background. */
   interrupt: { session: string };
@@ -15,9 +15,12 @@ export type RpcArgs = {
   answer: { session: string; digest: Digest; answers: Record<string, string> };
   /** Allow or deny a pending permission prompt. */
   decide: { session: string; digest: Digest; decision: 'allow' | 'deny'; message?: string };
-  /** This session's model and effort, from its next request on; at least one is set. */
+  /**
+   * This session's main-loop model and effort, from its next request on; at least one is set. `model` is a model id, a
+   * family alias the session's `ANTHROPIC_DEFAULT_<FAMILY>_MODEL` maps, or `"default"` (the session's own).
+   */
   model: { session: string; model?: string; effort?: string };
-  /** Compact now, or at the turn's end when asked during one. */
+  /** Compact now, or at the turn's end when asked during one; the outcome follows as the session's `compact` events. */
   compact: { session: string };
   /** A `claude --bg` session in a known checkout of the project on that machine. */
   spawn: { checkout: string; worktree?: string; brief: string; model?: string; effort?: string; permission_mode?: string };
@@ -33,10 +36,16 @@ export const RPC_NAMES = ['steer', 'interrupt', 'answer', 'decide', 'model', 'co
 export type RpcResults = {
   /** The uuid of the appended row. */
   steer: { row: string };
-  interrupt: Record<string, never>;
+  /**
+   * The aborted turn (null when idle), the background tasks its Bash calls were moved to and TaskStop ended, and those
+   * whose stop failed: a non-empty `running` is an incomplete interrupt.
+   */
+  interrupt: { turnId: string | null; stopped: string[]; running: string[] };
   answer: Record<string, never>;
   decide: Record<string, never>;
-  model: Record<string, never>;
+  /** The choice now in force; null for the session's own. */
+  model: { model: string | null; effort: string | null };
+  /** Answered at once: `now` when started, `turn-end` when held for the running turn's end. */
   compact: { at: 'now' | 'turn-end' };
   spawn: { session: string; alias: string };
   retire: Record<string, never>;
@@ -68,7 +77,10 @@ export type RpcErrorCode =
   | 'stale'
   | 'not-member'
   | 'bad-shape'
-  // The daemon's (DC7), before execution
+  // The daemon's (DC7), before execution. Every machine holds the org key, so a daemon binds an RPC to its own enrolled
+  // name, project, and session before anything else.
+  | 'wrong-machine'
+  | 'unknown-project'
   | 'bad-code'
   | 'read-only'
   | 'digest-mismatch'
@@ -78,6 +90,7 @@ export type RpcErrorCode =
   | 'no-session'
   | 'unsupported'
   | 'session-live'
+  | 'idle' // a steer while no turn is running: the web offers Send instead
   // The daemon's, after a claim
   | 'copy-started'
   | 'interrupted'

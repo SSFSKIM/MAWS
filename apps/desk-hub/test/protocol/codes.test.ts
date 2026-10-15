@@ -1,8 +1,9 @@
+import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import vectorsFile from '../../src/protocol/vectors/codes.json';
 import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../../src/protocol/base64url';
 import { canonicalize } from '../../src/protocol/canonical';
-import { coveredBytes, DOMAINS, importOrgKey, inputSha256, newNonce, orgKeyFromCryptoKey, seal, sealRpc, verify, verifyRpc, type ShapeKind } from '../../src/protocol/codes';
+import { coveredBytes, deriveLogNonce, DOMAINS, importOrgKey, inputSha256, newNonce, orgKeyFromCryptoKey, seal, sealRpc, verify, verifyRpc, type ShapeKind } from '../../src/protocol/codes';
 import type { JsonValue } from '../../src/protocol/json';
 import type { HumanDraft, LogEvent } from '../../src/protocol/log';
 import type { Rpc, RpcDraft } from '../../src/protocol/rpc';
@@ -248,5 +249,28 @@ describe('orgKeyFromCryptoKey: a key that exists only as a CryptoKey, such as on
   ])('refuses a key with %s', async (_case, why, make) => {
     const key = (await make()) as CryptoKey;
     expect(() => orgKeyFromCryptoKey(key)).toThrow(new TypeError(`the org key ${why}`));
+  });
+});
+
+describe("deriveLogNonce: a machine's own event's nonce, from the org key and the event (DC4's M3)", () => {
+  const project = '6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f';
+  const raw = Uint8Array.from({ length: 32 }, (_, i) => i);
+  const event = { ts: '2026-10-15T08:01:02.123Z', writer: 'SK.local/e0ad139c-18bc-45bd-9489-be8653145f80', seq: 42, kind: 'say', from: 'a', to: '*', text: 'hi' };
+
+  it('is the first 16 bytes of HMAC-SHA256 over smns-hub-nonce-v1, the project, and the JCS of the event without mac', async () => {
+    const expected = createHmac('sha256', raw).update(`smns-hub-nonce-v1\n${project}\n${canonicalize(event)}`).digest().subarray(0, 16).toString('base64url');
+    const derived = await deriveLogNonce(await importOrgKey(raw), project, event);
+    expect(derived).toBe(expected);
+    expect(isBase64urlOf(derived, 16)).toBe(true);
+  });
+
+  it('gives the same nonce to the event sealed or not, a different one to another event or project, and seals to a code that verifies', async () => {
+    const key = await importOrgKey(raw);
+    const nonce = await deriveLogNonce(key, project, event);
+    const sealed = await seal(key, 'log', project, event, nonce);
+    expect(await deriveLogNonce(key, project, sealed)).toBe(nonce);
+    expect(await deriveLogNonce(key, project, { ...event, seq: 43 })).not.toBe(nonce);
+    expect(await deriveLogNonce(key, '0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59', event)).not.toBe(nonce);
+    expect(await verify(key, 'log', project, sealed)).toBe(true);
   });
 });

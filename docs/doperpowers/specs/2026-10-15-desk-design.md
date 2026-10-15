@@ -943,7 +943,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 - **Design inheritance:** §3 session plane [binding], §5 [binding], §6
   [binding: the daemon as boundary, codes, digests, read-only].
 - **Required:** required.
-- **Status:** not-dispatched (blocked-by DC2.G1, DC4).
+- **Status:** in-flight (2026-10-15).
 
 ## Cross-Child Contracts
 
@@ -1483,6 +1483,7 @@ silent for three periods as dead and reconnects with backoff. A client closing t
 | `subscribe` | `project`, `session`, `agentId`, `sub` | serve a DX4 subscription scoped to one transcript: the session's main one (`agentId` null) or one subagent's |
 | `unsubscribe` | `project`, `sub` | end it |
 | `rows` | `project`, `session`, `agentId`, `sub`, `before`, `limit` | older rows of the sub's transcript, before row `before` |
+| `diff` | `project`, `session`, `sub` | the browser's DX3 `diff` on a main-transcript sub: answer with DX4 `diff` on that sub (M3) |
 | `part` | `id`, `index`, `count`, `data` | a slice of a larger frame (below) |
 
 **Frames up** (`UpFrame`):
@@ -1698,7 +1699,7 @@ type Envelope<K, Session, Sub, N> = {
 type SessionMessage =
   | Envelope<'snapshot', string, string, 0>                                                       // a sub's first message
   | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, …
-  | Envelope<'presence' | 'raised' | 'settled' | 'delivery', string, null, null>                 // to every browser, outside subs
+  | Envelope<'presence' | 'raised' | 'settled' | 'delivery' | 'compact', string, null, null>     // to every browser, outside subs
   | Envelope<'machine', null, null, null>;                                                         // names no session
 ```
 
@@ -1720,13 +1721,14 @@ and `streaming` are that agent's own.
 | `rows` | yes | `{rows, before, more}`: older rows of the sub's transcript, newest first, answering a `rows` request |
 | `subagents` | yes | `{subagents: [{agentId, meta}]}`, each `meta` a `subagents/*.meta.json` verbatim |
 | `diff` | yes | `{base, text}`: unified diff of the working tree against the base branch |
-| `usage` | yes | `{context: {tokens, window, percent}, cost}`: the bridge's `usage` event (DX5) verbatim, after each main turn, on main-transcript subscriptions only. It is the one source of a session's context use and cost on the web: the transcript's rows do not carry them (the engine's `cost-state` records have no `uuid` and are not rows here), so a session without a bridge shows both as unavailable |
+| `usage` | yes | `{context: {tokens?, window, percent?}, cost: {usd} \| null}`: the bridge's `usage` event (DX5) verbatim (`tokens` and `percent` absent until a response has reported the window's fill; `cost` null where the engine keeps no ledger), after each main turn, on main-transcript subscriptions only. It is the one source of a session's context use and cost on the web: the transcript's rows do not carry them (the engine's `cost-state` records have no `uuid` and are not rows here), so a session without a bridge shows both as unavailable |
 | `end` | yes | `{reason: "unsubscribed" \| "machine-offline" \| "session-ended" \| "discontinuity" \| "error", message?}` |
 | `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
 | `machine` | no (`session` null) | `{online, policy: {read_only, ceiling}, checkouts: [{path, branch}]}`; `online` is the hub's, from the lease (a producer sends true) |
 | `raised` | no | `{request, session, tool, input, deadline?, mac}` |
 | `settled` | no | `{request, winner: "web" \| "terminal" \| "other", outcome, by, mac}` |
 | `delivery` | no | `{event: {writer, seq}, session, outcome: "delivered" \| "recorded" \| "refused-read-only" \| "failed", reason, mac}` |
+| `compact` | no | `{rpc, phase: "start" \| "end", tokensBefore?, tokensAfter?, skip?, error?}`: a compaction's progress, from the bridge's DX5 `compact` events; `rpc` the nonce of the DX6 `compact` that asked for it, or null for one the session started itself; on `end`, `tokensBefore` and `tokensAfter` (null when the engine recorded none), or `skip` (a hook vetoed it), or `error` (the engine refused it) |
 
 `raised`, `settled`, and `delivery` carry codes under their own domains (DX1). The hub interprets `presence`,
 `machine`, `raised`, `settled`, and `delivery`; it relays every other kind, `block-row` included, without reading its
@@ -1748,8 +1750,10 @@ entry's `upTo`, the snapshot and the live part neither overlap nor leave a gap. 
 tool's, whose block streamed as none of the three kinds) settles nothing and is simply drawn.
 
 **Discontinuity.** A gap in `n`, a hub restart, or a dropped connection makes the browser subscribe again for a fresh
-snapshot. A gap in the bridge's own stream (DX5's `gap`) ends every subscription it touches with `end {reason:
-"discontinuity"}`, and the browser does the same. Nothing is resumed from a hub buffer.
+snapshot. A gap in the bridge's own stream (DX5's `gap`), and the end of a DX5 subscription the daemon holds (the
+child ends every open one when it applies any `resync` after its first: a module reload, a replacement child), each
+end every DX4 subscription they touch with `end {reason: "discontinuity"}`, and the browser does the same. Nothing is
+resumed from a hub buffer.
 
 **Settlement (confirmed by DC2, DX4's producer).** `settled.outcome` is one of `allow`, `deny`, `answered`,
 `withdrawn`. `winner` and `by` name who decided: `web` with `by` the member id; `terminal` with `by` `"terminal"`;
@@ -1880,7 +1884,7 @@ Every event is an object with `type` and `t` (the mod's clock, epoch ms). `agent
 | `tool` / `result` | M1 | `toolUseId, tool, agentId, isError, denied?, text?, truncated?` |
 | `agent` / `spawn` | M1 | `agentId, parentAgentId, subagentType, description, name, background, model, toolUseId` |
 | `agent` / `stop` | M1 | `agentId, agentType` |
-| `usage` | M1 | `context: {tokens, window, percent}, cost` — after each main turn |
+| `usage` | M1 | `context: {tokens?, window, percent?}, cost: {usd} \| null` — the engine's `$.session.usage()` context and cost as it returns them (`tokens` and `percent` absent before the first response; `cost` null without a ledger) — after each main turn |
 | `heartbeat` | M1 | `state` (as `ping`'s) — every 5 s |
 | `result` | M1 | `id, op, ok, result?, error?` — the mod's answer to a command |
 | `gap` | M1 | `dropped` — events that reached no child (a failed post, an overflowing queue). **[fw1]** Always followed at once by a `resync`; a live subscriber may also resubscribe |
@@ -2138,11 +2142,18 @@ type Rpc<N> = {
 "failed", error: {code, message}}`; the hub's record of an RPC adds `forwarded` (sent, no result yet) and
 `uncertain` (the machine's lease lapsed after forwarding, before a result).
 
+**Bound to where it runs.** Every enrolled machine holds the org key, so a valid code does not say which machine
+should act. Right after the code verifies, the daemon refuses an RPC whose `machine` is not its own enrolled name
+(`wrong-machine`), whose `project` is not a hub project of this machine with the org it enrolled in
+(`unknown-project`), or whose session is not a session of that project on this machine (`no-session`), before the
+ledger, before freshness, and before anything else. It never relies on the hub's routing for this.
+
 **Error codes.** The hub's: `machine-offline` (no fresh lease: fails at once, nothing queued), `stale` (older than 60
 seconds), `not-member` (`member` is not the signed-in member), `bad-shape`. The daemon's, before it executes:
-`bad-code`, `read-only`, `digest-mismatch`, `not-pending` (the request is no longer pending), `unknown-checkout`,
+`bad-code`, `wrong-machine`, `unknown-project`, `read-only`, `digest-mismatch`, `not-pending` (the request is no longer pending), `unknown-checkout`,
 `above-ceiling`, `no-session`, `unsupported` (the session's kind cannot, per §5's table), `session-live` (a Resume of
-a session live somewhere), `idle` (a steer while no turn is running: the web offers Send instead). After a claim: `copy-started` (a Resume raced the owner reopening the session; the copy is
+a session live on its machine: a session's transcript lives on the machine that ran it, so "live anywhere" means any
+process of this machine holding the session, terminal or `--bg`), `idle` (a steer while no turn is running: the web offers Send instead). After a claim: `copy-started` (a Resume raced the owner reopening the session; the copy is
 stopped), `interrupted` (below), `failed` (execution failed; `message` says how).
 
 **At most once.** The nonce is the RPC's id. The daemon claims it in its ledger (`claimed`) before the RPC has any
@@ -2467,7 +2478,7 @@ a hub that connects into machines (§2).
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | in-flight (dispatched 2026-10-15, parent pin 9471766c) |
-| DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, branch `worktree-smns-erb` at d1f12efa) | planned; in plan review; dispatch when DC4's M3 is reviewed clean |
+| DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | in-flight (dispatched 2026-10-15, after DC4's M3 was reviewed clean) |
 
 ## Surprises & Discoveries
 
@@ -2694,6 +2705,41 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DX4's and DX5's `usage` give the engine's shape exactly:
+  `context: {tokens?, window, percent?}` and `cost: {usd} | null`. The
+  bridge passes `$.session.usage()`'s `context` and `cost` through, so
+  the engine decides the shape and DX4 repeats it verbatim; the earlier
+  text named the fields without their optionality or the `usd` object.
+  DC3's module types (MAWS `068f14f3`) carried it first. Flags DC2 (its
+  plan's DX5 copy), DC5, DC6.
+  Date/Author: 2026-10-15, design session (DC3's M3 contract types).
+- Decision: Five gaps found by the adversarial review of DC7's plan,
+  closed in the contracts. (1) A valid code does not say which machine
+  should act, since every machine holds the org key. So the daemon binds
+  an RPC to itself, its project, and the session (`wrong-machine`,
+  `unknown-project`, `no-session`) before anything else, and never relies
+  on the hub's routing (DX6). (2) The browser's `diff` had no machine-side
+  frame: DX2 gains `diff` down. (3) A compaction's outcome had no route to
+  a browser: DX4 gains `compact`, outside subscriptions, carrying the
+  RPC's nonce. (4) A child could answer before the mod's first `resync`,
+  so a subscriber could take an empty snapshot and then lose the prefix
+  of a message already streaming. DC2's M4 makes the child hold `GET
+  /events` until its first `resync` is applied, and end every open DX5
+  subscription on any later one; a DX5 subscription ending ends the DX4
+  subscriptions it touches, as a `gap` does. (5) Resume's "live anywhere"
+  means live on the session's machine, since a session's transcript lives
+  where it ran. And DX5 gives DC7 a transcript cut and an order for rows
+  (DC2's M4, agreed): every row the mod observes gets one notice before it
+  is written (`block-row` for a response row, `row-seen` for any other),
+  the snapshot carries the per-loop `cut` of notices applied, history is
+  read from disk up to the cut and live rows follow their notices, and a
+  `block-row` for a row already emitted unnamed ends the DX4 subscription
+  as a discontinuity. DC7's
+  plan is amended to put its safeguards ahead of the paths they protect:
+  the policy, read-only delivery included, comes before any remote
+  execution or outside-origin delivery is enabled. Flags DC2, DC3, DC5,
+  DC7.
+  Date/Author: 2026-10-15, design session (DC7's plan review).
 - Decision: DX5 refreshed with DC2's M3 extension (doperpowers
   `9055a181`, reviewed clean after two fix waves). A settlement now names
   its winner from the engine's own evidence for that exact call, instead

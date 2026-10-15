@@ -4,7 +4,12 @@
 import { isMemberId } from './identity';
 import type { JsonObject } from './json';
 
-/** The authentication code: a 128-bit random nonce and HMAC-SHA256 with the org key, both base64url. */
+/**
+ * The authentication code: a 128-bit nonce, never repeated under one org key, and HMAC-SHA256 with the org key, both
+ * base64url. The nonce is random from a browser; a machine's own log events may instead carry one derived from the org
+ * key and the event (`deriveLogNonce`), so an upload resent after a lost answer carries the same bytes. A verifier
+ * cannot tell the two apart and needs not to.
+ */
 export type Mac = { nonce: string; value: string };
 
 export type Recipient = { session: string; alias: string };
