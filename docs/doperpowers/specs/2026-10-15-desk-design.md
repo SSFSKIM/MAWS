@@ -2713,6 +2713,17 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The web's look (owner, 2026-10-15), from DC5's mockups
+  (MAWS `smns-erb-web`, `mockups/desk/01-grid.html`, `02-project.html`).
+  The project grid uses card B, tiles, with its empty, loading, and
+  reconnecting states as mocked. The project view is approved as shown: a
+  sidebar with the group channel and the sessions grouped as waiting on
+  you, working, idle, and ended; the conversation in the center; the right
+  column kept for session depth (DC6). A browser that does not hold the
+  org key yet shows an empty sidebar, no session counts, since it cannot
+  verify anything it would draw. Rejected: cards A and C, and counts in
+  the locked view. Flags DC5, DC6.
+  Date/Author: 2026-10-15, owner.
 - Decision: A repeated `hello` on an open stream is allowed and
   idempotent (DX2), answered with a fresh `have` and the backlog past its
   vector. DX2 told a machine its archive designation only at `hello`, so a
