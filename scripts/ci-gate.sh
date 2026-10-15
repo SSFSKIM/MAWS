@@ -106,11 +106,26 @@ done
 echo "ci-gate: https://github.com/$REPO/actions/runs/$run_id"
 
 # A failed watch (an API error mid-poll) is not the end of the run: only the status `completed` is.
+# A run that can no longer be read (credentials revoked, run deleted) would be retried forever, so consecutive read failures are bounded.
+unreadable=0
+view_err=$out/ci-$short.err
 while :; do
   gh -R "$REPO" run watch "$run_id" --compact --interval 30 >/dev/null 2>&1
-  [[ $(gh -R "$REPO" run view "$run_id" --json status --jq .status 2>/dev/null) == completed ]] && break
+  if run_status=$(gh -R "$REPO" run view "$run_id" --json status --jq .status 2>"$view_err"); then
+    unreadable=0
+    [[ $run_status == completed ]] && break
+  else
+    unreadable=$((unreadable + 1))
+    if ((unreadable >= 20)); then
+      echo "ci-gate: run $run_id cannot be read (the last gh error follows)" >&2
+      cat "$view_err" >&2
+      rm -f "$view_err"
+      finish 1
+    fi
+  fi
   sleep 15
 done
+rm -f "$view_err"
 conclusion=$(gh -R "$REPO" run view "$run_id" --json conclusion --jq .conclusion)
 gh -R "$REPO" run view "$run_id" --json jobs --jq '.jobs[] | "\(.conclusion // .status)\t\(.name)"' | sort -k2
 
