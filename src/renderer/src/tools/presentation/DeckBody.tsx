@@ -4,14 +4,20 @@
 // is on screen, the slides in the deck's governing design system (D's chain: the deck's own system, its Space's default,
 // the owner's, else the bundled floor), and `onShown` once the first slide is drawn while the body is visible.
 // M6: the header's Present, Theme and Check on the tab's deck session; the Theme panel's systems and switch.
+// M7: comments go to the session the main area shows, through B's comment surface (P2's card with B's artifact target
+// and anchor), the replica held by the tab while the card's overlay writes; the header counts the open threads.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ArtifactHost } from '@artifacts/host';
 import { DeckEditor } from '@artifacts/slides/editor/DeckEditor';
 import type { DeckSession } from '@artifacts/slides/editor/session';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactEditorProps } from '../../artifacts/registry';
 import { useLibraryList, useLibraryRow } from '../../library/store';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
+import { shownSession } from '../../panel/host';
+import { useLayout } from '../../stores/layout';
+import { useDocumentComments } from '../document/comments'; // M7: B's surface
 import { chooseDeckSystem, presentDeck } from './commands';
 import { deckExports } from './exports';
 import { useDeckSystem } from './governing';
@@ -28,6 +34,7 @@ export function DeckMain(props: DeckEditorBodyProps) {
 }
 
 const NO_SESSION = () => () => {};
+const NO_APP_SESSION = '' as AppSessionId;
 /** M6: the panel open beside the stage (the header shows it pressed); null before the deck opens. */
 function useRail(session: DeckSession | null) {
   return useSyncExternalStore(session?.subscribe ?? NO_SESSION, () => session?.snapshot().rail ?? null);
@@ -46,7 +53,11 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
     () => (opened ? { present: () => void presentDeck(artifactId, opened.snapshot().currentSlide), toggleRail: (r) => opened.toggleRail(r) } : undefined),
     [opened, artifactId],
   );
-  useEditorHost(scope, deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: opened !== null }, commands));
+  useEditorHost(scope, deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: opened !== null, unresolved: snapshot.unresolved }, commands));
+
+  // M7: comments go to the session the main area shows (its Side thread, or its conversation); none shown, none offered
+  const appSessionId = useLayout((s) => shownSession(s.main));
+  const comments = useDocumentComments({ artifactId, appSessionId: appSessionId ?? NO_APP_SESSION, title, mode: scope.surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold });
 
   const placement = useMemo(() => (row ? { ...(row.designSystemId && { designSystemId: row.designSystemId }), ...(row.spaceId && { spaceId: row.spaceId }) } : null), [row]);
   const system = useDeckSystem(placement);
@@ -102,6 +113,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         artifactId={artifactId}
         importAsset={importAsset}
         theme={theme}
+        comments={appSessionId === null ? undefined : comments}
       />
     </div>
   );

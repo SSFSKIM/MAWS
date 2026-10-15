@@ -8,6 +8,7 @@ import type { Restored } from '@artifacts/provider/port';
 import { newDoc, transact } from '@artifacts/yjs';
 import { importSlide, setStyle, writeDeckKeys } from '@artifacts/slides/model';
 import { loadSlide } from '@artifacts/slides/parse';
+import { addThread, resolve } from '@artifacts/slides/threads'; // M7
 import { DeckTabState } from './tab-state';
 
 class FakeHandle implements DocumentHandle {
@@ -102,5 +103,30 @@ describe('a deck tab’s state (X32’s lifetime rule)', () => {
     handle.restore();
     expect(session.snapshot().canUndo).toBe(false);
     expect(session.undo.canUndo()).toBe(false);
+  });
+
+  // M7 (D9): the header's count and the comment card's hold on the replica
+  it('counts the open threads as they change, orphans included', async () => {
+    const { handle, state } = await opened();
+    expect(state.snapshot().unresolved).toBe(0);
+    addThread(handle.doc, { threadId: 't1', slideId: 'a', elementId: 'p', quote: 'Hi', by: { kind: 'human' }, at: 1 });
+    addThread(handle.doc, { threadId: 't2', slideId: 'a', elementId: 'gone', quote: 'Gone', by: { kind: 'human' }, at: 2 });
+    expect(state.snapshot().unresolved).toBe(2);
+    resolve(handle.doc, 't1', { kind: 'human' }, 3);
+    expect(state.snapshot().unresolved).toBe(1);
+    state.dispose();
+  });
+
+  it('disposed while something holds the replica, it closes it only once the last hold is released', async () => {
+    const { handle, state } = await opened();
+    const card = state.hold();
+    const send = state.hold();
+    state.dispose();
+    expect(handle.closed).toBe(false);
+    card();
+    card(); // a release counts once
+    expect(handle.closed).toBe(false);
+    send();
+    expect(handle.closed).toBe(true);
   });
 });

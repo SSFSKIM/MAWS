@@ -6,9 +6,11 @@
 // and the exports with M9; Mark up is the header's own, offered while the stage is registered as its surface.
 // M6: Present (the audience window, D13), Theme and Check against the design system (panels beside the stage, D10),
 // each driving the tab's own deck session, offered once the deck has opened.
+// M7: Comments (the threads rail beside the stage, D9) after Present, and the deck's open threads as the header's count.
 import type { DocumentState } from '@artifacts/host';
 import type { DeckRail } from '@artifacts/slides/editor/session';
 import type { EditorHostAction, EditorHostExport, EditorHostRegistration, SavedState } from '../../panel/editor-host';
+import { CommentsIcon } from '../document/icons'; // M7: the document's, so both kinds' Comments look alike
 import { CheckIcon, PresentIcon, ThemeIcon } from './icons';
 
 export function savedOf(document: DocumentState | null, saving: boolean): SavedState | null {
@@ -26,6 +28,7 @@ export interface DeckHeaderState {
   exports?: readonly EditorHostExport[]; // M9: the Export menu (exports.ts)
   rail: DeckRail | null; // M6: the panel open beside the stage
   canPresent: boolean; // M6: the deck has a slide to show
+  unresolved?: number; // M7: open threads, orphans included (0 or absent: no count)
 }
 
 /** M6: what the header's actions do, on the tab's own state (X32's lifetime rule). */
@@ -37,6 +40,7 @@ export interface DeckHeaderCommands {
 function deckActions(state: DeckHeaderState, commands: DeckHeaderCommands): EditorHostAction[] {
   return [
     { id: 'present', label: 'Present', icon: PresentIcon, disabled: !state.canPresent, onSelect: () => commands.present() },
+    { id: 'comments', label: 'Comments', icon: CommentsIcon, pressed: state.rail === 'comments', onSelect: () => commands.toggleRail('comments') }, // M7
     { id: 'theme', label: 'Theme', icon: ThemeIcon, pressed: state.rail === 'theme', onSelect: () => commands.toggleRail('theme') },
     { id: 'check', label: 'Check against the design system', icon: CheckIcon, pressed: state.rail === 'check', onSelect: () => commands.toggleRail('check') },
   ];
@@ -44,6 +48,6 @@ function deckActions(state: DeckHeaderState, commands: DeckHeaderCommands): Edit
 
 /** The registration; without `commands` (the deck not open yet) no actions. */
 export function deckHeader(state: DeckHeaderState, commands?: DeckHeaderCommands): EditorHostRegistration {
-  const { title, document, saving, closeGuard, exports } = state;
-  return { title, saved: savedOf(document, saving), closeGuard, ...(commands && { actions: deckActions(state, commands) }), ...(exports && { exports }) };
+  const { title, document, saving, closeGuard, exports, unresolved } = state;
+  return { title, saved: savedOf(document, saving), closeGuard, ...(commands && { actions: deckActions(state, commands) }), ...(exports && { exports }), ...(unresolved ? { unresolved } : {}) /* M7 */ };
 }

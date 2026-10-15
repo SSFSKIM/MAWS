@@ -4,8 +4,11 @@
 // unmounted on a tab switch). It opens and keeps the replica (`ArtifactHost.open`), follows its saved state, and holds
 // the deck session (the one undo stack, the slide shown, the zoom). A restore of a version (A's frame 101) clears the
 // undo stack: what it refers to was replaced. The replica closes once the host has acknowledged every edit it holds.
+// M7: the open threads the header counts, and what still writes into the replica (`hold`: the comment card's overlay
+// withdrawing an unsent draft, a sent comment recorded in its thread), which the close waits for (B's rule).
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { DeckSession } from '@artifacts/slides/editor/session';
+import { observeThreads, openThreadCount } from '@artifacts/slides/threads';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 
 const SAVE_WAIT_MS = 3_000; // how long the close guard waits for edits in flight before it asks (B's rule)
@@ -30,6 +33,8 @@ export interface DeckTabSnapshot {
   /** The replica's state as of its last change of phase, sync or read-only. */
   document: DocumentState | null;
   saving: boolean;
+  /** M7: the deck's open threads, orphans included (the header's count). */
+  unresolved: number;
 }
 
 const messageOf = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -42,11 +47,12 @@ export class DeckTabState {
   readonly artifactId: string;
   readonly surface: ArtifactEditorTarget['surface'];
   readonly host: ArtifactHost;
-  private current: DeckTabSnapshot = { failed: null, handle: null, session: null, document: null, saving: false };
+  private current: DeckTabSnapshot = { failed: null, handle: null, session: null, document: null, saving: false, unresolved: 0 };
   private readonly listeners = new Set<() => void>();
   private readonly stops: (() => void)[] = [];
   private disposed = false;
   private closing = false;
+  private holders = 0; // M7: what still writes into the replica (`hold`)
   private wasShown = false;
   private title = '';
   private savingTimer: ReturnType<typeof setTimeout> | null = null;
@@ -91,8 +97,12 @@ export class DeckTabState {
       handle.subscribe((document) => this.follow(handle, document)),
       handle.onRestored(() => session.undo.clear()),
       () => this.stopSavingTimer(),
+      observeThreads(handle.doc, () => {
+        const unresolved = openThreadCount(handle.doc);
+        if (unresolved !== this.current.unresolved) this.set({ unresolved });
+      }), // M7
     );
-    this.set({ handle, session, document: handle.state() });
+    this.set({ handle, session, document: handle.state(), unresolved: openThreadCount(handle.doc) });
   }
 
   // What the header reads of the replica: its phase, sync and read-only as they change, and edits left waiting for the
@@ -146,7 +156,22 @@ export class DeckTabState {
     return saved || handle.state().unsaved === 0 || this.deps.confirmDiscard(this.title);
   };
 
-  /** The tab stopped showing the deck: the replica closes once the host has acknowledged every edit it holds. */
+  /**
+   * M7: holds the replica open until the returned release (B's `hold`): the comment card's overlay takes it while it is
+   * mounted and until its withdrawal of an unsent draft is written, and each send until it settled.
+   */
+  hold = (): (() => void) => {
+    this.holders += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.holders -= 1;
+      if (this.disposed && this.holders === 0) this.closeWhenSaved();
+    };
+  };
+
+  /** The tab stopped showing the deck: the replica closes once nothing holds it and the host has acknowledged every edit. */
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
@@ -154,6 +179,10 @@ export class DeckTabState {
     for (const stop of this.stops.splice(0)) stop();
     this.listeners.clear();
     this.current.session?.dispose();
+    if (this.holders === 0) this.closeWhenSaved(); // M7: else the last release closes it
+  }
+
+  private closeWhenSaved(): void {
     const handle = this.current.handle;
     if (!handle || this.closing) return;
     if (handle.state().unsaved === 0 || handle.state().readOnly) return handle.close();

@@ -88,6 +88,9 @@ export function listThreads(doc: Doc): DeckThread[] {
 /** Calls `listener` after every transaction that changed the threads root or a thread in it; returns the unsubscribe. */
 export const observeThreads = Y.observeThreads;
 
+/** How many threads are open, orphans included (the header's unresolved count). */
+export const openThreadCount = (doc: Doc): number => Y.threadIds(doc).filter((id) => threadStatus(doc, id) === 'open').length;
+
 /** The state the UI and the agent see: each thread with whether its element lives and the derived `orphan`. */
 export function threadStates(doc: Doc): DeckThreadState[] {
   return listThreads(doc).map((thread) => {

@@ -4,6 +4,7 @@
 // the marquee and a flow child's insertion bar. It takes the stage's pointer presses (click, shift-click, ⌘-click,
 // double-click, marquee, drags), its keys (Escape, Tab, Enter, Delete, arrows, ⌘D, ⌘G, ⇧⌘G, ⌘] and ⌘[, ⌘A) and the
 // clipboard while the stage has focus. Gestures are gestures.ts's; which element a press picks is selection.ts's.
+// M7: the comment pins (../comments/Pins.tsx), at each commented element's top-right; a press on a pin is the pin's.
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import type { SlideCanvas } from '../../canvas';
 import { apply, applyLinear, HANDLES, union, type Box, type Guide, type Handle, type Pt } from '../../geometry';
@@ -11,6 +12,7 @@ import { isPinned } from '../../ir';
 import { ROOT } from '../../model';
 import type { ElementWrites } from '../../writers-elements';
 import { writeElements } from '../../writers-elements';
+import { CommentPins } from '../comments/Pins';
 import { DECK_COPY as C } from '../copy';
 import type { DeckSession } from '../session';
 import { copySelection, pasteClipboard, type ClipboardContext, type ImportAsset } from './clipboard';
@@ -111,7 +113,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       const c = ctx();
       const target = e.target as HTMLElement;
       if (!c) return;
-      if (target.closest('.deck-markbar, .deck-textbox')) return; // the text box's own
+      if (target.closest('.deck-markbar, .deck-textbox, .deck-comment-pin')) return; // the text box's own; M7: a pin's
       if (editing !== null && c.canvas.node(editing)?.contains(target)) return;
       el.focus({ preventScroll: true });
       const client = { x: e.clientX, y: e.clientY };
@@ -193,7 +195,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       const current = session.snapshot().selection;
       if (!c || current.length !== 1) return;
       const target = e.target as HTMLElement;
-      if (target.closest('.deck-markbar, .deck-textbox, [data-handle]')) return;
+      if (target.closest('.deck-markbar, .deck-textbox, [data-handle], .deck-comment-pin')) return; // M7: a pin's
       const client = { x: e.clientX, y: e.clientY };
       const p = slidePoint(client);
       const tree = slideTree(session.doc, slideId);
@@ -391,6 +393,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       {shown?.ghost && <div className="deck-ghost" style={boxStyle(shown.ghost)} />}
       {shown?.insertion && <div className="deck-insertion" data-insertion style={boxStyle(shown.insertion)} />}
       {editing !== null && canvas && renderText && <Fragment key={keyOf(canvas.node(editing))}>{renderText(editing, canvas)}</Fragment>}
+      {canvas && <CommentPins canvas={canvas} slideId={slideId} scale={scale} version={version} />}
     </div>
   );
 }

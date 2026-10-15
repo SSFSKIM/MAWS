@@ -12,7 +12,7 @@ import { slideOrder } from '../model';
 export type Zoom = 'fit' | number;
 export const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2] as const;
 /** M6: the panel beside the stage that a header action opens (one at a time; the milestones after add theirs). */
-export type DeckRail = 'theme' | 'check';
+export type DeckRail = 'theme' | 'check' | 'comments'; // M7: the threads rail
 
 export interface DeckSessionState {
   currentSlide: string | null;

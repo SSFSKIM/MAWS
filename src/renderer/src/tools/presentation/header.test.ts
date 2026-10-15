@@ -12,11 +12,12 @@ describe('the deck header’s actions (M6)', () => {
     const header = deckHeader(state(), { present: () => calls.push('present'), toggleRail: (rail) => calls.push(rail) });
     expect(header.actions?.map((a) => [a.id, a.label])).toEqual([
       ['present', 'Present'],
+      ['comments', 'Comments'], // M7
       ['theme', 'Theme'],
       ['check', 'Check against the design system'],
     ]);
     for (const action of header.actions ?? []) action.onSelect();
-    expect(calls).toEqual(['present', 'theme', 'check']);
+    expect(calls).toEqual(['present', 'comments', 'theme', 'check']);
   });
 
   it('shows the open panel pressed and Present disabled with no slide to show', () => {
@@ -27,5 +28,18 @@ describe('the deck header’s actions (M6)', () => {
 
   it('offers no actions before the deck has opened', () => {
     expect(deckHeader(state()).actions).toBeUndefined();
+  });
+
+  // M7 (D9): Comments after Present, the open-thread count on the header
+  it('offers Comments after Present, pressed while the threads rail is open, and counts the open threads', () => {
+    const calls: string[] = [];
+    const header = deckHeader(state({ rail: 'comments', unresolved: 3 }), { present: () => {}, toggleRail: (rail) => calls.push(rail) });
+    expect(header.actions?.map((a) => a.id)).toEqual(['present', 'comments', 'theme', 'check']);
+    const comments = header.actions!.find((a) => a.id === 'comments')!;
+    expect([comments.label, comments.pressed]).toEqual(['Comments', true]);
+    comments.onSelect();
+    expect(calls).toEqual(['comments']);
+    expect(header.unresolved).toBe(3);
+    expect(deckHeader(state({ unresolved: 0 })).unresolved).toBeUndefined();
   });
 });

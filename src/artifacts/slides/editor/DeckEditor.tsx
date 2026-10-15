@@ -6,6 +6,8 @@
 // M5: the transform layer on the stage, the toolbar's Insert and arrange controls, the inspector beside the stage.
 // M6: the Text style menu in the toolbar, New slide from layout in the filmstrip, and the panels the header's Theme and
 // Check open beside the stage (menus/).
+// M7: comments on elements (comments/): the toolbar's Comment and Comments, the threads rail beside the stage, the pins
+// on the overlay, and the frame P2's card is drawn over, through the shell's surface (B's `DocumentComments`).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { AssetUrl, SlideCanvas } from '../canvas';
@@ -19,6 +21,11 @@ import { Inspector } from './Inspector';
 import { measureInHost } from './transform/Overlay';
 import { useDeckView } from './deck-view';
 import { Filmstrip } from './Filmstrip';
+import type { CommentAuthor, DocumentComments } from '../../document/editor/comments/surface';
+import { CommentButtons } from './comments/CommentButtons';
+import { CommentFrame } from './comments/CommentFrame';
+import { CommentsRail } from './comments/CommentsRail';
+import { DeckCommentsProvider, useDeckComments } from './comments/controller';
 import { CheckPanel } from './menus/Check';
 import { insertLayoutSlide, LayoutsMenu } from './menus/Layouts';
 import { TextStyleMenu } from './menus/TextStyle';
@@ -51,6 +58,10 @@ export interface DeckEditorProps {
   importAsset?: ImportAsset;
   /** M6: the Theme panel's design systems and how the deck names one (the shell's: the artifact's `designSystemId`). */
   theme?: DeckThemeChoice;
+  /** M7: where a comment goes (P2's card, B's surface); without one, commenting is not offered. */
+  comments?: DocumentComments;
+  /** M7: who writes the editor's thread changes (the owner by default). */
+  commentAuthor?: CommentAuthor;
 }
 
 const NOTICE_MS = 6_000;
@@ -80,7 +91,7 @@ function faceRules(faces: Readonly<Record<string, DeckFace>>, assetUrl: AssetUrl
     .join('\n');
 }
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -177,8 +188,12 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   );
 
   const tokens = useDesignSystem(system).view?.tokens ?? null; // M6: the Text style menu's role faces
+  // M7: the comments' controller, shared by the toolbar, the overlay's pins, the rail and the card's frame
+  const openComments = useCallback(() => void (session.snapshot().rail !== 'comments' && session.toggleRail('comments')), [session]);
+  const commentsApi = useDeckComments({ session, surface: comments, author: commentAuthor, readOnly, openRail: openComments });
+
   const faces = faceRules(view.faces, assetUrl);
-  return (
+  const editor = (
     <div className="deck-editor" data-deck-editor data-compact={compact || undefined} onKeyDown={onKeyDown}>
       {faces && <style data-deck-faces>{faces}</style>}
       <Toolbar session={session} zoom={state.zoom} scale={scale} canUndo={state.canUndo && !readOnly} canRedo={state.canRedo && !readOnly}>
@@ -195,6 +210,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
           onToggleInspector={() => setInspectorOpen((open) => !open)}
         />
         <TextStyleMenu session={session} slideId={slide?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
+        <CommentButtons api={commentsApi} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
         <span role="status" className="deck-notice" data-deck-notice>
           {notice}
         </span>
@@ -213,31 +229,35 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
           />,
         )}
         <div className="deck-editor-main">
-          <Stage
-            session={session}
-            slide={slide}
-            scale={scale}
-            assetUrl={assetUrl}
-            viewport={viewport}
-            frame={frame}
-            onCanvas={onStageCanvas}
-            canvas={stageCanvas}
-            readOnly={!editable}
-            onNotice={setNotice}
-            artifactId={artifactId}
-            importAsset={importAsset}
-            scope={scope}
-          />
+          <CommentFrame api={commentsApi} surface={comments} canvas={stageCanvas} scale={scale}>
+            <Stage
+              session={session}
+              slide={slide}
+              scale={scale}
+              assetUrl={assetUrl}
+              viewport={viewport}
+              frame={frame}
+              onCanvas={onStageCanvas}
+              canvas={stageCanvas}
+              readOnly={!editable}
+              onNotice={setNotice}
+              artifactId={artifactId}
+              importAsset={importAsset}
+              scope={scope}
+            />
+          </CommentFrame>
           {slide && <Notes key={slide.id} session={session} slideId={slide.id} token={slide.token} readOnly={readOnly || slide.held !== null} />}
         </div>
         {state.rail === 'theme' && scope(<ThemePanel session={session} system={system} theme={theme} overrides={view.overrides} faces={view.faces} readOnly={readOnly} />)}
         {state.rail === 'check' && <CheckPanel session={session} system={system} />}
+        {state.rail === 'comments' && <CommentsRail api={commentsApi} onClose={() => session.toggleRail('comments')} />}
         {inspectorOpen &&
           slide &&
           scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} />)}
       </div>
     </div>
   );
+  return <DeckCommentsProvider value={commentsApi}>{editor}</DeckCommentsProvider>;
 }
 
 function Toolbar({ session, zoom, scale, canUndo, canRedo, children }: { session: DeckSession; zoom: Zoom; scale: number; canUndo: boolean; canRedo: boolean; children?: ReactNode }) {
