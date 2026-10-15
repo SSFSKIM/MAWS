@@ -6,6 +6,7 @@
 // The two paths give two different keys: an org keys itself one way, and every browser follows that way.
 import { argon2idAsync } from '@noble/hashes/argon2';
 import { importOrgKey, type OrgKey } from 'desk-hub/protocol';
+import { heldOrgKey } from './org-key';
 
 /** Names this derivation everywhere it is an input: the PRF's input, HKDF's info, and the passphrase's salt. */
 export const ORG_KEY_LABEL = 'smns-desk-org-key-v1';
@@ -60,7 +61,7 @@ export async function orgKeyFromPassphrase(passphrase: string, org: string, prog
  * the bytes. */
 export async function holdKeyBytes(raw: Uint8Array): Promise<OrgKey> {
   try {
-    return await importOrgKey(raw);
+    return heldOrgKey((await importOrgKey(raw)).hmac);
   } finally {
     raw.fill(0);
   }
