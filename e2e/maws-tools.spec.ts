@@ -21,6 +21,7 @@ import { parseAskSteer } from '../src/shared/maws/ask';
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
 import { invoke, value } from './support/c7-replay';
 import { asDocumentReplay } from './support/document-replay'; // P3-B (M7)
+import { FIRST_CREATED_REVISION } from './support/design-systems'; // P3-D (the P3 spec's Decision Log 67)
 import { REPO_ROOT } from './support/launch';
 import {
   allowNext, askFixture, clearToasts, fixtureRows, idle, mcpCalls, mcpResultOf, metaEvents, ofKind, PASS3, recordedCwd, recordEvents, replay, resultText, scene as sharedScene, shootThemes, show,
@@ -600,14 +601,15 @@ const DOCUMENT_MARKDOWN = '# Plan ^h1\n\nThe review is scheduled for Friday. ^p1
 
 test('the document tools on the real server: a document from markdown, its guide, a batch, a stale base with an intact quote applying, a half-invalid batch refused naming the block with nothing written', async () => {
   const repo = recordedCwd(ARTIFACTS);
+  const rev0 = FIRST_CREATED_REVISION; // P3-D: the seeded defaults take the first log rows (the P3 spec's Decision Log 67); derived, never a literal
   const replayed = asDocumentReplay(
     ARTIFACTS,
     [
       { name: 'artifact_create', input: { kind: 'document', title: 'Plan', handle: 'dash', content: DOCUMENT_MARKDOWN } },
       { name: 'artifact_describe_type', input: { kind: 'document' } },
-      { name: 'artifact_edit', input: { artifact: 'dash', baseRevision: 1, ops: [{ op: 'replace_text', block: 'p1', old: 'scheduled for Friday', new: 'moved to Monday' }] } },
-      { name: 'artifact_edit', input: { artifact: 'dash', baseRevision: 1, ops: [{ op: 'replace_text', block: 'p2', old: 'The owner signs off', new: 'The lead signs off' }] } },
-      { name: 'artifact_edit', input: { artifact: 'dash', baseRevision: 1, ops: [{ op: 'insert', after: 'h1', markdown: 'Would land first.' }, { op: 'replace_text', block: 'p1', old: 'scheduled for Friday', new: 'set for Tuesday' }] } },
+      { name: 'artifact_edit', input: { artifact: 'dash', baseRevision: rev0, ops: [{ op: 'replace_text', block: 'p1', old: 'scheduled for Friday', new: 'moved to Monday' }] } },
+      { name: 'artifact_edit', input: { artifact: 'dash', baseRevision: rev0, ops: [{ op: 'replace_text', block: 'p2', old: 'The owner signs off', new: 'The lead signs off' }] } },
+      { name: 'artifact_edit', input: { artifact: 'dash', baseRevision: rev0, ops: [{ op: 'insert', after: 'h1', markdown: 'Would land first.' }, { op: 'replace_text', block: 'p1', old: 'scheduled for Friday', new: 'set for Tuesday' }] } },
     ],
     'document',
   );
@@ -630,21 +632,21 @@ test('the document tools on the real server: a document from markdown, its guide
         expect(result.isError, resultText(result)).toBeUndefined();
         return JSON.parse(resultText(result)) as Record<string, unknown>;
       };
-      expect(json(0)).toMatchObject({ status: 'created', kind: 'document', title: 'Plan', handle: 'dash', revision: 1 });
+      expect(json(0)).toMatchObject({ status: 'created', kind: 'document', title: 'Plan', handle: 'dash', revision: rev0 }); // P3-D
       const described = json(1) as { kind: string; guide: string; format: string };
       expect(described.kind).toBe('document');
       expect(described.guide.startsWith('# Document: guide')).toBe(true);
       expect(described.format).toContain('## Limits');
       const first = json(2) as { revision: number; results: { line: string }[] };
-      expect(first.revision).toBe(2);
+      expect(first.revision).toBe(rev0 + 1); // P3-D
       expect(first.results.map((r) => r.line)).toEqual(['replaced 1 occurrence(s) in ^p1']);
       // a stale baseRevision whose quote is intact applies (quote validation, Decision Log 34)
-      expect(json(3)).toMatchObject({ status: 'edited', revision: 3 });
+      expect(json(3)).toMatchObject({ status: 'edited', revision: rev0 + 2 }); // P3-D
       // a quote the first batch changed: refused naming the block with its current text, the valid insert not written
       const refused = answer(4);
       expect(refused.isError).toBe(true);
       const refusal = JSON.parse(resultText(refused).slice(resultText(refused).indexOf(' {"reason":') + 1)) as Record<string, unknown>;
-      expect(refusal).toMatchObject({ reason: 'notFound', opIndex: 1, liveRevision: 3 });
+      expect(refusal).toMatchObject({ reason: 'notFound', opIndex: 1, liveRevision: rev0 + 2 }); // P3-D
       expect(refusal.candidates).toContainEqual({ id: 'p1', text: 'The review is moved to Monday.' });
     });
   } finally {

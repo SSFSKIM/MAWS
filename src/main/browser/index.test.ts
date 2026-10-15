@@ -394,7 +394,9 @@ describe("startBrowser: cua's primitive server (E13)", () => {
 
   // the socket peer authentication spec of 2026-10-09 (M2, Acceptance 4): every status of a known session names its engine
   // to the socket's peer check; the committed addon loads from the repository root (vitest's working directory)
-  it('names each known session\'s engine from its statuses: the pid while it runs, none once it exited, nothing for an unknown id', async () => {
+  // macOS: the server's peer module is the committed peer identity addon, a darwin-arm64 prebuild loaded only on Apple
+  // silicon macOS.
+  it.skipIf(process.platform !== 'darwin')('names each known session\'s engine from its statuses: the pid while it runs, none once it exited, nothing for an unknown id', async () => {
     userData = mkdtempSync('/tmp/mbs-');
     const listeners = new Set<(payload: { appSessionId: AppSessionId; status: { process: string; pid: number | null } }) => void>();
     const hosts = {

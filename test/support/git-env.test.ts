@@ -22,7 +22,10 @@ test('read oracle matches the app with global ignores and poisoned Git routing w
     writeFileSync(join(repo, 'visible.txt'), 'visible\n');
     writeFileSync(join(foreign, 'sentinel.txt'), 'foreign bytes\n');
     fixture(foreign, 'add', 'sentinel.txt');
-    fixture(foreign, '-c', 'commit.gpgsign=false', 'commit', '--quiet', '-m', 'foreign sentinel');
+    // git 2.47 and later detach the auto-maintenance a commit starts; left on, it takes and drops
+    // `.git/objects/maintenance.lock` under the snapshots below, which must see the foreign repository change only by
+    // what the reads do.
+    fixture(foreign, '-c', 'commit.gpgsign=false', '-c', 'maintenance.auto=false', 'commit', '--quiet', '-m', 'foreign sentinel');
     const snapshot = () => Object.fromEntries(readdirSync(foreign, { recursive: true, withFileTypes: true })
       .filter((entry) => entry.isFile()).map((entry) => {
         const path = join(entry.parentPath, entry.name);

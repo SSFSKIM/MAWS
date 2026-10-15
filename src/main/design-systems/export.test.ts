@@ -47,19 +47,20 @@ describe('the claude exporter', () => {
     expect(registry.get('design_system', 'claude')).toBeUndefined();
   });
 
-  it('writes the system as one zip of Claude’s files: tokens.json, README.md from the law, its faces under fonts/ and the assets its files name', async () => {
+  it('writes the system as one zip of Claude’s files: tokens.json, README.md from the law, its faces under fonts/ and every other asset it holds under assets/', async () => {
     const registry = new ExporterRegistry();
     registerDesignSystemExporters(registry);
     const held: Record<string, string> = {
       'assets/NotoSerifKR-Regular-full.woff2': 'regular face',
       'assets/NotoSerifKR-Bold-full.woff2': 'bold face',
       'assets/OFL.txt': 'SIL OPEN FONT LICENSE Version 1.1',
+      'assets/brand-guide.pdf': 'a brand guide nothing in the system names', // the gap of Decision Log 30, closed by A's listing
     };
     const asked: string[] = [];
     const sources: ExportSources = {
       title: 'Official',
       state: async () => systemState(official.files),
-      listAssets: async () => [], // P3-C at its merge of D under review: A's landed required member
+      listAssets: async () => Object.keys(held).map((ref) => ({ ref, name: ref.slice('assets/'.length), mime: 'application/octet-stream', size: held[ref]!.length })),
       readAsset: async (ref) => {
         asked.push(ref);
         return ref in held ? { bytes: bytes(held[ref]!), mime: 'application/octet-stream' } : null;
@@ -72,7 +73,8 @@ describe('the claude exporter', () => {
 
     const entries = readZip(new Uint8Array(await readFile(request().path)));
     const byName = Object.fromEntries(entries.map((entry) => [entry.name, new TextDecoder().decode(entry.data)]));
-    expect(Object.keys(byName).sort()).toEqual(['README.md', 'assets/OFL.txt', 'fonts/NotoSerifKR-Bold-full.woff2', 'fonts/NotoSerifKR-Regular-full.woff2', 'tokens.json']);
+    expect(Object.keys(byName).sort()).toEqual(['README.md', 'assets/OFL.txt', 'assets/brand-guide.pdf', 'fonts/NotoSerifKR-Bold-full.woff2', 'fonts/NotoSerifKR-Regular-full.woff2', 'tokens.json']);
+    expect(byName['assets/brand-guide.pdf']).toBe(held['assets/brand-guide.pdf']);
     expect(byName['README.md']).toBe(official.files['DESIGN.md']);
     expect(byName['fonts/NotoSerifKR-Regular-full.woff2']).toBe('regular face');
     expect(byName['assets/OFL.txt']).toBe(held['assets/OFL.txt']);
@@ -82,8 +84,25 @@ describe('the claude exporter', () => {
       { family: 'Noto Serif KR', file: 'NotoSerifKR-Regular-full.woff2', weight: '400', style: 'normal' },
       { family: 'Noto Serif KR', file: 'NotoSerifKR-Bold-full.woff2', weight: '700', style: 'normal' },
     ]);
-    // it read what the system's files name, and nothing else
+    // it read every asset the store lists, once each
     expect(asked.sort()).toEqual(Object.keys(held).sort());
+  });
+
+  // Fix wave 1: an asset the listing advertises but the store cannot read fails the export, naming it, rather than
+  // writing an archive without it
+  it('fails the export, naming the ref, when a listed asset cannot be read, and writes nothing', async () => {
+    const registry = new ExporterRegistry();
+    registerDesignSystemExporters(registry);
+    const listed = ['assets/OFL.txt', 'assets/vanished.png'];
+    const answer = await runExport(registry, request(), {
+      title: 'Official',
+      state: async () => systemState(official.files),
+      listAssets: async () => listed.map((ref) => ({ ref, name: ref.slice('assets/'.length), mime: 'application/octet-stream', size: 1 })),
+      readAsset: async (ref) => (ref === 'assets/OFL.txt' ? { bytes: bytes('licence'), mime: 'text/plain' } : null),
+      print: async () => new Uint8Array(),
+    });
+    expect(answer).toMatchObject({ ok: false, error: expect.stringContaining('assets/vanished.png') });
+    await expect(readFile(request().path)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('answers the converter’s refusal when the document holds no system, and writes nothing', async () => {

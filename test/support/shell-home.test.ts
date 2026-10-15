@@ -15,7 +15,9 @@ describe('a scratch shell home', () => {
   const answer = (shell: string, args: string[], env: Record<string, string>) =>
     execFileSync(shell, args, { env: { ...process.env, ...env }, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 4_000 }).trimEnd().split('\n').at(-1);
 
-  it('gives a zsh login shell its own profile and history file instead of the owner home’s', () => {
+  // macOS: zsh starts under macOS's system startup files there (/etc/zprofile, and /etc/zshrc, which puts HISTFILE
+  // under ZDOTDIR); Ubuntu's /etc/zsh files differ.
+  it.skipIf(process.platform !== 'darwin')('gives a zsh login shell its own profile and history file instead of the owner home’s', () => {
     const { env } = writeScratchShellHome(dir);
     expect(answer('/bin/zsh', ['-ilc', `print -r -- "$${PROFILE_VARIABLE}|$HISTFILE"`], env)).toBe(`.zprofile|${dir}/.zsh_history`);
   });

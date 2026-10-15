@@ -126,6 +126,7 @@ import { fileAdmission } from './library/admission'; // M6b
 import { registerDocumentExporters } from './artifacts/export-document'; // P3-B
 // P3-B end
 // P3-D start
+import { engineHostCall, governDocumentExporter } from './design-systems/documents';
 import { registerDesignSystemExporters } from './design-systems/export';
 import { registerPresentationExporters } from './presentations/export'; // P3-C M9
 import { registerPresenter } from './presentations/present'; // P3-C M6
@@ -583,7 +584,8 @@ void startWithProfileLock(app, () => {
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
   });
   shutdown.add('artifacts', artifacts.stop);
-  shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(exporter))); // P3-B: document × md, html, docx, pdf
+  // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
+  shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
   registerPresentationExporters(artifacts.exporters, { call: (name, input) => hosts.dispatch('engine-host', name, input) as never, defaults: () => defaultsOf(settings.state().settings) ?? { owner: null, spaces: {} }, env: process.env }); // P3-C M9: `presentation` as html, pdf, png, pptx, claude
   shutdown.add('presenter', registerPresenter({ register: registerMainHandler, appUrl, env: process.env }).end); // P3-C M6: `presentations.present`, the show's windows

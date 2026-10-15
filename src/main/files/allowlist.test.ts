@@ -49,7 +49,8 @@ describe('files allowlist', () => {
     expect(await rootsOf(record(join(base, 'gone'), [join(base, 'also-gone')]))).toEqual([]);
   });
 
-  it('canonicalises case on a case-insensitive volume, as the native realpath does', async () => {
+  // macOS: the temporary directory is on a case-insensitive APFS volume, where `repo` names `Repo`.
+  it.skipIf(process.platform !== 'darwin')('canonicalises case on a case-insensitive volume, as the native realpath does', async () => {
     mkdirSync(join(base, 'Repo'));
     const roots = await rootsOf(record(join(base, 'repo')));
     expect(roots).toEqual([join(await realpath(base), 'Repo')]);

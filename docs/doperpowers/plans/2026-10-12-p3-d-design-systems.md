@@ -44,6 +44,7 @@ What does not change: the engine and the wire (D-1); the app's own theme (`src/r
     - Gates at 49ff2c43: typecheck and lint clean; full unit suite 12900 passed, 1 skipped, and 1 failed (the known `live-budget` timeout flake at load 56, which passes alone); e2e design-systems 5/5, settings 10/10, panel 26/26, library 2/2, artifacts 4/4, tools 8/8.
     - Gates at 65f7647c: the design-system, main and engine-host design-system tests 260/260 and 276/276; typecheck and lint clean; `e2e:design-systems` 5/5.
 - [x] (2026-10-13 PDT) Whole-branch review: two `reviewer-high` reviews by area at ba7c2aa2, eight findings, and fix wave 15152e2a..e81614c4 (Decision Log 31). Both re-reviews were clean. Then master and L's 3e99c066 were merged (47573bcf), the final gates run, Outcomes written, and the hand-back made.
+- [x] (2026-10-14 PDT) Final re-merge of master cf33edc6 (Decision Log 33): the follow-up and its fix wave were reviewed clean. Gates at c079f39d: typecheck and lint clean; full unit suite at six workers 12995 passed, 1 skipped, 0 failed; e2e design-systems 6/6, settings 10/10, panel 26/26, library 5/5, artifacts 4/4 (A's perf case skipped), tools 10/10. Gates at d3ece4f4: typecheck and lint clean; the design-system, main and renderer artifacts tests 287/287; e2e design-systems 6/6, artifacts 4/4, library 5/5.
 
 ## Terms
 
@@ -656,6 +657,33 @@ Requested of A (through the architect): D10's four items, and in M6, if absent, 
       - the renderer's viewers and library pass 127/127;
       - the e2e groups pass: design-systems 5/5, settings 10/10, panel 26/26, library 4/4, artifacts 4/4, tools 8/8.
     - **Lineage.** Through the spec's Decision Log 49, §4.3, §4.6, §4.10 and §5 P3-D are unchanged since the pin (dda3d0b4 → fc1d12d5). Entries 39, 42, 43, 44 and 47 are this child's rulings, all folded here. The pin holds.
+33. 2026-10-14 (the final re-merge of master cf33edc6, which carries A at 14d350c5, L at bcea8eaa, P2-C2 and P2-C3; merged at ae7e7d14, with follow-up commits 5f0733ef..c079f39d and fix wave 33dedb5d..d3ece4f4; the follow-up and its fix wave were reviewed clean).
+    - **A's required members.** `ArtifactHost` now requires `open(id, {doc})`, `attributions(…, {doc})`, `acceptSuggestion` and `rejectSuggestion`. These were taken with P3-C's resolution (e4c3d2fe).
+    - **The Claude export carries every asset `ExportContext.assets.list()` reports.** The reference scan of entry 30 is gone, and an asset the listing advertises but that cannot be read fails the export, naming it.
+    - **The mirror writes the system's assets**, fonts included, at `<slug>/assets/<name>` through L's `readAsset`.
+    - **The `SETTINGS_DEFAULTS_V13` shim is deleted**, A's M8 cleanup.
+    - **The spec's Decision Log 59** amends A's `ArtifactHost.assetUrl(artifactId, ref, revision?)` in place, marked P3-D, in `src/artifacts/host.ts`. The renderer host builds `revision ?? 'live'`. A pinned version's view asks the host for its assets at the version's revision, so nothing under `src/artifacts/` knows the URL scheme any more. A deleted system's retained version keeps its fonts, because A's Decision Log 46 serves them only at a named revision. `e2e:design-systems` covers that case.
+    - **No exhaustive switch** of D's covers `Carry`, so A's new `accept` and `reject` kinds touched nothing. D numbers no index migration; settings 14 stays D's. Nothing of D's relies on `artifact_read`'s generic `json`, which P3-C omits for kinds that register `readFiles`.
+    - **The page** registers through master's editor registry with no change.
+34. 2026-10-14 (the spec's Decision Log 61, part 1: the renderer's house system; ddf93713..15f55315 with fix 58710515, reviewed clean).
+    - **The problem.** The renderer could not name the house system. A scope with no system and no defaults drew the bundled floor even where the owner had edited the house system.
+    - **The host command.** A D-owned IPC namespace, `designSystems`, carries one command, `designSystems.house`. The engine host owns it, windows may call it, it takes no input and it answers `{houseId: uuid | null}` from the chain's `house()`. `registerDesignSystemReads` in `src/engine-host/design-systems/reads.ts` serves it behind A's commit barrier.
+    - **The renderer hook.** `useHouseDesignSystem(): string | null` lives in `src/renderer/src/artifacts/design-system/house.ts`, with `houseDesignSystem` and `followHouseDesignSystem(client)`.
+      - One shared source reads on first use. It re-reads on the design systems' `artifacts.changed` and on `artifacts.resync`, and drops answers that a later read overtook.
+      - A failed read keeps the last good id. A `host_unavailable` refusal stays quiet; every other fault is reported through `console.error`.
+    - **The portable seam.** `apply.ts` adds the `HouseDesignSystem` interface and `DesignSystemHouseContext`, filled by the app-root provider. It also adds `useGoverningSystem(artifact, {owner, spaces}, live?)`, the resolver C's deck scope and B's documents call. It ends at the host's house system rather than the floor, and nothing under `src/artifacts/` imports renderer transport.
+    - **Tests.** `e2e:design-systems` edits the house system through its page and checks that an ungoverned fixture draws it. After the house is deleted, the same fixture draws the floor.
+    - **For part 2.** B's shell computes `systemFor` inside a `useMemo`, so `useGoverningSystem` must run in a component or custom hook with reactive settings and live-system inputs, not inside that memo.
+35. 2026-10-14 (the spec's Decision Log 61, part 2: the document binding; master 06c8ccdf with B landed, merged at 1a849fdd; 27f9bd0e..459b3f34; task-reviewed, with its one finding deferred below).
+    - **Form (b).** B's `SystemScope` calls a `use`-named hook in B's seam file, `useSystemFor`; the edit in B's file is marked P3-D. A plain call inside B's `useMemo` let the React Compiler cache it, and the hooks inside D's `systemFor` then stopped running.
+    - **What D's `systemFor` resolves through.** `useGoverningSystem`, bound to settings 14's owner and Space defaults, part 1's house hook, and the library's live design systems as the `live` check. Every id counts as live until the library first answers.
+    - **When it is provided.** `provideDocumentDesignSystem({Scope: DesignSystemScope, systemFor})` runs at App.tsx's module load, in a P3-D block. A provision arriving after a restored document's first render would change its hook count.
+    - **Exports.** B's document exporters now receive the governing system.
+      - A main-only host command, `designSystems.governing`, answers a version's own pin, else the chain, else the floor. It is main-only because windows never ask the host (the spec's DL 61(d)).
+      - Main wraps B's exporters with `resolveDsVars` and `officeThemeXml`, bound to that system.
+      - `resolveDsVars` moved into the React-free `resolve-vars.ts`; `apply.ts` re-exports it, so X28's import path holds. Before landing it must be reconciled with C's recorded `literals.ts` move (ledger §7).
+    - **B's e2e caret helper** now clicks the paragraph's last line, because the house system's 16 px body wraps in the 288 px panel.
+    - **Deferred, a `[parent-impact]` row.** HTML and PDF exports do not carry the system's bundled faces. The exporter seam receives the tokens but not the `@font-face` declarations or the font bytes, so `official`'s Noto Serif KR falls back where it is not installed. Carrying faces needs B's exporter seam and X31's `fonts?` policy (the spec's DL 53(4)) to accept sanitized face declarations with self-contained assets. That is a cross-child change for P3-F; exports used no system at all before this binding.
 2. 2026-10-12: parent pin taken at master 4a51531b (blob dda3d0b4), the spec's head when this document was written. Its only change since the dispatch commit 28dd4d9c is Decision Log 38 (the upstream filing), which does not touch §4.6, X28 or X29.
 
 ## Outcomes & Retrospective
@@ -685,13 +713,16 @@ A machine-made system, the agent's "Harbor Tutoring Design System" from a CSS-va
 - Line 15: the live run.
 - Line 16: the gates.
 
+**Closing (2026-10-14).** A document now renders and exports under its governing system through D's chain. That chain ends at the owner's house system in the renderer (Decision Log 34) and at the version's pin for a retained export (Decision Log 35).
+
 **Listed for P3-F, not faked here:**
-- the document restyle e2e on B's editor, and the deck restyle on C's (a fixture stands in for both);
-- an asset pinned after a system's deletion, once A's M9 keeps a deleted system's assets reachable;
+- the document restyle e2e on B's editor: buildable now that the binding exists (Decision Log 35). The deck restyle e2e on C's editor. A fixture stands in for both;
+- the system's bundled faces in HTML and PDF exports, which needs B's exporter seam and X31's `fonts?` (Decision Log 35);
 - the law edited in B's document editor (format 2, Decision Log 3);
 - the deck check against a system's hard don'ts, once C registers its element stream.
 
 **Retrospective.**
+- **The final re-merge (Decision Log 33)** closed three gaps the landing had carried: the export's asset completeness, the mirror's fonts, and a deleted system's assets for a retained version. It moved asset URLs behind `ArtifactHost` (the spec's Decision Log 59).
 - The milestone reviews caught real defects in every milestone, and most were cross-replica or cross-lifetime cases. A token and a descendant created on two replicas, an inherited `$type` lost on rehome, a shared style owned by the first replica, unacknowledged edits dropped on close: none of these shows on one replica in one tab. Writing the second replica or the second showing into the first test of each milestone would have saved most fix waves.
 - Splitting the whole-branch review by area (portable core, integration) against a synthetic base tree (master plus A plus L) kept the siblings' code out of the package. It found eight cross-milestone defects that the per-milestone reviews had missed.
 - One review round measured stale code (M3's second re-review). After that, every reviewer brief named the checkout head and required line numbers quoted from it.

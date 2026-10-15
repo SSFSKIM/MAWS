@@ -8,13 +8,17 @@
 //   minimal page in a `DesignSystemScope`, through `tokens.css`) restyles with its live system (10); a retained version
 //   of a document pinned to an older revision of its system renders that revision while the live fixture shows the new
 //   values (11); deleting the system is refused naming the document, succeeds once the page's sheet moves it, and the
-//   retained version still renders the pinned state (13);
+//   retained version still renders the pinned state (13); once deleted, the system's face is still served at the
+//   revision a retained version pins and refused live, until no version pins it (A's Decision Log 46);
 // - D's chain, registered in A's store, governs the pin a version is written with: with no defaults, the house system;
 //   then the defaults chosen in Settings › Artifacts (main's `artifacts.setDefaults`): a document's own system, else its
 //   Space's default, else the owner's; a deleted default falls through to the next link (12);
+// - the window resolves the same chain for a scope (the P3 spec's Decision Log 61): a fixture that names no system,
+//   under no default, draws the house system the host's chain names (`designSystems.house`) as the owner edited it, not
+//   the bundled floor, and the floor once the house system is deleted;
 // - `official`'s bundled face sets its page's Type section through the app's CSP, a canon frame shows the system's
-//   image asset, and the header's "Export for Claude" writes the system as a zip of Claude's files (A's export service;
-//   D12);
+//   image asset, and the header's "Export for Claude" writes the system as a zip of Claude's files with every asset it
+//   holds (A's export service; D12);
 // - the agent's `ask` with design_system questions, over C3's replay of a journal derived from E1's recorded blocking ask
 //   with only the ask's questions and its recorded answers rewritten (the replay matches the host's answers by request
 //   id; what the sheet submitted is asserted on the journal's own rows): the sheet lists the seeded systems with their
@@ -109,7 +113,7 @@ function recolourAccent(page: Page, artifactId: string, hex: string): Promise<{ 
 }
 
 // The document fixture (the renderer's e2e seam, standing for B's editor): a minimal page in a `DesignSystemScope`.
-type SystemRef = { id: string; versionSeq?: number } | { builtin: 'maws' } | null;
+type SystemRef = { id: string; versionSeq?: number } | { builtin: 'maws' } | null | { governedBy: { designSystemId?: string | null; spaceId?: string | null } };
 interface FixtureSeam {
   __maws_design_system_fixture: { mount(name: string, system: SystemRef): void; unmount(name: string): void };
 }
@@ -247,6 +251,73 @@ test('a document fixture restyles with its system, its retained version keeps th
   expect(launch!.consoleErrors()).toEqual([]);
 });
 
+// A's Decision Log 46 (X29): a retained version pinned to a system deleted since keeps that system's faces. The store
+// serves a deleted system's assets at a named revision while any retained version pins it, never live, and the version
+// view loads its faces at the pinned revision.
+test('a retained version keeps its deleted system’s face: served at the pinned revision, never live, until no version pins it', async () => {
+  test.setTimeout(150_000);
+  const page = await ready();
+  const official = (await systems(page)).find((s) => s.title === 'Official')!;
+  const { artifact: system } = await ok<{ artifact: Row }>(page, 'artifacts.duplicate', { artifactId: official.id }); // its assets copied with it
+  const { artifact: doc } = await ok<{ artifact: Row }>(page, 'artifacts.create', { kind: 'document', title: 'Transcript request', designSystemId: system.id });
+  const pin = (await saveVersion(page, doc.id, 'Sent')).designSystemRef!;
+  expect(pin).toEqual({ id: system.id, versionSeq: expect.any(Number) });
+  const FACE = 'assets/NotoSerifKR-Regular-full.woff2';
+  const faceAt = (revision: number | 'live') => `maws-artifact://${system.id}/${revision}/${FACE}`;
+  // Loads the face from the store as a new FontFace whose URL carries a fresh query, so no cache answers for the store
+  const loads = (url: string) =>
+    page.evaluate(async (u) => {
+      try {
+        await new FontFace('ds-e2e-probe', `url("${u}?probe=${Math.random()}")`).load();
+        return true;
+      } catch {
+        return false;
+      }
+    }, url);
+  // The face a fixture's body text is set in, under its private family name, and whether that face has loaded
+  const fixtureFace = (name: string) =>
+    fixture(page, name)
+      .locator('p.ds-type-body')
+      .evaluate(async (element) => {
+        const alias = getComputedStyle(element).fontFamily.split(',').map((family) => family.trim().replace(/^["']|["']$/g, '')).find((family) => family.startsWith('ds-face-'));
+        if (!alias) return null;
+        const faces = await document.fonts.load(`400 16px "${alias}"`, '밀도');
+        const urls = Array.from(document.head.querySelectorAll('style'), (style) => style.textContent ?? '').join('\n');
+        return { loaded: faces.length > 0 && faces.every((face) => face.status === 'loaded'), urls };
+      });
+  const pinnedUrl = `//${system.id}/${pin.versionSeq}/${FACE}`;
+
+  expect(await loads(faceAt(pin.versionSeq))).toBe(true);
+  expect(await loads(faceAt('live'))).toBe(true);
+  // the retained version renders in the pinned state, its face loaded at the pinned revision: the URL the window's
+  // ArtifactHost gives for `assetUrl(id, ref, versionSeq)` (the P3 spec's Decision Log 59)
+  await mountFixture(page, 'retained', pin);
+  await expect(fixture(page, 'retained')).toHaveAttribute('data-status', 'ready', { timeout: 15_000 });
+  await expect.poll(async () => (await fixtureFace('retained'))?.loaded, { timeout: 15_000, message: 'the pinned face loads' }).toBe(true);
+  expect((await fixtureFace('retained'))!.urls).toContain(pinnedUrl);
+  await unmountFixture(page, 'retained');
+
+  // the document moves to another system and the system is deleted
+  await ok(page, 'artifacts.update', { artifactId: doc.id, designSystemId: null });
+  await ok(page, 'artifacts.delete', { artifactId: system.id });
+  expect((await ok<{ artifact: Row | null }>(page, 'artifacts.get', { artifactId: system.id })).artifact).toBeNull();
+  // the face is still served at the pinned revision, and refused live
+  expect(await loads(faceAt(pin.versionSeq))).toBe(true);
+  expect(await loads(faceAt('live'))).toBe(false);
+  // the retained version, read again from the store, still renders with its face
+  await mountFixture(page, 'after delete', pin);
+  await expect(fixture(page, 'after delete')).toHaveAttribute('data-status', 'ready', { timeout: 15_000 });
+  await expect.poll(async () => (await fixtureFace('after delete'))?.loaded, { timeout: 15_000, message: 'the pinned face loads after the delete' }).toBe(true);
+  expect((await fixtureFace('after delete'))!.urls).toContain(pinnedUrl);
+  await unmountFixture(page, 'after delete');
+
+  // once no retained version pins it, the deleted system's face is refused at the pinned revision too
+  expect((await ok<{ removed: number }>(page, 'artifacts.pruneVersions', { artifactId: doc.id, olderThan: Date.now() + 60_000 })).removed).toBeGreaterThan(0);
+  expect(await loads(faceAt(pin.versionSeq))).toBe(false);
+  // the only console errors are the two refused loads (Chromium's line names no URL)
+  expect(launch!.consoleErrors()).toEqual(Array(2).fill('Failed to load resource: the server responded with a status of 404 (Not Found)'));
+});
+
 // A one-pixel PNG, the canon's image asset.
 const PIXEL_PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
 const unzip = (...args: string[]) => execFileSync('/usr/bin/unzip', args, { encoding: 'utf8' });
@@ -260,6 +331,11 @@ test('Official’s bundled face sets its Type section, a canon frame shows an im
   await page.evaluate(
     ([id, b64]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke('artifacts.uploadAsset', { artifactId: id, name: 'mark.png', mime: 'image/png', bytes: Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)) }),
     [official.id, PIXEL_PNG] as const,
+  );
+  // and an asset nothing in the system names, which the export carries all the same (A's assets.list())
+  await page.evaluate(
+    (id) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke('artifacts.uploadAsset', { artifactId: id, name: 'brand-notes.txt', mime: 'text/plain', bytes: new TextEncoder().encode('Notes for the brand.') }),
+    official.id,
   );
   const MARK = '<div class="mark"><img src="assets/mark.png" alt="The office mark" width="24" height="24"></div>';
   await ok(page, 'artifacts.testWrite', { artifactId: official.id, opId: 'ds-e2e-mark', ops: [{ op: 'setAttr', root: 'files', key: 'components/mark.html', value: MARK }] });
@@ -301,7 +377,7 @@ test('Official’s bundled face sets its Type section, a canon frame shows an im
   expect(path).toMatch(/\/\d+-claude\.zip$/);
   expect(unzip('-t', path)).toContain('No errors detected');
   expect(unzip('-Z1', path).trim().split('\n').sort()).toEqual([
-    'README.md', 'assets/OFL.txt', 'assets/mark.png', 'fonts/NotoSerifKR-Bold-full.woff2', 'fonts/NotoSerifKR-Regular-full.woff2', 'tokens.json',
+    'README.md', 'assets/OFL.txt', 'assets/brand-notes.txt', 'assets/mark.png', 'fonts/NotoSerifKR-Bold-full.woff2', 'fonts/NotoSerifKR-Regular-full.woff2', 'tokens.json',
   ]);
   expect(unzip('-p', path, 'README.md')).toBe(readFileSync(join(REPO_ROOT, 'src/artifacts/types/design_system/defaults/official/DESIGN.md'), 'utf8'));
   const tokens = JSON.parse(unzip('-p', path, 'tokens.json')) as { name: string; color: { tokens: { name: string; value: string }[] }; type: { fonts: unknown[] } };
@@ -313,6 +389,42 @@ test('Official’s bundled face sets its Type section, a canon frame shows an im
   ]);
   const bundledFont = readFileSync(join(REPO_ROOT, 'src/artifacts/types/design_system/defaults/official/assets/NotoSerifKR-Regular-full.woff2'));
   expect(Buffer.from(execFileSync('/usr/bin/unzip', ['-p', path, 'fonts/NotoSerifKR-Regular-full.woff2'], { maxBuffer: 16 * 1024 * 1024 })).equals(bundledFont)).toBe(true);
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// The P3 spec's Decision Log 61: a scope the window resolves itself (as B's documents and C's decks do) ends the chain at
+// the house system the host's chain names, so the owner's edits to it show; the bundled floor only once none is left.
+test('a scope that names no system, under no default, draws the house system as the owner edited it, and the floor once it is deleted', async () => {
+  test.setTimeout(120_000);
+  const page = await ready();
+  const house = (await systems(page)).find((s) => s.title === 'MAWS')!;
+  expect(await ok(page, 'designSystems.house')).toEqual({ houseId: house.id });
+  const BUNDLED = bundledHex('maws', 'accent');
+  const EDITED = '#2f6b4f';
+  expect(EDITED).not.toBe(BUNDLED);
+
+  // a document page with no system of its own, in no Space, with no defaults set
+  await mountFixture(page, 'loose', { governedBy: {} });
+  await expect(fixture(page, 'loose')).toHaveAttribute('data-ds-system', house.id, { timeout: 15_000 });
+  await expect(fixture(page, 'loose')).toHaveAttribute('data-status', 'ready', { timeout: 15_000 });
+  await expect.poll(() => fixtureAccent(page, 'loose')).toBe(rgbOf(BUNDLED));
+  // the owner recolours the house system on its page: the scope follows, which the floor never would
+  await openSystemPage(page, 'MAWS', house.id);
+  expect(await recolourAccent(page, house.id, EDITED)).toEqual({ swatch: rgbOf(EDITED), property: EDITED });
+  await expect.poll(() => fixtureAccent(page, 'loose'), { timeout: 10_000 }).toBe(rgbOf(EDITED));
+  // a fixture mounted now resolves the same house, edited
+  await mountFixture(page, 'later', { governedBy: { spaceId: null } });
+  await expect(fixture(page, 'later')).toHaveAttribute('data-ds-system', house.id, { timeout: 15_000 });
+  await expect.poll(() => fixtureAccent(page, 'later'), { timeout: 10_000 }).toBe(rgbOf(EDITED));
+
+  // the house system deleted through its page: no system of the house key is left, so the window learns of it at the
+  // change and the scope falls to the bundled floor
+  await page.getByRole('button', { name: 'Delete design system…' }).click();
+  await page.getByRole('dialog', { name: 'Delete “MAWS”?' }).getByRole('button', { name: 'Delete', exact: true }).click();
+  await expect.poll(async () => (await ok<{ artifact: Row | null }>(page, 'artifacts.get', { artifactId: house.id })).artifact, { timeout: 10_000 }).toBeNull();
+  expect(await ok(page, 'designSystems.house')).toEqual({ houseId: null });
+  await expect(fixture(page, 'loose')).toHaveAttribute('data-ds-system', 'floor', { timeout: 10_000 });
+  await expect.poll(() => fixtureAccent(page, 'loose')).toBe(rgbOf(BUNDLED));
   expect(launch!.consoleErrors()).toEqual([]);
 });
 

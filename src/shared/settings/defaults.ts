@@ -98,14 +98,6 @@ const SettingsV3Schema = SettingsV4Schema.extend({
 
 const defaults = (): Settings => structuredClone(SETTINGS_DEFAULTS_V14);
 
-// P3-D: settings as a build before P3-D wrote them (version 13, no design-system defaults). Kept only for P3-A's
-// src/main/artifacts/defaults.test.ts, which tests main's relay over a file without slot 14 and imports this name; it
-// goes when that test builds its own (reported to the architect). Typed as `Settings` because that is what the relay
-// takes; nothing at run time holds such an object, since every file migrates to version 14.
-const { artifacts: _slot14, ...SECTIONS_V13 } = SETTINGS_DEFAULTS_V14;
-void _slot14;
-export const SETTINGS_DEFAULTS_V13 = { ...SECTIONS_V13, version: 13 } as unknown as Settings;
-
 // P3-D: v13 → v14, the design-system defaults empty: the house system, no Space defaults
 const fromV13 = (v13: SettingsV13): Settings => ({ ...v13, version: 14, artifacts: defaults().artifacts });
 // P2-C: v12 → v13, the mods section with the to-human lane on, and the owner channel's two notification groups on;

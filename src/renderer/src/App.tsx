@@ -121,8 +121,10 @@ import { connectLibrary } from './library/store';
 import { registerDocumentEditor } from './tools/document';
 // P3-B end
 // P3-D start
+import { DOCUMENT_DESIGN_SYSTEM } from './artifacts/design-system/documents';
 import { registerDesignSystemEditor } from './artifacts/design-system/editor';
 import { DesignSystemHostProvider } from './artifacts/design-system/provider';
+import { provideDocumentDesignSystem } from './tools/document/design-system';
 // P3-D end
 // P3-C start
 import { registerPresentationEditor } from './tools/presentation';
@@ -132,6 +134,10 @@ import { registerPresentationEditor } from './tools/presentation';
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
 registerSetupIntentHook(useSetupIntent);
 // C10 end
+// P3-D start: D's apply API for B's document page (the P3 spec's Decision Log 61): the page calls its `systemFor` as a hook,
+// so it is provided at module load, before any page renders, and fixed for the page's life (C7's rule, as C10's above)
+provideDocumentDesignSystem(DOCUMENT_DESIGN_SYSTEM);
+// P3-D end
 
 export function App() {
   const resolvedTheme = useSettings((s) => s.state?.resolvedTheme);

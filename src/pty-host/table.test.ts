@@ -261,7 +261,10 @@ describe('pty host initial command runs under zsh and bash', () => {
     { shell: '/bin/zsh', login: '[[ -o login ]]', profile: '.zprofile' },
     { shell: '/bin/bash', login: 'shopt -q login_shell', profile: '.bash_profile' },
   ];
-  it.each(cases)('$shell starts as a login shell over the scratch home and runs the command it was spawned with', async ({ shell, login, profile }) => {
+  it.for(cases)('$shell starts as a login shell over the scratch home and runs the command it was spawned with', { timeout: 20_000 }, async ({ shell, login, profile }, { skip }) => {
+    // macOS: zsh starts under macOS's system startup files there (/etc/zprofile, and /etc/zshrc, which puts HISTFILE
+    // under ZDOTDIR); Ubuntu's /etc/zsh files differ.
+    skip(shell === '/bin/zsh' && process.platform !== 'darwin', 'macOS zsh startup files');
     const h = harness();
     const { ptyId } = await h.table.spawn(
       spawnInput({ shell, command: `printf 'MAWS_INIT_%s\\n' OK; ${login} && printf 'MAWS_LOGIN_%s|%s|%s\\n' YES "$${PROFILE_VARIABLE}" "$HISTFILE"` }),
@@ -277,11 +280,13 @@ describe('pty host initial command runs under zsh and bash', () => {
     h.table.write({ ptyId, data: 'exit\n' });
     await h.exited(ptyId);
     expect(readFileSync(history, 'utf8')).toContain('MAWS_INIT_');
-  }, 20_000);
+  });
 });
 
 describe('pty host foreground detection', () => {
-  it('reports busy false at a /bin/sh prompt and busy true with the program while sleep runs', async () => {
+  // macOS: node-pty names the foreground process by its kernel name there (`sh`, or the bash it re-executes); on Linux
+  // it reads argv[0] from /proc, `/bin/sh`, which no shell-name rule matches.
+  it.skipIf(process.platform !== 'darwin')('reports busy false at a /bin/sh prompt and busy true with the program while sleep runs', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: [] }));
     h.table.write({ ptyId, data: "printf 'MAWS_%s\\n' READY\r" });

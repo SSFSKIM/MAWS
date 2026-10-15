@@ -5,25 +5,28 @@
 // `<DesignSystemScope>`. The scope's `<style>` follows a live system, so every consumer restyles in the same frame with
 // no write to its own artifact; a version ref is read once and never followed. Overrides per the brief come last.
 // Portable (§4.10): the store is reached only through `ArtifactHost`, which the app provides once through
-// `DesignSystemHostContext`.
+// `DesignSystemHostContext`, and the house system, the chain's last link before the floor, only through the
+// `HouseDesignSystem` the app provides beside it (`DesignSystemHouseContext`; the P3 spec's Decision Log 61).
 //
 //   <DesignSystemHostContext.Provider value={artifactHost}>            (once, near the root)
-//     <DesignSystemScope system={governingSystem(artifact, defaults)} medium="document"
+//   <DesignSystemHouseContext.Provider value={house}>                  (the host's house link, followed)
+//     <DesignSystemScope system={useGoverningSystem(artifact, {owner, spaces}, live)} medium="document"
 //                        overrides={dsOverrides} className="doc-page">
 //       <div className="ds-doc">…</div>                                (the page reads var(--ds-*) and .ds-type-*)
 //     </DesignSystemScope>
-import { createContext, createElement, useContext, useEffect, useLayoutEffect, useState, type JSX, type ReactNode } from 'react';
+import { createContext, createElement, useContext, useEffect, useLayoutEffect, useState, useSyncExternalStore, type JSX, type ReactNode } from 'react';
 import type { ArtifactHost } from '../host';
 import { applyV2, newDoc } from '../yjs';
 import type { Medium } from './css';
 import { holdScopeStyle, scopeIdOf, type ViewLease } from './scope-style';
-import type { DesignSystemRef } from './governing';
+import { governingSystem, type DesignSystemRef } from './governing';
 import { builtinView, liveView, snapshotOfDoc, staticView, type DesignSystemView, type TokenOverrides } from './view';
 
 export { officeTheme, officeThemeXml, type OfficeTheme } from './office';
 export type { DesignSystemView, TokenOverrides } from './view';
 
 export { governingSystem, type DesignSystemRef } from './governing';
+export { resolveDsVars } from './resolve-vars';
 type SystemRef = DesignSystemRef | { builtin: 'maws' };
 
 /** The system is not there: no such artifact, a deleted one, no retained state at that seq, or not a design system. */
@@ -76,6 +79,11 @@ async function openSystem(host: ArtifactHost, ref: SystemRef, signal: AbortSigna
   if ('builtin' in ref) return builtinView();
   const toUrl = (asset: string) => host.assetUrl(ref.id, asset);
   if (ref.versionSeq !== undefined) {
+    // A pinned state's assets at its revision, not `live`: the store keeps serving a deleted system's assets at a named
+    // revision while a retained version pins it (A's Decision Log 46; the P3 spec's Decision Log 59), so the version
+    // keeps its faces and images.
+    const seq = ref.versionSeq;
+    const pinnedUrl = (asset: string) => host.assetUrl(ref.id, asset, seq);
     let bytes: Uint8Array;
     try {
       bytes = await host.versionState(ref.id, { seq: ref.versionSeq });
@@ -87,7 +95,7 @@ async function openSystem(host: ArtifactHost, ref: SystemRef, signal: AbortSigna
       applyV2(doc, bytes);
       const snapshot = snapshotOfDoc(doc);
       if (!snapshot) throw new DesignSystemMissing(ref);
-      return staticView(snapshot, toUrl);
+      return staticView(snapshot, pinnedUrl);
     } finally {
       doc.destroy();
     }
@@ -116,6 +124,37 @@ async function openSystem(host: ArtifactHost, ref: SystemRef, signal: AbortSigna
 
 /** The host the hooks and scopes open systems through: the app provides it once. Without one, only the floor renders. */
 export const DesignSystemHostContext = createContext<ArtifactHost | null>(null);
+
+/**
+ * The house system as the app follows it (D9's last link before the floor; the P3 spec's Decision Log 61): the host's
+ * chain names it, and the app reads it again whenever a design system changes. An external store, its two functions
+ * called unbound, so nothing asks the host until a render resolves a governing system.
+ */
+export interface HouseDesignSystem {
+  /** The house system's id; null while none is known, or none is left (the floor draws). */
+  current(): string | null;
+  subscribe(listener: () => void): () => void;
+}
+
+/** The house system the hooks resolve a governing system with: the app provides it once, beside the host. */
+export const DesignSystemHouseContext = createContext<HouseDesignSystem | null>(null);
+
+const NO_HOUSE: HouseDesignSystem = { current: () => null, subscribe: () => () => {} };
+
+/**
+ * The system governing an artifact in a render (D9): `governingSystem` with the house system the app provides, followed,
+ * so a scope moves when the house system is deleted or another takes its place. Without a provider the house is null
+ * and the chain ends at the floor. The defaults are the owner's and the Spaces' (settings 14); `live` as `governingSystem`.
+ */
+export function useGoverningSystem(
+  a: { designSystemId?: string | null; spaceId?: string | null },
+  d: { owner: string | null; spaces: Record<string, string> },
+  live?: (id: string) => boolean,
+): DesignSystemRef | { builtin: 'maws' } {
+  const house = useContext(DesignSystemHouseContext) ?? NO_HOUSE;
+  const houseId = useSyncExternalStore(house.subscribe, house.current);
+  return governingSystem(a, { owner: d.owner, spaces: d.spaces, house: houseId }, live);
+}
 
 const refKey = (ref: SystemRef): string => ('builtin' in ref ? `builtin:${ref.builtin}` : ref.versionSeq === undefined ? `live:${ref.id}` : `version:${ref.id}@${ref.versionSeq}`);
 function refOfKey(key: string): SystemRef {
@@ -231,8 +270,3 @@ export function DesignSystemScope(props: {
   }, [host, scopeId]);
   return createElement('div', { 'data-ds-scope': scopeId ?? undefined, className }, children);
 }
-
-// --- Export helpers ---------------------------------------------------------------------------------------------------
-
-// P3-C (M3 fix wave 1): `resolveDsVars` and its literal resolver live in the React-free `./literals`, re-exported here.
-export { resolveDsVars } from './literals';

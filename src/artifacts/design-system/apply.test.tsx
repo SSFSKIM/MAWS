@@ -2,20 +2,24 @@
 // The scope's style follows a live system and is shared by every consumer of one (system, medium, overrides); a
 // version ref is read once and never followed; overrides land after the system; the floor needs no store.
 import { act, cleanup, render } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { ArtifactHost, DocumentHandle } from '../host';
 import { DEFAULT_SYSTEMS, HOUSE_KEY } from '../types/design_system/defaults';
 import { newDoc, stateV2, type Doc } from '../yjs';
 import {
   DesignSystemHostContext,
+  DesignSystemHouseContext,
   DesignSystemMissing,
   DesignSystemScope,
   governingSystem,
   openDesignSystem,
   resolveDsVars,
   useDesignSystem,
+  useGoverningSystem,
   type DesignSystemRef,
   type DesignSystemView,
+  type HouseDesignSystem,
 } from './apply';
 import complete from './fixtures/complete.tokens.json';
 import { setToken, writeSystem } from './model';
@@ -59,7 +63,7 @@ function fakeHost(systems: Record<string, Doc>, versions: Record<string, Uint8Ar
     export: async () => ({ path: '' }),
     versionState,
     attributions: async () => new Uint8Array(),
-    acceptSuggestion: async () => ({ revision: 0 }), // P3-C at its merge of D: A's landed required members
+    acceptSuggestion: async () => ({ revision: 0 }), // P3-D re-merge: A's landed required members
     rejectSuggestion: async () => ({ revision: 0 }),
     uploadAsset: async () => ({ assetId: '', ref: '' }),
     copyAsset: async () => ({ assetId: '', ref: '' }), // P3-C (Decision Log 25)
@@ -175,6 +179,23 @@ describe('openDesignSystem (D8)', () => {
     expect(faces[0]).toMatch(/src: url\("maws-artifact\\3a \/\/a\/live\/assets\/iowan\.woff2"\) format\("woff2"\);/);
     expect(css).not.toContain('fonts.example');
     expect(css).not.toContain('Not Ours');
+  });
+
+  // A's Decision Log 46 and the P3 spec's Decision Log 59: a deleted system's assets are served at a named revision
+  // while a version pins it, never live; the view asks its host for that revision's URL, whatever form the host's URLs
+  // take (the regression: a host that is not the desktop app's)
+  it('asks the host for a version ref’s faces at the pinned revision, and uses the URL the host gives', async () => {
+    const doc = systemDoc({ 'components/document.css': FACE });
+    const { host } = fakeHost({ a: doc }, { 'a@7': stateV2(doc) });
+    const assetUrl = vi.fn((id: string, ref: string, revision?: number) => `https://assets.example/${id}/${revision ?? 'current'}/${ref}`);
+    host.assetUrl = assetUrl;
+    const css = (await openDesignSystem(host, { id: 'a', versionSeq: 7 })).css('[data-ds-scope="x"]', 'document');
+    expect(assetUrl).toHaveBeenCalledWith('a', 'assets/iowan.woff2', 7);
+    expect(assetUrl.mock.calls.every((call) => call[2] === 7)).toBe(true);
+    const faces = css.match(/@font-face \{[^}]*\}/g) ?? [];
+    expect(faces).toHaveLength(1);
+    expect(faces[0]).toMatch(/src: url\("https\\3a \/\/assets\.example\/a\/7\/assets\/iowan\.woff2"\) format\("woff2"\);/);
+    expect(css).not.toContain('maws-artifact');
   });
 });
 
@@ -294,6 +315,80 @@ describe('useDesignSystem (D8)', () => {
     );
     await flush();
     expect(view.container.textContent).toBe('missing');
+  });
+});
+
+// The P3 spec's Decision Log 61: the renderer re-runs the chain with the house system the app follows, so a scope that
+// names no system, under no default, draws the house system as the owner edited it, not the bundled floor.
+describe('useGoverningSystem (Decision Log 61)', () => {
+  /** The app's followed house system, as a test moves it. */
+  function houseSource(initial: string | null): HouseDesignSystem & { set(id: string | null): void } {
+    let id = initial;
+    const listeners = new Set<() => void>();
+    return {
+      current: () => id,
+      subscribe: (listener) => (listeners.add(listener), () => void listeners.delete(listener)),
+      set: (next) => {
+        id = next;
+        for (const listener of listeners) listener();
+      },
+    };
+  }
+  function Governed({ placement, defaults }: { placement: { designSystemId?: string; spaceId?: string }; defaults: { owner: string | null; spaces: Record<string, string> } }) {
+    const system = useGoverningSystem(placement, defaults);
+    return (
+      <DesignSystemScope system={system} medium="document">
+        <p data-system={'builtin' in system ? 'floor' : system.id} style={{ color: 'var(--ds-color-accent)' }}>
+          text
+        </p>
+      </DesignSystemScope>
+    );
+  }
+  const NO_DEFAULTS = { owner: null, spaces: {} };
+  const EDITED = '#2f6b4f';
+
+  it('draws the house system as edited for a scope with no system and no defaults, follows the house, and ends at the floor', async () => {
+    const house = systemDoc();
+    setToken(house, 'color.accent.$root', color(EDITED)); // the owner's edit of the house system
+    const { host } = fakeHost({ 'house-ds': house, 'owner-ds': systemDoc() });
+    const floorAccent = /--ds-color-accent: (#\w+)/.exec((await openDesignSystem(host, { builtin: 'maws' })).css(':root', 'document'))![1]!;
+    expect(floorAccent).not.toBe(EDITED);
+    const source = houseSource('house-ds');
+    const app = (children: ReactNode) => (
+      <DesignSystemHostContext.Provider value={host}>
+        <DesignSystemHouseContext.Provider value={source}>{children}</DesignSystemHouseContext.Provider>
+      </DesignSystemHostContext.Provider>
+    );
+    const view = render(app(<Governed placement={{}} defaults={NO_DEFAULTS} />));
+    await flush();
+    const p = () => view.container.querySelector('p')!;
+    expect(p().dataset.system).toBe('house-ds');
+    expect(getComputedStyle(p()).color).toBe(EDITED);
+    // the house deleted, none left: the floor
+    act(() => source.set(null));
+    await flush();
+    expect(p().dataset.system).toBe('floor');
+    expect(getComputedStyle(p()).color).toBe(floorAccent);
+    // a new house system named: the scope moves to it
+    act(() => source.set('house-ds'));
+    await flush();
+    expect(getComputedStyle(p()).color).toBe(EDITED);
+    // the earlier links still come first
+    view.rerender(app(<Governed placement={{}} defaults={{ owner: 'owner-ds', spaces: {} }} />));
+    await flush();
+    expect(p().dataset.system).toBe('owner-ds');
+    expect(getComputedStyle(p()).color).toBe('#c9663f');
+  });
+
+  it('ends at the floor without a house provider', async () => {
+    const { host } = fakeHost({});
+    const view = render(
+      <DesignSystemHostContext.Provider value={host}>
+        <Governed placement={{ spaceId: 's1' }} defaults={NO_DEFAULTS} />
+      </DesignSystemHostContext.Provider>,
+    );
+    await flush();
+    expect(view.container.querySelector('p')!.dataset.system).toBe('floor');
   });
 });
 

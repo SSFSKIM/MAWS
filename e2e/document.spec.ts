@@ -354,9 +354,19 @@ const passageAt = (text: Locator, index: number, quote: string) =>
     [index, quote] as const,
   );
 
-// The caret at the end of paragraph `index`.
+// The caret at the end of paragraph `index`. P3-D: the click lands on the paragraph's last line, since `End` ends the
+// visual line and the governing system's type (D's scope, the P3 spec's Decision Log 61) wraps a paragraph in the panel.
 async function caretAtEndOf(page: Page, text: Locator, index: number): Promise<void> {
-  await text.locator('p').nth(index).click();
+  const paragraph = text.locator('p').nth(index);
+  const lastLine = await paragraph.evaluate((p) => {
+    const range = document.createRange();
+    range.selectNodeContents(p);
+    const lines = range.getClientRects();
+    const line = lines[lines.length - 1]!;
+    const box = p.getBoundingClientRect();
+    return { x: Math.max(1, Math.min(line.right - box.left - 2, box.width - 1)), y: line.top - box.top + line.height / 2 };
+  });
+  await paragraph.click({ position: lastLine }); // P3-D
   await page.keyboard.press('End');
   await expect(text).toBeFocused();
   await expect.poll(() => text.evaluate((root, at) => {

@@ -37,7 +37,10 @@ const TIMING_NODE_TESTS = [
   'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
   'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
 ];
-const TIMING_RENDERER_TESTS = ['src/renderer/src/App.test.tsx'];
+const TIMING_RENDERER_TESTS = [
+  'src/renderer/src/App.test.tsx',
+  'src/renderer/src/sessions/resource.test.tsx', // a whole-tree mount switched across 20 sessions (gate offload, Decision Log 11)
+];
 // P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md); P3-C M4 shares the
 // project (the slide canvas, the deck editor).
 const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
@@ -94,9 +97,9 @@ export default defineConfig({
       // P3-A start: the portable artifact layer (src/artifacts/, docs/doperpowers/plans/2026-10-12-p3-a-store.md) under
       // Node; its code imports no Node or Electron module (eslint.config.js), so it runs here as it will in a renderer.
       // P3-B M6: `css` reads the editor's stylesheets as text, so the HTML export (run in main, tested here under Node)
-      // inlines theme.css rather than the blank vitest gives a `.css?raw` import outside `css.include`; P3-D M5: a design
-      // system's `document.css` likewise.
-      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'], exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS], css: { include: [/\/document\/editor\/.+\.css/, /\/design_system\/defaults\/.+\.css/] } } }, // P3-B: exclude, css; P3-D: defaults css
+      // inlines theme.css rather than the blank vitest gives a `.css?raw` import outside `css.include`.
+      // P3-D M5: a design system's `document.css` is bundled as text (`?raw`); vitest empties unprocessed CSS, raw included.
+      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'], exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS], css: { include: [/\/document\/editor\/.+\.css/, /\/design_system\/defaults\/.+\.css/ /* P3-D */] } } }, // P3-B: exclude, css
       // P3-A end
       // P3-B start: the document kind's suites that need a DOM (a real Tiptap editor: UniqueID through split and paste,
       // the editor, comments, history) run under happy-dom; its model, markdown and writer stay in `artifacts` (Node).
@@ -138,6 +141,9 @@ export default defineConfig({
             'src/renderer/src/tools/browser/**/*.test.tsx',
             // E4a end
             'src/artifacts/design-system/**/*.test.tsx', // P3-D M4: the apply API and the Design System page, under happy-dom as built
+            // P3-D (the P3 spec's Decision Log 61): B's page bound to D's scope as built, where the compiler would memoize a hook
+            // B called inside a memo
+            'src/renderer/src/artifacts/design-system/documents.test.tsx',
           ],
           env: { MAWS_REACT_COMPILER: '1' },
         },

@@ -1,7 +1,7 @@
 // The engine host's design-system module over A's real store (P3-D M6; docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md
 // D9, D10; Acceptance 7 through the store, 12 and 13): seeding, the default chain, the context `artifact_create`
 // attaches, the agent's publish through the registered adapter, deletion's refusal and the pinned version's read.
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -10,16 +10,20 @@ import { designSystemMirrorWriter } from '@artifacts/design-system/mirror';
 import { isGeneratedPath, readFiles, readSystem, setToken, writeSystem } from '@artifacts/design-system/model';
 import { parseTokens, serializeTokens } from '@artifacts/design-system/tokens';
 import { snapshotOfDoc, staticView } from '@artifacts/design-system/view';
-import { mirrorWriterFor } from '@artifacts/library/mirror';
+import { mirrorSlug, mirrorWriterFor } from '@artifacts/library/mirror';
 import { DEFAULT_SYSTEMS, HOUSE_KEY } from '@artifacts/types/design_system/defaults';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
+import { HostCommandError, type HostOn } from '@shared/host/runtime';
+import { commands, type CommandName, type CommandOutput } from '@shared/ipc/schema';
+import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { openDocuments, type Documents } from '../documents';
 import { ArtifactStoreError } from '../documents/errors';
+import { LibraryMirror } from '../library/mirror';
 import { artifactCreateTool, artifactDescribeTypeTool } from '../tool-server/artifact-tools';
 import { jsonOf, openWorld } from '../tool-server/artifact-world.fixture';
-import { registerDesignSystems, type DesignSystems } from '.';
+import { DESIGN_SYSTEMS_DEADLINE_SHAPES, registerDesignSystems, type DesignSystems } from '.';
 
 const HUMAN: Actor = { kind: 'human' };
 const AGENT: Actor = { kind: 'session', appSessionId: 'app-ds-agent' as AppSessionId };
@@ -29,11 +33,15 @@ let dir: string;
 let documents: Documents;
 let systems: DesignSystems;
 let logs: string[];
+let handlers: Map<string, (input: unknown) => Promise<unknown>>;
+// The runtime's `on` as a test records it (a re-registration replaces the handler, as a fresh host would serve it).
+const on: HostOn = (name, handler) => void handlers.set(name, handler as (input: unknown) => Promise<unknown>);
 
 function open(): void {
   documents = openDocuments(dir, () => {})!;
   logs = [];
-  systems = registerDesignSystems({ documents, log: (line) => logs.push(line), loadAssets: async (key) => (key === 'official' ? [FONT] : []) });
+  handlers = new Map();
+  systems = registerDesignSystems({ on, documents, log: (line) => logs.push(line), loadAssets: async (key) => (key === 'official' ? [FONT] : []) });
 }
 function close(): void {
   systems.close();
@@ -146,6 +154,105 @@ describe('the default chain (Acceptance 12)', () => {
   });
 });
 
+// A call as the runtime makes it: the input validated first, the output checked against the registry after.
+async function call<N extends CommandName>(name: N, input: unknown): Promise<CommandOutput<N>> {
+  const checked = validateCommandInput(name, input);
+  if (!checked.ok) throw new Error(`invalid input for ${name}: ${JSON.stringify(checked.error)}`);
+  const output = validateCommandOutput(name, await handlers.get(name)!(checked.value));
+  if (!output.ok) throw new Error(`invalid output of ${name}: ${JSON.stringify(output.error.issues)}`);
+  return output.value as CommandOutput<N>;
+}
+
+// The renderer's read of the chain's house link (the P3 spec's Decision Log 61; the ledger's X28): a window passes it
+// to `governingSystem` as `house`, so a scope draws the system the host's chain would name, not the bundled floor.
+describe('designSystems.house (Decision Log 61)', () => {
+  it('has a handler and one immediate deadline shape for every command the engine host owns in the namespace', () => {
+    const owned = Object.entries(commands).filter(([name, spec]) => name.startsWith('designSystems.') && spec.owner === 'engine-host').map(([name]) => name);
+    expect(Object.keys(DESIGN_SYSTEMS_DEADLINE_SHAPES).sort()).toEqual(owned.sort());
+    expect(new Set(Object.values(DESIGN_SYSTEMS_DEADLINE_SHAPES))).toEqual(new Set(['immediate']));
+    for (const name of owned) expect(handlers.has(name), name).toBe(true);
+  });
+
+  it('answers the chain’s house system as it moves: the seeded one even renamed and edited, the next on its deletion, null when none is left', async () => {
+    await systems.seeded;
+    const house = byKey(HOUSE_KEY);
+    expect(await call('designSystems.house', undefined)).toEqual({ houseId: house });
+    // the owner's edits do not move it: the origin, not the title or the tokens, names the house
+    await store().update(house, { title: 'Our house' });
+    await service().writeAs(house, HUMAN, (doc) => setToken(doc, 'color.accent.$root', { $value: '#2f6b4f' }));
+    expect(await call('designSystems.house', undefined)).toEqual({ houseId: house });
+    // a copy is a later system of the same origin; it becomes the house once the first is deleted
+    const copy = await store().duplicate(house, {}, HUMAN);
+    expect(await call('designSystems.house', undefined)).toEqual({ houseId: house });
+    await store().delete(house);
+    expect(await call('designSystems.house', undefined)).toEqual({ houseId: copy.id });
+    await store().delete(copy.id);
+    expect(await call('designSystems.house', undefined)).toEqual({ houseId: null });
+    expect(systems.chain!.governing({})).toEqual({ builtin: 'maws' }); // the same answer the host's own chain gives
+  });
+
+  it('answers unavailable when the store could not be opened this run', async () => {
+    handlers = new Map();
+    const without = registerDesignSystems({ on, documents: null, log: () => {} });
+    try {
+      await expect(call('designSystems.house', undefined)).rejects.toSatisfy((error) => error instanceof HostCommandError && error.ipcError.code === 'internal' && (error.ipcError.issues as { reason: string }).reason === 'unavailable');
+    } finally {
+      without.close();
+    }
+  });
+});
+
+// The export service's read (the P3 spec's Decision Log 61, part 2): which system governs a document main exports, so B's
+// exporters draw what the editor draws. The live artifact's through the chain; a version's by its pin.
+describe('designSystems.governing (Decision Log 61)', () => {
+  const refusalOf = async (input: unknown) => {
+    const error = await call('designSystems.governing', input as never).then(
+      () => null,
+      (thrown: unknown) => thrown,
+    );
+    expect(error).toBeInstanceOf(HostCommandError);
+    return (error as HostCommandError).ipcError;
+  };
+
+  it('answers the live artifact’s system down the chain, and a version’s pin however the artifact moved since', async () => {
+    await systems.seeded;
+    const [house, classroom, official] = [byKey(HOUSE_KEY), byKey('classroom'), byKey('official')];
+    const space = (await store().createSpace({ name: 'Teaching' })).id;
+    const doc = await store().create({ kind: 'document', title: 'Lab notes', spaceId: space }, AGENT);
+    expect(await call('designSystems.governing', { artifactId: doc.id })).toEqual({ system: { id: house } });
+    await store().setDefaults({ owner: official, spaces: {} });
+    expect(await call('designSystems.governing', { artifactId: doc.id })).toEqual({ system: { id: official } });
+    await store().setDefaults({ owner: official, spaces: { [space]: classroom } });
+    expect(await call('designSystems.governing', { artifactId: doc.id })).toEqual({ system: { id: classroom } });
+    // a version pins the system that governed it, at that system's state then
+    const versionId = (await store().createVersion(doc.id, { kind: 'named', actor: HUMAN, label: 'v1' }))!;
+    const pin = store().listVersions(doc.id).find((v) => v.id === versionId)!.designSystemRef!;
+    expect(pin).toEqual({ id: classroom, versionSeq: expect.any(Number) });
+    expect(await call('designSystems.governing', { artifactId: doc.id, versionId })).toEqual({ system: pin });
+    // the document chooses its own system: the live answer follows, the version's stays its pin
+    await store().update(doc.id, { designSystemId: official });
+    expect(await call('designSystems.governing', { artifactId: doc.id })).toEqual({ system: { id: official } });
+    expect(await call('designSystems.governing', { artifactId: doc.id, versionId })).toEqual({ system: pin });
+  });
+
+  it('answers the floor when no system is left, and for a version written with none', async () => {
+    await systems.seeded;
+    for (const { id } of live()) await store().delete(id);
+    const doc = await store().create({ kind: 'document', title: 'Note' }, AGENT);
+    expect(await call('designSystems.governing', { artifactId: doc.id })).toEqual({ system: { builtin: 'maws' } });
+    const versionId = (await store().createVersion(doc.id, { kind: 'named', actor: HUMAN, label: 'v1' }))!;
+    expect(await call('designSystems.governing', { artifactId: doc.id, versionId })).toEqual({ system: { builtin: 'maws' } });
+  });
+
+  it('refuses an artifact or a version that is not there, naming it', async () => {
+    await systems.seeded;
+    const missing = '99999999-9999-4999-8999-999999999999';
+    expect(await refusalOf({ artifactId: missing })).toMatchObject({ code: 'invalid_input', issues: { reason: 'notFound' } });
+    const doc = await store().create({ kind: 'document', title: 'Note' }, AGENT);
+    expect(await refusalOf({ artifactId: doc.id, versionId: 999 })).toMatchObject({ code: 'invalid_input', message: expect.stringContaining('999'), issues: { reason: 'notFound' } });
+  });
+});
+
 // D's chain registered in A's store (X23, A's M7): what A's pin and A's tools ask the store, D's chain answers, with the
 // house link and a deleted default's fall-through that A's own chain lacks.
 describe('the chain registered in A’s store (X23; Acceptance 12)', () => {
@@ -176,7 +283,7 @@ describe('the chain registered in A’s store (X23; Acceptance 12)', () => {
 
   it('attaches the governing system’s law to artifact_create and artifact_describe_type, down the chain', async () => {
     const world = openWorld();
-    const mounted = registerDesignSystems({ documents: { storage: world.storage, service: world.service, store: world.store, close: () => {} }, log: () => {}, loadAssets: async () => [] });
+    const mounted = registerDesignSystems({ on, documents: { storage: world.storage, service: world.service, store: world.store, close: () => {} }, log: () => {}, loadAssets: async () => [] });
     try {
       await mounted.seeded;
       const keyed = (key: string) => world.store.list({ kind: 'design_system' }).find((s) => s.title === DEFAULT_SYSTEMS.find((d) => d.key === key)!.name)!.id;
@@ -328,6 +435,25 @@ describe('the mirror (Decision Log 18)', () => {
     expect(designSystemMirrorWriter({ artifact, doc: newDoc() })).toEqual({ files: {} });
     systems.close();
     expect(mirrorWriterFor('design_system')).toBeUndefined();
-    systems = registerDesignSystems({ documents, log: () => {}, loadAssets: async () => [] }); // afterEach closes it
+    systems = registerDesignSystems({ on, documents, log: () => {}, loadAssets: async () => [] }); // afterEach closes it
+  });
+
+  it('mirrors a system in a linked Space with its assets, its face included, read from the store (L’s M6b)', async () => {
+    await systems.seeded;
+    const project = mkdtempSync(join(tmpdir(), 'maws-design-systems-project-'));
+    const mirror = new LibraryMirror(documents, { log: () => {} });
+    try {
+      const space = await store().createSpace({ name: 'Brand', linkedDir: project });
+      const id = byKey('official');
+      await store().update(id, { spaceId: space.id });
+      await mirror.start();
+      await mirror.flush();
+      const folder = join(project, 'artifacts', mirrorSlug(store().get(id)!));
+      expect([...readFileSync(join(folder, 'assets', FONT.name))]).toEqual([...FONT.bytes]);
+      expect(readFileSync(join(folder, 'tokens.css'), 'utf8')).toContain('--ds-color-accent');
+    } finally {
+      mirror.close();
+      rmSync(project, { recursive: true, force: true });
+    }
   });
 });

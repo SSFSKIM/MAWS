@@ -333,6 +333,8 @@ describe('the renderer’s ArtifactHost (M4)', () => {
     await expect(h.artifacts.versionState(ARTIFACT, 4)).rejects.toMatchObject({ error: { code: 'invalid_input' } });
     expect(h.artifacts.identity()).toMatchObject({ actor: { kind: 'human' }, name: 'You', color: expect.stringMatching(/^--author-[1-8]$/) });
     expect(h.artifacts.assetUrl(ARTIFACT, 'assets/a b.png')).toBe(`maws-artifact://${ARTIFACT}/live/assets/a%20b.png`);
+    // P3-D (the P3 spec's Decision Log 59): at a named revision, the form a retained version pinned to a deleted system loads
+    expect(h.artifacts.assetUrl(ARTIFACT, 'assets/a b.png', 7)).toBe(`maws-artifact://${ARTIFACT}/7/assets/a%20b.png`);
   });
 });
 

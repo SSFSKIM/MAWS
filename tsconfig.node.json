@@ -53,22 +53,22 @@
     // P3-B: test/artifacts/document-writer-bench.test.ts benches the patch writer on the 200-page seed M9's gate uses
     "e2e/support/document-seed.ts"
   ],
-  // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6); P3-D M4: the
-  // design system's React and DOM; P3-C M4: the slide canvas and the deck editor (M9: `canvas/css.ts` stays in, since
-  // the exporters in main write it); all typechecked by tsconfig.web.json
+  // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6), typechecked by
+  // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise. P3-C M4:
+  // the slide canvas and the deck editor, likewise (M9: `canvas/css.ts` stays in, since the exporters in main write it).
   "exclude": [
     "src/artifacts/document/editor/**/*",
     "src/artifacts/document/import/html*",
     "src/artifacts/document/import/docx*",
-    "src/artifacts/design-system/apply.ts",
-    "src/artifacts/design-system/scope-style.ts",
-    "src/artifacts/design-system/page/**/*",
-    "src/artifacts/design-system/**/*.test.tsx",
-    "src/artifacts/slides/canvas/slide-canvas.ts",
-    "src/artifacts/slides/canvas/elements.ts",
-    "src/artifacts/slides/canvas/fit.ts",
-    "src/artifacts/slides/canvas/index.ts",
-    "src/artifacts/slides/editor/**/*",
-    "src/artifacts/**/*.dom.test.tsx"
+    "src/artifacts/design-system/apply.ts", // P3-D
+    "src/artifacts/design-system/scope-style.ts", // P3-D
+    "src/artifacts/design-system/page/**/*", // P3-D
+    "src/artifacts/design-system/**/*.test.tsx", // P3-D
+    "src/artifacts/slides/canvas/slide-canvas.ts", // P3-C
+    "src/artifacts/slides/canvas/elements.ts", // P3-C
+    "src/artifacts/slides/canvas/fit.ts", // P3-C
+    "src/artifacts/slides/canvas/index.ts", // P3-C
+    "src/artifacts/slides/editor/**/*", // P3-C
+    "src/artifacts/**/*.dom.test.tsx" // P3-C
   ]
 }

@@ -18,7 +18,9 @@ afterEach(takeDown);
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
-describe('the socket and the hello', () => {
+// macOS: every stand here admits its fake host through the committed peer identity addon, a darwin-arm64 prebuild
+// loaded only on Apple silicon macOS, so each describe below is guarded to macOS.
+describe.skipIf(process.platform !== 'darwin')('the socket and the hello', () => {
   it('listens per app session at <userData>/browser/cua/<id>.sock in a 0700 directory swept of stale sockets, and says hello at once', async () => {
     const root = mkdtempSync('/tmp/mcua-');
     tracked.roots.push(root);
@@ -46,7 +48,7 @@ describe('the socket and the hello', () => {
   });
 });
 
-describe('tabs and windows', () => {
+describe.skipIf(process.platform !== 'darwin')('tabs and windows', () => {
   it('lists the session\'s reachable tabs (its own and, for a side thread, its parent\'s) and refuses any other by Chrome\'s wording', async () => {
     const h = harness();
     const mine = h.personTab(A, 'https://a.test/');
@@ -116,7 +118,7 @@ describe('tabs and windows', () => {
   });
 });
 
-describe('leases, reservations and the command filter', () => {
+describe.skipIf(process.platform !== 'darwin')('leases, reservations and the command filter', () => {
   it('attaches through a lease, passes page commands, refuses the filtered ones, and wants a lease for any command', async () => {
     const h = harness();
     const tab = h.personTab();
@@ -192,7 +194,7 @@ describe('leases, reservations and the command filter', () => {
   });
 });
 
-describe('the agent state reset', () => {
+describe.skipIf(process.platform !== 'darwin')('the agent state reset', () => {
   const TOGGLES: [string, Record<string, unknown>][] = [
     ['Fetch.enable', {}],
     ['Target.setAutoAttach', { autoAttach: true, waitForDebuggerOnStart: false, flatten: true }],
@@ -270,7 +272,7 @@ describe('the agent state reset', () => {
   });
 });
 
-describe('targets, events and closing', () => {
+describe.skipIf(process.platform !== 'darwin')('targets, events and closing', () => {
   it('Target.closeTarget closes a tab the connection holds and owns; any other target is not found, a person\'s tab is not owned', async () => {
     const h = harness();
     const person = h.personTab();
