@@ -30,9 +30,12 @@ export interface CommentFormInput {
   // asked when a side thread's fork answers: whether to reveal it in the parent's Side pane (the sheet: always; the card:
   // only once it is gone, since it shows the thread itself)
   reveal?: () => boolean;
+  // P3-B (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): told as a send sets out; the call it returns is told
+  // whether the send went, whether or not the presentation is still there (a document keeps the thread the comment names)
+  onSending?: (sending: { text: string; destination: CommentDestination }) => (went: boolean) => void;
 }
 
-export function useCommentForm({ anchor, parent, gone, onSent, reveal }: CommentFormInput) {
+export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending }: CommentFormInput) {
   const status = useSessions((s) => s.engine.get(parent) ?? null);
   const [text, setText] = useState('');
   const [destination, setDestination] = useState<CommentDestination>('thread');
@@ -53,6 +56,8 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal }: Comment
     if (!canSend(to)) return;
     setDestination(to);
     setPhase({ kind: 'sending', destination: to });
+    const sent = text.trim();
+    const settled = onSending?.({ text: sent, destination: to }); // P3-B
     // Send to main's acquisition of a parent that is not ready (P2-A, A's §5.6) runs here, before sendComment's
     // `side.sendToMain`, so the sheet and the card inherit it alike.
     // P2-A start (2026-10-09; the execution document §5.6): Send to main on a parent with no ready process starts it
@@ -67,14 +72,15 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal }: Comment
         refusal = error instanceof Error ? error.message : String(error);
       }
       if (refusal !== null) {
+        settled?.(false); // P3-B
         if (gone()) toast({ level: 'warning', text: COPY.refusedAfterClose(refusal), actions: [], dismissible: true });
         else setPhase({ kind: 'refused', destination: to, error: refusal });
         return;
       }
     }
     // P2-A end
-    const sent = text.trim();
     const result = await sendComment(to, { parent, anchor, text: sent, screenshot }, reveal ? { reveal } : {});
+    settled?.(result.ok); // P3-B
     if (gone()) {
       if (!result.ok) toast({ level: 'warning', text: COPY.refusedAfterClose(result.error), actions: [], dismissible: true });
       return;

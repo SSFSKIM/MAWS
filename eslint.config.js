@@ -28,6 +28,21 @@ const YJS_PATTERNS = [
 const YJS_DYNAMIC = { selector: 'ImportExpression[source.value=/^@y.(?:y|prosemirror)(?:\\W.*)?$/]', message: YJS_PATTERNS[0].message };
 const PORTABLE_DYNAMIC_SYNTAX = { selector: `ImportExpression[source.value=/${PORTABLE_DYNAMIC.source}/]`, message: PORTABLE };
 // P3-A end
+// P3-B start: schema parity (D4 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md). The document's ProseMirror
+// schema is built in one module, src/artifacts/document/schema.ts, so the host's writer and every editor derive the same
+// Yjs storage keys from it; a second `getSchema` or a mark or node created elsewhere is a second schema. The composer's
+// Tiptap schema is a different one and keeps its own. Core's `no-restricted-syntax` is configured per block above (a
+// later block's options replace an earlier one's), so this check runs the same rule under its own name and displaces
+// none of theirs.
+const { builtinRules } = require('eslint/use-at-your-own-risk');
+const ONE_SCHEMA_MESSAGE =
+  "The document schema is built only in src/artifacts/document/schema.ts (schema parity): import extensions() or schemaFor() from there, or add the node or mark to it.";
+const ONE_SCHEMA = [
+  { selector: "CallExpression[callee.name='getSchema']", message: ONE_SCHEMA_MESSAGE },
+  { selector: "CallExpression[callee.type='MemberExpression'][callee.object.name=/^(?:Mark|Node)$/][callee.property.name='create']", message: ONE_SCHEMA_MESSAGE },
+];
+const mawsSchemaPlugin = { rules: { 'one-schema': builtinRules.get('no-restricted-syntax') } };
+// P3-B end
 
 module.exports = defineConfig(
   { ignores: ['.doperpowers/', 'out/', 'dist/', 'node_modules/', 'mockups/', 'research/', 'spikes/', 'plugins/', 'test-results/', 'playwright-report/', '.claude/'] },
@@ -117,4 +132,12 @@ module.exports = defineConfig(
     },
   },
   // P3-A end
+  // P3-B start: the one-schema rule (above).
+  {
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/artifacts/document/schema.ts', 'src/renderer/src/composer/**'],
+    plugins: { 'maws-schema': mawsSchemaPlugin },
+    rules: { 'maws-schema/one-schema': ['error', ...ONE_SCHEMA] },
+  },
+  // P3-B end
 );
