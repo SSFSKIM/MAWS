@@ -1483,6 +1483,7 @@ silent for three periods as dead and reconnects with backoff. A client closing t
 | `subscribe` | `project`, `session`, `agentId`, `sub` | serve a DX4 subscription scoped to one transcript: the session's main one (`agentId` null) or one subagent's |
 | `unsubscribe` | `project`, `sub` | end it |
 | `rows` | `project`, `session`, `agentId`, `sub`, `before`, `limit` | older rows of the sub's transcript, before row `before` |
+| `diff` | `project`, `session`, `sub` | the browser's DX3 `diff` on a main-transcript sub: answer with DX4 `diff` on that sub (M3) |
 | `part` | `id`, `index`, `count`, `data` | a slice of a larger frame (below) |
 
 **Frames up** (`UpFrame`):
@@ -1698,7 +1699,7 @@ type Envelope<K, Session, Sub, N> = {
 type SessionMessage =
   | Envelope<'snapshot', string, string, 0>                                                       // a sub's first message
   | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, …
-  | Envelope<'presence' | 'raised' | 'settled' | 'delivery', string, null, null>                 // to every browser, outside subs
+  | Envelope<'presence' | 'raised' | 'settled' | 'delivery' | 'compact', string, null, null>     // to every browser, outside subs
   | Envelope<'machine', null, null, null>;                                                         // names no session
 ```
 
@@ -1727,6 +1728,7 @@ and `streaming` are that agent's own.
 | `raised` | no | `{request, session, tool, input, deadline?, mac}` |
 | `settled` | no | `{request, winner: "web" \| "terminal" \| "other", outcome, by, mac}` |
 | `delivery` | no | `{event: {writer, seq}, session, outcome: "delivered" \| "recorded" \| "refused-read-only" \| "failed", reason, mac}` |
+| `compact` | no | `{rpc, phase: "start" \| "end", tokensBefore?, tokensAfter?, skip?, error?}`: a compaction's progress, from the bridge's DX5 `compact` events; `rpc` the nonce of the DX6 `compact` that asked for it, or null for one the session started itself; on `end`, `tokensBefore` and `tokensAfter` (null when the engine recorded none), or `skip` (a hook vetoed it), or `error` (the engine refused it) |
 
 `raised`, `settled`, and `delivery` carry codes under their own domains (DX1). The hub interprets `presence`,
 `machine`, `raised`, `settled`, and `delivery`; it relays every other kind, `block-row` included, without reading its
@@ -1748,8 +1750,10 @@ entry's `upTo`, the snapshot and the live part neither overlap nor leave a gap. 
 tool's, whose block streamed as none of the three kinds) settles nothing and is simply drawn.
 
 **Discontinuity.** A gap in `n`, a hub restart, or a dropped connection makes the browser subscribe again for a fresh
-snapshot. A gap in the bridge's own stream (DX5's `gap`) ends every subscription it touches with `end {reason:
-"discontinuity"}`, and the browser does the same. Nothing is resumed from a hub buffer.
+snapshot. A gap in the bridge's own stream (DX5's `gap`), and a `resync` arriving on a DX5 subscription the daemon
+already holds (a module reload, or a child that answered before the mod's first `resync`), each end every
+subscription they touch with `end {reason: "discontinuity"}`, and the browser does the same. Nothing is resumed from a
+hub buffer.
 
 **Settlement (confirmed by DC2, DX4's producer).** `settled.outcome` is one of `allow`, `deny`, `answered`,
 `withdrawn`. `winner` and `by` name who decided: `web` with `by` the member id; `terminal` with `by` `"terminal"`;
@@ -2138,11 +2142,18 @@ type Rpc<N> = {
 "failed", error: {code, message}}`; the hub's record of an RPC adds `forwarded` (sent, no result yet) and
 `uncertain` (the machine's lease lapsed after forwarding, before a result).
 
+**Bound to where it runs.** Every enrolled machine holds the org key, so a valid code does not say which machine
+should act. Right after the code verifies, the daemon refuses an RPC whose `machine` is not its own enrolled name
+(`wrong-machine`), whose `project` is not a hub project of this machine with the org it enrolled in
+(`unknown-project`), or whose session is not a session of that project on this machine (`no-session`), before the
+ledger, before freshness, and before anything else. It never relies on the hub's routing for this.
+
 **Error codes.** The hub's: `machine-offline` (no fresh lease: fails at once, nothing queued), `stale` (older than 60
 seconds), `not-member` (`member` is not the signed-in member), `bad-shape`. The daemon's, before it executes:
-`bad-code`, `read-only`, `digest-mismatch`, `not-pending` (the request is no longer pending), `unknown-checkout`,
+`bad-code`, `wrong-machine`, `unknown-project`, `read-only`, `digest-mismatch`, `not-pending` (the request is no longer pending), `unknown-checkout`,
 `above-ceiling`, `no-session`, `unsupported` (the session's kind cannot, per §5's table), `session-live` (a Resume of
-a session live somewhere), `idle` (a steer while no turn is running: the web offers Send instead). After a claim: `copy-started` (a Resume raced the owner reopening the session; the copy is
+a session live on its machine: a session's transcript lives on the machine that ran it, so "live anywhere" means any
+process of this machine holding the session, terminal or `--bg`), `idle` (a steer while no turn is running: the web offers Send instead). After a claim: `copy-started` (a Resume raced the owner reopening the session; the copy is
 stopped), `interrupted` (below), `failed` (execution failed; `message` says how).
 
 **At most once.** The nonce is the RPC's id. The daemon claims it in its ledger (`claimed`) before the RPC has any
@@ -2694,6 +2705,29 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: Five gaps found by the adversarial review of DC7's plan,
+  closed in the contracts. (1) A valid code does not say which machine
+  should act, since every machine holds the org key. So the daemon binds
+  an RPC to itself, its project, and the session (`wrong-machine`,
+  `unknown-project`, `no-session`) before anything else, and never relies
+  on the hub's routing (DX6). (2) The browser's `diff` had no machine-side
+  frame: DX2 gains `diff` down. (3) A compaction's outcome had no route to
+  a browser: DX4 gains `compact`, outside subscriptions, carrying the
+  RPC's nonce. (4) A `resync` on a DX5 subscription the daemon already
+  holds ends the DX4 subscriptions it touches, as a `gap` does. A child
+  can answer before the mod's first `resync`, so a subscriber could take
+  an empty snapshot and then lose the prefix of a message already
+  streaming. (5) Resume's "live anywhere" means live on the session's
+  machine, since a session's transcript lives where it ran. Still open,
+  with DC2: DX5 must give DC7 a transcript cut and an order for rows, so a
+  snapshot never holds a row and its streaming block together, and no
+  live row arrives ahead of its `block-row` (DX5's snapshot keeps no row
+  cut today, and the mod's `block-row` can trail the row on disk). DC7's
+  plan is amended to put its safeguards ahead of the paths they protect:
+  the policy, read-only delivery included, comes before any remote
+  execution or outside-origin delivery is enabled. Flags DC2, DC3, DC5,
+  DC7.
+  Date/Author: 2026-10-15, design session (DC7's plan review).
 - Decision: DX5 refreshed with DC2's M3 extension (doperpowers
   `9055a181`, reviewed clean after two fix waves). A settlement now names
   its winner from the engine's own evidence for that exact call, instead
