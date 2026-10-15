@@ -187,6 +187,24 @@ test('an end keeps what was drawn and says why; the column subscribes again once
   await expect.poll(() => occurrences(depth, ANSWER)).toBe(1);
 });
 
+test('a subscription the hub ends before its snapshot reads as reconnecting, not as an empty transcript', async ({ page, hub }) => {
+  await stageProject(hub);
+  const player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks });
+  player.endBeforeSnapshot = 1;
+  player.holdSubscriptions = true;
+  player.skip(player.script.length);
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+  const depth = page.getByTestId('depth');
+  await expect.poll(() => hub.subscriptions(PROJECT).length).toBeGreaterThanOrEqual(2); // ended at n 0, then taken up again
+  await expect(depth.getByTestId('depth-status')).toHaveText('Reconnecting…');
+  await expect(depth.getByTestId('depth-reconnecting')).toBeVisible();
+  expect(player.releaseSubscriptions()).toBeGreaterThanOrEqual(1);
+  await expect(depth).toContainText(ANSWER);
+  await expect(depth.getByTestId('depth-reconnecting')).toHaveCount(0);
+  await expect(depth.getByTestId('depth-status')).toHaveText('');
+});
+
 const HOSTILE =
   'Plain words, then hostile ones.\n\n<script>window.__pwned = "script"</script>\n\n<img src="x" onerror="window.__pwned = \'img\'">\n\n<b>raw bold</b>\n\n[a link](javascript:window.__pwned=\'link\') and [a site](https://example.com/docs)';
 

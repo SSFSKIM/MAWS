@@ -37,8 +37,12 @@ export type TranscriptStoreApi = Pick<ReturnType<typeof createTranscriptStore>, 
 export type DepthTranscriptState = {
   /** The source MAWS's view attaches under `key`; a new one when the transcript is rebuilt (older rows, a new subscription). */
   source: TranscriptSource;
-  /** `loading` until a snapshot is in; `ended` after an `end` other than a reset, with its reason. */
-  phase: 'loading' | 'live' | 'ended';
+  /**
+   * `loading` until the first snapshot is in; `reconnecting` after a reset until the fresh one is (a subscription the
+   * hub ended before its snapshot, `end {discontinuity}` at n 0, reaches here as a reset too); `ended` after any other
+   * `end`, with its reason.
+   */
+  phase: 'loading' | 'reconnecting' | 'live' | 'ended';
   ended: SessionBodies['end'] | null;
   /** This transcript's blocks still streaming, in drawing order. */
   streaming: StreamBlock[];
@@ -210,6 +214,11 @@ export class DeskTranscript {
     this.subscription.rows(oldest.uuid, this.page);
   }
 
+  /** One agent's blocks still streaming on this subscription (the main one carries every agent's). */
+  streamingOf(agentId: string | null): StreamBlock[] {
+    return this.layer.blocks(agentId);
+  }
+
   // What the source reads.
 
   whenSnapshotted(): Promise<void> {
@@ -270,6 +279,9 @@ export class DeskTranscript {
         return;
       case 'block-row':
         this.layer.blockRow(message.body);
+        // Another transcript's block (a subagent's, on the main subscription): its row never comes on this
+        // subscription, so the block settles now (DX4, composite cd2667d8). Only this transcript's own blocks wait.
+        if (message.body.agentId !== this.target.agentId) this.layer.settle(message.body.uuid);
         return this.publish();
       case 'rows':
         return this.older(message.body);
@@ -302,7 +314,7 @@ export class DeskTranscript {
     this.layer.clear();
     this.served = false;
     this.snapshotted = deferred();
-    this.state.setState({ phase: 'loading', ended: null, more: false, loadingOlder: false, streaming: [] });
+    this.state.setState({ phase: 'reconnecting', ended: null, more: false, loadingOlder: false, streaming: [] });
     this.source.reset();
   }
 

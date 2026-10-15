@@ -287,6 +287,31 @@ describe('the main transcript through the session plane', () => {
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
   });
 
+  it('a subagent’s block-row on the main subscription settles its block at once: its row never comes here', async () => {
+    const script = scriptOf(recording.session, null);
+    plane.snapshot(script, 0);
+    await settle();
+    const agentId = recording.subagents[0].agentId;
+    plane.send('chunk', { turnId: 'sub-turn', agentId, step: 0, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: 'sub says' } });
+    expect(controller.streamingOf(agentId).map((b) => b.text)).toEqual(['sub says']);
+    plane.send('block-row', { uuid: 'sub-row', turnId: 'sub-turn', agentId, step: 0, index: 0 });
+    expect(controller.streamingOf(agentId)).toEqual([]);
+    // The main loop's own block waits for its row.
+    plane.send('chunk', { turnId: 'main-turn', agentId: null, step: 0, chunkIndex: 0, chunk: { kind: 'text', index: 0, text: 'main says' } });
+    plane.send('block-row', { uuid: 'main-row', turnId: 'main-turn', agentId: null, step: 0, index: 0 });
+    expect(controller.streamingOf(null).map((b) => b.text)).toEqual(['main says']);
+  });
+
+  it('a subscription that ends before its snapshot, and is taken up again, reads as reconnecting until the snapshot', async () => {
+    plane.current.listener.reset(); // the shell's answer to an `end {discontinuity}` at n 0: reset, then subscribe again
+    expect(controller.state.getState().phase).toBe('reconnecting');
+    const script = scriptOf(recording.session, null);
+    plane.snapshot(script, script.length);
+    await settle();
+    expect(controller.state.getState().phase).toBe('live');
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+  });
+
   it('closes its subscription when closed', () => {
     controller.close();
     expect(plane.current.closed).toBe(true);

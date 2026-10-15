@@ -27,6 +27,10 @@ export class DepthPlayer {
   overlapNext = 0;
   /** Holds each `rows` answer until `releaseRows`, so a suite can look at the column while a page is on its way. */
   holdRows = false;
+  /** Holds each new subscription's snapshot until `releaseSubscriptions`. */
+  holdSubscriptions = false;
+  /** The next this-many subscriptions are ended before their snapshot (`end {discontinuity}` at n 0). */
+  endBeforeSnapshot = 0;
   private held: Array<() => void> = [];
   private readonly open: Open[] = [];
   private cursor = 0;
@@ -89,7 +93,28 @@ export class DepthPlayer {
     }
   }
 
+  /** Releases the subscriptions held so far (`holdSubscriptions`), each answered with its snapshot now. */
+  releaseSubscriptions(): number {
+    const held = this.heldSubs.splice(0);
+    for (const sub of held) this.answer(sub);
+    return held.length;
+  }
+
+  private heldSubs: string[] = [];
+
   private subscribed(sub: string): void {
+    if (this.endBeforeSnapshot > 0) {
+      // Ended before its snapshot (DX4: an `end` may be a subscription's first message, at n 0).
+      this.endBeforeSnapshot -= 1;
+      const { project, machine, session } = this.options;
+      this.hub.sendSession(project, { project, machine, session, kind: 'end', sub, n: 0, body: { reason: 'discontinuity' } });
+      return;
+    }
+    if (this.holdSubscriptions) this.heldSubs.push(sub);
+    else this.answer(sub);
+  }
+
+  private answer(sub: string): void {
     const open: Open = { sub, n: 0 };
     this.open.push(open);
     const cut = Math.max(0, this.playhead - this.overlapNext);

@@ -38,6 +38,13 @@ const ENDED: Record<NonNullable<DepthTranscriptState['ended']>['reason'], string
   error: 'The transcript could not be served.',
 };
 
+const STATUS: Record<DepthTranscriptState['phase'], (state: DepthTranscriptState) => string> = {
+  loading: () => 'Loading…',
+  reconnecting: () => 'Reconnecting…',
+  live: (state) => (state.loadingOlder ? 'Loading older…' : ''),
+  ended: () => 'Unavailable',
+};
+
 function SessionDepth({ project, session, plane }: { project: string; session: DeskSession; plane: DepthSlotProps['plane'] }) {
   const [controller] = useState(() => new DeskTranscript({ plane, project, target: { machine: session.machine, session: session.session, agentId: null }, store: useTranscriptStore }));
   const state = useStore(controller.state);
@@ -89,9 +96,15 @@ function SessionDepth({ project, session, plane }: { project: string; session: D
         <span className="truncate text-ui font-medium text-fg">{session.alias}</span>
         <span className="text-ui-sm text-fg-muted">@{session.machine}</span>
         <span className="ml-auto text-ui-sm text-fg-muted" data-testid="depth-status">
-          {state.phase === 'loading' ? 'Loading…' : state.phase === 'live' ? (state.loadingOlder ? 'Loading older…' : '') : 'Unavailable'}
+          {STATUS[state.phase](state)}
         </span>
       </header>
+      {state.phase === 'reconnecting' && drawnRows === 0 && (
+        // A transcript between a reset and its fresh snapshot (or one the hub ended before its first) is not empty.
+        <p className="m-0 px-4 py-3 text-ui-sm text-fg-muted" role="status" data-testid="depth-reconnecting">
+          Reconnecting to the session…
+        </p>
+      )}
       {state.ended && (
         <p className="m-0 border-b border-border px-4 py-1.5 text-ui-sm text-fg-muted" role="status" data-testid="depth-unavailable">
           {ENDED[state.ended.reason]}
