@@ -62,11 +62,22 @@ function forward(request: Request, url: string, identity: Record<string, string>
   return forwarded;
 }
 
+// The build, named by the deploy (`wrangler deploy --define DESK_BUILD:'"…"'`; deploy/deploy.ts names the hub's commit and
+// the web app's), so a client can tell which code answered; `dev` for a bundle that named none (the suites, `local`).
+declare const DESK_BUILD: string | undefined;
+const BUILD = typeof DESK_BUILD === 'string' ? DESK_BUILD : 'dev';
+
 export default {
   async fetch(request, env): Promise<Response> {
     const response = await route(request, env);
     if (request.body && !request.bodyUsed) await drain(request.body);
-    return response;
+    // A WebSocket's upgrade (its socket rides on the answer) and a machine's stream are passed on untouched, as before
+    // the build was named: re-wrapping the stream's body would put a pipe of the Worker's between the client and the
+    // Machine object, whose close detection M1's probe measured without one. Every other answer names the build.
+    if (response.status === 101 || response.headers.get('Content-Type') === 'text/event-stream') return response;
+    const named = new Response(response.body, response);
+    named.headers.set('X-Desk-Build', BUILD);
+    return named;
   },
 } satisfies ExportedHandler<Env>;
 
