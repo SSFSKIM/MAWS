@@ -288,6 +288,14 @@ registrations through `connectDepth()`.
   cut is made once. Supersedes the constraint's "whichever child makes a
   cut first".
   Date/Author: 2026-10-15, composite's writer.
+- Decision: Heavy runs go to the gate's Linux lane (`scripts/ci-gate.sh
+  --gates <gate> --runner linux`; DC5's `e2e:desk-web` lane there, or one
+  of DC6's own beside it); focused unit tests run locally; nothing heavy
+  runs on the Mac. Reason: the harness refuses `with-slot.sh` in these
+  worktree sessions and the Mac's load has sat at 25–190 for hours, so
+  `waitload20.sh` never clears. Supersedes the constraint's load-rule
+  wording and the Concrete Steps' local `e2e`.
+  Date/Author: 2026-10-15, composite's writer.
 
 ## Surprises & Discoveries
 - 2026-10-15 (from DC2's M3, built, in review, via the composite's
