@@ -2813,7 +2813,16 @@ a hub that connects into machines (§2).
   order. Open: the live walk measures the largest flush-to-notice lag,
   since a notice later than the window releases its row unnamed and its
   `block-row` then ends the subscription; the window rises if the lag
-  nears it. DX5's text is refreshed from DC2's plan when M4 is reviewed.
+  nears it. And the mod seeds each loop's cut at load (DC7's M1 review):
+  with notices after `next()`, a `null` cut sent history to the end of
+  the file, so a row flushed after a module load but before its notice
+  sat in the snapshot's history beside its streaming block. On its first
+  `resync` the mod reports each loop's cut as the last row the engine held
+  for that loop when the module loaded, and no block of a loop enters
+  `streaming` before that loop's cut is seeded; `null` means the loop had
+  no rows. Rejected: an exception to DX4's no-overlap rule, healed by the
+  discontinuity the late `block-row` causes. DX5's text is refreshed from
+  DC2's plan when M4 is reviewed.
   With it, from DC7's M1: an `end` may be a sub's first message, at
   `n` 0 (DX4), and a subagent's `block-row` in a main-scope sub settles
   its block at once, since that sub never carries the row. Flags DC2,
