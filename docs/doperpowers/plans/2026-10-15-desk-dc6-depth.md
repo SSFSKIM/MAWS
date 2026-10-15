@@ -17,7 +17,7 @@
 
 ## Progress
 
-- [ ] M1 — The main transcript in depth
+- [x] M1 — The main transcript in depth (2026-10-15, reviewed clean: 46382c26..ba48dcda, fix 29fa876a..f6d42944)
 - [ ] M2 — Subagents
 - [ ] M3 — Diff, session info, the transcript slot, and the replayed acceptance
 
