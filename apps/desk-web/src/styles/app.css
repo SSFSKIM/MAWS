@@ -3,6 +3,13 @@
    tokens only. */
 @import "../../../../src/renderer/src/styles/app.css";
 
+/* DC6: MAWS's transcript view draws the depth column, so its components' utility classes are generated here too
+   (Tailwind scans only this app's own directory unless told). */
+@source "../../../../src/renderer/src/transcript";
+@source "../../../../src/renderer/src/owner";
+@source "../../../../src/renderer/src/engine-surface";
+@source "../../../../src/renderer/src/ui";
+
 /* The desk's own tokens (values advisory, as X7's): what MAWS's set has no name for. */
 :root {
   /* The grid's waiting-on-you numeral and its tile's tint (mockups/desk/01-grid.html). */
