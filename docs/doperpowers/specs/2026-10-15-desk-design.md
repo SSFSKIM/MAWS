@@ -250,6 +250,14 @@ every deploy restarts every object and disconnects every connection. So:
   evicted while its sockets stay connected; no reconnect follows, so no
   daemon republishes, and state held only in memory would be gone. The
   daemon's republish on reconnect still reconciles what storage holds.
+  The same holds for each browser socket's identity, visibility, and
+  subscriptions, which ride on the socket (its attachment) so a woken
+  object can route again.
+- **A machine is online while its lease is fresh**, renewed by its
+  connection's heartbeat and fenced by a connection generation, not while
+  a flag that a close callback would clear is set: an object can restart
+  without running any cleanup, and the close it would have reported never
+  arrives.
 - **Every frame is bounded at 1 MiB**; a larger payload (a big tool result
   in a transcript row, a snapshot) is split into numbered parts.
 - **After a deploy** browsers and daemons reconnect with backoff, and the
@@ -951,10 +959,13 @@ consumers start after that gate.
     The code covers the bytes `smns-hub-log-v1\n<project id>\n` followed by
     the canonical JSON (RFC 8785, JCS: sorted keys, no whitespace, UTF-8;
     vectors in Interfaces pin the Python and TypeScript implementations
-    to the same bytes) of **every field
-    of the event except `mac`** — and, for a `hub/` writer only, except
-    also `writer`, `seq`, and `ts`, which the hub assigns after the browser
-    computed the code. So no field can ride along unauthenticated (the
+    to the same bytes) of **the event with `mac` reduced to its
+    `nonce`** — every field but the code's own value — and, for a `hub/`
+    writer only, without `writer`, `seq`, and `ts`, which the hub assigns
+    after the browser computed the code. The nonce is covered because a
+    `hub/` event's position is not: a hub that re-sequenced a web `human`
+    under a fresh nonce would otherwise pass every daemon's seen-nonce
+    check. So no field can ride along unauthenticated (the
     delivery path reads more than the text: `frame_of` and
     `compose_frame` in `sminos.py` interpolate `msg_id` and `via`), an event
     cannot be moved to another position in its feed, and an event cannot be
@@ -1015,6 +1026,8 @@ consumers start after that gate.
     connection — makes the browser subscribe again and take a fresh
     snapshot; nothing is resumed from a hub buffer, which is an
     optimization only;
+  - every `mac` here is computed as DX1's is, with its own domain string
+    and its nonce covered;
   - **a pending request** is `raised {request: <tool-use id>, session,
     tool, input, mac}`, followed by exactly one `settled {request, winner:
     "web" | "terminal" | "other", outcome, by, mac}`, where the bridge names
@@ -1048,13 +1061,19 @@ consumers start after that gate.
   policy DC7 enforces: known checkouts, permission ceiling, read-only (RPCs
   and outside-origin delivery), 60-second freshness, digest match.
   **An RPC runs at most once.** Its nonce is its id. The daemon keeps a
-  durable ledger under `$SMINOS_HOME/daemon/` mapping each nonce to its
-  outcome — `done` with what the RPC produced (the spawned session's id,
-  the steer's row uuid) or `failed` with the reason — written before the
-  result is sent and kept for a day, well past the freshness window and a
+  durable ledger under `$SMINOS_HOME/daemon/`: it claims the nonce there
+  (`claimed`) before the RPC has any effect, then records the outcome —
+  `done` with what the RPC produced (the spawned session's id, the steer's
+  row uuid) or `failed` with the reason — before the result is sent, and
+  keeps the entry for a day, well past the freshness window and a
   reconnect. A nonce the ledger knows is answered from the ledger and never
-  executed again, a check made before the freshness check; an unknown nonce
-  older than 60 seconds is refused. The hub marks an RPC `uncertain` when
+  executed again, a check made before the freshness check. A nonce left
+  `claimed` with no outcome (the daemon stopped between the two writes) is
+  not executed again either: it is reconciled from the action's own trace
+  where one exists (a spawned seat carries the nonce that started it; a
+  steer's row is in the transcript) and otherwise answered `failed:
+  interrupted`, for the human to look at. An unknown nonce older than 60
+  seconds is refused. The hub marks an RPC `uncertain` when
   the machine's connection drops after the RPC was forwarded and before its
   result arrived, and resolves it from the results the daemon republishes
   on reconnect (DX2); a browser retry reuses the nonce. This matters for
@@ -1364,6 +1383,24 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DC3's plan review (2026-10-15) corrected two contracts and
+  two of §2's hub rules. DX1's code covers the `mac` nonce (everything but
+  the code's value): with the nonce outside it, a hub could re-sequence a
+  web `human` under a fresh nonce and every daemon's seen-nonce check
+  would pass the replay, delivering it again. DX6's daemon claims a nonce
+  in its ledger before the RPC has any effect and never re-executes a
+  claim left without an outcome, which closes the window between the
+  effect and the ledger write. §2: a machine is online by a lease fenced
+  by connection generation, not by a close callback, since Durable
+  Objects promise no shutdown hook; a browser socket's identity,
+  visibility, and subscriptions survive hibernation on the socket. And
+  the hub runs on its `workers.dev` host (owner, 2026-10-15) behind a
+  hostname-level Access application, because Worker-level Access refuses
+  WebSocket upgrades with a 403 (Cloudflare's Workers Access page, read
+  2026-10-15). Rejected then: an outcome-only ledger as DX6 first said,
+  and close notifications as the source of machine presence.
+  Date/Author: 2026-10-15, design session (adversarial review of DC3's
+  plan).
 - Decision: DC3 dispatched with its plan
   (`docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md`, MAWS), whose
   decisions touch the contracts. Machines connect over the HTTP pair (SSE
