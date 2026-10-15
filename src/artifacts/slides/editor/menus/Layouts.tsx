@@ -109,7 +109,7 @@ export function LayoutsMenu({ system, disabled, scope, onPick }: LayoutsMenuProp
   return (
     <DropdownMenu.Root modal={false}>
       <DropdownMenu.Trigger asChild>
-        <button type="button" className="deck-button deck-new-slide" disabled={disabled} aria-label={C.menu} title={C.menu}>
+        <button type="button" className="deck-button deck-new-slide" disabled={disabled} aria-label={C.button} title={C.menu}>
           {C.open}
         </button>
       </DropdownMenu.Trigger>

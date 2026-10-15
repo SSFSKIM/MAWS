@@ -24,6 +24,8 @@ export const TEXT_STYLE_COPY = {
 
 export const LAYOUTS_COPY = {
   menu: 'New slide from layout',
+  // the trigger's name: not "New slide …", which New slide's own name would no longer find alone
+  button: 'From layout',
   open: 'From layout…',
   loading: 'Reading the design system’s layouts…',
   none: 'This design system has no slide layouts.',

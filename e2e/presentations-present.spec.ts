@@ -137,7 +137,7 @@ test('the design system: Theme switches the deck’s system and overrides it, Te
   await theme.locator(`[data-system="${maws.id}"]`).click();
   await expect.poll(async () => (await ok<{ artifact: Row }>(page, 'artifacts.get', { artifactId: id })).artifact.designSystemId).toBe(maws.id);
   for (const layout of ['Content', 'Figures', 'Quote', 'Title']) {
-    await tab.getByRole('button', { name: 'New slide from layout', exact: true }).click();
+    await tab.getByRole('button', { name: 'From layout', exact: true }).click();
     const item = page.getByRole('menuitem', { name: `${layout} layout`, exact: true });
     await expect(item.locator('.maws-slide')).toBeVisible();
     await item.click();
