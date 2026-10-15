@@ -399,6 +399,28 @@ registrations through `connectDepth()`.
   M1 screenshot showed both. A MAWS renderer change for either goes to the
   composite's writer; a desk-side seam is preferred.
   Date/Author: 2026-10-15, composite's writer (from the M1 screenshot).
+- Decision (M3, as built): The acceptance runs the fake machine's DX4
+  producer (`SessionDepth`, deep-imported until DC3 exports it) on its
+  committed recording through DC5's DX3 double (`e2e/fake-machine.ts`),
+  not `FakeMachine` itself, which needs a DX2 hub the browser lane lacks;
+  recomposition's walk covers the real DX2 path (accepted by the
+  composite's writer). Every subscription message goes through the
+  double's `sendSub`, which numbers `diff` itself. Live marks close by a
+  desk-side row mapping (`live-marks.ts`) and settled ones by MAWS's
+  Presenter as it stands, labelled MAWS's "to human" (the writer's "to
+  you" was a suggestion; MAWS's Presenter is not edited). A hand-back turn
+  takes the engine origin, so it reads "Continued for Ns". A fold's span
+  index counts from 0 (sminos's numbering); a question bound leaves out
+  its call and result rows; an unresolved bound draws open with a note — a
+  question raised by the ask mod carries `toolu_plugin_…` where the
+  transcript's call is `toolu_01…`, which the composite's writer is
+  investigating, so no matching heuristic until it rules. The slot unfolds
+  each finished turn once, with its own subscription and store key per
+  open fold. Diff +/− counts come from the hunks. Fold height: sized to
+  content up to `min(60vh, 480px)` if the list allows it cheaply,
+  otherwise debt. DC3 gets, as minor items, `SessionDepth` not exported and
+  `diff()`'s hard-coded base `main`.
+  Date/Author: 2026-10-15, M3 executor; rulings by the composite's writer.
 - Decision: DX5 is final (composite at MAWS `361bee24`, DC2 closed): a
   `turn` start may carry `recovered: true` with `text: null`. Depth draws
   no turn start's text — DX4 relays no `turn` event, and the prompt row it
