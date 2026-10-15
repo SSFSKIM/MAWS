@@ -3,7 +3,7 @@ import vectorsFile from '../../src/protocol/vectors/codes.json';
 import { base64urlDecode } from '../../src/protocol/base64url';
 import { coveredBytes, DOMAINS, importOrgKey, inputSha256, newNonce, seal, sealRpc, verify, verifyRpc, type ShapeKind } from '../../src/protocol/codes';
 import type { HumanDraft, LogEvent } from '../../src/protocol/log';
-import type { Rpc } from '../../src/protocol/rpc';
+import type { Rpc, RpcDraft } from '../../src/protocol/rpc';
 
 type Vector = { name: string; domain: string; org_key: string; project: string; input: Record<string, unknown>; covered: string; covered_hex: string; code: string };
 type Negative = { name: string; of: string; why: string; domain: string; org_key: string; project: string; input: Record<string, unknown> };
@@ -41,7 +41,7 @@ describe('the committed vectors (written by generate.py, an independent implemen
       if (kind === 'rpc') {
         const draft: Partial<Rpc> = { ...(v.input as unknown as Rpc) };
         delete draft.mac;
-        expect(await sealRpc(key, draft as Omit<Rpc, 'mac'>)).toEqual(v.input);
+        expect(await sealRpc(key, draft as RpcDraft)).toEqual(v.input);
       } else {
         const { mac, ...draft } = v.input as { mac: { nonce: string; value: string } };
         expect(await seal(key, kind, v.project, draft as never, mac.nonce)).toEqual(v.input);

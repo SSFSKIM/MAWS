@@ -3,7 +3,7 @@
 // serves the suite's test key. Requests carry assertions signed with that key, as Access would add them.
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
-import { convertV4MiniflareOptions, Miniflare, Response as MiniflareResponse } from 'miniflare';
+import { convertV4MiniflareOptions, Miniflare, Response as MiniflareResponse, type V4WorkerOptions } from 'miniflare';
 import { inject } from 'vitest';
 import { accessKeyPair, signAssertion, type TestKey } from './assertions';
 
@@ -29,7 +29,10 @@ export type Hub = Awaited<ReturnType<typeof startHub>>;
 
 export async function startHub(vars: Partial<Record<keyof typeof DEPLOY_VARS, string>> = DEPLOY_VARS) {
   const key: TestKey = await accessKeyPair('test-k1');
-  const { workerOptions } = unstable_getMiniflareWorkerOptions(resolve(import.meta.dirname, '../../wrangler.jsonc'));
+  const workerOptions = unstable_getMiniflareWorkerOptions(resolve(import.meta.dirname, '../../wrangler.jsonc')).workerOptions as Pick<
+    V4WorkerOptions,
+    'durableObjects' | 'compatibilityDate' | 'compatibilityFlags' | 'bindings'
+  >;
   // Wrangler hands over Miniflare 4's option shape; Miniflare 5 converts it.
   const mf = new Miniflare(
     convertV4MiniflareOptions({
@@ -44,7 +47,7 @@ export async function startHub(vars: Partial<Record<keyof typeof DEPLOY_VARS, st
         // Modules are named relative to this root; one outside the bundle's directory names it `../…`, which workerd
         // refuses at startup with an opaque "internal error".
         modulesRoot: dirname(inject('hubScript')),
-        bindings: { ...(workerOptions.bindings as Record<string, string>), ...vars },
+        bindings: { ...workerOptions.bindings, ...vars },
         outboundService: (request) =>
           request.url === CERTS_URL ? MiniflareResponse.json({ keys: [key.jwk] }) : new MiniflareResponse('no outbound fetch in the suite', { status: 502 }),
       },

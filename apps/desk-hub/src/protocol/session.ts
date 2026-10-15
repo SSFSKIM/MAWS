@@ -37,13 +37,15 @@ export type Delivery = {
   mac: Mac;
 };
 
-/** A message the engine is still streaming, as a snapshot carries it. */
-export type Streaming = {
+/**
+ * A message the engine is still streaming, as the bridge's snapshot carries it (DX5's `streaming` entries, passed
+ * through): identified by `(turnId, agentId, step)`, its partial text through chunk `upTo` (-1 for none).
+ */
+export type Streaming = JsonObject & {
   turnId: string;
   agentId: string | null;
-  /** The ordinal of the model request within the turn. */
-  request: number;
-  /** The partial text, through chunk `upTo`. */
+  /** The model request's ordinal in the turn. */
+  step: number;
   text: string;
   upTo: number;
 };
@@ -66,8 +68,9 @@ export type SessionBodies = {
   snapshot: { rows: JsonObject[]; more: boolean; subagents: SubagentMeta[]; presence: SessionPresence; streaming: Streaming[] };
   /** A transcript row verbatim; `agentId` names the subagent whose transcript it is in. */
   row: { row: JsonObject; agentId: string | null };
-  /** A `turn.step` chunk verbatim, with its message's identity and its index in that message. */
-  chunk: { chunk: JsonObject; turnId: string; agentId: string | null; request: number; index: number };
+  /** A `turn.step` chunk object verbatim under `chunk`, nested beside its message's identity and its index in that
+   * message from 0 (DX5's chunk event). */
+  chunk: { turnId: string; agentId: string | null; step: number; chunkIndex: number; chunk: JsonObject };
   /** Older rows, newest first, answering a browser's `rows` request. */
   rows: { rows: JsonObject[]; before: string; more: boolean };
   subagents: { subagents: SubagentMeta[] };
