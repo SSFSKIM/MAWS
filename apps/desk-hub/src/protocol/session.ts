@@ -196,9 +196,10 @@ type Envelope<K extends SessionKind, Session extends string | null, Sub extends 
 export const SESSION_WIDE_KINDS = ['presence', 'compact', 'raised', 'settled', 'delivery'] as const satisfies readonly SessionKind[];
 
 /**
- * The envelope, discriminated by `kind`. A subscription's kinds carry `session`, `sub`, and `n` (0 for the snapshot,
- * then the live messages from 1: a gap makes the browser subscribe again); `presence`, `compact`, `raised`, `settled`,
- * and `delivery` carry `session` with `sub` and `n` null; `machine` carries all three null.
+ * The envelope, discriminated by `kind`. A subscription's kinds carry `session`, `sub`, and `n`: 0 for the snapshot,
+ * then n = 1, 2, … (`end` may come first, at n 0: a subscription ended before its snapshot could be taken, with the
+ * reason it would carry later); a gap makes the browser subscribe again. `presence`, `compact`, `raised`, `settled`, and
+ * `delivery` carry `session` with `sub` and `n` null; `machine` carries all three null.
  */
 export type SessionMessage<K extends SessionKind = SessionKind> = {
   [P in K]: P extends 'snapshot'

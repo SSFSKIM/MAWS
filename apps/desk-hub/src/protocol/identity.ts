@@ -1,6 +1,7 @@
 // DX7 — identity: the registry's records, machine names, and the enrollment code. Written to outlive phase 1: the
 // org phase adds roles and per-member keys to these records rather than replacing them.
 import { base64urlDecode, base64urlEncode } from './base64url';
+import type { JsonObject } from './json';
 
 /** A member id: 128 random bits as lowercase hex. Not a uuid, which sminos would read as a session (`writer_session`). */
 export type MemberId = string;
@@ -8,7 +9,53 @@ export const isMemberId = (id: string) => /^[0-9a-f]{32}$/.test(id);
 
 export type Role = 'admin' | 'member';
 
-export type OrgRecord = { id: string; name: string; created: string };
+/** `key_check` is the org key's check (HMAC-SHA256 of the key over `smns-desk-key-check-v1`), set by the first wrapped
+ * key and fixed from then: one org holds one key. Null until the first. */
+export type OrgRecord = { id: string; name: string; created: string; key_check: string | null };
+
+/**
+ * The org key wrapped for one unlock method (§6): the browser draws the key at random once and wraps it under a key it
+ * derives per method (a passkey's PRF output, or a passphrase), with AES-256-GCM, a fresh `iv`, and as additional data
+ * the UTF-8 of `smns-desk-wrap-v1` LF org id LF `method` LF `credential` (empty for a passphrase). The hub stores it and
+ * never sees the key; it reads nothing of `kdf`, `wrapped`, or `check` but their shapes and `check`'s equality.
+ */
+export type WrappedKeyRecord = {
+  /** The hub's: 128 random bits as 32 lowercase hex. */
+  id: string;
+  method: 'passkey' | 'passphrase';
+  /** The owner's name for it, 1 to 100 characters. */
+  label: string;
+  /** A passkey's WebAuthn credential id, base64url; null for a passphrase. */
+  credential: string | null;
+  /** How the browser derives the wrapping key: the browser's (DC5's), stored verbatim, at most 1 KiB as JSON. */
+  kdf: JsonObject;
+  /** 12 bytes, base64url. */
+  iv: string;
+  /** The 32-byte org key under AES-256-GCM with its tag: 48 bytes, base64url. */
+  wrapped: string;
+  /** HMAC-SHA256(org key, "smns-desk-key-check-v1"): 32 bytes, base64url. */
+  check: string;
+  created_by: MemberId;
+  created: string;
+};
+
+/**
+ * `GET /api/org/keys` (a member) answers `WrappedKeys`. `POST /api/org/keys` (an admin holding the key) takes a
+ * `WrappedKeyRequest` and answers `201 {key}`; `DELETE /api/org/keys/<id>` (an admin holding the key) takes
+ * `{auth}` and answers `{removed: <id>}`. Changing the wrapped keys takes the key, not only an Access session: `auth`
+ * is HMAC-SHA256(org key, UTF-8 `smns-desk-key-auth-v1`), 32 bytes, base64url (`keyAuth`). The first wrapped key sets
+ * the org's `key_check` and keeps SHA-256 of its `auth` (`key_auth`, never returned); every later change must carry the
+ * `auth` whose digest that is, or is refused `not-key-holder` before anything else about the records is told.
+ */
+export const ORG_KEYS_PATH = '/api/org/keys';
+export const KEY_CHECK_DOMAIN = 'smns-desk-key-check-v1';
+export const KEY_AUTH_DOMAIN = 'smns-desk-key-auth-v1';
+export type WrappedKeys = { key_check: string | null; keys: WrappedKeyRecord[] };
+export type WrappedKeyRequest = Pick<WrappedKeyRecord, 'method' | 'label' | 'kdf' | 'iv' | 'wrapped' | 'check'> & { credential?: string | null; auth: string };
+export type WrappedKeyRemoval = { auth: string };
+export type WrappedKeyAdded = { key: WrappedKeyRecord };
+export type WrappedKeyRemoved = { removed: string };
+export type WrappedKeyError = 'bad-shape' | 'not-admin' | 'not-key-holder' | 'different-key' | 'credential-taken' | 'unknown-key' | 'last-key';
 
 /** A person, admitted by Access; `email` is the Access identity, `id` is what logs carry (`hub/<id>`, `member`). */
 export type MemberRecord = { id: MemberId; email: string; role: Role; created: string };
@@ -54,12 +101,26 @@ export type ProjectRecord = {
   archive_machine: string | null;
 };
 
+/** One member device's Web Push subscription; `endpoint` is its key. */
 export type PushSubscriptionRecord = {
   member: MemberId;
   endpoint: string;
   keys: { p256dh: string; auth: string };
   created: string;
 };
+
+// Web Push's endpoints (DX7), the signed-in member's own. `GET /api/push/key` answers the hub's VAPID public key, the
+// `applicationServerKey` a browser subscribes with; `PUT /api/push/subscriptions` keeps a subscription (what
+// `PushSubscription.toJSON()` gives: an https endpoint, `p256dh` the 65-byte uncompressed P-256 point and `auth` 16
+// bytes, each canonical base64url); `DELETE` with `{endpoint}` forgets one; `GET` lists the member's.
+export const PUSH_KEY_PATH = '/api/push/key';
+export const PUSH_SUBSCRIPTIONS_PATH = '/api/push/subscriptions';
+/** The uncompressed P-256 point (65 bytes), base64url. */
+export type PushKey = { key: string };
+export type PushSubscriptionRequest = { endpoint: string; keys: { p256dh: string; auth: string } };
+export type PushSubscriptionKept = { subscription: PushSubscriptionRecord };
+export type PushSubscriptionDeleted = { deleted: boolean };
+export type PushSubscriptions = { subscriptions: PushSubscriptionRecord[] };
 
 // Machine names. A machine writes `<name>/<session>` feeds into files named after them on every machine, so a name is a
 // file-name-safe word, unique in the org without regard to case (macOS's disk ignores case), and never a prefix the hub

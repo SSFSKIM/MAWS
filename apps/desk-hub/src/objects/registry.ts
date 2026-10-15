@@ -1,6 +1,7 @@
 // The org's registry (DX7): one per org. It holds the org, its members, its machines, its projects, and the
-// enrollments that create machines, and answers who an Access identity is to the hub. M3 adds push subscriptions and
-// the grid.
+// enrollments that create machines, and answers who an Access identity is to the hub; its members' push subscriptions,
+// which it sends Web Push to; and the grid, each project's summary as its `Project` reports it, streamed to members'
+// grid sockets.
 //
 // Enrollment is a durable state machine. Redeeming a token reserves the machine's name and records the intent to mint
 // (a machine row without a client id) before Cloudflare's API is called; the service token is named
@@ -11,10 +12,12 @@
 // it left behind findable. Every call to the API under one token name (a sweep's deletion by name, a redemption's
 // deletion and mint) runs in turn on that name's queue, so a deletion by name never lists a token minted after it began.
 import { DurableObject } from 'cloudflare:workers';
-import { hubConfig, type Env, type HubConfig } from '../env';
+import { hubConfig, MEMBER_HEADER, type Env, type HubConfig } from '../env';
 import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
-import { base64urlEncode } from '../protocol/base64url';
+import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
+import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../protocol/base64url';
+import type { GridDown, ProjectSummary, PushNotice } from '../protocol/browser';
 import {
   ENROLLMENT_TTL_S,
   isMachineName,
@@ -27,8 +30,11 @@ import {
   type MemberRecord,
   type OrgRecord,
   type ProjectRecord,
+  type PushSubscriptionRecord,
   type Redeemed,
+  type WrappedKeyRemoved,
 } from '../protocol/identity';
+import { OrgKeys, type StoredKey } from './org-keys';
 
 export type Principal = { kind: 'member'; org: OrgRecord; member: MemberRecord } | { kind: 'machine'; org: OrgRecord; machine: MachineRecord };
 
@@ -39,7 +45,7 @@ const ok = <T>(value: T): Result<T> => ({ ok: true, value });
 const fail = (status: number, error: string, message?: string): Result<never> => ({ ok: false, status, error, ...(message ? { message } : {}) });
 
 const SCHEMA = `
-CREATE TABLE IF NOT EXISTS org (id TEXT PRIMARY KEY, name TEXT NOT NULL, created TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS org (id TEXT PRIMARY KEY, name TEXT NOT NULL, created TEXT NOT NULL, key_check TEXT, key_auth TEXT);
 CREATE TABLE IF NOT EXISTS members (
   id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS machines (
@@ -51,7 +57,17 @@ CREATE TABLE IF NOT EXISTS enrollments (
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, registered_by TEXT NOT NULL, created TEXT NOT NULL, archive_machine TEXT);
 CREATE TABLE IF NOT EXISTS orphans (token_name TEXT PRIMARY KEY, since TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  endpoint TEXT PRIMARY KEY, member TEXT NOT NULL, p256dh TEXT NOT NULL, auth TEXT NOT NULL, created TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS summaries (
+  project TEXT PRIMARY KEY, machines INTEGER NOT NULL, machines_online INTEGER NOT NULL, working INTEGER NOT NULL,
+  waiting INTEGER NOT NULL);
 `;
+
+/** A member's devices: enough for a person's phones, tablets, and browsers, and a bound on what one member can store. */
+const MAX_PUSH_SUBSCRIPTIONS = 20;
+const MAX_ENDPOINT = 2048;
+type Counts = Omit<ProjectSummary, 'id' | 'name'>;
 
 const MACHINE_COLUMNS = 'name, client_id, token_name, state, enrollment, created, confirmed';
 const ENROLLMENT_COLUMNS = 'id, created_by, created, expires, state, machine, ttl_s';
@@ -74,9 +90,15 @@ export class Registry extends DurableObject<Env> {
   /** Per service-token name, the tail of the API work queued under it (an object restart ends the work with it). */
   private readonly nameQueues = new Map<string, Promise<unknown>>();
 
+  private readonly keys: OrgKeys;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     ctx.storage.sql.exec(SCHEMA);
+    // An org stored before wrapped keys (M2's local state) gains its key check and key auth, empty.
+    const columns = ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(org)').toArray().map((c) => c.name);
+    for (const column of ['key_check', 'key_auth']) if (!columns.includes(column)) ctx.storage.sql.exec(`ALTER TABLE org ADD COLUMN ${column} TEXT`);
+    this.keys = new OrgKeys(ctx.storage);
   }
 
   private get config(): HubConfig {
@@ -248,8 +270,149 @@ export class Registry extends DurableObject<Env> {
 
   /** A machine's `hello` for a project the registry does not hold registers it, under the name from its `.smns`. */
   registerProject(id: string, name: string, machine: string): ProjectRecord {
-    this.sql.exec('INSERT OR IGNORE INTO projects (id, name, registered_by, created, archive_machine) VALUES (?, ?, ?, ?, NULL)', id, name, machine, iso(Date.now()));
-    return this.project(id)!;
+    const inserted = this.sql.exec('INSERT OR IGNORE INTO projects (id, name, registered_by, created, archive_machine) VALUES (?, ?, ?, ?, NULL)', id, name, machine, iso(Date.now())).rowsWritten;
+    const project = this.project(id)!;
+    if (inserted > 0) this.toGrid({ t: 'summary', project: this.summaryOf(project) });
+    return project;
+  }
+
+  // ---- The grid (DX3's registry socket) ------------------------------------------------------------------------
+
+  /** A member's grid socket (the Worker sends only a member's): every project's summary, then each change. */
+  async fetch(request: Request): Promise<Response> {
+    if (new URL(request.url).pathname !== '/grid') return new Response('not found', { status: 404 });
+    if (request.headers.get('Upgrade') !== 'websocket') return new Response('expected a WebSocket', { status: 426 });
+    const [client, server] = Object.values(new WebSocketPair());
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({ member: request.headers.get(MEMBER_HEADER) ?? '' });
+    this.send(server, { t: 'grid', projects: this.projects().map((p) => this.summaryOf(p)) });
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** The grid takes nothing up. */
+  async webSocketMessage(): Promise<void> {}
+
+  /** A project's counts, as its `Project` object reports them when they change. */
+  summary(project: string, counts: Counts): void {
+    this.sql.exec(
+      'INSERT OR REPLACE INTO summaries (project, machines, machines_online, working, waiting) VALUES (?, ?, ?, ?, ?)',
+      project,
+      counts.machines,
+      counts.machines_online,
+      counts.working,
+      counts.waiting,
+    );
+    const record = this.project(project);
+    if (record) this.toGrid({ t: 'summary', project: this.summaryOf(record) });
+  }
+
+  private summaryOf(project: ProjectRecord): ProjectSummary {
+    const counts = this.sql.exec<Counts>('SELECT machines, machines_online, working, waiting FROM summaries WHERE project = ?', project.id).toArray()[0];
+    return { id: project.id, name: project.name, ...(counts ?? { machines: 0, machines_online: 0, working: 0, waiting: 0 }) };
+  }
+
+  private toGrid(frame: GridDown): void {
+    for (const socket of this.ctx.getWebSockets()) this.send(socket, frame);
+  }
+
+  private send(socket: WebSocket, frame: GridDown): void {
+    try {
+      socket.send(JSON.stringify(frame));
+    } catch {
+      // closing as it is written to: the browser reconnects and gets the grid whole
+    }
+  }
+
+  // ---- Web Push (DX7) ----------------------------------------------------------------------------------------------
+
+  private vapid: Promise<VapidKey> | undefined;
+
+  private vapidKey(): Promise<VapidKey> {
+    this.vapid ??= importVapidKey(this.config.vapidKey);
+    return this.vapid;
+  }
+
+  /** The `applicationServerKey` a browser subscribes with. */
+  async pushKey(): Promise<{ key: string }> {
+    return { key: (await this.vapidKey()).publicKey };
+  }
+
+  /** Keeps a member device's subscription, keyed by its endpoint (a device subscribing again replaces its keys). */
+  keepPushSubscription(member: MemberRecord, body: unknown): Result<{ subscription: PushSubscriptionRecord }> {
+    const b = (typeof body === 'object' && body !== null ? body : {}) as { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
+    const endpoint = b.endpoint;
+    let url: URL | undefined;
+    try {
+      url = typeof endpoint === 'string' && endpoint.length <= MAX_ENDPOINT ? new URL(endpoint) : undefined;
+    } catch {
+      url = undefined;
+    }
+    if (url?.protocol !== 'https:' || !isBase64urlOf(b.keys?.p256dh, 65) || !isBase64urlOf(b.keys?.auth, 16)) {
+      return fail(400, 'bad-shape', 'the body is {endpoint: an https URL, keys: {p256dh: 65 bytes, auth: 16 bytes}}, base64url as PushSubscription.toJSON() gives them');
+    }
+    const kept = this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM push_subscriptions WHERE member = ? AND endpoint != ?', member.id, endpoint as string).one().n;
+    if (kept >= MAX_PUSH_SUBSCRIPTIONS) return fail(409, 'too-many', `a member keeps at most ${MAX_PUSH_SUBSCRIPTIONS} devices; delete one first`);
+    const record: PushSubscriptionRecord = { member: member.id, endpoint: endpoint as string, keys: { p256dh: b.keys!.p256dh as string, auth: b.keys!.auth as string }, created: iso(Date.now()) };
+    this.sql.exec(
+      'INSERT OR REPLACE INTO push_subscriptions (endpoint, member, p256dh, auth, created) VALUES (?, ?, ?, ?, ?)',
+      record.endpoint,
+      record.member,
+      record.keys.p256dh,
+      record.keys.auth,
+      record.created,
+    );
+    return ok({ subscription: record });
+  }
+
+  /** Forgets one of the member's own subscriptions. */
+  deletePushSubscription(member: MemberRecord, body: unknown): Result<{ deleted: boolean }> {
+    const endpoint = typeof body === 'object' && body !== null ? (body as { endpoint?: unknown }).endpoint : undefined;
+    if (typeof endpoint !== 'string') return fail(400, 'bad-shape', 'the body is {endpoint}');
+    return ok({ deleted: this.sql.exec('DELETE FROM push_subscriptions WHERE endpoint = ? AND member = ?', endpoint, member.id).rowsWritten > 0 });
+  }
+
+  pushSubscriptions(member: MemberRecord): { subscriptions: PushSubscriptionRecord[] } {
+    return { subscriptions: this.subscriptionsOf([member.id]) };
+  }
+
+  /**
+   * One push of `notice` to each subscribed device of every member not in `looking` (those with a browser showing the
+   * project). A push service that answers 404 or 410 has dropped the subscription, so the hub does too. Answers what
+   * happened, for the suites and the logs.
+   */
+  async push(notice: PushNotice, looking: string[]): Promise<{ sent: number; gone: number; failed: number }> {
+    const members = this.sql.exec<{ id: string }>('SELECT id FROM members').toArray().map((m) => m.id).filter((id) => !looking.includes(id));
+    const targets = this.subscriptionsOf(members);
+    if (targets.length === 0) return { sent: 0, gone: 0, failed: 0 };
+    const vapid = await this.vapidKey();
+    const subject = `mailto:${this.config.org.adminEmail}`;
+    const outcomes = await Promise.all(
+      targets.map(async (target): Promise<'sent' | 'gone' | 'failed'> => {
+        try {
+          const response = await fetch(await pushRequest(vapid, subject, target, notice));
+          await response.arrayBuffer().catch(() => {});
+          if (response.status === 404 || response.status === 410) {
+            this.sql.exec('DELETE FROM push_subscriptions WHERE endpoint = ?', target.endpoint);
+            return 'gone';
+          }
+          return response.ok ? 'sent' : 'failed';
+        } catch {
+          return 'failed';
+        }
+      }),
+    );
+    return { sent: outcomes.filter((o) => o === 'sent').length, gone: outcomes.filter((o) => o === 'gone').length, failed: outcomes.filter((o) => o === 'failed').length };
+  }
+
+  private subscriptionsOf(members: string[]): PushSubscriptionRecord[] {
+    if (members.length === 0) return [];
+    return this.sql
+      .exec<{ endpoint: string; member: string; p256dh: string; auth: string; created: string }>(
+        `SELECT endpoint, member, p256dh, auth, created FROM push_subscriptions WHERE member IN (${members.map(() => '?').join(', ')}) ORDER BY created, endpoint`,
+        ...members,
+      )
+      .toArray()
+      .map((row) => ({ member: row.member, endpoint: row.endpoint, keys: { p256dh: row.p256dh, auth: row.auth }, created: row.created }));
   }
 
   /** Names the one machine that writes the project's git archive (DX2's `have.archive` tells it at its next `hello`), or
@@ -356,14 +519,52 @@ export class Registry extends DurableObject<Env> {
 
   /** The org, created from the deploy configuration the first time it is needed, with its admin as the first member. */
   private ensureOrg(): OrgRecord {
-    const existing = this.sql.exec<OrgRecord>('SELECT id, name, created FROM org').toArray()[0];
+    const existing = this.sql.exec<OrgRecord>('SELECT id, name, created, key_check FROM org').toArray()[0];
     if (existing) return existing;
     const { org: config } = this.config;
     const created = iso(Date.now());
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec('INSERT INTO org (id, name, created) VALUES (?, ?, ?)', config.id, config.name, created);
+      this.sql.exec('INSERT INTO org (id, name, created, key_check) VALUES (?, ?, ?, NULL)', config.id, config.name, created);
       this.sql.exec('INSERT INTO members (id, email, role, created) VALUES (?, ?, ?, ?)', newId(), config.adminEmail.toLowerCase(), 'admin', created);
     });
-    return { id: config.id, name: config.name, created };
+    return { id: config.id, name: config.name, created, key_check: null };
+  }
+
+  // ---- The org key's wrapped copies (DX7) ----------------------------------------------------------------------
+
+  orgKeys(): { key_check: string | null; keys: StoredKey[] } {
+    return { key_check: this.ensureOrg().key_check, keys: this.keys.list() };
+  }
+
+  /** Adds a wrapped key; the first sets the org's `key_check` and `key_auth` in the same step as its insert. */
+  async addOrgKey(member: MemberRecord, body: unknown): Promise<Result<{ key: StoredKey }>> {
+    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const authHash = await this.authHash(body);
+    // From here to the insert, nothing else runs in this object: two first posts cannot both set the check.
+    const org = this.ensureOrg();
+    const keyAuth = this.keyAuth();
+    const setOrg = (check: string, auth: string) => this.sql.exec('UPDATE org SET key_check = ?, key_auth = ?', check, auth);
+    const added = this.keys.add(member, body, { keyCheck: org.key_check, keyAuth }, authHash, setOrg, newId(), iso(Date.now()));
+    return added.ok ? ok({ key: added.value }) : fail(added.status, added.error, added.message);
+  }
+
+  async removeOrgKey(member: MemberRecord, id: string, body: unknown): Promise<Result<WrappedKeyRemoved>> {
+    if (member.role !== 'admin') return fail(403, 'not-admin');
+    const authHash = await this.authHash(body);
+    const removed = this.keys.remove(id, this.keyAuth(), authHash);
+    return removed.ok ? ok({ removed: removed.value }) : fail(removed.status, removed.error, removed.message);
+  }
+
+  /** SHA-256 of a body's `auth` (32 bytes, canonical base64url), base64url; null when it carries none. The org keeps only
+   * this digest (`key_auth`), and compares digests, never the `auth` itself. */
+  private async authHash(body: unknown): Promise<string | null> {
+    const auth = typeof body === 'object' && body !== null ? (body as { auth?: unknown }).auth : undefined;
+    if (!isBase64urlOf(auth, 32)) return null;
+    return base64urlEncode(new Uint8Array(await crypto.subtle.digest('SHA-256', Uint8Array.from(base64urlDecode(auth as string)))));
+  }
+
+  /** The org's `key_auth`, never returned by any endpoint. */
+  private keyAuth(): string | null {
+    return this.sql.exec<{ key_auth: string | null }>('SELECT key_auth FROM org').toArray()[0]?.key_auth ?? null;
   }
 }

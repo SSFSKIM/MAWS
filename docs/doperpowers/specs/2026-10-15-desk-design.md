@@ -589,11 +589,16 @@ fork.
   still lets the hub forge peer messages, which drive delivery and resume
   just as `human` does (`_owed`, `push_event`, `push_member` in
   `sminos.py`)]**
-  - *The org key* is a 256-bit secret derived in the browser from the
-    owner's passkey through the WebAuthn PRF extension (HKDF over the PRF
-    output with the org id), or from a passphrase where PRF is unavailable;
-    any browser holding the passkey derives the same key. It reaches each
-    machine only inside the enrollment code, by the owner's hand.
+  - *The org key* is a 256-bit secret drawn at random in the owner's
+    browser when the org's first unlock method is set up. The hub keeps it
+    only wrapped, once per unlock method, each copy under a key derived
+    from the owner's passkey through the WebAuthn PRF extension, or from a
+    passphrase where PRF is unavailable (DX7's wrapped keys); a browser
+    holding any one method unwraps the same org key, and adding a method
+    takes one already held. **[owner, 2026-10-15: one random key, locked
+    per method, so a passkey and a passphrase open the same key.]** It
+    reaches each machine only inside the enrollment code, by the owner's
+    hand.
   - *What carries a code:* every log event on the hub, from any writer (the
     daemon adds the code when it uploads its machine's events; the browser
     when it writes a `human`); every RPC; every pending request and its
@@ -669,7 +674,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 4. **WebAuthn PRF and Access on the phone** (DC5): PRF support in the
    owner's browsers with an iCloud Keychain passkey, and inside an iOS
    home-screen app, whose storage is separate from Safari's, so the key is
-   derived again there; Cloudflare Access sign-in inside the standalone app
+   unwrapped again there; Cloudflare Access sign-in inside the standalone app
    (the identity provider's redirect leaves the app's scope, so the Access
    cookie must land in the standalone context); Access session lifetime
    against a push tapped hours later. The passphrase path covers missing
@@ -865,11 +870,13 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
     outcome per recipient, including after a reload; when the fake machine
     disconnects, its sessions' presence and depth show as unavailable while
     the conversation stays.
-  - **G3 (the key):** the org key derives from a passkey through PRF in the
-    owner's browsers, or from a passphrase; the enrollment code it produces
-    enrolls a machine through DC4.
+  - **G3 (the key):** the org key is drawn at random once and kept at the
+    hub wrapped per unlock method (DX7); a passkey through PRF or a
+    passphrase unwraps the same key in any of the owner's browsers, a
+    method is added only by a browser that already holds the key, and the
+    enrollment code it produces enrolls a machine through DC4.
   - **G4 (the phone):** installed to an iPhone's home screen, the app signs
-    in through Access, derives the org key, and draws the grid, the group
+    in through Access, unwraps the org key, and draws the grid, the group
     chat, a direct channel, and request cards in mobile layouts; a question
     raised by the fake machine pushes a notification that opens its card,
     and the answer from the phone reaches the fake machine authenticated.
@@ -1554,7 +1561,10 @@ refused `bad-shape`. A machine joins the project's fan-out in the same step the 
 stored after it reaches the machine behind the backlog and none falls between; the backlog is every writer's events
 past the `hello`'s vector, the machine's own included (a fresh machine bootstraps them), each writer's in seq order,
 in `events` frames of about 256 KiB. `have.archive` is read from the registry at each `hello`: a designation made later
-reaches the machine at its next `hello`. What a project sends a machine is fenced by the generation the project was
+reaches the machine at its next `hello`. A `hello` for a project already open on the stream is allowed and idempotent:
+the hub answers it with a fresh `have` and the backlog past that `hello`'s vector (events the machine already holds
+import idempotently), and the machine's place in the fan-out is unchanged. The daemon re-sends `hello` for each open
+project once per archive period, so a designation made or cleared later reaches a machine whose stream never drops. What a project sends a machine is fenced by the generation the project was
 opened on: a newer stream receives nothing of a project until the machine sends `hello` for it on that stream.
 
 **The POST's answer and the replies.** The hub writes its replies to a POST's frames — `have` and the backlog after a
@@ -1698,7 +1708,7 @@ type Envelope<K, Session, Sub, N> = {
 // Discriminated by kind; each kind's invariants are in its type:
 type SessionMessage =
   | Envelope<'snapshot', string, string, 0>                                                       // a sub's first message
-  | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, …
+  | Envelope<'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff' | 'usage' | 'end', string, string, number>   // then n = 1, 2, … (`end` may come first, at n 0)
   | Envelope<'presence' | 'raised' | 'settled' | 'delivery' | 'compact', string, null, null>     // to every browser, outside subs
   | Envelope<'machine', null, null, null>;                                                         // names no session
 ```
@@ -1706,10 +1716,15 @@ type SessionMessage =
 (`session.ts` writes it as a mapped type over the kinds, one `Envelope` per kind, so a `chunk` without a sub or a
 `machine` message with a session fails to typecheck.)
 
+**An `end` may be a sub's first message**, at `n` 0, when the subscription ends before its snapshot could be taken: an
+unknown session, a bridge not ready yet, a cut row that never reached disk (DX5). It carries the reason it would carry
+later; on `discontinuity` at `n` 0 the browser subscribes again after a short backoff rather than at once.
+
 **A subscription's scope** is one transcript, named when the browser subscribes (DX3) and carried to the machine
 (DX2): the session's main transcript (`agentId` null) or one subagent's. The snapshot's rows and every `rows` page
 come from that transcript alone. A main-scope sub also carries every agent's chunks and `block-row`s, and the
-subagent tree; an agent-scope sub carries that agent's rows, chunks, and `block-row`s, and its snapshot's `subagents`
+subagent tree; since it carries no subagent's rows, a subagent's `block-row` there settles that block at once, and the
+browser drops its partial text (the row is drawn by that agent's own sub). An agent-scope sub carries that agent's rows, chunks, and `block-row`s, and its snapshot's `subagents`
 and `streaming` are that agent's own.
 
 | `kind` | in a sub | body |
@@ -2167,7 +2182,7 @@ once the machine is back. Results reach the hub as DX2 `rpc-result` frames, repu
 **Left for M3:** forwarding, the record per nonce, `uncertain` on a lapsed lease, `rpc-ack`. The policy (DC7) is
 unchanged by these shapes.
 
-### DX7 — Identity (owner DC3; G1, amended; enrollment built at M2)
+### DX7 — Identity (owner DC3; G1, amended; enrollment built at M2; wrapped keys at M3)
 
 **Access.** Members sign in through Access; the Worker verifies `Cf-Access-Jwt-Assertion` on every request (RS256
 against the team's certificate endpoint, the application's AUD, the team's issuer, `exp` and `nbf`) and names a
@@ -2185,7 +2200,19 @@ signs in first.
 **Records** (`identity.ts`):
 
 ```ts
-type OrgRecord = { id: string; name: string; created: string };
+type OrgRecord = { id: string; name: string; created: string; key_check: string | null };  // set by the first wrapped key
+// Beside it the Registry keeps the org's `key_auth` verifier, SHA-256 of the first wrapped key's `auth`, never returned.
+type WrappedKeyRecord = {
+  id: string;                    // the hub's: 128 random bits as 32 lowercase hex
+  method: 'passkey' | 'passphrase';
+  label: string;                 // the owner's name for it, 1 to 100 characters
+  credential: string | null;     // a passkey's WebAuthn credential id, base64url; null for a passphrase
+  kdf: JsonObject;               // how the browser derives the wrapping key; the browser's (DC5's), stored verbatim
+  iv: string;                    // 12 bytes, base64url
+  wrapped: string;               // AES-256-GCM of the 32-byte org key with its tag: 48 bytes, base64url
+  check: string;                 // HMAC-SHA256(org key, "smns-desk-key-check-v1"), 32 bytes, base64url
+  created_by: MemberId; created: string;
+};
 type MemberRecord = { id: MemberId; email: string; role: 'admin' | 'member'; created: string };
 type MachineRecord = {
   name: string;
@@ -2234,6 +2261,9 @@ types are in `identity.ts` (`EnrollmentRequest`, `EnrollmentIssued`, `RedeemRequ
 | `DELETE /api/machines/<name>` | an admin | `200 {revoked: <name>}`: the service token deleted, the record gone, the machine's stream ended, the name released, any archive designation of it cleared | `403 not-admin`, `404 unknown-machine` |
 | `GET /api/projects` | a member | `200 {projects: ProjectRecord[]}` | |
 | `PUT /api/projects/<id>/archive` `{machine}` | an admin | `200 {project: ProjectRecord}`; `machine` an enrolled machine's name, or null to clear | `403 not-admin`, `400 bad-shape`, `404 unknown-project`, `409 unknown-machine` |
+| `GET /api/org/keys` | a member | `200 {key_check, keys: WrappedKeyRecord[]}`: `key_check` the org's, null while it has no key | |
+| `POST /api/org/keys` `{method, label, credential, kdf, iv, wrapped, check, auth}` | an admin holding the org key | `201 {key: WrappedKeyRecord}`; the first one sets the org's `key_check` and `key_auth` | `403 not-admin`, `403 not-key-holder` (the org has a key and SHA-256 of `auth` is not its `key_auth`), `400 bad-shape` (`kdf` above 1 KiB, a field of the wrong length, a `credential` on a passphrase or none on a passkey), `409 different-key` (`auth` matches but its `check` is not the org's), `409 credential-taken` (a wrapped key for that passkey exists) |
+| `DELETE /api/org/keys/<id>` `{auth}` | an admin holding the org key | `200 {removed: <id>}` | `403 not-admin`, `403 not-key-holder`, `404 unknown-key`, `409 last-key` (the org's only wrapped key is never removed: add another first) |
 
 Redemption recovers from every loss: a lost answer is recovered by redeeming again with the same token and name, which
 rotates the credential; an answer that never came back from Cloudflare (a lost mint) leaves a token named
@@ -2260,6 +2290,30 @@ and an empty field. (`encodeEnrollmentCode`, `decodeEnrollmentCode`.)
 **Archive designation:** `ProjectRecord.archive_machine`, an active machine's name, which DX2's `have.archive` tells
 that machine at its next `hello`; revoking the machine clears it. Only the archive machine may upload `legacy/` feeds.
 **Push subscriptions:** `PushSubscriptionRecord`, one per member device.
+
+**Wrapped keys** (§6; the hub stores them and never sees the org key). The browser draws the org key at random when the
+org's first method is set up, and for each unlock method derives a wrapping key (a passkey: from its PRF output; a
+passphrase: memory-hard; the derivations and their parameters are the browser's, carried in `kdf`), encrypts the org
+key under it with AES-256-GCM, a fresh 12-byte `iv`, and as additional data the UTF-8 of `smns-desk-wrap-v1` LF org id
+LF `method` LF `credential` (empty for a passphrase), and posts it. To unlock, a browser fetches the org's wrapped keys,
+asks for a passkey among their credentials or for the passphrase, and unwraps straight into a non-extractable HMAC key;
+a failed tag is a wrong passphrase or another passkey, and an unwrapped key whose `check` is not the org's
+`key_check` is refused. Adding a method, and building an enrollment code, unwrap the key once more as raw bytes and
+wipe them after. `key_check` and `key_auth` keep one org from ever holding two keys: a second first-time setup racing the first
+carries another `auth` and is refused `not-key-holder`, which the hub checks before anything else, so a caller without
+the key learns nothing of the records; `different-key` is left for a holder of the key whose record's `check` is wrong. It reveals nothing a code made with the key does not. **Changing the org's wrapped keys
+takes the key, not only an Access session:** `auth` is HMAC-SHA256(org key, UTF-8 `smns-desk-key-auth-v1`), 32 bytes,
+base64url, which a browser holding the key computes even from its non-extractable copy. The first wrapped key sets
+`key_auth` = SHA-256(`auth`) with `key_check`, in one step; every later add or removal must carry the `auth` whose
+hash it is, or is refused `not-key-holder`. `key_check` is public and proves nothing; without this, a stolen admin
+session could post a record carrying the public check over junk bytes and then delete every real one, leaving the
+org's browsers no way to their key. A hub that is itself compromised can still delete records, as it can withhold
+events: that is availability, not authority. An admin session that sets up a key before the owner does makes an org
+the owner cannot unlock (the owner's setup is refused `not-key-holder`), and gains no authority with it, since no
+machine holds that key; the owner sets up the key right after deploying. The hub can test passphrase guesses
+offline against a wrapped key at the derivation's cost per guess, as it could against any code; the memory-hard cost
+and the passphrase's length are the defense. Removing a method does not take the key from a browser that kept it;
+changing the org key itself means enrolling every machine again and is out of phase 1.
 
 **Built at M2** (proved by `test/enrollment.test.ts` through the stand-in: a name already enrolled refused, case
 aside; a confirmed token redeemed again refused; a revoked machine's connection refused, at once and with its token
@@ -2374,11 +2428,15 @@ passed through as DX4 has it.
 
 **The session** (`sessions.ts`): `DeskSession` is what the log says of a
 session joined with what the session plane says now —
-`{project, session, alias, machine, cwd, worktree, member, ended: {by,
+`{project, session, alias, machine, cwd, worktree, member, seat, ended: {by,
 reason} | null, charge, status, state: {word, ts} | null, joinedAt, group:
 "waiting" | "working" | "idle" | "ended", presence: SessionPresence |
 null, machineOnline: boolean | null}`. `presence` is null until the hub
-sends one and while the machine is offline. Model, context use, and cost
+sends one and while the machine is offline. `seat` is the seat its latest
+`joined` names, empty for a session the human opened; with `presence` it
+gives the session's kind for §5's table: a live record with the bridge is
+bridged; without it, a non-empty `seat` is a `--bg` seat and an empty one a
+terminal session; a null record is not running. Model, context use, and cost
 are not on it: the model comes from the transcript, and context use and
 cost from the main subscription's `usage` (DX4), both DC6's. Inside an open project
 `useDeskSessions(connection)` and `useDeskSession(connection, id)` serve
@@ -2705,6 +2763,108 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DX8's `DeskSession` gains `seat` (DC5's M3, additive). §5's
+  table differs between a `--bg` seat and a terminal session, and presence
+  alone does not tell them apart without a bridge; the log's `joined`
+  event already names the seat. Flags DC6.
+  Date/Author: 2026-10-15, design session (DC5's M3).
+- Decision: Changing the org's wrapped keys needs proof of the key, not
+  only an Access session (the wrapped-key contract's adversarial review,
+  P1). The public `key_check` let a stolen admin session post a junk
+  record that passed every check and then delete every real one, which
+  `last-key` did not prevent. Now each add or removal carries `auth`, a
+  domain-separated HMAC of a constant under the org key, and the hub
+  compares its SHA-256 with the `key_auth` the first wrapped key set and
+  never returns. Rejected: per-request codes under the org key, which the
+  hub cannot verify. A compromised hub can still delete records (it can
+  already withhold events), and an admin session ahead of the owner's
+  first setup can lock the owner out, though without gaining any
+  authority. The review confirmed WebCrypto unwraps AES-GCM straight into
+  a non-extractable HMAC key (a Node probe; Safari not exercised).
+  Backlog: a machine already enrolled holds the raw key and could give it
+  back to a browser that has lost every method, a recovery path out of
+  phase 1. Flags DC3, DC5.
+  Date/Author: 2026-10-15, design session (the contract's review).
+- Decision: The org key is one random key, wrapped once per unlock method
+  (owner, 2026-10-15: "Random key, locked per method"). As §6 first read,
+  a passkey (PRF, then HKDF) and a passphrase (Argon2id) derived two
+  different keys, and an org can use only one: unlocking a phone with the
+  passphrase after setting up with the passkey would have broken every
+  code. Now the browser draws the key at random once; the hub keeps it
+  wrapped under each method's derived key (DX7's `/api/org/keys`), and any
+  method opens the same key. A wrong passphrase now fails the unwrap
+  instead of producing a different key. `key_check` stops a second
+  first-time setup from minting a second key. Rejected: one unlock path
+  recorded per org, which leaves a passkey-only org with no way into a
+  browser without PRF, and a passphrase-only org without passkeys. DC5's
+  derivations (its plan's Decision Log) become the wrapping keys' and are
+  carried in each record's `kdf`, so their cost can rise without a new
+  contract. Recommended to the owner in the web: set up a second method
+  right after the first, since losing every method loses the key (the
+  enrolled machines still hold it, but nothing reads it back). Flags DC3
+  (the endpoints, in M3), DC5 (M2's open item closes on this).
+  Date/Author: 2026-10-15, owner; contract by the design session.
+- Decision: The web's look (owner, 2026-10-15), from DC5's mockups
+  (MAWS `smns-erb-web`, `mockups/desk/01-grid.html`, `02-project.html`).
+  The project grid uses card B, tiles, with its empty, loading, and
+  reconnecting states as mocked. The project view is approved as shown: a
+  sidebar with the group channel and the sessions grouped as waiting on
+  you, working, idle, and ended; the conversation in the center; the right
+  column kept for session depth (DC6). A browser that does not hold the
+  org key yet shows an empty sidebar, no session counts, since it cannot
+  verify anything it would draw. Rejected: cards A and C, and counts in
+  the locked view. Flags DC5, DC6.
+  Date/Author: 2026-10-15, owner.
+- Decision: A repeated `hello` on an open stream is allowed and
+  idempotent (DX2), answered with a fresh `have` and the backlog past its
+  vector. DX2 told a machine its archive designation only at `hello`, so a
+  machine whose stream never drops would never learn of a later one; DC4's
+  M4 re-sends `hello` per open project once per archive period (15
+  minutes), and DC3's hub already accepted the repeat without side
+  effect. Rejected: a hub push when the designation changes, a new frame
+  and new hub work for a backup whose latency does not matter. The
+  archive runs only on a fresh `have` naming this machine, so a machine
+  that loses the designation stops at the first answer after the change.
+  Residue: sminos's SKILL.md still says a `remote` makes `log/` a git
+  mirror, wrong for hub projects since DC4's M2; it is updated once for
+  the whole desk (hub projects, the bridge, the web's controls) after the
+  children merge, through doperpowers:writing-skills, as its own ticket.
+  Flags DC3, DC4.
+  Date/Author: 2026-10-15, design session (DC4's M4).
+- Decision: DX5's row order is disk order. DC2's M4 review broke the
+  agreed ordering live: a notice posted at hook entry can precede a row
+  the engine writes earlier (a session's first prompt was noticed before
+  its environment attachment but written after it), and a compaction's
+  rows, which no hook names, were emitted after the next prompt. So the
+  mod posts a row's notice once the engine has taken the row (after
+  `next()`), making notice order write order within a loop, and the
+  consumer emits each loop's rows strictly in disk order: a row past the
+  cut is released by its own notice, by a notice for a later row of the
+  same loop (a row passed over gets none), or after 2 s with neither;
+  every later row waits behind it. History waits for each loop's cut row
+  to reach disk (5 s, else a discontinuity), since a notice may now trail
+  the flush. A `block-row` for a row already released unnamed still ends
+  the subscription; a `row-seen` for one is ignored. History and live then
+  agree across a reconnect, both following the disk. Rejected: notices at
+  hook entry with a 2 s wait for unnamed rows, which emitted rows out of
+  order. Open: the live walk measures the largest flush-to-notice lag,
+  since a notice later than the window releases its row unnamed and its
+  `block-row` then ends the subscription; the window rises if the lag
+  nears it. And the mod seeds each loop's cut at load (DC7's M1 review):
+  with notices after `next()`, a `null` cut sent history to the end of
+  the file, so a row flushed after a module load but before its notice
+  sat in the snapshot's history beside its streaming block. On its first
+  `resync` the mod reports each loop's cut as the last row the engine held
+  for that loop when the module loaded, and no block of a loop enters
+  `streaming` before that loop's cut is seeded; `null` means the loop had
+  no rows. Rejected: an exception to DX4's no-overlap rule, healed by the
+  discontinuity the late `block-row` causes. DX5's text is refreshed from
+  DC2's plan when M4 is reviewed.
+  With it, from DC7's M1: an `end` may be a sub's first message, at
+  `n` 0 (DX4), and a subagent's `block-row` in a main-scope sub settles
+  its block at once, since that sub never carries the row. Flags DC2,
+  DC3 (the `end` type), DC5, DC6, DC7.
+  Date/Author: 2026-10-15, design session (DC2's M4 review, DC7's M1).
 - Decision: DX4's and DX5's `usage` give the engine's shape exactly:
   `context: {tokens?, window, percent?}` and `cost: {usd} | null`. The
   bridge passes `$.session.usage()`'s `context` and `cost` through, so

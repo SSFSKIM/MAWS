@@ -8,9 +8,10 @@
 //                   --user '' makes such a request refused, as Access refuses it
 //
 // State survives restarts: the Worker's objects in .wrangler/state (wrangler's), the stand-in's signing key and the
-// service tokens it minted in .wrangler/standin.json. Delete .wrangler/ to start from nothing.
+// service tokens it minted in .wrangler/standin.json, the hub's VAPID key in .wrangler/vapid.json. Delete .wrangler/ to
+// start from nothing.
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, webcrypto } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { connect } from 'node:net';
@@ -54,6 +55,15 @@ const standin = await AccessStandin.create({
   persist: (state) => writeFileSync(statePath, JSON.stringify(state, null, 2), { mode: 0o600 }),
 });
 
+// The hub's VAPID key for Web Push: generated on the first run and kept beside the stand-in's state (git-ignored, never
+// committed), since a browser's push subscription is bound to the key it subscribed with.
+const vapidPath = join(app, '.wrangler', 'vapid.json');
+if (!existsSync(vapidPath)) {
+  const pair = (await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])) as CryptoKeyPair;
+  const { kty, crv, x, y, d } = await webcrypto.subtle.exportKey('jwk', pair.privateKey);
+  writeFileSync(vapidPath, JSON.stringify({ kty, crv, x, y, d }), { mode: 0o600 });
+}
+
 const vars: Record<string, string> = {
   ORG_ID: ORG,
   ORG_NAME: 'Local org',
@@ -64,6 +74,7 @@ const vars: Record<string, string> = {
   CF_API_URL: `${origin}/standin/client/v4`,
   CF_ACCOUNT_ID: standin.account,
   CF_API_TOKEN: standin.apiToken,
+  VAPID_KEY: readFileSync(vapidPath, 'utf8'),
 };
 const wranglerBin = join(dirname(createRequire(import.meta.url).resolve('wrangler/package.json')), 'bin', 'wrangler.js');
 const wrangler = spawn(

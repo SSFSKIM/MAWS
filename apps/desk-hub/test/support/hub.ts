@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { convertV4MiniflareOptions, Miniflare, Response as MiniflareResponse, type V4WorkerOptions } from 'miniflare';
 import { inject } from 'vitest';
+import { generateVapidKey } from '../../src/push/web-push';
 import { accessKeyPair, signAssertion, type TestKey } from './assertions';
 
 const require = createRequire(import.meta.url);
@@ -30,7 +31,9 @@ export const DEPLOY_VARS = {
 
 export type Hub = Awaited<ReturnType<typeof startHub>>;
 
-export async function startHub(vars: Partial<Record<keyof typeof DEPLOY_VARS, string>> = DEPLOY_VARS) {
+export async function startHub(given: Partial<Record<keyof typeof DEPLOY_VARS | 'VAPID_KEY', string>> = DEPLOY_VARS) {
+  // The VAPID key is generated for the run, never committed.
+  const vars = { VAPID_KEY: await generateVapidKey(), ...given };
   const key: TestKey = await accessKeyPair('test-k1');
   const workerOptions = unstable_getMiniflareWorkerOptions(resolve(import.meta.dirname, '../../wrangler.jsonc')).workerOptions as Pick<
     V4WorkerOptions,

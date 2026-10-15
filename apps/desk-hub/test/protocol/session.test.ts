@@ -36,6 +36,8 @@ export const admitted: SessionMessage[] = [
   { ...base, session: 's', kind: 'compact', sub: null, n: null, body: { rpc: null, phase: 'end', skip: 'a hook vetoed it' } },
   { ...base, session: 's', kind: 'block-row', sub: 'x', n: 5, body: { uuid: 'u', turnId: 't', agentId: null, step: 0, index: 1 } },
   { ...base, session: 's', kind: 'end', sub: 'x', n: 6, body: { reason: 'discontinuity' } },
+  // An end may come first, before a snapshot could be taken.
+  { ...base, session: 's', kind: 'end', sub: 'w', n: 0, body: { reason: 'session-ended', message: 'no such session' } },
   { ...base, session: 's', kind: 'presence', sub: null, n: null, body: presence },
   { ...base, session: null, kind: 'machine', sub: null, n: null, body: machine },
 ];
@@ -71,7 +73,7 @@ describe('the DX4 envelope', () => {
     expect(SUBSCRIPTION_KINDS).toContain('block-row');
     expect(SUBSCRIPTION_KINDS).toContain('usage');
     expect(SESSION_WIDE_KINDS.filter((kind) => (SUBSCRIPTION_KINDS as readonly string[]).includes(kind))).toEqual([]);
-    expect(admitted).toHaveLength(12);
+    expect(admitted).toHaveLength(13);
     expect(refused).toHaveLength(11);
   });
 });

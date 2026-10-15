@@ -76,6 +76,22 @@ All of these are in the plan's Decision Log and Surprises & Discoveries:
     root lint covers the hub;
   - the tech-debt tracker logs uncapped reassembled part sets.
 
+## Update (fourth interim hand-back)
+
+- M2 is reviewed clean and ticked (71083dd4). Its last fix was b9e101ca:
+  a failed reply keeps its stream's queue failed, and a test-only seam
+  injects the failure.
+- M3 is executing with executor `a5e8645019cdbbc28`. Its commits:
+  - 068f14f3: the contract types, sent to the composite's writer;
+  - f167ca64: M3 itself;
+  - f22e0839: the wrapped org keys with `auth`, sent.
+
+  The workerd suites have not run locally, because the Mac's load stayed
+  at 40–190 for hours. The gate on f22e0839 stands in for them and is
+  running now. interfaces-M3.md and M3's report are not written yet.
+- M3's Decisions in the plan list every contract item folded since
+  dispatch (through 6a7cdde0).
+
 ## Next, on resume
 
 1. Read M2's report at

@@ -6,7 +6,7 @@
 import { hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
 import type { Principal, Registry, Result } from './objects/registry';
-import { REDEEM_PATH } from './protocol/identity';
+import { ORG_KEYS_PATH, PUSH_KEY_PATH, PUSH_SUBSCRIPTIONS_PATH, REDEEM_PATH } from './protocol/identity';
 import { POST_LIMIT } from './protocol/machine';
 
 export { Machine } from './objects/machine';
@@ -17,6 +17,7 @@ const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const PROJECT_SOCKET = new RegExp(`^/api/projects/(${UUID})/socket$`);
 const PROJECT_ARCHIVE = new RegExp(`^/api/projects/(${UUID})/archive$`);
 const MACHINE_PATH = /^\/api\/machines\/([^/]+)$/;
+const ORG_KEY_PATH = /^\/api\/org\/keys\/([^/]+)$/;
 /** A JSON body of an endpoint other than the machine's POST is small. */
 const BODY_LIMIT = 64 * 1024;
 
@@ -98,6 +99,19 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
   if (revoke && method === 'DELETE') return answer(await registry.revoke(you, decodeURIComponent(revoke[1])));
   const archive = PROJECT_ARCHIVE.exec(pathname);
   if (archive && method === 'PUT') return answer(await registry.designateArchive(you, archive[1], await body(request)));
+  if (pathname === ORG_KEYS_PATH && method === 'GET') return json(200, await registry.orgKeys());
+  if (pathname === ORG_KEYS_PATH && method === 'POST') return answer(await registry.addOrgKey(you, await body(request)), 201);
+  const orgKey = ORG_KEY_PATH.exec(pathname);
+  if (orgKey && method === 'DELETE') return answer(await registry.removeOrgKey(you, orgKey[1], await body(request)));
+  if (pathname === PUSH_KEY_PATH && method === 'GET') return json(200, await registry.pushKey());
+  if (pathname === PUSH_SUBSCRIPTIONS_PATH) {
+    if (method === 'GET') return json(200, await registry.pushSubscriptions(you));
+    if (method === 'PUT') return answer(await registry.keepPushSubscription(you, await body(request)));
+    if (method === 'DELETE') return answer(await registry.deletePushSubscription(you, await body(request)));
+  }
+  if (pathname === '/api/registry/socket' && method === 'GET') {
+    return registry.fetch(forward(request, 'https://registry/grid', { [MEMBER_HEADER]: you.id, [ORG_HEADER]: principal.org.id }));
+  }
   const socket = PROJECT_SOCKET.exec(pathname);
   if (socket && method === 'GET') {
     const project = socket[1];

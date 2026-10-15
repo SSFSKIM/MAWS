@@ -20,13 +20,15 @@ export interface Env {
   CF_API_URL: string;
   CF_ACCOUNT_ID: string;
   CF_API_TOKEN: string;
+  /** The hub's VAPID key for Web Push (a secret): a P-256 private key as JWK JSON. Pushes name `mailto:<admin>`. */
+  VAPID_KEY: string;
 }
 
 export type OrgConfig = { id: string; name: string; adminEmail: string };
 
 export type ApiConfig = { url: string; account: string; token: string };
 
-export type HubConfig = { org: OrgConfig; issuer: string; audience: string; certsUrl: string; api: ApiConfig };
+export type HubConfig = { org: OrgConfig; issuer: string; audience: string; certsUrl: string; api: ApiConfig; vapidKey: string };
 
 /** The deploy configuration, or null when any of it is missing (the Worker then refuses everything). */
 export function hubConfig(env: Env): HubConfig | null {
@@ -40,6 +42,7 @@ export function hubConfig(env: Env): HubConfig | null {
     env.CF_API_URL,
     env.CF_ACCOUNT_ID,
     env.CF_API_TOKEN,
+    env.VAPID_KEY,
   ];
   if (values.some((value) => typeof value !== 'string' || value === '')) return null;
   return {
@@ -48,6 +51,7 @@ export function hubConfig(env: Env): HubConfig | null {
     audience: env.ACCESS_AUD,
     certsUrl: env.ACCESS_CERTS_URL,
     api: { url: env.CF_API_URL, account: env.CF_ACCOUNT_ID, token: env.CF_API_TOKEN },
+    vapidKey: env.VAPID_KEY,
   };
 }
 
