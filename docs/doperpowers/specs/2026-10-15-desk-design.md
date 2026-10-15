@@ -1488,7 +1488,7 @@ silent for three periods as dead and reconnects with backoff. A client closing t
 | `rpc` | `rpc` | an RPC for this machine (DX6) |
 | `rpc-ack` | `project`, `nonce` | the hub recorded this result; stop republishing it |
 | `subscribe` | `project`, `session`, `agentId`, `sub` | serve a DX4 subscription scoped to one transcript: the session's main one (`agentId` null) or one subagent's |
-| `unsubscribe` | `project`, `sub` | end it |
+| `unsubscribe` | `project`, `sub` | end it; the machine answers `end {reason: "unsubscribed"}`, which the hub, having dropped the sub's route first, discards |
 | `rows` | `project`, `session`, `agentId`, `sub`, `before`, `limit` | older rows of the sub's transcript, before row `before` |
 | `diff` | `project`, `session`, `sub` | the browser's DX3 `diff` on a main-transcript sub: answer with DX4 `diff` on that sub (M3) |
 | `part` | `id`, `index`, `count`, `data` | a slice of a larger frame (below) |
@@ -2328,7 +2328,7 @@ Cloudflare's API and Access.
 
 **One command**, from the MAWS worktree root:
 
-    pnpm --filter desk-hub local                     # options: -- --port <n> --user <email>
+    pnpm --filter desk-hub local                     # options: --port <n> --user <email> (no `--`: pnpm passes it through)
 
 It starts `wrangler dev` (the Worker and its Durable Objects on workerd, on `127.0.0.1:<port + 1>`) and, in front of
 it, the stand-in for Access on `http://127.0.0.1:8747` (`--port`; it refuses a port something already answers on —
@@ -2765,6 +2765,16 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A browser never receives the `end {reason: "unsubscribed"}`
+  its own `unsubscribe` causes (DC7's M1, run against DC3's local hub).
+  The hub drops the sub's route before it forwards the `unsubscribe`, so
+  the machine's answer reaches no browser; the client's `close()` already
+  ends a sub silently, so nothing waits for it. The real hub's order is
+  the contract; a stand-in that delivers the `end` differs harmlessly.
+  Rejected: holding the route until the machine answers, which keeps a
+  dead sub's traffic flowing to a browser that has let it go. Flags DC3,
+  DC5, DC7.
+  Date/Author: 2026-10-15, design session (DC7's M1).
 - Decision: DX4 gains `step-end` in subscriptions (DC6's M1). A response
   aborted before its blocks were written left partial text with nothing
   to settle it: a subscription carried no step boundary, so the text stood
