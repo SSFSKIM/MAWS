@@ -1142,7 +1142,7 @@ as `desk-hub/protocol`) with its vectors
 beside them, a stdlib-Python implementation independent of the
 TypeScript one: where this text and the module ever differ, the module's
 tests decide and the text is corrected. Each subsection ends with what
-DC3's later milestones extend. DX5 is DC2's; DX8 waits for DC5.
+DC3's later milestones extend. DX5 is DC2's; DX8 is DC5's.
 
 Conventions throughout: hub-owned multi-word fields are snake_case (as smns's log and DX6's `input_sha256`); fields
 that pass through from the engine keep the engine's camelCase (`turnId`, `agentId`, `upTo`, `waitingFor`). Times are
@@ -2086,6 +2086,88 @@ subscriptions:** `PushSubscriptionRecord`, one per member device.
 **Left for M2:** the endpoints above built and fixed, and how to run the local hub and its stand-in for Access.
 **For M3:** the push-subscription endpoint and the VAPID public key.
 
+### DX8 — The web shell's slots (owner DC5; G1)
+
+Folded from DC5's plan (MAWS `66eabe92`,
+`docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` on `smns-erb-web`),
+written at DC5's M1 and reviewed clean with it (fix wave `16e3aaff`).
+
+Owner DC5, written at M1 (DC5.G1); binds DC6. The reference is the code under
+`apps/desk-web/src/shell/` (`slots.ts`, `slot-fallbacks.tsx`,
+`session-plane.ts`, `sessions.ts`, `layout.ts`): where this text and those
+types ever differ, the types decide and the text is corrected. A later
+change is a Decision Log entry that flags DC6.
+
+**Slots** (`slots.ts`, copied from MAWS's `src/renderer/src/app/slots.ts`).
+`registerSlot(name, component)` returns its unregistration and the last
+registration wins; `useSlot(name)` gives the registered component or the
+shell's fallback (a quiet note of what will be there); `resetSlots()` for
+tests. DC6 registers both slots from one `connectDepth()` called once from
+`apps/desk-web/src/main.tsx`, as MAWS's `connectTranscript()` is called
+from `App.tsx`.
+
+| slot | props | where the shell mounts it |
+| --- | --- | --- |
+| `depth` | `{project, session: DeskSession \| null, plane: SessionPlane}` | the project view's right column while it is open; `session` is the selected direct channel's, null on the group chat and while the browser is locked |
+| `transcript` | `{project, session: DeskSession, plane: SessionPlane}` | a direct channel's working record, unfolded in the center (DC5's M3 mounts it) |
+
+**The session plane** (`session-plane.ts`), handed to both slots as `plane`:
+
+```ts
+type SessionTarget = { machine: string; session: string; agentId: string | null }; // agentId null: the main thread
+type SubscriptionMessage = SessionMessage<'snapshot' | 'row' | 'chunk' | 'block-row' | 'rows' | 'subagents' | 'diff'>;
+interface SubscriptionListener {
+  message(message: SubscriptionMessage): void; // snapshot (n 0) first, then n = 1, 2, … with no gap
+  reset(): void;                                // a discontinuity the client recovers from: drop what was delivered
+  end(body: SessionBodies['end']): void;        // the hub ended it, or the client cannot serve it; nothing follows
+}
+interface Subscription { rows(before: string, limit: number): void; close(): void }
+interface SessionPlane { subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription }
+const transcriptKey: (project: string, target: { session: string; agentId: string | null }) => string;
+```
+
+The hub client keeps a subscription whole: a gap in `n`, a dropped socket,
+a hub restart, and the hub's `end {reason: "discontinuity"}` (the bridge's
+own stream lost events) each become `reset`; the client gives the broken
+sub up, subscribes again under a fresh `sub` once the socket is up, and a
+fresh snapshot follows; a message of a given-up sub is never delivered.
+Any other `end` (machine offline, session ended, unsubscribed, error) ends
+it for good: the consumer subscribes again when it wants to, for instance
+when `DeskSession` shows the machine back. `close()` ends it silently and
+it is never re-subscribed. Older rows arrive as a `rows` message through
+`message`. The target's `agentId` scopes the subscription to one
+transcript, as DX3's `subscribe` carries it; per-block streaming
+(`block-row` settling a block when its row arrives) is the consumer's,
+passed through as DX4 has it.
+
+**The session** (`sessions.ts`): `DeskSession` is what the log says of a
+session joined with what the session plane says now —
+`{project, session, alias, machine, cwd, worktree, member, ended: {by,
+reason} | null, charge, status, state: {word, ts} | null, joinedAt, group:
+"waiting" | "working" | "idle" | "ended", presence: SessionPresence |
+null, machineOnline: boolean | null}`. `presence` is null until the hub
+sends one and while the machine is offline. Model, context use, and cost
+are not on it: they come from the transcript, DC6's. Inside an open project
+`useDeskSessions(connection)` and `useDeskSession(connection, id)` serve
+any view; `useProjectConnection(project)` (`project/registry.ts`) gives the
+project's connection.
+
+**The layout** (`layout.ts`): `useDeskLayout` holds `route` (`{view:
+"grid"}` or `{view: "project", project, channel: {kind: "group"} |
+{kind: "session", session}}`, mirrored in the URL as `/`, `/p/<project>`,
+`/p/<project>/s/<session>`) and `depth: {open, width}` (default open, 380
+px, kept in the browser's `localStorage`), with `navigate(route)` and
+`setDepth(partial)`. The depth column's own tabs (transcript, subagents,
+diff, info) are DC6's state.
+
+**The transcript store.** DC6 imports MAWS's transcript model and
+`useTranscriptStore` as they stand (the renderer survey) and keeps each
+transcript under `transcriptKey(project, target)`. A `TranscriptSource`
+built over `SessionPlane` maps `reset` to `onReset`. A transcript is live
+while its `DeskSession` has `presence.record` non-null and `machineOnline`
+not false; DC6 tells the store through `setLive(key, live)`, as MAWS's
+`transcript/shell.tsx` does.
+
 ## Ordering & Dependency Map
 
 ```
@@ -2162,7 +2244,7 @@ a hub that connects into machines (§2).
 | DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | in-flight (dispatched 2026-10-15) |
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
-| DC6 web: depth | — | not-dispatched |
+| DC6 web: depth | — | ready to plan (DX8 folded 2026-10-15; DC3.G1 met) |
 | DC7 machine's controls | — | not-dispatched |
 
 ## Surprises & Discoveries
@@ -2368,6 +2450,15 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DX8 folded from DC5's M1 (MAWS `66eabe92`, reviewed clean).
+  DC6 plugs into two slots, `depth` and `transcript`, registered once
+  from `connectDepth()`. It reads sessions through a `SessionPlane` whose
+  client turns every discontinuity into `reset` and a fresh snapshot, so
+  DC6 never resumes a broken stream, and keeps MAWS's transcript store
+  keyed by project and target, live while the session has presence and
+  its machine is not offline. The types under `apps/desk-web/src/shell/`
+  decide where they and the text differ. Unblocks DC6's plan. Flags DC6.
+  Date/Author: 2026-10-15, design session (DC5's M1).
 - Decision: DX5 refreshed with DC2's M2 extension (doperpowers `7487ace4`,
   reviewed clean after two fix waves), and §5 and DX6 aligned with what
   the bridge proved. (1) Steer is refused when no turn is running, as the
