@@ -300,6 +300,50 @@ describe('S7a’s pitfall 10: the heavy deck’s per-element count reading 0 aft
   });
 });
 
+describe('fix wave 1 (R1): a node a restore re-created, edited after the restore', () => {
+  // The restore's credit covers what it re-created; what someone changed on the restored node afterwards is theirs.
+  const restoredSlide = (doc: Doc, body: string) =>
+    transact(doc, () => {
+      Y.deleteSlide(doc, 'a');
+      importSlide(doc, slideIR('a', body), 'a0');
+    });
+
+  it('credits a key set on a re-created slide’s element after the restore to its writer, and what the restore brought to the restorer', () => {
+    const w = world(['a']);
+    const v = w.mark(); // the import at T0 + 1 min
+    w.land('human', (doc) => Y.deleteSlide(doc, 'a')); // + 2 min
+    w.land('human:restore', (doc) => restoredSlide(doc, '<h1 id="title" style="font-size:80px">Title a</h1><p id="body" style="font-size:32px">Body of a</p>')); // + 3 min
+    w.land('session:x', (doc) => setStyle(doc, 'a', 'title', { color: '#ff0000' })); // + 4 min
+    w.land('session:x', (doc) => setNotes(doc, 'a', 'Notes of a, later')); // + 5 min
+    const changes = changesOf(w, v);
+    expect(changes.slides.map((s) => [s.id, s.kind])).toEqual([['a', 'changed']]);
+    const title = changes.slides[0]!.elements.find((e) => e.id === 'title')!;
+    expect(title.keys.map((k) => [k.key, k.by, k.at])).toEqual([
+      ['style:color', 'session:x', T0 + 4 * MIN],
+      ['style:font-size', 'human:restore', T0 + 3 * MIN],
+    ]);
+    expect([title.by, title.at]).toEqual(['session:x', T0 + 4 * MIN]);
+    expect(changes.slides[0]!.notes.map((r) => r.parts.map((p) => [p.kind, p.text, p.by]))).toEqual([[['ins', ', later', 'session:x']]]);
+  });
+
+  it('credits a key set on a re-created element after the restore to its writer, and what the restore brought to the restorer', () => {
+    const w = world(['a']);
+    const v = w.mark();
+    w.land('human', (doc) => deleteElementTree(doc, 'a', 'title')); // + 2 min
+    w.land('human:restore', (doc) => {
+      const restored = slideIR('a', '<h1 id="title" style="font-size:80px">Title a</h1>').children[0]!;
+      insertElements(doc, 'a', [restored]); // + 3 min
+    });
+    w.land('session:x', (doc) => setStyle(doc, 'a', 'title', { color: '#00ff00' })); // + 4 min
+    const changes = changesOf(w, v);
+    const title = changes.slides[0]!.elements.find((e) => e.id === 'title')!;
+    expect(title.kind).toBe('changed');
+    const keys = Object.fromEntries(title.keys.map((k) => [k.key, [k.by, k.at]]));
+    expect(keys['style:color']).toEqual(['session:x', T0 + 4 * MIN]);
+    expect(keys['style:font-size']).toEqual(['human:restore', T0 + 3 * MIN]);
+  });
+});
+
 describe('Show editors of a live element (D11)', () => {
   it('lists who set the element’s keys and typed its text, the latest time each, from provenance', () => {
     const w = world(['a']);

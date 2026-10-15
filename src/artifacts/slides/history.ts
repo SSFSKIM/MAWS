@@ -16,6 +16,7 @@
 // reproduced on S7a's soak: by month two today's heavy deck keeps 1 slide id of the version's 100 (none at month three),
 // so every change is a whole slide added or removed and 0 changed elements is the truth; the one kept slide was a
 // restore's, re-created under its id, which S7a's walk skipped and `walkSlide` reads (history.test.ts states it).
+import diff from 'fast-diff';
 import { applyV2, deletedBy, type ContentMap, type Doc, type Node as YType } from '../yjs';
 import { ContentType, createDiffRenderer, newDocGcOff, type DiffRenderer } from '../yjs/document';
 import { DECK_ROOT, SLIDES_ROOT } from '../yjs/slides';
@@ -233,9 +234,9 @@ function walkElement(id: string, op: Op, before: YType | null, after: YType | nu
     const t = touchOf(op.attribution);
     if (t.deleted || !inAfter) return inBefore ? { id, kind: 'removed', keys: [], by: t.by, at: t.at } : null;
     if (!inBefore) return { id, kind: 'added', keys: [], by: t.by, at: t.at };
-    // a new node under an id the earlier state holds: what differs, key by key, credited to whoever wrote the new node
-    const keys = differingKeys(nodeOf(before, id)!, nodeOf(after, id)!).map((key) => ({ ...key, by: t.by, at: t.at }));
-    return keys.length ? { id, kind: 'changed', keys, by: t.by, at: t.at } : null;
+    // a new node under an id the earlier state holds: what differs, key by key, each credited by its own leaf
+    const keys = replacedKeys(nodeOf(before, id)!, nodeOf(after, id)!, isDelta(op.value) ? op.value : undefined, t);
+    return keys.length ? { id, kind: 'changed', keys, ...latestOf(keys) } : null;
   }
   const keys = changedKeys(isDelta(op.value) ? op.value : {}, NONE);
   if (keys.length === 0) return null;
@@ -335,7 +336,7 @@ export function deckChanges(diff: Pick<DeckDiff, 'prevDoc' | 'nextDoc' | 'render
       continue;
     }
     if (!after.has(id)) continue;
-    const change = op.attribution ? replacedSlide(id, op, prevDoc, nextDoc) : walkSlide(id, op, prevDoc, nextDoc, diff.attributions);
+    const change = op.attribution ? replacedSlide(id, op, prevDoc, nextDoc, diff.attributions) : walkSlide(id, op, prevDoc, nextDoc, diff.attributions);
     if (change) changed.push(change);
   }
   // removed in a way the renderer does not draw (brought back by a restore, then deleted again)
@@ -353,8 +354,11 @@ export function deckChanges(diff: Pick<DeckDiff, 'prevDoc' | 'nextDoc' | 'render
  * A slide node the later state holds as a new item under an id the earlier state holds (a restore bringing a deleted
  * slide back, a held slide cleared by a re-import): walked like any kept slide, every element and key compared by id.
  */
-function replacedSlide(id: string, op: Op, prev: Doc, next: Doc): SlideChange | null {
+function replacedSlide(id: string, op: Op, prev: Doc, next: Doc, attributions: ContentMap): SlideChange | null {
   const t = touchOf(op.attribution!);
+  const node: Touch = { by: t.by, at: t.at };
+  const d = isDelta(op.value) ? op.value : undefined;
+  const elementsDelta = isDelta(d?.attrs?.elements?.value) ? d.attrs.elements.value : undefined;
   const elements: ElementChange[] = [];
   const before = elementsNode(prev, id);
   const after = elementsNode(next, id);
@@ -362,25 +366,82 @@ function replacedSlide(id: string, op: Op, prev: Doc, next: Doc): SlideChange | 
   for (const eid of ids) {
     const a = nodeOf(before, eid);
     const b = nodeOf(after, eid);
-    if (a && !b) elements.push({ id: eid, kind: 'removed', keys: [], by: t.by, at: t.at });
-    else if (!a && b) elements.push({ id: eid, kind: 'added', keys: [], by: t.by, at: t.at });
-    else if (a && b) {
-      const keys = differingKeys(a, b).map((k) => ({ ...k, by: t.by, at: t.at }));
-      if (keys.length) elements.push({ id: eid, kind: 'changed', keys, by: t.by, at: t.at });
+    const eop = elementsDelta?.attrs?.[eid];
+    if (a && !b) {
+      // not re-created, or re-created and deleted again: its last deleter when the later state holds the deletion
+      const last = lastDeletion(after, eid, attributions);
+      elements.push({ id: eid, kind: 'removed', keys: [], ...(last.by !== null ? last : node) });
+    } else if (!a && b) {
+      const added = eop?.attribution ? touchOf(eop.attribution) : node;
+      elements.push({ id: eid, kind: 'added', keys: [], by: added.by, at: added.at });
+    } else if (a && b) {
+      const keys = replacedKeys(a, b, isDelta(eop?.value) ? eop.value : undefined, node);
+      if (keys.length) elements.push({ id: eid, kind: 'changed', keys, ...latestOf(keys) });
     }
   }
   const order = readingOrder(next, id);
   const rank = (e: ElementChange) => (order.indexOf(e.id) < 0 ? Number.MAX_SAFE_INTEGER : order.indexOf(e.id));
   elements.sort((a, b) => rank(a) - rank(b) || (a.id < b.id ? -1 : 1));
-  const slideKeys = differingKeys(slideNode(prev, id)!, slideNode(next, id)!)
-    .filter((k) => !SLIDE_PARTS.has(k.key))
-    .map((k) => ({ ...k, by: t.by, at: t.at }));
-  const notesBefore = notesText(prev, id);
-  const notesAfter = notesText(next, id);
-  const parts: NotesPart[] = [...(notesBefore ? [{ kind: 'del' as const, text: notesBefore, by: t.by, at: t.at }] : []), ...(notesAfter ? [{ kind: 'ins' as const, text: notesAfter, by: t.by, at: t.at }] : [])];
-  const notes: NotesRun[] = notesBefore === notesAfter ? [] : [{ parts }];
+  const slideKeys = replacedKeys(slideNode(prev, id)!, slideNode(next, id)!, d, node).filter((k) => !SLIDE_PARTS.has(k.key));
+  const notesDelta = isDelta(d?.attrs?.notes?.value) ? d.attrs.notes.value : null;
+  const { runs: notes, pieces } = rediffNotes(notesText(prev, id), readNotesDelta(notesDelta).pieces, node);
   if (slideKeys.length === 0 && elements.length === 0 && notes.length === 0) return null;
-  return { id, kind: 'changed', keys: slideKeys, elements, notes, notesPieces: notes.length ? parts.map((part) => ({ ...part, run: 0 })) : null, by: t.by, at: t.at };
+  const touches = [...slideKeys, ...elements, ...notes.flatMap((r) => r.parts)];
+  return { id, kind: 'changed', keys: slideKeys, elements, notes, notesPieces: notes.length ? pieces : null, ...latestOf(touches) };
+}
+
+/**
+ * Fix wave 1 (R1): who set a key of a node as the later state holds it: the leaf's own attribution in the node's delta
+ * (a restore's for what it re-created, a later writer's for what they changed on the restored node), the node's own
+ * insertion only when the delta names none.
+ */
+function leafTouch(d: Delta | undefined, key: string, fallback: Touch): Touch {
+  const op = d?.attrs?.[key];
+  if (!op) return fallback;
+  if (op.attribution) {
+    const t = touchOf(op.attribution);
+    return { by: t.by, at: t.at };
+  }
+  return latestIn(op.value) ?? fallback;
+}
+
+/** The keys a node new under a kept id differs in from the earlier node, each credited by its leaf. */
+const replacedKeys = (a: YType, b: YType, d: Delta | undefined, fallback: Touch): KeyChange[] => differingKeys(a, b).map((k) => ({ ...k, ...leafTouch(d, k.key, fallback) }));
+
+/**
+ * Fix wave 1 (R1): the notes of a slide node new under a kept id, compared with the earlier notes as text: what differs
+ * is a change, an insert credited to whoever wrote those characters in the new node (the restore, or a later writer),
+ * a deletion to the node's writer (the earlier text went with the earlier node). Touching changes are one run.
+ */
+function rediffNotes(earlier: string, later: readonly NotesPiece[], node: Touch): { runs: NotesRun[]; pieces: NotesPiece[] } {
+  const chars: Touch[] = [];
+  for (const piece of later) if (piece.kind !== 'del') for (let i = 0; i < piece.text.length; i++) chars.push({ by: piece.by ?? node.by, at: piece.at ?? node.at });
+  const text = later.filter((p) => p.kind !== 'del').map((p) => p.text).join('');
+  const runs: NotesRun[] = [];
+  const pieces: NotesPiece[] = [];
+  let open: NotesRun | null = null;
+  let at = 0;
+  const part = (p: NotesPart) => {
+    if (!open) runs.push((open = { parts: [] }));
+    const last = open.parts.at(-1);
+    if (last && last.kind === p.kind && last.by === p.by && last.at === p.at) last.text += p.text;
+    else open.parts.push({ ...p });
+    const shown = pieces.at(-1);
+    if (shown && shown.kind === p.kind && shown.by === p.by && shown.at === p.at && shown.run === runs.length - 1) shown.text += p.text;
+    else pieces.push({ ...p, run: runs.length - 1 });
+  };
+  for (const [op, chunk] of diff(earlier, text)) {
+    if (op === diff.EQUAL) {
+      open = null;
+      pieces.push({ kind: 'same', text: chunk, by: null, at: null, run: null });
+      at += chunk.length;
+    } else if (op === diff.DELETE) part({ kind: 'del', text: chunk, by: node.by, at: node.at });
+    else {
+      for (let i = 0; i < chunk.length; i++) part({ kind: 'ins', text: chunk[i]!, ...chars[at + i]! });
+      at += chunk.length;
+    }
+  }
+  return { runs, pieces };
 }
 
 /**
