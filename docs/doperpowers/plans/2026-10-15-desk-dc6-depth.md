@@ -434,6 +434,19 @@ registrations through `connectDepth()`.
   from `fake-machine/index.ts`, and adds `FakeMachineOptions.diffBase`;
   M3's fix wave merges it, drops the deep import, and proves the question
   bound against the fake with no open-bound note for it.
+- Decision (M3 fix wave 1, after task review): a question's `from` bound
+  starts right after the question's call and leaves out only that
+  question's own `tool_result` blocks, so a parallel tool's call and
+  result between them draw; once a fold's start is found, a missing end is
+  marked unresolved even while older rows exist; live marks tell an open
+  fence from one closed on the last line or an inline span; a reset
+  reopens finished turns the fold had opened, never ones the reader
+  folded; a fold sizes to its content up to `min(60vh, 480px)` by
+  watching the list's content element. The acceptance's reload comparison
+  walks MAWS's virtualized list top to end, since only the rows near the
+  viewport are rendered. `diffBase` is unused: `main` is the recording's
+  base.
+  Date/Author: 2026-10-15, M3 executor, folded by the controller.
 - Decision: DX5 is final (composite at MAWS `361bee24`, DC2 closed): a
   `turn` start may carry `recovered: true` with `text: null`. Depth draws
   no turn start's text — DX4 relays no `turn` event, and the prompt row it
