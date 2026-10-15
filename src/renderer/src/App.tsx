@@ -117,6 +117,9 @@ import { registerByteViewers } from './tools/artifacts/viewers/register';
 import { Library } from './library/Library';
 import { connectLibrary } from './library/store';
 // P3-L end
+// P3-B start
+import { registerDocumentEditor } from './tools/document';
+// P3-B end
 // P3-D start
 import { registerDesignSystemEditor } from './artifacts/design-system/editor';
 import { DesignSystemHostProvider } from './artifacts/design-system/provider';
@@ -289,6 +292,9 @@ export function App() {
   useEffect(() => registerSlot('artifactsLibrary', Library), []); // the Artifacts tab's library, in P3-G's slot
   useEffect(() => registerByteViewers(), []); // M5b: the html and file viewers on maws-artifact:, and their frames' console
   // P3-L end
+  // P3-B start: the document kind's editor in L's registry (the panel's Artifacts tool and an `artifact` main tab)
+  useEffect(() => registerDocumentEditor(), []);
+  // P3-B end
   // P3-D start: the Design System page as the `design_system` kind's editor in L's registry (the library's tab and the
   // panel's Artifacts tool mount it)
   useEffect(() => registerDesignSystemEditor(), []);

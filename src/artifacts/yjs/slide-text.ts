@@ -1,6 +1,6 @@
 // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D1, D8 "Text in place"; M5): the @y/prosemirror 2
-// names the deck's text box needs, until B's `src/artifacts/yjs/prosemirror.ts` lands, when the merge folds this file
-// into B's (and the `declare global` below into B's `y-prosemirror-globals.d.ts`). A text element's `<doc>` node is
+// names the deck's text box needs, beside B's `src/artifacts/yjs/prosemirror.ts`; the package's global types come from
+// B's `y-prosemirror-globals.d.ts` (the shim this file carried folded into it at the merge of B). A text element's `<doc>` node is
 // @y/prosemirror 2's node shape (slides.ts), so a Tiptap editor binds to it with the package's `syncPlugin`, configured
 // once the view exists (S6's `binding-v14`). Callers see ProseMirror types only, never a Yjs one.
 import type { Plugin } from '@tiptap/pm/state';
@@ -9,23 +9,6 @@ import { configureYProsemirror, syncPlugin } from '@y/prosemirror';
 import * as Y from '@y/y';
 import { transact, type Doc } from './doc';
 import { elementScalars, hasText, SLIDES_ROOT, writeText } from './slides';
-
-// The package's declarations name types only its own global.d.ts declares (B's shim, `y-prosemirror-globals.d.ts`, is
-// not on this branch); under `skipLibCheck: false` the subset this file's imports reach, as B's shim spells them.
-declare global {
-  type YType = import('@y/y').Node;
-  type Renderer = import('@y/y').AbstractRenderer;
-  type EditorState = import('prosemirror-state').EditorState;
-  type EditorView = import('prosemirror-view').EditorView;
-  type CommandDispatch = (tr: import('prosemirror-state').Transaction) => void;
-  type AttributionMapper = (format: Record<string, unknown> | null, attribution: import('lib0/delta').Attribution) => Record<string, unknown> | null;
-  type AttributedNodesPredicate = (nodeName: string, kinds: { insert?: boolean; delete?: boolean; format?: boolean }) => boolean;
-  type NodeCompare = (a: import('lib0/delta').DeltaAny, b: import('lib0/delta').DeltaAny) => boolean;
-  type IsInitialContent = (doc: import('prosemirror-model').Node) => boolean;
-  type SyncPluginState = import('lib0/schema').Unwrap<typeof import('@y/prosemirror').$syncPluginState>;
-  type SyncPluginStateUpdate = import('lib0/schema').Unwrap<typeof import('@y/prosemirror').$syncPluginStateUpdate>;
-  type ProsemirrorDelta = import('lib0/schema').Unwrap<typeof import('@y/prosemirror').$prosemirrorDelta>;
-}
 
 /** A text element's block kind: one `p` for h1-h3/p/th/td, `li` items for ul/ol. */
 export type TextKind = 'p' | 'li';

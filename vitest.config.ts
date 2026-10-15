@@ -35,9 +35,11 @@ const TIMING_NODE_TESTS = [
   'src/main/usage/claude-usage-reader.test.ts',
   'test/artifacts/portability.test.ts', // P3-A: loads the repository's whole ESLint config and lints through it
   'src/engine-host/documents/sigkill.test.ts', // P3-A: bundles and forks a writer, kills it mid-stream, reopens the store
+  'test/artifacts/one-schema.test.ts', // P3-B: the portability test's pattern, for the one-schema rule
 ];
 const TIMING_RENDERER_TESTS = ['src/renderer/src/App.test.tsx'];
-// P3-C M4 (B's name and glob): the portable artifact layer's suites that need a DOM.
+// P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md); P3-C M4 shares the
+// project (the slide canvas, the deck editor).
 const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
 
 // C3 start: the `live` project runs the engine-host suite against the pinned binary through the relay
@@ -91,22 +93,27 @@ export default defineConfig({
       ...liveProjects, // C3
       // P3-A start: the portable artifact layer (src/artifacts/, docs/doperpowers/plans/2026-10-12-p3-a-store.md) under
       // Node; its code imports no Node or Electron module (eslint.config.js), so it runs here as it will in a renderer.
+      // P3-B M6: `css` reads the editor's stylesheets as text, so the HTML export (run in main, tested here under Node)
+      // inlines theme.css rather than the blank vitest gives a `.css?raw` import outside `css.include`; P3-D M5: a design
+      // system's `document.css` likewise.
+      { resolve: { alias }, test: { name: 'artifacts', environment: 'node', include: ['src/artifacts/**/*.test.ts'], exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS], css: { include: [/\/document\/editor\/.+\.css/, /\/design_system\/defaults\/.+\.css/] } } }, // P3-B: exclude, css; P3-D: defaults css
+      // P3-A end
+      // P3-B start: the document kind's suites that need a DOM (a real Tiptap editor: UniqueID through split and paste,
+      // the editor, comments, history) run under happy-dom; its model, markdown and writer stay in `artifacts` (Node).
+      // M3: the editor's stylesheets and the app's tokens are read as text by the theme suite (vitest blanks `.css`
+      // imports, `?raw` included, outside `css.include`).
       {
         resolve: { alias },
+        // fix wave 1 of M4: the setup drops KaTeX's quirks-mode warning, happy-dom having no `document.compatMode`
         test: {
-          name: 'artifacts',
-          environment: 'node',
-          include: ['src/artifacts/**/*.test.ts'],
-          exclude: [...configDefaults.exclude, ARTIFACTS_DOM_TESTS], // P3-C M4: the DOM suites run in `artifacts-dom`
-          // P3-D M5: a design system's `document.css` is bundled as text (`?raw`); vitest empties unprocessed CSS, raw included.
-          css: { include: [/\/design_system\/defaults\/.+\.css/] },
+          name: 'artifacts-dom',
+          environment: 'happy-dom',
+          include: [ARTIFACTS_DOM_TESTS],
+          setupFiles: ['test/support/artifacts-dom-setup.ts'],
+          css: { include: [/\/document\/editor\/.+\.css/, /\/renderer\/src\/styles\/tokens\.css/] },
         },
       },
-      // P3-A end
-      // P3-C start (M4): the portable layer's suites that need a DOM (the slide canvas, the deck editor) under happy-dom,
-      // as B's `artifacts-dom` project runs its own (the same name and glob, so the two merge as one project)
-      { resolve: { alias }, test: { name: 'artifacts-dom', environment: 'happy-dom', include: [ARTIFACTS_DOM_TESTS] } },
-      // P3-C end
+      // P3-B end
       // C8a start: the panel host's suites again under the React Compiler, as electron-vite builds the app, so a render
       // that reads mutable module state (the instance map, a tool's state) without selecting it is caught in a test.
       {

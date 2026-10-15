@@ -25,6 +25,9 @@
     // P3-C (M4): the presentations spec seeds S6's 100-slide bench deck
     "src/artifacts/slides/fixtures/bench.ts",
     "src/artifacts/slides/fixtures/s6.ts",
+    // P3-C at the merge of B: B's `src/artifacts/yjs/*.ts` takes in C's seams (slides.ts, slide-text.ts, slides-undo.ts),
+    // whose seam imports the dialect's IR
+    "src/artifacts/slides/ir.ts",
     "src/engine-host/binary-info.ts",
     "src/engine-host/engine-compat.ts",
     "src/engine-host/fs/paths.ts",
@@ -41,6 +44,7 @@
     "src/renderer/src/harness/code/api.ts",
     "src/renderer/src/harness/composer/api.ts",
     "src/renderer/src/harness/composer/editor-api.ts",
+    "src/renderer/src/harness/document/api.ts", // P3-B M3
     "src/renderer/src/harness/panel/api.ts",
     "src/renderer/src/harness/widgets/api.ts",
     "src/renderer/src/tools/agents/copy.ts",
@@ -75,7 +79,13 @@
     "test/support/shell-home.ts",
     "test/support/store-fixture.ts",
     "test/support/synth-transcript.ts",
-    "test/support/widget-backend.ts"
+    "test/support/widget-backend.ts",
+    // P3-B: e2e/support/document-seed.ts writes the 200-page document through the binding module and the schema module
+    "src/artifacts/yjs/*.ts",
+    "src/artifacts/document/ids.ts",
+    "src/artifacts/document/schema.ts",
+    "src/artifacts/document/tabs.ts",
+    "src/artifacts/document/threads.ts"
   ],
-  "exclude": ["src/shared/**/*.test.ts", "src/shared/**/*.test-d.ts"]
+  "exclude": ["src/shared/**/*.test.ts", "src/shared/**/*.test-d.ts", "src/artifacts/**/*.test.ts"]
 }

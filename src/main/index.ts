@@ -122,6 +122,9 @@ import { installStorePolicies, registerStoreSchemes, startArtifacts } from './ar
 import { startLibrary } from './library';
 import { fileAdmission } from './library/admission'; // M6b
 // P3-L end
+// P3-B start
+import { registerDocumentExporters } from './artifacts/export-document'; // P3-B
+// P3-B end
 // P3-D start
 import { registerDesignSystemExporters } from './design-systems/export';
 import { registerPresentationExporters } from './presentations/export'; // P3-C M9
@@ -579,6 +582,7 @@ void startWithProfileLock(app, () => {
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
   });
   shutdown.add('artifacts', artifacts.stop);
+  shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(exporter))); // P3-B: document × md, html, docx, pdf
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
   registerPresentationExporters(artifacts.exporters, { call: (name, input) => hosts.dispatch('engine-host', name, input) as never, defaults: () => defaultsOf(settings.state().settings) ?? { owner: null, spaces: {} }, env: process.env }); // P3-C M9: `presentation` as html, pdf, png, pptx, claude
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quarterly planning</title>
+<style>body { font-family: Georgia, serif; }</style>
+<script>document.title = 'changed';</script>
+<link rel="stylesheet" href="https://example.com/site.css">
+</head>
+<body onload="track()">
+<main class="article">
+<h1 id="top">Quarterly planning</h1>
+<p>The team meets on <b>Tuesday</b> to review the <em>roadmap</em>, <del>retired</del> items, the <code>budget</code> sheet and the <a href="https://example.com/plan" title="The plan" onclick="track()">plan</a>.</p>
+<h2>Goals</h2>
+<ul>
+  <li>Ship the editor</li>
+  <li>Write the guide
+    <ul><li>Nested detail</li></ul>
+  </li>
+</ul>
+<ol>
+  <li>First step</li>
+  <li>Second step</li>
+</ol>
+<ul class="contains-task-list">
+  <li class="task-list-item"><input type="checkbox" disabled> Open task</li>
+  <li class="task-list-item"><input type="checkbox" checked disabled> Done task</li>
+</ul>
+<blockquote><p>A quoted line.</p></blockquote>
+<pre><code class="language-ts">const total = 42</code></pre>
+<table>
+  <thead><tr><th>Name</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>alpha</td><td>1</td></tr>
+    <tr><td>한국어</td><td>2</td></tr>
+  </tbody>
+</table>
+<hr>
+<h3>회의 메모</h3>
+<p>안녕하세요, 팀 여러분. The logo: <img src="https://example.com/logo.png" alt="Logo" onerror="track()"></p>
+</main>
+<script>track();</script>
+</body>
+</html>

@@ -18,6 +18,7 @@ import type { PaneBridge } from './panes';
 import { sendFileTool } from './send-file';
 import type { McpToolDefinition } from './server';
 import { showPaneTool } from './show-pane';
+import { documentCreateTool, documentReadTool, documentTools, DocumentToolSession } from './documents'; // P3-B (M7)
 
 export function mawsTools(deps: {
   bridge: PaneBridge; capture: CaptureBridge; asks: AskTable; askCancelled: (ask: PendingAsk, reason: AskCancelReason) => void;
@@ -40,13 +41,17 @@ export function mawsTools(deps: {
       return tool.call(args, ctx);
     },
   });
+  // P3-B (M7): the document tools' session memory, sharing A's kinds-given-their-guide; A's create and read answer a
+  // document through P3-B's wrappers, every other kind as before
+  const documents = { artifacts: deps.artifacts, artifactScope: deps.artifactScope, session: new DocumentToolSession(artifacts.session.guided), log: deps.log };
   return [
     afterImport(sendFileTool(artifacts)), askTool({ asks: deps.asks, cancelled: deps.askCancelled }), showPaneTool(deps),
     ...[
-      artifactCreateTool(artifacts), artifactListTool(artifacts), artifactScreenshotTool({ ...artifacts, capture: deps.capture }), // E2
+      documentCreateTool(documents, artifactCreateTool(artifacts)), artifactListTool(artifacts), artifactScreenshotTool({ ...artifacts, capture: deps.capture }), // E2
       // P3-A (M6)
-      artifactDescribeTypeTool(artifacts), artifactReadTool(artifacts), artifactPublishTool(artifacts), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
+      artifactDescribeTypeTool(artifacts), documentReadTool(documents, artifactReadTool(artifacts)), artifactPublishTool(artifacts), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
       artifactExportTool({ ...artifacts, exporter: deps.exporter }),
+      ...documentTools(documents), // P3-B (M7)
     ].map(afterImport),
   ];
 }

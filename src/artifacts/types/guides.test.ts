@@ -35,4 +35,15 @@ describe('the kinds’ guides and format references', () => {
     expect(KIND_GUIDES.html.guide).toMatch(/artifact_publish/);
     expect(KIND_GUIDES.file.guide).toMatch(/send_file/);
   });
+
+  // P3-B (M7): the document kind's guide and format reference (their examples are checked against the dialect in
+  // document/format.test.ts)
+  it('writes the document kind in full: the guide names its tools, the format reference its dialect', () => {
+    const { guide, format } = KIND_GUIDES.document;
+    for (const text of [guide, format]) expect(text).not.toMatch(PLACEHOLDER);
+    expect(headings(guide)).toEqual(['## When to use this kind', '## Creating one', '## Reading and editing', '## Comments', '## Working with a design system', '## Before you finish']);
+    expect(headings(format)).toEqual(['## Structure', '## Elements and attributes', '## Limits', '## Examples']);
+    for (const name of ['artifact_create', 'artifact_read', 'sinceRevision', 'artifact_edit', 'baseRevision', 'answering', 'artifact_comments', 'artifact_reply', 'artifact_resolve']) expect(guide).toContain(name);
+    for (const form of ['^id', '<!-- ^id -->', '<c:ID>', '<chip kind="date"', ':::table', ':::row', ':::callout', ':::pending', 'two to four spaces']) expect(format).toContain(form);
+  });
 });
