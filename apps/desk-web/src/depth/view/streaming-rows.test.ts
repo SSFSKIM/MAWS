@@ -1,3 +1,4 @@
+import { parse } from '@shared/owner/to-human-parser';
 import { describe, expect, it } from 'vitest';
 import type { StreamBlock } from '../stream/layer';
 import { streamingRows } from './streaming-rows';
@@ -13,5 +14,10 @@ describe('the streaming rows', () => {
       ['assistant_text', 'Two.'],
     ]);
     expect(rows[0]).toMatchObject({ live: true });
+  });
+
+  it("hands a live answer's open `<message>` to MAWS's row closed, so its Presenter draws the span, never the tag", () => {
+    const [row] = streamingRows([block(0, 'text', '<message>\nBoth subagents rep')], since);
+    expect(row.kind === 'assistant_text' && parse(row.markdown).map((part) => [part.kind, part.text])).toEqual([['to-human', 'Both subagents rep']]);
   });
 });
