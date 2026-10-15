@@ -9,6 +9,7 @@ import { base64urlEncode } from '../src/protocol/base64url';
 import { importOrgKey, newNonce, seal, verify } from '../src/protocol/codes';
 import { isHubPosition, withoutPosition, type HumanDraft, type LogEvent } from '../src/protocol/log';
 import type { DownFrame } from '../src/protocol/machine';
+import type { SessionMessage } from '../src/protocol/session';
 import { BrowserClient, enroll, MachineClient, sorted } from './support/clients';
 import { ADMIN, credentials, startLocalHub, type LocalHub } from './support/local';
 
@@ -370,6 +371,92 @@ describe('browsers', () => {
     browser.send({ t: 'human', event: positioned as never });
     expect(await browser.next((f) => f.t === 'refused', 'refused', from)).toMatchObject({ refusal: { reason: 'bad-shape' } });
     expect((await hubCounts(project)).counts).toEqual({});
+    browser.close();
+    await a.close();
+  });
+  it('a human re-sent on a new socket after the log moved on gets its original ack; its nonce with another payload is a conflict', async () => {
+    const project = newProject();
+    const a = await machine('resent');
+    await a.sync(project);
+    const first = await BrowserClient.open(hub, ADMIN, project);
+    const sealed = await human(project, memberId, 'keep user_id');
+    first.send({ t: 'human', event: sealed });
+    const ack = await first.next((f) => f.t === 'human-ack', 'human-ack');
+    expect(ack).toEqual({ t: 'human-ack', nonce: sealed.mac.nonce, offset: 1, writer: `hub/${memberId}`, seq: 1 });
+    await a.postOk([{ t: 'events', project, events: [say(a, project, 1)] }]);
+    first.send({ t: 'human', event: await human(project, memberId, 'a later one') });
+    expect(await first.next((f) => f.t === 'human-ack' && f.seq === 2, 'the second ack')).toMatchObject({ offset: 3 });
+    first.close();
+
+    const second = await BrowserClient.open(hub, ADMIN, project);
+    second.send({ t: 'human', event: sealed });
+    expect(await second.next((f) => f.t === 'human-ack', 'the original ack')).toEqual(ack);
+
+    const { mac, ...draft } = sealed;
+    const other = await seal(await KEY, 'log', project, { ...draft, text: 'drop user_id' }, mac.nonce);
+    const from = second.frames.length;
+    second.send({ t: 'human', event: other });
+    const refused = (await second.next((f) => f.t === 'refused', 'refused', from)) as Extract<ProjectDown, { t: 'refused' }>;
+    expect(refused.refusal).toMatchObject({ reason: 'conflict', writer: `hub/${memberId}`, seq: 1, nonce: mac.nonce });
+    expect((await hubCounts(project)).counts).toEqual(sorted({ [`hub/${memberId}`]: 2, [`${a.name}/${SESSION}`]: 1 }));
+    second.close();
+    await a.close();
+  });
+});
+
+describe('session presence', () => {
+  const OTHER = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a';
+  const presence = (m: MachineClient, project: string, session: string, status: string | null): Extract<SessionMessage, { kind: 'presence' }> => ({
+    project,
+    machine: m.name,
+    session,
+    kind: 'presence',
+    sub: null,
+    n: null,
+    body: { record: status === null ? null : { status }, bridge: status !== null },
+  });
+  const presences = (b: BrowserClient) =>
+    b.frames.flatMap((f) => (f.t === 'session' && f.message.kind === 'presence' ? [f.message] : []));
+
+  it("a browser is sent each session's latest presence on connect, then each change", async () => {
+    const project = newProject();
+    const a = await machine('present');
+    await a.sync(project);
+    await a.postOk([
+      { t: 'session', message: presence(a, project, SESSION, 'busy') },
+      { t: 'session', message: presence(a, project, OTHER, null) },
+      { t: 'session', message: presence(a, project, SESSION, 'waiting') },
+    ]);
+    const browser = await BrowserClient.open(hub, ADMIN, project);
+    browser.send({ t: 'resume', after: 0 });
+    await browser.next((f) => f.t === 'caught-up', 'caught-up');
+    expect(Object.fromEntries(presences(browser).map((m) => [m.session, m]))).toEqual({
+      [SESSION]: presence(a, project, SESSION, 'waiting'),
+      [OTHER]: presence(a, project, OTHER, null),
+    });
+    expect(presences(browser)).toHaveLength(2);
+
+    await a.postOk([{ t: 'session', message: presence(a, project, OTHER, 'idle') }]);
+    await browser.next((f) => f.t === 'session' && f.message.session === OTHER && presences(browser).length === 3, 'the change');
+    expect(presences(browser)[2]).toEqual(presence(a, project, OTHER, 'idle'));
+    browser.close();
+    await a.close();
+  });
+
+  it("refuses presence for a project the stream has not opened, and presence naming another machine", async () => {
+    const project = newProject();
+    const a = await machine('presence-guard');
+    let from = a.frames.length;
+    await a.postOk([{ t: 'session', message: presence(a, project, SESSION, 'busy') }]);
+    expect(await a.next((f) => f.t === 'refused', 'refused', from)).toMatchObject({ refusal: { reason: 'not-open' } });
+    await a.sync(project);
+    from = a.frames.length;
+    await a.postOk([{ t: 'session', message: { ...presence(a, project, SESSION, 'busy'), machine: 'someone-else' } }]);
+    expect(await a.next((f) => f.t === 'refused', 'refused', from)).toMatchObject({ refusal: { reason: 'bad-shape' } });
+    const browser = await BrowserClient.open(hub, ADMIN, project);
+    browser.send({ t: 'resume', after: 0 });
+    await browser.next((f) => f.t === 'caught-up', 'caught-up');
+    expect(presences(browser)).toEqual([]);
     browser.close();
     await a.close();
   });

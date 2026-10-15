@@ -1,14 +1,15 @@
 // One project: its log (DX2's sync with machines, DX3's resume for browsers) and its audit record, held by a Durable
 // Object on SQLite. Browsers hold WebSockets accepted with the Hibernation API, each carrying its member and whether it
 // follows the log in its attachment, so a woken object knows whose it is. Machines reach it through their `Machine`
-// objects (`fromMachine`), and it reaches them back the same way, one ordered queue per machine. The session plane and
-// the pending set are M3's.
+// objects (`fromMachine`), and it reaches them back the same way, one ordered queue per machine. Of the session plane it
+// holds each session's latest presence, for the browsers that connect later; the rest of it and the pending set are M3's.
 import { DurableObject } from 'cloudflare:workers';
 import { MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from '../env';
 import type { AuditEntry, ProjectDown } from '../protocol/browser';
 import { isMemberId } from '../protocol/identity';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, LEGACY_WRITER_PREFIX, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
 import type { DownFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
+import type { SessionMessage } from '../protocol/session';
 import { FRAME_LIMIT, PartAssembler, toWire, type Part } from '../protocol/parts';
 import { eventShapeError, LogStore, sameEvent, type AuditRow, type Stored } from './log-store';
 
@@ -36,6 +37,7 @@ export class Project extends DurableObject<Env> {
     super(ctx, env);
     this.log = new LogStore(ctx.storage);
     ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS machines (name TEXT PRIMARY KEY, generation INTEGER NOT NULL)');
+    ctx.storage.sql.exec('CREATE TABLE IF NOT EXISTS presence (machine TEXT NOT NULL, session TEXT NOT NULL, message TEXT NOT NULL, PRIMARY KEY (machine, session))');
   }
 
   /** A browser's socket. The Worker sends one only for a project the registry holds. */
@@ -49,6 +51,9 @@ export class Project extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({ member, visible: false, subs: [], log: false } satisfies SocketAttachment);
     this.toSocket(server, { t: 'welcome', project: this.projectId, member, head: this.log.head() });
+    for (const { message } of this.ctx.storage.sql.exec<{ message: string }>('SELECT message FROM presence')) {
+      this.toSocket(server, { t: 'session', message: JSON.parse(message) as SessionMessage });
+    }
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -58,7 +63,8 @@ export class Project extends DurableObject<Env> {
     if (frame.t === 'hello') await this.hello(ctx, frame);
     else if (frame.t === 'events') await this.upload(ctx, frame.events);
     else if (frame.t === 'rejected') this.rejected(ctx, frame);
-    // `rpc-result`, `session`, and `pending` are the session plane's (M3).
+    else if (frame.t === 'session' && (frame.message as { kind?: unknown } | undefined)?.kind === 'presence') this.presence(ctx, frame.message);
+    // `rpc-result`, `pending`, and the session plane's other messages are M3's.
     await this.queues.get(ctx.machine);
   }
 
@@ -169,6 +175,17 @@ export class Project extends DurableObject<Env> {
       ...(frame.message === undefined ? {} : { message: frame.message }),
     };
     this.broadcast(this.audited(this.log.record('rejected', rejection)));
+  }
+
+  /** A session's presence: the latest kept per session, for browsers that connect later, and sent to every browser. */
+  private presence(ctx: MachineContext, message: unknown): void {
+    if (!this.isOpen(ctx)) return this.refuseMachine(ctx, { reason: 'not-open', message: 'send hello for this project on this stream first' });
+    const problem = presenceShapeError(message, ctx);
+    if (problem) return this.refuseMachine(ctx, { reason: 'bad-shape', message: problem });
+    const { session, body } = message as Extract<SessionMessage, { kind: 'presence' }>;
+    const kept: SessionMessage = { project: ctx.project, machine: ctx.machine, session, kind: 'presence', sub: null, n: null, body };
+    this.ctx.storage.sql.exec('INSERT OR REPLACE INTO presence (machine, session, message) VALUES (?, ?, ?)', ctx.machine, session, JSON.stringify(kept));
+    this.broadcast({ t: 'session', message: kept });
   }
 
   /** A browser resumes after an offset: the backlog, `caught-up`, then the log live; and the audit record's latest. */
@@ -291,6 +308,19 @@ export class Project extends DurableObject<Env> {
 function positionOf(event: unknown): { writer?: string; seq?: number } {
   const e = (typeof event === 'object' && event !== null ? event : {}) as { writer?: unknown; seq?: unknown };
   return { ...(typeof e.writer === 'string' ? { writer: e.writer } : {}), ...(typeof e.seq === 'number' ? { seq: e.seq } : {}) };
+}
+
+/** Why a machine's `presence` is not one for this project and machine (DX4: `sub` and `n` null, body
+ * `{record: object | null, bridge: boolean}`), or null. */
+function presenceShapeError(message: unknown, ctx: MachineContext): string | null {
+  const m = message as Record<string, unknown>;
+  if (m.project !== ctx.project || m.machine !== ctx.machine) return 'presence names this project and this machine';
+  if (typeof m.session !== 'string' || m.session === '' || m.session.length > 200) return 'presence names a session';
+  if (m.sub !== null || m.n !== null) return 'presence has sub and n null';
+  const body = m.body as Record<string, unknown> | null | undefined;
+  const isObject = (v: unknown) => typeof v === 'object' && v !== null && !Array.isArray(v);
+  if (!isObject(body) || typeof body!.bridge !== 'boolean' || !(body!.record === null || isObject(body!.record))) return 'presence is {record: object | null, bridge}';
+  return null;
 }
 
 /** Why a browser's `human` is not a sealed `HumanDraft`, or null. It must not name a position: the hub assigns it. */
