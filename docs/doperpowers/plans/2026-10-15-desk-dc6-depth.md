@@ -595,8 +595,8 @@ two-subagent recording through DC5's DX3 double in a real browser:
   each end with no gap and no duplicated text, in the main thread and in a
   subagent.
 
-The gate is green on the Linux lane (run 38815843041 on `64481c89`: static,
-unit, e2e:desk-web, 67 browser tests). `src/depth` passes 91/91.
+The gate is green on the Linux lane (run 38818748087 on `82b812e4`: static,
+unit, e2e:desk-web, 67 browser tests). `src/depth` passes 94/94.
 
 What DC6 produces is `connectDepth()`. It registers the `depth` slot (the
 Transcript, Subagents, Diff, and Info tabs) and the `transcript` slot,
@@ -624,9 +624,13 @@ What moved under the plan:
   place took the restore being armed only when the page is answered, a
   per-frame correction through an index jump, and the reader's own input
   ending that correction.
-- The final review found a resubscribe loop on terminal errors. It was
-  fixed by taking an ended transcript up again only when its session
-  becomes reachable again.
+- Resubscribing took two final fix waves. The final review found a
+  resubscribe loop on terminal errors; the first fix, which retried only
+  on an observed unreachable-to-reachable transition, stranded a
+  transcript when the hub replaced a machine online-to-online. The rule
+  that holds: retry at once on that transition, otherwise retry with a
+  backoff from 1 s to 60 s while the session is reachable (reset by a
+  snapshot), and never retry while it is unreachable.
 
 Left open:
 - **The depth chunk's weight.** xterm and mermaid ride along, and Vite
