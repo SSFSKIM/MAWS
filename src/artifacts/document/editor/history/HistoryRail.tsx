@@ -10,8 +10,8 @@ import type { HistoryController, HistorySnapshot } from './controller';
 import { authorOf, groupVersions, versionSummary, versionTitle, type Entry } from './model';
 
 interface Props {
-  controller: HistoryController;
-  snapshot: HistorySnapshot;
+  controller: Pick<HistoryController, 'select' | 'save'>; // P3-C (M8): what the rail drives, so a deck's controller drives it too
+  snapshot: Pick<HistorySnapshot, 'versions' | 'selected' | 'loading' | 'status' | 'error'>; // P3-C (M8): the list fields it reads
   sessionTitle?: (appSessionId: string) => string | undefined;
   /** Whether the Save version form is open (the editor holds it, so the header's Save version can open it). */
   saving: boolean;

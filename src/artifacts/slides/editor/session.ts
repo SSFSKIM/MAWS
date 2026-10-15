@@ -13,7 +13,7 @@ import { keepingRemovedQuotes } from '../threads'; // M7 fix wave 1
 export type Zoom = 'fit' | number;
 export const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.5, 2] as const;
 /** M6: the panel beside the stage that a header action opens (one at a time; the milestones after add theirs). */
-export type DeckRail = 'theme' | 'check' | 'comments'; // M7: the threads rail
+export type DeckRail = 'theme' | 'check' | 'comments' | 'history'; // M7: the threads rail; M8: version history
 
 export interface DeckSessionState {
   currentSlide: string | null;
@@ -53,6 +53,8 @@ export interface DeckTimings {
   syncedAt?: number;
   drawnAt?: number;
   thumbnails?: number;
+  /** M8: each version preview's time from its request to its slide drawn with its marks (ms). */
+  previewMs?: number[];
 }
 
 const TYPING_PAUSE_MS = 1_000; // typing in one field after this long a pause starts a new undo step

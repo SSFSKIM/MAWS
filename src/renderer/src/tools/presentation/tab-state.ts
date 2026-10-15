@@ -6,10 +6,16 @@
 // undo stack: what it refers to was replaced. The replica closes once the host has acknowledged every edit it holds.
 // M7: the open threads the header counts, and what still writes into the replica (`hold`: the comment card's overlay
 // withdrawing an unsent draft, a sent comment recorded in its thread), which the close waits for (B's rule).
+// M8: the deck's history api (B's `createHistoryApi` on A's IPC, D11), with the owner's last view as the artifact's row
+// held it before this showing (the "See N new changes" pill compares against it) and the rail's own view waiting until
+// the deck is first on screen, as B's tab does.
+import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { DeckSession } from '@artifacts/slides/editor/session';
 import { observeThreads, openThreadCount } from '@artifacts/slides/threads';
+import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
+import { createHistoryApi } from '../document/history-api'; // M8: B's, reused
 
 const SAVE_WAIT_MS = 3_000; // how long the close guard waits for edits in flight before it asks (B's rule)
 // Edits wait this long for the host's acknowledgement before the header says "Saving…", so a drag's frames, each
@@ -24,6 +30,10 @@ export interface DeckTabDeps {
   savingShownMs?: number;
   /** How long the close guard waits for edits in flight before it asks (3 s). */
   saveWaitMs?: number;
+  /** M8: A's IPC, for the deck's history (without it, no history). */
+  ipc?: Pick<MawsBridge, 'invoke' | 'on'>;
+  /** M8: a session's title for the history's author chips. */
+  sessionTitle?(appSessionId: string): string | undefined;
 }
 
 export interface DeckTabSnapshot {
@@ -47,6 +57,13 @@ export class DeckTabState {
   readonly artifactId: string;
   readonly surface: ArtifactEditorTarget['surface'];
   readonly host: ArtifactHost;
+  /** M8: the deck's version history on A's IPC; null without the IPC. */
+  readonly history: HistoryApi | null;
+  /** M8: a session's title for the history's author chips. */
+  readonly sessionTitle: ((appSessionId: string) => string | undefined) | undefined;
+  private viewedBefore: number | null = null; // M8: the owner's last view before this showing
+  private resolveShown: () => void = () => {};
+  private readonly whenShown = new Promise<void>((resolve) => (this.resolveShown = resolve));
   private current: DeckTabSnapshot = { failed: null, handle: null, session: null, document: null, saving: false, unresolved: 0 };
   private readonly listeners = new Set<() => void>();
   private readonly stops: (() => void)[] = [];
@@ -65,6 +82,19 @@ export class DeckTabState {
     this.artifactId = target.artifactId;
     this.surface = target.surface;
     this.host = deps.host;
+    const ipc = deps.ipc;
+    this.sessionTitle = deps.sessionTitle;
+    this.history = ipc
+      ? createHistoryApi({
+          artifactId: this.artifactId,
+          ipc,
+          host: deps.host,
+          viewedAt: { get: () => this.viewedBefore, set: (at) => (this.viewedBefore = at) },
+          whenShown: () => this.whenShown,
+          ...(deps.sessionTitle ? { sessionTitle: deps.sessionTitle } : {}),
+          log: deps.log,
+        })
+      : null;
     open.add(this);
     void this.open();
   }
@@ -81,6 +111,7 @@ export class DeckTabState {
   }
 
   private async open(): Promise<void> {
+    if (this.deps.ipc) await this.readViewed(this.deps.ipc);
     let handle: DocumentHandle;
     try {
       handle = await this.deps.host.open(this.artifactId);
@@ -103,6 +134,18 @@ export class DeckTabState {
       }), // M7
     );
     this.set({ handle, session, document: handle.state(), unresolved: openThreadCount(handle.doc) });
+  }
+
+  // M8: the owner's last view as the artifact's row holds it before this showing records its own (L's `onShown`, after
+  // the first slide is drawn, which the replica's open precedes).
+  private async readViewed(ipc: Pick<MawsBridge, 'invoke'>): Promise<void> {
+    try {
+      const result = await ipc.invoke('artifacts.get', { artifactId: this.artifactId });
+      if (!result.ok) throw new Error(result.error.message);
+      this.viewedBefore = result.value.artifact?.lastViewedAt ?? null;
+    } catch (error) {
+      this.deps.log(`presentation ${this.artifactId}: its row could not be read: ${messageOf(error)}`);
+    }
   }
 
   // What the header reads of the replica: its phase, sync and read-only as they change, and edits left waiting for the
@@ -134,6 +177,7 @@ export class DeckTabState {
   markShown = (): boolean => {
     if (this.wasShown) return false;
     this.wasShown = true;
+    this.resolveShown(); // M8: the rail's view waits for it
     return true;
   };
 

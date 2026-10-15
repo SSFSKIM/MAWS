@@ -6,6 +6,7 @@
 // M6: the header's Present, Theme and Check on the tab's deck session; the Theme panel's systems and switch.
 // M7: comments go to the session the main area shows, through B's comment surface (P2's card with B's artifact target
 // and anchor), the replica held by the tab while the card's overlay writes; the header counts the open threads.
+// M8: the header's Version history and the editor's history (the tab's history api over the tab's replica).
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { ArtifactHost } from '@artifacts/host';
 import { DeckEditor } from '@artifacts/slides/editor/DeckEditor';
@@ -53,7 +54,7 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
     () => (opened ? { present: () => void presentDeck(artifactId, opened.snapshot().currentSlide), toggleRail: (r) => opened.toggleRail(r) } : undefined),
     [opened, artifactId],
   );
-  useEditorHost(scope, deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: opened !== null, unresolved: snapshot.unresolved }, commands));
+  useEditorHost(scope, deckHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, exports, rail, canPresent: opened !== null, unresolved: snapshot.unresolved, history: state.history !== null }, commands));
 
   // M7: comments go to the session the main area shows (its Side thread, or its conversation); none shown, none offered
   const appSessionId = useLayout((s) => shownSession(s.main));
@@ -94,6 +95,10 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
   }, [visible, drawn, state, onShown]);
   const session = snapshot.session;
   const onDrawn = useCallback(() => setDrawn(true), []);
+  // M8: the deck's history over the tab's replica and history api
+  const handle = snapshot.handle;
+  const history = useMemo(() => (state.history && handle ? { api: state.history, handle } : undefined), [state.history, handle]);
+  const onPreviewDrawn = useCallback((ms: number) => session && (session.timings.previewMs ??= []).push(ms), [session]);
   const onThumbnailsDrawn = useCallback((thumbnails: number) => session?.markDrawn(thumbnails), [session]);
 
   if (snapshot.failed !== null) return <Notice>{`This presentation could not be opened: ${snapshot.failed}`}</Notice>;
@@ -114,6 +119,9 @@ function DeckBody({ artifactId, state, scope, visible, onShown, compact }: DeckE
         importAsset={importAsset}
         theme={theme}
         comments={appSessionId === null ? undefined : comments}
+        history={history}
+        sessionTitle={state.sessionTitle}
+        onPreviewDrawn={onPreviewDrawn}
       />
     </div>
   );

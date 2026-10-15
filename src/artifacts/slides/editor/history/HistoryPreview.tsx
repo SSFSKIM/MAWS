@@ -1,0 +1,258 @@
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D11, D8's "in history"; M8): the deck in place of the
+// editor while a version shows, read-only, drawn from the version's own doc in the design system pinned at the version
+// (the live deck's own for "See N new changes"). With Show changes on: the filmstrip edges each changed slide in its
+// author's colour (a new slide badged, a deleted one ghosted at its earlier place), the stage outlines each changed
+// element in its author's colour and ghosts each deleted one from the earlier doc where it was, the notes below show the
+// diff (inserts in the author's colour, deletions struck), and the deck's own changes are named above the stage; ↑ ↓
+// (the bar) reach each change, the stage moving to its slide. Nothing here writes: the docs are the controller's,
+// throwaway, and no transform layer, text box or notes field is mounted.
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { DesignSystemScope, type DesignSystemRef } from '../../../design-system/apply';
+import type { AssetUrl, SlideCanvas } from '../../canvas';
+import type { ChangeStop, ElementChange, NotesPiece, SlideChange } from '../../history';
+import { readNotes } from '../../../yjs/slides';
+import { useDeckView } from '../deck-view';
+import { SLIDE_H, SLIDE_W, SlideView } from '../SlideView';
+import { measure } from '../transform/measure';
+import { slideOrderOf, type DeckHistoryController, type DeckPreview } from './controller';
+import { HISTORY_COPY as C, keyLabel } from './copy';
+import './history.css';
+
+const STAGE_GUTTER = 48; // the editor's: px of app chrome around the fitted slide
+const NO_ELEMENTS: readonly ElementChange[] = [];
+
+interface Props {
+  controller: DeckHistoryController;
+  preview: DeckPreview;
+  /** The live deck's system: what the live deck's own preview draws in. */
+  liveSystem: DesignSystemRef | { builtin: 'maws' } | null;
+  assetUrl: AssetUrl;
+  /** The editor's zoom ('fit' or a scale). */
+  zoom: 'fit' | number;
+  thumbnailWidth: number;
+  /** Once the stage has drawn the shown slide with its marks (the e2e seam's preview time). */
+  onDrawn?: () => void;
+}
+
+export function HistoryPreview({ controller, preview, liveSystem, assetUrl, zoom, thumbnailWidth, onDrawn }: Props) {
+  const view = useDeckView(preview.shown);
+  const system = preview.system ?? liveSystem;
+  const scope = (children: ReactNode) => (
+    <DesignSystemScope system={system} medium="deck" overrides={view.overrides} className="deck-ds-scope">
+      {children}
+    </DesignSystemScope>
+  );
+  const bySlide = new Map(preview.changes.slides.map((s) => [s.id, s]));
+  const focus = preview.focus === null ? null : (preview.stops[preview.focus] ?? null);
+  const slideId = preview.slideId;
+  const change = slideId === null ? undefined : bySlide.get(slideId);
+  return (
+    <>
+      {scope(<HistoryFilmstrip controller={controller} preview={preview} bySlide={bySlide} assetUrl={assetUrl} width={thumbnailWidth} />)}
+      <div className="deck-editor-main" data-history-preview={preview.target.kind}>
+        {preview.showChanges && preview.changes.deck && (
+          <p className="deck-history-deck" role="status" data-focused={focus?.part === 'deck' || undefined}>
+            {C.deckChanged(preview.changes.deck.keys.map((k) => keyLabel(k.key)).join(', '))}
+          </p>
+        )}
+        {preview.showChanges && change?.kind === 'removed' && <p className="deck-history-slide-note">{C.deletedSlide}</p>}
+        {preview.showChanges && change?.kind === 'added' && <p className="deck-history-slide-note">{C.addedSlide}</p>}
+        <HistoryStage controller={controller} preview={preview} change={change} focus={focus} assetUrl={assetUrl} zoom={zoom} scope={scope} onDrawn={onDrawn} />
+        {slideId !== null && <NotesDiff controller={controller} preview={preview} slideId={slideId} change={change} focus={focus} />}
+      </div>
+    </>
+  );
+}
+
+// ---- the filmstrip
+
+function HistoryFilmstrip({ controller, preview, bySlide, assetUrl, width }: { controller: DeckHistoryController; preview: DeckPreview; bySlide: Map<string, SlideChange>; assetUrl: AssetUrl; width: number }) {
+  // a deleted slide is shown at its earlier place only while the changes are
+  const order = slideOrderOf(preview).filter((id) => preview.showChanges || bySlide.get(id)?.kind !== 'removed');
+  const scale = width / SLIDE_W;
+  return (
+    <nav className="deck-filmstrip" aria-label={C.filmstrip} style={{ width: width + 40 }}>
+      <ol className="deck-filmstrip-list">
+        {order.map((id, index) => {
+          const change = preview.showChanges ? bySlide.get(id) : undefined;
+          const removed = bySlide.get(id)?.kind === 'removed';
+          const author = change?.by ? controller.author(change.by) : null;
+          const style = author ? ({ '--deck-history-author': `var(${author.color})` } as CSSProperties) : undefined;
+          return (
+            <li key={id} className="deck-filmstrip-item">
+              <div className="deck-thumb" data-slide-thumb={id} data-current={id === preview.slideId || undefined} data-history-change={change?.kind} style={style}>
+                <span className="deck-thumb-number" aria-hidden>
+                  {index + 1}
+                </span>
+                <button
+                  type="button"
+                  className="deck-thumb-button"
+                  aria-label={C.slideLabel(index + 1, change?.kind ?? null)}
+                  aria-current={id === preview.slideId ? 'true' : undefined}
+                  title={author ? C.by(author.name, author.when(change!.at)) : undefined}
+                  onClick={() => controller.showSlide(id)}
+                >
+                  <SlideView doc={removed ? preview.earlier : preview.shown} slideId={id} token={removed ? preview.earlier : preview.shown} assetUrl={assetUrl} scale={scale} thumbnail />
+                  {change?.kind === 'added' && <span className="deck-thumb-badge deck-history-badge">{C.newBadge}</span>}
+                  {change?.kind === 'removed' && <span className="deck-thumb-badge deck-history-badge">{C.deletedBadge}</span>}
+                </button>
+              </div>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
+  );
+}
+
+// ---- the stage
+
+interface Mark {
+  id: string;
+  kind: ElementChange['kind'];
+  box: { x: number; y: number; w: number; h: number };
+  color: string | null;
+  title: string;
+}
+
+function HistoryStage({ controller, preview, change, focus, assetUrl, zoom, scope, onDrawn }: { controller: DeckHistoryController; preview: DeckPreview; change: SlideChange | undefined; focus: ChangeStop | null; assetUrl: AssetUrl; zoom: 'fit' | number; scope: (children: ReactNode) => ReactNode; onDrawn?: () => void }) {
+  const slideId = preview.slideId;
+  const requestedAt = preview.requestedAt;
+  const removed = change?.kind === 'removed';
+  const doc = removed ? preview.earlier : preview.shown;
+
+  // the fit zoom from the stage's own size, as the editor's stage reads it
+  const viewport = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState<{ w: number; h: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = viewport.current;
+    if (!el) return;
+    const read = () => setRoom({ w: el.clientWidth, h: el.clientHeight });
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const fit = room ? Math.max(0.05, Math.min((room.w - STAGE_GUTTER) / SLIDE_W, (room.h - STAGE_GUTTER) / SLIDE_H)) : 0.25;
+  const scale = zoom === 'fit' ? fit : zoom;
+
+  const [canvas, setCanvas] = useState<SlideCanvas | null>(null);
+  const [ghosts, setGhosts] = useState<SlideCanvas | null>(null);
+  const elements = preview.showChanges && change?.kind === 'changed' ? change.elements : NO_ELEMENTS;
+  const removedIds = useMemo(() => elements.filter((e) => e.kind === 'removed').map((e) => e.id), [elements]);
+
+  // the deleted elements are drawn from the earlier doc where they were, everything else of it hidden
+  useEffect(() => {
+    if (!ghosts) return;
+    for (const id of removedIds) {
+      const node = ghosts.node(id);
+      if (node) node.dataset.ghost = '';
+    }
+  }, [ghosts, removedIds]);
+
+  // the marks: each changed or new element outlined where it is drawn, each deleted one where it was
+  const [marks, setMarks] = useState<Mark[]>([]);
+  const drawnFor = useRef<number | null>(null); // the preview (its request time) whose drawing was reported
+  useEffect(() => {
+    if (!canvas) return;
+    let live = true;
+    const wait = [canvas.whenLaidOut(), ...(ghosts && removedIds.length > 0 ? [ghosts.whenLaidOut()] : [])];
+    void Promise.all(wait).then(() => {
+      if (!live) return;
+      const next: Mark[] = [];
+      for (const e of elements) {
+        const source = e.kind === 'removed' ? ghosts : canvas;
+        const m = source ? measure(source, e.id, scale) : null;
+        if (!m) continue;
+        const author = e.by ? controller.author(e.by) : null;
+        const what = e.kind === 'changed' ? e.keys.map((k) => keyLabel(k.key)).join(', ') : e.kind === 'added' ? C.newBadge : C.deletedBadge;
+        next.push({ id: e.id, kind: e.kind, box: m.bounds, color: author?.color ?? null, title: author ? `${what} — ${C.by(author.name, author.when(e.at))}` : what });
+      }
+      setMarks(next);
+      if (drawnFor.current !== requestedAt) {
+        drawnFor.current = requestedAt;
+        onDrawn?.();
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [canvas, ghosts, removedIds, scale, elements, controller, onDrawn, requestedAt]);
+
+  // ↑ ↓ reaching an element scrolls it into view
+  const focusedMark = useRef<HTMLDivElement | null>(null);
+  const focusedId = focus?.part === 'element' && focus.slideId === slideId ? focus.elementId : null;
+  useEffect(() => {
+    focusedMark.current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  }, [focusedId, marks]);
+
+  return (
+    <div className="deck-stage-column">
+      <div ref={viewport} className="deck-stage" role="region" aria-label={C.stage} data-history-stage>
+        {slideId !== null && (
+          <div className="deck-stage-center">
+            <div className="deck-stage-frame" data-stage-slide={slideId} data-history-slide={change?.kind ?? 'same'}>
+              {scope(<SlideView key={`${removed ? 'earlier' : 'shown'}:${slideId}`} doc={doc} slideId={slideId} token={doc} assetUrl={assetUrl} scale={scale} onCanvas={setCanvas} />)}
+              {removedIds.length > 0 && (
+                <div className="deck-history-ghosts" aria-hidden>
+                  {scope(<SlideView key={`ghosts:${slideId}`} doc={preview.earlier} slideId={slideId} token={preview.earlier} assetUrl={assetUrl} scale={scale} onCanvas={setGhosts} />)}
+                </div>
+              )}
+              <div className="deck-stage-overlay">
+                {marks.map((m) => (
+                  <div
+                    key={m.id}
+                    ref={m.id === focusedId ? focusedMark : undefined}
+                    className="deck-history-mark"
+                    data-history-mark={m.id}
+                    data-kind={m.kind}
+                    data-focused={m.id === focusedId || undefined}
+                    title={m.title}
+                    style={{ left: m.box.x * scale, top: m.box.y * scale, width: m.box.w * scale, height: m.box.h * scale, ...(m.color ? { '--deck-history-author': `var(${m.color})` } : {}) } as CSSProperties}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- the notes
+
+function NotesDiff({ controller, preview, slideId, change, focus }: { controller: DeckHistoryController; preview: DeckPreview; slideId: string; change: SlideChange | undefined; focus: ChangeStop | null }) {
+  const pieces: NotesPiece[] | null = preview.showChanges && change?.notesPieces ? change.notesPieces : null;
+  const text = pieces ? null : readNotes(change?.kind === 'removed' ? preview.earlier : preview.shown, slideId);
+  const focusedRun = focus?.part === 'notes' && focus.slideId === slideId ? focus.run : null;
+  return (
+    <div className="deck-notes deck-history-notes" role="region" aria-label={C.notes} data-history-notes>
+      {pieces ? (
+        <p className="deck-history-notes-text">
+          {pieces.map((piece, i) => (
+            <NotesSpan key={i} piece={piece} color={piece.by ? controller.author(piece.by).color : null} focused={piece.run !== null && piece.run === focusedRun} />
+          ))}
+        </p>
+      ) : text ? (
+        <p className="deck-history-notes-text">{text}</p>
+      ) : (
+        <p className="deck-history-notes-text deck-quiet-text">{C.noNotes}</p>
+      )}
+    </div>
+  );
+}
+
+function NotesSpan({ piece, color, focused }: { piece: NotesPiece; color: string | null; focused: boolean }) {
+  if (piece.kind === 'same') return <span>{piece.text}</span>;
+  const style = color ? ({ '--deck-history-author': `var(${color})` } as CSSProperties) : undefined;
+  return piece.kind === 'ins' ? (
+    <ins className="deck-history-ins" data-focused={focused || undefined} style={style}>
+      {piece.text}
+    </ins>
+  ) : (
+    <del className="deck-history-del" data-focused={focused || undefined} style={style}>
+      {piece.text}
+    </del>
+  );
+}

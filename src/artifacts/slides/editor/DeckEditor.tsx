@@ -8,7 +8,10 @@
 // Check open beside the stage (menus/).
 // M7: comments on elements (comments/): the toolbar's Comment and Comments, the threads rail beside the stage, the pins
 // on the overlay, and the frame P2's card is drawn over, through the shell's surface (B's `DocumentComments`).
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
+// M8: version history (history/): B's rail on the session's rail, the preview in place of the editor while a version
+// shows (its bar for the toolbar, the version's slides read-only with their changes), "See N new changes", the restore
+// banner, and Show editors on a right-click over the selected element.
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
 import type { AssetUrl, SlideCanvas } from '../canvas';
 import { DECK_LIMITS } from '../deck';
@@ -25,6 +28,13 @@ import type { CommentAuthor, DocumentComments } from '../../document/editor/comm
 import { CommentButtons } from './comments/CommentButtons';
 import { CommentFrame } from './comments/CommentFrame';
 import { CommentsRail } from './comments/CommentsRail';
+import { ShowEditorsMenu } from '../../document/editor/history/ShowEditors';
+import type { ShownEditor } from '../../document/editor/history/controller';
+import { DeckHistoryRail } from './history/DeckHistoryRail';
+import { HistoryBar } from './history/HistoryBar';
+import { HistoryPreview } from './history/HistoryPreview';
+import { HISTORY_COPY } from './history/copy';
+import { useDeckHistoryController, useDeckHistorySnapshot, type DeckHistorySource } from './history/use-deck-history';
 import { DeckCommentsProvider, useDeckComments } from './comments/controller';
 import { CheckPanel } from './menus/Check';
 import { insertLayoutSlide, LayoutsMenu } from './menus/Layouts';
@@ -62,6 +72,12 @@ export interface DeckEditorProps {
   comments?: DocumentComments;
   /** M7: who writes the editor's thread changes (the owner by default). */
   commentAuthor?: CommentAuthor;
+  /** M8: the deck's version history (B's api on A's IPC, the replica); without it, no history. */
+  history?: DeckHistorySource;
+  /** M8: a session's title for the history's author chips. */
+  sessionTitle?: (appSessionId: string) => string | undefined;
+  /** M8: once a version's preview has drawn its slide and its marks: ms since it was asked for (the e2e seam's). */
+  onPreviewDrawn?: (ms: number) => void;
 }
 
 const NOTICE_MS = 6_000;
@@ -69,7 +85,7 @@ const TEXT_KINDS: readonly NewKind[] = ['text', 'heading', 'bullets', 'numbers']
 
 const STAGE_GUTTER = 48; // px of app chrome around the fitted slide
 
-export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor }: DeckEditorProps) {
+export function DeckEditor({ session, assetUrl, system, readOnly, compact = false, onStage, onDrawn, onThumbnailsDrawn, uploadAsset, artifactId, importAsset, theme, comments, commentAuthor, history: historySource, sessionTitle, onPreviewDrawn }: DeckEditorProps) {
   useCanvasCss();
   const doc = session.doc;
   const view = useDeckView(doc);
@@ -123,9 +139,25 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
     </DesignSystemScope>
   );
 
+  // M8: the history controller (one per replica), its preview, and what the live editor tells it
+  const history = useDeckHistoryController(historySource);
+  const historySnapshot = useDeckHistorySnapshot(history);
+  const preview = historySnapshot?.preview ?? null;
+  const slideShown = slide?.id ?? null;
+  useEffect(() => history?.setLiveSlide(slideShown), [history, slideShown]);
+  useEffect(() => history?.applied(preview?.shown ?? null), [history, preview?.shown]);
+  const historyOpen = state.rail === 'history';
+  const previewing = preview !== null || historySnapshot?.loading === true;
+  useEffect(() => {
+    if (!historyOpen && previewing) history?.close(); // the rail closed: back to the live deck
+  }, [historyOpen, previewing, history]);
+  const showEditors = useShowEditors(history, session, slideShown);
+  const requestedAt = preview?.requestedAt ?? 0;
+  const previewDrawn = useCallback(() => onPreviewDrawn?.(performance.now() - requestedAt), [onPreviewDrawn, requestedAt]);
+
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const mod = event.metaKey || event.ctrlKey;
-    if (!mod || readOnly) return;
+    if (!mod || readOnly || preview) return; // M8: no undo in history (the live deck is not shown)
     const target = event.target as HTMLElement;
     if (event.defaultPrevented || target.isContentEditable) return; // the text box routes its own (M5)
     if (target.tagName === 'INPUT' || target.tagName === 'SELECT') return; // a field keeps its own undo
@@ -171,65 +203,110 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   const commentsApi = useDeckComments({ session, surface: comments, author: commentAuthor, readOnly, openRail: openComments });
 
   const faces = faceRules(view.faces, assetUrl);
-  const editor = (
-    <div className="deck-editor" data-deck-editor data-compact={compact || undefined} onKeyDown={onKeyDown}>
-      {faces && <style data-deck-faces>{faces}</style>}
-      <Toolbar session={session} zoom={state.zoom} scale={scale} canUndo={state.canUndo && !readOnly} canRedo={state.canRedo && !readOnly}>
-        <ElementBar
-          session={session}
-          slideId={slide?.id ?? null}
-          canvas={stageCanvas}
-          scale={scale}
-          readOnly={!editable}
-          onInsert={insert}
-          uploadAsset={uploadAsset}
-          onNotice={setNotice}
-          inspectorOpen={inspectorOpen}
-          onToggleInspector={() => setInspectorOpen((open) => !open)}
-        />
-        <TextStyleMenu session={session} slideId={slide?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
-        <CommentButtons api={commentsApi} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
-        <span role="status" className="deck-notice" data-deck-notice>
-          {notice}
-        </span>
-      </Toolbar>
-      <div className="deck-editor-body">
-        {scope(
-          <Filmstrip
-            session={session}
-            view={view}
-            current={slide?.id ?? null}
-            assetUrl={assetUrl}
-            width={compact ? 120 : SLIDE_W / 8}
-            readOnly={readOnly}
-            onDrawn={onThumbnailsDrawn}
-            fromLayout={<LayoutsMenu system={system} disabled={readOnly || view.slides.length >= DECK_LIMITS.slides} scope={scope} onPick={(layout) => insertLayoutSlide(session, layout, slide?.id ?? order.at(-1) ?? null)} />}
-          />,
-        )}
-        <div className="deck-editor-main">
-          <CommentFrame api={commentsApi} surface={comments} canvas={stageCanvas} scale={scale}>
-            <Stage
+  const historyRail = history && historySnapshot && historyOpen && <DeckHistoryRail controller={history} snapshot={historySnapshot} sessionTitle={sessionTitle} onClose={() => session.toggleRail('history')} />;
+  // one tree in both modes, so B's rail keeps its place (and its open folds) while a version shows
+  const live = (
+    <>
+          {scope(
+            <Filmstrip
               session={session}
-              slide={slide}
-              scale={scale}
+              view={view}
+              current={slide?.id ?? null}
               assetUrl={assetUrl}
-              viewport={viewport}
-              frame={frame}
-              onCanvas={onStageCanvas}
+              width={compact ? 120 : SLIDE_W / 8}
+              readOnly={readOnly}
+              onDrawn={onThumbnailsDrawn}
+              fromLayout={<LayoutsMenu system={system} disabled={readOnly || view.slides.length >= DECK_LIMITS.slides} scope={scope} onPick={(layout) => insertLayoutSlide(session, layout, slide?.id ?? order.at(-1) ?? null)} />}
+            />,
+          )}
+          {historySnapshot?.pill && (
+            <div className="deck-history-pill" data-markup-occluder>
+              <button
+                type="button"
+                className="deck-button"
+                onClick={() => {
+                  if (!historyOpen) session.toggleRail('history');
+                  void history?.openNewChanges();
+                }}
+              >
+                {HISTORY_COPY.pill(historySnapshot.pill.count)}
+              </button>
+              {historySnapshot.pill.failed !== null && (
+                <button type="button" className="deck-button" aria-label={HISTORY_COPY.pillRetry} title={historySnapshot.pill.failed} onClick={() => void history?.recount()}>
+                  ↻
+                </button>
+              )}
+              <button type="button" className="deck-button" aria-label={HISTORY_COPY.pillDismiss} onClick={() => history?.dismissPill()}>
+                ×
+              </button>
+            </div>
+          )}
+          <div className="deck-editor-main" data-show-editors onContextMenu={showEditors.onContextMenu}>
+            {showEditors.open && <ShowEditorsMenu open={showEditors.open} onShow={showEditors.show} onClose={showEditors.close} />}
+            <CommentFrame api={commentsApi} surface={comments} canvas={stageCanvas} scale={scale}>
+              <Stage
+                session={session}
+                slide={slide}
+                scale={scale}
+                assetUrl={assetUrl}
+                viewport={viewport}
+                frame={frame}
+                onCanvas={onStageCanvas}
+                canvas={stageCanvas}
+                readOnly={!editable}
+                onNotice={setNotice}
+                artifactId={artifactId}
+                importAsset={importAsset}
+                scope={scope}
+              />
+            </CommentFrame>
+            {slide && <Notes key={slide.id} session={session} slideId={slide.id} token={slide.token} readOnly={readOnly || slide.held !== null} />}
+          </div>
+          {state.rail === 'theme' && scope(<ThemePanel session={session} system={system} theme={theme} overrides={view.overrides} faces={view.faces} readOnly={readOnly} />)}
+          {state.rail === 'check' && <CheckPanel session={session} system={system} />}
+          {state.rail === 'comments' && <CommentsRail api={commentsApi} onClose={() => session.toggleRail('comments')} />}
+    </>
+  );
+  const editor = (
+    <div className="deck-editor" data-deck-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown}>
+      {faces && <style data-deck-faces>{faces}</style>}
+      {!preview &&
+        historySnapshot?.banner && (
+          <div className="deck-history-banner" role="status" aria-label={HISTORY_COPY.restoredBanner}>
+            <span>{historySnapshot.banner}</span>
+            <button type="button" className="deck-button" onClick={() => history?.dismissBanner()}>
+              {HISTORY_COPY.dismiss}
+            </button>
+          </div>
+        )}
+      {preview ? (
+        <HistoryBar preview={preview} controller={history!} onBack={() => history!.close()} />
+      ) : (
+          <Toolbar session={session} zoom={state.zoom} scale={scale} canUndo={state.canUndo && !readOnly} canRedo={state.canRedo && !readOnly}>
+            <ElementBar
+              session={session}
+              slideId={slide?.id ?? null}
               canvas={stageCanvas}
+              scale={scale}
               readOnly={!editable}
+              onInsert={insert}
+              uploadAsset={uploadAsset}
               onNotice={setNotice}
-              artifactId={artifactId}
-              importAsset={importAsset}
-              scope={scope}
+              inspectorOpen={inspectorOpen}
+              onToggleInspector={() => setInspectorOpen((open) => !open)}
             />
-          </CommentFrame>
-          {slide && <Notes key={slide.id} session={session} slideId={slide.id} token={slide.token} readOnly={readOnly || slide.held !== null} />}
-        </div>
-        {state.rail === 'theme' && scope(<ThemePanel session={session} system={system} theme={theme} overrides={view.overrides} faces={view.faces} readOnly={readOnly} />)}
-        {state.rail === 'check' && <CheckPanel session={session} system={system} />}
-        {state.rail === 'comments' && <CommentsRail api={commentsApi} onClose={() => session.toggleRail('comments')} />}
-        {inspectorOpen &&
+            <TextStyleMenu session={session} slideId={slide?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
+            <CommentButtons api={commentsApi} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
+            <span role="status" className="deck-notice" data-deck-notice>
+              {notice}
+            </span>
+          </Toolbar>
+      )}
+      <div className="deck-editor-body">
+        {preview ? <HistoryPreview controller={history!} preview={preview} liveSystem={system} assetUrl={assetUrl} zoom={state.zoom} thumbnailWidth={compact ? 120 : SLIDE_W / 8} onDrawn={previewDrawn} /> : live}
+        {historyRail}
+        {!preview &&
+          inspectorOpen &&
           slide &&
           scope(<Inspector session={session} slideId={slide.id} readOnly={!editable} faces={view.faces} uploadAsset={uploadAsset} measure={(id) => measureInHost(stageCanvas, id, scale)} />)}
       </div>
@@ -275,4 +352,32 @@ function Toolbar({ session, zoom, scale, canUndo, canRedo, children }: { session
       </button>
     </div>
   );
+}
+
+/**
+ * M8: Show editors (§4.7; B's menu, ShowEditors.tsx): a right-click over the stage with one element selected opens a
+ * small menu; "Show editors" lists who set that element's keys and typed its text, and when, from provenance. A
+ * right-click with no single selection keeps the system's menu.
+ */
+function useShowEditors(history: ReturnType<typeof useDeckHistoryController>, session: DeckSession, slideId: string | null) {
+  type Open = { x: number; y: number; from: number; to: number; asked: boolean; editors: ShownEditor[] | null; error: string | null; elementId: string };
+  const [open, setOpen] = useState<Open | null>(null);
+  const onContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
+    const selection = session.snapshot().selection;
+    if (!history || slideId === null || selection.length !== 1) return;
+    if (!(event.target as HTMLElement).closest('[data-stage-surface]')) return;
+    event.preventDefault();
+    const frame = event.currentTarget.getBoundingClientRect();
+    setOpen({ x: event.clientX - frame.left, y: event.clientY - frame.top, from: 0, to: 0, asked: false, editors: null, error: null, elementId: selection[0]! });
+  };
+  const show = () => {
+    if (!open || !history || slideId === null) return;
+    const asked: Open = { ...open, asked: true, editors: null, error: null };
+    setOpen(asked);
+    history
+      .editorsOf(slideId, asked.elementId)
+      .then((editors) => setOpen((now) => (now === asked ? { ...asked, editors } : now)))
+      .catch((error: unknown) => setOpen((now) => (now === asked ? { ...asked, editors: [], error: error instanceof Error ? error.message : String(error) } : now)));
+  };
+  return { open, onContextMenu, show, close: () => setOpen(null) };
 }
