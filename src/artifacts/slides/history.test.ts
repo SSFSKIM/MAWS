@@ -156,8 +156,8 @@ describe('the per-slide diff (D11)', () => {
     w.land('session:x', (doc) => Y.setDeckKey(doc, 'title', 'Renamed'));
     const changes = changesOf(w, v);
     expect(changes.deck?.keys.map((k) => [k.key, k.by])).toEqual([
-      ['title', 'session:x'],
       ['dsOverrides', 'human'],
+      ['title', 'session:x'],
     ]);
     expect(changes.count).toBe(1);
     expect(changes.slides).toEqual([]);

@@ -180,7 +180,7 @@ function changedKeys(d: Delta, skip: ReadonlySet<string>): KeyChange[] {
     const inner = latestIn(op.value);
     if (inner) keys.push({ key, kind: 'set', ...inner });
   }
-  return keys;
+  return keys.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)); // a doc's attribute order is not its history's
 }
 
 const latestOf = (touches: readonly Touch[]): Touch => touches.reduce<Touch | null>((a, b) => later(a, b), null) ?? { by: null, at: null };

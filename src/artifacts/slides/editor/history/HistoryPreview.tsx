@@ -51,7 +51,7 @@ export function HistoryPreview({ controller, preview, liveSystem, assetUrl, zoom
       {scope(<HistoryFilmstrip controller={controller} preview={preview} bySlide={bySlide} assetUrl={assetUrl} width={thumbnailWidth} />)}
       <div className="deck-editor-main" data-history-preview={preview.target.kind}>
         {preview.showChanges && preview.changes.deck && (
-          <p className="deck-history-deck" role="status" data-focused={focus?.part === 'deck' || undefined}>
+          <p className="deck-history-deck" role="status" data-focused={focus?.part === 'deck' ? '' : undefined}>
             {C.deckChanged(preview.changes.deck.keys.map((k) => keyLabel(k.key)).join(', '))}
           </p>
         )}
@@ -80,7 +80,7 @@ function HistoryFilmstrip({ controller, preview, bySlide, assetUrl, width }: { c
           const style = author ? ({ '--deck-history-author': `var(${author.color})` } as CSSProperties) : undefined;
           return (
             <li key={id} className="deck-filmstrip-item">
-              <div className="deck-thumb" data-slide-thumb={id} data-current={id === preview.slideId || undefined} data-history-change={change?.kind} style={style}>
+              <div className="deck-thumb" data-slide-thumb={id} data-current={id === preview.slideId ? '' : undefined} data-history-change={change?.kind} style={style}>
                 <span className="deck-thumb-number" aria-hidden>
                   {index + 1}
                 </span>
@@ -206,7 +206,7 @@ function HistoryStage({ controller, preview, change, focus, assetUrl, zoom, scop
                     className="deck-history-mark"
                     data-history-mark={m.id}
                     data-kind={m.kind}
-                    data-focused={m.id === focusedId || undefined}
+                    data-focused={m.id === focusedId ? '' : undefined}
                     title={m.title}
                     style={{ left: m.box.x * scale, top: m.box.y * scale, width: m.box.w * scale, height: m.box.h * scale, ...(m.color ? { '--deck-history-author': `var(${m.color})` } : {}) } as CSSProperties}
                   />
@@ -247,11 +247,11 @@ function NotesSpan({ piece, color, focused }: { piece: NotesPiece; color: string
   if (piece.kind === 'same') return <span>{piece.text}</span>;
   const style = color ? ({ '--deck-history-author': `var(${color})` } as CSSProperties) : undefined;
   return piece.kind === 'ins' ? (
-    <ins className="deck-history-ins" data-focused={focused || undefined} style={style}>
+    <ins className="deck-history-ins" data-focused={focused ? '' : undefined} style={style}>
       {piece.text}
     </ins>
   ) : (
-    <del className="deck-history-del" data-focused={focused || undefined} style={style}>
+    <del className="deck-history-del" data-focused={focused ? '' : undefined} style={style}>
       {piece.text}
     </del>
   );
