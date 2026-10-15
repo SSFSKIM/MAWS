@@ -277,7 +277,7 @@ export class DeskTranscript {
         this.subagents = subagentLookupOf(message.body.subagents);
         return;
       default:
-        return; // `diff` is the diff view's (M3)
+        return; // `diff` and `usage` are the diff view's and session info's (M3)
     }
   }
 
