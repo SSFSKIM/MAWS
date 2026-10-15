@@ -13,6 +13,8 @@ import { BENCH_SLIDES, CLAUDE_SLIDES, LAYOUT_SLIDES } from '../fixtures/corpus';
 import { claudeAssetPath, claudeDeckFiles } from './claude';
 import { FIXTURE_FILES, fixtureDoc } from './deck.test-support';
 import { exportDeckOf } from './standalone';
+import { apply, cornersOf, multiply, placement, type Box } from '../geometry';
+import type { ElementIR } from '../ir';
 
 const LOGO = new Uint8Array([137, 80, 78, 71]);
 const FONT = new Uint8Array([119, 79, 70, 50]);
@@ -71,5 +73,52 @@ describe('the For Claude export of a deck with held slides', () => {
     }
     expect(message).toContain('slide broken is held');
     expect(message).toContain(held[0]!.reasons[0]!);
+  });
+});
+
+// fix wave 1 (finding 4): Claude flattens a pinned div inside a host (its format.md: "its positioned children re-pin to
+// the host (exact for left/top)… it stays only if painted or holding flow content"), losing the div's own transform.
+// The export lowers MAWS's groups itself: each member's pose in the slide baked into its own left, top and transform.
+describe('the For Claude export of groups', () => {
+  const GROUP = (paint: string) => `<section id="g1" style="background:#ffffff">
+<div id="grp" data-group="" style="position:absolute; left:600px; top:300px; width:400px; height:200px; transform:rotate(30deg) scale(1.2); color:#ff0000; opacity:0.5${paint}">
+<p id="a" style="position:absolute; left:0px; top:0px; width:200px; height:60px; font-size:32px">A</p>
+<x-shape id="b" kind="ellipse" style="position:absolute; left:200px; top:100px; width:200px; height:100px; background:#00ff00; transform:rotate(10deg)"></x-shape>
+<x-connector id="c" x1="0" y1="200" x2="400" y2="0"></x-connector>
+</div>
+<p id="after" style="font-size:32px">Flow</p>
+</section>`;
+  const filesOf = (paint: string) => ({ 'project/deck.json': JSON.stringify({ v: 4, title: 'Groups', order: ['g1'] }), [slidePath('g1')]: GROUP(paint) });
+  const G = placement({ x: 600, y: 300, w: 400, h: 200 }, 'rotate(30deg) scale(1.2)');
+  const worldCorners = (box: Box, transform: string | undefined) => cornersOf(multiply(G, placement(box, transform)), box.w, box.h);
+  const near = (a: { x: number; y: number }[], b: { x: number; y: number }[]) => a.every((p, i) => Math.hypot(p.x - b[i]!.x, p.y - b[i]!.y) < 0.6);
+
+  function lowered(paint: string) {
+    const files = claudeDeckFiles(fixtureDoc(filesOf(paint)), { resolveVar: () => undefined, assets: new Map() });
+    const loaded = loadSlide(files[slidePath('g1')] as string, { fileId: 'g1' });
+    if (!loaded.ok) throw new Error(loaded.held.reasons.join('; '));
+    return loaded.slide;
+  }
+  const own = (el: ElementIR): Box => ({ x: parseFloat(el.style.left!), y: parseFloat(el.style.top!), w: parseFloat(el.style.width!), h: parseFloat(el.style.height!) });
+
+  it('re-pins an unpainted group’s members to the host, each keeping its pose in the slide, the group gone', () => {
+    const slide = lowered('');
+    expect(slide.children.map((c) => c.id)).toEqual(['a', 'b', 'c', 'after']);
+    const [a, b, c] = slide.children as [ElementIR, ElementIR, ElementIR];
+    expect(near(cornersOf(placement(own(a), a.style.transform), own(a).w, own(a).h), worldCorners({ x: 0, y: 0, w: 200, h: 60 }, undefined))).toBe(true);
+    expect(near(cornersOf(placement(own(b), b.style.transform), own(b).w, own(b).h), worldCorners({ x: 200, y: 100, w: 200, h: 100 }, 'rotate(10deg)'))).toBe(true);
+    expect([b.style.transform, own(b).w, own(b).h]).toEqual(['rotate(40deg)', 240, 120]); // an x-shape takes rotate only: its scale goes into its size
+    const ends = [apply(G, { x: 0, y: 200 }), apply(G, { x: 400, y: 0 })];
+    expect(near([{ x: +c.attrs.x1!, y: +c.attrs.y1! }, { x: +c.attrs.x2!, y: +c.attrs.y2! }], ends)).toBe(true);
+    // what the group gave its members by inheritance and opacity, they carry themselves
+    expect(a.style.color).toBe('#ff0000');
+    expect(a.style.opacity).toBe('0.5');
+  });
+
+  it('keeps a painted group in place, painted, its members lifted out over it', () => {
+    const slide = lowered('; background:#eeeeee');
+    expect(slide.children.map((c) => c.id)).toEqual(['grp', 'a', 'b', 'c', 'after']);
+    expect(slide.children[0]!.children).toEqual([]);
+    expect(slide.children[0]!.style).toMatchObject({ background: '#eeeeee', transform: 'rotate(30deg) scale(1.2)' });
   });
 });

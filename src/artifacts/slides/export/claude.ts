@@ -3,7 +3,8 @@
 // `dsOverrides`, every slide canonical with each design-system token resolved to its literal (the overrides applied
 // first, as the deck's stage draws them; a token with neither a value nor a fallback takes its property out, since
 // Claude's grammar has no `var()`), and each uploaded asset the deck draws or loads a face from moved under
-// `project/ds/maws/<name>`, the slides and the index pointing there. A held slide has no Claude-readable form (its source
+// `project/ds/maws/<name>`, the slides and the index pointing there; MAWS's pinned groups lowered into their hosts
+// (lower.ts: Claude would flatten them and lose their transforms). A held slide has no Claude-readable form (its source
 // failed the loader; its model is only its last good state): the export is refused, naming each held slide and its
 // reasons (fix wave 1). Portable: the caller gives the token values and the assets' bytes.
 import { DECK_PATH, serializeDeckJson, slidePath, type DeckFace } from '../deck';
@@ -11,15 +12,19 @@ import type { ElementIR } from '../ir';
 import { heldOf, readDeckJson, readSlide, slideOrder } from '../model';
 import { serializeSlide } from '../serialize';
 import type { Doc } from '../../yjs';
+import { lowerGroups } from './lower';
+import { literalStyle } from './standalone';
 
 /** Where an uploaded asset (`assets/<name>`) goes in the export: an installed system's path Claude's loader takes. */
 export const claudeAssetPath = (ref: string): string => `project/ds/maws/${ref.slice('assets/'.length)}`;
 
-const rewrite = (children: ElementIR[], moved: (src: string) => string): ElementIR[] =>
+// Each picture's source moved, each style literal (tokens resolved; a property with no value left out).
+const rewrite = (children: ElementIR[], moved: (src: string) => string, resolveVar: (name: string) => string | undefined): ElementIR[] =>
   children.map((el) => ({
     ...el,
     attrs: el.tag === 'img' && el.attrs.src !== undefined ? { ...el.attrs, src: moved(el.attrs.src) } : el.attrs,
-    children: rewrite(el.children, moved),
+    style: literalStyle(el.style, resolveVar),
+    children: rewrite(el.children, moved, resolveVar),
   }));
 
 export interface ClaudeDeckOptions {
@@ -58,7 +63,8 @@ export function claudeDeckFiles(doc: Doc, { resolveVar, assets }: ClaudeDeckOpti
       }
     };
     walk(slide.children);
-    files[slidePath(id)] = serializeSlide({ ...slide, children: rewrite(slide.children, moved) }, { resolveVar });
+    // MAWS's pinned groups lowered to Claude's form (lower.ts), over literal geometry
+    files[slidePath(id)] = serializeSlide({ ...slide, children: lowerGroups(rewrite(slide.children, moved, resolveVar)) }, { resolveVar });
   }
   for (const ref of [...used].sort()) {
     const bytes = assets.get(ref);
