@@ -132,8 +132,8 @@ describe("a machine's stream, held by its Machine object", () => {
 });
 
 describe('without its deploy configuration', () => {
-  it('refuses everything', async () => {
-    const bare = await startHub({ ...DEPLOY_VARS, ACCESS_AUD: '' });
+  it.each([['ACCESS_AUD'], ['VAPID_KEY']])('refuses everything without %s', async (missing) => {
+    const bare = await startHub({ ...DEPLOY_VARS, [missing]: '' });
     try {
       const response = await bare.fetch('/api/me', { assertion: await bare.human(ADMIN) });
       expect(response.status).toBe(503);

@@ -37,5 +37,6 @@
     "CF_API_URL": "",
     "CF_ACCOUNT_ID": ""
   }
-  // CF_API_TOKEN is a secret (`wrangler secret put CF_API_TOKEN`, M5); the local command passes the stand-in's.
+  // CF_API_TOKEN and VAPID_KEY (Web Push's P-256 private key, JWK JSON) are secrets (`wrangler secret put`, M5); the
+  // local command passes the stand-in's token and a key it generated, the suites one generated per run.
 }

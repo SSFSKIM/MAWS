@@ -1,21 +1,32 @@
 // One enrolled machine's connection (DX2): the SSE stream down, which the machine opens outbound and this object holds,
 // and the machine's POSTs up, which it hands, frame by frame and in order, to the projects they name. Each stream gets
 // the next connection generation; a newer stream ends the older one, and a POST belongs to the stream it names. A
-// `Project` reaches the machine only through `send`, which writes to the stream or answers "offline" at once. The lease
-// that tells projects the machine is online (renewed by the daemon's `hb-ack`, fenced by generation) is M3's.
+// `Project` reaches the machine only through `send`, which writes to the stream or answers "offline" at once.
+//
+// The machine's lease in each project it opened on a stream begins with that `hello` and is renewed by the daemon's
+// `hb-ack` of the stream's generation, which this object hands to each of those projects; the stream's end is handed to
+// them too, so the lease ends at once. Neither is relied on alone: an object can restart without running any of this,
+// and the projects then find the lease lapsed (Project's alarm).
 import { DurableObject } from 'cloudflare:workers';
 import { MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
-import { GENERATION_HEADER, HEARTBEAT_MS, POST_LIMIT, type DownFrame, type UpFrame } from '../protocol/machine';
+import { GENERATION_HEADER, HEARTBEAT_MS, LEASE_MS, POST_LIMIT, type DownFrame, type UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, toWire, type Part } from '../protocol/parts';
-import { PROJECT_ID } from './project';
+import { PROJECT_ID, type MachineContext } from './project';
 
 type Stream = {
+  org: string;
+  machine: string;
   generation: number;
   writer: WritableStreamDefaultWriter<Uint8Array>;
   heartbeat: ReturnType<typeof setInterval>;
   /** Part sets of frames posted on this stream, which may span POSTs. */
   parts: PartAssembler;
+  /** The projects this stream opened with `hello`: those its lease is renewed and ended in. */
+  projects: Set<string>;
 };
+
+/** How often the stream's heartbeat goes and how long a renewal keeps the machine online. */
+export type Timing = { heartbeatMs: number; leaseMs: number };
 
 const encoder = new TextEncoder();
 const utf8Length = (text: string) => encoder.encode(text).length;
@@ -62,6 +73,11 @@ export class Machine extends DurableObject<Env> {
     this.end(this.stream);
   }
 
+  /** The deployed timing; the suites' Worker shortens it per machine (test/support/worker-under-test.ts). */
+  protected timing(): Timing {
+    return { heartbeatMs: HEARTBEAT_MS, leaseMs: LEASE_MS };
+  }
+
   private open(request: Request): Response {
     const org = request.headers.get(ORG_HEADER) ?? '';
     const machine = request.headers.get(MACHINE_HEADER) ?? '';
@@ -69,17 +85,21 @@ export class Machine extends DurableObject<Env> {
     this.ctx.storage.kv.put('generation', generation);
     this.end(this.stream);
 
+    const { heartbeatMs } = this.timing();
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const stream: Stream = {
+      org,
+      machine,
       generation,
       writer: writable.getWriter(),
-      heartbeat: setInterval(() => void this.write(stream, { t: 'hb', at: new Date().toISOString() }), HEARTBEAT_MS),
+      heartbeat: setInterval(() => void this.write(stream, { t: 'hb', at: new Date().toISOString() }), heartbeatMs),
       parts: new PartAssembler(),
+      projects: new Set(),
     };
     this.stream = stream;
     // The client's close reaches the object as the request's abort (compatibility flag enable_request_signal).
     request.signal.addEventListener('abort', () => this.end(stream));
-    void this.write(stream, { t: 'welcome', org, machine, generation, heartbeat_ms: HEARTBEAT_MS });
+    void this.write(stream, { t: 'welcome', org, machine, generation, heartbeat_ms: heartbeatMs });
     return new Response(readable, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store' } });
   }
 
@@ -92,8 +112,6 @@ export class Machine extends DurableObject<Env> {
    * could not be written ends the stream and answers `503 delivery-failed`: reconnect, and the handshake heals it.
    */
   private async frames(request: Request): Promise<Response> {
-    const org = request.headers.get(ORG_HEADER) ?? '';
-    const machine = request.headers.get(MACHINE_HEADER) ?? '';
     const stream = this.stream;
     if (!stream || request.headers.get(GENERATION_HEADER) !== String(stream.generation)) {
       return json(409, { error: 'stale-generation', message: 'the POST names no current stream of this machine; open the stream and use its generation' });
@@ -139,7 +157,8 @@ export class Machine extends DurableObject<Env> {
       }
       const project = projectOf(frame);
       if (project === null) {
-        // `hb-ack`: the lease it renews is M3's.
+        // `hb-ack`: renews the lease in every project this stream opened, when it names this stream's generation.
+        if (frame.t === 'hb-ack' && frame.generation === stream.generation) await this.renew(stream);
         applied++;
         continue;
       }
@@ -148,9 +167,10 @@ export class Machine extends DurableObject<Env> {
         applied++;
         continue;
       }
-      const target = this.env.PROJECT.get(this.env.PROJECT.idFromName(`${org}:${project}`));
+      const target = this.project(stream, project);
+      if (frame.t === 'hello') stream.projects.add(project);
       try {
-        await target.fromMachine({ org, project, machine, generation: stream.generation }, frame);
+        await target.fromMachine(this.context(stream, project), frame);
       } catch {
         this.end(stream);
         return json(503, { error: 'delivery-failed', message: 'a reply to this POST could not be written to the stream; reconnect and send it again', frames: applied });
@@ -170,10 +190,27 @@ export class Machine extends DurableObject<Env> {
     }
   }
 
+  private context(stream: Stream, project: string): MachineContext {
+    return { org: stream.org, project, machine: stream.machine, generation: stream.generation, leaseMs: this.timing().leaseMs };
+  }
+
+  private project(stream: Stream, project: string) {
+    return this.env.PROJECT.get(this.env.PROJECT.idFromName(`${stream.org}:${project}`));
+  }
+
+  /** The daemon answered a heartbeat of this stream: its lease goes on in every project the stream opened. */
+  private async renew(stream: Stream): Promise<void> {
+    await Promise.allSettled([...stream.projects].map((project) => this.project(stream, project).renew(this.context(stream, project))));
+  }
+
   private end(stream: Stream | undefined): void {
     if (!stream) return;
     clearInterval(stream.heartbeat);
     if (this.stream === stream) this.stream = undefined;
     stream.writer.close().catch(() => {});
+    // The stream's end ends its lease at once in every project it opened; a project that misses this finds the lease
+    // lapsed instead.
+    for (const project of stream.projects) void this.project(stream, project).closed(this.context(stream, project)).catch(() => {});
+    stream.projects.clear();
   }
 }

@@ -54,12 +54,26 @@ export type ProjectRecord = {
   archive_machine: string | null;
 };
 
+/** One member device's Web Push subscription; `endpoint` is its key. */
 export type PushSubscriptionRecord = {
   member: MemberId;
   endpoint: string;
   keys: { p256dh: string; auth: string };
   created: string;
 };
+
+// Web Push's endpoints (DX7), the signed-in member's own. `GET /api/push/key` answers the hub's VAPID public key, the
+// `applicationServerKey` a browser subscribes with; `PUT /api/push/subscriptions` keeps a subscription (what
+// `PushSubscription.toJSON()` gives: an https endpoint, `p256dh` the 65-byte uncompressed P-256 point and `auth` 16
+// bytes, each canonical base64url); `DELETE` with `{endpoint}` forgets one; `GET` lists the member's.
+export const PUSH_KEY_PATH = '/api/push/key';
+export const PUSH_SUBSCRIPTIONS_PATH = '/api/push/subscriptions';
+/** The uncompressed P-256 point (65 bytes), base64url. */
+export type PushKey = { key: string };
+export type PushSubscriptionRequest = { endpoint: string; keys: { p256dh: string; auth: string } };
+export type PushSubscriptionKept = { subscription: PushSubscriptionRecord };
+export type PushSubscriptionDeleted = { deleted: boolean };
+export type PushSubscriptions = { subscriptions: PushSubscriptionRecord[] };
 
 // Machine names. A machine writes `<name>/<session>` feeds into files named after them on every machine, so a name is a
 // file-name-safe word, unique in the org without regard to case (macOS's disk ignores case), and never a prefix the hub

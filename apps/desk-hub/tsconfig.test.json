@@ -8,7 +8,7 @@
     "types": ["node"],
     "allowImportingTsExtensions": true
   },
-  "include": ["test/**/*.ts", "local/**/*.ts", "vitest.config.ts", "src/protocol/**/*.ts", "src/identity/access.ts"],
+  "include": ["test/**/*.ts", "local/**/*.ts", "vitest.config.ts", "src/protocol/**/*.ts", "src/identity/access.ts", "src/push/**/*.ts"],
   // The suites' Worker entry runs in workerd, not Node: tsconfig.json types it with the Worker.
   "exclude": ["test/support/worker-under-test.ts"]
 }
