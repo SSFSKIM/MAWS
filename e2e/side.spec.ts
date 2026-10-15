@@ -20,6 +20,7 @@ import { StoreFixture } from '../test/support/store-fixture';
 import { menu, otherThemeColours } from './support/code-product';
 import { clickRevealed } from './support/hover';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { FIRST_CREATED_REVISION } from './support/design-systems'; // Decision Log 67: fresh artifacts follow the seeded defaults.
 import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SIDE_QUESTION_ROWS, SideJournal, solidPng, transcript } from './support/side-replay';
 import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
 import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b
@@ -998,14 +999,14 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
 // P2-E1 (M5): a side thread that updates its parent's page: the anchored prompt, the rename, the update (P3-A M6:
 // `artifact_read` of the page, allowed by a rule, then `artifact_publish` of the new page from the revision the read
-// returned, the parent's create being the store's first write; asked, allowed, served by the host), the reply. `answer`
+// returned, the parent's create following the seeded defaults (Decision Log 67); asked, allowed, served by the host), the reply. `answer`
 // is the JSON the engine's tool result carries (the host's own answer is what the replay checks and the test reads).
 function updateJournal(cwd: string, answer: Record<string, unknown>): SideJournal {
   const thread = new SideJournal(CHILD, cwd);
   const prompt = thread.prompt();
   thread.rename(HERO);
   thread.mawsToolCall('artifact_read', { artifact: 'dash' }, { status: 'read', id: 'dash', kind: 'html', revision: 1 }, { asked: false });
-  thread.mawsToolCall('artifact_publish', { artifact: 'dash', baseRevision: 1, files: { 'index.html': HEADING_PAGE_V2 } }, answer);
+  thread.mawsToolCall('artifact_publish', { artifact: 'dash', baseRevision: FIRST_CREATED_REVISION, files: { 'index.html': HEADING_PAGE_V2 } }, answer); // Decision Log 67: the real read's fresh base.
   thread.reply(prompt, CARD_UPDATED);
   thread.completed(prompt);
   return thread;
