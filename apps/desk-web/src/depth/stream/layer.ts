@@ -7,8 +7,10 @@
 //
 // A request is `(turnId, agentId, step)`; a block is its content block `index`. A chunk at or below the request's
 // watermark (the last chunk its text includes: the snapshot's `upTo`, then each chunk applied) is already in the text;
-// a chunk for a block whose `block-row` has arrived is ignored, since its row holds the block whole.
+// a chunk for a block whose `block-row` has arrived is ignored, since its row holds the block whole. A request's
+// `step-end` drops its blocks no `block-row` named, so no partial text outlives its request.
 import type { BlockRow, JsonObject, SessionBodies, Streaming } from 'desk-hub/protocol';
+import type { StepEnd } from './step-end';
 
 export type BlockKind = 'text' | 'thinking' | 'tool';
 
@@ -35,6 +37,8 @@ type Request = {
   blocks: Map<number, StreamBlock>;
   /** Blocks whose `block-row` has arrived: their later chunks are ignored. */
   named: Set<number>;
+  /** The request's `step-end` has arrived: it takes no more chunks. */
+  ended: boolean;
 };
 
 const requestKey = (turnId: string, agentId: string | null, step: number) => `${turnId}\u0000${agentId ?? ''}\u0000${step}`;
@@ -78,7 +82,7 @@ export class StreamingLayer {
   /** Applies one live chunk; true when it changed what is drawn. */
   chunk(body: SessionBodies['chunk']): boolean {
     const request = this.request(body.turnId, body.agentId, body.step);
-    if (body.chunkIndex <= request.upTo) return false;
+    if (request.ended || body.chunkIndex <= request.upTo) return false;
     request.upTo = body.chunkIndex;
     const chunk: JsonObject = body.chunk;
     const index = chunk.index;
@@ -114,6 +118,23 @@ export class StreamingLayer {
     request.named.add(body.index);
     const block = request.blocks.get(body.index);
     if (block) block.settledBy = body.uuid;
+  }
+
+  /**
+   * The request ended (DX4 `step-end`, after every `block-row` of the step): a block no `block-row` named never gets
+   * one — the response was aborted or its turn cut it off — so its partial text is dropped; a named block stays drawn
+   * until its row lands. True when any was dropped.
+   */
+  stepEnd(body: StepEnd): boolean {
+    const request = this.request(body.turnId, body.agentId, body.step);
+    request.ended = true;
+    let changed = false;
+    for (const [index, block] of request.blocks) {
+      if (block.settledBy !== null) continue;
+      request.blocks.delete(index);
+      changed = true;
+    }
+    return changed;
   }
 
   /** The row `uuid` landed in the store: the blocks it settles are dropped. True when any was. */
@@ -153,7 +174,7 @@ export class StreamingLayer {
   private request(turnId: string, agentId: string | null, step: number): Request {
     const key = requestKey(turnId, agentId, step);
     let request = this.requests.get(key);
-    if (!request) this.requests.set(key, (request = { turnId, agentId, step, upTo: -1, blocks: new Map(), named: new Set() }));
+    if (!request) this.requests.set(key, (request = { turnId, agentId, step, upTo: -1, blocks: new Map(), named: new Set(), ended: false }));
     return request;
   }
 }

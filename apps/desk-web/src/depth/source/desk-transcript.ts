@@ -9,12 +9,15 @@
 // after it continue that context. Older rows (a `rows` page) go before the oldest held one, and the transcript is
 // rebuilt from all of them under a new source, which MAWS's store installs staged — the old rows stay drawn until the
 // new state is whole, and keep their ids — so an older page never lands after newer turns and a page boundary between
-// a tool call and its result attributes nothing wrongly (the DC6 plan's M1 decision on older rows).
+// a tool call and its result attributes nothing wrongly (the DC6 plan's M1 decision on older rows). Subagent metadata
+// arriving live does the same when it names an agent call a held row was mapped without, so the rows are attributed
+// as a fresh load with that metadata attributes them.
 //
 // The stream. Chunks never reach MAWS's reducer, which pairs a streaming block with its row only by an API message id
 // that DX4's chunks lack: they go to the streaming layer (`stream/layer.ts`), and a block's text is dropped from it
 // once the row its `block-row` named is in the store (applied, not just received: a staged rebuild may still be
 // installing), so its partial text and its row are never drawn together and nothing streamed goes missing between.
+// A step's `step-end` drops its blocks no `block-row` named: an aborted response's partial text goes with its request.
 //
 // Disruptions (DX8). A `reset` (a gap, a dropped socket, a hub restart, the bridge's own discontinuity) drops what was
 // drawn: the layer is cleared, the source resets MAWS's store key, and its next snapshot waits for the fresh one the
@@ -28,8 +31,9 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import { createBackfillContext, recordToEvents, type BackfillContext, type SubagentLookup } from '../../../../../src/engine-host/fs/backfill';
 import type { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import type { TranscriptSource } from '../../../../../src/renderer/src/transcript/source/types';
-import { transcriptKey, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionMessage } from '../../shell/session-plane';
+import { transcriptKey, type SessionPlane, type SessionTarget, type Subscription } from '../../shell/session-plane';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
+import type { DepthMessage } from '../stream/step-end';
 
 /** What the adapter reads of MAWS's transcript store: whether a row's events have been applied under a key. */
 export type TranscriptStoreApi = Pick<ReturnType<typeof createTranscriptStore>, 'getState' | 'subscribe'>;
@@ -263,7 +267,10 @@ export class DeskTranscript {
 
   private subscribe(): void {
     this.subscription = this.plane.subscribe(this.target, {
-      message: (message) => (message.kind === 'snapshot' ? this.snapshot(message.body) : this.receive(message)),
+      message: (delivered) => {
+        const message = delivered as DepthMessage; // `step-end` too, until DX8's type carries it (`stream/step-end.ts`)
+        return message.kind === 'snapshot' ? this.snapshot(message.body) : this.receive(message);
+      },
       reset: () => this.reset(),
       end: (body) => {
         this.subscription = null;
@@ -291,7 +298,7 @@ export class DeskTranscript {
     this.publish();
   }
 
-  private receive(message: Exclude<SubscriptionMessage, { kind: 'snapshot' }>): void {
+  private receive(message: Exclude<DepthMessage, { kind: 'snapshot' }>): void {
     switch (message.kind) {
       case 'row':
         return this.row(message.body.row);
@@ -304,6 +311,9 @@ export class DeskTranscript {
         // subscription, so the block settles now (DX4, composite cd2667d8). Only this transcript's own blocks wait.
         if (message.body.agentId !== this.target.agentId) this.layer.settle(message.body.uuid);
         return this.publish();
+      case 'step-end':
+        if (this.layer.stepEnd(message.body)) this.publish();
+        return;
       case 'rows':
         return this.older(message.body);
       case 'subagents':

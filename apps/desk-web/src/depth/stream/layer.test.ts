@@ -130,6 +130,22 @@ describe('the streaming layer', () => {
     expect(drawn(layer, 'a7')).toEqual([['text', 'sub']]);
   });
 
+  it('a step that ends drops its blocks no block-row named, keeps those awaiting their row, and takes no more chunks', () => {
+    const layer = new StreamingLayer();
+    layer.chunk(chunk(0, 0, { kind: 'thinking', index: 0, text: 'Hm.' }));
+    layer.chunk(text(0, 1, 1, 'Half an ans'));
+    layer.chunk(text(0, 0, 0, 'Theirs.', 'a1'));
+    layer.blockRow(blockRow(0, 0, 'r-thinking'));
+    layer.stepEnd({ turnId: 't1', agentId: null, step: 0 });
+    expect(drawn(layer)).toEqual([['thinking', 'Hm.']]);
+    expect(drawn(layer, 'a1')).toEqual([['text', 'Theirs.']]); // another agent's step 0 goes on
+    expect(layer.chunk(text(0, 2, 1, 'wer.'))).toBe(false);
+    expect(layer.chunk(text(0, 3, 2, 'More.'))).toBe(false);
+    layer.chunk(text(1, 0, 0, 'Next.'));
+    layer.settle('r-thinking');
+    expect(drawn(layer)).toEqual([['text', 'Next.']]);
+  });
+
   it('clears everything', () => {
     const layer = new StreamingLayer();
     layer.chunk(text(0, 0, 0, 'a'));

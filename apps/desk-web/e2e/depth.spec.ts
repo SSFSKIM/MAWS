@@ -60,6 +60,7 @@ test('a direct channel draws its transcript; a response streams per block, settl
   player.advance(1); // the first thinking chunk: live thinking, MAWS's own row
   await expect(streamingRows(depth)).toHaveCount(1);
   await expect(depth.locator('[data-kind="thinking"]')).toBeVisible();
+  await expect(streamingRows(depth)).not.toContainText('One repor'); // live thinking is its label alone, never text
 
   // The answer streams: its partial text is drawn, then settles into its row, drawn once.
   await midAnswer(player, depth, 'Both subagents rep');

@@ -8,6 +8,7 @@ import { createTranscriptStore } from '../../../../../src/renderer/src/stores/tr
 import type { Row } from '../../../../../src/renderer/src/transcript/model/rows';
 import { readRecording, rowsBefore, scriptOf, snapshotAt, STRAY, type LiveItem } from '../../../test/double/session-stream';
 import type { SessionPlane, SessionTarget, Subscription, SubscriptionListener, SubscriptionMessage } from '../../shell/session-plane';
+import type { StepEnd } from '../stream/step-end';
 import { DeskTranscript, freshSource, subagentLookupOf } from './desk-transcript';
 
 const PROJECT = 'proj';
@@ -27,9 +28,10 @@ class FakePlane implements SessionPlane {
   get current(): Held {
     return this.subs.at(-1)!;
   }
-  send<K extends SubscriptionMessage['kind']>(kind: K, body: SessionBodies[K]): void {
+  send<K extends SubscriptionMessage['kind'] | 'step-end'>(kind: K, body: K extends keyof SessionBodies ? SessionBodies[K] : StepEnd): void {
     const held = this.current;
     const n = kind === 'snapshot' ? 0 : ++held.n;
+    // `step-end` reaches the listener as the shell's client will relay it once DC3's protocol carries the kind.
     held.listener.message({ project: PROJECT, machine: TARGET.machine, session: TARGET.session, kind, sub: 'sub', n, body } as SubscriptionMessage);
   }
   snapshot(script: LiveItem[], cut: number, limit?: number): void {
@@ -78,7 +80,18 @@ async function freshRows(rows: readonly SessionBodies['row']['row'][]): Promise<
 }
 
 const rowsOf = (script: LiveItem[], cut = script.length) => script.slice(0, cut).flatMap((item) => (item.kind === 'row' ? [item.body.row] : []));
-const textOfRows = (rows: Row[]) => rows.flatMap((row) => (row.kind === 'assistant_text' ? [row.markdown] : row.kind === 'thinking' ? [row.text] : []));
+/** The script index of the `step-end` of the one step a block of which streamed and was never named by a `block-row`. */
+function cutStepEnd(script: LiveItem[]): number {
+  const key = (b: { turnId: string; step: number }, index?: unknown) => `${b.turnId}|${b.step}|${index ?? ''}`;
+  const named = new Set(script.flatMap((item) => (item.kind === 'block-row' ? [key(item.body, item.body.index)] : [])));
+  const cut = script.find((item) => item.kind === 'chunk' && typeof item.body.chunk.index === 'number' && !named.has(key(item.body, item.body.chunk.index)));
+  if (!cut || cut.kind !== 'chunk') throw new Error('no cut block in the script');
+  const at = script.findIndex((item) => item.kind === 'step-end' && key(item.body) === key(cut.body));
+  if (at < 0) throw new Error('the cut step has no step-end');
+  return at;
+}
+
+const textOfRows =(rows: Row[]) => rows.flatMap((row) => (row.kind === 'assistant_text' ? [row.markdown] : row.kind === 'thinking' ? [row.text] : []));
 
 describe('the main transcript through the session plane', () => {
   let plane: FakePlane;
@@ -364,6 +377,72 @@ describe('the main transcript through the session plane', () => {
     await settle();
     await step(script.slice(cut));
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+  });
+
+  // The fixture's main transcript: row 15 is a response's thinking block and row 16 its text; row 21 is the last
+  // response of a turn, and row 23 starts the next.
+  it('an aborted response drops its partial text at its step-end and keeps what was written', async () => {
+    const script = scriptOf(recording.session, null, { stepEnds: true, cutOff: 16 });
+    const ended = cutStepEnd(script);
+    expect(script.some((item, i) => i < ended && item.kind === 'block-row' && item.body.turnId === (script[ended].body as StepEnd).turnId)).toBe(true); // the step's thinking was written
+    const firstChunk = script.findIndex((item) => item.kind === 'chunk');
+    plane.snapshot(script, firstChunk);
+    await settle();
+    await step(script.slice(firstChunk, ended));
+    const partial = controller.state.getState().streaming.filter((b) => b.kind === 'text' && b.settledBy === null);
+    expect(partial).toHaveLength(1);
+    expect(partial[0].text.length).toBeGreaterThan(0);
+    await step(script.slice(ended, ended + 1));
+    expect(controller.state.getState().streaming.filter((b) => b.settledBy === null)).toEqual([]);
+    await step(script.slice(ended + 1));
+    expect(controller.state.getState().streaming).toEqual([]);
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+    // A snapshot taken after the step ended holds none of its partial text either.
+    const late = new DeskTranscript({ plane, project: PROJECT, target: TARGET, store: createTranscriptStore() });
+    late.open();
+    plane.snapshot(script, ended + 1);
+    expect(late.state.getState().streaming).toEqual([]);
+    late.close();
+  });
+
+  it('a turn cut off mid-step drops the step’s partial text, ignores its stragglers, and the next turn draws on', async () => {
+    const script = scriptOf(recording.session, null, { stepEnds: true, cutOff: 21 });
+    const ended = cutStepEnd(script);
+    const cut = script[ended].body as StepEnd;
+    const firstChunk = script.findIndex((item) => item.kind === 'chunk');
+    plane.snapshot(script, firstChunk);
+    await settle();
+    await step(script.slice(firstChunk, ended));
+    expect(controller.state.getState().streaming.some((b) => b.turnId === cut.turnId && b.step === cut.step && b.settledBy === null)).toBe(true);
+    await step(script.slice(ended, ended + 1));
+    expect(controller.state.getState().streaming).toEqual([]);
+    plane.send('chunk', { ...cut, chunkIndex: 999, chunk: { kind: 'text', index: 0, text: STRAY } });
+    await settle();
+    expect(controller.state.getState().streaming).toEqual([]);
+    await step(script.slice(ended + 1));
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rowsOf(script)));
+  });
+
+  it('a block-row that arrives after its step ended names nothing drawn; its row is then drawn once', async () => {
+    // The bridge holds a step's end until its notices are posted, for at most a second (DC2's walk, composite
+    // 2038124c): past that, the step's end can come first.
+    const script = scriptOf(recording.session, null, { stepEnds: true, cutOff: 16 });
+    const ended = cutStepEnd(script);
+    const cut = script[ended].body as StepEnd;
+    const row = recording.session[16];
+    const firstChunk = script.findIndex((item) => item.kind === 'chunk');
+    plane.snapshot(script, firstChunk);
+    await settle();
+    await step(script.slice(firstChunk, ended + 1));
+    expect(controller.state.getState().streaming).toEqual([]);
+    await step([
+      { kind: 'block-row', body: { uuid: String(row.uuid), turnId: cut.turnId, agentId: null, step: cut.step, index: Number(row.apiBlockIndex) } },
+      { kind: 'row', body: { row, agentId: null } },
+    ]);
+    expect(controller.state.getState().streaming).toEqual([]);
+    await step(script.slice(ended + 1));
+    expect(controller.state.getState().streaming).toEqual([]);
+    expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(recording.session));
   });
 
   it('closes its subscription when closed', () => {

@@ -1,12 +1,14 @@
 // The session plane's live part, synthesized from a recorded transcript (the DC6 plan's Decision Log, "The double's
 // fixture"): a plain recording carries no bridge stream, so each assistant row's content block is played as DX5
 // `turn.step` chunks in the engine's own shapes, then the block's `block-row`, then the row (DX4's order), and every
-// other row is played as it is. A cut anywhere in that script gives the snapshot a producer would take there: the rows
-// already written (newest first) and, per model request still streaming, the blocks without a `block-row` yet with the
-// text of their chunks up to the cut and its `upTo`. Used by the unit suites and by the browser suites' double.
+// other row is played as it is; with `stepEnds`, each model request closes with its `step-end`. A cut anywhere in that
+// script gives the snapshot a producer would take there: the rows already written (newest first) and, per model
+// request still streaming (not ended), the blocks without a `block-row` yet with the text of their chunks up to the
+// cut and its `upTo`. Used by the unit suites and by the browser suites' double.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JsonObject, SessionBodies, SessionPresence, Streaming, StreamingBlock, SubagentMeta } from 'desk-hub/protocol';
+import type { StepEnd } from '../../src/depth/stream/step-end';
 
 export type Recording = { session: JsonObject[]; subagents: Array<SubagentMeta & { rows: JsonObject[] }> };
 
@@ -34,7 +36,8 @@ export function readRecording(dir = RECORDING_DIR): Recording {
 export type LiveItem =
   | { kind: 'row'; body: SessionBodies['row'] }
   | { kind: 'chunk'; body: SessionBodies['chunk'] }
-  | { kind: 'block-row'; body: SessionBodies['block-row'] };
+  | { kind: 'block-row'; body: SessionBodies['block-row'] }
+  | { kind: 'step-end'; body: StepEnd };
 
 export type ScriptOptions = {
   /** Characters per text, thinking, or input chunk. */
@@ -46,6 +49,16 @@ export type ScriptOptions = {
   lateRows?: boolean;
   /** After the n-th `block-row` of the script (from 0), one more chunk for that block: a straggler the browser ignores. */
   strayAfterBlockRow?: number;
+  /**
+   * Each model request ends with a `step-end` (DX4, the composite's Decision Log), after every `block-row` of the step.
+   * Off by default while the shell's client relays only DC3's protocol kinds, which do not carry it yet.
+   */
+  stepEnds?: boolean;
+  /**
+   * The index (in `rows`) of an assistant row whose block is cut off mid-stream: half its chunks, no `block-row`, no
+   * row, and its response's later rows never written. Its step ends there (with `stepEnds`).
+   */
+  cutOff?: number;
 };
 
 /** The text a straggler chunk carries, so a suite can say it is never drawn. */
@@ -93,22 +106,42 @@ export function scriptOf(rows: JsonObject[], agentId: string | null, options: Sc
   let chunkIndex = 0;
   let blockRows = 0;
   let late: LiveItem | null = null; // a row held back until the next block of its response has begun
+  let aborted: string | null = null; // the response cut off by `cutOff`: its later rows were never written
   const flushLate = () => {
     if (late) items.push(late);
     late = null;
   };
-  for (const row of rows) {
+  /** The response's stop chunk, when it finished, and its `step-end`, after every `block-row` of the step. */
+  const endStep = (finished: boolean) => {
+    if (message === null) return;
+    if (finished) items.push({ kind: 'chunk', body: { turnId, agentId, step, chunkIndex: chunkIndex++, chunk: { kind: 'stop', stopReason: 'end_turn', usage: null } } });
+    if (options.stepEnds) items.push({ kind: 'step-end', body: { turnId, agentId, step } });
+    message = null;
+  };
+  for (const [at, row] of rows.entries()) {
     const id = (row.message as JsonObject | undefined)?.id;
     if (row.type === 'assistant' && typeof id === 'string') {
+      if (id === aborted) continue;
       if (id !== message) {
         flushLate();
-        if (message !== null) items.push({ kind: 'chunk', body: { turnId, agentId, step, chunkIndex: chunkIndex++, chunk: { kind: 'stop', stopReason: 'end_turn', usage: null } } });
+        endStep(true);
         message = id;
         step += 1;
         chunkIndex = 0;
       }
       const index = typeof row.apiBlockIndex === 'number' ? row.apiBlockIndex : 0;
       const chunks = contentOf(row).flatMap((block, i) => chunksOfBlock(block, index + i, size));
+      if (at === options.cutOff) {
+        // Half the block streams, then the response stops: no `block-row`, no row, the step ends.
+        chunks.slice(0, Math.ceil(chunks.length / 2)).forEach((chunk, i) => {
+          items.push({ kind: 'chunk', body: { turnId, agentId, step, chunkIndex: chunkIndex++, chunk } });
+          if (i === 0) flushLate();
+        });
+        flushLate();
+        aborted = id;
+        endStep(false);
+        continue;
+      }
       chunks.forEach((chunk, i) => {
         items.push({ kind: 'chunk', body: { turnId, agentId, step, chunkIndex: chunkIndex++, chunk } });
         if (i === 0) flushLate(); // the previous block's row trails the first chunk of this one
@@ -126,10 +159,7 @@ export function scriptOf(rows: JsonObject[], agentId: string | null, options: Sc
       continue;
     }
     flushLate();
-    if (message !== null) {
-      items.push({ kind: 'chunk', body: { turnId, agentId, step, chunkIndex: chunkIndex++, chunk: { kind: 'stop', stopReason: 'end_turn', usage: null } } });
-      message = null;
-    }
+    endStep(true);
     if (startsTurn(row)) {
       turn += 1;
       turnId = `turn-${turn}`;
@@ -138,6 +168,7 @@ export function scriptOf(rows: JsonObject[], agentId: string | null, options: Sc
     items.push({ kind: 'row', body: { row, agentId } });
   }
   flushLate();
+  if (options.stepEnds) endStep(true);
   return items;
 }
 
@@ -155,7 +186,9 @@ export function snapshotAt(script: LiveItem[], cut: number, extra: { subagents?:
   const limit = extra.limit ?? rows.length;
   const messages = new Map<string, Streaming>();
   const settled = new Set<string>();
+  const ended = new Set<string>();
   for (const item of played) {
+    if (item.kind === 'step-end') ended.add(`${item.body.turnId}|${item.body.agentId}|${item.body.step}`);
     if (item.kind === 'block-row') settled.add(`${item.body.turnId}|${item.body.agentId}|${item.body.step}|${item.body.index}`);
     if (item.kind !== 'chunk') continue;
     const { turnId, agentId, step, chunkIndex, chunk } = item.body;
@@ -172,7 +205,9 @@ export function snapshotAt(script: LiveItem[], cut: number, extra: { subagents?:
     block.upTo = chunkIndex;
     message.upTo = chunkIndex; // the request's watermark (DX4 at composite 8f7e09d3); a block's own is informational
   }
-  const streaming = [...messages.values()]
+  const streaming = [...messages.entries()]
+    .filter(([key]) => !ended.has(key)) // a step that ended keeps no block: the named ones have their rows, the rest never will
+    .map(([, m]) => m)
     .map((m) => ({ ...m, blocks: m.blocks.filter((b) => !settled.has(`${m.turnId}|${m.agentId}|${m.step}|${b.index}`)) }))
     .filter((m) => m.blocks.length > 0);
   return {
