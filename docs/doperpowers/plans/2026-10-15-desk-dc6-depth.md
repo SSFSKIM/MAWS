@@ -307,5 +307,13 @@ registrations through `connectDepth()`.
   the bridge missed the step's start; an entry with `blocks: []` may
   persist until its step ends and is skipped; a server tool's row gets no
   `block-row`, settles nothing, and is simply drawn.
+- 2026-10-15: DC3's M3 contract types landed in `desk-hub/protocol` (MAWS
+  `068f14f3`, `smns-erb`; composite `2ae6ac3a` gives `usage` exactly):
+  DX4 `usage` is `{context: {tokens?, window, percent?}, cost: {usd} |
+  null}`, main-transcript subs only, the snapshot's `usage` null with no
+  bridge or none yet and absent on an agent sub, each missing piece drawn
+  unavailable; the streaming entry as settled above; `compact` is
+  session-wide (`SESSION_WIDE_KINDS`); DX3 `diff {sub}` is up. DC6 merges
+  `smns-erb` to build on them.
 
 ## Outcomes & Retrospective
