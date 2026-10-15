@@ -11,7 +11,7 @@
 import { base64urlDecode, base64urlEncode } from './base64url';
 import { canonicalize } from './canonical';
 import type { JsonValue } from './json';
-import { isHubWriter, type Mac } from './log';
+import { isHubPosition, isHubWriter, type Mac } from './log';
 import type { Rpc, RpcDraft } from './rpc';
 
 export const DOMAINS = {
@@ -92,7 +92,13 @@ export async function seal<T extends object>(key: OrgKey, kind: MacKind, project
   return { ...draft, mac: { nonce, value } };
 }
 
+/**
+ * True when the code verifies and, for a log event of a `hub/` writer, its position (`writer`, `seq`, `ts`, which the
+ * code leaves out) passes `isHubPosition`: an importer or a browser refuses such an event as it refuses a bad code.
+ */
 export async function verify(key: OrgKey, kind: MacKind, project: string, shape: object): Promise<boolean> {
+  const writer = (shape as { writer?: unknown }).writer;
+  if (kind === 'log' && typeof writer === 'string' && isHubWriter(writer) && !isHubPosition(shape)) return false;
   const mac = (shape as { mac?: Partial<Mac> }).mac;
   return check(key, kind, project, shape, typeof mac === 'object' && mac !== null ? mac.value : undefined);
 }

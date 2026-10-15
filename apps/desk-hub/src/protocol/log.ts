@@ -1,6 +1,7 @@
 // DX1 — log events (docs/doperpowers/specs/2026-10-15-desk-design.md): smns §3's events, carried by the hub exactly as
 // received. The hub reads `writer`, `seq`, `kind`, `to`, and `member`; every other field passes through, which is why an
 // event is typed as an open object.
+import { isMemberId } from './identity';
 import type { JsonObject } from './json';
 
 /** The authentication code: a 128-bit random nonce and HMAC-SHA256 with the org key, both base64url. */
@@ -40,6 +41,44 @@ export const LEGACY_WRITER_PREFIX = 'legacy/';
 
 export const hubWriter = (member: string) => `${HUB_WRITER_PREFIX}${member}`;
 export const isHubWriter = (writer: string) => writer.startsWith(HUB_WRITER_PREFIX);
+
+/** A log `seq`: a JSON number whose value is a positive integer no larger than 2^53 − 1. */
+export function isLogSeq(seq: unknown): seq is number {
+  return typeof seq === 'number' && Number.isSafeInteger(seq) && seq >= 1;
+}
+
+const ISO_MILLIS = /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})\.[0-9]{3}Z$/;
+
+/**
+ * An ISO 8601 UTC time with milliseconds, `YYYY-MM-DDTHH:MM:SS.mmmZ`, naming a real calendar day (leap years by the
+ * Gregorian rule), an hour below 24, and minutes and seconds below 60. Checked by these rules alone, not by a date
+ * library, so the daemon's Python and this agree on every string.
+ */
+export function isIsoMillis(ts: unknown): ts is string {
+  if (typeof ts !== 'string') return false;
+  const m = ISO_MILLIS.exec(ts);
+  if (!m) return false;
+  const [year, month, day, hour, minute, second] = m.slice(1).map(Number);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+  return days !== undefined && day >= 1 && day <= days && hour < 24 && minute < 60 && second < 60;
+}
+
+/**
+ * A `hub/` event's position — `writer`, `seq`, `ts`, which the hub assigns and its code leaves out — checked by shape
+ * (DX1): the writer is exactly `hub/` and the event's own `member` (32 lowercase hex, which the code covers), the seq a
+ * positive integer, the time ISO 8601 UTC with milliseconds. sminos's delivery writes the writer into the frame a
+ * session reads, so an unchecked writer could carry text no code covers. `verify` applies it to every `hub/` event.
+ */
+export function isHubPosition(event: { writer?: unknown; seq?: unknown; ts?: unknown; member?: unknown }): boolean {
+  return (
+    typeof event.member === 'string' &&
+    isMemberId(event.member) &&
+    event.writer === hubWriter(event.member) &&
+    isLogSeq(event.seq) &&
+    isIsoMillis(event.ts)
+  );
+}
 
 /** The machine a writer belongs to (`<machine>/<session uuid>` or `<machine>/human`), or null for `hub/` and `legacy/`. */
 export function writerMachine(writer: string): string | null {
