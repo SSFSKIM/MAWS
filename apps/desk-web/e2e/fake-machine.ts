@@ -5,15 +5,14 @@
 // standing for the hub's relay, which DC3's own G5 suite proves on the local runtime. Every coupling of the browser
 // suites to the fake machine is in this file.
 //
-// What does not fit `interfaces-M4` as written (reported to DC3 through the DC6 plan): `FakeMachine` speaks DX2 to a
-// hub, and the desk's gated browser lane has none (DC5's local-hub suite is outside the gate, and its first setup is a
-// one-time ceremony per hub state), so this drives the producer without the network; `desk-hub/fake-machine` exports
-// `SessionDepth` only as types, so it is imported by path below. The double answers a `diff` request itself, numbered
+// `FakeMachine` itself speaks DX2 to a hub, and the desk's gated browser lane has none (DC5's local-hub suite is outside
+// the gate, and its first setup is a one-time ceremony per hub state), so this drives the producer without the network
+// (accepted by the composite's writer; recomposition's walk covers DX2). The double answers a `diff` request itself, numbered
 // on the subscription, so the producer's subscription messages are renumbered by the double (`sendSub`) and the
 // double is handed the recording's diff to answer with, as the producer's `diff` would.
 import type { SessionMessage } from 'desk-hub/protocol';
-import { loadRecording, TWO_SUBAGENTS, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
-import { SessionDepth } from '../../desk-hub/fake-machine/session';
+import { loadRecording, SessionDepth, TWO_SUBAGENTS, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
+import type { JsonObject, Raised } from 'desk-hub/protocol';
 import type { HubDouble } from '../test/double/hub-double';
 
 export class FakeMachineReplay {
@@ -47,6 +46,18 @@ export class FakeMachineReplay {
   sendPresence(): void {
     const { project, machine } = this.where;
     this.hub.sendSession(project, { project, machine, session: this.session, kind: 'presence', sub: null, n: null, body: { record: this.depth.presence, bridge: true } } as SessionMessage);
+  }
+
+  /** The recorded question (the ask mod's blocking one), raised on the hub as the machine raised it, `toolUseId` and all. */
+  async raiseRecordedQuestion(): Promise<Raised> {
+    const step = this.recording.steps.find((s) => s.k === 'raised' && s.draft.tool === 'AskUserQuestion');
+    if (step?.k !== 'raised') throw new Error('the recording raised no question');
+    return this.hub.raise(this.where.project, this.where.machine, { ...step.draft, session: this.session });
+  }
+
+  /** The `message` events the session's machine logged, as recorded (`src` naming the transcript row and span). */
+  recordedMessages(): JsonObject[] {
+    return this.recording.steps.flatMap((s) => (s.k === 'log' && s.event.kind === 'message' && s.event.session === undefined && String(s.event.writer ?? '').endsWith(this.session) ? [s.event] : []));
   }
 
   /** Applies the next `count` steps of the timeline. */

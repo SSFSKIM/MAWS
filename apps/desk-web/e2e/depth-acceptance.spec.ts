@@ -143,6 +143,35 @@ test.describe('the main thread', () => {
   });
 });
 
+test("a fold bounded by the recorded question resolves its bound in the transcript (the raised request's toolUseId)", async ({ page, hub }) => {
+  const { fm, depth } = await openSession(page, hub);
+  fm.playThrough();
+  await expect(depth).toContainText(ANSWER);
+  // The question, raised as the machine raised it (its request the ask dialog's own id, its toolUseId the transcript's
+  // call), then the session's `<message>`, as its machine logged them: the channel folds the record at each.
+  const raised = await fm.raiseRecordedQuestion();
+  expect(raised.toolUseId).toBeDefined();
+  expect(raised.toolUseId).not.toBe(raised.request);
+  const [message] = fm.recordedMessages();
+  await hub.append(PROJECT, { writer: `${MACHINE}/${fm.session}`, kind: 'message', from: message.from, to: message.to, text: message.text, src: message.src });
+  const folds = page.getByTestId('working-record');
+  await expect(folds).toHaveCount(3); // before the question, between it and the message, and the live one after
+
+  await folds.nth(0).click();
+  const before = page.getByTestId('fold-transcript').last();
+  await expect(before).toContainText('The two subagents are still running');
+  await expect(before.getByTestId('fold-unresolved')).toHaveCount(0); // its end, the question's call, is found
+  await folds.nth(0).click();
+
+  await folds.nth(1).click();
+  const after = page.getByTestId('fold-transcript').last();
+  await expect(after).toBeVisible();
+  await expect(after.getByTestId('fold-unresolved')).toHaveCount(0); // its start, the question's call, is found
+  await expect(after).not.toContainText('The two subagents are still running'); // so not drawn from the start
+  await expect(after).not.toContainText('Your questions have been answered'); // the question's answer is the channel's
+  await expect(after).not.toContainText(ANSWER); // the bounding message's span
+});
+
 /** Opens an agent from the tree, once the tree shows it. */
 async function openAgent(depth: Locator, agentId: string): Promise<Locator> {
   await depth.getByTestId('depth-tab-subagents').click();
