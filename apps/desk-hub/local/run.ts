@@ -126,5 +126,6 @@ The local hub, behind its stand-in for Access: ${proxy.url}
 
   an enrollment code for machine <name> (a fresh org key unless you pass one):
     curl -s -X POST ${proxy.url}/standin/enrollment-code -d '{"machine": "<name>"}'
-  then on the machine: sminos hub enroll <code>   (it redeems at ${proxy.url}/machine/enroll)
+  then on the machine: sminos hub enroll, and paste the code at its hidden prompt (never an argument: it carries
+    the org key); it redeems at ${proxy.url}/machine/enroll
 `);

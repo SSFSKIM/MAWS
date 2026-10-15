@@ -1,8 +1,9 @@
+import { createHmac } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import vectorsFile from '../../src/protocol/vectors/codes.json';
 import { base64urlDecode, base64urlEncode, isBase64urlOf } from '../../src/protocol/base64url';
 import { canonicalize } from '../../src/protocol/canonical';
-import { coveredBytes, DOMAINS, importOrgKey, inputSha256, newNonce, seal, sealRpc, verify, verifyRpc, type ShapeKind } from '../../src/protocol/codes';
+import { coveredBytes, deriveLogNonce, DOMAINS, importOrgKey, inputSha256, newNonce, orgKeyFromCryptoKey, seal, sealRpc, verify, verifyRpc, type ShapeKind } from '../../src/protocol/codes';
 import type { JsonValue } from '../../src/protocol/json';
 import type { HumanDraft, LogEvent } from '../../src/protocol/log';
 import type { Rpc, RpcDraft } from '../../src/protocol/rpc';
@@ -222,5 +223,54 @@ describe('codes', () => {
 
   it('takes only a 256-bit org key', async () => {
     await expect(importOrgKey(new Uint8Array(16))).rejects.toThrow(TypeError);
+  });
+});
+
+describe('orgKeyFromCryptoKey: a key that exists only as a CryptoKey, such as one the browser derived', () => {
+  const hmac = (raw: Uint8Array, hash: string, usages: KeyUsage[]) => crypto.subtle.importKey('raw', Uint8Array.from(raw), { name: 'HMAC', hash }, false, usages);
+  const bytes = (length: number) => new Uint8Array(length).fill(7);
+
+  it('seals a vector with a non-extractable key', async () => {
+    const v = vectors.find((x) => x.name === 'say-ascii')!;
+    const key = orgKeyFromCryptoKey(await hmac(base64urlDecode(v.org_key), 'SHA-256', ['sign', 'verify']));
+    expect(key.hmac.extractable).toBe(false);
+    const { mac, ...draft } = v.input as { mac: { nonce: string; value: string } };
+    expect(await seal(key, 'log', v.project, draft as never, mac.nonce)).toEqual(v.input);
+    expect(await verify(key, 'log', v.project, v.input)).toBe(true);
+  });
+
+  it.each([
+    ['another algorithm', 'is an HMAC-SHA-256 key', () => crypto.subtle.importKey('raw', bytes(32), { name: 'AES-GCM' }, false, ['encrypt', 'decrypt'])],
+    ['another hash', 'is an HMAC-SHA-256 key', () => hmac(bytes(32), 'SHA-384', ['sign', 'verify'])],
+    ['another length', 'is 256 bits', () => hmac(bytes(16), 'SHA-256', ['sign', 'verify'])],
+    ["HMAC's generated default, 512 bits", 'is 256 bits', () => crypto.subtle.generateKey({ name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify'])],
+    ['no verify usage', 'signs and verifies', () => hmac(bytes(32), 'SHA-256', ['sign'])],
+    ['no sign usage', 'signs and verifies', () => hmac(bytes(32), 'SHA-256', ['verify'])],
+  ])('refuses a key with %s', async (_case, why, make) => {
+    const key = (await make()) as CryptoKey;
+    expect(() => orgKeyFromCryptoKey(key)).toThrow(new TypeError(`the org key ${why}`));
+  });
+});
+
+describe("deriveLogNonce: a machine's own event's nonce, from the org key and the event (DC4's M3)", () => {
+  const project = '6f1c0a8e-3b2d-4c5e-9f70-8a1b2c3d4e5f';
+  const raw = Uint8Array.from({ length: 32 }, (_, i) => i);
+  const event = { ts: '2026-10-15T08:01:02.123Z', writer: 'SK.local/e0ad139c-18bc-45bd-9489-be8653145f80', seq: 42, kind: 'say', from: 'a', to: '*', text: 'hi' };
+
+  it('is the first 16 bytes of HMAC-SHA256 over smns-hub-nonce-v1, the project, and the JCS of the event without mac', async () => {
+    const expected = createHmac('sha256', raw).update(`smns-hub-nonce-v1\n${project}\n${canonicalize(event)}`).digest().subarray(0, 16).toString('base64url');
+    const derived = await deriveLogNonce(await importOrgKey(raw), project, event);
+    expect(derived).toBe(expected);
+    expect(isBase64urlOf(derived, 16)).toBe(true);
+  });
+
+  it('gives the same nonce to the event sealed or not, a different one to another event or project, and seals to a code that verifies', async () => {
+    const key = await importOrgKey(raw);
+    const nonce = await deriveLogNonce(key, project, event);
+    const sealed = await seal(key, 'log', project, event, nonce);
+    expect(await deriveLogNonce(key, project, sealed)).toBe(nonce);
+    expect(await deriveLogNonce(key, project, { ...event, seq: 43 })).not.toBe(nonce);
+    expect(await deriveLogNonce(key, '0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59', event)).not.toBe(nonce);
+    expect(await verify(key, 'log', project, sealed)).toBe(true);
   });
 });

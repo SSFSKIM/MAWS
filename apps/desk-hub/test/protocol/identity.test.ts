@@ -10,7 +10,7 @@ const code = (): EnrollmentCode => ({
   key: base64urlEncode(new Uint8Array(32).fill(9)),
 });
 
-describe('the enrollment code (built in the browser, run as `sminos hub enroll <code>`)', () => {
+describe('the enrollment code (built in the browser, pasted at the prompt of `sminos hub enroll`)', () => {
   it('round-trips', () => {
     const text = encodeEnrollmentCode(code());
     expect(text.startsWith('smns-enroll-v1.')).toBe(true);

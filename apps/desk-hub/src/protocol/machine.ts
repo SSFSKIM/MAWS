@@ -13,6 +13,14 @@ import type { Raised, SessionMessage } from './session';
  */
 export const HEARTBEAT_MS = 15_000;
 
+/**
+ * How long a machine stays online in a project after its last renewal (the `hello` that opened the project on the
+ * stream, then each `hb-ack` of that stream's generation): three heartbeat periods, the same span after which the
+ * daemon gives its stream up as dead. A lease that lapses, or the close of the stream it belongs to, puts the machine
+ * offline: its subscriptions end and its forwarded RPCs without a result become `uncertain`.
+ */
+export const LEASE_MS = 3 * HEARTBEAT_MS;
+
 /** A POST body holds at most this many bytes (each frame in it at most FRAME_LIMIT). */
 export const POST_LIMIT = 4 * 1024 * 1024;
 
@@ -56,14 +64,19 @@ export type DownFrame =
   | { t: 'unsubscribe'; project: string; sub: string }
   /** Older transcript rows for a subscription, before the row `before`, newest first, from the sub's transcript. */
   | { t: 'rows'; project: string; session: string; agentId: string | null; sub: string; before: string; limit: number }
+  /** The session's working-tree diff against its base branch, answered as DX4 `diff` on the sub (a main-scope sub's). */
+  | { t: 'diff'; project: string; session: string; sub: string }
   | Part;
 
 /**
  * Why a daemon refused an event the hub sent it (DX1): its code does not verify (`bad-code`, which includes a `hub/`
  * event whose position fails its shape and an event transplanted from another project), its nonce was seen before
- * (`seen-nonce`), or it is not a log event the daemon can read (`bad-shape`).
+ * (`seen-nonce`), it is not a log event the daemon can read (`bad-shape`), or its code verifies but the daemon already
+ * holds a different event at that `(writer, seq)` (`conflict`; in a `hub/` feed, the hub re-sequenced one). Whatever
+ * the reason, the refused position is spent on that daemon: its `hello` vector moves past it, and the hub, which
+ * streams strictly beyond the vector a daemon sends, never sends it again.
  */
-export type RejectionReason = 'bad-code' | 'seen-nonce' | 'bad-shape';
+export type RejectionReason = 'bad-code' | 'seen-nonce' | 'bad-shape' | 'conflict';
 
 /**
  * A daemon's report of an event it refused; the hub keeps it in the project's audit record and shows it to browsers.

@@ -76,8 +76,9 @@ export function isMachineName(name: string): boolean {
 /** The Access service token's name, so an orphan of an interrupted enrollment is found by name. */
 export const serviceTokenName = (org: string, machine: string) => `desk-${org}-${machine}`;
 
-// The enrollment code: built in the browser (the hub never sees the org key), carried by the owner's hand, and run on
-// the machine as `sminos hub enroll <code>`. Text form: `smns-enroll-v1.` + base64url of the UTF-8 JSON object.
+// The enrollment code: built in the browser (the hub never sees the org key), carried by the owner's hand, and pasted
+// on the machine at the hidden prompt of `sminos hub enroll` (never an argument, since it carries the org key). Text
+// form: `smns-enroll-v1.` + base64url of the UTF-8 JSON object.
 
 // Enrollment's endpoints (DX7). Every error is `{error, message?}`.
 

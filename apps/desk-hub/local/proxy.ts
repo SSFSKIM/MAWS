@@ -1,6 +1,8 @@
 // The stand-in's front door: an HTTP server that does to each request what Access does in front of the deployed hub,
 // then passes it to the hub (`wrangler dev`, or the suites' Miniflare) and streams the answer back — SSE and WebSocket
 // upgrades included. Its own paths (/standin/…) it answers itself. Node only; run by the local command and the suites.
+// Each request to the hub gets a connection of its own (`agent: false`), so requests share nothing: a conservative
+// choice after a 502 of unknown cause was seen once on the CI runner, on a request that needed nothing beyond the hub.
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import type { AccessStandin } from './standin.ts';
@@ -46,7 +48,7 @@ export async function startProxy(options: {
     }
     const target = new URL(upstream());
     const forwarded = req.pipe(
-      httpRequest({ host: target.hostname, port: target.port, method: req.method, path: req.url, headers: outgoing(req.headers, target, admission) }, (up) => {
+      httpRequest({ host: target.hostname, port: target.port, method: req.method, path: req.url, headers: outgoing(req.headers, target, admission), agent: false }, (up) => {
         res.writeHead(up.statusCode ?? 502, incoming(up.headers));
         res.flushHeaders();
         up.pipe(res);
@@ -56,8 +58,11 @@ export async function startProxy(options: {
       if (!res.headersSent) res.writeHead(502, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'upstream', message: error.message }));
     });
-    // A client that goes away takes its upstream request with it, so the hub sees an SSE stream close.
-    res.on('close', () => forwarded.destroy());
+    // A client that goes away before its answer is done takes its upstream request with it, so the hub sees an SSE
+    // stream close. (`close` also follows a finished answer; destroying then would be at best useless.)
+    res.on('close', () => {
+      if (!res.writableFinished) forwarded.destroy();
+    });
   }
 
   server.on('upgrade', (req: IncomingMessage, socket: Socket, head: Buffer) => {
@@ -73,7 +78,7 @@ export async function startProxy(options: {
       const headers = outgoing(req.headers, target, admission);
       headers.connection = 'Upgrade';
       headers.upgrade = req.headers.upgrade ?? 'websocket';
-      const up = httpRequest({ host: target.hostname, port: target.port, method: req.method, path: req.url, headers });
+      const up = httpRequest({ host: target.hostname, port: target.port, method: req.method, path: req.url, headers, agent: false });
       up.on('upgrade', (upRes, upSocket, upHead) => {
         const lines = [`HTTP/1.1 ${upRes.statusCode} ${upRes.statusMessage}`];
         for (let i = 0; i < upRes.rawHeaders.length; i += 2) lines.push(`${upRes.rawHeaders[i]}: ${upRes.rawHeaders[i + 1]}`);
