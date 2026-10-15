@@ -12,12 +12,13 @@
 // - Show changes off draws the version plainly; Compare by shift-click; Back to presentation;
 // - Show editors on a selected element names who edited it;
 // - Restore brings the slides and the deck's properties back as a new `restore` version, with the banner.
-// "See N new changes" needs an agent's write since the owner's last view, which the product build cannot make without
-// an engine; the controller's unit suite covers it (src/artifacts/slides/editor/history/controller.test.ts).
+// - fix wave 1 (R4): "See N new changes": the owner views the deck, an agent session writes into it between two views
+//   (the host's e2e-only history seam, `writeAs` as the session, then the scheduler's `auto` version), and the next
+//   showing offers the pill with the count; opening it shows the comparison since the last view.
 // The second case is M8's bound: the preview of a 3-month-old version of S7a's heavy deck (the soak's own states, read
 // from MAWS_DECK_HISTORY's export) ≤ 1,000 ms through the editor's whole path, the 1-minute load printed beside it.
-import { existsSync, readFileSync } from 'node:fs';
-import { loadavg } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -48,10 +49,24 @@ const seam = <K extends keyof Seam['__maws_presentations']>(page: Page, name: K,
   page.evaluate(([n, a]) => ((window as unknown as Seam).__maws_presentations[n as K] as (...x: unknown[]) => unknown)(...(a as unknown[])), [name, args] as const) as ReturnType<Seam['__maws_presentations'][K]>;
 
 let launch: MawsLaunch | null = null;
+let channel: string | null = null; // fix wave 1 (R4): the host's history seam's directory
 test.afterEach(async () => {
   await launch?.cleanup();
   launch = null;
+  if (channel) rmSync(channel, { recursive: true, force: true });
+  channel = null;
 });
+
+/** Fix wave 1 (R4): one command through the host's history seam (src/engine-host/presentations/history-seam.ts). */
+async function hostWrite(command: unknown): Promise<{ ok: boolean; error?: string }> {
+  const name = `${Date.now()}-${Math.random().toString(36).slice(2)}.json`;
+  mkdirSync(join(channel!, 'in'), { recursive: true });
+  writeFileSync(join(channel!, 'in', `${name}.tmp`), JSON.stringify(command));
+  renameSync(join(channel!, 'in', `${name}.tmp`), join(channel!, 'in', name));
+  const out = join(channel!, 'out', name);
+  await expect.poll(() => existsSync(out), { timeout: 15_000, message: 'the history seam answers' }).toBe(true);
+  return JSON.parse(readFileSync(out, 'utf8')) as { ok: boolean; error?: string };
+}
 
 interface Row {
   id: string;
@@ -59,8 +74,8 @@ interface Row {
 }
 const systems = async (page: Page): Promise<Row[]> => (await ok<{ artifacts: Row[] }>(page, 'artifacts.list', { filter: { kind: 'design_system' } })).artifacts;
 
-async function ready(): Promise<Page> {
-  launch = await launchMaws();
+async function ready(env?: Record<string, string>): Promise<Page> {
+  launch = await launchMaws(env ? { env } : {});
   await launch.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1800, 1000));
   const { page } = launch;
   await expect.poll(async () => (await ok<{ state: string }>(page, 'engine.hostState')).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
@@ -90,15 +105,16 @@ const bundled = (key: string) => JSON.parse(readFileSync(join(REPO_ROOT, `src/ar
 const rgbOf = (hex: string) => `rgb(${[1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).join(', ')})`;
 const computed = (node: Locator, property: string) => node.evaluate((n, p) => getComputedStyle(n).getPropertyValue(p), property);
 
-const DECK_JSON = (order: string[], cover: string) => JSON.stringify({ v: 4, createdOnFiles: { v: 1, at: '2026-10-15T09:00:00Z' }, title: 'History lab', cover, order });
+// fix wave 1 (R2): the deck's uploaded face is re-mapped after the version
+const DECK_JSON = (order: string[], cover: string, face: string) => JSON.stringify({ v: 4, createdOnFiles: { v: 1, at: '2026-10-15T09:00:00Z' }, title: 'History lab', cover, order, faces: { brand: { family: 'History Brand', src: `assets/${face}` } } });
 const slide = (id: string, body: string, notes: string) => `<section id="${id}" style="background:var(--ds-color-bg, #ffffff); padding:128px">${body}<aside>${notes}</aside></section>`;
 const S1 = slide('s1', '<h1 id="t1" style="font-size:96px; color:var(--ds-color-text, #111111)">Opening</h1>', 'Welcome everyone.');
 const S2 = slide('s2', '<h2 id="title" style="font-size:72px; color:var(--ds-color-text, #111111)">Plan</h2><p id="body" style="font-size:40px">One path</p>', 'Speak to the plan.');
 const S3 = slide('s3', '<h2 id="t3" style="font-size:72px">Numbers</h2><p id="gone" style="position:absolute; left:300px; top:600px; width:600px; height:120px; font-size:48px; background:#eef2ff">To be cut</p>', 'The numbers.');
 const S3_CUT = slide('s3', '<h2 id="t3" style="font-size:72px">Numbers</h2>', 'The numbers.');
 const S4 = slide('s4', '<h2 id="t4" style="font-size:72px">Next steps</h2>', 'Close.');
-const DRAFT: Record<string, string> = { 'project/deck.json': DECK_JSON(['s1', 's2', 's3'], 's1'), 'project/slides/s1.html': S1, 'project/slides/s2.html': S2, 'project/slides/s3.html': S3 };
-const REVIEWED: Record<string, string> = { 'project/deck.json': DECK_JSON(['s2', 's3', 's4'], 's2'), 'project/slides/s2.html': S2, 'project/slides/s3.html': S3_CUT, 'project/slides/s4.html': S4 };
+const DRAFT: Record<string, string> = { 'project/deck.json': DECK_JSON(['s1', 's2', 's3'], 's1', 'brand-draft.woff2'), 'project/slides/s1.html': S1, 'project/slides/s2.html': S2, 'project/slides/s3.html': S3 };
+const REVIEWED: Record<string, string> = { 'project/deck.json': DECK_JSON(['s2', 's3', 's4'], 's2', 'brand-reviewed.woff2'), 'project/slides/s2.html': S2, 'project/slides/s3.html': S3_CUT, 'project/slides/s4.html': S4 };
 
 test('history per slide: the rail, a version’s changes on the stage and filmstrip, its pinned system, compare, Show editors, restore', async () => {
   test.setTimeout(180_000);
@@ -117,7 +133,7 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
   await seam(page, 'edit', id, { op: 'setNotes', slideId: 's2', text: 'Speak to the revised plan.' });
   await ok(page, 'artifacts.update', { artifactId: id, designSystemId: maws.id });
   const reviewed = await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId: id, label: 'Reviewed' });
-  const listed = await ok<{ versions: { id: number; kind: string; designSystemRef?: { id: string } }[] }>(page, 'artifacts.versions', { artifactId: id });
+  const listed = await ok<{ versions: { id: number; seq: number; kind: string; designSystemRef?: { id: string } }[] }>(page, 'artifacts.versions', { artifactId: id });
   expect(listed.versions.find((v) => v.id === draft.versionId)?.designSystemRef?.id, 'the draft pins Official').toBe(official.id);
 
   const tab = await openFromLibrary(page, 'History lab', id);
@@ -191,6 +207,12 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
     await filmstrip.locator('[data-slide-thumb="s2"] button').click();
     const title = stage.locator('[data-stage-slide] [data-eid="title"]').first();
     await expect.poll(() => computed(title, 'color')).toBe(rgbOf(bundled('official').color.text!.$root.$value.hex));
+    // fix wave 1 (R2): the draft's own face mapping, at the draft's assets, not the live deck's
+    const faces = tab.locator('style[data-deck-faces]');
+    await expect(faces).toHaveCount(1);
+    const draftRevision = listed.versions.find((v) => v.id === draft.versionId)!.seq;
+    expect(await faces.textContent()).toContain(`/${draftRevision}/assets/brand-draft.woff2`);
+    expect(await faces.textContent()).not.toContain('brand-reviewed');
   });
 
   await test.step('Compare by shift-click; Back to presentation', async () => {
@@ -203,6 +225,7 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
     const live = tab.locator('[data-stage-slide] [data-eid="title"]');
     await tab.locator('[data-slide-thumb="s2"] .deck-thumb-button').click();
     await expect.poll(() => computed(live, 'color')).toBe('rgb(192, 57, 43)');
+    expect(await tab.locator('style[data-deck-faces]').textContent()).toContain('brand-reviewed.woff2'); // the live mapping again
   });
 
   await test.step('Show editors on the selected element names who edited it', async () => {
@@ -235,6 +258,46 @@ test('history per slide: the rail, a version’s changes on the stage and filmst
     await expect(tab.getByRole('status', { name: 'Restored' })).toContainText('Restored from Draft');
     expect(reviewed.versionId).toBeGreaterThan(draft.versionId);
   });
+});
+
+test('See N new changes: an agent session’s write between two views is offered as a pill, opening the changes since the last view', async () => {
+  test.setTimeout(120_000);
+  channel = mkdtempSync(join(tmpdir(), 'maws-deck-history-'));
+  const page = await ready({ MAWS_PRESENTATIONS_HISTORY: channel });
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'presentation', title: 'Pill lab' });
+  const id = artifact.id;
+  await seam(page, 'seed', id, DRAFT);
+
+  // the first view: the deck drawn in a main tab records the owner's view (L's onShown, then the rail's markViewed)
+  let tab = await openFromLibrary(page, 'Pill lab', id);
+  await expect.poll(async () => (await ok<{ artifact: { lastViewedAt: number | null } }>(page, 'artifacts.get', { artifactId: id })).artifact.lastViewedAt).not.toBeNull();
+  await expect(tab.locator('.deck-history-pill')).toHaveCount(0); // nothing new: no pill
+  await page.getByRole('button', { name: 'Close Pill lab', exact: true }).click();
+  await expect(tab).toHaveCount(0);
+
+  // an agent session writes between the views: a restyle and the notes of s2, then the scheduler's version
+  const session = '00000000-0000-4000-8000-0000000000a7';
+  expect(await hostWrite({ cmd: 'write', artifactId: id, session, edit: { op: 'setStyle', slideId: 's2', elementId: 'title', props: { color: '#2e86de' } } })).toEqual(expect.objectContaining({ ok: true }));
+  expect(await hostWrite({ cmd: 'write', artifactId: id, session, edit: { op: 'setNotes', slideId: 's2', text: 'Speak to the plan, briefly.' } })).toEqual(expect.objectContaining({ ok: true }));
+  const versions = await ok<{ versions: { kind: string; actor: { kind: string } }[] }>(page, 'artifacts.versions', { artifactId: id });
+  expect(versions.versions.at(-1)).toEqual(expect.objectContaining({ kind: 'auto', actor: expect.objectContaining({ kind: 'session' }) }));
+
+  // the next showing offers the pill with the count, and opening it shows the comparison since the last view
+  tab = await openFromLibrary(page, 'Pill lab', id);
+  const pill = tab.locator('.deck-history-pill');
+  await expect(pill.getByRole('button', { name: 'See 2 new changes' })).toBeVisible();
+  await pill.getByRole('button', { name: 'See 2 new changes' }).click();
+  const bar = tab.getByRole('toolbar', { name: 'Version preview' });
+  await expect(bar.locator('.deck-history-heading')).toHaveText('Changes since you last looked');
+  await expect(bar.locator('[data-history-count]')).toHaveText('2 changes');
+  await expect(tab.getByRole('complementary', { name: 'Version history' })).toBeVisible();
+  const filmstrip = tab.getByRole('navigation', { name: 'Slides in this version' });
+  await expect(filmstrip.locator('[data-slide-thumb="s2"]')).toHaveAttribute('data-history-change', 'changed');
+  await filmstrip.locator('[data-slide-thumb="s2"] button').click();
+  const mark = tab.locator('[data-history-stage] [data-history-mark="title"]');
+  await expect(mark).toHaveAttribute('title', /Claude/); // the agent, by the session's title or "Claude"
+  await expect(tab.locator('[data-history-notes] ins')).toContainText('briefly');
+  await expect(bar.getByRole('button', { name: 'Restore this version' })).toHaveCount(0); // the live deck: nothing to restore
 });
 
 // M8's bound on S7a's heavy deck: the soak's 3-month-old version and its live state, written into a deck through A's

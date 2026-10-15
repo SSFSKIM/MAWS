@@ -21,6 +21,7 @@ import type { DesignSystemChain } from '../design-systems/chain';
 import type { Documents } from '../documents';
 import type { DocumentService } from '../documents/service';
 import type { ArtifactStore } from '../documents/store';
+import { historySeamDir, startDeckHistorySeam } from './history-seam'; // M8 fix wave 1 (R4): e2e only
 
 export interface Presentations {
   close(): void;
@@ -31,9 +32,11 @@ export interface PresentationsDeps {
   chain: Pick<DesignSystemChain, 'governing'> | null; // P3-D's default chain; null while the store is unavailable
   /** L's mirror's `refresh` (Decision Log 29): schedules the decks named, as their own change would. */
   refresh(artifactIds: string[]): void;
+  /** M8 fix wave 1 (R4): the host's environment (the history seam opens under MAWS_E2E=1 only); `process.env` by default. */
+  env?: Record<string, string | undefined>;
 }
 
-export function registerPresentations({ documents, chain, refresh }: PresentationsDeps): Presentations {
+export function registerPresentations({ documents, chain, refresh, env = process.env }: PresentationsDeps): Presentations {
   if (!documents) return { close: () => {} };
   const { store, service } = documents;
   store.registerAdapter(createPresentationAdapter());
@@ -47,6 +50,8 @@ export function registerPresentations({ documents, chain, refresh }: Presentatio
     if (decks.length > 0) refresh(decks);
   };
   const offs = [store.onChange(({ kind }) => kind === 'design_system' && refreshDecks()), store.onDefaultsChange(refreshDecks)];
+  const seamDir = historySeamDir(env); // M8 fix wave 1 (R4): an agent's write between two views, for the e2e
+  if (seamDir) offs.push(startDeckHistorySeam({ store, service }, seamDir).close);
   return {
     close: () => {
       for (const off of offs) off();
