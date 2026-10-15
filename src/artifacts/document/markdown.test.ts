@@ -311,6 +311,8 @@ describe('every stored state, one at a time', () => {
     literalInInlineCode: p(t(`x ${SENTINEL_ALPHABET.join('')}`, [{ type: 'code' }])),
     literalInAttributes: p({ type: 'mention', attrs: { kind: 'person', ref: 'r', label: SENTINEL_ALPHABET.join('') } }, { type: 'image', attrs: { src: 'https://e.com/a.png', alt: `x${SENTINEL_ALPHABET.join('')}`, assetId: null } }),
     literalInIntent: { type: 'pending', attrs: { intent: SENTINEL_ALPHABET.join(' ') } },
+    // the re-review's P3: a chart's opaque spec carries the characters in its property names too
+    literalInSpecKeys: { type: 'chart', attrs: { source: 'data', spec: Object.fromEntries(SENTINEL_ALPHABET.map((char, k) => [`k${char}`, { [`${char}in`]: k }])) } },
   };
 
   it.each(Object.entries(states))('%s', (_name, json) => {

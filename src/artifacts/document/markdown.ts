@@ -86,12 +86,12 @@ const ALPHABET = /[\uE000-\uE00F]/g;
 const LITERAL_PAIR = /\uE00D([a-p])/g;
 const toLiteral = (text: string): string => text.replace(ALPHABET, (char) => `${LITERAL}${String.fromCharCode(97 + char.charCodeAt(0) - 0xe000)}`);
 const fromLiteral = (text: string): string => text.replace(LITERAL_PAIR, (_, letter: string) => String.fromCharCode(0xe000 + letter.charCodeAt(0) - 97));
-/** Every string a node's JSON holds (its texts and attribute values), mapped. */
+/** Every string a node's JSON holds (its texts, attribute values, and property names inside an opaque value), mapped. */
 const mapStrings = <T>(value: T, map: (text: string) => string): T => {
   if (typeof value === 'string') return map(value) as T;
   if (Array.isArray(value)) return value.map((item) => mapStrings(item, map)) as T;
   if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, mapStrings(item, map)])) as T;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [map(key), mapStrings(item, map)])) as T;
 };
 
 const ID = '[0-9a-z]{2,32}';
