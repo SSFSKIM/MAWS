@@ -1077,8 +1077,11 @@ consumers start after that gate.
     both sides), followed by exactly one `settled {request, winner:
     "web" | "terminal" | "other", outcome, by, mac}`, where the bridge names
     the side whose answer the engine used. The hub removes the request on
-    `settled` and writes its audit record from it; after a reconnect it
-    drops any request the daemon does not republish;
+    `settled` and writes its audit record from it, once per request: a
+    `settled` for a request it has already settled (a daemon relaying a
+    settlement again after a restart) is taken without a second broadcast
+    or audit record; after a reconnect it drops any request the daemon
+    does not republish;
   - **a delivery outcome** is `delivery {event: {writer, seq}, session,
     outcome: "delivered" | "recorded" | "refused-read-only" | "uncertain" |
     "failed", reason, mac}`, produced by the daemon when `deliver_next`
