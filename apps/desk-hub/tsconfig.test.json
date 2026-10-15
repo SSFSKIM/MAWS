@@ -1,0 +1,10 @@
+{
+  // The suites, which run under Node (vitest) and reach the Worker through Miniflare; they import the protocol module
+  // and the identity verifier, which are runtime-neutral, and never the Worker's own modules.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2023", "DOM"],
+    "types": ["node"]
+  },
+  "include": ["test/**/*.ts", "vitest.config.ts", "src/protocol/**/*.ts", "src/identity/**/*.ts"]
+}

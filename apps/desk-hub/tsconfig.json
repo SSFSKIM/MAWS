@@ -1,0 +1,17 @@
+{
+  // The Worker and its Durable Objects, typed against the Workers runtime. The protocol module is typechecked here as
+  // the Worker imports it and again, alone, by tsconfig.protocol.json; the tests by tsconfig.test.json.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023"],
+    "types": ["@cloudflare/workers-types"],
+    "strict": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*.ts"]
+}

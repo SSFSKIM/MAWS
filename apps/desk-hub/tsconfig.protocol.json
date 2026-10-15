@@ -1,0 +1,9 @@
+{
+  // The protocol module alone, against types/neutral-runtime.d.ts and no runtime's types: it is imported by the Worker,
+  // the web app (DC5), and the fake machine, so a Workers, Node, or DOM API it reaches for fails to compile here.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": []
+  },
+  "include": ["src/protocol/**/*.ts", "types/neutral-runtime.d.ts"]
+}
