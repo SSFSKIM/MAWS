@@ -196,7 +196,7 @@ function Review({ view, artifactId, tabId, host, editorHost, pageScope: Scope, r
   const index = Math.min(selected, Math.max(0, blocks.length - 1));
   const block = blocks[index];
   const settle = async (action: 'acceptSuggestion' | 'rejectSuggestion') => {
-    if (!block || busy) return;
+    if (!block || busy || readOnly) return;
     setBusy(true);
     setError(null);
     try { await host[action](artifactId, block.ranges); }

@@ -44,9 +44,9 @@ export function ThreadsRail({ doc, tabs, activeTab, activeThread, author, readOn
       selected={thread.id === activeThread}
       readOnly={readOnly}
       onShow={() => onShow(thread)}
-      onReply={(body) => reply(doc, thread.id, { id: `${thread.id}:${nanoid8()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN)}
-      onResolve={() => resolve(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
-      onReopen={() => reopen(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
+      onReply={(body) => !readOnly && reply(doc, thread.id, { id: `${thread.id}:${nanoid8()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN)}
+      onResolve={() => !readOnly && resolve(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
+      onReopen={() => !readOnly && reopen(doc, thread.id, author.actor, author.now(), COMMENTS_ORIGIN)}
     />
   );
   return (

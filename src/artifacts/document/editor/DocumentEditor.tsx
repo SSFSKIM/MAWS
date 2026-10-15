@@ -381,7 +381,6 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
         pill={preview ? null : (historySnapshot?.pill ?? null)}
         pageScope={pageScope}
         onPage={onPage}
-        readOnly={readOnly}
         onNewChanges={() => {
           openRail('history');
           void historyController?.openNewChanges();
@@ -407,12 +406,10 @@ interface PageFrameProps {
   pill: HistorySnapshot['pill'];
   pageScope: DocumentEditorProps['pageScope'];
   onPage: DocumentEditorProps['onPage'];
-  /** The store is read-only: the overlay's thread changes write nothing. */
-  readOnly: boolean;
   onNewChanges(): void;
 }
 
-function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, readOnly, onNewChanges }: PageFrameProps) {
+function PageFrame({ editor, live, previewEditor, handle, author, comments, tabId, preview, history, pill, pageScope: Scope, onPage, onNewChanges }: PageFrameProps) {
   const editors = useShowEditors(live, history, tabId, preview === null);
   const frame = useRef<HTMLDivElement>(null);
   const [layout, setLayout] = useState(0);
@@ -443,23 +440,25 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
 
   const reach = useMemo<Omit<CommentOverlayProps, 'layoutKey'>>(() => {
     const { doc } = handle;
+    // read when the overlay writes, not when it was drawn: the store may have turned read-only since
+    const writable = () => !handle.state().readOnly;
     return {
       doc,
       locate: (threadId) => passageRect(editor, frame.current, threadId),
       setActive: (threadId) => void (!editor.isDestroyed && editor.commands.setActiveThread(threadId)),
       resolve: (threadId) => {
-        if (!readOnly && getThread(doc, threadId)) resolve(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN);
+        if (writable() && getThread(doc, threadId)) resolve(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN);
       },
       reopen: (threadId) => {
-        if (!readOnly && getThread(doc, threadId)) reopen(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN);
+        if (writable() && getThread(doc, threadId)) reopen(doc, threadId, author.actor, author.now(), COMMENTS_ORIGIN);
       },
       record: (threadId, body) => {
-        if (!readOnly && getThread(doc, threadId)) reply(doc, threadId, { id: `${threadId}:${nanoid8()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN);
+        if (writable() && getThread(doc, threadId)) reply(doc, threadId, { id: `${threadId}:${nanoid8()}`, by: author.actor, at: author.now(), body }, COMMENTS_ORIGIN);
       },
-      discard: (threadId) => void (!readOnly && discardThread(doc, threadId, COMMENTS_ORIGIN)),
+      discard: (threadId) => void (writable() && discardThread(doc, threadId, COMMENTS_ORIGIN)),
       focus: () => void (!editor.isDestroyed && editor.commands.focus()),
     };
-  }, [editor, handle, author, readOnly]);
+  }, [editor, handle, author]);
 
   // a version is drawn with the design-system tokens it pinned (and its own overrides)
   const tokens = preview ? (preview.tokens as CSSProperties) : undefined;

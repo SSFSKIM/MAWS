@@ -13,7 +13,8 @@ import { DocumentEditor } from './DocumentEditor';
 import type { DocumentHandle, EditorHost } from './host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import type { MentionSource, MentionTarget } from './MentionPicker';
-import type { DocumentComments } from './comments/surface';
+import type { CommentOverlayProps, DocumentComments } from './comments/surface';
+import { getThread, liveThreadIds } from '../threads';
 import { TAB, World, doc, endOf, para, readOnlySwitch, until } from './test-world';
 
 let world: World | null = null;
@@ -408,5 +409,80 @@ describe('a read-only document', () => {
     await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
     expect(current!.isEditable).toBe(false);
     expect(within(toolbar()).getByRole('button', { name: 'Bold' })).toHaveProperty('disabled', true);
+  });
+});
+
+// The re-review's P2: a control drawn before the store turned read-only writes nothing after it did. Each case holds the
+// control it opened while writable and uses it after the flip: the popover is gone, and the retained element writes
+// nothing (an upload in flight inserts nothing either).
+describe('a control drawn before the store turned read-only', () => {
+  async function mountSwitchable(host: EditorHost = owner, comments?: DocumentComments) {
+    world = new World(doc(para('p1', 'Original text')));
+    const opened = openMemoryHandle(world.host, { log: () => {} });
+    handles.push(opened);
+    await whenSynced(opened);
+    const switched = readOnlySwitch(opened);
+    let current: Editor | null = null;
+    render(<DocumentEditor artifactId="doc1" handle={switched.handle} host={host} comments={comments} onEditor={(e) => (current = e)} />);
+    await until(() => current !== null && current.getText().length > 0, 'the editor to bind');
+    return { editor: () => current!, set: switched.set, handle: switched.handle };
+  }
+
+  it('the open link form closes, and submitting it writes no link', async () => {
+    const { editor, set } = await mountSwitchable();
+    act(() => void editor().chain().focus().setTextSelection({ from: 1, to: 9 }).run());
+    press('Link');
+    const field = screen.getByRole('textbox', { name: 'Link address' });
+    act(() => void fireEvent.change(field, { target: { value: 'https://example.com' } }));
+    const before = JSON.stringify(editor().getJSON());
+    act(() => set(true));
+    act(() => void fireEvent.submit(field.closest('form')!));
+    expect(JSON.stringify(editor().getJSON())).toBe(before);
+    expect(screen.queryByRole('textbox', { name: 'Link address' })).toBeNull();
+  });
+
+  it('the open Insert menu closes, and its item inserts nothing', async () => {
+    const { editor, set } = await mountSwitchable();
+    press('Insert');
+    const item = screen.getByRole('menuitem', { name: 'Pending section' });
+    const before = JSON.stringify(editor().getJSON());
+    act(() => set(true));
+    act(() => void fireEvent.click(item));
+    expect(JSON.stringify(editor().getJSON())).toBe(before);
+    expect(screen.queryByRole('menu')).toBeNull();
+  });
+
+  it('an image upload that finishes after the flip inserts nothing', async () => {
+    let finish!: (asset: { assetId: string; ref: string }) => void;
+    const slow: EditorHost = { ...owner, uploadAsset: () => new Promise((resolve) => (finish = resolve)) };
+    const { editor, set } = await mountSwitchable(slow);
+    const before = JSON.stringify(editor().getJSON());
+    insert('Image…');
+    act(() => void fireEvent.change(screen.getByLabelText('Image file'), { target: { files: [new File([new Uint8Array([137, 80, 78, 71])], 'chart.png', { type: 'image/png' })] } }));
+    await until(() => finish !== undefined, 'the upload to start');
+    act(() => set(true));
+    await act(async () => finish({ assetId: 'as1', ref: 'maws-artifact://doc1/as1' }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+    expect(JSON.stringify(editor().getJSON())).toBe(before);
+  });
+
+  it('the comment overlay drawn while writable writes nothing to a thread after the flip', async () => {
+    let drawn: CommentOverlayProps | null = null;
+    const comments: DocumentComments = { opened: () => {}, overlay: (props) => {
+      drawn = props;
+      return null;
+    } };
+    const { editor, set, handle } = await mountSwitchable(owner, comments);
+    act(() => void editor().chain().focus().setTextSelection({ from: 1, to: 9 }).run());
+    press('Comment');
+    const [threadId] = liveThreadIds(handle.doc);
+    const kept = drawn!;
+    act(() => set(true));
+    act(() => {
+      kept.record(threadId, 'Sent after the flip.');
+      kept.resolve(threadId);
+      kept.discard(threadId);
+    });
+    expect(getThread(handle.doc, threadId)).toMatchObject({ status: 'open', messages: [] });
   });
 });

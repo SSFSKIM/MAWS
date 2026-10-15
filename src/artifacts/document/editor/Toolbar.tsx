@@ -7,7 +7,7 @@
 import type { Editor, JSONContent } from '@tiptap/core';
 import { NodeSelection, Selection } from '@tiptap/pm/state';
 import { useEditorState } from '@tiptap/react';
-import { useRef, useState, type ChangeEvent, type FormEvent, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type MouseEvent, type ReactNode } from 'react';
 import { actorKey } from '@shared/artifacts/actor';
 import { nanoid8 } from '../schema';
 import type { EditorHost } from './host-types';
@@ -34,6 +34,9 @@ function blockStyle(editor: Editor): string {
   return 'p';
 }
 
+/** Whether a change may be written now: a control drawn while the page was editable may be used after it stopped being. */
+const writable = (editor: Editor): boolean => !editor.isDestroyed && editor.isEditable;
+
 function positionOf(editor: Editor, id: string): number {
   let at = -1;
   editor.state.doc.descendants((node, pos) => {
@@ -52,12 +55,14 @@ function editAtom(editor: Editor, pos: number): void {
 }
 
 function insertInline(editor: Editor, node: JSONContent, edit: boolean): void {
+  if (!writable(editor)) return;
   editor.chain().focus().insertContent(node).run();
   const pos = editor.state.selection.from - 1;
   if (edit && editor.state.doc.nodeAt(pos)?.type.name === node.type) editAtom(editor, pos);
 }
 
 function insertBlock(editor: Editor, node: JSONContent, then: 'edit' | 'inside'): void {
+  if (!writable(editor)) return;
   const id = nanoid8();
   editor
     .chain()
@@ -113,8 +118,15 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
   const [uploadError, setUploadError] = useState<string | null>(null);
   const imageFile = useRef<HTMLInputElement>(null);
   const run = () => editor.chain().focus();
+  // every change is checked when it is made, not when its control was drawn (the store may have turned read-only since)
+  const write = (change: () => unknown) => () => void (writable(editor) && change());
+  // a popover open when the page stops being editable goes
+  useEffect(() => {
+    if (!state.editable) setMenu(null);
+  }, [state.editable]);
 
   const setStyle = (value: string) => {
+    if (!writable(editor)) return;
     if (value === 'p') run().setParagraph().run();
     else run().setHeading({ level: Number(value.slice(1)) as 1 | 2 | 3 }).run();
   };
@@ -128,7 +140,7 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
     try {
       const bytes = new Uint8Array(await file.arrayBuffer());
       const { assetId, ref } = await host.uploadAsset(artifactId, bytes, { name: file.name, mime: file.type || 'application/octet-stream' });
-      if (!editor.isDestroyed) run().insertContent({ type: 'image', attrs: { src: ref, alt: file.name, assetId } }).run();
+      if (writable(editor)) run().insertContent({ type: 'image', attrs: { src: ref, alt: file.name, assetId } }).run();
     } catch (error) {
       setUploadError(`Couldn’t upload ${file.name}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -136,8 +148,8 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
 
   const inserts: Array<[string, () => void]> = [
     ['Table', () => insertBlock(editor, tableJSON(3, 3), 'inside')],
-    ['Image…', () => imageFile.current?.click()],
-    ['Divider', () => run().setHorizontalRule().run()],
+    ['Image…', write(() => imageFile.current?.click())],
+    ['Divider', write(() => run().setHorizontalRule().run())],
     ['Callout', () => insertBlock(editor, { type: 'callout', attrs: { tone: 'note' }, content: [{ type: 'paragraph' }] }, 'inside')],
     ['Math', () => insertInline(editor, { type: 'math', attrs: { latex: '' } }, true)],
     ['Equation', () => insertBlock(editor, { type: 'mathBlock', attrs: { latex: '' } }, 'edit')],
@@ -145,28 +157,28 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
     ['Pending section', () => insertBlock(editor, { type: 'pending', attrs: { intent: '' } }, 'edit')],
     ['Date', () => insertInline(editor, { type: 'date', attrs: { iso: today() } }, true)],
     // with a source, a picker of people, sessions and artifacts; without one, the owner, named in place
-    ['Mention', () => (mentions ? setMenu('mention') : insertInline(editor, { type: 'mention', attrs: { kind: 'person', ref: actorKey(host.identity().actor), label: host.identity().name } }, true))],
+    ['Mention', write(() => (mentions ? setMenu('mention') : insertInline(editor, { type: 'mention', attrs: { kind: 'person', ref: actorKey(host.identity().actor), label: host.identity().name } }, true)))],
     ['Status', () => insertInline(editor, { type: 'dropdown', attrs: { options: STATUSES, value: STATUSES[0] } }, false)],
   ];
 
-  const tableControls: Array<[string, () => boolean]> = [
-    ['Add row above', () => run().addRowBefore().run()],
-    ['Add row below', () => run().addRowAfter().run()],
-    ['Add column left', () => run().addColumnBefore().run()],
-    ['Add column right', () => run().addColumnAfter().run()],
-    ['Delete row', () => run().deleteRow().run()],
-    ['Delete column', () => run().deleteColumn().run()],
-    ['Header row', () => run().toggleHeaderRow().run()],
-    ['Delete table', () => run().deleteTable().run()],
+  const tableControls: Array<[string, () => void]> = [
+    ['Add row above', write(() => run().addRowBefore().run())],
+    ['Add row below', write(() => run().addRowAfter().run())],
+    ['Add column left', write(() => run().addColumnBefore().run())],
+    ['Add column right', write(() => run().addColumnAfter().run())],
+    ['Delete row', write(() => run().deleteRow().run())],
+    ['Delete column', write(() => run().deleteColumn().run())],
+    ['Header row', write(() => run().toggleHeaderRow().run())],
+    ['Delete table', write(() => run().deleteTable().run())],
   ];
 
   const disabled = !state.editable;
   return (
     <div role="toolbar" aria-label="Formatting" className="doc-toolbar">
-      <Tool label="Undo" disabled={disabled || !state.canUndo} onClick={() => run().undo().run()}>
+      <Tool label="Undo" disabled={disabled || !state.canUndo} onClick={write(() => run().undo().run())}>
         ↶
       </Tool>
-      <Tool label="Redo" disabled={disabled || !state.canRedo} onClick={() => run().redo().run()}>
+      <Tool label="Redo" disabled={disabled || !state.canRedo} onClick={write(() => run().redo().run())}>
         ↷
       </Tool>
       <span className="doc-toolbar-separator" />
@@ -178,22 +190,22 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
         ))}
       </select>
       <span className="doc-toolbar-separator" />
-      <Tool label="Bold" active={state.bold} disabled={disabled} onClick={() => run().toggleBold().run()}>
+      <Tool label="Bold" active={state.bold} disabled={disabled} onClick={write(() => run().toggleBold().run())}>
         <b>B</b>
       </Tool>
-      <Tool label="Italic" active={state.italic} disabled={disabled} onClick={() => run().toggleItalic().run()}>
+      <Tool label="Italic" active={state.italic} disabled={disabled} onClick={write(() => run().toggleItalic().run())}>
         <i>I</i>
       </Tool>
-      <Tool label="Underline" active={state.underline} disabled={disabled} onClick={() => run().toggleUnderline().run()}>
+      <Tool label="Underline" active={state.underline} disabled={disabled} onClick={write(() => run().toggleUnderline().run())}>
         <u>U</u>
       </Tool>
-      <Tool label="Strikethrough" active={state.strike} disabled={disabled} onClick={() => run().toggleStrike().run()}>
+      <Tool label="Strikethrough" active={state.strike} disabled={disabled} onClick={write(() => run().toggleStrike().run())}>
         <s>S</s>
       </Tool>
-      <Tool label="Inline code" active={state.code} disabled={disabled} onClick={() => run().toggleCode().run()}>
+      <Tool label="Inline code" active={state.code} disabled={disabled} onClick={write(() => run().toggleCode().run())}>
         {'</>'}
       </Tool>
-      <Tool label="Highlight" active={state.highlight} disabled={disabled} onClick={() => run().toggleHighlight().run()}>
+      <Tool label="Highlight" active={state.highlight} disabled={disabled} onClick={write(() => run().toggleHighlight().run())}>
         ▍
       </Tool>
       <span className="doc-menu-anchor">
@@ -205,7 +217,7 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
             href={state.href}
             onDone={(href) => {
               setMenu(null);
-              if (href === null) return;
+              if (href === null || !writable(editor)) return;
               if (href) run().extendMarkRange('link').setLink({ href }).run();
               else run().extendMarkRange('link').unsetLink().run();
             }}
@@ -213,19 +225,19 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
         )}
       </span>
       <span className="doc-toolbar-separator" />
-      <Tool label="Bulleted list" active={state.bulletList} disabled={disabled} onClick={() => run().toggleBulletList().run()}>
+      <Tool label="Bulleted list" active={state.bulletList} disabled={disabled} onClick={write(() => run().toggleBulletList().run())}>
         •
       </Tool>
-      <Tool label="Numbered list" active={state.orderedList} disabled={disabled} onClick={() => run().toggleOrderedList().run()}>
+      <Tool label="Numbered list" active={state.orderedList} disabled={disabled} onClick={write(() => run().toggleOrderedList().run())}>
         1.
       </Tool>
-      <Tool label="Checklist" active={state.taskList} disabled={disabled} onClick={() => run().toggleTaskList().run()}>
+      <Tool label="Checklist" active={state.taskList} disabled={disabled} onClick={write(() => run().toggleTaskList().run())}>
         ☑
       </Tool>
-      <Tool label="Quote" active={state.blockquote} disabled={disabled} onClick={() => run().toggleBlockquote().run()}>
+      <Tool label="Quote" active={state.blockquote} disabled={disabled} onClick={write(() => run().toggleBlockquote().run())}>
         ❝
       </Tool>
-      <Tool label="Code block" active={state.codeBlock} disabled={disabled} onClick={() => run().toggleCodeBlock().run()}>
+      <Tool label="Code block" active={state.codeBlock} disabled={disabled} onClick={write(() => run().toggleCodeBlock().run())}>
         {'{ }'}
       </Tool>
       {state.codeBlock && (
@@ -234,7 +246,7 @@ export function Toolbar({ editor, artifactId, host, onFind, comments, history, m
           aria-label="Code language"
           disabled={disabled}
           value={state.language}
-          onChange={(event) => run().updateAttributes('codeBlock', { language: event.target.value || null }).run()}
+          onChange={(event) => write(() => run().updateAttributes('codeBlock', { language: event.target.value || null }).run())()}
         >
           {(LANGUAGES.includes(state.language) ? LANGUAGES : [...LANGUAGES, state.language]).map((language) => (
             <option key={language} value={language}>

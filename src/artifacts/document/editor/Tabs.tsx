@@ -14,16 +14,18 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
   const index = tabs.findIndex((tab) => tab.id === active);
 
   const add = () => {
+    if (readOnly) return;
     const id = addTab(doc, { title: `Tab ${tabs.length + 1}`, ...(active ? { after: active } : {}) });
     onSelect(id);
   };
   const move = (by: -1 | 1) => {
+    if (readOnly) return;
     const neighbour = tabs[index + by];
     if (active && neighbour) moveTab(doc, active, by < 0 ? { before: neighbour.id } : { after: neighbour.id });
     setMenu(false);
   };
   const remove = () => {
-    if (!active || tabs.length < 2) return;
+    if (readOnly || !active || tabs.length < 2) return;
     const next = tabs[index + 1] ?? tabs[index - 1];
     deleteTab(doc, active);
     onSelect(next.id);
@@ -47,7 +49,7 @@ export function Tabs({ doc, tabs, active, readOnly = false, onSelect }: { doc: D
               key={tab.id}
               title={tab.title}
               onDone={(title) => {
-                if (title !== null && title.trim() && title !== tab.title) renameTab(doc, tab.id, title.trim());
+                if (!readOnly && title !== null && title.trim() && title !== tab.title) renameTab(doc, tab.id, title.trim());
                 setRenaming(null);
               }}
             />
