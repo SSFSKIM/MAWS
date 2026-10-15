@@ -163,8 +163,7 @@ export class DepthPlayer {
     else answer();
   }
 
-  /** `step-end` included: the shell's client relays it once DC3's protocol carries the kind; until then no script here plays it. */
-  private send(open: Open, kind: SessionMessage['kind'] | 'step-end', body: unknown): void {
+  private send(open: Open, kind: SessionMessage['kind'], body: unknown): void {
     const n = kind === 'snapshot' ? 0 : ++open.n;
     const { project, machine, session } = this.options;
     this.hub.sendSession(project, { project, machine, session, kind, sub: open.sub, n, body } as SessionMessage);
@@ -233,7 +232,7 @@ export class AgentTrack {
     if (at >= 0) this.open.splice(at, 1);
   }
 
-  private send(open: Open, kind: SessionMessage['kind'] | 'step-end', body: unknown): void {
+  private send(open: Open, kind: SessionMessage['kind'], body: unknown): void {
     const n = kind === 'snapshot' ? 0 : ++open.n;
     const { project, machine, session } = this.options;
     this.hub.sendSession(project, { project, machine, session, kind, sub: open.sub, n, body } as SessionMessage);

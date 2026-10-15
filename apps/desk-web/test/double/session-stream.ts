@@ -9,7 +9,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JsonObject, SessionBodies, SessionPresence, Streaming, StreamingBlock, SubagentMeta } from 'desk-hub/protocol';
-import type { StepEnd } from '../../src/depth/stream/step-end';
 
 export type Recording = { session: JsonObject[]; subagents: Array<SubagentMeta & { rows: JsonObject[] }> };
 
@@ -60,7 +59,7 @@ export type LiveItem =
   | { kind: 'row'; body: SessionBodies['row'] }
   | { kind: 'chunk'; body: SessionBodies['chunk'] }
   | { kind: 'block-row'; body: SessionBodies['block-row'] }
-  | { kind: 'step-end'; body: StepEnd }
+  | { kind: 'step-end'; body: SessionBodies['step-end'] }
   | { kind: 'subagents'; body: SessionBodies['subagents'] };
 
 export type ScriptOptions = {
@@ -73,10 +72,7 @@ export type ScriptOptions = {
   lateRows?: boolean;
   /** After the n-th `block-row` of the script (from 0), one more chunk for that block: a straggler the browser ignores. */
   strayAfterBlockRow?: number;
-  /**
-   * Each model request ends with a `step-end` (DX4, the composite's Decision Log), after every `block-row` of the step.
-   * Off by default while the shell's client relays only DC3's protocol kinds, which do not carry it yet.
-   */
+  /** Each model request ends with a `step-end` (DX4), after every `block-row` of the step. */
   stepEnds?: boolean;
   /**
    * The index (in `rows`) of an assistant row whose block is cut off mid-stream: half its chunks, no `block-row`, no

@@ -37,10 +37,9 @@ import { createBackfillContext, recordToEvents, type BackfillContext, type Subag
 import type { createTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 import { emptyGraph, type TaskGraph } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
 import type { TranscriptSource } from '../../../../../src/renderer/src/transcript/source/types';
-import { transcriptKey, type SessionPlane, type SessionTarget, type Subscription } from '../../shell/session-plane';
+import { transcriptKey, type SessionPlane, type SessionTarget, type Subscription, type SubscriptionMessage } from '../../shell/session-plane';
 import { taskGraphOf, withEvents, withMetas } from '../agents/task-feed';
 import { StreamingLayer, type StreamBlock } from '../stream/layer';
-import type { DepthMessage } from '../stream/step-end';
 
 /** What the adapter reads of MAWS's transcript store: whether a row's events have been applied under a key. */
 export type TranscriptStoreApi = Pick<ReturnType<typeof createTranscriptStore>, 'getState' | 'subscribe'>;
@@ -279,10 +278,7 @@ export class DeskTranscript {
 
   private subscribe(): void {
     this.subscription = this.plane.subscribe(this.target, {
-      message: (delivered) => {
-        const message = delivered as DepthMessage; // `step-end` too, until DX8's type carries it (`stream/step-end.ts`)
-        return message.kind === 'snapshot' ? this.snapshot(message.body) : this.receive(message);
-      },
+      message: (message) => (message.kind === 'snapshot' ? this.snapshot(message.body) : this.receive(message)),
       reset: () => this.reset(),
       end: (body) => {
         this.subscription = null;
@@ -314,7 +310,7 @@ export class DeskTranscript {
     this.publish();
   }
 
-  private receive(message: Exclude<DepthMessage, { kind: 'snapshot' }>): void {
+  private receive(message: Exclude<SubscriptionMessage, { kind: 'snapshot' }>): void {
     switch (message.kind) {
       case 'row':
         return this.row(message.body.row);

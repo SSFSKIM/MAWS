@@ -5,15 +5,16 @@
 import type { SessionBodies, SubagentMeta } from 'desk-hub/protocol';
 import type { createTranscriptStore } from '../../../../src/renderer/src/stores/transcript';
 import type { DeskTranscript } from '../../src/depth/source/desk-transcript';
-import type { StepEnd } from '../../src/depth/stream/step-end';
 import type { SessionPlane, SessionTarget, Subscription, SubscriptionListener, SubscriptionMessage } from '../../src/shell/session-plane';
 import { snapshotAt, type LiveItem } from './session-stream';
 
-type Kind = SubscriptionMessage['kind'] | 'step-end';
-type Body<K extends Kind> = K extends keyof SessionBodies ? SessionBodies[K] : StepEnd;
+type Kind = SubscriptionMessage['kind'];
+type Body<K extends Kind> = SessionBodies[K];
 
 export class HeldSubscription {
   readonly asked: Array<{ before: string; limit: number }> = [];
+  /** How many times the view asked for the diff. */
+  diffs = 0;
   closed = false;
   n = 0;
 
@@ -27,7 +28,6 @@ export class HeldSubscription {
   send<K extends Kind>(kind: K, body: Body<K>): void {
     const n = kind === 'snapshot' ? 0 : ++this.n;
     const { machine, session } = this.target;
-    // `step-end` reaches the listener as the shell's client will relay it once DC3's protocol carries the kind.
     this.listener.message({ project: this.project, machine, session, kind, sub: 'sub', n, body } as SubscriptionMessage);
   }
 
@@ -52,7 +52,11 @@ export class FakePlane implements SessionPlane {
   subscribe(target: SessionTarget, listener: SubscriptionListener): Subscription {
     const held = new HeldSubscription(this.project, target, listener, this.subagents);
     this.subs.push(held);
-    return { rows: (before, limit) => void held.asked.push({ before, limit }), close: () => void (held.closed = true) };
+    return {
+      rows: (before, limit) => void held.asked.push({ before, limit }),
+      diff: () => void (held.diffs += 1),
+      close: () => void (held.closed = true),
+    };
   }
 
   /** The latest subscription. */

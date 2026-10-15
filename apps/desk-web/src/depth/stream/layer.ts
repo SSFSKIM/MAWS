@@ -10,7 +10,7 @@
 // a chunk for a block whose `block-row` has arrived is ignored, since its row holds the block whole. A request's
 // `step-end` drops its blocks no `block-row` named, so no partial text outlives its request.
 import type { BlockRow, JsonObject, SessionBodies, Streaming } from 'desk-hub/protocol';
-import type { StepEnd } from './step-end';
+import type { StepEnd } from 'desk-hub/protocol';
 
 export type BlockKind = 'text' | 'thinking' | 'tool';
 

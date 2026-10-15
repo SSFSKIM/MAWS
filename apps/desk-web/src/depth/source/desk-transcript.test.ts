@@ -9,7 +9,7 @@ import type { Row } from '../../../../../src/renderer/src/transcript/model/rows'
 import { FakePlane, mount, settle } from '../../../test/double/fake-plane';
 import { readRecording, rowsBefore, scriptOf, snapshotAt, STRAY, type LiveItem } from '../../../test/double/session-stream';
 import type { SessionTarget } from '../../shell/session-plane';
-import type { StepEnd } from '../stream/step-end';
+import type { StepEnd } from 'desk-hub/protocol';
 import { DeskTranscript, freshSource, subagentLookupOf } from './desk-transcript';
 
 const PROJECT = 'proj';

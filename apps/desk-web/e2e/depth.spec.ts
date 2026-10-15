@@ -172,6 +172,28 @@ test('older rows page in when the reader reaches the top, and the reader stays w
   await expect(depth).toContainText('Think briefly first'); // the turn's prompt, from the older page
 });
 
+test("a response cut off mid-block drops its partial text at its step-end; what was written stays, and a reload draws the same rows", async ({ page, hub }) => {
+  // The fixture's row 16 is the text block of a response whose thinking (row 15) was written: half of it streams, no
+  // `block-row` names it, and its step ends (DX4 `step-end`, relayed by the shell's client as any subscription kind).
+  const { player, depth } = await openDepth(page, hub, { stepEnds: true, cutOff: 16 });
+  const cut = 'The kettle rep';
+  player.advanceTo((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text' && String(item.body.chunk.text).startsWith('The kettl'));
+  const ended = player.script.findIndex((item, i) => i >= player.playhead && item.kind === 'step-end');
+  player.advance(ended - player.playhead);
+  await expect(streamingRows(depth).last()).toContainText(cut);
+  expect(await occurrences(depth, cut)).toBe(1);
+  player.advance(1); // the step's end
+  await expect(streamingRows(depth)).toHaveCount(0);
+  await expect.poll(() => occurrences(depth, cut)).toBe(0);
+  player.advance(player.script.length);
+  await expect.poll(() => occurrences(depth, ANSWER)).toBe(1);
+  expect(await occurrences(depth, cut)).toBe(0);
+  const settled = await rowIds(depth);
+  await page.reload();
+  await expect(depth).toContainText(ANSWER);
+  await expect.poll(() => rowIds(depth)).toEqual(settled);
+});
+
 test('an end keeps what was drawn and says why; the column subscribes again once the session is reachable', async ({ page, hub }) => {
   const { player, depth } = await openDepth(page, hub);
   await midAnswer(player, depth, 'Both sub');
