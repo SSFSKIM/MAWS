@@ -2,7 +2,7 @@
 // (`/api/projects/<id>/socket`), one to the org's `Registry` for the grid (`/api/registry/socket`). Browsers see project
 // offsets, never writer vectors.
 import type { HumanEvent, LogEvent } from './log';
-import type { Refusal } from './machine';
+import type { Refusal, Rejection } from './machine';
 import type { Part } from './parts';
 import type { Rpc, RpcOutcome, RpcState } from './rpc';
 import type { Delivery, MachinePresence, Raised, SessionMessage } from './session';
@@ -14,8 +14,11 @@ export type ProjectUp =
   /** A sealed web `human`; the hub assigns `writer` (`hub/<member>`), `seq`, and `ts`, and answers `human-ack`. */
   | { t: 'human'; event: HumanEvent }
   | { t: 'rpc'; rpc: Rpc }
-  /** `sub` is the browser's own random id (128 bits, base64url), unique at the machine. */
-  | { t: 'subscribe'; machine: string; session: string; sub: string }
+  /**
+   * `sub` is the browser's own random id (128 bits, base64url), unique at the machine. The scope is one transcript:
+   * the session's main one (`agentId` null) or one subagent's (DX2's `subscribe`).
+   */
+  | { t: 'subscribe'; machine: string; session: string; agentId: string | null; sub: string }
   | { t: 'unsubscribe'; sub: string }
   | { t: 'rows'; sub: string; before: string; limit: number }
   /** Whether this tab shows the project; a visible tab of a member holds back that member's pushes. */
@@ -40,9 +43,17 @@ export type ProjectDown =
   | { t: 'deliveries'; deliveries: Delivery[] }
   | { t: 'machines'; machines: Array<{ machine: string } & MachinePresence> }
   | { t: 'rpc-state'; nonce: string; state: RpcState; outcome?: RpcOutcome }
-  /** A refusal the hub reports to the project's browsers (the audit record of what it refused), or to the sender. */
-  | { t: 'refused'; refusal: Refusal & { nonce?: string; machine?: string } }
+  /** A refusal of the hub's own, recorded in the project's audit record: to the sender and to the project's browsers. */
+  | { t: 'refused'; refusal: AuditEntry & Refusal & { nonce?: string; machine?: string; member?: string } }
+  /** A daemon's report of an event it refused (DX2 `rejected`), recorded in the audit record and shown to every browser. */
+  | { t: 'rejected'; rejection: AuditEntry & Rejection & { machine: string } }
   | Part;
+
+/**
+ * An entry of the project's audit record: `id` its place in the record (rising; a browser that sees an entry twice
+ * keeps one), `at` when the hub recorded it.
+ */
+export type AuditEntry = { id: number; at: string };
 
 export type PendingRequest = { machine: string; raised: Raised; terminal_only: boolean };
 
