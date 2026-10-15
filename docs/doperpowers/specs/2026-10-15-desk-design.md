@@ -2790,6 +2790,17 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: Omitted thinking draws as a live label that goes when its
+  row settles (DC6's M1 fix wave). The step-end decision asked live
+  thinking to match its settled drawing; the settled drawing turns out to
+  be nothing, since MAWS's renderer draws no row for a thinking block
+  without text (`derive.ts`), so depth shows the label while the model
+  thinks and it goes when the row lands, as a progress mark does. No text
+  ever vanishes, which is what the earlier decision guarded against.
+  Rejected: a lasting "thought" row, which needs a change to MAWS's
+  renderer this phase does not cut; and nothing live, which leaves a long
+  think looking like a stalled session. Flags DC6.
+  Date/Author: 2026-10-15, design session (DC6's M1).
 - Decision: Three DX4 amendments from DC7's M2. (1) A message to a closed
   terminal session is reported `recorded` without being settled: it stays
   owed, as smns §4 already keeps it, and is delivered if Resume brings the
