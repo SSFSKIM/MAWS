@@ -3,7 +3,8 @@
 // notification itself (§6). iOS shows the permission prompt only from a tap, and only in the installed app.
 import { useEffect, useState } from 'react';
 import { HubRequestError } from '../../hub/http';
-import { browserPushEnv, disablePush, enablePush, pushState, type PushState } from '../../push/device';
+import { usePushAtStart } from '../../push/at-start';
+import { browserPushEnv, disablePush, enablePush, pushState, retryPush, type PushState } from '../../push/device';
 import { registerServiceWorker } from '../../pwa/service-worker';
 import { buttonPrimary, buttonSecondary, Dialog } from '../common/Dialog';
 
@@ -25,7 +26,13 @@ export function NotificationsDialog({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     let live = true;
     pushState(env()).then(
-      (s) => live && setState(s),
+      (s) => {
+        if (!live) return;
+        // The hub's own words for why it holds no subscription, when the start's attempt got them.
+        const atStart = usePushAtStart.getState().state;
+        const why = s.kind === 'unsynced' && s.error === null && atStart?.kind === 'unsynced' && atStart.endpoint === s.endpoint ? atStart.error : null;
+        setState(why && s.kind === 'unsynced' ? { ...s, error: why } : s);
+      },
       (e: unknown) => live && setError(explain(e)),
     );
     return () => {
@@ -36,7 +43,10 @@ export function NotificationsDialog({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError(null);
     action(env())
-      .then(setState, (e: unknown) => setError(explain(e)))
+      .then((s) => {
+        setState(s);
+        usePushAtStart.setState({ state: s });
+      }, (e: unknown) => setError(explain(e)))
       .finally(() => setBusy(false));
   };
   return (
@@ -53,6 +63,16 @@ export function NotificationsDialog({ onClose }: { onClose: () => void }) {
             Turn on notifications
           </button>
         )}
+        {state?.kind === 'unsynced' && (
+          <div className="flex gap-2">
+            <button type="button" className={buttonPrimary} disabled={busy} onClick={() => act(retryPush)}>
+              Retry
+            </button>
+            <button type="button" className={buttonSecondary} disabled={busy} onClick={() => act(disablePush)}>
+              Turn off on this device
+            </button>
+          </div>
+        )}
         {state?.kind === 'on' && (
           <button type="button" className={`${buttonSecondary} self-start`} disabled={busy} onClick={() => act(disablePush)}>
             Turn off on this device
@@ -68,6 +88,17 @@ function StateText({ state }: { state: PushState }) {
   switch (state.kind) {
     case 'on':
       return <p className="m-0 font-medium">On for this device.</p>;
+    case 'unsynced':
+      return (
+        <>
+          <p className="m-0 leading-5">This device is subscribed, but the hub does not hold its subscription yet, so no notification reaches it.</p>
+          {state.error !== null && (
+            <p className="m-0 text-ui-sm text-danger" role="alert" data-testid="push-error">
+              {explain(state.error)}
+            </p>
+          )}
+        </>
+      );
     case 'off':
       return <p className="m-0 leading-5">Get a notification on this device when a session asks you something or sends you a message, while no window of yours shows its project.</p>;
     case 'denied':

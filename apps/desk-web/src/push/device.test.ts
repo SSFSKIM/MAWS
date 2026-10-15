@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { base64urlDecode, base64urlEncode } from 'desk-hub/protocol';
 import { DOUBLE_MEMBER } from '../../test/double/hub-double';
 import { PushDouble } from '../../test/double/push';
-import { disablePush, enablePush, pushState, resyncPush, type PushEnv } from './device';
+import { disablePush, enablePush, pushState, resyncPush, retryPush, type PushEnv } from './device';
 import { HubRequestError } from '../hub/http';
 
 type FakeSubscription = { endpoint: string; options: { applicationServerKey: ArrayBuffer | null }; toJSON(): PushSubscriptionJSON; unsubscribe(): Promise<boolean> };
@@ -75,8 +75,16 @@ describe('pushState', () => {
     expect(await pushState(fakeEnv().env)).toEqual({ kind: 'off' });
     const granted = fakeEnv({ permission: 'granted' });
     expect(await pushState(granted.env)).toEqual({ kind: 'off' });
-    granted.setCurrent(base64urlDecode(hub.key));
+    await enablePush(granted.env);
     expect(await pushState(granted.env)).toEqual({ kind: 'on', endpoint: granted.current()!.endpoint });
+  });
+
+  it('reads on only while the hub holds the subscription; a device subscribed alone is not on', async () => {
+    const device = fakeEnv({ permission: 'granted' });
+    device.setCurrent(base64urlDecode(hub.key)); // subscribed here, never kept by the hub
+    expect(await pushState(device.env)).toEqual({ kind: 'unsynced', endpoint: device.current()!.endpoint, error: null });
+    hub.configured = false; // the hub cannot be asked
+    expect(await pushState(device.env)).toMatchObject({ kind: 'unsynced', error: { status: 503, code: 'not-configured' } });
   });
 });
 
@@ -121,9 +129,37 @@ describe('enablePush', () => {
     const keys = { p256dh: base64urlEncode(new Uint8Array(65).fill(4)), auth: base64urlEncode(new Uint8Array(16)) };
     for (let i = 0; i < 20; i++) await hub.handle(DOUBLE_MEMBER, 'PUT', '/api/push/subscriptions', { endpoint: `https://push.example/other/${i}`, keys });
     expect(hub.subscriptions).toHaveLength(20);
-    const error = await enablePush(fakeEnv().env).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(HubRequestError);
-    expect(error).toMatchObject({ status: 409, code: 'too-many' });
+    // Subscribed here but not kept there: not on, with the refusal to show beside Retry.
+    const state = await enablePush(fakeEnv().env);
+    expect(state.kind).toBe('unsynced');
+    expect((state as { error: unknown }).error).toBeInstanceOf(HubRequestError);
+    expect(state).toMatchObject({ error: { status: 409, code: 'too-many' } });
+  });
+});
+
+describe('a subscription the hub did not keep', () => {
+  it('is kept as not on, with the failure, and Retry hands it over again', async () => {
+    const device = fakeEnv();
+    const keep = hub.fetch(DOUBLE_MEMBER);
+    let refuse = true;
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) =>
+      refuse && init?.method === 'PUT' ? Promise.resolve(new Response(JSON.stringify({ error: 'too-many' }), { status: 409 })) : keep(input, init),
+    );
+    const failed = await enablePush(device.env);
+    expect(failed).toMatchObject({ kind: 'unsynced', endpoint: device.current()!.endpoint, error: { status: 409, code: 'too-many' } });
+    expect(hub.subscriptions).toEqual([]);
+    expect(await pushState(device.env)).toMatchObject({ kind: 'unsynced', error: null }); // reopened: still not on
+    refuse = false;
+    expect(await retryPush(device.env)).toEqual({ kind: 'on', endpoint: device.current()!.endpoint });
+    expect(hub.subscriptions.map((s) => s.endpoint)).toEqual([device.current()!.endpoint]);
+  });
+
+  it("at start is answered with the hub's refusal rather than dropped", async () => {
+    const device = fakeEnv();
+    await enablePush(device.env);
+    hub.subscriptions = [];
+    hub.configured = false;
+    expect(await resyncPush(device.env)).toMatchObject({ kind: 'unsynced', error: { status: 503, code: 'not-configured' } });
   });
 });
 

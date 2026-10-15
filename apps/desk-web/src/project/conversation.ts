@@ -39,6 +39,12 @@ export type ConversationState = {
   compactions: Record<string, CompactBody>;
   /** What failed verification and is not drawn. */
   unverified: Unverified[];
+  /**
+   * The pending set this connection received has been checked under the current key and what it holds is in
+   * `requests`: until then a request missing from them may only not be checked yet (a landing reads "Checking").
+   * False again on a reconnect (`restart`), a new pending set, and a key change.
+   */
+  checked: boolean;
 };
 
 export const deliveryKey = (event: { writer: string; seq: number }) => `${event.writer}:${event.seq}`;
@@ -46,7 +52,9 @@ export const deliveryKey = (event: { writer: string; seq: number }) => `${event.
 type Seen = { machine: string; raised: Raised; at: number };
 
 export class Conversation {
-  readonly store: StoreApi<ConversationState> = createStore<ConversationState>(() => ({ requests: {}, deliveries: {}, rpcs: {}, outbox: {}, compactions: {}, unverified: [] }));
+  readonly store: StoreApi<ConversationState> = createStore<ConversationState>(() => ({ requests: {}, deliveries: {}, rpcs: {}, outbox: {}, compactions: {}, unverified: [], checked: false }));
+  /** Whether this connection has had the hub's pending set yet (it comes on every connect, DX3). */
+  private pendingReceived = false;
   private key: OrgKey | null = null;
   /** Counts recomputations: only the newest commits, so a slower older one never overwrites a newer one. */
   private run = 0;
@@ -66,13 +74,22 @@ export class Conversation {
   setKey(key: OrgKey | null): void {
     if (key === this.key) return;
     this.key = key;
+    this.store.setState({ checked: false });
     this.verdicts = new WeakMap();
     void this.recompute();
   }
 
   // From the hub.
 
+  /** A new connection: its pending set is still to come. */
+  restart(): void {
+    this.pendingReceived = false;
+    this.store.setState({ checked: false });
+  }
+
   pendingSet(requests: PendingRequest[]): void {
+    this.pendingReceived = true;
+    this.store.setState({ checked: false });
     this.pending = requests;
     for (const { machine, raised } of requests) this.see(machine, raised);
     void this.recompute();
@@ -151,7 +168,7 @@ export class Conversation {
   private async recompute(): Promise<void> {
     const run = ++this.run;
     if (this.key === null) {
-      this.store.setState({ requests: {}, deliveries: {}, unverified: [] });
+      this.store.setState({ requests: {}, deliveries: {}, unverified: [], checked: false });
       return;
     }
     const unverified: Unverified[] = [];
@@ -184,6 +201,7 @@ export class Conversation {
       deliveries[key] = { ...deliveries[key], [delivery.session]: delivery };
     }
     if (run !== this.run) return;
-    this.store.setState({ requests, deliveries, unverified });
+    // The newest recomputation commits alone, and every pending set starts one: it covers the latest set.
+    this.store.setState({ requests, deliveries, unverified, checked: this.pendingReceived });
   }
 }

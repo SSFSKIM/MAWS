@@ -5,6 +5,7 @@
 import { useMemo } from 'react';
 import { useDeskLayout } from '../../shell/layout';
 import { sortForGrid, useGrid } from '../../state/grid';
+import { GridPushBanner } from '../notifications/PushBanner';
 import { ProjectCard } from './ProjectCard';
 
 const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -16,6 +17,7 @@ export function GridView({ onEnroll }: { onEnroll: () => void }) {
   const stale = loaded && status === 'connecting';
   return (
     <main className="h-full overflow-y-auto bg-bg" aria-label="Projects">
+      <GridPushBanner />
       {stale && sorted.length > 0 && (
         <div className="flex items-center gap-2 border-b border-border bg-bg-raised px-6 py-2 text-ui-sm text-fg-muted" role="status" data-testid="grid-stale">
           <strong className="font-medium text-fg">Counts as of {asOf === null ? 'the last connection' : time(asOf)}.</strong> They may have changed since; the grid updates as soon as the hub answers.

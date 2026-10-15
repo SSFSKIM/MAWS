@@ -255,3 +255,17 @@ test('the app sets the icon badge from the grid while it is open, and clears it 
   hub.updateSummary(summary({ waiting: 0 })); // answered, anywhere
   await expect.poll(badges).toEqual([1, 'clear']);
 });
+
+test('@layout the installed app offers notifications once on the grid, and Not now keeps it gone', async ({ page, hub }) => {
+  await stageProject(hub);
+  await seedKey(page, hub);
+  await page.addInitScript(() => Object.defineProperty(navigator, 'standalone', { configurable: true, value: true })); // iOS's home-screen app
+  await page.goto(hub.url);
+  const banner = page.getByTestId('push-banner');
+  await expect(banner).toContainText('Get a notification when a session asks you something');
+  await banner.getByRole('button', { name: 'Not now' }).click();
+  await expect(banner).toHaveCount(0);
+  await page.reload();
+  await expect(page.getByTestId('grid')).toBeVisible();
+  await expect(page.getByTestId('push-banner')).toHaveCount(0);
+});

@@ -87,6 +87,7 @@ export class ProjectConnection {
           // Presence from before the drop may no longer hold; until the hub sends it again a session's group reads the
           // log's last `state`, which is the record for exactly that case.
           this.live.setState({ caughtUp: false, presence: {} });
+          this.conversation.restart();
         },
         log: (entries) => {
           this.log.receive(entries);

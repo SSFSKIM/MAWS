@@ -14,7 +14,7 @@ import type { LogEvent } from 'desk-hub/protocol';
 import { buildStream, type PlacedRequest } from '../../conversation/stream';
 import { capabilities, kindOf } from '../../conversation/capabilities';
 import { isQuestion } from '../../conversation/card-state';
-import { landedItem, landingStatus } from '../../conversation/landing';
+import { landedItem, landingReady, landingStatus } from '../../conversation/landing';
 import { refused } from '../../log/project-log';
 import { useLanding } from '../../pwa/service-worker';
 import { useNarrow } from '../../shell/viewport';
@@ -95,6 +95,7 @@ function useLanded(channel: Channel, items: ReturnType<typeof buildStream>) {
     if (landed && !here) useLanding.getState().clear();
   }, [landed, here]);
   const caughtUp = useStore(connection.live, (s) => s.caughtUp);
+  const checked = useStore(connection.conversation.store, (s) => s.checked);
   const unverified = useStore(connection.conversation.store, (s) => s.unverified);
   const failed = useStore(connection.log.store, (s) => s);
   if (!landed || !here) return { item: null, notice: null };
@@ -104,7 +105,7 @@ function useLanded(channel: Channel, items: ReturnType<typeof buildStream>) {
     landing.kind === 'request'
       ? unverified.some((u) => u.what === 'request' && u.id === landing.request)
       : refused(failed).some((e) => e.event?.writer === landing.writer && e.event?.seq === landing.seq);
-  const status = landingStatus({ landing, found: item !== null, caughtUp, unverified: bad });
+  const status = landingStatus({ landing, found: item !== null, ready: landingReady(caughtUp, { checked }, failed), unverified: bad });
   return { item, notice: status.kind === 'shown' ? null : status };
 }
 

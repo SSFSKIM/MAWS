@@ -1,9 +1,11 @@
 // This device's notifications (§4: Web Push): the browser's permission, its push subscription under the hub's VAPID
 // key, and the hub's record of it (DX7). Written against the few browser pieces it touches (`PushEnv`) so the suites
-// can stand in for a push service. A push reaches a device only while the hub keeps its subscription, so the app hands
-// it over again at every start (`resyncPush`); a rotated hub key means subscribing anew.
+// can stand in for a push service. A push reaches a device only while the hub keeps its subscription, so "on" means
+// the hub holds it (`GET /api/push/subscriptions` lists it), never the browser's subscription alone: one the hub did
+// not keep reads `unsynced`, with why when the hub said, and `retryPush` hands it over again. The app does that at
+// every start too (`resyncPush`); a rotated hub key means subscribing anew.
 import { base64urlDecode, base64urlEncode, type PushSubscriptionRequest } from 'desk-hub/protocol';
-import { forgetSubscription, hubPushKey, keepSubscription } from './hub-push';
+import { forgetSubscription, hubPushKey, hubSubscriptions, keepSubscription } from './hub-push';
 
 export type PushState =
   /** No Push API here, but an iPhone's installed app would have one (an iOS Safari tab). */
@@ -11,7 +13,9 @@ export type PushState =
   | { kind: 'unsupported' }
   | { kind: 'denied' }
   | { kind: 'off' }
-  | { kind: 'on'; endpoint: string };
+  | { kind: 'on'; endpoint: string }
+  /** Subscribed here, but the hub does not hold it (or could not be asked: `error`), so no push reaches this device. */
+  | { kind: 'unsynced'; endpoint: string; error: unknown };
 
 type SubscriptionLike = {
   endpoint: string;
@@ -53,21 +57,52 @@ export async function pushState(env: PushEnv): Promise<PushState> {
   if (permission === 'denied') return { kind: 'denied' };
   if (permission !== 'granted') return off;
   const subscription = await (await env.pushManager()).getSubscription();
-  return subscription ? { kind: 'on', endpoint: subscription.endpoint } : off;
+  return subscription ? held(subscription.endpoint) : off;
+}
+
+/** On when the hub lists the endpoint among the member's subscriptions; otherwise not, with the hub's error if any. */
+async function held(endpoint: string): Promise<PushState> {
+  try {
+    return (await hubSubscriptions()).some((s) => s.endpoint === endpoint) ? { kind: 'on', endpoint } : { kind: 'unsynced', endpoint, error: null };
+  } catch (error) {
+    return { kind: 'unsynced', endpoint, error };
+  }
+}
+
+/** Hands the subscription to the hub, answering on, or unsynced with the hub's refusal. */
+async function handOver(subscription: SubscriptionLike): Promise<PushState> {
+  try {
+    await keepSubscription(requestOf(subscription));
+    return { kind: 'on', endpoint: subscription.endpoint };
+  } catch (error) {
+    return { kind: 'unsynced', endpoint: subscription.endpoint, error };
+  }
 }
 
 /**
  * Turns notifications on for this device. The permission prompt comes first, straight from the owner's tap (iOS shows
- * it only then), before anything is fetched. Throws the hub's refusal (`HubRequestError`: `not-configured`, `too-many`).
+ * it only then), before anything is fetched. Throws the hub's refusal of its key
+ * (`HubRequestError`: `not-configured`), when nothing was subscribed; a subscription the hub then refuses to keep
+ * (`too-many`) is answered as `unsynced`, with the refusal, for Retry.
  */
 export async function enablePush(env: PushEnv): Promise<PushState> {
   if (!env.notifications || !env.pushManager) return pushState(env);
   const answer = await env.notifications.requestPermission();
   if (answer === 'denied') return { kind: 'denied' };
   if (answer !== 'granted') return off;
-  const subscription = await subscribed(env.pushManager);
-  await keepSubscription(requestOf(subscription));
-  return { kind: 'on', endpoint: subscription.endpoint };
+  return handOver(await subscribed(env.pushManager));
+}
+
+/** Hands this device's subscription to the hub again (Retry), without turning anything off. */
+export async function retryPush(env: PushEnv): Promise<PushState> {
+  if (!env.notifications || !env.pushManager || env.notifications.permission() !== 'granted') return pushState(env);
+  if (!(await (await env.pushManager()).getSubscription())) return off;
+  try {
+    return await handOver(await subscribed(env.pushManager));
+  } catch (error) {
+    const held = await (await env.pushManager()).getSubscription();
+    return held ? { kind: 'unsynced', endpoint: held.endpoint, error } : off;
+  }
 }
 
 /**
@@ -85,11 +120,14 @@ export async function disablePush(env: PushEnv): Promise<PushState> {
   return pushState(env);
 }
 
-/** At start: a device already subscribed hands its subscription to the hub again, never asking the owner anything. */
-export async function resyncPush(env: PushEnv): Promise<void> {
-  if (!env.notifications || !env.pushManager || env.notifications.permission() !== 'granted') return;
-  if (!(await (await env.pushManager()).getSubscription())) return;
-  await keepSubscription(requestOf(await subscribed(env.pushManager)));
+/**
+ * At start: a device already subscribed hands its subscription to the hub again, never asking the owner anything.
+ * Answers what came of it (null when the device is not subscribed), so a failure is kept rather than dropped.
+ */
+export async function resyncPush(env: PushEnv): Promise<PushState | null> {
+  if (!env.notifications || !env.pushManager || env.notifications.permission() !== 'granted') return null;
+  if (!(await (await env.pushManager()).getSubscription())) return null;
+  return retryPush(env);
 }
 
 /** The subscription under the hub's current key: the one held when its key matches, else a fresh one. */
