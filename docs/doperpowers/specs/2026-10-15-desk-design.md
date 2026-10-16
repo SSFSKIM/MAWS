@@ -174,8 +174,10 @@ Terms used throughout:
 - **Access** — Cloudflare Access, the identity gate in front of the
   Worker; a **service token** is Access's credential for a non-human
   client.
-- **Daemon** — `sminos daemon` (smns §8), one per machine, a launchd agent;
-  its **uplink** is the part that talks to the hub.
+- **Daemon** — `sminos daemon` (smns §8), one per machine, a launchd agent
+  on macOS, a systemd user service on Linux (doperpowers #203, 7.159.0,
+  proven on an Ubuntu VM against a local hub: logout with lingering, reboot,
+  restart on new code); its **uplink** is the part that talks to the hub.
 - **Bridge** — the doperpowers mod (a function-hook module the engine loads
   into every session when `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`) that gives
   the daemon control of the session it is loaded in.
@@ -836,7 +838,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
   (stores, never alters).
 - **Design inheritance:** §2 Hub, §3 [binding parts], §6, §8 unknown 3.
 - **Required:** required.
-- **Status:** in-flight (2026-10-15).
+- **Status:** merged (2026-10-15; MAWS PR #14, `c4d4458e`; deployed `hub@b11ea5f8 web@smns-erb-web.3de8a15e`).
 
 ### DC4: The uplink — plan
 
@@ -911,7 +913,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
   taste-heavy surfaces (the grid card, the folded agent-traffic row, the
   request cards) go to the owner as mockups before polish.
 - **Required:** required.
-- **Status:** in-flight (2026-10-15).
+- **Status:** merged (2026-10-16; MAWS PR #13, `76b1de782`).
 
 ### DC6: The web — session depth — plan
 
@@ -930,7 +932,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 - **Design inheritance:** §2 Web client (the adapter), §3 session plane, §4
   right panel.
 - **Required:** required.
-- **Status:** PR open (2026-10-15; MAWS PR #12, stacked on `smns-erb-web`).
+- **Status:** merged (2026-10-16; MAWS PR #12, `1a06f2d9`).
 
 ### DC7: The machine's controls — plan
 
@@ -2328,7 +2330,7 @@ listed stand as M1–M3 left them. Changed rows are marked **[M4]**.
 | `type` | Built | Fields |
 | --- | --- | --- |
 | `block-row` | M3, **[M4]** | `uuid, turnId, agentId, step, index` — **[M4]** also the response row's **notice**: emitted in the `session.append` hook once the append resolves (the row is written), so notice order is write order within a loop. The child moves the loop's cut to `uuid` in the same step that settles the block |
-| `row-seen` | **[M4]** | `uuid, agentId, door` — the notice of every other row the session keeps, once its append resolves: <ul><li>any door but `response` and `queue`;</li><li>a response row whose block never streamed, the rows of an excluded request (the seed, below) included: nothing of theirs ever streamed;</li><li>door `note` (a plugin's own append) only once kept, never when refused;</li><li>the bridge's own steer row from the append's returned uuid (door `note`), after it is written.</li></ul> None for door `queue`, and none for a `hook_success` with no text (raised but never written by 2.1.300). Rows a plugin's own calls write that pass no hook of the plugin's get none: a compaction the bridge runs, the engine's reload notice |
+| `row-seen` | **[M4]** | `uuid, agentId, door` — the notice of every other row the session keeps, once its append resolves: <ul><li>any door but `response` and `queue`;</li><li>a response row whose block never streamed, the rows of an excluded request (the seed, below) included: nothing of theirs ever streamed;</li><li>door `note` (a plugin's own append) only once kept, never when refused;</li><li>the bridge's own steer row from the append's returned uuid (door `note`), after it is written.</li></ul> None for door `queue`, and none for a `hook_success` with no text (raised but never written by 2.1.300). **[#78]** A manual compaction's rows (the person's `/compact`, a command run, any plugin's `$.session.compact`, the bridge's own included) pass no `session.append` hook, so once the compaction stands the mod holds its poster, reads the loop's rows past its cut from the child (`GET /rows`) until the summary row is on disk, and names each unnamed one `row-seen` with `door: "compaction"`, in disk order, ahead of anything later of its loop. An automatic compaction's rows pass the hook and are named as they are written. The engine's reload line passes `session.append` (door `notice`) and is named by the new module |
 | `step` (`phase: "end"`) | M1, **[M4, fix wave 1]** | unchanged fields. **Ordered after every `block-row` of its step**: the engine can append a response row after the request's result (it withholds a refusal or max-output row until the stream is done, and closes a block the stream left open), so the mod holds the end until each block that streamed has its row named, at most 1 s (`STEP_END_WAIT_MS`), and posts it before anything later of its loop (the next request, the turn's end, the subagent's stop). **[fix wave 2]** Once a step's end is out, whichever released it, the step's pairing is closed: a row of it that comes later is named by `row-seen`, never a `block-row` after its step's end. DX4's `step-end` relies on this order. **The child removes the step's whole message from `streaming` at its end, under the lock that applies events (as M1 said; M3's per-block settling did not change it), whether or not a `block-row` came for each block**, so a block aborted mid-response is in no later snapshot; a turn's `complete` removes its messages too |
 | `turn` (`phase: "start"`) | M1, **[final-review wave]** | may carry **`recovered: true`** with `text: null`: a main turn the module saw no `turn.start` of (it was reloaded while the turn ran), taken from the turn's next main-loop request (`turn.step`'s `turnId`, the id `turn.complete` and `$.turn.abort` use). The turn's own `complete` follows as usual |
 | `export` | **[M4]** | `records: [{type: "assistant"\|"user", uuid, message: {content}}]` — main-loop rows as the transcript keeps them: <ul><li>a text row that may hold a mark (its text blocks; not sent past 65,536 characters);</li><li>an async ask's call row with its result row.</li></ul> **Consumed by the child, never handed to subscribers.** The child appends their host events to the project's log with `sminos.export_live`: the Stop hook's writer, `host_events` and `(kind, src)` dedup (`message`: `<row uuid>#<span index>`; `question`: the call id). Membership on sight; one export at a time, in order, off the stream's lock |
@@ -2428,8 +2430,11 @@ transcript line carrying a `uuid`. The stream ending is the other discontinuity:
 subscribes again and starts over from the fresh snapshot.
 
 Known rows with no notice, released unnamed (on the next notice of their loop, or 2 s when
-last on disk): the bridge's own compaction rows (boundary, summary, the attachments after),
-and the engine's line for a module reload.
+last on disk), since doperpowers #202 (7.158.3) only the compactions the mod cannot place: one
+whose summary row is not on disk within 1.5 s, one before the module's first hello, one whose
+cut lies more than 4 MiB back, one whose result carries no row handles (a hook answered it
+with messages of its own), and the person's `/compact` where an organization manages Claude
+Code (the engine runs no `session.compact` hook of a person-installed plugin there).
 
 `tests/sminos/bridge_order.py` (`Consumer`) is the reference implementation, run against
 the real child.
@@ -3241,10 +3246,10 @@ a hub that connects into machines (§2).
 | --- | --- | --- |
 | DC1 bridge spike | findings: `docs/doperpowers/specs/2026-10-15-arkho-desk-c1-findings.md` | **landed 2026-10-15**: 11 items, every primitive promoted, six with a change folded into §2 and §5; probe kept at `/tmp/c1probe` |
 | DC2 bridge | plan: `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md` (doperpowers, branch `worktree-smns-erb`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/195, merge `a6c90a13`, 7.155.0; report `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-report.md` |
-| DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | **PR open 2026-10-15**: M1–M5, the xhigh panel and its fix waves, and the joint re-review clean; PR https://github.com/SSFSKIM/MAWS/pull/14 (`smns-erb` → `master`); Linux gate run 38846390702 green on `36d6bae3`; deployed `hub@b11ea5f8 web@smns-erb-web.3de8a15e`; residue the staging re-measure and the shared per-session stream (Deferred), two tech-debt rows in the PR; report `docs/doperpowers/plans/2026-10-15-desk-dc3-report.md` |
+| DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | **merged 2026-10-15**: M1–M5, the xhigh panel and its fix waves, and the joint re-review clean; PR https://github.com/SSFSKIM/MAWS/pull/14 (`smns-erb` → `master`), merge `c4d4458e` after master was merged in at `349f524f` (gate run 38848788463); Linux gate run 38846390702 green on `36d6bae3`; deployed `hub@b11ea5f8 web@smns-erb-web.3de8a15e`; residue the staging re-measure and the shared per-session stream (Deferred), two tech-debt rows in the PR; report `docs/doperpowers/plans/2026-10-15-desk-dc3-report.md` |
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/194, merge `9e7d3d30`, 7.156.0 (main merged in at `2a864e49` after DC2); report `docs/doperpowers/plans/2026-10-15-desk-dc4-report.md` |
-| DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | **PR open 2026-10-15**: every task reviewed clean; PR https://github.com/SSFSKIM/MAWS/pull/13, stacked on `smns-erb`, retargeted to `master` when DC3 merges; 256 unit tests, the Linux lane 38/38 (runs 38846307022, 38847209275), against the local hub with the fake machine local-hub 7/7 and session-plane 9/9; the owner's phone walk through P2.12, P2.11 pending; the xhigh whole-branch panel (`895e27d1..3de8a15e`) running; report `docs/doperpowers/plans/2026-10-15-desk-dc5-report.md` |
-| DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | **PR open 2026-10-15**: M1–M3 and the branch reviewed clean (`high`, after two final fix waves); PR https://github.com/SSFSKIM/MAWS/pull/12, stacked on `smns-erb-web`, retargeted to `master` when DC5 merges; Linux gate run 38818748087 green (67 browser tests, 8 acceptance specs against the fake machine); report `docs/doperpowers/plans/2026-10-15-desk-dc6-report.md` |
+| DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | **merged 2026-10-16**: every task, the xhigh whole-branch panel (`895e27d1..3de8a15e`, 16 findings, 14 fixed over two reviewed waves, one left to DC5's judgment, one to tech debt) and the tail-follow rework reviewed clean; PR https://github.com/SSFSKIM/MAWS/pull/13, merge `76b1de782` at head `12ca2e89`; 287 unit tests; `e2e:desk-web` 45/45 on the Mac mini (run 38899621892) and 49/49 on Linux with WebKit (38899609623), `static,unit` 38899633797; the real-hub suite, gate group `e2e:desk-web-hub`, 16/16 on the mini (38890504759); the owner's phone walk through P2.12, P2.11 pending; residue the wrapped-key label collision (tech debt) and Safari before 27 (Decision Log); report `docs/doperpowers/plans/2026-10-15-desk-dc5-report.md` |
+| DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | **merged 2026-10-16**: M1–M3 and the branch reviewed clean (`high`, after two final fix waves); the xhigh whole-branch panel (`76b1de78..1a59b984`, 3 P2: paging that stalled on a page with no drawn rows, folds cut with a grammar other than the export's, a tool result lost across a fold boundary) fixed in one reviewed wave, its one regression fixed and re-reviewed; PR https://github.com/SSFSKIM/MAWS/pull/12, merge `1a06f2d9` at head `9dc963ab`; `src/depth` 111 unit tests; `static,unit` 38911431438, `e2e:desk-web` on the Mac mini 38912283795 and on Linux 38912751782, `e2e:desk-web-hub` 38913352891; report `docs/doperpowers/plans/2026-10-15-desk-dc6-report.md` |
 | DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`; four P2 fixed after the final review, the presence watermark among them); PR https://github.com/SSFSKIM/doperpowers/pull/196 (branch `dc7-controls`), merge `af3a5573`, 7.157.0; sminos 1740/1742 (the two load-timing assertions in TECH-DEBT), mods 298/298; Resume live 5/5 on 2.1.301; report `docs/doperpowers/plans/2026-10-15-desk-dc7-report.md` |
 
 ## Surprises & Discoveries
@@ -3489,6 +3494,49 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The channel follows its tail as a `column-reverse` scroller with the browser's own scroll anchoring (DC5).
+  The list keeps its chronological DOM, keyboard and accessibility order inside a reversed container, so the bottom
+  is the scroll origin: opening at the tail needs no code, and a reader scrolled back keeps their place through
+  growth, collapse and removal above them and a message arriving below. The only scroll code left is a
+  notification's landing. Three hand-rolled passes came first, and each review found the next case the browser
+  already handles: a scroll event arriving a frame after the row it raced (installed Chrome on the Mac lane, never
+  headless Chromium), growth above the reader (native anchoring moved `scrollTop` and read as a return to the
+  tail), shrink above (the browser clamps before the hook runs), growth inside the one long row being read, and an
+  unreported scroll-up landing with a collapse. Every one of those is now a browser regression. Safari has scroll
+  anchoring only from 27.0; Playwright's WebKit (26.6) held the row within a pixel, but a phone on iOS 26 or older
+  may move about one row when a message arrives below a reader scrolled back, so the owner's iOS version decides
+  whether that needs a follow-up. Rejected: a fourth hand-rolled pass (it was rebuilding scroll anchoring case by
+  case); a follow-output component (none fit the stack without a heavy dependency). DC6's transcript and subagent
+  panes are unaffected: they follow through MAWS's virtualized `Transcript` list, the desktop app's own chat-mode
+  follow, and hand-roll only the paging of older rows.
+  Date/Author: 2026-10-16, design session (DC5's Mac lane).
+- Decision: The real-hub suite bounds a machine's offline step by the local close latency DX2 states, the configured
+  heartbeat plus 500 ms; busy, waiting and shell keep 2 s. On the Mac mini (run 38889971966) offline came at
+  2,309 ms against the local command's 2 s heartbeat, because workerd sees `wrangler dev`'s graceful close only at
+  the next heartbeat write; the MacBook's earlier 1,344 ms was a drop that landed just before one. Acceptance 1's
+  2 s holds for offline on the deployed hub, where the edge cancels into workerd at once, and the walk proves it
+  there. The suite is the gate group `e2e:desk-web-hub` on the Mac mini, where MAWS's e2e groups now run (the
+  gate-offload plan §3.5–3.6). Rejected: a shorter local heartbeat (DC3's to set, and nothing needs it); keeping
+  the MacBook pass at `3de8a15e` (it predates the panel's fixes to resume and routing, and passed by timing).
+  Date/Author: 2026-10-16, design session (DC5).
+- Decision: A Linux machine is a desk machine, built alongside Phase 1 (Arkho #85): `sminos daemon install`
+  writes a systemd user service on Linux (restart on new code, lingering for a machine without a login session),
+  and the process-identity check holds on Linux, where `ps -o lstart` reads up to a second early. The owner asked
+  whether the daemon assumed Linux; nothing in smns §8 or here planned it, though the desk exists to control
+  projects wherever their sessions run, the owner's cloud Linux machines included. The hub and the web are
+  already OS-neutral (DX2 is HTTP and SSE), so the gap is the machine side alone. Proven on a throwaway Ubuntu VM
+  against a local hub, never by enrolling it into `ssfskim`. Phase 1's acceptance stays the two Macs and the
+  phone. Rejected: making a Linux machine part of Phase 1's acceptance (it would gate the close on a machine the
+  owner does not yet run); deferring it past Phase 1 (the gap is small and independent of the walk).
+  Date/Author: 2026-10-15, owner ruling (design session).
+- Decision: A manual compaction's rows are named from the transcript (DX5, Arkho #78). The live engine (2.1.301)
+  raises no `session.append` for any manual compaction's rows, the person's typed `/compact` included, not only a
+  plugin's own; an automatic compaction's rows it raises. A compaction's result carries each message's `handle`,
+  which is the row's uuid, so the mod waits for the summary row on disk and names what lies past its cut before
+  anything later. The reload line was never unnamed (it passes `session.append`, door `notice`). Rejected: asking
+  upstream for `session.append` on a plugin's own writes (it would not cover a typed `/compact`); accepting the 2 s
+  stall per compaction. Flags DC4 (the uplink's ordering is unchanged), DC6, DC7.
+  Date/Author: 2026-10-15, design session (Arkho #78, doperpowers #202).
 - Decision: A steer's trace for reconciling a lost outcome is the mod's answer, kept by the bridge child under the
   RPC's nonce, not a transcript row (DX6). The recomposition panel (scalpel-2#2) found no reliable link from a
   transcript row to the claim that caused it. Rejected: answering every orphaned steer `interrupted`, which would

@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { build, defineConfig, type Plugin, type Rollup } from 'vite';
 
@@ -67,9 +68,16 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), serviceWorker()],
   resolve: {
     alias: {
-      // MAWS's renderer modules the desk imports as they stand (the renderer survey) name src/shared as `@shared`.
+      // MAWS's renderer modules the desk imports as they stand (the renderer survey) name src/shared as `@shared`; the
+      // depth column (DC6) imports MAWS's transcript and backfill, which also reach src/artifacts as `@artifacts`.
       '@shared': resolve(import.meta.dirname, '../../src/shared'),
+      '@artifacts': resolve(import.meta.dirname, '../../src/artifacts'),
       'shiki/wasm': resolve(import.meta.dirname, 'src/vendor/shiki-wasm-unused.ts'),
+      // The depth column's diff (DC6) draws through MAWS's ReviewView, whose diff library's core would ship every
+      // highlight.js grammar, unused since the view highlights through shiki: MAWS's own aliases (its C8c block in
+      // electron.vite.config.ts) hand lowlight's engine no grammar.
+      lowlight: resolve(import.meta.dirname, '../../src/renderer/src/tools/code/review/lowlight-no-grammars.mjs'),
+      'lowlight-engine': resolve(createRequire(resolve(import.meta.dirname, '../../package.json')).resolve('lowlight'), '../lib/index.js'),
     },
   },
   build: { outDir: 'dist', emptyOutDir: true, rollupOptions: { output: { manualChunks: vendorChunk } } },
