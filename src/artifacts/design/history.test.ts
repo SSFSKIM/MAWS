@@ -7,8 +7,8 @@
 // count through C's `countChanges` hook is editor/history.dom.test.tsx's (C's controller is the editor's).
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { deckChanges, openDeckDiff } from '../slides/history';
-import { setStyle, setText } from '../slides/model';
+import { deckChanges, elementHistory, openDeckDiff } from '../slides/history';
+import { setStyle, setText, zOrder } from '../slides/model';
 import { applyV1, applyV2, attributionMap, contentIdsOf, mergeMaps, newDoc, onUpdate, stateV2, transact, type ContentMap, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
 import { designChanges, designStops, type DesignChanges, type ElementMove } from './history';
@@ -22,7 +22,7 @@ const SESSION = '00000000-0000-4000-8000-0000000000e1' as AppSessionId;
 const AGENT = `session:${SESSION}`;
 
 const A = `<h1 id="title" style="font-size:72px">Phone</h1><p id="e1" style="font-size:32px">Moved text</p><div id="card" style="position:absolute; left:20px; top:300px; width:300px; height:200px; display:flex; flex-direction:column"><p id="note" style="font-size:20px">Card note</p><p id="small" style="font-size:16px">Small print</p></div><p id="keep" style="font-size:20px">Stays</p>`;
-const B = `<h1 id="title" style="font-size:72px">Desktop</h1><p id="other" style="font-size:20px">Other</p>`;
+const B = `<h1 id="title" style="font-size:72px">Desktop</h1><p id="other" style="font-size:20px">Other</p><div id="badge" style="position:absolute; left:10px; top:10px; width:50px; height:50px"></div>`;
 const C = `<p id="far" style="font-size:20px">Far</p>`;
 const SEEDS: BoardSeed[] = [
   { id: 'a', at: { x: 0, y: 0, w: 390, h: 844 }, body: A, title: 'Phone' },
@@ -35,7 +35,7 @@ function world(seeds: BoardSeed[] = SEEDS) {
   const host = newDoc();
   const maps: ContentMap[] = [];
   let at = T0;
-  const land = (actor: string, edit: (doc: Doc) => void) => {
+  const land = (actor: string, edit: (doc: Doc) => void, { sameMinute = false }: { sameMinute?: boolean } = {}) => {
     const doc = newDoc();
     applyV2(doc, stateV2(host));
     const updates: Uint8Array[] = [];
@@ -45,7 +45,7 @@ function world(seeds: BoardSeed[] = SEEDS) {
     doc.destroy();
     for (const u of updates) {
       applyV1(host, u);
-      at += MIN;
+      if (!sameMinute) at += MIN; // the store floors provenance to the minute
       maps.push(attributionMap(contentIdsOf(u), { insertActor: actor, deleteActor: actor, at }));
     }
   };
@@ -56,7 +56,7 @@ function world(seeds: BoardSeed[] = SEEDS) {
     const diff = openDeckDiff({ prevState: from?.state ?? null, nextState: to.state, attributions: mergeMaps(maps.slice(from?.seq ?? 0, to.seq)) });
     try {
       const changes = deckChanges(diff);
-      return { c: changes, d: designChanges(diff, changes) };
+      return { c: changes, d: designChanges(diff, changes, (earlier, shown) => elementHistory(diff, earlier, shown)) };
     } finally {
       diff.destroy();
     }
@@ -67,6 +67,51 @@ function world(seeds: BoardSeed[] = SEEDS) {
 const boardOf = (d: DesignChanges, id: string) => d.boards.find((b) => b.id === id);
 const movesOn = (d: DesignChanges, id: string) => (boardOf(d, id)?.elements ?? []).filter((e): e is ElementMove => e.kind === 'moved');
 const kinds = (d: DesignChanges, id: string) => (boardOf(d, id)?.elements ?? []).map((e) => [e.kind, e.id]);
+
+describe('who a move and the edits since it are credited to (C’s element history, the P3-E spec’s Decision Log 30)', () => {
+  it('credits a move into a board made in the window to its mover, not to the board’s creator', () => {
+    const w = world();
+    const v = w.mark();
+    w.land('human', (doc) => insertBoard(doc, { id: 'n', frame: { x: 0, y: 1000, w: 390, h: 844 }, slide: boardIR('n', '<p id="fresh">Fresh</p>') }, 'c'));
+    let moved = '';
+    w.land(AGENT, (doc) => (moved = moveElementToBoard(doc, 'a', 'n', 'e1').ids.get('e1')!));
+    const { d } = w.project(v);
+    expect(boardOf(d, 'n')).toMatchObject({ kind: 'added', by: 'human' });
+    expect(movesOn(d, 'n')).toEqual([expect.objectContaining({ id: moved, by: AGENT, at: T0 + 3 * MIN, keys: [] })]);
+  });
+
+  it('credits an edit made after the move to its author, in a later minute or the same one', () => {
+    for (const sameMinute of [false, true]) {
+      const w = world();
+      const v = w.mark();
+      let moved = '';
+      w.land(AGENT, (doc) => (moved = moveElementToBoard(doc, 'a', 'b', 'e1').ids.get('e1')!));
+      w.land('human', (doc) => setStyle(doc, 'b', moved, { color: '#ff0000' }), { sameMinute });
+      const [move] = movesOn(w.project(v).d, 'b');
+      expect(move, `same minute: ${sameMinute}`).toMatchObject({ by: AGENT, keys: [expect.objectContaining({ key: 'style:color', by: 'human' })] });
+    }
+  });
+
+  it('keeps a later restack of the moved element by its author, or by the mover in a later minute; the move’s own paint key stays out', () => {
+    const restack = (actor: string, sameMinute: boolean) => {
+      const w = world();
+      const v = w.mark();
+      let moved = '';
+      w.land(AGENT, (doc) => (moved = moveElementToBoard(doc, 'a', 'b', 'card').ids.get('card')!));
+      w.land(actor, (doc) => zOrder(doc, 'b', moved, 'back'), { sameMinute });
+      return movesOn(w.project(v).d, 'b')[0]!.keys.filter((k) => k.key === 'z');
+    };
+    expect(restack('human', false)).toEqual([expect.objectContaining({ key: 'z', by: 'human' })]);
+    expect(restack('human', true)).toEqual([expect.objectContaining({ key: 'z', by: 'human' })]);
+    expect(restack(AGENT, false)).toEqual([expect.objectContaining({ key: 'z', by: AGENT })]);
+    // the boundary: the mover's own restack within the move's minute reads as the move's paint key
+    expect(restack(AGENT, true)).toEqual([]);
+    const w = world();
+    const v = w.mark();
+    w.land(AGENT, (doc) => moveElementToBoard(doc, 'a', 'b', 'card'));
+    expect(movesOn(w.project(v).d, 'b')[0]!.keys.map((k) => k.key)).toEqual([]); // a plain move: no paint or parent noise
+  });
+});
 
 describe('the design’s history projection', () => {
   it('shows a cross-board move as one move from where it was, by its author, where C reads a removal and an addition', () => {
@@ -122,8 +167,8 @@ describe('the design’s history projection', () => {
     expect(move).toMatchObject({ id: ids.get('card'), from: { board: 'a', id: 'card' }, by: AGENT });
     expect(move!.descendants.sort()).toEqual([ids.get('note'), ids.get('small')].sort());
     expect(move!.keys.map((k) => k.key).sort()).toEqual(['style:left', 'style:top']); // the move's geometry; not its place in the stack
-    // its text, changed after the move: C credits an element added in the window whole, so the projection credits the move's author
-    expect(boardOf(d, 'b')!.elements.find((e) => e.id === ids.get('note'))).toMatchObject({ kind: 'changed', keys: [expect.objectContaining({ key: 'text', by: AGENT })] });
+    // its text, changed after the move by someone else: credited to its author (C's leaf), not to the mover
+    expect(boardOf(d, 'b')!.elements.find((e) => e.id === ids.get('note'))).toMatchObject({ kind: 'changed', by: 'human', keys: [expect.objectContaining({ key: 'text', by: 'human' })] });
     expect(kinds(d, 'a')).toEqual(expect.arrayContaining([['changed', 'keep'], ['movedAway', 'card']]));
     expect(boardOf(d, 'c')).toMatchObject({ kind: 'changed', keys: [expect.objectContaining({ key: 'x' })] });
     expect(c.count).toBe(1 + 3 + 3 + 1); // keep, three removals, three additions, c's frame

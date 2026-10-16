@@ -429,6 +429,39 @@ const pick = (t: Touch): Touch => ({ by: t.by, at: t.at });
 /** The keys a node new under a kept id differs in from the earlier node, each credited by its leaf. */
 const replacedKeys = (a: YType, b: YType, d: Delta | undefined, fallback: Touch): KeyChange[] => differingKeys(a, b).map((k) => ({ ...k, ...leafTouch(d, k.key, fallback) }));
 
+// P3-E start (E1 M4 fix wave; the P3-E spec's Decision Log 30): one element's history between two places, for a kind whose
+// element can change id and slide between the states (a design's element moved across boards, XE4). `inserted` is who
+// put the shown element's node there (its own item's insertion in the window's provenance; the null touch when it was
+// not inserted in the window), and `keys` what differs between the earlier element and the shown one, each credited by
+// its own leaf exactly as a node re-created under a kept id is (`replacedKeys`, `leafTouch`: a later edit's author, the
+// node's inserter otherwise, the same-minute rule unchanged). Additive: the deck's diff never calls it.
+const slidesDeltas = new WeakMap<DiffRenderer, Delta>();
+function slidesDeltaOf(diff: Pick<DeckDiff, 'nextDoc' | 'renderer'>): Delta {
+  let d = slidesDeltas.get(diff.renderer);
+  if (!d) slidesDeltas.set(diff.renderer, (d = diff.nextDoc.get(SLIDES_ROOT).toDeltaDeep({ renderer: diff.renderer }).toJSON() as Delta));
+  return d;
+}
+export interface ElementPlace {
+  slideId: string;
+  elementId: string;
+}
+export function elementHistory(diff: Pick<DeckDiff, 'prevDoc' | 'nextDoc' | 'renderer' | 'attributions'>, earlier: ElementPlace, shown: ElementPlace): { inserted: Touch; keys: KeyChange[] } {
+  const after = elementsNode(diff.nextDoc, shown.slideId);
+  const node = nodeOf(after, shown.elementId);
+  const item = after?._map.get(shown.elementId);
+  const who = item && !item.deleted ? insertedBy(diff.attributions, item.id) : null;
+  const slideOp = slidesDeltaOf(diff).attrs?.[shown.slideId];
+  const slideDelta = isDelta(slideOp?.value) ? slideOp.value : undefined;
+  const elementsOp = slideDelta?.attrs?.elements;
+  const op = isDelta(elementsOp?.value) ? elementsOp.value.attrs?.[shown.elementId] : undefined;
+  const fromOp = op?.attribution && !touchOf(op.attribution).deleted ? touchOf(op.attribution) : null;
+  const inserted: Touch = who ? { by: who.actor, at: who.at } : fromOp ? { by: fromOp.by, at: fromOp.at } : { by: null, at: null };
+  const before = nodeOf(elementsNode(diff.prevDoc, earlier.slideId), earlier.elementId);
+  const keys = before && node ? replacedKeys(before, node, isDelta(op?.value) ? op.value : undefined, inserted) : [];
+  return { inserted, keys };
+}
+// P3-E end
+
 /**
  * Fix wave 1 (R1), fix wave 2: the notes of a slide node new under a kept id, compared with the earlier notes as text,
  * each change credited from the new node's own items. A character still there is an insert by whoever wrote it (the

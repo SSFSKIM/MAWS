@@ -13,7 +13,7 @@ import { CANVAS_PATH } from '@artifacts/design/canvas';
 import { designChanges, type ElementMove } from '@artifacts/design/history';
 import { moveElementToBoard } from '@artifacts/design/move';
 import { publishCanvas } from '@artifacts/design/publish';
-import { deckChanges, openDeckDiff } from '@artifacts/slides/history';
+import { deckChanges, elementHistory, openDeckDiff } from '@artifacts/slides/history';
 import { ROOT } from '@artifacts/slides/model';
 import { addThread, threadStates } from '@artifacts/slides/threads';
 import { applyV2, decodeMap, newDoc, type Doc } from '@artifacts/yjs';
@@ -131,7 +131,7 @@ describe('a design’s history after a host restart', () => {
     const [v0, v1] = [versions.find((v) => v.id === before)!, versions.find((v) => v.id === after)!];
     const diff = openDeckDiff({ prevState: store.versionState(id, v0.id), nextState: store.versionState(id, v1.id), attributions: decodeMap(store.attributions(id, v0.seq, v1.seq)) });
     try {
-      const projected = designChanges(diff, deckChanges(diff));
+      const projected = designChanges(diff, deckChanges(diff), (earlier, shown) => elementHistory(diff, earlier, shown));
       const moves = projected.boards.flatMap((b) => b.elements.filter((e): e is ElementMove => e.kind === 'moved').map((e) => ({ board: b.id, ...e })));
       expect(moves.map((m) => [m.board, m.id, m.from, m.by])).toEqual(
         expect.arrayContaining([

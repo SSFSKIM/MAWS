@@ -267,7 +267,8 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const shownDoc = preview?.shown ?? null;
   const earlierDoc = preview?.earlier ?? null;
   const previewChanges = preview?.changes ?? null;
-  const projected = useMemo(() => (shownDoc && earlierDoc && previewChanges ? designChanges({ prevDoc: earlierDoc, nextDoc: shownDoc }, previewChanges) : null), [shownDoc, earlierDoc, previewChanges]);
+  const previewHistory = preview?.elementHistory; // C's element history over the preview's own diff (Decision Log 30)
+  const projected = useMemo(() => (shownDoc && earlierDoc && previewChanges ? designChanges({ prevDoc: earlierDoc, nextDoc: shownDoc }, previewChanges, previewHistory) : null), [shownDoc, earlierDoc, previewChanges, previewHistory]);
   const { focus, step } = useDesignFocus(projected);
   const previewBoards = useMemo(() => (preview && projected ? historyBoards(preview, projected) : []), [preview, projected]);
   const previewView = useMemo(() => {

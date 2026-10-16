@@ -18,7 +18,7 @@ import type { ShownEditor } from '../../../document/editor/history/controller';
 import { authorOf, formatWhen, newChangesBase, versionTitle } from '../../../document/editor/history/model';
 import type { DocumentHandle } from '../../../host';
 import { decodeMap, stateV2, type Doc } from '../../../yjs';
-import { changeStops, deckChanges, elementEditors, openDeckDiff, type ChangeStop, type DeckChanges, type DeckDiff } from '../../history';
+import { changeStops, deckChanges, elementEditors, elementHistory, openDeckDiff, type ChangeStop, type DeckChanges, type DeckDiff, type ElementPlace, type KeyChange, type Touch } from '../../history'; // P3-E: elementHistory
 import { slideOrder } from '../../model';
 
 export type DeckPreviewTarget = { kind: 'version'; versionId: number } | { kind: 'compare'; versionIds: [number, number] } | { kind: 'since'; versionId: number | null };
@@ -45,6 +45,12 @@ export interface DeckPreview {
   /** Fix wave 1 (R2): the revisions whose assets each state draws with (the version's seq; null for the live deck). */
   revision: number | null;
   earlierRevision: number | null;
+  /**
+   * P3-E (the P3-E spec's Decision Log 30): one element's history between a place in the earlier state and one in the
+   * shown state (`elementHistory` over this preview's own diff, which the controller keeps and frees with the preview);
+   * optional for a preview made elsewhere, always set by the controller.
+   */
+  elementHistory?: (earlier: ElementPlace, shown: ElementPlace) => { inserted: Touch; keys: KeyChange[] };
 }
 
 export interface DeckPill {
@@ -354,6 +360,7 @@ export class DeckHistoryController {
           requestedAt,
           revision: next ? next.seq : null,
           earlierRevision: prev ? prev.seq : null,
+          elementHistory: (earlier, shown) => elementHistory(diff, earlier, shown), // P3-E
         },
       });
     } catch (error) {

@@ -9,14 +9,22 @@
 // one with one per identity: an element present on both sides keeps its own identity, and an ambiguous identity (two
 // candidates on a side) stays as C reads it.
 //
-// A paired move across boards is one change at its destination, credited to whoever added it there, carrying what else
-// differs in it (its geometry, its style, its text; never the association, its parent or its place in the stack, which
-// the move itself sets), and its moved descendants grouped under it, each counted only for a change of its own. A pair on
+// A paired move across boards is one change at its destination, credited to whoever inserted the element there (C's
+// `elementHistory`, the P3-E spec's Decision Log 30: the element's own item in the window's provenance, never the board's
+// creator), carrying what else differs in it, each key credited by its own leaf as C credits a node re-created under a
+// kept id (a later edit by its author, the same-minute rule C's), and its moved descendants grouped under it, each
+// counted only for a change of its own. What the relocation itself writes stays out: the association always; the
+// parent when it is the same one (the root's: the destination's top level, where every move puts it); the root's paint
+// key (`order`, `z`) only when credited to the move itself (its inserter, the same minute). A paint key or a parent
+// credited otherwise is a later, authored edit and is kept. The boundary: through `{inserted, keys}` a restack of the
+// moved root by its own mover within the same minute cannot be told from the move's own key, and is read as the move's.
+// Without C's accessor (a preview made elsewhere), the keys are compared plainly and credited to the move. A pair on
 // one board is an element that went away and came back: shown as a change of what actually differs, or nothing. The
 // source keeps a ghost entry, `movedAway`, that counts nothing. The count and ↑ ↓'s stops are this projection's: the
 // workbench's bar and navigation read them, and the new-change pill counts them through C's `countChanges` hook, so the
 // pill and the preview agree. Pure: no DOM.
-import type { DeckChanges, DeckDiff, ElementChange, KeyChange, SlideChange, Touch } from '../slides/history';
+import type { DeckChanges, DeckDiff, ElementChange, ElementPlace, KeyChange, SlideChange, Touch } from '../slides/history';
+import { elementHistory } from '../slides/history';
 import { ROOT } from '../slides/model';
 import type { Doc } from '../yjs';
 import * as Y from '../yjs/slides';
@@ -109,28 +117,31 @@ function pairsOf(removals: Side[], additions: Side[], prev: Doc, next: Doc): { r
 
 const plain = (v: unknown): string => JSON.stringify(v);
 
-/**
- * What differs between an element as it was and as it is (its scalars and its text), ignoring the association, and its
- * parent when `parent` says the parent is the same one; `place` ignores the paint keys too (a move sets them).
- */
-function differences(prev: Doc, was: Side, next: Doc, now: Side, ignore: { parentSame: boolean; place: boolean }, touch: Touch): KeyChange[] {
-  const a = Y.elementScalars(prev, was.board, was.id);
-  const b = Y.elementScalars(next, now.board, now.id);
-  const skip = new Set<string>([MOVE_ORIGIN_KEY, ...(ignore.parentSame ? ['parent'] : []), ...(ignore.place ? ['parent', 'order', 'z'] : [])]);
-  const keys: KeyChange[] = [];
-  for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-    if (skip.has(key) || plain(a[key]) === plain(b[key])) continue;
-    keys.push({ key, kind: key in b ? 'set' : 'removed', by: touch.by, at: touch.at });
-  }
-  const text = (doc: Doc, s: Side) => (Y.hasText(doc, s.board, s.id) ? plain(Y.readText(doc, s.board, s.id)) : '');
-  if (text(prev, was) !== text(next, now)) keys.push({ key: 'text', kind: 'set', by: touch.by, at: touch.at });
-  return keys.sort((x, y) => (x.key < y.key ? -1 : 1));
+/** One element's history between two places: C's `elementHistory` over the comparison's diff (Decision Log 30). */
+export type ElementHistory = (earlier: ElementPlace, shown: ElementPlace) => { inserted: Touch; keys: KeyChange[] };
+
+/** Without C's accessor: what differs, plainly (the scalars and the text), each credited to `touch`. */
+function plainHistory(prev: Doc, next: Doc, touch: Touch): ElementHistory {
+  return (earlier, shown) => {
+    const a = Y.elementScalars(prev, earlier.slideId, earlier.elementId);
+    const b = Y.elementScalars(next, shown.slideId, shown.elementId);
+    const keys: KeyChange[] = [];
+    for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) if (plain(a[key]) !== plain(b[key])) keys.push({ key, kind: key in b ? 'set' : 'removed', by: touch.by, at: touch.at });
+    const text = (doc: Doc, p: ElementPlace) => (Y.hasText(doc, p.slideId, p.elementId) ? plain(Y.readText(doc, p.slideId, p.elementId)) : '');
+    if (text(prev, earlier) !== text(next, shown)) keys.push({ key: 'text', kind: 'set', by: touch.by, at: touch.at });
+    return { inserted: { by: null, at: null }, keys };
+  };
 }
 
 const touchOf = (t: Touch): Touch => ({ by: t.by, at: t.at });
+const sameTouch = (a: Touch, b: Touch): boolean => a.by === b.by && a.at === b.at;
+const PAINT = new Set(['order', 'z']);
 
-/** The design's projection of C's change set over the same two states (module header). */
-export function designChanges(docs: Pick<DeckDiff, 'prevDoc' | 'nextDoc'>, changes: DeckChanges): DesignChanges {
+/**
+ * The design's projection of C's change set over the same two states (module header); `history` is C's element history
+ * over their diff (a preview's `elementHistory`, or `elementHistory` bound to the diff), else keys are compared plainly.
+ */
+export function designChanges(docs: Pick<DeckDiff, 'prevDoc' | 'nextDoc'>, changes: DeckChanges, history?: ElementHistory): DesignChanges {
   const { prevDoc: prev, nextDoc: next } = docs;
   const { removals, additions } = sidesOf(changes, prev, next);
   const pairs = pairsOf(removals, additions, prev, next);
@@ -156,23 +167,28 @@ export function designChanges(docs: Pick<DeckDiff, 'prevDoc' | 'nextDoc'>, chang
   const push = (board: string, entry: DesignElementChange) => added.set(board, [...(added.get(board) ?? []), entry]);
   const moves = new Map<string, ElementMove>();
   for (const { removal, addition } of pairs) {
-    const touch = touchOf(addition);
+    const earlierPlace = { slideId: removal.board, elementId: removal.id };
+    const shownPlace = { slideId: addition.board, elementId: addition.id };
+    const found = (history ?? plainHistory(prev, next, touchOf(addition)))(earlierPlace, shownPlace);
+    // the element's own insertion here (the mover), not the board's when the board came in the window too
+    const touch = found.inserted.by !== null ? touchOf(found.inserted) : touchOf(addition);
     const earlierParent = String(Y.elementScalars(prev, removal.board, removal.id).parent ?? ROOT);
     const mappedParent = earlierParent === ROOT ? ROOT : (byRemoval.get(`${removal.board}\u0000${earlierParent}`)?.addition.id ?? earlierParent);
-    const parentSame = mappedParent === parentOf(addition);
-    if (removal.board === addition.board) {
-      // home again: what actually differs, or nothing
-      const keys = differences(prev, removal, next, addition, { parentSame, place: false }, touch);
-      if (keys.length > 0) push(addition.board, { id: addition.id, kind: 'changed', keys, ...touch });
+    const shownParent = parentOf(addition);
+    const crossRoot = removal.board !== addition.board && rootOf(addition) === addition;
+    const keys = found.keys
+      .filter((k) => k.key !== MOVE_ORIGIN_KEY)
+      // the parent the move gave it: the same one mapped through the pairs, or the top level a moved root lands at
+      .filter((k) => k.key !== 'parent' || !(mappedParent === shownParent || (crossRoot && shownParent === ROOT)))
+      // the root's paint key the move wrote, credited to the move itself; a later, authored restack stays
+      .filter((k) => !(crossRoot && PAINT.has(k.key) && (history === undefined || sameTouch(k, touch))))
+      .map((k) => (history === undefined ? { ...k, ...touch } : k));
+    if (!crossRoot) {
+      // home again, or a descendant moved with its root: what actually differs, or nothing
+      if (keys.length > 0) push(addition.board, { id: addition.id, kind: 'changed', keys, ...latestTouch(keys) });
       continue;
     }
-    const root = rootOf(addition);
-    if (root !== addition) {
-      const keys = differences(prev, removal, next, addition, { parentSame, place: false }, touch);
-      if (keys.length > 0) push(addition.board, { id: addition.id, kind: 'changed', keys, ...touch });
-      continue;
-    }
-    const move: ElementMove = { kind: 'moved', id: addition.id, from: { board: removal.board, id: removal.id }, keys: differences(prev, removal, next, addition, { parentSame, place: true }, touch), descendants: [], ...touch };
+    const move: ElementMove = { kind: 'moved', id: addition.id, from: { board: removal.board, id: removal.id }, keys, descendants: [], ...touch };
     moves.set(at(addition), move);
     push(addition.board, move);
     push(removal.board, { kind: 'movedAway', id: removal.id, to: { board: addition.board, id: addition.id }, ...touchOf(removal) });
@@ -196,6 +212,13 @@ export function designChanges(docs: Pick<DeckDiff, 'prevDoc' | 'nextDoc'>, chang
   return { deck: changes.deck, boards, count };
 }
 
+/** The latest of some keys' touches (a missing time loses). */
+function latestTouch(keys: readonly KeyChange[]): Touch {
+  let best: Touch = { by: null, at: null };
+  for (const k of keys) if (best.by === null || (k.at ?? -Infinity) > (best.at ?? -Infinity)) best = { by: k.by, at: k.at };
+  return best;
+}
+
 /** ↑ ↓'s stops: the deck, then per board its own change, then each element change but the ghosts of moves away. */
 export function designStops(changes: DesignChanges): DesignStop[] {
   const stops: DesignStop[] = [];
@@ -208,4 +231,4 @@ export function designStops(changes: DesignChanges): DesignStop[] {
 }
 
 /** C's `countChanges` hook for a design's history controller: the projection's count (Decision Log 23). */
-export const countDesignChanges = (diff: Pick<DeckDiff, 'prevDoc' | 'nextDoc'>, changes: DeckChanges): number => designChanges(diff, changes).count;
+export const countDesignChanges = (diff: Pick<DeckDiff, 'prevDoc' | 'nextDoc' | 'renderer' | 'attributions'>, changes: DeckChanges): number => designChanges(diff, changes, (earlier, shown) => elementHistory(diff, earlier, shown)).count;
