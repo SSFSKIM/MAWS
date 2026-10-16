@@ -26,46 +26,73 @@ const time = (ts: string) => {
 /** How close to the bottom, in pixels, a reader counts as reading the tail. */
 const TAIL_SLACK = 48;
 
+/** Where each row of the list was, and how tall the list and its box were, when last measured. */
+type Measured = { content: number; box: number; rows: Map<Element, { top: number; bottom: number }> };
+
+function measure(el: HTMLElement): Measured {
+  const rows = new Map<Element, { top: number; bottom: number }>();
+  for (const row of el.children) {
+    const r = row as HTMLElement;
+    rows.set(row, { top: r.offsetTop, bottom: r.offsetTop + r.offsetHeight });
+  }
+  return { content: el.scrollHeight, box: el.clientHeight, rows };
+}
+
+/** At the tail, or kept in place: `was` is the list as measured before this change, `el.scrollTop` the reader's now. */
+function settle(el: HTMLElement, was: Measured | null): Measured {
+  if (was === null || was.content - el.scrollTop - was.box <= TAIL_SLACK) {
+    el.scrollTop = el.scrollHeight;
+  } else {
+    // The row at the top of what the reader sees, as the list was laid out when they saw it.
+    let anchor: Element | null = null;
+    for (const [row, at] of was.rows) {
+      if (at.bottom > el.scrollTop && row.isConnected) {
+        anchor = row;
+        break;
+      }
+    }
+    if (anchor) el.scrollTop += (anchor as HTMLElement).offsetTop - was.rows.get(anchor)!.top;
+  }
+  return measure(el);
+}
+
 /**
  * Keeps a scrolled list at its tail while the reader is there: it opens at the tail, and whatever is added or grows
  * below (a message, a card, Markdown drawn late) keeps it there; once the reader scrolls up, or a landing scrolls to its
  * card, it stays where it was put until the reader returns to the bottom.
  *
- * Whether the reader is at the tail is judged at each change, from the scroll position as it is now against the list as
- * it was last measured (its content height and its own height before this change), never from the last scroll event:
- * the browser delivers that a frame late, so a scroll to the bottom followed at once by a new row (desktop Chrome, 9 ms
- * apart) would read as the reader not being there.
+ * Whether the reader is at the tail is judged at each change (a commit, a resize), from the scroll position as it is
+ * now against the list as it was last measured, never from the last scroll event: the browser delivers that a frame
+ * late, so a scroll to the bottom followed at once by a new row (desktop Chrome, 9 ms apart) would read as the reader
+ * not being there. That judgement holds only while the scroll position moves for the reader alone, so the browser's own
+ * scroll anchoring is off (`overflow-anchor: none`), and a reader off the tail is kept in place here instead: the row
+ * they were reading keeps its place on the screen when a row above it grows.
  */
 function useTail(items: StreamItem[], outbox: OutboxItem[], landed: string | null) {
   const list = useRef<HTMLOListElement>(null);
   const landedRow = useRef<HTMLLIElement>(null);
   /** The list as last measured: null before the first change, which opens at the tail. */
-  const measured = useRef<{ content: number; box: number } | null>(null);
-  // What was added moves the tail, before it is painted.
+  const measured = useRef<Measured | null>(null);
+  // What was added moves the tail, or keeps the reader in place, before it is painted.
   useLayoutEffect(() => {
-    const el = list.current;
-    if (!el) return;
-    const was = measured.current;
-    if (was === null || was.content - el.scrollTop - was.box <= TAIL_SLACK) el.scrollTop = el.scrollHeight;
-    measured.current = { content: el.scrollHeight, box: el.clientHeight };
+    if (list.current) measured.current = settle(list.current, measured.current);
   }, [items, outbox]);
-  // Rows that grow after they are drawn (Markdown loaded late, a card's preview), and the list's own box (the composer
-  // growing beneath it), move it too.
+  // Rows that grow after they are drawn (Markdown loaded late, a card's preview, a fold opened), and the list's own box
+  // (the composer growing beneath it), do too.
   useEffect(() => {
     const el = list.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      const was = measured.current;
-      if (was === null || was.content - el.scrollTop - was.box <= TAIL_SLACK) el.scrollTop = el.scrollHeight;
-      measured.current = { content: el.scrollHeight, box: el.clientHeight };
-    });
+    const observer = new ResizeObserver(() => (measured.current = settle(el, measured.current)));
     observer.observe(el);
     for (const row of el.children) observer.observe(row);
     return () => observer.disconnect();
   }, [items, outbox]);
   // A landing decides where the reader is: scrolled to its card, the reader is no longer at the tail.
   useEffect(() => {
-    landedRow.current?.scrollIntoView({ block: 'center' });
+    const el = list.current;
+    if (!el || !landedRow.current) return;
+    landedRow.current.scrollIntoView({ block: 'center' });
+    measured.current = measure(el);
   }, [landed]);
   return { list, landedRow };
 }
@@ -73,7 +100,8 @@ function useTail(items: StreamItem[], outbox: OutboxItem[], landed: string | nul
 export function StreamView({ items, outbox, landed = null }: { items: StreamItem[]; outbox: OutboxItem[]; landed?: string | null }) {
   const { list, landedRow } = useTail(items, outbox, landed);
   return (
-    <ol ref={list} className="m-0 min-h-0 flex-1 list-none overflow-y-auto px-4 py-3" data-testid="channel-events">
+    // `relative`: the rows measure their place from the list itself; `overflow-anchor: none`: useTail keeps the reader in place.
+    <ol ref={list} className="relative m-0 min-h-0 flex-1 list-none overflow-y-auto px-4 py-3 [overflow-anchor:none]" data-testid="channel-events">
       {items.length === 0 && outbox.length === 0 && <li className="text-ui-sm text-fg-muted">Nothing here yet.</li>}
       {items.map((item) => (
         <li
