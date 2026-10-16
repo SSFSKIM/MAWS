@@ -3050,9 +3050,11 @@ deployment, so they never switch the production Worker's org, is deferred.
 **The owner's first steps** (DX7's ordering): sign in, set up the org key first (the first unlock method), then
 enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the code pasted at its hidden prompt).
 
-**State** (2026-10-15, evening):
-- **Deployed:** `hub@85e83830 web@smns-erb-web.fdb7b406`. DC3's `90ace676` (a `503 delivery-failed` keeps the
-  frames its batched call applied) is reviewed and waits for a redeploy scheduled around the owner's phone walk.
+**State** (2026-10-15, night):
+- **Deployed:** `hub@b11ea5f8 web@smns-erb-web.3de8a15e` (Worker version `bf5e8232`): DC3's whole branch after its
+  panel wave (the hub's code at `36d6bae3`) and DC5's web after its Task 6, so DX3's paged `resume` runs on both
+  sides. The deploy reconciled Access with no change and left the walk's machine, project, push subscription, and
+  org key as they were. Before it: `hub@85e83830 web@smns-erb-web.fdb7b406`.
 - **Org key:** set up by the owner in the phone walk's Part 2 (fingerprint `8133-6dc8-be8e`), with a passkey and a
   passphrase.
 - **Machines:** `phone-walk`, the fake machine enrolled from an owner-made code for the walk's pushed requests, with
@@ -3237,9 +3239,9 @@ a hub that connects into machines (§2).
 | --- | --- | --- |
 | DC1 bridge spike | findings: `docs/doperpowers/specs/2026-10-15-arkho-desk-c1-findings.md` | **landed 2026-10-15**: 11 items, every primitive promoted, six with a change folded into §2 and §5; probe kept at `/tmp/c1probe` |
 | DC2 bridge | plan: `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md` (doperpowers, branch `worktree-smns-erb`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/195, merge `a6c90a13`, 7.155.0; report `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-report.md` |
-| DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | in-flight: M1–M5 built (2026-10-15); deployed behind Access in the org `ssfskim` (hub `85e83830`, web `fdb7b406`), nothing enrolled; final review, panel, and PR next |
+| DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | **PR open 2026-10-15**: M1–M5, the xhigh panel and its fix waves, and the joint re-review clean; PR https://github.com/SSFSKIM/MAWS/pull/14 (`smns-erb` → `master`); Linux gate run 38846390702 green on `36d6bae3`; deployed `hub@b11ea5f8 web@smns-erb-web.3de8a15e`; residue the staging re-measure and the shared per-session stream (Deferred), two tech-debt rows in the PR; report `docs/doperpowers/plans/2026-10-15-desk-dc3-report.md` |
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/194, merge `9e7d3d30`, 7.156.0 (main merged in at `2a864e49` after DC2); report `docs/doperpowers/plans/2026-10-15-desk-dc4-report.md` |
-| DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
+| DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | **PR open 2026-10-15**: every task reviewed clean; PR https://github.com/SSFSKIM/MAWS/pull/13, stacked on `smns-erb`, retargeted to `master` when DC3 merges; 256 unit tests, the Linux lane 38/38 (runs 38846307022, 38847209275), against the local hub with the fake machine local-hub 7/7 and session-plane 9/9; the owner's phone walk through P2.12, P2.11 pending; the xhigh whole-branch panel (`895e27d1..3de8a15e`) running; report `docs/doperpowers/plans/2026-10-15-desk-dc5-report.md` |
 | DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | **PR open 2026-10-15**: M1–M3 and the branch reviewed clean (`high`, after two final fix waves); PR https://github.com/SSFSKIM/MAWS/pull/12, stacked on `smns-erb-web`, retargeted to `master` when DC5 merges; Linux gate run 38818748087 green (67 browser tests, 8 acceptance specs against the fake machine); report `docs/doperpowers/plans/2026-10-15-desk-dc6-report.md` |
 | DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`; four P2 fixed after the final review, the presence watermark among them); PR https://github.com/SSFSKIM/doperpowers/pull/196 (branch `dc7-controls`), merge `af3a5573`, 7.157.0; sminos 1740/1742 (the two load-timing assertions in TECH-DEBT), mods 298/298; Resume live 5/5 on 2.1.301; report `docs/doperpowers/plans/2026-10-15-desk-dc7-report.md` |
 
