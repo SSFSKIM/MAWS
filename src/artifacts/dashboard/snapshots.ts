@@ -1,13 +1,14 @@
-// The editor's reach to a snapshot's rows (P3-E2 M3; XE5, the ledger's X23 `readDataset`): the whole of one immutable
+// The reach to a snapshot's rows (P3-E2 M3, moved here from editor/ by M5 for main's exporters, E's Decision Log 32;
+// XE5, the ledger's X23 `readDataset`; DOM-free): the whole of one immutable
 // snapshot, named by its asset ref and the format the displayed descriptor reads it in, read page by page from the host
 // (each page bounded in rows and bytes, so the next starts at the rows the last one answered, never at `limit`). Every
 // view of a dashboard and its source sheet share one reader per tab: a snapshot is read once while cached, concurrent
 // readers wait on the same read, the least recently read snapshot leaves past the bound, and a failed read is not
 // kept. A ref names immutable bytes, so a cached snapshot is never stale; the host checks the artifact's ownership on
 // every page.
-import type { ArtifactHost } from '../../host';
-import type { DatasetFormat } from '../datasets';
-import type { ViewTable } from '../render';
+import type { ArtifactHost } from '../host';
+import type { DatasetFormat } from './datasets';
+import type { ViewTable } from './render';
 
 export interface SnapshotRef {
   ref: string;

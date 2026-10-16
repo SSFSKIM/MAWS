@@ -48,7 +48,35 @@ export interface ExportOptions<T = LocalTokens> {
   system?: DesignSystemExport<T>;
   /** Letter or A4 (Decision Log 43); the system's page size, else Letter, when absent. */
   pageSize?: PageSize;
+  // P3-E start (E2 M5; E's Decision Logs 15, 24 and 32): a kind's drawing of a `chart` block, prepared before the export
+  // runs (synchronous, as `ImageLoader`'s work is preloaded); undefined keeps the labelled placeholder
+  renderView?: ViewRenderer;
+  /** CSS appended to the HTML page's own (through the system's resolver, as the theme is), when given. */
+  viewCss?: string;
+  // P3-E end
 }
+
+// P3-E start (E2 M5; E's Decision Log 32): what a chart block exports as. A chart is its SVG (with its size in CSS px and,
+// for Word, a PNG of it as the fallback picture); a table is a native table, its HTML and the same cells as text (one
+// formatter writes both, so nothing reads generated HTML back). Both carry the caption, the source label, the warnings
+// shown under the label (E's Decision Log 35; a table's preview and overflow notes stay in `table.notes`), and the view
+// as GFM for a Markdown export.
+export interface ExportViewTable {
+  columns: { name: string; numeric: boolean }[];
+  rows: string[][];
+  notes: string[];
+}
+interface ExportViewCommon {
+  caption: string;
+  sourceLabel: string;
+  /** What the view could not show as asked, and its dataset's validation notes: under the label. */
+  warnings?: readonly string[];
+  /** The view as Markdown: caption, the bounded preview as GFM, its notes and the label. */
+  markdown: string;
+}
+export type ExportView = ExportViewCommon & ({ svg: string; width: number; height: number; png?: Uint8Array; html?: never; table?: never } | { html: string; table: ExportViewTable; svg?: never; width?: never; height?: never; png?: never });
+export type ViewRenderer = (node: PMNode) => ExportView | undefined;
+// P3-E end
 
 /** The tabs an export writes: the one named, else every tab. */
 export function tabsOf(source: ExportSource, tab: string | undefined): ExportTab[] {

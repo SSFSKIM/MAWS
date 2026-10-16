@@ -13,7 +13,7 @@ import { snapshotOf, type Cell, type DatasetDescriptor } from '../datasets';
 import { compareCells, viewRows, type ViewTable } from '../render';
 import { mismatchNotes, sourceLabel, VIEW_STATES } from '../states';
 import type { SheetDataset, SourceSheetState } from './sheet';
-import type { SnapshotReader } from './snapshots';
+import type { SnapshotReader } from '../snapshots';
 import { toTsv } from './tsv';
 import './sheet.css';
 

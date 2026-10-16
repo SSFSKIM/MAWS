@@ -9,7 +9,7 @@ import type { DatasetPage } from '../../host';
 import type { DatasetDescriptor } from '../datasets';
 import { SourceSheet } from './SourceSheet';
 import { SourceSheetState } from './sheet';
-import { SnapshotReader } from './snapshots';
+import { SnapshotReader } from '../snapshots';
 
 const AT = Date.UTC(2026, 9, 16, 8, 30);
 const descriptor = (ref: string, rows: number, over: Partial<DatasetDescriptor> = {}): DatasetDescriptor => ({

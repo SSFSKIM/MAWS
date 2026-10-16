@@ -2,7 +2,7 @@
 // `ArtifactHost.readDataset` by ref and format, continuing at the rows each page answered; one read per snapshot while
 // cached (bounded), shared by every view and the source sheet; a failed read is not kept.
 import { describe, expect, it, vi } from 'vitest';
-import type { ArtifactHost, DatasetPage } from '../../host';
+import type { ArtifactHost, DatasetPage } from '../host';
 import { SnapshotReader } from './snapshots';
 
 const columns = [{ name: 'n', type: 'number' as const }];

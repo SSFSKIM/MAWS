@@ -9,7 +9,7 @@ import { listDatasets } from '@artifacts/dashboard/datasets';
 import { datasetChanges } from '@artifacts/dashboard/history';
 import { createChartRenderer } from '@artifacts/dashboard/editor/chart-view';
 import { SourceSheetState, type SheetDataset } from '@artifacts/dashboard/editor/sheet';
-import { SnapshotReader } from '@artifacts/dashboard/editor/snapshots';
+import { SnapshotReader } from '@artifacts/dashboard/snapshots';
 import { onUpdate, type Doc } from '@artifacts/yjs';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import { DocumentTabState, type DocumentTabDeps } from '../document/tab-state';

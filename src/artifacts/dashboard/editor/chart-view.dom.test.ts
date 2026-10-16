@@ -9,7 +9,7 @@ import { displayedDocument, type ViewEnvironment } from '../../document/editor/n
 import { newDoc, type Doc } from '../../yjs';
 import { removeDataset, setDataset, type DatasetDescriptor } from '../datasets';
 import { createChartRenderer, type SourceCapture } from './chart-view';
-import { SnapshotReader } from './snapshots';
+import { SnapshotReader } from '../snapshots';
 
 const AT = Date.UTC(2026, 9, 16, 8, 30);
 const descriptor = (ref: string, over: Partial<DatasetDescriptor> = {}): DatasetDescriptor => ({

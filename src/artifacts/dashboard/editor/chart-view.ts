@@ -18,7 +18,7 @@ import { captionOf, renderFailure, renderView, themeFrom, THEME_PROPERTIES, type
 import { parseSpec } from '../spec';
 import { DATASET_STATES, mismatchNotes, sourceLabel } from '../states';
 import { attachHover } from './hover';
-import type { SnapshotReader } from './snapshots';
+import type { SnapshotReader } from '../snapshots';
 
 /** What the source sheet opens on: the dataset as the view drew it (a copy of its descriptor, never a live lookup) and
  * the view's spec, whose transformed rows the sheet shows beside the snapshot's. */

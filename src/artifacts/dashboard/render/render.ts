@@ -14,6 +14,7 @@
 // so its strokes never take the bar's pointer); the points of a line, an area or a scatter, every drawable one, sit in
 // one empty layer, `<g data-hover="nearest" data-xy="x,y …" data-tips="…">` (tips one per line), which the host
 // searches for the point nearest the pointer, so hover reaches every value without one element per point.
+import type { ExportViewTable } from '../../document/export/source';
 import type { Cell } from '../datasets';
 import { parseSpec, type ValueFormat, type ViewSpec } from '../spec';
 import { DATASET_STATES, VIEW_STATES } from '../states';
@@ -28,7 +29,7 @@ import { columnFormat, instantOf, overflowKey, shownColumns, transform, typedKey
  * exactly one of `svg` and `html` is set. A state drawn in place (an error, an empty view) is an SVG frame for every
  * kind.
  */
-export type Rendered = ({ svg: string; html?: never } | { html: string; svg?: never }) & {
+export type Rendered = ({ svg: string; html?: never; table?: never } | { html: string; table: ExportViewTable; svg?: never }) & {
   /** What the view could not show as asked (dropped spec keys, undrawn rows, shortened labels): noted under it. */
   warnings: string[];
 };
@@ -759,18 +760,50 @@ const html = (value: string): string => esc(value);
  * caption. The page's and the exporters' stylesheets draw it. Each column takes its role's format (`columnFormat`).
  */
 function tableView(v: View): Rendered {
-  const { spec, data, warnings } = v;
+  const table = preview(v.spec, v.data, shownColumns(v.data, v.spec));
+  const cell = (tag: 'th' | 'td', k: number, content: string) => `<${tag}${table.columns[k].numeric ? ' class="dash-num"' : ''}>${html(content)}</${tag}>`;
+  const head = `<thead><tr>${table.columns.map((c, k) => cell('th', k, c.name)).join('')}</tr></thead>`;
+  const rows = table.rows.map((row) => `<tr>${row.map((value, k) => cell('td', k, value)).join('')}</tr>`).join('');
+  const { notes } = table;
+  return { html: `<table class="dash-table">${notes.length > 0 ? `<caption class="dash-table-note">${html(notes.join(' · '))}</caption>` : ''}${head}<tbody>${rows}</tbody></table>`, table, warnings: v.warnings };
+}
+
+/**
+ * P3-E2 M5 (E's Decision Log 32): the one preview formatter. The transformed view's columns `at`, each in its role's
+ * format, its first rows in spec order (`TABLE_VIEW_ROWS` without a `limit`, the `limit` up to `TABLE_VIEW_MAX_ROWS`
+ * with one), and its notes: "first <n> of <N> rows" when it shows fewer than the view holds, "no rows to draw" when it
+ * holds none, then the transform's (an overflowed aggregate, its cell "overflow"). The table view's HTML, Word's native
+ * cells and a Markdown export's GFM are all written from this, never from one another.
+ */
+function preview(spec: ViewSpec, data: ViewData, at: number[]): ExportViewTable {
   const { table } = data;
-  const at = shownColumns(data, spec);
   const cols = at.map((i) => table.columns[i]);
   const formats = at.map((i) => columnFormat(spec, data, i));
   const bound = spec.limit === undefined ? TABLE_VIEW_ROWS : Math.min(spec.limit, TABLE_VIEW_MAX_ROWS);
   const shown = table.rows.slice(0, bound);
-  const numeric = cols.map((c) => c.type === 'number');
-  const cell = (tag: 'th' | 'td', k: number, content: string) => `<${tag}${numeric[k] ? ' class="dash-num"' : ''}>${html(content)}</${tag}>`;
-  const head = `<thead><tr>${cols.map((c, k) => cell('th', k, c.name)).join('')}</tr></thead>`;
   const value = (row: readonly Cell[], r: number, i: number, k: number) => (data.overflow.has(overflowKey(r, i)) ? VIEW_STATES.overflowCell : formatCell(row[i] ?? null, cols[k], formats[k]));
-  const rows = shown.map((row, r) => `<tr>${at.map((i, k) => cell('td', k, value(row, r, i, k))).join('')}</tr>`).join('');
   const notes = [table.rows.length === 0 ? VIEW_STATES.empty : table.rows.length > shown.length ? VIEW_STATES.tablePreview(shown.length, table.rows.length) : null, ...data.notes].filter((n): n is string => n !== null);
-  return { html: `<table class="dash-table">${notes.length > 0 ? `<caption class="dash-table-note">${html(notes.join(' · '))}</caption>` : ''}${head}<tbody>${rows}</tbody></table>`, warnings };
+  return { columns: cols.map((c) => ({ name: c.name, numeric: c.type === 'number' })), rows: shown.map((row, r) => at.map((i, k) => value(row, r, i, k))), notes };
+}
+
+/**
+ * P3-E2 M5: a view's data as `preview` bounds and notes it: a table view's shown columns, a chart's the figure's roles
+ * (its x, its series, each measure, as the transform aggregated them), or why there is none (the state its figure draws).
+ */
+export function viewPreview(spec: unknown, table: ViewTable, datasetId: string): { ok: true; table: ExportViewTable } | { ok: false; error: string } {
+  const parsed = parseSpec(spec);
+  if (!parsed.ok) return { ok: false, error: parsed.error };
+  const shaped = transform(table, parsed.spec, datasetId);
+  if (!shaped.ok) return shaped;
+  const { data } = shaped;
+  const roles = [...new Set([data.x, data.series, ...data.ys].filter((i): i is number => i !== undefined))];
+  const at = parsed.spec.view === 'table' || roles.length === 0 ? shownColumns(data, parsed.spec) : roles;
+  return { ok: true, table: preview(parsed.spec, data, at) };
+}
+
+/** P3-E2 M5: a figure's size in CSS px, as its root element states it (`frame` writes both). */
+export function svgSize(svg: string): { width: number; height: number } {
+  const root = /^<svg [^>]*?width="([\d.]+)" height="([\d.]+)"/.exec(svg);
+  if (!root) throw new Error('not a figure of this renderer');
+  return { width: Number(root[1]), height: Number(root[2]) };
 }
