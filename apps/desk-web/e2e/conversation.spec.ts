@@ -408,3 +408,36 @@ test("when a machine disconnects its sessions' presence and depth show as unavai
   await expect(composer.getByRole('button', { name: 'Compact' })).toHaveAttribute('title', 'mini is offline');
   await expect(composer.getByTestId('composer-note')).toHaveText('kept in the log; delivered when mini reconnects');
 });
+
+test('a channel opens at its tail and follows it while the reader is at the bottom; scrolled back, or landed on a card, it stays put', async ({ page, hub }) => {
+  await stageProject(hub);
+  const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rt${n}#0` });
+  const first = await message(1);
+  for (let n = 2; n <= 60; n++) await message(n);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await open(page, hub);
+  await expect(line(60)).toBeInViewport();
+  await message(61);
+  await expect(line(61)).toBeInViewport();
+
+  // Scrolled back on purpose: what comes next does not pull the reader down.
+  await center(page).getByTestId('channel-events').evaluate((el) => el.scrollTo({ top: 0 }));
+  await expect(line(1)).toBeInViewport();
+  await message(62);
+  await expect(line(62)).toBeAttached();
+  await expect(line(62)).not.toBeInViewport();
+  await expect(line(1)).toBeInViewport();
+
+  // Back at the bottom, it follows again.
+  await center(page).getByTestId('channel-events').evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+  await message(63);
+  await expect(line(63)).toBeInViewport();
+
+  // A notification's landing on an early message keeps the reader there as the conversation goes on.
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}?writer=${encodeURIComponent(first.event.writer)}&seq=${first.event.seq}`);
+  await expect(center(page).locator('[data-landed]')).toContainText('line 1');
+  await expect(line(1)).toBeInViewport();
+  await message(64);
+  await expect(line(64)).toBeAttached();
+  await expect(line(1)).toBeInViewport();
+});
