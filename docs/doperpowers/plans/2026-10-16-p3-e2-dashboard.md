@@ -10,8 +10,8 @@ The owner and an agent can work on a document containing real charts and tables 
 
 - [x] (2026-10-16) Parent, interface ledger and B/C precedents grounded at 6e1b827fd; execution document drafted.
 - [x] (2026-10-16) Execution document adversarially reviewed; both findings folded; checkpoint rulings recorded in parent Decision Log 6–8. Initial document committed at 1a1faa996; M1 dispatched.
-- [ ] M1 — Renderer comparison: promote one route, discard the other.
-- [ ] M2 — Dataset boundary, atomic tool, bounded reader and dashboard kind.
+- [ ] M1 — Renderer comparison: prototype/fixes/evidence committed e2afc56fe..ede04feb6; final mini run 38892044284 green (6 e2e, 37 units, load 3.96). d3 recommended; task review pending before promotion.
+- [ ] M2 — Dataset boundary, atomic tool, bounded reader and dashboard kind (executing independently while M1's verdict is reviewed; base fcd11592d includes master 1dfe24eb1 and the HistoryRail fix).
 - [ ] M3 — Shared rendering and the dashboard editor with source inspection.
 - [ ] M4 — Block comments, history, restore and duplicate.
 - [ ] M5 — Four exports, mirror and complete kind guides.
@@ -92,7 +92,7 @@ The approved store signature is `ArtifactStore.writeWithAssets(artifactId: strin
 
 ### M6 — Full product acceptance and hand-back
 
-Run acceptance 1–8 on the product build, extending `e2e/dashboard.spec.ts`, `dashboard-export.spec.ts`, `dashboard-comments.spec.ts`, `dashboard-history.spec.ts` and support fixtures rather than test-only rendering paths. Add `e2e:dashboard` through `scripts/e2e-build.sh plain`; propose only `dashboard` for the architect's `CLASS1_E2E` edit. Add separately guarded live and scale scripts/specs (`MAWS_LIVE=1`, `MAWS_DASHBOARD_SCALE=1`) using existing scratch-config/live-budget lifecycle and quiet mini instrumentation. The scale fixture is `src/artifacts/dashboard/fixtures/bench.ts`; record every measured row, load and environment. Ratification of missed candidates goes to the architect, never an assertion relaxation hidden in a test.
+Run acceptance 1–8 on the product build, extending `e2e/dashboard.spec.ts`, `dashboard-export.spec.ts`, `dashboard-comments.spec.ts`, `dashboard-history.spec.ts` and support fixtures rather than test-only rendering paths. Add `e2e:dashboard` through `scripts/e2e-build.sh plain`; propose only `dashboard` for the architect's `CLASS1_E2E` edit. Add separately guarded live and scale scripts/specs (`MAWS_LIVE=1`, `MAWS_DASHBOARD_SCALE=1`) using existing scratch-config/live-budget lifecycle and quiet mini instrumentation. The scale fixture is `src/artifacts/dashboard/fixtures/bench.ts`; record every measured row, load and environment. On the mini, wait up to a few minutes for `os.loadavg()[0] < 10` after the build before measuring (the one-minute load lags the build's CPU burst); record the settle readings. If it never settles, report run id/readings to the architect as hardware evidence, not a product failure or timing pass. A same-commit rerun uses the e2e build cache. Ratification of missed candidates goes to the architect, never an assertion relaxation hidden in a test.
 
 After the master merge, final gate runs and whole-branch high review, route all actionable review findings into one fix wave, rerun affected gates, update this record and hand back branch/head/merge-base, run ids/counts, measurements, ledger names/files/lines, proposed tracker rows and any unmet acceptance. Do not land master or call unrun work green.
 
@@ -120,6 +120,9 @@ After the master merge, final gate runs and whole-branch high review, route all 
 - B's generic atom view redraws only on atom attribute changes and has no destroy hook (`src/artifacts/document/editor/nodes/atom.ts`). A dataset-only replacement changes neither chart attribute; E must own a subscribed node-view lifecycle, not just inject SVG once.
 - B's exporter context and `DocumentExporter.kind` are document-only; D's governing wrapper is generic over that type (`src/main/artifacts/export-document.ts`, `src/main/design-systems/documents.ts`). Reusing all four needs an additive kind widening and prepared view hook, not four duplicate serializers.
 - B's history mounts a separate preview editor; reading descriptors through the live handle would make a retained chart lie. The displayed Doc must travel with the view environment.
+
+- M1's real export screenshots found defects unit geometry did not initially catch: negative-bar value/category collision, SF Pro digit advance 0.63em rather than estimated 0.62, and categorical labels thinned by continuous-axis logic. Spike fixes cbb32731a and 1a4b6e340 are covered by new assertions and final mini run 38892044284.
+- M1's two DOM-free routes both pass the recorded comparison cases; d3's kit is 56 custom code lines versus 176 for the in-house route, which reached parity by recreating d3 tick/time algorithms. Full standalone render bundle: d3 71,343 bytes / 26,602 gzip; in-house 26,158 / 10,632. Quiet mini medians (load 3.96), 10,000 points: d3 line 11.69 ms, scatter 19.19 ms; in-house 11.42/13.13 ms. These are spike render costs, not M6's app/host/source-sheet scale results. Integrated B exporters and editor remain unproved until M3/M5. Full evidence: `spikes/p3-dashboard/findings.txt`.
 
 ## Decision Log
 
