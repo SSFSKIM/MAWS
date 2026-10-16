@@ -42,6 +42,7 @@ export interface BoardIR {
 export interface TabView {
   surface: string;
   viewport: Viewport | null;
+  room: { w: number; h: number } | null;
   frame: string | null;
   currentBoard: string | null;
   selection: string[];

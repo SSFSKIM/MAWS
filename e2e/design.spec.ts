@@ -203,7 +203,8 @@ test('a design in the panel and a main tab: two replicas, every board mounted th
       outside,
     };
   });
-  await test.info().attach('design-panel-geometry', { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
+  const panelView = await viewOf(page, id, 'panel'); // the view's room and viewport, to tell a stale room from a stale layout
+  await test.info().attach('design-panel-geometry', { body: JSON.stringify({ ...geometry, view: { room: panelView.room, viewport: panelView.viewport, frame: panelView.frame } }, null, 2), contentType: 'application/json' });
   // nothing overflows the panel sideways and nothing is scrolled: the editor fits it, every control lies inside it
   const panelBox = (await panel.boundingBox())!;
   const inside = async (what: string, locator: Locator) => {

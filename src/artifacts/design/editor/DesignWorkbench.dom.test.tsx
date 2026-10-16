@@ -460,3 +460,15 @@ describe('a gesture outside the world (post-fix gate: a pan crossing into the bo
     expect(boardFrame(doc, 'b2')!.x).toBe(440);
   });
 });
+
+describe('a fit after the layout moved (the regate: the inspector opened under the world, its resize not yet reported)', () => {
+  it('Fit selection reads the world’s size as it is now', () => {
+    const { container, view, world } = mount();
+    fireEvent.click(title(container, 'b1'));
+    // the world shrank (the inspector stacked under it) and no resize has been reported yet
+    for (const [k, v] of [['clientWidth', 1000], ['clientHeight', 300]] as const) Object.defineProperty(world, k, { configurable: true, get: () => v });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Zoom' }), { target: { value: 'fit-selection' } });
+    expect(view.snapshot().room).toEqual({ w: 1000, h: 300 });
+    expect(view.snapshot().viewport!.zoom).toBeCloseTo((300 - 96) / 844, 6);
+  });
+});

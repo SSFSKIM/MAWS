@@ -107,4 +107,30 @@ describe('the tab-owned view', () => {
     view.selectFrame('poster');
     expect(calls).toBe(2);
   });
+
+  it('reads the mounted body’s room as it is at every fit, not the last one reported (a rail opened since)', () => {
+    const view = new DesignView();
+    view.setRoom({ w: 380, h: 730 }); // reported before the inspector opened under the world
+    let live = { w: 380, h: 400 }; // the world's size now, its resize not yet reported
+    const detach = view.measureRoomWith(() => live);
+    view.fitTo({ x: 0, y: 0, w: 390, h: 844 }, 1);
+    expect(view.snapshot().room).toEqual({ w: 380, h: 400 });
+    expect(view.snapshot().viewport!.zoom).toBeCloseTo((400 - 96) / 844, 6);
+    // a zoom step is about the room's centre now
+    live = { w: 380, h: 300 };
+    view.step(1);
+    expect(view.snapshot().room).toEqual({ w: 380, h: 300 });
+    // nothing measures, and the view keeps its place on a resize: no fit happens unasked
+    view.setViewport({ zoom: 0.5, x: 10, y: 20 });
+    live = { w: 380, h: 900 };
+    view.setRoom(live);
+    expect(view.snapshot().viewport).toEqual({ zoom: 0.5, x: 10, y: 20 });
+    // the body gone: the last room stands; an unmeasurable body (hidden) is not read either
+    detach();
+    view.fitTo({ x: 0, y: 0, w: 390, h: 844 }, 1);
+    expect(view.snapshot().room).toEqual({ w: 380, h: 900 });
+    view.measureRoomWith(() => null);
+    view.fitTo({ x: 0, y: 0, w: 390, h: 844 }, 1);
+    expect(view.snapshot().room).toEqual({ w: 380, h: 900 });
+  });
 });

@@ -84,6 +84,8 @@ export class DesignView {
   private readonly listeners = new Set<() => void>();
   /** A fit asked before the room was measured, with its zoom cap. */
   private pendingFit: { rect: Rect; max: number } | null = null;
+  /** The mounted body's live measure of its room (null while none is mounted, or it cannot measure). */
+  private roomSource: (() => Room | null) | null = null;
 
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
@@ -109,10 +111,9 @@ export class DesignView {
     this.set({ viewport: { ...viewport, zoom: clampZoom(viewport.zoom) } });
   }
 
-  /** The body's measured size; a fit waiting for it lands now. */
+  /** The body's measured size; a fit waiting for it lands now. A resize alone never moves the view. */
   setRoom(room: Room): void {
-    const r = this.state.room;
-    if (!r || r.w !== room.w || r.h !== room.h) this.set({ room: { w: room.w, h: room.h } });
+    this.keepRoom(room);
     const fit = this.pendingFit;
     if (fit) {
       this.pendingFit = null;
@@ -120,9 +121,33 @@ export class DesignView {
     }
   }
 
+  private keepRoom(room: Room): void {
+    const r = this.state.room;
+    if (!r || r.w !== room.w || r.h !== room.h) this.set({ room: { w: room.w, h: room.h } });
+  }
+
+  /**
+   * The mounted body's measure of its room as it is now, read before every fit and zoom: a layout change (a rail opened
+   * under or beside the world) reaches the view's next fit even before its resize is reported (the narrow-panel regate:
+   * Fit selection right after the inspector opened fitted the room from before). Returns its removal.
+   */
+  measureRoomWith(source: () => Room | null): () => void {
+    this.roomSource = source;
+    return () => {
+      if (this.roomSource === source) this.roomSource = null;
+    };
+  }
+
+  /** The room now: the mounted body's measure when it has one, else the last reported. */
+  private currentRoom(): Room | null {
+    const live = this.roomSource?.() ?? null;
+    if (live) this.keepRoom(live);
+    return this.state.room;
+  }
+
   /** Shows `rect` whole (fit all, fit selection, zoom to board); waits for the room when it is not measured yet. */
   fitTo(rect: Rect, max = ZOOM_MAX): void {
-    const room = this.state.room;
+    const room = this.currentRoom();
     if (!room) {
       this.pendingFit = { rect, max };
       return;
@@ -133,7 +158,7 @@ export class DesignView {
   /** A zoom about the room's centre. */
   setZoom(zoom: number): void {
     const v = this.state.viewport;
-    const room = this.state.room;
+    const room = this.currentRoom();
     if (!v) return;
     this.setViewport(zoomAt(v, zoom, room ? { x: room.w / 2, y: room.h / 2 } : { x: 0, y: 0 }));
   }

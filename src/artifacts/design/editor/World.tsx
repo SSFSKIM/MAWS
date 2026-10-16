@@ -114,12 +114,20 @@ export function World(props: WorldProps) {
     const el = surface.current;
     if (!el) return;
     // a body not laid out (a hidden tab) measures nothing: the room it had stands
-    const measure = () => el.clientWidth > 0 && el.clientHeight > 0 && view.setRoom({ w: el.clientWidth, h: el.clientHeight });
+    const room = () => (el.clientWidth > 0 && el.clientHeight > 0 ? { w: el.clientWidth, h: el.clientHeight } : null);
+    const measure = () => {
+      const r = room();
+      if (r) view.setRoom(r);
+    };
     measure();
-    if (typeof ResizeObserver === 'undefined') return;
+    const detach = view.measureRoomWith(room); // every fit reads the world as it is then, reported or not
+    if (typeof ResizeObserver === 'undefined') return detach;
     const observer = new ResizeObserver(measure);
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      detach();
+    };
   }, [surface, view]);
 
   // an element selected (here or by the overlay) leaves the frame selection; a frame of a board gone is dropped

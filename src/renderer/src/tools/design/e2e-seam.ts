@@ -29,6 +29,8 @@ export type DesignSeamEdit =
 export interface DesignTabView {
   surface: string;
   viewport: Viewport | null;
+  /** The room the view last fitted into (the world's size as measured). */
+  room: { w: number; h: number } | null;
   frame: string | null;
   currentBoard: string | null;
   selection: readonly string[];
@@ -117,9 +119,9 @@ export function installDesignSeam(win: Window, host: () => ArtifactHost): void {
         .flatMap((tab) => {
           const session = tab.snapshot().session;
           if (!session) return [];
-          const { viewport, frame } = tab.view.snapshot();
+          const { viewport, room, frame } = tab.view.snapshot();
           const { currentSlide, selection } = session.snapshot();
-          return [{ surface: tab.surface, viewport, frame, currentBoard: currentSlide, selection, timings: { ...session.timings } }];
+          return [{ surface: tab.surface, viewport, room, frame, currentBoard: currentSlide, selection, timings: { ...session.timings } }];
         }),
   };
 }
