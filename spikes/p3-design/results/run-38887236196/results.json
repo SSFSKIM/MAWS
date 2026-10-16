@@ -1,0 +1,3959 @@
+{
+  "f.type": {
+    "f-document": {
+      "file": "test-results/design-spike/f-document.png",
+      "type": [
+        {
+          "tag": "h1",
+          "text": "Today 오늘",
+          "fontSize": "34px",
+          "lineHeight": "44.2px",
+          "fontWeight": "700",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "Three things need you · ",
+          "fontSize": "19px",
+          "lineHeight": "29.45px",
+          "fontWeight": "500",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "h1",
+          "text": "Heading one 제목",
+          "fontSize": "26px",
+          "lineHeight": "35.1px",
+          "fontWeight": "700",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "h2",
+          "text": "Heading two",
+          "fontSize": "21px",
+          "lineHeight": "30.45px",
+          "fontWeight": "700",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "h3",
+          "text": "Heading three",
+          "fontSize": "17px",
+          "lineHeight": "26.35px",
+          "fontWeight": "600",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "Body text on a phone scr",
+          "fontSize": "16px",
+          "lineHeight": "27.2px",
+          "fontWeight": "400",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "Caption · updated 2 min ",
+          "fontSize": "13px",
+          "lineHeight": "20.15px",
+          "fontWeight": "400",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "“Design is how it works.",
+          "fontSize": "17px",
+          "lineHeight": "29.75px",
+          "fontWeight": "400",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        }
+      ]
+    },
+    "f-deck": {
+      "file": "test-results/design-spike/f-deck.png",
+      "type": [
+        {
+          "tag": "h1",
+          "text": "Today 오늘",
+          "fontSize": "96px",
+          "lineHeight": "115.2px",
+          "fontWeight": "700",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "Three things need you · ",
+          "fontSize": "44px",
+          "lineHeight": "61.6px",
+          "fontWeight": "500",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "h1",
+          "text": "Heading one 제목",
+          "fontSize": "72px",
+          "lineHeight": "90px",
+          "fontWeight": "700",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "h2",
+          "text": "Heading two",
+          "fontSize": "56px",
+          "lineHeight": "72.8px",
+          "fontWeight": "700",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "h3",
+          "text": "Heading three",
+          "fontSize": "44px",
+          "lineHeight": "59.4px",
+          "fontWeight": "600",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "Body text on a phone scr",
+          "fontSize": "40px",
+          "lineHeight": "60px",
+          "fontWeight": "400",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "Caption · updated 2 min ",
+          "fontSize": "28px",
+          "lineHeight": "40.6px",
+          "fontWeight": "400",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "“Design is how it works.",
+          "fontSize": "48px",
+          "lineHeight": "69.6px",
+          "fontWeight": "400",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        }
+      ]
+    },
+    "f-plain-slide": {
+      "file": "test-results/design-spike/f-plain-slide.png",
+      "type": [
+        {
+          "tag": "h1",
+          "text": "Today 오늘",
+          "fontSize": "96px",
+          "lineHeight": "105.6px",
+          "fontWeight": "600",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "p",
+          "text": "Three things need you · ",
+          "fontSize": "32px",
+          "lineHeight": "44.8px",
+          "fontWeight": "400",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "h1",
+          "text": "Heading one 제목",
+          "fontSize": "96px",
+          "lineHeight": "105.6px",
+          "fontWeight": "600",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "h2",
+          "text": "Heading two",
+          "fontSize": "64px",
+          "lineHeight": "73.6px",
+          "fontWeight": "600",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "h3",
+          "text": "Heading three",
+          "fontSize": "44px",
+          "lineHeight": "52.8px",
+          "fontWeight": "600",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "p",
+          "text": "Body text on a phone scr",
+          "fontSize": "32px",
+          "lineHeight": "44.8px",
+          "fontWeight": "400",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "p",
+          "text": "Caption · updated 2 min ",
+          "fontSize": "32px",
+          "lineHeight": "44.8px",
+          "fontWeight": "400",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "p",
+          "text": "“Design is how it works.",
+          "fontSize": "32px",
+          "lineHeight": "44.8px",
+          "fontWeight": "400",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        }
+      ]
+    },
+    "f-plain-screen": {
+      "file": "test-results/design-spike/f-plain-screen.png",
+      "type": [
+        {
+          "tag": "h1",
+          "text": "Today 오늘",
+          "fontSize": "32px",
+          "lineHeight": "38.4px",
+          "fontWeight": "600",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "p",
+          "text": "Three things need you · ",
+          "fontSize": "16px",
+          "lineHeight": "24px",
+          "fontWeight": "400",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "h1",
+          "text": "Heading one 제목",
+          "fontSize": "32px",
+          "lineHeight": "38.4px",
+          "fontWeight": "600",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "h2",
+          "text": "Heading two",
+          "fontSize": "24px",
+          "lineHeight": "30px",
+          "fontWeight": "600",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "h3",
+          "text": "Heading three",
+          "fontSize": "20px",
+          "lineHeight": "26px",
+          "fontWeight": "600",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "p",
+          "text": "Body text on a phone scr",
+          "fontSize": "16px",
+          "lineHeight": "24px",
+          "fontWeight": "400",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "p",
+          "text": "Caption · updated 2 min ",
+          "fontSize": "16px",
+          "lineHeight": "24px",
+          "fontWeight": "400",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        },
+        {
+          "tag": "p",
+          "text": "“Design is how it works.",
+          "fontSize": "16px",
+          "lineHeight": "24px",
+          "fontWeight": "400",
+          "fontFamily": "system-ui, -apple-system, \"Helvetica Neue\", Arial, sans-seri"
+        }
+      ]
+    },
+    "f-desktop-document": {
+      "file": "test-results/design-spike/f-desktop-document.png",
+      "type": [
+        {
+          "tag": "h1",
+          "text": "Today 오늘",
+          "fontSize": "34px",
+          "lineHeight": "44.2px",
+          "fontWeight": "700",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "Three things need you · ",
+          "fontSize": "19px",
+          "lineHeight": "29.45px",
+          "fontWeight": "500",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "h1",
+          "text": "Heading one 제목",
+          "fontSize": "26px",
+          "lineHeight": "35.1px",
+          "fontWeight": "700",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "h2",
+          "text": "Heading two",
+          "fontSize": "21px",
+          "lineHeight": "30.45px",
+          "fontWeight": "700",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "h3",
+          "text": "Heading three",
+          "fontSize": "17px",
+          "lineHeight": "26.35px",
+          "fontWeight": "600",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "Body text on a phone scr",
+          "fontSize": "16px",
+          "lineHeight": "27.2px",
+          "fontWeight": "400",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "Caption · updated 2 min ",
+          "fontSize": "13px",
+          "lineHeight": "20.15px",
+          "fontWeight": "400",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        },
+        {
+          "tag": "p",
+          "text": "“Design is how it works.",
+          "fontSize": "17px",
+          "lineHeight": "29.75px",
+          "fontWeight": "400",
+          "fontFamily": "\"SF Pro Text\", \"Apple SD Gothic Neo\", -apple-system, \"Segoe "
+        }
+      ]
+    }
+  },
+  "f.consoleErrors": [],
+  "a.board.390x844": {
+    "board": "390x844",
+    "scale": 0.8234,
+    "frame": [
+      321,
+      695
+    ],
+    "sectionDrawn": [
+      321,
+      695
+    ],
+    "outlineVsPainted": [
+      -3,
+      -3,
+      6,
+      6
+    ],
+    "snapRight": "270px",
+    "guideX": {
+      "heightScreen": 695,
+      "boardHeightScreen": 695,
+      "deckHeightScreen": 889
+    },
+    "snapBottom": "764px",
+    "guideY": {
+      "widthScreen": 321,
+      "boardWidthScreen": 321,
+      "deckWidthScreen": 1581
+    },
+    "undo": "both drags undone",
+    "inspector": {
+      "left": "260px",
+      "background": "#0000ff"
+    },
+    "text": "[{\"text\":\"Edit me board\",\"marks\":{}}]"
+  },
+  "a.board.1440x1024": {
+    "board": "1440x1024",
+    "scale": 0.2389,
+    "frame": [
+      344,
+      245
+    ],
+    "sectionDrawn": [
+      344,
+      245
+    ],
+    "outlineVsPainted": [
+      -3,
+      -3,
+      6,
+      6
+    ],
+    "snapRight": "1181px",
+    "guideX": {
+      "heightScreen": 245,
+      "boardHeightScreen": 245,
+      "deckHeightScreen": 258
+    },
+    "snapBottom": "944px",
+    "guideY": {
+      "widthScreen": 344,
+      "boardWidthScreen": 344,
+      "deckWidthScreen": 459
+    },
+    "undo": "both drags undone",
+    "inspector": {
+      "left": "1171px",
+      "background": "#0000ff"
+    },
+    "text": "[{\"text\":\"Edit me board\",\"marks\":{}}]"
+  },
+  "a.board.1080x8192": {
+    "board": "1080x8192",
+    "scale": 0.0848,
+    "frame": [
+      92,
+      695
+    ],
+    "sectionDrawn": [
+      92,
+      695
+    ],
+    "outlineVsPainted": [
+      -3,
+      -3,
+      6,
+      6
+    ],
+    "snapRight": "886px",
+    "guideX": {
+      "heightScreen": 695,
+      "boardHeightScreen": 695,
+      "deckHeightScreen": 92
+    },
+    "snapBottom": "7700px",
+    "guideY": {
+      "widthScreen": 92,
+      "boardWidthScreen": 92,
+      "deckWidthScreen": 163
+    },
+    "undo": "both drags undone",
+    "inspector": {
+      "left": "876px",
+      "background": "#0000ff"
+    },
+    "text": "[{\"text\":\"Edit me board\",\"marks\":{}}]"
+  },
+  "a.board.4096x4096": {
+    "board": "4096x4096",
+    "scale": 0.084,
+    "frame": [
+      344,
+      344
+    ],
+    "sectionDrawn": [
+      344,
+      344
+    ],
+    "outlineVsPainted": [
+      -3,
+      -3,
+      6,
+      6
+    ],
+    "snapRight": "3359px",
+    "guideX": {
+      "heightScreen": 344,
+      "boardHeightScreen": 344,
+      "deckHeightScreen": 91
+    },
+    "snapBottom": "3850px",
+    "guideY": {
+      "widthScreen": 344,
+      "boardWidthScreen": 344,
+      "deckWidthScreen": 161
+    },
+    "undo": "both drags undone",
+    "inspector": {
+      "left": "3349px",
+      "background": "#0000ff"
+    },
+    "text": "[{\"text\":\"Edit me board\",\"marks\":{}}]"
+  },
+  "a.summary": [
+    {
+      "board": "390x844",
+      "scale": 0.8234,
+      "frame": [
+        321,
+        695
+      ],
+      "sectionDrawn": [
+        321,
+        695
+      ],
+      "outlineVsPainted": [
+        -3,
+        -3,
+        6,
+        6
+      ],
+      "snapRight": "270px",
+      "guideX": {
+        "heightScreen": 695,
+        "boardHeightScreen": 695,
+        "deckHeightScreen": 889
+      },
+      "snapBottom": "764px",
+      "guideY": {
+        "widthScreen": 321,
+        "boardWidthScreen": 321,
+        "deckWidthScreen": 1581
+      },
+      "undo": "both drags undone",
+      "inspector": {
+        "left": "260px",
+        "background": "#0000ff"
+      },
+      "text": "[{\"text\":\"Edit me board\",\"marks\":{}}]"
+    },
+    {
+      "board": "1440x1024",
+      "scale": 0.2389,
+      "frame": [
+        344,
+        245
+      ],
+      "sectionDrawn": [
+        344,
+        245
+      ],
+      "outlineVsPainted": [
+        -3,
+        -3,
+        6,
+        6
+      ],
+      "snapRight": "1181px",
+      "guideX": {
+        "heightScreen": 245,
+        "boardHeightScreen": 245,
+        "deckHeightScreen": 258
+      },
+      "snapBottom": "944px",
+      "guideY": {
+        "widthScreen": 344,
+        "boardWidthScreen": 344,
+        "deckWidthScreen": 459
+      },
+      "undo": "both drags undone",
+      "inspector": {
+        "left": "1171px",
+        "background": "#0000ff"
+      },
+      "text": "[{\"text\":\"Edit me board\",\"marks\":{}}]"
+    },
+    {
+      "board": "1080x8192",
+      "scale": 0.0848,
+      "frame": [
+        92,
+        695
+      ],
+      "sectionDrawn": [
+        92,
+        695
+      ],
+      "outlineVsPainted": [
+        -3,
+        -3,
+        6,
+        6
+      ],
+      "snapRight": "886px",
+      "guideX": {
+        "heightScreen": 695,
+        "boardHeightScreen": 695,
+        "deckHeightScreen": 92
+      },
+      "snapBottom": "7700px",
+      "guideY": {
+        "widthScreen": 92,
+        "boardWidthScreen": 92,
+        "deckWidthScreen": 163
+      },
+      "undo": "both drags undone",
+      "inspector": {
+        "left": "876px",
+        "background": "#0000ff"
+      },
+      "text": "[{\"text\":\"Edit me board\",\"marks\":{}}]"
+    },
+    {
+      "board": "4096x4096",
+      "scale": 0.084,
+      "frame": [
+        344,
+        344
+      ],
+      "sectionDrawn": [
+        344,
+        344
+      ],
+      "outlineVsPainted": [
+        -3,
+        -3,
+        6,
+        6
+      ],
+      "snapRight": "3359px",
+      "guideX": {
+        "heightScreen": 344,
+        "boardHeightScreen": 344,
+        "deckHeightScreen": 91
+      },
+      "snapBottom": "3850px",
+      "guideY": {
+        "widthScreen": 344,
+        "boardWidthScreen": 344,
+        "deckWidthScreen": 161
+      },
+      "undo": "both drags undone",
+      "inspector": {
+        "left": "3349px",
+        "background": "#0000ff"
+      },
+      "text": "[{\"text\":\"Edit me board\",\"marks\":{}}]"
+    }
+  ],
+  "a.consoleErrors": [],
+  "e.real.pdf": {
+    "ms": 293,
+    "raw": {
+      "typePage": 5,
+      "mediaBoxesPx": [
+        [
+          390.7,
+          844.2
+        ],
+        [
+          1920,
+          1080
+        ],
+        [
+          1080,
+          8192
+        ],
+        [
+          4096,
+          4096
+        ],
+        [
+          1080,
+          12000
+        ]
+      ],
+      "objStm": false
+    },
+    "pages": 5,
+    "pagePx": [
+      [
+        390.7,
+        844.2
+      ],
+      [
+        1920,
+        1080
+      ],
+      [
+        1080,
+        8192
+      ],
+      [
+        4096,
+        4096
+      ],
+      [
+        1080,
+        12000
+      ]
+    ],
+    "cm": [
+      [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        633.12
+      ],
+      [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        810
+      ],
+      [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        6144
+      ],
+      [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        3072
+      ],
+      [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        9000
+      ]
+    ],
+    "want": [
+      [
+        390,
+        844
+      ],
+      [
+        1920,
+        1080
+      ],
+      [
+        1080,
+        8192
+      ],
+      [
+        4096,
+        4096
+      ],
+      [
+        1080,
+        12000
+      ]
+    ],
+    "rects": [
+      [
+        [
+          0,
+          0,
+          390,
+          844
+        ],
+        [
+          0,
+          0,
+          1218.75,
+          2637.5
+        ],
+        [
+          0,
+          0,
+          390,
+          844
+        ],
+        [
+          0,
+          0,
+          1218.75,
+          2637.5
+        ],
+        [
+          0,
+          0,
+          390,
+          844
+        ],
+        [
+          0,
+          0,
+          1218.75,
+          2637.5
+        ],
+        [
+          0,
+          0,
+          64,
+          64
+        ],
+        [
+          326,
+          0,
+          64,
+          64
+        ]
+      ],
+      [
+        [
+          0,
+          0,
+          1920,
+          1080
+        ],
+        [
+          0,
+          0,
+          6000,
+          3375
+        ],
+        [
+          0,
+          844,
+          1920,
+          1080
+        ],
+        [
+          0,
+          0,
+          6000,
+          3375
+        ],
+        [
+          0,
+          844,
+          1920,
+          1080
+        ],
+        [
+          0,
+          0,
+          6000,
+          3375
+        ],
+        [
+          0,
+          844,
+          135,
+          135
+        ],
+        [
+          1785,
+          844,
+          135,
+          135
+        ]
+      ],
+      [
+        [
+          0,
+          0,
+          1080,
+          8192
+        ],
+        [
+          0,
+          0,
+          3375,
+          25600
+        ],
+        [
+          0,
+          1924,
+          1080,
+          8192
+        ],
+        [
+          0,
+          0,
+          3375,
+          25600
+        ],
+        [
+          0,
+          1924,
+          1080,
+          8192
+        ],
+        [
+          0,
+          0,
+          3375,
+          25600
+        ],
+        [
+          0,
+          1924,
+          135,
+          135
+        ],
+        [
+          945,
+          1924,
+          135,
+          135
+        ]
+      ],
+      [
+        [
+          0,
+          0,
+          4096,
+          4096
+        ],
+        [
+          0,
+          0,
+          12800,
+          12800
+        ],
+        [
+          0,
+          10116,
+          4096,
+          4096
+        ],
+        [
+          0,
+          0,
+          12800,
+          12800
+        ],
+        [
+          0,
+          10116,
+          4096,
+          4096
+        ],
+        [
+          0,
+          0,
+          12800,
+          12800
+        ],
+        [
+          0,
+          10116,
+          512,
+          512
+        ],
+        [
+          3584,
+          10116,
+          512,
+          512
+        ]
+      ],
+      [
+        [
+          0,
+          0,
+          1080,
+          12000
+        ],
+        [
+          0,
+          0,
+          3375,
+          37500
+        ],
+        [
+          0,
+          14212,
+          1080,
+          12000
+        ],
+        [
+          0,
+          0,
+          3375,
+          37500
+        ],
+        [
+          0,
+          14212,
+          1080,
+          12000
+        ],
+        [
+          0,
+          0,
+          3375,
+          37500
+        ],
+        [
+          0,
+          14212,
+          135,
+          135
+        ],
+        [
+          945,
+          14212,
+          135,
+          135
+        ]
+      ]
+    ]
+  },
+  "e.real.png.poster": {
+    "ms": 283,
+    "want": [
+      1080,
+      8192
+    ],
+    "size": {
+      "width": 1080,
+      "height": 8192
+    },
+    "corners": [
+      "#ff0000",
+      "#00c000",
+      "#0000ff",
+      "#ff00ff",
+      "#00c0c0"
+    ],
+    "wantCorners": [
+      "#ff0000",
+      "#00c000",
+      "#0000ff",
+      "#ff00ff",
+      "#00c0c0"
+    ]
+  },
+  "e.real.png.over": {
+    "ms": 357,
+    "want": [
+      1080,
+      12000
+    ],
+    "size": {
+      "width": 1080,
+      "height": 12000
+    },
+    "corners": [
+      "#ff0000",
+      "#00c000",
+      "#0000ff",
+      "#ff00ff",
+      "#00c0c0"
+    ],
+    "wantCorners": [
+      "#ff0000",
+      "#00c000",
+      "#0000ff",
+      "#ff00ff",
+      "#00c0c0"
+    ]
+  },
+  "e.real.png.square": {
+    "ms": 357,
+    "want": [
+      4096,
+      4096
+    ],
+    "size": {
+      "width": 4096,
+      "height": 4096
+    },
+    "corners": [
+      "#ff0000",
+      "#00c000",
+      "#0000ff",
+      "#ff00ff",
+      "#00c0c0"
+    ],
+    "wantCorners": [
+      "#ff0000",
+      "#00c000",
+      "#0000ff",
+      "#ff00ff",
+      "#00c0c0"
+    ]
+  },
+  "e.print.sizes": [
+    {
+      "size": [
+        390,
+        844
+      ],
+      "ms": 125,
+      "bytes": 2106,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            390.7,
+            844.2
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          390.7,
+          844.2
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        633.12
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          1218.75,
+          2637.5
+        ],
+        [
+          0,
+          0,
+          390,
+          844
+        ],
+        [
+          0,
+          0,
+          1218.75,
+          2637.5
+        ],
+        [
+          0,
+          0,
+          64,
+          64
+        ],
+        [
+          326,
+          0,
+          64,
+          64
+        ],
+        [
+          0,
+          780,
+          64,
+          64
+        ]
+      ]
+    },
+    {
+      "size": [
+        1920,
+        1080
+      ],
+      "ms": 122,
+      "bytes": 2112,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            1920,
+            1080
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          1920,
+          1080
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        810
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          6000,
+          3375
+        ],
+        [
+          0,
+          0,
+          1920,
+          1080
+        ],
+        [
+          0,
+          0,
+          6000,
+          3375
+        ],
+        [
+          0,
+          0,
+          135,
+          135
+        ],
+        [
+          1785,
+          0,
+          135,
+          135
+        ],
+        [
+          0,
+          945,
+          135,
+          135
+        ]
+      ]
+    },
+    {
+      "size": [
+        1080,
+        8192
+      ],
+      "ms": 124,
+      "bytes": 2115,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            1080,
+            8192
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          1080,
+          8192
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        6144
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          3375,
+          25600
+        ],
+        [
+          0,
+          0,
+          1080,
+          8192
+        ],
+        [
+          0,
+          0,
+          3375,
+          25600
+        ],
+        [
+          0,
+          0,
+          135,
+          135
+        ],
+        [
+          945,
+          0,
+          135,
+          135
+        ],
+        [
+          0,
+          8057,
+          135,
+          135
+        ]
+      ]
+    },
+    {
+      "size": [
+        4096,
+        4096
+      ],
+      "ms": 123,
+      "bytes": 2115,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            4096,
+            4096
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          4096,
+          4096
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        3072
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          12800,
+          12800
+        ],
+        [
+          0,
+          0,
+          4096,
+          4096
+        ],
+        [
+          0,
+          0,
+          12800,
+          12800
+        ],
+        [
+          0,
+          0,
+          512,
+          512
+        ],
+        [
+          3584,
+          0,
+          512,
+          512
+        ],
+        [
+          0,
+          3584,
+          512,
+          512
+        ]
+      ]
+    },
+    {
+      "size": [
+        1080,
+        12000
+      ],
+      "ms": 135,
+      "bytes": 2124,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            1080,
+            12000
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          1080,
+          12000
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        9000
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          3375,
+          37500
+        ],
+        [
+          0,
+          0,
+          1080,
+          12000
+        ],
+        [
+          0,
+          0,
+          3375,
+          37500
+        ],
+        [
+          0,
+          0,
+          135,
+          135
+        ],
+        [
+          945,
+          0,
+          135,
+          135
+        ],
+        [
+          0,
+          11865,
+          135,
+          135
+        ]
+      ]
+    },
+    {
+      "size": [
+        8192,
+        8192
+      ],
+      "ms": 128,
+      "bytes": 2130,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            8192,
+            8192
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          8192,
+          8192
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        6144
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          25600,
+          25600
+        ],
+        [
+          0,
+          0,
+          8192,
+          8192
+        ],
+        [
+          0,
+          0,
+          25600,
+          25600
+        ],
+        [
+          0,
+          0,
+          1024,
+          1024
+        ],
+        [
+          7168,
+          0,
+          1024,
+          1024
+        ],
+        [
+          0,
+          7168,
+          1024,
+          1024
+        ]
+      ]
+    },
+    {
+      "size": [
+        1080,
+        16384
+      ],
+      "ms": 127,
+      "bytes": 2127,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            1080,
+            16384
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          1080,
+          16384
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        12288
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          3375,
+          51200
+        ],
+        [
+          0,
+          0,
+          1080,
+          16384
+        ],
+        [
+          0,
+          0,
+          3375,
+          51200
+        ],
+        [
+          0,
+          0,
+          135,
+          135
+        ],
+        [
+          945,
+          0,
+          135,
+          135
+        ],
+        [
+          0,
+          16249,
+          135,
+          135
+        ]
+      ]
+    },
+    {
+      "size": [
+        14400,
+        1080
+      ],
+      "ms": 125,
+      "bytes": 2124,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            14400,
+            1080
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          14400,
+          1080
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        810
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          45000,
+          3375
+        ],
+        [
+          0,
+          0,
+          14400,
+          1080
+        ],
+        [
+          0,
+          0,
+          45000,
+          3375
+        ],
+        [
+          0,
+          0,
+          135,
+          135
+        ],
+        [
+          14265,
+          0,
+          135,
+          135
+        ],
+        [
+          0,
+          945,
+          135,
+          135
+        ]
+      ]
+    },
+    {
+      "size": [
+        16384,
+        16384
+      ],
+      "ms": 127,
+      "bytes": 2142,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            16384,
+            16384
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          16384,
+          16384
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        12288
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          51200,
+          51200
+        ],
+        [
+          0,
+          0,
+          16384,
+          16384
+        ],
+        [
+          0,
+          0,
+          51200,
+          51200
+        ],
+        [
+          0,
+          0,
+          2048,
+          2048
+        ],
+        [
+          14336,
+          0,
+          2048,
+          2048
+        ],
+        [
+          0,
+          14336,
+          2048,
+          2048
+        ]
+      ]
+    },
+    {
+      "size": [
+        1080,
+        19200
+      ],
+      "ms": 121,
+      "bytes": 2124,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            1080,
+            19200
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          1080,
+          19200
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        14400
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          3375,
+          60000
+        ],
+        [
+          0,
+          0,
+          1080,
+          19200
+        ],
+        [
+          0,
+          0,
+          3375,
+          60000
+        ],
+        [
+          0,
+          0,
+          135,
+          135
+        ],
+        [
+          945,
+          0,
+          135,
+          135
+        ],
+        [
+          0,
+          19065,
+          135,
+          135
+        ]
+      ]
+    },
+    {
+      "size": [
+        1080,
+        20000
+      ],
+      "ms": 123,
+      "bytes": 2124,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            1080,
+            20000
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          1080,
+          20000
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        15000
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          3375,
+          62500
+        ],
+        [
+          0,
+          0,
+          1080,
+          20000
+        ],
+        [
+          0,
+          0,
+          3375,
+          62500
+        ],
+        [
+          0,
+          0,
+          135,
+          135
+        ],
+        [
+          945,
+          0,
+          135,
+          135
+        ],
+        [
+          0,
+          19865,
+          135,
+          135
+        ]
+      ]
+    },
+    {
+      "size": [
+        1080,
+        32768
+      ],
+      "ms": 125,
+      "bytes": 2127,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            1080,
+            32768
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          1080,
+          32768
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        24576
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          3375,
+          102400
+        ],
+        [
+          0,
+          0,
+          1080,
+          32768
+        ],
+        [
+          0,
+          0,
+          3375,
+          102400
+        ],
+        [
+          0,
+          0,
+          135,
+          135
+        ],
+        [
+          945,
+          0,
+          135,
+          135
+        ],
+        [
+          0,
+          32633,
+          135,
+          135
+        ]
+      ]
+    },
+    {
+      "size": [
+        32768,
+        32768
+      ],
+      "ms": 123,
+      "bytes": 2142,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            32768,
+            32768
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          32768,
+          32768
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        24576
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          102400,
+          102400
+        ],
+        [
+          0,
+          0,
+          32768,
+          32768
+        ],
+        [
+          0,
+          0,
+          102400,
+          102400
+        ],
+        [
+          0,
+          0,
+          4096,
+          4096
+        ],
+        [
+          28672,
+          0,
+          4096,
+          4096
+        ],
+        [
+          0,
+          28672,
+          4096,
+          4096
+        ]
+      ]
+    },
+    {
+      "size": [
+        1080,
+        65536
+      ],
+      "ms": 137,
+      "bytes": 2127,
+      "raw": {
+        "typePage": 1,
+        "mediaBoxesPx": [
+          [
+            1080,
+            65536
+          ]
+        ],
+        "objStm": false
+      },
+      "pages": 1,
+      "pagePx": [
+        [
+          1080,
+          65536
+        ]
+      ],
+      "cm": [
+        0.23999999,
+        0,
+        0,
+        -0.23999999,
+        0,
+        49152
+      ],
+      "rects": [
+        [
+          0,
+          0,
+          3375,
+          204800
+        ],
+        [
+          0,
+          0,
+          1080,
+          65536
+        ],
+        [
+          0,
+          0,
+          3375,
+          204800
+        ],
+        [
+          0,
+          0,
+          135,
+          135
+        ],
+        [
+          945,
+          0,
+          135,
+          135
+        ],
+        [
+          0,
+          65401,
+          135,
+          135
+        ]
+      ]
+    }
+  ],
+  "e.print.mixed": {
+    "ms": 132,
+    "raw": {
+      "typePage": 6,
+      "mediaBoxesPx": [
+        [
+          390.7,
+          844.2
+        ],
+        [
+          1920,
+          1080
+        ],
+        [
+          1080,
+          8192
+        ],
+        [
+          4096,
+          4096
+        ],
+        [
+          1080,
+          12000
+        ],
+        [
+          16384,
+          16384
+        ]
+      ],
+      "objStm": false
+    },
+    "pages": [
+      [
+        390.7,
+        844.2
+      ],
+      [
+        1920,
+        1080
+      ],
+      [
+        1080,
+        8192
+      ],
+      [
+        4096,
+        4096
+      ],
+      [
+        1080,
+        12000
+      ],
+      [
+        16384,
+        16384
+      ]
+    ],
+    "want": [
+      [
+        390,
+        844
+      ],
+      [
+        1920,
+        1080
+      ],
+      [
+        1080,
+        8192
+      ],
+      [
+        4096,
+        4096
+      ],
+      [
+        1080,
+        12000
+      ],
+      [
+        16384,
+        16384
+      ]
+    ]
+  },
+  "e.capture": [
+    {
+      "board": [
+        1080,
+        8192
+      ],
+      "scale": 1,
+      "window": [
+        1080,
+        8192
+      ],
+      "kind": "offscreen",
+      "ok": true,
+      "ms": 407,
+      "content": [
+        1080,
+        8192
+      ],
+      "size": {
+        "width": 1080,
+        "height": 8192
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        1080,
+        8192
+      ],
+      "scale": 1,
+      "window": [
+        1080,
+        8192
+      ],
+      "kind": "hidden",
+      "ok": true,
+      "ms": 1592,
+      "content": [
+        1080,
+        8192
+      ],
+      "size": {
+        "width": 1080,
+        "height": 8192
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        4096,
+        4096
+      ],
+      "scale": 1,
+      "window": [
+        4096,
+        4096
+      ],
+      "kind": "offscreen",
+      "ok": true,
+      "ms": 400,
+      "content": [
+        4096,
+        4096
+      ],
+      "size": {
+        "width": 4096,
+        "height": 4096
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        4096,
+        4096
+      ],
+      "scale": 1,
+      "window": [
+        4096,
+        4096
+      ],
+      "kind": "hidden",
+      "ok": true,
+      "ms": 1598,
+      "content": [
+        4096,
+        4096
+      ],
+      "size": {
+        "width": 4096,
+        "height": 4096
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        8192,
+        8192
+      ],
+      "scale": 1,
+      "window": [
+        8192,
+        8192
+      ],
+      "kind": "offscreen",
+      "ok": true,
+      "ms": 450,
+      "content": [
+        8192,
+        8192
+      ],
+      "size": {
+        "width": 8192,
+        "height": 8192
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        8192,
+        8192
+      ],
+      "scale": 1,
+      "window": [
+        8192,
+        8192
+      ],
+      "kind": "hidden",
+      "ok": true,
+      "ms": 1678,
+      "content": [
+        8192,
+        8192
+      ],
+      "size": {
+        "width": 8192,
+        "height": 8192
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        1080,
+        12000
+      ],
+      "scale": 1,
+      "window": [
+        1080,
+        12000
+      ],
+      "kind": "offscreen",
+      "ok": true,
+      "ms": 419,
+      "content": [
+        1080,
+        12000
+      ],
+      "size": {
+        "width": 1080,
+        "height": 12000
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        1080,
+        12000
+      ],
+      "scale": 1,
+      "window": [
+        1080,
+        12000
+      ],
+      "kind": "hidden",
+      "ok": true,
+      "ms": 1595,
+      "content": [
+        1080,
+        12000
+      ],
+      "size": {
+        "width": 1080,
+        "height": 12000
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        1080,
+        16384
+      ],
+      "scale": 1,
+      "window": [
+        1080,
+        16384
+      ],
+      "kind": "offscreen",
+      "ok": true,
+      "ms": 436,
+      "content": [
+        1080,
+        16384
+      ],
+      "size": {
+        "width": 1080,
+        "height": 16384
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        1080,
+        16384
+      ],
+      "scale": 1,
+      "window": [
+        1080,
+        16384
+      ],
+      "kind": "hidden",
+      "ok": true,
+      "ms": 1600,
+      "content": [
+        1080,
+        16384
+      ],
+      "size": {
+        "width": 1080,
+        "height": 16384
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        16384,
+        1080
+      ],
+      "scale": 1,
+      "window": [
+        16384,
+        1080
+      ],
+      "kind": "offscreen",
+      "ok": true,
+      "ms": 426,
+      "content": [
+        16384,
+        1080
+      ],
+      "size": {
+        "width": 16384,
+        "height": 1080
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        16384,
+        1080
+      ],
+      "scale": 1,
+      "window": [
+        16384,
+        1080
+      ],
+      "kind": "hidden",
+      "ok": true,
+      "ms": 1605,
+      "content": [
+        16384,
+        1080
+      ],
+      "size": {
+        "width": 16384,
+        "height": 1080
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        1080,
+        12000
+      ],
+      "scale": 0.6827,
+      "window": [
+        738,
+        8192
+      ],
+      "kind": "offscreen",
+      "ok": true,
+      "ms": 401,
+      "content": [
+        738,
+        8192
+      ],
+      "size": {
+        "width": 738,
+        "height": 8192
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        1080,
+        12000
+      ],
+      "scale": 0.6827,
+      "window": [
+        738,
+        8192
+      ],
+      "kind": "hidden",
+      "ok": true,
+      "ms": 1590,
+      "content": [
+        738,
+        8192
+      ],
+      "size": {
+        "width": 738,
+        "height": 8192
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        16384,
+        16384
+      ],
+      "scale": 0.5,
+      "window": [
+        8192,
+        8192
+      ],
+      "kind": "offscreen",
+      "ok": true,
+      "ms": 604,
+      "content": [
+        8192,
+        8192
+      ],
+      "size": {
+        "width": 8192,
+        "height": 8192
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    },
+    {
+      "board": [
+        16384,
+        16384
+      ],
+      "scale": 0.5,
+      "window": [
+        8192,
+        8192
+      ],
+      "kind": "hidden",
+      "ok": true,
+      "ms": 1669,
+      "content": [
+        8192,
+        8192
+      ],
+      "size": {
+        "width": 8192,
+        "height": 8192
+      },
+      "corners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "wantCorners": [
+        "#ff0000",
+        "#00c000",
+        "#0000ff",
+        "#ff00ff"
+      ]
+    }
+  ],
+  "e.consoleErrors": [],
+  "g.draw": [
+    {
+      "size": [
+        8192,
+        8192
+      ],
+      "mpx": 67.1,
+      "laidOut": {
+        "w": 8192,
+        "h": 8192,
+        "offsetW": 8192,
+        "offsetH": 8192
+      },
+      "zoom1": {
+        "br": "#ff00ff",
+        "brOk": true,
+        "brHit": {
+          "eid": "br",
+          "board": "g8192x8192"
+        },
+        "tl": "#ff0000",
+        "tlOk": true
+      },
+      "fit": {
+        "zoom": 0.10986,
+        "markerScreenPx": 112.5,
+        "mid": "#00c0c0",
+        "midOk": true,
+        "br": "#ff00ff",
+        "brOk": true
+      },
+      "openMs": 23.1,
+      "memory": {
+        "rendererMB": 203.8,
+        "gpuMB": 87,
+        "totalMB": 871.4
+      }
+    },
+    {
+      "size": [
+        12288,
+        1080
+      ],
+      "mpx": 13.3,
+      "laidOut": {
+        "w": 12288,
+        "h": 1080,
+        "offsetW": 12288,
+        "offsetH": 1080
+      },
+      "zoom1": {
+        "br": "#ff00ff",
+        "brOk": true,
+        "brHit": {
+          "eid": "br",
+          "board": "g12288x1080"
+        },
+        "tl": "#ff0000",
+        "tlOk": true
+      },
+      "fit": {
+        "zoom": 0.12207,
+        "markerScreenPx": 16.5,
+        "mid": "#00c0c0",
+        "midOk": true,
+        "br": "#ff00ff",
+        "brOk": true
+      },
+      "openMs": 52.3,
+      "memory": {
+        "rendererMB": 204.6,
+        "gpuMB": 87.1,
+        "totalMB": 872.8
+      }
+    },
+    {
+      "size": [
+        16384,
+        4096
+      ],
+      "mpx": 67.1,
+      "laidOut": {
+        "w": 16384,
+        "h": 4096,
+        "offsetW": 16384,
+        "offsetH": 4096
+      },
+      "zoom1": {
+        "br": "#ff00ff",
+        "brOk": true,
+        "brHit": {
+          "eid": "br",
+          "board": "g16384x4096"
+        },
+        "tl": "#ff0000",
+        "tlOk": true
+      },
+      "fit": {
+        "zoom": 0.09155,
+        "markerScreenPx": 46.9,
+        "mid": "#00c0c0",
+        "midOk": true,
+        "br": "#ff00ff",
+        "brOk": true
+      },
+      "openMs": 46.2,
+      "memory": {
+        "rendererMB": 205,
+        "gpuMB": 87.1,
+        "totalMB": 873.4
+      }
+    },
+    {
+      "size": [
+        16384,
+        16384
+      ],
+      "mpx": 268.4,
+      "laidOut": {
+        "w": 16384,
+        "h": 16384,
+        "offsetW": 16384,
+        "offsetH": 16384
+      },
+      "zoom1": {
+        "br": "#ff00ff",
+        "brOk": true,
+        "brHit": {
+          "eid": "br",
+          "board": "g16384x16384"
+        },
+        "tl": "#ff0000",
+        "tlOk": true
+      },
+      "fit": {
+        "zoom": 0.05493,
+        "markerScreenPx": 112.5,
+        "mid": "#00c0c0",
+        "midOk": true,
+        "br": "#ff00ff",
+        "brOk": true
+      },
+      "openMs": 46.4,
+      "memory": {
+        "rendererMB": 205.3,
+        "gpuMB": 87.1,
+        "totalMB": 873.9
+      }
+    },
+    {
+      "size": [
+        1080,
+        24576
+      ],
+      "mpx": 26.5,
+      "laidOut": {
+        "w": 1080,
+        "h": 24576,
+        "offsetW": 1080,
+        "offsetH": 24576
+      },
+      "zoom1": {
+        "br": "#ff00ff",
+        "brOk": true,
+        "brHit": {
+          "eid": "br",
+          "board": "g1080x24576"
+        },
+        "tl": "#ff0000",
+        "tlOk": true
+      },
+      "fit": {
+        "zoom": 0.03662,
+        "markerScreenPx": 4.9,
+        "mid": "#00c0c0",
+        "midOk": true,
+        "br": "#ff00ff",
+        "brOk": true
+      },
+      "openMs": 34.7,
+      "memory": {
+        "rendererMB": 205.6,
+        "gpuMB": 87.2,
+        "totalMB": 874.5
+      }
+    },
+    {
+      "size": [
+        32768,
+        1080
+      ],
+      "mpx": 35.4,
+      "laidOut": {
+        "w": 32768,
+        "h": 1080,
+        "offsetW": 32768,
+        "offsetH": 1080
+      },
+      "zoom1": {
+        "br": "#ff00ff",
+        "brOk": true,
+        "brHit": {
+          "eid": "br",
+          "board": "g32768x1080"
+        },
+        "tl": "#ff0000",
+        "tlOk": true
+      },
+      "fit": {
+        "zoom": 0.04578,
+        "markerScreenPx": 6.2,
+        "mid": "#00c0c0",
+        "midOk": true,
+        "br": "#ff00ff",
+        "brOk": true
+      },
+      "openMs": 46.6,
+      "memory": {
+        "rendererMB": 205.8,
+        "gpuMB": 87.1,
+        "totalMB": 874.8
+      }
+    },
+    {
+      "size": [
+        1080,
+        32768
+      ],
+      "mpx": 35.4,
+      "laidOut": {
+        "w": 1080,
+        "h": 32768,
+        "offsetW": 1080,
+        "offsetH": 32768
+      },
+      "zoom1": {
+        "br": "#ff00ff",
+        "brOk": true,
+        "brHit": {
+          "eid": "br",
+          "board": "g1080x32768"
+        },
+        "tl": "#ff0000",
+        "tlOk": true
+      },
+      "fit": {
+        "zoom": 0.02747,
+        "markerScreenPx": 3.7,
+        "mid": "#00c0c0",
+        "midOk": true,
+        "br": "#ff00ff",
+        "brOk": true
+      },
+      "openMs": 54.8,
+      "memory": {
+        "rendererMB": 205.9,
+        "gpuMB": 87.1,
+        "totalMB": 875.1
+      }
+    },
+    {
+      "size": [
+        23170,
+        23170
+      ],
+      "mpx": 536.8,
+      "laidOut": {
+        "w": 23170,
+        "h": 23170,
+        "offsetW": 23170,
+        "offsetH": 23170
+      },
+      "zoom1": {
+        "br": "#ff00ff",
+        "brOk": true,
+        "brHit": {
+          "eid": "br",
+          "board": "g23170x23170"
+        },
+        "tl": "#ff0000",
+        "tlOk": true
+      },
+      "fit": {
+        "zoom": 0.03884,
+        "markerScreenPx": 112.5,
+        "mid": "#00c0c0",
+        "midOk": true,
+        "br": "#ff00ff",
+        "brOk": true
+      },
+      "openMs": 51,
+      "memory": {
+        "rendererMB": 206.3,
+        "gpuMB": 87.1,
+        "totalMB": 875.6
+      }
+    },
+    {
+      "size": [
+        32768,
+        32768
+      ],
+      "mpx": 1073.7,
+      "laidOut": {
+        "w": 32768,
+        "h": 32768,
+        "offsetW": 32768,
+        "offsetH": 32768
+      },
+      "zoom1": {
+        "br": "#ff00ff",
+        "brOk": true,
+        "brHit": {
+          "eid": "br",
+          "board": "g32768x32768"
+        },
+        "tl": "#ff0000",
+        "tlOk": true
+      },
+      "fit": {
+        "zoom": 0.02747,
+        "markerScreenPx": 112.5,
+        "mid": "#00c0c0",
+        "midOk": true,
+        "br": "#ff00ff",
+        "brOk": true
+      },
+      "openMs": 53.8,
+      "memory": {
+        "rendererMB": 206.3,
+        "gpuMB": 87.1,
+        "totalMB": 875.8
+      }
+    },
+    {
+      "size": [
+        65536,
+        1080
+      ],
+      "mpx": 70.8,
+      "laidOut": {
+        "w": 65536,
+        "h": 1080,
+        "offsetW": 65536,
+        "offsetH": 1080
+      },
+      "zoom1": {
+        "br": "#ff00ff",
+        "brOk": true,
+        "brHit": {
+          "eid": "br",
+          "board": "g65536x1080"
+        },
+        "tl": "#ff0000",
+        "tlOk": true
+      },
+      "fit": {
+        "zoom": 0.02289,
+        "markerScreenPx": 3.1,
+        "mid": "#00c0c0",
+        "midOk": true,
+        "br": "#ff00ff",
+        "brOk": true
+      },
+      "openMs": 47.5,
+      "memory": {
+        "rendererMB": 206.5,
+        "gpuMB": 87.1,
+        "totalMB": 876.3
+      }
+    },
+    {
+      "size": [
+        1080,
+        65536
+      ],
+      "mpx": 70.8,
+      "laidOut": {
+        "w": 1080,
+        "h": 65536,
+        "offsetW": 1080,
+        "offsetH": 65536
+      },
+      "zoom1": {
+        "br": "#ff00ff",
+        "brOk": true,
+        "brHit": {
+          "eid": "br",
+          "board": "g1080x65536"
+        },
+        "tl": "#ff0000",
+        "tlOk": true
+      },
+      "fit": {
+        "zoom": 0.01373,
+        "markerScreenPx": 1.9,
+        "mid": "#11c4c4",
+        "midOk": true,
+        "br": "#ff2bff",
+        "brOk": false
+      },
+      "openMs": 46.5,
+      "memory": {
+        "rendererMB": 206.7,
+        "gpuMB": 87.4,
+        "totalMB": 877
+      }
+    }
+  ],
+  "g.edit.error": {
+    "error": "\u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mnot\u001b[2m.\u001b[22mtoBe\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // Object.is equality\u001b[22m\n\nExpected: not \u001b[32m\"945px\"\u001b[39m\n\nCall Log:\n- Timeout 10000ms exceeded while waiting on the predicate"
+  },
+  "g.consoleErrors": [],
+  "b.load.start": 6.71,
+  "b.page": {
+    "visibility": "visible",
+    "focused": true,
+    "dpr": 1,
+    "w": 1600,
+    "h": 1000
+  },
+  "b.idleFrameMs": 16.7,
+  "b.world.24": {
+    "boards": 24,
+    "worldW": 11790,
+    "worldH": 19258,
+    "area": 90647508
+  },
+  "b.24.all": {
+    "load": 6.41,
+    "opened": {
+      "boards": 24,
+      "mounted": 24,
+      "openMs": 43.4,
+      "settledMs": 123.4,
+      "nodes": 2113
+    },
+    "pan": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.1,
+        "max": 18.7,
+        "mean": 16.66
+      },
+      "dropped": 0,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.2,
+        "p95": 0.3,
+        "max": 0.4,
+        "mean": 0.22
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 24,
+        "max": 24,
+        "mean": 24
+      },
+      "mountsDuring": 0,
+      "unmountsDuring": 0
+    },
+    "zoom": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.2,
+        "max": 31.6,
+        "mean": 16.74
+      },
+      "dropped": 1,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 0.6,
+        "mean": 0.22
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 24,
+        "max": 24,
+        "mean": 24
+      },
+      "mountsDuring": 0,
+      "unmountsDuring": 0
+    },
+    "wheel": {
+      "events": 150,
+      "inputToFrameMs": {
+        "n": 150,
+        "p50": 28,
+        "p95": 35.7,
+        "max": 38.2,
+        "mean": 28.06
+      },
+      "work": {
+        "n": 150,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 0.5,
+        "mean": 0.24
+      }
+    },
+    "relayMs": 13.5,
+    "fitView": {
+      "mounted": 24,
+      "settledMs": 26.4
+    },
+    "memory": {
+      "before": {
+        "rendererMB": 215.6,
+        "gpuMB": 80.1,
+        "totalMB": 916.4
+      },
+      "afterOpen": {
+        "rendererMB": 268.9,
+        "gpuMB": 92.3,
+        "totalMB": 984
+      },
+      "afterFit": {
+        "rendererMB": 275.7,
+        "gpuMB": 109.9,
+        "totalMB": 989
+      }
+    },
+    "loadEnd": 5.87
+  },
+  "b.24.visible": {
+    "load": 5.87,
+    "opened": {
+      "boards": 24,
+      "mounted": 18,
+      "openMs": 45.6,
+      "settledMs": 63.4,
+      "nodes": 1495
+    },
+    "pan": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.3,
+        "max": 33.4,
+        "mean": 16.73
+      },
+      "dropped": 1,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.3,
+        "p95": 0.6,
+        "max": 10.8,
+        "mean": 0.42
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 0,
+        "max": 20,
+        "mean": 5.1
+      },
+      "mountsDuring": 3,
+      "unmountsDuring": 21
+    },
+    "zoom": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.2,
+        "max": 18.7,
+        "mean": 16.67
+      },
+      "dropped": 0,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.3,
+        "p95": 3.3,
+        "max": 12,
+        "mean": 0.63
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 1,
+        "totalMs": 67.9,
+        "maxMs": 67.9,
+        "renderMaxMs": 15.5
+      },
+      "mounted": {
+        "min": 3,
+        "max": 24,
+        "mean": 13.2
+      },
+      "mountsDuring": 21,
+      "unmountsDuring": 21
+    },
+    "wheel": {
+      "events": 150,
+      "inputToFrameMs": {
+        "n": 150,
+        "p50": 28.9,
+        "p95": 35.8,
+        "max": 46.8,
+        "mean": 28.44
+      },
+      "work": {
+        "n": 150,
+        "p50": 0.3,
+        "p95": 1.2,
+        "max": 10.5,
+        "mean": 0.42
+      }
+    },
+    "relayMs": 15.6,
+    "fitView": {
+      "mounted": 24,
+      "settledMs": 73.5
+    },
+    "memory": {
+      "before": {
+        "rendererMB": 247.2,
+        "gpuMB": 105.7,
+        "totalMB": 950.5
+      },
+      "afterOpen": {
+        "rendererMB": 258,
+        "gpuMB": 107.4,
+        "totalMB": 963.5
+      },
+      "afterFit": {
+        "rendererMB": 231.9,
+        "gpuMB": 124.3,
+        "totalMB": 772.4
+      }
+    },
+    "loadEnd": 6.17
+  },
+  "b.24.cv-auto": {
+    "load": 6.17,
+    "opened": {
+      "boards": 24,
+      "mounted": 24,
+      "openMs": 40.2,
+      "settledMs": 75.8,
+      "nodes": 2113
+    },
+    "pan": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.6,
+        "p95": 18.4,
+        "max": 18.7,
+        "mean": 16.67
+      },
+      "dropped": 0,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 0.5,
+        "mean": 0.22
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 24,
+        "max": 24,
+        "mean": 24
+      },
+      "mountsDuring": 0,
+      "unmountsDuring": 0
+    },
+    "zoom": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.2,
+        "max": 32.2,
+        "mean": 16.73
+      },
+      "dropped": 1,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.2,
+        "p95": 0.3,
+        "max": 0.9,
+        "mean": 0.22
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 24,
+        "max": 24,
+        "mean": 24
+      },
+      "mountsDuring": 0,
+      "unmountsDuring": 0
+    },
+    "wheel": {
+      "events": 150,
+      "inputToFrameMs": {
+        "n": 150,
+        "p50": 28.8,
+        "p95": 36.5,
+        "max": 38,
+        "mean": 28.62
+      },
+      "work": {
+        "n": 150,
+        "p50": 0.2,
+        "p95": 0.3,
+        "max": 0.5,
+        "mean": 0.22
+      }
+    },
+    "relayMs": 17.3,
+    "fitView": {
+      "mounted": 24,
+      "settledMs": 23.8
+    },
+    "memory": {
+      "before": {
+        "rendererMB": 206.3,
+        "gpuMB": 119.6,
+        "totalMB": 742.3
+      },
+      "afterOpen": {
+        "rendererMB": 226.9,
+        "gpuMB": 120.9,
+        "totalMB": 768.7
+      },
+      "afterFit": {
+        "rendererMB": 191.5,
+        "gpuMB": 117.4,
+        "totalMB": 635.4
+      }
+    },
+    "loadEnd": 6.15
+  },
+  "b.24.all.noWillChange": {
+    "load": 6.15,
+    "opened": {
+      "boards": 24,
+      "mounted": 24,
+      "openMs": 41.5,
+      "settledMs": 89.4,
+      "nodes": 2113
+    },
+    "pan": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.2,
+        "max": 18.6,
+        "mean": 16.67
+      },
+      "dropped": 0,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.2,
+        "p95": 0.3,
+        "max": 0.6,
+        "mean": 0.18
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 24,
+        "max": 24,
+        "mean": 24
+      },
+      "mountsDuring": 0,
+      "unmountsDuring": 0
+    },
+    "zoom": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.5,
+        "max": 34.2,
+        "mean": 17.02
+      },
+      "dropped": 5,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.1,
+        "p95": 0.2,
+        "max": 0.3,
+        "mean": 0.11
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 24,
+        "max": 24,
+        "mean": 24
+      },
+      "mountsDuring": 0,
+      "unmountsDuring": 0
+    },
+    "wheel": {
+      "events": 150,
+      "inputToFrameMs": {
+        "n": 150,
+        "p50": 28.1,
+        "p95": 36.6,
+        "max": 38.2,
+        "mean": 26.54
+      },
+      "work": {
+        "n": 150,
+        "p50": 0.2,
+        "p95": 0.3,
+        "max": 0.5,
+        "mean": 0.23
+      }
+    },
+    "relayMs": 13.7,
+    "fitView": {
+      "mounted": 24,
+      "settledMs": 25.4
+    },
+    "memory": {
+      "before": {
+        "rendererMB": 179.2,
+        "gpuMB": 117.4,
+        "totalMB": 624.9
+      },
+      "afterOpen": {
+        "rendererMB": 212.7,
+        "gpuMB": 118.2,
+        "totalMB": 681.2
+      },
+      "afterFit": {
+        "rendererMB": 257.2,
+        "gpuMB": 149,
+        "totalMB": 769.7
+      }
+    },
+    "loadEnd": 6.08
+  },
+  "b.world.100": {
+    "boards": 100,
+    "worldW": 11932,
+    "worldH": 67724,
+    "area": 363906672
+  },
+  "b.100.all": {
+    "load": 6.08,
+    "opened": {
+      "boards": 100,
+      "mounted": 100,
+      "openMs": 78.8,
+      "settledMs": 199.5,
+      "nodes": 8589
+    },
+    "pan": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.3,
+        "max": 18.7,
+        "mean": 16.67
+      },
+      "dropped": 0,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.2,
+        "p95": 0.3,
+        "max": 0.5,
+        "mean": 0.19
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 100,
+        "max": 100,
+        "mean": 100
+      },
+      "mountsDuring": 0,
+      "unmountsDuring": 0
+    },
+    "zoom": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.4,
+        "max": 68.2,
+        "mean": 17.09
+      },
+      "dropped": 6,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 1.4,
+        "mean": 0.22
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 2,
+        "totalMs": 139.1,
+        "maxMs": 80.5,
+        "renderMaxMs": 0.3
+      },
+      "mounted": {
+        "min": 100,
+        "max": 100,
+        "mean": 100
+      },
+      "mountsDuring": 0,
+      "unmountsDuring": 0
+    },
+    "wheel": {
+      "events": 150,
+      "inputToFrameMs": {
+        "n": 150,
+        "p50": 28.6,
+        "p95": 36.2,
+        "max": 39.8,
+        "mean": 28.65
+      },
+      "work": {
+        "n": 150,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 0.7,
+        "mean": 0.24
+      }
+    },
+    "relayMs": 34,
+    "fitView": {
+      "mounted": 100,
+      "settledMs": 16.7
+    },
+    "memory": {
+      "before": {
+        "rendererMB": 250.2,
+        "gpuMB": 140.2,
+        "totalMB": 943.2
+      },
+      "afterOpen": {
+        "rendererMB": 330.8,
+        "gpuMB": 133.7,
+        "totalMB": 1049.4
+      },
+      "afterFit": {
+        "rendererMB": 329.9,
+        "gpuMB": 133.4,
+        "totalMB": 879.2
+      }
+    },
+    "loadEnd": 7.14
+  },
+  "b.100.visible": {
+    "load": 6.97,
+    "opened": {
+      "boards": 100,
+      "mounted": 18,
+      "openMs": 35.7,
+      "settledMs": 53.9,
+      "nodes": 1571
+    },
+    "pan": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.2,
+        "max": 33.29,
+        "mean": 16.73
+      },
+      "dropped": 1,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.3,
+        "p95": 6.6,
+        "max": 26.5,
+        "mean": 1.19
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 1,
+        "max": 19,
+        "mean": 7.4
+      },
+      "mountsDuring": 55,
+      "unmountsDuring": 72
+    },
+    "zoom": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.4,
+        "max": 83.4,
+        "mean": 17.09
+      },
+      "dropped": 6,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.4,
+        "p95": 5.6,
+        "max": 18.2,
+        "mean": 1.12
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 2,
+        "totalMs": 268.5,
+        "maxMs": 189.6,
+        "renderMaxMs": 33.7
+      },
+      "mounted": {
+        "min": 3,
+        "max": 75,
+        "mean": 25.3
+      },
+      "mountsDuring": 72,
+      "unmountsDuring": 97
+    },
+    "wheel": {
+      "events": 150,
+      "inputToFrameMs": {
+        "n": 150,
+        "p50": 28.9,
+        "p95": 36.8,
+        "max": 48.3,
+        "mean": 28.44
+      },
+      "work": {
+        "n": 150,
+        "p50": 0.3,
+        "p95": 2.3,
+        "max": 19.2,
+        "mean": 0.83
+      }
+    },
+    "relayMs": 7.1,
+    "fitView": {
+      "mounted": 100,
+      "settledMs": 203.9
+    },
+    "memory": {
+      "before": {
+        "rendererMB": 264.2,
+        "gpuMB": 133.4,
+        "totalMB": 813.6
+      },
+      "afterOpen": {
+        "rendererMB": 294,
+        "gpuMB": 138,
+        "totalMB": 856.7
+      },
+      "afterFit": {
+        "rendererMB": 363,
+        "gpuMB": 139.5,
+        "totalMB": 852.9
+      }
+    },
+    "loadEnd": 7.16
+  },
+  "b.100.cv-auto": {
+    "load": 7.16,
+    "opened": {
+      "boards": 100,
+      "mounted": 100,
+      "openMs": 75.9,
+      "settledMs": 137.3,
+      "nodes": 8589
+    },
+    "pan": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.4,
+        "max": 33.39,
+        "mean": 16.74
+      },
+      "dropped": 1,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.2,
+        "p95": 0.3,
+        "max": 0.4,
+        "mean": 0.19
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 100,
+        "max": 100,
+        "mean": 100
+      },
+      "mountsDuring": 0,
+      "unmountsDuring": 0
+    },
+    "zoom": {
+      "frames": 240,
+      "interval": {
+        "n": 240,
+        "p50": 16.7,
+        "p95": 18.3,
+        "max": 18.6,
+        "mean": 16.67
+      },
+      "dropped": 0,
+      "nominalMs": 16.7,
+      "work": {
+        "n": 240,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 1.1,
+        "mean": 0.21
+      },
+      "longTasks": 0,
+      "loaf": {
+        "count": 0,
+        "totalMs": 0,
+        "maxMs": 0,
+        "renderMaxMs": 0
+      },
+      "mounted": {
+        "min": 100,
+        "max": 100,
+        "mean": 100
+      },
+      "mountsDuring": 0,
+      "unmountsDuring": 0
+    },
+    "wheel": {
+      "events": 150,
+      "inputToFrameMs": {
+        "n": 150,
+        "p50": 28.3,
+        "p95": 36,
+        "max": 39.9,
+        "mean": 28.26
+      },
+      "work": {
+        "n": 150,
+        "p50": 0.2,
+        "p95": 0.4,
+        "max": 0.6,
+        "mean": 0.25
+      }
+    },
+    "relayMs": 32,
+    "fitView": {
+      "mounted": 100,
+      "settledMs": 22.5
+    },
+    "memory": {
+      "before": {
+        "rendererMB": 260.9,
+        "gpuMB": 139.6,
+        "totalMB": 751.9
+      },
+      "afterOpen": {
+        "rendererMB": 303.8,
+        "gpuMB": 141.1,
+        "totalMB": 854.8
+      },
+      "afterFit": {
+        "rendererMB": 272.9,
+        "gpuMB": 112.5,
+        "totalMB": 726.1
+      }
+    },
+    "loadEnd": 8.37
+  },
+  "b.consoleErrors": []
+}

@@ -1,0 +1,424 @@
+P3-E SPIKE E0: PROVE VARIABLE-ARTBOARD REUSE — FINDINGS
+
+Cites docs/doperpowers/plans/2026-10-16-p3-e-design-dashboard.md, child E0 ("E0: Prove variable-artboard reuse"; §1 "The
+Design artifact", XE3, XE4, XE9, §"Risks", Decision Log 2, 3 and 5), parent pin blob
+fc78c4644adbf59f3e1435914a2b6eff50f121cd at master 6e1b827fd; and its parent docs/doperpowers/plans/2026-10-12-p3-co-work.md
+§4.5 and §4.7. Run 2026-10-16 on branch worktree-agent-adb813606d1632ad9: 830b6946 (the touches, the seam, pass 1 of the
+e2e), 9363b009 (the model proofs), 7ede2e6d (pass 2 of the e2e), and the commit carrying this file. C's code is cited at
+master 6e1b827fd (file:line). A spike: nothing here merges; every change outside spikes/p3-design/ is throwaway on this
+branch and is listed below as the additive touch list.
+
+Where it ran. Electron, build and every measure on the Mac mini through GitHub Actions (`scripts/ci-gate.sh <wt> --gates
+e2e:design-spike`): run 38887236196 (pass 1, commit 830b6946; 5 cases passed in 3.1 min, the sixth failing by design so
+gate.yml uploads test-results/; the mini's 1-minute load 5.9 to 8.4 through (b)'s measures) and run 38889194727 (pass
+2, commit 7ede2e6d; 3 cases passed in 1.2 min, pass 1's skipped, the evidence case failing by design). Neither run
+waited in the mini's queue (each job started within 15 s; 4.3 and 2.4 min a job). Model proofs and the fixture check
+under vitest on this MacBook through the slot script, named files: `vitest run --config spikes/p3-design/vitest.config.ts`
+(34 tests, all pass); C's touched suites likewise (8 files, 183 tests, all pass). Every number below is in the run's job log
+as `[e0] <name> <json>` and in spikes/p3-design/results/run-<id>/results.json (copied from the run's artifact).
+
+How a design is stood in. No design adapter exists, so a design is a `presentation` (C's adapter, roots and seam
+verbatim, which is §1's model default) whose slides carry the board's plain keys x, y, w, h on their nodes, written
+through a throwaway seam op (`setSlideKeys`); its board files are C's dialect unchanged (spikes/p3-design/fixture.ts,
+every file loading with no hold and no diagnostic: fixture.test.ts). The world layer of (b), (f) and (g) is a throwaway
+renderer seam (src/renderer/src/tools/presentation/e0-world.ts) mounting C's own SlideCanvas per board on one transformed
+div; (a) edits the boards in C's own deck editor with the touches below.
+
+
+VERDICT
+
+YES on every item, with one rule to change (XE4) and the model cap measured.
+
+(a) C's element engine edits boards of other sizes as built once ten files learn the board's size: 75 changed lines,
+    every one additive with the deck's 1920×1080 default. Overlay, inspector, text box and snapping proved at 390×844,
+    1440×1024, 1080×8,192 and 4,096×4,096; selection and drag also proved on 8,192², 16,384², 1080×32,768 and
+    65,536×1080 boards in the editor. The real list differs from the spec's guess: of the nine SLIDE_W/SLIDE_H readers
+    E1 touches four (SlideView, geometry's candidates(), main's exporter, HistoryPreview), the rest being the deck's own
+    (DeckEditor, filmstrip, layouts, presenter); `measurePass` needs nothing; `deckPage` needs per-board frames and named
+    @page rules; the gestures need the board's lines; and SlideCanvas reads the board's size from its node.
+(b) Many boards are cheap. 100 boards always mounted (8,589 DOM nodes) lay out in 200 ms; pan and zoom spend at most
+    0.4 ms (p95) of main thread per frame, no pan drops a frame (the compositor's trace agrees), the renderer holds
+    331 MB. Visible-only mounting is the worse strategy (mount storms: 27 ms of work in a pan frame, a 190 ms frame
+    zooming out to fit, twice the compositor's dropped frames). E1 ships always-mounted.
+(c) §1's root-reuse default holds: geometry as plain scalar keys on C's slide node converges, undoes with ⌘Z alone, shows
+    in history as the board's own keys, comes back on restore, and C's publish, repair and reads never touch it. Against
+    XE4: keeping a moved element's id loses an element when another replica inserts that id into the destination
+    concurrently; a cross-board move must always take a new id (proposed Decision Log line).
+(d) An agent publish of the manifest and two boards lands mid-drag with the owner's drag intact (A's real store).
+(e) The real exporter, given the board's size, prints one native-sized PDF page per board (390×844 through 1080×12,000,
+    mixed in one file) and pictures 1080×8,192 and 1080×12,000 whole at native size. Chromium's printer has no page-size
+    limit to 65,536 px; the portable limit is the PDF readers' 14,400 pt (19,200 px) a side. The capture window draws
+    whole to 16,384 px a side at any area tried (to 144 Mpx) and past 16,384 silently cuts the picture at 16,384; the
+    8,192 picture cap is MAWS's policy, under Chromium's real one.
+(f) The design system's document medium reads as screen type on a 390 px board (screenshots); no `design` medium.
+(g) Chromium draws, hit-tests and edits boards far past both candidates (65,536 px a side, 1.07 Gpx, memory flat), so the
+    editor does not set the cap; output does. Recommended model cap: 16,384 px per side and 2^26 px (64 Mi px, 8,192²) of
+    area.
+
+
+(a) BOARDS OF FOUR SIZES EDIT WITH C'S ENGINE
+
+What was run (pass 1, test "(a) boards of 390×844, …"): one design with four boards, each a red rectangle r at the centre,
+a green one c near the top left and a paragraph t near the bottom (fixture.ts editBoardHtml), opened from the library in
+a main tab; per board, at the editor's fit zoom: select r by a click; drag it until its right edge is 2 screen px short
+of the board's right edge, then its bottom edge 2 px short of the board's bottom; two Undo; the inspector's X past the
+deck's 1,920 and its Fill colour; the text box on t (double-click, type, Escape). Results, all four boards
+(results.json a.summary):
+
+  board         fit zoom  snap right        snap bottom       x guide spans         undo   inspector X, fill   text box
+  390×844       0.823     left 270px  ✓     top 764px   ✓     695 px = the board     both   260px, #0000ff      "Edit me board"
+  1440×1024     0.239     left 1181px ✓     top 944px   ✓     245 px = the board     both   1171px, #0000ff     "Edit me board"
+  1080×8,192    0.085     left 886px  ✓     top 7700px  ✓     695 px = the board     both   876px, #0000ff      "Edit me board"
+  4,096×4,096   0.084     left 3359px ✓     top 3850px  ✓     344 px = the board     both   3349px, #0000ff     "Edit me board"
+
+The stage frame and the drawn section have the board's size at every zoom (e.g. 92×695 px for the poster); the overlay's
+selection outline sits on the painted element with its 3 px pad at every size ([-3,-3,6,6]); the snapping guides span the
+board on both axes (the poster's vertical guide 695 px where C as built draws 92, s(1080), geometry.ts:470); no console
+error. Every write is C's own: the move and resize gestures, one undo step per drag (slides-undo.ts:37), the inspector's
+Arrange fields reading layout through measureInHost, the Tiptap text box. Larger boards in C's editor, the far corner's
+marker selected and dragged: 8,192² at fit 0.042 and 16,384² at fit 0.021 (pass 1, g.edit) moved by exactly the wanted
+−819 and −1,638 px; 1080×32,768 at 25 % and 65,536×1080 at 50 % (pass 2, g2.edit; the stage scrolled to the corner) by
+exactly −160 and −80 px. (Pass 1's 1080×32,768 at its fit zoom, 0.021, failed only because the board was 23 screen px
+wide and the drag 2.3 px, under the gesture's threshold; pass 2's 32,768² at 75 % failed because the 3,072 px marker's
+clamped click point fell outside the stage: both the test's geometry.)
+
+The touch list as proved (git diff 6e1b827fd..7ede2e6d -- src, P3-E E0-marked in each file):
+  1. canvas/slide-canvas.ts (+30): the canvas reads a board's size from its node's plain `w`/`h` keys in applySlideKey
+     (:184), writes the section's inline width and height and `data-board`, and answers `size` and `isBoard`; a deck's
+     slide has no such keys and keeps CANVAS_CSS's 1920×1080 (canvas/css.ts:17). A resize patches through the canvas's
+     own change record (one style write), never a new canvas.
+  2. editor/SlideView.tsx (+9): `size?: {w, h} | null`: the frame (:29) and the scaler (:30, whose 1920×1080 is
+     deck.css:16-17) at the board's size.
+  3. editor/deck-view.ts (+7): SlideEntry gains `size?` (:17, :39) and `sameSlides` compares it (:61). E1's board list
+     reads it, or its own view of the same keys.
+  4. editor/Stage.tsx (+2): passes `slide.size` to SlideView (:65).
+  5. editor/transform/Overlay.tsx (+2): the guides' SVG at `canvas.size` (:378), not s(1920)×s(1080).
+  6. editor/transform/gestures.ts (+17): the three `slideLines()` calls (:183 move, :292 resize, :384 endpoint) take the
+     canvas's size with margin 0 for a board (slideLines(w, h, 0); a board has no 128 px margin) and pass `extent`.
+  7. geometry.ts (+4): `SnapContext.extent?: {w, h}` (:437), read by candidates() (:470) for the guides' span.
+  8. editor/DeckEditor.tsx (+7, the stand-in only): the fit zoom and Insert's centre from the board's size (:119, :202),
+     the fit's floor from 0.05 to 0.005. E1's workbench is its own editor; this file is not on E1's list.
+  9. export/standalone.ts (+19): ExportSlide gains `size?` (:30, read at :56); a sized board's frame and section are
+     written at its size (:266-278); `print` mode adds one named page per board size, `@page board-WxH { size: Wpx Hpx;
+     margin: 0 }` with `.maws-frame[data-size="WxH"] { page: board-WxH }` (after :286). `html` and `measure` need only
+     the sized frames.
+ 10. src/main/presentations/export.ts (+2): STAGE's whole-slide box is the shown frame's rect (:212), not 1920×1080, so
+     withDeckWindow's capture grows its window to the board as it already grows for a large element (:255-263).
+ Needs nothing: export/measure.ts (reads each slide relative to its own rect, :264), measurePass and withDeckWindow
+ (:233's 1920×1080 window is only the starting size), TextBox, Inspector, CommentPins, selection, writers-elements,
+ session.ts (DeckSession's currentSlide and selection serve as the selected board's).
+ E1 touches, not exercised here: editor/history/HistoryPreview.tsx (:93 thumbnails at width/SLIDE_W, :170 the fit by
+ SLIDE_W/SLIDE_H) for per-board history previews.
+ Deck-only, not touched: Filmstrip.tsx:41 (the board list replaces it), menus/Layouts.tsx:216 (deck layouts),
+ present/stage.ts:16-17 and Presentation.tsx:255-256 (no presenter for designs), export/pptx.ts:79 (no PPTX of a
+ design), design-system/page/Canon.tsx:11 (D's own page).
+
+The dialect's limits bind boards as they bind slides (XE3; parse.ts:18-31): 200 elements, 24 pinned children per host
+(a hold, parse.ts:268, so a free-form board past 24 must group: the guide says so), 20,000 characters of text; font-size
+8 to 400 px, padding 0 to 256, gap 0 to 512; positions and sizes are unbounded px (css.ts:282-283), so nothing in the
+dialect limits a board's size.
+
+
+(b) MANY BOARDS: OPEN, PAN, ZOOM, MEMORY, PER MOUNTING STRATEGY
+
+What was run (pass 1, test "(b) 24 then 100 boards…", MAWS_E2E_FOREGROUND=1: the window visible, opaque and key, dpr 1,
+1600×1000, frames at 60 Hz, idle rAF 16.7 ms; 1-minute load 5.9 to 8.4). Boards: E1's bench mix cycled (fixture.ts
+MIX_24: 6 phones 390×844, 5 tablets 834×1194, 5 desktops 1440×1024, 4 slides 1920×1080, 2 posters 1080×8,192, one
+4,096², one 4,096×8,192), each a header and a wrapping grid of cards scaled to its area (up to 55 cards, ~180 elements on
+the large boards). 24 boards: 2,113 DOM nodes, a world 11,790×19,258, 90.6 Mpx of boards. 100 boards: 8,589 nodes,
+11,932×67,724, 364 Mpx. Per strategy: open at 25 %; a scripted diagonal pan across the world at 25 % (240 frames); a zoom
+from fit (0.0127 for 100) to 100 % and back about a desktop board (240 frames); 150 wheel events panning; every canvas
+re-laid at once (a scope change's or a face's cost); then fit. "work" is the frame callback's own time (the view change,
+any mounts, a forced style and layout); "dropped" counts frames longer than 1.5 intervals; LoAF is Chromium's
+long-animation-frame entries (> 50 ms).
+
+  24 boards             open→laid out  pan p95/max ms  pan drop  pan work p95  zoom drop  zoom work p95/max  LoAF        re-lay  renderer MB (open, fit)  GPU MB
+  always mounted        123 ms         18.1 / 18.7     0         0.3 ms        1          0.4 / 0.6          none        13.5    269, 276                 92, 110
+  visible only (±200)   63 ms (18)     18.3 / 33.4     1         0.6 (max 11)  0          3.3 / 12.0         1 × 68 ms   15.6    258, 232                 107, 124
+  content-visibility    76 ms          18.4 / 18.7     0         0.4 ms        1          0.3 / 0.9          none        17.3    227, 192                 121, 117
+  always, no will-chg   89 ms          18.2 / 18.6     0         0.3 ms        5          0.2 / 0.3          none        13.7    213, 257                 118, 149
+
+  100 boards            open→laid out  pan p95/max ms  pan drop  pan work p95  zoom drop  zoom work p95/max  LoAF        re-lay  renderer MB (open, fit)  GPU MB
+  always mounted        200 ms         18.3 / 18.7     0         0.3 ms        6          0.4 / 1.4          2, ≤ 81 ms  34.0    331, 330                 134, 133
+  visible only (±200)   54 ms (18)     18.2 / 33.3     1         6.6 (max 27)  6          5.6 / 18.2         2, ≤ 190 ms 7.1     294, 363                 138, 140
+  content-visibility    137 ms         18.4 / 18.7     1         0.3 ms        0          0.4 / 1.1          none        32.0    304, 273                 141, 113
+
+Wheel input to the frame after its view: p50 28 to 29 ms, p95 36 to 37 ms in every row, including the trivial ones, so it
+is the synthesized wheel's own pipeline on this runner, not the boards' cost (C's drag probe measured mouse moves, not
+wheels). The renderer before each open read 179 to 264 MB (the app itself), so 100 always-mounted boards cost about
++80 MB; nothing approaches E1's 500 MB.
+
+Reading. On the main thread the boards are nearly free at these densities: the frame interval p95 of ~18 ms is 60 Hz
+jitter (the idle page's), not work. Visible-only mounting pays for every board that comes into view inside the frame
+(55 mounts on the 100-board pan, work up to 27 ms; 72 mounts and a 190 ms frame zooming out to fit, where every board is
+visible again), and saves no memory at fit. Always-mounted is the default E1 ships; content-visibility:auto on each board
+is a free addition (no worse anywhere, zoom with no dropped frame at 100 boards). Visible-only mounting with cached
+pictures (the spec's fallback) was not built; nothing measured calls for it below 100 boards.
+
+The compositor's view (pass 2, test "(b2)", the same worlds and strategies, each run of 180 frames under a DevTools trace
+of the frame, cc, viz and gpu categories; a third run pans 3,000×1,500 px at 100 % from a desktop board, rastering new
+tiles at full scale). DroppedFrame events and frames the pipeline reporter marks as checkerboarded:
+
+  world, strategy        pan at 25 %             zoom fit ↔ 100 %                    pan at 100 %      raster on workers (zoom)
+  24, always mounted     0 dropped               0 dropped, 1 checkerboarded         0 dropped         266 tasks, 37 ms
+  24, visible only       0 dropped               3 dropped                           0 dropped         406 tasks, 22 ms
+  100, always mounted    0 dropped               9 of 189 dropped, 2 checkerboarded  0 dropped         974 tasks, 119 ms
+  100, visible only      0 dropped               15 of 185 dropped                   1 dropped         995 tasks, 79 ms
+
+So the raster threads keep up: no dropped frame on any pan, 100 % included; zoom at 24 boards always mounted drops none;
+the drops come at 100 boards while zooming out to fit (the whole world rastered at a new scale), and visible-only mounting
+doubles them. (The first trace in each world costs one long animation frame at its start, 56 to 249 ms, before the
+run's first frame; the rAF figures of the runs themselves match pass 1's.)
+
+What E1's scale rows should take: "pan and zoom frame p95 ≤ 16 ms" cannot be read from rAF intervals (an idle page's p95
+is 18 ms at 60 Hz here; the gate-offload spec's background window paces 18.4 ms at 54 Hz); measure the frame's work (as
+above) and the dropped frames: proposed rows, on the 24-board bench at a load below 10, pan and zoom frame work p95 ≤ 4 ms (measured 0.4) and
+dropped frames ≤ 2 % of 240 (measured 0 to 0.4 %); open cold to laid out ≤ 1,000 ms (measured 123 ms warm in the page,
+host load not included: E1 measures its own cold open); re-lay of every board after a scope change ≤ 50 ms (13.5); the
+renderer ≤ 500 MB (276). At 100 boards pan holds every row; zoom drops 2.5 % (rAF, 6 of 240) to 4.8 % (the compositor,
+9 of 189), so a 100-board row, if E1 keeps one, takes ≤ 5 %.
+
+
+(c) THE MODEL: GEOMETRY AS PLAIN KEYS ON C'S SLIDE NODE
+
+Proved on C's model and A's real store (spikes/p3-design/model/, 32 tests; fixture boards b1 {0,0,390,844}, b2
+{500,0,1440,1024}, b3 {2000,0,1080,8192}, keys written by Y.setSlideKey):
+ 1. Convergence (geometry.test.ts): A writes b1.x and B writes b1.w concurrently: both kept, states equal. Both write b1.x:
+    one value, the higher clientID's, on every replica and in both delivery orders. Each key is its own attribute of the
+    slide node (yjs/slides.ts:136-138).
+ 2. ⌘Z alone: a four-frame drag under DeckUndo's origin, cut before and after, is one undo step; a remote write landing
+    mid-drag (b1.w, b2.x) is not undone; a board move and an element restyle in one stack undo separately, move first;
+    redo restores the move (slides-undo.ts:37, :53). Observed, C's rule as for element styles: a remote x written after
+    the owner's drag survives the owner's undo of the drag while y goes back.
+ 3. History: after a move, deckChanges lists exactly b2 `changed` with keys x and y, author and minute, count 1; a
+    three-update drag reads as one change credited to its last frame; a resize lists w and h (history.ts:192, :203:
+    every slide key but elements and notes is the slide's own).
+ 4. Restore (restore.test.ts, A's DocumentService and ArtifactStore with C's adapter): a version, then a drag, a resize,
+    an agent restyle and a reply; store.restore brings b1's x, y, w, h and the element back, deckFiles equals the
+    version's, and the thread's later message stays (adapter.ts:170-181, revertScope keeping conversations only). A
+    board deleted since the version comes back with its geometry.
+ 5. C's paths leave the keys: a heavy agent publishDeck of the board (restyle, text, an element added and one removed),
+    a forced publish over a conflicting restyle, a held board file then fixed, and repair: x, y, w, h untouched every time
+    (publish.ts:96, :110, :668-681 compare and write only style:/attr: slide keys; :961 writes only order; repair writes
+    order and parent only, model.ts:560-599). deckFiles carries no geometry (model.ts:234-248): the design's adapter
+    writes it into canvas.json. Observers: a geometry write reaches observeSlide as {kind:'slide', keys:['x','y']} and
+    touchedSlides answers the board, so the host's repair is scoped to it (adapter.ts:160-163).
+ Two things E1 owns: C's duplicateSlide drops x, y, w, h (and a `title` key) and keeps the element ids (writers.ts:50-54,
+ model.ts:115-118, 133-136, 195-201), while §1 wants a duplicated board to have new element ids and new geometry: E1 writes
+ its own duplicateBoard. And a board created by its file alone (or held when new, publish.ts:637) has no geometry: the
+ manifest gives it, else §1's default placement.
+ The default stands; no reason for a canvas root was found.
+
+The cross-board move (move.ts, a prototype of §1 "Identity" in one transaction: the subtree read with its text, deleted
+from the source, created at the destination's top level, every thread anchored to a moved element rewritten):
+ - No collision: the id kept, the thread follows ({b2, e1}, live, quote kept).
+ - Collision: the moved element (and any colliding descendant) takes elementMinter's id; the threads are rewritten in the
+   same update (one update); two ⌘Z restore both boards deep-equal and the anchors (the undo scope holds threads).
+ - The race the acceptance names, under XE4's keep-id rule: A moves e1 from b1 to b2 (b2 lacks it at A's state) while B
+   creates e1 in b2 (Y.createElement, and as an agent publishDeck of b2 adding <p id="e1">). Both replicas converge with
+   one e1 in b2 and no orphan, but one element is silently lost: with A's clientID higher, the agent's published element
+   is gone; with B's higher, the moved element's content is gone from every board and the thread {b2, e1}, live, now
+   quotes the agent's element. A container moved this way loses itself and re-parents its children. Cause: both are
+   sets of one key of b2's `elements` node (yjs/slides.ts:184-189; publish.ts:817, 826 create by key), last writer wins.
+ - Always minting a new id (clientID-hashed, elementMinter): both elements survive in both orders, the thread follows the
+   moved one. Its one cost: two replicas moving the same element into the same board at once leave two copies (the
+   thread on one); keep-id leaves one. A derived id (a function of source board, destination board and id alone, no
+   clientID) survived both races in the tests: one copy on a double move, both elements on an insertion race.
+ Recommendation: XE4's "keeps its id unless the destination holds it" becomes "always takes a new id": the derived id
+ (8+ base36 characters, falling back to elementMinter on a collision with the destination at the mover's state) is the
+ best of the three; plain minting is acceptable if E1 prefers C's minter. Losing content silently is worse than keeping
+ two copies of one element, and the kept id buys nothing once the threads are rewritten in the move's transaction (the
+ agent's next read sees the move either way). Side note: elementMinter's suffix is hash4, four base36 characters
+ (parse.ts:77-84, ~1.7 M values), so two replicas' minted ids differ only probabilistically; a longer suffix is safer if
+ moves mint.
+
+
+(d) AN AGENT PUBLISH WHILE THE OWNER DRAGS
+
+Prototype publishCanvas(live, base, sent, force) (model/publish-canvas.ts): board files renamed onto C's paths and
+published by C's publishDeck; canvas.json compared three-way per key (deck keys; each board's x, y, w, h, title; order as
+one key) with the details `board <id>: <key> changed since your read`, `board <id>: removed since your read`, `order:
+changed since your read`, `canvas.json key <k>: changed since your read`; any conflict refuses the whole publish unless
+force; one transaction. On A's real store (publish-canvas.test.ts, service.writeAs, each drag frame the owner's own
+write): the agent reads, the owner drags b3 for 10 frames, the agent publishes canvas.json (b1 moved, b2 resized, b3 as
+read) and the files of b1 and b2, the owner drags 10 frames more: no conflict, changed [b1, b2, canvas]; host and owner
+both end with b3 at the owner's last position {2200,100}, b1 {50,60}, b2 1200×800, the agent's restyle and text in
+place; the owner's one ⌘Z returns b3 to {2000,0} and leaves the agent's b1. Variant: the agent also moves b3: refused
+with exactly `board b3: x changed since your read` and `board b3: y changed since your read`, nothing written; forced,
+the agent wins exactly x and y while a key it sent equal to its base (b1.w, changed by the owner) is left alone.
+
+
+(e) EXPORT: MIXED-SIZE PDF, NATIVE PNG, THE LIMITS
+
+The real exporter (pass 1, artifacts.export through main's registry, with touches 9 and 10 only):
+ - PDF of five boards, 293 ms: five pages, each its board's size: 293×633 pt (390.7×844.2 px), 1920×1080, 1080×8,192,
+   4,096×4,096, 1080×12,000 px; each page's content at 1:1 (the stream's 0.24 × 3.125 = 0.75 pt per CSS px), the corner
+   markers at their native coordinates. One page is off by a fraction of a pixel: the 390×844 board's page is
+   390.7×844.2 px (293×633.1 pt), every other size exact; a sub-pixel white edge at most, worth one line in E1's tests.
+ - PNG of the 1080×8,192 board: 1080×8,192, every corner and the centre the right colour, 283 ms. PNG of the 1080×12,000
+   board: 1080×12,000 whole, 357 ms: given the board's box, withDeckWindow grew its offscreen window to 1920×12,000 and
+   captured it; nothing in Chromium enforced 8,192. 4,096² whole, 357 ms.
+ The printer (main's printHtmlToPdf options on a fresh partition: hidden 816×1056 window, JavaScript off,
+ preferCSSPageSize, printBackground, the outline): every size from 390×844 to 1080×65,536 and 32,768² printed as one page
+ of its CSS size, markers at native coordinates (e.g. 1080×65,536: the bottom marker at y 65,401), 121 to 137 ms and about
+ 2.1 KB each; one PDF of six sizes (390×844 … 16,384²) in 132 ms, every page its own size. Chromium writes the MediaBox in
+ points with no UserUnit, so a side above 14,400 pt (19,200 px) is beyond the PDF readers' implementation limit: Acrobat
+ warns "the dimensions of this page are out of range" and shows only a 200-inch window (Annex C of ISO 32000-1; Adobe's
+ PDF Reference). The native-page limit E1 states is therefore 19,200 px a side, not Chromium's.
+ The capture window (openCaptureWindow's options, offscreen, and the named fallback, a hidden window captured with
+ stayHidden): 1080×8,192, 4,096², 8,192², 1080×12,000, 1080×16,384 and 16,384×1080 at 1:1 all captured whole with four
+ right corners (offscreen 400 to 450 ms, hidden about 1.6 s); the over-cap boards at the scale that fits the 8,192 cap,
+ 1080×12,000 × 0.6827 → 738×8,192 and 16,384² × 0.5 → 8,192², right. Pass 2 (offscreen): 16,384×4,096 (67 Mpx, 697 ms),
+ 12,000² (144 Mpx, 1,082 ms) and 16,384×8,192 (134 Mpx, 608 ms) captured whole; 1080×24,576, 24,576×1080 and 1080×32,768
+ did not: the window took the size (getContentSize answered it) and capturePage answered a picture cut at 16,384 px on the
+ long side with no error (1080×16,384 for the 24,576-tall board, its bottom corners white). So the capture window's hard
+ limit is 16,384 px a side (the GPU's largest texture), not an area, and past it the failure is silent.
+ The real exporter at the candidate cap (pass 2): PNGs of 1080×16,384 (380 ms, 87 KB) and 16,384×4,096 (683 ms, 204 KB)
+ whole at native size, every corner right; one PDF of 1080×20,000 and 16,384² (246 ms): two pages, each its board's size,
+ drawn at 1:1.
+ So XE9 stands as written, and the limits are MAWS's: EXPORT_SIZE_MAX (8,192, schema/artifacts.ts:106-107) for a picture,
+ scale or refuse above it, and never a capture past 16,384 a side, which Chromium would cut silently; a PDF page at native
+ size to 19,200 px a side, scale or refuse above it (no Letter fitting).
+
+
+(f) THE DOCUMENT MEDIUM ON SCREENS
+
+Five boards in the world layer at 100 % (pass 1; screenshots in run 38887236196's artifact e2e-design-spike,
+test-results/design-spike/*.png, copied to spikes/p3-design/results/run-38887236196/): one element per type role drawn
+through the role's custom properties (fixture.ts typeBoardHtml), in the house system (builtinView) at each medium; and
+the same tags with no font values under C's slide defaults and under §1's proposed board defaults. Computed type (px,
+line height, weight):
+  role        document medium     deck medium        plain tags, C's slide defaults   plain tags, §1's board defaults
+  title       34 / 44 / 700       96 / 115 / 700     (h1) 96 / 106 / 600               (h1) 32 / 38 / 600
+  subtitle    19 / 29 / 500       44 / 62 / 500      (p)  32 / 45 / 400                (p)  16 / 24 / 400
+  h1          26 / 35 / 700       72 / 90 / 700      96 / 106 / 600                    32 / 38 / 600
+  h2          21 / 30 / 700       56 / 73 / 700      64 / 74 / 600                     24 / 30 / 600
+  h3          17 / 26 / 600       44 / 59 / 600      44 / 53 / 600                     20 / 26 / 600
+  body        16 / 27 / 400       40 / 60 / 400      32 / 45 / 400                     16 / 24 / 400
+  caption     13 / 20 / 400       28 / 41 / 400      32 / 45 / 400                     16 / 24 / 400
+  quote       17 / 30 / 400       48 / 70 / 400      32 / 45 / 400                     16 / 24 / 400
+f-document.png reads as a phone screen (title 34 as iOS's large title, body 16, caption 13, Korean wrapping cleanly);
+f-deck.png is presentation type, the title wrapping to two lines at 96 px and the board overflowing by its fourth role;
+f-desktop-document.png (1440×1024) reads as a desktop page. The other default systems' document roles are of the same
+scale (classroom body 16, title 30; official body 15, title 26; their tokens.tokens.json). One taste note for E1's guide,
+not a medium: the document body's line height (1.7 in the house system) is reading-length; UI copy usually wants 1.4 to
+1.5, which a board element sets inline. Finding: the document medium serves designs; no `design` medium is asked (X28's
+conditional row stays unused). §1's board defaults (`.maws-slide[data-board]`, f-plain-screen.png) give untagged text
+screen sizes too and stay as proposed; the canvas's `data-board` attribute (touch 1) is their hook.
+
+
+(g) THE SIZE CHROMIUM DRAWS AND EDITS: THE NUMBERS BEHIND THE CAP
+
+Each board drawn alone in the world layer (pass 1, test "(g) …"; markers 1/8 of the shorter side in each corner and at
+the centre): laid out at its CSS size (offsetWidth and offsetHeight exact); at 100 % with its far corner brought under a
+point, the bottom-right marker's pixel right and hit-tested as that element, the top-left right; at the fit zoom, the
+centre and bottom-right markers right; the renderer's working set after each:
+  8,192² (67 Mpx), 12,288×1080, 16,384×4,096 (67 Mpx), 16,384² (268 Mpx), 1080×24,576, 32,768×1080, 1080×32,768,
+  23,170² (537 Mpx), 32,768² (1,074 Mpx), 65,536×1080, 1080×65,536: all right at 100 % and at fit (the last's
+  bottom-right marker 1.9 screen px at fit, blended at its edge). Laid out in 23 to 55 ms; renderer 204 to 207 MB and GPU
+  87 MB whatever the size (Chromium tiles: only the visible tiles are rastered).
+Editing: in C's editor, the far-corner markers of 8,192², 16,384², 1080×32,768 and 65,536×1080 boards selected and
+dragged exactly as wanted ((a) above).
+
+So neither candidate is an editor limit. What does bind, by output:
+  - a native PDF page: 19,200 px a side (the readers' 14,400 pt), Chromium itself none to 65,536;
+  - a picture: MAWS's 8,192 a side (policy); Chromium's capture window whole to 16,384 a side at any area tried (144 Mpx)
+    and silently cut at 16,384 past it (the GPU's largest texture on Apple silicon); and a native bitmap's memory, 4
+    bytes a pixel in main (67 Mpx = 256 MiB; 268 Mpx = 1 GiB);
+  - the same 16,384 texture for any surface Chromium must hold whole (a filter or opacity group over a whole board, a
+    cached picture of a board for a level-of-detail view): content layers tile past it, such surfaces do not.
+Recommended cap for the owner's ruling (Decision Log 5): 16,384 px per side and 2^26 px (67,108,864, written "64 Mi px",
+8,192²) of area. Every board inside it prints as one native PDF page in every reader, pictures natively when ≤ 8,192 a
+side and at a stated scale otherwise (and could picture natively whole should the policy ever rise to 16,384), and keeps
+a whole-board surface inside one texture; the area bound keeps a native bitmap at 256 MiB. E1's bench boards (4,096×8,192,
+1080×8,192) and the posters of the parent's acceptance (taller than 8,192) are inside it with room (1080 × 16,384 is
+17.7 Mpx). A board outside it is refused at creation or publish naming the board and the limit (§1 "Limits").
+
+
+WHAT E1 INHERITS
+
+The additive touch list (X27's row "the exact list is E0's finding (g)"), each P3-E-marked in C's file, deck defaults
+unchanged; the shapes proposed:
+  - SlideCanvas reads a board's `w`/`h` from its node (no option needed): `get size(): {w, h}` (1920×1080 for a deck's
+    slide), `get isBoard(): boolean`, the section's inline width/height and `data-board`. Preferred over §1's
+    `SlideCanvasOptions.size?`: history previews, thumbnails and the exporter read the same keys, and a resize is one
+    style write through the canvas's change records, not a remount. (If E1 prefers the option, it must add a setter for
+    live resizes.)
+  - SlideView `size?: {w, h} | null`; SlideEntry (or E1's board view) `size?`.
+  - Overlay: the guides' SVG at `canvas.size`; no new prop.
+  - gestures.ts: the canvas's own lines, `slideLines(w, h, 0)` for a board, `slideLines()` for a slide, and `extent`;
+    GestureContext unchanged (it already carries the canvas).
+  - geometry.ts: `SnapContext.extent?: {w, h}` read by candidates(); slideLines(w, h, margin) as built.
+  - standalone.ts: `ExportSlide.size?`; sized frames and sections; in `print` mode `@page board-WxH` and
+    `.maws-frame[data-size]`'s `page:`.
+  - main's exporter: STAGE's whole-slide box from the shown frame (src/main/presentations/export.ts:212). E1's
+    `src/main/design/export.ts` reuses withDeckWindow and measurePass unchanged.
+  - HistoryPreview: per-board sizes for its stage and thumbnails (E1's own touch; not exercised here).
+  - Not C's: E1 writes duplicateBoard (C's duplicateSlide drops geometry and keeps element ids) and moveElementToBoard
+    with the id rule below; publishCanvas owns the manifest's three-way compare (C's publish never sees geometry);
+    the design limit of 200 boards is E1's (C's DECK_LIMITS.slides is 500, deck.ts:21-27).
+The bounds for E1's scale rows (24-board bench at a load below 10; the frame measure is the frame's work and dropped
+frames, not rAF intervals): open to laid out ≤ 1,000 ms (123 ms in the page); pan and zoom frame work p95 ≤ 4 ms (0.4);
+dropped frames ≤ 2 % (≤ 0.4 %); a re-lay of every board ≤ 50 ms (13.5); renderer ≤ 500 MB (276); always-mounted boards
+with content-visibility:auto, no visible-only unmounting. The drag and publish rows E1 measures itself (C's drag probe
+works on a board unchanged: the dragged element is C's).
+The model cap for the format reference: 16,384 px per side, 2^26 px of area. The export limits for XE9: a picture 8,192 a
+side (scale or refuse, as written), a PDF page 19,200 px a side (scale or refuse).
+
+Proposed Decision Log lines (for the architect to record; this file does not edit the spec):
+  - "2026-10-16 (E0's findings, spikes/p3-design/findings.txt (c)): XE4 amended: an element moved across boards always
+    takes a new id (an id derived from its source board, destination board and old id, falling back to C's minter on a
+    collision at the mover's state), never its old one, with every thread anchored to it rewritten in the move's
+    transaction; reason: under the keep-id rule a concurrent insertion of that id into the destination by another
+    replica or an agent publish drops one element silently (Yjs last-writer on the elements node's key), reproduced in
+    both clientID orders; minting keeps both. §1 'Identity' and E1 (3) follow."
+  - "2026-10-16 (E0's findings (g); the owner's ruling of Decision Log 5 applied): the board model's cap is 16,384 px per
+    side and 2^26 px of area, stated in the Design format reference; Chromium draws and edits past 65,536 px, so the cap
+    comes from output: a native PDF page in every reader (14,400 pt = 19,200 px), the capture window's and the GPU's
+    16,384 (a capture past it is cut silently), a native picture's memory."
+  - "2026-10-16 (E0's findings (e)): XE9's PDF policy names its limit: a board prints as one page at native size up to
+    19,200 px a side (PDF readers' 14,400 pt implementation limit; Chromium has none to 65,536), scaled or refused above
+    it; under the model cap every board prints native."
+  - "2026-10-16 (E0's findings (b)): visible-only mounting is not E1's strategy: boards stay mounted (content-visibility:
+    auto on each); E1's pan and zoom rows measure the frame's work and dropped frames, since an idle page's rAF interval
+    p95 is 18 ms at 60 Hz."
+  - "2026-10-16 (E0's findings (f)): designs render in the document medium; X28's conditional `design` medium row is not
+    asked."
+  - "2026-10-16 (E0's findings (a)): X27's additive list for E1 is E0's ten touches (findings (a)); the board's size is
+    read by SlideCanvas from the board node's w/h keys rather than passed as SlideCanvasOptions.size."
+
+
+NOT PROVED
+
+ - C's whole gate with the touches applied: the touched files' unit suites ran green on this MacBook with them (geometry,
+   export/standalone, canvas/slide-canvas, transform, DeckEditor, parse, history, publish: 8 files, 183 tests);
+   e2e:presentations and the full suite were not run on the branch (E1's gates run them, XE3).
+ - Compositor checkerboarding measured only as the pipeline reporter's flag and DroppedFrame counts in a DevTools trace
+   (b2); no visual check of blank tiles; the trace's own start costs one long frame.
+ - Visible-only mounting with cached pictures (the spec's fallback), and level-of-detail at low zoom: not built.
+ - The world layer is the spike's, not E1's workbench: no board frames, board snapping, board list or zoom UI were
+   measured; the wheel probe's 28 ms floor is the synthesized input's.
+ - Density: boards up to ~180 elements (C's limit is 200); text-heavy boards and many pictures were not measured.
+ - Korean composition in a board's text box (C's e2e proves it on slides; the text box is unchanged).
+ - A native picture of more than 144 Mpx (a 16,384² board's would be 1 GiB) was never attempted; capture past 16,384 a side
+   was shown to cut, not to fail loudly.
+ - Editing a 32,768² board in the editor (pass 2's click fell outside the stage); 32,768² was drawn and hit-tested in the
+   world layer only.
+ - PDF readers: the 14,400 pt limit is the readers' documented one (Acrobat, ISO 32000-1 Annex C), not tested in a
+   reader; macOS Preview and Chromium's own viewer were not opened.
+ - (c) and (d) are model-level on A's real store with replicas in one process; the two-window e2e of a board move
+   (panel and main tab) is E1's (2).
+
+
+EVIDENCE INDEX (spikes/p3-design/)
+
+ findings.txt            this file
+ fixture.ts              the boards: the bench mix, (a)'s edit boards, (g)'s marker boards, (f)'s type boards
+ fixture.test.ts         every board file loads in C's loader with no hold and no diagnostic
+ model/                  the model proofs: geometry.test.ts (1, 2, 3, 5), restore.test.ts (4), move.ts and move.test.ts
+                         (the cross-board move under three id rules), publish-canvas.ts and publish-canvas.test.ts ((d)),
+                         support.ts and store-support.ts; run: `vitest run --config spikes/p3-design/vitest.config.ts`
+ results/run-38887236196/ pass 1's results.json and the five (f) screenshots
+ results/run-38889194727/ pass 2's results.json
+ e2e/design-spike.spec.ts the Mac-lane measures (throwaway, with `pnpm e2e:design-spike`); the seam in
+                         src/renderer/src/tools/presentation/e0-world.ts and e2e-seam.ts's setSlideKeys (throwaway)
