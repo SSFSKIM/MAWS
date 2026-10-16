@@ -90,9 +90,10 @@ const VIEWS = [
   chart('sites', { view: 'line', x: 'x', y: 'level', series: 'site', title: '마라도 관측소 여덟 곳' }),
 ];
 const COUNTRIES = ['캐나다', '독일', '프랑스', '영국', '이탈리아', '일본', '대한민국', '미국']; // the snapshot's order
-// A synthetic fixture for tip geometry only (no observations): eight long Korean series names, three points each.
+// A synthetic fixture for tip geometry only (no observations): eight long Korean series names, three falling points each,
+// the last series' last point the lowest of all, so its tip has the frame's bottom just below it.
 const SITE = (i: number) => `제주특별자치도 서귀포시 대정읍 마라도 등대 앞 선착장 관측소 ${i}`;
-const SITES_CSV = `x,level,site\n${Array.from({ length: 24 }, (_, k) => `${k % 3},${Math.floor(k / 3) + 1 + (k % 3)},${SITE(Math.floor(k / 3) + 1)}`).join('\n')}\n`;
+const SITES_CSV = `x,level,site\n${Array.from({ length: 24 }, (_, k) => `${k % 3},${3 * (8 - Math.floor(k / 3)) - (k % 3)},${SITE(Math.floor(k / 3) + 1)}`).join('\n')}\n`;
 
 /**
  * Hovers the figure's last drawable point with the real pointer and proves its tip readable (E2's Decision Log 21), not
@@ -172,22 +173,34 @@ async function hoverLastPoint(page: Page, figure: Locator, evidence: string) {
     };
   }, last);
   expect(shown.inside, `the tip is whole inside the frame's visible box: ${shown.seen}`).toBe(true);
-  // The visible frame captured without disturbing the hover. Playwright's CDP capture made Chromium resync hover with the
-  // OS cursor, which a quiet e2e window (transparent, ignoring the mouse: showAppWindow) never has: run 38946147833's log
-  // shows 'capture start | pointerout … | pointer left the window | pointerleave … | tip hidden | capture end', no SVG
-  // replaced. Electron's own surface copy of the page's window (capturePage, kept hidden) takes the pixels without that
-  // resync; the log still brackets the capture.
+  // The visible frame captured without disturbing the hover. Observed in run 38946147833: during Playwright's CDP capture
+  // the page received a window leave that hid the tip ('capture start | pointerout … | pointer left the window |
+  // pointerleave … | tip hidden | capture end', no SVG replaced). Why the capture produced it is not proved; the window is
+  // the quiet e2e one (transparent, ignoring the mouse: showAppWindow). The pixels are taken by Electron's own surface copy
+  // of the page's window instead (capturePage, kept hidden); the log still brackets the capture, so a leave would show.
   const mark = (text: string) => frame.evaluate((el, t) => void (el as HTMLElement & { hoverLog?: string[] }).hoverLog?.push(t), text);
   await mark('capture start');
-  const png = await launch!.app.evaluate(
-    async ({ BrowserWindow }, { url, rect }) => {
+  // capturePage's rect is in the window's DIPs: the clip's CSS px times the page's actual zoom factor
+  const captured = await launch!.app.evaluate(
+    async ({ BrowserWindow }, { url, clip }) => {
       const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL() === url);
       if (!win) throw new Error(`no window shows ${url}`);
-      return (await win.webContents.capturePage(rect, { stayHidden: true })).toPNG().toString('base64');
+      const zoom = win.webContents.getZoomFactor();
+      const rect = { x: Math.round(clip.x * zoom), y: Math.round(clip.y * zoom), width: Math.round(clip.width * zoom), height: Math.round(clip.height * zoom) };
+      const image = await win.webContents.capturePage(rect, { stayHidden: true });
+      return { png: image.toPNG().toString('base64'), zoom, size: image.getSize() };
     },
-    { url: page.url(), rect: { x: Math.round(shown.clip.x), y: Math.round(shown.clip.y), width: Math.round(shown.clip.width), height: Math.round(shown.clip.height) } },
+    { url: page.url(), clip: shown.clip },
   );
-  writeFileSync(`${PROOF}/${evidence}.png`, Buffer.from(png, 'base64'));
+  writeFileSync(`${PROOF}/${evidence}.png`, Buffer.from(captured.png, 'base64'));
+  // the zoom used and the image's size checked against the clip, so the rect is verified rather than assumed: the image is
+  // the clip in DIPs (CSS px × zoom) or in device pixels (CSS px × the page's devicePixelRatio, which includes the zoom)
+  const dpr = await page.evaluate(() => devicePixelRatio);
+  const near = (scale: number) => Math.abs(captured.size.width - shown.clip.width * scale) <= 2 && Math.abs(captured.size.height - shown.clip.height * scale) <= 2;
+  const units = near(captured.zoom) ? 'dip' : near(dpr) ? 'device' : null;
+  const sizeNote = { zoom: captured.zoom, devicePixelRatio: dpr, clip: shown.clip, image: captured.size, units };
+  writeFileSync(`${PROOF}/${evidence}.json`, JSON.stringify(sizeNote));
+  expect(units, `the capture is the visible frame's size: ${JSON.stringify(sizeNote)}`).not.toBeNull();
   await mark('capture end');
   const survived = await tip.waitFor({ state: 'visible', timeout: 1_000 }).then(
     () => true,
@@ -330,7 +343,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
   await test.step('a long name\'s tip wraps and stays whole at a scrolled right-edge point near the frame\'s bottom', async () => {
     const sites = figures(main).nth(6);
     const hovered = await hoverLastPoint(page, sites, 'long-tip-hover');
-    expect(hovered.tip).toBe(`2 · ${SITE(8)} · level: 10`);
+    expect(hovered.tip).toBe(`2 · ${SITE(8)} · level: 1`);
     expect(hovered.scrollLeft, 'the frame is scrolled to the point').toBeGreaterThan(0);
     expect(hovered.lines, 'the tip wraps').toBeGreaterThanOrEqual(2);
     expect(hovered.roomBelow, 'too little room below the point: the tip must turn above it').toBeLessThan(hovered.tipHeight + 12);
