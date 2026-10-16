@@ -8,12 +8,12 @@ import { attachHover } from './hover';
 const rect = (left: number, top: number, width: number, height: number) => ({ left, top, width, height, right: left + width, bottom: top + height, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
 
 /** A frame at (100, 50) showing `visible` of its content, scrolled by `scroll`, around a figure with one bar mark. */
-function world({ visible = [400, 300] as [number, number], scroll = [0, 0] as [number, number], tipSize = [120, 24] as [number, number] } = {}) {
-  const frame = document.body.appendChild(document.createElement('div'));
+function world({ visible = [400, 300] as [number, number], scroll = [0, 0] as [number, number], tipSize = [120, 24] as [number, number], at = [100, 50] as [number, number], parent = document.body as HTMLElement } = {}) {
+  const frame = parent.appendChild(document.createElement('div'));
   frame.innerHTML = '<svg width="672" height="300"><path d="M0,0h10v10h-10Z" data-tip="2024 · 미국 · growth_pct: 2.79"/></svg>';
   const tip = frame.appendChild(document.createElement('div'));
   tip.hidden = true;
-  frame.getBoundingClientRect = () => rect(100, 50, visible[0], visible[1]);
+  frame.getBoundingClientRect = () => rect(at[0], at[1], visible[0], visible[1]);
   Object.defineProperties(frame, {
     clientWidth: { value: visible[0] },
     clientHeight: { value: visible[1] },
@@ -22,14 +22,18 @@ function world({ visible = [400, 300] as [number, number], scroll = [0, 0] as [n
     scrollLeft: { value: scroll[0] },
     scrollTop: { value: scroll[1] },
   });
-  tip.getBoundingClientRect = () => rect(0, 0, tipSize[0], tipSize[1]);
+  const measured: string[] = []; // the tip's width style when it was measured
+  tip.getBoundingClientRect = () => {
+    measured.push(tip.style.width);
+    return rect(0, 0, tipSize[0], tipSize[1]);
+  };
   const release = attachHover(frame, tip);
   const mark = frame.querySelector('[data-tip]')!;
-  const at = (clientX: number, clientY: number) => {
+  const move = (clientX: number, clientY: number) => {
     mark.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX, clientY }));
     return { left: Number.parseFloat(tip.style.left), top: Number.parseFloat(tip.style.top), hidden: tip.hidden, text: tip.textContent };
   };
-  return { frame, tip, at, release };
+  return { frame, tip, at: move, release, measured, resize: (w: number, h: number) => void (tipSize = [w, h]) };
 }
 
 const releases: Array<() => void> = [];
@@ -72,5 +76,41 @@ describe('the hover tip', () => {
     // in the frame's visible box: content x minus the scroll, inside 0..400
     expect(placed.left - 272).toBeGreaterThanOrEqual(0);
     expect(placed.left - 272 + 120).toBeLessThanOrEqual(400);
+  });
+
+  it('stays inside the window when the frame runs past it: a tall frame, the pointer near the window\'s bottom', () => {
+    const height = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+    Object.defineProperty(window, 'innerHeight', { value: 500, configurable: true });
+    try {
+      const { at } = make({ visible: [400, 900], at: [100, 100] });
+      const placed = at(150, 490); // the frame reaches y 1000; the window ends at 500
+      expect(placed.top).toBe(490 - 12 - 24 - 100); // above the pointer, in the frame's coordinates
+      expect(100 + placed.top + 24).toBeLessThanOrEqual(500);
+    } finally {
+      if (height) Object.defineProperty(window, 'innerHeight', height);
+    }
+  });
+
+  it('stays inside a clipping ancestor (the editor\'s scroller) that shows less of the frame', () => {
+    const scroller = document.body.appendChild(document.createElement('div'));
+    scroller.style.overflowY = 'auto';
+    scroller.getBoundingClientRect = () => rect(0, 0, 1000, 300);
+    Object.defineProperties(scroller, { clientWidth: { value: 1000 }, clientHeight: { value: 300 }, clientLeft: { value: 0 }, clientTop: { value: 0 } });
+    const { at } = make({ visible: [400, 900], at: [100, 50], parent: scroller });
+    const placed = at(150, 290); // the scroller shows the frame down to y 300
+    expect(placed.top).toBe(290 - 12 - 24 - 50);
+    expect(50 + placed.top + 24).toBeLessThanOrEqual(300);
+  });
+
+  it('fixes the measured width before it is placed, and measures afresh for the next value', () => {
+    const { at, tip, measured, resize } = make({ scroll: [272, 0] });
+    at(490, 100);
+    expect(measured).toEqual(['']); // measured at its natural size, no width imposed
+    expect(tip.style.width).toBe('120px'); // kept at that size wherever it is placed
+    expect(tip.style.boxSizing).toBe('border-box');
+    resize(200, 40);
+    at(150, 100);
+    expect(measured).toEqual(['', '']);
+    expect(tip.style.width).toBe('200px');
   });
 });

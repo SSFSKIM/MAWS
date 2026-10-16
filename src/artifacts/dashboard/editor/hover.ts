@@ -26,6 +26,49 @@ function layerOf(svg: SVGSVGElement): Layer | null {
   return { xy, tips: (g.getAttribute('data-tips') ?? '').split('\n') };
 }
 
+interface Box {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+/** An element's client box (inside its borders, without its scrollbars) in window coordinates. */
+function clientBox(el: Element): Box {
+  const box = el.getBoundingClientRect();
+  const left = box.left + el.clientLeft;
+  const top = box.top + el.clientTop;
+  return { left, top, right: left + el.clientWidth, bottom: top + el.clientHeight };
+}
+
+const CLIPS = new Set(['hidden', 'clip', 'scroll', 'auto']);
+
+/** What can be seen of `frame`, in window coordinates: its client box, cut on each axis by every ancestor that clips
+ * that axis, and by the window. */
+function visibleBox(frame: HTMLElement): Box {
+  const seen = clientBox(frame);
+  const view = frame.ownerDocument.defaultView;
+  for (let el = frame.parentElement; el && view; el = el.parentElement) {
+    const style = view.getComputedStyle(el);
+    const clipsX = CLIPS.has(style.overflowX);
+    const clipsY = CLIPS.has(style.overflowY);
+    if (!clipsX && !clipsY) continue;
+    const box = clientBox(el);
+    if (clipsX) [seen.left, seen.right] = [Math.max(seen.left, box.left), Math.min(seen.right, box.right)];
+    if (clipsY) [seen.top, seen.bottom] = [Math.max(seen.top, box.top), Math.min(seen.bottom, box.bottom)];
+  }
+  if (view) [seen.left, seen.top, seen.right, seen.bottom] = [Math.max(seen.left, 0), Math.max(seen.top, 0), Math.min(seen.right, view.innerWidth), Math.min(seen.bottom, view.innerHeight)];
+  return seen;
+}
+
+/** Where a tip `extent` long starts on one axis: `OFFSET` after the pointer, else before it where that would cross `hi`,
+ * clamped into `lo..hi` (at `lo` when it is longer than the room). */
+function place(pointer: number, extent: number, lo: number, hi: number): number {
+  const after = pointer + OFFSET;
+  const at = after + extent <= hi ? after : pointer - OFFSET - extent;
+  return Math.max(lo, Math.min(at, hi - extent));
+}
+
 /** Hover over the figure in `frame`, its tip drawn in `tip`; answers its removal. */
 export function attachHover(frame: HTMLElement, tip: HTMLElement): () => void {
   let layer: Layer | null | undefined; // read on first use after each drawing
@@ -34,25 +77,26 @@ export function attachHover(frame: HTMLElement, tip: HTMLElement): () => void {
     tip.hidden = true;
   };
   // The frame is the tip's positioning ancestor and also the figure's scroller (a figure wider than its column scrolls
-  // in it), which clips what lies outside its visible box. The tip is placed in that visible box, measured: beside the
-  // pointer, on its other side where it would cross the right or bottom edge, clamped inside; then written in the
-  // frame's content coordinates (its scroll added), where an absolutely placed child of a scroller lives.
+  // in it). What the owner can see of it is its client box cut by every clipping ancestor (the editor's scroller) and
+  // the window. The tip is measured once at its natural size, which is then fixed (a box placed near its containing
+  // block's edge would otherwise shrink to fit and rewrap); placed in that visible box beside the pointer, on its other
+  // side where it would cross the right or bottom edge, clamped inside; and written in the frame's content coordinates
+  // (its scroll added), where an absolutely placed child of a scroller lives.
   const show = (text: string, event: PointerEvent) => {
-    const box = frame.getBoundingClientRect();
     tip.textContent = text;
     tip.hidden = false;
-    tip.style.left = '0px'; // measured at the frame's start, where the whole width is free (shrink-to-fit narrows it at an edge)
+    tip.style.width = '';
+    tip.style.left = '0px'; // measured at the frame's start, where the whole width is free
     tip.style.top = '0px';
     const size = tip.getBoundingClientRect();
-    const place = (pointer: number, extent: number, room: number) => {
-      const after = pointer + OFFSET;
-      const at = after + extent <= room ? after : pointer - OFFSET - extent;
-      return Math.max(0, Math.min(at, room - extent));
-    };
-    const x = place(event.clientX - box.left - frame.clientLeft, size.width, frame.clientWidth);
-    const y = place(event.clientY - box.top - frame.clientTop, size.height, frame.clientHeight);
-    tip.style.left = `${x + frame.scrollLeft}px`;
-    tip.style.top = `${y + frame.scrollTop}px`;
+    tip.style.boxSizing = 'border-box';
+    tip.style.width = `${size.width}px`;
+    const box = frame.getBoundingClientRect();
+    const seen = visibleBox(frame);
+    const x = place(event.clientX, size.width, seen.left, seen.right);
+    const y = place(event.clientY, size.height, seen.top, seen.bottom);
+    tip.style.left = `${x - box.left - frame.clientLeft + frame.scrollLeft}px`;
+    tip.style.top = `${y - box.top - frame.clientTop + frame.scrollTop}px`;
   };
   const move = (event: PointerEvent) => {
     const target = event.target as Element | null;

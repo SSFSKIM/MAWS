@@ -4,7 +4,9 @@
 // over real data (M1's vendored World Bank and penguin tables, Korean labels included) with their source labels; the
 // narrow panel scrolls a figure rather than shrinking its text; the real editor's hover reaches a scatter's last point
 // and a hatched bar's own value; eight series draw as named small multiples on one scale, a filter to the first and last
-// keeping their names, hover reaching the last panel; the keyboard opens and closes the source sheet from a label; the sheet copies its rows,
+// keeping their names, hover reaching the last panel with its tip shown whole in the frame's visible box (a long, wrapping
+// tip too, at a scrolled right-edge point near the frame's bottom); the keyboard opens and closes the source sheet from a
+// label; the sheet copies its rows,
 // downloads the snapshot's own bytes through main's save, and stays on the snapshot it opened on while the dataset is
 // replaced, both views redrawing; the header's Datasets lists the datasets. M6 extends this group with the agent's path
 // (artifact_create, artifact_dataset), comments, history and exports.
@@ -84,8 +86,86 @@ const VIEWS = [
   // eight countries, past the six forms: labelled small multiples (parent Decision Log 27); then its first and last alone
   chart('gdp', { view: 'line', x: 'year', y: 'growth_pct', series: 'country_ko', format: { year: 'text' }, title: '8개국 GDP 성장률, 2019–2024 (%)' }),
   chart('gdp', { view: 'line', x: 'year', y: 'growth_pct', series: 'country_ko', filter: [{ column: 'iso3', op: 'in', value: ['CAN', 'USA'] }], format: { year: 'text' }, title: '캐나다와 미국' }),
+  // eight long-named series: the last panel's last point at the figure's right edge, its tip long enough to wrap
+  chart('sites', { view: 'line', x: 'x', y: 'level', series: 'site', title: '마라도 관측소 여덟 곳' }),
 ];
 const COUNTRIES = ['캐나다', '독일', '프랑스', '영국', '이탈리아', '일본', '대한민국', '미국']; // the snapshot's order
+// A synthetic fixture for tip geometry only (no observations): eight long Korean series names, three points each.
+const SITE = (i: number) => `제주특별자치도 서귀포시 대정읍 마라도 등대 앞 선착장 관측소 ${i}`;
+const SITES_CSV = `x,level,site\n${Array.from({ length: 24 }, (_, k) => `${k % 3},${Math.floor(k / 3) + 1 + (k % 3)},${SITE(Math.floor(k / 3) + 1)}`).join('\n')}\n`;
+
+/**
+ * Hovers the figure's last drawable point with the real pointer and proves its tip readable (E2's Decision Log 21), not
+ * only present: the frame scrolled to the point (a figure wider than its column scrolls in its frame), the point under
+ * the pointer, the tip shown with the point's exact value, its rendered box whole inside the frame's visible box and the
+ * window, captured by a page clip that neither scrolls nor moves the pointer, and still shown after. The frame's pointer
+ * events and the tip's changes are recorded, so a tip that does not show says what hid it.
+ */
+async function hoverLastPoint(page: Page, figure: Locator, evidence: string) {
+  const frame = figure.locator('.dash-figure');
+  await figure.locator('svg').evaluate((svg) => svg.scrollIntoView({ block: 'center', inline: 'nearest' }));
+  const last = await frame.evaluate((el) => {
+    const log: string[] = [];
+    (el as HTMLElement & { hoverLog?: string[] }).hoverLog = log;
+    for (const type of ['pointerover', 'pointerenter', 'pointermove', 'pointerout', 'pointerleave'])
+      el.addEventListener(type, (event) => log.push(`${type} ${(event.target as Element).tagName} ${Math.round((event as PointerEvent).clientX)},${Math.round((event as PointerEvent).clientY)}`), true);
+    el.ownerDocument.addEventListener('pointerout', (event) => (event as PointerEvent).relatedTarget === null && log.push('pointer left the window'));
+    el.ownerDocument.defaultView!.addEventListener('blur', () => log.push('window blur'));
+    const tip = el.querySelector<HTMLElement>('.dash-tip')!;
+    new MutationObserver((records) => records.forEach((r) => log.push(r.type === 'childList' ? 'figure redrawn' : `tip ${tip.hidden ? 'hidden' : 'shown'}`))).observe(el, { childList: true, attributes: true, attributeFilter: ['hidden'], subtree: true });
+    const svg = el.querySelector('svg')!;
+    const layer = svg.querySelector('[data-hover="nearest"]')!;
+    const [x, y] = layer.getAttribute('data-xy')!.split(' ').at(-1)!.split(',').map(Number);
+    const scale = svg.getBoundingClientRect().width / Number(svg.getAttribute('width'));
+    // a column narrower than the figure's 480 px minimum scrolls it (run 38940311997): scrolled to the point, as the owner would
+    el.scrollLeft = Math.max(0, x * scale - el.clientWidth + 16);
+    const box = svg.getBoundingClientRect();
+    const at = { x: box.left + x * scale, y: box.top + y * scale };
+    const hit = document.elementFromPoint(at.x, at.y);
+    const seen = { ...at, figure: [box.left, box.top, box.width, box.height].map(Math.round), frame: [el.clientWidth, el.scrollLeft], viewport: [innerWidth, innerHeight], hit: hit ? `${hit.tagName}.${hit.getAttribute('class') ?? ''}` : null };
+    return { ...at, scrollLeft: el.scrollLeft, inFigure: hit !== null && svg.contains(hit), seen: JSON.stringify(seen), tip: layer.getAttribute('data-tips')!.split('\n').at(-1)! };
+  });
+  expect(last.inFigure, `the last point is on screen, under the figure: ${last.seen}`).toBe(true);
+  await page.mouse.move(last.x, last.y);
+  const tip = figure.locator('.dash-tip');
+  const events = () => frame.evaluate((el) => ((el as HTMLElement & { hoverLog?: string[] }).hoverLog ?? []).join(' | '));
+  await expect(tip).toHaveText(last.tip);
+  const visible = await tip.waitFor({ state: 'visible', timeout: 3_000 }).then(
+    () => true,
+    () => false,
+  );
+  expect(visible, `the tip is shown: ${await events()}`).toBe(true);
+  // the tip's rendered box whole inside the frame's visible box (the frame scrolls and clips its figure) and the window
+  const shown = await frame.evaluate((el, point) => {
+    const box = el.getBoundingClientRect();
+    const tipEl = el.querySelector<HTMLElement>('.dash-tip')!;
+    const at = tipEl.getBoundingClientRect();
+    const visible = {
+      left: Math.max(box.left + el.clientLeft, 0),
+      top: Math.max(box.top + el.clientTop, 0),
+      right: Math.min(box.left + el.clientLeft + el.clientWidth, innerWidth),
+      bottom: Math.min(box.top + el.clientTop + el.clientHeight, innerHeight),
+    };
+    const rendered = { left: at.left, top: at.top, right: at.right, bottom: at.bottom };
+    const inside = at.width > 0 && at.height > 0 && rendered.left >= visible.left - 0.5 && rendered.right <= visible.right + 0.5 && rendered.top >= visible.top - 0.5 && rendered.bottom <= visible.bottom + 0.5;
+    const style = getComputedStyle(tipEl);
+    const lineHeight = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.2;
+    return {
+      inside,
+      seen: JSON.stringify({ rendered, visible }),
+      clip: { x: visible.left, y: visible.top, width: visible.right - visible.left, height: visible.bottom - visible.top },
+      tipHeight: at.height,
+      lines: Math.round((at.height - Number.parseFloat(style.paddingTop) - Number.parseFloat(style.paddingBottom)) / lineHeight),
+      roomBelow: visible.bottom - point.y,
+    };
+  }, last);
+  expect(shown.inside, `the tip is whole inside the frame's visible box: ${shown.seen}`).toBe(true);
+  // a page clip of the visible frame: no scrolling and no pointer movement, so the hover stays as asserted
+  await page.screenshot({ path: `${PROOF}/${evidence}.png`, clip: shown.clip });
+  await expect(tip, 'the hover survives its capture').toBeVisible();
+  await expect(tip).toHaveText(last.tip);
+  return { tip: last.tip, scrollLeft: last.scrollLeft, tipHeight: shown.tipHeight, lines: shown.lines, roomBelow: shown.roomBelow };
+}
 
 /** The owner's editor in `scope` inserts the blocks after its last one (the editor's own write, through its replica). */
 async function insertBlocks(scope: Locator, blocks: unknown[]): Promise<void> {
@@ -118,6 +198,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
 
   const gdpRef = await bind(page, id, 'gdp', '세계은행 GDP 성장률', 'gdp-growth.csv', GDP_CSV);
   await bind(page, id, 'penguins', 'Palmer penguins', 'penguins.csv', PENGUINS_CSV);
+  await bind(page, id, 'sites', '마라도 관측소 (합성)', 'sites.csv', SITES_CSV);
   await insertBlocks(main, [{ type: 'paragraph', content: [{ type: 'text', text: '2020년의 급락 이후 대부분의 경제가 회복했다.' }] }, ...VIEWS]);
 
   await test.step('the main tab draws every view with its caption and source label', async () => {
@@ -210,48 +291,18 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     for (const p of geometry) expect(p.rules).toEqual(geometry[0].rules);
     await eight.locator('svg').evaluate((svg) => svg.scrollIntoView({ block: 'center', inline: 'nearest' }));
     await eight.screenshot({ path: `${PROOF}/small-multiples.png` });
-    // The last point is at the figure's right edge. A column narrower than the figure's 480 px minimum scrolls the figure
-    // in its frame rather than shrinking it (run 38940311997: figure 480 px wide at x 372, the point at x 846 beyond the
-    // column), so the frame is scrolled to the point, as the owner would, before the point's place is read.
-    const last = await eight.locator('.dash-figure').evaluate((frame) => {
-      const svg = frame.querySelector('svg')!;
-      const layer = svg.querySelector('[data-hover="nearest"]')!;
-      const [x, y] = layer.getAttribute('data-xy')!.split(' ').at(-1)!.split(',').map(Number);
-      const scale = svg.getBoundingClientRect().width / Number(svg.getAttribute('width'));
-      frame.scrollLeft = Math.max(0, x * scale - frame.clientWidth + 16);
-      const box = svg.getBoundingClientRect();
-      const at = { x: box.left + x * scale, y: box.top + y * scale };
-      const hit = document.elementFromPoint(at.x, at.y);
-      const seen = { ...at, figure: [box.left, box.top, box.width, box.height].map(Math.round), frame: [frame.clientWidth, frame.scrollLeft], viewport: [innerWidth, innerHeight], hit: hit ? `${hit.tagName}.${hit.getAttribute('class') ?? ''}` : null };
-      return { ...at, inFigure: hit !== null && svg.contains(hit), seen: JSON.stringify(seen), tip: layer.getAttribute('data-tips')!.split('\n').at(-1)! };
-    });
-    expect(last.tip).toMatch(/^2024 · 미국 · growth_pct: /);
-    expect(last.inFigure, `the last point is on screen, under the figure: ${last.seen}`).toBe(true);
-    await page.mouse.move(last.x, last.y);
-    const tip = eight.locator('.dash-tip');
-    await expect(tip).toHaveText(last.tip);
-    await expect(tip).toBeVisible();
-    // readable, not only present (Decision Log 21): the tip's rendered box whole inside the frame's visible box (the
-    // frame scrolls and clips its figure) and the window
-    const shown = await eight.locator('.dash-figure').evaluate((frame) => {
-      const box = frame.getBoundingClientRect();
-      const at = frame.querySelector('.dash-tip')!.getBoundingClientRect();
-      const visible = {
-        left: Math.max(box.left + frame.clientLeft, 0),
-        top: Math.max(box.top + frame.clientTop, 0),
-        right: Math.min(box.left + frame.clientLeft + frame.clientWidth, innerWidth),
-        bottom: Math.min(box.top + frame.clientTop + frame.clientHeight, innerHeight),
-      };
-      const rendered = { left: at.left, top: at.top, right: at.right, bottom: at.bottom };
-      const inside = at.width > 0 && at.height > 0 && rendered.left >= visible.left - 0.5 && rendered.right <= visible.right + 0.5 && rendered.top >= visible.top - 0.5 && rendered.bottom <= visible.bottom + 0.5;
-      return { inside, seen: JSON.stringify({ rendered, visible }), clip: { x: visible.left, y: visible.top, width: visible.right - visible.left, height: visible.bottom - visible.top } };
-    });
-    expect(shown.inside, `the tip is whole inside the frame's visible box: ${shown.seen}`).toBe(true);
-    // a page clip of the visible frame: no scrolling and no pointer movement, so the hover stays as asserted
-    await page.screenshot({ path: `${PROOF}/small-multiples-hover.png`, clip: shown.clip });
-    await expect(tip, 'the hover survives its capture').toHaveText(last.tip);
-    await expect(tip).toBeVisible();
+    const hovered = await hoverLastPoint(page, eight, 'small-multiples-hover');
+    expect(hovered.tip).toMatch(/^2024 · 미국 · growth_pct: /);
     await figures(main).nth(5).screenshot({ path: `${PROOF}/small-multiples-pair.png` });
+  });
+
+  await test.step('a long name\'s tip wraps and stays whole at a scrolled right-edge point near the frame\'s bottom', async () => {
+    const sites = figures(main).nth(6);
+    const hovered = await hoverLastPoint(page, sites, 'long-tip-hover');
+    expect(hovered.tip).toBe(`2 · ${SITE(8)} · level: 10`);
+    expect(hovered.scrollLeft, 'the frame is scrolled to the point').toBeGreaterThan(0);
+    expect(hovered.lines, 'the tip wraps').toBeGreaterThanOrEqual(2);
+    expect(hovered.roomBelow, 'too little room below the point: the tip must turn above it').toBeLessThan(hovered.tipHeight + 12);
   });
 
   await test.step('the keyboard opens the source sheet from a label, on the view\'s own rows, and closes it, the focus returning', async () => {
@@ -307,7 +358,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     };
     await datasets();
     const picker = page.getByRole('dialog').getByRole('combobox', { name: 'Dataset' });
-    await expect(picker.locator('option')).toHaveText(['세계은행 GDP 성장률 (gdp)', 'Palmer penguins (penguins)']);
+    await expect(picker.locator('option')).toHaveText(['세계은행 GDP 성장률 (gdp)', 'Palmer penguins (penguins)', '마라도 관측소 (합성) (sites)']);
     await page.screenshot({ path: `${PROOF}/datasets-sheet.png` });
     await datasets();
     await expect(page.getByRole('dialog')).toBeHidden();
