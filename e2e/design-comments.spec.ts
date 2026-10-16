@@ -167,7 +167,10 @@ test('comments on a design’s boards and elements: the card, the pins through m
     onTablet = (await viewOf(page, id, 'panel')).selection[0]!;
     expect(onTablet).toMatch(/^m[0-9a-z]{8}$/);
     expect(await elementOf(page, id, 'desktop', 'note')).toBeUndefined();
-    expect((await elementOf(page, id, 'tablet', onTablet))?.style.left).toBe('400px');
+    // pinned, it keeps its top and is nudged left just enough to lie inside the narrower tablet (834 px; it is 800 wide)
+    const there = (await elementOf(page, id, 'tablet', onTablet))!.style;
+    expect(there.top).toBe('700px');
+    expect(Number.parseFloat(there.left!)).toBeLessThanOrEqual(34.5);
     await expect.poll(async () => await threadOf((t) => t.id === noteThread)).toMatchObject({ slideId: 'tablet', elementId: onTablet, live: true, quote: 'Edit me' });
     const pin = ws.locator(`[data-comment-pin="${onTablet}"]`);
     await expect.poll(() => pinOffset(pin, ws.locator(`[data-board-id="tablet"] [data-eid="${onTablet}"]`))).toBeLessThan(4);
