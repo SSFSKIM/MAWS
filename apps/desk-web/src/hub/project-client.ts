@@ -93,6 +93,8 @@ export class ProjectClient implements SessionPlane {
   private visible: boolean | null = null;
   private repeat: ReturnType<typeof setInterval> | null = null;
   private readonly humans = new Map<string, { event: HumanEvent; resolve: (ack: HumanAck) => void; reject: (error: HumanRefused) => void }>();
+  /** Called once no `human` is left unacknowledged. */
+  private readonly humansSent = new Set<() => void>();
   private readonly rpcs = new Map<string, Rpc>();
   private readonly rpcListeners = new Set<(frame: RpcStateFrame) => void>();
   private readonly subs = new Set<OpenSubscription>();
@@ -130,6 +132,17 @@ export class ProjectClient implements SessionPlane {
       this.humans.set(event.mac.nonce, { event, resolve, reject });
       if (this.welcomed) this.socket.send({ t: 'human', event });
     });
+  }
+
+  /** Whether a `human` sent through this client is still waiting for the hub's acknowledgement (or refusal). */
+  holdsHumans(): boolean {
+    return this.humans.size > 0;
+  }
+
+  /** Calls `done` once no `human` is left waiting: at once when none is. */
+  whenHumansSent(done: () => void): void {
+    if (this.humans.size === 0) done();
+    else this.humansSent.add(done);
   }
 
   /**
@@ -190,6 +203,13 @@ export class ProjectClient implements SessionPlane {
     };
   }
 
+  private humanSettled(): void {
+    if (this.humans.size > 0) return;
+    const done = [...this.humansSent];
+    this.humansSent.clear();
+    for (const call of done) call();
+  }
+
   private disconnected(): void {
     if (!this.welcomed) return;
     this.welcomed = false;
@@ -243,6 +263,7 @@ export class ProjectClient implements SessionPlane {
         if (!waiting) return;
         this.humans.delete(frame.nonce);
         waiting.resolve({ offset: frame.offset, writer: frame.writer, seq: frame.seq });
+        this.humanSettled();
         return;
       }
       case 'rpc-state':
@@ -270,6 +291,7 @@ export class ProjectClient implements SessionPlane {
         if (waiting) {
           this.humans.delete(nonce!);
           waiting.reject(new HumanRefused(frame.refusal));
+          this.humanSettled();
         }
         handlers.refused?.(frame.refusal);
         return;
