@@ -11,6 +11,9 @@
 // medium the workbench draws boards in. A startup mirror reads a design no actor has opened since E1 without migrating
 // it: the writer projects a legacy state on a temporary copy (Decision Log 13 (3)).
 // M4: under MAWS_E2E=1 with MAWS_DESIGN_HISTORY named, the e2e seam that writes as an agent's session (./history-seam.ts).
+// M6: under MAWS_E2E=1 with MAWS_DESIGN_PERF named, the scale gate's seam (e2e/design-scale.spec.ts): C's deck scale seam
+// reused as it is, since its tools are A's generic `artifact_read` and `artifact_publish` run as an agent's session, a
+// design's publish going through this kind's adapter, and the host loop sampled around each call.
 import { createDesignAdapter } from '@artifacts/design/adapter';
 import { designMirrorWriter } from '@artifacts/design/mirror';
 import { readSystem } from '@artifacts/design-system/model';
@@ -23,6 +26,7 @@ import type { DesignSystemChain } from '../design-systems/chain';
 import type { Documents } from '../documents';
 import type { DocumentService } from '../documents/service';
 import type { ArtifactStore } from '../documents/store';
+import { startPresentationsScaleSeam } from '../presentations/scale-seam';
 import { designSeamDir, startDesignSeam } from './history-seam';
 
 export interface Designs {
@@ -54,6 +58,8 @@ export function registerDesigns({ documents, chain, refresh, env = process.env }
   const offs = [store.onChange(({ kind }) => kind === 'design_system' && refreshDesigns()), store.onDefaultsChange(refreshDesigns)];
   const seamDir = designSeamDir(env); // M4: an agent's writes, replies and resolutions, for the e2e
   if (seamDir) offs.push(startDesignSeam({ store, service }, seamDir).close);
+  const perfDir = designPerfSeamDir(env); // M6: the scale gate's agent session
+  if (perfDir) offs.push(startPresentationsScaleSeam(store, perfDir, (line) => console.warn(`[design-scale] ${line}`)).close);
   return {
     close: () => {
       for (const off of offs) off();
@@ -61,6 +67,9 @@ export function registerDesigns({ documents, chain, refresh, env = process.env }
     },
   };
 }
+
+/** M6: the scale gate's channel, when the host runs for it (MAWS_E2E=1 and MAWS_DESIGN_PERF naming the directory). */
+export const designPerfSeamDir = (env: Record<string, string | undefined>): string | null => (env.MAWS_E2E === '1' && env.MAWS_DESIGN_PERF ? env.MAWS_DESIGN_PERF : null);
 
 const governingRef = (chain: DesignsDeps['chain'], artifact: Artifact) => chain?.governing({ designSystemId: artifact.designSystemId, spaceId: artifact.spaceId }) ?? { builtin: 'maws' as const };
 

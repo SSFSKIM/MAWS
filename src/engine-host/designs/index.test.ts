@@ -3,13 +3,13 @@
 // tokens resolved; a change of the governing system or the defaults, and an uploaded asset the design names, rewrite it
 // with no write to the design. A startup mirror of a design no actor has opened since E1 writes its legacy projection
 // and invents no migration; malformed legacy input leaves every file the mirror wrote before.
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { boardPath, CANVAS_PATH } from '@artifacts/design/canvas';
 import { tokenProperties } from '@artifacts/design-system/css';
-import { readSystem, writeSystem } from '@artifacts/design-system/model';
+import { readSystem, setToken, writeSystem } from '@artifacts/design-system/model';
 import { builtinView } from '@artifacts/design-system/view';
 import { publishFiles, readFiles } from '@artifacts/files';
 import { mirrorSlug, mirrorWriterFor } from '@artifacts/library/mirror';
@@ -173,6 +173,58 @@ describe('the design mirror’s freshness under its governing system', () => {
     applyV2(doc, documents.service.readState(system.id).state);
     expect(board()).toContain(`background:${tokenProperties(readSystem(doc).tokens, 'document').get('--ds-color-bg')}`);
     expect(documents.store.revision(design.id)).toBe(revision);
+
+    // M6: a token of the system that now governs the design edited: the existing board file is rewritten in the new
+    // value, still with no write to the design
+    const governed = board();
+    expect(governed).not.toContain('background:#123456');
+    refreshed.length = 0;
+    await documents.service.writeAs(system.id, HUMAN, (doc) => setToken(doc, 'color.bg', { $type: 'color', $value: { colorSpace: 'srgb', components: [0x12 / 255, 0x34 / 255, 0x56 / 255], hex: '#123456' } }));
+    await settle(); // the store's feed holds a second commit of the system this long
+    expect(refreshed.some((asked) => asked.includes(design.id))).toBe(true);
+    await mirror!.flush();
+    expect(board()).not.toBe(governed);
+    expect(board()).toContain('background:#123456');
+    expect(documents.store.revision(design.id)).toBe(revision);
+  });
+});
+
+// M6: the scale gate's host seam (e2e/design-scale.spec.ts): C's deck scale seam, whose artifact_read and
+// artifact_publish are A's real tools as an agent's session, opened only under MAWS_E2E=1 with MAWS_DESIGN_PERF naming
+// its channel
+describe('the design scale gate’s host seam', () => {
+  const answer = async (dir: string, name: string, command: Record<string, unknown>) => {
+    mkdirSync(join(dir, 'in'), { recursive: true });
+    writeFileSync(join(dir, 'in', `${name}.tmp`), JSON.stringify(command));
+    renameSync(join(dir, 'in', `${name}.tmp`), join(dir, 'in', name));
+    for (let k = 0; k < 200 && !existsSync(join(dir, 'out', name)); k++) await new Promise((resolve) => setTimeout(resolve, 25));
+    return JSON.parse(readFileSync(join(dir, 'out', name), 'utf8')) as { ok: boolean; isError?: boolean; result?: { revision: number; files?: Record<string, string>; changed?: string[] }; busyMs?: number; wallMs?: number; loop?: { max: number } };
+  };
+
+  it('answers a design’s read and publish as an agent’s session with the host loop around each call', async () => {
+    const dir = join(userData, 'design-perf');
+    documents = openDocuments(userData, () => {})!;
+    mirror = null;
+    designs = registerDesigns({ documents, chain: null, refresh: () => {}, env: { MAWS_E2E: '1', MAWS_DESIGN_PERF: dir } });
+    const design = await documents.store.create({ kind: 'design', title: 'Scale' }, HUMAN);
+    const read = await answer(dir, '00000001.json', { cmd: 'call', session: 'agent', tool: 'artifact_read', args: { artifact: design.id } });
+    expect(read).toMatchObject({ ok: true, isError: false });
+    expect(Object.keys(read.result!.files!)).toContain(CANVAS_PATH);
+    expect(read.loop!.max).toBeGreaterThan(0);
+    const board = Object.keys(read.result!.files!).find((path) => path !== CANVAS_PATH)!;
+    const sent = read.result!.files![board]!.replace('</section>', '<p id="scaled">Scaled</p></section>');
+    const published = await answer(dir, '00000002.json', { cmd: 'call', session: 'agent', tool: 'artifact_publish', args: { artifact: design.id, baseRevision: 'last', files: { [board]: sent } } });
+    expect(published).toMatchObject({ ok: true, isError: false, result: { changed: [board] } });
+    expect(published.busyMs).toBeGreaterThanOrEqual(0);
+    expect(published.wallMs).toBeGreaterThan(0);
+  });
+
+  it('is not opened without MAWS_E2E=1 and the channel named', () => {
+    start();
+    expect(existsSync(join(userData, 'design-perf'))).toBe(false);
+    designs.close();
+    designs = registerDesigns({ documents, chain: null, refresh: () => {}, env: { MAWS_DESIGN_PERF: join(userData, 'design-perf') } });
+    expect(existsSync(join(userData, 'design-perf'))).toBe(false);
   });
 });
 
