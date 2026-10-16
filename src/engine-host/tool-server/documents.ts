@@ -63,6 +63,7 @@ import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
 import { documentAdapterOf } from '../documents/kinds/document';
 import { datasetFooter } from '../dashboards/answers'; // P3-E
 import { legacyDashboardFiles, legacyDashboardReason } from '@artifacts/dashboard/legacy'; // P3-E
+import { chartSpecsBefore, normalizeChartSpecs, viewWarnings, type ViewWarning } from '@artifacts/dashboard/views'; // P3-E (E2 M3)
 import { changesSince, DocumentViews, onSessionReplica, warmInSlices } from '../documents/kinds/document-host';
 import type { AgentReplica } from '../documents/replica';
 import type { ArtifactStore } from '../documents/store';
@@ -310,6 +311,7 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
                       checkProposalTargets(base, doc, ops);
                     });
                   }
+                  const specsBefore = artifact.kind === 'dashboard' ? chartSpecsBefore(doc) : null; // P3-E (E2 M3)
                   const applied = applyEdit(doc, ops, {
                     since: view?.epoch ?? (suggesting ? undefined : -1), // a base the session never saw here: every checked target counts as changed
                     carets: caretsOf(agent.provider.awareness.getStates(), doc, agent.provider.awareness.clientID),
@@ -318,13 +320,15 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
                     blocksPerTab: DOCUMENT_LIMITS.blocksPerTab,
                   });
                   adapter.registerCarries(writeId, applied.carries);
+                  // P3-E (E2 M3; E's Decision Log 9): a dashboard's chart specs this batch wrote, normalised in its frame
+                  const written = specsBefore ? normalizeChartSpecs(doc, specsBefore) : [];
                   let answered: ArtifactEditResult['answered'];
                   if (applied.answer) {
                     const messageId = `${applied.answer.threadId}:${nanoid8()}`;
                     reply(doc, applied.answer.threadId, { id: messageId, by: actor, at: now(), body: applied.answer.body });
                     answered = { threadId: applied.answer.threadId, messageId };
                   }
-                  outcome.result = { status: 'edited', artifactId: id, revision: 0, results: applied.results, orphaned: applied.orphaned, ...(answered && { answered }) };
+                  outcome.result = { status: 'edited', artifactId: id, revision: 0, results: applied.results, orphaned: applied.orphaned, ...(answered && { answered }), ...(written.length > 0 && { viewWarnings: written }) /* P3-E */ };
                 } catch (error) {
                   if (!(error instanceof EditError)) throw error;
                   const liveRevision = store.service.revision(id);
@@ -569,7 +573,11 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
         const versions = await store.readCommitted(() => store.listVersions(artifact.id).slice(-VERSIONS_LISTED).reverse().map((version) => versionSummary(version, ctx.appSessionId)));
         const head = { status: 'read' as const, artifactId: artifact.id, kind: artifact.kind as DocumentLikeKind /* P3-E */, title: artifact.title, ...(artifact.handle !== undefined && { handle: artifact.handle }), versions };
         // P3-E: a dashboard's read closes with its datasets as the read doc holds them (the footer of the parent's §2)
-        const footer = (doc: Doc) => (artifact.kind === 'dashboard' ? { datasets: datasetFooter(doc, (actor) => authorOf(actor, ctx.appSessionId)) } : {});
+        const footer = (doc: Doc) => {
+          if (artifact.kind !== 'dashboard') return {};
+          const warnings = viewWarnings(doc); // E2 M3: a retained spec's problems, read only (E's Decision Log 9)
+          return { datasets: datasetFooter(doc, (actor) => authorOf(actor, ctx.appSessionId)), ...(warnings.length > 0 && { viewWarnings: warnings }) };
+        };
         let result: DocumentReadResult;
         if (input.version !== undefined) {
           if (input.sinceRevision !== undefined) throw refuse(TOOL, { reason: 'invalid' }, 'a retained version is read whole, without sinceRevision');
@@ -690,7 +698,7 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
                 const taken = store.resolve(handle, [ctx.appSessionId]) ? 'this session' : deps.artifactScope?.length && store.resolve(handle, deps.artifactScope) ? 'the conversation this side thread was opened from' : null;
                 if (taken) return refusedAfterCommit(store, refuse(TOOL, { reason: 'handleTaken', handle }, `an artifact "${handle}" already exists in ${taken}; edit it with artifact_edit`));
               }
-              const made: { artifact?: Artifact; doc?: Doc; answer?: Record<string, unknown> & { artifactId: string } } = {};
+              const made: { artifact?: Artifact; doc?: Doc; answer?: Record<string, unknown> & { artifactId: string }; viewWarnings?: ViewWarning[] /* P3-E */ } = {};
               // `initial` given (empty), so the kind's seed hook writes no first tab: the content's is written below
               const creating = store.create({ kind /* P3-E */, title: input.title, initial: () => {}, ...(handle !== undefined && { handle }) }, actor, (artifact) => (made.artifact = artifact));
               // the first tab, written through the session's host replica in the batch that holds the entity row
@@ -698,11 +706,13 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
                 ? store.service.writeAs(made.artifact.id, actor, (doc) => {
                     made.doc = doc;
                     createDocument(doc, { title: input.title, body });
+                    if (kind === 'dashboard') made.viewWarnings = normalizeChartSpecs(doc, new Map()); // P3-E (E2 M3): in the create's frame
                   }, {
                     inFrame: (revision) => {
                       made.answer = {
                         status: 'created', kind /* P3-E */, artifactId: made.artifact!.id, title: made.artifact!.title, revision, ...(handle !== undefined && { handle }),
                         ...(guide && { guide }), ...(designSystem !== null && { designSystem }),
+                        ...(made.viewWarnings?.length && { viewWarnings: made.viewWarnings }), // P3-E (E2 M3)
                       };
                       if (made.doc) deps.session.views.record(made.doc, revision);
                       op.record(made.answer);

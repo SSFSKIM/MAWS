@@ -55,6 +55,14 @@ export interface DashboardDatasetSummary {
   state?: { status: string; message?: string }; // when not ok
 }
 
+// P3-E2 M3 (E's Decision Log 9): on a dashboard's `artifact_create`, `artifact_read` and `artifact_edit` answers, what a
+// chart block's view spec drops (an unknown key, a value the grammar refuses) or cannot draw (an unknown view kind),
+// block by block; absent when there is nothing to say, and never on a document's answers.
+export interface DashboardViewWarning {
+  blockId: string;
+  message: string;
+}
+
 export const DASHBOARD_TOOLS = {
   artifact_dataset: {
     title: 'Bind dashboard dataset',
