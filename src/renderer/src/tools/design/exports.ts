@@ -32,9 +32,13 @@ export const DESIGN_EXPORTS: readonly DesignExportEntry[] = [
   { id: 'pdf', label: 'PDF (all boards)', format: 'pdf', of: 'all' },
 ];
 
-/** What the tab shows when an entry is chosen: its selected board, and the version its history previews. */
+/**
+ * What the tab shows when an entry is chosen: the board an export takes and its name as shown (the live selection, or
+ * while a version is previewed that version's own board and name), and the version its history previews.
+ */
 export interface DesignExportContext {
   board: string | null;
+  label: string | null;
   shown: ShownVersion;
 }
 
@@ -54,7 +58,7 @@ export function designExportRequest(entry: DesignExportEntry, { board, shown }: 
 }
 
 /** The header's Export entries; a board's need a board, and none is offered while two versions are compared. */
-export function designExports(context: DesignExportContext, run: (entry: DesignExportEntry) => void): EditorHostExport[] {
+export function designExports(context: Pick<DesignExportContext, 'board' | 'shown'>, run: (entry: DesignExportEntry) => void): EditorHostExport[] {
   return DESIGN_EXPORTS.map((entry) => {
     const disabled = context.shown === 'compare' || (entry.of === 'board' && context.board === null);
     return { id: entry.id, label: entry.label, onSelect: () => run(entry), ...(disabled && { disabled }) };
@@ -92,4 +96,9 @@ export async function exportDesign(artifactId: string, request: DesignExportRequ
   const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format: request.format, ...(exportId !== undefined && { exportId }) } } });
   if (!saved.ok) return toastFailure(VIEWERS_COPY.exportFailed(saved.error.message));
   if (saved.value.saved) void toast({ level: 'info', text: VIEWERS_COPY.saved(saved.value.path), actions: [], dismissible: true });
+}
+
+/** `entry` exported for what the tab shows (`context`, read as it is chosen): the sheet names the board as shown. */
+export function runDesignExport(artifactId: string, entry: DesignExportEntry, context: DesignExportContext, deps: { client?: MawsBridge; ask?: DesignExportAsk } = {}): Promise<void> {
+  return exportDesign(artifactId, designExportRequest(entry, context), { ...deps, boardName: (id) => (id === context.board && context.label ? context.label : id) });
 }

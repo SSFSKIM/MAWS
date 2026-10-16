@@ -18,7 +18,7 @@ import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, n
 import { writeBoards, type BoardSeed } from '../fixtures/support';
 import { countDesignChanges } from '../history';
 import { moveElementToBoard } from '../move';
-import { deleteBoard, setBoardFrame } from '../writers';
+import { deleteBoard, insertBoard, setBoardFrame } from '../writers';
 import { DesignWorkbench } from './DesignWorkbench';
 import { DesignView } from './viewport';
 
@@ -180,7 +180,7 @@ describe('a version’s preview in the workbench', () => {
     const rail = screen.getByRole('complementary', { name: 'Version history' });
     fireEvent.click(within(rail).getByRole('button', { name: /^Version Draft/ }));
     await settle();
-    expect(view.snapshot().shown).toEqual({ versionId: 1 });
+    expect(view.snapshot().shown).toEqual({ versionId: 1, board: 'a', label: 'Phone' }); // the live selection, which the version holds
     fireEvent.click(within(rail).getByRole('button', { name: /^Version Reviewed/ }), { shiftKey: true });
     await settle();
     expect(screen.getByRole('toolbar', { name: 'Version preview' }).querySelector('.deck-history-heading')!.textContent).toContain('→');
@@ -190,9 +190,44 @@ describe('a version’s preview in the workbench', () => {
     expect(view.snapshot().shown).toBeNull();
     fireEvent.click(within(rail).getByRole('button', { name: /^Version Reviewed/ }));
     await settle();
-    expect(view.snapshot().shown).toEqual({ versionId: 2 });
+    expect(view.snapshot().shown).toEqual({ versionId: 2, board: 'a', label: 'Phone' });
     unmount();
     expect(view.snapshot().shown).toBeNull();
+  });
+
+  it('M5 fix wave: the version’s own board for its Export: the live selection when the version holds it, else its first; the board navigated to; the live selection kept for Back', async () => {
+    const { view, session, land } = mount();
+    await settle();
+    // a board added live after both versions, and selected
+    act(() => land(HUMAN, (d) => insertBoard(d, { id: 'n', frame: { x: 3000, y: 0, w: 300, h: 200 }, title: 'New' }, 'b')));
+    act(() => {
+      session.show('n');
+      view.selectFrame('n');
+    });
+    const rail = screen.getByRole('complementary', { name: 'Version history' });
+    fireEvent.click(within(rail).getByRole('button', { name: /^Version Draft/ }));
+    await settle();
+    expect(view.snapshot().shown).toEqual({ versionId: 1, board: 'a', label: 'Phone' }); // the version lacks the new board
+    const list = screen.getByRole('navigation', { name: 'Boards in this version' });
+    fireEvent.click(within(list).getByRole('button', { name: /^Desktop/ }));
+    expect(view.snapshot().shown).toEqual({ versionId: 1, board: 'b', label: 'Desktop' });
+    expect(list.querySelector('[data-history-board-row="b"] .design-board-row')!.getAttribute('aria-current')).toBe('true');
+    // a deleted board's row fits it but is not the version's to export
+    fireEvent.click(within(rail).getByRole('button', { name: /^Version Reviewed/ }));
+    await settle();
+    expect(view.snapshot().shown).toEqual({ versionId: 2, board: 'a', label: 'Phone' }); // a new comparison starts from the selection again
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Boards in this version' })).getByRole('button', { name: /^Spare/ }));
+    expect(view.snapshot().shown).toEqual({ versionId: 2, board: 'a', label: 'Phone' });
+    // a change reached with ↓ is its board's
+    const bar = screen.getByRole('toolbar', { name: 'Version preview' });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Next change' }));
+    const focused = screen.getByRole('region', { name: 'Design in this version' }).querySelector('[data-history-board][data-focused]')!.getAttribute('data-history-board');
+    expect(focused).toBe('b');
+    expect(view.snapshot().shown).toEqual({ versionId: 2, board: 'b', label: 'Desktop' });
+    fireEvent.click(within(bar).getByRole('button', { name: 'Back to design' }));
+    await settle();
+    expect(view.snapshot().shown).toBeNull();
+    expect([view.snapshot().frame, session.snapshot().currentSlide]).toEqual(['n', 'n']); // the live selection as it was
   });
 
   it('Restore asks A’s restore for the version shown, after a confirmation', async () => {

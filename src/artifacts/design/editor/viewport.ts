@@ -72,8 +72,11 @@ export function unionRect(rects: readonly Rect[]): Rect | null {
   return { x, y, w: right - x, h: bottom - y };
 }
 
-/** M5: what the history shows in place of the live design: one retained version, two compared, or nothing (live). */
-export type ShownVersion = { versionId: number } | 'compare' | null;
+/**
+ * M5: what the history shows in place of the live design: one retained version with the board of it an export takes
+ * (and how that board is named in the version), two versions compared, or nothing (the live design).
+ */
+export type ShownVersion = { versionId: number; board: string | null; label: string | null } | 'compare' | null;
 
 export interface DesignViewState {
   /** Null until the body first places the world (a fit once its room is known). */
@@ -180,10 +183,10 @@ export class DesignView {
     this.set({ frame: boardId });
   }
 
-  /** M5: the history shows one version (its id), two compared (`compare`), or the live design (null). */
-  showVersion(shown: number | 'compare' | null): void {
+  /** M5: the history shows one version (with its board), two compared (`compare`), or the live design (null). */
+  showVersion(shown: ShownVersion): void {
     const now = this.state.shown;
-    if (shown === null ? now === null : shown === 'compare' ? now === 'compare' : typeof now === 'object' && now?.versionId === shown) return;
-    this.set({ shown: typeof shown === 'number' ? { versionId: shown } : shown });
+    const same = shown === null || shown === 'compare' ? now === shown : now !== null && now !== 'compare' && now.versionId === shown.versionId && now.board === shown.board && now.label === shown.label;
+    if (!same) this.set({ shown });
   }
 }

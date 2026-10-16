@@ -77,16 +77,19 @@ describe('a design tab’s state', () => {
     expect(handle.closed).toBe(true);
   });
 
-  it('M5 (Decision Log 31): answers what its Export exports now: the selected frame, else the active board, and the version shown', async () => {
+  it('M5 (Decision Log 31): answers what its Export exports now: live, the selected frame else the active board, named as now; a previewed version, its own board and name', async () => {
     const { state } = await opened();
-    expect(state.exportContext()).toEqual({ board: 'phone', shown: null }); // the active board
+    expect(state.exportContext()).toEqual({ board: 'phone', label: 'phone', shown: null }); // the active board, untitled: its id
     state.view.selectFrame('poster');
-    state.view.showVersion(3);
-    expect(state.exportContext()).toEqual({ board: 'poster', shown: { versionId: 3 } });
+    expect(state.exportContext()).toEqual({ board: 'poster', label: 'poster', shown: null });
+    // a version previewed that lacks the live selection: the version's own board and name, never the live board's
+    const shown = { versionId: 3, board: 'old', label: 'Old poster' };
+    state.view.showVersion(shown);
+    expect(state.exportContext()).toEqual({ board: 'old', label: 'Old poster', shown });
     state.view.showVersion('compare');
     expect(state.exportContext().shown).toBe('compare');
     state.view.showVersion(null);
-    expect(state.exportContext().shown).toBeNull();
+    expect(state.exportContext()).toEqual({ board: 'poster', label: 'poster', shown: null }); // the live selection kept
     state.dispose();
   });
 });

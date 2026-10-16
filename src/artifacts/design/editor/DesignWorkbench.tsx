@@ -153,12 +153,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   useEffect(() => {
     if (!historyOpen && previewing) history?.close(); // the rail closed: back to the live design
   }, [historyOpen, previewing, history]);
-  // M5 (the parent's Decision Log 31): the tab's view says what the history shows, so the header's Export (which outlives
-  // this body) exports it: the one version previewed, nothing while two are compared, else the live design
-  const target = preview?.target ?? null;
-  const shownVersion = target?.kind === 'version' ? target.versionId : target?.kind === 'compare' ? 'compare' : null;
-  useEffect(() => view.showVersion(shownVersion), [view, shownVersion]);
-  useEffect(() => () => view.showVersion(null), [view]); // unmounted, the controller drops its preview: the live design
+  useEffect(() => () => view.showVersion(null), [view]); // M5: unmounted, the controller drops its preview: the live design
 
   // no write lands while the replica is read-only (an awaited upload finishing after it turned so), nor behind a version
   const holdWrites = previewing || readOnly;
@@ -298,12 +293,18 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
     ),
     [previewSystem, previewOverrides],
   );
+  // M5 (the parent's Decision Log 31; fix wave): the version's own board for the header's Export, kept apart from the live
+  // selection (which Back returns to): the board last navigated to in this comparison (a list row, a change reached with
+  // ↑ ↓) while the version holds it, else the live selection when the version holds it, else the version's first
+  const [navigated, setNavigated] = useState<{ doc: Doc; board: string } | null>(null);
+  const navigate = useCallback((boardId: string) => shownDoc && setNavigated({ doc: shownDoc, board: boardId }), [shownDoc]);
   const fitPreviewBoard = useCallback(
     (boardId: string) => {
       const frame = previewBoards.find((b) => b.board.id === boardId)?.board.frame;
       if (frame) previewView.fitTo(frame, BOARD_FIT_MAX);
+      navigate(boardId);
     },
-    [previewBoards, previewView],
+    [previewBoards, previewView, navigate],
   );
 
   // ---- board commands (each one gesture, one undo step)
@@ -377,6 +378,19 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const elementsSelected = state.selection.length > 0;
   const faces = versionFaces ? versionFaces.css : liveFaces.css;
   const focusStop = focus.index === null ? null : (focus.stops[focus.index] ?? null);
+  const focusBoard = focusStop && focusStop.part !== 'deck' ? focusStop.boardId : null;
+  useEffect(() => void (focusBoard && navigate(focusBoard)), [focusBoard, navigate]);
+  const shownBoards = useMemo(() => (shownDoc ? readBoards(shownDoc).boards : []), [shownDoc]);
+  const inShown = (id: string | null | undefined) => (id ? (shownBoards.find((b) => b.id === id) ?? null) : null);
+  const exportBoard = inShown(navigated?.doc === shownDoc ? navigated.board : null) ?? inShown(viewState.frame ?? state.currentSlide) ?? shownBoards[0] ?? null;
+  // the tab's view says what the history shows, so the header's Export (which outlives this body) exports it: the one
+  // version previewed with its board, nothing while two are compared, else the live design
+  const target = preview?.target ?? null;
+  const shownKind = target?.kind ?? null;
+  const shownId = target?.kind === 'version' ? target.versionId : null;
+  const exportBoardId = exportBoard?.id ?? null;
+  const exportLabel = exportBoard ? boardLabel(exportBoard) : null;
+  useEffect(() => view.showVersion(shownKind === 'version' && shownId !== null ? { versionId: shownId, board: exportBoardId, label: exportLabel } : shownKind === 'compare' ? 'compare' : null), [view, shownKind, shownId, exportBoardId, exportLabel]);
   const historyRail = history && historySnapshot && historyOpen && <DeckHistoryRail controller={history} snapshot={historySnapshot} sessionTitle={sessionTitle} onClose={() => session.toggleRail('history')} />;
   const onMoved = (to: BoardView, ids: string[]) => {
     session.show(to.id);
@@ -455,7 +469,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
       <div className="deck-editor-body">
         {preview && projected && history ? (
           <>
-            {boardsOpen && <HistoryBoardList controller={history} boards={previewBoards} showChanges={preview.showChanges} onFit={fitPreviewBoard} />}
+            {boardsOpen && <HistoryBoardList controller={history} boards={previewBoards} showChanges={preview.showChanges} onFit={fitPreviewBoard} current={exportBoardId} />}
             <HistoryWorld controller={history} preview={preview} projected={projected} boards={previewBoards} focus={focusStop} view={previewView} assets={previewAssets} faces={versionFaces!} scope={previewScope} />
           </>
         ) : (

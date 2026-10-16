@@ -9,6 +9,7 @@
 // selected board (its frame, else the active board) and the version the history shows.
 import type { BoardFrame } from '@artifacts/design/canvas';
 import { boardFrame, boardOrder } from '@artifacts/design/model';
+import { boardLabel, readBoards } from '@artifacts/design/editor/boards';
 import { BOARD_FIT_MAX, DesignView, unionRect } from '@artifacts/design/editor/viewport';
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import { DeckTabState, openDeckTabs, type DeckTabDeps } from '../presentation/tab-state';
@@ -34,10 +35,17 @@ export class DesignTabState extends DeckTabState {
     if (rect) this.view.fitTo(rect, BOARD_FIT_MAX);
   };
 
-  /** M5: what an export from the header exports now: the selected board, and the version the history shows. */
+  /**
+   * M5: what an export from the header exports now: while the history previews a version, that version and its own board
+   * (as the workbench published them); otherwise the live selection (its frame, else the active board), named as now.
+   */
   exportContext = (): DesignExportContext => {
     const { frame, shown } = this.view.snapshot();
-    return { board: frame ?? this.snapshot().session?.snapshot().currentSlide ?? null, shown };
+    if (shown !== null && shown !== 'compare') return { board: shown.board, label: shown.label, shown };
+    const board = frame ?? this.snapshot().session?.snapshot().currentSlide ?? null;
+    const doc = this.snapshot().handle?.doc;
+    const live = board && doc ? readBoards(doc).boards.find((b) => b.id === board) : undefined;
+    return { board, label: live ? boardLabel(live) : null, shown };
   };
 }
 

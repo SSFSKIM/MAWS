@@ -195,19 +195,19 @@ export function historyBoards(preview: Pick<DeckPreview, 'shown' | 'earlier' | '
 const authorStyle = (controller: DeckHistoryController, by: string | null): CSSProperties | undefined => (by ? ({ '--deck-history-author': `var(${controller.author(by).color})` } as CSSProperties) : undefined);
 
 /** The read-only list of the comparison's boards, each changed one edged in its author's colour; a click fits it. */
-export function HistoryBoardList({ controller, boards, showChanges, onFit }: { controller: DeckHistoryController; boards: readonly HistoryBoard[]; showChanges: boolean; onFit(boardId: string): void }) {
+export function HistoryBoardList({ controller, boards, showChanges, onFit, current = null }: { controller: DeckHistoryController; boards: readonly HistoryBoard[]; showChanges: boolean; onFit(boardId: string): void; /** M5: the version's board an export takes */ current?: string | null }) {
   return (
     <nav className="design-boards" aria-label={C.historyBoards} data-design-rail="boards">
       <div className="design-boards-header">
         <span>{C.historyBoards}</span>
       </div>
       <ol className="design-boards-list">
-        {boards.map(({ board, change }) => {
+        {boards.map(({ board, change, removed }) => {
           const kind = showChanges ? (change?.kind ?? null) : null;
           const author = kind && change?.by ? controller.author(change.by) : null;
           return (
             <li key={board.id} className="design-board-item" data-history-board-row={board.id} data-history-change={kind ?? undefined} style={authorStyle(controller, kind ? (change?.by ?? null) : null)}>
-              <button type="button" className="design-board-row" aria-label={C.historyBoardRow(boardLabel(board), kind)} title={author ? HISTORY_COPY.by(author.name, author.when(change!.at)) : undefined} onClick={() => onFit(board.id)}>
+              <button type="button" className="design-board-row" aria-label={C.historyBoardRow(boardLabel(board), kind)} title={author ? HISTORY_COPY.by(author.name, author.when(change!.at)) : undefined} aria-current={!removed && board.id === current ? 'true' : undefined} onClick={() => onFit(board.id)}>
                 <span className="design-board-name">{boardLabel(board)}</span>
                 {kind === 'added' && <span className="design-board-badge deck-history-badge">{HISTORY_COPY.newBadge}</span>}
                 {kind === 'removed' && <span className="design-board-badge deck-history-badge">{HISTORY_COPY.deletedBadge}</span>}

@@ -7,7 +7,7 @@ import { act } from '@testing-library/react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { useNotices } from '../../stores/notices';
 import { installFakeMain, ok } from '../../test-support/code';
-import { DESIGN_EXPORTS, designExportRequest, designExports, exportDesign, type DesignExportAsk } from './exports';
+import { DESIGN_EXPORTS, designExportRequest, designExports, exportDesign, runDesignExport, type DesignExportAsk } from './exports';
 
 const A = '00000000-0000-4000-8000-0000000000d5';
 const toasts = () => useNotices.getState().notices.filter((n) => n.kind === 'toast').map((n) => [n.level, n.text]);
@@ -34,11 +34,13 @@ describe('the design’s Export menu', () => {
   });
 
   it('asks for the tab’s board, every board, and the version the history shows', () => {
-    expect(designExportRequest(entry('png'), { shown: null, board: 'phone' })).toEqual({ format: 'png', board: 'phone' });
-    expect(designExportRequest(entry('pdf-board'), { shown: null, board: 'phone' })).toEqual({ format: 'pdf', boards: ['phone'] });
-    expect(designExportRequest(entry('pdf'), { shown: null, board: 'phone' })).toEqual({ format: 'pdf' });
-    expect(designExportRequest(entry('png'), { shown: { versionId: 4 }, board: 'poster' })).toEqual({ format: 'png', board: 'poster', versionId: 4 });
-    expect(designExportRequest(entry('pdf'), { shown: { versionId: 4 }, board: null })).toEqual({ format: 'pdf', versionId: 4 });
+    const live = { shown: null, board: 'phone', label: 'Phone' };
+    expect(designExportRequest(entry('png'), live)).toEqual({ format: 'png', board: 'phone' });
+    expect(designExportRequest(entry('pdf-board'), live)).toEqual({ format: 'pdf', boards: ['phone'] });
+    expect(designExportRequest(entry('pdf'), live)).toEqual({ format: 'pdf' });
+    const version = { versionId: 4, board: 'poster', label: 'Poster' };
+    expect(designExportRequest(entry('png'), { shown: version, board: 'poster', label: 'Poster' })).toEqual({ format: 'png', board: 'poster', versionId: 4 });
+    expect(designExportRequest(entry('pdf'), { shown: version, board: null, label: null })).toEqual({ format: 'pdf', versionId: 4 });
   });
 });
 
@@ -79,6 +81,14 @@ describe('an export from the menu', () => {
       ['artifacts.export', { artifactId: A, format: 'png', board: 'poster', scale: 0.9102 }],
       ['library.saveAs', { artifactId: A, source: { export: { revision: 7, format: 'png' } } }],
     ]);
+  });
+
+  it('the sheet names the board as the shown version names it, not as the live design does', async () => {
+    installFakeMain(() => tooLarge);
+    const asked: string[] = [];
+    const context = { board: 'poster', label: 'Festival poster (Draft)', shown: { versionId: 2, board: 'poster', label: 'Festival poster (Draft)' } };
+    await act(() => runDesignExport(A, entry('png'), context, { ask: async (sheet) => (asked.push(sheet.title), false) }));
+    expect(asked).toEqual(['Export “Festival poster (Draft)” at 91.02%?']);
   });
 
   it('declined, nothing more is asked of main; any other refusal is told and nothing is saved', async () => {
