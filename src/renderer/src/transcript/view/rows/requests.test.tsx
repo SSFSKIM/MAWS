@@ -11,7 +11,8 @@ import { rowId } from '../../model/keys';
 import { serializeRows } from '../../model/serialize';
 import type { Row } from '../../model/rows';
 import { api, builder, request, tool, uuid } from '../../model/test-events';
-import { DEFAULT_ACTIONS, Disclosures } from '../context';
+import { Disclosures } from '../context';
+import { DEFAULT_ACTIONS } from '../default-actions';
 import { renderRow, rowOf, spyActions, storeWith } from './test-support';
 
 afterEach(cleanup);
