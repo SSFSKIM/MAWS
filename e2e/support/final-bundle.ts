@@ -4,8 +4,9 @@
 // `test-results/bundle/<variant>.tgz` beside `manifest.json`:
 //   {commit, buildCommit, variant: 'plain' | 'harness', tgz: '<variant>.tgz', sha256 (of the archive),
 //    files: [{path, bytes, sha256}] sorted by path, one entry per file of out/, each path `out/…`}
-// It writes it only for the child's reserved final gate and only after proving the build is the source's:
-//   - on CI (`CI=true`) on macOS, the ref `ci/<label>-<short>` for the child's reserved label (ci-gate.sh's `--label`);
+// The child's reserved ref `ci/<label>-<short>` (ci-gate.sh's `--label`) alone selects the final run; on it the bundle is
+// written only after proving the build is the source's, and anything unproven fails the run:
+//   - on CI (`CI=true`) on macOS;
 //   - HEAD equal to GITHUB_SHA and to the build cache's key (MAWS_E2E_BUILD_KEY, the commit scripts/e2e-build.sh built);
 //   - HEAD is ci-gate.sh's wrapper: its commit object carries the `Evidence: yes` trailer and exactly one parent, the
 //     source commit (read from the object, which a shallow checkout keeps; the parent itself is fetched by its sha when
@@ -46,7 +47,7 @@ export interface FinalBundleRequest {
   log(line: string): void;
 }
 
-// Not this run's to bundle: an ordinary run, a development label, Linux. Nothing is written and nothing fails.
+// Not this run's to bundle: any ref but the reserved one. Nothing is written and nothing fails.
 export class NotFinalRun extends Error {}
 
 const LABEL = /^[A-Za-z0-9._-]+$/;
@@ -131,13 +132,18 @@ export function provenance(request: Pick<FinalBundleRequest, 'label' | 'root' | 
   return { commit: parent, buildCommit: head };
 }
 
-// Whether this run is the child's final run at all (else NotFinalRun, which writes nothing and fails nothing).
+// Whether this run is the child's final run: its reserved ref alone selects it (Decision Log 50, amended 19:57Z), so a
+// selected run whose other preconditions fail is a failure, never a silent pass without a bundle.
+export function isFinalRef(label: string, env: Record<string, string | undefined>): boolean {
+  if (!LABEL.test(label)) throw new Error(`the reserved label ${label} is not a ref name`);
+  return new RegExp(`^ci/${label.replaceAll('.', '\\.')}-[0-9a-f]{8}$`).test(env.GITHUB_REF_NAME ?? '');
+}
+
+// The final run's own place: on CI, on macOS (throws why not).
 export function finalRun(request: Pick<FinalBundleRequest, 'label' | 'env' | 'platform'>): void {
-  if (!LABEL.test(request.label)) throw new Error(`the reserved label ${request.label} is not a ref name`);
-  const ref = request.env.GITHUB_REF_NAME ?? '';
-  if (!new RegExp(`^ci/${request.label.replaceAll('.', '\\.')}-[0-9a-f]{8}$`).test(ref)) throw new NotFinalRun(`the ref ${ref || '(none)'} is not ci/${request.label}-<sha>`);
-  if (request.env.CI !== 'true') throw new NotFinalRun('not on CI');
-  if (request.platform !== 'darwin') throw new NotFinalRun(`on ${request.platform}, not macOS`);
+  if (!isFinalRef(request.label, request.env)) throw new NotFinalRun(`the ref ${request.env.GITHUB_REF_NAME || '(none)'} is not ci/${request.label}-<sha>`);
+  if (request.env.CI !== 'true') throw new Error(`the final ref ${request.env.GITHUB_REF_NAME} runs off CI (CI=${request.env.CI ?? 'unset'})`);
+  if (request.platform !== 'darwin') throw new Error(`the final ref ${request.env.GITHUB_REF_NAME} runs on ${request.platform}, not macOS`);
 }
 
 // The bundle, written and answered; throws when the run is final but its build cannot be proven the source's.

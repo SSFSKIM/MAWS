@@ -6,7 +6,9 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { FullConfig, FullResult, TestCase, TestResult } from '@playwright/test/reporter';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import FinalBundleReporter, { finalBundleOption } from '../../e2e/support/final-bundle-reporter';
 import { cacheDigest, inventory, NotFinalRun, parseCommit, trailer, writeFinalBundle, type BundleManifest, type FinalBundleRequest } from '../../e2e/support/final-bundle';
 import { isolatedGitEnv } from './git-env';
 
@@ -142,14 +144,26 @@ describe('the final bundle', () => {
   });
 
   it.each([
-    ['a development label', { GITHUB_REF_NAME: 'ci/h-dev-0123abcd' }, 'darwin'],
-    ['no ref', { GITHUB_REF_NAME: undefined }, 'darwin'],
-    ['off CI', { CI: undefined }, 'darwin'],
-    ['Linux', {}, 'linux'],
-  ] as const)('is not this run’s on %s: nothing written, nothing proven', (_name, env, platform) => {
+    ['a development label', { GITHUB_REF_NAME: 'ci/h-dev-0123abcd' }],
+    ['no ref', { GITHUB_REF_NAME: undefined }],
+    ['another child’s final label', { GITHUB_REF_NAME: 'ci/e1-final-0123abcd' }],
+  ] as const)('is not this run’s on %s: nothing written, nothing proven', (_name, env) => {
     const g = gate();
-    const request = g.request({ platform }, env);
+    const request = g.request({}, env);
     expect(() => writeFinalBundle(request)).toThrow(NotFinalRun);
+    expect(existsSync(bundleOf(g))).toBe(false);
+  });
+
+  // Decision Log 50 (amended 19:57Z): the reserved ref alone selects the final run; its other preconditions fail it
+  it.each([
+    ['off CI', { CI: undefined }, 'darwin', 'runs off CI'],
+    ['CI=false', { CI: 'false' }, 'darwin', 'runs off CI'],
+    ['Linux', {}, 'linux', 'runs on linux, not macOS'],
+  ] as const)('refuses the reserved ref %s, as a failure rather than a pass without a bundle', (_name, env, platform, words) => {
+    const g = gate();
+    const attempt = () => writeFinalBundle(g.request({ platform }, env));
+    expect(attempt).toThrow(words);
+    expect(attempt).not.toThrow(NotFinalRun);
     expect(existsSync(bundleOf(g))).toBe(false);
   });
 
@@ -194,76 +208,91 @@ describe('the final bundle', () => {
   });
 });
 
+// The reporter as Playwright drives it: begun on the checkout's config, its tests ended, its run ended; the real bundle
+// writer over the scratch gate, with the job's environment and platform stubbed.
 describe('the reporter', () => {
-  const passed = (title: string) => [{ title, retries: 0 }, { status: 'passed', retry: 0 }] as never;
-  const config = { configFile: '/repo/playwright.config.ts', projects: [{ outputDir: '/repo/test-results' }] } as never;
+  const ended = (reporter: FinalBundleReporter, statuses: TestResult['status'][]) =>
+    statuses.forEach((status, k) => reporter.onTestEnd({ title: `case ${k}`, retries: 0 } as TestCase, { status, retry: 0 } as TestResult));
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  let logs: ReturnType<typeof vi.spyOn>;
+  let errors: ReturnType<typeof vi.spyOn>;
 
-  async function reporterWith(write: (request: FinalBundleRequest) => unknown) {
-    vi.resetModules();
-    vi.doMock('../../e2e/support/final-bundle', async (actual) => ({ ...(await actual<typeof import('../../e2e/support/final-bundle')>()), writeFinalBundle: vi.fn(write) }));
-    const { default: FinalBundleReporter } = await import('../../e2e/support/final-bundle-reporter');
-    const bundle = await import('../../e2e/support/final-bundle');
+  function reporterOn(g: Gate, env: Record<string, string | undefined> = {}, on: NodeJS.Platform = 'darwin') {
+    for (const [key, value] of Object.entries(g.request({}, env).env)) vi.stubEnv(key, value);
+    Object.defineProperty(process, 'platform', { ...platform, value: on });
     const reporter = new FinalBundleReporter({ label: 'h-final', variant: 'plain' });
-    reporter.onBegin(config);
-    return { reporter, write: bundle.writeFinalBundle as unknown as ReturnType<typeof vi.fn>, NotFinal: bundle.NotFinalRun };
+    reporter.onBegin({ configFile: join(g.checkout, 'playwright.config.ts'), projects: [{ outputDir: join(g.checkout, 'test-results') }] } as unknown as FullConfig);
+    return reporter;
   }
+  beforeEach(() => {
+    logs = vi.spyOn(console, 'log').mockImplementation(() => {});
+    errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
   afterEach(() => {
-    vi.doUnmock('../../e2e/support/final-bundle');
+    Object.defineProperty(process, 'platform', platform);
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
-  it('reads MAWS_E2E_FINAL_BUNDLE as <label>:<variant>', async () => {
-    const { finalBundleOption } = await import('../../e2e/support/final-bundle-reporter');
+  it('reads MAWS_E2E_FINAL_BUNDLE as <label>:<variant>', () => {
     expect(finalBundleOption(undefined)).toBeNull();
     expect(finalBundleOption('h-final:plain')).toEqual({ label: 'h-final', variant: 'plain' });
     expect(() => finalBundleOption('h-final')).toThrow('<label>:plain or <label>:harness');
     expect(() => finalBundleOption('ci/x:plain')).toThrow();
   });
 
-  it('writes after a whole passing invocation, into the config’s test-results/bundle', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const { reporter, write } = await reporterWith(() => ({}));
-    reporter.onTestEnd(...(passed('a') as [never, never]));
-    reporter.onTestEnd(...(passed('b') as [never, never]));
-    expect(await reporter.onEnd({ status: 'passed' } as never)).toBeUndefined();
-    expect(write).toHaveBeenCalledTimes(1);
-    expect(write.mock.calls[0]![0]).toMatchObject({ label: 'h-final', variant: 'plain', root: '/repo', bundleDir: '/repo/test-results/bundle', platform: process.platform });
+  it('on the reserved ref, writes the bundle after a whole passing invocation and leaves the run passed', async () => {
+    const g = gate();
+    const reporter = reporterOn(g);
+    ended(reporter, ['passed', 'passed']);
+    expect(await reporter.onEnd({ status: 'passed' } as FullResult)).toBeUndefined();
+    expect(JSON.parse(readFileSync(join(bundleOf(g), 'manifest.json'), 'utf8'))).toMatchObject({ commit: g.source, buildCommit: g.wrapper, variant: 'plain' });
+    expect(errors).not.toHaveBeenCalled();
   });
 
-  it('writes nothing after a failed, skipped or empty invocation, and changes nothing', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const failed = await reporterWith(() => ({}));
-    failed.reporter.onTestEnd(...(passed('a') as [never, never]));
-    expect(await failed.reporter.onEnd({ status: 'failed' } as never)).toBeUndefined();
-    expect(failed.write).not.toHaveBeenCalled();
-
-    const skipped = await reporterWith(() => ({}));
-    skipped.reporter.onTestEnd(...(passed('a') as [never, never]));
-    skipped.reporter.onTestEnd({ title: 'b', retries: 0 } as never, { status: 'skipped', retry: 0 } as never);
-    expect(await skipped.reporter.onEnd({ status: 'passed' } as never)).toBeUndefined();
-    expect(skipped.write).not.toHaveBeenCalled();
-
-    const empty = await reporterWith(() => ({}));
-    expect(await empty.reporter.onEnd({ status: 'passed' } as never)).toBeUndefined();
-    expect(empty.write).not.toHaveBeenCalled();
+  it.each([
+    ['a skipped test', ['passed', 'skipped'], {}, 'darwin', 'not every test passed: case 1: skipped'],
+    ['no test', [], {}, 'darwin', 'no test ran'],
+    ['CI unset', ['passed'], { CI: undefined }, 'darwin', 'runs off CI'],
+    ['CI=false', ['passed'], { CI: 'false' }, 'darwin', 'runs off CI'],
+    ['Linux', ['passed'], {}, 'linux', 'not macOS'],
+    ['HEAD not GITHUB_SHA', ['passed'], { GITHUB_SHA: '0'.repeat(40) }, 'darwin', 'is not GITHUB_SHA'],
+  ] as const)('on the reserved ref, fails an otherwise-passing invocation with %s, writing no bundle', async (_name, statuses, env, on, words) => {
+    const g = gate();
+    const reporter = reporterOn(g, env, on);
+    ended(reporter, [...statuses]);
+    expect(await reporter.onEnd({ status: 'passed' } as FullResult)).toEqual({ status: 'failed' });
+    expect(existsSync(bundleOf(g))).toBe(false);
+    expect(errors).toHaveBeenCalledWith(expect.stringContaining(words));
   });
 
-  it('a run that is not the final gate passes as it was; a final gate whose build cannot be proven fails', async () => {
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
-    let NotFinal: typeof NotFinalRun = NotFinalRun; // the freshly imported module's class, bound before the call
-    const ordinary = await reporterWith(() => {
-      throw new NotFinal('the ref ci/h-dev-0123abcd is not ci/h-final-<sha>');
-    });
-    NotFinal = ordinary.NotFinal;
-    ordinary.reporter.onTestEnd(...(passed('a') as [never, never]));
-    expect(await ordinary.reporter.onEnd({ status: 'passed' } as never)).toBeUndefined();
+  it('on the reserved ref, fails a wrapper with no Evidence trailer, writing no bundle', async () => {
+    const g = gate({ message: 'ci-gate: x\n\nNonce: 1' });
+    const reporter = reporterOn(g);
+    ended(reporter, ['passed']);
+    expect(await reporter.onEnd({ status: 'passed' } as FullResult)).toEqual({ status: 'failed' });
+    expect(existsSync(bundleOf(g))).toBe(false);
+  });
 
-    const refused = await reporterWith(() => {
-      throw new Error('the wrapper’s tree t1 is not its parent’s t2');
-    });
-    refused.reporter.onTestEnd(...(passed('a') as [never, never]));
-    expect(await refused.reporter.onEnd({ status: 'passed' } as never)).toEqual({ status: 'failed' });
-    expect(errors).toHaveBeenCalledWith(expect.stringContaining('REFUSED on the final run'));
+  it('on the reserved ref, leaves an already failed run failed, with no bundle', async () => {
+    const g = gate();
+    const reporter = reporterOn(g);
+    ended(reporter, ['passed', 'failed']);
+    expect(await reporter.onEnd({ status: 'failed' } as FullResult)).toBeUndefined();
+    expect(existsSync(bundleOf(g))).toBe(false);
+  });
+
+  it.each([
+    ['passing', ['passed'], 'passed'],
+    ['with a skipped test', ['passed', 'skipped'], 'passed'],
+    ['failed', ['failed'], 'failed'],
+  ] as const)('on any other ref, a %s run is as it was: no bundle, no status change', async (_name, statuses, status) => {
+    const g = gate();
+    const reporter = reporterOn(g, { GITHUB_REF_NAME: `ci/h-dev-${g.source.slice(0, 8)}` });
+    ended(reporter, [...statuses]);
+    expect(await reporter.onEnd({ status } as FullResult)).toBeUndefined();
+    expect(existsSync(bundleOf(g))).toBe(false);
+    expect(errors).not.toHaveBeenCalled();
+    expect(logs).toHaveBeenCalledWith(expect.stringContaining('not written'));
   });
 });

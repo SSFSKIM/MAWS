@@ -12,8 +12,9 @@
 //     `maxBudgetUsd` (the engine's `--max-budget-usd`), the run's cap, before the owner's gesture, so the turn runs in
 //     that capped process (Decision Log 87 picks the artifact's own session; a live one is used as it is);
 //   - the owner: Artifacts › the row's "…" › Export › Send to Google Drive…, the sheet's default format for an HTML page
-//     (PDF) and its session line, Send; the app opens the session; the connector's approval card is answered Allow, as
-//     the owner answers any tool's (the connector, or a Read of the export it names, allowed; anything else denied).
+//     (PDF) and its session line, Send; the app opens the session; each approval is answered on the card of its own
+//     request: Allow only for the connector's upload of, or a Read of, the export the request names (by canonical path
+//     under the scratch store, e2e/support/send-to-approval.ts), Deny for anything else.
 // It passes when the fixture received exactly the export the sheet's Send wrote (the file the prompt names: same path,
 // bytes and SHA-256), the turn ended with its receipt in the same engine process, no other session or engine started,
 // and the accounted spend is within the cap. The run's lines go to stdout and `live-run.txt` under the scratch root,
@@ -41,6 +42,7 @@ import { journal } from './support/c7-live';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { liveMaxUsd } from './support/live-budget';
+import { approvesExport, requestCardSelector } from './support/send-to-approval';
 import { endLiveRun, liveSpend } from './support/live-lifecycle';
 import { eventsOf, importSeeded, ofKind, recordEvents, seedArtifact, seedTranscripts } from './support/maws-tools';
 import { chargeOf, installedEngine } from './support/p1-live';
@@ -201,9 +203,18 @@ test('Send to Google Drive from the library: the owner’s gesture, one capped m
     await expect(page.locator(`[data-region="main"] [data-composer="${id}"]`).first()).toBeVisible({ timeout: 30_000 });
     note('G2: Send closed the sheet and the app shows the session');
 
-    // ---- the turn, its connector call answered as the owner answers any tool's ----------------------------------------
+    // ---- the export the Send wrote, named by its request (the one prompt written) ------------------------------------
+    await expect.poll(() => promptsOf(rows()).length, { timeout: 30_000, message: 'the Send to request reached the engine' }).toBeGreaterThan(0);
+    const prompts = promptsOf(rows());
+    expect(prompts, 'one prompt, the owner’s Send to request').toHaveLength(1);
+    const exportPath = /`([^`]+)`/.exec(prompts[0]!)?.[1] ?? '';
+    expect(exportPath.startsWith(`${store}/${record.id}/exports/`) && /\/\d+-pdf\.pdf$/.test(exportPath), `the request names the artifact's PDF export under the store: ${exportPath}`).toBe(true);
+    note(`G2b: the request names ${exportPath}`);
+
+    // ---- the turn: each request answered on its own card; only the connector's upload or a Read of that export allowed
     const allowed: string[] = [];
     const denied: string[] = [];
+    const allowedIds = new Set<string>();
     const deadline = Date.now() + TURN_MS;
     for (;;) {
       const status = await statusOf();
@@ -212,16 +223,18 @@ test('Send to Google Drive from the library: the owner’s gesture, one capped m
       if (status.process === 'exited') throw new Error('the engine exited during the Send to turn');
       if (Date.now() > deadline) throw new Error('timed out waiting for the Send to turn to end');
       const resolved = new Set(ofKind(all, 'permission.resolved').map((e) => e.requestId));
-      const open = ofKind(all, 'permission.requested').filter((e) => !resolved.has(e.requestId));
-      const card = page.locator('[data-region="main"]').getByRole('group', { name: 'Approval needed' }).first();
-      const allow = card.getByRole('button', { name: 'Allow', exact: true });
-      if (open.length > 0 && (await allow.isVisible().catch(() => false)) && (await allow.isEnabled().catch(() => false))) {
-        // the owner allows what the request needs (the connector, or reading the export it names) and denies the rest
-        const wanted = open[0]!.toolName === TOOL || open[0]!.toolName === 'Read';
-        await (wanted ? allow : card.getByRole('button', { name: 'Deny', exact: true })).click();
-        (wanted ? allowed : denied).push(open[0]!.toolName);
-        await expect.poll(async () => ofKind(await events(), 'permission.resolved').some((e) => e.requestId === open[0]!.requestId), { timeout: 30_000 }).toBe(true);
-        continue;
+      const request = ofKind(all, 'permission.requested').find((e) => !resolved.has(e.requestId));
+      const card = request === undefined ? null : page.locator(`[data-region="main"] ${requestCardSelector(id, request.requestId)}`).first();
+      if (request !== undefined && card !== null && (await card.isVisible().catch(() => false))) {
+        const allow = approvesExport(request, { tool: TOOL, exported: exportPath, store });
+        const button = card.getByRole('button', { name: allow ? 'Allow' : 'Deny', exact: true });
+        if (await button.isEnabled().catch(() => false)) {
+          await button.click();
+          (allow ? allowed : denied).push(`${request.toolName} ${JSON.stringify(request.input)}`);
+          if (allow) allowedIds.add(request.requestId);
+          await expect.poll(async () => ofKind(await events(), 'permission.resolved').some((e) => e.requestId === request.requestId), { timeout: 30_000 }).toBe(true);
+          continue;
+        }
       }
       await page.waitForTimeout(400);
     }
@@ -229,14 +242,12 @@ test('Send to Google Drive from the library: the owner’s gesture, one capped m
     const reply = mainEnded(all).at(-1)?.resultText ?? '';
     const tools = ofKind(all, 'tool.use').filter((e) => e.parentToolUseId === null).map((e) => e.toolName);
     note(`G3: the turn ended: reply ${JSON.stringify(reply.slice(0, 400))}; tools ${JSON.stringify(tools)}; allowed ${JSON.stringify(allowed)}, denied ${JSON.stringify(denied)}; receipts so far US$${chargeOf(rows(), CAP_USD).receipted.toFixed(4)}`);
-    expect(ofKind(all, 'permission.requested').map((e) => e.toolName), 'the connector asked the owner, as any tool does').toContain(TOOL);
-    expect(allowed, 'the owner allowed the connector through its ordinary card').toContain(TOOL);
+    const uploads = ofKind(all, 'permission.requested').filter((e) => e.toolName === TOOL);
+    expect(uploads.length, 'the connector asked the owner, as any tool does').toBeGreaterThan(0);
+    expect(uploads.some((e) => allowedIds.has(e.requestId) && approvesExport(e, { tool: TOOL, exported: exportPath, store })), 'the owner allowed the connector’s upload of exactly the export, on its own card').toBe(true);
+    expect(promptsOf(rows()), 'still the one prompt').toHaveLength(1);
 
     // ---- the delivery: exactly the export the Send wrote ------------------------------------------------------------
-    const prompts = promptsOf(rows());
-    expect(prompts, 'one prompt, the owner’s Send to request').toHaveLength(1);
-    const exportPath = /`([^`]+)`/.exec(prompts[0]!)?.[1] ?? '';
-    expect(exportPath.startsWith(`${store}/${record.id}/exports/`) && /\/\d+-pdf\.pdf$/.test(exportPath), `the request names the artifact's PDF export under the store: ${exportPath}`).toBe(true);
     const exported = readFileSync(exportPath);
     cpSync(exportPath, join(root, 'exported.pdf'));
     const delivered = readDeliveries();

@@ -1,13 +1,14 @@
 // The final reporter that writes a child's live-run build into its acceptance run's evidence (./final-bundle.ts; gate-
 // offload Decision Log 50). playwright.config.ts adds it beside the list and HTML reporters only when the invocation
 // names it (`MAWS_E2E_FINAL_BUNDLE=<label>:<variant>`, set by the child's acceptance script), so every other run is as
-// it was. At the end of the invocation it writes the bundle only when the whole invocation passed: every test ran and
-// passed (a skipped or failed test, an interrupted or timed-out run, writes nothing). A run that is not the child's
-// final gate writes nothing and changes nothing; on the final gate, a build it cannot prove the source's fails the run,
-// so a green final run always carries its bundle.
+// it was. The child's reserved ref alone selects the final run (Decision Log 50, amended 19:57Z): on any other ref it
+// writes nothing and changes nothing. On the final ref it writes the bundle only when the whole invocation passed,
+// every test ran and passed; an otherwise-passing invocation with a skipped test or none, or a build it cannot prove
+// the source's (CI, macOS, the wrapper, the trees, the cache), fails the run, so a green final run always carries its
+// bundle. A run already failed stays failed, with no bundle.
 import { dirname, join } from 'node:path';
 import type { FullConfig, FullResult, Reporter, TestCase, TestResult } from '@playwright/test/reporter';
-import { NotFinalRun, writeFinalBundle, type BundleVariant } from './final-bundle';
+import { isFinalRef, writeFinalBundle, type BundleVariant } from './final-bundle';
 
 export interface FinalBundleOptions {
   label: string;
@@ -44,20 +45,25 @@ export default class FinalBundleReporter implements Reporter {
 
   async onEnd(result: FullResult): Promise<{ status?: FullResult['status'] } | undefined> {
     const log = (line: string) => console.log(line);
-    if (result.status !== 'passed' || this.ran === 0 || this.notPassed.length > 0) {
-      log(`final bundle: not written (the run ${result.status}; ${this.ran} tests ran${this.notPassed.length > 0 ? `; not passed: ${this.notPassed.join(', ')}` : ''})`);
+    if (!isFinalRef(this.options.label, process.env)) {
+      log(`final bundle: not written (the ref ${process.env.GITHUB_REF_NAME || '(none)'} is not ci/${this.options.label}-<sha>)`);
       return undefined;
     }
+    const refuse = (why: string) => {
+      console.error(`final bundle: REFUSED on the final run: ${why}`);
+      return { status: 'failed' as const };
+    };
+    if (result.status !== 'passed') {
+      log(`final bundle: not written (the run ${result.status})`); // already a failure
+      return undefined;
+    }
+    if (this.ran === 0) return refuse('no test ran');
+    if (this.notPassed.length > 0) return refuse(`not every test passed: ${this.notPassed.join(', ')}`);
     try {
       writeFinalBundle({ ...this.options, root: this.root, bundleDir: join(this.outputDir, 'bundle'), env: process.env, platform: process.platform, log });
       return undefined;
     } catch (error) {
-      if (error instanceof NotFinalRun) {
-        log(`final bundle: not written (${error.message})`);
-        return undefined;
-      }
-      console.error(`final bundle: REFUSED on the final run: ${error instanceof Error ? error.message : String(error)}`);
-      return { status: 'failed' };
+      return refuse(error instanceof Error ? error.message : String(error));
     }
   }
 

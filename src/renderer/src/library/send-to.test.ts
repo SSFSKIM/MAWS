@@ -74,7 +74,7 @@ describe('a Send to run', () => {
     await run.send(request());
     expect(invoke).toHaveBeenCalledWith('artifacts.export', { artifactId: 'a1', format: 'docx' });
     expect(deps.start).not.toHaveBeenCalled();
-    expect(deps.send).toHaveBeenCalledWith(OWN, sendToPrompt(request(), EXPORTED), expect.objectContaining({ origin: 'sendTo' }));
+    expect(deps.send).toHaveBeenCalledWith(OWN, sendToPrompt(request(), EXPORTED), expect.objectContaining({ origin: 'sendTo', requireEmptyMessage: true })); // Decision Log 88 through any acquisition the send makes
     expect(deps.open).toHaveBeenCalledWith(OWN);
     expect(phases).toEqual(['exporting', 'sending', 'sent']);
   });

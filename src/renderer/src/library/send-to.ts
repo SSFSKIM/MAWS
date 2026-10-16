@@ -144,7 +144,8 @@ export function createSendToRun(deps: SendToDeps): SendToRun {
       state.setState({ phase: 'sending', appSessionId: target }, true);
       let result: HumanPromptResult;
       try {
-        result = await deps.send(target, sendToPrompt(request, exported.value), { origin: 'sendTo', current });
+        // Decision Log 88 holds through any acquisition the send itself makes (a session gone cold since it was ready)
+        result = await deps.send(target, sendToPrompt(request, exported.value), { origin: 'sendTo', requireEmptyMessage: true, current });
       } catch (error) {
         if (current()) state.setState({ phase: 'failed', words: messageOf(error), appSessionId: target }, true);
         return;

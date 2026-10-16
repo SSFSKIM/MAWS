@@ -1130,4 +1130,17 @@ describe('a start that requires no message (P3-H, Decision Log 88)', () => {
     expect(await h.service.acquire(record.appId, 'read', { ...EMPTY, trust: 'accepted' })).toMatchObject({ status: 'ready', launched: true });
     expect(h.host.calledWith('session.send')).toEqual([]);
   });
+
+  // Send to's acquisition for its own send (the human prompt path's fallback when the session went cold): the retained
+  // message neither goes nor is dropped; the owner's own start sends it later
+  it('refuses an acquisition for a send while a resume’s message is retained, keeping the message for the owner', async () => {
+    const record = recordAt();
+    expect(await h.service.startSession(record.appId, { message: OK_MESSAGE, options: {} })).toMatchObject({ status: 'needs_trust' });
+    expect(await h.service.acquire(record.appId, 'send', { ...EMPTY, trust: 'accepted' })).toMatchObject({ status: 'refused', appSessionId: record.appId });
+    expect(h.host.launches).toEqual([]);
+    expect(h.host.calledWith('session.send')).toEqual([]);
+    await h.service.startSession(record.appId, { message: null, options: { trust: 'accepted' } });
+    expect(await h.settled(record.appId)).toMatchObject({ phase: 'ready' });
+    expect(h.host.calledWith('session.send')).toHaveLength(1); // the retained message, still there for the owner's start
+  });
 });
