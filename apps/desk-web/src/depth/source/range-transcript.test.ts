@@ -106,4 +106,30 @@ describe('a fold of the working record', () => {
     await settle();
     expect(controller.state.getState()).toMatchObject({ bounds: { from: 'missing', to: 'found' }, more: true });
   });
+
+  it("a tool's result draws with its call, as the complete transcript draws it: in the fold before a question that came between them", async () => {
+    // A subagent's transcript (its Read call, then its result), with a question asked between the call and the result.
+    const agent = recording.subagents.find((a) => a.rows.some((row) => JSON.stringify(row.message ?? {}).includes('"name":"Read"')))!;
+    const call = agent.rows.findIndex((row) => JSON.stringify(row.message ?? {}).includes('"name":"Read"'));
+    const ask = { ...agent.rows[call], uuid: 'ask', message: { ...(agent.rows[call].message as JsonObject), content: [{ type: 'tool_use', id: 'toolu_q', name: 'AskUserQuestion', input: { questions: [] } }] } };
+    const answer = { ...agent.rows[call + 1], uuid: 'ask-answer', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_q', content: 'The answer: blue' }] } };
+    const held = [...agent.rows.slice(0, call + 1), ask, agent.rows[call + 1], answer, ...agent.rows.slice(call + 2)] as Array<JsonObject & { uuid: string }>;
+    // The Read output's own line (the agent's hand-back quotes the word too, so the line's numbering tells them apart).
+    const OUTPUT = '3\\tgamma';
+    expect(JSON.stringify(agent.rows[call + 1].message)).toContain(OUTPUT);
+    const drawn = async (view: JsonObject[]) => {
+      const store = createTranscriptStore();
+      await store.getState().attach('fresh', freshSource(view, TARGET.session, subagentLookupOf([]), agent.agentId), { agentId: agent.agentId as never });
+      store.getState().expandAll('fresh', { cells: true });
+      return JSON.stringify(store.getState().entries.fresh.rows);
+    };
+    expect(await drawn(held)).toContain(OUTPUT); // the complete transcript draws it
+
+    const before = rowsInRange(held, { from: null, to: 'toolu_q' }).rows;
+    const after = rowsInRange(held, { from: 'toolu_q', to: null }).rows;
+    expect(await drawn(before)).toContain(OUTPUT);
+    expect(await drawn(after)).not.toContain(OUTPUT);
+    expect(after.map((row) => row.uuid)).not.toContain(agent.rows[call + 1].uuid);
+    expect(JSON.stringify(after)).not.toContain('The answer: blue');
+  });
 });

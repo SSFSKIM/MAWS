@@ -12,10 +12,9 @@ import type { DeskSession } from '../../shell/sessions';
 import type { DeskTranscript, DepthTranscriptState } from '../source/desk-transcript';
 import type { StreamBlock } from '../stream/layer';
 import { useKeepPlaceThroughOlderRows } from './keep-place';
+import { useOlderPages } from './older-pages';
 import { streamingRows } from './streaming-rows';
 
-/** Within this many pixels of the top the reader has reached it, and older rows are asked for. */
-const TOP = 160;
 const NO_ROWS: readonly Row[] = [];
 
 /** A transcript is live while its session has a live process and its machine's lease holds (DX8). */
@@ -132,23 +131,12 @@ type PaneProps = {
 
 /** The transcript's rows and stream, and what its subscription's disruptions say. */
 export function TranscriptPane({ controller, state, variant, actions, list }: PaneProps) {
-  // Older rows when the reader scrolls to the top, or while the rows drawn do not fill the pane (its top is in view).
+  // Older rows when the reader scrolls to the top, while the rows drawn do not fill the pane, and after a page that drew
+  // nothing new (`older-pages.ts`).
   const rows = useTranscriptStore((s) => s.entries[controller.key]?.rows ?? NO_ROWS);
   const drawnRows = rows.length;
   useKeepPlaceThroughOlderRows(list, rows, state.loadingOlder);
-  useEffect(() => {
-    const element = list.current?.scrollElement;
-    if (!element) return;
-    const scrolled = () => {
-      if (element.scrollTop <= TOP) controller.loadOlder();
-    };
-    element.addEventListener('scroll', scrolled, { passive: true });
-    return () => element.removeEventListener('scroll', scrolled);
-  }, [controller, list]);
-  useEffect(() => {
-    const element = list.current?.scrollElement;
-    if (element && drawnRows > 0 && element.scrollHeight - element.clientHeight <= TOP) controller.loadOlder();
-  }, [controller, list, drawnRows, state.more]);
+  useOlderPages(controller, list, state);
 
   const since = useSince();
   const tail = useMemo(() => streamingRows(state.streaming, since), [state.streaming, since]);

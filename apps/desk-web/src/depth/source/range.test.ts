@@ -60,6 +60,17 @@ describe('the rows a fold draws', () => {
     expect(drawn(rowsInRange(rows, { from: 'm1#0', to: 'm2#0' }).rows)).toEqual(['w: Work.']);
   });
 
+  it('cuts a row by the spans the export numbered: an unclosed <message> is span #0, as sminos record reads it', () => {
+    const rows = [text('w1', 'Work before. <message>Already in channel'), text('w2', 'Working on.'), text('m2', '<message>Next.</message>')];
+    // Ending at the open span: the working record before it, never the channel's message again.
+    expect(drawn(rowsInRange(rows, { from: null, to: 'w1#0' }).rows)).toEqual(['w1: Work before.']);
+    // Starting at it: nothing of the row is after the span, and the rows after it are drawn.
+    expect(drawn(rowsInRange(rows, { from: 'w1#0', to: 'm2#0' }).rows)).toEqual(['w2: Working on.']);
+    // A nested mark is spans of their own, numbered as the export numbers them.
+    const nested = [text('n', '<message>Outer <insight>inner</insight> tail</message> end')];
+    expect(drawn(rowsInRange(nested, { from: 'n#1', to: null }).rows)).toEqual(['n: <message>tail</message> end']);
+  });
+
   it('a span inside the stretch (one the log missed) is kept as a span', () => {
     const rows = [text('m1', '<message>One.</message> <message>Two.</message> Work.'), text('m2', '<message>Three.</message>')];
     expect(drawn(rowsInRange(rows, { from: 'm1#0', to: 'm2#0' }).rows)).toEqual(['m1: <message>Two.</message> Work.']);

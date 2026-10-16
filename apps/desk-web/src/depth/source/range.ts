@@ -2,18 +2,25 @@
 // rows strictly between two exchange items, cut at span granularity. Each bound is the `src` of the item:
 //
 // - a `<message>` span, `<row uuid>#<span index>`: the index counts the row's marked spans from 0, as `sminos record`
-//   numbers the `message` events it exports from that row (doperpowers' `host_events`). Only the bounding span is left
+//   numbers the `message` events it exports from that row (doperpowers' `host_events`), read with the export's grammar
+//   (`export-marks.ts`: an unclosed mark is a span to the end of the text). Only the bounding span is left
 //   out: unmarked text of the same row before it (a `to`) or after it (a `from`) is working record and is drawn;
 // - a question, its call id (`toolUseId ?? request`, composite 43a27604: the transcript's own call): the row holding
 //   that `tool_use` is the question, and its `tool_result` (the answer, which the channel draws) belongs to it too. Only
 //   the question's own call and result are left out: other work between the call and its answer (a parallel tool's
 //   call and result) is working record and is drawn.
 //
+// A tool's result draws with its call, where the complete transcript draws it: MAWS's reducer routes a result to the
+// call it answers and its derivation draws the pair as the call's row, at the call's place. So a fold holding a call
+// also holds that call's result when the result was written after the fold's end (a question asked while the tool
+// ran), and a fold whose start comes after a call leaves that call's result out — it is drawn in the earlier fold, and
+// here it would be a result without its call, which draws nothing. The question's own answer is such a result.
+//
 // A null bound is open: the transcript's start, or its end (a live session's last fold, which rows arriving later
 // extend). A bound no held row names is `missing`; the slot pages older rows in while one may still be found, and
 // draws an unresolved bound as open, never less than what lies between.
-import { parse, type Part } from '@shared/owner/to-human-parser';
 import type { JsonObject } from 'desk-hub/protocol';
+import { exportParts } from './export-marks';
 
 export type Range = { from: string | null; to: string | null };
 export type BoundState = 'open' | 'found' | 'missing';
@@ -33,48 +40,53 @@ const contentOf = (row: JsonObject): unknown[] => {
 };
 const blockOf = (block: unknown): JsonObject | null => (typeof block === 'object' && block !== null ? (block as JsonObject) : null);
 const callsIn = (row: JsonObject, call: string) => row.type === 'assistant' && contentOf(row).some((b) => blockOf(b)?.type === 'tool_use' && blockOf(b)?.id === call);
-const answers = (row: JsonObject, call: string) => row.type === 'user' && contentOf(row).some((b) => blockOf(b)?.type === 'tool_result' && blockOf(b)?.tool_use_id === call);
 
 /** The index of the row holding a bound's item; -1 when no held row does. */
 const locate = (rows: readonly (JsonObject & { uuid: string })[], bound: Bound): number =>
   'row' in bound ? rows.findIndex((row) => row.uuid === bound.row) : rows.findIndex((row) => callsIn(row, bound.call));
 
-// Each row without a question's answer, so the same row is the same object: a live row then continues what is drawn.
-const unanswered = new WeakMap<JsonObject, Map<string, JsonObject | null>>();
+const callIds = (rows: readonly JsonObject[]): Set<string> =>
+  new Set(rows.flatMap((row) => (row.type === 'assistant' ? contentOf(row).flatMap((b) => (blockOf(b)?.type === 'tool_use' && typeof blockOf(b)?.id === 'string' ? [String(blockOf(b)!.id)] : [])) : [])));
+const resultOf = (block: unknown): string | null => (blockOf(block)?.type === 'tool_result' && typeof blockOf(block)?.tool_use_id === 'string' ? String(blockOf(block)!.tool_use_id) : null);
 
-/** The row without the question `call`'s `tool_result` blocks (the row itself when it has none); null when nothing is left. */
-function withoutAnswer<R extends JsonObject>(row: R, call: string): R | null {
-  if (!answers(row, call)) return row;
-  let byCall = unanswered.get(row);
-  if (!byCall) unanswered.set(row, (byCall = new Map()));
-  if (!byCall.has(call)) {
-    const rest = contentOf(row).filter((b) => !(blockOf(b)?.type === 'tool_result' && blockOf(b)?.tool_use_id === call));
-    byCall.set(call, rest.length === 0 ? null : { ...row, message: { ...(row.message as JsonObject), content: rest } });
-  }
-  return byCall.get(call) as R | null;
+// Each row's result cuts, so the same row cut the same way is the same object: a live row then continues what is drawn.
+const resultCuts = new WeakMap<JsonObject, Map<string, JsonObject | null>>();
+
+/**
+ * The row with its blocks filtered: `keep` decides each `tool_result` block by the call it answers; with `onlyResults`
+ * every other block goes too. The row itself when nothing goes, null when nothing is left.
+ */
+function filterResults<R extends JsonObject>(row: R, keep: (call: string) => boolean, onlyResults: boolean): R | null {
+  if (row.type !== 'user' && onlyResults) return null;
+  const blocks = contentOf(row);
+  const kept = blocks.filter((b) => {
+    const call = resultOf(b);
+    return call === null ? !onlyResults : keep(call);
+  });
+  if (kept.length === blocks.length && blocks.length > 0) return row;
+  if (kept.length === 0) return null;
+  const key = `${onlyResults ? 'o' : 's'}:${kept.map((b) => resultOf(b) ?? '').join(',')}`;
+  let byCut = resultCuts.get(row);
+  if (!byCut) resultCuts.set(row, (byCut = new Map()));
+  if (!byCut.has(key)) byCut.set(key, { ...row, message: { ...(row.message as JsonObject), content: kept } });
+  return byCut.get(key) as R;
 }
 
-// The grammar's mark names, `to-human` written as `<message>` (its name since contract 2).
-const tagOf = (kind: Exclude<Part['kind'], 'plain'>) => (kind === 'to-human' ? 'message' : kind);
-
-/** A part back as the text it was parsed from, closely enough that the grammar reads it the same. */
-function textOf(part: Part): string {
-  if (part.kind === 'plain') return part.text;
-  const choices = (part.choices ?? []).map((c) => `\n<choice${c.recommended ? ' recommended' : ''}>${c.text}</choice>`).join('');
-  return `<${tagOf(part.kind)}>${part.text}${choices}</${tagOf(part.kind)}>`;
-}
-
-/** The row's text parts strictly after its marked span `after` and before its marked span `before` (null: no cut). */
+/**
+ * The row's text strictly after its span `after` and before its span `before` (null: no cut), the spans read with the
+ * export's own grammar (`export-marks.ts`), so the indices are the ones the bounds carry. The working record around
+ * them is kept as written (tag-free outside code); a span inside the stretch (one the log missed) is kept as a
+ * `<message>`, which MAWS's Presenter then draws as one.
+ */
 function cutText(text: string, after: number | null, before: number | null): string {
-  let marked = -1; // the index of the last marked span passed
-  const kept: Part[] = [];
-  for (const part of parse(text)) {
-    if (part.kind !== 'plain') marked += 1;
-    // A span is inside when its own index is; plain text when the spans passed before it put it there.
-    const inside = part.kind !== 'plain' ? (after === null || marked > after) && (before === null || marked < before) : (after === null || marked >= after) && (before === null || marked < before);
-    if (inside) kept.push(part);
+  let passed = -1; // the index of the last span passed
+  let kept = '';
+  for (const part of exportParts(text)) {
+    if (part.kind === 'span') passed = part.index;
+    const inside = part.kind === 'span' ? (after === null || passed > after) && (before === null || passed < before) : (after === null || passed >= after) && (before === null || passed < before);
+    if (inside) kept += part.kind === 'span' ? `<message>${part.text}</message>` : part.text;
   }
-  return kept.map(textOf).join('').trim();
+  return kept.trim();
 }
 
 // Each row's cuts, so the same row cut the same way is the same object: a live row then continues what is drawn.
@@ -109,7 +121,6 @@ export function rowsInRange<R extends JsonObject & { uuid: string }>(rows: reado
   const view: RangeView<R> = { rows: [], from: from === null ? 'open' : start !== null ? 'found' : 'missing', to: to === null ? 'open' : stop !== null ? 'found' : 'missing' };
   const spanFrom = from !== null && 'row' in from && start !== null ? from.span : null;
   const spanTo = to !== null && 'row' in to && stop !== null ? to.span : null;
-  const answered = from !== null && 'call' in from && start !== null ? from.call : null;
   if (start !== null && stop !== null && stop < start) return view;
   if (start !== null && start === stop && spanFrom !== null && spanTo !== null) {
     // Both bounds in one row: what lies between its two spans.
@@ -122,13 +133,24 @@ export function rowsInRange<R extends JsonObject & { uuid: string }>(rows: reado
     if (after) view.rows.push(after);
   }
   const first = start === null ? 0 : start + 1;
-  for (const row of rows.slice(first, Math.max(first, stop ?? rows.length))) {
-    const kept = answered === null ? row : withoutAnswer(row, answered);
+  const middle = rows.slice(first, Math.max(first, stop ?? rows.length));
+  // Results of calls made before the fold are drawn with their calls, in an earlier fold; results of the fold's own
+  // calls written after its end are drawn here, with them.
+  const earlier = callIds(rows.slice(0, first));
+  const own = callIds(middle);
+  for (const row of middle) {
+    const kept = earlier.size === 0 ? row : filterResults(row, (call) => own.has(call) || !earlier.has(call), false);
     if (kept) view.rows.push(kept);
   }
   if (spanTo !== null) {
     const before = cutRow(rows[stop!], null, spanTo);
     if (before) view.rows.push(before);
+  }
+  if (stop !== null && own.size > 0) {
+    for (const row of rows.slice(stop + 1)) {
+      const late = filterResults(row, (call) => own.has(call), true);
+      if (late) view.rows.push(late);
+    }
   }
   return view;
 }

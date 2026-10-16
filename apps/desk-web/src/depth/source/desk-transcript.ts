@@ -442,10 +442,12 @@ export class DeskTranscript {
 
   private older(body: SessionBodies['rows']): void {
     const older = [...body.rows].reverse().filter((row): row is Row => hasUuid(row) && !this.uuids.has(row.uuid));
+    // The rebuilt source first: whoever reads the page answered (loadingOlder false) reads the source that holds it.
+    if (older.length > 0) {
+      this.setRows([...older, ...this.rows]);
+      this.rebuild();
+    }
     this.state.setState({ more: body.more, loadingOlder: false });
-    if (older.length === 0) return;
-    this.setRows([...older, ...this.rows]);
-    this.rebuild();
   }
 
   private reset(): void {
