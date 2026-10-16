@@ -12,8 +12,12 @@
 //   the member's drawn pose re-expressed in the host's padding box (`MeasureNeeded` asks the caller for the measure);
 // - an x-shape takes rotate only, so a uniform scale goes into its size; a coordinate connector's ends map through the
 //   group (% of its padding box);
+// - a coordinate connector's route moves with its ends, re-chosen as the editor's ungroup chooses it (a quarter turn makes
+//   `hv` a `vh`), and refused when no route of the dialect draws it (the final review's A6);
 // - a pose the dialect cannot write (a skew or scale out of its ranges, a mirror, an x-shape skewed) refuses the export,
-//   naming the slide, the group and the member: never a silent loss.
+//   naming the slide, the group and the member: never a silent loss;
+// - a hidden group (`display:none`) with pinned members draws nothing and would show them once lifted: it is left out
+//   whole (A8).
 // A lifted member carries what it would have inherited from the group: the group's opacity (multiplied into its own) and
 // the inheritable typography the dialect takes on it, but never what its own tag sets by default (h1 to h3 their size,
 // weight and line height; a header cell its weight and alignment; a cell its alignment; CANVAS_CSS's defaults).
@@ -22,6 +26,7 @@
 import { appliesTo, PROPS } from '../css';
 import { apply, IDENTITY, invert, isIdentityLinear, linear, multiply, placement, px, shift, transformMatrix, transformOf, type Affine } from '../geometry';
 import { isPinned, type ElementIR, type Style } from '../ir';
+import { routedOut } from '../writers-elements';
 import type { MeasuredElement } from './measure';
 
 /** The model cannot place a member: the caller measures the deck in the export window and lowers again with the measure. */
@@ -88,6 +93,39 @@ function poseStyle(k: ElementIR, world: Affine, w: number, h: number, refusal: (
   return style;
 }
 
+type Ends = Record<'x1' | 'y1' | 'x2' | 'y2', number>;
+/** A coordinate connector's ends in its host's local px (a % end a share of `w` or `h`); null when one cannot be read. */
+function connectorEnds(k: ElementIR, w: number, h: number): Ends | null {
+  const ends = {} as Ends;
+  for (const [key, size] of [['x1', w], ['y1', h], ['x2', w], ['y2', h]] as const) {
+    const m = COORD.exec((k.attrs[key] ?? '').trim());
+    if (!m) return null;
+    ends[key] = m[2] === '%' ? (Number(m[1]) / 100) * size : Number(m[1]);
+  }
+  return ends;
+}
+
+/**
+ * A connector carried by `M` (its host's local px → the new host's) with its whole route, as the editor's ungroup carries
+ * it (writers-elements.ts `routedOut`): its ends moved, its route the one that draws the moved route exactly (a quarter
+ * turn makes `hv` a `vh`), and a route no supported one draws (a turn off the quarters bends an elbow) refused (A6).
+ */
+function routedConnector(k: ElementIR, ends: Ends, M: Affine, refusal: (reason: string) => never): ElementIR {
+  const px6 = (n: number) => String(Math.round(n * 1e6) / 1e6);
+  let moved: Record<string, string | null>;
+  try {
+    moved = routedOut({ ...k.attrs, x1: px6(ends.x1), y1: px6(ends.y1), x2: px6(ends.x2), y2: px6(ends.y2) }, M);
+  } catch (error) {
+    return refusal((error as Error).message);
+  }
+  const attrs = { ...k.attrs };
+  for (const [key, value] of Object.entries(moved)) {
+    if (value === null) delete attrs[key];
+    else attrs[key] = value;
+  }
+  return { ...k, attrs };
+}
+
 /** The group's placement in its host from the model (local px → host px), or null when it is not placed in px. */
 function modelPlacement(group: ElementIR): { G: Affine; w: number | null; h: number | null } | null {
   if (group.style.right !== undefined || group.style.bottom !== undefined) return null;
@@ -109,16 +147,10 @@ function modelPlacement(group: ElementIR): { G: Affine; w: number | null; h: num
 function modelMember(k: ElementIR, group: ElementIR, model: NonNullable<ReturnType<typeof modelPlacement>>, refusal: (reason: string) => never): ElementIR | null {
   const { G } = model;
   if (isConnector(k)) {
-    const attrs = { ...k.attrs };
-    for (const [x, y] of [['x1', 'y1'], ['x2', 'y2']] as const) {
-      const [mx, my] = [COORD.exec((k.attrs[x] ?? '').trim()), COORD.exec((k.attrs[y] ?? '').trim())];
-      if (!mx || !my) return null;
-      if ((mx[2] === '%' && model.w === null) || (my[2] === '%' && model.h === null)) return null;
-      const local = { x: mx[2] === '%' ? (Number(mx[1]) / 100) * model.w! : Number(mx[1]), y: my[2] === '%' ? (Number(my[1]) / 100) * model.h! : Number(my[1]) };
-      const p = apply(G, local);
-      [attrs[x], attrs[y]] = [num(p.x), num(p.y)];
-    }
-    return { ...k, attrs };
+    if ([k.attrs.x1, k.attrs.x2].some((v) => v?.trim().endsWith('%')) && model.w === null) return null;
+    if ([k.attrs.y1, k.attrs.y2].some((v) => v?.trim().endsWith('%')) && model.h === null) return null;
+    const local = connectorEnds(k, model.w ?? 0, model.h ?? 0);
+    return local && routedConnector(k, local, G, refusal);
   }
   if (k.style.right !== undefined || k.style.bottom !== undefined) return null;
   const [x, y, w, h] = [pxOf(k.style.left ?? '0px'), pxOf(k.style.top ?? '0px'), pxOf(k.style.width), pxOf(k.style.height)];
@@ -162,15 +194,9 @@ function measuredMember(k: ElementIR, group: ElementIR, host: ElementIR | null, 
     const { W, w, h } = drawn(g);
     const [bl, bt, br, bb] = [g.paint.borders[3]?.width ?? 0, g.paint.borders[0]?.width ?? 0, g.paint.borders[1]?.width ?? 0, g.paint.borders[2]?.width ?? 0];
     const inner = multiply(W, shift(bl, bt));
-    const attrs = { ...k.attrs };
-    for (const [x, y] of [['x1', 'y1'], ['x2', 'y2']] as const) {
-      const [mx, my] = [COORD.exec((k.attrs[x] ?? '').trim()), COORD.exec((k.attrs[y] ?? '').trim())];
-      if (!mx || !my) return refusal(`its ${x}/${y} cannot be read`);
-      const local = { x: mx[2] === '%' ? (Number(mx[1]) / 100) * (w - bl - br) : Number(mx[1]), y: my[2] === '%' ? (Number(my[1]) / 100) * (h - bt - bb) : Number(my[1]) };
-      const p = apply(toHost, apply(inner, local));
-      [attrs[x], attrs[y]] = [num(p.x), num(p.y)];
-    }
-    return { ...k, attrs };
+    const local = connectorEnds(k, w - bl - br, h - bt - bb);
+    if (!local) return refusal('its ends cannot be read');
+    return routedConnector(k, local, multiply(toHost, inner), refusal);
   }
   const m = ctx.measured.get(k.id);
   if (!m) return refusal('it was not measured (is it drawn?)');
@@ -217,6 +243,8 @@ function lowerGroup(group: ElementIR, host: ElementIR | null, ctx: LowerContext 
  */
 export function lowerGroups(children: ElementIR[], host: ElementIR | null = null, ctx?: LowerContext): ElementIR[] {
   return children.flatMap((el) => {
+    // a hidden group draws nothing, and Claude would re-pin its members into view: it goes whole (A8)
+    if (el.tag === 'div' && pinned(el) && el.style.display === 'none' && el.children.some(pinned)) return [];
     const inner = el.children.length ? { ...el, children: lowerGroups(el.children, el, ctx) } : el;
     if (inner.tag !== 'div' || !pinned(inner)) return [inner];
     return lowerGroup(inner, host, ctx) ?? [inner];

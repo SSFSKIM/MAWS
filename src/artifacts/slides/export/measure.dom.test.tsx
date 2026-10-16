@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { builtinView } from '../../design-system/view';
 import { deckTokenValues } from '../mirror';
 import { TEXT_TAGS } from '../ir';
-import { fixtureDoc } from './deck.test-support';
+import { FIXTURE_FILES, fixtureDoc } from './deck.test-support';
 import { shrinkScale } from '../render-rules';
 import { measureDeckPage, type MeasuredDeck } from './measure';
 import { deckPage, exportDeckOf } from './standalone';
@@ -94,5 +94,38 @@ describe('measureDeckPage', () => {
     const badge = measured.slides[1]!.elements.find((e) => e.id === 'badge')!;
     expect(badge.shape!.shadow).toMatchObject({ x: 0, y: 8, blur: 24 });
     expect(badge.shape!.shadow!.color).not.toBe('');
+  });
+});
+
+// The final review's A9 and A10: each a regression of a code-traced finding.
+describe('measureDeckPage: the final review', () => {
+  async function measuredSlide(body: string) {
+    const deck = exportDeckOf(fixtureDoc({ ...FIXTURE_FILES, 'project/slides/body.html': `<section id="body">${body}</section>` }), 'Untitled');
+    const html = deckPage(deck, { mode: 'measure', resolveVar: () => undefined, asset: () => null, facesCss: '', only: ['body'] });
+    document.head.innerHTML = `<style>${/<style>([\s\S]*?)<\/style>/.exec(html)![1]!}</style>`;
+    document.body.innerHTML = /<body[^>]*>([\s\S]*)<\/body>/.exec(html)![1]!;
+    const alone = new Function(`return (${String(measureDeckPage)})`)() as typeof measureDeckPage;
+    const search = new Function(`return (${String(shrinkScale)})`)() as typeof shrinkScale;
+    return (await alone({ textTags: [...TEXT_TAGS] }, search)).slides[0]!;
+  }
+  const runsOf = (slide: Awaited<ReturnType<typeof measuredSlide>>, id: string) => slide.elements.find((e) => e.id === id)!.text!.paragraphs.flatMap((p) => p.runs.map((r) => [r.text, r.breaks ?? 0]));
+
+  it('A9: keeps every line break: two in a row, a leading one, and the trailing ones the app shows (one fewer)', async () => {
+    const slide = await measuredSlide('<p id="t">A<br><br>B<br><br></p><p id="l"><br>Lead</p><p id="e">End<br></p>');
+    expect(runsOf(slide, 't')).toEqual([['A', 0], ['B', 2], ['', 1]]);
+    expect(runsOf(slide, 'l')).toEqual([['Lead', 1]]);
+    expect(runsOf(slide, 'e')).toEqual([['End', 0]]);
+  });
+
+  it('A10: writes the text the app shows under text-transform, its own or inherited, capitalizing words across runs', async () => {
+    const slide = await measuredSlide('<p id="u" style="text-transform:uppercase">Big <b>deal</b></p><div id="d" style="text-transform:lowercase"><p id="i">LOUD</p></div><p id="c" style="text-transform:capitalize">hello <b>wor</b>ld again</p>');
+    expect(runsOf(slide, 'u')).toEqual([['BIG ', 0], ['DEAL', 0]]);
+    expect(runsOf(slide, 'i')).toEqual([['loud', 0]]);
+    expect(runsOf(slide, 'c')).toEqual([['Hello ', 0], ['Wor', 0], ['ld Again', 0]]);
+  });
+
+  it('leaves out what a hidden ancestor hides', async () => {
+    const slide = await measuredSlide('<div id="g" data-group="" style="position:absolute; left:0px; top:0px; width:100px; height:100px; display:none"><p id="in" style="position:absolute; left:0px; top:0px">Hidden</p></div><p id="out">Shown</p>');
+    expect(slide.elements.map((e) => e.id)).toEqual(['out']);
   });
 });

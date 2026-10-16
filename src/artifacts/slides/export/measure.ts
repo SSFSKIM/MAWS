@@ -10,8 +10,10 @@
 //    function's and which arrives as the second argument,
 // 3. reads every slide: its background, then each element in paint order (document order, the page writing a section's
 //    children under, flow, over), each with its box before rotation in slide px, its rotation, its paint, and for text
-//    its paragraphs of runs with their computed face, size, weight, style, colour and decoration; tables by rows of
-//    cells; pictures with their natural size; inline svg and icons as their markup in their colour.
+//    its paragraphs of runs with their computed face, size, weight, style, colour and decoration, the text as shown
+//    (its `text-transform` applied) and every line break the app shows (the final review's A9, A10); tables by rows of
+//    cells; pictures with their natural size; inline svg and icons as their markup in their colour. What a hidden
+//    ancestor hides is left out.
 // Portable: types and one function over the DOM, no imports.
 
 export interface MeasuredBox {
@@ -36,8 +38,11 @@ export interface MeasuredRun {
   /** px; 0 when normal. */
   letterSpacing: number;
   href?: string;
-  /** A line break (`<br>`) before this run's text. */
-  breakBefore?: boolean;
+  /**
+   * The line breaks (`<br>`) before this run's text, as many as the app shows (absent at none). A run with no text carries
+   * the empty lines a paragraph ends with: a block's last break ends its line and adds none, so `A<br><br>` ends with one.
+   */
+  breaks?: number;
 }
 
 export interface MeasuredParagraph {
@@ -349,25 +354,49 @@ export async function measureDeckPage(args: MeasureArgs, shrinkScale: (base: num
       ...(href && { href }),
     };
   };
+  // The text as the app shows it under the computed (so inherited) `text-transform` (A10); `capitalize` raises a word's
+  // first letter, a word running on across runs (`wor` + `ld`) by what came before it in the paragraph.
+  const wordy = /[\p{L}\p{N}]/u;
+  const shown = (text: string, el: DomElement, before: string): string => {
+    const transform = css(el, 'text-transform');
+    if (transform === 'uppercase') return text.toUpperCase();
+    if (transform === 'lowercase') return text.toLowerCase();
+    if (transform !== 'capitalize') return text;
+    let out = '';
+    let last = before;
+    for (const ch of text) {
+      out += wordy.test(ch) && !wordy.test(last) ? ch.toUpperCase() : ch;
+      last = ch;
+    }
+    return out;
+  };
   const paragraphOf = (block: DomElement, bullet?: MeasuredParagraph['bullet']): MeasuredParagraph => {
     const runs: MeasuredRun[] = [];
-    let breakNext = false;
+    let breaks = 0; // the line breaks since the last run (A9: each one kept)
+    let before = ''; // the paragraph's text so far, its last character
     const walk = (node: DomNode) => {
       for (const child of Array.from(node.childNodes)) {
         if (child.nodeType === 3) {
-          const text = (child.textContent ?? '').replace(/[ \t\n\r\f]+/g, ' ');
+          let text = (child.textContent ?? '').replace(/[ \t\n\r\f]+/g, ' ');
+          if (breaks > 0 || runs.length === 0) text = text.replace(/^ /, ''); // a line's leading space collapses away
           if (!text) continue;
-          runs.push({ ...runOf(text, child.parentElement ?? block, block), ...(breakNext && { breakBefore: true }) });
-          breakNext = false;
-        } else if (child.nodeType === 1 && (child as DomElement).tagName === 'BR') breakNext = true;
-        else if (child.nodeType === 1) walk(child);
+          const parent = child.parentElement ?? block;
+          text = shown(text, parent, before);
+          before = text.slice(-1);
+          runs.push({ ...runOf(text, parent, block), ...(breaks > 0 && { breaks }) });
+          breaks = 0;
+        } else if (child.nodeType === 1 && (child as DomElement).tagName === 'BR') {
+          breaks++;
+          before = '';
+        } else if (child.nodeType === 1) walk(child);
       }
     };
     walk(block);
-    if (runs.length) runs[0]!.text = runs[0]!.text.replace(/^ /, '');
+    // the breaks a block ends with: its last ends the line, the rest show as empty lines
+    if (breaks > 1) runs.push({ ...runOf('', block, block), breaks: breaks - 1 });
     const size = num(css(block, 'font-size'));
     const line = css(block, 'line-height');
-    return { runs: runs.filter((r) => r.text !== ''), align: alignOf(css(block, 'text-align')), lineHeight: line === 'normal' || line === '' ? size * 1.2 : num(line), ...(bullet && { bullet }) };
+    return { runs, align: alignOf(css(block, 'text-align')), lineHeight: line === 'normal' || line === '' ? size * 1.2 : num(line), ...(bullet && { bullet }) };
   };
   // The line boxes of a block's text: one rect per line per text node (the nodes' own, never an element's box).
   const lineRects = (block: DomElement): DomRect[] => {
@@ -464,13 +493,19 @@ export async function measureDeckPage(args: MeasureArgs, shrinkScale: (base: num
     return null;
   };
 
+  // Not drawn: the element or an ancestor within the slide is `display:none` (a hidden group's members draw nothing).
+  const hiddenIn = (el: DomElement, slide: DomElement): boolean => {
+    for (let at: DomElement | null = el; at && at !== slide; at = at.parentElement) if (css(at, 'display') === 'none') return true;
+    return false;
+  };
+
   const slides: MeasuredSlide[] = [];
   for (const slide of Array.from(doc.querySelectorAll('section.maws-slide'))) {
     const elements: MeasuredElement[] = [];
     for (const el of Array.from(slide.querySelectorAll('[data-eid]'))) {
       const tag = el.tagName.toLowerCase();
       if (tag === 'tr' || tag === 'th' || tag === 'td') continue; // read with their table
-      if (css(el, 'display') === 'none') continue;
+      if (hiddenIn(el, slide)) continue;
       const { box, rotate, scale, linear } = boxOf(el, slide);
       const attrs: Record<string, string> = {};
       for (const a of Array.from(el.attributes)) if (!['style', 'src', 'data-eid', 'data-layer', 'data-fit-box'].includes(a.name)) attrs[a.name] = a.value;

@@ -7,7 +7,9 @@
 // the owner's crop as a source rectangle); an x-shape its preset geometry; an x-connector and an hr lines (a routed
 // connector one open path), heads as line ends; a table a native table with its column widths, row heights, fills,
 // borders and cell text; an inline svg and an x-icon an SVG picture with a PNG fallback the window drew. What no native
-// object carries (an x-embed, a gradient fill, a gradient slide background) is a picture of its region the window took.
+// object carries (an x-embed, a gradient fill, a gradient slide background, a turned table) is a picture of its region
+// the window took. A turn (the element's own and its ancestors') turns a connector's points and a box's border bars with
+// it (the final review's A5, A11, A12); every line break is a native one (A9).
 // Every object is named by its element's id (`shapeName`); notes, hidden slides, fade and push transitions (magic as
 // fade), and the theme part of the design system (D's `officeThemeXml`) are written by post-processing the package.
 //
@@ -87,7 +89,8 @@ export function pictureJobs(measured: MeasuredDeck, variant: PptxFontVariant): P
     if (slide.background.image) jobs.push({ key: pictureKey(slide.id, ''), slideId: slide.id, elementId: '', mode: 'background', box: FULL });
     for (const el of slide.elements) {
       const job = (mode: PictureJob['mode']) => jobs.push({ key: pictureKey(slide.id, el.id), slideId: slide.id, elementId: el.id, mode, box: el.box });
-      if (el.tag === 'x-embed' || el.tag === 'svg' || el.tag === 'x-icon') job('tree');
+      // a turned table has no native form (a PowerPoint table does not turn): the window's picture of it (A11)
+      if (el.tag === 'x-embed' || el.tag === 'svg' || el.tag === 'x-icon' || (el.tag === 'table' && el.rotate !== 0)) job('tree');
       else if (el.paint.image && el.tag !== 'img' && el.tag !== 'x-shape' && el.tag !== 'x-connector' && el.tag !== 'hr') job('self');
     }
   }
@@ -131,6 +134,20 @@ function boxShape(paint: MeasuredPaint, box: MeasuredBox): { shape: PptxGenJS.SH
   return r > 0.5 ? { shape: 'roundRect', rectRadius: inches(r) } : { shape: 'rect' };
 }
 
+const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
+/**
+ * A part of an owner's unturned box where the owner's turn (`deg` clockwise about its centre, its own and its
+ * ancestors') carries it: the part keeps its size and turns by as much about its own centre (A12).
+ */
+function turnedWith(part: MeasuredBox, owner: MeasuredBox, deg: number): MeasuredBox {
+  if (!deg) return part;
+  const t = (deg * Math.PI) / 180;
+  const [cx, cy] = [owner.x + owner.w / 2, owner.y + owner.h / 2];
+  const [dx, dy] = [part.x + part.w / 2 - cx, part.y + part.h / 2 - cy];
+  const [px, py] = [cx + dx * Math.cos(t) - dy * Math.sin(t), cy + dx * Math.sin(t) + dy * Math.cos(t)];
+  return { x: round6(px - part.w / 2), y: round6(py - part.h / 2), w: part.w, h: part.h };
+}
+
 /** A box's paint: its shape, fill, uniform line and shadow; a side drawn alone is its own bar (named `<id>:border-<side>`). */
 function paintObjects(el: MeasuredElement, withFill: boolean): { options: PptxGenJS.ShapeProps; shape: PptxGenJS.SHAPE_NAME; sides: PptxObject[] } {
   const { paint, box } = el;
@@ -149,7 +166,7 @@ function paintObjects(el: MeasuredElement, withFill: boolean): { options: PptxGe
       if (!border || !c) return;
       const bar: MeasuredBox =
         i === 0 ? { x: box.x, y: box.y, w: box.w, h: border.width } : i === 1 ? { x: box.x + box.w - border.width, y: box.y, w: border.width, h: box.h } : i === 2 ? { x: box.x, y: box.y + box.h - border.width, w: box.w, h: border.width } : { x: box.x, y: box.y, w: border.width, h: box.h };
-      sides.push({ kind: 'shape', name: `${el.id}:border-${names[i]}`, shape: 'rect', options: { ...at(bar), objectName: `${el.id}:border-${names[i]}`, fill: { color: c.hex, transparency: transparencyOf(c.alpha, paint.opacity) }, line: { type: 'none' } } });
+      sides.push({ kind: 'shape', name: `${el.id}:border-${names[i]}`, shape: 'rect', options: { ...at(turnedWith(bar, box, el.rotate)), objectName: `${el.id}:border-${names[i]}`, fill: { color: c.hex, transparency: transparencyOf(c.alpha, paint.opacity) }, line: { type: 'none' }, ...(el.rotate && { rotate: el.rotate }) } });
     });
   }
   const shadow = shadowOf(paint);
@@ -171,33 +188,33 @@ function runsOf(text: MeasuredText, variant: PptxFontVariant, opacity: number, l
       ...(paragraph.bullet === 'decimal' && { bullet: { type: 'number', indent: points(listIndent) } }),
     };
     const last = p === text.paragraphs.length - 1;
-    const runs = paragraph.runs.length ? paragraph.runs : [null];
-    runs.forEach((run, r) => {
-      const end = r === runs.length - 1 && !last;
-      if (!run) {
-        out.push({ text: '', options: { ...para, ...(end && { breakLine: true }) } });
-        return;
-      }
+    const pieces: PptxGenJS.TextProps[] = [];
+    for (const run of paragraph.runs) {
       const color = parseColor(run.color);
-      out.push({
-        text: run.text,
-        options: {
-          // the paragraph's properties on its first run (`onePPr` keeps that one; pptxgenjs writes one per run)
-          ...(r === 0 && para),
-          fontFace: faceFor(run.font, variant),
-          fontSize: points(run.size),
-          bold: run.bold,
-          italic: run.italic,
-          ...(run.underline && { underline: { style: 'sng' } }),
-          ...(run.strike && { strike: 'sngStrike' }),
-          ...(color && { color: color.hex, ...(transparencyOf(color.alpha, opacity) > 0 && { transparency: transparencyOf(color.alpha, opacity) }) }),
-          ...(run.letterSpacing !== 0 && { charSpacing: points(run.letterSpacing) }),
-          ...(run.href && { hyperlink: { url: run.href } }),
-          ...(run.breakBefore && { softBreakBefore: true }),
-          ...(end && { breakLine: true }),
-        },
-      });
-    });
+      const chars: PptxGenJS.TextPropsOptions = {
+        fontFace: faceFor(run.font, variant),
+        fontSize: points(run.size),
+        bold: run.bold,
+        italic: run.italic,
+        ...(run.underline && { underline: { style: 'sng' } }),
+        ...(run.strike && { strike: 'sngStrike' }),
+        ...(color && { color: color.hex, ...(transparencyOf(color.alpha, opacity) > 0 && { transparency: transparencyOf(color.alpha, opacity) }) }),
+        ...(run.letterSpacing !== 0 && { charSpacing: points(run.letterSpacing) }),
+      };
+      // every break a native one (A9): pptxgenjs writes one before a paragraph's second run on, so a paragraph that
+      // opens with a break opens with an empty run, and each break but the run's own last rides an empty run
+      const breaks = run.breaks ?? 0;
+      for (let k = 0; k < breaks; k++) {
+        if (!pieces.length) pieces.push({ text: '', options: { ...chars } });
+        if (k < breaks - 1) pieces.push({ text: '', options: { ...chars, softBreakBefore: true } });
+      }
+      pieces.push({ text: run.text, options: { ...chars, ...(run.href && { hyperlink: { url: run.href } }), ...(breaks > 0 && { softBreakBefore: true }) } });
+    }
+    if (!pieces.length) pieces.push({ text: '', options: {} });
+    // the paragraph's properties on its first run (`onePPr` keeps that one; pptxgenjs writes one per run)
+    pieces[0]!.options = { ...para, ...pieces[0]!.options };
+    if (!last) pieces[pieces.length - 1]!.options = { ...pieces[pieces.length - 1]!.options, breakLine: true };
+    out.push(...pieces);
   });
   return out;
 }
@@ -321,10 +338,17 @@ function connectorObject(el: MeasuredElement): PptxObject[] {
   const stroke = el.shape?.stroke;
   const width = stroke?.width ?? 2;
   const color = parseColor(el.color);
-  // its coordinates are its host's own px: routed in the undrawn box, then drawn at the host's scale
+  // its coordinates are its host's own px: routed in the undrawn box, then carried by the composed placement (its
+  // host's scale and turn, A5) about the box's centre, which is where the layout box's centre is drawn
   const [sx, sy] = el.connectorScale ?? [1, 1];
-  const local = connectorPoints(el.attrs, el.box.w / sx, el.box.h / sy, width / Math.sqrt(sx * sy));
-  const pts = local.map(([x, y]): [number, number] => [el.box.x + x * sx, el.box.y + y * sy]);
+  const [lw, lh] = [el.box.w / sx, el.box.h / sy];
+  const local = connectorPoints(el.attrs, lw, lh, width / Math.sqrt(sx * sy));
+  const [a, b, c, d] = el.linear ?? [sx, 0, 0, sy];
+  const [cx, cy] = [el.box.x + el.box.w / 2, el.box.y + el.box.h / 2];
+  const pts = local.map(([x, y]): [number, number] => {
+    const [dx, dy] = [x - lw / 2, y - lh / 2];
+    return [round6(cx + a * dx + c * dy), round6(cy + b * dx + d * dy)];
+  });
   const heads = connectorHeads(el.attrs);
   const line: PptxGenJS.ShapeLineProps = {
     width: points(width),
@@ -440,7 +464,7 @@ function elementObjects(drawn: MeasuredElement, ir: ElementIR | undefined, pictu
     case 'hr':
       return hrObject(el);
     case 'table':
-      return tableObject(el, options.variant);
+      return el.rotate !== 0 && picture ? pictureObject(el, picture) : tableObject(el, options.variant);
     case 'div': {
       if (el.paint.image && picture) return pictureObject(el, picture);
       if (!painted(el.paint)) return [];

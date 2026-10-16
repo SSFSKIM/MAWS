@@ -68,6 +68,12 @@ async function required<N extends CommandName>(deps: PresentationExportDeps, nam
 export interface DeckSystem extends DesignSystemExport<TokenSet> {
   /** The system's id, null for the bundled floor. */
   id: string | null;
+  /**
+   * The revision the system is read at: a version's pin (X29's `versionSeq`), absent for the live system. Its faces'
+   * files are read at it too: a system deleted since lends a retained version its files only at a named revision (the
+   * final review's A15; the host's `artifacts.content`).
+   */
+  revision?: number;
   /** `components/document.css`, whose `@font-face` blocks are the system's faces. */
   documentCss: string | undefined;
 }
@@ -77,14 +83,14 @@ function floor(): DeckSystem {
   return { id: null, name: view.name || 'MAWS', tokens: view.tokens, documentCss: undefined, resolveDsVars, officeThemeXml };
 }
 
-/** The system in `bytes`; the floor when it holds no system yet (a seeding cut short), as the editor draws it. */
-function systemOf(id: string, bytes: Uint8Array): DeckSystem {
+/** The system in `bytes` (at `revision`, a pin); the floor when it holds no system yet (a seeding cut short), as the editor draws it. */
+function systemOf(id: string, bytes: Uint8Array, revision: number | undefined): DeckSystem {
   const doc = newDoc();
   try {
     applyV2(doc, bytes);
     const state = readSystem(doc);
     if (!state.meta) return floor();
-    return { id, name: state.meta.name, tokens: state.tokens, documentCss: state.files[DOCUMENT_CSS_PATH], resolveDsVars, officeThemeXml };
+    return { id, ...(revision !== undefined && { revision }), name: state.meta.name, tokens: state.tokens, documentCss: state.files[DOCUMENT_CSS_PATH], resolveDsVars, officeThemeXml };
   } finally {
     doc.destroy();
   }
@@ -100,17 +106,17 @@ export async function deckSystem(request: Pick<ExportRequest, 'artifactId' | 've
   const { system } = await required(deps, 'designSystems.governing', { artifactId: request.artifactId, ...(request.versionId !== undefined && { versionId: request.versionId }) });
   if ('builtin' in system) return floor();
   const { bytes } = system.versionSeq === undefined ? await required(deps, 'artifacts.state', { artifactId: system.id }) : await required(deps, 'artifacts.versionState', { artifactId: system.id, seq: system.versionSeq });
-  return systemOf(system.id, bytes);
+  return systemOf(system.id, bytes, system.versionSeq);
 }
 
 const dataUrl = (bytes: Uint8Array, mime: string) => `data:${mime};base64,${Buffer.from(bytes).toString('base64')}`;
 
-/** The system's faces, their files inlined (a face whose file cannot be read is left out). */
-async function systemFacesCss(system: DeckSystem, deps: PresentationExportDeps): Promise<string> {
+/** The system's faces, their files inlined, read at the system's revision (a face whose file cannot be read is left out). */
+export async function systemFacesCss(system: DeckSystem, deps: PresentationExportDeps): Promise<string> {
   if (!system.id || !system.documentCss) return '';
   const urls = new Map<string, string>();
   for (const ref of new Set(systemFaces(system.documentCss, system.tokens).flatMap((face) => face.refs))) {
-    const found = await deps.call('artifacts.content', { artifactId: system.id, path: ref });
+    const found = await deps.call('artifacts.content', { artifactId: system.id, path: ref, ...(system.revision !== undefined && { revision: system.revision }) });
     if (found.ok) urls.set(ref, dataUrl(new Uint8Array(await readFile(found.value.path)), mimeOf(found.value.name)));
   }
   // a source that is not there points nowhere loadable (the page's policy refuses it): the face falls back

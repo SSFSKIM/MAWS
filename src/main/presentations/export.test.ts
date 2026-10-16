@@ -2,7 +2,7 @@
 // D12; X31): the five formats registered; the design system a deck exports in (D's `designSystems.governing`: a version's
 // pin, else the host's chain, else the floor; Decision Log 27 (2)) with D's export helpers bound to it; the `claude` zip through A's `runExport`; the `embedded` PPTX variant refused with its reason.
 // The window's formats (html, pdf, png, pptx) run in `e2e/presentations-export.spec.ts` on the product build.
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -20,7 +20,7 @@ vi.mock('electron', () => ({ BrowserWindow: class {} }));
 
 import { ExporterRegistry, runExport, type ExportRequest, type ExportSources } from '../artifacts/export';
 import { readZip } from '../design-systems/read-zip.test-support';
-import { deckSystem, registerPresentationExporters, STAGE, type PresentationExportDeps } from './export';
+import { deckSystem, registerPresentationExporters, STAGE, systemFacesCss, type PresentationExportDeps } from './export';
 
 const DECK = '1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d';
 const OWN = '2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e';
@@ -97,6 +97,40 @@ describe('the system a deck exports in', () => {
     const system = await deckSystem({ artifactId: DECK, versionId: 9 }, deps);
     expect(system.name).toBe('Official');
     expect(deps.asked).toEqual([['designSystems.governing', { artifactId: DECK, versionId: 9 }], ['artifacts.versionState', { artifactId: OWN, seq: 3 }]]);
+  });
+
+  // the final review's A15: a version's system may be deleted since; its faces are served only at a named revision
+  it('reads a version’s system faces at the pinned revision, so a system deleted since still lends them', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'maws-deck-faces-'));
+    try {
+      const font = join(dir, 'face.woff2');
+      await writeFile(font, 'font bytes');
+      const deps = depsOf({ rows: {}, states: { [`${OWN}@3`]: official }, governing: { 9: { id: OWN, versionSeq: 3 } } });
+      const call = deps.call;
+      const content: unknown[] = [];
+      deps.call = (async (name: CommandName, input: unknown) => {
+        if (name !== 'artifacts.content') return call(name as never, input as never);
+        content.push(input);
+        // deleted since: its files answer only for a named revision
+        return (input as { revision?: number }).revision === 3 ? { ok: true, value: { path: font, name: 'face.woff2' } } : { ok: false, error: { code: 'not_found', message: 'deleted' } };
+      }) as typeof deps.call;
+      const system = await deckSystem({ artifactId: DECK, versionId: 9 }, deps);
+      const css = await systemFacesCss(system, deps);
+      expect(content.length).toBeGreaterThan(0);
+      expect(content.every((input) => (input as { revision?: number }).revision === 3)).toBe(true);
+      expect(css).toContain(`base64,${Buffer.from('font bytes').toString('base64')}`); // the CSS escapes the url's `:` and `;`
+      expect(css).not.toContain('data:,');
+      // the live system's faces: no revision named
+      const live = depsOf({ rows: {}, states: { [OWN]: official }, governing: { live: { id: OWN } } });
+      const asked: unknown[] = [];
+      const liveCall = live.call;
+      live.call = (async (name: CommandName, input: unknown) => (name === 'artifacts.content' ? (asked.push(input), { ok: true, value: { path: font, name: 'face.woff2' } }) : liveCall(name as never, input as never))) as typeof live.call;
+      await systemFacesCss(await deckSystem({ artifactId: DECK }, live), live);
+      expect(asked.length).toBeGreaterThan(0);
+      expect(asked.every((input) => !Object.hasOwn(input as object, 'revision'))).toBe(true);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('is the bundled floor when the host names it, or when the named system holds no system yet', async () => {

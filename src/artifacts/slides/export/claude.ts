@@ -7,9 +7,11 @@
 // (lower.ts: Claude would flatten them and lose their transforms). A held slide has no Claude-readable form (its source
 // failed the loader; its model is only its last good state): the export is refused, naming each held slide and its
 // reasons (fix wave 1). Portable: the caller gives the token values and the assets' bytes.
+import { mapStyleMapAssets, slideAssetRefs } from '../asset-refs';
 import { DECK_PATH, serializeDeckJson, slidePath, type DeckFace } from '../deck';
 import type { ElementIR } from '../ir';
 import { heldOf, readDeckJson, readSlide, slideOrder } from '../model';
+import { loadSlide } from '../parse';
 import { serializeSlide } from '../serialize';
 import type { Doc } from '../../yjs';
 import { lowerGroups, MeasureNeeded } from './lower';
@@ -19,12 +21,15 @@ import { literalStyle } from './standalone';
 /** Where an uploaded asset (`assets/<name>`) goes in the export: an installed system's path Claude's loader takes. */
 export const claudeAssetPath = (ref: string): string => `project/ds/maws/${ref.slice('assets/'.length)}`;
 
-// Each picture's source moved, each style literal (tokens resolved; a property with no value left out).
+// A style literal (tokens resolved; a property with no value left out), its assets' urls moved with the pictures (A13).
+const movedStyle = (style: Readonly<Record<string, string>>, resolveVar: (name: string) => string | undefined): Record<string, string> => mapStyleMapAssets(literalStyle(style, resolveVar), (ref) => `url(${claudeAssetPath(ref)})`);
+
+// Each picture's source moved, each style literal with its urls moved.
 const rewrite = (children: ElementIR[], moved: (src: string) => string, resolveVar: (name: string) => string | undefined): ElementIR[] =>
   children.map((el) => ({
     ...el,
     attrs: el.tag === 'img' && el.attrs.src !== undefined ? { ...el.attrs, src: moved(el.attrs.src) } : el.attrs,
-    style: literalStyle(el.style, resolveVar),
+    style: movedStyle(el.style, resolveVar),
     children: rewrite(el.children, moved, resolveVar),
   }));
 
@@ -61,13 +66,7 @@ export function claudeDeckFiles(doc: Doc, { resolveVar, assets, measured }: Clau
   const files: Record<string, string | Uint8Array> = { [DECK_PATH]: serializeDeckJson(deck) };
   for (const id of slideOrder(doc)) {
     const slide = readSlide(doc, id);
-    const walk = (els: ElementIR[]) => {
-      for (const el of els) {
-        if (el.tag === 'img' && el.attrs.src?.startsWith('assets/')) used.add(el.attrs.src);
-        walk(el.children);
-      }
-    };
-    walk(slide.children);
+    for (const ref of slideAssetRefs(slide)) used.add(ref);
     // MAWS's pinned groups lowered to Claude's form (lower.ts), over literal geometry; a pose the dialect cannot write
     // refuses the export, and a place the model cannot give asks for the window's measure (`MeasureNeeded`)
     const ctx = { slideId: id, measured: measuredOf(id) };
@@ -78,7 +77,12 @@ export function claudeDeckFiles(doc: Doc, { resolveVar, assets, measured }: Clau
       if (error instanceof MeasureNeeded) throw error;
       throw new Error(`the presentation cannot be exported for Claude: ${(error as Error).message}`, { cause: error });
     }
-    files[slidePath(id)] = serializeSlide({ ...slide, children }, { resolveVar });
+    const file = serializeSlide({ ...slide, style: movedStyle(slide.style, resolveVar), children }, { resolveVar });
+    // the lowered slide is a slide of its own: the loader judges it (A7), since lifting members may cross a limit (two
+    // groups of 13 pinned members each make 26 pinned children of their host)
+    const loaded = loadSlide(file, { fileId: id });
+    if (!loaded.ok) throw new Error(`the presentation cannot be exported for Claude: slide ${id} would not load once its groups are lowered to Claude's form (${loaded.held.reasons.join('; ')})`);
+    files[slidePath(id)] = file;
   }
   for (const ref of [...used].sort()) {
     const bytes = assets.get(ref);

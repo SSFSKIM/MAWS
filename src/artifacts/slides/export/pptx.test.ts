@@ -8,6 +8,7 @@ import { officeThemeXml } from '../../design-system/office';
 import { builtinView } from '../../design-system/view';
 import { fixtureDoc, MEASURED } from './deck.test-support';
 import { inches, parseColor, pictureJobs, pictureKey, points, pptxSlides, writePptx, type PptxObject } from './pptx';
+import type { MeasuredElement } from './measure';
 import { exportDeckOf } from './standalone';
 
 const LOGO = 'data:image/png;base64,iVBORw0KGgo=';
@@ -183,5 +184,57 @@ describe('the PPTX mapping', () => {
     const rId = /<a:blip r:embed="(rId\d+)"/.exec(pic)![1];
     const target = new RegExp(`Id="${rId}"[^>]*Target="\\.\\./media/([^"]+)"`).exec(rels)![1]!;
     expect(await zip.file(`ppt/media/${target}`)!.async('base64')).toBe(PNG.split(',')[1]);
+  });
+});
+
+// The final review's A5, A9, A11 and A12: each a regression of a code-traced finding.
+describe('the PPTX mapping: the final review', () => {
+  const body = MEASURED.slides[1]!;
+  const only = (el: MeasuredElement, pictures = new Map<string, string>()) => pptxSlides(deck(), { slides: [{ ...body, elements: [el] }] }, { variant: 'named', pictures, asset })[0]!.objects;
+  const quarter: [number, number, number, number] = [0, 1, -1, 0]; // a quarter turn clockwise (y down)
+
+  it('A5: draws a connector through its host’s turn: a horizontal line in a quarter-turned group runs down the slide', () => {
+    // the group: 200 × 100, centred at (300, 250), turned 90°; the connector across its middle
+    const wire: MeasuredElement = { ...body.elements[1]!, id: 'wire', box: { x: 200, y: 200, w: 200, h: 100 }, rotate: 90, linear: quarter, attrs: { x1: '0', y1: '50', x2: '200', y2: '50' } };
+    const out = named(only(wire), 'wire');
+    expect(out).toMatchObject({ kind: 'shape', shape: 'line' });
+    expect(out.options).toMatchObject({ x: inches(300), y: inches(150), w: 0, h: inches(200) });
+    expect(out.options).not.toHaveProperty('rotate');
+    // a routed one keeps its corners where they are drawn
+    const routed = named(only({ ...wire, attrs: { ...wire.attrs, x2: '200', y2: '100', route: 'hv' } }), 'wire');
+    // hv from (0, 50) to (200, 100): (300, 150), (300, 350), (250, 350) on the slide
+    expect(routed.options).toMatchObject({ x: inches(250), y: inches(150), points: [{ x: inches(50), y: 0, moveTo: true }, { x: inches(50), y: inches(200) }, { x: 0, y: inches(200) }] });
+  });
+
+  it('A11: exports a turned table as the window’s picture of it, turned', () => {
+    const grid = body.elements.find((e) => e.id === 'grid')!;
+    const turned = { ...grid, rotate: 30 };
+    expect(pictureJobs({ slides: [{ ...body, elements: [turned] }] }, 'named').map((j) => [j.key, j.mode])).toEqual([['body/grid', 'tree']]);
+    expect(pictureJobs({ slides: [{ ...body, elements: [grid] }] }, 'named')).toEqual([]);
+    const out = only(turned, new Map([[pictureKey('body', 'grid'), PNG]]));
+    expect(out).toEqual([{ kind: 'image', name: 'grid', options: expect.objectContaining({ data: PNG, rotate: 30, x: inches(grid.box.x), w: inches(grid.box.w) }) }]);
+  });
+
+  it('A12: turns a box’s uneven border bars with it, about the box’s centre', () => {
+    const top = { width: 10, style: 'solid', color: 'rgb(255, 0, 0)' };
+    const card: MeasuredElement = { ...body.elements[0]!, id: 'card', tag: 'div', box: { x: 100, y: 100, w: 200, h: 100 }, rotate: 90, linear: quarter, paint: { fill: null, image: false, borders: [top, null, null, null], radius: 0, shadow: null, opacity: 1 } };
+    const bar = named(only(card), 'card:border-top');
+    // unturned, the bar is 200 × 10 centred at (200, 105); a quarter turn about (200, 150) takes its centre to (245, 150)
+    expect(bar.options).toMatchObject({ x: inches(145), y: inches(145), w: inches(200), h: inches(10), rotate: 90 });
+  });
+
+  it('A9: writes every line break as a native break: several in a row, one leading, the trailing ones the app shows', async () => {
+    const title = MEASURED.slides[0]!.elements[0]!;
+    const run = title.text!.paragraphs[0]!.runs[0]!;
+    const broken: MeasuredElement = {
+      ...title,
+      text: { ...title.text!, oneLine: false, paragraphs: [{ ...title.text!.paragraphs[0]!, runs: [{ ...run, text: 'Lead', breaks: 1 }, { ...run, text: 'A' }, { ...run, text: 'B', breaks: 2 }, { ...run, text: '', breaks: 1 }] }] },
+    };
+    const slides = pptxSlides(deck(), { slides: [{ ...MEASURED.slides[0]!, elements: [broken] }] }, { variant: 'named', pictures: new Map(), asset });
+    const zip = await JSZip.loadAsync(await writePptx(slides, { title: 'x' }));
+    const xml = await zip.file('ppt/slides/slide1.xml')!.async('string');
+    const paragraph = xml.split('<a:p>').slice(1).map((p) => p.slice(0, p.indexOf('</a:p>'))).find((p) => p.includes('Lead'))!;
+    const sequence = [...paragraph.matchAll(/<a:br\/>|<a:t>([^<]*)<\/a:t>/g)].map((m) => (m[0] === '<a:br/>' ? '|' : m[1])).filter((t) => t !== '').join('');
+    expect(sequence).toBe('|LeadA||B|');
   });
 });

@@ -91,3 +91,47 @@ describe('the deck’s standalone page', () => {
     expect(html).not.toContain('object-fit:cover');
   });
 });
+
+// The final review's A4 and A13: each a regression of a code-traced finding.
+describe('the deck’s standalone page: the final review', () => {
+  it('A4: draws a shape’s outline and a connector at their layout size inside a scaled group, not at the drawn size again', () => {
+    const files = {
+      ...FIXTURE_FILES,
+      'project/slides/body.html':
+        '<section id="body"><div id="g" data-group="" style="position:absolute; left:100px; top:100px; width:200px; height:100px; transform:scale(2)">' +
+        '<x-shape id="dot" kind="ellipse" style="position:absolute; left:0px; top:0px; width:100px; height:100px; background:#2b7a78"></x-shape>' +
+        '<x-connector id="wire" x1="0%" y1="50%" x2="100%" y2="50%"></x-connector></div></section>',
+    };
+    const deck = exportDeckOf(fixtureDoc(files), 'x');
+    const measured = {
+      slides: [
+        {
+          id: 'body',
+          background: { fill: null, image: false },
+          elements: [
+            { ...MEASURED.slides[1]!.elements[0]!, id: 'dot', box: { x: 0, y: 50, w: 200, h: 200 }, scale: [2, 2] as [number, number], linear: [2, 0, 0, 2] as [number, number, number, number] },
+            { ...MEASURED.slides[1]!.elements[1]!, id: 'wire', box: { x: 0, y: 50, w: 400, h: 200 }, scale: [2, 2] as [number, number], linear: [2, 0, 0, 2] as [number, number, number, number], attrs: { x1: '0%', y1: '50%', x2: '100%', y2: '50%' } },
+          ],
+        },
+      ],
+    };
+    const html = deckPage(deck, { mode: 'html', resolveVar: () => undefined, asset, facesCss: '', measured, only: ['body'] });
+    expect(html).toMatch(/<x-shape data-eid="dot"[^>]*><svg data-glyph="" [^>]*width="100" height="100" viewBox="0 0 100 100">/);
+    expect(html).toMatch(/<x-connector data-eid="wire"[^>]*><svg data-glyph="" [^>]*width="200" height="100"[^>]*><polyline points="0,50 200,50"/);
+  });
+
+  it('A13: inlines a CSS background’s asset, on an element and on the section, and lists it among the deck’s assets', () => {
+    const files = {
+      ...FIXTURE_FILES,
+      'project/slides/body.html':
+        '<section id="body" style="background:url(assets/logo.png) center / cover"><h1 id="t" style="background:url(assets/logo.png); background-clip:text; -webkit-text-fill-color:transparent">Gold</h1></section>',
+    };
+    const deck = exportDeckOf(fixtureDoc(files), 'x');
+    expect(deckAssetRefs(deck)).toContain('assets/logo.png');
+    expect(deckAssetRefs(exportDeckOf(fixtureDoc({ ...files, 'project/slides/cover.html': '<section id="cover"></section>' }), 'x'))).toContain('assets/logo.png');
+    const html = deckPage(deck, { mode: 'html', resolveVar: () => undefined, asset, facesCss: '', only: ['body'] });
+    expect(html).not.toMatch(/url\(["']?assets\//);
+    expect(html).toContain(`<section class="maws-slide" data-slide="body" style="background:url(&quot;${LOGO}&quot;) center / cover"`);
+    expect(html).toContain(`<h1 data-eid="t" style="background:url(&quot;${LOGO}&quot;); background-clip:text`);
+  });
+});

@@ -164,3 +164,25 @@ describe('the For Claude export of groups the model cannot place alone', () => {
 });
 
 const near = (a: { x: number; y: number }[], b: { x: number; y: number }[]) => a.every((p, i) => Math.hypot(p.x - b[i]!.x, p.y - b[i]!.y) < 0.6);
+
+// The final review's A7 and A13: each a regression of a code-traced finding.
+describe('the For Claude export: the final review', () => {
+  it('A7: refuses a slide whose lowered groups the loader would hold, naming the slide and the reason', () => {
+    const members = (g: number) => Array.from({ length: 13 }, (_, k) => `<p id="g${g}m${k}" style="position:absolute; left:${k}px; top:0px">${k}</p>`).join('');
+    const group = (g: number) => `<div id="g${g}" data-group="" style="position:absolute; left:${g * 100}px; top:0px">${members(g)}</div>`;
+    const files = { ...FIXTURE_FILES, 'project/slides/body.html': `<section id="body">${group(1)}${group(2)}</section>` };
+    expect(() => exported(files)).toThrow(/cannot be exported for Claude: slide body .*26 pinned children/);
+  });
+
+  it('A13: moves a CSS background’s asset with the pictures, on an element and on the section', () => {
+    const files = exported({
+      ...FIXTURE_FILES,
+      'project/slides/cover.html': '<section id="cover" style="background:url(assets/logo.png) center / cover"><h1 id="t" style="background:url(assets/logo.png); background-clip:text; -webkit-text-fill-color:transparent">Gold</h1></section>',
+    });
+    const cover = files[slidePath('cover')] as string;
+    expect(cover).not.toContain('url(assets/');
+    expect(cover.match(/url\(project\/ds\/maws\/logo\.png\)/g)).toHaveLength(2);
+    expect(files['project/ds/maws/logo.png']).toBe(LOGO);
+    expect(loadSlide(cover, { fileId: 'cover' }).ok).toBe(true);
+  });
+});

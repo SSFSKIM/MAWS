@@ -63,3 +63,37 @@ describe('lowering a group into its host', () => {
     expect(body.style).toMatchObject({ 'font-size': '40px', 'font-weight': '700', 'line-height': '2', color: '#ff0000' });
   });
 });
+
+// The final review's A6 and A8: each a regression of a code-traced finding.
+describe('lowering a group into its host: the final review', () => {
+  const wire = (attrs: Record<string, string>) => el('wire', 'x-connector', {}, [], attrs);
+  const sized = { left: '100px', top: '100px', width: '200px', height: '100px' };
+
+  it('A6: rewrites a connector’s route with its ends: a quarter turn makes hv a vh (from the model)', () => {
+    const [w] = lowerGroups([group({ ...sized, transform: 'rotate(90deg)' }, [wire({ x1: '0', y1: '50', x2: '200', y2: '100', route: 'hv' })])]);
+    // (0, 50) (200, 50) (200, 100) about the centre (200, 150): (200, 50) (200, 250) (150, 250)
+    expect(w!.attrs).toEqual({ x1: '200', y1: '50', x2: '150', y2: '250', route: 'vh' });
+  });
+
+  it('A6: rewrites the route from the window’s measure too, and keeps % ends of the group’s box', () => {
+    const G = placement({ x: 100, y: 100, w: 200, h: 100 }, 'rotate(90deg)');
+    const tree = [group({ right: '0px', bottom: '0px', width: '200px', height: '100px', transform: 'rotate(90deg)' }, [wire({ x1: '0%', y1: '50%', x2: '100%', y2: '100%', route: 'hv' })])];
+    expect(() => lowerGroups(tree)).toThrow(MeasureNeeded);
+    const [w] = lowerGroups(tree, null, { slideId: 's', measured: new Map([['grp', measuredAt('grp', 'div', G, 200, 100)]]) });
+    expect(w!.attrs).toEqual({ x1: '200', y1: '50', x2: '150', y2: '250', route: 'vh' });
+  });
+
+  it('A6: refuses a routed connector a turn off the quarters would bend, naming the group and the member; a straight one turns', () => {
+    expect(() => lowerGroups([group({ ...sized, transform: 'rotate(30deg)' }, [wire({ x1: '0', y1: '50', x2: '200', y2: '100', route: 'hv' })])], null, { slideId: 's1', measured: null })).toThrow(/slide s1, group grp, member wire: .*route/);
+    const [w] = lowerGroups([group({ ...sized, transform: 'rotate(30deg)' }, [wire({ x1: '0', y1: '50', x2: '200', y2: '50' })])]);
+    expect(w!.attrs.route).toBeUndefined();
+  });
+
+  it('A8: drops a hidden group whole rather than lifting its members into view', () => {
+    const hidden = group({ ...sized, display: 'none' }, [el('p', 'p', { position: 'absolute', left: '10px', top: '20px' }), el('r', 'p', { position: 'absolute', right: '0px', top: '0px' })]);
+    expect(lowerGroups([hidden], null, { slideId: 's', measured: null })).toEqual([]);
+    // inside a visible group, the hidden one goes, its sibling lifts
+    const outer = el('outer', 'div', { position: 'absolute', left: '0px', top: '0px' }, [{ ...hidden, id: 'inner' }, el('q', 'p', { position: 'absolute', left: '5px', top: '5px' })], { 'data-group': '' });
+    expect(lowerGroups([outer]).map((k) => k.id)).toEqual(['q']);
+  });
+});

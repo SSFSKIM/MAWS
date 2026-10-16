@@ -14,6 +14,7 @@
 // What depends on layout (an x-shape's outline, an x-connector's line, a text box's fitted size, a crop's view box) is
 // drawn from a measurement of the same page: the `html` and `print` pages are written after a `measure` pass.
 // Portable.
+import { mapStyleMapAssets, slideAssetRefs } from '../asset-refs';
 import { CANVAS_CSS } from '../canvas/css';
 import { resolveVars } from '../css';
 import type { DeckFace } from '../deck';
@@ -58,19 +59,23 @@ export function exportDeckOf(doc: Doc, fallbackTitle: string): ExportDeck {
   return { title, cover, slides, faces: deck.faces ?? {}, overrides: deck.dsOverrides ?? {} };
 }
 
-/** Every `assets/<name>` the deck draws or loads a face from. */
+/** Every `assets/<name>` the deck draws (a picture's source, a style's url) or loads a face from. */
 export function deckAssetRefs(deck: ExportDeck): string[] {
   const refs = new Set<string>();
-  const walk = (els: ElementIR[]) => {
-    for (const el of els) {
-      if (el.tag === 'img' && el.attrs.src?.startsWith('assets/')) refs.add(el.attrs.src);
-      walk(el.children);
-    }
-  };
-  for (const slide of deck.slides) walk(slide.ir.children);
+  for (const slide of deck.slides) for (const ref of slideAssetRefs(slide.ir)) refs.add(ref);
   for (const face of Object.values(deck.faces)) if (typeof face.src === 'string' && face.src.startsWith('assets/')) refs.add(face.src);
   return [...refs].sort();
 }
+
+/** A literal style with its assets' urls inlined as `data:` (A13); one the deck lacks stays named, and loads nothing. */
+const inlinedStyle = (style: Readonly<Record<string, string>>, options: PageOptions): Record<string, string> =>
+  mapStyleMapAssets(literalStyle(style, options.resolveVar), (ref) => {
+    const data = options.asset(ref);
+    return data ? `url("${data}")` : null;
+  });
+
+/** The size an element is laid out at, before its own and its ancestors' transforms scale it (its box is drawn size). */
+const layoutSize = (m: MeasuredElement): { w: number; h: number } => ({ w: m.box.w / (m.scale?.[0] || 1), h: m.box.h / (m.scale?.[1] || 1) });
 
 /** The deck's uploaded faces as `@font-face` blocks, their files inlined (a face whose file is not there is left out). */
 export function deckFacesCss(deck: ExportDeck, asset: (ref: string) => string | null): string {
@@ -189,7 +194,7 @@ function textHtml(tag: string, blocks: TextBlock[], resolveVar: (name: string) =
 
 function elementHtml(el: ElementIR, w: Writer, under: boolean): string {
   const { options } = w;
-  const style = literalStyle(el.style, options.resolveVar);
+  const style = inlinedStyle(el.style, options);
   const measured = el.id ? w.measured.get(el.id) : undefined;
   const attrs: string[] = [];
   if (el.id) attrs.push(`data-eid="${escAttr(el.id)}"`);
@@ -214,8 +219,14 @@ function elementHtml(el: ElementIR, w: Writer, under: boolean): string {
   else if (el.tag === 'x-embed') {
     const picture = w.pictures?.get(el.id);
     inner = picture ? `<img alt="" src="${escAttr(picture)}">` : `<iframe sandbox="allow-scripts" tabindex="-1" srcdoc="${escAttr(embedDocument(el.raw ?? ''))}"></iframe>`;
-  } else if (el.tag === 'x-shape' && el.attrs.kind !== 'rect' && measured) inner = shapeSvg(style, el.attrs.kind ?? 'rect', measured.box.w, measured.box.h);
-  else if (el.tag === 'x-connector' && measured) inner = connectorSvg(style, el.attrs, measured.box.w, measured.box.h);
+  } else if (el.tag === 'x-shape' && el.attrs.kind !== 'rect' && measured) {
+    // drawn inside the element, which its transforms and its ancestors' still scale: at its layout size (A4)
+    const { w: lw, h: lh } = layoutSize(measured);
+    inner = shapeSvg(style, el.attrs.kind ?? 'rect', lw, lh);
+  } else if (el.tag === 'x-connector' && measured) {
+    const { w: lw, h: lh } = layoutSize(measured);
+    inner = connectorSvg(style, el.attrs, lw, lh);
+  }
   else if (el.text) inner = textHtml(el.tag, el.text, options.resolveVar);
   else if (CONTAINER_TAGS.has(el.tag)) inner = (el.tag === 'div' ? canonicalOrder(el.children) : el.children).map((c) => elementHtml(c, w, false)).join('');
   const css = styleText(style);
@@ -232,7 +243,7 @@ function slideHtml(slide: ExportSlide, options: PageOptions): string {
     if (k === 'hidden') attrs.push('data-hidden=""');
     else attrs.push(`${k}="${escAttr(slide.ir.attrs[k]!)}"`);
   }
-  const css = styleText(literalStyle(slide.ir.style, options.resolveVar));
+  const css = styleText(inlinedStyle(slide.ir.style, options));
   if (css) attrs.push(`style="${escAttr(css)}"`);
   const { under, flow, over } = partition(slide.ir.children);
   const children = [...under.map((c) => elementHtml(c, w, true)), ...[...flow, ...over].map((c) => elementHtml(c, w, false))].join('');

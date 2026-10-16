@@ -438,7 +438,7 @@ const ROUTES = ['straight', 'hv', 'vh', 'elbow'] as const;
  * A pinned connector's attributes after its host's map `G`: its ends moved, and its route the supported one that draws
  * the moved route exactly (a quarter turn makes `hv` a `vh`); refused when none does (fix wave 2).
  */
-function routedOut(attrs: Readonly<Record<string, string>>, G: ReturnType<typeof shift>): Record<string, string | null> {
+export function routedOut(attrs: Readonly<Record<string, string>>, G: ReturnType<typeof shift>): Record<string, string | null> {
   const [x1, y1, x2, y2] = [coordOf(attrs.x1), coordOf(attrs.y1), coordOf(attrs.x2), coordOf(attrs.y2)];
   const moved = connectorRoute(attrs.route, x1, y1, x2, y2).map(([x, y]) => apply(G, { x, y }));
   const [a, b] = [moved[0]!, moved[moved.length - 1]!];
