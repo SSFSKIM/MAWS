@@ -139,27 +139,32 @@ export interface ExtraChange {
 export const unboundExtras = (extras: readonly ExtraChange[] | undefined): ExtraChange[] => extras?.filter((extra) => extra.tabId === null) ?? [];
 
 /**
- * A rendered tab's changes with its extras merged in, in document order: each extra a change spanning its block, unless a
- * change already touches that block (counted once) or the tab does not hold it. `runs` is 0: no attributed run made it.
+ * A rendered tab's changes with its extras merged in, in document order: each extra a change spanning its block (`runs`
+ * 0: no attributed run made it), or, where a change already touches that block, merged into it (E's Decision Log 34):
+ * one change still, its authors the union (the body's first, so its paint stays), its time the later, its runs the
+ * body's. An extra whose block the tab does not hold adds nothing.
  */
 export function mergeExtraChanges(doc: PMNode, changes: readonly Change[], extras: readonly ExtraChange[]): Change[] {
-  const wanted = new Map<string, ExtraChange>();
-  for (const extra of extras) if (extra.blockId !== null && !wanted.has(extra.blockId)) wanted.set(extra.blockId, extra);
+  const wanted = new Map<string, ExtraChange[]>();
+  for (const extra of extras) if (extra.blockId !== null) wanted.set(extra.blockId, [...(wanted.get(extra.blockId) ?? []), extra]);
+  const out = changes.map((change) => ({ ...change, who: [...change.who] }));
   const added: Change[] = [];
   if (wanted.size > 0) {
     doc.descendants((node, pos) => {
-      const extra = typeof node.attrs.id === 'string' ? wanted.get(node.attrs.id) : undefined;
-      if (extra) {
+      const onBlock = typeof node.attrs.id === 'string' ? wanted.get(node.attrs.id) : undefined;
+      if (onBlock) {
         wanted.delete(node.attrs.id as string);
         const to = pos + node.nodeSize;
-        if (!changes.some((change) => change.from < to && change.to > pos)) {
-          added.push({ from: pos, to, kinds: ['attrs'], who: extra.who === null ? [] : [extra.who], at: extra.at, where: `${node.type.name}#${node.attrs.id as string}`, runs: 0 });
+        const change = out.find((c) => c.from < to && c.to > pos) ?? added[added.push({ from: pos, to, kinds: ['attrs'], who: [], at: null, where: `${node.type.name}#${node.attrs.id as string}`, runs: 0 }) - 1]!;
+        for (const extra of onBlock) {
+          if (extra.who !== null && !change.who.includes(extra.who)) change.who.push(extra.who);
+          if (extra.at !== null) change.at = Math.max(change.at ?? extra.at, extra.at);
         }
       }
       return wanted.size > 0 && !node.isTextblock;
     });
   }
-  return added.length === 0 ? [...changes] : [...changes, ...added].sort((a, b) => a.from - b.from || b.to - a.to);
+  return added.length === 0 ? out : [...out, ...added].sort((a, b) => a.from - b.from || b.to - a.to);
 }
 // P3-E end
 

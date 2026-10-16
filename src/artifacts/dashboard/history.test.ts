@@ -4,8 +4,8 @@
 // change itself from provenance (the replacer, the remover), never to the prior binding's creator. An equal descriptor
 // is no change. Counted once with a block whose spec changed too; documents without datasets give none.
 import { describe, expect, it } from 'vitest';
-import { countChanges, documentChanges, openDiff } from '../document/history';
-import { AGENT_1, AGENT_2, HUMAN, HistoryHub, TAB, block } from '../document/history.fixture';
+import { changeList, countChanges, documentChanges, mergeExtraChanges, openDiff, renderDiff } from '../document/history';
+import { AGENT_1, AGENT_2, HUMAN, HistoryHub, TAB, block, body } from '../document/history.fixture';
 import { schemaFor } from '../document/schema';
 import { addTab, createDocument } from '../document/tabs';
 import { removeDataset, setDataset, type DatasetDescriptor } from './datasets';
@@ -107,6 +107,31 @@ describe('a dashboard’s dataset changes in the history (P3-E2 M4)', () => {
     try {
       expect(extras.map((extra) => extra.key)).toEqual(['dataset:sales:c1', 'dataset:sales:c2', 'dataset:sales:c3']);
       expect(countChanges(diff)).toBe(1); // c1's spec
+      expect(countChanges(diff, extras)).toBe(3); // c1 once, c2, c3
+    } finally {
+      diff.destroy();
+    }
+  });
+
+  it('a spec changed by one actor and its data by another: one change, both credited, the body’s author first and the later time', () => {
+    const hub = board();
+    const before = hub.version('before', HUMAN);
+    block(hub.connect(AGENT_1), 'c1').setAttr('spec', { view: 'line', x: 'region', y: 'total', title: 'Sales by region' });
+    setDataset(hub.connect(AGENT_2), 'sales', descriptor('b', AGENT_2));
+    const after = hub.version('after', AGENT_2);
+    const attributions = hub.attributions(before.seq, after.seq);
+    const diff = openDiff({ prevState: before.state, nextState: after.state, attributions });
+    try {
+      const extras = datasetChanges(diff.prevDoc, diff.nextDoc, attributions);
+      const pm = renderDiff(body(diff.nextDoc), diff.renderer);
+      const plain = changeList(pm);
+      expect(plain).toHaveLength(1);
+      const merged = mergeExtraChanges(pm, plain, extras.filter((extra) => extra.tabId === TAB));
+      const onC1 = merged.filter((change) => change.where === 'chart#c1');
+      expect(onC1).toHaveLength(1);
+      expect(onC1[0]!.who).toEqual([AGENT_1, AGENT_2]); // the data's changer is not dropped
+      expect(onC1[0]!.at).toBe(hub.lastAt);
+      expect(onC1[0]!.runs).toBe(plain[0]!.runs); // the body's paint stays
       expect(countChanges(diff, extras)).toBe(3); // c1 once, c2, c3
     } finally {
       diff.destroy();
