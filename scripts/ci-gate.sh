@@ -2,7 +2,7 @@
 # Runs MAWS's class-1 gates for one tree on GitHub Actions (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.4, §3.6).
 #
 #   scripts/ci-gate.sh <worktree-or-sha> [--gates static,unit,unit:darwin,probes,e2e:<group>,…] [--runner linux|macos]
-#                      [--label <name>] [--keep]
+#                      [--class1a linux|macos|pool] [--label <name>] [--keep]
 #
 # Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for the run of
 # .github/workflows/gate.yml on it, prints each job's conclusion, downloads the failed e2e jobs' reports to
@@ -13,30 +13,35 @@
 #   --gates            narrow to static, unit, unit:darwin (always macOS), probes or e2e:<group>; default: class 1a
 #                      (static, unit, probes), plus unit:darwin and every class-1 e2e group when the e2e lane is macOS
 #   --runner           the e2e lane, linux or macos (default: $MAWS_GATE_RUNNER, else the repository's variables)
+#   --class1a          class 1a's runner (static, unit, probes): linux, macos or pool, ci-kit's Hetzner box (default:
+#                      the repository's variable GATE_RUNNER, else linux)
 #   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
 #   --keep             leave the ci/ ref in place
 #
 # Every invocation pushes a fresh empty commit on top of the sha: its message carries a unique nonce (so the push always
-# triggers a run of its own and the run found is this one's) and, when given, the `Gates:` and `Runner:` trailers. The
-# pushed tree is always the tested tree plus that one commit. A Linux lane admits only the e2e groups green there
-# (§3.1); the plan refuses the rest. Every gh call names the repository, so the script runs from any directory.
+# triggers a run of its own and the run found is this one's) and, when given, the `Gates:`, `Runner:` and `Class1a:`
+# trailers. The pushed tree is always the tested tree plus that one commit. A Linux lane admits only the e2e groups green
+# there (§3.1); the plan refuses the rest. The pool takes class 1a alone; the plan job, hosted, makes its box. Every gh
+# call names the repository, so the script runs from any directory.
 set -uo pipefail
 
 REPO=SSFSKIM/MAWS
 usage() {
-  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//' >&2
+  sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//' >&2
   exit 2
 }
 
 target=''
 gates=''
 runner=${MAWS_GATE_RUNNER:-}
+class1a=''
 label=''
 keep=false
 while (($# > 0)); do
   case $1 in
     --gates) gates=${2:?--gates needs a list}; shift 2 ;;
     --runner) runner=${2:?--runner needs linux or macos}; shift 2 ;;
+    --class1a) class1a=${2:?--class1a needs linux, macos or pool}; shift 2 ;;
     --label) label=${2:?--label needs a name}; shift 2 ;;
     --keep) keep=true; shift ;;
     -h | --help) usage ;;
@@ -46,6 +51,7 @@ while (($# > 0)); do
 done
 [[ -n $target ]] || usage
 case $runner in '' | linux | macos) ;; *) echo "ci-gate: --runner is linux or macos, not $runner" >&2; exit 2 ;; esac
+case $class1a in '' | linux | macos | pool) ;; *) echo "ci-gate: --class1a is linux, macos or pool, not $class1a" >&2; exit 2 ;; esac
 
 # The repository the git commands run in: the worktree given, or this script's own checkout for a bare sha.
 if [[ -d $target ]]; then
@@ -70,6 +76,7 @@ exec > >(tee "$log") 2>&1
 trailers="Nonce: $(date +%s)-$$"
 [[ -n $gates ]] && trailers+=$'\n'"Gates: $gates"
 [[ -n $runner ]] && trailers+=$'\n'"Runner: $runner"
+[[ -n $class1a ]] && trailers+=$'\n'"Class1a: $class1a"
 pushed=$(git -C "$git_dir" commit-tree "$sha^{tree}" -p "$sha" -m "ci-gate: $short" -m "$trailers") || exit 1
 
 run_id=''
@@ -93,7 +100,7 @@ interrupted() {
 }
 trap interrupted INT TERM
 
-echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}"
+echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}"
 { git -C "$git_dir" push --quiet --force origin "$pushed:refs/heads/$ref" 2>&1; } | sed '/^remote:/d' || { echo 'ci-gate: push failed' >&2; exit 1; }
 
 # The run appears a few seconds after the push; a minute without it means the workflow did not trigger.
