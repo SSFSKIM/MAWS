@@ -37,6 +37,21 @@ function kept(a: string[], b: string[], weight: (id: string) => number): Set<str
 }
 
 /**
+ * The boards both orders hold that some longest common run of them leaves out, by the classification `mergeBoardOrder`
+ * uses: a board every such run leaves out was moved; one only some leave out is a tie no sequence can settle ("it moved"
+ * or "its neighbour moved"). A board every longest run keeps stood still.
+ */
+export function movableIn(base: string[], sent: string[]): Set<string> {
+  const inSent = new Set(sent);
+  const shared = base.filter((id) => inSent.has(id));
+  const set = new Set(shared);
+  const a = sent.filter((id) => set.has(id));
+  const longest = kept(shared, a, () => 1).size;
+  const without = (id: string) => kept(shared.filter((x) => x !== id), a.filter((x) => x !== id), () => 1).size;
+  return new Set(shared.filter((id) => without(id) === longest));
+}
+
+/**
  * `base` the order the agent read, `sent` its order (null when it sent no manifest or left the order as read), `live` the
  * order now (without the boards this publish removes), `created` the boards the publish adds (placed where `sent` lists
  * them, else appended by id).

@@ -388,3 +388,30 @@ describe('task-review fix wave 1', () => {
     expect(Object.hasOwn(readCanvas(doc).boards.b1!, '__proto__')).toBe(false);
   });
 });
+
+describe('task-review fix wave 2', () => {
+  it('(1) recreates, under force, a board deleted since the read whose changed file comes with its entry as read, at that frame', () => {
+    const doc = design();
+    const base = designFiles(doc);
+    transact(doc, () => {
+      Y.deleteSlide(doc, 'b2');
+      Y.deleteSlide(doc, 'b3');
+    });
+    const sent = { ...base, ...sentWith(base, (c) => (c.boards.b1!.x = 50)), [B2]: base[B2]!.replace('Body of b2', 'Body two') };
+    const { out } = publish(doc, base, sent, true);
+    expect(out.conflicts).toEqual([]);
+    expect(boardFrame(doc, 'b2')).toEqual({ x: 500, y: 0, w: 1440, h: 1024 });
+    expect(out.warnings.filter((w) => /no x|no w|frame is/.test(w.message))).toEqual([]);
+    expect(Y.hasSlide(doc, 'b3')).toBe(false); // untouched: its deletion stands
+    expect(boardFrame(doc, 'b1')!.x).toBe(50);
+  });
+
+  it('(2) merges an order that moved only another board around a board deleted since the read', () => {
+    const doc = design([...BOARDS, { id: 'b4', at: { x: 4000, y: 0, w: 10, h: 10 } }]);
+    const base = designFiles(doc);
+    transact(doc, () => Y.deleteSlide(doc, 'b2'));
+    const { out } = publish(doc, base, sentWith(base, (c) => (c.order = ['b2', 'b3', 'b4', 'b1'])));
+    expect(out.conflicts).toEqual([]);
+    expect(slideOrder(doc)).toEqual(['b3', 'b4', 'b1']);
+  });
+});

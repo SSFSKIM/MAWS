@@ -1,7 +1,7 @@
 // P3-E1 M1: the manifest's order merged board by board (order.ts), so unrelated re-orders land together and a clash
 // names the board.
 import { describe, expect, it } from 'vitest';
-import { mergeBoardOrder } from './order';
+import { mergeBoardOrder, movableIn } from './order';
 
 const base = ['a', 'b', 'c', 'd'];
 
@@ -30,5 +30,14 @@ describe('mergeBoardOrder', () => {
     expect(mergeBoardOrder(base, ['a', 'n', 'b', 'c', 'd'], base, ['n'], false).desired).toEqual(['a', 'n', 'b', 'c', 'd']);
     expect(mergeBoardOrder(base, ['n', 'a', 'b', 'c', 'd'], ['b', 'a', 'c', 'd'], ['n'], false).desired).toEqual(['n', 'b', 'a', 'c', 'd']);
     expect(mergeBoardOrder(base, ['b', 'a', 'd'], base, [], false)).toEqual({ desired: ['b', 'a', 'c', 'd'], clashes: [] });
+  });
+});
+
+describe('movableIn', () => {
+  it('names the boards some longest common run of the two orders leaves out: a move, or a tie that cannot tell', () => {
+    expect(movableIn(['a', 'b', 'c', 'd'], ['b', 'c', 'd', 'a'])).toEqual(new Set(['a'])); // only a moved
+    expect(movableIn(['a', 'b', 'c'], ['b', 'a', 'c'])).toEqual(new Set(['a', 'b'])); // a or b: a tie
+    expect(movableIn(['a', 'b', 'c', 'd'], ['a', 'b', 'd', 'c'])).toEqual(new Set(['c', 'd']));
+    expect(movableIn(['a', 'b'], ['a', 'x', 'b'])).toEqual(new Set());
   });
 });

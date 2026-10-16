@@ -24,7 +24,7 @@ import { applyV2, newDoc, stateV2, transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
 import { boardIdOf, boardPath, CANVAS_LIMITS, CANVAS_PATH, dict, FRAME_KEYS, frameProblems, parseCanvasJson, type BoardFrame, type CanvasBoard, type CanvasJson } from './canvas';
 import { boardFrame, DEFAULT_SIZE, isMissingSource, MISSING_SOURCE_KEY, placementAfter, readCanvas, writeBoardEntry } from './model';
-import { mergeBoardOrder } from './order';
+import { mergeBoardOrder, movableIn } from './order';
 
 export interface CanvasPublishOutcome extends PublishOutcome {
   /** The board files the publish created (a subset of `changed`). */
@@ -207,7 +207,9 @@ function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
       const bb = own(B.boards, id) as CanvasBoard | undefined;
       const lb = live.has(id) ? L.boards[id]! : undefined;
       if (!lb) {
-        if (bb && stable(ab) === stable(bb)) continue; // its entry as read, the board deleted since: the deletion stands
+        // its entry as read and no new file for it: the deletion made since the read stands (a changed file recreating it
+        // is the agent's change, its entry then the frame it stands at)
+        if (bb && stable(ab) === stable(bb) && !fileCreated.has(id)) continue;
         if (bb && !force) {
           conflict(`board ${id}: removed since your read`);
           continue;
@@ -273,14 +275,11 @@ function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
   const survivors = L.order.filter((id) => !removed.has(id));
   const sentOrder = A && stable(A.order) !== stable(B.order) ? A.order : null;
   if (A) {
-    // a board deleted since the read keeps its deletion, unless the agent's order put it in a new place relative to any
-    // board it read beside it (a sequence cannot tell "this one moved" from "its neighbour moved", so either clashes)
+    // a board deleted since the read keeps its deletion, unless the agent's order moved it: order.ts's classification,
+    // where a tie that cannot tell its move from a neighbour's counts as one (refused rather than settled silently)
     const deleted = B.order.filter((id) => !live.has(id) && A.order.includes(id) && !created.has(id));
-    const both = B.order.filter((id) => A.order.includes(id));
-    for (const id of deleted) {
-      const flipped = both.some((other) => other !== id && B.order.indexOf(id) < B.order.indexOf(other) !== A.order.indexOf(id) < A.order.indexOf(other));
-      if (flipped && !force) conflict(`board ${id}: removed since your read`);
-    }
+    const movable = deleted.length > 0 ? movableIn(B.order, A.order) : new Set<string>();
+    for (const id of deleted) if (movable.has(id) && !force) conflict(`board ${id}: removed since your read`);
     for (const id of A.order) if (!survivors.includes(id) && !created.has(id) && !deleted.includes(id) && !removed.has(id)) warn(`order lists board ${id}, which the design does not hold; dropped`, 'order');
     if (sentOrder) for (const id of B.order) if (survivors.includes(id) && !A.order.includes(id)) warn(`order leaves out board ${id}; its place is kept`, 'order');
   }
