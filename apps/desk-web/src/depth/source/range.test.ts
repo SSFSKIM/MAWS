@@ -71,6 +71,20 @@ describe('the rows a fold draws', () => {
     expect(drawn(rowsInRange(nested, { from: 'n#1', to: null }).rows)).toEqual(['n: <message>tail</message> end']);
   });
 
+  it('a fold after an earlier tool call keeps its rows that are not results: prompts and string-content notifications', () => {
+    const prompt = user('p2', 'Please keep this instruction');
+    const notification = user('n1', '<task-notification>\n<task-id>a1</task-id>\n</task-notification>');
+    const bare: R = { type: 'user', uuid: 'bare', message: { role: 'user' } };
+    // After a question bound (its call is the earlier call).
+    const afterQuestion = rowsInRange([call('q', 'toolu_q'), prompt, notification, bare, text('m', '<message>Done.</message>')], { from: 'toolu_q', to: 'm#0' });
+    expect(afterQuestion.rows.map((row) => row.uuid)).toEqual(['p2', 'n1', 'bare']);
+    // After a message bound that follows an earlier tool call (and its result, drawn in the earlier fold).
+    const rows = [call('read', 'toolu_read'), text('m1', '<message>Reading.</message>'), result('read-result', 'toolu_read'), prompt, notification, text('m2', '<message>Next.</message>')];
+    const afterMessage = rowsInRange(rows, { from: 'm1#0', to: 'm2#0' });
+    expect(afterMessage.rows.map((row) => row.uuid)).toEqual(['p2', 'n1']);
+    expect(afterMessage.rows[0]).toBe(prompt); // passed through as it is
+  });
+
   it('a span inside the stretch (one the log missed) is kept as a span', () => {
     const rows = [text('m1', '<message>One.</message> <message>Two.</message> Work.'), text('m2', '<message>Three.</message>')];
     expect(drawn(rowsInRange(rows, { from: 'm1#0', to: 'm2#0' }).rows)).toEqual(['m1: <message>Two.</message> Work.']);

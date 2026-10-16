@@ -54,16 +54,19 @@ const resultCuts = new WeakMap<JsonObject, Map<string, JsonObject | null>>();
 
 /**
  * The row with its blocks filtered: `keep` decides each `tool_result` block by the call it answers; with `onlyResults`
- * every other block goes too. The row itself when nothing goes, null when nothing is left.
+ * every other block goes too. The row itself when nothing goes (a row holding no result passes untouched unless only
+ * results are wanted), null when nothing is left.
  */
 function filterResults<R extends JsonObject>(row: R, keep: (call: string) => boolean, onlyResults: boolean): R | null {
-  if (row.type !== 'user' && onlyResults) return null;
   const blocks = contentOf(row);
+  // A row with no result (a prompt, a string-content notification, any other record) is no result to place: kept as it
+  // is in a fold's own rows, never taken as a late result.
+  if (!blocks.some((b) => resultOf(b) !== null)) return onlyResults ? null : row;
   const kept = blocks.filter((b) => {
     const call = resultOf(b);
     return call === null ? !onlyResults : keep(call);
   });
-  if (kept.length === blocks.length && blocks.length > 0) return row;
+  if (kept.length === blocks.length) return row;
   if (kept.length === 0) return null;
   const key = `${onlyResults ? 'o' : 's'}:${kept.map((b) => resultOf(b) ?? '').join(',')}`;
   let byCut = resultCuts.get(row);
