@@ -1688,7 +1688,12 @@ browser's larger frame is refused `too-large`, unread. A larger frame travels as
 one logical frame, which may be larger than 1 MiB (the bound is the wire's):
 each holds a slice of the frame's JSON text (`data`), all with one random `id` and the set's `count`, `index` from 0;
 the receiver joins the slices in index order when the last arrives, in whatever order they came, and parses the
-whole. A slice never splits a surrogate pair. (`toWire` and `PartAssembler` in `parts.ts`.)
+whole. A slice never splits a surrogate pair. (`toWire` and `PartAssembler` in `parts.ts`.) A receiver's unfinished
+sets are bounded, one assembler per machine stream and per browser socket: at most 16 MiB of part data held across
+its sets, at most 64 sets open, an `id` of at most 128 characters (the hub's own are 22, a 128-bit nonce), and a set
+waiting more than 60 s for its other parts is dropped (a late part of it starts a set of its own). A part that would
+pass the byte budget or open a 65th set is refused `too-large` (a machine's POST `413`, a browser's `refused`) and its
+set dropped; a longer `id` is `bad-shape` [2026-10-15, DC3's panel wave].
 
 **Measured (M1's probe on the owner's account, 2026-10-15):** an SSE stream held by a Durable Object for 11 minutes
 with 15-second heartbeats, never evicted; a second stream idle 150 seconds between heartbeats also held, so the
@@ -1725,7 +1730,7 @@ below); a frame naming a `sub` this socket does not hold (one that just ended, s
 
 | `t` | fields | meaning |
 | --- | --- | --- |
-| `resume` | `after` | the events with an offset above `after` (0 is the start), one page of about 1 MiB; then `caught-up` and live, or `more` when events remain |
+| `resume` | `after` | the events with an offset above `after` (0 is the start), one page of four `log` frames; then `caught-up` and live, or `more` when events remain |
 | `human` | `event` (a sealed `HumanEvent`) | a web `human`; the hub assigns `writer` `hub/<member>`, `seq`, `ts` and answers `human-ack` |
 | `rpc` | `rpc` | a sealed RPC (DX6); answered by `rpc-state` (below) |
 | `subscribe` | `machine`, `session`, `agentId`, `sub` | a DX4 subscription scoped to one transcript (`agentId` null for the main one); `sub` is the browser's own random id, 128 bits in canonical base64url (`newNonce()`), unique at the machine. At most 32 per socket |
@@ -1748,13 +1753,16 @@ sealed event safely; the same nonce with a different payload is refused `conflic
 
 **Resume.** `resume {after}` (a non-negative integer) makes the socket follow the log, a mark kept in its attachment
 across hibernation: the hub sends the events with an offset above `after` in `log` frames of about 256 KiB, one page
-of about 1 MiB at a time. When the page reaches the head, `caught-up {offset}` follows with the head, then each new
-event live as it is stored. When events remain, the page ends with `more {offset}` (the last offset sent) instead,
-and the browser sends `resume {after: offset}` for the next page; a socket gets live `log` frames only from its
-`caught-up` on, and a later page carries what was stored meanwhile. The browser's requests pace the backlog, so a
-long-lived project's first open never buffers its whole log in the object or the socket [2026-10-15, DC3's panel
-wave, scalpel-5#3]. A socket that has not resumed gets no `log` frames. Resuming again sends the backlog again from
-the new `after`. `welcome.head` is the latest offset when the
+of four frames at a time. A frame holds at least one event and an event is at most 1 MiB, so a page is about 1 MiB
+and at most about 4 MiB. When the page reaches the head, `caught-up {offset}` follows with the head, then each new
+event live as it is stored; a page that sends nothing (`after` at or above the head) is just `caught-up`. When events
+remain, the page ends with `more {offset}` (the last offset the page sent) instead, and the browser sends `resume
+{after: offset}` for the next page; a socket gets live `log` frames only from its `caught-up` on, and a later page
+carries what was stored meanwhile. The hub keeps no cursor, so a browser that never asks for the next page stays not
+following and holds nothing at the hub. The browser's requests pace the backlog, so a long-lived project's first open
+never buffers its whole log in the object or the socket [2026-10-15, DC3's panel wave, scalpel-5#3]. A socket that
+has not resumed gets no `log` frames. Resuming again sends the backlog again from the new `after`, and the socket gets
+nothing live until that resume's `caught-up`. `welcome.head` is the latest offset when the
 socket opened.
 
 **On connect**, in this order: `welcome`; `machines`; one `session` frame per session carrying its latest `presence`,
@@ -3477,6 +3485,13 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A `resume` page is counted in frames, not bytes (DX3), and a receiver's open part sets are bounded
+  in count and id length as well as bytes (DX2, DX3). As built, a page is four `log` frames of about 256 KiB, so
+  about 1 MiB, and up to about 4 MiB when its events approach the 1 MiB event bound. Rejected: a byte cap per page
+  (an event alone may be 1 MiB, so a cap still sends near-1 MiB pages, and holding to it exactly would split events
+  for no bound the four-frame page lacks). The part-set count (64) and id length (128) close the panel's finding
+  that sets with empty data piled up metadata past the byte budget. Flags DC3, DC5.
+  Date/Author: 2026-10-15, design session (DC3's panel wave, as built).
 - Decision: A browser's `resume` is paged by the browser (DX3): a page of about 1 MiB, then `more {offset}`
   when events remain, and the browser resumes from there; live frames start at `caught-up`. DC3's xhigh panel
   (scalpel-5#3) found the hello backlog and a browser's resume suffix enqueued whole; the hello backlog is now
