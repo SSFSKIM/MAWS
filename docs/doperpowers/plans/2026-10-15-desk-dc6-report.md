@@ -40,6 +40,34 @@
 - **Gate:** green on the Linux lane, run 38818748087 on `82b812e4` (static, unit, e2e:desk-web with 67 browser tests, including 8 acceptance specs against DC3's fake machine).
 - **Unit tests:** `pnpm --filter desk-web exec vitest run src/depth` passes 94/94 across 13 files.
 
+## After DC5 landed (2026-10-16)
+
+- **Retarget and first merge.** DC5 merged to `master` as `76b1de78`, and
+  PR #12 was retargeted to `master`. `origin/master` was merged in as
+  `1a59b984`. The one conflict was `apps/desk-web/src/main.tsx`, resolved by
+  keeping both sides: master's `followLandings()` and
+  `installPreviewPolicy()`, and DC6's `connectDepth()`.
+- **Gates on `1a59b984`, all green.** `static,unit` 38902444847;
+  `e2e:desk-web` on the mini 38903248599 and on the Linux lane 38903677809;
+  `e2e:desk-web-hub` 38904233453.
+- **The composite writer's xhigh panel** read `76b1de78..1a59b984` and
+  confirmed three P2s:
+  - paging stalled on pages that draw nothing;
+  - folds cut rows with a grammar other than the export's;
+  - a tool result lost its call across a fold boundary.
+- **The fixes.** `f70de6fc` fixed all three, and the task review found that
+  its result filter dropped rows holding no result. `2ebd3e05` fixed that,
+  and the re-review is clean. The changes:
+  - older pages keep loading until a page draws or `more` is false
+    (`view/older-pages.ts`);
+  - folds are cut by a port of `sminos_marks.py` `_parse_marked`
+    (`source/export-marks.ts`);
+  - a fold that holds a call takes that call's results, and rows without
+    results pass through unchanged.
+  - `src/depth` passes 111/111 on named files.
+- **Second merge.** `origin/master` (`9cf2b480`) was merged once more as
+  `f8a5cdf2`, with no conflicts.
+
 ## Environmental friction routed around
 
 - **Linux lane instead of the local load rule.** The harness refused `/tmp/maws-review/with-slot.sh`, and the Mac's load stayed at 25 to 290, so `waitload20.sh` never cleared. Following the composite writer's ruling, heavy suites ran on the gate's Linux lane, and the M2 screenshot was taken there.
