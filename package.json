@@ -51,6 +51,7 @@
     "e2e:presentations-live": "scripts/e2e-build.sh plain && playwright test e2e/presentations-live.spec.ts",
     "e2e:presentations-scale": "scripts/e2e-build.sh plain && playwright test e2e/presentations-scale.spec.ts",
     "e2e:library-live": "scripts/e2e-build.sh plain && playwright test e2e/library-live.spec.ts",
+    "e2e:send-to-live": "scripts/e2e-build.sh plain && playwright test e2e/send-to-live.spec.ts",
     "e2e:design-systems-live": "scripts/e2e-build.sh plain && playwright test e2e/design-systems-live.spec.ts",
     "e2e:supervisor": "scripts/e2e-build.sh plain && MAWS_SUPERVISOR_E2E=1 MAWS_HOST_MODE=detached MAWS_ENGINE_REPLAY=1 playwright test e2e/supervisor.spec.ts",
     "e2e:supervisor:packaged": "MAWS_E2E_EXECUTABLE=${MAWS_E2E_EXECUTABLE:-dist/mac-arm64/MAWS.app/Contents/MacOS/MAWS} MAWS_SUPERVISOR_E2E=1 MAWS_HOST_MODE=detached playwright test e2e/supervisor-packaged.spec.ts",

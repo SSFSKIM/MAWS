@@ -53,9 +53,8 @@ export function sendToPrompt(request: Pick<SendRequest, 'title' | 'kind' | 'targ
     '',
     `\`${exported.path}\``,
     '',
-    `It is “${request.title}” (${KIND_LABELS[request.kind]}, revision ${exported.revision}) exported as ${VIEWERS_COPY.exportFormats[request.format]}.`,
-    `Deliver this exact file with a ${service} connector available in this session. Don’t change it, export it again or send it anywhere else.`,
-    `If this session has no ${service} connector, or it can’t take a file, say so and stop. When it is delivered, say where.`,
+    `It is “${request.title}” (${KIND_LABELS[request.kind]}, revision ${exported.revision}) exported as ${VIEWERS_COPY.exportFormats[request.format]}, the version the owner chose to send, so upload it as it is with a ${service} connector available in this session.`,
+    `If no ${service} connector here can take a file, say so rather than reaching ${service} another way. Once it is uploaded, say where it is.`,
   ].join('\n');
 }
 

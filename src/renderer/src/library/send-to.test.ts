@@ -58,12 +58,12 @@ describe('the format a target starts with', () => {
 });
 
 describe('the request the session reads', () => {
-  it('names the exported file, what it is, its revision and format, and the service, and refuses another route', () => {
+  it('names the exported file, what it is, its revision and format, and the service, and asks for no other route', () => {
     const prompt = sendToPrompt(request(), EXPORTED);
     expect(prompt).toContain('Send this file to Google Drive');
     expect(prompt).toContain('`/ud/artifacts/a1/exports/7-docx.docx`');
     expect(prompt).toContain('“Launch plan” (Document, revision 7) exported as Word document');
-    expect(prompt).toContain('If this session has no Google Drive connector');
+    expect(prompt).toContain('If no Google Drive connector here can take a file, say so rather than reaching Google Drive another way');
     expect(sendToPrompt(request({ target: 'notion', format: 'md' }), EXPORTED)).toContain('Send this file to Notion');
   });
 });
