@@ -4,6 +4,17 @@
 // renderer's implementation over main's ports now, a web client's in P4). Shapes from the P3-A document's Interfaces.
 import type { Awareness } from '@y/protocols/awareness';
 import type { Actor } from '@shared/artifacts/actor';
+import type {
+  ConnectorCallOutcome,
+  ConnectorCallRequest,
+  ConnectorDeclareOutcome,
+  ConnectorGrant,
+  ConnectorGrantGesture,
+  ConnectorGrantOutcome,
+  ConnectorToolRef,
+  ConnectorWatchRequest,
+  ConnectorWatchStart,
+} from '@shared/artifacts/connectors';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { Restored, SaveState } from './provider/port';
 import type { Carry, ContentIds, Doc, SuggestionRange } from './yjs';
@@ -133,6 +144,30 @@ export interface ArtifactDocOption {
   doc?: 'suggestions';
 }
 
+// P3-H H4: an artifact page's connector calls (the X9 amendment's bridge; docs/doperpowers/plans/2026-10-12-p3-co-work.md,
+// P3-H and Decision Log 24, 80 and 84; P3-E's XE8). One surface per page load: main holds its lease, which starts hidden
+// and ends with `close`, the page's window going, or the app quitting. A declaration grants nothing; only the owner's
+// grant (below) admits a call, and only a visible surface calls anything, its watches included. No answer carries an
+// error's words: a refusal is a state and a reason from `ConnectorRefusal`'s closed lists. A surface whose lease could
+// not be opened, or one already closed, answers `invalid: lease` (false for `unwatchTool` and `refreshWatch`) without
+// asking main; a command main cannot be reached for rejects, as the other methods do.
+export interface ConnectorSurface {
+  // Adds `server · tool` pairs the page may call; answers everything the surface has declared.
+  declareTools(tools: readonly ConnectorToolRef[]): Promise<ConnectorDeclareOutcome>;
+  // Runs a declared tool once, answering when it has (a tool may take minutes).
+  callTool(request: ConnectorCallRequest): Promise<ConnectorCallOutcome>;
+  // Refreshes a declared read-only tool every `intervalMs` (clamped to 30 s .. 24 h, at most 64 watches in the app) while
+  // the surface is visible, each refresh's outcome to `listener`; one due while hidden runs once when shown. The listener
+  // may hear a first refresh before the start's promise settles.
+  watchTool(request: ConnectorWatchRequest, listener: (update: ConnectorCallOutcome) => void): Promise<ConnectorWatchStart>;
+  unwatchTool(watchId: string): Promise<boolean>;
+  // A refresh now, when the watch is visible, granted and idle (after the owner started a session, say).
+  refreshWatch(watchId: string): Promise<boolean>;
+  // The trusted owner's alone (an artifact page never sets it): whether the page is on screen.
+  setVisible(visible: boolean): void;
+  close(): void;
+}
+
 export interface ArtifactHost {
   open(artifactId: string, options?: ArtifactDocOption): Promise<DocumentHandle>; // resolves once the replica has synced; rejects if the store refuses it
   // P3-D (the P3 spec's Decision Log 59): `revision` names a retained revision (a design-system pin's `versionSeq`), at
@@ -150,4 +185,13 @@ export interface ArtifactHost {
   // unchanged; answers the target's ref (an existing one for identical bytes).
   copyAsset(from: string, ref: string, to: string): Promise<{ assetId: string; ref: string }>;
   identity(): { actor: Actor; name: string; color: string };
+  // P3-H H4 (the X9 amendment, Decision Log 80): a page's connector surface, and the owner's grants of one artifact's
+  // tools (the editor header's, never a page's). A grant is taken under the fingerprint of the route that has the tool
+  // now, so with no live route it answers `paused: noRoute`; a `read` grant needs a tool the route marks read-only
+  // (`invalid: notReadOnly` otherwise; an Allow once serves the one call it admits). A revoke stops the tool's calls and
+  // watches for the artifact at once; it answers whether there was a grant.
+  openConnectors(artifactId: string): ConnectorSurface;
+  connectorGrants(artifactId: string): Promise<ConnectorGrant[]>;
+  grantConnectorTool(artifactId: string, tool: ConnectorGrantGesture): Promise<ConnectorGrantOutcome>;
+  revokeConnectorTool(artifactId: string, tool: ConnectorToolRef): Promise<boolean>;
 }

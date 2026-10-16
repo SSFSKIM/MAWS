@@ -52,6 +52,8 @@
     "src/renderer/src/app/date-format.ts",
     "src/renderer/src/test-support/relative-time.ts",
     "src/renderer/src/artifacts/host.ts", // P3-A M5: the detached-channel test drives the real ArtifactHost under Node
+    "src/renderer/src/artifacts/command-error.ts", // P3-H H4: host.ts's error, shared with its connector family
+    "src/renderer/src/artifacts/connectors.ts", // P3-H H4: host.ts's connector family
     // P3-B: test/artifacts/document-writer-bench.test.ts benches the patch writer on the 200-page seed M9's gate uses
     "e2e/support/document-seed.ts"
   ],
