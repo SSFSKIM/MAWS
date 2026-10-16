@@ -69,7 +69,7 @@
     "e2e:desk-web": "pnpm --filter desk-web e2e",
     "e2e:desk-web-hub": "pnpm --filter desk-web e2e:hub",
     "e2e:document-scale": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/document-scale.spec.ts",
-    "e2e:dashboard": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/dashboard.spec.ts"
+    "e2e:dashboard": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/dashboard.spec.ts e2e/dashboard-comments.spec.ts e2e/dashboard-history.spec.ts"
   },
   "dependencies": {
     "node-pty": "1.1.0",
