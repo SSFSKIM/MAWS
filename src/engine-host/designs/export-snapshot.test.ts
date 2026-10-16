@@ -72,7 +72,7 @@ describe('a retained version’s export of a design whose live state cannot migr
     const service = startExportService({ registry, root: join(userData, 'artifacts'), call: call as never, onEvent: () => () => {}, answer: async () => {} });
     try {
       const exported = await service.exportForLibrary({ artifactId: id, format: 'pdf', versionId: versionId! });
-      expect(exported.path).toMatch(/-pdf\.pdf$/);
+      expect(exported.path).toMatch(/-pdf-[0-9a-f-]{36}\.pdf$/); // M5 (Decision Log 33): a design export's own file
       expect(seen).toEqual([LEGACY_FILES]);
       expect(logRows(userData, id)).toEqual(rows);
 
