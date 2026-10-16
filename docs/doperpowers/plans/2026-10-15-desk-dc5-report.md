@@ -36,7 +36,7 @@ Execution used doperpowers:subagent-driven-execution with a fresh executor per t
 
 ## Deferred minor findings
 
-These are in the PR's Unresolved Review Findings:
+These are rows of `docs/tech-debt-tracker.md` (owner DC5), logged by the xhigh review's fix wave:
 - `KeyDialog.test.tsx:117-121`: a fixed 50 ms wait;
 - `test/local/hub.ts:46-52`: the state directory is not removed when startup fails;
 - three lazy third-party chunks over 500 kB, accepted by the writer.
@@ -51,5 +51,4 @@ These are in the PR's Unresolved Review Findings:
 
 ## Residue
 
-- **The ask mod's blocking-question folds draw open** until DC7's bridge emits `raised.toolUseId`. The web is ready for it and uses no fallback.
 - **Labels of wrapped-key methods collide** when two methods are added in the same minute, because no rename endpoint exists.
