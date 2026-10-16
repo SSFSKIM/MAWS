@@ -26,10 +26,15 @@
 // leaves on either answer. A locate never starts picking or changes the page. The capture window loads the page
 // top-level, where there is no parent to listen to, so the script does nothing there.
 //
+// P3-H H4: the page's connector runtime (`window.mawsConnectors`, ./page-connectors.ts) runs in the same script, after
+// the picker; its requests go over a port the app's frame hands the page at each load, never to `window.parent` itself.
+//
 // A plain string, not a stringified function: a bundler's helpers (esbuild's `__name`) would not exist in the page.
 // Served as one line: it goes ahead of the artifact's own scripts, so a line of its own would move every line number
 // Chromium reports for the page's console errors away from the agent's file. The source below is written so that
 // joining its lines changes nothing (no `//` comments, every statement ended by its semicolon).
+import { PAGE_CONNECTORS_SOURCE } from './page-connectors';
+
 const SOURCE = String.raw`(function () {
   'use strict';
   var host = window.parent;
@@ -195,6 +200,8 @@ const SOURCE = String.raw`(function () {
   }, true);
 })();`;
 
-export const BRIDGE_SCRIPT = SOURCE.split('\n')
+// P3-H H4: the page's connector runtime (./page-connectors.ts) follows the picker's, in the same one line.
+export const BRIDGE_SCRIPT = [SOURCE, PAGE_CONNECTORS_SOURCE]
+  .flatMap((source) => source.split('\n'))
   .map((line) => line.trim())
   .join(' ');
