@@ -137,6 +137,24 @@ describe('enrollment refuses', () => {
     expect((await machines()).map((m) => m.name)).not.toContain('revoked-1');
   });
 
+  it("a request the Worker admitted before a revocation reaches the machine's object after it: refused, the stream and a POST; the name enrolled again is served (scalpel-1#1)", async () => {
+    const old = await enroll(hub, ADMIN, 'revoked-3');
+    const machine = new MachineClient(hub, 'revoked-3', old);
+    await machine.connect();
+    expect((await hub.fetchAs(ADMIN, '/api/machines/revoked-3', { method: 'DELETE' })).status).toBe(200);
+    // The requests the Worker resolved for the revoked credential, delivered now.
+    const late = { 'X-Desk-Client': old.clientId };
+    expect(await hub.machineRequest('revoked-3', '/stream', late)).toBe(403);
+    const hello = JSON.stringify({ t: 'hello', project: '6a1c0a8e-3b2d-4c5e-9f70-000000000001', name: 'p', have: {} });
+    expect(await hub.machineRequest('revoked-3', '/frames', { ...late, 'X-Desk-Generation': String(machine.generation + 1) }, hello)).toBe(403);
+    // Enrolled again under the same name: its own credential is served, the old one still refused.
+    const again = new MachineClient(hub, 'revoked-3', await enroll(hub, ADMIN, 'revoked-3'));
+    await again.connect();
+    expect(await hub.machineRequest('revoked-3', '/stream', late)).toBe(403);
+    expect(again.isEnded).toBe(false);
+    await again.close();
+  });
+
   it('a revoked machine whose service token outlived the revocation: the hub no longer knows it', async () => {
     const creds1 = await enroll(hub, ADMIN, 'revoked-2');
     const machine = new MachineClient(hub, 'revoked-2', creds1);

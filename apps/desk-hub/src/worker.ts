@@ -3,8 +3,8 @@
 // assertion is enrollment's redemption (`/machine/enroll`), which Access does not guard either: its one-time token
 // does. Every path it answers is under `/api/*` or `/machine/*`, the routes wrangler.jsonc runs it first for; the web
 // app's assets answer the rest.
-import { drain } from './drain';
-import { hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from './env';
+import { drain, readLimited } from './drain';
+import { CLIENT_HEADER, hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
 import type { Principal, Registry, Result } from './objects/registry';
 import { ORG_KEYS_PATH, PUSH_KEY_PATH, PUSH_SUBSCRIPTIONS_PATH, REDEEM_PATH } from './protocol/identity';
@@ -44,8 +44,8 @@ const answer = <T>(result: Result<T>, status = 200) =>
 /** A small JSON body; undefined when it is missing, too large, or not JSON (the callee answers `bad-shape`). */
 async function body(request: Request): Promise<unknown> {
   if (Number(request.headers.get('Content-Length') ?? 0) > BODY_LIMIT) return undefined;
-  const bytes = await request.arrayBuffer();
-  if (bytes.byteLength > BODY_LIMIT) return undefined;
+  const bytes = await readLimited(request.body, BODY_LIMIT);
+  if (!bytes) return undefined;
   try {
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
   } catch {
@@ -57,7 +57,7 @@ async function body(request: Request): Promise<unknown> {
  * client sent; it keeps the client's signal, so the object sees the client go. */
 function forward(request: Request, url: string, identity: Record<string, string>): Request {
   const forwarded = new Request(url, request);
-  for (const header of [MEMBER_HEADER, PROJECT_HEADER, ORG_HEADER, MACHINE_HEADER]) forwarded.headers.delete(header);
+  for (const header of [MEMBER_HEADER, PROJECT_HEADER, ORG_HEADER, MACHINE_HEADER, CLIENT_HEADER]) forwarded.headers.delete(header);
   for (const [header, value] of Object.entries(identity)) forwarded.headers.set(header, value);
   return forwarded;
 }
@@ -144,7 +144,7 @@ async function member(request: Request, url: URL, env: Env, registry: DurableObj
 
 async function machine(request: Request, url: URL, env: Env, principal: Extract<Principal, { kind: 'machine' }>): Promise<Response> {
   const stub = env.MACHINE.get(env.MACHINE.idFromName(`${principal.org.id}:${principal.machine.name}`));
-  const identity = { [ORG_HEADER]: principal.org.id, [MACHINE_HEADER]: principal.machine.name };
+  const identity = { [ORG_HEADER]: principal.org.id, [MACHINE_HEADER]: principal.machine.name, [CLIENT_HEADER]: principal.machine.client_id ?? '' };
   if (url.pathname === '/machine/stream' && request.method === 'GET') return stub.fetch(forward(request, 'https://machine/stream', identity));
   if (url.pathname === '/machine/frames' && request.method === 'POST') {
     if (Number(request.headers.get('Content-Length') ?? 0) > POST_LIMIT) return json(413, { error: 'too-large' });

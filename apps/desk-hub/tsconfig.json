@@ -1,7 +1,8 @@
 {
   // The Worker and its Durable Objects, typed against the Workers runtime. The protocol module is typechecked here as
   // the Worker imports it and again, alone, by tsconfig.protocol.json; the tests by tsconfig.test.json, but for the
-  // Worker entry the suites load, which runs in workerd and is typed here.
+  // Worker entry the suites load, which runs in workerd, and the one suite that runs a Worker object under Node, which
+  // are typed here.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -14,5 +15,5 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "test/support/worker-under-test.ts", "test/support/send-fault.ts"]
+  "include": ["src/**/*.ts", "test/support/worker-under-test.ts", "test/support/send-fault.ts", "test/machine-end.test.ts"]
 }

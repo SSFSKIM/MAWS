@@ -12,7 +12,26 @@ import { inject } from 'vitest';
 import { startProxy, type Proxy } from '../../local/proxy.ts';
 import { AccessStandin, IDENTITY_HEADER } from '../../local/standin.ts';
 import { generateVapidKey } from '../../src/push/web-push';
-import { ABORT_REASON, MACHINE_ABORT_PATH, MEMBER_PATH, ORG_ROW_PATH, PROJECT_CALLS_PATH, PROJECT_HOLD_PATH, PROJECT_VISIBLE_PATH, PROJECT_LEASE_PATH, PROJECT_LIFE_PATH, PROJECTS_PATH, SEND_FAULT_PATH, TIMING_PATH } from './send-fault';
+import {
+  ABORT_REASON,
+  MACHINE_ABORT_PATH,
+  MEMBER_PATH,
+  ORG_ROW_PATH,
+  PROJECT_ARCHIVE_HOLD_PATH,
+  PROJECT_BACKLOG_PATH,
+  PROJECT_CALLS_PATH,
+  PROJECT_HOLD_PATH,
+  PROJECT_LEASE_PATH,
+  PROJECT_LIFE_PATH,
+  PROJECT_QUEUES_PATH,
+  PROJECT_SEND_PATH,
+  PROJECT_VISIBLE_PATH,
+  PROJECTS_PATH,
+  SEND_FAULT_PATH,
+  SEND_HOLD_PATH,
+  SEND_RELEASE_PATH,
+  TIMING_PATH,
+} from './send-fault';
 
 const require = createRequire(import.meta.url);
 const { unstable_getMiniflareWorkerOptions } = require('wrangler') as typeof import('wrangler');
@@ -150,6 +169,19 @@ export async function startLocalHub() {
     pushes,
     /** A push service's answer per endpoint (201 when unset): 404 or 410 says the subscription is gone. */
     pushAnswers,
+    /**
+     * A request straight to a machine's object (`/stream` or `/frames`) with the identity headers the Worker sets once it
+     * has verified a request: how a request the Worker admitted reaches the object late, after a revocation, say.
+     */
+    async machineRequest(machine: string, path: '/stream' | '/frames', headers: Record<string, string>, body?: string) {
+      const namespace = await mf.getDurableObjectNamespace('MACHINE');
+      const response = await namespace
+        .get(namespace.idFromName(`${ORG}:${machine}`))
+        .fetch(`https://machine${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'X-Desk-Org': ORG, 'X-Desk-Machine': machine, ...headers }, body });
+      const status = response.status;
+      await response.body?.cancel();
+      return status;
+    },
     /** Shortens a machine's heartbeat and lease; set before its stream opens (the suites' Worker only). */
     async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number }) {
       await seam('MACHINE', machine, `${TIMING_PATH}?heartbeatMs=${timing.heartbeatMs}&leaseMs=${timing.leaseMs}`);
@@ -194,6 +226,34 @@ export async function startLocalHub() {
       if (!(failure instanceof Error && failure.message.includes(ABORT_REASON))) {
         throw new Error(`the Machine was not terminated: ${failure === undefined ? 'its seam answered' : String(failure)}`);
       }
+    },
+    /** Holds the machine's next send of a `kind` frame until `releaseSend` (the suites' Worker only). */
+    async holdSend(machine: string, kind: string) {
+      await seam('MACHINE', machine, `${SEND_HOLD_PATH}?kind=${kind}`);
+    },
+    /** Releases the machine's held send, once it is held (waiting for it to be). */
+    async releaseSend(machine: string) {
+      const deadline = Date.now() + 10_000;
+      while ((await seam('MACHINE', machine, SEND_RELEASE_PATH)) !== 'released') {
+        if (Date.now() > deadline) throw new Error(`no send of ${machine} was held`);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    },
+    /** Holds, or releases, a project's lookups of its archive machine (an upload of a legacy/ feed makes one). */
+    async holdArchiveLookups(project: string, hold: boolean) {
+      await seam('PROJECT', project, PROJECT_ARCHIVE_HOLD_PATH, { hold });
+    },
+    /** A project's send queues, `<machine>#<generation>`. */
+    async projectQueues(project: string): Promise<string[]> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_QUEUES_PATH)) as string[];
+    },
+    /** Has a project queue a frame for a machine's stream of `generation`, as a reply on a retired stream is queued. */
+    async projectSend(project: string, machine: string, generation: number, frame: unknown) {
+      await seam('PROJECT', project, PROJECT_SEND_PATH, { machine, generation, frame });
+    },
+    /** How many pages of `hello` backlogs a project has read. */
+    async backlogPages(project: string): Promise<number> {
+      return JSON.parse(await seam('PROJECT', project, PROJECT_BACKLOG_PATH)) as number;
     },
     /** Holds, or releases, a project's `hello`s at their registration. */
     async holdHellos(project: string, hold: boolean) {

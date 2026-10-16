@@ -2,7 +2,7 @@
 // sequenced one at a time; a decision or an answer must fit the request it names; every accepted effect is complete
 // before the crash-after-effect checkpoint and before its outcome is recorded; a malformed RPC is refused before any
 // claim, and an effect or a script that throws ends as a recorded `failed` outcome rather than a claim left open.
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { emptyMemory, FakeMachine, type Memory, type Recording, type RpcScript } from '../../fake-machine';
 import type { ProjectDown } from '../../src/protocol/browser';
 import { inputSha256, newNonce, sealRpc, importOrgKey } from '../../src/protocol/codes';
@@ -46,14 +46,23 @@ const requests: Recording = {
   ],
 };
 
-async function setUp(options: { memory?: Memory; script?: RpcScript } = {}) {
+const OTHER = '7e6d5c4b-3a29-4180-9f7e-6d5c4b3a2918';
+/** A second session of the same machine, with one permission prompt of its own. */
+const other: Recording = {
+  ...requests,
+  name: 'other',
+  session: OTHER,
+  steps: [{ at: 0, k: 'raised', draft: { request: 'toolu_other', tool: 'Bash', input: { command: 'rm -rf build' } } }],
+};
+
+async function setUp(options: { memory?: Memory; script?: RpcScript; recordings?: Recording[] } = {}) {
   const project = newProject();
   const name = `rp-${count}`;
   const credentials = await enroll(hub, ADMIN, name);
   // Miniflare sees a stream's close only when a write to it fails, so a test that crashes the machine beats often.
   await hub.timing(name, { heartbeatMs: 250, leaseMs: 45_000 });
   const memory = options.memory ?? emptyMemory();
-  const make = () => new FakeMachine({ hub: hub.url, machine: name, credentials, orgKey: RAW_KEY, project, recordings: [requests], member, memory, script: options.script });
+  const make = () => new FakeMachine({ hub: hub.url, machine: name, credentials, orgKey: RAW_KEY, project, recordings: options.recordings ?? [requests], member, memory, script: options.script });
   const fm = make();
   await fm.connect();
   await fm.play({ speed: 0 });
@@ -186,5 +195,56 @@ describe('a malformed or failing RPC', () => {
     expect(memory.ledger[model.nonce]?.outcome).toEqual({ state: 'failed', error: { code: 'failed', message: 'the bridge went away' } });
     b.close();
     await fm.close();
+  });
+});
+
+describe('a decision, against the session it names and the request as it stands', () => {
+  it("is bound to its own session: a digest naming another session is bad-shape before any claim, as the real machine refuses it, and the request stays pending", async () => {
+    const { fm, b, raised, call, final, digest, memory } = await setUp({ recordings: [requests, other] });
+    const across = await call('decide', { session: SESSION, decision: 'allow', digest: await digest(raised('toolu_other')) });
+    expect((await final(across)).outcome).toEqual({ state: 'failed', error: { code: 'bad-shape', message: 'the digest names another session' } });
+    expect(memory.ledger[across.nonce]).toBeUndefined();
+    expect(fm.pendingRequests().map((r) => r.request)).toContain('toolu_other');
+    const own = await call('decide', { session: OTHER, decision: 'allow', digest: await digest(raised('toolu_other')) });
+    expect((await final(own)).outcome).toEqual({ state: 'done', result: {} });
+    b.close();
+    await fm.close();
+  });
+
+  it('that loses the race to the terminal while its digest is checked fails not-pending naming the winner, and runs nothing', async () => {
+    const { fm, b, raised, call, final, digest, memory } = await setUp();
+    const d = await digest(raised('toolu_bash'));
+    // The terminal answers while the machine is hashing the request's input for the digest check.
+    const original = crypto.subtle.digest.bind(crypto.subtle);
+    const spy = vi.spyOn(crypto.subtle, 'digest').mockImplementationOnce(async (algorithm, data) => {
+      await fm.answerInTerminal('toolu_bash', 'deny');
+      return original(algorithm, data);
+    });
+    try {
+      const late = await call('decide', { session: SESSION, decision: 'allow', digest: d });
+      expect((await final(late)).outcome).toMatchObject({ state: 'failed', error: { code: 'not-pending', winner: 'terminal', by: 'terminal' } });
+      expect(memory.trace[late.nonce]).toBeUndefined();
+      expect(fm.rpcs.find((r) => r.nonce === late.nonce)).toMatchObject({ executed: false });
+      await b.next((f) => f.t === 'decided', 'the decision');
+      expect(b.frames.filter((f) => f.t === 'decided').map((f) => f.t === 'decided' && f.decision.settled.winner)).toEqual(['terminal']);
+    } finally {
+      spy.mockRestore();
+    }
+    b.close();
+    await fm.close();
+  });
+});
+
+describe('a fake machine that stops', () => {
+  it("publishes its sessions' presence as ended (record null), as a machine does when its sessions end", async () => {
+    const { fm, b } = await setUp({ recordings: [requests, other] });
+    const from = b.frames.length;
+    await fm.close();
+    for (const session of [SESSION, OTHER]) {
+      expect(await b.next((f) => f.t === 'session' && f.message.kind === 'presence' && f.message.session === session, `${session}'s presence`, from)).toMatchObject({
+        message: { body: { record: null } },
+      });
+    }
+    b.close();
   });
 });

@@ -23,3 +23,16 @@ export const MEMBER_PATH = '/__test/member';
 export const PROJECT_CALLS_PATH = '/__test/calls';
 /** Where the suites' `Registry` rewrites its org's stored record (`{id, name}`), as a deploy's previous version made it. */
 export const ORG_ROW_PATH = '/__test/org-row';
+/** Where the suites' `Machine` holds its next send of one frame kind (`?kind=`) until it is released. */
+export const SEND_HOLD_PATH = '/__test/send-hold';
+/** Where the suites' `Machine` releases a held send: answers `released`, or `none` while no send is held. */
+export const SEND_RELEASE_PATH = '/__test/send-release';
+/** Where the suites' `Project` holds, or releases, its lookups of the archive machine (`{hold: boolean}`). */
+export const PROJECT_ARCHIVE_HOLD_PATH = '/__test/archive-hold';
+/** Where the suites' `Project` lists its send queues (`<machine>#<generation>`). */
+export const PROJECT_QUEUES_PATH = '/__test/queues';
+/** Where the suites' `Project` queues a frame for a machine's stream of any generation (`{machine, generation, frame}`),
+ * as a reply on a retired stream would be queued. */
+export const PROJECT_SEND_PATH = '/__test/send';
+/** Where the suites' `Project` says how many pages of a `hello`'s backlog it has read. */
+export const PROJECT_BACKLOG_PATH = '/__test/backlog-pages';

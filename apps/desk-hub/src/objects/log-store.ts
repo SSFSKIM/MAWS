@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS audit (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT 
 
 /** Bytes of event JSON per frame the hub sends; a larger batch is split across frames, a larger frame into parts. */
 export const BATCH_BYTES = 256 * 1024;
+/** Rows one query of a backlog's page reads at most (a page ends at BATCH_BYTES first, unless events are tiny). */
+const PAGE_ROWS = 1000;
 
 const encoder = new TextEncoder();
 const hasControl = (text: string) => [...text].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f);
@@ -121,15 +123,24 @@ export class LogStore {
     );
   }
 
-  /** Every writer's events past `have` (the suffix a machine lacks), each writer's in seq order, in batches. */
-  *beyond(have: Vector): Generator<LogEvent[]> {
+  /**
+   * Every writer's events past `have` (the suffix a machine lacks) and at or before offset `head`, each writer's in seq
+   * order, in batches. Each batch is read when it is asked for, by its own query, so a caller that takes one at a time
+   * across awaits holds one at a time, and events stored meanwhile (past `head`) are not among them.
+   */
+  *beyond(have: Vector, head: number = this.head()): Generator<LogEvent[]> {
     for (const writer of Object.keys(this.vector())) {
-      const from = have[writer] ?? 0;
-      yield* batches(
-        this.sql.exec<{ body: string }>('SELECT body FROM events WHERE writer = ? AND seq > ? ORDER BY seq', writer, from),
-        (row) => row.body,
-        (row) => JSON.parse(row.body) as LogEvent,
-      );
+      let after = have[writer] ?? 0;
+      for (;;) {
+        const [batch] = batches(
+          this.sql.exec<{ body: string }>('SELECT body FROM events WHERE writer = ? AND seq > ? AND offset <= ? ORDER BY seq LIMIT ?', writer, after, head, PAGE_ROWS),
+          (row) => row.body,
+          (row) => JSON.parse(row.body) as LogEvent,
+        );
+        if (!batch) break;
+        yield batch;
+        after = batch[batch.length - 1].seq;
+      }
     }
   }
 

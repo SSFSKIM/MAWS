@@ -251,7 +251,7 @@ export class Registry extends DurableObject<Env> {
       this.sql.exec('UPDATE projects SET archive_machine = NULL WHERE archive_machine = ?', machine.name);
       this.orphan(machine.token_name);
     });
-    await this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org.id}:${machine.name}`)).revoke();
+    await this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org.id}:${machine.name}`)).revoke(machine.client_id);
     await this.sweepOrphans();
     await this.scheduleAlarm();
     return ok({ revoked: machine.name });
