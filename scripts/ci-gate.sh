@@ -10,7 +10,7 @@
 # ref (unless --keep) and exits with the run's status (0 green, 1 anything else).
 #
 #   <worktree-or-sha>  a worktree path (its HEAD is tested) or a commit
-#   --gates            narrow to static, unit, unit:darwin (always macOS), probes or e2e:<group>; default: class 1a
+#   --gates            narrow to static, unit, unit:darwin, packaged (macOS), probes or e2e:<group>; default: class 1a
 #                      (static, unit, probes), plus unit:darwin and every class-1 e2e group when the e2e lane is macOS
 #   --runner           the e2e lane, linux or macos (default: $MAWS_GATE_RUNNER, else the repository's variables)
 #   --class1a          class 1a's runner (static, unit, probes): linux, macos or pool, ci-kit's Hetzner box (default:
