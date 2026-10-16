@@ -250,11 +250,30 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   await page.keyboard.press('Space');
   const lifted = inMain.locator(`[data-slide-thumb="${before[0]}"]`);
   await expect(lifted).toHaveAttribute('data-dragging', 'true'); // the sensor listens from the next tick on
+  // DIAGNOSIS (temporary, the mini's keyboard reorder): the list's scroll and the first thumbs' places around the press
+  const filmGeometry = () =>
+    inMain.locator('.deck-filmstrip-list').evaluate((el) => ({
+      list: { top: Math.round(el.getBoundingClientRect().top), client: el.clientHeight, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight },
+      thumbs: [...el.querySelectorAll('[data-slide-thumb]')].slice(0, 3).map((t) => {
+        const r = t.getBoundingClientRect();
+        return [t.getAttribute('data-slide-thumb'), Math.round(r.top), Math.round(r.height), (t as HTMLElement).style.transform];
+      }),
+      window: [window.innerWidth, window.innerHeight],
+      live: [...document.querySelectorAll('[id^="DndLiveRegion"]')].map((n) => n.textContent),
+    }));
+  console.log(`[filmstrip kbd] lifted ${JSON.stringify(await filmGeometry())}`);
   // the sensor starts listening a tick after the lift: an arrow pressed before that moves nothing, so press until it moves
+  let presses = 0;
   await expect(async () => {
-    if (!/translate3d\(0px, [1-9]/.test((await lifted.getAttribute('style')) ?? '')) await page.keyboard.press('ArrowDown');
+    if (!/translate3d\(0px, [1-9]/.test((await lifted.getAttribute('style')) ?? '')) {
+      await page.keyboard.press('ArrowDown');
+      presses++;
+    }
     await expect(lifted).toHaveAttribute('style', /translate3d\(0px, [1-9]/, { timeout: 250 });
   }).toPass();
+  console.log(`[filmstrip kbd] moved after ${presses} press(es) ${JSON.stringify(await filmGeometry())}`);
+  await page.waitForTimeout(1_000);
+  console.log(`[filmstrip kbd] 1 s later ${JSON.stringify(await filmGeometry())}`);
   // dropped once the sensor has the next slide under it (its announcement says so)
   await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: `over droppable area ${before[1]}.` })).toHaveCount(1);
   await page.keyboard.press('Space');
