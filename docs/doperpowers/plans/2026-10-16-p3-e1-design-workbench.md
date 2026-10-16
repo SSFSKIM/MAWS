@@ -11,7 +11,7 @@ An owner and an agent can work on a design containing phone screens, desktop scr
 - [x] (2026-10-16) Parent, interface ledger and E0 findings grounded against C's model, editor, export and host seams; one frozen offline-preferred install completed through the shared slot.
 - [x] (2026-10-16) Execution-document adversarial review: four verified gaps adopted; architect checkpoints approved (parent Decision Logs 11–13).
 - [x] (2026-10-16) M1 — Implementation e1852b130; five material review findings fixed at 50c4920ac, two interactions fixed at 0dc9f98ad. Independent task review approved with no material findings remaining. Red/green regressions recorded below; covering run 339/339 in 27 files, final focused 30/30 and related 205/205, typecheck/touched lint clean. M2 consumes this frontier.
-- [ ] M2 — Host migration, tools, mirror and agent guides.
+- [ ] M2 — Host migration, tools, mirror and agent guides (executing from clean master merge c45baa263; first remote class-1a gate follows wiring).
 - [ ] M3 — Mounted-board workbench and C's additive dimensions.
 - [ ] M4 — Object comments and board history.
 - [ ] M5 — Native-size exports and their UI.
