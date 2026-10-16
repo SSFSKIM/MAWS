@@ -22,7 +22,7 @@ import type { ImportAsset } from './transform/clipboard';
 import { Inspector } from './Inspector';
 import { measureInHost } from './transform/Overlay';
 import { useDeckView } from './deck-view';
-import { faceRules, useCanvasCss } from './page-styles';
+import { useCanvasCss, useDeckFaces } from './page-styles';
 import { Filmstrip } from './Filmstrip';
 import type { CommentAuthor, DocumentComments } from '../../document/editor/comments/surface';
 import { CommentButtons } from './comments/CommentButtons';
@@ -32,7 +32,7 @@ import { ShowEditorsMenu } from '../../document/editor/history/ShowEditors';
 import type { ShownEditor } from '../../document/editor/history/controller';
 import { DeckHistoryRail } from './history/DeckHistoryRail';
 import { HistoryBar } from './history/HistoryBar';
-import { previewFaces } from './history/faces';
+import { aliasOverrides, previewFaces } from './history/faces';
 import { historyAssets, HistoryPreview } from './history/HistoryPreview';
 import { HISTORY_COPY } from './history/copy';
 import { useDeckHistoryController, useDeckHistorySnapshot, type DeckHistorySource } from './history/use-deck-history';
@@ -136,8 +136,12 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   );
   const frame = useCallback((element: HTMLDivElement | null) => onStage?.(element), [onStage]);
 
+  // B6: the deck's uploaded faces under private names of its own (another deck in this window may upload a family of
+  // the same name), its canvases and its font tokens' overrides drawing them by those names
+  const liveFaces = useDeckFaces(view.faces, assetUrl);
+  const scopeOverrides = useMemo(() => aliasOverrides(view.overrides, liveFaces.aliases), [view.overrides, liveFaces.aliases]);
   const scope = (children: ReactNode) => (
-    <DesignSystemScope system={system} medium="deck" overrides={view.overrides} className="deck-ds-scope">
+    <DesignSystemScope system={system} medium="deck" overrides={scopeOverrides} className="deck-ds-scope">
       {children}
     </DesignSystemScope>
   );
@@ -151,6 +155,13 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   useEffect(() => history?.applied(preview?.shown ?? null), [history, preview?.shown]);
   const historyOpen = state.rail === 'history';
   const previewing = preview !== null || historySnapshot?.loading === true;
+  // final fix wave (B4): an awaited edit (an upload, an asset copy) finishing while a version shows, or once the deck
+  // turned read-only, writes nothing
+  const holdWrites = previewing || readOnly;
+  useLayoutEffect(() => {
+    session.holdWrites(holdWrites);
+    return () => session.holdWrites(false);
+  }, [session, holdWrites]);
   useEffect(() => {
     if (!historyOpen && previewing) history?.close(); // the rail closed: back to the live deck
   }, [historyOpen, previewing, history]);
@@ -214,7 +225,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
   const shownDoc = preview?.shown ?? null;
   const earlierDoc = preview?.earlier ?? null;
   const versionFaces = useMemo(() => (shownDoc && earlierDoc ? previewFaces({ shown: shownDoc, earlier: earlierDoc }, previewAssets) : null), [shownDoc, earlierDoc, previewAssets]);
-  const faces = versionFaces ? versionFaces.css : faceRules(view.faces, assetUrl);
+  const faces = versionFaces ? versionFaces.css : liveFaces.css;
   const historyRail = history && historySnapshot && historyOpen && <DeckHistoryRail controller={history} snapshot={historySnapshot} sessionTitle={sessionTitle} onClose={() => session.toggleRail('history')} />;
   // one tree in both modes, so B's rail keeps its place (and its open folds) while a version shows
   const live = (
@@ -225,10 +236,11 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
               view={view}
               current={slide?.id ?? null}
               assetUrl={assetUrl}
+              faces={liveFaces.aliases}
               width={compact ? 120 : SLIDE_W / 8}
               readOnly={readOnly}
               onDrawn={onThumbnailsDrawn}
-              fromLayout={<LayoutsMenu system={system} disabled={readOnly || view.slides.length >= DECK_LIMITS.slides} scope={scope} onPick={(layout) => insertLayoutSlide(session, layout, slide?.id ?? order.at(-1) ?? null)} />}
+              fromLayout={<LayoutsMenu system={system} disabled={readOnly || view.slides.length >= DECK_LIMITS.slides} scope={scope} onPick={(layout) => void insertLayoutSlide(session, layout, slide?.id ?? order.at(-1) ?? null, importAsset).then((r) => 'reason' in r && setNotice(r.reason))} />}
             />,
           )}
           {historySnapshot?.pill && (
@@ -270,6 +282,7 @@ export function DeckEditor({ session, assetUrl, system, readOnly, compact = fals
                 artifactId={artifactId}
                 importAsset={importAsset}
                 scope={scope}
+                faces={liveFaces.aliases}
               />
             </CommentFrame>
             {slide && <Notes key={slide.id} session={session} slideId={slide.id} token={slide.token} readOnly={readOnly || slide.held !== null} />}

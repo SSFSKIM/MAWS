@@ -5,6 +5,7 @@
 // reasons.
 import { useCallback, useRef, type ReactNode, type RefObject } from 'react';
 import type { AssetUrl, SlideCanvas } from '../canvas';
+import type { FaceAliases } from '../canvas/faces';
 import type { SlideEntry } from './deck-view';
 import { DECK_COPY as C } from './copy';
 import type { DeckSession } from './session';
@@ -32,9 +33,11 @@ export interface StageProps {
   importAsset?: ImportAsset;
   /** The DesignSystemScope the slide draws in. */
   scope: (children: ReactNode) => ReactNode;
+  /** B6: the deck's uploaded faces' private names (editor/page-styles.ts). */
+  faces?: FaceAliases;
 }
 
-export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanvas, canvas, readOnly, onNotice, artifactId, importAsset, scope }: StageProps) {
+export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanvas, canvas, readOnly, onNotice, artifactId, importAsset, scope, faces }: StageProps) {
   const frameRef = useRef<HTMLDivElement | null>(null);
   const setFrame = useCallback(
     (element: HTMLDivElement | null) => {
@@ -59,7 +62,7 @@ export function Stage({ session, slide, scale, assetUrl, viewport, frame, onCanv
         {slide ? (
           <div className="deck-stage-center">
             <div ref={setFrame} className="deck-stage-frame" data-stage-slide={slide.id} data-held={slide.held ? '' : undefined}>
-              {scope(<SlideView doc={session.doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} />)}
+              {scope(<SlideView doc={session.doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} faces={faces} />)}
               <div className="deck-stage-overlay">
                 {scope(
                   <Overlay

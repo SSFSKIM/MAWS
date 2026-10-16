@@ -10,6 +10,7 @@ import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { AssetUrl, SlideCanvas } from '../canvas';
+import type { FaceAliases } from '../canvas/faces';
 import { DECK_LIMITS } from '../deck';
 import { moveSlide, setAttrs, ROOT } from '../model';
 import { addSlide, blankSlide, duplicateSlide, mintSectionKey, mintSlideId, removeSlide, setSection } from '../writers';
@@ -30,9 +31,11 @@ export interface FilmstripProps {
   onDrawn?: (thumbnails: number) => void;
   /** M6: New slide from layout, beside New slide. */
   fromLayout?: ReactNode;
+  /** B6: the deck's uploaded faces' private names (editor/page-styles.ts). */
+  faces?: FaceAliases;
 }
 
-export function Filmstrip({ session, view, current, assetUrl, width, readOnly, onDrawn, fromLayout }: FilmstripProps) {
+export function Filmstrip({ session, view, current, assetUrl, width, readOnly, onDrawn, fromLayout, faces }: FilmstripProps) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const ids = view.slides.map((s) => s.id);
   const scale = width / SLIDE_W;
@@ -82,6 +85,7 @@ export function Filmstrip({ session, view, current, assetUrl, width, readOnly, o
                   current={slide.id === current}
                   scale={scale}
                   assetUrl={assetUrl}
+                  faces={faces}
                   readOnly={readOnly}
                   startsSection={view.sections.some((s) => s.before === slide.id && !s.empty)}
                   full={full}
@@ -112,13 +116,14 @@ function Thumbnail(props: {
   current: boolean;
   scale: number;
   assetUrl: AssetUrl;
+  faces: FaceAliases | undefined;
   readOnly: boolean;
   startsSection: boolean;
   /** The deck holds as many slides as a deck may: no duplicate. */
   full: boolean;
   onCanvas: (canvas: SlideCanvas | null) => void;
 }) {
-  const { session, slide, index, current, scale, assetUrl, readOnly, startsSection, full, onCanvas } = props;
+  const { session, slide, index, current, scale, assetUrl, faces, readOnly, startsSection, full, onCanvas } = props;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: slide.id, disabled: readOnly });
   const doc = session.doc;
   const label = C.slideLabel(index + 1, slide.hidden, slide.held !== null);
@@ -173,7 +178,7 @@ function Thumbnail(props: {
           if (!event.defaultPrevented) (listeners?.onKeyDown as ((e: KeyboardEvent<HTMLElement>) => void) | undefined)?.(event);
         }}
       >
-        <SlideView doc={doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} thumbnail />
+        <SlideView doc={doc} slideId={slide.id} token={slide.token} assetUrl={assetUrl} scale={scale} onCanvas={onCanvas} faces={faces} thumbnail />
         {slide.held && <span className="deck-thumb-badge">{C.held}</span>}
         {slide.hidden && <span className="deck-thumb-badge deck-thumb-badge-quiet">{C.hiddenBadge}</span>}
       </button>
