@@ -669,6 +669,7 @@ test('2b. a page thread in the Side pane re-docks into the card under the pane s
       await expect(card).toHaveAttribute('data-card-phase', 'thread');
       await expect(card.locator('[data-needs-you]'), 'the thread’s request, in the card again').toContainText('Waiting for your permission');
       await expect(main.locator('[data-card-caret]'), 'no caret: no pick position is stored').toHaveCount(0);
+      await expectOnPane(s, t.tabId, paneIn(main), 'main'); // the page's shrink reaches main a frame and an invoke later
       const view = (await viewOf(s, t.tabId))!;
       expect(view.visible && !(await tabState(s, t.tabId)).tab?.covered, 'the page stays up over the card').toBe(true);
       expect((await card.boundingBox())!.y, 'the card under the view').toBeGreaterThanOrEqual(view.bounds!.y + view.bounds!.height);

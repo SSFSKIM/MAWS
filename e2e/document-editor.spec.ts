@@ -233,7 +233,10 @@ test.describe('the document editor', () => {
     await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');
     await expect(card).toHaveAttribute('data-anchor-locator', QUOTE);
     await expect(card.getByRole('heading')).toHaveText('Field notes, Notes');
-    const threads = await page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads());
+    // the host's doc has the thread once replica A's update arrived over its port (as the next case reads it)
+    const hostThreads = () => page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads());
+    await expect.poll(async () => (await hostThreads()).length, { message: 'the new thread at the host' }).toBe(1);
+    const threads = await hostThreads();
     expect(threads).toEqual([{ id: expect.any(String), status: 'open', quote: QUOTE, messages: [] }]);
     const threadId = threads[0]!.id;
 
