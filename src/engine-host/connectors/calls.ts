@@ -177,6 +177,9 @@ export class ConnectorCalls {
     // what main admitted, against the session's mcp_status now, before the grant is asked (and an Allow once used)
     const before = await this.admitted(first.client, input, signal);
     if (before !== null) return before;
+    // Main's cancel or close may land between the check's answer and this continuation: an operation no longer
+    // registered takes no fence (nothing would drop it again) and asks for no grant.
+    if (signal.aborted || this.operations.get(operation.id) !== operation) return unavailable('cancelled');
     const call = { server: input.server, tool: input.tool, fingerprint: input.fingerprint };
     // Broken by a revoke, a delete or a grant replacing this fingerprint and mode the moment it is asked for: the
     // operation aborts there, so a call not yet written (still queued behind the engine's stdin) never is, and one
@@ -188,8 +191,8 @@ export class ConnectorCalls {
       operation.controller.abort();
       if (operation.outcome) operation.outcome = revokedWhile(input, 'its outcome waited for main');
     });
-    // Taken synchronously after `admitted` found the operation not cancelled, so it is still registered here, and its
-    // `drop` (take, cancel, expiry, close) is what lets go of the fence.
+    // Taken and its cleanup installed in the same synchronous step as the check above found the operation registered,
+    // so its `drop` (take, cancel, expiry, close) is what lets go of the fence.
     operation.release = () => store.releaseConnectorFence(fence);
     return this.fenced(store, fence, first.client, input, signal);
   }

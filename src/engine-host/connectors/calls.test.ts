@@ -433,20 +433,40 @@ describe('ConnectorCalls: a completed outcome awaiting its take', () => {
     expect(fences().size).toBe(0);
   });
 
-  it('a cancel before the fence is even taken leaves none behind once the operation ends', async () => {
-    await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
-    for (let i = 0; i < 6; i++) {
-      // cancelled at successive points of its run: before its first status read answered, after it, at the authorization
-      const start = startOf();
+  // The boundary between the first status check answering (the operation not cancelled yet) and `execute` going on
+  // past its await: main's cancel, or main going, lands exactly there. No fence may be taken for an operation already
+  // dropped (nothing would let go of it), the Allow once stays unused and nothing reaches the engine.
+  for (const ending of ['cancel', 'close'] as const) {
+    it(`main’s ${ending} between the first status check’s answer and the operation going on takes no fence, uses no grant and calls nothing`, async () => {
+      const print = await printOf('send_document');
+      await grant({ server: 'fixture', tool: 'send_document', fingerprint: print, mode: 'once' });
+      const start = startOf({ tool: 'send_document', fingerprint: print, mode: 'once' });
+      const internals = calls as unknown as { admitted: (...args: unknown[]) => Promise<unknown> };
+      const admitted = internals.admitted.bind(calls);
+      let checks = 0;
+      const answered: unknown[] = [];
+      vi.spyOn(internals, 'admitted').mockImplementation(async (...args: unknown[]) => {
+        const answer = await admitted(...args);
+        if (++checks === 1) {
+          answered.push(answer); // it found the operation live: null, its signal not aborted
+          if (ending === 'cancel') expect(calls.cancel(start.operationId)).toBe(true);
+          else calls.close();
+        }
+        return answer;
+      });
       calls.start(start);
-      for (let j = 0; j < i; j++) await Promise.resolve();
-      calls.cancel(start.operationId);
-    }
-    await settle();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(held()).toBe(0);
-    expect(completed).toEqual([]);
-  });
+      await vi.waitFor(() => expect(checks).toBeGreaterThanOrEqual(1));
+      await settle();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(answered, 'the check answered admitted before the operation ended').toEqual([null]);
+      expect(held(), 'no fence left behind').toBe(0);
+      expect(fences().size).toBe(0);
+      expect(engine.calls(), 'nothing reached the engine').toEqual([]);
+      expect(await store.connectorGrants(artifactId), 'the Allow once unused').toEqual([expect.objectContaining({ tool: 'send_document', mode: 'once' })]);
+      expect(completed).toEqual([]);
+      expect(calls.take(start.operationId)).toBeNull();
+    });
+  }
 });
 
 // The host's last word: main's check consumed nothing and may be stale by the write, so the host compares the grant
