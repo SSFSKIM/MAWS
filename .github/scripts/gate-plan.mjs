@@ -1,10 +1,11 @@
 // The gate set of one run of .github/workflows/gate.yml (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.1, §3.2,
 // §3.6) and the runner its e2e jobs take. The set: a manual run's `gates` input, else the pushed commit's `Gates:`
-// trailer (scripts/ci-gate.sh writes it when its caller narrows the set), else class 1a, with class 1's e2e groups added
-// when the e2e lane is a macOS runner. The e2e lane: the `runner` input or the `Runner:` trailer (`linux` or `macos`),
-// else the repository variable GATE_E2E_RUNNER, else GATE_RUNNER, else `linux`; a Linux lane takes only the groups that
-// run green there (LINUX_E2E). Writes the switches, the e2e matrix and its runner to the job's outputs and the set to its
-// summary. Run from the checkout's root.
+// trailer (scripts/ci-gate.sh writes it when its caller narrows the set), else class 1a, with unit:darwin and class 1's
+// e2e groups added when the e2e lane is a macOS runner. Explicit unit:darwin runs on macOS regardless of the e2e lane.
+// The e2e lane: the `runner` input or the `Runner:` trailer (`linux` or `macos`), else the repository variable
+// GATE_E2E_RUNNER, else GATE_RUNNER, else `linux`; a Linux lane takes only the groups that run green there (LINUX_E2E).
+// Writes the switches, the e2e matrix and its runner to the job's outputs and the set to its summary. Run from the
+// checkout's root.
 import { appendFileSync, readFileSync } from 'node:fs';
 import process from 'node:process';
 
@@ -33,11 +34,11 @@ if (lane !== 'linux' && lane !== 'macos') refuse(`no such runner: ${lane} (linux
 const RUNNERS = { linux: 'ubuntu-24.04', macos: ['self-hosted', 'macOS', 'ARM64'] };
 
 const asked = dispatched ? env.INPUT_GATES : trailer('Gates');
-const defaults = ['static', 'unit', 'probes', ...(lane === 'macos' ? words(env.CLASS1_E2E).filter((group) => scriptOf(group) in scripts).map((group) => `e2e:${group}`) : [])];
+const defaults = ['static', 'unit', 'probes', ...(lane === 'macos' ? ['unit:darwin', ...words(env.CLASS1_E2E).filter((group) => scriptOf(group) in scripts).map((group) => `e2e:${group}`)] : [])];
 const gates = new Set(words(asked).length > 0 ? words(asked) : defaults);
 
-const unknown = [...gates].filter((gate) => !['static', 'unit', 'probes'].includes(gate) && !(gate.startsWith('e2e:') && scriptOf(gate.slice(4)) in scripts));
-if (unknown.length > 0) refuse(`no such gate: ${unknown.join(', ')} (static, unit, probes, e2e:default or e2e:<group> with a package.json script)`);
+const unknown = [...gates].filter((gate) => !['static', 'unit', 'unit:darwin', 'probes'].includes(gate) && !(gate.startsWith('e2e:') && scriptOf(gate.slice(4)) in scripts));
+if (unknown.length > 0) refuse(`no such gate: ${unknown.join(', ')} (static, unit, unit:darwin, probes, e2e:default or e2e:<group> with a package.json script)`);
 
 // A Linux lane runs only the groups §3.1's table found green there; the rest are macOS work, refused here rather than
 // scheduled to fail.
@@ -54,7 +55,7 @@ const e2e = [...gates]
   });
 
 const has = (gate) => String(gates.has(gate));
-appendFileSync(env.GITHUB_OUTPUT, `static=${has('static')}\nunit=${has('unit')}\nprobes=${has('probes')}\ne2e=${JSON.stringify(e2e)}\ne2e_runner=${JSON.stringify(RUNNERS[lane])}\n`);
-const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, and class 1 e2e on a macOS lane)';
+appendFileSync(env.GITHUB_OUTPUT, `static=${has('static')}\nunit=${has('unit')}\nunit_darwin=${has('unit:darwin')}\nprobes=${has('probes')}\ne2e=${JSON.stringify(e2e)}\ne2e_runner=${JSON.stringify(RUNNERS[lane])}\n`);
+const from = words(asked).length > 0 ? (dispatched ? 'the `gates` input' : 'the `Gates:` trailer') : 'the default (class 1a, with unit:darwin and class 1 e2e on a macOS lane)';
 appendFileSync(env.GITHUB_STEP_SUMMARY, `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. E2e lane: ${lane}.\n`);
 process.stdout.write(`${[...gates].join('\n')}\nlane: ${lane}\n`);
