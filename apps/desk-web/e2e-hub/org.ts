@@ -1,6 +1,6 @@
-// The org key and its dialog as the local-hub suites drive them. The local hub's state outlives a run, and an org has
-// one key ever: a suite that meets an org with no key sets one up with the suite's passphrase; one that meets an org
-// with a key unlocks with that passphrase, which every first setup by these suites adds.
+// The org key and its dialog as the local-hub suites drive them. Each run's local hub starts from a fresh state (no key),
+// and an org has one key ever: a suite that meets an org with no key sets one up with the suite's passphrase; one that
+// meets an org with a key (a hub whose state was kept) unlocks with that passphrase, which every first setup adds.
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { WrappedKeys } from 'desk-hub/protocol';
 import type { LocalHub } from '../test/local/hub';

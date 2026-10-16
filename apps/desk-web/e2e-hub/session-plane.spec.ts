@@ -33,7 +33,7 @@ let orgKey: Uint8Array;
 let org: string;
 let member: string;
 const machines: Array<{ close(): Promise<void> }> = [];
-/** Every machine name this run enrolled, revoked at the end (the local hub's state outlives a run). */
+/** Every machine name this run enrolled, revoked at the end. */
 const enrolledNames: string[] = [];
 
 const short = () => randomUUID().slice(0, 8);
@@ -224,7 +224,8 @@ test("G2: an RPC is drawn forwarded, uncertain when its machine drops, retried u
   await expect(composer.locator('[data-rpc-state="forwarded"]')).toContainText(`Sent to ${fm.name}; waiting for its answer`);
   await fm.drop();
   const uncertain = composer.locator('[data-rpc-state="uncertain"]');
-  await expect(uncertain).toContainText(`${fm.name} dropped before answering: it may or may not have happened`);
+  // Locally a close is seen at the stream's next heartbeat write (2 s, DX2's per-runtime latency): up to 10 s.
+  await expect(uncertain).toContainText(`${fm.name} dropped before answering: it may or may not have happened`, { timeout: 10_000 });
   await fm.connect();
   await expect(page.getByTestId('machine-offline')).toHaveCount(0);
   await uncertain.getByRole('button', { name: 'Retry' }).click();
@@ -276,7 +277,7 @@ test("G2: when the machine goes offline its session's presence and depth read un
   await expect(page.getByTestId('machine-offline')).toHaveCount(0);
 
   await fm.drop();
-  await expect(page.getByTestId('machine-offline')).toContainText(`${fm.name} is offline: fakerec's presence and depth are unavailable`);
+  await expect(page.getByTestId('machine-offline')).toContainText(`${fm.name} is offline: fakerec's presence and depth are unavailable`, { timeout: 10_000 });
   await expect(center(page)).toContainText('You chose blue');
   await expect(nav(page).locator(`[data-session="${rec.session}"]`)).toContainText('offline');
   await expect(page.getByTestId('composer').getByRole('button', { name: 'Compact' })).toHaveAttribute('title', `${fm.name} is offline`);

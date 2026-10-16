@@ -7,8 +7,8 @@
 // The machine here is a DX7/DX2 test client (test/local/machine.ts); the grid's counts and M3's proofs against DC3's
 // session plane and fake machine are session-plane.spec.ts.
 //
-// The local hub's state outlives a run (apps/desk-hub/.wrangler), and an org has one key ever: first setup is proved on
-// a hub whose org has none. It adds the suite's passphrase, which a later run unlocks with instead.
+// Each run's local hub starts from a fresh state (test/local/hub.ts), so first setup is proved on an org with no key; an
+// org has one key ever, and the setup adds the suite's passphrase, which a hub whose state was kept would unlock with.
 //
 // One browser page for the suite: its virtual authenticator holds the org's passkey from the setup on.
 import { randomUUID } from 'node:crypto';
