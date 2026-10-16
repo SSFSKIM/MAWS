@@ -42,6 +42,10 @@
     "e2e/support/live-budget.ts",
     // P2-F F-E: test/support/live-turns.test.ts runs the live specs' wait for a submitted turn
     "e2e/support/live-turns.ts",
+    // P3-C M9: test/support/text-run.test.ts runs the LibreOffice compare's text matcher
+    "e2e/support/text-run.ts",
+    // P3-C M10: test/support/live-lifecycle.test.ts runs the live runs' end (the stop, the cleanup, the engine's survival, the spend)
+    "e2e/support/live-lifecycle.ts",
     // P2-F S-locale: the transcript model's day words and the agent tools' ages write through the renderer's date
     // formats (D2 widened), and the agent models' tests read the system locale's relative times; listed for the same
     // reason as C8a's
@@ -52,7 +56,8 @@
     "e2e/support/document-seed.ts"
   ],
   // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6), typechecked by
-  // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise.
+  // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise. P3-C M4:
+  // the slide canvas and the deck editor, likewise (M9: `canvas/css.ts` stays in, since the exporters in main write it).
   "exclude": [
     "src/main/artifacts/*.dom.test.tsx",
     "src/artifacts/document/editor/**/*",
@@ -61,6 +66,12 @@
     "src/artifacts/design-system/apply.ts", // P3-D
     "src/artifacts/design-system/scope-style.ts", // P3-D
     "src/artifacts/design-system/page/**/*", // P3-D
-    "src/artifacts/design-system/**/*.test.tsx" // P3-D
+    "src/artifacts/design-system/**/*.test.tsx", // P3-D
+    "src/artifacts/slides/canvas/slide-canvas.ts", // P3-C
+    "src/artifacts/slides/canvas/elements.ts", // P3-C
+    "src/artifacts/slides/canvas/fit.ts", // P3-C
+    "src/artifacts/slides/canvas/index.ts", // P3-C
+    "src/artifacts/slides/editor/**/*", // P3-C
+    "src/artifacts/**/*.dom.test.tsx" // P3-C
   ]
 }

@@ -30,7 +30,7 @@ export const IMPORT_READ_WAIT_MS = 8_000;
 
 const describe = (counts: DeliverablesImport) => `imported ${counts.imported}, skipped ${counts.skipped}, missing ${counts.missing}, failed ${counts.failed}`;
 
-export function registerLibrary(on: HostOn, { documents, deliverablesDir, log = (line) => console.warn(`[library] ${line}`), e2e = false }: LibraryDeps): { close(): void } {
+export function registerLibrary(on: HostOn, { documents, deliverablesDir, log = (line) => console.warn(`[library] ${line}`), e2e = false }: LibraryDeps): { close(): void; refresh(artifactIds: string[]): void /* P3-C */ } {
   registerLibraryReads(on, documents, { afterImport: (store) => importSettledWithin(store, IMPORT_READ_WAIT_MS) });
   const mirror = documents ? new LibraryMirror(documents) : null;
   void mirror?.start(); // its steps log their own failures
@@ -51,5 +51,7 @@ export function registerLibrary(on: HostOn, { documents, deliverablesDir, log = 
     if (!documents) throw new HostCommandError(ipcError('internal', 'the artifact store could not be opened this run'));
     return runImport();
   });
-  return { close: () => mirror?.close() };
+  // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29): the mirror's `refresh`, for the deck
+  // module, whose mirror follows its governing design system
+  return { close: () => mirror?.close(), refresh: (artifactIds) => mirror?.refresh(artifactIds) };
 }

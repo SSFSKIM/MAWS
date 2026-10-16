@@ -22,6 +22,12 @@
     "src/artifacts/design-system/roles.ts",
     "src/artifacts/design-system/tokens.ts",
     "src/artifacts/design-system/values.ts",
+    // P3-C (M4): the presentations spec seeds S6's 100-slide bench deck
+    "src/artifacts/slides/fixtures/bench.ts",
+    "src/artifacts/slides/fixtures/s6.ts",
+    // P3-C at the merge of B: B's `src/artifacts/yjs/*.ts` takes in C's seams (slides.ts, slide-text.ts, slides-undo.ts),
+    // whose seam imports the dialect's IR
+    "src/artifacts/slides/ir.ts",
     "src/engine-host/binary-info.ts",
     "src/engine-host/engine-compat.ts",
     "src/engine-host/fs/paths.ts",

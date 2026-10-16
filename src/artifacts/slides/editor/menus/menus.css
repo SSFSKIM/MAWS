@@ -1,0 +1,201 @@
+/* The design system's menus and panels (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md D10; M6): app chrome,
+   the app's tokens only; the swatches and the layouts' thumbnails paint the deck's own values (drawn in its scope). They
+   ride the inspector's column, fields and buttons (inspector.css). */
+
+/* the filmstrip's two ways to a new slide */
+.deck-new-slides {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px;
+}
+.deck-new-slides .deck-new-slide {
+  margin: 0;
+}
+
+/* Text style */
+.deck-text-style {
+  min-width: 84px;
+  justify-content: flex-start;
+}
+.deck-menu-check {
+  display: inline-block;
+  width: 16px;
+  color: var(--accent);
+}
+
+/* Theme */
+.deck-theme-systems {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.deck-theme-system {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 8px;
+  align-items: center;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+.deck-theme-system:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.deck-theme-system[aria-checked='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.deck-theme-system:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.deck-theme-system-swatches {
+  display: flex;
+  grid-row: span 2;
+}
+.deck-theme-system-swatch {
+  width: 14px;
+  height: 14px;
+  margin-left: -3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+}
+.deck-theme-system-swatch:first-child {
+  margin-left: 0;
+}
+.deck-theme-system-name {
+  overflow: hidden;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deck-theme-system-detail {
+  overflow: hidden;
+  color: var(--fg-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deck-theme-row[data-overridden] .deck-inspector-caption {
+  color: var(--fg);
+  font-weight: 500;
+}
+.deck-theme-picker {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+.deck-theme-picker::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.deck-theme-picker::-webkit-color-swatch {
+  border: 0;
+  border-radius: 2px;
+}
+
+/* Check */
+.deck-check-body {
+  display: flex;
+  flex-direction: column;
+}
+.deck-check-note,
+.deck-check-summary {
+  margin: 0;
+  padding: 0 12px 10px;
+  color: var(--fg-muted);
+}
+.deck-check-list,
+.deck-check-plain {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.deck-check-plain {
+  gap: 6px;
+  color: var(--fg-muted);
+}
+.deck-check-violation {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+}
+.deck-check-violation:hover {
+  background: var(--bg-hover);
+}
+.deck-check-violation:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.deck-check-message {
+  overflow-wrap: anywhere;
+}
+.deck-check-where {
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deck-check-rule {
+  color: var(--fg-faint);
+  overflow-wrap: anywhere;
+}
+
+/* New slide from layout */
+.deck-layouts {
+  max-height: min(70vh, 640px);
+  overflow-y: auto;
+}
+.deck-layouts-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 160px);
+  gap: 8px;
+  padding: 4px;
+}
+.deck-layouts-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border-radius: var(--radius-sm);
+  outline: none;
+}
+.deck-layouts-item[data-highlighted] {
+  background: var(--bg-hover);
+}
+.deck-layouts-thumb {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+.deck-layouts-name {
+  color: var(--fg);
+  font-size: var(--text-ui-sm);
+}
+.deck-layouts-note {
+  margin: 0;
+  padding: 8px;
+  color: var(--fg-muted);
+}

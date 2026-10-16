@@ -102,6 +102,9 @@ export interface KindAdapter {
   initial?(doc: Doc, info: { title: string }): void;
   readFiles?(doc: Doc): Record<string, string>; // M6
   publish?(live: Doc, base: Record<string, string>, sent: Record<string, string | null>, force: boolean): { changed: string[]; conflicts: { path: string; detail?: string }[] }; // M6
+  // P3-C (the parent's Decision Log 58): the paths `readFiles` would answer, in its order, without their text; a publish
+  // builds its answer's `kept` and `removed` from them. Without it, the paths of `readFiles` (or the generic file model).
+  paths?(doc: Doc): string[];
 }
 
 // What an editor shows of an open document (P3-G's header maps it: `unsaved > 0` while live is saving, phase `off` is
@@ -135,7 +138,7 @@ export interface ArtifactHost {
   // P3-D (the P3 spec's Decision Log 59): `revision` names a retained revision (a design-system pin's `versionSeq`), at
   // which the store serves a deleted system's assets while a version pins it (Decision Log 46); omitted, the live one.
   assetUrl(artifactId: string, ref: string, revision?: number): string;
-  export(artifactId: string, format: string, version?: number, options?: { pageSize?: 'letter' | 'a4' }): Promise<{ path: string }>; // M7; `pageSize`: Decision Log 42
+  export(artifactId: string, format: string, version?: number, options?: { pageSize?: 'letter' | 'a4'; fonts?: 'named' | 'basic' | 'pictures' | 'embedded' /* P3-C (H2-4) */ }): Promise<{ path: string }>; // M7; `pageSize`: Decision Log 42
   versionState(artifactId: string, version: number | { seq: number }): Promise<Uint8Array>; // V2 bytes (Decision Log 22c)
   attributions(artifactId: string, fromSeq: number, toSeq: number, options?: ArtifactDocOption): Promise<Uint8Array>; // a merged ContentMap (23a)
   // The owner settles proposals of the suggestion doc (Decision Log 45): ranges are the item ids the editor's selection
@@ -143,5 +146,8 @@ export interface ArtifactHost {
   acceptSuggestion(artifactId: string, ranges: SuggestionRange[]): Promise<{ revision: number }>;
   rejectSuggestion(artifactId: string, ranges: SuggestionRange[]): Promise<{ revision: number }>;
   uploadAsset(artifactId: string, bytes: Uint8Array, meta: { name: string; mime: string }): Promise<{ assetId: string; ref: string }>; // 25l
+  // P3-C (Decision Log 25; the parent's 65): one artifact's asset copied into another by the store, bytes and mime
+  // unchanged; answers the target's ref (an existing one for identical bytes).
+  copyAsset(from: string, ref: string, to: string): Promise<{ assetId: string; ref: string }>;
   identity(): { actor: Actor; name: string; color: string };
 }

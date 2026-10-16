@@ -35,7 +35,7 @@ export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShap
   'artifacts.list': 'immediate', 'artifacts.get': 'immediate', 'artifacts.create': 'immediate', 'artifacts.update': 'immediate',
   'artifacts.delete': 'immediate', 'artifacts.duplicate': 'immediate', 'artifacts.search': 'immediate', 'artifacts.versions': 'immediate',
   'artifacts.saveVersion': 'immediate', 'artifacts.nameVersion': 'immediate', 'artifacts.restore': 'immediate', 'artifacts.markViewed': 'immediate', 'artifacts.pruneVersions': 'immediate',
-  'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.acceptSuggestion': 'immediate', 'artifacts.rejectSuggestion': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.testLoopDelay': 'immediate',
+  'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.acceptSuggestion': 'immediate', 'artifacts.rejectSuggestion': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.copyAsset': 'immediate' /* P3-C */, 'artifacts.testLoopDelay': 'immediate',
   'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.state': 'immediate', 'artifacts.assets': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
   'spaces.list': 'immediate', 'spaces.create': 'immediate', 'spaces.update': 'immediate', 'spaces.delete': 'immediate',
 };
@@ -187,6 +187,7 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   serve('artifacts.acceptSuggestion', ({ artifactId, ranges }) => settle(artifactId, (service) => service.acceptSuggestion(artifactId, ranges, HUMAN)));
   serve('artifacts.rejectSuggestion', ({ artifactId, ranges }) => settle(artifactId, (service) => service.rejectSuggestion(artifactId, ranges, HUMAN)));
   serve('artifacts.uploadAsset', ({ artifactId, name, mime, bytes }) => storeOf().uploadAsset(artifactId, bytes, { name, mime }, HUMAN));
+  serve('artifacts.copyAsset', ({ from, ref, to }) => storeOf().copyAsset(from, ref, to, HUMAN)); // P3-C (Decision Log 25)
   serve('artifacts.testLoopDelay', ({ reset }) => {
     e2eOnly('artifacts.testLoopDelay');
     const histogram = loopDelay!;

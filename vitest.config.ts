@@ -41,7 +41,8 @@ const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',
   'src/renderer/src/sessions/resource.test.tsx', // a whole-tree mount switched across 20 sessions (gate offload, Decision Log 11)
 ];
-// P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md).
+// P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md); P3-C M4 shares the
+// project (the slide canvas, the deck editor).
 const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
 
 // C3 start: the `live` project runs the engine-host suite against the pinned binary through the relay

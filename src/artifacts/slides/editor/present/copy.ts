@@ -1,0 +1,20 @@
+// P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D13; M6): the show's words.
+export const PRESENT_COPY = {
+  nothing: 'This deck has no slides to show (every slide is hidden).',
+  count: (n: number, of: number) => `Slide ${n} of ${of}`,
+  elapsed: (time: string) => `Elapsed ${time}`,
+  back: 'Previous',
+  next: 'Next',
+  black: 'Black',
+  blackShown: 'The audience sees black',
+  audienceView: 'Audience view',
+  end: 'End show',
+  current: 'Current slide',
+  nextUp: 'Next slide',
+  nextBuild: 'Next build',
+  endOfShow: 'End of the show.',
+  notes: 'Speaker notes',
+  noNotes: 'No notes for this slide.',
+  opening: 'Opening the presentation…',
+  failed: (reason: string) => `The presentation could not be opened: ${reason}`,
+} as const;
