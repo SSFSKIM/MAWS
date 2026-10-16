@@ -30,38 +30,42 @@ const TAIL_SLACK = 48;
  * Keeps a scrolled list at its tail while the reader is there: it opens at the tail, and whatever is added or grows
  * below (a message, a card, Markdown drawn late) keeps it there; once the reader scrolls up, or a landing scrolls to its
  * card, it stays where it was put until the reader returns to the bottom.
+ *
+ * Whether the reader is at the tail is judged at each change, from the scroll position as it is now against the list as
+ * it was last measured (its content height and its own height before this change), never from the last scroll event:
+ * the browser delivers that a frame late, so a scroll to the bottom followed at once by a new row (desktop Chrome, 9 ms
+ * apart) would read as the reader not being there.
  */
 function useTail(items: StreamItem[], outbox: OutboxItem[], landed: string | null) {
   const list = useRef<HTMLOListElement>(null);
   const landedRow = useRef<HTMLLIElement>(null);
-  const following = useRef(true);
-  useEffect(() => {
-    const el = list.current;
-    if (!el) return;
-    const onScroll = () => (following.current = el.scrollHeight - el.scrollTop - el.clientHeight <= TAIL_SLACK);
-    el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, []);
+  /** The list as last measured: null before the first change, which opens at the tail. */
+  const measured = useRef<{ content: number; box: number } | null>(null);
   // What was added moves the tail, before it is painted.
   useLayoutEffect(() => {
     const el = list.current;
-    if (el && following.current) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    const was = measured.current;
+    if (was === null || was.content - el.scrollTop - was.box <= TAIL_SLACK) el.scrollTop = el.scrollHeight;
+    measured.current = { content: el.scrollHeight, box: el.clientHeight };
   }, [items, outbox]);
-  // Rows that grow after they are drawn (Markdown loaded late, a card's preview) move it too.
+  // Rows that grow after they are drawn (Markdown loaded late, a card's preview), and the list's own box (the composer
+  // growing beneath it), move it too.
   useEffect(() => {
     const el = list.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
-      if (following.current) el.scrollTop = el.scrollHeight;
+      const was = measured.current;
+      if (was === null || was.content - el.scrollTop - was.box <= TAIL_SLACK) el.scrollTop = el.scrollHeight;
+      measured.current = { content: el.scrollHeight, box: el.clientHeight };
     });
+    observer.observe(el);
     for (const row of el.children) observer.observe(row);
     return () => observer.disconnect();
   }, [items, outbox]);
-  // A landing decides where the reader is.
+  // A landing decides where the reader is: scrolled to its card, the reader is no longer at the tail.
   useEffect(() => {
-    if (!landedRow.current) return;
-    following.current = false;
-    landedRow.current.scrollIntoView({ block: 'center' });
+    landedRow.current?.scrollIntoView({ block: 'center' });
   }, [landed]);
   return { list, landedRow };
 }
