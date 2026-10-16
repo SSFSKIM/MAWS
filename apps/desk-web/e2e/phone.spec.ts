@@ -215,6 +215,20 @@ test('a tap with the app already open sends that window to the card, in place', 
   await expect(page).toHaveURL(new RegExp(`/p/${PROJECT}/s/${S.asks}$`));
 });
 
+test('a tap reaches a window still waiting on its sign-in, and lands on the card once the desk is drawn', async ({ page, hub }) => {
+  await stageProject(hub);
+  await seedKey(page, hub);
+  let signIn!: () => void;
+  const signedIn = new Promise<void>((resolve) => (signIn = resolve));
+  await page.route('**/api/me', async (route) => (await signedIn, route.continue()));
+  await page.goto(hub.url); // the document is loaded: a message no listener takes is dropped from here on
+  await raiseQuestion(hub, 'toolu_q3');
+  await page.evaluate((url) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'desk-open', url } })), `/p/${PROJECT}/s/${S.asks}?request=toolu_q3`);
+  signIn();
+  await expect(center(page).locator('[data-landed]')).toContainText('Which column do we keep?');
+  await expect(page).toHaveURL(new RegExp(`/p/${PROJECT}/s/${S.asks}$`));
+});
+
 test('a card the push named says why it is not drawn: settled before the tap, or failing verification', async ({ page, hub }) => {
   await stageProject(hub);
   await seedKey(page, hub);
