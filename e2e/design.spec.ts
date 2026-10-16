@@ -173,6 +173,37 @@ test('a design in the panel and a main tab: two replicas, every board mounted th
   await inPanel.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-selection');
   await expect(inPanel.getByRole('textbox', { name: 'Board width' })).toHaveValue('390');
   await expect(inPanel.locator('[data-board-id="phone"]')).toHaveAttribute('data-frame-selected', 'true');
+  // the evidence first, so a first failing bound hides nothing: the screenshot, then every box the bounds below read
+  // and each element of the editor's chrome lying outside it (the world's own contents excluded: its boards are clipped
+  // to it by design), attached as one JSON
+  await panel.screenshot({ path: test.info().outputPath('design-panel-phone.png') });
+  const geometry = await inPanel.evaluate((n) => {
+    const rect = (el: Element | null) => {
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.x * 10) / 10, y: Math.round(r.y * 10) / 10, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 };
+    };
+    const editor = n.querySelector<HTMLElement>('[data-design-editor]')!;
+    const e = editor.getBoundingClientRect();
+    const world = editor.querySelector('[data-design-world]');
+    const outside = Array.from(editor.querySelectorAll<HTMLElement>('*'))
+      .filter((el) => !(world && world !== el && world.contains(el)))
+      .map((el) => ({ el, r: el.getBoundingClientRect() }))
+      .filter(({ r }) => r.width > 0 && (r.left < e.left - 1 || r.right > e.right + 1))
+      .map(({ el }) => ({ tag: el.tagName.toLowerCase(), className: typeof el.className === 'string' ? el.className : '', role: el.getAttribute('role'), label: el.getAttribute('aria-label'), rect: rect(el), scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }));
+    let scrolled = 0;
+    for (let a: HTMLElement | null = n as HTMLElement; a; a = a.parentElement) scrolled += a.scrollLeft;
+    return {
+      editor: { rect: rect(editor), scrollWidth: editor.scrollWidth, clientWidth: editor.clientWidth },
+      scrolled,
+      toolbar: { rect: rect(editor.querySelector('[role="toolbar"]')), scrollWidth: editor.querySelector('[role="toolbar"]')?.scrollWidth ?? null },
+      world: rect(world),
+      inspector: rect(editor.querySelector('[data-design-rail="inspector"]')),
+      phone: rect(editor.querySelector('[data-board-id="phone"]')),
+      outside,
+    };
+  });
+  await test.info().attach('design-panel-geometry', { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
   // nothing overflows the panel sideways and nothing is scrolled: the editor fits it, every control lies inside it
   const panelBox = (await panel.boundingBox())!;
   const inside = async (what: string, locator: Locator) => {
@@ -210,7 +241,7 @@ test('a design in the panel and a main tab: two replicas, every board mounted th
   expect(phoneBox.y).toBeGreaterThanOrEqual(worldBox.y - 1);
   expect(phoneBox.x + phoneBox.width).toBeLessThanOrEqual(worldBox.x + worldBox.width + 1);
   expect(phoneBox.y + phoneBox.height).toBeLessThanOrEqual(worldBox.y + worldBox.height + 1);
-  await panel.screenshot({ path: test.info().outputPath('design-panel-phone.png') });
+  expect(geometry.outside, 'the editor’s chrome outside the editor').toEqual([]);
 
   expect(launch!.consoleErrors()).toEqual([]);
 });
