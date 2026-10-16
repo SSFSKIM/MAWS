@@ -23,7 +23,9 @@ import { ArtifactSession, type ArtifactToolDeps } from '../tool-server/artifact-
 import { artifactExportTool, type ExportBridge } from '../tool-server/artifact-export';
 import { artifactCreateTool } from '../tool-server/artifact-tools';
 import type { McpToolContext, McpToolResult } from '../tool-server/server';
+import { publishFiles, readFiles } from '@artifacts/files';
 import { registerDesigns, type Designs } from '.';
+import { logRows, makeLegacyDesign } from './legacy.fixture';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 const { ExporterRegistry, startExportService } = await import('../../main/artifacts/export');
@@ -45,6 +47,9 @@ const bridged: unknown[] = [];
 
 beforeEach(() => {
   userData = mkdtempSync(join(tmpdir(), 'maws-design-export-route-'));
+});
+/** The host's store and handlers, main's export service with the design's exporters, and the bridge between them. */
+function start(): void {
   documents = openDocuments(userData, () => {})!;
   designs = registerDesigns({ documents, chain: null, refresh: () => {} });
   const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
@@ -97,12 +102,12 @@ beforeEach(() => {
         listener!(event as never);
       }),
   } as unknown as ExportBridge;
-});
+}
 afterEach(() => {
-  service.stop();
-  surface.close();
-  designs.close();
-  documents.close();
+  service?.stop();
+  surface?.close();
+  designs?.close();
+  documents?.close();
   rmSync(userData, { recursive: true, force: true });
   captured.length = 0;
   loaded.length = 0;
@@ -125,6 +130,7 @@ const FILES = {
   [boardPath('poster')]: '<section id="poster" style="background:#000000"><h1 id="t" style="color:#ffffff">Poster</h1></section>',
 };
 async function created(): Promise<string> {
+  start();
   const result = await artifactCreateTool(deps()).call({ kind: 'design', title: 'Launch', files: FILES }, ctx());
   return (JSON.parse(textOf(result)) as { artifactId: string }).artifactId;
 }
@@ -177,5 +183,23 @@ describe('the library’s route: artifacts.export to main’s design exporter', 
     expect(pdf.boards).toEqual(['phone']);
     await service.exportForLibrary(pdf);
     expect(printed.at(-1)).not.toContain('data-frame="poster"');
+  });
+});
+
+describe('a retained version of a design whose live legacy state cannot migrate (Decision Log 22)', () => {
+  it('exports through the real design exporter from the version’s projection, writing no migration row', async () => {
+    const { id, versionId } = await makeLegacyDesign(userData, { version: true });
+    start();
+    // an earlier build broke the live manifest after the version was kept
+    await documents.service.writeAs(id, { kind: 'human' }, (doc) => void publishFiles(doc, readFiles(doc), { [CANVAS_PATH]: '{"v":' }, false));
+    const rows = logRows(userData, id);
+    const exported = await service.exportForLibrary({ artifactId: id, format: 'png', versionId: versionId!, board: 'phone' });
+    expect(readFileSync(exported.path, 'utf8')).toBe('png:phone');
+    expect(loaded[0]).toContain('data-frame="phone" data-size="390x844"');
+    expect(logRows(userData, id)).toEqual(rows);
+    const tooLarge = await service.exportForLibrary({ artifactId: id, format: 'png', versionId: versionId!, board: 'poster' }).catch((error: unknown) => error);
+    expect((tooLarge as InstanceType<typeof CommandFailure>).error.issues).toEqual({ reason: 'exportTooLarge', data: { board: 'poster', w: 1080, h: 10_000, maxScale: 0.8192 } });
+    await expect(service.exportForLibrary({ artifactId: id, format: 'png' })).rejects.toThrow(/canvas\.json is not JSON/);
+    expect(logRows(userData, id)).toEqual(rows);
   });
 });
