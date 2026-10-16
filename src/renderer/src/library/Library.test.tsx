@@ -411,6 +411,27 @@ describe('the row actions', () => {
     expect(within(menu).queryByRole('menuitem', { name: 'Export' })).toBeNull();
   });
 
+  // P3-H (Decision Log 87): Send to Google Drive and Notion, inside Export only, for a kind with a format to send
+  it('Export › Send to Google Drive… and Send to Notion… follow the formats and open the confirmation; a kind with no format has neither', async () => {
+    answers['library.exportFormats'] = (input) => ok({ formats: input.kind === 'html' ? ['pdf', 'png'] : [] });
+    const user = userEvent.setup();
+    render(<Library />);
+    await user.click(within(await openMenu(user, 'Pricing page')).getByRole('menuitem', { name: 'Export' }));
+    await screen.findByRole('menuitem', { name: 'PDF' });
+    const items = screen.getAllByRole('menuitem').map((item) => item.textContent);
+    expect(items.slice(items.indexOf('PDF'))).toEqual(['PDF', 'PNG', 'Send to Google Drive…', 'Send to Notion…']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Send to Notion…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Send to Notion' });
+    await waitFor(() => expect((within(sheet).getByRole('combobox', { name: 'Format' }) as HTMLSelectElement).value).toBe('pdf'));
+    expect(main.callsOf('artifacts.export')).toEqual([]); // nothing runs before the owner's Send
+    await user.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    expect(useLibraryDialog.getState().open).toBeNull();
+
+    await user.click(within(await openMenu(user, 'export.csv')).getByRole('menuitem', { name: 'Export' }));
+    await screen.findByRole('menuitem', { name: 'Save a copy…' });
+    expect(screen.queryByRole('menuitem', { name: 'Send to Google Drive…' })).toBeNull();
+  });
+
   it('Move to Space › New Space… makes the Space and moves the artifact into it', async () => {
     const user = userEvent.setup();
     render(<Library />);

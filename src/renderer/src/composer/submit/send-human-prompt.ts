@@ -15,7 +15,8 @@ import { readSessionQueue } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { ENDED, STARTING, isBusy } from './submit-state';
 
-export type HumanPromptOrigin = 'composer' | 'answer' | 'reply' | 'comment' | 'peer';
+// P3-H (Decision Log 87): 'sendTo', the library's Send to request; internal typing, never an IPC name
+export type HumanPromptOrigin = 'composer' | 'answer' | 'reply' | 'comment' | 'peer' | 'sendTo';
 export interface HumanPromptOptions {
   origin: HumanPromptOrigin; // the caller's provenance; not a plugin-origin submission or a new engine/written field
   display?: string; // C12's first-message display: the composer preserves its pasted-segment markers
