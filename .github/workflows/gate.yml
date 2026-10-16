@@ -29,11 +29,12 @@ env:
   # runner once the artifact kinds landed (Decision Log 17 and 19); the runner has 7 GB. A limit, not an allocation.
   NODE_OPTIONS: --max-old-space-size=5120
   # §3.1's class-1 e2e groups, the default set on a macOS lane. A name whose script is not in package.json is skipped,
-  # so a child's group joins the default set at the commit that adds its script.
+  # so a child's group joins the default set at the commit that adds its script. browser-cua and browser-chrome are
+  # macOS-only and run on fakes (the cua host, a synthetic Chrome profile, the MAWS_E2E_KEYCHAIN seam; Decision Log 35).
   CLASS1_E2E: >-
     default artifacts library side tools to-human deliverables panel supervisor browser browser-comment browser-import
     settings transcript terminal code agents widgets c7 scm c12 available document document-app presentations
-    design-systems
+    design-systems browser-cua browser-chrome
   # The groups §3.1's table found green on a Linux runner, the only ones a Linux lane takes (never by default).
   LINUX_E2E: library artifacts available tools agents
   # The groups that render documents through LibreOffice (P3-B's DOCX-to-PDF case, P3-C's render-and-compare).
