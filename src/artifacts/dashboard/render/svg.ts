@@ -2,6 +2,7 @@
 // formats, and the theme, resolved from D's document-medium `--ds-*` values (the same input in the editor and the
 // exporters) and validated before any value enters an attribute. Nothing here reads a DOM, the locale, the clock or
 // randomness, so equal inputs write equal bytes.
+import { authoredFontStack } from '../../design-system/assets';
 import { HOUSE_TOKENS } from '../../document/export/design-system';
 
 /** Text and attribute content, escaped for XML; control characters other than tab and newline are dropped. */
@@ -84,7 +85,9 @@ export const THEME_PROPERTIES = ['--ds-color-bg-raised', '--ds-color-text', '--d
 
 /** The theme from resolved `--ds-*` properties (an absent or empty one is the house system's, D's `maws` default); a value
  * the figure cannot take safely (not a six-digit hex colour, a font list with markup, a size outside 8 to 40 px) is
- * refused with a warning and the house value kept. */
+ * refused with a warning and the house value kept. A font list is written as the system authored it (P3-E Decision Log
+ * 37): an editor scope's private names of uploaded faces dropped, so the editor's figure is the exports' figure; the
+ * editor's stylesheet draws it in the scope's faces. */
 export function themeFrom(props: Readonly<Record<string, string | undefined>>, width = FIGURE_WIDTH): { theme: Theme; warnings: string[] } {
   const warnings: string[] = [];
   const house = HOUSE_TOKENS.properties as Readonly<Record<string, string>>;
@@ -111,8 +114,8 @@ export function themeFrom(props: Readonly<Record<string, string | undefined>>, w
       ink: pick('--ds-color-text', HEX),
       muted: pick('--ds-color-text-muted', HEX),
       rule: pick('--ds-color-border', HEX),
-      fontBody: pick('--ds-font-body', FONT),
-      fontMono: pick('--ds-font-mono', FONT),
+      fontBody: authoredFontStack(pick('--ds-font-body', FONT)),
+      fontMono: authoredFontStack(pick('--ds-font-mono', FONT)),
       caption: size('--ds-type-caption-size'),
       body: size('--ds-type-body-size'),
       width: Number.isFinite(width) && width >= 240 && width <= 2000 ? Math.round(width) : FIGURE_WIDTH,

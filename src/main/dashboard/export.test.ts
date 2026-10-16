@@ -4,13 +4,18 @@
 // checked before and after every page, so a replacement landing while an export reads its first page changes nothing in
 // any of the four files; a snapshot that cannot be read, a cancelled export and a held legacy dashboard each fail the
 // export with nothing written; and Word alone takes pictures, one per chart, none of a table.
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import JSZip from 'jszip';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 import { exportTheme } from '@artifacts/dashboard/export';
 import { descriptor, exportDashboard, NEW_REF, OLD_REF, REPLACED_AT, SNAPSHOTS } from '@artifacts/dashboard/fixtures/export';
 import { setDataset } from '@artifacts/dashboard/datasets';
 import { renderView } from '@artifacts/dashboard/render';
+import { writeSystem } from '@artifacts/design-system/model';
+import { DEFAULT_SYSTEMS } from '@artifacts/types/design_system/defaults';
 import { newDoc, stateV2 } from '@artifacts/yjs';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
@@ -208,5 +213,63 @@ describe('registerDashboardExporters', () => {
     await exporters(bare.call).get('md')!.run(request('md'), none);
     expect(bare.pages).toHaveLength(0);
     expect(out.size).toBe(1);
+  });
+});
+
+// P3-E Decision Log 37: a dashboard governed by a system with uploaded faces (the bundled Official's Noto Serif KR). The
+// figure names the authored family, as the editor's figure does; HTML and PDF carry the system's faces under that name,
+// their files inlined, so the page draws the figure's text in the face the editor draws it in; Word's picture window is
+// handed the same faces; Markdown reads none.
+describe('a dashboard governed by a system with uploaded faces', () => {
+  const SYSTEM = '00000000-0000-4000-8000-0000000000e5';
+  const FACE = new Uint8Array([0x77, 0x4f, 0x46, 0x32, 1, 2, 3]); // a stand-in woff2's bytes
+  let dir = '';
+  function governed() {
+    const source = DEFAULT_SYSTEMS.find((system) => system.key === 'official')!;
+    const doc = newDoc();
+    writeSystem(doc, source.files, { route: 'default', key: 'official', at: 0 }, { name: 'Official' });
+    const systemState = stateV2(doc);
+    doc.destroy();
+    const { call: base } = host();
+    return vi.fn(async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>> => {
+      if (name === 'designSystems.governing') return { ok: true, value: { system: { id: SYSTEM } } } as never;
+      if (name === 'artifacts.state') return { ok: true, value: { bytes: systemState, revision: 3 } } as never;
+      if (name === 'artifacts.content') {
+        const path = (input as CommandInput<'artifacts.content'>).path ?? '';
+        dir ||= mkdtempSync(join(tmpdir(), 'maws-dashboard-faces-'));
+        const file = join(dir, path.replace(/\//g, '_'));
+        writeFileSync(file, FACE);
+        return { ok: true, value: { revision: 3, kind: 'design_system', name: path.split('/').at(-1)!, size: FACE.length, sha256: 'f', path: file } } as never;
+      }
+      return (await base(name, input)) as never;
+    });
+  }
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+    dir = '';
+  });
+
+  it('html and pdf: the figure names the authored family and the page declares it, its face inlined', async () => {
+    const call = governed();
+    for (const format of ['html', 'pdf'] as const) {
+      const { ctx, written, printed } = context(captured());
+      await exporters(call).get(format)!.run(request(format), ctx);
+      const html = format === 'html' ? String(written.get('/exports/9-html')) : printed[0]!;
+      expect(html).toMatch(/<svg [^>]* font-family="[^"]*&quot;Noto Serif KR&quot;/);
+      expect(html).not.toContain('ds-face-');
+      // the face's file inlined as D writes a source URL (its `:` and `;` as CSS escapes, which a page reads back)
+      expect(html).toMatch(/@font-face \{\s*font-family: "Noto Serif KR";[^}]*src: url\("data\\3a font\/woff2\\3b base64,d09GMgECAw=="\)/);
+    }
+  });
+
+  it('Word’s picture window is handed the same faces; Markdown reads none', async () => {
+    const call = governed();
+    const faces: string[] = [];
+    const pictures = vi.fn(({ facesCss }: { facesCss(): Promise<string> }) => ({ take: async () => (faces.push(await facesCss()), PNG), close: () => {} })) as unknown as OpenPictures;
+    await exporters(call, pictures).get('docx')!.run(request('docx'), context(captured()).ctx);
+    expect(faces[0]).toMatch(/@font-face \{\s*font-family: "Noto Serif KR";/);
+    const before = call.mock.calls.length;
+    await exporters(call).get('md')!.run(request('md'), context(captured()).ctx);
+    expect(call.mock.calls.slice(before).map(([name]) => name)).not.toContain('artifacts.content');
   });
 });

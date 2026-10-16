@@ -34,6 +34,9 @@
   overflow-x: auto; /* a narrow column scrolls the figure rather than shrinking its text below legibility */
 }
 .ds-doc .dash-figure > svg {
+  /* the figure names its system's families as authored (one SVG for the editor and every export, P3-E Decision Log 37);
+     the page draws it in the scope's faces, declared under their private names: a property beats its attribute */
+  font-family: var(--ds-font-body, var(--font-prose));
   display: block;
   width: 100%;
   min-width: 480px;

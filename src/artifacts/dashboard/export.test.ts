@@ -8,7 +8,9 @@ import type { Node as PMNode } from '@tiptap/pm/model';
 import { generateTokensCss } from '../design-system/css';
 import { officeThemeXml } from '../design-system/office';
 import { resolveDsVars } from '../design-system/resolve-vars';
-import { builtinView } from '../design-system/view';
+import { builtinView, snapshotCss, type SystemSnapshot } from '../design-system/view';
+import { parseTokens } from '../design-system/tokens';
+import { defaultSystem } from '../types/design_system/defaults';
 import { substituteVars, type DesignSystemExport } from '../document/export/design-system';
 import { exportSource, defaultAuthorName, type ExportView } from '../document/export/source';
 import { newDoc } from '../yjs';
@@ -176,5 +178,31 @@ describe('exportTheme', () => {
     expect(exported).toEqual(editor);
     expect(exported.ink).toBe('#203040');
     expect(renderView(BAR, SNAPSHOTS[OLD_REF], exported, 'sales').svg).toBe(renderView(BAR, SNAPSHOTS[OLD_REF], editor, 'sales').svg);
+  });
+
+  // P3-E Decision Log 37: a system with uploaded faces (the bundled Official's Noto Serif KR). The editor's scope is D's
+  // own stylesheet (`snapshotCss`), its faces under private names placed before their authored ones; the export resolves
+  // the authored stack. The figure is one figure: the editor's bytes are the export's, naming the authored families.
+  describe('a system with uploaded faces', () => {
+    const source = defaultSystem('official')!;
+    const tokens = parseTokens(source.files['tokens.tokens.json']!).tokens!;
+    const snapshot: SystemSnapshot = { tokens, law: '', name: source.name, files: source.files, origin: null };
+    const system: DesignSystemExport = { name: source.name, tokens, resolveDsVars: resolveDsVars as DesignSystemExport['resolveDsVars'], officeThemeXml: officeThemeXml as DesignSystemExport['officeThemeXml'] };
+    const editorTheme = (overrides?: Record<string, string>) => themeFrom(scopeProps(snapshotCss(snapshot, (ref) => `maws-artifact://sys/3/${ref}`, '.s', 'document', overrides))).theme;
+
+    for (const [name, overrides] of [
+      ['the system’s own stack', undefined],
+      ['a single-quoted override naming the face', { '--ds-font-body': "'Noto Serif KR', serif" }],
+    ] as const) {
+      it(`${name}: the editor’s figure bytes are the export’s, naming the authored family`, () => {
+        const scope = snapshotCss(snapshot, (ref) => `maws-artifact://sys/3/${ref}`, '.s', 'document', overrides);
+        expect(scopeProps(scope)['--ds-font-body']).toMatch(/ds-face-[0-9a-z]+, "Noto Serif KR"/); // the editor's own face, aliased
+        const editor = renderView(BAR, SNAPSHOTS[OLD_REF], editorTheme(overrides), 'sales').svg!;
+        const exported = renderView(BAR, SNAPSHOTS[OLD_REF], exportTheme(system, overrides ?? {}), 'sales').svg!;
+        expect(editor).toBe(exported);
+        expect(exported).toMatch(/^<svg [^>]* font-family="[^"]*&quot;Noto Serif KR&quot;/);
+        expect(exported).not.toContain('ds-face-');
+      });
+    }
   });
 });

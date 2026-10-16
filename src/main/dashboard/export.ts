@@ -7,6 +7,8 @@
 // and after every page. A snapshot that cannot be read fails the export, as does its cancellation; a held legacy
 // dashboard is refused with its files. Word alone takes pictures: each distinct chart's SVG drawn once in a protected
 // capture window, with the governing system's faces, as the PNG fallback beside the SVG; a table is never a picture.
+// HTML and PDF pages declare the same faces, so a figure's authored family draws as the editor draws it (P3-E Decision
+// Log 37; B's own document pages and Word's font embedding are tracked separately).
 import { DATASET_LIMITS } from '@artifacts/dashboard/datasets';
 import { exportTheme, prepareViews, VIEW_CSS } from '@artifacts/dashboard/export';
 import { SnapshotReader } from '@artifacts/dashboard/snapshots';
@@ -54,8 +56,12 @@ function dashboardExporter(exporter: DocumentExporter, deps: DashboardExportDeps
     run: async (request: DocumentExportRequest, context: DocumentExportContext) => {
       if (context.signal.aborted) throw cancelled();
       const doc = newDoc();
+      // the governing system's faces under their authored names, their files inlined (P3-E Decision Log 37): the names
+      // the figures carry; read once per run, and only by a format that draws (HTML and PDF pages, Word's pictures)
+      let faces: Promise<string> | null = null;
+      const facesCss = () => (faces ??= (async () => systemFacesCss(await deckSystem(request, deps), deps))());
       // Word's pictures: the window opened at the first chart, closed when the run ends
-      const window = exporter.format === 'docx' ? pictures({ signal: context.signal, facesCss: async () => systemFacesCss(await deckSystem(request, deps), deps) }) : null;
+      const window = exporter.format === 'docx' ? pictures({ signal: context.signal, facesCss }) : null;
       try {
         applyV2(doc, await context.state());
         const reader = new SnapshotReader(pagesOf(deps.call, context.signal), request.artifactId, DATASET_LIMITS.datasets);
@@ -66,7 +72,9 @@ function dashboardExporter(exporter: DocumentExporter, deps: DashboardExportDeps
           ...(window && { picture: (svg: string, size: { width: number; height: number }) => window.take(svg, size) }),
         });
         if (context.signal.aborted) throw cancelled();
-        await exporter.run(request, { ...context, renderView, viewCss: VIEW_CSS });
+        const pageFaces = exporter.format === 'html' || exporter.format === 'pdf' ? await facesCss() : '';
+        if (context.signal.aborted) throw cancelled();
+        await exporter.run(request, { ...context, renderView, viewCss: `${pageFaces}${VIEW_CSS}` });
       } finally {
         window?.close();
         doc.destroy();
