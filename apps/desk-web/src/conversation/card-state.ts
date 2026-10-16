@@ -3,7 +3,8 @@
 // of the same nonce; failed with its reason (another decision may follow); sent and waiting for the settlement;
 // settled by its winner — and a late decision the bridge refused naming the winner is that settlement, not an error;
 // waiting in the terminal when the hub marks it `terminal_only` or the session has no bridge; shown but not answerable
-// while the machine is offline; closed when it left the pending set with no settlement this tab saw.
+// while the machine is offline; closed when it left the pending set with no settlement this tab saw (unless a
+// decision on it is `uncertain`: that keeps its Retry).
 import type { Raised, Settled } from 'desk-hub/protocol';
 import { failureOf } from './outcome';
 import type { RequestRecord, RpcEntry } from '../project/conversation';
@@ -36,9 +37,10 @@ export function cardState(record: RequestRecord, rpc: RpcEntry | null, capabilit
   if (failure?.terminalOnly) return { kind: 'terminal', why: 'window' };
   // A late decision, refused naming who decided: `by` says who, and may come without `winner`.
   if (failure && (failure.winner || failure.by)) return { kind: 'settled', winner: failure.winner ?? null, outcome: null, by: failure.by ?? '' };
-  if (!record.pending) return { kind: 'closed' };
-  // A decision whose result is unknown stays so whatever the machine does: its retry is the only way to learn it.
+  // A decision whose result is unknown stays so whatever the machine does, and whether or not the request is still in
+  // the pending set (a daemon's republished set drops one without saying how): its retry is the only way to learn it.
   if (rpc?.state === 'uncertain') return { kind: 'uncertain', offline: machineOnline === false };
+  if (!record.pending) return { kind: 'closed' };
   if (machineOnline === false) return { kind: 'offline' };
   if (record.terminalOnly) return { kind: 'terminal', why: 'window' };
   if (!capability.can) return { kind: 'terminal', why: capability.reason ?? 'terminal only' };

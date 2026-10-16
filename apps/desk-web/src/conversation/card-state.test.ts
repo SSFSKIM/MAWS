@@ -7,7 +7,7 @@ import type { RequestRecord, RpcEntry } from '../project/conversation';
 import { cardState, isAsyncQuestion, isQuestion } from './card-state';
 
 const raised: Raised = { request: 'toolu_1', session: 's', tool: 'Bash', input: { command: 'pnpm e2e' }, mac: { nonce: 'n', value: 'v' } };
-const record = (over: Partial<RequestRecord> = {}): RequestRecord => ({ request: 'toolu_1', machine: 'mini', raised, at: 0, pending: true, terminalOnly: false, settled: null, ...over });
+const record = (over: Partial<RequestRecord> = {}): RequestRecord => ({ key: 'k1', request: 'toolu_1', machine: 'mini', raised, at: 0, pending: true, terminalOnly: false, settled: null, ...over });
 const rpc = (state: RpcEntry['state'], outcome?: RpcEntry['outcome']): RpcEntry => ({ nonce: 'r', rpc: {} as RpcEntry['rpc'], state, outcome });
 const settled = (winner: Settled['winner'], outcome: Settled['outcome'], by: string): Settled => ({ request: 'toolu_1', winner, outcome, by, mac: { nonce: 'n', value: 'v' } });
 const can = { can: true, reason: null };
@@ -54,6 +54,11 @@ describe('cardState', () => {
   it('is shown, not answerable, while the machine is offline; closed once it left the set unsettled', () => {
     expect(cardState(record(), null, { can: false, reason: 'mini is offline: shown, not answerable' }, false)).toEqual({ kind: 'offline' });
     expect(cardState(record({ pending: false }), null, can)).toEqual({ kind: 'closed' });
+  });
+
+  it('keeps an uncertain decision uncertain, with its retry, when the request left the pending set unsettled', () => {
+    // A daemon's republished set can drop a request with no settlement: that says nothing of whether the decision ran.
+    expect(cardState(record({ pending: false }), rpc('uncertain'), can)).toEqual({ kind: 'uncertain', offline: false });
   });
 });
 
