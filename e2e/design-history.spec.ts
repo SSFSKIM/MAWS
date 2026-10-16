@@ -49,6 +49,10 @@ async function ready(env: Record<string, string>): Promise<Page> {
 }
 
 const computed = (node: Locator, property: string) => node.evaluate((n, p) => getComputedStyle(n).getPropertyValue(p), property);
+// a bundled system's text colour as the heading resolves it (the token its `var(--ds-color-text, …)` reads; C's spec's way)
+const bundled = (key: string) => JSON.parse(readFileSync(join(REPO_ROOT, `src/artifacts/types/design_system/defaults/${key}/tokens.tokens.json`), 'utf8')) as { color: { text: { $root: { $value: { hex: string } } } } };
+const rgbOf = (hex: string) => `rgb(${[1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).join(', ')})`;
+const TEXT_IN = { official: rgbOf(bundled('official').color.text.$root.$value.hex), maws: rgbOf(bundled('maws').color.text.$root.$value.hex) };
 const KATEX = (file: string) => [...readFileSync(join(REPO_ROOT, 'node_modules/katex/dist/fonts', file))];
 async function upload(page: Page, artifactId: string, name: string, file: string): Promise<string> {
   return page.evaluate(
@@ -112,8 +116,12 @@ test('history per board: the rail, two versions’ changes in the world and list
   const tab = await openFromLibrary(page, 'History lab', id);
   const liveWorld = tab.locator('[data-design-world]');
   const liveHead = liveWorld.locator('[data-board-id="desktop"] [data-eid="head"]');
-  await expect.poll(() => computed(liveHead, 'color')).not.toBe('');
-  const inOfficial = await computed(liveHead, 'color');
+  // the governing system's style arrives after the first draw (the heading reads its authored fallback until then): wait
+  // for Official's own text colour, not for any colour
+  const inOfficial = TEXT_IN.official;
+  expect(inOfficial).not.toBe(TEXT_IN.maws);
+  expect(inOfficial).not.toBe('rgb(17, 17, 17)'); // the heading's authored fallback, #111111
+  await expect.poll(() => computed(liveHead, 'color'), { timeout: 15_000 }).toBe(inOfficial);
   const serif = await settledWidth(liveWorld); // the first face, live
   const draft = await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId: id, label: 'Draft' });
   await editDesign(page, id, { op: 'addThread', threadId: 'late', boardId: 'desktop', elementId: '', body: 'Wider margins?' });
@@ -134,7 +142,7 @@ test('history per board: the rail, two versions’ changes in the world and list
   await page.getByRole('menuitem', { name: 'Delete board' }).click();
   await expect.poll(async () => (await boardsOf(page, id)).map((b) => b.id)).toEqual(['phone', 'desktop']);
   await ok(page, 'artifacts.update', { artifactId: id, designSystemId: maws.id });
-  await expect.poll(() => computed(liveHead, 'color')).not.toBe(inOfficial);
+  await expect.poll(() => computed(liveHead, 'color'), { timeout: 15_000 }).toBe(TEXT_IN.maws);
   const mono = await settledWidth(liveWorld); // the second face, live
   expect(Math.abs(mono - serif), `the two faces draw the probe apart (serif ${serif}, mono ${mono})`).toBeGreaterThan(serif * 0.2);
   await ok<{ versionId: number }>(page, 'artifacts.saveVersion', { artifactId: id, label: 'Reviewed' });
@@ -204,7 +212,7 @@ test('history per board: the rail, two versions’ changes in the world and list
     await rail.getByRole('button', { name: /^Version Draft by You/ }).click();
     await expect(bar.locator('.deck-history-heading')).not.toContainText('→');
     await expect(bar.locator('.deck-history-heading')).toContainText('Draft');
-    await expect.poll(() => computed(world.locator('[data-board-id="desktop"] .design-board-canvas [data-eid="head"]').first(), 'color')).toBe(inOfficial);
+    await expect.poll(() => computed(world.locator('[data-board-id="desktop"] .design-board-canvas [data-eid="head"]').first(), 'color'), { timeout: 15_000 }).toBe(inOfficial);
     const faces = tab.locator('style[data-deck-faces]');
     await expect(faces).toHaveCount(1);
     const listed = await ok<{ versions: { id: number; seq: number }[] }>(page, 'artifacts.versions', { artifactId: id });
@@ -219,7 +227,7 @@ test('history per board: the rail, two versions’ changes in the world and list
   await test.step('Back to design: the live design in its system and with its own face again', async () => {
     await bar.getByRole('button', { name: 'Back to design' }).click();
     await expect(tab.getByRole('toolbar', { name: 'Design' })).toBeVisible();
-    await expect.poll(() => computed(liveHead, 'color')).not.toBe(inOfficial);
+    await expect.poll(() => computed(liveHead, 'color'), { timeout: 15_000 }).toBe(TEXT_IN.maws);
     expect(Math.abs((await settledWidth(liveWorld)) - mono)).toBeLessThanOrEqual(mono * 0.02);
   });
 
