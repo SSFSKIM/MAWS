@@ -16,7 +16,8 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpath
 import type { ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, type FrameLocator, type Locator, type Page, type TestInfo } from '@playwright/test';
+import { expect, type FrameLocator, type JSHandle, type Locator, type Page, type TestInfo } from '@playwright/test';
+import type { BrowserWindow } from 'electron';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { FIXTURE_SERVER, type CallLogEntry } from './connector-engine';
@@ -126,6 +127,7 @@ export class ConnectorScene {
     this.runs.push(run);
     await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1440, 900));
     await expect(maws.page.locator('[data-region="main"]')).toBeVisible();
+    this.note('launched window', await this.windowState(run)); // P3-H H4: the window main reads for its pages' veto
     await this.supervisor(run.page);
     if (first) {
       // the owner's profile: the project indexed, and new sessions on the Direct route (no relay runs here)
@@ -253,16 +255,32 @@ export class ConnectorScene {
     await expect(page.locator('[data-connectors-sheet]')).toHaveCount(0);
   }
 
-  // The window hidden and shown again without taking focus (the page's document reads hidden, then visible).
+  // The page's own window hidden and shown again without taking focus (P3 Decision Log 89). What a spec holds the product
+  // to is the native window's state, main's veto of its pages; the document's visibility is evidence only, with the
+  // Chromium switches the Playwright Electron loader adds, under which a hidden window's document may still read visible.
   async hideWindow(run: Run): Promise<void> {
-    await run.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.hide());
-    await expect.poll(() => run.page.evaluate(() => document.visibilityState), { message: 'the window’s document reads hidden' }).toBe('hidden');
-    this.note('hidden');
+    const win = await this.windowOf(run);
+    await win.evaluate((w) => w.hide());
+    await expect.poll(() => win.evaluate((w) => w.isVisible()), { message: 'the page’s window reads hidden' }).toBe(false);
+    this.note('hidden', await this.windowState(run));
   }
   async showWindow(run: Run): Promise<void> {
-    await run.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.showInactive());
-    await expect.poll(() => run.page.evaluate(() => document.visibilityState), { message: 'the window’s document reads visible' }).toBe('visible');
-    this.note('shown');
+    const win = await this.windowOf(run);
+    await win.evaluate((w) => w.showInactive());
+    await expect.poll(() => win.evaluate((w) => w.isVisible() && !w.isMinimized()), { message: 'the page’s window reads shown, not minimized' }).toBe(true);
+    this.note('shown', await this.windowState(run));
+  }
+  private async windowOf(run: Run): Promise<JSHandle<BrowserWindow>> {
+    return (await run.maws.app.browserWindow(run.page)) as JSHandle<BrowserWindow>;
+  }
+  // The evidence: the native window's state, its document's visibility, and which backgrounding switches the app runs with.
+  private async windowState(run: Run): Promise<unknown> {
+    const native = await (await this.windowOf(run)).evaluate((w) => ({ visible: w.isVisible(), minimized: w.isMinimized() }));
+    const documentVisibility = await run.page.evaluate(() => document.visibilityState);
+    const switches = await run.maws.app.evaluate(({ app }) =>
+      Object.fromEntries(['disable-renderer-backgrounding', 'disable-background-timer-throttling', 'disable-backgrounding-occluded-windows'].map((name) => [name, app.commandLine.hasSwitch(name)])),
+    );
+    return { native, documentVisibility, switches };
   }
 
   // The app killed (no quit, no question): a detached supervisor and its engines are left running with no client.

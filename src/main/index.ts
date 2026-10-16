@@ -2,7 +2,7 @@ import { guardStdio } from './stdio-guard'; // cua board #97
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
 import { join } from 'node:path';
 import { totalmem } from 'node:os'; // C12: the default memory budget
-import { app, BrowserWindow, dialog, screen } from 'electron';
+import { app, BrowserWindow, dialog, screen, type WebContents } from 'electron';
 import { createHosts } from './hosts';
 import { installRouter } from './ipc/router';
 import { startSettings } from './settings';
@@ -587,7 +587,8 @@ void startWithProfileLock(app, () => {
   // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the
   // engine host's main-only commands). Its stop runs before the hosts' (steps run in the order added): every lease,
   // watch and pending operation ends, each operation withdrawn from the host, while the host can still hear it.
-  const connectors = startConnectors({ hosts, register: registerMainHandler, index });
+  // P3-H H4: a page's owner window, read by main, vetoes its pages while hidden or minimized (P3 Decision Log 89)
+  const connectors = startConnectors({ hosts, register: registerMainHandler, index, windowOf: (sender) => BrowserWindow.fromWebContents(sender as WebContents) });
   shutdown.add('connectors', connectors.stop);
   // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D

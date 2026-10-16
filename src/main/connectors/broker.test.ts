@@ -132,6 +132,7 @@ let engine: FakeRoute;
 let direct: FakeRoute;
 let broker: ConnectorBroker;
 let log: ReturnType<typeof vi.fn<(line: string) => void>>;
+let recheck: (owner: string) => void; // main's re-read of an owner window before work starts
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -140,7 +141,11 @@ beforeEach(() => {
   direct = new FakeRoute('direct');
   engine = new FakeRoute('engine', 'session-a');
   log = vi.fn<(line: string) => void>();
-  broker = new ConnectorBroker({ routes: [engine, direct], grants, log });
+  broker = new ConnectorBroker({ routes: [engine, direct], grants, log, recheckWindow: (owner) => recheck(owner) });
+  recheck = () => {};
+  // P3-H H4 (P3 Decision Log 89): the owner windows are shown, as main reports them; their own cases hide them
+  broker.setWindowShown(ME, true);
+  broker.setWindowShown(THEM, true);
 });
 
 afterEach(() => {
@@ -406,6 +411,7 @@ describe('a call (route choice, the grant on every call)', () => {
     }
     const route: ConnectorRoute = { route: 'engine', resolve: () => Promise.resolve(new SessionTarget()) };
     broker = new ConnectorBroker({ routes: [route], grants, log });
+    broker.setWindowShown(ME, true); // P3-H H4: main's report of the owner window
     grants.put(ART, ROWS, 'fp-1', 'read');
     const lease = page();
     expect(await broker.callTool(ME, lease, ROWS)).toMatchObject({ ok: true, result: 'from the session', via: { route: 'engine', sessionId: 'session-b' } });
@@ -941,6 +947,176 @@ describe('a watch (30 s to 24 h, at most 64 per app, only while visible)', () =>
     await vi.advanceTimersByTimeAsync(30_000);
     expect(engine.calls).toHaveLength(2);
     expect(log).toHaveBeenCalledWith(expect.stringContaining('listener broke'));
+  });
+});
+
+// P3-H H4 (P3 Decision Log 80 and 89): a page is visible only while its surface is (the renderer's report) and its owner
+// window is shown and not minimized (main's native report). The two are held apart: the window's state is main's, so
+// the renderer's report never overrides a hidden window, and a window shown again never revives a hidden surface.
+describe('the owner window’s native visibility (P3 Decision Log 89)', () => {
+  beforeEach(() => {
+    engine.has(ROWS);
+    grants.put(ART, ROWS, 'fp-1', 'read');
+  });
+
+  it('hiding the window aborts work in flight, clears every timer, and refuses calls and the owner’s Refresh', async () => {
+    const lease = page();
+    const { listener, updates } = watcher();
+    const start = broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    if (!start.ok) throw new Error('refused');
+    await settle();
+    expect(updates).toHaveLength(1);
+    engine.hold = true;
+    const pending = broker.callTool(ME, lease, ROWS);
+    await settle();
+    broker.setWindowShown(ME, false);
+    expect(await pending).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    expect(engine.last().context.signal.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    const seen = [engine.resolves, grants.checks.length, engine.calls.length];
+    expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    expect(broker.refreshWatch(ME, lease, start.watchId)).toBe(false);
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect([engine.resolves, grants.checks.length, engine.calls.length]).toEqual(seen);
+    expect(updates).toHaveLength(1);
+  });
+
+  it('drops a refresh in flight when the window hides, never publishing it', async () => {
+    const lease = page();
+    const { listener, updates } = watcher();
+    engine.hold = true;
+    broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    await settle();
+    broker.setWindowShown(ME, false);
+    engine.calls[0]!.answer.resolve({ ok: true, result: 'stale' });
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect(engine.calls[0]!.context.signal.aborted).toBe(true);
+    expect(updates).toEqual([]);
+    expect(engine.calls).toHaveLength(1);
+  });
+
+  it('a hidden or minimized window is not overridden by the renderer saying visible', async () => {
+    broker.setWindowShown(ME, false);
+    const lease = page(); // the renderer reports its surface visible
+    const { listener, updates } = watcher();
+    const start = broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    if (!start.ok) throw new Error('refused');
+    expect(broker.setVisible(ME, lease, false)).toBe(true);
+    expect(broker.setVisible(ME, lease, true)).toBe(true); // said again: still the window's veto
+    expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    expect(broker.refreshWatch(ME, lease, start.watchId)).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect([engine.resolves, direct.resolves, grants.checks.length, updates.length]).toEqual([0, 0, 0, 0]);
+  });
+
+  it('showing the window again does not revive a page whose surface is hidden', async () => {
+    const lease = page();
+    const { listener, updates } = watcher();
+    broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    await settle();
+    broker.setVisible(ME, lease, false);
+    broker.setWindowShown(ME, false);
+    broker.setWindowShown(ME, true);
+    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect(engine.calls).toHaveLength(1);
+    expect(updates).toHaveLength(1);
+    expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+  });
+
+  it('shown again after ten minutes, a due watch catches up once, however often the window is reported shown', async () => {
+    const lease = page();
+    const { listener, updates } = watcher();
+    broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    await settle();
+    broker.setWindowShown(ME, false);
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect(engine.calls).toHaveLength(1);
+    broker.setWindowShown(ME, true);
+    broker.setWindowShown(ME, true);
+    broker.setVisible(ME, lease, true); // the renderer's own report, unchanged
+    await settle();
+    expect(engine.calls).toHaveLength(2); // once, not the twenty it missed
+    expect(updates).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(engine.calls).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(engine.calls).toHaveLength(3);
+  });
+
+  it('a page shown while its window was hidden runs only once both are shown', async () => {
+    const lease = page();
+    const { listener } = watcher();
+    broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    await settle();
+    broker.setVisible(ME, lease, false);
+    broker.setWindowShown(ME, false);
+    broker.setVisible(ME, lease, true);
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect(engine.calls).toHaveLength(1);
+    broker.setWindowShown(ME, true);
+    await settle();
+    expect(engine.calls).toHaveLength(2);
+  });
+
+  it('hiding another window stops nothing of this one', async () => {
+    const lease = page();
+    const { listener } = watcher();
+    broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    await settle();
+    broker.setWindowShown(THEM, false);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(engine.calls).toHaveLength(2);
+  });
+
+  it('an owner whose window main never reported is hidden: it fails closed', async () => {
+    const stranger = 'window-3';
+    const lease = page(stranger);
+    const { listener, updates } = watcher();
+    broker.watchTool(stranger, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    expect(await broker.callTool(stranger, lease, ROWS)).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect([engine.resolves, updates.length]).toEqual([0, 0]);
+  });
+
+  it('asks main to re-read the window before work starts, so a hide main has not yet heard of calls nothing', async () => {
+    const lease = page();
+    const { listener, updates } = watcher();
+    broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    await settle();
+    const asked: string[] = [];
+    let hiddenNow = true; // the window was hidden, and no event said so
+    recheck = (owner) => {
+      asked.push(owner);
+      broker.setWindowShown(owner, !hiddenNow);
+    };
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(asked).toEqual([ME]);
+    expect(engine.calls).toHaveLength(1);
+    expect(updates).toHaveLength(1);
+    expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    expect(vi.getTimerCount()).toBe(0);
+    hiddenNow = false;
+    broker.setWindowShown(ME, true); // main's re-read finds it shown again: the refresh that fell due, once
+    await settle();
+    expect(engine.calls).toHaveLength(2);
+    expect(updates).toHaveLength(2);
+  });
+
+  it('the window’s state outlives its pages (a reload), and a gone owner’s state goes with it', async () => {
+    broker.setWindowShown(ME, false);
+    page();
+    broker.closeOwner(ME); // the renderer navigated: its leases end, its window stays hidden
+    const reloaded = page();
+    expect(await broker.callTool(ME, reloaded, ROWS)).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    broker.setWindowShown(ME, true);
+    expect(await broker.callTool(ME, reloaded, ROWS)).toMatchObject({ ok: true });
+    broker.forgetOwner(ME); // its webContents destroyed: leases and window state gone
+    expect(await broker.callTool(ME, reloaded, ROWS)).toEqual({ ok: false, state: 'invalid', reason: 'lease' });
+    const late = page(); // a lease opened for it after all is never shown
+    expect(await broker.callTool(ME, late, ROWS)).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    expect(engine.calls).toHaveLength(1);
   });
 });
 

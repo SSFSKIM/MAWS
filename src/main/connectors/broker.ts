@@ -7,7 +7,11 @@
 //
 // The rules, each enforced here rather than trusted to a caller:
 // - A lease starts hidden; only its owner shows or hides it, and a hidden or closed lease calls nothing, its calls and
-//   its watches alike. Only the owner that opened a lease may use it.
+//   its watches alike. Only the owner that opened a lease may use it. P3-H H4 (P3 Decision Log 89): a lease is visible
+//   only while its surface is (the renderer's report, `setVisible`) and its owner window is shown and not minimized
+//   (main's native report, `setWindowShown`). The two are held apart: the renderer's report never overrides a hidden
+//   window, and a window shown again never revives a hidden surface. An owner whose window main has not reported is
+//   hidden, and main is asked to re-read the window before any work starts, so a hide no event announced calls nothing.
 // - A page calls only the server and tool pairs it declared, and a declaration grants nothing.
 // - Every call, a watch's refresh included, asks the routes for an already-live target, then checks the owner's grant
 //   against the fingerprint that target reports (a non-consuming check); the route's annotations, never the page, say
@@ -59,6 +63,8 @@ export interface ConnectorBrokerOptions {
   routes: readonly ConnectorRoute[];
   grants: ConnectorGrantAuthority;
   log?: (line: string) => void;
+  // P3-H H4: main re-reads `owner`'s window, reporting any change through `setWindowShown` before it returns.
+  recheckWindow?: (owner: string) => void;
 }
 
 export type ConnectorWatchListener = (update: ConnectorCallOutcome) => void;
@@ -69,7 +75,7 @@ interface Lease {
   readonly id: string;
   readonly owner: string;
   readonly artifactId: string;
-  visible: boolean;
+  surfaceVisible: boolean; // the renderer's report; the lease is visible only while its window is shown too (P3-H H4)
   readonly declared: Map<string, ConnectorToolRef>;
   readonly work: Set<Work>;
   readonly watches: Set<Watch>;
@@ -141,6 +147,8 @@ export class ConnectorBroker {
   private readonly routes: readonly ConnectorRoute[];
   private readonly authority: ConnectorGrantAuthority;
   private readonly log: (line: string) => void;
+  private readonly recheckWindow: (owner: string) => void;
+  private readonly windowShown = new Map<string, boolean>(); // P3-H H4: per owner, main's native report
   private readonly leases = new Map<string, Lease>();
   private readonly watches = new Map<string, Watch>();
   private readonly revoking = new Map<string, number>(); // keys whose owner's revoke the store has not answered yet
@@ -152,6 +160,7 @@ export class ConnectorBroker {
     this.routes = options.routes;
     this.authority = options.grants;
     this.log = options.log ?? ((line) => console.error(line));
+    this.recheckWindow = options.recheckWindow ?? (() => {});
   }
 
   // ── the page's lease (relayed by the owner) ──
@@ -161,7 +170,7 @@ export class ConnectorBroker {
     if (this.stopped) throw new Error('the connector broker has stopped');
     if (typeof owner !== 'string' || owner.length === 0) throw new TypeError('a connector lease needs an owner');
     if (typeof artifactId !== 'string' || !ARTIFACT_ID.test(artifactId)) throw new TypeError('not an artifact id');
-    const lease: Lease = { id: randomUUID(), owner, artifactId, visible: false, declared: new Map(), work: new Set(), watches: new Set() };
+    const lease: Lease = { id: randomUUID(), owner, artifactId, surfaceVisible: false, declared: new Map(), work: new Set(), watches: new Set() };
     this.leases.set(lease.id, lease);
     return lease.id;
   }
@@ -225,11 +234,11 @@ export class ConnectorBroker {
   refreshWatch(owner: string, leaseId: string, watchId: string): boolean {
     const watch = this.watchOf(owner, leaseId, watchId);
     if (watch) this.wakeIfGranted(watch);
-    if (watch?.waitingForGrant && watch.lease.visible) {
+    if (watch?.waitingForGrant && this.visible(watch.lease)) {
       void this.recheck(watch);
       return true;
     }
-    if (!watch || !watch.lease.visible || watch.waitingForGrant || watch.running) return false;
+    if (!watch || !this.visible(watch.lease) || watch.waitingForGrant || watch.running) return false;
     clearTimeout(watch.timer);
     void this.refresh(watch);
     return true;
@@ -237,19 +246,24 @@ export class ConnectorBroker {
 
   // ── the owner's controls ──
 
+  // The renderer's report of the lease's surface (the editor's and its document's visibility).
   setVisible(owner: string, leaseId: string, visible: boolean): boolean {
     const lease = this.leaseOf(owner, leaseId);
     if (!lease || typeof visible !== 'boolean') return false;
-    if (lease.visible === visible) return true;
-    lease.visible = visible;
-    if (visible) {
-      for (const watch of lease.watches) this.schedule(watch);
-      for (const watch of lease.watches) if (watch.waitingForGrant) void this.recheck(watch); // P3-H H3b
-    } else {
-      for (const watch of lease.watches) clearTimeout(watch.timer);
-      this.abort(lease.work, refusal('paused', 'hidden'));
-    }
+    if (lease.surfaceVisible === visible) return true;
+    const was = this.visible(lease);
+    lease.surfaceVisible = visible;
+    this.changed(lease, was);
     return true;
+  }
+
+  // P3-H H4: main's report of `owner`'s native window: shown (and not minimized) or not.
+  setWindowShown(owner: string, shown: boolean): void {
+    if (this.windowShown.get(owner) === shown) return;
+    const leases = [...this.leases.values()].filter((lease) => lease.owner === owner);
+    const was = leases.map((lease) => this.visible(lease));
+    this.windowShown.set(owner, shown);
+    leases.forEach((lease, i) => this.changed(lease, was[i]!));
   }
 
   close(owner: string, leaseId: string): boolean {
@@ -259,15 +273,23 @@ export class ConnectorBroker {
     return true;
   }
 
-  // The owner's window went (closed, or its renderer replaced): every lease it held closes.
+  // The owner's page went (navigated, or its renderer replaced): every lease it held closes. Its window's state stays.
   closeOwner(owner: string): void {
     for (const lease of [...this.leases.values()]) if (lease.owner === owner) this.dispose(lease);
+  }
+
+  // P3-H H4: the owner is gone for good (its webContents destroyed): its leases close and its window's state is
+  // forgotten, so a lease opened for it after all stays hidden.
+  forgetOwner(owner: string): void {
+    this.closeOwner(owner);
+    this.windowShown.delete(owner);
   }
 
   // The app is quitting: everything closes, and nothing opens again.
   stop(): void {
     this.stopped = true;
     for (const lease of [...this.leases.values()]) this.dispose(lease);
+    this.windowShown.clear();
   }
 
   grants(artifactId: string): Promise<ConnectorGrant[]> {
@@ -331,7 +353,8 @@ export class ConnectorBroker {
 
   // One run of `work`; when it was aborted, the abort's reason (a refusal) is the outcome.
   private async run(lease: Lease, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, work: Work): Promise<ConnectorCallOutcome> {
-    if (!lease.visible) return refusal('paused', 'hidden');
+    this.recheckWindow(lease.owner); // P3-H H4: a hide no event announced is heard now, before anything is asked
+    if (!this.visible(lease)) return refusal('paused', 'hidden');
     if (this.revoking.has(work.key)) return refusal('revoked', 'revoked');
     lease.work.add(work);
     const outcome = await this.attempt(lease.artifactId, tool, args, use, work.controller.signal);
@@ -467,14 +490,14 @@ export class ConnectorBroker {
     clearTimeout(watch.timer);
     delete watch.timer;
     this.wakeIfGranted(watch);
-    if (!watch.lease.visible || watch.waitingForGrant || watch.running || !this.watches.has(watch.id)) return;
+    if (!this.visible(watch.lease) || watch.waitingForGrant || watch.running || !this.watches.has(watch.id)) return;
     const delay = watch.endedAt === undefined ? 0 : Math.max(0, watch.endedAt + watch.intervalMs - Date.now());
     watch.timer = setTimeout(() => void this.refresh(watch), delay);
   }
 
   private async refresh(watch: Watch): Promise<void> {
     delete watch.timer;
-    if (watch.running || watch.waitingForGrant || !watch.lease.visible || !this.watches.has(watch.id)) return;
+    if (watch.running || watch.waitingForGrant || !this.visible(watch.lease) || !this.watches.has(watch.id)) return;
     const { lease } = watch;
     const work = this.work(lease, watch.tool);
     const generation = this.generation(watch.key);
@@ -483,7 +506,7 @@ export class ConnectorBroker {
     delete watch.running;
     // The publication fence, checked now rather than when the run ended: a hide, close, unwatch or revoke since then
     // (another watch's listener, say) has aborted the work, which is still registered, or changed what it would check.
-    if (work.controller.signal.aborted || !this.watches.has(watch.id) || !lease.visible || watch.waitingForGrant) {
+    if (work.controller.signal.aborted || !this.watches.has(watch.id) || !this.visible(lease) || watch.waitingForGrant) {
       lease.work.delete(work);
       this.schedule(watch); // a hide's watch is due again once shown; a revoke's waits; a closed one is gone
       return;
@@ -537,6 +560,25 @@ export class ConnectorBroker {
     this.leases.delete(lease.id);
     for (const watch of [...lease.watches]) this.end(watch);
     this.abort(lease.work, refusal('paused', 'closed'));
+  }
+
+  // P3-H H4: visible while its surface is and its window is shown; an owner whose window main never reported is hidden.
+  private visible(lease: Lease): boolean {
+    return lease.surfaceVisible && this.windowShown.get(lease.owner) === true;
+  }
+
+  // A lease's visibility as it is now, against `was`: shown, its watches fall due (a due one catches up once) and those
+  // waiting for a grant re-read it; hidden, its timers stop and its work in flight answers paused.
+  private changed(lease: Lease, was: boolean): void {
+    const now = this.visible(lease);
+    if (now === was) return;
+    if (now) {
+      for (const watch of lease.watches) this.schedule(watch);
+      for (const watch of lease.watches) if (watch.waitingForGrant) void this.recheck(watch); // P3-H H3b
+    } else {
+      for (const watch of lease.watches) clearTimeout(watch.timer);
+      this.abort(lease.work, refusal('paused', 'hidden'));
+    }
   }
 
   private leaseOf(owner: string, leaseId: string): Lease | undefined {

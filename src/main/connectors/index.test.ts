@@ -8,7 +8,7 @@ import type { ConnectorCallOutcome } from '@shared/artifacts/connectors';
 import { eventChannel, type CommandName, type EventName, type HostState } from '@shared/ipc/schema';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import type { MainContext } from '../ipc/router';
-import { startConnectors, type ConnectorSender } from '.';
+import { startConnectors, WINDOW_RECHECK_MS, type ConnectorSender, type ConnectorWindow } from '.';
 import { CONNECTOR_OPERATION_DEADLINE_MS } from './engine-route';
 
 const ART = '11111111-1111-4111-8111-111111111111';
@@ -136,12 +136,45 @@ class FakeSender extends EventEmitter {
   send = (channel: string, payload: unknown) => void this.sent.push({ channel, payload });
 }
 
+// P3-H H4: an owner window as main reads it (shown, minimized) and the events it emits. `hide()` and the rest change
+// the state and emit, as Electron's window does when its state changes; a test sets the fields alone for a change no
+// event announced (on macOS the window's show and hide events follow its occlusion, not the calls).
+class FakeWindow extends EventEmitter {
+  visible = true;
+  minimized = false;
+  destroyed = false;
+  isVisible = () => this.visible;
+  isMinimized = () => this.minimized;
+  isDestroyed = () => this.destroyed;
+  hide(): void {
+    this.visible = false;
+    this.emit('hide');
+  }
+  show(): void {
+    this.visible = true;
+    this.emit('show');
+  }
+  minimize(): void {
+    this.minimized = true;
+    this.emit('minimize');
+  }
+  restore(): void {
+    this.minimized = false;
+    this.emit('restore');
+  }
+  listeners_(): number {
+    return ['show', 'hide', 'minimize', 'restore'].reduce((sum, name) => sum + this.listenerCount(name), 0);
+  }
+}
+
 let fake: FakeHost;
 let handlers: Map<string, (input: unknown, context: MainContext) => unknown>;
 let service: { stop(): void };
 let me: FakeSender;
 let them: FakeSender;
 let records: Map<string, { projectId: string | null; directory: string }>;
+let windows: Map<number, FakeWindow>; // by its webContents' id: the window that owns it
+let logged: string[];
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -150,12 +183,15 @@ beforeEach(() => {
   me = new FakeSender(7);
   them = new FakeSender(8);
   records = new Map([['app-own', { projectId: 'proj', directory: '/repo' }]]);
+  windows = new Map([[7, new FakeWindow()], [8, new FakeWindow()]]);
+  logged = [];
   service = startConnectors({
     hosts: { dispatch: fake.dispatch as never, onEvent: fake.onEvent as never, onState: fake.onState as never, onStreaming: fake.onStreaming as never, streaming: fake.streaming as never },
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
     index: { sessions: { get: (id) => records.get(id) ?? null }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
     realpath: (path) => path,
-    log: () => {},
+    windowOf: (sender) => (windows.get(sender.id) ?? null) as ConnectorWindow | null,
+    log: (line) => void logged.push(line),
   });
 });
 afterEach(() => {
@@ -424,6 +460,148 @@ describe('main’s connector service (P3-H H3b)', () => {
     await settle();
     expect(fake.dispatched.filter((entry) => entry.name === 'connectors.cancel').map((entry) => entry.input)).toEqual([{ operationId }]);
     expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { sender: me as unknown as MainContext['sender'] })).toThrow();
+  });
+});
+
+// P3-H H4 (P3 Decision Log 80 and 89): main reads the window that owns a page's webContents, when it first follows it,
+// on its show, hide, minimize and restore, before any work starts, and every WINDOW_RECHECK_MS while it reads hidden;
+// a hidden or minimized window pauses its pages whatever the renderer reports.
+describe('the owner window’s native visibility (P3-H H4)', () => {
+  const rows = JSON.stringify(['fixture', 'rows']);
+  const win = () => windows.get(7)!;
+  async function watching(): Promise<{ leaseId: string; watchId: string }> {
+    const leaseId = await visiblePage();
+    const start = (await invoke('connectors.watch', { leaseId, request: { ...ROWS, intervalMs: 30_000 } })) as { watchId: string };
+    return { leaseId, watchId: start.watchId };
+  }
+  beforeEach(() => {
+    fake.grants.set(rows, 'read');
+    fake.endAtStart = true;
+  });
+
+  it('a window hidden when first followed pauses its pages, calling nothing, until it is shown: then one catch-up', async () => {
+    win().visible = false;
+    const { leaseId, watchId } = await watching();
+    expect(await invoke('connectors.call', { leaseId, request: ROWS })).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    expect(await invoke('connectors.refresh', { leaseId, watchId })).toEqual({ refreshing: false });
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(fake.names()).not.toContain('connectors.resolve');
+    expect(updatesOf(me)).toEqual([]);
+    win().show();
+    await settle();
+    expect(fake.started()).toHaveLength(1);
+    expect(updatesOf(me).map((entry) => entry.update)).toEqual([expect.objectContaining({ ok: true })]);
+  });
+
+  for (const [away, back] of [['hide', 'show'], ['minimize', 'restore']] as const) {
+    it(`on ${away}, withdraws the work in flight and stays silent whatever the renderer says; on ${back}, catches up once`, async () => {
+      fake.endAtStart = false;
+      const leaseId = await visiblePage();
+      const answering = invoke('connectors.call', { leaseId, request: ROWS });
+      await settle();
+      const [operationId] = fake.started();
+      win()[away]();
+      expect(await answering).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+      expect(fake.dispatched.filter((entry) => entry.name === 'connectors.cancel').map((entry) => entry.input)).toEqual([{ operationId }]);
+      fake.endAtStart = true;
+      const { watchId } = (await invoke('connectors.watch', { leaseId, request: { ...ROWS, intervalMs: 30_000 } })) as { watchId: string };
+      expect(await invoke('connectors.visibility', { leaseId, visible: true })).toEqual({ ok: true }); // the renderer's report
+      const starts = fake.started().length;
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(fake.started()).toHaveLength(starts);
+      expect(updatesOf(me)).toEqual([]);
+      win()[back]();
+      await settle();
+      expect(fake.started()).toHaveLength(starts + 1);
+      expect(updatesOf(me)).toEqual([{ leaseId, watchId, update: expect.objectContaining({ ok: true }) }]);
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(fake.started()).toHaveLength(starts + 1);
+    });
+  }
+
+  it('a window shown again does not revive a page whose renderer hid it', async () => {
+    const { leaseId } = await watching();
+    await settle();
+    expect(updatesOf(me)).toHaveLength(1);
+    await invoke('connectors.visibility', { leaseId, visible: false });
+    win().hide();
+    win().show();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(fake.started()).toHaveLength(1);
+    expect(updatesOf(me)).toHaveLength(1);
+  });
+
+  it('reads the window rather than trusting an event: a hide event while it is still shown changes nothing', async () => {
+    await watching();
+    await settle();
+    win().emit('hide'); // macOS emits show and hide on occlusion changes; the window itself is still shown
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(fake.started()).toHaveLength(2);
+  });
+
+  it('hears a hide no event announced before the next refresh, and a show no event announced within its re-read', async () => {
+    await watching();
+    await settle();
+    expect(fake.started()).toHaveLength(1);
+    win().visible = false; // hidden, silently
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(fake.started()).toHaveLength(1);
+    expect(fake.names().filter((name) => name === 'connectors.resolve')).toHaveLength(1);
+    win().visible = true; // shown, silently
+    await vi.advanceTimersByTimeAsync(WINDOW_RECHECK_MS + 1); // the re-read, then the refresh it armed
+    await settle();
+    expect(fake.started()).toHaveLength(2); // the refresh that fell due, once
+    expect(updatesOf(me)).toHaveLength(2);
+    expect(vi.getTimerCount()).toBe(1); // the watch's next refresh alone: no re-read while shown
+  });
+
+  it('keeps the window’s state across a reload of its page, following it once', async () => {
+    win().hide();
+    await visiblePage();
+    me.emit('did-navigate');
+    const reloaded = await visiblePage();
+    expect(await invoke('connectors.call', { leaseId: reloaded, request: ROWS })).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    expect(win().listeners_()).toBe(4);
+    win().show();
+    expect(await invoke('connectors.call', { leaseId: reloaded, request: ROWS })).toMatchObject({ ok: true });
+  });
+
+  it('when its webContents is destroyed, lets go of the window, its re-reads and its leases, and opens none again', async () => {
+    const { leaseId } = await watching();
+    await settle();
+    win().hide();
+    expect(vi.getTimerCount()).toBe(1); // the hidden window's re-read
+    me.destroyed = true;
+    me.emit('destroyed');
+    expect(win().listeners_()).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+    win().show();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect(fake.started()).toHaveLength(1);
+    await expect(invoke('connectors.call', { leaseId, request: ROWS })).rejects.toThrow();
+    await expect(invoke('connectors.open', { artifactId: ART })).rejects.toThrow();
+    expect(win().listeners_()).toBe(0);
+  });
+
+  it('fails closed when no window owns the webContents: its pages stay paused, and main says so', async () => {
+    windows.delete(7);
+    const leaseId = await visiblePage();
+    expect(await invoke('connectors.call', { leaseId, request: ROWS })).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    expect(fake.names()).not.toContain('connectors.resolve');
+    expect(vi.getTimerCount()).toBe(0);
+    expect(logged).toEqual([expect.stringContaining('no window owns')]);
+  });
+
+  it('at stop, lets go of every window and its re-reads', async () => {
+    await visiblePage(me);
+    await visiblePage(them);
+    windows.get(8)!.hide();
+    service.stop();
+    expect([win().listeners_(), windows.get(8)!.listeners_(), vi.getTimerCount()]).toEqual([0, 0, 0]);
+    const late = new FakeSender(9); // a window first heard from after the stop is never followed
+    windows.set(9, new FakeWindow());
+    expect(() => handlers.get('connectors.open')!({ artifactId: ART }, { sender: late as unknown as MainContext['sender'] })).toThrow();
+    expect([windows.get(9)!.listeners_(), late.listenerCount('destroyed')]).toEqual([0, 0]);
   });
 });
 
