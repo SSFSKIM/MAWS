@@ -5,7 +5,8 @@
 //   code    the custom numerical/geometry lines each candidate carries (non-blank, non-comment);
 //   time    every real view and the two synthetic 10,000-point views, rendered in Node from the minified bundle:
 //           warm-up 5, then 30 timed runs each (median, p95, max), and the heap after.
-// Evidence lines start `SPIKE-MEASURE ` (JSON). A load average at or above 10 is reported as not quiet, never a pass.
+// It first waits (up to 5 min) for the one-minute load to fall below 10. Evidence lines start `SPIKE-MEASURE ` (JSON);
+// a load still at or above 10 is reported as not quiet, never a pass.
 import { build } from 'esbuild';
 import { cpus, hostname, loadavg, totalmem } from 'node:os';
 import { readFileSync } from 'node:fs';
@@ -23,7 +24,17 @@ const emit = (key, value) => console.log(`SPIKE-MEASURE ${JSON.stringify({ key, 
 const load = () => loadavg().map((n) => Number(n.toFixed(2)));
 
 emit('machine', { host: hostname(), cpu: cpus()[0]?.model, cores: cpus().length, memoryGiB: Math.round(totalmem() / 2 ** 30), node: process.version, platform: `${process.platform}-${process.arch}`, load: load() });
-if (loadavg()[0] >= 10) emit('quiet', `NOT QUIET: one-minute load ${loadavg()[0].toFixed(2)} >= 10; the timings below are not a pass`);
+
+// The settle wait: a build just before this job (the e2e lane's) leaves the one-minute load high for a minute or two.
+// Poll every 10 s, up to 5 min, until it is below 10; every reading is recorded.
+const readings = [];
+for (const start = Date.now(); ; ) {
+  readings.push({ s: Math.round((Date.now() - start) / 1000), load: load() });
+  if (loadavg()[0] < 10 || Date.now() - start >= 300_000) break;
+  await new Promise((done) => setTimeout(done, 10_000));
+}
+emit('settle', readings);
+if (loadavg()[0] >= 10) emit('quiet', `NOT QUIET: one-minute load ${loadavg()[0].toFixed(2)} >= 10 after the 5 min wait; the timings below are not a pass`);
 
 // ---- bundle ----
 const bundle = async (name, contents) => {
