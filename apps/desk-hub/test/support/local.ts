@@ -150,6 +150,19 @@ export async function startLocalHub() {
     pushes,
     /** A push service's answer per endpoint (201 when unset): 404 or 410 says the subscription is gone. */
     pushAnswers,
+    /**
+     * A request straight to a machine's object (`/stream` or `/frames`) with the identity headers the Worker sets once it
+     * has verified a request: how a request the Worker admitted reaches the object late, after a revocation, say.
+     */
+    async machineRequest(machine: string, path: '/stream' | '/frames', headers: Record<string, string>, body?: string) {
+      const namespace = await mf.getDurableObjectNamespace('MACHINE');
+      const response = await namespace
+        .get(namespace.idFromName(`${ORG}:${machine}`))
+        .fetch(`https://machine${path}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'X-Desk-Org': ORG, 'X-Desk-Machine': machine, ...headers }, body });
+      const status = response.status;
+      await response.body?.cancel();
+      return status;
+    },
     /** Shortens a machine's heartbeat and lease; set before its stream opens (the suites' Worker only). */
     async timing(machine: string, timing: { heartbeatMs: number; leaseMs: number }) {
       await seam('MACHINE', machine, `${TIMING_PATH}?heartbeatMs=${timing.heartbeatMs}&leaseMs=${timing.leaseMs}`);

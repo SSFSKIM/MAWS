@@ -72,3 +72,6 @@ export const MEMBER_HEADER = 'X-Desk-Member';
 export const PROJECT_HEADER = 'X-Desk-Project';
 export const ORG_HEADER = 'X-Desk-Org';
 export const MACHINE_HEADER = 'X-Desk-Machine';
+/** The service token's client id the Worker resolved a machine's request from: its `Machine` object refuses one whose
+ * credential was revoked, though the Worker admitted the request before the revocation. */
+export const CLIENT_HEADER = 'X-Desk-Client';

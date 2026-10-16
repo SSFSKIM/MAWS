@@ -7,8 +7,12 @@
 // `hb-ack` of the stream's generation, which this object hands to each of those projects; the stream's end is handed to
 // them too, so the lease ends at once. Neither is relied on alone: an object can restart without running any of this,
 // and the projects then find the lease lapsed (Project's alarm).
+//
+// A revocation is a fence: the revoked credential's client id is kept, and a request carrying it is refused here, so
+// one the Worker admitted before the revocation and delivered after it opens nothing, and the name enrolled again (a
+// new credential) is served.
 import { DurableObject } from 'cloudflare:workers';
-import { heartbeatMs, MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
+import { CLIENT_HEADER, heartbeatMs, MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
 import { GENERATION_HEADER, LEASE_PERIODS, POST_LIMIT, type DownFrame, type UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, toWire, type Part } from '../protocol/parts';
 import { PROJECT_ID, type MachineContext } from './project';
@@ -18,6 +22,8 @@ type Stream = {
   machine: string;
   generation: number;
   writer: WritableStreamDefaultWriter<Uint8Array>;
+  /** Errors the stream, both its sides: how it ends (`end`). */
+  fail: (reason: Error) => void;
   heartbeat: ReturnType<typeof setInterval>;
   /** Part sets of frames posted on this stream, which may span POSTs. */
   parts: PartAssembler;
@@ -39,6 +45,8 @@ function sse(frame: DownFrame): Uint8Array {
   return encoder.encode(lines.map((line) => `event: ${event}\ndata: ${line}\n\n`).join(''));
 }
 
+const revokedKey = (clientId: string) => `revoked:${clientId}`;
+
 /** The project a frame up is addressed to, or null for one that names none (`hb-ack`). */
 function projectOf(frame: UpFrame): unknown {
   if (frame.t === 'session') return (frame.message as { project?: unknown } | undefined)?.project;
@@ -49,6 +57,9 @@ export class Machine extends DurableObject<Env> {
   private stream: Stream | undefined;
 
   async fetch(request: Request): Promise<Response> {
+    if (this.ctx.storage.kv.get(revokedKey(request.headers.get(CLIENT_HEADER) ?? ''))) {
+      return json(403, { error: 'not-enrolled', message: 'this credential was revoked' });
+    }
     const url = new URL(request.url);
     if (url.pathname === '/stream' && request.method === 'GET') return this.open(request);
     if (url.pathname === '/frames' && request.method === 'POST') return this.frames(request);
@@ -68,8 +79,10 @@ export class Machine extends DurableObject<Env> {
     if (this.stream?.generation === generation) this.end(this.stream);
   }
 
-  /** The machine was revoked: its stream ends now (the Worker refuses its credential from here on). */
-  revoke(): void {
+  /** The machine was revoked: its stream ends now, and a request with the revoked credential is refused from here on,
+   * one the Worker admitted before the revocation included. */
+  revoke(clientId: string | null): void {
+    if (clientId) this.ctx.storage.kv.put(revokedKey(clientId), true);
     this.end(this.stream);
   }
 
@@ -88,12 +101,14 @@ export class Machine extends DurableObject<Env> {
     this.end(this.stream);
 
     const { heartbeatMs } = this.timing();
-    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    let fail!: (reason: Error) => void;
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>({ start: (controller) => void (fail = (reason) => controller.error(reason)) });
     const stream: Stream = {
       org,
       machine,
       generation,
       writer: writable.getWriter(),
+      fail,
       heartbeat: setInterval(() => void this.write(stream, { t: 'hb', at: new Date().toISOString() }), heartbeatMs),
       parts: new PartAssembler(),
       projects: new Set(),
@@ -241,7 +256,10 @@ export class Machine extends DurableObject<Env> {
     if (!stream) return;
     clearInterval(stream.heartbeat);
     if (this.stream === stream) this.stream = undefined;
-    stream.writer.close().catch(() => {});
+    // Errored, not closed: a close (or an abort) waits behind a write a client that stopped reading never takes, and the
+    // writes queued after it are a project's send chain and the POSTs waiting on it. Erroring the stream fails them all
+    // at once, so they answer offline.
+    stream.fail(new Error('the stream ended'));
     // The stream's end ends its lease at once in every project it opened; a project that misses this finds the lease
     // lapsed instead.
     for (const project of stream.projects) void this.project(stream, project).closed(this.context(stream, project)).catch(() => {});
