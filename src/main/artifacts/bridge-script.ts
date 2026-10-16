@@ -21,9 +21,10 @@
 // Re-pin (P2-E1 document, D8): `{ type: 'maws:locate', id, selector }` from the parent (a numeric id, a string
 // selector) is answered with `{ type: 'maws:located', id, selector, rect }`, the id echoed so the app tells two asks of
 // one selector apart, the rect `getBoundingClientRect` of `document.querySelector(selector)`, or null when the selector
-// matches nothing or is invalid (a throwing selector is caught). A locate never starts picking and leaves nothing in the
-// page. The capture window loads the page top-level, where there is no parent to
-// listen to, so the script does nothing there.
+// matches nothing or is invalid (a throwing selector is caught). A zero-size rect is not final: observe the anchor until
+// both dimensions have size, bounded by HtmlFrame's one-second locate budget (null if it never gains size). The observer
+// leaves on either answer. A locate never starts picking or changes the page. The capture window loads the page
+// top-level, where there is no parent to listen to, so the script does nothing there.
 //
 // A plain string, not a stringified function: a bundler's helpers (esbuild's `__name`) would not exist in the page.
 // Served as one line: it goes ahead of the artifact's own scripts, so a line of its own would move every line number
@@ -142,7 +143,21 @@ const SOURCE = String.raw`(function () {
       var el = document.querySelector(data.selector);
       if (el) { var r = el.getBoundingClientRect(); rect = { x: r.left, y: r.top, width: r.width, height: r.height }; }
     } catch (error) { rect = null; }
-    post({ type: 'maws:located', id: data.id, selector: data.selector, rect: rect });
+    if (!rect || (rect.width > 0 && rect.height > 0)) {
+      post({ type: 'maws:located', id: data.id, selector: data.selector, rect: rect });
+      return;
+    }
+    function finish(rect) {
+      window.clearTimeout(timer);
+      observer.disconnect();
+      post({ type: 'maws:located', id: data.id, selector: data.selector, rect: rect });
+    }
+    var observer = new window.ResizeObserver(function () {
+      var r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) finish({ x: r.left, y: r.top, width: r.width, height: r.height });
+    });
+    var timer = window.setTimeout(function () { finish(null); }, 1000);
+    observer.observe(el);
   });
 
   window.addEventListener('mousemove', function (event) {
