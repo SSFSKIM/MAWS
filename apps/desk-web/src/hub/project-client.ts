@@ -150,11 +150,12 @@ export class ProjectClient implements SessionPlane {
    * Sends a newly sealed RPC, again after each reconnect, until the hub reports its result (`done` or `failed`). False,
    * and nothing kept, when the socket is not welcomed: the hub queues nothing for an absent party (it fails an offline
    * machine's at once), and an RPC is a decision for the moment it was made — an Interrupt held until a later welcome
-   * could stop a later turn.
+   * could stop a later turn. Kept only once the socket took it: a connection already closing (its close not yet
+   * handled, so the welcome still stands) takes nothing, and the RPC is refused like any other.
    */
   sendRpc(rpc: Rpc): boolean {
-    if (!this.welcomed) return false;
-    this.resendRpc(rpc);
+    if (!this.welcomed || !this.socket.send({ t: 'rpc', rpc })) return false;
+    this.rpcs.set(rpc.nonce, rpc);
     return true;
   }
 

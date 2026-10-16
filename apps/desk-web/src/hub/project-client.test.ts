@@ -189,6 +189,17 @@ describe('what goes up', () => {
     expect(double.up.filter((u) => u.frame.t === 'rpc')).toHaveLength(0);
   });
 
+  it('refuses an RPC the socket would not take though the welcome still stands (a connection already closing)', async () => {
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    // The connection is closing; its close callback, which ends the welcome, has not run yet.
+    (c as unknown as { socket: { ws: WebSocket } }).socket.ws.close();
+    expect(c.sendRpc(rpcTo())).toBe(false);
+    await until(() => caughtUp.length === 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(double.up.filter((u) => u.frame.t === 'rpc')).toHaveLength(0);
+  });
+
   it('holds a retry of an RPC it already sent while disconnected, and sends it on the next welcome', async () => {
     const { c, caughtUp, statuses } = client();
     await until(() => caughtUp.length === 1);
