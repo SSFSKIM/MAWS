@@ -33,6 +33,15 @@ function walk(n = 10_000): ViewTable {
   });
   return { columns: [{ name: 'step', type: 'number' }, { name: 'level', type: 'number' }, { name: 'noise', type: 'number' }, { name: 'group', type: 'string' }], rows };
 }
+// Synthetic series for the small multiples: `n` series S0…, `per` points each, series i's j-th point at (j, (i + 1)(j + 1)).
+function manySeries(n: number, per = 3, name = (i: number) => `S${i}`): ViewTable {
+  const rows = Array.from({ length: n * per }, (_, k) => {
+    const [i, j] = [Math.floor(k / per), k % per];
+    return [j, (i + 1) * (j + 1), name(i)];
+  });
+  return { columns: [{ name: 'x', type: 'number' }, { name: 'y', type: 'number' }, { name: 's', type: 'string' }], rows };
+}
+const longSeries = () => manySeries(8, 3, (i) => `제주특별자치도 서귀포시 대정읍 마라도 등대 앞 선착장 ${i + 1}번 관측소`);
 const HOSTILE: ViewTable = {
   columns: [{ name: 'name', type: 'string' }, { name: 'v', type: 'number' }],
   rows: [['</text><script>alert(1)</script>', 1], ['" onload="alert(2)', 2], ['<a href="https://evil.example/">x</a>', 3], ['&amp; ]]> <!-- \u0000\u0007', 4]],
@@ -64,6 +73,9 @@ const CASES: Case[] = [
   { id: 'edge-hostile', dataset: 'gdp', table: HOSTILE, spec: { view: 'bar', x: 'name', y: 'v', title: '<script>alert("t")</script> javascript:alert(3)', onclick: 'alert(4)', href: 'https://evil.example/' } },
   { id: 'edge-extreme', dataset: 'x', table: EXTREME, spec: { view: 'bar', x: 'k', y: 'v' } },
   { id: 'edge-long-korean', dataset: 'regions', table: LONG, spec: { view: 'bar', x: LONG.columns[0].name, y: '값', title: '이름이 긴 행정 구역별 값의 비교 — 줄바꿈과 잘림 없이' } },
+  { id: 'facet-line-gdp', dataset: 'gdp', table: gdp, spec: { view: 'line', x: 'year', y: 'growth_pct', series: 'country_ko', format: { year: 'text' }, title: '8개국 GDP 성장률, 2019–2024 (%)' } },
+  { id: 'facet-bar-gdp', dataset: 'gdp', table: gdp, spec: { view: 'bar', x: 'year', y: 'growth_pct', series: 'country_ko', filter: [{ column: 'year', op: 'gt', value: 2021 }], format: { year: 'text' }, title: 'GDP growth by country, 2022–2024' } },
+  { id: 'facet-long-korean', dataset: 'regions', table: longSeries(), spec: { view: 'scatter', x: 'x', y: 'y', series: 's', title: '긴 이름의 계열 여덟 개' } },
   { id: 'stress-line-10k', dataset: 'walk', table: walk(), spec: { view: 'line', x: 'step', y: 'level', title: 'Synthetic walk, 10,000 steps' } },
   { id: 'stress-scatter-10k', dataset: 'walk', table: walk(), spec: { view: 'scatter', x: 'step', y: 'noise', series: 'group', title: 'Synthetic noise in three groups' } },
 ];
@@ -76,6 +88,25 @@ const draw = (id: string) => {
 /** A view's one output, whichever it is. */
 const out = (rendered: Rendered): string => rendered.svg ?? rendered.html!;
 const tips = (svg: string) => [...svg.matchAll(/data-tip="([^"]*)"/g)].map((m) => m[1]);
+/** A faceted figure's panels: each `<g role="group" aria-label>` (its series' label) and what it draws. */
+const panels = (svg: string) => [...svg.matchAll(/<g role="group" aria-label="([^"]*)">(.*?)<\/g>/g)].map((m) => ({ label: m[1], body: m[2] }));
+/** A legend entry's key mark, its numbers blanked: the form that tells its series apart. */
+const formOf = (svg: string, label: string): string => {
+  const legend = /<g>(.*?)<\/g>/.exec(svg)![1];
+  const key = legend.slice(0, legend.lastIndexOf('<text', legend.indexOf(`>${label}</text>`)));
+  return key.slice(key.lastIndexOf('<path d="M')).replace(/-?\d+(?:\.\d+)?/g, '#');
+};
+/** A panel's plot box, from its grid rules (`M x0,y H x1`). */
+const boxOf = (body: string) => {
+  const rules = [...body.matchAll(/<path d="M([\d.]+),([\d.]+)H([\d.]+)"/g)].map((m) => m.slice(1).map(Number));
+  return { x0: rules[0][0], x1: rules[0][2], top: Math.min(...rules.map((r) => r[1])), bottom: Math.max(...rules.map((r) => r[1])), rules: rules.map((r) => r[1]) };
+};
+/** The nearest-point layer's points and their tips. */
+const layer = (svg: string) => {
+  const m = /<g data-hover="nearest" data-xy="([^"]*)" data-tips="([^"]*)"\/>/.exec(svg)!;
+  const tipList = m[2].split('&#10;');
+  return m[1].split(' ').map((pair, i) => ({ x: Number(pair.split(',')[0]), y: Number(pair.split(',')[1]), tip: tipList[i] }));
+};
 
 // ── the grade: a strict reading of the output as XML, against a whitelist ──
 
@@ -213,14 +244,12 @@ describe('renderView', () => {
   });
 
   it('keeps series identity from the unfiltered snapshot: a filter never changes a surviving series\' form', () => {
-    const style = (svg: string, label: string) => {
-      const legend = /<g>(.*?)<\/g>/.exec(svg)![1];
-      const at = legend.indexOf(`>${label}</text>`);
-      return /stroke-dasharray="([^"]*)"/.exec(legend.slice(legend.lastIndexOf('<path d="M', at), at))?.[1] ?? 'solid';
-    };
-    const three = draw('line-gdp-three').svg;
-    const two = renderView({ ...(byId('line-gdp-three').spec as object), filter: [{ column: 'iso3', op: 'in', value: ['KOR', 'USA'] }] }, gdp, theme, 'gdp').svg!;
-    for (const name of ['대한민국', '미국']) expect(style(two, name), name).toBe(style(three, name));
+    const spec = { view: 'scatter', x: 'flipper_length_mm', y: 'body_mass_g', series: 'species_ko' };
+    const three = renderView(spec, penguins, theme, 'penguins').svg!;
+    const two = renderView({ ...spec, filter: [{ column: 'species', op: 'in', value: ['Adelie', 'Gentoo'] }] }, penguins, theme, 'penguins').svg!;
+    expect(panels(three)).toEqual([]); // three forms: one figure, a legend
+    for (const name of ['아델리펭귄', '젠투펭귄']) expect(formOf(two, name), name).toBe(formOf(three, name));
+    expect(formOf(two, '아델리펭귄')).not.toBe(formOf(two, '젠투펭귄'));
   });
 
   it('breaks a line at a missing value and counts what it did not draw, never drawing zero', () => {
@@ -365,7 +394,7 @@ describe('renderView', () => {
 
   it('answers the complete transformed view for inspection, the interpretation the view draws', () => {
     const counted = viewRows({ view: 'pie', x: 'island_ko', agg: 'count' }, penguins, 'penguins');
-    expect(counted).toEqual({ ok: true, table: { columns: [{ name: 'island_ko', type: 'string' }, { name: 'count', type: 'number' }], rows: [['토르게르센섬', 52], ['비스코섬', 168], ['드림섬', 124]] } });
+    expect(counted).toMatchObject({ ok: true, notes: [], table: { columns: [{ name: 'island_ko', type: 'string' }, { name: 'count', type: 'number' }], rows: [['토르게르센섬', 52], ['비스코섬', 168], ['드림섬', 124]] } });
     const projected = viewRows({ view: 'table', columns: ['growth_pct', 'country'], filter: [{ column: 'year', op: 'eq', value: 2024 }] }, gdp, 'gdp');
     expect(projected.ok && projected.table.columns.map((c) => c.name)).toEqual(['growth_pct', 'country']);
     expect(projected.ok && projected.table.rows).toHaveLength(8);
@@ -414,5 +443,178 @@ describe('renderView', () => {
     }
     const pie = renderView({ view: 'pie', x: 'x', y: 'y' }, { columns: t.columns, rows: [[1, 1e306], [2, 1e306], [3, 1e306]] }, theme, 't');
     expect(out(pie)).not.toMatch(/NaN|Infinity/);
+  });
+});
+
+describe('many series: labelled small multiples (parent Decision Log 27)', () => {
+  const scatter = (t: ViewTable, over: Record<string, unknown> = {}) => renderView({ view: 'scatter', x: 'x', y: 'y', series: 's', ...over }, t, theme, 't');
+  const textsOf = (body: string) => grade(`<svg xmlns="http://www.w3.org/2000/svg">${body}</svg>`).texts;
+
+  it('draws seven series as seven labelled panels in snapshot order; filtered to S0 and S6, two panels named so, never a cycled form', () => {
+    const seven = manySeries(7);
+    const all = scatter(seven).svg!;
+    expect(panels(all).map((p) => p.label)).toEqual(['S0', 'S1', 'S2', 'S3', 'S4', 'S5', 'S6']);
+    expect(all).not.toContain('<g>'); // the panels' names carry identity, not a legend of forms
+    const pair = scatter(seven, { filter: [{ column: 's', op: 'in', value: ['S0', 'S6'] }] }).svg!;
+    const shown = panels(pair);
+    expect(shown.map((p) => p.label)).toEqual(['S0', 'S6']);
+    // each panel says its series' name in text and draws that series' values alone
+    for (const p of shown) expect(textsOf(p.body)[0]).toBe(p.label);
+    expect(layer(pair).map((point) => point.tip)).toEqual(['0 · S0 · y: 1', '1 · S0 · y: 2', '2 · S0 · y: 3', '0 · S6 · y: 7', '1 · S6 · y: 14', '2 · S6 · y: 21']);
+    expect(grade(pair).problems).toEqual([]);
+  });
+
+  it('keeps one figure with a legend of distinct forms up to six identities, a filter keeping each survivor\'s form', () => {
+    const six = scatter(manySeries(6)).svg!;
+    expect(panels(six)).toEqual([]);
+    const forms = ['S0', 'S1', 'S2', 'S3', 'S4', 'S5'].map((label) => formOf(six, label));
+    expect(new Set(forms).size).toBe(6);
+    const two = scatter(manySeries(6), { filter: [{ column: 's', op: 'in', value: ['S0', 'S5'] }] }).svg!;
+    expect([formOf(two, 'S0'), formOf(two, 'S5')]).toEqual([forms[0], forms[5]]);
+  });
+
+  it('shares the axes and the scales: every panel the same grid, equal values at equal heights in a row, the x ticks alike', () => {
+    const svg = scatter(manySeries(8)).svg!;
+    const boxes = panels(svg).map((p) => boxOf(p.body));
+    expect(boxes).toHaveLength(8);
+    const relative = (b: (typeof boxes)[number]) => ({ width: Math.round((b.x1 - b.x0) * 100), rules: b.rules.map((y) => Math.round((y - b.top) * 100)) });
+    for (const b of boxes) expect(relative(b)).toEqual(relative(boxes[0]));
+    const points = layer(svg);
+    const at = (tip: string) => points.find((p) => p.tip === tip)!;
+    expect(at('1 · S0 · y: 2').y).toBe(at('0 · S1 · y: 2').y); // side by side in the first row, one height for one value
+    expect(at('0 · S4 · y: 5').x).toBe(at('0 · S0 · y: 1').x); // S4 heads the second row, under S0
+    // the y labels once per row, beside its first panel; the x ticks under the last panel of each column, all alike
+    expect(grade(svg).texts.filter((t) => t === '20')).toHaveLength(2);
+    const firstRow = panels(svg).slice(0, 4).map((p) => textsOf(p.body).slice(1));
+    expect(firstRow).toEqual([[], [], [], []]);
+    const lastRow = panels(svg).slice(4).map((p) => textsOf(p.body).slice(1));
+    for (const ticks of lastRow) expect(ticks).toEqual(lastRow[0]);
+    expect(lastRow[0].length).toBeGreaterThan(1);
+  });
+
+  it('draws 24 panels in six rows of four; a 25th series answers the named state, the view\'s rows still whole for inspection', () => {
+    const svg = scatter(manySeries(24)).svg!;
+    const boxes = panels(svg).map((p) => boxOf(p.body));
+    expect(boxes).toHaveLength(24);
+    expect(new Set(boxes.map((b) => b.x0)).size).toBe(4);
+    expect(new Set(boxes.map((b) => b.top)).size).toBe(6);
+    for (const b of boxes) expect(b.x1).toBeLessThanOrEqual(theme.width);
+    const many = scatter(manySeries(25));
+    expect(many.svg).toContain('too many series: 25; filter or aggregate');
+    expect(many.warnings).toContain('too many series: 25; filter or aggregate');
+    expect(panels(many.svg!)).toEqual([]);
+    const inspected = viewRows({ view: 'scatter', x: 'x', y: 'y', series: 's' }, manySeries(25), 't');
+    expect(inspected.ok && inspected.table.rows).toHaveLength(75);
+    expect(panels(scatter(manySeries(25), { filter: [{ column: 's', op: 'ne', value: 'S7' }] }).svg!)).toHaveLength(24);
+  });
+
+  it('keeps sparse filtered identities in snapshot order under their own names', () => {
+    const svg = scatter(manySeries(30), { filter: [{ column: 's', op: 'in', value: ['S29', 'S3', 'S17'] }] }).svg!;
+    expect(panels(svg).map((p) => p.label)).toEqual(['S3', 'S17', 'S29']);
+    expect(new Set(panels(svg).map((p) => boxOf(p.body).top)).size).toBe(1); // three columns, one row
+  });
+
+  it('names typed series apart: the number 1, the text "1", an empty cell and the text "(none)", in panels and in a legend', () => {
+    const typed: ViewTable = { columns: [{ name: 'x', type: 'number' }, { name: 'y', type: 'number' }, { name: 's', type: 'string' }], rows: [[1, 2, 1], [2, 3, '1'], [3, 4, null], [4, 5, '(none)'], [5, 6, 'a'], [6, 7, 'b'], [7, 8, 'c']] };
+    const qualified = ['1 (number)', '1 (text)', '(none) (empty)', '(none) (text)'];
+    expect(panels(scatter(typed).svg!).map((p) => p.label)).toEqual([...qualified, 'a', 'b', 'c']);
+    expect(layer(scatter(typed).svg!).map((p) => p.tip).slice(0, 2)).toEqual(['1 · 1 (number) · y: 2', '2 · 1 (text) · y: 3']);
+    const four = scatter({ columns: typed.columns, rows: typed.rows.slice(0, 4) }).svg!;
+    expect(grade(/<g>(.*?)<\/g>/.exec(four)![0]).texts).toEqual(qualified);
+  });
+
+  it('draws a panel for each series and measure, each measure in its own format', () => {
+    const t: ViewTable = {
+      columns: [{ name: 'x', type: 'string' }, { name: 's', type: 'string' }, { name: 'rate', type: 'number' }, { name: 'amount', type: 'number' }],
+      rows: ['a', 'b', 'c', 'd'].flatMap((name, i) => [['p', name, 0.1 * (i + 1), 10 * (i + 1)], ['q', name, 0.05, 5]]),
+    };
+    const { svg = '' } = renderView({ view: 'bar', x: 'x', y: ['rate', 'amount'], series: 's', format: { rate: 'percent' } }, t, theme, 't');
+    expect(panels(svg).map((p) => p.label)).toEqual(['a · rate', 'a · amount', 'b · rate', 'b · amount', 'c · rate', 'c · amount', 'd · rate', 'd · amount']);
+    expect(tips(svg).slice(0, 4)).toEqual(['p · a · rate: 10%', 'q · a · rate: 5%', 'p · a · amount: 10', 'q · a · amount: 5']);
+    expect(grade(svg).problems).toEqual([]);
+  });
+
+  it('fits long Korean panel names inside their panels, wrapped and, past two lines, shortened with a note', () => {
+    const { svg = '', warnings } = draw('facet-long-korean');
+    expect(panels(svg)).toHaveLength(8);
+    const shown = panels(svg).map((p, i) => {
+      const box = boxOf(p.body);
+      const title = /^<text x="([\d.]+)" y="[\d.]+"[^>]*>(.*?)<\/text>/.exec(p.body)!;
+      expect(Number(title[1])).toBe(box.x0);
+      const lines = title[2].includes('<tspan') ? [...title[2].matchAll(/<tspan[^>]*>(.*?)<\/tspan>/g)].map((t) => t[1]) : [title[2]];
+      expect(lines.length).toBeLessThanOrEqual(2);
+      for (const line of lines) expect(textWidth(line, theme.caption), line).toBeLessThanOrEqual(box.x1 - box.x0);
+      // a shortened name keeps its beginning and its end, where names that share a long beginning differ
+      expect(lines[0]).toMatch(/^제주특별자치도/);
+      expect(lines.at(-1)).toMatch(new RegExp(`^….* ${i + 1}번 관측소$`));
+      return lines.join(' ');
+    });
+    expect(new Set(shown).size).toBe(8);
+    expect(warnings).toContain('some series names are shortened; the tips and the source table have them whole');
+    expect(layer(svg)[0].tip).toBe('0 · 제주특별자치도 서귀포시 대정읍 마라도 등대 앞 선착장 1번 관측소 · y: 1'); // whole in the tip
+  });
+
+  it('places every hover point of a later panel inside that panel, its tip naming the series', () => {
+    for (const view of ['line', 'scatter', 'area']) {
+      const svg = renderView({ view, x: 'x', y: 'y', series: 's' }, manySeries(10, 5), theme, 't').svg!;
+      const points = layer(svg);
+      expect(points, view).toHaveLength(50);
+      for (const p of panels(svg)) {
+        const box = boxOf(p.body);
+        const own = points.filter((point) => point.tip.includes(` · ${p.label} · `));
+        expect(own, `${view} ${p.label}`).toHaveLength(5);
+        for (const point of own) {
+          expect(point.x, `${view} ${point.tip}`).toBeGreaterThanOrEqual(box.x0);
+          expect(point.x, `${view} ${point.tip}`).toBeLessThanOrEqual(box.x1);
+          expect(point.y, `${view} ${point.tip}`).toBeGreaterThanOrEqual(box.top);
+          expect(point.y, `${view} ${point.tip}`).toBeLessThanOrEqual(box.bottom);
+        }
+      }
+    }
+  });
+});
+
+describe('aggregate overflow and renamed measures', () => {
+  const huge: ViewTable = { columns: [{ name: 'g', type: 'string' }, { name: 'v', type: 'number' }], rows: [['A', 1.7e308], ['A', 1.7e308], ['B', 2]] };
+  const NOTE = 'sum of v overflows in 1 group: too large to represent';
+
+  it('names an overflowing sum in a table view: its cell and the table\'s note, never an unexplained dash', () => {
+    const { html = '' } = renderView({ view: 'table', x: 'g', y: 'v', agg: 'sum' }, huge, theme, 't');
+    expect(html).toContain(`<caption class="dash-table-note">${NOTE}</caption>`);
+    expect(html).toContain('<tr><td>A</td><td class="dash-num">overflow</td></tr><tr><td>B</td><td class="dash-num">2</td></tr>');
+    expect(html).not.toContain('—');
+    expect(grade(html).problems).toEqual([]);
+    const many: ViewTable = { columns: huge.columns, rows: [...huge.rows, ...Array.from({ length: 30 }, (_, i) => [`G${i}`, i])] };
+    expect(renderView({ view: 'table', x: 'g', y: 'v', agg: 'sum' }, many, theme, 't').html).toContain(`<caption class="dash-table-note">first 25 of 32 rows · ${NOTE}</caption>`);
+  });
+
+  it('names an overflowing sum under a chart, not as a missing value', () => {
+    for (const view of ['bar', 'line', 'pie']) {
+      const { svg = '', warnings } = renderView({ view, x: 'g', y: 'v', agg: 'sum' }, huge, theme, 't');
+      expect(warnings, view).toContain(NOTE);
+      expect(warnings.join(' '), view).not.toMatch(/has no v|no positive v/);
+      expect(svg, view).not.toMatch(/NaN|Infinity/);
+    }
+    const alone = renderView({ view: 'bar', x: 'g', y: 'v', agg: 'sum' }, { columns: huge.columns, rows: huge.rows.slice(0, 2) }, theme, 't');
+    expect(alone.svg).toContain(NOTE); // nothing left to draw: the reason in place
+  });
+
+  it('answers the complete view for inspection with the overflow: the note and the cell', () => {
+    const inspected = viewRows({ view: 'table', x: 'g', y: 'v', agg: 'sum', columns: ['v', 'g'] }, huge, 't');
+    if (!inspected.ok) throw new Error(inspected.error);
+    expect(inspected.table.rows).toEqual([[null, 'A'], [2, 'B']]);
+    expect(inspected.notes).toEqual([NOTE]);
+    expect([inspected.overflowed(0, 0), inspected.overflowed(0, 1), inspected.overflowed(1, 0)]).toEqual([true, false, false]);
+  });
+
+  it('formats a measure renamed apart from its grouping column as its source column asks, else by its own name', () => {
+    const t: ViewTable = { columns: [{ name: 'rate', type: 'number' }], rows: [[0.1], [0.1], [0.2]] };
+    const table = renderView({ view: 'table', x: 'rate', y: 'rate', agg: 'mean', columns: ['mean of rate'], format: { rate: 'percent' } }, t, theme, 't').html!;
+    expect(table).toContain('<td class="dash-num">10%</td>');
+    expect(table).toContain('<td class="dash-num">20%</td>');
+    const bar = renderView({ view: 'bar', x: 'rate', y: 'rate', agg: 'mean', format: { rate: 'percent' } }, t, theme, 't').svg!;
+    expect(tips(bar)).toEqual(['10% · mean of rate: 10%', '20% · mean of rate: 20%']);
+    const own = renderView({ view: 'table', x: 'rate', y: 'rate', agg: 'mean', columns: ['mean of rate'], format: { 'mean of rate': 'percent' } }, t, theme, 't').html!;
+    expect(own).toContain('<td class="dash-num">10%</td>');
   });
 });

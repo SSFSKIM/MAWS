@@ -3,7 +3,7 @@
 // name stay apart; actual values asserted.
 import { describe, expect, it } from 'vitest';
 import type { ViewSpec } from '../spec';
-import { instantOf, transform, typedKey, type ViewData, type ViewTable } from './transform';
+import { columnFormat, instantOf, overflowKey, transform, typedKey, type ViewData, type ViewTable } from './transform';
 
 const SALES: ViewTable = {
   columns: [{ name: 'region', type: 'string' }, { name: 'month', type: 'date' }, { name: 'sales', type: 'number' }, { name: 'rep', type: 'string' }],
@@ -26,7 +26,7 @@ const rows = (spec: Omit<ViewSpec, 'view'>, table = SALES) => data(spec, table).
 
 describe('transform', () => {
   it('keeps every row in order without agg, the roles by index', () => {
-    expect(data({ x: 'region', y: 'sales' })).toEqual({ table: SALES, x: 0, ys: [2], yNames: ['sales'], seriesKeys: [] });
+    expect(data({ x: 'region', y: 'sales' })).toEqual({ table: SALES, x: 0, ys: [2], ySources: ['sales'], seriesKeys: [], overflow: new Set(), notes: [] });
   });
 
   it('filters before grouping and aggregates each y per group in first-seen order; count counts rows, nulls included', () => {
@@ -42,7 +42,7 @@ describe('transform', () => {
     const counted = data({ x: 'region', y: 'region', agg: 'count' });
     expect(counted.table.columns.map((c) => c.name)).toEqual(['region', 'count of region']);
     expect(counted.table.rows).toEqual([['north', 3], ['south', 2], ['east', 1]]);
-    expect([counted.x, counted.ys, counted.yNames]).toEqual([0, [1], ['region']]);
+    expect([counted.x, counted.ys, counted.ySources]).toEqual([0, [1], ['region']]);
     // the implicit count beside a grouping column named `count`
     const table: ViewTable = { columns: [{ name: 'count', type: 'string' }], rows: [['a'], ['a'], ['b']] };
     const implicit = data({ x: 'count', agg: 'count' }, table);
@@ -65,6 +65,40 @@ describe('transform', () => {
     const huge: ViewTable = { columns: big.columns, rows: [['A', 1.7e308], ['A', 1.7e308]] };
     expect(rows({ x: 'g', y: 'v', agg: 'sum' }, huge)).toEqual([['A', null]]);
     expect(rows({ x: 'g', y: 'v', agg: 'max' }, huge)).toEqual([['A', 1.7e308]]);
+  });
+
+  it('names an aggregate that overflows: the cell held as null, marked, and a note naming the measure and its groups', () => {
+    const huge: ViewTable = { columns: [{ name: 'g', type: 'string' }, { name: 'v', type: 'number' }], rows: [['A', 1.7e308], ['A', 1.7e308], ['B', 1], ['C', -1.7e308], ['C', -1.7e308]] };
+    const summed = data({ x: 'g', y: 'v', agg: 'sum' }, huge);
+    expect(summed.table.rows).toEqual([['A', null], ['B', 1], ['C', null]]);
+    expect(summed.notes).toEqual(['sum of v overflows in 2 groups: too large to represent']);
+    expect([...summed.overflow]).toEqual([overflowKey(0, 1), overflowKey(2, 1)]);
+    // the note counts the groups the view keeps, after its sort and limit (nulls sort last)
+    const kept = data({ x: 'g', y: 'v', agg: 'sum', sort: { by: 'v', dir: 'desc' }, limit: 1 }, huge);
+    expect([kept.table.rows, kept.notes, kept.overflow.size]).toEqual([[['B', 1]], [], 0]);
+    // a mean never overflows: it is the mean of the values, however large their sum
+    expect(rows({ x: 'g', y: 'v', agg: 'mean' }, huge)).toEqual([['A', 1.7e308], ['B', 1], ['C', -1.7e308]]);
+    expect(data({ x: 'g', y: 'v', agg: 'mean' }, huge).notes).toEqual([]);
+    // a running sum that passes the largest number on its way to a representable answer is that answer
+    expect(rows({ x: 'g', y: 'v', agg: 'sum' }, { columns: huge.columns, rows: [['A', 1.7e308], ['A', 1.7e308], ['A', -1.7e308]] })).toEqual([['A', 1.7e308]]);
+    // an empty group's sum is no value without a reason to give: no note
+    const empty = data({ x: 'g', y: 'v', agg: 'sum' }, { columns: huge.columns, rows: [['A', null]] });
+    expect([empty.table.rows, empty.notes, empty.overflow.size]).toEqual([[['A', null]], [], 0]);
+  });
+
+  it('formats each column by its role: a renamed measure by its source column, then by its own name; a grouping column by its name', () => {
+    const t: ViewTable = { columns: [{ name: 'rate', type: 'number' }, { name: 'count', type: 'string' }], rows: [[0.1, 'a'], [0.2, 'b']] };
+    const spec = { view: 'table' as const, x: 'rate', y: 'rate', agg: 'mean' as const, format: { rate: 'percent' as const } };
+    const renamed = data(spec, t);
+    expect(renamed.table.columns.map((c) => c.name)).toEqual(['rate', 'mean of rate']);
+    expect([columnFormat(spec, renamed, 0), columnFormat(spec, renamed, 1)]).toEqual(['percent', 'percent']);
+    const byOutput = { ...spec, format: { 'mean of rate': 'text' as const } };
+    expect([columnFormat(byOutput, renamed, 0), columnFormat(byOutput, renamed, 1)]).toEqual([undefined, 'text']);
+    // the implicit count has no source column: a grouping column named `count` keeps its format to itself
+    const counting = { view: 'table' as const, x: 'count', agg: 'count' as const, format: { count: 'text' as const } };
+    const counted = data(counting, t);
+    expect(counted.table.columns.map((c) => c.name)).toEqual(['count', 'count of rows']);
+    expect([columnFormat(counting, counted, 0), columnFormat(counting, counted, 1)]).toEqual(['text', undefined]);
   });
 
   it('sorts stably after aggregating, nulls last either way, then limits', () => {

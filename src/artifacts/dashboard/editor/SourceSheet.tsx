@@ -11,7 +11,7 @@ import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactHost } from '../../host';
 import { snapshotOf, type Cell, type DatasetDescriptor } from '../datasets';
 import { compareCells, viewRows, type ViewTable } from '../render';
-import { mismatchNotes, sourceLabel } from '../states';
+import { mismatchNotes, sourceLabel, VIEW_STATES } from '../states';
 import type { SheetDataset, SourceSheetState } from './sheet';
 import type { SnapshotReader } from './snapshots';
 import { toTsv } from './tsv';
@@ -184,6 +184,13 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
       <p className="dash-sheet-status" role="status">
         {status}
       </p>
+      {shown === 'view' &&
+        viewed?.ok &&
+        viewed.notes.map((note) => (
+          <p key={note} className="dash-sheet-note">
+            {note}
+          </p>
+        ))}
       {failed !== null ? (
         <p className="dash-sheet-note" role="alert">{`The rows could not be read: ${failed}`}</p>
       ) : shown === 'view' && viewed && !viewed.ok ? (
@@ -191,7 +198,7 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
       ) : table === null ? (
         <p className="dash-sheet-loading">Reading the rows…</p>
       ) : (
-        <Rows key={shown} table={table} order={order} sort={sort} onSort={cycle} />
+        <Rows key={shown} table={table} order={order} sort={sort} onSort={cycle} overflowed={shown === 'view' && viewed?.ok ? viewed.overflowed : undefined} />
       )}
     </div>
   );
@@ -199,8 +206,9 @@ function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorNa
 
 // The rows as a table whose body draws only the rows in view (and a few beyond), each ROW_H high, over a spacer as tall
 // as all of them, so the page holds a bounded number of rows at any snapshot size. One element scrolls both ways, the
-// head sticking at its top, so the head's columns and the rows' always line up.
-function Rows({ table, order, sort, onSort }: { table: ViewTable; order: number[]; sort: Sort; onSort(column: number): void }) {
+// head sticking at its top, so the head's columns and the rows' always line up. A view's aggregate that overflowed reads
+// "overflow" in its cell (the note above says which), and copies as the empty field it holds.
+function Rows({ table, order, sort, onSort, overflowed }: { table: ViewTable; order: number[]; sort: Sort; onSort(column: number): void; overflowed?: (row: number, column: number) => boolean }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0);
   const [height, setHeight] = useState(VIEWPORT_FALLBACK);
@@ -231,7 +239,7 @@ function Rows({ table, order, sort, onSort }: { table: ViewTable; order: number[
           <div key={index} role="row" aria-rowindex={first + k + 2} className="dash-sheet-row" style={{ gridTemplateColumns: template, position: 'absolute', top: (first + k) * ROW_H, height: ROW_H, left: 0, right: 0 }}>
             {table.columns.map((column, c) => (
               <div key={column.name} role="cell" className="dash-sheet-cell" data-numeric={column.type === 'number' ? '' : undefined}>
-                {cellText(table.rows[index][c])}
+                {overflowed?.(index, c) ? VIEW_STATES.overflowCell : cellText(table.rows[index][c])}
               </div>
             ))}
           </div>

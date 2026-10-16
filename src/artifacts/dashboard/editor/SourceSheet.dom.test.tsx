@@ -175,6 +175,21 @@ describe('the source sheet', () => {
     expect(readDataset.mock.calls.every(([, ref]) => ref === 'assets/sales.tsv')).toBe(true);
   });
 
+  it('names an overflowing aggregate in the view’s rows: the note and the cell, copied as an empty field', async () => {
+    readDataset.mockImplementation(async () => ({ columns: [{ name: 'region', type: 'string' }, { name: 'sales', type: 'number' }], rows: [['서울', 1.7e308], ['서울', 1.7e308], ['부산', 7]], total: 3, truncated: false }));
+    mount();
+    const view = { spec: { view: 'bar', x: 'region', y: 'sales', agg: 'sum' }, caption: 'Total sales' };
+    act(() => sheet.open([{ id: 'sales', descriptor: descriptor('assets/sums.tsv', 3), view }], 'sales'));
+    await until(() => bodyRows().length > 0, 'the view rows');
+    expect(within(dialog()).getByText('sum of sales overflows in 1 group: too large to represent')).toBeTruthy();
+    expect(bodyRows().map(cells)).toEqual([['서울', 'overflow'], ['부산', '7']]);
+    await act(async () => void fireEvent.click(within(dialog()).getByRole('button', { name: 'Copy rows' })));
+    expect(writeText).toHaveBeenLastCalledWith('region\tsales\n서울\t\n부산\t7\n');
+    // the snapshot as bound has no such note
+    act(() => void fireEvent.click(within(dialog()).getByRole('button', { name: /^All source rows/ })));
+    expect(within(dialog()).queryByText('sum of sales overflows in 1 group: too large to represent')).toBeNull();
+  });
+
   it('says so when the dashboard has no dataset', () => {
     mount();
     act(() => sheet.open([]));

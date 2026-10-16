@@ -6,7 +6,10 @@
 //
 // The house law has no categorical palette, so a figure is drawn in text ink: series part by dash, marker shape and
 // fill treatment, always with a legend (two or more series) or a direct label, never by colour alone; status colours
-// are never borrowed. Hover is the host's handler around the figure; the figure carries none. A discrete mark (a bar,
+// are never borrowed. There are six forms: a view whose unfiltered snapshot holds more series identities draws labelled
+// small multiples instead (parent Decision Log 27), one panel per series in the first form, named above it, in up to
+// four columns on one shared x and y scale, at most 24 panels (past them the named state "too many series"). Hover is
+// the host's handler around the figure; the figure carries none. A discrete mark (a bar,
 // a wedge) names its value in `data-tip` and is its own hit target (a bar's hatching is drawn `pointer-events="none"`,
 // so its strokes never take the bar's pointer); the points of a line, an area or a scatter, every drawable one, sit in
 // one empty layer, `<g data-hover="nearest" data-xy="x,y …" data-tips="…">` (tips one per line), which the host
@@ -18,7 +21,7 @@ import * as geo from './geometry';
 import { SHAPES, type Point, type Ticks } from './geometry';
 import { decimalsFor, esc, formatInstant, formatNumber, px, unitOf, type Theme } from './svg';
 import { textWidth, wrap } from './text';
-import { instantOf, shownColumns, transform, typedKey, type ViewColumn, type ViewData, type ViewTable } from './transform';
+import { columnFormat, instantOf, overflowKey, shownColumns, transform, typedKey, type ViewColumn, type ViewData, type ViewTable } from './transform';
 
 /**
  * A view's one output (parent Decision Log 24): a chart is an SVG, a table an HTML `<table>` (text, not a picture), so
@@ -41,7 +44,14 @@ const BAR_FILLS: { solid: boolean; hatch: (45 | 135)[]; dash?: string }[] = [
   { solid: false, hatch: [45, 135] },
   { solid: false, hatch: [], dash: '3 2' },
 ];
-const MAX_SERIES = 6;
+/** The stable forms (DASHES, SHAPES, BAR_FILLS): a view whose unfiltered identities number more draws small multiples. */
+const MAX_FORMS = 6;
+// Small multiples (parent Decision Log 27): one labelled panel per series, up to four columns, at most 24 panels.
+const MAX_PANELS = 24;
+const PANEL_COLUMNS = 4;
+const PANEL_H = 120;
+const PANEL_GAP = 24;
+const PANEL_ROW_GAP = 16;
 const PLOT_H = 260;
 // A magnitude past this cannot take part in a scale's span (the span of ±1.7e308 is not a number): counted, not drawn.
 const DRAWABLE = 1e306;
@@ -69,16 +79,26 @@ export function renderView(spec: unknown, table: ViewTable | null, theme: Theme,
 }
 
 /** The transformed view as the source sheet inspects it, complete (before a table view's preview bound): the same
- * interpretation the figure and the table draw, or why there is none. */
-export function viewRows(spec: unknown, table: ViewTable, datasetId: string): { ok: true; table: ViewTable } | { ok: false; error: string } {
+ * interpretation the figure and the table draw, with what it could not compute (its notes, and which cells overflowed),
+ * or why there is none. */
+export function viewRows(
+  spec: unknown,
+  table: ViewTable,
+  datasetId: string,
+): { ok: true; table: ViewTable; notes: string[]; overflowed(row: number, column: number): boolean } | { ok: false; error: string } {
   const parsed = parseSpec(spec);
   if (!parsed.ok) return parsed;
   const shaped = transform(table, parsed.spec, datasetId);
   if (!shaped.ok) return shaped;
   const { data } = shaped;
-  if (parsed.spec.view !== 'table' || !parsed.spec.columns) return { ok: true, table: data.table };
-  const at = shownColumns(data, parsed.spec);
-  return { ok: true, table: { columns: at.map((i) => data.table.columns[i]), rows: data.table.rows.map((row) => at.map((i) => row[i] ?? null)) } };
+  // a table view's `columns` project the view; every other view inspects all of its columns
+  const at = parsed.spec.view === 'table' && parsed.spec.columns ? shownColumns(data, parsed.spec) : null;
+  return {
+    ok: true,
+    table: at ? { columns: at.map((i) => data.table.columns[i]), rows: data.table.rows.map((row) => at.map((i) => row[i] ?? null)) } : data.table,
+    notes: data.notes,
+    overflowed: (row, column) => data.overflow.has(overflowKey(row, at ? at[column] : column)),
+  };
 }
 
 /** A view that cannot be drawn for a reason outside its spec and rows (its snapshot unreadable), in the same frame. */
@@ -235,14 +255,69 @@ interface Mark {
   x: Cell;
   y: number | null;
   tip: string;
+  /** Its value is an aggregate past the largest number (the transform's note says so), not a missing one. */
+  overflow: boolean;
 }
 interface Series extends Entry {
   marks: Mark[];
+  /** The form it is drawn in: its identity's (`style`) in one figure, the first in its own panel. */
+  form: number;
   /** The format of the measure it draws (each y its own). */
   format?: ValueFormat;
   /** Its series value's name ('' without a series column) and its measure's name, as its tips say them. */
   seriesName: string;
   measure: string;
+}
+
+/** Where a plot sits in the figure: its box, where its x labels go (null: a panel below carries them) and the room
+ * those labels may take at its edges. */
+interface Plot {
+  series: Series[];
+  x0: number;
+  x1: number;
+  top: number;
+  bottom: number;
+  axisY: number | null;
+  lo: number;
+  hi: number;
+}
+
+/** The x axis in a plot's own units (0 at its left edge), alike for every panel: a value's place, the labels, their
+ * height, and a bar view's bands. */
+interface XAxis {
+  at(x: Cell): number | null;
+  labels: { x: number; lines: string[]; anchor?: 'middle' }[];
+  height: number;
+  band?: { starts: number[]; bandwidth: number; keys: string[] };
+}
+
+const TYPE_NAMES = { number: 'number', string: 'text', boolean: 'true or false' } as const;
+/** A value's type as a qualifier, for two values that read alike (the number 1 and the text "1"). */
+const typeName = (value: Cell): string => (value === null ? 'empty' : TYPE_NAMES[typeof value as keyof typeof TYPE_NAMES]);
+
+/**
+ * The series values' names over the unfiltered snapshot's identities (`seriesKeys`), so a filter never renames one:
+ * each value's name, qualified by its type where values of two types read alike ("1 (number)", "1 (text)").
+ */
+function seriesNames(seriesKeys: string[], column: ViewColumn, format: ValueFormat | undefined): Map<string, string> {
+  const names = new Map(seriesKeys.map((key) => [key, nameOf(JSON.parse(key) as Cell, column, format)]));
+  const readers = new Map<string, string[]>();
+  for (const [key, name] of names) readers.set(name, [...(readers.get(name) ?? []), key]);
+  for (const [name, keys] of readers) if (keys.length > 1) for (const key of keys) names.set(key, `${name} (${typeName(JSON.parse(key) as Cell)})`);
+  return names;
+}
+
+/**
+ * A panel's name in at most two lines of `width`. A name too long for them keeps its first line and its end ("…" and
+ * as much of the end as fits), since names that share a long beginning ("… 1번 관측소", "… 2번 관측소") differ at it.
+ */
+function panelTitle(label: string, size: number, width: number): { lines: string[]; shortened: boolean } {
+  const whole = wrap(label, size, width, 2);
+  if (!whole.shortened) return whole;
+  const chars = [...label];
+  let from = chars.length;
+  while (from > 0 && textWidth(`…${chars.slice(from - 1).join('')}`, size) <= width) from -= 1;
+  return { lines: [wrap(label, size, width, Infinity).lines[0], `…${chars.slice(from).join('').trimStart()}`], shortened: true };
 }
 
 function cartesian(v: View): Rendered {
@@ -256,38 +331,52 @@ function cartesian(v: View): Rendered {
   const yName = (k: number) => table.columns[ys[k]].name;
   const nonNumber = ys.filter((y) => table.columns[y].type !== 'number' && table.columns[y].type !== 'null');
   if (nonNumber.length > 0) return failure(theme, VIEW_STATES.notNumbers(table.columns[nonNumber[0]].name), v.caption);
-  const formats = data.yNames.map((name) => spec.format?.[name]);
-  const xFormat = spec.format?.[spec.x];
+  const formats = ys.map((y) => columnFormat(spec, data, y));
+  const xFormat = columnFormat(spec, data, xi);
+  warnings.push(...data.notes);
 
-  // Series: by the series column's typed values (identity and form from the unfiltered snapshot), or one per y.
+  // Series: by the series column's typed values (identity, name and form from the unfiltered snapshot), or one per y.
   const si = data.series;
+  const names = si === undefined ? null : seriesNames(data.seriesKeys, table.columns[si], columnFormat(spec, data, si));
+  const rank = new Map(data.seriesKeys.map((key, i) => [key, i]));
   const all: Series[] = [];
   const byKey = new Map<string, Series>();
-  for (const row of table.rows)
+  table.rows.forEach((row, r) =>
     ys.forEach((yi, k) => {
       const value = si === undefined ? null : (row[si] ?? null);
       const key = si === undefined ? `y${k}` : `${typedKey(value)}\u0000${k}`;
       let s = byKey.get(key);
       if (!s) {
-        const seriesName = si === undefined ? '' : nameOf(value, table.columns[si], spec.series ? spec.format?.[spec.series] : undefined);
+        const seriesName = names?.get(typedKey(value)) ?? '';
         const label = si === undefined ? yName(k) : ys.length > 1 ? `${seriesName} · ${yName(k)}` : seriesName;
-        const style = si === undefined ? k : Math.max(0, data.seriesKeys.indexOf(typedKey(value))) * ys.length + k;
-        s = { key, label, style, marks: [], format: formats[k], seriesName, measure: yName(k) };
+        const style = si === undefined ? k : (rank.get(typedKey(value)) ?? 0) * ys.length + k;
+        s = { key, label, style, form: style, marks: [], format: formats[k], seriesName, measure: yName(k) };
         byKey.set(key, s);
         all.push(s);
       }
       const y = row[yi];
-      s.marks.push({ x: row[xi] ?? null, y: typeof y === 'number' && Number.isFinite(y) ? y : null, tip: '' });
-    });
+      s.marks.push({ x: row[xi] ?? null, y: typeof y === 'number' && Number.isFinite(y) ? y : null, tip: '', overflow: data.overflow.has(overflowKey(r, yi)) });
+    }),
+  );
   all.sort((a, b) => a.style - b.style);
-  if (all.length > MAX_SERIES) warnings.push(VIEW_STATES.seriesCap(MAX_SERIES, all.length));
-  const series = all.slice(0, MAX_SERIES);
+  // two entries whose names still read alike (a series name holding " · ", a y named twice) are numbered apart
+  const seen = new Map<string, number>();
+  for (const s of all) {
+    const n = (seen.get(s.label) ?? 0) + 1;
+    seen.set(s.label, n);
+    if (n > 1) s.label = `${s.label} (${n})`;
+  }
+  // More identities than forms: one labelled panel each, each in the first form (parent Decision Log 27). The domain is
+  // the unfiltered snapshot's, so a filter to S0 and S6 of seven stays two named panels and never cycles a form.
+  const faceted = (si === undefined ? ys.length : data.seriesKeys.length * ys.length) > MAX_FORMS;
+  if (faceted && all.length > MAX_PANELS) return notice(theme, VIEW_STATES.tooManySeries(all.length), v.caption, warnings);
+  if (faceted) for (const s of all) s.form = 0;
 
   // A magnitude past ±1e306 would overflow a scale's span; it is counted and not drawn, never clamped.
   const xKind: 'band' | 'time' | 'linear' = spec.view === 'bar' || xCol.type === 'string' || xCol.type === 'boolean' ? 'band' : xCol.type === 'date' ? 'time' : 'linear';
   const xValue = (x: Cell) => (xKind === 'time' ? instantOf(x) : typeof x === 'number' && Number.isFinite(x) ? x : null);
   let huge = 0;
-  for (const s of series)
+  for (const s of all)
     for (const m of s.marks) {
       const x = xKind === 'linear' ? xValue(m.x) : null;
       if ((m.y !== null && Math.abs(m.y) > DRAWABLE) || (x !== null && Math.abs(x) > DRAWABLE)) {
@@ -298,126 +387,195 @@ function cartesian(v: View): Rendered {
     }
   if (huge > 0) warnings.push(VIEW_STATES.tooLarge(huge));
   let nullY = 0;
-  for (const s of series) for (const m of s.marks) if (m.y === null) nullY += 1;
+  for (const s of all) for (const m of s.marks) if (m.y === null && !m.overflow) nullY += 1;
   nullY -= huge;
   if (nullY > 0) warnings.push(VIEW_STATES.missing(nullY, ys.map((_, k) => yName(k)).join(', ')));
   if (xKind !== 'band') {
     let nullX = 0;
-    for (const s of series) for (const m of s.marks) if (m.y !== null && xValue(m.x) === null) nullX += 1;
+    for (const s of all) for (const m of s.marks) if (m.y !== null && xValue(m.x) === null) nullX += 1;
     if (nullX > 0) warnings.push(VIEW_STATES.missing(nullX, xCol.name));
-    for (const s of series) {
+    for (const s of all) {
       s.marks = s.marks.filter((m) => xValue(m.x) !== null);
       // A line is drawn along x; the data's order is kept for everything else (the table, the tips).
       if (spec.view !== 'scatter') s.marks = s.marks.map((m, i) => ({ m, i })).sort((a, b) => xValue(a.m.x)! - xValue(b.m.x)! || a.i - b.i).map(({ m }) => m);
     }
-  } else for (const s of series) s.marks = s.marks.filter((m) => !(m.x === null && m.y === null));
-  for (const s of series)
-    for (const m of s.marks) m.tip = `${formatCell(m.x, xCol, xFormat)}${si !== undefined && series.length > 1 ? ` · ${s.seriesName}` : ''} · ${s.measure}: ${formatCell(m.y, undefined, s.format)}`;
+  } else for (const s of all) s.marks = s.marks.filter((m) => !(m.x === null && m.y === null));
+  const named = si !== undefined && (faceted || all.length > 1);
+  for (const s of all) for (const m of s.marks) m.tip = `${formatCell(m.x, xCol, xFormat)}${named ? ` · ${s.seriesName}` : ''} · ${s.measure}: ${formatCell(m.y, undefined, s.format)}`;
 
-  // Frame: legend on top, then the plot, then the x axis. The y axis takes the measures' common format, else raw numbers.
-  const top = 8;
-  const lg = legend(series, theme, 0, top, (entry, x, y) => keyMark(spec.view, entry.style, x, y, theme));
   const yValues: number[] = [];
-  for (const s of series) for (const m of s.marks) if (m.y !== null) yValues.push(m.y);
-  if (yValues.length === 0) return notice(theme, VIEW_STATES.missing(nullY, ys.map((_, k) => yName(k)).join(', ')), v.caption, warnings);
-  const axisFormat = commonFormat(series.map((s) => s.format));
-  let barCount = 0;
-  if (spec.view === 'bar') for (const s of series) barCount += s.marks.length;
-  const valueLabels = spec.view === 'bar' && barCount <= 16;
-  const plotTop = top + lg.height + (valueLabels ? theme.caption + 10 : 6);
-  const negative = yValues.some((y) => y < 0);
-  // A negative bar's value sits below its tip, so the scale stops short of the axis labels by one label's room.
-  const room = valueLabels && negative ? theme.caption + 10 : 0;
-  const plotBottom = plotTop + PLOT_H - room;
-  const axisY = plotBottom + room;
-  const yScale = geo.linear(domainOf(yValues, spec.view === 'bar' || spec.view === 'area'), [plotBottom, plotTop], 5, true);
-  const yLabels = tickLabels(yScale.ticks, 'linear', axisFormat);
+  for (const s of all) for (const m of s.marks) if (m.y !== null) yValues.push(m.y);
+  if (yValues.length === 0) {
+    const why = nullY > 0 ? VIEW_STATES.missing(nullY, ys.map((_, k) => yName(k)).join(', ')) : huge > 0 ? VIEW_STATES.tooLarge(huge) : (data.notes[0] ?? VIEW_STATES.empty);
+    return notice(theme, why, v.caption, warnings.filter((w) => w !== why));
+  }
+  // One y domain for every panel (a scale's ticks depend on its domain alone), its labels in the measures' common
+  // format, else raw numbers.
+  const yDomain = domainOf(yValues, spec.view === 'bar' || spec.view === 'area');
+  const yScaleOver = (bottom: number, top: number) => geo.linear(yDomain, [bottom, top], 5, true);
+  const yLabels = tickLabels(yScaleOver(1, 0).ticks, 'linear', commonFormat(all.map((s) => s.format)));
   const left = Math.ceil(largest(yLabels.map((l) => textWidth(l, theme.caption)), 0)) + 10;
+  const lineH = theme.caption * 1.4;
 
-  // Direct labels at a line's end (four series or fewer, separated), else the legend carries identity.
-  const ends = spec.view === 'line' || spec.view === 'area' ? endLabels(series, yScale, theme) : [];
-  const right = theme.width - (ends.length > 0 ? Math.min(160, largest(ends.map((e) => textWidth(e.label, theme.caption)), 0) + 14) : 8);
-
-  let xAxis: { svg: string; height: number; map: (x: Cell) => number | null; band?: { starts: number[]; bandwidth: number; keys: string[] } };
-  if (xKind === 'band') {
-    const keys: string[] = [];
-    const labelFor = new Map<string, string>();
-    for (const s of series)
-      for (const m of s.marks) {
-        const key = typedKey(m.x);
-        if (labelFor.has(key)) continue;
-        labelFor.set(key, nameOf(m.x, xCol, xFormat));
-        keys.push(key);
-      }
-    const band = geo.band(keys.length, [left, right], 0.2, 0.1);
-    const lineH = theme.caption * 1.4;
-    let shortened = false;
-    const wrapped = keys.map((k) => {
-      const w = wrap(labelFor.get(k)!, theme.caption, band.bandwidth / 0.8 - 4, 2);
-      shortened ||= w.shortened;
-      return w.lines;
-    });
-    if (shortened) warnings.push(VIEW_STATES.labelsShortened);
-    // Every category keeps its label (a bar without one has no identity): each is wrapped to its band's step less 4 px,
-    // so neighbours never touch and nothing is thinned.
-    const svg = wrapped.map((lines, i) => text(band.starts[i] + band.bandwidth / 2, axisY + theme.caption + 8, lines, { anchor: 'middle', fill: theme.muted, line: lineH })).join('');
-    const at = new Map(keys.map((k, i) => [k, band.starts[i] + band.bandwidth / 2]));
-    xAxis = { svg, height: theme.caption + 8 + (largest(wrapped.map((l) => l.length), 1) - 1) * lineH + 8, map: (x) => at.get(typedKey(x)) ?? null, band: { ...band, keys } };
-  } else {
+  // The x axis over a plot `width` wide, shared by every panel: every category of every series, or the whole x domain.
+  const xAxisOf = (width: number): XAxis => {
+    if (xKind === 'band') {
+      const keys: string[] = [];
+      const labelFor = new Map<string, string>();
+      for (const s of all)
+        for (const m of s.marks) {
+          const key = typedKey(m.x);
+          if (labelFor.has(key)) continue;
+          labelFor.set(key, nameOf(m.x, xCol, xFormat));
+          keys.push(key);
+        }
+      const band = geo.band(keys.length, [0, width], 0.2, 0.1);
+      let shortened = false;
+      // Every category keeps its label (a bar without one has no identity): each is wrapped to its band's step less
+      // 4 px, so neighbours never touch and nothing is thinned.
+      const wrapped = keys.map((k) => {
+        const w = wrap(labelFor.get(k)!, theme.caption, band.bandwidth / 0.8 - 4, 2);
+        shortened ||= w.shortened;
+        return w.lines;
+      });
+      if (shortened) warnings.push(VIEW_STATES.labelsShortened);
+      const centre = new Map(keys.map((k, i) => [k, band.starts[i] + band.bandwidth / 2]));
+      return {
+        at: (x) => centre.get(typedKey(x)) ?? null,
+        labels: wrapped.map((lines, i) => ({ x: band.starts[i] + band.bandwidth / 2, lines, anchor: 'middle' })),
+        height: theme.caption + 8 + (largest(wrapped.map((l) => l.length), 1) - 1) * lineH + 8,
+        band: { ...band, keys },
+      };
+    }
     const xs: number[] = [];
-    for (const s of series) for (const m of s.marks) xs.push(xValue(m.x)!);
-    const scale = xKind === 'time' ? geo.time(domainOf(xs, false), [left, right], 6) : geo.linear(domainOf(xs, false), [left, right], 6, spec.view === 'scatter');
+    for (const s of all) for (const m of s.marks) xs.push(xValue(m.x)!);
+    const scale = xKind === 'time' ? geo.time(domainOf(xs, false), [0, width], 6) : geo.linear(domainOf(xs, false), [0, width], 6, spec.view === 'scatter');
     const labels = tickLabels(scale.ticks, xKind, xFormat);
     const every = thinning(
       labels.map((l) => textWidth(l, theme.caption)),
       scale.ticks.length > 1 ? Math.abs(scale.map(scale.ticks[1]) - scale.map(scale.ticks[0])) : theme.width,
     );
-    const svg = scale.ticks.map((t, i) => (i % every === 0 ? text(scale.map(t), axisY + theme.caption + 8, labels[i], { anchor: edgeAnchor(scale.map(t), labels[i], theme), fill: theme.muted }) : '')).join('');
-    xAxis = { svg, height: theme.caption + 16, map: (x) => (xValue(x) === null ? null : scale.map(xValue(x)!)) };
-  }
-
-  // Axes and grid: hairline rules at the y ticks; the zero line, when inside the domain, a step darker.
-  let body = lg.svg;
-  body += yScale.ticks.map((t, i) => hline(left, right, yScale.map(t), theme.rule) + text(left - 8, yScale.map(t) + theme.caption * 0.35, yLabels[i], { anchor: 'end', fill: theme.muted })).join('');
-  if (yScale.domain[0] < 0 && yScale.domain[1] > 0) body += hline(left, right, yScale.map(0), theme.muted);
-  body += xAxis.svg;
-
-  const hover: { x: number; y: number; tip: string }[] = [];
-  const hoverAll = () => {
-    for (const s of series) for (const m of s.marks) if (m.y !== null) hover.push({ x: xAxis.map(m.x)!, y: yScale.map(m.y), tip: m.tip });
+    return {
+      at: (x) => (xValue(x) === null ? null : scale.map(xValue(x)!)),
+      labels: scale.ticks.flatMap((t, i) => (i % every === 0 ? [{ x: scale.map(t), lines: [labels[i]] }] : [])),
+      height: theme.caption + 16,
+    };
   };
-  const pointsOf = (s: Series): Point[] => s.marks.map((m) => [xAxis.map(m.x)!, m.y === null ? null : yScale.map(m.y)] as const);
 
-  if (spec.view === 'bar') body += bars(series, xAxis.band!, yScale, theme, valueLabels);
-  else if (spec.view === 'scatter') {
-    for (const s of series) {
-      const centres = pointsOf(s).filter((p): p is [number, number] => p[1] !== null);
-      body += `<path d="${geo.symbols(SHAPES[s.style % SHAPES.length], 64, centres)}" fill="${theme.ink}" fill-opacity="0.72" stroke="${theme.ground}" stroke-width="1"/>`;
-    }
-    hoverAll();
+  // The layout: one figure (legend on top, the plot, the x axis), or the panels in rows of up to four, each named above
+  // its plot, the y labels beside each row's first panel, the x labels under the last panel of each column.
+  let head = '';
+  let ends: { m: Mark; label: string; y: number }[] = [];
+  let valueLabels = false;
+  let xAxis: XAxis;
+  const plots: Plot[] = [];
+  const titles: string[][] = [];
+  let height: number;
+  if (!faceted) {
+    const top = 8;
+    const lg = legend(all, theme, 0, top, (entry, x, y) => keyMark(spec.view, entry.style, x, y, theme));
+    head = lg.svg;
+    let barCount = 0;
+    if (spec.view === 'bar') for (const s of all) barCount += s.marks.length;
+    valueLabels = spec.view === 'bar' && barCount <= 16;
+    const plotTop = top + lg.height + (valueLabels ? theme.caption + 10 : 6);
+    // A negative bar's value sits below its tip, so the scale stops short of the axis labels by one label's room.
+    const room = valueLabels && yValues.some((y) => y < 0) ? theme.caption + 10 : 0;
+    const plotBottom = plotTop + PLOT_H - room;
+    // Direct labels at a line's end (four series or fewer, separated), else the legend carries identity.
+    ends = spec.view === 'line' || spec.view === 'area' ? endLabels(all, yScaleOver(plotBottom, plotTop), theme) : [];
+    const right = theme.width - (ends.length > 0 ? Math.min(160, largest(ends.map((e) => textWidth(e.label, theme.caption)), 0) + 14) : 8);
+    xAxis = xAxisOf(right - left);
+    plots.push({ series: all, x0: left, x1: right, top: plotTop, bottom: plotBottom, axisY: plotBottom + room, lo: 0, hi: theme.width });
+    height = plotBottom + room + xAxis.height;
   } else {
-    const base = yScale.map(Math.max(yScale.domain[0], Math.min(0, yScale.domain[1])));
-    for (const s of series) {
-      const pts = pointsOf(s);
-      if (spec.view === 'area') body += `<path d="${geo.area(pts, base)}" fill="${theme.ink}" fill-opacity="0.1"/>`;
-      const dash = DASHES[s.style % DASHES.length];
-      body += `<path d="${geo.line(pts)}" fill="none" stroke="${theme.ink}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/>`;
-      if (series.length > 1 && s.marks.length <= 24) {
-        const centres = pts.filter((p): p is [number, number] => p[1] !== null);
-        body += `<path d="${geo.symbols(SHAPES[s.style % SHAPES.length], 48, centres)}" fill="${theme.ink}" stroke="${theme.ground}" stroke-width="2" paint-order="stroke"/>`;
-      }
+    const n = all.length;
+    const cols = Math.min(PANEL_COLUMNS, n);
+    const width = (theme.width - 8 - left - (cols - 1) * PANEL_GAP) / cols;
+    xAxis = xAxisOf(width);
+    let shortened = false;
+    for (const s of all) {
+      const w = panelTitle(s.label, theme.caption, width);
+      shortened ||= w.shortened;
+      titles.push(w.lines);
     }
-    body += ends.map((e) => text(xAxis.map(e.m.x)! + 8, e.y + theme.caption * 0.35, e.label)).join('');
-    hoverAll();
+    if (shortened) warnings.push(VIEW_STATES.seriesNamesShortened);
+    const titleH = largest(titles.map((t) => t.length), 1) * lineH + 6;
+    let rowTop = 8;
+    for (let first = 0; first < n; first += cols) {
+      const top = rowTop + titleH;
+      const bottom = top + PANEL_H;
+      let labelled = false;
+      for (let i = first; i < Math.min(n, first + cols); i += 1) {
+        const col = i - first;
+        const x0 = left + col * (width + PANEL_GAP);
+        const below = i + cols < n; // a panel under it carries the column's x labels
+        labelled ||= !below;
+        plots.push({ series: [all[i]], x0, x1: x0 + width, top, bottom, axisY: below ? null : bottom, lo: col === 0 ? 0 : x0 - PANEL_GAP / 2, hi: col === cols - 1 ? theme.width : x0 + width + PANEL_GAP / 2 });
+      }
+      rowTop = bottom + (labelled ? xAxis.height : 0) + PANEL_ROW_GAP;
+    }
+    height = rowTop - PANEL_ROW_GAP;
   }
+
+  // Each plot: hairline rules at the y ticks (the zero line, inside the domain, a step darker), its x labels, its marks;
+  // every drawable point of a line, an area or a scatter into the one nearest-point layer, in figure units.
+  const hover: { x: number; y: number; tip: string }[] = [];
+  const drawPlot = (p: Plot): string => {
+    const yScale = yScaleOver(p.bottom, p.top);
+    const mapX = (x: Cell) => p.x0 + xAxis.at(x)!;
+    let out = yScale.ticks.map((t) => hline(p.x0, p.x1, yScale.map(t), theme.rule)).join('');
+    if (yScale.domain[0] < 0 && yScale.domain[1] > 0) out += hline(p.x0, p.x1, yScale.map(0), theme.muted);
+    if (p.axisY !== null) {
+      const y = p.axisY + theme.caption + 8;
+      out += xAxis.labels.map((l) => text(p.x0 + l.x, y, l.lines, { anchor: l.anchor ?? edgeAnchor(p.x0 + l.x, l.lines[0], p.lo, p.hi, theme), fill: theme.muted, line: lineH })).join('');
+    }
+    const pointsOf = (s: Series): Point[] => s.marks.map((m) => [mapX(m.x), m.y === null ? null : yScale.map(m.y)] as const);
+    const hoverAll = () => {
+      for (const s of p.series) for (const m of s.marks) if (m.y !== null) hover.push({ x: mapX(m.x), y: yScale.map(m.y), tip: m.tip });
+    };
+    if (spec.view === 'bar') out += bars(p.series, { ...xAxis.band!, starts: xAxis.band!.starts.map((s) => p.x0 + s) }, yScale, theme, valueLabels);
+    else if (spec.view === 'scatter') {
+      for (const s of p.series) {
+        const centres = pointsOf(s).filter((pt): pt is [number, number] => pt[1] !== null);
+        out += `<path d="${geo.symbols(SHAPES[s.form % SHAPES.length], 64, centres)}" fill="${theme.ink}" fill-opacity="0.72" stroke="${theme.ground}" stroke-width="1"/>`;
+      }
+      hoverAll();
+    } else {
+      const base = yScale.map(Math.max(yScale.domain[0], Math.min(0, yScale.domain[1])));
+      for (const s of p.series) {
+        const pts = pointsOf(s);
+        if (spec.view === 'area') out += `<path d="${geo.area(pts, base)}" fill="${theme.ink}" fill-opacity="0.1"/>`;
+        const dash = DASHES[s.form % DASHES.length];
+        out += `<path d="${geo.line(pts)}" fill="none" stroke="${theme.ink}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/>`;
+        if (p.series.length > 1 && s.marks.length <= 24) {
+          const centres = pts.filter((pt): pt is [number, number] => pt[1] !== null);
+          out += `<path d="${geo.symbols(SHAPES[s.form % SHAPES.length], 48, centres)}" fill="${theme.ink}" stroke="${theme.ground}" stroke-width="2" paint-order="stroke"/>`;
+        }
+      }
+      out += ends.map((e) => text(mapX(e.m.x) + 8, e.y + theme.caption * 0.35, e.label)).join('');
+      hoverAll();
+    }
+    return out;
+  };
+
+  let body = head;
+  // the y labels, once per row of plots, beside its first
+  for (const p of plots) {
+    if (p.x0 !== left) continue;
+    const yScale = yScaleOver(p.bottom, p.top);
+    body += yScale.ticks.map((t, i) => text(left - 8, yScale.map(t) + theme.caption * 0.35, yLabels[i], { anchor: 'end', fill: theme.muted })).join('');
+  }
+  if (!faceted) body += drawPlot(plots[0]);
+  else plots.forEach((p, i) => (body += `<g role="group" aria-label="${esc(all[i].label)}">${text(p.x0, p.top - (titles[i].length - 1) * lineH - 6 - theme.caption * 0.3, titles[i], { line: lineH })}${drawPlot(p)}</g>`));
   if (hover.length > 0)
     body += `<g data-hover="nearest" data-xy="${hover.map((h) => `${px(h.x)},${px(h.y)}`).join(' ')}" data-tips="${hover.map((h) => esc(h.tip.replace(/[\r\n]+/g, ' '))).join('&#10;')}"/>`;
 
-  const height = axisY + xAxis.height;
   let points = 0;
-  for (const s of series) points += s.marks.length;
+  for (const s of all) points += s.marks.length;
   const measured = ys.map((_, k) => yName(k)).join(', ');
-  const desc = `${cap(spec.view)} chart of ${measured} by ${xCol.name}${spec.series ? ` and ${spec.series}` : ''}, ${points} ${points === 1 ? 'value' : 'values'}${series.length > 1 ? ` in ${series.length} series (${series.map((s) => s.label).join(', ')})` : ''}. The values are in the source table under the figure.`;
+  const among = faceted ? ` in ${all.length} ${all.length === 1 ? 'panel' : 'panels'} sharing one scale (${all.map((s) => s.label).join(', ')})` : all.length > 1 ? ` in ${all.length} series (${all.map((s) => s.label).join(', ')})` : '';
+  const desc = `${cap(spec.view)} chart of ${measured} by ${xCol.name}${spec.series ? ` and ${spec.series}` : ''}, ${points} ${points === 1 ? 'value' : 'values'}${among}. The values are in the source table under the figure.`;
   return { svg: frame(theme, height, v.caption, desc, body), warnings };
 }
 
@@ -441,11 +599,11 @@ function thinning(widths: number[], pitch: number): number {
   return Math.max(1, Math.ceil(widest / Math.max(1, pitch)));
 }
 
-/** A label at the plot's edge anchors inward, so it never leaves the frame. */
-function edgeAnchor(x: number, label: string, theme: Theme): 'start' | 'middle' | 'end' {
+/** A label at the edge of its room (the frame, or a panel's share of it) anchors inward, so it never leaves it. */
+function edgeAnchor(x: number, label: string, lo: number, hi: number, theme: Theme): 'start' | 'middle' | 'end' {
   const half = textWidth(label, theme.caption) / 2;
-  if (x - half < 0) return 'start';
-  if (x + half > theme.width) return 'end';
+  if (x - half < lo) return 'start';
+  if (x + half > hi) return 'end';
   return 'middle';
 }
 
@@ -457,7 +615,7 @@ function keyMark(view: string, style: number, x: number, y: number, theme: Theme
 }
 
 /** Columns from the zero line, at most 24 px thick, the data end rounded 4 px, a 2 px ground gap between neighbours; each
- * in its series' own form (a series alone after a filter keeps the form it has in the whole snapshot). */
+ * in its series' own form (a series alone after a filter keeps the form it has in the whole snapshot; a panel's, the first). */
 function bars(series: Series[], band: { starts: number[]; bandwidth: number; keys: string[] }, y: Ticks, theme: Theme, labels: boolean): string {
   const n = series.length;
   const slot = band.bandwidth / n;
@@ -470,7 +628,7 @@ function bars(series: Series[], band: { starts: number[]; bandwidth: number; key
       if (m.y === null) continue;
       const x = at.get(typedKey(m.x))! + slot * k + (slot - thick) / 2;
       const tip = y.map(m.y);
-      out += treated(roundedBar(x, thick, zero, tip), { x0: x, y0: Math.min(zero, tip), x1: x + thick, y1: Math.max(zero, tip) }, s.style, theme, ` data-tip="${esc(m.tip)}"`);
+      out += treated(roundedBar(x, thick, zero, tip), { x0: x, y0: Math.min(zero, tip), x1: x + thick, y1: Math.max(zero, tip) }, s.form, theme, ` data-tip="${esc(m.tip)}"`);
       if (labels) {
         const below = m.y < 0;
         out += text(x + thick / 2, below ? tip + theme.caption + 4 : tip - 6, formatCell(m.y, undefined, s.format), { anchor: 'middle', fill: theme.ink });
@@ -527,14 +685,16 @@ function pieView(v: View): Rendered {
   const xi = data.x;
   const yi = data.ys[0];
   const yName = table.columns[yi].name;
-  const format = spec.format?.[data.yNames[0]];
-  const slices = table.rows.map((row) => ({ label: nameOf(row[xi] ?? null, table.columns[xi], spec.format?.[spec.x!]), value: row[yi] ?? null }));
+  const format = columnFormat(spec, data, yi);
+  const xFormat = columnFormat(spec, data, xi);
+  warnings.push(...data.notes);
+  const slices = table.rows.map((row, r) => ({ label: nameOf(row[xi] ?? null, table.columns[xi], xFormat), value: row[yi] ?? null, overflow: data.overflow.has(overflowKey(r, yi)) }));
   const positive = (value: Cell): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
   const huge = slices.filter((s) => positive(s.value) && s.value > DRAWABLE).length;
   if (huge > 0) warnings.push(VIEW_STATES.tooLarge(huge));
-  const dropped = slices.filter((s) => !positive(s.value)).length;
+  const dropped = slices.filter((s) => !positive(s.value) && !s.overflow).length; // an overflow is the transform's note
   if (dropped > 0) warnings.push(VIEW_STATES.slicesDropped(dropped, yName));
-  let kept = slices.filter((s): s is { label: string; value: number } => positive(s.value) && s.value <= DRAWABLE);
+  let kept = slices.flatMap((s) => (positive(s.value) && s.value <= DRAWABLE ? [{ label: s.label, value: s.value }] : []));
   if (kept.length > 6) {
     const rest = kept.slice(5);
     let other = 0;
@@ -544,7 +704,10 @@ function pieView(v: View): Rendered {
   }
   let total = 0;
   for (const s of kept) total += s.value;
-  if (kept.length === 0 || !Number.isFinite(total)) return notice(theme, kept.length === 0 ? VIEW_STATES.noPositive(yName) : VIEW_STATES.tooLarge(kept.length), v.caption, warnings);
+  if (kept.length === 0 || !Number.isFinite(total)) {
+    const why = kept.length > 0 ? VIEW_STATES.tooLarge(kept.length) : dropped === 0 && huge === 0 && data.notes.length > 0 ? data.notes[0] : VIEW_STATES.noPositive(yName);
+    return notice(theme, why, v.caption, warnings.filter((w) => w !== why));
+  }
   const r = 110;
   const cx = r + 8;
   const cy = r + 12;
@@ -591,20 +754,23 @@ const html = (value: string): string => esc(value);
  * A table view as an HTML `<table>` (parent Decision Log 24: text, not a picture): the transformed view's rows in its
  * order, at most `TABLE_VIEW_ROWS` without a `limit` and the `limit` up to `TABLE_VIEW_MAX_ROWS` with one, the note
  * "first <n> of <N> rows" when it shows fewer than the view holds (N after the spec's filter, aggregation, sort and
- * limit), "no rows to draw" when it holds none. Only table elements and `class` attributes: numbers right-aligned by
- * class, the note a bottom caption. The page's and the exporters' stylesheets draw it.
+ * limit), "no rows to draw" when it holds none, and the transform's notes (an aggregate that overflowed, its cell
+ * saying "overflow"). Only table elements and `class` attributes: numbers right-aligned by class, the notes a bottom
+ * caption. The page's and the exporters' stylesheets draw it. Each column takes its role's format (`columnFormat`).
  */
 function tableView(v: View): Rendered {
   const { spec, data, warnings } = v;
   const { table } = data;
   const at = shownColumns(data, spec);
   const cols = at.map((i) => table.columns[i]);
+  const formats = at.map((i) => columnFormat(spec, data, i));
   const bound = spec.limit === undefined ? TABLE_VIEW_ROWS : Math.min(spec.limit, TABLE_VIEW_MAX_ROWS);
   const shown = table.rows.slice(0, bound);
   const numeric = cols.map((c) => c.type === 'number');
   const cell = (tag: 'th' | 'td', k: number, content: string) => `<${tag}${numeric[k] ? ' class="dash-num"' : ''}>${html(content)}</${tag}>`;
   const head = `<thead><tr>${cols.map((c, k) => cell('th', k, c.name)).join('')}</tr></thead>`;
-  const rows = shown.map((row) => `<tr>${at.map((i, k) => cell('td', k, formatCell(row[i] ?? null, cols[k], spec.format?.[cols[k].name]))).join('')}</tr>`).join('');
-  const note = table.rows.length === 0 ? VIEW_STATES.empty : table.rows.length > shown.length ? VIEW_STATES.tablePreview(shown.length, table.rows.length) : null;
-  return { html: `<table class="dash-table">${note !== null ? `<caption class="dash-table-note">${html(note)}</caption>` : ''}${head}<tbody>${rows}</tbody></table>`, warnings };
+  const value = (row: readonly Cell[], r: number, i: number, k: number) => (data.overflow.has(overflowKey(r, i)) ? VIEW_STATES.overflowCell : formatCell(row[i] ?? null, cols[k], formats[k]));
+  const rows = shown.map((row, r) => `<tr>${at.map((i, k) => cell('td', k, value(row, r, i, k))).join('')}</tr>`).join('');
+  const notes = [table.rows.length === 0 ? VIEW_STATES.empty : table.rows.length > shown.length ? VIEW_STATES.tablePreview(shown.length, table.rows.length) : null, ...data.notes].filter((n): n is string => n !== null);
+  return { html: `<table class="dash-table">${notes.length > 0 ? `<caption class="dash-table-note">${html(notes.join(' · '))}</caption>` : ''}${head}<tbody>${rows}</tbody></table>`, warnings };
 }

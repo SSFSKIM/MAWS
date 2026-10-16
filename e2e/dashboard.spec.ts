@@ -3,7 +3,8 @@
 // tab and in the panel's Artifacts tool as two replicas of one host doc; its chart and table blocks draw E's renderer
 // over real data (M1's vendored World Bank and penguin tables, Korean labels included) with their source labels; the
 // narrow panel scrolls a figure rather than shrinking its text; the real editor's hover reaches a scatter's last point
-// and a hatched bar's own value; the keyboard opens and closes the source sheet from a label; the sheet copies its rows,
+// and a hatched bar's own value; eight series draw as named small multiples on one scale, a filter to the first and last
+// keeping their names, hover reaching the last panel; the keyboard opens and closes the source sheet from a label; the sheet copies its rows,
 // downloads the snapshot's own bytes through main's save, and stays on the snapshot it opened on while the dataset is
 // replaced, both views redrawing; the header's Datasets lists the datasets. M6 extends this group with the agent's path
 // (artifact_create, artifact_dataset), comments, history and exports.
@@ -80,7 +81,11 @@ const VIEWS = [
   chart('gdp', { view: 'table', columns: ['country_ko', 'year', 'growth_pct'], filter: [{ column: 'year', op: 'eq', value: 2020 }], sort: { by: 'growth_pct', dir: 'asc' }, title: '2020년 성장률, 낮은 순' }),
   chart('penguins', { view: 'scatter', x: 'flipper_length_mm', y: 'body_mass_g', series: 'species_ko', title: '펭귄 344마리의 날개 길이와 체중' }),
   chart('penguins', { view: 'bar', x: 'island_ko', series: 'species_ko', agg: 'count', title: '섬별 종의 관측 수' }),
+  // eight countries, past the six forms: labelled small multiples (parent Decision Log 27); then its first and last alone
+  chart('gdp', { view: 'line', x: 'year', y: 'growth_pct', series: 'country_ko', format: { year: 'text' }, title: '8개국 GDP 성장률, 2019–2024 (%)' }),
+  chart('gdp', { view: 'line', x: 'year', y: 'growth_pct', series: 'country_ko', filter: [{ column: 'iso3', op: 'in', value: ['CAN', 'USA'] }], format: { year: 'text' }, title: '캐나다와 미국' }),
 ];
+const COUNTRIES = ['캐나다', '독일', '프랑스', '영국', '이탈리아', '일본', '대한민국', '미국']; // the snapshot's order
 
 /** The owner's editor in `scope` inserts the blocks after its last one (the editor's own write, through its replica). */
 async function insertBlocks(scope: Locator, blocks: unknown[]): Promise<void> {
@@ -116,7 +121,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
   await insertBlocks(main, [{ type: 'paragraph', content: [{ type: 'text', text: '2020년의 급락 이후 대부분의 경제가 회복했다.' }] }, ...VIEWS]);
 
   await test.step('the main tab draws every view with its caption and source label', async () => {
-    await expect(figures(main)).toHaveCount(4);
+    await expect(figures(main)).toHaveCount(VIEWS.length);
     for (const figure of await figures(main).all()) await expect(figure.locator('.dash-figure > svg, .dash-figure > table')).toBeVisible({ timeout: 15_000 });
     const bar = figures(main).nth(0);
     await expect(bar.locator('.dash-caption')).toHaveText('2024년 실질 GDP 성장률 (%)');
@@ -150,7 +155,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     await panel.locator(`[data-artifact-row][data-artifact-id="${id}"]`).click({ timeout: 15_000 });
     const shown = panel.locator(`[data-artifact-record="${id}"]`);
     record = shown;
-    await expect(figures(shown)).toHaveCount(4, { timeout: 15_000 });
+    await expect(figures(shown)).toHaveCount(VIEWS.length, { timeout: 15_000 });
     await expect(figures(shown).nth(0).locator('svg')).toBeVisible({ timeout: 15_000 });
     expect(await tipsOf(figures(shown).nth(0))).toEqual(await tipsOf(figures(main).nth(0)));
     const frame = figures(shown).nth(0).locator('.dash-figure');
@@ -182,6 +187,39 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     await page.mouse.move(hatched.x, hatched.y);
     await expect(counts.locator('.dash-tip')).toHaveText(hatched.tip);
     await counts.screenshot({ path: `${PROOF}/hatched-hover.png` });
+  });
+
+  await test.step('eight series draw as eight named panels on one scale; the first and the last alone stay two named panels; hover reaches the last panel', async () => {
+    const panelsOf = (figure: Locator) => figure.locator('svg g[role="group"]').evaluateAll((gs) => gs.map((g) => g.getAttribute('aria-label')));
+    const eight = figures(main).nth(4);
+    await eight.scrollIntoViewIfNeeded();
+    expect(await panelsOf(eight)).toEqual(COUNTRIES);
+    expect(await panelsOf(figures(main).nth(5))).toEqual(['캐나다', '미국']);
+    await expect.poll(() => panelsOf(figures(record!).nth(4)), { timeout: 15_000, message: 'the panel\'s replica draws the same panels' }).toEqual(COUNTRIES);
+    // on the real faces: each panel's name inside its own plot's width, every panel's grid the same heights in its row
+    const geometry = await eight.locator('svg').evaluate((svg) =>
+      Array.from(svg.querySelectorAll('g[role="group"]')).map((g) => {
+        const rules = Array.from(g.querySelectorAll('path')).filter((p) => /^M[\d.]+,[\d.]+H[\d.]+$/.test(p.getAttribute('d') ?? ''));
+        const plot = rules[0].getBBox();
+        const name = (g.querySelector('text') as SVGTextElement).getBBox();
+        const top = Math.min(...rules.map((r) => r.getBBox().y));
+        return { inside: name.x >= plot.x - 0.5 && name.x + name.width <= plot.x + plot.width + 0.5, rules: rules.map((r) => Math.round(r.getBBox().y - top)) };
+      }),
+    );
+    expect(geometry.map((p) => p.inside), 'every name inside its panel').toEqual(COUNTRIES.map(() => true));
+    for (const p of geometry) expect(p.rules).toEqual(geometry[0].rules);
+    const last = await eight.locator('svg').evaluate((svg) => {
+      const layer = svg.querySelector('[data-hover="nearest"]')!;
+      const [x, y] = layer.getAttribute('data-xy')!.split(' ').at(-1)!.split(',').map(Number);
+      const box = svg.getBoundingClientRect();
+      const scale = box.width / Number(svg.getAttribute('width'));
+      return { x: box.left + x * scale, y: box.top + y * scale, tip: layer.getAttribute('data-tips')!.split('\n').at(-1)! };
+    });
+    expect(last.tip).toMatch(/^2024 · 미국 · growth_pct: /);
+    await page.mouse.move(last.x, last.y);
+    await expect(eight.locator('.dash-tip')).toHaveText(last.tip);
+    await eight.screenshot({ path: `${PROOF}/small-multiples.png` });
+    await figures(main).nth(5).screenshot({ path: `${PROOF}/small-multiples-pair.png` });
   });
 
   await test.step('the keyboard opens the source sheet from a label, on the view\'s own rows, and closes it, the focus returning', async () => {

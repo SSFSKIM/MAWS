@@ -19,7 +19,12 @@ export const VIEW_STATES = {
   notNumbers: (column: string) => `${column} is not a number column`,
   empty: 'no rows to draw',
   tablePreview: (shown: number, total: number) => `first ${shown} of ${total} rows`, // a table view's bound (parent Decision Log 24)
-  seriesCap: (shown: number, total: number) => `${total} series; the first ${shown} are drawn`,
+  // past the small multiples' 24 panels (parent Decision Log 27); the view's rows stay whole in the source sheet
+  tooManySeries: (count: number) => `too many series: ${count}; filter or aggregate`,
+  seriesNamesShortened: 'some series names are shortened; the tips and the source table have them whole',
+  // an aggregate past the largest number (parent Decision Log 27): the note on the view, the word in its cell
+  overflow: (count: number, agg: string, column: string) => `${agg} of ${column} overflows in ${count} ${count === 1 ? 'group' : 'groups'}: too large to represent`,
+  overflowCell: 'overflow',
   tooLarge: (count: number) => `${count} ${count === 1 ? 'value is' : 'values are'} too large to draw`,
   noPositive: (column: string) => `no positive ${column} to draw`,
   slicesDropped: (count: number, column: string) => `${count} ${count === 1 ? 'slice has' : 'slices have'} no positive ${column}; not drawn`,

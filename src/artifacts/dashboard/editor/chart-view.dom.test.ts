@@ -266,6 +266,26 @@ describe('hover', () => {
     expect(tip.hidden).toBe(true);
   });
 
+  it('reaches a point in the last of many panels (small multiples, parent Decision Log 27), its tip naming the series', async () => {
+    const columns = [{ name: 'step', type: 'number' as const }, { name: 'level', type: 'number' as const }, { name: 'site', type: 'string' as const }];
+    const rows = Array.from({ length: 9 * 40 }, (_, k) => [k % 40, Math.floor(k / 40) + (k % 40) / 10, `관측소 ${Math.floor(k / 40) + 1}`]);
+    SNAPSHOTS['assets/sites.csv'] = { columns, rows, total: rows.length, truncated: false };
+    const doc = newDoc();
+    setDataset(doc, 'sites', descriptor('assets/sites.csv', { columns, rows: rows.length }));
+    const w = world();
+    const { into } = mount(w.renderChart, doc, node('sites', { view: 'line', x: 'step', y: 'level', series: 'site' }));
+    await settle();
+    const svg = into.querySelector('svg')!;
+    expect([...svg.querySelectorAll('g[role="group"]')].map((g) => g.getAttribute('aria-label'))).toEqual(Array.from({ length: 9 }, (_, i) => `관측소 ${i + 1}`));
+    const width = Number(svg.getAttribute('width'));
+    const height = Number(svg.getAttribute('height'));
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width, height, right: width, bottom: height, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const layer = svg.querySelector('[data-hover="nearest"]')!;
+    const [x, y] = layer.getAttribute('data-xy')!.split(' ').at(-1)!.split(',').map(Number);
+    svg.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x - 1, clientY: y + 1 }));
+    expect(into.querySelector('.dash-tip')?.textContent).toBe('39 · 관측소 9 · level: 11.9');
+  });
+
   it('shows a hatched bar\'s own value: the hatching never takes the pointer', async () => {
     const doc = newDoc();
     const columns = [{ name: 'region', type: 'string' as const }, { name: 'kind', type: 'string' as const }, { name: 'sales', type: 'number' as const }];
