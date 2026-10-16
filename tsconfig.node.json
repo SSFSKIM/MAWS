@@ -59,6 +59,7 @@
   // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise. P3-C M4:
   // the slide canvas and the deck editor, likewise (M9: `canvas/css.ts` stays in, since the exporters in main write it).
   "exclude": [
+    "src/main/artifacts/*.dom.test.tsx",
     "src/artifacts/document/editor/**/*",
     "src/artifacts/document/import/html*",
     "src/artifacts/document/import/docx*",

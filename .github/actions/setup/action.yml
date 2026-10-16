@@ -1,9 +1,9 @@
 name: MAWS gate setup
 description: >-
   The shared setup of .github/workflows/gate.yml (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.2), run after
-  the checkout: pnpm from packageManager, Node 22 with the pnpm store cached, Electron's download cached by its version,
-  the frozen install; on a Linux runner, for an e2e job the virtual display, the CJK fonts and Electron's sandbox, and
-  LibreOffice for the groups that render documents through it.
+  the checkout: pnpm from packageManager, Node 22 and the frozen install. Linux jobs cache the pnpm store and Electron's
+  download by its version; the macOS runner relies on its own disk. On Linux, e2e jobs get the virtual display, the CJK
+  fonts and Electron's sandbox, and LibreOffice for the groups that render documents through it.
 inputs:
   e2e:
     description: Install xvfb and the CJK fonts, and lift the apparmor restriction on unprivileged user namespaces.
@@ -21,13 +21,14 @@ runs:
     - uses: actions/setup-node@v7
       with:
         node-version: 22
-        cache: pnpm
+        cache: ${{ runner.os == 'Linux' && 'pnpm' || '' }}
     - id: electron
       shell: bash
       run: echo "version=$(node -p "require('./package.json').devDependencies.electron")" >> "$GITHUB_OUTPUT"
     - uses: actions/cache@v6
+      if: runner.os == 'Linux'
       with:
-        path: ${{ runner.os == 'macOS' && '~/Library/Caches/electron' || '~/.cache/electron' }}
+        path: ~/.cache/electron
         key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}
     # The Linux packages; a macOS runner carries its display and fonts, and LibreOffice there is the machine's own.
     - if: runner.os == 'Linux' && (inputs.e2e == 'true' || inputs.libreoffice == 'true' || inputs.apt != '')

@@ -349,7 +349,9 @@ describe('pty host tty has iutf8', () => {
 describe('pty host coalesces reads into fewer events', () => {
   // A producer faster than the host's event loop (a slow one, like `seq` to a tty, gets one read per turn and is
   // emitted at once: coalescing costs an interactive program no latency).
-  it('emits fewer events than node-pty reads under a flood, every byte in order at monotone, contiguous offsets', async () => {
+  // macOS: the flood's tail survives the child's exit (the pty keeps delivering after SIGCHLD); Linux's master answers EIO at
+  // the exit and drops what was still buffered, so the 2 MB compare below came up short once there (gate-offload Decision Log 27).
+  floodThroughExit('emits fewer events than node-pty reads under a flood, every byte in order at monotone, contiguous offsets', async () => {
     const h = harness();
     const { ptyId } = await h.table.spawn(spawnInput({ shell: '/bin/sh', args: ['-c', 'yes | head -c 2000000'] }));
     h.ackers.add(ptyId);
