@@ -28,7 +28,8 @@ export const PROJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 
 /**
  * A browser socket's attachment (at most 2,048 bytes serialized): its id, which is also its hibernation tag, the member
- * the Worker admitted, whether its tab shows the project, whether it follows the log, and for each of its
+ * the Worker admitted, whether its tab shows the project, whether it follows the log live (from its `caught-up` on;
+ * false while it pages through the backlog), and for each of its
  * subscriptions the `n` the browser expects next (one past the last relayed), so an `end` the hub writes itself carries
  * the right `n` after a hibernation too.
  */
@@ -45,6 +46,8 @@ export type MachineContext = { org: string; project: string; machine: string; ge
 
 /** How many audit entries a browser that resumes is shown after `caught-up`. */
 const AUDIT_REPLAY = 100;
+/** `log` frames (of about BATCH_BYTES, 256 KiB) in one page of a resume: about 1 MiB. */
+const RESUME_PAGE_FRAMES = 4;
 /** Subscriptions one socket may hold: their numbering rides in its attachment, which holds 2,048 bytes. */
 const MAX_SUBS = 32;
 /** A `<message>` pushes when it is this fresh: a machine's first sync uploads its whole backlog, which must not. */
@@ -788,12 +791,29 @@ export class Project extends DurableObject<Env> {
 
   // ---- Browsers' sockets ---------------------------------------------------------------------------------------
 
-  /** A browser resumes after an offset: the backlog, `caught-up`, then the log live; and the audit record's latest. */
+  /**
+   * A browser resumes after an offset: one page of the backlog (RESUME_PAGE_FRAMES frames, about 1 MiB). When the page
+   * reaches the head, `caught-up`, the log live from then on, and the audit record's latest; otherwise `more` with the
+   * last offset sent, and the browser asks for the next page. A hibernatable socket's send gives no settlement, so the
+   * browser's requests are what pace a long backlog. Until its `caught-up`, the socket gets nothing live (the mark is in
+   * its attachment, so a hibernation between pages keeps it): what is stored meanwhile comes in a later page, once.
+   */
   private resume(socket: WebSocket, after: unknown): void {
     if (!Number.isSafeInteger(after) || (after as number) < 0) return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'resume is {after: offset}' });
+    let last = after as number;
+    let frames = 0;
+    for (const events of this.log.after(last)) {
+      this.toSocket(socket, { t: 'log', events });
+      last = events[events.length - 1].offset;
+      if (++frames === RESUME_PAGE_FRAMES) break;
+    }
+    const head = this.log.head();
+    if (last < head) {
+      this.attach(socket, (a) => ({ ...a, log: false }));
+      return this.toSocket(socket, { t: 'more', offset: last });
+    }
     this.attach(socket, (a) => ({ ...a, log: true }));
-    for (const events of this.log.after(after as number)) this.toSocket(socket, { t: 'log', events });
-    this.toSocket(socket, { t: 'caught-up', offset: this.log.head() });
+    this.toSocket(socket, { t: 'caught-up', offset: head });
     for (const row of this.log.audit(AUDIT_REPLAY)) this.toSocket(socket, this.audited(row));
   }
 

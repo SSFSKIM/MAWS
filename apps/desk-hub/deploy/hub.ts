@@ -47,7 +47,8 @@ export class Person {
   }
 }
 
-/** A WebSocket that keeps every frame it received, joining `part` sets, each frame stamped with its arrival. */
+/** A WebSocket that keeps every frame it received, joining `part` sets, each frame stamped with its arrival; it follows a
+ * paged resume (DX3 `more`). */
 export class Socket {
   readonly frames: Array<{ at: number; frame: { t: string } & Record<string, unknown> }> = [];
   closed = false;
@@ -69,6 +70,8 @@ export class Socket {
         frame = whole as typeof frame;
       }
       socket.frames.push({ at, frame });
+      // A paged resume (DX3): the next page is asked for as each one ends.
+      if (frame.t === 'more') socket.send({ t: 'resume', after: frame.offset });
       socket.onFrame?.(frame, at);
     });
     ws.addEventListener('close', () => (socket.closed = true));

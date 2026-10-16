@@ -12,7 +12,7 @@ import { GENERATION_HEADER, type DownFrame } from '../src/protocol/machine';
 import { FRAME_LIMIT, toWire } from '../src/protocol/parts';
 import type { SessionMessage } from '../src/protocol/session';
 import { BrowserClient, enroll, MachineClient, sorted } from './support/clients';
-import { ADMIN, credentials, startLocalHub, type LocalHub } from './support/local';
+import { ADMIN, credentials, ORG, startLocalHub, type LocalHub } from './support/local';
 
 let hub: LocalHub;
 let memberId: string;
@@ -503,6 +503,92 @@ describe('refusals', () => {
     expect(sent).toEqual([4]);
     await writer.close();
     await reader.close();
+  });
+});
+
+describe('a paged resume (DX3 more)', () => {
+  /** A project whose log is `count` events of about 100 KB (several pages), and a browser that drives its pages. */
+  async function longLog(count: number) {
+    const project = newProject();
+    const a = await machine('paged');
+    await a.sync(project);
+    for (let from = 1; from <= count; from += 8) {
+      const events = Array.from({ length: Math.min(8, count - from + 1) }, (_, i) => say(a, project, from + i, 'x'.repeat(100_000)));
+      await a.postOk([{ t: 'events', project, events }]);
+    }
+    const browser = await BrowserClient.open(hub, ADMIN, project);
+    browser.followMore = false;
+    return { project, a, browser };
+  }
+
+  /** The page the browser's last `resume` asked for: its `log` frames' offsets and how it ended. */
+  async function page(browser: BrowserClient, after: number) {
+    const from = browser.frames.length;
+    browser.send({ t: 'resume', after });
+    const end = (await browser.next((f) => f.t === 'more' || f.t === 'caught-up', 'the page end', from)) as Extract<ProjectDown, { t: 'more' | 'caught-up' }>;
+    const at = browser.frames.indexOf(end);
+    const frames = browser.frames.slice(from, at).filter((f): f is Extract<ProjectDown, { t: 'log' }> => f.t === 'log');
+    return { end, frames, offsets: frames.flatMap((f) => f.events.map((e) => e.offset)) };
+  }
+
+  it('a long suffix arrives in pages of at most four frames, each but the last ending more at its last offset, with no event missing or twice', async () => {
+    const { a, browser } = await longLog(30);
+    const offsets: number[] = [];
+    let after = 0;
+    let pages = 0;
+    for (;;) {
+      const p = await page(browser, after);
+      pages++;
+      expect(p.frames.length).toBeLessThanOrEqual(4);
+      offsets.push(...p.offsets);
+      if (p.end.t === 'caught-up') {
+        expect(p.end.offset).toBe(30);
+        break;
+      }
+      expect(p.end.offset).toBe(p.offsets.at(-1));
+      after = p.end.offset;
+    }
+    expect(pages).toBeGreaterThan(1);
+    expect(offsets).toEqual(Array.from({ length: 30 }, (_, i) => i + 1));
+    browser.close();
+    await a.close();
+  });
+
+  it('live frames reach a caught-up socket and not one mid-paging, whose later page carries them exactly once, across a real hibernation', async () => {
+    const { project, a, browser } = await longLog(30);
+    const follower = await BrowserClient.open(hub, ADMIN, project);
+    follower.send({ t: 'resume', after: 0 });
+    await follower.next((f) => f.t === 'caught-up', 'caught-up');
+    const first = await page(browser, 0);
+    expect(first.end.t).toBe('more');
+
+    // Stored while the browser is mid-paging: live to the follower only.
+    await a.postOk([{ t: 'events', project, events: [say(a, project, 31)] }]);
+    await follower.next((f) => f.t === 'log' && f.events.some((e) => e.offset === 31), 'the live event');
+    // The browser's paging survives a real hibernation: still not caught up, it gets nothing live.
+    const life = await hub.projectLife(project);
+    await hub.evict('Project', ORG + ':' + project, 'hibernate');
+    expect(await hub.projectLife(project)).not.toBe(life);
+    await a.postOk([{ t: 'events', project, events: [say(a, project, 32)] }]);
+    await follower.next((f) => f.t === 'log' && f.events.some((e) => e.offset === 32), 'the live event after the hibernation');
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const seen = () => browser.logged.map((e) => e.offset);
+    expect(seen().filter((o) => o > 30)).toEqual([]);
+
+    let after = first.end.offset;
+    for (;;) {
+      const p = await page(browser, after);
+      if (p.end.t === 'caught-up') break;
+      after = p.end.offset;
+    }
+    expect(seen()).toEqual(Array.from({ length: 32 }, (_, i) => i + 1));
+    // Caught up now: live.
+    await a.postOk([{ t: 'events', project, events: [say(a, project, 33)] }]);
+    await browser.next((f) => f.t === 'log' && f.events.some((e) => e.offset === 33), 'live once caught up');
+    expect(seen().filter((o) => o === 33)).toEqual([33]);
+    follower.close();
+    browser.close();
+    await a.close();
   });
 });
 
