@@ -131,6 +131,7 @@ describe('duplicateBoard', () => {
     transact(doc, () => Y.setSlideKey(doc, 'b1', MISSING_SOURCE_KEY, true));
     expect(refusal(() => duplicateBoard(doc, 'b1'))).toEqual(['board b1: its file never arrived, so there is nothing to copy']);
     expect(refusal(() => duplicateBoard(doc, 'nope'))).toEqual(['board nope: no such board']);
+    expect(refusal(() => duplicateBoard(doc, 'b2', { at: { x: Number.NaN, y: 0 } }))[0]).toMatch(/^board s[0-9a-z]+-\d+: x is not a finite number$/);
   });
 });
 

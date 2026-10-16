@@ -22,7 +22,7 @@ import { publishDeck, type DeckPublishOutcome } from '../slides/publish';
 import { ANY, rekey } from '../slides/order';
 import { applyV2, newDoc, stateV2, transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
-import { boardIdOf, boardPath, CANVAS_LIMITS, CANVAS_PATH, FRAME_KEYS, frameProblems, parseCanvasJson, type BoardFrame, type CanvasBoard, type CanvasJson } from './canvas';
+import { boardIdOf, boardPath, CANVAS_LIMITS, CANVAS_PATH, dict, FRAME_KEYS, frameProblems, parseCanvasJson, type BoardFrame, type CanvasBoard, type CanvasJson } from './canvas';
 import { boardFrame, DEFAULT_SIZE, isMissingSource, MISSING_SOURCE_KEY, placementAfter, readCanvas, writeBoardEntry } from './model';
 import { mergeBoardOrder } from './order';
 
@@ -63,26 +63,29 @@ interface Input {
   baseCanvas: CanvasJson;
   /** Board id → its sent file (null removes it). */
   boards: Map<string, string | null>;
-  /** Board id → the size its sent file's `data-size` gives. */
-  sizes: Map<string, { w: number; h: number }>;
+  /** Board id → the size its sent file's `data-size` gives, or why that attribute gives none (absent: no entry). */
+  sizes: Map<string, { w: number; h: number } | { problem: string }>;
   warnings: PublishWarning[];
   notes: number;
 }
 
 const DATA_SIZE_RE = /^\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*$/;
-function dataSize(id: string, source: string): { w: number; h: number } | null {
+/** A board file's `data-size` (`<w>x<h>` in px): null when absent, else the size or why it is not one the model holds. */
+function dataSize(id: string, source: string): { w: number; h: number } | { problem: string } | null {
   const top = parseHtml(source).find((n) => n.kind === 'element');
   const value = top && top.kind === 'element' && top.tag === 'section' ? new Map(top.attrs).get('data-size') : undefined;
-  const m = value === undefined ? null : DATA_SIZE_RE.exec(value);
-  if (!m) return null;
+  if (value === undefined) return null;
+  const m = DATA_SIZE_RE.exec(value);
+  if (!m) return { problem: `board ${id}: data-size ${JSON.stringify(value)} is not <w>x<h> in px` };
   const size = { w: Number(m[1]), h: Number(m[2]) };
-  return frameProblems(id, size).length === 0 ? size : null;
+  const found = frameProblems(id, size);
+  return found.length === 0 ? size : { problem: `board ${id}: data-size ${JSON.stringify(value)}: ${found[0]!.slice(`board ${id}: `.length)}` };
 }
 
 function prepare(base: Readonly<Record<string, string>>, sent: Readonly<Record<string, string | null>>): Input {
   const problems: FileProblem[] = [];
   const boards = new Map<string, string | null>();
-  const sizes = new Map<string, { w: number; h: number }>();
+  const sizes: Input['sizes'] = new Map();
   let bytes = 0;
   for (const path of Object.keys(sent).sort()) {
     const text = sent[path];
@@ -140,13 +143,18 @@ function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
   const fileCreated = new Set<string>();
   for (const [id, text] of input.boards) {
     const read = input.base[boardPath(id)] !== undefined;
+    if (text === input.base[boardPath(id)]) continue; // the file as read: not the agent's change (C's rule)
     if (text === null) {
       if (!live.has(id) || !(read || Object.hasOwn(B.boards, id))) continue; // not a board the agent read
       removed.add(id);
       const [bb, lb] = [own(B.boards, id) as CanvasBoard | undefined, L.boards[id]!];
       if (bb && !force) for (const key of new Set([...Object.keys(bb), ...Object.keys(lb)])) if (stable(own(bb, key)) !== stable(own(lb, key))) conflict(`board ${id}: ${key} changed since your read`);
       if (read) deckSent[slidePath(id)] = null;
-      else ownRemovals.push(id);
+      else {
+        // read as manifest-only: a file that arrived since is content the agent never saw (C's removal rule)
+        if (!isMissingSource(doc, id) && !force) conflicts.push({ path: boardPath(id), detail: 'board: changed since your read' });
+        ownRemovals.push(id);
+      }
       continue;
     }
     deckSent[slidePath(id)] = text;
@@ -199,6 +207,7 @@ function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
       const bb = own(B.boards, id) as CanvasBoard | undefined;
       const lb = live.has(id) ? L.boards[id]! : undefined;
       if (!lb) {
+        if (bb && stable(ab) === stable(bb)) continue; // its entry as read, the board deleted since: the deletion stands
         if (bb && !force) {
           conflict(`board ${id}: removed since your read`);
           continue;
@@ -215,7 +224,7 @@ function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
         conflict(`board ${id}: created since your read`);
         continue;
       }
-      const keys: Record<string, unknown> = {};
+      const keys = dict<unknown>(); // any key, `__proto__` too, an own entry
       const lacking: string[] = [];
       for (const key of new Set([...Object.keys(bb ?? {}), ...Object.keys(ab)])) {
         if ((FRAME_KEYS as readonly string[]).includes(key) && ab[key] === undefined) {
@@ -243,7 +252,13 @@ function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
   const sizeProblems: FileProblem[] = [];
   for (const [id, lacking] of partial) {
     const entry = entries.get(id) ?? {};
-    const size = input.sizes.get(id) ?? DEFAULT_SIZE;
+    const given = input.sizes.get(id);
+    const needed = lacking.includes('w') || lacking.includes('h');
+    if (needed && given && 'problem' in given) {
+      sizeProblems.push({ path: CANVAS_PATH, message: given.problem }); // an explicit size it would use, refused, never defaulted
+      continue;
+    }
+    const size = given && !('problem' in given) ? given : DEFAULT_SIZE;
     const fill = { w: lacking.includes('w') ? size.w : (entry.w as number), h: lacking.includes('h') ? size.h : (entry.h as number) };
     fills.set(id, fill);
     for (const message of frameProblems(id, fill)) sizeProblems.push({ path: CANVAS_PATH, message });
@@ -258,7 +273,15 @@ function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
   const survivors = L.order.filter((id) => !removed.has(id));
   const sentOrder = A && stable(A.order) !== stable(B.order) ? A.order : null;
   if (A) {
-    for (const id of A.order) if (!survivors.includes(id) && !created.has(id)) warn(`order lists board ${id}, which the design does not hold; dropped`, 'order');
+    // a board deleted since the read keeps its deletion, unless the agent's order put it in a new place relative to any
+    // board it read beside it (a sequence cannot tell "this one moved" from "its neighbour moved", so either clashes)
+    const deleted = B.order.filter((id) => !live.has(id) && A.order.includes(id) && !created.has(id));
+    const both = B.order.filter((id) => A.order.includes(id));
+    for (const id of deleted) {
+      const flipped = both.some((other) => other !== id && B.order.indexOf(id) < B.order.indexOf(other) !== A.order.indexOf(id) < A.order.indexOf(other));
+      if (flipped && !force) conflict(`board ${id}: removed since your read`);
+    }
+    for (const id of A.order) if (!survivors.includes(id) && !created.has(id) && !deleted.includes(id) && !removed.has(id)) warn(`order lists board ${id}, which the design does not hold; dropped`, 'order');
     if (sentOrder) for (const id of B.order) if (survivors.includes(id) && !A.order.includes(id)) warn(`order leaves out board ${id}; its place is kept`, 'order');
   }
   const order = mergeBoardOrder(B.order, A?.order ?? null, survivors, created, force);
@@ -304,7 +327,8 @@ function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
     const fill: BoardFrame = { ...placementAfter(doc, [id]), ...fills.get(id)! };
     for (const k of lacking) Y.setSlideKey(doc, id, k, fill[k as keyof BoardFrame]);
     const f = boardFrame(doc, id)!;
-    const sized = input.sizes.has(id) && (lacking.includes('w') || lacking.includes('h'));
+    const given = input.sizes.get(id);
+    const sized = given !== undefined && !('problem' in given) && (lacking.includes('w') || lacking.includes('h'));
     warn(`board ${id}: no ${lacking.join(', ')} in canvas.json; its frame is ${f.x},${f.y} ${f.w}×${f.h}${sized ? ' (its data-size)' : ''}`);
     manifest++;
   }

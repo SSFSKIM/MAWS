@@ -10,6 +10,7 @@ import * as Y from '../yjs/slides';
 import { boardPath, CANVAS_PATH, parseCanvasJson, serializeCanvasJson, type CanvasJson } from './canvas';
 import { boardFrame, designFiles, isMissingSource, readCanvas, writeBoardEntry } from './model';
 import { publishCanvas, type CanvasPublishOutcome } from './publish';
+import { EXTRA_PREFIX } from './model';
 import { setBoardFrame } from './writers';
 import { BOARDS, design, replicaFrom, updatesOf } from './fixtures/support';
 
@@ -307,5 +308,83 @@ describe('what the publish refuses before planning', () => {
     // a created board's size as its entry and data-size together would make it, before anything lands
     expect(refused(() => publishCanvas(doc, base, sentWith(base, (c) => (c.boards.wide = { w: 16_384 }), { [boardPath('wide')]: '<section id="wide" data-size="100x8192"></section>' }), false))).toEqual(['project/canvas.json: board wide: 16384×8192 is 134217728 px (over 67108864 px)']);
     expect(designFiles(doc)).toEqual(base);
+  });
+});
+
+describe('task-review fix wave 1', () => {
+  it('(1) leaves a board deleted since the read deleted when the agent resends its untouched entry and file, forced or not', () => {
+    for (const force of [false, true]) {
+      const doc = design();
+      const base = designFiles(doc);
+      transact(doc, () => Y.deleteSlide(doc, 'b2'));
+      const sent = { ...base, ...sentWith(base, (c) => (c.boards.b1!.x = 50)) }; // every file it read, b2's included
+      const { out } = publish(doc, base, sent, force);
+      expect(out.conflicts).toEqual([]);
+      expect(Y.hasSlide(doc, 'b2')).toBe(false);
+      expect(boardFrame(doc, 'b1')!.x).toBe(50);
+      expect(out.warnings.filter((w) => w.message.includes('b2'))).toEqual([]);
+    }
+  });
+
+  it('(1) still refuses an edit or a re-order of a board deleted since the read', () => {
+    const doc = design();
+    const base = designFiles(doc);
+    transact(doc, () => Y.deleteSlide(doc, 'b2'));
+    expect(publish(doc, base, sentWith(base, (c) => (c.boards.b2!.title = 'Kept'))).out.conflicts).toEqual([{ path: CANVAS_PATH, detail: 'board b2: removed since your read' }]);
+    expect(publish(doc, base, sentWith(base, (c) => (c.order = ['b2', 'b1', 'b3']))).out.conflicts).toEqual([{ path: CANVAS_PATH, detail: 'board b2: removed since your read' }]);
+    expect(publish(doc, base, sentWith(base, (c) => (c.order = ['b1', 'b3', 'b2']))).out.conflicts).toEqual([{ path: CANVAS_PATH, detail: 'board b2: removed since your read' }]);
+    // a re-order of other boards that leaves the deleted one where it stood among them is not its
+    const four = design([...BOARDS, { id: 'b4', at: { x: 4000, y: 0, w: 10, h: 10 } }]);
+    const read = designFiles(four);
+    transact(four, () => Y.deleteSlide(four, 'b2'));
+    expect(publish(four, read, sentWith(read, (c) => (c.order = ['b1', 'b2', 'b4', 'b3']))).out.conflicts).toEqual([]);
+    expect(slideOrder(four)).toEqual(['b1', 'b4', 'b3']);
+  });
+
+  it('(2) refuses a null for a manifest-only board whose file arrived since the read, writing nothing; forced, removes it', () => {
+    const doc = design();
+    const base = designFiles(doc);
+    publish(doc, base, sentWith(base, (c) => (c.boards.later = { x: 0, y: 2000, w: 390, h: 844 })));
+    const read = designFiles(doc); // the agent reads 'later' as manifest-only
+    publish(doc, read, { [boardPath('later')]: '<section id="later"><p id="p" style="font-size:16px">Arrived</p></section>' }); // another writer's file
+    const before = designFiles(doc);
+    const { out, updates } = publish(doc, read, { [boardPath('later')]: null });
+    expect(out.conflicts).toEqual([{ path: boardPath('later'), detail: 'board: changed since your read' }]);
+    expect(updates).toBe(0);
+    expect(designFiles(doc)).toEqual(before);
+    expect(publish(doc, read, { [boardPath('later')]: null }, true).out.conflicts).toEqual([]);
+    expect(Y.hasSlide(doc, 'later')).toBe(false);
+  });
+
+  it('(3) refuses an invalid data-size it would use for a missing dimension, before any write, and ignores it under a whole frame', () => {
+    const doc = design();
+    const base = designFiles(doc);
+    const file = (size: string) => ({ [boardPath('n')]: `<section id="n" data-size="${size}"></section>` });
+    expect(refused(() => publishCanvas(doc, base, file('16385x10'), false))).toEqual(['project/canvas.json: board n: data-size "16385x10": w is 16385 px (over 16384 px a side)']);
+    expect(refused(() => publishCanvas(doc, base, file('16384x8192'), false))).toEqual(['project/canvas.json: board n: data-size "16384x8192": 16384×8192 is 134217728 px (over 67108864 px)']);
+    expect(refused(() => publishCanvas(doc, base, file('0x10'), false))).toEqual(['project/canvas.json: board n: data-size "0x10": w is 0 (a side is more than 0 px)']);
+    expect(refused(() => publishCanvas(doc, base, file('wide'), false))).toEqual(['project/canvas.json: board n: data-size "wide" is not <w>x<h> in px']);
+    expect(refused(() => publishCanvas(doc, base, { ...sentWith(base, (c) => (c.boards.n = { x: 0, y: 0, h: 10 })), ...file('16385x10') }, false))).toEqual(['project/canvas.json: board n: data-size "16385x10": w is 16385 px (over 16384 px a side)']);
+    expect(designFiles(doc)).toEqual(base);
+    const whole = publish(doc, base, { ...sentWith(base, (c) => (c.boards.n = { x: 0, y: 3000, w: 100, h: 100 })), ...file('16385x10') });
+    expect(whole.out.conflicts).toEqual([]);
+    expect(boardFrame(doc, 'n')).toEqual({ x: 0, y: 3000, w: 100, h: 100 });
+  });
+
+  it('(4) adds, changes and removes a kept board key named __proto__ through the publish', () => {
+    const doc = design();
+    const edit = (change: (entry: Record<string, unknown>) => void) => {
+      const read = designFiles(doc);
+      const c = manifest(read);
+      change(c.boards.b1 as Record<string, unknown>);
+      expect(publish(doc, read, { [CANVAS_PATH]: serializeCanvasJson(c) }).out.conflicts).toEqual([]);
+      return Y.slideScalars(doc, 'b1')[`${EXTRA_PREFIX}__proto__`];
+    };
+    const own = (v: unknown) => Object.defineProperty({}, '__proto__', { value: v, enumerable: true, writable: true, configurable: true }) as Record<string, unknown>;
+    expect(edit((e) => Object.assign(e, own({ p: 1 })))).toBe('{"p":1}');
+    expect(Object.hasOwn(readCanvas(doc).boards.b1!, '__proto__')).toBe(true);
+    expect(edit((e) => Object.assign(e, own({ p: 2 })))).toBe('{"p":2}');
+    expect(edit((e) => delete e['__proto__'])).toBeUndefined();
+    expect(Object.hasOwn(readCanvas(doc).boards.b1!, '__proto__')).toBe(false);
   });
 });

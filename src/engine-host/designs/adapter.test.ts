@@ -205,17 +205,67 @@ describe('the design adapter on the document service', () => {
     expect(store.listVersions(id).map((v) => v.kind)).toContain('restore');
   });
 
-  it('repairs a frame two replicas merged past the cap as the write of the actor whose update produced it', async () => {
+  // Parent Decision Log 17: only the host's afterUpdate bounds a frame, and only one that concurrent merging alone made;
+  // each write below is valid by itself
+  for (const order of ['w first', 'h first'] as const)
+    it(`repairs a frame two replicas’ valid writes merged past the cap (${order}), credited to the actor whose update produced the merge`, async () => {
+      const id = await createDesign();
+      await service.writeAs(id, human, (doc) => setBoardFrame(doc, 'b2', { w: 8192, h: 4096 }));
+      const [wide, tall] = [replicaOf(id), replicaOf(id)];
+      const [svWide, svTall] = [stateVector(wide), stateVector(tall)];
+      setBoardFrame(wide, 'b2', { w: 16_384 }); // 16384×4096, inside
+      setBoardFrame(tall, 'b2', { h: 8192 }); // 8192×8192, inside
+      const [first, second] = order === 'w first' ? [[wide, svWide, agent] as const, [tall, svTall, other] as const] : [[tall, svTall, other] as const, [wide, svWide, agent] as const];
+      await service.writeAs(id, first[2], (doc) => applyV1(doc, diffV1(first[0], first[1])));
+      expect(boardFrame(replicaOf(id), 'b2')).toEqual(order === 'w first' ? { x: 500, y: 0, w: 16_384, h: 4096 } : { x: 500, y: 0, w: 8192, h: 8192 });
+      const logged = rows(id).length;
+      await service.writeAs(id, second[2], (doc) => applyV1(doc, diffV1(second[0], second[1])));
+      const added = rows(id).slice(logged);
+      expect(added.length).toBeGreaterThan(0);
+      expect(added.every((r) => r.actor === (second[2] === agent ? 'session:app-1' : 'session:app-2'))).toBe(true);
+      const host = replicaOf(id);
+      expect(boardFrame(host, 'b2')).toEqual({ x: 500, y: 0, w: 16_384, h: 4096 });
+      // both replicas converge on the repaired frame when they pull
+      for (const r of [wide, tall]) applyV1(r, diffV1(host, stateVector(r)), 'remote');
+      expect(boardFrame(wide, 'b2')).toEqual(boardFrame(host, 'b2'));
+      expect(boardFrame(tall, 'b2')).toEqual(boardFrame(host, 'b2'));
+    });
+
+  it('repairs a reconnecting replica’s offline resize that merges past the cap with edits made meanwhile, credited to the reconnecting actor', async () => {
     const id = await createDesign();
     await service.writeAs(id, human, (doc) => setBoardFrame(doc, 'b2', { w: 8192, h: 4096 }));
-    const replica = replicaOf(id);
-    const sv = stateVector(replica);
-    setBoardFrame(replica, 'b2', { w: 16_384 }); // 16384×4096, inside
-    await service.writeAs(id, human, (doc) => setBoardFrame(doc, 'b2', { h: 8192 })); // 8192×8192, inside
+    const offline = replicaOf(id);
+    const sv = stateVector(offline);
+    setBoardFrame(offline, 'b2', { w: 12_000 }); // offline: 12000×4096
+    setBoardFrame(offline, 'b2', { w: 16_384 }); // offline: 16384×4096
+    await service.writeAs(id, human, (doc) => setBoardFrame(doc, 'b2', { h: 8000 })); // meanwhile: 8192×8000
+    await service.writeAs(id, human, (doc) => setBoardFrame(doc, 'b1', { x: 10 }));
     const logged = rows(id).length;
-    await service.writeAs(id, other, (doc) => applyV1(doc, diffV1(replica, sv)));
+    await service.writeAs(id, other, (doc) => applyV1(doc, diffV1(offline, sv))); // the reconnect's one frame
     expect(rows(id).slice(logged).every((r) => r.actor === 'session:app-2')).toBe(true);
     expect(boardFrame(replicaOf(id), 'b2')).toEqual({ x: 500, y: 0, w: 16_384, h: 4096 });
+    applyV1(offline, diffV1(replicaOf(id), stateVector(offline)), 'remote');
+    expect(designFiles(offline)).toEqual(designFiles(replicaOf(id)));
+  });
+
+  it('leaves the state, the revision and the announcements untouched when an agent removes a manifest-only board whose file arrived since its read', async () => {
+    const id = await createDesign();
+    const base = designFiles(replicaOf(id));
+    await publishAs(id, human, base, sentWith(base, (c) => (c.boards.later = { x: 0, y: 9000, w: 390, h: 844 })));
+    const read = designFiles(replicaOf(id));
+    expect(read[boardPath('later')]).toBeUndefined();
+    await publishAs(id, other, read, { [boardPath('later')]: '<section id="later"><p id="p" style="font-size:16px">Arrived</p></section>' });
+    await service.whenCommitted();
+    const events: unknown[] = [];
+    const off = service.onCommitted((change) => events.push(change));
+    const [revision, logged, state] = [service.revision(id), rows(id).length, designFiles(replicaOf(id))];
+    const out = await publishAs(id, agent, read, { [boardPath('later')]: null });
+    await service.whenCommitted();
+    off();
+    expect(out.conflicts).toEqual([{ path: boardPath('later'), detail: 'board: changed since your read' }]);
+    expect([service.revision(id), rows(id).length, events]).toEqual([revision, logged, []]);
+    expect(designFiles(replicaOf(id))).toEqual(state);
+    expect(state[boardPath('later')]).toContain('Arrived');
   });
 
   it('keeps a moved element’s origin association across moves and a restart of the store', async () => {

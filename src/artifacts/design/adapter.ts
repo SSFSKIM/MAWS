@@ -10,8 +10,8 @@ import { createPresentationAdapter } from '../slides/adapter';
 import { importSlide } from '../slides/model';
 import { captureQuotes, storeDeletedQuotes } from '../slides/threads';
 import { transact, type Doc } from '../yjs';
-import { touchedSlides } from '../yjs/slides';
-import { boardIdOf, CANVAS_PATH } from './canvas';
+import * as Y from '../yjs/slides';
+import { boardIdOf, CANVAS_PATH, FRAME_KEYS, frameProblems } from './canvas';
 import { designFiles, designPaths, repairBoards, writeBoardEntry, writeCanvasKeys } from './model';
 import { publishCanvas } from './publish';
 import { blankBoard } from './writers';
@@ -78,17 +78,29 @@ export function createDesignAdapter(options: { now?: () => Date } = {}): KindAda
       if (quotes.size > 0) storeDeletedQuotes(live, quotes);
       return outcome;
     },
-    // C's repair and threads mirror, then the frames of the boards the update touched (as the triggering actor's write)
+    // C's repair and threads mirror, then the frames of the boards the update touched, as the triggering actor's write
+    // (the parent's Decision Log 17: the one place a frame is bounded). Every single-writer route refuses an invalid frame
+    // before it writes: the loader and publish (`frameProblems` on the sent and merged frames), the board writers, the
+    // duplicate, and a restore (`revertScope` below); C's element writers and the dialect never write the frame keys. So
+    // an update that reaches the host leaving a frame outside the rules is a merge of valid concurrent writes (a replica's
+    // frame, or a reconnect's), which no one can be asked to redo: rejecting it would evict and replay it (A's Decision
+    // Log 26), so it is bounded deterministically instead.
     afterUpdate: (live, info) => {
       const answer = deck.afterUpdate!(live, info);
-      const touched = touchedSlides(live, info.update);
+      const touched = Y.touchedSlides(live, info.update);
       repairBoards(live, touched === null ? {} : { boards: touched });
       return answer;
     },
-    afterRestore: (live, info) => {
-      const answer = deck.afterRestore!(live, info);
-      repairBoards(live);
-      return answer;
+    // A restore writes the version's boards as they were: one whose frame breaks the rules (a state no writer of this
+    // build makes) is refused before anything is written, never clamped.
+    revertScope: (live, old, info) => {
+      const problems = Y.slideIds(old).flatMap((id) => {
+        const s = Y.slideScalars(old, id);
+        if (FRAME_KEYS.some((k) => s[k] === undefined)) return [`board ${id}: a frame has x, y, w and h`];
+        return frameProblems(id, s);
+      });
+      if (problems.length > 0) throw new Error(`the version cannot be restored: ${problems.join('; ')}`);
+      return deck.revertScope!(live, old, info);
     },
     summarizeTurn: summarizeDesignTurn,
   };

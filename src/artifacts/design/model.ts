@@ -114,7 +114,8 @@ export function placementAfter(doc: Doc, except: Iterable<string> = []): { x: nu
 }
 
 /**
- * The host's repair of board frames (beside C's `repair`, after every update and restore): a frame concurrency left
+ * The host's repair of board frames (beside C's `repair`, from the adapter's `afterUpdate` alone; the parent's Decision
+ * Log 17): a frame concurrency left
  * outside the model's rules is brought back by one deterministic rule, so every replica repairing the same state writes
  * the same values. Every writer refuses an invalid frame, so only merges produce one: two valid writes of `w` and `h`
  * whose product passes the area cap (the height is cut to fit the width), or a key a replica removed or wrote unreadable

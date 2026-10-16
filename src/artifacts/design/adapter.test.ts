@@ -47,6 +47,21 @@ describe('the design adapter', () => {
     expect(adapter.afterUpdate!(host, { artifactId: 'd1', update: threaded!, actor: human })).toMatchObject({ threads: { upsert: [expect.objectContaining({ threadId: 't2', quote: 'Title big' })] } });
   });
 
+  it('(fix wave 1, 5) refuses to restore a version whose frames break the cap, before writing, and never clamps in afterRestore', () => {
+    const live = design();
+    const old = design([{ id: 'b1', at: { x: 0, y: 0, w: 390, h: 844 } }]);
+    transact(old, () => writeBoardEntry(old, 'b1', { w: 16_384, h: 8192 })); // a legacy state no writer of this build makes
+    expect(() => adapter.revertScope!(live, old, { artifactId: 'd1' })).toThrow('the version cannot be restored: board b1: 16384×8192 is 134217728 px (over 67108864 px)');
+    transact(old, () => writeBoardEntry(old, 'b1', { w: undefined }));
+    expect(() => adapter.revertScope!(live, old, { artifactId: 'd1' })).toThrow('the version cannot be restored: board b1: a frame has x, y, w and h');
+    expect(adapter.revertScope!(live, design(), { artifactId: 'd1' })).toMatchObject({ keep: expect.anything() });
+    // afterRestore is C's alone: a frame it finds is left as it is (the refusal above is the restore's guard)
+    const odd = design([{ id: 'b1', at: { x: 0, y: 0, w: 390, h: 844 } }]);
+    transact(odd, () => writeBoardEntry(odd, 'b1', { w: 16_384, h: 8192 }));
+    adapter.afterRestore!(odd, { artifactId: 'd2', versionId: 1 });
+    expect(boardFrame(odd, 'b1')).toEqual({ x: 0, y: 0, w: 16_384, h: 8192 });
+  });
+
   it('keeps the conversations a restore would take back (C’s revertScope and afterRestore)', () => {
     expect(adapter.revertScope).toBeTypeOf('function');
     expect(adapter.afterRestore).toBeTypeOf('function');
