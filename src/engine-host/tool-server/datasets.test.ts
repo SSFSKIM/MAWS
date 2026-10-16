@@ -7,7 +7,9 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readDataset } from '@artifacts/dashboard/datasets';
+import { readDataset, snapshotOf, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
+import { applyV2, newDoc } from '@artifacts/yjs';
+import { datasetReaderOf } from '../dashboards/read';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { artifactRefusalOf } from '@shared/maws/tools';
@@ -230,6 +232,28 @@ describe('artifact_dataset', () => {
     expect(readDataset(world.service.live(id), 'sales')).toBeNull();
     expect(world.store.listAssets(id)).toHaveLength(1);
     expect(refusal(await bind({ baseRevision: removed.revision, id: 'sales', remove: true }))).toMatchObject({ reason: 'notFound' });
+  });
+
+  it('reads identical bytes bound as CSV and as TSV each as its descriptor names, from a version after removal and restart', async () => {
+    const { id, revision } = await created();
+    const bytes = 'a,b\tc\n1,2\t3\n';
+    const asCsv = json<Bound>(await bind({ baseRevision: revision, id: 'comma', path: file('same.csv', bytes) }));
+    const asTsv = json<Bound>(await bind({ baseRevision: asCsv.revision, id: 'tab', path: file('same.tsv', bytes) }));
+    expect(asTsv.columns.map((c) => c.name)).toEqual(['a,b', 'c']);
+    const comma = readDataset(world.service.live(id), 'comma')!;
+    const tab = readDataset(world.service.live(id), 'tab')!;
+    expect(tab.source).toMatchObject({ ref: comma.source.kind === 'file' ? comma.source.ref : '', format: 'tsv' }); // one asset, two tables
+    const version = await world.store.createVersion(id, { kind: 'named', actor: { kind: 'human' }, label: 'both' });
+    json(await bind({ baseRevision: asTsv.revision, id: 'comma', remove: true }));
+    json(await bind({ baseRevision: world.store.revision(id), id: 'tab', remove: true }));
+    close();
+    world = open(); // a cold cache
+    const old = newDoc();
+    applyV2(old, world.store.versionState(id, version!));
+    const names = (d: DatasetDescriptor) => datasetReaderOf(world.store).read(id, snapshotOf(d).ref, { format: snapshotOf(d).format }).columns.map((c) => c.name);
+    expect(names(readDataset(old, 'tab')!)).toEqual(['a,b', 'c']);
+    expect(names(readDataset(old, 'comma')!)).toEqual(['a', 'b\tc']);
+    old.destroy();
   });
 
   it('leaves no asset, descriptor or op behind a write that failed before its commit, across a restart', async () => {
