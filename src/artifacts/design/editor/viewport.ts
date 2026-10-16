@@ -5,7 +5,9 @@
 //
 // `DesignView` is what a tab keeps of that view (X32's lifetime rule: the tab owns it, so the header's Zoom to fit and a
 // body remounting on a tab switch find it): the viewport, the room the body last measured, and the board whose frame is
-// selected (the board's geometry, as against C's element selection in the deck session). Pure: no DOM, no React.
+// selected (the board's geometry, as against C's element selection in the deck session). M5 (the parent's Decision Log
+// 31): and which retained version the history shows in place of the live design, so the header's Export, which outlives
+// the body, exports what is on screen. Pure: no DOM, no React.
 import type { Pt } from '../../slides/geometry';
 
 export interface Viewport {
@@ -70,17 +72,22 @@ export function unionRect(rects: readonly Rect[]): Rect | null {
   return { x, y, w: right - x, h: bottom - y };
 }
 
+/** M5: what the history shows in place of the live design: one retained version, two compared, or nothing (live). */
+export type ShownVersion = { versionId: number } | 'compare' | null;
+
 export interface DesignViewState {
   /** Null until the body first places the world (a fit once its room is known). */
   viewport: Viewport | null;
   room: Room | null;
   /** The board whose frame is selected (its geometry), if any. */
   frame: string | null;
+  /** M5: what the history shows (Decision Log 31); null while the live design is shown. */
+  shown: ShownVersion;
 }
 
 /** What one tab keeps of its workbench's view (module header). */
 export class DesignView {
-  private state: DesignViewState = { viewport: null, room: null, frame: null };
+  private state: DesignViewState = { viewport: null, room: null, frame: null, shown: null };
   private readonly listeners = new Set<() => void>();
   /** A fit asked before the room was measured, with its zoom cap. */
   private pendingFit: { rect: Rect; max: number } | null = null;
@@ -171,5 +178,12 @@ export class DesignView {
 
   selectFrame(boardId: string | null): void {
     this.set({ frame: boardId });
+  }
+
+  /** M5: the history shows one version (its id), two compared (`compare`), or the live design (null). */
+  showVersion(shown: number | 'compare' | null): void {
+    const now = this.state.shown;
+    if (shown === null ? now === null : shown === 'compare' ? now === 'compare' : typeof now === 'object' && now?.versionId === shown) return;
+    this.set({ shown: typeof shown === 'number' ? { versionId: shown } : shown });
   }
 }

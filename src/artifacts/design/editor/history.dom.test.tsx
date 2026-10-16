@@ -173,6 +173,28 @@ describe('a version’s preview in the workbench', () => {
     expect(session.writable()).toBe(true);
   });
 
+  it('M5 (Decision Log 31): the tab’s view says what is shown for its Export: the version alone, Compare, then live again; unmounted, live', async () => {
+    const { view, unmount } = mount();
+    await settle();
+    expect(view.snapshot().shown).toBeNull();
+    const rail = screen.getByRole('complementary', { name: 'Version history' });
+    fireEvent.click(within(rail).getByRole('button', { name: /^Version Draft/ }));
+    await settle();
+    expect(view.snapshot().shown).toEqual({ versionId: 1 });
+    fireEvent.click(within(rail).getByRole('button', { name: /^Version Reviewed/ }), { shiftKey: true });
+    await settle();
+    expect(screen.getByRole('toolbar', { name: 'Version preview' }).querySelector('.deck-history-heading')!.textContent).toContain('→');
+    expect(view.snapshot().shown).toBe('compare');
+    fireEvent.click(within(screen.getByRole('toolbar', { name: 'Version preview' })).getByRole('button', { name: 'Back to design' }));
+    await settle();
+    expect(view.snapshot().shown).toBeNull();
+    fireEvent.click(within(rail).getByRole('button', { name: /^Version Reviewed/ }));
+    await settle();
+    expect(view.snapshot().shown).toEqual({ versionId: 2 });
+    unmount();
+    expect(view.snapshot().shown).toBeNull();
+  });
+
   it('Restore asks A’s restore for the version shown, after a confirmation', async () => {
     const { restore } = mount();
     await settle();

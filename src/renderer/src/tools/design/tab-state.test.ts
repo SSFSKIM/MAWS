@@ -76,4 +76,17 @@ describe('a design tab’s state', () => {
     expect(openDesignTabs()).not.toContain(state);
     expect(handle.closed).toBe(true);
   });
+
+  it('M5 (Decision Log 31): answers what its Export exports now: the selected frame, else the active board, and the version shown', async () => {
+    const { state } = await opened();
+    expect(state.exportContext()).toEqual({ board: 'phone', shown: null }); // the active board
+    state.view.selectFrame('poster');
+    state.view.showVersion(3);
+    expect(state.exportContext()).toEqual({ board: 'poster', shown: { versionId: 3 } });
+    state.view.showVersion('compare');
+    expect(state.exportContext().shown).toBe('compare');
+    state.view.showVersion(null);
+    expect(state.exportContext().shown).toBeNull();
+    state.dispose();
+  });
 });

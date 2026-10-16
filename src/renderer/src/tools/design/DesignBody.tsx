@@ -3,12 +3,13 @@
 // registry made for this tab), the X32 header registered under the scope the surface gives, the world registered as the
 // tab's Mark-up surface while it is on screen, the boards in the design's governing design system (D's chain, as the
 // deck's: its own system, its Space's default, the owner's, else the bundled floor), and `onShown` once every board has
-// drawn while the body is visible. Export (M5) joins here later.
+// drawn while the body is visible. M5: the header's Export (./exports.ts), each entry reading the tab's state when chosen.
 // M4: comments go to the session the main area shows, through B's comment surface (P2's card with B's artifact target,
 // the design kind and its board or element target), the replica held by the tab while the card's overlay writes; the
 // header's Version history and Comments and its open-thread count; the history over the tab's history api read through
 // the design model, its new-change pill counting the design's projection (C's `countChanges` hook, Decision Log 23).
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { boardLabel, readBoards } from '@artifacts/design/editor/boards';
 import { DesignWorkbench } from '@artifacts/design/editor/DesignWorkbench';
 import { countDesignChanges } from '@artifacts/design/history';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -22,6 +23,7 @@ import { useLayout } from '../../stores/layout';
 import { useDocumentComments } from '../document/comments';
 import { chooseDeckSystem } from '../presentation/commands';
 import { useDeckSystem } from '../presentation/governing';
+import { designExportRequest, designExports, exportDesign } from './exports';
 import { designHeader, type DesignHeaderCommands } from './header';
 import type { DesignTabState } from './tab-state';
 
@@ -49,7 +51,24 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
   const session = snapshot.session;
   const rail = useRail(session);
   const commands = useMemo<DesignHeaderCommands | undefined>(() => (session ? { fitAll: state.fitAll, toggleRail: (r) => session.toggleRail(r) } : undefined), [session, state]);
-  useEditorHost(scope, designHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, rail, unresolved: snapshot.unresolved, history: state.designHistory !== null }, commands));
+  // M5: the Export menu follows what the tab shows (its selected board, the version its history previews); an entry
+  // chosen reads the tab's state then, so what it exports is what is on screen at that moment
+  const exportShown = useSyncExternalStore(state.view.subscribe, () => state.view.snapshot().shown);
+  const exportBoard = useSyncExternalStore(state.view.subscribe, () => state.view.snapshot().frame);
+  const activeBoard = useSyncExternalStore(session?.subscribe ?? NO_SESSION, () => session?.snapshot().currentSlide ?? null);
+  const exports = useMemo(
+    () =>
+      designExports({ shown: exportShown, board: exportBoard ?? activeBoard }, (entry) => {
+        const doc = state.snapshot().handle?.doc;
+        const boardName = (id: string) => {
+          const board = doc ? readBoards(doc).boards.find((b) => b.id === id) : undefined;
+          return board ? boardLabel(board) : id;
+        };
+        void exportDesign(artifactId, designExportRequest(entry, state.exportContext()), { boardName });
+      }),
+    [exportShown, exportBoard, activeBoard, state, artifactId],
+  );
+  useEditorHost(scope, designHeader({ title, document: snapshot.document, saving: snapshot.saving, closeGuard: state.closeGuard, rail, unresolved: snapshot.unresolved, history: state.designHistory !== null, exports }, commands));
 
   // M4: comments go to the session the main area shows (its Side thread, or its conversation); none shown, none offered
   const appSessionId = useLayout((s) => shownSession(s.main));

@@ -153,6 +153,12 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   useEffect(() => {
     if (!historyOpen && previewing) history?.close(); // the rail closed: back to the live design
   }, [historyOpen, previewing, history]);
+  // M5 (the parent's Decision Log 31): the tab's view says what the history shows, so the header's Export (which outlives
+  // this body) exports it: the one version previewed, nothing while two are compared, else the live design
+  const target = preview?.target ?? null;
+  const shownVersion = target?.kind === 'version' ? target.versionId : target?.kind === 'compare' ? 'compare' : null;
+  useEffect(() => view.showVersion(shownVersion), [view, shownVersion]);
+  useEffect(() => () => view.showVersion(null), [view]); // unmounted, the controller drops its preview: the live design
 
   // no write lands while the replica is read-only (an awaited upload finishing after it turned so), nor behind a version
   const holdWrites = previewing || readOnly;

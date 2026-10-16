@@ -4,12 +4,15 @@
 // workbench's own view (`DesignView`: the viewport and the selected board frame), so the header's Zoom to fit acts with
 // no body mounted and a body remounting on a tab switch finds the world where it was. A restore of a version clears the
 // undo stack (C's); the view stays. M4: the history api the workbench's history reads, C's through the design model
-// (history-api.ts), made once per tab so the history controller is kept across remounts.
+// (history-api.ts), made once per tab so the history controller is kept across remounts. M5 (the parent's Decision Log
+// 31): what the header's Export exports, read from this state when an entry is chosen (never a body's closure): the
+// selected board (its frame, else the active board) and the version the history shows.
 import type { BoardFrame } from '@artifacts/design/canvas';
 import { boardFrame, boardOrder } from '@artifacts/design/model';
 import { BOARD_FIT_MAX, DesignView, unionRect } from '@artifacts/design/editor/viewport';
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import { DeckTabState, openDeckTabs, type DeckTabDeps } from '../presentation/tab-state';
+import type { DesignExportContext } from './exports';
 import { designHistoryApi } from './history-api';
 
 export type DesignTabDeps = DeckTabDeps;
@@ -29,6 +32,12 @@ export class DesignTabState extends DeckTabState {
       return frame ? [frame] : [];
     }));
     if (rect) this.view.fitTo(rect, BOARD_FIT_MAX);
+  };
+
+  /** M5: what an export from the header exports now: the selected board, and the version the history shows. */
+  exportContext = (): DesignExportContext => {
+    const { frame, shown } = this.view.snapshot();
+    return { board: frame ?? this.snapshot().session?.snapshot().currentSlide ?? null, shown };
   };
 }
 

@@ -28,6 +28,12 @@ describe('the design header', () => {
     expect(header.unresolved).toBeUndefined();
   });
 
+  it('M5: carries the tab’s Export entries as given', () => {
+    const exports = [{ id: 'png', label: 'PNG (selected board)', onSelect: () => {} }];
+    expect(designHeader(state({ exports }), { fitAll: () => {}, toggleRail: () => {} }).exports).toBe(exports);
+    expect(designHeader(state()).exports).toBeUndefined();
+  });
+
   it('shows Theme pressed while its panel is open, read-only as read-only, and no actions before the design opens', () => {
     const header = designHeader(state({ rail: 'theme', document: { ...live!, readOnly: true } }), { fitAll: () => {}, toggleRail: () => {} });
     expect(header.actions!.find((a) => a.id === 'theme')!.pressed).toBe(true);

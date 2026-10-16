@@ -2,7 +2,7 @@
 // `{title, saved, unresolved, actions: [History, Comments, Export, Zoom to fit], exports: [png, pdf]}`), built from the
 // tab's own state (X32's lifetime rule). The saved word is C's deck's (`savedOf`). M3 brings Zoom to fit (the tab's view,
 // every board in it) and Theme (C's panel beside the world, the restyle of every board); M4 Version history and Comments
-// (the rails beside the world) before them, in the order the row names; the PNG and PDF exports arrive with M5.
+// (the rails beside the world) before them, in the order the row names; M5 the PNG and PDF exports (./exports.ts).
 import type { DocumentState } from '@artifacts/host';
 import type { DeckRail } from '@artifacts/slides/editor/session';
 import type { EditorHostAction, EditorHostExport, EditorHostRegistration } from '../../panel/editor-host';
