@@ -36,7 +36,7 @@ export function ElementBar({ session, slideId, canvas, scale, readOnly, onInsert
   );
   return (
     <div className="deck-element-bar" role="group" aria-label={C.arrange}>
-      <InsertMenu disabled={readOnly || slideId === null} onInsert={onInsert} uploadAsset={uploadAsset} onNotice={onNotice} />
+      <InsertMenu session={session} disabled={readOnly || slideId === null} onInsert={onInsert} uploadAsset={uploadAsset} onNotice={onNotice} />
       <span className="deck-toolbar-divider" aria-hidden />
       {button(C.bringToFront, cmds?.canZ ?? false, () => cmds?.z('front'), '⤒')}
       {button(C.bringForward, cmds?.canZ ?? false, () => cmds?.z('forward'), '↑')}

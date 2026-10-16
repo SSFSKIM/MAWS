@@ -8,6 +8,9 @@
 // came from and the assets its pictures refer to; a paste into another deck brings each asset over first
 // (`importAsset`, the shell's: read from the source deck, uploaded into this one) and rewrites the refs before anything
 // is written.
+//
+// Final fix wave (B4): bringing them over is the session's awaited edit (`later`): the tab's close waits for it, and
+// the paste lands only if the deck still takes writes when the assets are in.
 import { escAttr, escText } from '../../serialize';
 import { copyElements, pasteElements } from '../../writers-elements';
 import type { GestureContext } from './gestures';
@@ -85,21 +88,28 @@ export async function pasteClipboard(event: ClipboardEvent, ctx: ClipboardContex
   const text = payload ? '' : data.getData('text/plain');
   if (!payload && !text.trim()) return null;
   event.preventDefault();
-  let markup = payload?.html ?? `<p style="position:absolute; left:560px; top:480px; width:800px; font-size:40px">${text.trim().split('\n').map(escText).join('<br>')}</p>`;
+  const markup = payload?.html ?? `<p style="position:absolute; left:560px; top:480px; width:800px; font-size:40px">${text.trim().split('\n').map(escText).join('<br>')}</p>`;
+  const out: { result: ReturnType<typeof pasteElements> } = { result: { ok: false, reason: 'nothing to paste' } };
+  const write = (markup: string) => {
+    const tree = slideTree(ctx.session.doc, ctx.slideId);
+    const last = selection[selection.length - 1];
+    const after = last !== undefined && tree.has(last) ? last : null;
+    ctx.session.edit((origin) => (out.result = pasteElements(ctx.session.doc, ctx.slideId, markup, { offset: PASTE_OFFSET, after }, origin)));
+  };
   if (payload && payload.artifactId !== null && payload.artifactId !== ctx.artifactId && payload.assets.length) {
-    if (!ctx.importAsset) return { reason: 'the copied pictures belong to another deck, and this one cannot bring them over' };
-    try {
+    const { importAsset } = ctx;
+    if (!importAsset) return { reason: 'the copied pictures belong to another deck, and this one cannot bring them over' };
+    const source = payload.artifactId;
+    const brought = (async () => {
       const refs = new Map<string, string>();
-      for (const ref of payload.assets) refs.set(ref, await ctx.importAsset(payload.artifactId, ref));
-      markup = markup.replace(ASSET_SRC, (whole, ref: string) => (refs.has(ref) ? ` src="${escAttr(refs.get(ref)!)}"` : whole));
+      for (const ref of payload.assets) refs.set(ref, await importAsset(source, ref));
+      return markup.replace(ASSET_SRC, (whole, ref: string) => (refs.has(ref) ? ` src="${escAttr(refs.get(ref)!)}"` : whole));
+    })();
+    try {
+      if (!(await ctx.session.later(brought, write))) return { reason: 'the paste was not placed: the deck stopped taking edits here while the copied pictures were brought over' };
     } catch (e) {
       return { reason: `the copied pictures could not be brought over: ${e instanceof Error ? e.message : String(e)}` };
     }
-  }
-  const tree = slideTree(ctx.session.doc, ctx.slideId);
-  const last = selection[selection.length - 1];
-  const after = last !== undefined && tree.has(last) ? last : null;
-  const out: { result: ReturnType<typeof pasteElements> } = { result: { ok: false, reason: 'nothing to paste' } };
-  ctx.session.edit((origin) => (out.result = pasteElements(ctx.session.doc, ctx.slideId, markup, { offset: PASTE_OFFSET, after }, origin)));
+  } else write(markup);
   return out.result.ok ? { ids: out.result.ids } : { reason: out.result.reason };
 }

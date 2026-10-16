@@ -3,6 +3,8 @@
 // text; a shape's kind; an icon's name and colour; a connector's heads (`head-start`/`head-end`, the `head` shorthand
 // removed so the two read alone), route and stroke; a table's rows and columns. Attribute values come from the
 // dialect's closed lists, so they are the loader's by construction; a crop is checked against its range first.
+// Final fix wave (B4): Replace's upload is the session's awaited edit (`later`): the tab's close waits for it, and the
+// picture is replaced only if the deck still takes writes when the upload is done.
 import { useRef, useState } from 'react';
 import { isAssetRef } from '../../css';
 import { px } from '../../geometry';
@@ -20,7 +22,7 @@ const NO_CROP: Crop = { zoom: 1, x: 50, y: 50 };
 // ---------------------------------------------------------------- image
 
 export function ImageSection() {
-  const { picked, style, attrs, uploadAsset, readOnly } = useInspector();
+  const { session, picked, style, attrs, uploadAsset, readOnly } = useInspector();
   const [refused, refuse] = useRefusal();
   const [busy, setBusy] = useState(false);
   const file = useRef<HTMLInputElement>(null);
@@ -55,13 +57,13 @@ export function ImageSection() {
     if (!chosen || !uploadAsset) return;
     setBusy(true);
     try {
-      const ref = await uploadAsset(chosen);
-      if (!isAssetRef(ref) || !ref.startsWith('assets/')) refuse([C.notAnAsset(ref)]);
-      else {
+      const placed = await session.later(uploadAsset(chosen), (ref) => {
+        if (!isAssetRef(ref) || !ref.startsWith('assets/')) return refuse([C.notAnAsset(ref)]);
         refuse([]);
         // a new picture drops the crop made for the old one (Claude: keep data-crop unless src changes)
         attrs(() => ({ src: ref, 'data-crop': null }), 'edit');
-      }
+      });
+      if (!placed) refuse([C.replaceNotPlaced]);
     } catch (e) {
       refuse([e instanceof Error ? e.message : String(e)]);
     } finally {

@@ -2,7 +2,7 @@
 // the filmstrip's thumbnails, sections, hidden and held slides; the slide gestures as one undo step each; the notes
 // bound by character diff in both directions. Drag reorder, zoom by fit and paint are the e2e's.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyV1, diffV1, newDoc, stateVector, transact, type Doc } from '../../yjs';
 import * as Y from '../../yjs/slides';
 import { flushLayout } from '../canvas';
@@ -158,5 +158,67 @@ describe('the notes under a composition and the dialect’s limits (findings 1 a
     mount(doc);
     expect((screen.getByRole('button', { name: 'New slide' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/at most 500 slides/)).toBeTruthy();
+  });
+});
+
+// ---------------------------------------------------------------- final fix wave (B4): awaited edits and the editor's lifetime
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => (resolve = r));
+  return { promise, resolve };
+}
+
+describe('final fix wave B4: an awaited edit writes only while the deck takes writes', () => {
+  const pictures = (doc: Doc) => readSlide(doc, 'a').children.filter((e) => e.tag === 'img');
+  function withUpload(readOnly = false) {
+    const doc = deck();
+    const session = new DeckSession(doc);
+    const upload = deferred<string>();
+    const ui = (ro: boolean) => <DeckEditor session={session} assetUrl={() => null} system={null} readOnly={ro} uploadAsset={() => upload.promise} />;
+    const utils = render(ui(readOnly));
+    const pick = () => fireEvent.change(utils.container.querySelector('[data-insert-image]')!, { target: { files: [new File(['x'], 'b.png', { type: 'image/png' })] } });
+    return { doc, session, upload, ui, pick, ...utils };
+  }
+
+  it('an image whose upload finishes in time is placed', async () => {
+    const { doc, upload, pick } = withUpload();
+    pick();
+    await act(async () => upload.resolve('assets/b.png'));
+    expect(pictures(doc).map((e) => e.attrs.src)).toEqual(['assets/b.png']);
+  });
+
+  it('an image whose upload finishes after the deck turned read-only is not placed, and the owner is told', async () => {
+    const { doc, upload, ui, pick, rerender } = withUpload();
+    pick();
+    rerender(ui(true));
+    await act(async () => upload.resolve('assets/b.png'));
+    expect(pictures(doc)).toEqual([]);
+    expect(screen.getByText(/uploaded but not placed/)).toBeTruthy();
+  });
+
+  it('an image whose upload finishes after the tab closed writes nothing into the disposed session', async () => {
+    const { doc, session, upload, pick, unmount } = withUpload();
+    pick();
+    unmount();
+    session.dispose();
+    await act(async () => upload.resolve('assets/b.png'));
+    expect(pictures(doc)).toEqual([]);
+  });
+
+  it('the session counts an awaited edit until it settles, and drops its write while a version shows', async () => {
+    const session = new DeckSession(deck());
+    const work = deferred<string>();
+    const write = vi.fn();
+    const done = session.later(work.promise, write);
+    expect(session.snapshot().pending).toBe(1);
+    session.holdWrites(true); // the editor shows a version in place of the live deck
+    work.resolve('x');
+    await expect(done).resolves.toBe(false);
+    expect(write).not.toHaveBeenCalled();
+    expect(session.snapshot().pending).toBe(0);
+    session.holdWrites(false);
+    await expect(session.later(Promise.resolve('y'), write)).resolves.toBe(true);
+    expect(write).toHaveBeenCalledWith('y');
   });
 });

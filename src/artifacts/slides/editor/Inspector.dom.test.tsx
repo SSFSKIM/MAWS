@@ -369,3 +369,18 @@ describe('fix wave 3: a transform that is a design-system token', () => {
     expect(note).not.toMatch(/[Dd]etach/);
   });
 });
+
+// final fix wave (B4): Replace's upload is an awaited edit; one finishing after the tab closed writes nothing
+describe('final fix wave B4: a replacement finishing after the tab closed', () => {
+  it('writes nothing into the disposed session', async () => {
+    let finish!: (ref: string) => void;
+    const uploadAsset = vi.fn(() => new Promise<string>((resolve) => (finish = resolve)));
+    const { doc, session, unmount } = mount(['pic'], { uploadAsset });
+    fireEvent.change(screen.getByLabelText('Image file'), { target: { files: [new File(['x'], 'b.png', { type: 'image/png' })] } });
+    expect(uploadAsset).toHaveBeenCalled();
+    unmount();
+    session.dispose();
+    await act(async () => finish('assets/b.png'));
+    expect(attrsOf(doc, 'pic').src).toBe('assets/a.png');
+  });
+});

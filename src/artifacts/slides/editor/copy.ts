@@ -69,4 +69,5 @@ export const DECK_COPY = {
       ? 'This element’s transform is a design-system token: Detach transform, in the inspector, replaces it with its fallback value, which can then be rotated and resized.'
       : 'This element’s transform is a design-system token with no fallback value, so it is not rotated or resized here: give it a fallback in the slide or change it in the design system.',
   uploadFailed: (reason: string) => `The image could not be uploaded: ${reason}`,
+  uploadNotPlaced: 'The image was uploaded but not placed: the deck stopped taking edits here while it uploaded',
 } as const;

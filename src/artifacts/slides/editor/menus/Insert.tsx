@@ -2,12 +2,15 @@
 // box, a heading, a bulleted and a numbered list, the shape kinds, an icon (the thirty names), an image (uploaded through
 // the ArtifactHost), a table (rows × columns), a line and a connector. What it makes is writers-elements.ts's
 // `newElement`, loaded through the dialect; where it goes is the editor's.
+// Final fix wave (B4): the image's upload is the session's awaited edit (`later`): the tab's close waits for it, and it
+// is placed only if the deck still takes writes when the upload is done.
 import { DropdownMenu } from 'radix-ui';
 import { useRef } from 'react';
 import { ICON_GLYPHS } from '../../glyphs';
 import { ICON_NAMES } from '../../parse';
 import type { NewKind } from '../../writers-elements';
 import { DECK_COPY as C } from '../copy';
+import type { DeckSession } from '../session';
 
 const SHAPES = ['rect', 'rounded', 'ellipse', 'diamond', 'arrow-right', 'arrow-left', 'arrow-up', 'arrow-down', 'line'] as const;
 const TABLES: readonly [number, number][] = [
@@ -21,6 +24,7 @@ const TABLES: readonly [number, number][] = [
 ];
 
 export interface InsertMenuProps {
+  session: DeckSession;
   disabled: boolean;
   onInsert: (kind: NewKind) => void;
   /** Uploads a picked image and answers its `assets/<name>` ref; without it the menu has no Image item. */
@@ -28,7 +32,7 @@ export interface InsertMenuProps {
   onNotice?: (text: string) => void;
 }
 
-export function InsertMenu({ disabled, onInsert, uploadAsset, onNotice }: InsertMenuProps) {
+export function InsertMenu({ session, disabled, onInsert, uploadAsset, onNotice }: InsertMenuProps) {
   const file = useRef<HTMLInputElement>(null);
   const item = (kind: NewKind, label: string) => (
     <DropdownMenu.Item className="deck-menu-item" onSelect={() => onInsert(kind)}>
@@ -41,8 +45,8 @@ export function InsertMenu({ disabled, onInsert, uploadAsset, onNotice }: Insert
     if (!picked || !uploadAsset) return;
     onNotice?.(C.uploading);
     try {
-      onInsert(`image:${await uploadAsset(picked)}`);
-      onNotice?.('');
+      const placed = await session.later(uploadAsset(picked), (ref) => onInsert(`image:${ref}`));
+      onNotice?.(placed ? '' : C.uploadNotPlaced);
     } catch (e) {
       onNotice?.(C.uploadFailed(e instanceof Error ? e.message : String(e)));
     }

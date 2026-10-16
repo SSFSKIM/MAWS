@@ -4,6 +4,11 @@
 //
 // A gesture is one transaction and one undo step: `edit` cuts the undo step before and after its write; a drag or a
 // burst of typing (`continuing`) keeps writing into the step it started until something else cuts it.
+//
+// Final fix wave (B4): an edit whose write waits on work first (an upload, a copy of assets between artifacts) is the
+// tab's too (`later`): counted while it runs, so the tab's close guard waits for it (B's rule), and written only if the
+// session still takes writes when the work is done; a closed tab, a read-only replica or a version shown in place of
+// the live deck drops it.
 import type { Awareness } from '@y/protocols/awareness';
 import { transact, type Doc } from '../../yjs';
 import { createDeckUndo, type DeckUndo } from '../../yjs/slides-undo';
@@ -26,6 +31,8 @@ export interface DeckSessionState {
   editingText: string | null;
   /** M6: the panel the header's Theme or Check opened beside the stage, if any. */
   rail: DeckRail | null;
+  /** Final fix wave (B4): edits waiting on their work (an upload, an asset copy) before their write. */
+  pending: number;
 }
 
 export interface DeckSessionOptions {
@@ -37,6 +44,8 @@ export interface DeckSessionOptions {
    * replicas' selections from it.
    */
   presence?: { awareness: Awareness; name: string; color: string };
+  /** Final fix wave (B4): whether the replica refuses writes now (the host's read-only), read when an awaited edit writes. */
+  readOnly?: () => boolean;
 }
 
 /** What a replica publishes of its deck editor in awareness, beside its name and colour. */
@@ -66,6 +75,8 @@ export class DeckSession {
   private typingIn: { target: string; at: number } | null = null;
   private readonly stopUndo: () => void;
   readonly timings: DeckTimings;
+  private disposed = false; // B4
+  private writesHeld = false; // B4: the editor shows a version in place of the live deck
 
   constructor(
     readonly doc: Doc,
@@ -73,7 +84,7 @@ export class DeckSession {
     private readonly options: DeckSessionOptions = {},
   ) {
     this.undo = createDeckUndo(doc, { editor: 'deck' });
-    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null, rail: null };
+    this.state = { currentSlide: slideOrder(doc)[0] ?? null, zoom: 'fit', canUndo: false, canRedo: false, selection: NONE, editingText: null, rail: null, pending: 0 };
     this.timings = { openedAt };
     this.stopUndo = this.undo.subscribe(() => this.set({ canUndo: this.undo.canUndo(), canRedo: this.undo.canRedo() }));
     this.publish();
@@ -133,6 +144,33 @@ export class DeckSession {
       run();
     } finally {
       this.undo.cut();
+    }
+  }
+
+  /** B4: whether a write may land now: the tab is open, the replica takes writes and the editor shows the live deck. */
+  writable(): boolean {
+    return !this.disposed && !this.writesHeld && !(this.options.readOnly?.() ?? false);
+  }
+
+  /** B4: the editor shows a version in place of the live deck (no write lands behind it), or the live deck again. */
+  holdWrites(on: boolean): void {
+    this.writesHeld = on;
+  }
+
+  /**
+   * B4: an edit whose write waits on `work`. It is counted in `pending` until it settles (the tab's close guard waits
+   * for it), and `write` runs with the work's value only if the session is still `writable` then: true when written,
+   * false when dropped. The work's rejection is the caller's.
+   */
+  async later<T>(work: Promise<T>, write: (value: T) => void): Promise<boolean> {
+    this.set({ pending: this.state.pending + 1 });
+    try {
+      const value = await work;
+      if (!this.writable()) return false;
+      write(value);
+      return true;
+    } finally {
+      if (!this.disposed) this.set({ pending: this.state.pending - 1 }); // after the write: the guard then sees it unsaved
     }
   }
 
@@ -218,6 +256,7 @@ export class DeckSession {
   }
 
   dispose(): void {
+    this.disposed = true; // B4: an awaited edit still running writes nothing
     const presence = this.options.presence;
     if (presence && presence.awareness.getLocalState()) presence.awareness.setLocalStateField('deck', null);
     this.stopUndo();

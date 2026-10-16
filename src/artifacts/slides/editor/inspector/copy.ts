@@ -86,6 +86,7 @@ export const INSPECTOR_COPY = {
   imageFile: 'Image file',
   uploading: 'Uploading…',
   notAnAsset: (ref: string) => `The upload answered "${ref}", which is not an assets/ file`,
+  replaceNotPlaced: 'The image was uploaded but not placed: the deck stopped taking edits here while it uploaded',
   altText: 'Alt text',
   altPlaceholder: 'What the picture shows',
   // shape, icon, connector

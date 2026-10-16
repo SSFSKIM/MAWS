@@ -105,6 +105,38 @@ describe('a deck tab’s state (X32’s lifetime rule)', () => {
     expect(session.undo.canUndo()).toBe(false);
   });
 
+  // final fix wave (B4): an awaited edit (an upload, an asset copy) has nothing unsaved yet, but its write is to come
+  it('its close guard waits for an awaited edit still to write, and asks when it does not finish in time', async () => {
+    const { state, confirmDiscard } = await opened();
+    const session = state.snapshot().session!;
+    let finish!: () => void;
+    const written = session.later(new Promise<void>((resolve) => (finish = resolve)), () => {});
+    const asked = state.closeGuard();
+    let answered = false;
+    void asked.then(() => (answered = true));
+    await Promise.resolve();
+    expect(answered).toBe(false);
+    finish();
+    await written;
+    await expect(asked).resolves.toBe(true);
+    expect(confirmDiscard).not.toHaveBeenCalled();
+
+    void session.later(new Promise<void>(() => {}), () => {}); // never finishes
+    await expect(state.closeGuard()).resolves.toBe(false);
+    expect(confirmDiscard).toHaveBeenCalledTimes(1);
+  });
+
+  it('an awaited edit finishing once the replica turned read-only writes nothing', async () => {
+    const { handle, state } = await opened();
+    const write = vi.fn();
+    let finish!: () => void;
+    const written = state.snapshot().session!.later(new Promise<void>((resolve) => (finish = resolve)), write);
+    handle.set({ readOnly: true });
+    finish();
+    await expect(written).resolves.toBe(false);
+    expect(write).not.toHaveBeenCalled();
+  });
+
   // M7 (D9): the header's count and the comment card's hold on the replica
   it('counts the open threads as they change, orphans included', async () => {
     const { handle, state } = await opened();

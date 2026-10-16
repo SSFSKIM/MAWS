@@ -9,6 +9,8 @@
 // M8: the deck's history api (B's `createHistoryApi` on A's IPC, D11), with the owner's last view as the artifact's row
 // held it before this showing (the "See N new changes" pill compares against it) and the rail's own view waiting until
 // the deck is first on screen, as B's tab does.
+// Final fix wave (B4): the close guard waits for the session's awaited edits too (an upload, an asset copy, whose write
+// has not happened yet), and the session reads the replica's read-only state before such an edit writes.
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { DeckSession } from '@artifacts/slides/editor/session';
@@ -122,7 +124,7 @@ export class DeckTabState {
     if (this.disposed) return void handle.close();
     // M5: the text box's composition hold; fix wave 1: the selection published to other replicas beside who this is
     const { name, color } = this.deps.host.identity();
-    const session = new DeckSession(handle.doc, this.openedAt, { holdRemote: (on) => handle.holdRemote(on), presence: { awareness: handle.awareness, name, color } });
+    const session = new DeckSession(handle.doc, this.openedAt, { holdRemote: (on) => handle.holdRemote(on), presence: { awareness: handle.awareness, name, color }, readOnly: () => handle.state().readOnly });
     session.timings.syncedAt = performance.now();
     this.stops.push(
       handle.subscribe((document) => this.follow(handle, document)),
@@ -181,23 +183,29 @@ export class DeckTabState {
     return true;
   };
 
-  /** X32's close guard: nothing is lost once the host has every edit; edits in flight are waited for, then asked about. */
+  /**
+   * X32's close guard: nothing is lost once the host has every edit and no awaited edit (B4: an upload, an asset copy)
+   * is still to write; those in flight are waited for, then asked about.
+   */
   closeGuard = async (): Promise<boolean> => {
     const handle = this.current.handle;
-    if (!handle || handle.state().readOnly || handle.state().unsaved === 0) return true;
+    if (!handle) return true;
+    const session = this.current.session;
+    const settled = () => handle.state().readOnly || (handle.state().unsaved === 0 && (session?.snapshot().pending ?? 0) === 0);
+    if (settled()) return true;
     const saved = await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => {
-        off();
-        resolve(false);
-      }, this.deps.saveWaitMs ?? SAVE_WAIT_MS);
-      const off = handle.subscribe((state) => {
-        if (state.unsaved > 0) return;
+      const stops: (() => void)[] = [];
+      const finish = (ok: boolean) => {
         clearTimeout(timer);
-        off();
-        resolve(true);
-      });
+        for (const stop of stops.splice(0)) stop();
+        resolve(ok);
+      };
+      const timer = setTimeout(() => finish(false), this.deps.saveWaitMs ?? SAVE_WAIT_MS);
+      const check = () => settled() && finish(true);
+      stops.push(handle.subscribe(check));
+      if (session) stops.push(session.subscribe(check));
     });
-    return saved || handle.state().unsaved === 0 || this.deps.confirmDiscard(this.title);
+    return saved || settled() || this.deps.confirmDiscard(this.title);
   };
 
   /**
