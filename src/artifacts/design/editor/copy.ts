@@ -55,6 +55,14 @@ export const DESIGN_COPY = {
   moveToBoard: 'Move to board…',
   moveToBoardTitle: 'Move the selected elements to another board (they take new ids there; their comments go with them)',
   movedTo: (label: string) => `Moved to ${label}.`,
+  // the comments rail's words for a design (the P3-E spec's Decision Log 29)
+  commentsEmpty: 'No open comments. Select a board or an element and choose Comment.',
+  threadBoard: (label: string) => `Board ${label}`,
+  threadDeletedBoard: 'A deleted board',
+  showBoard: (quote: string) => `Show board: ${quote}`,
+  showElement: (quote: string) => `Show element: ${quote}`,
+  orphanBoard: 'The commented board was deleted.',
+  orphanElement: 'The commented element was deleted.',
   // M4: version history (the rail and Restore's question are B's and C's; the design's own words here)
   historyBack: 'Back to design',
   historyRestoreBody: 'The design goes back to it as a new version: its boards, their places and sizes, their content and the design’s settings. Everything since stays in history, and comment conversations are kept.',

@@ -14,6 +14,7 @@ import { ROOT } from '../../slides/model';
 import { addThread, discardThread, elementQuote, getThread, newThreadId, reopen, reply, resolve, type DeckThread } from '../../slides/threads';
 import { COMMENTS_ORIGIN, HUMAN_AUTHOR, useDeckComments, type DeckCommentsApi } from '../../slides/editor/comments/controller';
 import { COMMENTS_COPY } from '../../slides/editor/comments/copy';
+import type { CommentsRailLabels } from '../../slides/editor/comments/CommentsRail';
 import { useDeckThreadStates, useOpenThreadCount } from '../../slides/editor/comments/use-threads';
 import type { DeckSession } from '../../slides/editor/session';
 import { useDocVersion } from '../../slides/editor/transform/use-doc-version';
@@ -93,6 +94,27 @@ export function useDesignComments({ session, view, surface, author = HUMAN_AUTHO
     [deck, session, view, reveal, setActive],
   );
   return useMemo(() => ({ ...deck, comment, show }), [deck, comment, show]);
+}
+
+/**
+ * The rail's words for a design (C's rail's optional labels, the P3-E spec's Decision Log 29): where a thread is by its
+ * board's name ("Board …" for a board's own thread), a deleted board said so; Show and the orphan note name a board or an
+ * element.
+ */
+export function designRailLabels(boards: readonly BoardView[]): CommentsRailLabels {
+  const names = new Map(boards.map((b) => [b.id, boardLabel(b)]));
+  return {
+    empty: C.commentsEmpty,
+    target: (thread) => {
+      const board = thread.elementId === ROOT;
+      const name = names.get(thread.slideId);
+      return {
+        location: name === undefined ? C.threadDeletedBoard : board ? C.threadBoard(name) : name,
+        show: board ? C.showBoard(thread.quote) : C.showElement(thread.quote),
+        orphan: board ? C.orphanBoard : C.orphanElement,
+      };
+    },
+  };
 }
 
 /** The toolbar's Comment (the one selected element, else the selected or active board) and Comments with the open count. */

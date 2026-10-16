@@ -108,10 +108,40 @@ describe('comments on a design', () => {
     fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
     const rail = await screen.findByRole('complementary', { name: 'Comments' });
     await act(async () => new Promise((r) => setTimeout(r, 80)));
-    fireEvent.click(within(rail).getByRole('button', { name: 'Show element: Desktop' }));
+    fireEvent.click(within(rail).getByRole('button', { name: 'Show board: Desktop' }));
     expect([session.snapshot().currentSlide, session.snapshot().selection, view.snapshot().frame]).toEqual(['b2', [], 'b2']);
     fireEvent.click(within(rail).getByRole('button', { name: 'Show element: Ship the first week.' }));
     expect([session.snapshot().currentSlide, session.snapshot().selection, view.snapshot().frame]).toEqual(['b1', ['lede'], null]);
+  });
+});
+
+describe('the rail’s words for a design (Decision Log 29)', () => {
+  it('names each thread’s board, shows a board or an element, and says which was deleted', async () => {
+    const { doc, session, container } = mount();
+    addThread(doc, { threadId: 'tb', slideId: 'b2', elementId: ROOT, quote: 'Desktop', by: { kind: 'human' }, at: 1 }, 'deck-comments');
+    addThread(doc, { threadId: 'te', slideId: 'b1', elementId: 'lede', quote: 'Ship the first week.', by: { kind: 'human' }, at: 1 }, 'deck-comments');
+    fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
+    const rail = await screen.findByRole('complementary', { name: 'Comments' });
+    await act(async () => new Promise((r) => setTimeout(r, 80)));
+    const board = rail.querySelector<HTMLElement>('article[data-thread="tb"]')!;
+    const element = rail.querySelector<HTMLElement>('article[data-thread="te"]')!;
+    expect(board.querySelector('.deck-thread-slide')!.textContent).toBe('Board Desktop');
+    expect(element.querySelector('.deck-thread-slide')!.textContent).toBe('Phone');
+    expect(within(board).getByRole('button', { name: 'Show board: Desktop' })).toBeTruthy();
+    expect(within(element).getByRole('button', { name: 'Show element: Ship the first week.' })).toBeTruthy();
+    // the board deleted: its thread orphaned, saying the board went, where it was named
+    act(() => session.edit((origin) => Y.deleteSlide(doc, 'b2') ?? origin));
+    await act(async () => new Promise((r) => setTimeout(r, 80)));
+    const orphan = container.querySelector<HTMLElement>('article[data-thread="tb"]')!;
+    expect(orphan.querySelector('.deck-thread-slide')!.textContent).toBe('A deleted board');
+    expect(orphan.querySelector('.deck-thread-note')!.textContent).toBe('The commented board was deleted.');
+  });
+
+  it('says what to select when nothing is open', async () => {
+    mount();
+    fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
+    const rail = await screen.findByRole('complementary', { name: 'Comments' });
+    expect(rail.querySelector('.deck-comments-empty')!.textContent).toBe('No open comments. Select a board or an element and choose Comment.');
   });
 });
 

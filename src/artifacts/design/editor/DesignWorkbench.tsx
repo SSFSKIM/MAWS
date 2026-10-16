@@ -45,7 +45,7 @@ import { BoardInspector } from './BoardInspector';
 import { BoardList } from './BoardList';
 import { boardLabel, keepEqualBoards, readBoards, type BoardView, type DesignBoards } from './boards';
 import { DESIGN_COPY as C, type BoardPreset } from './copy';
-import { DesignCommentButtons, DesignCommentFrame, useDesignComments } from './comments';
+import { DesignCommentButtons, DesignCommentFrame, designRailLabels, useDesignComments } from './comments';
 import { boardKeyLabel, DesignHistoryBar, HistoryBoardList, historyBoards, HistoryWorld, useDesignFocus } from './history';
 import { boardElement } from './insert';
 import { MoveToBoard } from './MoveToBoard';
@@ -259,6 +259,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
     [boards, view],
   );
   const openComments = useCallback(() => void (session.snapshot().rail !== 'comments' && session.toggleRail('comments')), [session]);
+  const railLabels = useMemo(() => designRailLabels(boards), [boards]);
   const commentsApi = useDesignComments({ session, view, surface: comments, author: commentAuthor, readOnly, openRail: openComments, reveal });
 
   // ---- M4: a version's preview: the projection, ↑ ↓ over it, its own view, its faces and assets
@@ -521,7 +522,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
           </DesignCommentFrame>
         )}
         {state.rail === 'theme' && scope(<ThemePanel session={session} system={system} theme={theme} overrides={overrides} faces={deckFaces} readOnly={readOnly} />)}
-        {state.rail === 'comments' && <CommentsRail api={commentsApi} onClose={() => session.toggleRail('comments')} />}
+        {state.rail === 'comments' && <CommentsRail api={commentsApi} labels={railLabels} onClose={() => session.toggleRail('comments')} />}
         {inspectorOpen && active && (
           <div className="design-inspector" data-design-rail="inspector" data-board-context={!elementsSelected || undefined}>
             {!elementsSelected && <BoardInspector session={session} board={active} readOnly={readOnly} />}
