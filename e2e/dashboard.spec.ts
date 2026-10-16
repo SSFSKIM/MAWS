@@ -110,9 +110,21 @@ async function hoverLastPoint(page: Page, figure: Locator, evidence: string) {
     for (const type of ['pointerover', 'pointerenter', 'pointermove', 'pointerout', 'pointerleave'])
       el.addEventListener(type, (event) => log.push(`${type} ${(event.target as Element).tagName} ${Math.round((event as PointerEvent).clientX)},${Math.round((event as PointerEvent).clientY)}`), true);
     el.ownerDocument.addEventListener('pointerout', (event) => (event as PointerEvent).relatedTarget === null && log.push('pointer left the window'));
+    // the pointer reported anywhere else in the window (the OS cursor resyncing hover, for one)
+    for (const type of ['pointermove', 'pointerover'])
+      el.ownerDocument.addEventListener(type, (event) => !el.contains(event.target as Node) && log.push(`${type} elsewhere ${(event.target as Element).tagName} ${Math.round((event as PointerEvent).clientX)},${Math.round((event as PointerEvent).clientY)}`), true);
     el.ownerDocument.defaultView!.addEventListener('blur', () => log.push('window blur'));
+    el.ownerDocument.defaultView!.addEventListener('focus', () => log.push('window focus'));
+    el.ownerDocument.addEventListener('visibilitychange', () => log.push(`visibility ${el.ownerDocument.visibilityState}`));
     const tip = el.querySelector<HTMLElement>('.dash-tip')!;
-    new MutationObserver((records) => records.forEach((r) => log.push(r.type === 'childList' ? 'figure redrawn' : `tip ${tip.hidden ? 'hidden' : 'shown'}`))).observe(el, { childList: true, attributes: true, attributeFilter: ['hidden'], subtree: true });
+    // an SVG added to or removed from the frame is a redrawn figure; the tip's own text changes are not
+    const svgs = (nodes: NodeList) => Array.from(nodes).some((n) => n.nodeName.toLowerCase() === 'svg');
+    new MutationObserver((records) =>
+      records.forEach((r) => {
+        if (r.type === 'attributes') log.push(`tip ${tip.hidden ? 'hidden' : 'shown'}`);
+        else if (r.target === el && (svgs(r.addedNodes) || svgs(r.removedNodes))) log.push('figure redrawn');
+      }),
+    ).observe(el, { childList: true, attributes: true, attributeFilter: ['hidden'], subtree: true });
     const svg = el.querySelector('svg')!;
     const layer = svg.querySelector('[data-hover="nearest"]')!;
     const [x, y] = layer.getAttribute('data-xy')!.split(' ').at(-1)!.split(',').map(Number);
@@ -160,9 +172,17 @@ async function hoverLastPoint(page: Page, figure: Locator, evidence: string) {
     };
   }, last);
   expect(shown.inside, `the tip is whole inside the frame's visible box: ${shown.seen}`).toBe(true);
-  // a page clip of the visible frame: no scrolling and no pointer movement, so the hover stays as asserted
+  // a page clip of the visible frame: no scrolling and no pointer movement, so the hover stays as asserted (run 38945319905
+  // found the tip shown and whole before the capture and hidden after it; the log brackets the capture to say why)
+  const mark = (text: string) => frame.evaluate((el, t) => void (el as HTMLElement & { hoverLog?: string[] }).hoverLog?.push(t), text);
+  await mark('capture start');
   await page.screenshot({ path: `${PROOF}/${evidence}.png`, clip: shown.clip });
-  await expect(tip, 'the hover survives its capture').toBeVisible();
+  await mark('capture end');
+  const survived = await tip.waitFor({ state: 'visible', timeout: 1_000 }).then(
+    () => true,
+    () => false,
+  );
+  expect(survived, `the hover survives its capture: ${await events()}`).toBe(true);
   await expect(tip).toHaveText(last.tip);
   return { tip: last.tip, scrollLeft: last.scrollLeft, tipHeight: shown.tipHeight, lines: shown.lines, roomBelow: shown.roomBelow };
 }
