@@ -153,14 +153,19 @@ export class Machine extends DurableObject<Env> {
       const { project, frames: batch, weights } = run;
       run = null;
       if (this.stream !== stream) return stale(applied);
-      let result: { applied: number; stale: boolean };
+      const failed = () => {
+        this.end(stream);
+        return json(503, { error: 'delivery-failed', message: 'a reply to this POST could not be written to the stream; reconnect and send it again', frames: applied });
+      };
+      let result: { applied: number; stale: boolean; failed: boolean };
       try {
         result = await this.project(stream, project).fromMachine(this.context(stream, project), batch);
       } catch {
-        this.end(stream);
-        return json(503, { error: 'delivery-failed', message: 'a reply to this POST could not be written to the stream; reconnect and send it again', frames: applied });
+        // The call itself failed: what the project applied of this run is unknown, so only earlier runs count.
+        return failed();
       }
       applied += weights.slice(0, result.applied).reduce((sum, weight) => sum + weight, 0);
+      if (result.failed) return failed();
       return result.stale ? stale(applied) : null;
     };
 

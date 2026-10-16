@@ -586,6 +586,23 @@ describe('delivery failures', () => {
     await target.close();
   });
 
+  it("answers 503 counting the frames applied before the one whose reply failed, though they reached the project in one call", async () => {
+    const project = newProject();
+    const m = await machine('progress');
+    await m.sync(project);
+    // One call to the project: an upload that owes no reply and is stored, then one with a gap, which owes `resend`.
+    await hub.failNextSend(m.name, 'resend');
+    const response = await m.post([
+      { t: 'events', project, events: [say(m, project, 1)] },
+      { t: 'events', project, events: [say(m, project, 3)] },
+    ]);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: 'delivery-failed', frames: 1 });
+    expect((await hubCounts(project)).counts).toEqual({ [`${m.name}/${SESSION}`]: 1 });
+    await until(() => m.isEnded);
+    await m.close();
+  });
+
   it('ends a stream a live event could not be sent to; the machine reconnects, and its hello heals what it missed', async () => {
     const project = newProject();
     const source = await machine('live-source');

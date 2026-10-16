@@ -80,7 +80,7 @@ export class Machine extends DeployedMachine {
 export class Project extends DeployedProject {
   private held: { promise: Promise<void>; release: () => void } | undefined;
 
-  async fromMachine(ctx: MachineContext, frames: UpFrame[]): Promise<{ applied: number; stale: boolean }> {
+  async fromMachine(ctx: MachineContext, frames: UpFrame[]): Promise<{ applied: number; stale: boolean; failed: boolean }> {
     const calls = this.ctx.storage.kv.get<{ calls: number; frames: number }>('calls') ?? { calls: 0, frames: 0 };
     this.ctx.storage.kv.put('calls', { calls: calls.calls + 1, frames: calls.frames + frames.length });
     return super.fromMachine(ctx, frames);
