@@ -10,10 +10,11 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalS
 import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactHost } from '../../host';
 import { snapshotOf, type Cell, type DatasetDescriptor } from '../datasets';
-import { compareCells, type ViewTable } from '../render';
+import { compareCells, viewRows, type ViewTable } from '../render';
 import { mismatchNotes, sourceLabel } from '../states';
-import type { SourceSheetState } from './sheet';
+import type { SheetDataset, SourceSheetState } from './sheet';
 import type { SnapshotReader } from './snapshots';
+import { toTsv } from './tsv';
 import './sheet.css';
 
 const ROW_H = 28; // px, every row one line
@@ -22,7 +23,6 @@ const VIEWPORT_FALLBACK = 480; // px, before the scroller is measured
 
 const TYPE_NAMES: Record<string, string> = { string: 'text', number: 'number', boolean: 'true or false', date: 'date', null: 'empty' };
 const cellText = (value: Cell | undefined): string => (value === null || value === undefined ? '' : String(value));
-const tsvField = (text: string): string => text.replace(/[\t\r\n]+/g, ' ');
 const baseName = (path: string): string => path.split(/[\\/]/).pop() ?? path;
 
 export interface SourceSheetProps {
@@ -78,7 +78,7 @@ export function SourceSheet({ artifactId, sheet, reader, host, actorName }: Sour
         </label>
       )}
       {shown ? (
-        <DatasetDetail key={`${state.opened}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} reader={reader} host={host} actorName={actorName} />
+        <DatasetDetail key={`${state.opened}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} view={shown.view} reader={reader} host={host} actorName={actorName} />
       ) : (
         <p className="dash-sheet-empty">No data is bound to this dashboard yet. An agent binds a file with artifact_dataset.</p>
       )}
@@ -88,8 +88,13 @@ export function SourceSheet({ artifactId, sheet, reader, host, actorName }: Sour
 
 type Sort = { column: number; dir: 'ascending' | 'descending' } | null;
 
-function DatasetDetail({ artifactId, id, descriptor, reader, host, actorName }: { artifactId: string; id: string; descriptor: DatasetDescriptor } & Pick<SourceSheetProps, 'reader' | 'host' | 'actorName'>) {
-  const [table, setTable] = useState<ViewTable | null>(null);
+// What the rows show: the view's transformed rows (after its filter, aggregation, sort and limit, complete), or the whole
+// snapshot as bound. A sheet opened from the header, on no view, shows the snapshot alone.
+type Shown = 'view' | 'source';
+
+function DatasetDetail({ artifactId, id, descriptor, view, reader, host, actorName }: { artifactId: string; id: string; descriptor: DatasetDescriptor; view?: SheetDataset['view'] } & Pick<SourceSheetProps, 'reader' | 'host' | 'actorName'>) {
+  const [source, setSource] = useState<ViewTable | null>(null);
+  const [shown, setShown] = useState<Shown>(view ? 'view' : 'source');
   const [failed, setFailed] = useState<string | null>(null);
   const [sort, setSort] = useState<Sort>(null);
   const [status, setStatus] = useState('');
@@ -97,13 +102,16 @@ function DatasetDetail({ artifactId, id, descriptor, reader, host, actorName }: 
   useEffect(() => {
     let current = true;
     reader.read(snapshot).then(
-      (read) => current && setTable(read),
+      (read) => current && setSource(read),
       (error: unknown) => current && setFailed(error instanceof Error ? error.message : String(error)),
     );
     return () => {
       current = false;
     };
   }, [reader, snapshot]);
+  // the view's rows: the interpretation the view itself draws (renderView's transform), never a second one
+  const viewed = useMemo(() => (view && source ? viewRows(view.spec, source, id) : null), [view, source, id]);
+  const table = shown === 'view' ? (viewed?.ok ? viewed.table : null) : source;
   const order = useMemo(() => {
     if (!table) return [];
     const indexes = table.rows.map((_, i) => i);
@@ -112,12 +120,16 @@ function DatasetDetail({ artifactId, id, descriptor, reader, host, actorName }: 
     const sign = sort.dir === 'ascending' ? 1 : -1;
     return indexes.sort((a, b) => compareCells(table.rows[a][sort.column] ?? null, table.rows[b][sort.column] ?? null, column, sign) || a - b);
   }, [table, sort]);
+  const choose = (next: Shown) => {
+    setShown(next);
+    setSort(null);
+  };
   const cycle = (column: number) => setSort((now) => (now?.column !== column ? { column, dir: 'ascending' } : now.dir === 'ascending' ? { column, dir: 'descending' } : null));
   const copy = async () => {
     if (!table) return;
-    const lines = [table.columns.map((c) => tsvField(c.name)).join('\t'), ...order.map((i) => table.rows[i].map((cell) => tsvField(cellText(cell))).join('\t'))];
+    const text = toTsv([table.columns.map((c) => c.name), ...order.map((i) => table.rows[i].map(cellText))]);
     try {
-      await navigator.clipboard.writeText(`${lines.join('\n')}\n`);
+      await navigator.clipboard.writeText(text);
       setStatus(`Copied ${order.length.toLocaleString('en-US')} ${order.length === 1 ? 'row' : 'rows'}`);
     } catch (error) {
       setStatus(`Not copied: ${error instanceof Error ? error.message : String(error)}`);
@@ -150,8 +162,18 @@ function DatasetDetail({ artifactId, id, descriptor, reader, host, actorName }: 
           </li>
         ))}
       </ul>
+      {view && (
+        <div className="dash-sheet-shown" role="group" aria-label="Rows shown">
+          <button type="button" className="doc-tool" aria-pressed={shown === 'view'} data-active={shown === 'view' ? '' : undefined} onClick={() => choose('view')}>
+            {viewed?.ok ? `This view’s rows (${viewed.table.rows.length.toLocaleString('en-US')})` : 'This view’s rows'}
+          </button>
+          <button type="button" className="doc-tool" aria-pressed={shown === 'source'} data-active={shown === 'source' ? '' : undefined} onClick={() => choose('source')}>
+            {`All source rows (${descriptor.rows.toLocaleString('en-US')})`}
+          </button>
+        </div>
+      )}
       <div className="dash-sheet-actions">
-        <span className="dash-sheet-count">{`${descriptor.rows.toLocaleString('en-US')} ${descriptor.rows === 1 ? 'row' : 'rows'}`}</span>
+        <span className="dash-sheet-count">{shown === 'view' && view ? `${view.caption}: ${table ? `${table.rows.length.toLocaleString('en-US')} ${table.rows.length === 1 ? 'row' : 'rows'}` : '…'}` : `${descriptor.rows.toLocaleString('en-US')} ${descriptor.rows === 1 ? 'row' : 'rows'}`}</span>
         <button type="button" className="doc-tool" disabled={!table} onClick={() => void copy()}>
           Copy rows
         </button>
@@ -164,10 +186,12 @@ function DatasetDetail({ artifactId, id, descriptor, reader, host, actorName }: 
       </p>
       {failed !== null ? (
         <p className="dash-sheet-note" role="alert">{`The rows could not be read: ${failed}`}</p>
+      ) : shown === 'view' && viewed && !viewed.ok ? (
+        <p className="dash-sheet-note" role="alert">{`This view cannot be drawn: ${viewed.error}`}</p>
       ) : table === null ? (
         <p className="dash-sheet-loading">Reading the rows…</p>
       ) : (
-        <Rows table={table} order={order} sort={sort} onSort={cycle} />
+        <Rows key={shown} table={table} order={order} sort={sort} onSort={cycle} />
       )}
     </div>
   );

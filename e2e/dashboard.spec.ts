@@ -117,12 +117,16 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
 
   await test.step('the main tab draws every view with its caption and source label', async () => {
     await expect(figures(main)).toHaveCount(4);
-    for (const figure of await figures(main).all()) await expect(figure.locator('.dash-figure svg')).toBeVisible({ timeout: 15_000 });
+    for (const figure of await figures(main).all()) await expect(figure.locator('.dash-figure > svg, .dash-figure > table')).toBeVisible({ timeout: 15_000 });
     const bar = figures(main).nth(0);
     await expect(bar.locator('.dash-caption')).toHaveText('2024년 실질 GDP 성장률 (%)');
     expect((await tipsOf(bar))[0]).toBe('미국 · growth_pct: 2.79');
     await expect(bar.locator('button.dash-source-label')).toHaveText(/^세계은행 GDP 성장률 · from gdp-growth\.csv · updated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC by You$/);
-    await expect(figures(main).nth(1).locator('svg')).toContainText('대한민국');
+    // the table view is the document's own table, its text selectable: the first 25 rows of the view, noted
+    const table = figures(main).nth(1).locator('.dash-figure > table.dash-table');
+    await expect(table).toContainText('대한민국');
+    await expect(table.locator('tbody tr')).toHaveCount(8);
+    expect(await figures(main).nth(1).locator('.dash-figure svg').count()).toBe(0);
     // M1's geometry grade on the real faces: every text's glyph box inside its figure, Korean included
     const outside = await main.locator('.dash-figure svg').evaluateAll((svgs) =>
       svgs.flatMap((svg) => {
@@ -180,14 +184,15 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     await counts.screenshot({ path: `${PROOF}/hatched-hover.png` });
   });
 
-  await test.step('the keyboard opens the source sheet from a label and closes it, the focus returning', async () => {
+  await test.step('the keyboard opens the source sheet from a label, on the view\'s own rows, and closes it, the focus returning', async () => {
     const label = figures(main).nth(0).locator('button.dash-source-label');
     await label.focus();
     await page.keyboard.press('Enter');
     const sheet = main.page().getByRole('dialog', { name: 'Source of 세계은행 GDP 성장률' });
     await expect(sheet).toBeVisible();
-    await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', '49');
-    await expect(sheet.getByRole('row').nth(1)).toContainText('캐나다');
+    await expect(sheet.getByRole('button', { name: 'This view’s rows (8)' })).toHaveAttribute('aria-pressed', 'true');
+    await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', '9'); // 2024, sorted as the view
+    await expect(sheet.getByRole('row').nth(1)).toContainText('미국');
     await page.keyboard.press('Escape');
     await expect(sheet).toBeHidden();
     expect(await label.evaluate((el) => el === document.activeElement)).toBe(true);
@@ -196,6 +201,8 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
   await test.step('the sheet sorts and copies its rows, downloads the snapshot\'s own bytes, and keeps its snapshot across a replacement', async () => {
     await figures(main).nth(0).locator('button.dash-source-label').click();
     const sheet = page.getByRole('dialog', { name: 'Source of 세계은행 GDP 성장률' });
+    await sheet.getByRole('button', { name: 'All source rows (48)' }).click();
+    await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', '49');
     await sheet.getByRole('button', { name: 'Sort by growth_pct' }).click();
     await sheet.getByRole('button', { name: 'Sort by growth_pct' }).click(); // descending
     await sheet.getByRole('button', { name: 'Copy rows' }).click();
@@ -213,11 +220,12 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     const only2024 = `${[header, ...GDP_CSV.split('\n').filter((line) => /,2024,[^,]*$/.test(line))].join('\n')}\n`; // "Korea, Rep." is quoted with its comma
     const replacedRef = await bind(page, id, 'gdp', '세계은행 GDP 성장률', 'gdp-growth.csv', only2024);
     expect(replacedRef).not.toBe(gdpRef);
-    await expect(figures(main).nth(1).locator('svg')).toContainText('no rows to draw', { timeout: 15_000 }); // the 2020 table, now empty
-    await expect(figures(record!).nth(1).locator('svg')).toContainText('no rows to draw', { timeout: 15_000 });
+    await expect(figures(main).nth(1).locator('table caption')).toHaveText('no rows to draw', { timeout: 15_000 }); // the 2020 table, now empty
+    await expect(figures(record!).nth(1).locator('table caption')).toHaveText('no rows to draw', { timeout: 15_000 });
     await expect(sheet.getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', '49');
     await sheet.getByRole('button', { name: 'Close' }).click();
     await figures(main).nth(0).locator('button.dash-source-label').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'All source rows (8)' }).click();
     await expect(page.getByRole('dialog').getByRole('table', { name: 'Rows' })).toHaveAttribute('aria-rowcount', '9');
     await page.keyboard.press('Escape');
   });

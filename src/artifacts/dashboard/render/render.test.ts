@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { HOUSE_TOKENS } from '../../document/export/design-system';
 import { parseDataset, DatasetError } from '../parse';
 import { GDP_CSV, PENGUINS_CSV } from '../fixtures/datasets';
-import { renderFailure, renderView, themeFrom, type ViewTable } from './index';
+import { renderFailure, renderView, themeFrom, TABLE_VIEW_MAX_ROWS, viewRows, type Rendered, type ViewTable } from './index';
 import { textWidth } from './text';
 
 const table = (csv: string): ViewTable => {
@@ -68,15 +68,21 @@ const CASES: Case[] = [
   { id: 'stress-scatter-10k', dataset: 'walk', table: walk(), spec: { view: 'scatter', x: 'step', y: 'noise', series: 'group', title: 'Synthetic noise in three groups' } },
 ];
 const byId = (id: string) => CASES.find((c) => c.id === id)!;
+// a case's output, both fields typed as text (a chart's `html`, a table's `svg`, is undefined at run time)
 const draw = (id: string) => {
   const c = byId(id);
-  return renderView(c.spec, c.table, theme, c.dataset);
+  return renderView(c.spec, c.table, theme, c.dataset) as unknown as { svg: string; html: string; warnings: string[] };
 };
+/** A view's one output, whichever it is. */
+const out = (rendered: Rendered): string => rendered.svg ?? rendered.html!;
 const tips = (svg: string) => [...svg.matchAll(/data-tip="([^"]*)"/g)].map((m) => m[1]);
 
 // ── the grade: a strict reading of the output as XML, against a whitelist ──
 
 const ELEMENTS = new Set(['svg', 'title', 'desc', 'g', 'path', 'rect', 'text', 'tspan']);
+// A table view's HTML (parent Decision Log 24): table elements, and no attribute but the renderer's own classes.
+const TABLE_ELEMENTS = new Set(['table', 'caption', 'thead', 'tbody', 'tr', 'th', 'td']);
+const TABLE_CLASSES = new Set(['dash-table', 'dash-table-note', 'dash-num']);
 const ATTRIBUTES = new Set([
   'xmlns', 'viewBox', 'width', 'height', 'role', 'aria-label', 'font-family', 'font-size', 'font-weight', 'fill', 'fill-opacity', 'style',
   'd', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-linejoin', 'stroke-linecap', 'paint-order', 'transform', 'pointer-events',
@@ -87,6 +93,7 @@ const ENTITY = /&(?:amp|lt|gt|quot|#39|#10);/g;
 
 /** Every grade violation: anything that is not the whitelist's elements and attributes, well formed; a reference. */
 function grade(svg: string): { problems: string[]; texts: string[] } {
+  const html = svg.startsWith('<table');
   const problems: string[] = [];
   const texts: string[] = [];
   const stack: string[] = [];
@@ -105,9 +112,13 @@ function grade(svg: string): { problems: string[]; texts: string[] } {
       if (stack.pop() !== tag) problems.push(`unbalanced </${tag}>`);
       continue;
     }
-    if (!ELEMENTS.has(tag)) problems.push(`element <${tag}>`);
-    if (stack.length === 0 && tag !== 'svg') problems.push('not an SVG root');
+    if (!(html ? TABLE_ELEMENTS : ELEMENTS).has(tag)) problems.push(`element <${tag}>`);
+    if (stack.length === 0 && tag !== (html ? 'table' : 'svg')) problems.push('not a root');
     for (const [, name, value] of attrs.matchAll(/\s+([a-zA-Z:-]+)="([^"]*)"/g)) {
+      if (html) {
+        if (name !== 'class' || !TABLE_CLASSES.has(value)) problems.push(`attribute ${name}="${value}" on <${tag}>`);
+        continue;
+      }
       if (!ATTRIBUTES.has(name)) problems.push(`attribute ${name} on <${tag}>`);
       if (value.replace(ENTITY, '').includes('&')) problems.push(`raw & in ${name}`);
       if (name === 'style' && value !== 'font-variant-numeric:tabular-nums') problems.push(`style "${value}"`);
@@ -117,7 +128,7 @@ function grade(svg: string): { problems: string[]; texts: string[] } {
   }
   if (at !== svg.length) problems.push(`unreadable from ${at}: ${svg.slice(at, at + 40)}`);
   if (stack.length > 0) problems.push(`unclosed <${stack.join('> <')}>`);
-  if (!svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')) problems.push('not an SVG root');
+  if (!html && !svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')) problems.push('not an SVG root');
   return { problems, texts };
 }
 
@@ -131,30 +142,35 @@ describe('the grade check', () => {
     expect(grade(svg('<path d="M0,0" fill="url(#g)"/>')).problems).toContain('reference in fill="url(#g)"');
     expect(grade(svg('<g>', ' id="a"')).problems.length).toBeGreaterThan(0);
     expect(grade(svg('<text>a & b</text>')).problems.length).toBeGreaterThan(0);
+    expect(grade('<table class="dash-table"><tbody><tr><td class="dash-num">1</td></tr></tbody></table>').problems).toEqual([]);
+    expect(grade('<table class="dash-table"><tr><td style="color:red">1</td></tr></table>').problems).toEqual(['attribute style="color:red" on <td>']);
+    expect(grade('<table class="x"><tr><td><a>1</a></td></tr></table>').problems).toEqual(expect.arrayContaining(['attribute class="x" on <table>', 'element <a>']));
   });
 });
 
 describe('renderView', () => {
   it('renders every case, all six kinds included, in Node, inside the grade', () => {
     for (const c of CASES) {
-      const { svg } = renderView(c.spec, c.table, theme, c.dataset);
-      expect(grade(svg).problems, c.id).toEqual([]);
-      expect(svg, c.id).not.toMatch(/NaN|Infinity|undefined/);
+      const rendered = renderView(c.spec, c.table, theme, c.dataset);
+      expect(rendered.svg === undefined, c.id).not.toBe(rendered.html === undefined); // exactly one output
+      expect(rendered.html === undefined, c.id).toBe((c.spec as { view?: string }).view !== 'table' || c.table === null);
+      expect(grade(out(rendered)).problems, c.id).toEqual([]);
+      expect(out(rendered), c.id).not.toMatch(/NaN|Infinity|undefined/);
     }
     const kinds = CASES.filter((c) => c.table && !c.id.startsWith('edge')).map((c) => (c.spec as { view: string }).view);
     expect([...new Set(kinds)].sort()).toEqual(['area', 'bar', 'line', 'pie', 'scatter', 'table']);
-    for (const c of CASES.filter((c) => !c.id.startsWith('edge'))) expect(renderView(c.spec, c.table, theme, c.dataset).svg, c.id).not.toContain('cannot be drawn');
+    for (const c of CASES.filter((c) => !c.id.startsWith('edge'))) expect(out(renderView(c.spec, c.table, theme, c.dataset)), c.id).not.toContain('cannot be drawn');
   });
 
   it('writes byte-equal output for equal inputs, whatever the time zone', () => {
     try {
-      const first = CASES.map((c) => renderView(c.spec, c.table, theme, c.dataset).svg);
-      expect(CASES.map((c) => renderView(c.spec, c.table, theme, c.dataset).svg)).toEqual(first);
+      const first = CASES.map((c) => out(renderView(c.spec, c.table, theme, c.dataset)));
+      expect(CASES.map((c) => out(renderView(c.spec, c.table, theme, c.dataset)))).toEqual(first);
       vi.stubEnv('TZ', 'Asia/Seoul');
       expect(new Date(0).getHours()).toBe(9); // the zone took
-      expect(CASES.map((c) => renderView(c.spec, c.table, theme, c.dataset).svg)).toEqual(first);
+      expect(CASES.map((c) => out(renderView(c.spec, c.table, theme, c.dataset)))).toEqual(first);
       vi.stubEnv('TZ', 'America/Los_Angeles');
-      expect(CASES.map((c) => renderView(c.spec, c.table, theme, c.dataset).svg)).toEqual(first);
+      expect(CASES.map((c) => out(renderView(c.spec, c.table, theme, c.dataset)))).toEqual(first);
     } finally {
       vi.unstubAllEnvs();
     }
@@ -203,13 +219,13 @@ describe('renderView', () => {
       return /stroke-dasharray="([^"]*)"/.exec(legend.slice(legend.lastIndexOf('<path d="M', at), at))?.[1] ?? 'solid';
     };
     const three = draw('line-gdp-three').svg;
-    const two = renderView({ ...(byId('line-gdp-three').spec as object), filter: [{ column: 'iso3', op: 'in', value: ['KOR', 'USA'] }] }, gdp, theme, 'gdp').svg;
+    const two = renderView({ ...(byId('line-gdp-three').spec as object), filter: [{ column: 'iso3', op: 'in', value: ['KOR', 'USA'] }] }, gdp, theme, 'gdp').svg!;
     for (const name of ['대한민국', '미국']) expect(style(two, name), name).toBe(style(three, name));
   });
 
   it('breaks a line at a missing value and counts what it did not draw, never drawing zero', () => {
     const t: ViewTable = { columns: [{ name: 'x', type: 'number' }, { name: 'y', type: 'number' }], rows: [[1, 2], [2, 3], [3, null], [4, 5], [5, 4]] };
-    const { svg, warnings } = renderView({ view: 'line', x: 'x', y: 'y' }, t, theme, 't');
+    const { svg = '', warnings } = renderView({ view: 'line', x: 'x', y: 'y' }, t, theme, 't');
     const d = /<path d="(M[^"]*)" fill="none" stroke=/.exec(svg)![1];
     expect(d.match(/M/g)).toHaveLength(2);
     expect(warnings).toContain('1 row has no y; not drawn');
@@ -219,7 +235,7 @@ describe('renderView', () => {
 
   it('keeps every row without agg, and a date axis in UTC whatever the offsets the dates were written in', () => {
     const t: ViewTable = { columns: [{ name: 'at', type: 'date' }, { name: 'v', type: 'number' }], rows: [['2026-10-16T09:00:00+09:00', 1], ['2026-10-16T00:30:00.123456789Z', 2], ['2026-10-16', 3], ['2026-10-16', 4]] };
-    const { svg } = renderView({ view: 'scatter', x: 'at', y: 'v' }, t, theme, 't');
+    const { svg = '' } = renderView({ view: 'scatter', x: 'at', y: 'v' }, t, theme, 't');
     const list = /data-tips="([^"]*)"/.exec(svg)![1].split('&#10;');
     expect(list).toEqual(['2026-10-16 00:00 UTC · v: 1', '2026-10-16 00:30 UTC · v: 2', '2026-10-16 · v: 3', '2026-10-16 · v: 4']);
   });
@@ -231,7 +247,7 @@ describe('renderView', () => {
     expect(draw('edge-unknown-view').svg).toContain('unknown view &quot;sankey&quot;');
     expect(draw('edge-unknown-view').svg).toContain('aria-label="Flows"');
     expect(draw('edge-empty-bar').svg).toContain('no rows to draw');
-    expect(draw('edge-empty-table').svg).toContain('no rows to draw');
+    expect(draw('edge-empty-table').html).toContain('<caption class="dash-table-note">no rows to draw</caption>');
     const unreadable = renderFailure(byId('edge-no-dataset').spec, theme, 'sales', 'the file of "sales" could not be read');
     expect(unreadable.svg).toContain('the file of &quot;sales&quot; could not be read');
     expect(unreadable.svg).toContain('aria-label="Monthly sales"');
@@ -252,7 +268,7 @@ describe('renderView', () => {
     expect(hostile.warnings).toEqual(['theme value --ds-color-text refused', 'theme value --ds-color-border refused', 'theme value --ds-font-body refused', 'theme value --ds-type-caption-size refused']);
     expect(hostile.theme).toEqual(theme);
     const c = byId('bar-gdp-2024');
-    expect(grade(renderView(c.spec, c.table, hostile.theme, c.dataset).svg).problems).toEqual([]);
+    expect(grade(out(renderView(c.spec, c.table, hostile.theme, c.dataset))).problems).toEqual([]);
     // an absent or empty value is the house system's, without a warning (a page with no system in scope)
     expect(themeFrom({ '--ds-color-text': '' })).toEqual({ theme, warnings: [] });
   });
@@ -265,7 +281,8 @@ describe('renderView', () => {
 
   it('keeps every text inside the frame by its estimated width; long Korean category names wrap rather than drop', () => {
     for (const c of CASES) {
-      const { svg } = renderView(c.spec, c.table, theme, c.dataset);
+      const { svg = '' } = renderView(c.spec, c.table, theme, c.dataset);
+      if (!svg) continue; // a table view is text the page lays out
       const width = Number(/width="(\d+)"/.exec(svg)![1]);
       for (const m of svg.matchAll(/<text(?: pointer-events="none")? x="([\d.-]+)" y="[\d.-]+"(?: text-anchor="(\w+)")?([^>]*)>(.*?)<\/text>/g)) {
         const size = Number(/font-size="([\d.]+)"/.exec(m[3])?.[1] ?? theme.caption);
@@ -299,7 +316,7 @@ describe('renderView', () => {
 
   it('draws bar hatching that cannot take the bar\'s pointer: the mark under it is the hit target (M1 review debt)', () => {
     // three species per island: solid, hollow, and hatched at 45° (the third series' treatment)
-    const { svg } = renderView({ view: 'bar', x: 'island_ko', series: 'species_ko', agg: 'count' }, penguins, theme, 'penguins');
+    const { svg = '' } = renderView({ view: 'bar', x: 'island_ko', series: 'species_ko', agg: 'count' }, penguins, theme, 'penguins');
     const paths = [...svg.matchAll(/<path [^>]*\/>/g)].map((m) => m[0]);
     const hatches = paths.filter((p) => p.includes('fill="none"') && /stroke-width="1"/.test(p) && /L/.test(/ d="([^"]*)"/.exec(p)![1]));
     expect(hatches.length).toBeGreaterThan(0);
@@ -320,8 +337,82 @@ describe('renderView', () => {
     expect(new Set([...bySeries.values()].map((t) => [...t][0])).size).toBe(2);
   });
 
-  it('shows at most 25 rows of a table view and says the source table has every row', () => {
-    const { svg } = renderView({ view: 'table', columns: ['country', 'year', 'growth_pct'] }, gdp, theme, 'gdp');
-    expect(svg).toContain('25 of 48 rows; the source table has every row.');
+  it('draws a table view as native table HTML in the view\'s order, its numbers marked, nothing else', () => {
+    const { html, warnings } = draw('table-gdp-2020');
+    expect(html).toMatch(/^<table class="dash-table"><thead><tr><th>country_ko<\/th><th>country<\/th><th class="dash-num">growth_pct<\/th><\/tr><\/thead><tbody><tr><td>영국<\/td><td>United Kingdom<\/td><td class="dash-num">−10\.05<\/td><\/tr>/);
+    expect(html).not.toContain('<caption'); // eight rows, all shown
+    expect(warnings).toEqual([]);
+    const hostile = renderView({ view: 'table' }, HOSTILE, theme, 'gdp').html!;
+    expect(hostile).toContain('&lt;/text&gt;&lt;script&gt;alert(1)&lt;/script&gt;');
+    expect(grade(hostile).problems).toEqual([]);
+  });
+
+  it('bounds a table view: 25 rows without a limit, an explicit limit up to 100, the note counting the whole transformed view', () => {
+    const rows = (rendered: Rendered) => (rendered.html!.match(/<tr>/g) ?? []).length - 1;
+    const note = (rendered: Rendered) => /<caption class="dash-table-note">([^<]*)<\/caption>/.exec(rendered.html!)?.[1] ?? null;
+    const all = renderView({ view: 'table', columns: ['country', 'year', 'growth_pct'] }, gdp, theme, 'gdp');
+    expect([rows(all), note(all)]).toEqual([25, 'first 25 of 48 rows']);
+    const forty = renderView({ view: 'table', limit: 40 }, gdp, theme, 'gdp');
+    expect([rows(forty), note(forty)]).toEqual([40, null]);
+    const filtered = renderView({ view: 'table', filter: [{ column: 'year', op: 'gt', value: 2022 }] }, gdp, theme, 'gdp');
+    expect([rows(filtered), note(filtered)]).toEqual([16, null]);
+    // past TABLE_VIEW_MAX_ROWS: the first 100 in the spec's order, N after filter, aggregation, sort and limit
+    const many: ViewTable = { columns: [{ name: 'n', type: 'number' }], rows: Array.from({ length: 1_000 }, (_, i) => [i]) };
+    const big = renderView({ view: 'table', limit: 500, sort: { by: 'n', dir: 'desc' } }, many, theme, 'n');
+    expect([rows(big), note(big)]).toEqual([TABLE_VIEW_MAX_ROWS, 'first 100 of 500 rows']);
+    expect(big.html).toContain('<tbody><tr><td class="dash-num">999</td></tr>');
+  });
+
+  it('answers the complete transformed view for inspection, the interpretation the view draws', () => {
+    const counted = viewRows({ view: 'pie', x: 'island_ko', agg: 'count' }, penguins, 'penguins');
+    expect(counted).toEqual({ ok: true, table: { columns: [{ name: 'island_ko', type: 'string' }, { name: 'count', type: 'number' }], rows: [['토르게르센섬', 52], ['비스코섬', 168], ['드림섬', 124]] } });
+    const projected = viewRows({ view: 'table', columns: ['growth_pct', 'country'], filter: [{ column: 'year', op: 'eq', value: 2024 }] }, gdp, 'gdp');
+    expect(projected.ok && projected.table.columns.map((c) => c.name)).toEqual(['growth_pct', 'country']);
+    expect(projected.ok && projected.table.rows).toHaveLength(8);
+    expect(viewRows({ view: 'bar', x: 'nope' }, gdp, 'gdp')).toEqual({ ok: false, error: 'dataset "gdp" has no column "nope"' });
+  });
+
+  it('counts the rows of each group when the measure is the grouping column (x: region, y: region, agg: count)', () => {
+    const t: ViewTable = { columns: [{ name: 'region', type: 'string' }], rows: [['A'], ['A'], ['B']] };
+    const pie = renderView({ view: 'pie', x: 'region', y: 'region', agg: 'count' }, t, theme, 't');
+    expect(tips(pie.svg!)).toEqual(['A: 2 (66.7%)', 'B: 1 (33.3%)']);
+    const bar = renderView({ view: 'bar', x: 'region', y: 'region', agg: 'count' }, t, theme, 't');
+    expect(tips(bar.svg!)).toEqual(['A · count of region: 2', 'B · count of region: 1']);
+  });
+
+  it('gives each measure its own format; a shared axis of unlike formats reads raw numbers', () => {
+    const t: ViewTable = { columns: [{ name: 'x', type: 'string' }, { name: 'rate', type: 'number' }, { name: 'amount', type: 'number' }], rows: [['A', 0.1, 10]] };
+    const { svg = '' } = renderView({ view: 'bar', x: 'x', y: ['rate', 'amount'], format: { rate: 'percent', amount: 'number' } }, t, theme, 't');
+    expect(tips(svg!)).toEqual(['A · rate: 10%', 'A · amount: 10']);
+    expect(svg).not.toContain('1000%');
+    const texts = grade(svg!).texts;
+    expect(texts).toEqual(expect.arrayContaining(['10%', '10'])); // each bar's label in its own format
+    expect(texts.filter((label) => label.endsWith('%'))).toEqual(['10%']); // the axis is raw numbers
+    const same = renderView({ view: 'bar', x: 'x', y: ['rate'], format: { rate: 'percent' } }, t, theme, 't');
+    expect(grade(same.svg!).texts).toContain('0%'); // one format: the axis takes it
+  });
+
+  it('keeps typed series apart (1, "1", an empty cell and "(none)") and a lone filtered series in its own form', () => {
+    const t: ViewTable = { columns: [{ name: 'x', type: 'number' }, { name: 'y', type: 'number' }, { name: 's', type: 'string' }], rows: [[1, 2, 1], [2, 3, '1'], [3, 4, null], [4, 5, '(none)']] };
+    const { svg = '' } = renderView({ view: 'scatter', x: 'x', y: 'y', series: 's' }, t, theme, 't');
+    expect(/<g>(.*?)<\/g>/.exec(svg!)![1].match(/<text/g)).toHaveLength(4);
+    const bars: ViewTable = { columns: [{ name: 'x', type: 'string' }, { name: 'y', type: 'number' }, { name: 's', type: 'string' }], rows: [['cat', 1, 'A'], ['cat', 2, 'B']] };
+    const spec = { view: 'bar', x: 'x', y: 'y', series: 's' };
+    const marks = (out: string) => [...out.matchAll(/<path d="[^"]*" (fill="[^"]*"[^>]*?) data-tip="([^"]*)"\/>/g)].map((m) => [m[2], m[1]] as [string, string]);
+    const both = new Map(marks(renderView(spec, bars, theme, 't').svg!));
+    const alone = marks(renderView({ ...spec, filter: [{ column: 's', op: 'eq', value: 'B' }] }, bars, theme, 't').svg!);
+    expect(alone).toEqual([['cat · y: 2', both.get('cat · B · y: 2')]]); // hollow, as beside A
+  });
+
+  it('counts and leaves out finite magnitudes no scale can span, x or y, never drawing NaN', () => {
+    const t: ViewTable = { columns: [{ name: 'x', type: 'number' }, { name: 'y', type: 'number' }], rows: [[-1.7e308, 1], [1.7e308, 2], [3, 4], [5, 1.7e308]] };
+    for (const view of ['scatter', 'line', 'area']) {
+      const { svg = '', warnings } = renderView({ view, x: 'x', y: 'y' }, t, theme, 't');
+      expect(svg, view).not.toMatch(/NaN|Infinity/);
+      expect(warnings, view).toContain('3 values are too large to draw');
+      expect(grade(svg!).problems, view).toEqual([]);
+    }
+    const pie = renderView({ view: 'pie', x: 'x', y: 'y' }, { columns: t.columns, rows: [[1, 1e306], [2, 1e306], [3, 1e306]] }, theme, 't');
+    expect(out(pie)).not.toMatch(/NaN|Infinity/);
   });
 });

@@ -13,16 +13,19 @@ import type { Actor } from '@shared/artifacts/actor';
 import type { ViewEnvironment } from '../../document/editor/nodes/views';
 import { onUpdate, type Doc } from '../../yjs';
 import { readDataset, snapshotOf, type DatasetDescriptor } from '../datasets';
+import { dsOverrides } from '../../document/meta';
 import { captionOf, renderFailure, renderView, themeFrom, THEME_PROPERTIES, type Rendered, type Theme } from '../render';
 import { parseSpec } from '../spec';
 import { DATASET_STATES, mismatchNotes, sourceLabel } from '../states';
 import { attachHover } from './hover';
 import type { SnapshotReader } from './snapshots';
 
-/** What the source sheet opens on: the dataset as the view drew it (a copy of its descriptor, never a live lookup). */
+/** What the source sheet opens on: the dataset as the view drew it (a copy of its descriptor, never a live lookup) and
+ * the view's spec, whose transformed rows the sheet shows beside the snapshot's. */
 export interface SourceCapture {
   datasetId: string;
   descriptor: DatasetDescriptor;
+  view?: { spec: unknown; caption: string };
 }
 
 export interface ChartRendererDeps {
@@ -46,9 +49,42 @@ function themeOf(into: HTMLElement): Theme {
   return themeFrom(Object.fromEntries(THEME_PROPERTIES.map((name) => [name, style.getPropertyValue(name)]))).theme;
 }
 
+// The theme's input changes with no change of a view's own: D's scope style is rewritten in place when the governing
+// system changes, a scope moves to another id when the document's overrides or system do (C's slide canvas follows the
+// same two signals), and the document's own overrides live in its doc. Each live view registers its re-check; a signal
+// re-checks them in the next frame, once, after the styles apply; a view whose resolved theme differs draws again from
+// its cached rows.
+const live = new Set<() => void>();
+const due = new Set<() => void>();
+let frameAsked = false;
+function recheckSoon(check: () => void): void {
+  due.add(check);
+  if (frameAsked) return;
+  frameAsked = true;
+  requestAnimationFrame(() => {
+    frameAsked = false;
+    const checks = [...due];
+    due.clear();
+    for (const run of checks) run();
+  });
+}
+const watched = new WeakSet<Document>();
+function watchScopes(document: Document): void {
+  if (watched.has(document)) return;
+  watched.add(document);
+  const Observer = document.defaultView?.MutationObserver;
+  if (!Observer) return;
+  const all = () => live.forEach(recheckSoon);
+  const isScopeStyle = (node: Node | null) => node instanceof Element && node.tagName === 'STYLE' && node.hasAttribute('data-ds-scope-style');
+  new Observer((records) => {
+    if (records.some((r) => isScopeStyle(r.target) || isScopeStyle(r.target.parentNode) || [...r.addedNodes, ...r.removedNodes].some(isScopeStyle))) all();
+  }).observe(document.head, { childList: true, subtree: true, characterData: true });
+  new Observer(all).observe(document.body, { attributes: true, attributeFilter: ['data-ds-scope'], subtree: true });
+}
+
 export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEnvironment['renderChart']> {
   return (into: HTMLElement, node: PMNode, env: ViewEnvironment) => {
-    const datasetId = String(node.attrs.source ?? '').trim();
+    const datasetId = typeof node.attrs.source === 'string' ? node.attrs.source.trim() : '';
     const spec: unknown = node.attrs.spec ?? null;
     const parsed = parseSpec(spec);
     const caption = parsed.ok ? captionOf(parsed.spec, datasetId) : (parsed.title ?? 'Chart');
@@ -68,6 +104,8 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
 
     let released = false;
     let generation = 0;
+    let drawnTheme: string | null = null; // the resolved theme the view was last drawn with
+    let shown: { descriptor: DatasetDescriptor | null } | null = null; // the descriptor last asked for
     let drawnKey: string | null = null; // the descriptor last asked for, as JSON ('' for none)
     let stopDoc = () => {};
 
@@ -83,17 +121,17 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       button.type = 'button';
       button.textContent = sourceLabel(descriptor, deps.actorName(descriptor.updated.by));
       button.setAttribute('aria-label', `Source of “${caption}”: ${button.textContent}`);
-      const captured: SourceCapture = { datasetId, descriptor: structuredClone(descriptor) };
+      const captured: SourceCapture = { datasetId, descriptor: structuredClone(descriptor), view: { spec: structuredClone(spec), caption } };
       button.addEventListener('click', () => deps.openSource(captured));
       source.append(button);
     };
     const show = (rendered: Rendered, descriptor: DatasetDescriptor | null) => {
-      frame.innerHTML = rendered.svg; // the renderer's escaped, script-free SVG (its grade), never a string of the page's
+      frame.innerHTML = rendered.svg ?? rendered.html; // the renderer's escaped, script-free SVG or table (its grade), never a string of the page's
       frame.append(tip);
       tip.hidden = true;
       label(descriptor);
       // what the view could not show as asked; a view that cannot be drawn says so in its own frame already
-      const drawnInPlace = rendered.svg.includes('<desc>This view cannot be drawn: ');
+      const drawnInPlace = rendered.svg?.includes('<desc>This view cannot be drawn: ') ?? false;
       const notes = [...(descriptor ? mismatchNotes(descriptor) : []), ...(drawnInPlace ? [] : rendered.warnings)];
       if (notes.length > 0) {
         const list = element('div', 'dash-notes');
@@ -113,7 +151,8 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
 
     const paint = async (descriptor: DatasetDescriptor | null) => {
       const mine = ++generation;
-      if (frame.querySelector('svg')) view.setAttribute('aria-busy', 'true'); // the earlier figure stays, dimmed
+      shown = { descriptor };
+      if (frame.querySelector('svg, table')) view.setAttribute('aria-busy', 'true'); // the earlier view stays, dimmed
       else if (descriptor) {
         frame.textContent = `Loading ${descriptor.title}…`;
         frame.classList.add('dash-loading');
@@ -122,10 +161,14 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       try {
         const table = descriptor ? await deps.reader.read(snapshotOf(descriptor)) : null;
         if (!(await placed(mine))) return;
-        rendered = renderView(spec, table, themeOf(into), datasetId);
+        const theme = themeOf(into);
+        drawnTheme = JSON.stringify(theme);
+        rendered = renderView(spec, table, theme, datasetId);
       } catch {
         if (!(await placed(mine))) return;
-        rendered = renderFailure(spec, themeOf(into), datasetId, DATASET_STATES.unreadable(datasetId));
+        const theme = themeOf(into);
+        drawnTheme = JSON.stringify(theme);
+        rendered = renderFailure(spec, theme, datasetId, DATASET_STATES.unreadable(datasetId));
       }
       frame.classList.remove('dash-loading');
       show(rendered, descriptor);
@@ -139,6 +182,13 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
       drawnKey = key;
       void paint(descriptor);
     };
+    // The theme re-checked: drawn again, from the cached rows, when its resolved input is no longer the one drawn.
+    const recheck = () => {
+      if (released || shown === null || drawnTheme === null || !into.isConnected) return;
+      if (JSON.stringify(themeOf(into)) !== drawnTheme) void paint(shown.descriptor);
+    };
+    live.add(recheck);
+    watchScopes(into.ownerDocument);
     const follow = () => {
       stopDoc();
       const doc = env.displayed?.current().doc;
@@ -147,7 +197,14 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
         void paint(null);
         return;
       }
-      stopDoc = onUpdate(doc, () => check(doc));
+      let overrides = JSON.stringify(dsOverrides(doc));
+      stopDoc = onUpdate(doc, () => {
+        check(doc);
+        const now = JSON.stringify(dsOverrides(doc)); // the document's own overrides, which its page's scope applies
+        if (now === overrides) return;
+        overrides = now;
+        recheckSoon(recheck);
+      });
       check(doc);
     };
     const stopDisplayed = env.displayed?.subscribe(follow) ?? (() => {});
@@ -156,6 +213,8 @@ export function createChartRenderer(deps: ChartRendererDeps): NonNullable<ViewEn
     return () => {
       released = true;
       generation += 1;
+      live.delete(recheck);
+      due.delete(recheck);
       stopDoc();
       stopDisplayed();
       detachHover();

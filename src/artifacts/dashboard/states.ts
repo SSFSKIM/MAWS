@@ -18,13 +18,13 @@ export const VIEW_STATES = {
   needs: (view: string, what: string) => `a ${view} view needs ${what}`,
   notNumbers: (column: string) => `${column} is not a number column`,
   empty: 'no rows to draw',
+  tablePreview: (shown: number, total: number) => `first ${shown} of ${total} rows`, // a table view's bound (parent Decision Log 24)
   seriesCap: (shown: number, total: number) => `${total} series; the first ${shown} are drawn`,
   tooLarge: (count: number) => `${count} ${count === 1 ? 'value is' : 'values are'} too large to draw`,
   noPositive: (column: string) => `no positive ${column} to draw`,
   slicesDropped: (count: number, column: string) => `${count} ${count === 1 ? 'slice has' : 'slices have'} no positive ${column}; not drawn`,
   slicesFolded: (count: number) => `${count} slices; the smallest after the first five are drawn as one`,
   labelsShortened: 'some category labels are shortened; the source table has them whole',
-  cellsShortened: 'some cells are shortened; the source table has them whole',
   kept: 'The caption, comments and edits on this block are kept.',
 } as const;
 

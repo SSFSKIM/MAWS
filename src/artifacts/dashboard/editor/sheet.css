@@ -39,6 +39,29 @@
   min-width: 480px;
   height: auto;
 }
+/* a table view is the document's own table (the system's `.ds-doc table` rules: the head's rule, the rows' hairlines),
+   its numbers right-aligned in tabular figures, its preview note under it */
+.ds-doc .dash-figure > table.dash-table {
+  table-layout: auto;
+  margin: 0;
+}
+.ds-doc .dash-table .dash-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.ds-doc .dash-table td.dash-num {
+  font-family: var(--ds-font-mono, var(--font-mono));
+}
+.ds-doc .dash-table-note {
+  caption-side: bottom;
+  text-align: left;
+  padding-top: var(--ds-space-2, calc(var(--space) * 2));
+  font-size: var(--ds-type-caption-size, var(--text-ui-sm));
+  color: var(--ds-color-text-muted, var(--fg-muted));
+}
+.ds-doc .dash-view[aria-busy='true'] .dash-figure > table {
+  opacity: 0.5;
+}
 .ds-doc .dash-loading {
   font-size: var(--ds-type-caption-size, var(--text-ui-sm));
   color: var(--ds-color-text-muted, var(--fg-muted));
@@ -194,6 +217,10 @@
 .dash-sheet-type {
   color: var(--fg-muted);
   font-size: var(--text-ui-sm);
+}
+.dash-sheet-shown {
+  display: flex;
+  gap: var(--space);
 }
 .dash-sheet-actions {
   display: flex;

@@ -9,6 +9,9 @@ import { transact, type Doc, type Node } from '../yjs';
 import { YNode } from '../yjs/document';
 import { normalizeSpec } from './spec';
 
+// An attribute a replica wrote as text, else empty (a value of any other shape is never stringified through its own methods).
+const textOf = (value: unknown): string => (typeof value === 'string' ? value : '');
+
 export interface ViewWarning {
   blockId: string;
   message: string;
@@ -27,7 +30,7 @@ export function chartSpecs(doc: Doc): ChartBlock[] {
   const walk = (node: Node) => {
     for (const child of node.toArray()) {
       if (!(child instanceof YNode)) continue;
-      if (child.name === 'chart') out.push({ node: child, blockId: String(child.getAttr('id') ?? ''), source: String(child.getAttr('source') ?? ''), spec: child.getAttr('spec') ?? null });
+      if (child.name === 'chart') out.push({ node: child, blockId: textOf(child.getAttr('id')), source: textOf(child.getAttr('source')), spec: child.getAttr('spec') ?? null });
       else walk(child);
     }
   };

@@ -32,7 +32,7 @@ export class DashboardTabState {
     this.renderChart = createChartRenderer({
       reader: this.reader,
       actorName: this.actorName,
-      openSource: ({ datasetId, descriptor }) => this.sheet.open([{ id: datasetId, descriptor }], datasetId),
+      openSource: ({ datasetId, descriptor, view }) => this.sheet.open([{ id: datasetId, descriptor, ...(view && { view }) }], datasetId),
     });
   }
 

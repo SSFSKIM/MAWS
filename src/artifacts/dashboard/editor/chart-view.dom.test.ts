@@ -76,7 +76,7 @@ describe('the chart view', () => {
     const label = into.querySelector<HTMLButtonElement>('button.dash-source-label')!;
     expect(label.textContent).toBe('지역별 매출 · from sales.csv · updated 2026-10-16 08:30 UTC by Claude');
     label.click();
-    expect(w.opened).toEqual([{ datasetId: 'sales', descriptor: descriptor('assets/sales.csv') }]);
+    expect(w.opened).toEqual([{ datasetId: 'sales', descriptor: descriptor('assets/sales.csv'), view: { spec: { view: 'bar', x: 'region', y: 'sales', title: 'Sales by region' }, caption: 'Sales by region' } }]);
     expect(w.readDataset).toHaveBeenCalledWith('dash1', 'assets/sales.csv', { format: 'csv' });
   });
 
@@ -172,6 +172,72 @@ describe('the chart view', () => {
     await settle();
     expect(w.readDataset.mock.calls.length).toBe(reads);
     expect(tips(into)[0]).toBe('서울 · sales: 12');
+  });
+});
+
+describe('a table view', () => {
+  it('is a native table in the page, its numbers marked, no figure', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const w = world();
+    const { into } = mount(w.renderChart, doc, node('sales', { view: 'table', sort: { by: 'sales', dir: 'desc' }, title: 'All regions' }));
+    await settle();
+    expect(into.querySelector('svg')).toBeNull();
+    const table = into.querySelector('.dash-figure > table.dash-table')!;
+    expect([...table.querySelectorAll('tbody tr')].map((tr) => tr.textContent)).toEqual(['서울12', '부산7', '제주3']);
+    expect(table.querySelector('th.dash-num')?.textContent).toBe('sales');
+    expect(into.querySelector('.dash-caption')?.textContent).toBe('All regions');
+  });
+});
+
+describe('the theme', () => {
+  const pollFor = async (check: () => boolean) => {
+    for (let i = 0; i < 50 && !check(); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  };
+
+  it('redraws from its cached rows when the document\'s overrides change what the page resolves, no dataset change needed', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const w = world();
+    const { into } = mount(w.renderChart, doc);
+    into.style.setProperty('--ds-color-text', '#123456');
+    await settle();
+    await pollFor(() => into.querySelector('svg')?.getAttribute('fill') === '#123456');
+    expect(into.querySelector('svg')?.getAttribute('fill')).toBe('#123456');
+    const reads = w.readDataset.mock.calls.length;
+    into.style.setProperty('--ds-color-text', '#654321');
+    doc.get('meta').setAttr('dsOverrides', { '--ds-color-text': '#654321' });
+    await pollFor(() => into.querySelector('svg')?.getAttribute('fill') === '#654321');
+    expect(into.querySelector('svg')?.getAttribute('fill')).toBe('#654321');
+    expect(w.readDataset.mock.calls.length).toBe(reads); // the rows came from the reader's cache
+  });
+
+  it('redraws when D\'s scope style is rewritten in place (the governing system changed), and not once released', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const style = document.head.appendChild(document.createElement('style'));
+    style.setAttribute('data-ds-scope-style', '');
+    style.textContent = '.scope-a { --ds-color-text: #111111; }';
+    const host = document.body.appendChild(document.createElement('div'));
+    host.className = 'scope-a';
+    const w = world();
+    const into = host.appendChild(document.createElement('div'));
+    into.className = 'scope-a'; // (happy-dom resolves a stylesheet's custom property on the matched element itself)
+    const release = w.renderChart(into, node('sales'), { artifactId: 'dash1', host: {} as never, renderDiagram: async () => '', displayed: displayedDocument(doc) });
+    try {
+      await settle();
+      await pollFor(() => into.querySelector('svg')?.getAttribute('fill') === '#111111');
+      expect(into.querySelector('svg')?.getAttribute('fill')).toBe('#111111');
+      style.textContent = '.scope-a { --ds-color-text: #222222; }';
+      await pollFor(() => into.querySelector('svg')?.getAttribute('fill') === '#222222');
+      expect(into.querySelector('svg')?.getAttribute('fill')).toBe('#222222');
+      release();
+      style.textContent = '.scope-a { --ds-color-text: #333333; }';
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      expect(into.querySelector('svg')?.getAttribute('fill')).toBe('#222222');
+    } finally {
+      style.remove();
+    }
   });
 });
 

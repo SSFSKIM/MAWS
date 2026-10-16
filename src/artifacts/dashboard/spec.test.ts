@@ -31,6 +31,12 @@ describe('parseSpec', () => {
     expect(parseSpec(null)).toEqual({ ok: false, error: 'the view spec is not an object' });
     expect(parseSpec('{"view":"bar"}')).toEqual({ ok: false, error: 'the view spec is not an object' });
     expect(parseSpec({ view: 'x'.repeat(100) })).toMatchObject({ ok: false, error: `unknown view "${'x'.repeat(40)}…"` });
+    // any JSON, never read through its own methods: `{toString: 0}` would throw if stringified
+    expect(parseSpec(JSON.parse('{"view":{"toString":0},"title":"T"}'))).toEqual({ ok: false, error: 'unknown view object', title: 'T' });
+    expect(parseSpec({ view: ['bar'] })).toEqual({ ok: false, error: 'unknown view list' });
+    expect(parseSpec({ view: 3 })).toEqual({ ok: false, error: 'unknown view number 3' });
+    expect(parseSpec({})).toEqual({ ok: false, error: 'unknown view (none)' });
+    expect(normalizeSpec(JSON.parse('{"view":{"toString":0}}')).warnings).toEqual(['unknown view object; the view draws as an error']);
   });
 
   it('takes a column named like an object prototype key as a column', () => {

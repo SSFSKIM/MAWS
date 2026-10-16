@@ -8,6 +8,8 @@ import type { DatasetDescriptor } from '../datasets';
 export interface SheetDataset {
   id: string;
   descriptor: DatasetDescriptor;
+  /** The view it was opened from (a source label's), whose transformed rows the sheet shows beside the snapshot's. */
+  view?: { spec: unknown; caption: string };
 }
 
 export interface SourceSheetSnapshot {
@@ -32,7 +34,7 @@ export class SourceSheetState {
 
   /** Opens on `datasets` (copied), `selected` shown first (else the first, else none). */
   open(datasets: readonly SheetDataset[], selected?: string): void {
-    const copies = datasets.map(({ id, descriptor }) => ({ id, descriptor: structuredClone(descriptor) }));
+    const copies = datasets.map(({ id, descriptor, view }) => ({ id, descriptor: structuredClone(descriptor), ...(view && { view: structuredClone(view) }) }));
     const shown = copies.find((dataset) => dataset.id === selected)?.id ?? copies[0]?.id ?? null;
     this.set({ open: true, datasets: copies, selected: shown, opened: this.current.opened + 1 });
   }

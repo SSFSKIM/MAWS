@@ -145,6 +145,36 @@ describe('the source sheet', () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  it('copies fields holding tabs, line breaks and quotes as quoted TSV', async () => {
+    readDataset.mockImplementation(async () => ({ columns: [{ name: 'note', type: 'string' }, { name: 'n', type: 'number' }], rows: [['two\nlines', 1], ['a\tb "c"', 2]], total: 2, truncated: false }));
+    mount();
+    act(() => sheet.open([{ id: 'notes', descriptor: descriptor('assets/notes.tsv', 2) }]));
+    await until(() => screen.queryAllByRole('row').length > 1, 'the rows');
+    await act(async () => void fireEvent.click(within(dialog()).getByRole('button', { name: 'Copy rows' })));
+    expect(writeText).toHaveBeenCalledWith('note\tn\n"two\nlines"\t1\n"a\tb ""c"""\t2\n');
+  });
+
+  it('opened from a view, shows that view’s complete transformed rows beside the whole snapshot, sorting and copying each', async () => {
+    mount();
+    const view = { spec: { view: 'bar', x: 'month', y: 'sales', filter: [{ column: 'region', op: 'ne', value: '제주' }], sort: { by: 'sales', dir: 'asc' } }, caption: 'Sales by month' };
+    act(() => sheet.open([{ id: 'sales', descriptor: descriptor('assets/sales.tsv', 3), view }], 'sales'));
+    await until(() => bodyRows().length > 0, 'the view rows');
+    const pressed = (name: RegExp) => within(dialog()).getByRole('button', { name }).getAttribute('aria-pressed');
+    expect(pressed(/^This view’s rows \(2\)$/)).toBe('true');
+    expect(bodyRows().map(cells)).toEqual([['부산', '7', '2026-02-01'], ['서울', '12', '2026-01-01']]);
+    await act(async () => void fireEvent.click(within(dialog()).getByRole('button', { name: 'Copy rows' })));
+    expect(writeText).toHaveBeenLastCalledWith('region\tsales\tmonth\n부산\t7\t2026-02-01\n서울\t12\t2026-01-01\n');
+    act(() => void fireEvent.click(within(dialog()).getByRole('button', { name: /^All source rows \(3\)$/ })));
+    expect(pressed(/^All source rows/)).toBe('true');
+    expect(bodyRows().map((row) => cells(row)[0])).toEqual(['서울', '부산', '제주']);
+    // an aggregating view's rows are its groups and measures
+    act(() => sheet.open([{ id: 'sales', descriptor: descriptor('assets/sales.tsv', 3), view: { spec: { view: 'pie', x: 'region', y: 'region', agg: 'count' }, caption: 'Regions' } }], 'sales'));
+    await until(() => within(dialog()).queryAllByRole('columnheader').length === 2, 'the grouped rows');
+    expect(within(dialog()).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['region', 'count of region']);
+    expect(bodyRows().map(cells)).toEqual([['서울', '1'], ['부산', '1'], ['제주', '1']]);
+    expect(readDataset.mock.calls.every(([, ref]) => ref === 'assets/sales.tsv')).toBe(true);
+  });
+
   it('says so when the dashboard has no dataset', () => {
     mount();
     act(() => sheet.open([]));

@@ -45,6 +45,8 @@ const isName = (value: unknown): value is string => typeof value === 'string' &&
 const isCell = (value: unknown): value is Cell => value === null || typeof value === 'string' || typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value));
 const oneOf = <T extends string>(list: readonly T[], value: unknown): value is T => typeof value === 'string' && (list as readonly string[]).includes(value);
 const clip = (text: string, max = 40) => (text.length <= max ? text : `${text.slice(0, max)}…`);
+/** An untrusted value named in a message, never by calling its own methods (`{toString: 0}` is valid JSON). */
+const describe = (value: unknown): string => (typeof value === 'string' ? `"${clip(value)}"` : value === undefined ? '(none)' : value === null ? 'null' : Array.isArray(value) ? 'list' : typeof value === 'object' ? 'object' : `${typeof value} ${clip(JSON.stringify(value) ?? '')}`);
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** Reads an untrusted spec (a chart atom's `spec` attribute) into the grammar. */
@@ -52,7 +54,7 @@ export function parseSpec(input: unknown): ParsedSpec {
   if (!isRecord(input)) return { ok: false, error: 'the view spec is not an object' };
   const raw = input;
   const title = typeof raw.title === 'string' && raw.title.trim() !== '' ? raw.title.slice(0, SPEC_LIMITS.title) : undefined;
-  if (!oneOf(VIEW_KINDS, raw.view)) return { ok: false, error: `unknown view "${clip(String(raw.view))}"`, ...(title !== undefined && { title }) };
+  if (!oneOf(VIEW_KINDS, raw.view)) return { ok: false, error: `unknown view ${describe(raw.view)}`, ...(title !== undefined && { title }) };
   const warnings = Object.keys(raw)
     .filter((key) => !KEYS.includes(key))
     .map((key) => `unknown key "${clip(key)}" ignored`);

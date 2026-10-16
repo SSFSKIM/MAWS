@@ -12,19 +12,23 @@
 // one empty layer, `<g data-hover="nearest" data-xy="x,y …" data-tips="…">` (tips one per line), which the host
 // searches for the point nearest the pointer, so hover reaches every value without one element per point.
 import type { Cell } from '../datasets';
-import { parseSpec, yColumns, type ValueFormat, type ViewSpec } from '../spec';
+import { parseSpec, type ValueFormat, type ViewSpec } from '../spec';
 import { DATASET_STATES, VIEW_STATES } from '../states';
 import * as geo from './geometry';
 import { SHAPES, type Point, type Ticks } from './geometry';
 import { decimalsFor, esc, formatInstant, formatNumber, px, unitOf, type Theme } from './svg';
 import { textWidth, wrap } from './text';
-import { instantOf, seriesKey, transform, type ViewColumn, type ViewTable } from './transform';
+import { instantOf, shownColumns, transform, typedKey, type ViewColumn, type ViewData, type ViewTable } from './transform';
 
-export interface Rendered {
-  svg: string;
-  /** What the figure could not show as asked (dropped spec keys, undrawn rows, shortened labels): noted under it. */
+/**
+ * A view's one output (parent Decision Log 24): a chart is an SVG, a table an HTML `<table>` (text, not a picture), so
+ * exactly one of `svg` and `html` is set. A state drawn in place (an error, an empty view) is an SVG frame for every
+ * kind.
+ */
+export type Rendered = ({ svg: string; html?: never } | { html: string; svg?: never }) & {
+  /** What the view could not show as asked (dropped spec keys, undrawn rows, shortened labels): noted under it. */
   warnings: string[];
-}
+};
 
 const DASHES = ['', '6 4', '2 3', '10 3 2 3', '1 3', '14 4'];
 const TINTS = [0.88, 0.5, 0.24, 0.7, 0.36, 0.12];
@@ -39,7 +43,12 @@ const BAR_FILLS: { solid: boolean; hatch: (45 | 135)[]; dash?: string }[] = [
 ];
 const MAX_SERIES = 6;
 const PLOT_H = 260;
-const TABLE_ROWS = 25;
+// A magnitude past this cannot take part in a scale's span (the span of ±1.7e308 is not a number): counted, not drawn.
+const DRAWABLE = 1e306;
+/** A table view's rows without a `limit` (parent Decision Log 24). */
+export const TABLE_VIEW_ROWS = 25;
+/** The most rows a table view shows, whatever its `limit`; past it the view notes how many there are. */
+export const TABLE_VIEW_MAX_ROWS = 100;
 
 /**
  * Draws `spec` (a chart atom's spec, untrusted) over `table`, the snapshot of the dataset `datasetId` names (null: no
@@ -52,11 +61,24 @@ export function renderView(spec: unknown, table: ViewTable | null, theme: Theme,
   if (table === null) return failure(theme, DATASET_STATES.noDataset(datasetId), caption);
   const shaped = transform(table, parsed.spec, datasetId);
   if (!shaped.ok) return failure(theme, shaped.error, caption);
-  const view: View = { spec: parsed.spec, table: shaped.table, series: shaped.series, theme, caption, warnings: [...parsed.warnings] };
+  const view: View = { spec: parsed.spec, data: shaped.data, theme, caption, warnings: [...parsed.warnings] };
   if (parsed.spec.view === 'table') return tableView(view);
-  if (shaped.table.rows.length === 0) return notice(theme, VIEW_STATES.empty, caption, view.warnings);
+  if (shaped.data.table.rows.length === 0) return notice(theme, VIEW_STATES.empty, caption, view.warnings);
   if (parsed.spec.view === 'pie') return pieView(view);
   return cartesian(view);
+}
+
+/** The transformed view as the source sheet inspects it, complete (before a table view's preview bound): the same
+ * interpretation the figure and the table draw, or why there is none. */
+export function viewRows(spec: unknown, table: ViewTable, datasetId: string): { ok: true; table: ViewTable } | { ok: false; error: string } {
+  const parsed = parseSpec(spec);
+  if (!parsed.ok) return parsed;
+  const shaped = transform(table, parsed.spec, datasetId);
+  if (!shaped.ok) return shaped;
+  const { data } = shaped;
+  if (parsed.spec.view !== 'table' || !parsed.spec.columns) return { ok: true, table: data.table };
+  const at = shownColumns(data, parsed.spec);
+  return { ok: true, table: { columns: at.map((i) => data.table.columns[i]), rows: data.table.rows.map((row) => at.map((i) => row[i] ?? null)) } };
 }
 
 /** A view that cannot be drawn for a reason outside its spec and rows (its snapshot unreadable), in the same frame. */
@@ -72,11 +94,17 @@ export const captionOf = (spec: ViewSpec, datasetId: string): string => spec.tit
 
 interface View {
   spec: ViewSpec;
-  table: ViewTable;
-  series: string[];
+  data: ViewData;
   theme: Theme;
   caption: string;
   warnings: string[];
+}
+
+/** The largest of `values` without spreading them into a call (a view may hold 200,000). */
+function largest(values: Iterable<number>, floor = -Infinity): number {
+  let out = floor;
+  for (const value of values) if (value > out) out = value;
+  return out;
 }
 
 // ---- writing ----
@@ -145,6 +173,12 @@ function formatCell(value: Cell, column: ViewColumn | undefined, format?: ValueF
   return value;
 }
 
+/** A category's or a series' name: its value as the view formats it, "(none)" for an empty cell. */
+const nameOf = (value: Cell, column: ViewColumn | undefined, format?: ValueFormat): string => (value === null ? '(none)' : formatCell(value, column, format));
+
+/** The one format a shared axis may take: the measures' common one, else none (raw numbers, whatever each tip says). */
+const commonFormat = (formats: (ValueFormat | undefined)[]): ValueFormat | undefined => (formats.every((f) => f === formats[0]) ? formats[0] : undefined);
+
 function tickLabels(ticks: number[], kind: 'linear' | 'time', format?: ValueFormat): string[] {
   if (kind === 'time') {
     const unit = unitOf(ticks);
@@ -204,69 +238,91 @@ interface Mark {
 }
 interface Series extends Entry {
   marks: Mark[];
+  /** The format of the measure it draws (each y its own). */
+  format?: ValueFormat;
+  /** Its series value's name ('' without a series column) and its measure's name, as its tips say them. */
+  seriesName: string;
+  measure: string;
 }
 
 function cartesian(v: View): Rendered {
-  const { spec, table, theme, warnings } = v;
-  const col = (name: string) => table.columns.find((c) => c.name === name);
-  if (spec.x === undefined) return failure(theme, VIEW_STATES.needs(spec.view, 'an x column'), v.caption);
-  const ys = yColumns(spec).length > 0 ? yColumns(spec) : spec.agg === 'count' ? ['count'] : [];
-  if (ys.length === 0) return failure(theme, VIEW_STATES.needs(spec.view, 'a y column'), v.caption);
-  const xCol = col(spec.x)!;
-  const xi = table.columns.indexOf(xCol);
-  const yis = ys.map((y) => table.columns.findIndex((c) => c.name === y));
-  const si = spec.series === undefined ? -1 : table.columns.findIndex((c) => c.name === spec.series);
-  const nonNumber = ys.filter((_, k) => table.columns[yis[k]].type !== 'number' && table.columns[yis[k]].type !== 'null');
-  if (nonNumber.length > 0) return failure(theme, VIEW_STATES.notNumbers(nonNumber[0]), v.caption);
+  const { spec, data, theme, warnings } = v;
+  const { table } = data;
+  if (spec.x === undefined || data.x === undefined) return failure(theme, VIEW_STATES.needs(spec.view, 'an x column'), v.caption);
+  if (data.ys.length === 0) return failure(theme, VIEW_STATES.needs(spec.view, 'a y column'), v.caption);
+  const xi = data.x;
+  const xCol = table.columns[xi];
+  const ys = data.ys;
+  const yName = (k: number) => table.columns[ys[k]].name;
+  const nonNumber = ys.filter((y) => table.columns[y].type !== 'number' && table.columns[y].type !== 'null');
+  if (nonNumber.length > 0) return failure(theme, VIEW_STATES.notNumbers(table.columns[nonNumber[0]].name), v.caption);
+  const formats = data.yNames.map((name) => spec.format?.[name]);
+  const xFormat = spec.format?.[spec.x];
 
-  // Series: by the series column's values (identity from the unfiltered snapshot), or one per y column.
+  // Series: by the series column's typed values (identity and form from the unfiltered snapshot), or one per y.
+  const si = data.series;
   const all: Series[] = [];
   const byKey = new Map<string, Series>();
-  const keyOf = (row: readonly Cell[], k: number) => (si >= 0 ? (ys.length > 1 ? `${seriesKey(row[si])} · ${ys[k]}` : seriesKey(row[si])) : ys[k]);
-  const styleOf = (row: readonly Cell[], k: number) => (si >= 0 ? v.series.indexOf(seriesKey(row[si])) * ys.length + k : k);
   for (const row of table.rows)
-    ys.forEach((_, k) => {
-      const key = keyOf(row, k);
+    ys.forEach((yi, k) => {
+      const value = si === undefined ? null : (row[si] ?? null);
+      const key = si === undefined ? `y${k}` : `${typedKey(value)}\u0000${k}`;
       let s = byKey.get(key);
       if (!s) {
-        s = { key, label: key, style: styleOf(row, k), marks: [] };
+        const seriesName = si === undefined ? '' : nameOf(value, table.columns[si], spec.series ? spec.format?.[spec.series] : undefined);
+        const label = si === undefined ? yName(k) : ys.length > 1 ? `${seriesName} · ${yName(k)}` : seriesName;
+        const style = si === undefined ? k : Math.max(0, data.seriesKeys.indexOf(typedKey(value))) * ys.length + k;
+        s = { key, label, style, marks: [], format: formats[k], seriesName, measure: yName(k) };
         byKey.set(key, s);
         all.push(s);
       }
-      const y = row[yis[k]];
+      const y = row[yi];
       s.marks.push({ x: row[xi] ?? null, y: typeof y === 'number' && Number.isFinite(y) ? y : null, tip: '' });
     });
   all.sort((a, b) => a.style - b.style);
   if (all.length > MAX_SERIES) warnings.push(VIEW_STATES.seriesCap(MAX_SERIES, all.length));
   const series = all.slice(0, MAX_SERIES);
 
-  // A magnitude past ±1e306 would overflow the scale's span; it is counted and not drawn, never clamped.
-  const huge = series.reduce((n, s) => n + s.marks.filter((m) => m.y !== null && Math.abs(m.y) > 1e306).length, 0);
-  if (huge > 0) warnings.push(VIEW_STATES.tooLarge(huge));
-  for (const s of series) for (const m of s.marks) if (m.y !== null && Math.abs(m.y) > 1e306) m.y = null;
-  const nullY = series.reduce((n, s) => n + s.marks.filter((m) => m.y === null).length, 0) - huge;
-  if (nullY > 0) warnings.push(VIEW_STATES.missing(nullY, ys.join(', ')));
+  // A magnitude past ±1e306 would overflow a scale's span; it is counted and not drawn, never clamped.
   const xKind: 'band' | 'time' | 'linear' = spec.view === 'bar' || xCol.type === 'string' || xCol.type === 'boolean' ? 'band' : xCol.type === 'date' ? 'time' : 'linear';
   const xValue = (x: Cell) => (xKind === 'time' ? instantOf(x) : typeof x === 'number' && Number.isFinite(x) ? x : null);
+  let huge = 0;
+  for (const s of series)
+    for (const m of s.marks) {
+      const x = xKind === 'linear' ? xValue(m.x) : null;
+      if ((m.y !== null && Math.abs(m.y) > DRAWABLE) || (x !== null && Math.abs(x) > DRAWABLE)) {
+        huge += 1;
+        m.y = null;
+        m.x = null;
+      }
+    }
+  if (huge > 0) warnings.push(VIEW_STATES.tooLarge(huge));
+  let nullY = 0;
+  for (const s of series) for (const m of s.marks) if (m.y === null) nullY += 1;
+  nullY -= huge;
+  if (nullY > 0) warnings.push(VIEW_STATES.missing(nullY, ys.map((_, k) => yName(k)).join(', ')));
   if (xKind !== 'band') {
-    const nullX = series.reduce((n, s) => n + s.marks.filter((m) => xValue(m.x) === null).length, 0);
-    if (nullX > 0) warnings.push(VIEW_STATES.missing(nullX, spec.x));
+    let nullX = 0;
+    for (const s of series) for (const m of s.marks) if (m.y !== null && xValue(m.x) === null) nullX += 1;
+    if (nullX > 0) warnings.push(VIEW_STATES.missing(nullX, xCol.name));
     for (const s of series) {
       s.marks = s.marks.filter((m) => xValue(m.x) !== null);
       // A line is drawn along x; the data's order is kept for everything else (the table, the tips).
       if (spec.view !== 'scatter') s.marks = s.marks.map((m, i) => ({ m, i })).sort((a, b) => xValue(a.m.x)! - xValue(b.m.x)! || a.i - b.i).map(({ m }) => m);
     }
-  }
-  const yFormat = spec.format?.[ys[0]];
+  } else for (const s of series) s.marks = s.marks.filter((m) => !(m.x === null && m.y === null));
   for (const s of series)
-    for (const m of s.marks) m.tip = `${formatCell(m.x, xCol, spec.format?.[spec.x])}${series.length > 1 ? ` · ${s.label}` : ''} · ${ys.length === 1 ? ys[0] : s.label}: ${formatCell(m.y, undefined, yFormat)}`;
+    for (const m of s.marks) m.tip = `${formatCell(m.x, xCol, xFormat)}${si !== undefined && series.length > 1 ? ` · ${s.seriesName}` : ''} · ${s.measure}: ${formatCell(m.y, undefined, s.format)}`;
 
-  // Frame: legend on top, then the plot, then the x axis.
+  // Frame: legend on top, then the plot, then the x axis. The y axis takes the measures' common format, else raw numbers.
   const top = 8;
   const lg = legend(series, theme, 0, top, (entry, x, y) => keyMark(spec.view, entry.style, x, y, theme));
-  const yValues = series.flatMap((s) => s.marks.map((m) => m.y).filter((y): y is number => y !== null));
-  if (yValues.length === 0) return notice(theme, VIEW_STATES.missing(nullY, ys.join(', ')), v.caption, warnings);
-  const barCount = spec.view === 'bar' ? series.reduce((n, s) => n + s.marks.length, 0) : 0;
+  const yValues: number[] = [];
+  for (const s of series) for (const m of s.marks) if (m.y !== null) yValues.push(m.y);
+  if (yValues.length === 0) return notice(theme, VIEW_STATES.missing(nullY, ys.map((_, k) => yName(k)).join(', ')), v.caption, warnings);
+  const axisFormat = commonFormat(series.map((s) => s.format));
+  let barCount = 0;
+  if (spec.view === 'bar') for (const s of series) barCount += s.marks.length;
   const valueLabels = spec.view === 'bar' && barCount <= 16;
   const plotTop = top + lg.height + (valueLabels ? theme.caption + 10 : 6);
   const negative = yValues.some((y) => y < 0);
@@ -275,27 +331,25 @@ function cartesian(v: View): Rendered {
   const plotBottom = plotTop + PLOT_H - room;
   const axisY = plotBottom + room;
   const yScale = geo.linear(domainOf(yValues, spec.view === 'bar' || spec.view === 'area'), [plotBottom, plotTop], 5, true);
-  const yLabels = tickLabels(yScale.ticks, 'linear', yFormat);
-  const left = Math.ceil(Math.max(...yLabels.map((l) => textWidth(l, theme.caption)))) + 10;
+  const yLabels = tickLabels(yScale.ticks, 'linear', axisFormat);
+  const left = Math.ceil(largest(yLabels.map((l) => textWidth(l, theme.caption)), 0)) + 10;
 
   // Direct labels at a line's end (four series or fewer, separated), else the legend carries identity.
-  const ends = spec.view === 'line' || spec.view === 'area' ? endLabels(series, yScale, theme, yFormat) : [];
-  const right = theme.width - (ends.length > 0 ? Math.min(160, Math.max(...ends.map((e) => textWidth(e.label, theme.caption))) + 14) : 8);
+  const ends = spec.view === 'line' || spec.view === 'area' ? endLabels(series, yScale, theme) : [];
+  const right = theme.width - (ends.length > 0 ? Math.min(160, largest(ends.map((e) => textWidth(e.label, theme.caption)), 0) + 14) : 8);
 
   let xAxis: { svg: string; height: number; map: (x: Cell) => number | null; band?: { starts: number[]; bandwidth: number; keys: string[] } };
   if (xKind === 'band') {
     const keys: string[] = [];
-    const seen = new Set<string>();
+    const labelFor = new Map<string, string>();
     for (const s of series)
       for (const m of s.marks) {
-        const key = seriesKey(m.x);
-        if (seen.has(key)) continue;
-        seen.add(key);
+        const key = typedKey(m.x);
+        if (labelFor.has(key)) continue;
+        labelFor.set(key, nameOf(m.x, xCol, xFormat));
         keys.push(key);
       }
     const band = geo.band(keys.length, [left, right], 0.2, 0.1);
-    const labelFor = new Map(keys.map((k) => [k, k]));
-    for (const s of series) for (const m of s.marks) labelFor.set(seriesKey(m.x), formatCell(m.x, xCol, spec.format?.[spec.x]));
     const lineH = theme.caption * 1.4;
     let shortened = false;
     const wrapped = keys.map((k) => {
@@ -308,11 +362,12 @@ function cartesian(v: View): Rendered {
     // so neighbours never touch and nothing is thinned.
     const svg = wrapped.map((lines, i) => text(band.starts[i] + band.bandwidth / 2, axisY + theme.caption + 8, lines, { anchor: 'middle', fill: theme.muted, line: lineH })).join('');
     const at = new Map(keys.map((k, i) => [k, band.starts[i] + band.bandwidth / 2]));
-    xAxis = { svg, height: theme.caption + 8 + (Math.max(...wrapped.map((l) => l.length)) - 1) * lineH + 8, map: (x) => at.get(seriesKey(x)) ?? null, band: { ...band, keys } };
+    xAxis = { svg, height: theme.caption + 8 + (largest(wrapped.map((l) => l.length), 1) - 1) * lineH + 8, map: (x) => at.get(typedKey(x)) ?? null, band: { ...band, keys } };
   } else {
-    const xs = series.flatMap((s) => s.marks.map((m) => xValue(m.x)!));
+    const xs: number[] = [];
+    for (const s of series) for (const m of s.marks) xs.push(xValue(m.x)!);
     const scale = xKind === 'time' ? geo.time(domainOf(xs, false), [left, right], 6) : geo.linear(domainOf(xs, false), [left, right], 6, spec.view === 'scatter');
-    const labels = tickLabels(scale.ticks, xKind, spec.format?.[spec.x]);
+    const labels = tickLabels(scale.ticks, xKind, xFormat);
     const every = thinning(
       labels.map((l) => textWidth(l, theme.caption)),
       scale.ticks.length > 1 ? Math.abs(scale.map(scale.ticks[1]) - scale.map(scale.ticks[0])) : theme.width,
@@ -333,7 +388,7 @@ function cartesian(v: View): Rendered {
   };
   const pointsOf = (s: Series): Point[] => s.marks.map((m) => [xAxis.map(m.x)!, m.y === null ? null : yScale.map(m.y)] as const);
 
-  if (spec.view === 'bar') body += bars(series, xAxis.band!, yScale, theme, valueLabels, yFormat);
+  if (spec.view === 'bar') body += bars(series, xAxis.band!, yScale, theme, valueLabels);
   else if (spec.view === 'scatter') {
     for (const s of series) {
       const centres = pointsOf(s).filter((p): p is [number, number] => p[1] !== null);
@@ -359,18 +414,21 @@ function cartesian(v: View): Rendered {
     body += `<g data-hover="nearest" data-xy="${hover.map((h) => `${px(h.x)},${px(h.y)}`).join(' ')}" data-tips="${hover.map((h) => esc(h.tip.replace(/[\r\n]+/g, ' '))).join('&#10;')}"/>`;
 
   const height = axisY + xAxis.height;
-  const points = series.reduce((n, s) => n + s.marks.length, 0);
-  const desc = `${cap(spec.view)} chart of ${ys.join(', ')} by ${spec.x}${spec.series ? ` and ${spec.series}` : ''}, ${points} ${points === 1 ? 'value' : 'values'}${series.length > 1 ? ` in ${series.length} series (${series.map((s) => s.label).join(', ')})` : ''}. The values are in the source table under the figure.`;
+  let points = 0;
+  for (const s of series) points += s.marks.length;
+  const measured = ys.map((_, k) => yName(k)).join(', ');
+  const desc = `${cap(spec.view)} chart of ${measured} by ${xCol.name}${spec.series ? ` and ${spec.series}` : ''}, ${points} ${points === 1 ? 'value' : 'values'}${series.length > 1 ? ` in ${series.length} series (${series.map((s) => s.label).join(', ')})` : ''}. The values are in the source table under the figure.`;
   return { svg: frame(theme, height, v.caption, desc, body), warnings };
 }
 
-/** A line's end labels (four series or fewer), or none when two would sit closer than a line apart. */
-function endLabels(list: Series[], scale: Ticks, theme: Theme, format?: ValueFormat): { m: Mark; label: string; y: number }[] {
+/** A line's end labels (four series or fewer), each in its measure's format, or none when two would sit closer than a line apart. */
+function endLabels(list: Series[], scale: Ticks, theme: Theme): { m: Mark; label: string; y: number }[] {
   if (list.length > 4) return [];
   const out = list.flatMap((s) => {
-    const last = [...s.marks].reverse().find((m) => m.y !== null);
+    let last: Mark | undefined;
+    for (const m of s.marks) if (m.y !== null) last = m;
     if (!last) return [];
-    const value = formatCell(last.y, undefined, format);
+    const value = formatCell(last.y, undefined, s.format);
     return [{ m: last, label: list.length === 1 ? value : `${s.label} ${value}`, y: scale.map(last.y!) }];
   });
   const sorted = [...out].sort((a, b) => a.y - b.y);
@@ -398,8 +456,9 @@ function keyMark(view: string, style: number, x: number, y: number, theme: Theme
   return `<path d="M${px(x)},${px(y)}H${px(x + 16)}" stroke="${theme.ink}" stroke-width="2" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/>` + `<path d="${geo.symbols(SHAPES[style % SHAPES.length], 36, [[x + 8, y]])}" fill="${theme.ink}"/>`;
 }
 
-/** Columns from the zero line, at most 24 px thick, the data end rounded 4 px, a 2 px ground gap between neighbours. */
-function bars(series: Series[], band: { starts: number[]; bandwidth: number; keys: string[] }, y: Ticks, theme: Theme, labels: boolean, format?: ValueFormat): string {
+/** Columns from the zero line, at most 24 px thick, the data end rounded 4 px, a 2 px ground gap between neighbours; each
+ * in its series' own form (a series alone after a filter keeps the form it has in the whole snapshot). */
+function bars(series: Series[], band: { starts: number[]; bandwidth: number; keys: string[] }, y: Ticks, theme: Theme, labels: boolean): string {
   const n = series.length;
   const slot = band.bandwidth / n;
   const thick = Math.max(1, Math.min(24, slot - 2));
@@ -409,12 +468,12 @@ function bars(series: Series[], band: { starts: number[]; bandwidth: number; key
   series.forEach((s, k) => {
     for (const m of s.marks) {
       if (m.y === null) continue;
-      const x = at.get(seriesKey(m.x))! + slot * k + (slot - thick) / 2;
+      const x = at.get(typedKey(m.x))! + slot * k + (slot - thick) / 2;
       const tip = y.map(m.y);
-      out += treated(roundedBar(x, thick, zero, tip), { x0: x, y0: Math.min(zero, tip), x1: x + thick, y1: Math.max(zero, tip) }, n === 1 ? 0 : s.style, theme, ` data-tip="${esc(m.tip)}"`);
+      out += treated(roundedBar(x, thick, zero, tip), { x0: x, y0: Math.min(zero, tip), x1: x + thick, y1: Math.max(zero, tip) }, s.style, theme, ` data-tip="${esc(m.tip)}"`);
       if (labels) {
         const below = m.y < 0;
-        out += text(x + thick / 2, below ? tip + theme.caption + 4 : tip - 6, formatCell(m.y, undefined, format), { anchor: 'middle', fill: theme.ink });
+        out += text(x + thick / 2, below ? tip + theme.caption + 4 : tip - 6, formatCell(m.y, undefined, s.format), { anchor: 'middle', fill: theme.ink });
       }
     }
   });
@@ -461,30 +520,39 @@ function roundedBar(x: number, w: number, base: number, tip: number): string {
 // ---- pie ----
 
 function pieView(v: View): Rendered {
-  const { spec, table, theme, warnings } = v;
-  if (spec.x === undefined) return failure(theme, VIEW_STATES.needs('pie', 'an x column (the slices)'), v.caption);
-  const yName = yColumns(spec)[0] ?? (spec.agg === 'count' ? 'count' : undefined);
-  if (yName === undefined) return failure(theme, VIEW_STATES.needs('pie', 'a y column (the sizes)'), v.caption);
-  const xi = table.columns.findIndex((c) => c.name === spec.x);
-  const yi = table.columns.findIndex((c) => c.name === yName);
-  const slices = table.rows.map((row) => ({ label: formatCell(row[xi] ?? null, table.columns[xi], spec.format?.[spec.x!]), value: row[yi] ?? null }));
-  const dropped = slices.filter((s) => !(typeof s.value === 'number' && Number.isFinite(s.value) && s.value > 0)).length;
+  const { spec, data, theme, warnings } = v;
+  const { table } = data;
+  if (spec.x === undefined || data.x === undefined) return failure(theme, VIEW_STATES.needs('pie', 'an x column (the slices)'), v.caption);
+  if (data.ys.length === 0) return failure(theme, VIEW_STATES.needs('pie', 'a y column (the sizes)'), v.caption);
+  const xi = data.x;
+  const yi = data.ys[0];
+  const yName = table.columns[yi].name;
+  const format = spec.format?.[data.yNames[0]];
+  const slices = table.rows.map((row) => ({ label: nameOf(row[xi] ?? null, table.columns[xi], spec.format?.[spec.x!]), value: row[yi] ?? null }));
+  const positive = (value: Cell): value is number => typeof value === 'number' && Number.isFinite(value) && value > 0;
+  const huge = slices.filter((s) => positive(s.value) && s.value > DRAWABLE).length;
+  if (huge > 0) warnings.push(VIEW_STATES.tooLarge(huge));
+  const dropped = slices.filter((s) => !positive(s.value)).length;
   if (dropped > 0) warnings.push(VIEW_STATES.slicesDropped(dropped, yName));
-  let kept = slices.filter((s): s is { label: string; value: number } => typeof s.value === 'number' && Number.isFinite(s.value) && s.value > 0);
-  if (kept.length === 0) return notice(theme, VIEW_STATES.noPositive(yName), v.caption, warnings);
+  let kept = slices.filter((s): s is { label: string; value: number } => positive(s.value) && s.value <= DRAWABLE);
   if (kept.length > 6) {
     const rest = kept.slice(5);
-    kept = [...kept.slice(0, 5), { label: `other (${rest.length})`, value: rest.reduce((a, s) => a + s.value, 0) }];
+    let other = 0;
+    for (const s of rest) other += s.value;
+    kept = [...kept.slice(0, 5), { label: `other (${rest.length})`, value: other }];
     warnings.push(VIEW_STATES.slicesFolded(rest.length + 5));
   }
-  const total = kept.reduce((a, s) => a + s.value, 0);
+  let total = 0;
+  for (const s of kept) total += s.value;
+  if (kept.length === 0 || !Number.isFinite(total)) return notice(theme, kept.length === 0 ? VIEW_STATES.noPositive(yName) : VIEW_STATES.tooLarge(kept.length), v.caption, warnings);
   const r = 110;
   const cx = r + 8;
   const cy = r + 12;
   const angles = geo.pie(kept.map((s) => s.value));
+  const shareOf = (value: number) => `${formatNumber((value / total) * 100, 1)}%`;
   let body = `<g transform="translate(${px(cx)},${px(cy)})">`;
   kept.forEach((s, i) => {
-    const tip = `${s.label}: ${formatNumber(s.value, 2)} (${formatNumber((s.value / total) * 100, 1)}%)`;
+    const tip = `${s.label}: ${formatCell(s.value, undefined, format)} (${shareOf(s.value)})`;
     body += `<path d="${geo.arc(angles[i].start, angles[i].end, r)}" fill="${theme.ink}" fill-opacity="${TINTS[i % TINTS.length]}" stroke="${theme.ground}" stroke-width="2" stroke-linejoin="round" data-tip="${esc(tip)}"/>`;
   });
   body += '</g>';
@@ -504,64 +572,39 @@ function pieView(v: View): Rendered {
   const listTop = cy - (kept.length * lineH) / 2 + theme.caption;
   kept.forEach((s, i) => {
     const y = listTop + i * lineH;
-    const share = `${formatNumber((s.value / total) * 100, 1)}%`;
-    const room = theme.width - lx - 40 - textWidth(`  ${formatNumber(s.value, 2)}  ${share}`, theme.caption);
+    const figures = `${formatCell(s.value, undefined, format)}  ${shareOf(s.value)}`;
+    const room = theme.width - lx - 40 - textWidth(`  ${figures}`, theme.caption);
     body += `<rect x="${px(lx)}" y="${px(y - theme.caption * 0.85)}" width="14" height="12" rx="2" fill="${theme.ink}" fill-opacity="${TINTS[i % TINTS.length]}"/>`;
     const label = wrap(s.label, theme.caption, Math.max(40, room), 1).lines[0];
-    body += text(lx + 22, y, String(i + 1)) + text(lx + 40, y, label) + text(theme.width - 8, y, `${formatNumber(s.value, 2)}  ${share}`, { anchor: 'end', fill: theme.muted });
+    body += text(lx + 22, y, String(i + 1)) + text(lx + 40, y, label) + text(theme.width - 8, y, figures, { anchor: 'end', fill: theme.muted });
   });
-  const desc = `Pie chart of ${yName} by ${spec.x}, ${kept.length} slices: ${kept.map((s) => `${s.label} ${formatNumber((s.value / total) * 100, 1)}%`).join(', ')}. The values are in the source table under the figure.`;
+  const desc = `Pie chart of ${yName} by ${table.columns[xi].name}, ${kept.length} slices: ${kept.map((s) => `${s.label} ${shareOf(s.value)}`).join(', ')}. The values are in the source table under the figure.`;
   return { svg: frame(theme, cy * 2, v.caption, desc, body), warnings };
 }
 
 // ---- table ----
 
+/** Text for HTML content, escaped; control characters other than tab and newline dropped. */
+const html = (value: string): string => esc(value);
+
+/**
+ * A table view as an HTML `<table>` (parent Decision Log 24: text, not a picture): the transformed view's rows in its
+ * order, at most `TABLE_VIEW_ROWS` without a `limit` and the `limit` up to `TABLE_VIEW_MAX_ROWS` with one, the note
+ * "first <n> of <N> rows" when it shows fewer than the view holds (N after the spec's filter, aggregation, sort and
+ * limit), "no rows to draw" when it holds none. Only table elements and `class` attributes: numbers right-aligned by
+ * class, the note a bottom caption. The page's and the exporters' stylesheets draw it.
+ */
 function tableView(v: View): Rendered {
-  const { spec, table, theme, warnings } = v;
-  const names = spec.columns ?? table.columns.map((c) => c.name);
-  const cols = names.map((name) => table.columns.find((c) => c.name === name)!);
-  const shown = table.rows.slice(0, Math.min(spec.limit ?? TABLE_ROWS, TABLE_ROWS));
-  const at = cols.map((c) => table.columns.indexOf(c));
-  const cells = shown.map((row) => at.map((i, k) => formatCell(row[i] ?? null, cols[k], spec.format?.[cols[k].name])));
+  const { spec, data, warnings } = v;
+  const { table } = data;
+  const at = shownColumns(data, spec);
+  const cols = at.map((i) => table.columns[i]);
+  const bound = spec.limit === undefined ? TABLE_VIEW_ROWS : Math.min(spec.limit, TABLE_VIEW_MAX_ROWS);
+  const shown = table.rows.slice(0, bound);
   const numeric = cols.map((c) => c.type === 'number');
-  const size = theme.body;
-  // Column widths from the widest cell (head or value), scaled to the width when they overflow; cells then wrap.
-  const pad = 12;
-  const natural = cols.map((c, k) => Math.max(textWidth(c.name, theme.caption), ...cells.map((r) => textWidth(r[k], size, numeric[k]))) + pad * 2);
-  const sum = natural.reduce((a, b) => a + b, 0);
-  const widths = sum <= theme.width ? natural : natural.map((w) => Math.max(56, (w / sum) * theme.width));
-  const scale = widths.reduce((a, b) => a + b, 0) > theme.width ? theme.width / widths.reduce((a, b) => a + b, 0) : 1;
-  const ws = widths.map((w) => w * scale);
-  const xs = ws.map((_, k) => ws.slice(0, k).reduce((a, b) => a + b, 0));
-  let shortened = false;
-  const lineH = size * 1.5;
-  const headLines = cols.map((c, k) => wrap(c.name, theme.caption, ws[k] - pad * 2, 2));
-  const headH = Math.max(0, ...headLines.map((h) => h.lines.length)) * theme.caption * 1.4 + 16;
-  let body = hline(0, theme.width, 0.5, theme.ink);
-  headLines.forEach((h, k) => {
-    shortened ||= h.shortened;
-    body += text(numeric[k] ? xs[k] + ws[k] - pad : xs[k] + pad, 8 + theme.caption, h.lines, { anchor: numeric[k] ? 'end' : 'start', fill: theme.muted, line: theme.caption * 1.4 });
-  });
-  let y = headH;
-  body += hline(0, theme.width, y, theme.rule);
-  for (const row of cells) {
-    const wrapped = row.map((cell, k) => (numeric[k] ? { lines: [cell], shortened: false } : wrap(cell, size, ws[k] - pad * 2, 3)));
-    const h = Math.max(1, ...wrapped.map((w) => w.lines.length)) * lineH + 10;
-    wrapped.forEach((w, k) => {
-      shortened ||= w.shortened;
-      body += text(numeric[k] ? xs[k] + ws[k] - pad : xs[k] + pad, y + 5 + size, w.lines, { anchor: numeric[k] ? 'end' : 'start', size, line: lineH, mono: numeric[k] ? theme.fontMono : undefined });
-    });
-    y += h;
-    body += hline(0, theme.width, y, theme.rule);
-  }
-  if (shortened) warnings.push(VIEW_STATES.cellsShortened);
-  if (table.rows.length > shown.length) {
-    body += text(0, y + theme.caption + 10, `${shown.length} of ${table.rows.length} rows; the source table has every row.`, { fill: theme.muted });
-    y += theme.caption + 18;
-  } else if (table.rows.length === 0) {
-    body += text(0, y + theme.caption + 10, VIEW_STATES.empty, { fill: theme.muted });
-    y += theme.caption + 18;
-  }
-  const desc = `Table of ${names.join(', ')}, ${table.rows.length} ${table.rows.length === 1 ? 'row' : 'rows'}${table.rows.length > shown.length ? `, the first ${shown.length} shown` : ''}. The source table has every row.`;
-  return { svg: frame(theme, y + 4, v.caption, desc, body), warnings };
+  const cell = (tag: 'th' | 'td', k: number, content: string) => `<${tag}${numeric[k] ? ' class="dash-num"' : ''}>${html(content)}</${tag}>`;
+  const head = `<thead><tr>${cols.map((c, k) => cell('th', k, c.name)).join('')}</tr></thead>`;
+  const rows = shown.map((row) => `<tr>${at.map((i, k) => cell('td', k, formatCell(row[i] ?? null, cols[k], spec.format?.[cols[k].name]))).join('')}</tr>`).join('');
+  const note = table.rows.length === 0 ? VIEW_STATES.empty : table.rows.length > shown.length ? VIEW_STATES.tablePreview(shown.length, table.rows.length) : null;
+  return { html: `<table class="dash-table">${note !== null ? `<caption class="dash-table-note">${html(note)}</caption>` : ''}${head}<tbody>${rows}</tbody></table>`, warnings };
 }
