@@ -11,10 +11,10 @@ import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '..
 import { readFlat, ROOT } from '../../slides/model';
 import { addThread, threadStates } from '../../slides/threads';
 import { DeckSession } from '../../slides/editor/session';
-import { transact } from '../../yjs';
+import { applyV2, newDoc, stateV2, transact } from '../../yjs';
 import * as Y from '../../yjs/slides';
 import { design, type BoardSeed } from '../fixtures/support';
-import { moveOriginOf } from '../move';
+import { moveElementToBoard, moveOriginOf } from '../move';
 import { DesignWorkbench } from './DesignWorkbench';
 import { DesignView } from './viewport';
 
@@ -115,6 +115,66 @@ describe('comments on a design', () => {
     expect([session.snapshot().currentSlide, session.snapshot().selection, view.snapshot().frame]).toEqual(['b2', [], 'b2']);
     fireEvent.click(within(rail).getByRole('button', { name: 'Show element: Ship the first week.' }));
     expect([session.snapshot().currentSlide, session.snapshot().selection, view.snapshot().frame]).toEqual(['b1', ['lede'], null]);
+  });
+});
+
+/** happy-dom lays nothing out: a board's elements report their style's box (C's comments test's way). */
+function fakeLayout(container: HTMLElement, boardId: string): void {
+  const root = container.querySelector<HTMLElement>(`[data-board-id="${boardId}"] .maws-slide`)!;
+  const px = (n: HTMLElement, k: string) => Number.parseFloat(n.style.getPropertyValue(k)) || 0;
+  for (const n of root.querySelectorAll<HTMLElement>('[data-eid]')) {
+    Object.defineProperty(n, 'offsetLeft', { configurable: true, get: () => px(n, 'left') });
+    Object.defineProperty(n, 'offsetTop', { configurable: true, get: () => px(n, 'top') });
+    Object.defineProperty(n, 'offsetWidth', { configurable: true, get: () => px(n, 'width') });
+    Object.defineProperty(n, 'offsetHeight', { configurable: true, get: () => px(n, 'height') });
+    Object.defineProperty(n, 'offsetParent', { configurable: true, get: () => root });
+  }
+}
+
+describe('element pins on every board', () => {
+  it('pins an element on an inactive board (a move another replica made lands there unseen by this one), once, at its corner; the active board’s stay its overlay’s', async () => {
+    const { doc, session, container } = mount();
+    act(() => session.show('b2')); // the desktop active: its overlay alone takes gestures
+    addThread(doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: '', by: { kind: 'human' }, at: 1 }, 'deck-comments');
+    fakeLayout(container, 'b1');
+    await act(async () => new Promise((r) => setTimeout(r, 80)));
+    const pins = () => [...container.querySelectorAll<HTMLElement>('[data-comment-pin="cta"]')];
+    expect(pins()).toHaveLength(1);
+    const pin = pins()[0]!;
+    expect(pin.closest('[data-active-board]')).toBeNull(); // not the overlay's
+    // at the element's top-right on screen: the board at (0, 0) of the world, the view at (10, 20) × 0.5
+    const host = pin.closest<HTMLElement>('[data-board-pins-of="b1"]')!;
+    expect([host.style.left, host.style.top]).toEqual(['10px', '20px']);
+    expect([Number.parseFloat(pin.style.left), Number.parseFloat(pin.style.top)]).toEqual([(24 + 342) * 0.5, 740 * 0.5]);
+    fireEvent.click(pin);
+    expect(session.snapshot().rail).toBe('comments');
+
+    // the board activated: its pin is its overlay's, and only one
+    act(() => session.show('b1'));
+    fakeLayout(container, 'b1');
+    await act(async () => new Promise((r) => setTimeout(r, 80)));
+    expect(pins()).toHaveLength(1);
+    expect(pins()[0]!.closest('[data-active-board="b1"]')).not.toBeNull();
+  });
+
+  it('another replica’s cross-board move: the source stays active here, the pin and the card follow to the destination, once', async () => {
+    const { doc, session, container, overlay } = mount();
+    addThread(doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: '', by: { kind: 'human' }, at: 1 }, 'deck-comments');
+    act(() => session.show('b1'));
+    const remote = newDoc();
+    applyV2(remote, stateV2(doc));
+    const moved = moveElementToBoard(remote, 'b1', 'b2', 'cta').ids.get('cta')!;
+    act(() => applyV2(doc, stateV2(remote), 'remote'));
+    expect(session.snapshot().currentSlide).toBe('b1');
+    fakeLayout(container, 'b2');
+    await act(async () => new Promise((r) => setTimeout(r, 80)));
+    expect(container.querySelectorAll('[data-comment-pin="cta"]')).toHaveLength(0);
+    const pins = container.querySelectorAll<HTMLElement>(`[data-comment-pin="${moved}"]`);
+    expect(pins).toHaveLength(1);
+    expect(pins[0]!.closest('[data-board-pins-of="b2"]')).not.toBeNull();
+    expect([Number.parseFloat(pins[0]!.style.left), Number.parseFloat(pins[0]!.style.top)]).toEqual([(24 + 342) * 0.5, 740 * 0.5]);
+    expect(overlay().locate('t1')).not.toBeNull(); // the card finds it on the destination's canvas
+    expect(Y.threadScalars(doc, 't1')).toMatchObject({ slideId: 'b2', elementId: moved });
   });
 });
 

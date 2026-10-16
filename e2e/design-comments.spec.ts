@@ -10,7 +10,8 @@
 //   element; its pin follows the element's move and its board's move; "Move to board…" takes the element across boards
 //   under a derived id, the thread with it, and again onto a board already holding the id that move would derive (the
 //   element under a minted id, the thread on it); the agent's republish of its text moves the quote.
-// - The agent replies and resolves through its tools' writes; the rail shows both and the count follows.
+// - The agent replies and resolves through its tools' writes; the rail shows both and the count follows. Its move of the
+//   element to a board this replica does not show leaves the source active and pins the element on the destination once.
 // - Deleting the element orphans its thread with the last text, Undo brings it back; deleting the board orphans the
 //   board's thread with the last title, a restore of a version from before brings the board back with the thread live and
 //   every conversation since kept.
@@ -224,6 +225,18 @@ test('comments on a design’s boards and elements: the card, the pins through m
     await toggleRail();
     await toolbar.getByRole('button', { name: 'Undo' }).click();
     await expect.poll(async () => await threadOf((t) => t.id === noteThread)).toMatchObject({ orphan: false, live: true });
+  });
+
+  await test.step('the agent moves it to a board this replica does not show: the source stays active, the pin follows, once', async () => {
+    const { moved } = await asAgent(channel!, id, { op: 'move', from: 'phone', to: 'desktop', elementId: onPhone });
+    await expect.poll(async () => await threadOf((t) => t.id === noteThread)).toMatchObject({ slideId: 'desktop', elementId: moved, live: true });
+    expect((await viewOf(page, id, 'panel')).currentBoard).toBe('phone'); // nothing activated the destination here
+    await ws.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
+    const pin = ws.locator(`[data-comment-pin="${moved}"]`);
+    await expect(pin).toHaveCount(1);
+    await expect(ws.locator(`[data-board-pins-of="desktop"] [data-comment-pin="${moved}"]`)).toHaveCount(1);
+    await expect.poll(() => pinOffset(pin, ws.locator(`[data-board-id="desktop"] [data-eid="${moved}"]`))).toBeLessThan(4);
+    await expect(ws.locator(`[data-comment-pin="${onPhone}"]`)).toHaveCount(0);
   });
 
   await test.step('deleting the board orphans its thread with the last title; a restore brings it back live, every conversation since kept', async () => {

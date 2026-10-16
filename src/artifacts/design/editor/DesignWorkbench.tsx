@@ -498,7 +498,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
             <p className="deck-quiet">{C.noBoards}</p>
           </div>
         ) : (
-          <DesignCommentFrame api={commentsApi} surface={comments} view={view} boards={boards} canvases={canvases}>
+          <DesignCommentFrame api={commentsApi} activeId={active?.id ?? null} surface={comments} view={view} boards={boards} canvases={canvases}>
           <World
             session={session}
             view={view}

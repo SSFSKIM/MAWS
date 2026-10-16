@@ -316,6 +316,9 @@
 .design-board-pins .deck-comment-pin {
   pointer-events: auto;
 }
+.design-board-element-pins {
+  position: absolute;
+}
 .design-move-to-board {
   display: flex;
   padding: 8px 12px 0;

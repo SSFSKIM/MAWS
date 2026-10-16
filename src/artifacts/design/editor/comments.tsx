@@ -5,8 +5,11 @@
 // element's through C's controller with the surface's passage renamed for a board (its title, not a slide number) and
 // both naming their target (`artifactTarget`, Decision Log 12) for the agent's lead. Showing a board's thread selects
 // the board's frame. C's pins, rail, Resolve and Reopen, reply and orphan reading are C's as they are; this module adds
-// the comment frame's locator over every board (an element's box on its board's canvas, a board's frame) and the
-// boards' own pins at their top-right corners. Thread writes carry C's comments origin, outside undo.
+// the comment frame's locator over every board (an element's box on its board's canvas, a board's frame), the boards'
+// own pins at their top-right corners, and the element pins of every board but the active one, C's pins (`CommentPins`)
+// over each such board's own canvas: the active board's are its overlay's, the one interaction overlay, so an element
+// pins once wherever it is, including on a board another replica moved it to while this one shows another. Thread
+// writes carry C's comments origin, outside undo.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from '../../document/editor/comments/surface';
 import type { SlideCanvas } from '../../slides/canvas';
@@ -15,6 +18,7 @@ import { addThread, discardThread, elementQuote, getThread, newThreadId, reopen,
 import { COMMENTS_ORIGIN, HUMAN_AUTHOR, useDeckComments, type DeckCommentsApi } from '../../slides/editor/comments/controller';
 import { COMMENTS_COPY } from '../../slides/editor/comments/copy';
 import type { CommentsRailLabels } from '../../slides/editor/comments/CommentsRail';
+import { CommentPins } from '../../slides/editor/comments/Pins';
 import { useDeckThreadStates, useOpenThreadCount } from '../../slides/editor/comments/use-threads';
 import type { DeckSession } from '../../slides/editor/session';
 import { useDocVersion } from '../../slides/editor/transform/use-doc-version';
@@ -141,6 +145,8 @@ export function DesignCommentButtons({ api, view, railOpen, onToggleRail }: { ap
 
 interface FrameProps {
   api: DeckCommentsApi;
+  /** The board C's overlay is on (its element pins are the overlay's). */
+  activeId: string | null;
   surface: DocumentComments | undefined;
   view: DesignView;
   boards: readonly BoardView[];
@@ -153,7 +159,7 @@ interface FrameProps {
  * located on whichever board it is on, an element by its node on that board's canvas, a board by its frame on screen;
  * the layout key moves with the view, every update and every board's layout pass. ⌥⌘M comments. The boards' pins.
  */
-export function DesignCommentFrame({ api, surface, view, boards, canvases, children }: FrameProps) {
+export function DesignCommentFrame({ api, activeId, surface, view, boards, canvases, children }: FrameProps) {
   const { session, author, readOnly, setActive } = api;
   const frame = useRef<HTMLDivElement>(null);
   const version = useDocVersion(session);
@@ -209,7 +215,7 @@ export function DesignCommentFrame({ api, surface, view, boards, canvases, child
   return (
     <div ref={frame} className="deck-comment-frame design-comment-frame" data-design-comment-frame onKeyDown={onKeyDown}>
       {children}
-      {viewport && <BoardPins api={api} boards={boards} zoom={viewport.zoom} x={viewport.x} y={viewport.y} />}
+      {viewport && <BoardPins api={api} activeId={activeId} boards={boards} canvases={canvases} version={version} zoom={viewport.zoom} x={viewport.x} y={viewport.y} />}
       {surface?.overlay({ ...reach, layoutKey: `${at}:${version}:${layout}` })}
     </div>
   );
@@ -225,18 +231,36 @@ function threadRect(canvases: ReadonlyMap<string, SlideCanvas>, frame: HTMLEleme
   return { x: r.left - f.left, y: r.top - f.top, width: r.width, height: r.height };
 }
 
-/** One pin per board carrying an open board-level thread, at its frame's top-right corner on screen. */
-function BoardPins({ api, boards, zoom, x, y }: { api: DeckCommentsApi; boards: readonly BoardView[]; zoom: number; x: number; y: number }) {
+/**
+ * One pin per board carrying an open board-level thread, at its frame's top-right corner on screen; and C's element pins
+ * on each inactive board carrying an open element thread, in a box at the board's place on screen.
+ */
+function BoardPins(props: { api: DeckCommentsApi; activeId: string | null; boards: readonly BoardView[]; canvases: ReadonlyMap<string, SlideCanvas>; version: number; zoom: number; x: number; y: number }) {
+  const { api, activeId, boards, canvases, version, zoom, x, y } = props;
   const threads = useDeckThreadStates(api.session.doc);
-  const byBoard = useMemo(() => {
+  const { byBoard, elementBoards } = useMemo(() => {
     const out = new Map<string, typeof threads>();
-    for (const t of threads) if (t.elementId === ROOT && t.status === 'open' && t.live) out.set(t.slideId, [...(out.get(t.slideId) ?? []), t]);
-    return out;
+    const elements = new Set<string>();
+    for (const t of threads) {
+      if (t.status !== 'open' || !t.live) continue;
+      if (t.elementId === ROOT) out.set(t.slideId, [...(out.get(t.slideId) ?? []), t]);
+      else elements.add(t.slideId);
+    }
+    return { byBoard: out, elementBoards: elements };
   }, [threads]);
-  if (byBoard.size === 0) return null;
   const frames = new Map(boards.flatMap((b): [string, BoardFrame][] => (b.frame ? [[b.id, b.frame]] : [])));
+  const passive = [...elementBoards].filter((id) => id !== activeId && frames.has(id) && canvases.has(id));
+  if (byBoard.size === 0 && passive.length === 0) return null;
   return (
     <div className="design-board-pins">
+      {passive.map((boardId) => {
+        const f = frames.get(boardId)!;
+        return (
+          <div key={`elements:${boardId}`} className="design-board-element-pins" data-board-pins-of={boardId} style={{ left: x + f.x * zoom, top: y + f.y * zoom, width: f.w * zoom, height: f.h * zoom }}>
+            <CommentPins canvas={canvases.get(boardId)!} slideId={boardId} scale={zoom} version={version} />
+          </div>
+        );
+      })}
       {[...byBoard].map(([boardId, list]) => {
         const f = frames.get(boardId);
         if (!f) return null;
