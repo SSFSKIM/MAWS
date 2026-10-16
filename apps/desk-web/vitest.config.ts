@@ -11,6 +11,6 @@ export default defineConfig({
     name: 'desk-web',
     root: import.meta.dirname,
     environment: 'node',
-    include: ['src/**/*.test.{ts,tsx}'],
+    include: ['src/**/*.test.{ts,tsx}', 'test/**/*.test.ts'],
   },
 });

@@ -20,6 +20,7 @@ import { FakeMachine, loadRecording, TWO_SUBAGENTS, type FakeMachineOptions, typ
 import { base64urlEncode, encodeEnrollmentCode, seal, type EnrollmentIssued, type LogEvent, type ProjectUp, type Raised, type Rpc } from 'desk-hub/protocol';
 import { LocalHub } from '../test/local/hub';
 import { TestMachine } from '../test/local/machine';
+import { revokeMachines } from '../test/local/revoke';
 import { enrollInBrowser, holdOrgKey } from './org';
 
 // Each case opens its own project with its own machines, so one failing does not stop the rest.
@@ -55,9 +56,11 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   for (const m of machines) await m.close();
-  for (const name of enrolledNames) await fetch(`${hub.url}/api/machines/${encodeURIComponent(name)}`, { method: 'DELETE' }).catch(() => {});
+  const left = hub ? await revokeMachines(hub.url, enrolledNames) : [];
   await context?.close();
   await hub?.stop();
+  // After the browser and the hub are down: a machine the hub did not revoke stays enrolled in the persistent local org.
+  expect(left, 'machines this run left enrolled in the local org').toEqual([]);
 });
 
 /** An enrollment code for `machine`, as the browser builds one: a one-time token from the hub, and the org key. */
