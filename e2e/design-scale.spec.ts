@@ -1,0 +1,658 @@
+// The design scale gate (docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md, M6, acceptance 7; E0's ratified
+// table, spikes/p3-design/findings.txt (b)): the product build, the 24-board bench design (E0's exact mix with its card
+// grids, src/artifacts/design/fixtures/bench.ts, one board 4,096×8,192) seeded through the renderer's design seam, an agent
+// session driven through the host's scale seam (C's DeckScaleSeam under MAWS_DESIGN_PERF: A's real `artifact_read` and
+// `artifact_publish` as the session, a design's publish through its adapter, the host loop sampled around each call).
+// Every row is measured on the product's own routes, at the trials' 1-minute load, and judged on its WORST trial; no
+// best-of-trials and no high-load waiver: a trial at a load of 10 or more is not acceptance, and the run fails then.
+//   1 open      artifact-cold (the host's copy unloaded, seed and earlier replicas closed, nothing holding the design) in
+//               a ready app: the library row's press (its pointerdown's timestamp) to every board's canvas laid out (the
+//               tab's drawnAt, which waits each canvas's first layout pass); the tab constructor to drawn beside it; every
+//               board's identity, size and element count verified in the DOM at ready                       ≤ 1,000 ms
+//   2 frames    real wheel input through the world's own handler (pan at 25 %; a pinch zoom from fit to about 100 % and
+//               back): a DevTools trace's per-frame main-thread executing work (top-level tasks clipped to the renderer's
+//               BeginFrame intervals; e2e/support/design-frames.ts), p95 over the active frames             ≤ 4 ms
+//   2 drops     the rAF-gap proxy over its calibrated idle interval (≤ 2 %); the compositor's own PipelineReporter drops
+//               beside it, separately labelled (≤ 2 %, or unavailable when the trace carries none)
+//   2 stress    the same frame rows while the owner drags a board by its title and the agent republishes that board (a
+//               card's fill, content unrelated to the frame) every 0.7 s, its actual start cadence and changed paths
+//               recorded; the dragged frame and the agent's fill both stand after it
+//   3 relayout  a Theme background change through the Theme rail (the design's overrides: the scope moves, every canvas
+//               invalidated in one batch): its Enter's timestamp to the last of 24 fresh onLayout observations  ≤ 50 ms
+//   4 memory    the renderer's working set (its window's own PID in Electron's metrics, KiB → MiB), ordinary and after a
+//               forced collection, with every export window closed: ordinary ≤ 500 MB (500 × 10⁶ bytes)
+//   5 publish   the host loop's busy time over one agent publish (one board; the whole design's 24 boards); its longest
+//               gap and wall time beside it                                                     ≤ 50 ms; ≤ 300 ms
+//   6 pdf       every board as one PDF through main's export service: the request to the committed file, its 24 pages
+//               checked against each board's native size                                                    < 55 s
+// Raw trials, frame lists, publish cadences, the machine and its loads go to test-results/design-scale.json, each trial's
+// trace to test-results/design-scale/. Run on purpose only, at the quietest load the machine gives:
+//   pnpm e2e:design-scale          (MAWS_DESIGN_SCALE=1 inline; never in a default list)
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { cpus, loadavg, release, totalmem } from 'node:os';
+import { join } from 'node:path';
+import { expect, test, type Locator, type Page } from '@playwright/test';
+import { BENCH_CARD, BENCH_CARD_FILLS, benchBoards, benchDesignFiles, type BenchBoard } from '../src/artifacts/design/fixtures/bench';
+import { frameWork, rafDrops, type FrameWork, type RafDrops, type TraceEvent } from './support/design-frames';
+import { armLayoutProbe, boardOf, boardsOf, disarmLayoutProbe, findIn, frameOf, headerAction, layoutProbeResult, ok, seamInstalled, seed, tabsOf, type TabView } from './support/design';
+import { PerfSeam, type LoopStats } from './support/document-scale';
+import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+
+test.skip(process.env.MAWS_DESIGN_SCALE !== '1', 'the design scale gate runs only under MAWS_DESIGN_SCALE=1');
+test.describe.configure({ timeout: 3_600_000 });
+
+const RESULTS = join(REPO_ROOT, 'test-results', 'design-scale.json');
+const TRACES = join(REPO_ROOT, 'test-results', 'design-scale');
+const UNLOAD_WAIT_MS = 66_000; // the host's idle unload (A's IDLE_UNLOAD_MS, 60 s) and a margin
+const TRIALS = 3;
+const LOAD_LIMIT = 10;
+const QUIET_WAIT_MS = 10 * 60_000;
+const PUBLISH_EVERY_MS = 700;
+const TITLE = 'Scale 24';
+const AGENT = 'design-agent';
+const POPPLER = '/opt/homebrew/bin';
+const BOARDS = benchBoards();
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const load1 = (): number => +loadavg()[0]!.toFixed(2);
+const boardPath = (id: string) => `project/boards/${id}.html`;
+const rgbOf = (hex: string) => `rgb(${[1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).join(', ')})`;
+const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)]!;
+
+/** Waits (bounded) for a 1-minute load under the limit; answers the load the trial starts at. */
+async function quiet(): Promise<number> {
+  const until = Date.now() + QUIET_WAIT_MS;
+  while (load1() >= LOAD_LIMIT && Date.now() < until) await sleep(15_000);
+  return load1();
+}
+
+// ---- rows: each judged on its worst trial; a trial at load ≥ 10 is not acceptance ------------------------------------
+
+type Verdict = 'met' | 'missed' | 'not acceptance (load ≥ 10)' | 'unreadable' | 'recorded';
+interface Trial {
+  /** null when the trial could not be read (its error says why); never a stand-in number. */
+  value: number | null;
+  load: number;
+  note?: string;
+  error?: string;
+}
+interface Row {
+  row: string;
+  measure: string;
+  unit: string;
+  bound: string;
+  limit: number | null;
+  /** Strictly below the limit (the PDF's "< 55 s"), else at most. */
+  strict?: boolean;
+  value: number | null; // the worst trial's
+  verdict: Verdict;
+  loads: number[];
+  trials: Trial[];
+}
+
+class Rows {
+  readonly rows: Row[] = [];
+  private readonly extra: Record<string, unknown> = {};
+  constructor(private readonly meta: Record<string, unknown>) {}
+
+  add(row: string, measure: string, unit: string, limit: number | null, bound: string, trials: Trial[], strict = false): Row {
+    const read = trials.filter((t) => t.value !== null).map((t) => t.value!);
+    const worst = read.length > 0 ? Math.max(...read) : null;
+    const loads = trials.map((t) => t.load);
+    const verdict: Verdict =
+      trials.length === 0 || trials.some((t) => t.value === null) ? 'unreadable'
+      : limit === null ? 'recorded'
+      : loads.some((l) => l >= LOAD_LIMIT) ? 'not acceptance (load ≥ 10)'
+      : (strict ? worst! < limit : worst! <= limit) ? 'met'
+      : 'missed';
+    const entry: Row = { row, measure, unit, bound, limit, ...(strict && { strict }), value: worst === null ? null : +worst.toFixed(3), verdict, loads, trials: trials.map((t) => ({ ...t, value: t.value === null ? null : +t.value.toFixed(3) })) };
+    this.rows.push(entry);
+    this.write();
+    console.log(`[design scale] ${row}: ${entry.value ?? '—'} ${unit} (worst of ${trials.length}; ${verdict}; bound ${bound}; trials ${trials.map((t) => `${t.value === null ? `unreadable (${t.error})` : t.value.toFixed(2)} at load ${t.load}`).join(', ')})`);
+    return entry;
+  }
+
+  write(extra: Record<string, unknown> = {}): void {
+    Object.assign(this.extra, extra);
+    mkdirSync(join(RESULTS, '..'), { recursive: true });
+    writeFileSync(RESULTS, `${JSON.stringify({ ...this.meta, ...this.extra, judging: { rule: 'each row on its worst trial; a trial at a 1-minute load of 10 or more is not acceptance; an unreadable trial is never replaced by a number', loadLimit: LOAD_LIMIT }, rows: this.rows }, null, 2)}\n`);
+  }
+}
+
+// ---- the app --------------------------------------------------------------------------------------------------------
+
+let launch: MawsLaunch | null = null;
+let userData: string | null = null;
+test.afterEach(async () => {
+  await launch?.cleanup();
+  launch = null;
+  if (userData) rmSync(userData, { recursive: true, force: true });
+  userData = null;
+});
+
+async function showLibrary(page: Page): Promise<void> {
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  await expect(page.locator('[data-library]')).toBeVisible({ timeout: 15_000 });
+}
+
+const mainTab = async (page: Page, id: string): Promise<TabView | undefined> => (await tabsOf(page, id)).find((t) => t.surface === 'main');
+
+/** What the main tab draws, read at ready: each board's identity, drawn size and element nodes. */
+async function drawnBoards(tab: Locator): Promise<{ id: string; w: number; h: number; elements: number }[]> {
+  return tab.locator('[data-design-world] [data-board-id]').evaluateAll((nodes) =>
+    nodes.map((n) => {
+      const slide = n.querySelector<HTMLElement>('.maws-slide');
+      return { id: (n as HTMLElement).dataset.boardId!, w: slide?.offsetWidth ?? -1, h: slide?.offsetHeight ?? -1, elements: slide ? slide.querySelectorAll('[data-eid]').length : -1 };
+    }),
+  );
+}
+
+/** Opens the design from the library in a main tab: the row's press to every canvas laid out, and what was drawn. */
+async function openTimed(page: Page, id: string): Promise<{ inputToReady: number; constructorToDrawn: number; inputToConstructor: number; tab: Locator; drawn: Awaited<ReturnType<typeof drawnBoards>> }> {
+  await showLibrary(page);
+  // the press's own timestamp (the page's clock, as the tab's timings are)
+  await page.evaluate(() => {
+    const w = window as unknown as { __designPress?: number | null };
+    w.__designPress = null;
+    window.addEventListener('pointerdown', (e) => (w.__designPress ??= e.timeStamp), { capture: true, once: true });
+  });
+  await page.locator('[data-library]').getByRole('article', { name: TITLE, exact: true }).click({ timeout: 15_000 });
+  const tab = page.locator(`[data-region="main"] [data-artifact-tab="${id}"]`);
+  await expect(tab.locator('[data-design-editor]')).toBeVisible({ timeout: 30_000 });
+  await expect.poll(async () => (await mainTab(page, id))?.timings.drawnAt !== undefined, { timeout: 60_000, message: 'every board of the open is laid out' }).toBe(true);
+  const timings = (await mainTab(page, id))!.timings;
+  const press = await page.evaluate(() => (window as unknown as { __designPress?: number | null }).__designPress ?? null);
+  if (press === null) throw new Error('the library row’s press was not seen');
+  const drawn = await drawnBoards(tab);
+  return { inputToReady: timings.drawnAt! - press, constructorToDrawn: timings.drawnAt! - timings.openedAt, inputToConstructor: timings.openedAt - press, tab, drawn };
+}
+
+async function closeTab(page: Page): Promise<void> {
+  await page.getByRole('button', { name: `Close ${TITLE}`, exact: true }).click();
+  await expect(page.getByRole('button', { name: `Close ${TITLE}`, exact: true })).toHaveCount(0, { timeout: 15_000 });
+}
+
+// ---- the agent, through the host's scale seam -----------------------------------------------------------------------
+
+interface ToolCall<R> {
+  ok: true;
+  isError: boolean;
+  result?: R;
+  text: string;
+  wallMs: number;
+  loop: LoopStats;
+  busyMs: number;
+}
+type ReadResult = { revision: number; files: Record<string, string> };
+type PublishResult = { revision: number; changed: string[] };
+
+/** The agent's view of the design: its last read's files, updated by what it publishes. */
+class DesignAgent {
+  files: Record<string, string> = {};
+  constructor(private readonly seam: PerfSeam, readonly artifactId: string) {}
+
+  async read(): Promise<ToolCall<ReadResult>> {
+    const answer = await this.seam.send<ToolCall<ReadResult>>({ cmd: 'call', session: AGENT, tool: 'artifact_read', args: { artifact: this.artifactId } });
+    if (answer.isError) throw new Error(`the agent's read was refused: ${answer.text}`);
+    this.files = { ...answer.result!.files };
+    return answer;
+  }
+
+  /** The card's fill on a board as the agent last saw it. */
+  fillOf(boardId: string): string {
+    const tag = /<div\b[^>]*\bid="c0"[^>]*>/.exec(this.files[boardPath(boardId)] ?? '')?.[0];
+    const fill = tag ? /background:\s*([^;"]+)/.exec(tag)?.[1]?.trim() : undefined;
+    if (!fill) throw new Error(`${boardId}'s ${BENCH_CARD} has no fill in the agent's read`);
+    return fill;
+  }
+
+  /** One publish restyling each board's card (its fill toggled), from the revision it last saw. */
+  async publish(boardIds: string[]): Promise<ToolCall<PublishResult> & { fills: Record<string, string> }> {
+    const sent: Record<string, string> = {};
+    const fills: Record<string, string> = {};
+    for (const boardId of boardIds) {
+      const path = boardPath(boardId);
+      const now = this.fillOf(boardId).toLowerCase();
+      const next = now === BENCH_CARD_FILLS[0] ? BENCH_CARD_FILLS[1] : BENCH_CARD_FILLS[0];
+      sent[path] = this.files[path]!.replace(/<div\b[^>]*\bid="c0"[^>]*>/, (tag) => tag.replace(/background:\s*[^;"]+/, `background:${next}`));
+      if (sent[path] === this.files[path]) throw new Error(`${path}: the card's fill did not change`);
+      fills[boardId] = next;
+    }
+    const answer = await this.seam.send<ToolCall<PublishResult>>({ cmd: 'call', session: AGENT, tool: 'artifact_publish', args: { artifact: this.artifactId, baseRevision: 'last', files: sent } });
+    if (answer.isError) throw new Error(`the agent's publish was refused: ${answer.text}`);
+    expect([...answer.result!.changed].sort(), 'the publish changed exactly what was sent').toEqual(Object.keys(sent).sort());
+    Object.assign(this.files, sent);
+    return { ...answer, fills };
+  }
+}
+
+interface Publication {
+  due: number;
+  requestedAt: number;
+  answeredAt: number;
+  wallMs: number;
+  busyMs: number;
+  loopMaxMs: number;
+  changed: string[];
+}
+/** The agent republishing `boardId` on a 0.7 s grid until `until` settles; each publication's actual start recorded. */
+async function republishing(agent: DesignAgent, boardId: string, until: Promise<unknown>): Promise<Publication[]> {
+  let done = false;
+  void until.finally(() => (done = true));
+  const t0 = Date.now();
+  const out: Publication[] = [];
+  for (let k = 1; !done; k++) {
+    await sleep(Math.max(0, t0 + k * PUBLISH_EVERY_MS - Date.now()));
+    if (done) break;
+    const requestedAt = Date.now();
+    const answer = await agent.publish([boardId]);
+    out.push({ due: t0 + k * PUBLISH_EVERY_MS, requestedAt, answeredAt: Date.now(), wallMs: answer.wallMs, busyMs: answer.busyMs, loopMaxMs: answer.loop.max, changed: answer.result!.changed });
+  }
+  return out;
+}
+
+// ---- the page's frames ------------------------------------------------------------------------------------------------
+
+const TRACE_CATEGORIES = ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame', 'toplevel', 'blink.user_timing', 'benchmark', 'cc'];
+
+/** `run` under a DevTools trace of the window (Chromium's Tracing domain on the page's session), its events answered. */
+async function traced<T>(page: Page, run: () => Promise<T>): Promise<{ result: T; events: TraceEvent[] }> {
+  const cdp = await page.context().newCDPSession(page);
+  const events: TraceEvent[] = [];
+  cdp.on('Tracing.dataCollected', ({ value }) => events.push(...(value as unknown as TraceEvent[])));
+  const complete = new Promise<void>((resolve) => cdp.once('Tracing.tracingComplete', () => resolve()));
+  await cdp.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { recordMode: 'recordAsMuchAsPossible', includedCategories: TRACE_CATEGORIES, excludedCategories: ['*'] } });
+  let result: T;
+  try {
+    result = await run();
+  } finally {
+    await cdp.send('Tracing.end');
+    await complete;
+    await cdp.detach();
+  }
+  return { result: result!, events };
+}
+
+/** `count` idle animation frame timestamps (the proxy's calibration). */
+const idleFrames = (page: Page, count = 61) =>
+  page.evaluate(
+    (n) =>
+      new Promise<number[]>((resolve) => {
+        const stamps: number[] = [];
+        const tick = (t: number) => {
+          stamps.push(t);
+          if (stamps.length >= n) resolve(stamps);
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    count,
+  );
+const startFrames = (page: Page) =>
+  page.evaluate(() => {
+    const r: { on: boolean; stamps: number[] } = { on: true, stamps: [] };
+    (window as unknown as { __designRaf: typeof r }).__designRaf = r;
+    const tick = (t: number) => {
+      if (!r.on) return;
+      r.stamps.push(t);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    performance.mark('design-scale-start');
+  });
+const stopFrames = (page: Page) =>
+  page.evaluate(() => {
+    performance.mark('design-scale-end');
+    const r = (window as unknown as { __designRaf: { on: boolean; stamps: number[] } }).__designRaf;
+    r.on = false;
+    return r.stamps;
+  });
+
+interface FrameTrial {
+  work: FrameWork | null;
+  drops: RafDrops | null;
+  error?: string;
+}
+/** A gesture measured: its trace's frame work and the rAF proxy, the trace kept on disk. */
+async function measureFrames(page: Page, name: string, gesture: () => Promise<void>): Promise<FrameTrial> {
+  const idle = await idleFrames(page);
+  const { result: stamps, events } = await traced(page, async () => {
+    await startFrames(page);
+    try {
+      await gesture();
+    } finally {
+      await sleep(100); // the last input's frame
+    }
+    return stopFrames(page);
+  });
+  mkdirSync(TRACES, { recursive: true });
+  writeFileSync(join(TRACES, `${name}.trace.json`), JSON.stringify({ traceEvents: events }));
+  const out: FrameTrial = { work: null, drops: null };
+  const errors: string[] = [];
+  try {
+    out.work = frameWork(events, 'design-scale-start', 'design-scale-end');
+  } catch (error) {
+    errors.push(`trace: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  try {
+    out.drops = rafDrops(idle, stamps);
+  } catch (error) {
+    errors.push(`rAF: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (errors.length > 0) out.error = errors.join('; ');
+  return out;
+}
+
+// ---- memory ---------------------------------------------------------------------------------------------------------
+
+/** The window's renderer working set: its own PID found in Electron's metrics (no PID, no figure), KiB → MiB and bytes. */
+async function rendererMemory(launch: MawsLaunch): Promise<{ pid: number; windows: number; workingSetKiB: number; mib: number; bytes: number }> {
+  const read = await launch.app.evaluate(({ app, BrowserWindow }) => {
+    const windows = BrowserWindow.getAllWindows();
+    const pid = windows[0]!.webContents.getOSProcessId();
+    const metric = app.getAppMetrics().find((m) => m.pid === pid);
+    return { pid, windows: windows.length, workingSetKiB: metric ? metric.memory.workingSetSize : null };
+  });
+  if (read.workingSetKiB === null) throw new Error(`no metrics entry for the window's renderer pid ${read.pid}`);
+  return { pid: read.pid, windows: read.windows, workingSetKiB: read.workingSetKiB, mib: read.workingSetKiB / 1024, bytes: read.workingSetKiB * 1024 };
+}
+
+/** Each page's size in PDF points, from pdfinfo. */
+function pageSizes(pdf: string): [number, number][] {
+  const info = execFileSync(join(POPPLER, 'pdfinfo'), ['-f', '1', '-l', '999', pdf], { encoding: 'utf8' });
+  return [...info.matchAll(/^Page\s+\d+ size:\s+([\d.]+) x ([\d.]+) pts/gm)].map((m) => [Number(m[1]), Number(m[2])]);
+}
+
+const worldPoint = async (tab: Locator) => {
+  const box = (await tab.locator('[data-design-world]').boundingBox())!;
+  return { box, mid: { x: box.x + box.width / 2, y: box.y + box.height / 2 } };
+};
+
+test('the design scale gate on the 24-board bench: cold open, pan and zoom frame work and drops (alone and under a drag with the agent publishing), re-layout, memory, host publishes, the PDF', async () => {
+  const loads: Record<string, number> = { start: load1() };
+  userData = mkdtempSync('/tmp/maws-e2e-design-scale-');
+  const perf = join(userData, 'design-perf');
+  launch = await launchMaws({ userData, env: { MAWS_DESIGN_PERF: perf } });
+  const { page, app } = launch;
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1600, 1000));
+  await expect.poll(async () => (await ok<{ state: string }>(page, 'engine.hostState')).state, { timeout: 30_000, message: 'the engine host is ready' }).toBe('ready');
+  await expect.poll(() => seamInstalled(page), { message: 'the renderer seam is installed' }).toBe('object');
+  const seam = new PerfSeam(perf);
+  await expect.poll(() => existsSync(join(perf, 'in')), { timeout: 10_000, message: 'the host started the design scale seam' }).toBe(true);
+  const machine = {
+    cpu: cpus()[0]?.model,
+    cores: cpus().length,
+    memoryGiB: +(totalmem() / 2 ** 30).toFixed(1),
+    os: `${process.platform} ${release()}`,
+    ...(await app.evaluate(({ screen, BrowserWindow }) => ({ electron: process.versions.electron, chrome: process.versions.chrome, display: { hz: screen.getPrimaryDisplay().displayFrequency, scale: screen.getPrimaryDisplay().scaleFactor }, window: BrowserWindow.getAllWindows()[0]!.getBounds() }))),
+    build: process.env.MAWS_E2E_BUILD_KEY ?? null,
+  };
+  const rows = new Rows({ run: new Date().toISOString(), design: 'benchDesignFiles(): E0’s 24-board mix with its card grids (src/artifacts/design/fixtures/bench.ts)', boards: BOARDS.map((b) => ({ id: b.id, size: b.size, w: b.w, h: b.h, elements: b.elements })), machine, loads });
+  const failures: string[] = [];
+
+  // the design, made by the owner and seeded from the bench's files; the seed's replica closes once the host has them
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'design', title: TITLE });
+  const id = artifact.id;
+  const seeded = await seed(page, id, benchDesignFiles(TITLE));
+  expect(seeded.held).toEqual([]);
+  expect((await boardsOf(page, id)).map((b) => [b.id, b.frame])).toEqual(BOARDS.map((b) => [b.id, { x: b.x, y: b.y, w: b.w, h: b.h }]));
+
+  await test.step('1: open artifact-cold, three times: the row’s press to every canvas laid out, every board verified', async () => {
+    const trials: Trial[] = [];
+    const constructor: Trial[] = [];
+    for (let k = 0; k < TRIALS; k++) {
+      await sleep(UNLOAD_WAIT_MS); // nothing holds the design: the host unloads it
+      const load = await quiet();
+      const open = await openTimed(page, id);
+      const end = load1();
+      const want = BOARDS.map((b) => ({ id: b.id, w: b.w, h: b.h, elements: b.elements }));
+      const mismatched = want.filter((b) => !open.drawn.some((d) => d.id === b.id && d.w === b.w && d.h === b.h && d.elements === b.elements));
+      const note = `${open.drawn.length} boards drawn; constructor → drawn ${open.constructorToDrawn.toFixed(1)} ms; press → constructor ${open.inputToConstructor.toFixed(1)} ms${k === 0 ? '; the window’s first design open' : ''}`;
+      if (open.drawn.length !== BOARDS.length || mismatched.length > 0) trials.push({ value: null, load: Math.max(load, end), error: `drawn boards differ from the bench: ${JSON.stringify({ drawn: open.drawn, mismatched })}` });
+      else trials.push({ value: open.inputToReady, load: Math.max(load, end), note });
+      constructor.push({ value: open.constructorToDrawn, load: Math.max(load, end) });
+      await closeTab(page);
+    }
+    rows.add('1 open cold', 'artifact-cold open in a ready app: the library row’s pointerdown to every board’s canvas laid out (drawnAt), identities, sizes and element counts verified', 'ms', 1000, '≤ 1,000 ms (E0 123 ms world-only warm)', trials);
+    rows.add('1 open cold (constructor)', 'the same opens: the tab’s constructor (openedAt) to every canvas laid out', 'ms', null, 'recorded beside row 1', constructor);
+  });
+
+  const { tab } = await openTimed(page, id);
+  await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
+  const agent = new DesignAgent(seam, id);
+  const first = await agent.read();
+  expect(Object.keys(agent.files).filter((p) => p.startsWith('project/boards/'))).toHaveLength(24);
+  rows.write({ agentFirstRead: { wallMs: first.wallMs, loopMaxMs: first.loop.max, busyMs: first.busyMs, load: load1() } });
+
+  await test.step('5: the agent’s publishes through A’s real publish, the design open: one board, seven times; all 24 boards, five times', async () => {
+    await agent.publish([BOARDS[0]!.id]); // warm-up: the session's base becomes its own publish
+    const one: Trial[] = [];
+    for (let k = 0; k < 7; k++) {
+      const load = await quiet();
+      const answer = await agent.publish([BOARDS[(1 + k * 5) % BOARDS.length]!.id]);
+      one.push({ value: answer.busyMs, load: Math.max(load, load1()), note: `longest loop gap ${answer.loop.max.toFixed(1)} ms; wall ${answer.wallMs.toFixed(1)} ms; changed ${answer.result!.changed.join(', ')}` });
+      await sleep(300);
+    }
+    const whole: Trial[] = [];
+    for (let k = 0; k < 5; k++) {
+      const load = await quiet();
+      const answer = await agent.publish(BOARDS.map((b) => b.id));
+      whole.push({ value: answer.busyMs, load: Math.max(load, load1()), note: `longest loop gap ${answer.loop.max.toFixed(1)} ms; wall ${answer.wallMs.toFixed(1)} ms; ${answer.result!.changed.length} paths changed` });
+      await sleep(1_000);
+    }
+    rows.add('5 publish one board', 'one board’s publish by the agent’s session through A’s real artifact_publish: the host loop’s busy time over the call (the 1 ms sampler’s gaps past its tick)', 'ms', 50, '≤ 50 ms', one);
+    rows.add('5 publish whole design', 'all 24 boards in one publish, each changed: the host loop’s busy time over the call', 'ms', 300, '≤ 300 ms', whole);
+  });
+
+  const frameRows = (label: string, what: string, trials: (FrameTrial & { load: number; note?: string })[]) => {
+    rows.add(`2 ${label} frame work p95`, `${what}: per-frame main-thread executing work, p95 over the active frames (DevTools trace)`, 'ms', 4, '≤ 4 ms (E0 0.4 ms, a stand-in)', trials.map((t) => (t.work ? { value: t.work.active.p95, load: t.load, note: `${t.work.active.n} active of ${t.work.all.n} frames; all-frames p95 ${t.work.all.p95.toFixed(2)} ms; active max ${t.work.active.max.toFixed(2)} ms; ${t.work.inputs} inputs dispatched${t.note ? `; ${t.note}` : ''}` } : { value: null, load: t.load, error: t.error })));
+    rows.add(`2 ${label} dropped (rAF proxy)`, `${what}: the rAF-gap proxy, frames skipped over the span’s frames at the calibrated idle interval`, '%', 2, '≤ 2 % (E0 0–0.4 %)', trials.map((t) => (t.drops ? { value: t.drops.share * 100, load: t.load, note: `${t.drops.dropped} of ${t.drops.expected} at ${t.drops.intervalMs.toFixed(2)} ms; longest gap ${t.drops.longestGapMs.toFixed(1)} ms` } : { value: null, load: t.load, error: t.error })));
+    const compositor = trials.map((t) => t.work?.compositor ?? null);
+    if (compositor.every((c) => c !== null))
+      rows.add(`2 ${label} dropped (compositor)`, `${what}: the compositor’s PipelineReporter frames dropped, of its frames in the window`, '%', 2, '≤ 2 %', trials.map((t) => ({ value: (t.work!.compositor!.dropped / Math.max(1, t.work!.compositor!.frames)) * 100, load: t.load, note: `${t.work!.compositor!.dropped} of ${t.work!.compositor!.frames}; ${t.work!.compositor!.droppedFrameEvents} DroppedFrame events` })));
+    else rows.write({ [`compositor ${label}`]: `unavailable: ${compositor.filter((c) => c === null).length} of ${trials.length} traces carry no PipelineReporter for the renderer (the rAF proxy row stands alone; no zero is substituted)` });
+  };
+
+  await test.step('2: pan at 25 % and a pinch zoom from fit to about 100 % and back, through the world’s wheel handler, three times each', async () => {
+    const pans: (FrameTrial & { load: number; note?: string })[] = [];
+    const zooms: (FrameTrial & { load: number; note?: string })[] = [];
+    for (let k = 0; k < TRIALS; k++) {
+      await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
+      await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('0.25');
+      const { mid } = await worldPoint(tab);
+      await page.mouse.move(mid.x, mid.y);
+      const before = (await mainTab(page, id))!.viewport!;
+      let load = await quiet();
+      const pan = await measureFrames(page, `pan-${k + 1}`, async () => {
+        for (let i = 0; i < 240; i++) {
+          await page.mouse.wheel(i < 120 ? 12 : -12, i < 120 ? 18 : -18);
+          await page.waitForTimeout(8);
+        }
+      });
+      const after = (await mainTab(page, id))!.viewport!;
+      pans.push({ ...pan, load: Math.max(load, load1()), note: `the view panned through (${before.x.toFixed(0)}, ${before.y.toFixed(0)}) → turned back at its far end (${after.x.toFixed(0)}, ${after.y.toFixed(0)}) at zoom ${after.zoom}` });
+      if (after.zoom !== 0.25) failures.push(`pan ${k + 1}: the zoom moved (${after.zoom})`);
+
+      await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
+      const desktop = BOARDS.find((b) => b.size === 'desktop')!;
+      const at = (await tab.locator(`[data-board-id="${desktop.id}"]`).boundingBox())!;
+      await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+      const fit = (await mainTab(page, id))!.viewport!.zoom;
+      load = await quiet();
+      let peak = 0;
+      const zoom = await measureFrames(page, `zoom-${k + 1}`, async () => {
+        await page.keyboard.down('Control');
+        try {
+          // each step zooms by e^(±0.027) about the pointer (the world's ⌃-wheel rule): 120 in take fit (about 4 %) to
+          // about 100 %, 120 out bring it back
+          for (let i = 0; i < 240; i++) {
+            await page.mouse.wheel(0, i < 120 ? -2.7 : 2.7);
+            if (i === 119) peak = (await mainTab(page, id))!.viewport!.zoom;
+            await page.waitForTimeout(8);
+          }
+        } finally {
+          await page.keyboard.up('Control');
+        }
+      });
+      const back = (await mainTab(page, id))!.viewport!.zoom;
+      zooms.push({ ...zoom, load: Math.max(load, load1()), note: `zoom ${fit.toFixed(4)} (fit) → ${peak.toFixed(4)} → ${back.toFixed(4)} over 240 pinch steps` });
+      if (!(peak > fit * 10)) failures.push(`zoom ${k + 1}: the pinch did not zoom in (fit ${fit}, peak ${peak})`);
+    }
+    frameRows('pan', 'a pan at 25 % by 240 real wheel events', pans);
+    frameRows('zoom', 'a pinch (⌃-wheel) zoom from fit in and back out about a desktop board, 240 real wheel events', zooms);
+  });
+
+  await test.step('2 (stress): a pan while the owner drags a board by its title and the agent republishes that board every 0.7 s, three times', async () => {
+    const trials: (FrameTrial & { load: number; note?: string })[] = [];
+    const cadences: Record<string, unknown>[] = [];
+    for (let k = 0; k < TRIALS; k++) {
+      await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
+      await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('0.25');
+      const { box: world } = await worldPoint(tab);
+      // a board whose title lies whole inside the world at this view
+      let dragged: BenchBoard | null = null;
+      for (const b of BOARDS) {
+        const t = await tab.locator(`[data-board-title="${b.id}"]`).boundingBox();
+        if (t && t.x > world.x + 20 && t.y > world.y + 20 && t.x + t.width < world.x + world.width - 300 && t.y + t.height < world.y + world.height - 200) {
+          dragged = b;
+          break;
+        }
+      }
+      if (!dragged) throw new Error('no board title lies inside the world at 25 %');
+      const start = (await frameOf(page, id, dragged.id))!;
+      const title = (await tab.locator(`[data-board-title="${dragged.id}"]`).boundingBox())!;
+      const from = { x: title.x + Math.min(20, title.width / 2), y: title.y + title.height / 2 };
+      const load = await quiet();
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => (release = resolve));
+      const publishes = republishing(agent, dragged.id, released);
+      publishes.catch(() => {}); // settled below
+      let published: PromiseSettledResult<Publication[]>;
+      let frames: FrameTrial;
+      try {
+        await page.mouse.move(from.x, from.y);
+        await page.mouse.down();
+        frames = await measureFrames(page, `stress-${k + 1}`, async () => {
+          for (let i = 0; i < 240; i++) {
+            await page.mouse.move(from.x + i * 0.75, from.y + (i % 40) * 0.5);
+            if (i % 2 === 0) await page.mouse.wheel(i < 120 ? 10 : -10, i < 120 ? 14 : -14);
+            await page.waitForTimeout(8);
+          }
+        });
+        await page.mouse.up();
+      } finally {
+        release(); // the agent's workload ends with the drag, whether it finished or threw (its error wins)
+        [published] = await Promise.allSettled([publishes]);
+      }
+      if (published.status === 'rejected') throw published.reason;
+      const pubs = published.value;
+      const lastFill = pubs.length > 0 ? agent.fillOf(dragged.id) : null;
+      // the dragged frame stands (moved, written, drawn) and the agent's restyle of its card with it
+      await sleep(500);
+      const end = (await frameOf(page, id, dragged.id))!;
+      const drawn = await tab.locator(`[data-board-id="${dragged.id}"]`).evaluate((n) => [(n as HTMLElement).style.left, (n as HTMLElement).style.top]);
+      const card = findIn((await boardOf(page, id, dragged.id)).children, BENCH_CARD)?.style.background;
+      const cardDrawn = await tab.locator(`[data-board-id="${dragged.id}"] .design-board-canvas [data-eid="${BENCH_CARD}"]`).evaluate((n) => (n as HTMLElement).style.getPropertyValue('background-color'));
+      const intervals = pubs.slice(1).map((p, j) => p.requestedAt - pubs[j]!.requestedAt);
+      const cadence = { board: dragged.id, publishes: pubs.length, everyMs: PUBLISH_EVERY_MS, intervalsMs: intervals, intervalP50: intervals.length ? median(intervals) : null, intervalMax: intervals.length ? Math.max(...intervals) : null, lateMs: pubs.map((p) => p.requestedAt - p.due), hostStartApproxMs: pubs.map((p) => +(p.answeredAt - p.wallMs - pubs[0]!.requestedAt).toFixed(1)), changed: pubs.map((p) => p.changed), busyMs: pubs.map((p) => +p.busyMs.toFixed(2)) };
+      cadences.push(cadence);
+      const problems: string[] = [];
+      if (pubs.length < 3) problems.push(`only ${pubs.length} publications during the drag`);
+      if (pubs.some((p) => p.changed.length !== 1 || p.changed[0] !== boardPath(dragged.id))) problems.push('a publication changed something other than the dragged board');
+      if (end.x === start.x && end.y === start.y) problems.push(`the dragged frame did not move (${JSON.stringify(start)})`);
+      if (drawn[0] !== `${end.x}px` || drawn[1] !== `${end.y}px`) problems.push(`the world draws ${drawn.join(', ')} for the frame ${end.x}, ${end.y}`);
+      if (lastFill !== null && card !== lastFill) problems.push(`the card's fill is ${card}, not the agent's last ${lastFill}`);
+      if (lastFill !== null && cardDrawn !== rgbOf(lastFill)) problems.push(`the world draws the card in ${cardDrawn}, not the agent's last ${lastFill}`);
+      if (problems.length > 0) failures.push(`stress ${k + 1}: ${problems.join('; ')}`);
+      trials.push({ ...frames!, load: Math.max(load, load1()), note: `dragged ${dragged.id} ${JSON.stringify(start)} → ${JSON.stringify(end)}; ${pubs.length} publications every ${intervals.length ? median(intervals) : '—'} ms (max ${intervals.length ? Math.max(...intervals) : '—'}); card ${card} (drawn ${cardDrawn})` });
+    }
+    rows.write({ stressPublications: cadences });
+    frameRows('stress', 'a pan by real wheel events during an owner’s title drag of a board while the agent republishes that board every 0.7 s', trials);
+  });
+
+  await test.step('3: re-layout every board after a Theme background change, three times: the Enter to the last fresh onLayout', async () => {
+    await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
+    await headerAction(page, 'Theme');
+    const theme = tab.locator('[data-deck-rail="theme"]');
+    await expect(theme).toBeVisible();
+    const background = theme.getByRole('textbox', { name: 'Background', exact: true });
+    const trials: Trial[] = [];
+    for (let k = 0; k < TRIALS; k++) {
+      const colour = ['#123456', '#654321', '#2b7a78'][k]!;
+      await background.fill(colour);
+      const load = await quiet();
+      const probe = await armLayoutProbe(page, id, 'main');
+      try {
+        await page.evaluate(() => {
+          const w = window as unknown as { __designEnter?: number | null };
+          w.__designEnter = null;
+          window.addEventListener('keydown', (e) => (w.__designEnter ??= e.key === 'Enter' ? e.timeStamp : null), { capture: true, once: true });
+        });
+        await background.press('Enter');
+        const enter = async () => page.evaluate(() => (window as unknown as { __designEnter?: number | null }).__designEnter ?? null);
+        await expect.poll(async () => {
+          const at = await enter();
+          const result = await layoutProbeResult(page, probe);
+          return at !== null && BOARDS.every((b) => (result.layouts[b.id] ?? []).some((t) => t >= at));
+        }, { timeout: 15_000, message: 'every board laid out again after the change' }).toBe(true);
+        const at = (await enter())!;
+        const { layouts } = await layoutProbeResult(page, probe);
+        const firsts = BOARDS.map((b) => layouts[b.id]!.find((t) => t >= at)!);
+        trials.push({ value: Math.max(...firsts) - at, load: Math.max(load, load1()), note: `${Object.keys(layouts).length} canvases observed; first layout ${(Math.min(...firsts) - at).toFixed(2)} ms after the Enter, last ${(Math.max(...firsts) - at).toFixed(2)} ms (spread ${(Math.max(...firsts) - Math.min(...firsts)).toFixed(2)} ms)` });
+      } finally {
+        await disarmLayoutProbe(page, probe);
+      }
+      await expect.poll(() => tab.locator(`[data-board-id="${BOARDS[0]!.id}"] .maws-slide`).evaluate((n) => getComputedStyle(n).backgroundColor)).not.toBe('');
+    }
+    rows.add('3 relayout', 'a Theme background change (the design’s overrides, the scope moved): its Enter’s timestamp to the last of 24 fresh onLayout observations, one per canvas', 'ms', 50, '≤ 50 ms (E0 13.5 ms)', trials);
+  });
+
+  await test.step('6: every board as one PDF through main’s export service, three times: the request to the committed file, its 24 pages checked', async () => {
+    const trials: Trial[] = [];
+    for (let k = 0; k < TRIALS; k++) {
+      const load = await quiet();
+      const started = Date.now();
+      const { path } = await ok<{ path: string }>(page, 'artifacts.export', { artifactId: id, format: 'pdf' });
+      const answered = Date.now();
+      const problems: string[] = [];
+      if (!existsSync(path)) problems.push('no file at the answered path');
+      else {
+        const stat = statSync(path);
+        if (stat.size === 0) problems.push('an empty file');
+        const sizes = pageSizes(path);
+        if (sizes.length !== 24) problems.push(`${sizes.length} pages`);
+        sizes.forEach(([w, h], i) => {
+          const b = BOARDS[i];
+          if (b && (Math.abs(w - b.w * 0.75) > 1 || Math.abs(h - b.h * 0.75) > 1)) problems.push(`page ${i + 1} is ${w}×${h} pt for ${b.id} (${b.w}×${b.h} px)`);
+        });
+        rmSync(path);
+      }
+      trials.push(problems.length > 0 ? { value: null, load, error: problems.join('; ') } : { value: answered - started, load: Math.max(load, load1()), note: '24 pages at each board’s native size' });
+    }
+    rows.add('6 pdf all boards', 'every board as one PDF through main’s export service (the menu’s route): the request to its answer with the file committed, 24 native pages checked', 'ms', 55_000, '< 55 s', trials, true);
+  });
+
+  await test.step('4: the renderer’s working set with every export window closed, ordinary and after a forced collection', async () => {
+    await expect.poll(async () => (await rendererMemory(launch!)).windows, { timeout: 30_000, message: 'every export window closed' }).toBe(1);
+    const load = await quiet();
+    const ordinary = await rendererMemory(launch!);
+    const cdp = await page.context().newCDPSession(page);
+    try {
+      await cdp.send('HeapProfiler.collectGarbage');
+    } finally {
+      await cdp.detach();
+    }
+    await sleep(1_000);
+    const collected = await rendererMemory(launch!);
+    if (collected.pid !== ordinary.pid) failures.push(`the renderer's pid changed between the readings (${ordinary.pid} → ${collected.pid})`);
+    rows.add('4 renderer memory', `the window’s renderer working set (pid ${ordinary.pid}), ordinary, with the design open after every row above and every export window closed; the bound read as 500 × 10⁶ bytes`, 'MiB', 500e6 / 2 ** 20, '≤ 500 MB (476.8 MiB; E0 276)', [{ value: ordinary.mib, load: Math.max(load, load1()), note: `${ordinary.workingSetKiB} KiB; after a forced collection ${collected.mib.toFixed(1)} MiB (${collected.workingSetKiB} KiB)` }]);
+    rows.add('4 renderer memory (after collection)', `the same renderer (pid ${collected.pid}) after HeapProfiler.collectGarbage`, 'MiB', null, 'recorded beside row 4', [{ value: collected.mib, load: Math.max(load, load1()) }]);
+  });
+
+  loads.end = load1();
+  await seam.send({ cmd: 'release', session: AGENT });
+  rows.write({ loads, failures });
+  const failed = rows.rows.filter((r) => r.verdict !== 'met' && r.verdict !== 'recorded');
+  expect([...failures, ...failed.map((r) => `${r.row}: ${r.value ?? '—'} ${r.unit} against ${r.limit} (${r.verdict}; loads ${r.loads.join(', ')})`)], `rows not met (the figures are in ${RESULTS})`).toEqual([]);
+  expect(launch.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});

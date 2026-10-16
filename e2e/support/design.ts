@@ -5,7 +5,7 @@
 // a board whose file does not load (held), every live one drawn on the design system's background.
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 export async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -76,8 +76,42 @@ interface Seam {
     tabs(artifactId: string): TabView[];
     threads(artifactId: string): Promise<SeamThread[]>; // M4
     derivedId(artifactId: string, from: string, to: string, elementId: string): Promise<string>; // M4
+    frameProbe: { arm(artifactId: string, surface: string, model: FrameProbeModel, dom: FrameProbeDom[]): string; result(probe: string): FrameProbeResult | null; disarm(probe: string): void }; // M6
+    layoutProbe: { arm(artifactId: string, surface: string): string; result(probe: string): { armedAt: number; layouts: Record<string, number[]> }; disarm(probe: string): void }; // M6
   };
 }
+
+// ---- M6: the within-a-frame probe (src/renderer/src/tools/design/e2e-seam.ts)
+export type FrameProbeModel = { kind: 'frame'; boardId: string; key: 'x' | 'y' | 'w' | 'h'; value: number } | { kind: 'style'; boardId: string; elementId: string; prop: string; value: string };
+export interface FrameProbeDom {
+  selector: string;
+  style: string;
+  equals: string;
+}
+export interface FrameProbeResult {
+  surface: string;
+  inbound: number;
+  startedAt: number;
+  domObservedMs: number | null;
+  sentinelMs: number;
+  atSentinel: { selector: string; style: string; value: string | null; ok: boolean }[];
+  withinFrame: boolean;
+}
+export const armFrameProbe = (page: Page, id: string, surface: 'main' | 'panel', model: FrameProbeModel, dom: FrameProbeDom[]) =>
+  page.evaluate(([a, s, m, d]) => (window as unknown as Seam).__maws_design.frameProbe.arm(a, s, m, d), [id, surface, model, dom] as const);
+/** The probe's result once the edit's sentinel ran; disarmed either way (a probe that never resolves throws). */
+export async function frameProbeResult(page: Page, probe: string, timeout = 10_000): Promise<FrameProbeResult> {
+  let result: FrameProbeResult | null = null;
+  try {
+    await expect.poll(async () => (result = await page.evaluate((p) => (window as unknown as Seam).__maws_design.frameProbe.result(p), probe)) !== null, { timeout, message: 'the edit reached the receiving replica and its sentinel frame ran' }).toBe(true);
+  } finally {
+    await page.evaluate((p) => (window as unknown as Seam).__maws_design.frameProbe.disarm(p), probe);
+  }
+  return result!;
+}
+export const armLayoutProbe = (page: Page, id: string, surface: 'main' | 'panel') => page.evaluate(([a, s]) => (window as unknown as Seam).__maws_design.layoutProbe.arm(a, s), [id, surface] as const);
+export const layoutProbeResult = (page: Page, probe: string) => page.evaluate((p) => (window as unknown as Seam).__maws_design.layoutProbe.result(p), probe);
+export const disarmLayoutProbe = (page: Page, probe: string) => page.evaluate((p) => (window as unknown as Seam).__maws_design.layoutProbe.disarm(p), probe);
 export const seamInstalled = (page: Page) => page.evaluate(() => typeof (window as unknown as Partial<Seam>).__maws_design);
 export const seed = (page: Page, id: string, files: Record<string, string>) => page.evaluate(([a, f]) => (window as unknown as Seam).__maws_design.seed(a, f), [id, files] as const);
 export const editDesign = (page: Page, id: string, edit: DesignEdit) => page.evaluate(([a, e]) => (window as unknown as Seam).__maws_design.edit(a, e), [id, edit] as const);
@@ -164,12 +198,100 @@ export const centre = async (locator: Locator) => {
 };
 
 /** A header action by its label: its button, or its entry under More actions when the header folded it there. */
-export async function headerAction(page: Page, label: string): Promise<void> {
-  const header = page.locator('[data-region="main"] [data-editor-header]');
+export async function headerAction(page: Page, label: string, region: 'main' | 'panel' = 'main'): Promise<void> {
+  const header = page.locator(`[data-region="${region}"] [data-editor-header]`);
   const button = header.getByRole('button', { name: label, exact: true });
   if (await button.isVisible()) return button.click();
   await header.getByRole('button', { name: 'More actions', exact: true }).click();
   await page.getByRole('menuitemcheckbox', { name: label }).or(page.getByRole('menuitem', { name: label })).click();
+}
+
+/** M6: an Export entry by its label, from the header's Export menu, or from More actions where a narrow header folds it. */
+export async function exportEntry(page: Page, label: string, region: 'main' | 'panel' = 'main'): Promise<void> {
+  const header = page.locator(`[data-region="${region}"] [data-editor-header]`);
+  const button = header.getByRole('button', { name: 'Export', exact: true });
+  await ((await button.isVisible()) ? button : header.getByRole('button', { name: 'More actions', exact: true })).click();
+  await page.getByRole('menuitem', { name: label, exact: true }).click();
+}
+
+/** M6: what a surface's evidence records beside its screenshot: the editor and its chrome, measured. */
+export interface SurfaceGeometry {
+  window: { w: number; h: number };
+  editor: { rect: Rect; scrollWidth: number; clientWidth: number } | null;
+  world: Rect | null;
+  rails: { label: string | null; rect: Rect }[];
+  toolbars: { label: string | null; rect: Rect; scrollWidth: number; clientWidth: number }[];
+  /** P2's comment card and any dialog, where they are drawn on the window. */
+  overlays: { what: string; label: string | null; rect: Rect }[];
+  /** The editor's chrome lying outside the editor sideways (the world's own contents excluded: its boards are clipped to it). */
+  outside: { tag: string; className: string; role: string | null; label: string | null; rect: Rect }[];
+  /** Sideways scroll of the editor's ancestors. */
+  scrolled: number;
+}
+type Rect = { x: number; y: number; w: number; h: number };
+
+/**
+ * M6: a surface's evidence, kept before any bound reads it so a failing bound still leaves it: a screenshot of `shot` (a
+ * region, or the whole window for a sheet) under the test's output, and the geometry of the editor in `body` attached as
+ * JSON beside it.
+ */
+export async function surfaceEvidence(page: Page, name: string, body: Locator, shot: Locator | null = null): Promise<SurfaceGeometry> {
+  const info = test.info();
+  if (shot) await shot.screenshot({ path: info.outputPath(`${name}.png`) });
+  else await page.screenshot({ path: info.outputPath(`${name}.png`) });
+  const geometry = await body.evaluate((n): SurfaceGeometry => {
+    const rect = (el: Element) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.x * 10) / 10, y: Math.round(r.y * 10) / 10, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 };
+    };
+    const editor = n.querySelector<HTMLElement>('[data-design-editor]');
+    const world = editor?.querySelector('[data-design-world]') ?? null;
+    const e = editor?.getBoundingClientRect();
+    const outside = editor
+      ? Array.from(editor.querySelectorAll<HTMLElement>('*'))
+          .filter((el) => !(world && world !== el && world.contains(el)))
+          .map((el) => ({ el, r: el.getBoundingClientRect() }))
+          .filter(({ r }) => r.width > 0 && (r.left < e!.left - 1 || r.right > e!.right + 1))
+          .map(({ el }) => ({ tag: el.tagName.toLowerCase(), className: typeof el.className === 'string' ? el.className : '', role: el.getAttribute('role'), label: el.getAttribute('aria-label'), rect: rect(el) }))
+      : [];
+    let scrolled = 0;
+    for (let a: HTMLElement | null = n as HTMLElement; a; a = a.parentElement) scrolled += a.scrollLeft;
+    const overlays = [
+      ...Array.from(document.querySelectorAll('[data-comment-card]')).map((el) => ({ what: 'comment card', label: el.getAttribute('aria-label'), rect: rect(el) })),
+      ...Array.from(document.querySelectorAll('[role="dialog"], [role="alertdialog"]')).map((el) => ({ what: el.getAttribute('role')!, label: el.getAttribute('aria-label'), rect: rect(el) })),
+    ];
+    return {
+      window: { w: window.innerWidth, h: window.innerHeight },
+      editor: editor ? { rect: rect(editor), scrollWidth: editor.scrollWidth, clientWidth: editor.clientWidth } : null,
+      world: world ? rect(world) : null,
+      rails: Array.from(editor?.querySelectorAll('[role="complementary"]') ?? []).map((el) => ({ label: el.getAttribute('aria-label'), rect: rect(el) })),
+      toolbars: Array.from(editor?.querySelectorAll<HTMLElement>('[role="toolbar"]') ?? []).map((el) => ({ label: el.getAttribute('aria-label'), rect: rect(el), scrollWidth: el.scrollWidth, clientWidth: el.clientWidth })),
+      overlays,
+      outside,
+      scrolled,
+    };
+  });
+  await info.attach(`${name}-geometry`, { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
+  return geometry;
+}
+
+/** M6: the bounds every surface keeps, read from its evidence: nothing sideways out of the editor or scrolled, the rails inside it, every overlay on the window. */
+export function expectSurfaceBounds(name: string, g: SurfaceGeometry): void {
+  expect(g.editor, `${name}: an editor`).not.toBeNull();
+  expect(g.scrolled, `${name}: nothing scrolled sideways`).toBe(0);
+  expect(g.editor!.scrollWidth - g.editor!.clientWidth, `${name}: the editor does not overflow sideways`).toBeLessThanOrEqual(1);
+  expect(g.outside, `${name}: the editor's chrome outside the editor`).toEqual([]);
+  const e = g.editor!.rect;
+  for (const rail of g.rails) {
+    expect(rail.rect.x, `${name}: the ${rail.label} rail`).toBeGreaterThanOrEqual(e.x - 1);
+    expect(rail.rect.x + rail.rect.w, `${name}: the ${rail.label} rail`).toBeLessThanOrEqual(e.x + e.w + 1);
+  }
+  for (const o of g.overlays) {
+    expect(o.rect.x, `${name}: the ${o.what} ${o.label}`).toBeGreaterThanOrEqual(-1);
+    expect(o.rect.y, `${name}: the ${o.what} ${o.label}`).toBeGreaterThanOrEqual(-1);
+    expect(o.rect.x + o.rect.w, `${name}: the ${o.what} ${o.label}`).toBeLessThanOrEqual(g.window.w + 1);
+    expect(o.rect.y + o.rect.h, `${name}: the ${o.what} ${o.label}`).toBeLessThanOrEqual(g.window.h + 1);
+  }
 }
 
 export async function createDesign(page: Page, title: string, files: Record<string, string>): Promise<string> {

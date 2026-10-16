@@ -129,6 +129,7 @@ test('history per board: the rail, two versions’ changes in the world and list
   // after the version: the desktop moved, its heading restyled, the agent's cross-board move, a cut, a board deleted,
   // the family re-mapped to the second face and the system switched
   await editDesign(page, id, { op: 'setFrame', boardId: 'desktop', frame: { y: 300 } });
+  await editDesign(page, id, { op: 'setFrame', boardId: 'phone', frame: { w: 430, h: 932 } }); // M6: a resize alone
   await editDesign(page, id, { op: 'setStyle', boardId: 'desktop', elementId: 'head', props: { 'font-size': '64px' } });
   const { moved } = await asAgent(channel, id, { op: 'move', from: 'phone', to: 'desktop', elementId: 'lede' });
   const files = await filesOf(page, id);
@@ -170,14 +171,21 @@ test('history per board: the rail, two versions’ changes in the world and list
     await expect(bar.getByRole('button', { name: 'Restore this version' })).toHaveCount(0); // two versions: nothing to restore
     await expect(tab.getByRole('toolbar', { name: 'Design' })).toHaveCount(0); // the editor's tools are gone: read-only
     await expect(tab.locator('[data-active-board]')).toHaveCount(0);
-    // the face's mapping, the desktop's frame, its heading, the move (once; C reads it as two), the cut, the deleted board
-    await expect(bar.locator('[data-history-count]')).toHaveText('6 changes');
+    // the face's mapping, the phone's size, the desktop's frame, its heading, the move (once; C reads it as two), the cut,
+    // the deleted board
+    await expect(bar.locator('[data-history-count]')).toHaveText('7 changes');
     await expect(tab.locator('.deck-history-deck')).toContainText('faces');
     for (const [board, kind] of [['phone', 'changed'], ['desktop', 'changed'], ['spare', 'removed']] as const) {
       await expect(world.locator(`[data-history-board="${board}"]`)).toHaveAttribute('data-history-change', kind);
       await expect(list.locator(`[data-history-board-row="${board}"]`)).toHaveAttribute('data-history-change', kind);
     }
     await expect(world.locator('[data-history-board="desktop"]')).toHaveAttribute('style', /top: 300px/); // the later version's frame
+    // M6: the resize alone: the phone's frame drawn at its new size, named a size change (its position unchanged)
+    const phoneBoard = world.locator('[data-history-board="phone"]');
+    await expect(phoneBoard).toHaveAttribute('style', /left: 0px; top: 0px; width: 430px; height: 932px/);
+    await expect(phoneBoard).toHaveAttribute('title', 'size');
+    await expect(world.locator('[data-history-title="phone"]')).toContainText('430 × 932');
+    await expect(world.locator('[data-history-board="desktop"]')).toHaveAttribute('title', 'position');
     const move = world.locator(`[data-history-mark="${moved}"]`);
     await expect(move).toHaveAttribute('data-kind', 'moved');
     await expect(move).toHaveAttribute('title', /Moved from Phone.*Claude/);
@@ -191,9 +199,11 @@ test('history per board: the rail, two versions’ changes in the world and list
     expect(Math.abs(m!.x - el!.x)).toBeLessThan(3);
     expect(Math.abs(m!.width - el!.width)).toBeLessThan(3);
 
-    // ↓: the design's settings first, then the desktop's frame, its board brought into view
+    // ↓: the design's settings first, then the phone's size, then the desktop's frame, its board brought into view
     await bar.getByRole('button', { name: 'Next change' }).click();
     await expect(tab.locator('.deck-history-deck')).toHaveAttribute('data-focused', 'true');
+    await bar.getByRole('button', { name: 'Next change' }).click();
+    await expect(phoneBoard).toHaveAttribute('data-focused', 'true');
     await bar.getByRole('button', { name: 'Next change' }).click();
     await expect(world.locator('[data-history-board="desktop"]')).toHaveAttribute('data-focused', 'true');
     const [w, d] = [(await world.boundingBox())!, (await world.locator('[data-history-board="desktop"]').boundingBox())!];
@@ -243,6 +253,8 @@ test('history per board: the rail, two versions’ changes in the world and list
       ['desktop', 0],
       ['spare', 0],
     ]);
+    expect((await boardsOf(page, id))[0]!.frame).toEqual({ x: 0, y: 0, w: 390, h: 844 }); // M6: the resize undone too
+    await expect(liveWorld.locator('[data-board-id="phone"]')).toHaveCSS('width', '390px');
     expect(await elementOf(page, id, 'phone', 'lede')).toBeDefined();
     expect(await elementOf(page, id, 'desktop', moved!)).toBeUndefined();
     expect(await elementOf(page, id, 'desktop', 'gone')).toBeDefined();

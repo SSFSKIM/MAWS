@@ -13,11 +13,16 @@
 //   ungroup, a board move and an element edit undone from one stack, Insert on the phone at screen type, and text in
 //   place through a Korean composition while another replica edits the same box.
 // - Theme restyles every board through the document medium; a held board is drawn labelled and never written.
+// - M6: a board's middle snaps to a sibling's and to an equal gap between two (their guides drawn); an edit in the main
+//   tab patches the panel's replica within a frame, its geometry and its content (the seam's frame probe); the comments
+//   rail and card, the history comparison and the Export sheet, wide in a main tab and narrow in the panel, each
+//   screenshotted and measured before its bounds are read.
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject } from './support/sidebar';
 import {
+  armFrameProbe,
   boardAt,
   boardOf,
   boardsOf,
@@ -27,7 +32,11 @@ import {
   drag,
   editDesign,
   elementOf,
+  expectSurfaceBounds,
+  exportEntry,
   frameOf,
+  frameProbeResult,
+  type FrameProbeResult,
   FRAMES,
   headerAction,
   ok,
@@ -36,6 +45,8 @@ import {
   plain,
   px,
   seamInstalled,
+  surfaceEvidence,
+  type SurfaceGeometry,
   viewOf,
   worldAt,
 } from './support/design';
@@ -58,19 +69,10 @@ async function ready(): Promise<Page> {
   return page;
 }
 
-const frameOnly = (id: keyof typeof FRAMES) => {
-  const { x, y, w, h } = FRAMES[id]!;
-  return { x, y, w, h };
-};
-
-test('a design in the panel and a main tab: two replicas, every board mounted through pan and zoom, the zoom range and its fits', async () => {
-  test.setTimeout(180_000);
-  repo = await ScratchRepo.create({ sentinels: false });
-  const page = await ready();
-  const id = await createDesign(page, 'Launch screens', DESIGN_FILES);
-  expect((await boardsOf(page, id)).map((b) => b.id)).toEqual(ORDER);
-
+/** The design in the panel's Artifacts tool (pinned) and in a main tab: two replicas in one window. */
+async function inPanelAndTab(page: Page, id: string): Promise<{ panel: Locator; inPanel: Locator; inMain: Locator }> {
   // a chat shown, so the panel takes tools; its Artifacts tool pinned, so it stays while a main tab shows the design
+  repo = await ScratchRepo.create({ sentinels: false });
   const project = await ok<{ name: string }>(page, 'session.projects.add', { directory: repo.root });
   await openProject(page, project.name);
   await newChatIn(page, project.name);
@@ -87,6 +89,21 @@ test('a design in the panel and a main tab: two replicas, every board mounted th
   await expect(inMain.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
   await panel.getByRole('tab', { name: 'Artifacts' }).click();
   await expect(inPanel.locator('[data-design-editor]')).toBeVisible();
+  return { panel, inPanel, inMain };
+}
+
+const frameOnly = (id: keyof typeof FRAMES) => {
+  const { x, y, w, h } = FRAMES[id]!;
+  return { x, y, w, h };
+};
+
+test('a design in the panel and a main tab: two replicas, every board mounted through pan and zoom, the zoom range and its fits', async () => {
+  test.setTimeout(180_000);
+  const page = await ready();
+  const id = await createDesign(page, 'Launch screens', DESIGN_FILES);
+  expect((await boardsOf(page, id)).map((b) => b.id)).toEqual(ORDER);
+
+  const { panel, inPanel, inMain } = await inPanelAndTab(page, id);
   await expect(page.locator('[data-region="main"] [data-editor-header] [data-header-title]')).toHaveText('Launch screens');
   await expect(page.locator('[data-region="main"] [data-editor-header] [data-header-saved]')).toHaveText('All changes saved');
   await expect.poll(async () => (await ok<{ artifact: { lastViewedAt: number | null } }>(page, 'artifacts.get', { artifactId: id })).artifact.lastViewedAt).not.toBeNull();
@@ -295,6 +312,21 @@ test('board frames: moved and snapped, resized, sized by preset and refused past
   await expect(tab.getByRole('alert')).toContainText('over 16384 px a side');
   expect(await frame('tablet')).toEqual({ x: 650, y: 0, w: 390, h: 844 });
   await height.press('Escape');
+
+  // M6: the now phone-sized tablet dropped 5 world px below the desktop's middle: its middle snapped to the desktop's,
+  // a centre guide drawn (no edge or gap lies within the six screen px there)
+  const t2 = await centre(title);
+  await drag(page, t2, { x: t2.x, y: t2.y + 95 * 0.25 }, { during: async () => await expect(tab.locator('.design-world-screen .deck-guide[data-guide="centre"]').first()).toBeVisible() });
+  await expect.poll(() => frame('tablet')).toEqual({ x: 650, y: 512 - 844 / 2, w: 390, h: 844 });
+  // then 7 world px short of centred between the phone (ending at 390) and the desktop (starting at 1,424): an equal gap
+  // either side, its gap guides drawn
+  const t3 = await centre(title);
+  await drag(page, t3, { x: t3.x + 55 * 0.25, y: t3.y }, { during: async () => await expect(tab.locator('.design-world-screen .deck-guide[data-guide="gap"]').first()).toBeVisible() });
+  const between = (390 + 1424 - 390) / 2;
+  await expect.poll(() => frame('tablet')).toEqual({ x: between, y: 90, w: 390, h: 844 });
+  expect(between - 390).toBe(1424 - (between + 390));
+  for (let i = 0; i < 2; i++) await tab.getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(() => frame('tablet')).toEqual({ x: 650, y: 0, w: 390, h: 844 });
 
   // zoom to board: the poster, taller than 8,192 px, fitted by its height
   await tab.getByRole('button', { name: 'Board Poster options' }).click();
@@ -511,5 +543,130 @@ test('a held board is drawn labelled and never written; Theme restyles every boa
   // house h1 is 26 px in the document medium, 72 px in the deck's)
   for (const b of ['phone', 'poster']) expect(await tab.locator(`[data-board-id="${b}"] .maws-slide`).evaluate((n) => Number.parseFloat(getComputedStyle(n).getPropertyValue('--ds-type-h1-size')))).toBeLessThan(40);
 
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// M6 (product evidence for the owner's sitting): M4's comments and history surfaces and M5's Export sheet, each wide in a
+// main tab and narrow in the panel, a screenshot and the editor's measured geometry kept first, then the bounds every
+// surface keeps (nothing sideways out of the editor, the rails inside it, the card and the sheet on the window).
+test('the comments, history and Export sheet surfaces, wide in a main tab and narrow in the panel: evidence first, then their bounds', async () => {
+  test.setTimeout(240_000);
+  const page = await ready();
+  const id = await createDesign(page, 'Launch screens', DESIGN_FILES);
+  await editDesign(page, id, { op: 'addThread', threadId: 'board', boardId: 'phone', elementId: '', body: 'Is this the launch screen?' });
+  await editDesign(page, id, { op: 'addThread', threadId: 'box', boardId: 'desktop', elementId: 'a', body: 'A softer red?' });
+  await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Draft' });
+  await editDesign(page, id, { op: 'setFrame', boardId: 'desktop', frame: { y: 300 } });
+  await editDesign(page, id, { op: 'setStyle', boardId: 'desktop', elementId: 'a', props: { background: '#cc4444' } });
+  await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Reviewed' });
+  const { panel, inPanel, inMain } = await inPanelAndTab(page, id);
+  const mainRegion = page.locator('[data-region="main"]');
+  const bounds: [string, SurfaceGeometry][] = [];
+
+  for (const [surface, body, shot] of [
+    ['wide', inMain, mainRegion],
+    ['narrow', inPanel, panel],
+  ] as const) {
+    const region = surface === 'wide' ? 'main' : 'panel';
+    const toolbar = body.getByRole('toolbar', { name: 'Design' });
+    await test.step(`${surface}: comments, the rail and a board’s new comment card`, async () => {
+      await toolbar.getByRole('button', { name: /^Comments/ }).click();
+      const rail = body.getByRole('complementary', { name: 'Comments' });
+      await expect(rail.locator('article[data-thread]')).toHaveCount(2);
+      bounds.push([`design-comments-rail-${surface}`, await surfaceEvidence(page, `design-comments-rail-${surface}`, body, shot)]);
+      await toolbar.getByRole('button', { name: /^Comments/ }).click();
+      await expect(rail).toHaveCount(0);
+      await body.getByRole('button', { name: 'Board Phone', exact: true }).click(); // its frame selected
+      await expect.poll(async () => (await viewOf(page, id, region)).frame).toBe('phone');
+      await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
+      const card = page.locator('[data-comment-card]');
+      await expect(card).toBeVisible();
+      bounds.push([`design-comments-card-${surface}`, await surfaceEvidence(page, `design-comments-card-${surface}`, body, null)]);
+      await page.keyboard.press('Escape'); // focus is in the card's field
+      await expect(card).toHaveCount(0);
+    });
+
+    await test.step(`${surface}: history, the two versions compared`, async () => {
+      await headerAction(page, 'Version history', region);
+      const rail = body.getByRole('complementary', { name: 'Version history' });
+      await expect(rail).toBeVisible();
+      for (const fold of await rail.getByRole('button', { name: /^\d+ more versions?$/ }).all()) await fold.click();
+      await rail.getByRole('button', { name: /^Version Draft by You/ }).click();
+      const bar = body.getByRole('toolbar', { name: 'Version preview' });
+      await expect(bar.locator('.deck-history-heading')).toContainText('Draft');
+      await rail.getByRole('button', { name: /^Version Reviewed by You/ }).click({ modifiers: ['Shift'] });
+      await expect(bar.locator('.deck-history-heading')).toHaveText('Draft → Reviewed');
+      await expect(body.getByRole('region', { name: 'Design in this version' }).locator('[data-history-board="desktop"]')).toHaveAttribute('data-history-change', 'changed');
+      bounds.push([`design-history-compare-${surface}`, await surfaceEvidence(page, `design-history-compare-${surface}`, body, shot)]);
+      await bar.getByRole('button', { name: 'Back to design' }).click();
+      await expect(body.getByRole('toolbar', { name: 'Design' })).toBeVisible();
+      await headerAction(page, 'Version history', region);
+      await expect(rail).toHaveCount(0);
+    });
+
+    await test.step(`${surface}: the Export sheet stating the poster’s fitting scale`, async () => {
+      await body.locator('[data-board-title="poster"]').click(); // its frame selected: what Export takes
+      await expect.poll(async () => (await viewOf(page, id, region)).frame).toBe('poster');
+      await exportEntry(page, 'PNG (selected board)', region);
+      const sheet = page.getByRole('dialog', { name: 'Export “Poster” at 91.02%?' });
+      await expect(sheet).toBeVisible();
+      bounds.push([`design-export-sheet-${surface}`, await surfaceEvidence(page, `design-export-sheet-${surface}`, body, null)]);
+      await page.keyboard.press('Escape');
+      await expect(sheet).toHaveCount(0);
+    });
+  }
+
+  for (const [name, geometry] of bounds) expectSurfaceBounds(name, geometry);
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// M6 (acceptance 2: "an edit patches the other replica within a frame"): the panel's replica receives the main tab's edit
+// through its port; the probe, armed on the panel before the edit, notes the inbound transaction's start in the replica's
+// own `beforeTransaction` (origin its PortProvider), asks the next animation frame then, and reads the panel's DOM at that
+// sentinel, with a MutationObserver noting when the values first stood. No layout or style is forced, no flush is called,
+// and no text box is open on the panel (a composition hold would hold the frame by design).
+test('an edit in one replica patches the other within a frame: a board’s geometry and an element’s fill, on the panel before its next animation frame', async () => {
+  test.setTimeout(180_000);
+  const page = await ready();
+  const id = await createDesign(page, 'Launch screens', DESIGN_FILES);
+  const { inPanel, inMain } = await inPanelAndTab(page, id);
+  for (const where of [inMain, inPanel]) await expect(where.locator('[data-board-id] .maws-slide[data-board]')).toHaveCount(ORDER.length);
+  const results: Record<string, FrameProbeResult> = {};
+
+  await test.step('geometry: the tablet moved through the main tab’s inspector', async () => {
+    await inMain.locator('[data-board-title="tablet"]').click();
+    const boardX = inMain.getByRole('textbox', { name: 'Board X' });
+    await expect(boardX).toHaveValue('490');
+    const probe = await armFrameProbe(page, id, 'panel', { kind: 'frame', boardId: 'tablet', key: 'x', value: 600 }, [{ selector: '[data-board-id="tablet"]', style: 'left', equals: '600px' }]);
+    await boardX.fill('600');
+    await boardX.press('Enter');
+    results.geometry = await frameProbeResult(page, probe);
+  });
+
+  await test.step('content: the desktop’s red box filled blue through the main tab’s inspector', async () => {
+    await inMain.getByRole('button', { name: 'Board Desktop options' }).click();
+    await page.getByRole('menuitem', { name: 'Zoom to board' }).click();
+    const d = await boardAt(inMain, 'desktop', frameOnly('desktop'));
+    await page.mouse.click(d.at(300, 560).x, d.at(300, 560).y); // the inactive desktop activated, its box selected
+    await expect.poll(async () => (await viewOf(page, id, 'main')).selection).toEqual(['a']);
+    const probe = await armFrameProbe(page, id, 'panel', { kind: 'style', boardId: 'desktop', elementId: 'a', prop: 'background', value: '#0000ff' }, [{ selector: '[data-board-id="desktop"] .design-board-canvas [data-eid="a"]', style: 'background-color', equals: 'rgb(0, 0, 255)' }]);
+    const fill = inMain.getByRole('complementary', { name: 'Inspector' }).getByRole('textbox', { name: 'Fill colour' });
+    await fill.fill('rgb(0, 0, 255)');
+    await fill.press('Enter');
+    results.content = await frameProbeResult(page, probe);
+  });
+
+  // the evidence first, then the bounds: milliseconds are remote-transaction-start to DOM-observed on the panel, and to the
+  // sentinel frame's callback; not port arrival
+  await test.info().attach('design-frame-proof', { body: JSON.stringify(results, null, 2), contentType: 'application/json' });
+  for (const [what, r] of Object.entries(results))
+    console.log(`[design frame] ${what}: remote-transaction-start → DOM observed ${r.domObservedMs?.toFixed(2) ?? 'never'} ms, → sentinel frame ${r.sentinelMs.toFixed(2)} ms (${r.inbound} inbound transaction${r.inbound === 1 ? '' : 's'} while armed)`);
+  for (const [what, r] of Object.entries(results)) {
+    expect(r.atSentinel.filter((v) => !v.ok), `${what}: every expected value stood at the sentinel`).toEqual([]);
+    expect(r.domObservedMs, `${what}: the panel's DOM took the values before the sentinel`).not.toBeNull();
+    expect(r.domObservedMs!, what).toBeLessThanOrEqual(r.sentinelMs);
+    expect(r.withinFrame, what).toBe(true);
+  }
+  await expect(inPanel.locator('[data-board-id="tablet"]')).toHaveCSS('left', '600px');
   expect(launch!.consoleErrors()).toEqual([]);
 });
