@@ -31,6 +31,10 @@ export const LAYOUTS_COPY = {
   none: 'This design system has no slide layouts.',
   failed: (reason: string) => `The layouts could not be read: ${reason}`,
   layout: (name: string) => `${name} layout`,
+  // final fix wave (B5): a system's layout whose pictures are the system's assets
+  noAssetCopy: 'This layout’s pictures belong to its design system, and this deck cannot copy them in',
+  assetsFailed: (reason: string) => `The layout’s pictures could not be copied into the deck: ${reason}`,
+  notPlaced: 'The layout was not added: the deck stopped taking edits here while its pictures were copied',
 } as const;
 
 export const CHECK_COPY = {
