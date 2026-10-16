@@ -26,8 +26,8 @@ const time = (ts: string) => {
 /** How close to the bottom, in pixels, a reader counts as reading the tail. */
 const TAIL_SLACK = 48;
 
-/** Where each row of the list was, and how tall the list and its box were, when last measured. */
-type Measured = { content: number; box: number; rows: Map<Element, { top: number; bottom: number }> };
+/** Where each row of the list was, how tall the list and its box were, and where the reader was, when last measured. */
+type Measured = { content: number; box: number; top: number; rows: Map<Element, { top: number; bottom: number }> };
 
 function measure(el: HTMLElement): Measured {
   const rows = new Map<Element, { top: number; bottom: number }>();
@@ -35,23 +35,31 @@ function measure(el: HTMLElement): Measured {
     const r = row as HTMLElement;
     rows.set(row, { top: r.offsetTop, bottom: r.offsetTop + r.offsetHeight });
   }
-  return { content: el.scrollHeight, box: el.clientHeight, rows };
+  return { content: el.scrollHeight, box: el.clientHeight, top: el.scrollTop, rows };
 }
 
-/** At the tail, or kept in place: `was` is the list as measured before this change, `el.scrollTop` the reader's now. */
+/**
+ * At the tail, or kept in place: `was` is the list as measured before this change. The reader's position is the scroll
+ * position now, which moves only for them (a scroll of theirs the browser has not yet reported included), except where
+ * the change shrank the list under them and the browser clamped it to the new bottom: they are then still where they
+ * were measured.
+ */
+const wasClamped = (el: HTMLElement, was: Measured) => was.top > el.scrollTop && el.scrollTop >= el.scrollHeight - el.clientHeight - 1;
+
 function settle(el: HTMLElement, was: Measured | null): Measured {
-  if (was === null || was.content - el.scrollTop - was.box <= TAIL_SLACK) {
+  const top = was !== null && wasClamped(el, was) ? was.top : el.scrollTop;
+  if (was === null || was.content - top - was.box <= TAIL_SLACK) {
     el.scrollTop = el.scrollHeight;
   } else {
     // The row at the top of what the reader sees, as the list was laid out when they saw it.
     let anchor: Element | null = null;
     for (const [row, at] of was.rows) {
-      if (at.bottom > el.scrollTop && row.isConnected) {
+      if (at.bottom > top && row.isConnected) {
         anchor = row;
         break;
       }
     }
-    if (anchor) el.scrollTop += (anchor as HTMLElement).offsetTop - was.rows.get(anchor)!.top;
+    if (anchor) el.scrollTop = top + (anchor as HTMLElement).offsetTop - was.rows.get(anchor)!.top;
   }
   return measure(el);
 }
@@ -73,6 +81,19 @@ function useTail(items: StreamItem[], outbox: OutboxItem[], landed: string | nul
   const landedRow = useRef<HTMLLIElement>(null);
   /** The list as last measured: null before the first change, which opens at the tail. */
   const measured = useRef<Measured | null>(null);
+  // Where the reader scrolled to, against the list as it then was: the place a clamped scroll position is restored to.
+  // (Only the place: whether they are at the tail is still judged at each change, from the position then.)
+  useEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const onScroll = () => {
+      const was = measured.current;
+      // The browser's own clamp, the list having shrunk under the reader since it was measured, is not the reader's.
+      if (was && !(el.scrollHeight < was.content && wasClamped(el, was))) was.top = el.scrollTop;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
   // What was added moves the tail, or keeps the reader in place, before it is painted.
   useLayoutEffect(() => {
     if (list.current) measured.current = settle(list.current, measured.current);
