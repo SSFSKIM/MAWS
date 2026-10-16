@@ -26,4 +26,12 @@ describe('sandboxed preview', () => {
     });
     expect(screen.getByTitle('Preview of Red').getAttribute('srcdoc')).toContain('color:dark-ink');
   });
+
+  it('carries its own policy ahead of the preview, so model-written text reaches no network wherever it is drawn', () => {
+    // The desk's web app has no app-wide policy to inherit, as the desktop's frame does.
+    render(<SandboxedPreview preview="<b>Red</b>" title="Preview" />);
+    const srcdoc = screen.getByTitle('Preview').getAttribute('srcdoc')!;
+    const policy = /^<!doctype html><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="([^"]+)">/.exec(srcdoc)?.[1];
+    expect(policy?.split('; ')).toEqual(["default-src 'none'", "style-src 'unsafe-inline'", 'img-src data: blob: maws-artifact:', 'font-src data: maws-artifact:']);
+  });
 });
