@@ -107,7 +107,8 @@ describe('the fake machine reconnecting by itself', () => {
       hub.refuse(status);
       hub.beat();
       await until(() => fm.generation === 2 && hub.generation === 2, `a reconnect after an hb-ack's ${status}`);
-      expect(hub.posted.some((p) => p.generation === 2 && p.frames.some((f) => f.t === 'hello'))).toBe(true);
+      // The generation moves at the new stream's welcome; its hello follows.
+      await until(() => hub.posted.some((p) => p.generation === 2 && p.frames.some((f) => f.t === 'hello')), 'the hello on the new stream');
     });
   }
 });
