@@ -1,7 +1,7 @@
 // The projects open in this tab, one connection each, shared by every view of the project and closed shortly after
 // the last view leaves it (a remount — React's development double mount, a route change back — keeps it), or once the
-// hub has acknowledged every send it holds, whichever is later. The org key
-// reaches every open connection from the key holder.
+// hub has acknowledged every send it holds, whichever is later. The org key reaches every open connection from the key
+// holder.
 import { useEffect } from 'react';
 import { idbLogRecord, type LogRecord } from '../log/record';
 import { useKeyHolder } from '../key/holder';

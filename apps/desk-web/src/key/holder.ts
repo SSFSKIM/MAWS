@@ -95,6 +95,7 @@ export function beginUnlock(org: string, store: KeyStore = idbKeyStore()): Unloc
         // What the device kept before this write, so the write can be undone should this unlock no longer be the newest
         // operation once it lands.
         const before = await store.load(org).catch(() => null);
+        if (!newest()) return;
         if (keep === 'device') await store.save(org, key.hmac);
         else await store.forget(org);
         if (!newest()) {

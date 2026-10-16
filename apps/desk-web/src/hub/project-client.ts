@@ -1,8 +1,9 @@
 // The project socket (DX3): `/api/projects/<id>/socket`. On every connection, after the hub's `welcome`, it resumes
 // after the last offset the browser holds — so a drop, a deploy, or a reload never replays from the start and never
 // skips — and sends again everything the hub has not acknowledged: a web `human` until its `human-ack`, an RPC until
-// the hub reports its result. A new RPC is refused while the socket is not welcomed; a `human` is held until it is. It also serves the session plane (DX8's `SessionPlane`): DX4 subscriptions whose
-// messages reach their listener in order, re-subscribed after any discontinuity.
+// the hub reports its result. A new RPC is refused while the socket is not welcomed; a `human` is held until it is. It
+// also serves the session plane (DX8's `SessionPlane`): DX4 subscriptions whose messages reach their listener in order,
+// re-subscribed after any discontinuity.
 import {
   newNonce,
   type HumanEvent,

@@ -34,8 +34,8 @@ export type StreamItem =
   | { kind: 'request'; key: string; request: string; ref: string };
 
 /**
- * A request as the stream places it: `key` is its key in the conversation's `requests` (machine, session, id); `at` is the offset of the last log entry the browser held when it first saw it;
- * `question` whether it is a question (an exchange item, so it bounds the working record: a native one has no
+ * A request as the stream places it: `key` is its key in the conversation's `requests` (machine, session, id); `at`
+ * is the offset of the last log entry the browser held when it first saw it; `question` whether it is a question (an exchange item, so it bounds the working record: a native one has no
  * `question` event to do it); `call` the transcript's tool-use id of the call it belongs to, the bound a question
  * gives the working record (its `request` when absent).
  */
