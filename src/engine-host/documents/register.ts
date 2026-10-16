@@ -28,6 +28,7 @@ import { fromMessagePortMain } from './ports';
 import { suggestionKey, type DocumentService } from './service';
 import type { Documents } from '.';
 import type { ArtifactStore, ByteContent } from './store';
+import { datasetReaderOf } from '../dashboards/read'; // P3-E
 
 type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.open' | 'artifacts.export'> | keyof typeof SpaceCommands;
 
@@ -35,7 +36,7 @@ export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShap
   'artifacts.list': 'immediate', 'artifacts.get': 'immediate', 'artifacts.create': 'immediate', 'artifacts.update': 'immediate',
   'artifacts.delete': 'immediate', 'artifacts.duplicate': 'immediate', 'artifacts.search': 'immediate', 'artifacts.versions': 'immediate',
   'artifacts.saveVersion': 'immediate', 'artifacts.nameVersion': 'immediate', 'artifacts.restore': 'immediate', 'artifacts.markViewed': 'immediate', 'artifacts.pruneVersions': 'immediate',
-  'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.acceptSuggestion': 'immediate', 'artifacts.rejectSuggestion': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.copyAsset': 'immediate' /* P3-C */, 'artifacts.testLoopDelay': 'immediate',
+  'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.acceptSuggestion': 'immediate', 'artifacts.rejectSuggestion': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.copyAsset': 'immediate' /* P3-C */, 'artifacts.readDataset': 'immediate' /* P3-E */, 'artifacts.testLoopDelay': 'immediate',
   'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.state': 'immediate', 'artifacts.assets': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
   'spaces.list': 'immediate', 'spaces.create': 'immediate', 'spaces.update': 'immediate', 'spaces.delete': 'immediate',
 };
@@ -188,6 +189,11 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   serve('artifacts.rejectSuggestion', ({ artifactId, ranges }) => settle(artifactId, (service) => service.rejectSuggestion(artifactId, ranges, HUMAN)));
   serve('artifacts.uploadAsset', ({ artifactId, name, mime, bytes }) => storeOf().uploadAsset(artifactId, bytes, { name, mime }, HUMAN));
   serve('artifacts.copyAsset', ({ from, ref, to }) => storeOf().copyAsset(from, ref, to, HUMAN)); // P3-C (Decision Log 25)
+  // P3-E (E2 M2): a page of a dataset snapshot by its immutable ref and format, ownership checked on every call
+  serve('artifacts.readDataset', ({ artifactId, ref, format, offset, limit }) => {
+    const store = storeOf();
+    return store.readCommitted(() => datasetReaderOf(store).read(artifactId, ref, { format, offset, limit }));
+  });
   serve('artifacts.testLoopDelay', ({ reset }) => {
     e2eOnly('artifacts.testLoopDelay');
     const histogram = loopDelay!;

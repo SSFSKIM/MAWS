@@ -232,6 +232,8 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     rejectSuggestion: (artifactId, ranges) => call('artifacts.rejectSuggestion', { artifactId, ranges }),
     uploadAsset: (artifactId, bytes, { name, mime }) => call('artifacts.uploadAsset', { artifactId, bytes, name, mime }),
     copyAsset: (from, ref, to) => call('artifacts.copyAsset', { from, ref, to }), // P3-C (Decision Log 25)
+    // P3-E (E2 M2): a page of a dataset snapshot, read by the host
+    readDataset: (artifactId, ref, { format, offset, limit }) => call('artifacts.readDataset', { artifactId, ref, format, ...(offset !== undefined && { offset }), ...(limit !== undefined && { limit }) }),
     identity: () => ({ actor: HUMAN, ...actorDisplay(HUMAN) }),
   };
 }

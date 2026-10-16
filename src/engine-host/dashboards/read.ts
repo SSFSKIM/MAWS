@@ -9,17 +9,11 @@
 // continues at `offset + rows.length`, and a single row larger than a page is refused `tooLarge`. The parse cache is
 // keyed by the bytes' sha256 and the format, bounded by entries and by source bytes, least recently read leaving first;
 // it is not authoritative and starts cold after a restart.
-import { DATASET_READ_MAX_BYTES, DATASET_READ_MAX_ROWS, type Cell, type DatasetColumn, type DatasetFormat } from '@artifacts/dashboard/datasets';
+import { DATASET_READ_MAX_BYTES, DATASET_READ_MAX_ROWS, type Cell, type DatasetFormat } from '@artifacts/dashboard/datasets';
 import { DatasetError, parseDataset, type ParsedDataset } from '@artifacts/dashboard/parse';
+import type { DatasetPage } from '@artifacts/host';
 import { ArtifactStoreError } from '../documents/errors';
 import type { ArtifactStore } from '../documents/store';
-
-export interface DatasetPage {
-  columns: DatasetColumn[];
-  rows: Cell[][];
-  total: number;
-  truncated: boolean;
-}
 
 export interface DatasetReadOptions {
   format: DatasetFormat;

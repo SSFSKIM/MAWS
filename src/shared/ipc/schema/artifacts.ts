@@ -184,6 +184,20 @@ export const commands = {
   // target (content-addressed, so identical bytes answer the target's existing ref and a name is made unique there);
   // both artifacts live, a deleted or missing one refused by name.
   'artifacts.copyAsset': host(z.strictObject({ from: Id, ref: z.string().min(1).max(1_000), to: Id }), z.strictObject({ assetId: z.uuid(), ref: z.string() })),
+  // P3-E (docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md M2; ledger X23 as amended by E's Decision Log 8): one
+  // page of a dataset snapshot, the asset `ref` read as `format` (the displayed or exported descriptor's: one ref may
+  // be bound as two formats), parsed by the host. At most `limit` rows (≤ 2,000, DATASET_READ_MAX_ROWS) and 1 MiB of
+  // JSON; the caller continues at `offset` plus the rows answered. A ref the artifact does not hold is `notFound`, a
+  // snapshot that does not read as the format `invalid {line?}`, a single row larger than a page `tooLarge`.
+  'artifacts.readDataset': host(
+    z.strictObject({ artifactId: Id, ref: z.string().min(1).max(1_000), format: z.enum(['csv', 'tsv', 'json']), offset: Seq.optional(), limit: z.number().int().min(1).max(2_000).optional() }),
+    z.strictObject({
+      columns: z.array(z.strictObject({ name: z.string(), type: z.enum(['string', 'number', 'boolean', 'date', 'null']), mismatches: z.number().int().positive().optional() })),
+      rows: z.array(z.array(z.union([z.string(), z.number(), z.boolean(), z.null()]))),
+      total: Seq,
+      truncated: z.boolean(),
+    }),
+  ),
   // The host's event-loop delay in ms since the last reset (Decision Log 23h); refused unless the host runs under MAWS_E2E=1.
   'artifacts.testLoopDelay': host(
     z.strictObject({ reset: z.boolean().optional() }),

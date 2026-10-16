@@ -67,6 +67,7 @@ function fakeHost(systems: Record<string, Doc>, versions: Record<string, Uint8Ar
     rejectSuggestion: async () => ({ revision: 0 }),
     uploadAsset: async () => ({ assetId: '', ref: '' }),
     copyAsset: async () => ({ assetId: '', ref: '' }), // P3-C (Decision Log 25)
+    readDataset: async () => ({ columns: [], rows: [], total: 0, truncated: false }), // P3-E (E2 M2)
     identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '#000000' }),
   };
   return { host, open, closed, versionState };

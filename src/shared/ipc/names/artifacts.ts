@@ -8,6 +8,7 @@ export const commands = [
   'artifacts.acceptSuggestion', 'artifacts.rejectSuggestion', // P3-A M8
   'artifacts.uploadAsset',
   'artifacts.copyAsset', // P3-C (Decision Log 25)
+  'artifacts.readDataset', // P3-E (E2 M2)
   'artifacts.testLoopDelay', 'artifacts.status', 'artifacts.testWrite', 'artifacts.open',
   'artifacts.export', // P3-A M7: main's
 ] as const;
