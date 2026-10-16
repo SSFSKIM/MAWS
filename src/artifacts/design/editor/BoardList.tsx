@@ -126,6 +126,8 @@ function Row(props: {
     if (renaming === null) return;
     const title = renaming.trim();
     setRenaming(null);
+    // M6 final review: the board and the replica as they stand at the commit, not as they stood when the field opened
+    if (readOnly || !editable) return;
     if (title !== board.title) onRename(title);
   };
   if (renaming !== null) {

@@ -406,6 +406,28 @@ describe('task-review fix wave 2', () => {
     expect(boardFrame(doc, 'b1')!.x).toBe(50);
   });
 
+  it('(M6 final review) recreates, under force, a board deleted since the read at its frame and title when the manifest comes back byte for byte as read', () => {
+    const doc = design();
+    const base = designFiles(doc);
+    transact(doc, () => Y.deleteSlide(doc, 'b1'));
+    setBoardFrame(doc, 'b2', { x: 777 }); // a survivor moved since the read: an unchanged manifest leaves it alone
+    const sent = { [CANVAS_PATH]: base[CANVAS_PATH]!, [B1]: restyled(base) };
+    const before = designFiles(doc);
+    const refusedOut = publish(doc, base, sent);
+    expect(refusedOut.out.conflicts.length).toBeGreaterThan(0); // not forced: refused, nothing written
+    expect(refusedOut.updates).toBe(0);
+    expect(designFiles(doc)).toEqual(before);
+    const { out } = publish(doc, base, sent, true);
+    expect(out.conflicts).toEqual([]);
+    expect(boardFrame(doc, 'b1')).toEqual({ x: 0, y: 0, w: 390, h: 844 });
+    expect(readCanvas(doc).boards.b1!.title).toBe('Phone');
+    expect(readSlide(doc, 'b1').children[0]!.style.color).toBe('#123456');
+    expect(out.warnings.filter((w) => /no x|no w|placed/.test(w.message))).toEqual([]);
+    expect(boardFrame(doc, 'b2')!.x).toBe(777);
+    // sent as read with nothing recreated, the same manifest stays no change at all, forced or not
+    for (const force of [false, true]) expect(publish(doc, designFiles(doc), designFiles(doc), force).updates).toBe(0);
+  });
+
   it('(2) merges an order that moved only another board around a board deleted since the read', () => {
     const doc = design([...BOARDS, { id: 'b4', at: { x: 4000, y: 0, w: 10, h: 10 } }]);
     const base = designFiles(doc);

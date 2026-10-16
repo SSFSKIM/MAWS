@@ -20,7 +20,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 
 /** Runs a command and answers its stdout; throws when it fails. */
 export type Command = (file: string, args: string[], options?: { env?: Record<string, string> }) => string;
@@ -76,6 +76,47 @@ export function selectedRef(env: Record<string, string | undefined>): string | n
 /** The spec files a package script runs (`e2e/<name>.spec.ts`), by name. */
 export function intendedSpecs(script: string): string[] {
   return [...script.matchAll(/(?:^|\s)e2e\/([\w.-]+\.spec\.ts)(?=\s|$)/g)].map((m) => m[1]!);
+}
+
+/** The final reporter, as the package command names it. */
+export const FINAL_REPORTER = 'e2e/support/design-final-reporter.ts';
+/** The only options the package command passes. */
+const ADMITTED_FLAGS = new Set(['--forbid-only']);
+
+/**
+ * How the runner's command line (the config's `argv`, `process.argv` of the runner) narrows the run, as words; empty
+ * when it is the package command exactly: `playwright test`, every intended spec as `e2e/<name>` once and no other
+ * argument, `--forbid-only`, and `--add-reporter` naming the final reporter (`=` or as the next word). Anything else,
+ * whatever its alias or spelling (a grep or its inverse, the last failures, a test list, a location `file:line`, a
+ * project, a shard, a stop after failures, words after `--`), is narrowing: the CLI applies several of these outside the
+ * config the reporter sees, so the command line is the only complete record.
+ */
+export function invocationFilters(argv: readonly string[], intended: readonly string[], root: string): string[] {
+  const at = argv.indexOf('test', 2);
+  if (at < 0) return ['the invocation is not `playwright test`'];
+  const words: string[] = [];
+  const specs: string[] = [];
+  const reporter = resolvePath(root, FINAL_REPORTER);
+  const args = argv.slice(at + 1);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (ADMITTED_FLAGS.has(arg)) continue;
+    if (arg === '--add-reporter' || arg.startsWith('--add-reporter=')) {
+      const value = arg === '--add-reporter' ? args[++i] : arg.slice('--add-reporter='.length);
+      if (value === undefined || resolvePath(root, value) !== reporter) words.push(`--add-reporter ${value ?? ''}`.trim());
+      continue;
+    }
+    if (arg === '--') {
+      words.push(`-- ${args.slice(i + 1).join(' ')}`.trim());
+      break;
+    }
+    if (arg.startsWith('-')) words.push(i + 1 < args.length && !args[i + 1]!.startsWith('-') && !arg.includes('=') && !args[i + 1]!.startsWith('e2e/') ? `${arg} ${args[++i]}` : arg);
+    else specs.push(arg);
+  }
+  const want = intended.map((name) => `e2e/${name}`);
+  for (const spec of specs) if (!want.includes(spec)) words.push(`a spec filter outside the package command: ${spec}`);
+  for (const spec of want) if (!specs.includes(spec)) words.push(`the package command's ${spec} not named`);
+  return words;
 }
 
 /** Why the run was not the whole intended invocation passed; empty when it was. */

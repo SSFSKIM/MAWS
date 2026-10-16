@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { finalBundle, intendedSpecs, inventory, invocationProblems, selectedRef, type BundleContext, type Command, type InvocationSummary } from '../../e2e/support/design-bundle';
+import { finalBundle, intendedSpecs, inventory, invocationFilters, invocationProblems, selectedRef, type BundleContext, type Command, type InvocationSummary } from '../../e2e/support/design-bundle';
 
 const SOURCE = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
 const WRAPPER = 'f0e1d2c3b4a5968778695a4b3c2d1e0f12345678';
@@ -209,5 +209,45 @@ describe('the inventory', () => {
       { path: 'out/b/Z.js', bytes: 1, sha256: sha('z') },
     ]);
     expect(() => inventory(join(root, 'missing'))).toThrow(/no out\//);
+  });
+});
+
+// M6 final review: the CLI narrows a run through options the reporter's config does not carry (a grep or its inverse,
+// the last failures, a test list, a location, a project, a shard, a stop after failures…); the invocation as typed is the
+// only complete record, so a selected final run admits exactly the package command and nothing else
+describe('the invocation as typed', () => {
+  const ROOT = '/repo';
+  const PACKAGE = ['/usr/local/bin/node', '/repo/node_modules/@playwright/test/cli.js', 'test', 'e2e/design.spec.ts', 'e2e/design-comments.spec.ts', 'e2e/design-history.spec.ts', 'e2e/design-export.spec.ts', '--forbid-only', '--add-reporter=./e2e/support/design-final-reporter.ts'];
+  it('admits the package command, its reporter given either way', () => {
+    expect(invocationFilters(PACKAGE, SPECS, ROOT)).toEqual([]);
+    expect(invocationFilters([...PACKAGE.slice(0, -1), '--add-reporter', 'e2e/support/design-final-reporter.ts'], SPECS, ROOT)).toEqual([]);
+  });
+  const narrowed: [string, string[], RegExp][] = [
+    ['--grep-invert', ['--grep-invert', 'export'], /--grep-invert/],
+    ['-G', ['-G', 'export'], /-G/],
+    ['--grep=', ['--grep=menu'], /--grep=menu/],
+    ['-g', ['-g', 'menu'], /-g/],
+    ['--last-failed', ['--last-failed'], /--last-failed/],
+    ['--test-list', ['--test-list', 'list.txt'], /--test-list/],
+    ['--test-list-invert=', ['--test-list-invert=skip.txt'], /--test-list-invert=skip.txt/],
+    ['--only-changed', ['--only-changed'], /--only-changed/],
+    ['--shard=', ['--shard=1/2'], /--shard=1\/2/],
+    ['--project', ['--project', 'chromium'], /--project/],
+    ['-x', ['-x'], /-x/],
+    ['--max-failures=', ['--max-failures=1'], /--max-failures=1/],
+    ['another reporter', ['--add-reporter', './other.ts'], /--add-reporter/],
+    ['after --', ['--', '--grep'], /--/],
+  ];
+  for (const [what, extra, words] of narrowed)
+    it(`reports the run narrowed by ${what}`, () => {
+      const found = invocationFilters([...PACKAGE, ...extra], SPECS, ROOT);
+      expect(found.length).toBeGreaterThan(0);
+      expect(found.join('; ')).toMatch(words);
+    });
+  it('reports a location selector, a missing spec, a spec filter of its own, or no test command', () => {
+    expect(invocationFilters(PACKAGE.map((a) => (a === 'e2e/design.spec.ts' ? 'e2e/design.spec.ts:120' : a)), SPECS, ROOT).join('; ')).toMatch(/e2e\/design.spec.ts:120/);
+    expect(invocationFilters(PACKAGE.filter((a) => a !== 'e2e/design-export.spec.ts'), SPECS, ROOT).join('; ')).toMatch(/design-export.spec.ts/);
+    expect(invocationFilters([...PACKAGE, 'design'], SPECS, ROOT).join('; ')).toMatch(/design/);
+    expect(invocationFilters(['node', 'cli.js', 'show-report'], SPECS, ROOT)).toEqual(['the invocation is not `playwright test`']);
   });
 });

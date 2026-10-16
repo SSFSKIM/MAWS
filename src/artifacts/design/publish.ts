@@ -248,6 +248,16 @@ function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
     }
     for (const id of Object.keys(B.boards)) if (live.has(id) && !removed.has(id) && !Object.hasOwn(A.boards, id)) warn(`board ${id}: not in canvas.json’s boards; its frame is kept`);
   }
+  // M6 final review: a manifest sent byte for byte as read is no change of the agent's (nothing above compares it), yet
+  // it still says where a board the agent's changed file recreates stood: forced, that board takes its entry as read
+  // (unforced, C's half refuses the recreation); surviving boards are left alone as before
+  if (!A && force && input.sent[CANVAS_PATH] !== undefined && input.sent[CANVAS_PATH] === input.base[CANVAS_PATH])
+    for (const id of fileCreated) {
+      const bb = own(B.boards, id) as CanvasBoard | undefined;
+      if (!bb || entries.has(id)) continue;
+      entries.set(id, { ...bb });
+      partial.set(id, FRAME_KEYS.filter((k) => bb[k] === undefined));
+    }
   for (const id of fileCreated) if (!entries.has(id)) partial.set(id, [...FRAME_KEYS]);
   // a created board's size as it will stand (its entry's, else its data-size or the slide's), judged before any write
   const fills = new Map<string, { w: number; h: number }>();

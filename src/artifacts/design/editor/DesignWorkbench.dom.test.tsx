@@ -286,6 +286,43 @@ describe('the board list', () => {
     fireEvent.keyDown(field, { key: 'Enter' });
     expect(Y.slideScalars(doc, 'b2').title).toBe('Landing');
   });
+
+  it('(M6 final review) a rename opened before the replica turned read-only, the board held or missing, or writes held, commits nothing by Enter or blur; Escape cancels', () => {
+    for (const turn of ['readOnly', 'held', 'missing', 'holdWrites'] as const)
+      for (const commit of ['Enter', 'blur'] as const) {
+        const { doc, session, turnReadOnly } = mount();
+        const { remote, toLocal } = remoteOf(doc);
+        openMenu(screen.getByRole('button', { name: 'Board Desktop options' }));
+        fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+        const field = screen.getByRole('textbox', { name: 'Rename board' });
+        fireEvent.change(field, { target: { value: 'Landing' } });
+        if (turn === 'readOnly') turnReadOnly();
+        else if (turn === 'holdWrites') act(() => session.holdWrites(true));
+        else {
+          transact(remote, () => {
+            if (turn === 'held') Y.setSlideKey(remote, 'b2', 'held', { source: '<section id="b2"><blink>x</blink></section>', reasons: ['an unknown tag <blink>'] });
+            else Y.setSlideKey(remote, 'b2', MISSING_SOURCE_KEY, true);
+          });
+          toLocal();
+        }
+        const now = screen.queryByRole('textbox', { name: 'Rename board' });
+        if (now) {
+          if (commit === 'Enter') fireEvent.keyDown(now, { key: 'Enter' });
+          else fireEvent.blur(now);
+        }
+        expect(Y.slideScalars(doc, 'b2').title, `${turn}, ${commit}`).toBe('Desktop');
+        expect(session.undo.canUndo(), `${turn}, ${commit}: nothing on the undo stack`).toBe(false);
+        cleanup();
+      }
+    const { doc } = mount();
+    openMenu(screen.getByRole('button', { name: 'Board Desktop options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const field = screen.getByRole('textbox', { name: 'Rename board' });
+    fireEvent.change(field, { target: { value: 'Landing' } });
+    fireEvent.keyDown(field, { key: 'Escape' });
+    expect(screen.queryByRole('textbox', { name: 'Rename board' })).toBeNull();
+    expect(Y.slideScalars(doc, 'b2').title).toBe('Desktop');
+  });
 });
 
 describe('one undo stack, and what writes nothing', () => {

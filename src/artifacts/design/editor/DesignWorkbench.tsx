@@ -345,7 +345,13 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
     tryEdit((origin) => deleteBoard(doc, boardId, origin));
     if (view.snapshot().frame === boardId) view.selectFrame(null);
   };
-  const rename = (boardId: string, title: string) => tryEdit(() => writeBoardEntry(doc, boardId, { title: title || undefined })); // inside the edit's transaction
+  // M6 final review: a rename commits only while the replica takes writes and the board, as the model holds it now, is
+  // drawn from its file (not held, not missing); the field may have opened before either changed
+  const rename = (boardId: string, title: string) => {
+    const now = readBoards(doc).boards.find((b) => b.id === boardId);
+    if (readOnly || !session.writable() || !now || now.held !== null || now.missing) return false;
+    return tryEdit(() => writeBoardEntry(doc, boardId, { title: title || undefined })); // inside the edit's transaction
+  };
 
   const editable = !readOnly && active !== null && active.held === null && !active.missing;
   const insert = useCallback(
