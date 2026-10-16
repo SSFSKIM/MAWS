@@ -93,3 +93,11 @@ describe('capabilities', () => {
     expect(c.retire.can).toBe(true);
   });
 });
+
+describe('while the project socket is not connected', () => {
+  it('offers no RPC, whatever presence last said: the hub queues nothing for an absent party; a send waits for the reconnect', () => {
+    const c = capabilities(base, false);
+    for (const verb of ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume'] as const) expect(c[verb], verb).toEqual({ can: false, reason: 'not connected to the hub' });
+    expect(c.send).toEqual({ can: true, reason: null, note: 'sent once the desk reconnects' });
+  });
+});

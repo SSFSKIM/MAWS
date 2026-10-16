@@ -1,7 +1,7 @@
 // The project socket (DX3): `/api/projects/<id>/socket`. On every connection, after the hub's `welcome`, it resumes
 // after the last offset the browser holds — so a drop, a deploy, or a reload never replays from the start and never
 // skips — and sends again everything the hub has not acknowledged: a web `human` until its `human-ack`, an RPC until
-// the hub reports a state for it. It also serves the session plane (DX8's `SessionPlane`): DX4 subscriptions whose
+// the hub reports its result. A new RPC is refused while the socket is not welcomed; a `human` is held until it is. It also serves the session plane (DX8's `SessionPlane`): DX4 subscriptions whose
 // messages reach their listener in order, re-subscribed after any discontinuity.
 import {
   newNonce,
@@ -132,8 +132,23 @@ export class ProjectClient implements SessionPlane {
     });
   }
 
-  /** Sends a sealed RPC, again after each reconnect, until the hub reports its result (`done` or `failed`). */
-  sendRpc(rpc: Rpc): void {
+  /**
+   * Sends a newly sealed RPC, again after each reconnect, until the hub reports its result (`done` or `failed`). False,
+   * and nothing kept, when the socket is not welcomed: the hub queues nothing for an absent party (it fails an offline
+   * machine's at once), and an RPC is a decision for the moment it was made — an Interrupt held until a later welcome
+   * could stop a later turn.
+   */
+  sendRpc(rpc: Rpc): boolean {
+    if (!this.welcomed) return false;
+    this.resendRpc(rpc);
+    return true;
+  }
+
+  /**
+   * Sends an RPC already sent once again, exactly as sealed (an `uncertain` one's retry, DX6): kept and sent after
+   * each reconnect until its result, as when it was first sent.
+   */
+  resendRpc(rpc: Rpc): void {
     this.rpcs.set(rpc.nonce, rpc);
     if (this.welcomed) this.socket.send({ t: 'rpc', rpc });
   }

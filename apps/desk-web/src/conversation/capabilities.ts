@@ -52,11 +52,19 @@ export const turnRunning = (s: CapabilityInput): boolean => {
 const yes = (note?: string): Capability => (note === undefined ? { can: true, reason: null } : { can: true, reason: null, note });
 const no = (reason: string): Capability => ({ can: false, reason });
 
-export function capabilities(s: CapabilityInput): Record<Verb, Capability> {
+/**
+ * `connected`: the project socket is welcomed. While it is not, no RPC is offered, whatever presence last said: the
+ * browser sends none then (the hub queues nothing for an absent party), and presence from before the drop may no longer
+ * hold. A send is a log `human`, held and sent once the socket is back.
+ */
+export function capabilities(s: CapabilityInput, connected = true): Record<Verb, Capability> {
   const byKind = capabilitiesByKind(s);
   // A send to a retired session is only recorded, whatever its process or its machine is doing: sminos delivers nothing
   // to a session that is not a member.
-  return retiredBy(s) === null ? byKind : { ...byKind, send: yes('recorded, not delivered: it is retired') };
+  const can = retiredBy(s) === null ? byKind : { ...byKind, send: yes('recorded, not delivered: it is retired') };
+  if (connected) return can;
+  const off = no('not connected to the hub');
+  return { send: can.send.can ? yes('sent once the desk reconnects') : can.send, steer: off, interrupt: off, answer: off, decide: off, model: off, compact: off, retire: off, resume: off };
 }
 
 function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {

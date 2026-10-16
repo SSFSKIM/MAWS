@@ -6,7 +6,7 @@ import { useState, type FormEvent } from 'react';
 import { useStore } from 'zustand';
 import { resultOf } from '../../conversation/outcome';
 import { buttonPrimary, buttonSecondary, Dialog, textInput } from '../common/Dialog';
-import { useDesk } from '../conversation/desk-context';
+import { useConnected, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
 
 const MODES = ['default', 'acceptEdits', 'plan', 'auto'];
@@ -15,6 +15,7 @@ const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 export function SpawnDialog({ onClose, onOpen }: { onClose: () => void; onOpen: (session: string) => void }) {
   const { connection, member } = useDesk();
   const machines = useStore(connection.live, (s) => s.machines);
+  const connected = useConnected();
   const online = Object.entries(machines).filter(([, m]) => m.online);
   const [machine, setMachine] = useState(online[0]?.[0] ?? '');
   const checkouts = machines[machine]?.checkouts ?? [];
@@ -116,7 +117,12 @@ export function SpawnDialog({ onClose, onOpen }: { onClose: () => void; onOpen: 
                 Open it
               </button>
             )}
-            <button type="submit" className={`${buttonPrimary} ml-auto`} disabled={!checkout || !brief.trim() || (entry !== undefined && entry.state !== 'failed')}>
+            {!connected && <span className="text-ui-sm text-warning">Not connected to the hub</span>}
+            <button
+              type="submit"
+              className={`${buttonPrimary} ml-auto`}
+              disabled={!connected || !checkout || !brief.trim() || (entry !== undefined && entry.state !== 'failed' && entry.state !== 'not-connected')}
+            >
               Start
             </button>
           </div>

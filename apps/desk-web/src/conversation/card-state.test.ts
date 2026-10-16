@@ -62,6 +62,18 @@ describe('cardState', () => {
   });
 });
 
+describe('while the project socket is not connected', () => {
+  it('is shown, not answerable; an uncertain decision keeps its Retry', () => {
+    const off = { can: false, reason: 'not connected to the hub' };
+    expect(cardState(record(), null, off, true, false)).toEqual({ kind: 'disconnected' });
+    expect(cardState(record(), rpc('uncertain'), off, true, false)).toEqual({ kind: 'uncertain', offline: false });
+  });
+
+  it('draws a decision refused in the browser for want of a connection as failed, so another can follow', () => {
+    expect(cardState(record(), rpc('not-connected'), can)).toEqual({ kind: 'failed', code: 'not-connected', message: 'not connected to the hub: nothing was sent' });
+  });
+});
+
 describe('the kind of request', () => {
   it('tells a question from a permission prompt, and an async question (`raised.async`) from a native one', () => {
     expect(isQuestion('AskUserQuestion')).toBe(true);

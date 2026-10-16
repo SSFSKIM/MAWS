@@ -36,6 +36,7 @@ let connection: ProjectConnection;
 beforeEach(async () => {
   connection = new ProjectConnection(PROJECT, { base: 'ws://127.0.0.1:9', record: memoryLogRecord() });
   connection.setKey(await importOrgKey(VECTOR_KEY));
+  connection.live.setState({ connected: true }); // the controls act only on a welcomed socket
 });
 afterEach(() => {
   cleanup();
@@ -64,4 +65,20 @@ it("carries none of one session's draft or confirmation into another's channel, 
   fireEvent.click(screen.getByRole('button', { name: 'Retire' }));
   await waitFor(() => expect(Object.values(connection.conversation.store.getState().rpcs)).toHaveLength(1));
   expect(Object.values(connection.conversation.store.getState().rpcs)[0].rpc.args).toEqual({ session: B });
+});
+
+it('draws every control that issues an RPC disabled while the project socket is down, saying why; Send stays', () => {
+  connection.live.setState({ connected: false });
+  const sessions = new Map([[A, session(A, 'maws-45')]]);
+  render(
+    <DeskContext.Provider value={{ connection, member: '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c', sessions }}>
+      <ChannelView name="MAWS" channel={{ kind: 'session', session: A }} session={sessions.get(A)!} events={[]} />
+    </DeskContext.Provider>,
+  );
+  for (const name of ['Retire…', 'Steer', 'Interrupt', 'Model', 'Compact']) {
+    const button = screen.getByRole('button', { name }) as HTMLButtonElement;
+    expect(button.disabled, name).toBe(true);
+    expect(button.title, name).toBe('not connected to the hub');
+  }
+  expect((screen.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(false);
 });

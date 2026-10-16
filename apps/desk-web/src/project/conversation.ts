@@ -33,7 +33,8 @@ export type RequestRecord = {
   settled: Settled | null;
 };
 
-export type RpcEntryState = 'sending' | RpcOutcome['state'] | 'forwarded' | 'uncertain';
+/** `not-connected`: refused in the browser, the project socket being down; nothing was sent. */
+export type RpcEntryState = 'sending' | RpcOutcome['state'] | 'forwarded' | 'uncertain' | 'not-connected';
 /** `request`: the key of the request an answer or a decision is on. */
 export type RpcEntry = { nonce: string; rpc: Rpc; state: RpcEntryState; outcome?: RpcOutcome; request?: string };
 
@@ -181,6 +182,11 @@ export class Conversation {
   /** `request`: the key of the request an answer or a decision is on. */
   rpcSent(rpc: Rpc, request?: string): void {
     this.store.setState((s) => ({ rpcs: { ...s.rpcs, [rpc.nonce]: { nonce: rpc.nonce, rpc, state: 'sending', ...(request && { request }) } } }));
+  }
+
+  /** The RPC was refused in the browser: the project socket was down, so nothing was sent. */
+  rpcNotConnected(nonce: string): void {
+    this.store.setState((s) => (s.rpcs[nonce] ? { rpcs: { ...s.rpcs, [nonce]: { ...s.rpcs[nonce], state: 'not-connected' } } } : s));
   }
 
   retrying(nonce: string): void {

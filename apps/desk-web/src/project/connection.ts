@@ -32,6 +32,11 @@ import { Conversation, type RequestRecord } from './conversation';
 
 export type LiveState = {
   status: ConnectionStatus;
+  /**
+   * The hub has welcomed this connection and not dropped it since: only then is an RPC sent, and only then do the
+   * controls that act on presence act (presence and the pending set from before a drop may no longer hold).
+   */
+  connected: boolean;
   /** The backlog after the latest resume has arrived. */
   caughtUp: boolean;
   presence: Record<string, SessionPresence>;
@@ -59,7 +64,7 @@ export class NoKey extends Error {
 
 export class ProjectConnection {
   readonly log: ProjectLog;
-  readonly live: StoreApi<LiveState> = createStore<LiveState>(() => ({ status: 'connecting', caughtUp: false, presence: {}, machines: {}, pending: [], audit: [] }));
+  readonly live: StoreApi<LiveState> = createStore<LiveState>(() => ({ status: 'connecting', connected: false, caughtUp: false, presence: {}, machines: {}, pending: [], audit: [] }));
   readonly conversation: Conversation;
   readonly client: ProjectClient;
   private key: OrgKey | null = null;
@@ -86,7 +91,7 @@ export class ProjectConnection {
           this.head = frame.head;
           // Presence from before the drop may no longer hold; until the hub sends it again a session's group reads the
           // log's last `state`, which is the record for exactly that case.
-          this.live.setState({ caughtUp: false, presence: {} });
+          this.live.setState({ connected: true, caughtUp: false, presence: {} });
           // A hub holding another log (started afresh) reported nothing that belongs to it: the conversation starts over.
           if (replaced) this.conversation.reset();
           this.conversation.restart();
@@ -115,7 +120,7 @@ export class ProjectConnection {
         decided: (decision) => this.conversation.decided(decision, this.log.offsetAt(decision.at)),
         refused: (entry) => this.record({ kind: 'refused', entry }),
         rejected: (entry) => this.record({ kind: 'rejected', entry }),
-        status: (status) => this.live.setState({ status }),
+        status: (status) => this.live.setState(status === 'connecting' ? { status, connected: false } : { status }),
       },
     });
     this.client.onRpcState((frame) => this.conversation.rpcState(frame.nonce, frame.state, frame.outcome));
@@ -159,13 +164,16 @@ export class ProjectConnection {
     return nonce;
   }
 
-  /** A sealed DX6 RPC to `machine`; resolves with its nonce (its id) once sent. */
+  /**
+   * A sealed DX6 RPC to `machine`; resolves with its nonce (its id) once sent, or once refused as `not-connected` when
+   * the project socket is down (nothing is held for later: see `ProjectClient.sendRpc`).
+   */
   async rpc<N extends RpcName>(member: string, machine: string, name: N, args: RpcArgs[N], request?: string): Promise<string> {
     const key = this.requireKey();
     const draft = { rpc: name, project: this.project, machine, member, created: new Date().toISOString(), nonce: newNonce(), args } as RpcDraft;
     const rpc = await sealRpc(key, draft);
     this.conversation.rpcSent(rpc, request);
-    this.client.sendRpc(rpc);
+    if (!this.client.sendRpc(rpc)) this.conversation.rpcNotConnected(rpc.nonce);
     return rpc.nonce;
   }
 
@@ -186,7 +194,7 @@ export class ProjectConnection {
     const entry = this.conversation.store.getState().rpcs[nonce];
     if (!entry) return;
     this.conversation.retrying(nonce);
-    this.client.sendRpc(entry.rpc);
+    this.client.resendRpc(entry.rpc);
   }
 
   // Internals.

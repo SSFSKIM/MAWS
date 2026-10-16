@@ -235,6 +235,22 @@ describe('RPCs', () => {
     expect(conv(c).rpcs[nonce].outcome).toBeUndefined();
   });
 
+  it('refuses an RPC issued while the socket is down as not connected, and never sends it after the reconnect', async () => {
+    const c = await connect();
+    expect(c.live.getState().connected).toBe(true);
+    hub.admit = 'not-a-member';
+    hub.dropConnections();
+    await until(() => c.live.getState().status === 'connecting');
+    expect(c.live.getState().connected).toBe(false);
+    const nonce = await c.rpc(M, 'mini', 'interrupt', { session: S1 });
+    expect(conv(c).rpcs[nonce].state).toBe('not-connected');
+    hub.admit = 'member';
+    await until(() => c.live.getState().connected && c.live.getState().caughtUp);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(hub.rpcs(PROJECT)).toEqual([]);
+    expect(conv(c).rpcs[nonce].state).toBe('not-connected');
+  });
+
   it('fails at once for a machine that is offline', async () => {
     const c = await connect();
     hub.dropMachine(PROJECT, 'mini');

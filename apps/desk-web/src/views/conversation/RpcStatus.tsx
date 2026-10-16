@@ -1,6 +1,7 @@
 // An RPC's state as the hub reports it (DX6): sent, forwarded, done with its result in words, failed with its reason,
 // or `uncertain` — the machine's lease lapsed after the hub forwarded it, so it may or may not have happened — with a
-// Retry that sends the same sealed RPC again, nonce and all, which the machine answers from its ledger if it ran.
+// Retry that sends the same sealed RPC again, nonce and all, which the machine answers from its ledger if it ran — or
+// refused in the browser because the project socket was down, nothing sent.
 import { useStore } from 'zustand';
 import { failureOf, resultOf } from '../../conversation/outcome';
 import { failureText, resultText } from '../../conversation/words';
@@ -32,6 +33,12 @@ export function RpcStatus({ nonce, className = '' }: { nonce: string | null; cla
           <button type="button" className="underline hover:text-fg" onClick={() => connection.retryRpc(entry.nonce)}>
             Retry
           </button>
+        </span>
+      );
+    case 'not-connected':
+      return (
+        <span className={`${base} text-danger`} role="alert" data-rpc-state="not-connected">
+          Not connected to the hub: nothing was sent
         </span>
       );
     case 'failed':

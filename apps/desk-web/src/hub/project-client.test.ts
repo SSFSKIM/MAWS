@@ -167,6 +167,41 @@ describe('what goes up', () => {
     expect(double.up.filter((u) => u.frame.t === 'human')).toHaveLength(1);
   });
 
+  const rpcTo = (nonce = newNonce()) => ({ rpc: 'interrupt' as const, project: PROJECT, machine: 'mini', member: DOUBLE_MEMBER.id, created: new Date().toISOString(), nonce, args: { session: 's' }, mac: 'x' });
+
+  /** Drops the socket and holds the client off until `release()`. */
+  async function disconnect(statuses: ConnectionStatus[]) {
+    double.admit = 'not-a-member';
+    double.dropConnections();
+    await until(() => statuses.at(-1) === 'connecting');
+    return { release: () => (double.admit = 'member') };
+  }
+
+  it('refuses an RPC first issued while the socket is not welcomed, and never sends it after the reconnect', async () => {
+    const { c, caughtUp, statuses } = client();
+    await until(() => caughtUp.length === 1);
+    const { release } = await disconnect(statuses);
+    // The hub queues nothing for an absent party: an Interrupt held until a later welcome could stop a later turn.
+    expect(c.sendRpc(rpcTo())).toBe(false);
+    release();
+    await until(() => caughtUp.length === 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(double.up.filter((u) => u.frame.t === 'rpc')).toHaveLength(0);
+  });
+
+  it('holds a retry of an RPC it already sent while disconnected, and sends it on the next welcome', async () => {
+    const { c, caughtUp, statuses } = client();
+    await until(() => caughtUp.length === 1);
+    const rpc = rpcTo();
+    expect(c.sendRpc(rpc)).toBe(true);
+    await until(() => double.up.filter((u) => u.frame.t === 'rpc').length === 1);
+    double.answerRpc(PROJECT, rpc.nonce, 'uncertain');
+    const { release } = await disconnect(statuses);
+    c.resendRpc(rpc); // the uncertain one's Retry: the same nonce, already transmitted
+    release();
+    await until(() => double.up.filter((u) => u.frame.t === 'rpc').length === 2);
+  });
+
   it('keeps an RPC through `forwarded` and `uncertain`, sending it again after each reconnect, until done or failed', async () => {
     const { c, caughtUp } = client();
     await until(() => caughtUp.length === 1);

@@ -21,7 +21,7 @@ import { useNarrow } from '../../shell/viewport';
 import type { Channel } from '../../shell/layout';
 import type { DeskSession } from '../../shell/sessions';
 import { GroupComposer, SessionComposer } from '../composer/Composer';
-import { useDesk } from '../conversation/desk-context';
+import { useConnected, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
 import { StreamView } from '../conversation/StreamView';
 
@@ -117,7 +117,7 @@ const retiredText = (by: string, member: string) => (by ? `Retired by ${byWhom(b
 function ResumeBar({ session }: { session: DeskSession }) {
   const { connection, member } = useDesk();
   const [rpc, setRpc] = useState<string | null>(null);
-  const can = capabilities(session).resume;
+  const can = capabilities(session, useConnected()).resume;
   const retired = retiredBy(session);
   if (retired !== null)
     return (
@@ -147,7 +147,7 @@ function SessionActions({ session, phone }: { session: DeskSession; phone: boole
   const [rpc, setRpc] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [opened, setOpened] = useState(false);
-  const can = capabilities(session);
+  const can = capabilities(session, useConnected());
   const ended = session.group === 'ended';
   const retired = retiredBy(session);
   if (phone && ended) return null; // Resume (or who retired it) replaces the composer
