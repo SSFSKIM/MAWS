@@ -210,7 +210,7 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
 
     // the dataset replaced by its 2024 rows alone (a real subset): both replicas' views redraw, the open sheet stays
     const header = GDP_CSV.split('\n')[0];
-    const only2024 = `${[header, ...GDP_CSV.split('\n').filter((line) => line.split(',')[3] === '2024')].join('\n')}\n`;
+    const only2024 = `${[header, ...GDP_CSV.split('\n').filter((line) => /,2024,[^,]*$/.test(line))].join('\n')}\n`; // "Korea, Rep." is quoted with its comma
     const replacedRef = await bind(page, id, 'gdp', '세계은행 GDP 성장률', 'gdp-growth.csv', only2024);
     expect(replacedRef).not.toBe(gdpRef);
     await expect(figures(main).nth(1).locator('svg')).toContainText('no rows to draw', { timeout: 15_000 }); // the 2020 table, now empty

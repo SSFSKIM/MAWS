@@ -98,7 +98,7 @@ describe('the source sheet', () => {
     await until(() => screen.queryAllByRole('row').length > 1, 'the rows');
     expect(readDataset).toHaveBeenCalledTimes(25); // 2,000 rows a page
     expect(bodyRows().length).toBeLessThanOrEqual(60);
-    const scroller = dialog().querySelector<HTMLElement>('.dash-sheet-rows')!;
+    const scroller = within(dialog()).getByRole('table', { name: 'Rows' });
     scroller.scrollTop = BIG * 28;
     act(() => void fireEvent.scroll(scroller));
     expect(bodyRows().length).toBeLessThanOrEqual(60);

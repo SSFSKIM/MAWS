@@ -174,7 +174,8 @@ function DatasetDetail({ artifactId, id, descriptor, reader, host, actorName }: 
 }
 
 // The rows as a table whose body draws only the rows in view (and a few beyond), each ROW_H high, over a spacer as tall
-// as all of them, so the page holds a bounded number of rows at any snapshot size.
+// as all of them, so the page holds a bounded number of rows at any snapshot size. One element scrolls both ways, the
+// head sticking at its top, so the head's columns and the rows' always line up.
 function Rows({ table, order, sort, onSort }: { table: ViewTable; order: number[]; sort: Sort; onSort(column: number): void }) {
   const scroller = useRef<HTMLDivElement>(null);
   const [top, setTop] = useState(0);
@@ -186,9 +187,10 @@ function Rows({ table, order, sort, onSort }: { table: ViewTable; order: number[
   const first = Math.max(0, Math.floor(top / ROW_H) - OVERSCAN);
   const last = Math.min(order.length, Math.ceil((top + height) / ROW_H) + OVERSCAN);
   const template = `repeat(${table.columns.length}, minmax(calc(var(--space) * 28), 1fr))`;
+  const width = `calc(var(--space) * 28 * ${table.columns.length})`; // every column at least its minimum, the head's and the rows' alike
   return (
-    <div className="dash-sheet-table" role="table" aria-label="Rows" aria-rowcount={order.length + 1} aria-colcount={table.columns.length}>
-      <div role="rowgroup" className="dash-sheet-head">
+    <div ref={scroller} className="dash-sheet-table" role="table" aria-label="Rows" aria-rowcount={order.length + 1} aria-colcount={table.columns.length} tabIndex={0} onScroll={(event) => setTop(event.currentTarget.scrollTop)}>
+      <div role="rowgroup" className="dash-sheet-head" style={{ minWidth: width }}>
         <div role="row" aria-rowindex={1} className="dash-sheet-row" style={{ gridTemplateColumns: template }}>
           {table.columns.map((column, i) => (
             <div key={column.name} role="columnheader" aria-sort={sort?.column === i ? sort.dir : 'none'} className="dash-sheet-cell">
@@ -200,18 +202,16 @@ function Rows({ table, order, sort, onSort }: { table: ViewTable; order: number[
           ))}
         </div>
       </div>
-      <div ref={scroller} role="rowgroup" className="dash-sheet-rows" tabIndex={0} aria-label="Rows, scrollable" onScroll={(event) => setTop(event.currentTarget.scrollTop)}>
-        <div style={{ height: order.length * ROW_H, position: 'relative' }}>
-          {order.slice(first, last).map((index, k) => (
-            <div key={index} role="row" aria-rowindex={first + k + 2} className="dash-sheet-row" style={{ gridTemplateColumns: template, position: 'absolute', top: (first + k) * ROW_H, height: ROW_H, left: 0, right: 0 }}>
-              {table.columns.map((column, c) => (
-                <div key={column.name} role="cell" className="dash-sheet-cell" data-numeric={column.type === 'number' ? '' : undefined}>
-                  {cellText(table.rows[index][c])}
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
+      <div role="rowgroup" className="dash-sheet-rows" style={{ height: order.length * ROW_H, minWidth: width }}>
+        {order.slice(first, last).map((index, k) => (
+          <div key={index} role="row" aria-rowindex={first + k + 2} className="dash-sheet-row" style={{ gridTemplateColumns: template, position: 'absolute', top: (first + k) * ROW_H, height: ROW_H, left: 0, right: 0 }}>
+            {table.columns.map((column, c) => (
+              <div key={column.name} role="cell" className="dash-sheet-cell" data-numeric={column.type === 'number' ? '' : undefined}>
+                {cellText(table.rows[index][c])}
+              </div>
+            ))}
+          </div>
+        ))}
       </div>
     </div>
   );

@@ -204,25 +204,26 @@
   margin-right: auto;
 }
 .dash-sheet-table {
-  display: flex;
-  flex-direction: column;
+  position: relative;
   flex: 1;
   min-height: calc(var(--space) * 40);
   margin: 0 calc(var(--space) * -3);
   border-top: 1px solid var(--border);
-  overflow-x: auto;
+  overflow: auto; /* one scroller both ways: the head (sticky) and the rows line up */
+}
+.dash-sheet-table:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 .dash-sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-raised);
   border-bottom: 1px solid var(--border-strong);
 }
 .dash-sheet-rows {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-.dash-sheet-rows:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
+  position: relative;
 }
 .dash-sheet-row {
   display: grid;
