@@ -18,7 +18,8 @@
 // It passes when the fixture received exactly the export the sheet's Send wrote (the file the prompt names: same path,
 // bytes and SHA-256), the turn ended with its receipt in the same engine process, no other session or engine started,
 // and the accounted spend is within the cap. The run's lines go to stdout and `live-run.txt` under the scratch root,
-// which is kept for inspection (journal, delivery log, export copy).
+// which is kept for inspection (journal, delivery log, export copy, and the row menu's diagnostics with their
+// screenshots, menu-<n>.png: after the Actions click, and again if Export › Send to Google Drive… fails).
 //
 // It spends money, within MAWS_LIVE_MAX_USD (US$0.50 when unset, at most US$1); run on purpose only, against a built
 // out/ (the architect's CI bundle, gate-offload Decision Log 50), with no build prefix:
@@ -29,7 +30,8 @@ import { createHash } from 'node:crypto';
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type JSHandle } from '@playwright/test';
+import type { BrowserWindow } from 'electron';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
@@ -188,9 +190,63 @@ test('Send to Google Drive from the library: the owner’s gesture, one capped m
     await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
     const article = page.locator('[data-library]').getByRole('article', { name: TITLE, exact: true });
     await expect(article).toBeVisible({ timeout: 30_000 });
-    await article.getByRole('button', { name: `Actions for ${TITLE}` }).click();
-    await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Send to Google Drive…', exact: true }).click();
+    const actions = article.getByRole('button', { name: `Actions for ${TITLE}` });
+    // What the row's menu showed (attempt 1 found no Export item there): the trigger's state, each open menu's aria
+    // snapshot, the formats main serves an HTML page (the Export item shows once they are known), where the keyboard is,
+    // and the window as drawn, saved under the scratch root. Each part is bounded and noted on its own and none throws,
+    // so a failing diagnostic never stands in for the gesture's own failure.
+    const electronApp = maws.app;
+    let shots = 0;
+    const diagnoseMenu = async (when: string) => {
+      const part = async (name: string, read: () => Promise<string>) => {
+        let timer: NodeJS.Timeout | undefined;
+        const bound = new Promise<never>((_, reject) => (timer = setTimeout(() => reject(new Error('no answer in 10 s')), 10_000)));
+        try {
+          note(`  ${name}: ${await Promise.race([read(), bound])}`);
+        } catch (error) {
+          note(`  ${name}: diagnostic failed (${error instanceof Error ? error.message.split('\n')[0] : String(error)})`);
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+      note(`diagnostics ${when}:`);
+      await part('the Actions button', async () => JSON.stringify({ 'aria-expanded': await actions.getAttribute('aria-expanded', { timeout: 2_000 }), 'data-state': await actions.getAttribute('data-state', { timeout: 2_000 }) }));
+      await part('open menus', async () => {
+        const menus = page.locator('[role="menu"]');
+        const snapshots: string[] = [];
+        for (let i = 0, n = await menus.count(); i < n; i++) snapshots.push(await menus.nth(i).ariaSnapshot({ timeout: 2_000 }));
+        return `${snapshots.length}${snapshots.map((s, i) => `\n  [menu ${i + 1}]\n${s.replace(/^/gm, '    ')}`).join('')}`;
+      });
+      await part('library.exportFormats {kind: html}', async () => JSON.stringify(await invoke(page, 'library.exportFormats', { kind: 'html' })));
+      await part('focus', () => page.evaluate(() => {
+        const at = document.activeElement;
+        return at === null ? 'none' : [at.tagName.toLowerCase(), at.getAttribute('role'), at.getAttribute('aria-label')].filter((s) => s !== null && s !== '').join(' ');
+      }));
+      await part('open dialogs', async () => String(await page.getByRole('dialog').count()));
+      await part('screenshot', async () => {
+        const file = join(root, `menu-${++shots}.png`);
+        const win = (await electronApp.browserWindow(page)) as JSHandle<BrowserWindow>;
+        const png = await win.evaluate(async (w) => {
+          const image = await w.webContents.capturePage();
+          return image.isEmpty() ? '' : image.toPNG().toString('base64');
+        });
+        if (png !== '') {
+          writeFileSync(file, Buffer.from(png, 'base64'));
+          return file;
+        }
+        await page.screenshot({ path: file, timeout: 5_000 });
+        return `${file} (page.screenshot: capturePage gave an empty image)`;
+      });
+    };
+    await actions.click();
+    await diagnoseMenu('after the Actions click');
+    try {
+      await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Send to Google Drive…', exact: true }).click();
+    } catch (error) {
+      await diagnoseMenu('when the menu gesture failed');
+      throw error;
+    }
     const sheet = page.getByRole('dialog', { name: 'Send to Google Drive' });
     await expect(sheet.getByRole('combobox', { name: 'Format' })).toHaveValue('pdf');
     await expect(sheet.locator('[data-send-to-session]')).toHaveText(/^Claude sends it from “/);
