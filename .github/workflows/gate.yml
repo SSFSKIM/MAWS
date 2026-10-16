@@ -5,7 +5,7 @@ name: gate
 
 on:
   push:
-    branches: ['ci/**']
+    branches: ['ci/**', master]
   workflow_dispatch:
     inputs:
       gates:
@@ -44,7 +44,18 @@ defaults:
     shell: bash
 
 jobs:
+  # Master's caches are readable by fresh ci/ refs, unlike another ci/ ref's caches (Decision Log 26).
+  # Warm them once on landing so matching Linux jobs restore without re-saving.
+  warm:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
   plan:
+    if: github.ref != 'refs/heads/master'
     # Class 1a's runner is chosen here alone (the jobs below repeat the anchor): Linux, or the self-hosted Mac when the
     # repository variable GATE_RUNNER is `macos` (§3.6). The e2e jobs take the lane the plan resolves.
     runs-on: &runner ${{ vars.GATE_RUNNER == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-24.04' }}
