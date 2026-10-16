@@ -19,14 +19,14 @@
 //   since ProseMirror transforms the dragged slice before it deletes the source.
 import { Extension, type Editor } from '@tiptap/core';
 import { Fragment, Slice, type Mark, type Node as PMNode } from '@tiptap/pm/model';
-import { Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state';
+import { NodeSelection /* P3-E */, Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import type { Actor } from '@shared/artifacts/actor';
 import type { Doc } from '../../../yjs';
 import { relativePositionToJSON } from '../../../yjs/document';
 import { resolvedPositionsToRelativePositions } from '../../../yjs/prosemirror';
 import { listTabs, tabBody } from '../../tabs';
-import { addThread, getThread, liveIdsY, observeThreads, threadStatus } from '../../threads';
+import { addThread, blockThreads /* P3-E */, getThread, liveIdsY, observeThreads, threadStatus } from '../../threads';
 import { touchedRanges } from '../touched';
 
 /** The origin of the editor's own threads-map writes (no binding's: never in the editor's undo). */
@@ -84,12 +84,53 @@ export function commentSelection(editor: Editor, doc: Doc, comment: NewComment):
   return { threadId: comment.threadId, quote };
 }
 
+// P3-E start (E2 M4; E's Decision Log 28): a selected block commented whole, when the editor's `blockQuote` names it
+/**
+ * Comments the selected block (a NodeSelection) with the quote `blockQuote` gives it: the thread with the block
+ * discriminant, its block and tab, and no mark. Null, writing nothing, when the selection is not a block or the callback
+ * gives no quote for it.
+ */
+export function commentBlock(editor: Editor, doc: Doc, comment: NewComment, blockQuote: (node: PMNode) => string | undefined): { threadId: string; quote: string } | null {
+  const { selection } = editor.state;
+  if (!(selection instanceof NodeSelection) || !selection.node.isBlock) return null;
+  const blockId: unknown = selection.node.attrs.id;
+  const quote = blockQuote(selection.node);
+  if (typeof blockId !== 'string' || quote === undefined || quote.trim() === '') return null;
+  addThread(doc, { threadId: comment.threadId, tabId: comment.tabId, blockId, quote, anchor: { kind: 'block' }, by: comment.by, at: comment.at, ...(comment.body != null && { body: comment.body }) }, COMMENTS_ORIGIN);
+  return { threadId: comment.threadId, quote };
+}
+
+/** The open block threads of the doc by their block's id (none walked or drawn when the doc has no block thread). */
+function openBlockThreads(ydoc: Doc): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const [threadId, blockId] of blockThreads(ydoc)) {
+    if (!CLASS_SAFE.test(threadId) || threadStatus(ydoc, threadId) !== 'open') continue;
+    out.set(blockId, [...(out.get(blockId) ?? []), threadId]);
+  }
+  return out;
+}
+
+/** The block decorations of the open block threads (`byBlock`): the block's own node, drawn as their comment. */
+function decorateBlocks(doc: PMNode, byBlock: ReadonlyMap<string, string[]>, active: string | null): Decoration[] {
+  const out: Decoration[] = [];
+  if (byBlock.size === 0) return out;
+  doc.descendants((node, pos) => {
+    const ids = typeof node.attrs.id === 'string' ? byBlock.get(node.attrs.id) : undefined;
+    if (ids) out.push(Decoration.node(pos, pos + node.nodeSize, { class: ['comment', ...ids.map((id) => `comment-${id}`), ...(active !== null && ids.includes(active) ? ['comment-active'] : [])].join(' ') }, { blockComment: true }));
+    return !node.isTextblock; // a textblock's inline content holds no block
+  });
+  return out;
+}
+// P3-E end
+
 // ── the display ──
 export const commentDisplayKey = new PluginKey<DisplayState>('commentDisplay');
 
 interface DisplayState {
   active: string | null;
   decorations: DecorationSet;
+  /** P3-E: the open block threads by block id, read with the threads map (empty: a keystroke draws no block). */
+  blocks: ReadonlyMap<string, string[]>;
 }
 type DisplayMeta = { active: string | null } | { threads: true };
 
@@ -105,10 +146,12 @@ function decorate(doc: PMNode, from: number, to: number, ydoc: Doc, active: stri
   });
 }
 
-function rebuild(doc: PMNode, ydoc: Doc, active: string | null): DecorationSet {
+function rebuild(doc: PMNode, ydoc: Doc, active: string | null): DisplayState {
   const out: Decoration[] = [];
   decorate(doc, 0, doc.content.size, ydoc, active, out);
-  return DecorationSet.create(doc, out);
+  const blocks = openBlockThreads(ydoc); // P3-E
+  out.push(...decorateBlocks(doc, blocks, active)); // P3-E
+  return { active, decorations: DecorationSet.create(doc, out), blocks };
 }
 
 // The textblocks a transaction changed, in its resulting doc (`touchedRanges`), or null when the transaction has too
@@ -150,23 +193,25 @@ function display(ydoc: Doc, onActivate: ((threadId: string) => void) | null): Pl
   return new Plugin<DisplayState>({
     key: commentDisplayKey,
     state: {
-      init: (_config, state) => ({ active: null, decorations: rebuild(state.doc, ydoc, null) }),
+      init: (_config, state) => rebuild(state.doc, ydoc, null),
       apply(tr, old, _oldState, state) {
         const meta = tr.getMeta(commentDisplayKey) as DisplayMeta | undefined;
-        if (meta) {
-          const active = 'active' in meta ? meta.active : old.active;
-          return { active, decorations: rebuild(state.doc, ydoc, active) };
-        }
+        if (meta) return rebuild(state.doc, ydoc, 'active' in meta ? meta.active : old.active);
         if (!tr.docChanged) return old;
         const blocks = touchedBlocks(tr);
-        if (blocks === null) return { active: old.active, decorations: rebuild(tr.doc, ydoc, old.active) };
+        if (blocks === null) return rebuild(tr.doc, ydoc, old.active);
         let decorations = old.decorations.map(tr.mapping, tr.doc);
         for (const [from, to] of blocks) {
           const fresh: Decoration[] = [];
           decorate(tr.doc, from, to, ydoc, old.active, fresh);
-          decorations = decorations.remove(decorations.find(from, to)).add(tr.doc, fresh);
+          decorations = decorations.remove(decorations.find(from, to, (spec: { blockComment?: boolean }) => !spec.blockComment /* P3-E */)).add(tr.doc, fresh);
         }
-        return { active: old.active, decorations };
+        // P3-E: a block (re)inserted under a commented id is drawn as its comment (a move, an undo of its deletion)
+        if (old.blocks.size > 0) {
+          const drawn = decorations.find(undefined, undefined, (spec: { blockComment?: boolean }) => spec.blockComment === true);
+          decorations = decorations.remove(drawn).add(tr.doc, decorateBlocks(tr.doc, old.blocks, old.active));
+        }
+        return { active: old.active, decorations, blocks: old.blocks };
       },
     },
     props: {
@@ -238,6 +283,8 @@ function paste(ydoc: Doc, tabId: string | null): Plugin {
 }
 
 export interface CommentsOptions {
+  /** P3-E (E2 M4): the quote of a selected block commented whole; absent, or undefined for a node, only text is commented. */
+  blockQuote?: ((node: PMNode) => string | undefined) | null;
   /** The replica's doc, whose threads map the editor reads and writes; none, no comment plugins. */
   doc: Doc | null;
   /** The tab this editor binds (the dedupe reads the other tabs from the doc). */

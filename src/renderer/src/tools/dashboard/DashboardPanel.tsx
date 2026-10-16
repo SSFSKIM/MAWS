@@ -1,9 +1,11 @@
 // The dashboard editor in the panel's Artifacts tool and an `artifact` main tab (P3-E2 M3; X32, E's Decision Log 19): B's
 // document body over the tab's DocumentTabState, given the dashboard's chart renderer, its kind and its Datasets header
-// action, with the source sheet beside it as the dashboard's own overlay. A dashboard made before dashboards were
+// action, with the source sheet beside it as the dashboard's own overlay; M4: a selected view is commented whole, under
+// its view and caption (E's Decision Log 28). A dashboard made before dashboards were
 // documents (held legacy content: files and no tab) is shown as held, its files named with the way forward, never as an
 // editable blank document.
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
+import { blockCommentQuote } from '@artifacts/dashboard/comments';
 import { legacyDashboardFiles } from '@artifacts/dashboard/legacy';
 import { SourceSheet } from '@artifacts/dashboard/editor/SourceSheet';
 import { onUpdate, type Doc } from '@artifacts/yjs';
@@ -52,7 +54,7 @@ function DashboardBody({ state, surface, ...props }: DashboardEditorProps & { su
   if (held) return <HeldDashboard {...props} state={state} files={held} />;
   return (
     <div className="dash-shell">
-      <DocumentBody {...props} state={state.document} surface={surface} renderChart={state.renderChart} artifactKind="dashboard" additionalActions={actions} onDisplayedDocument={state.displayed} />
+      <DocumentBody {...props} state={state.document} surface={surface} renderChart={state.renderChart} artifactKind="dashboard" additionalActions={actions} onDisplayedDocument={state.displayed} blockCommentQuote={blockCommentQuote} />
       <SourceSheet artifactId={props.artifactId} sheet={state.sheet} reader={state.reader} host={state.document.host} actorName={state.actorName} />
     </div>
   );

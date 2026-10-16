@@ -9,6 +9,7 @@ import type { Editor } from '@tiptap/core';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactKind } from '@shared/artifacts/entity'; // P3-E
 import type { Doc } from '@artifacts/yjs'; // P3-E
+import type { Node as PMNode } from '@tiptap/pm/model'; // P3-E
 import type { ViewEnvironment } from '@artifacts/document/editor/nodes/views'; // P3-E
 import type { EditorHostAction } from '../../panel/editor-host'; // P3-E
 import type { ArtifactEditorProps } from '../../artifacts/registry';
@@ -32,6 +33,8 @@ interface DocumentShellAdditions {
   artifactKind?: ArtifactKind;
   additionalActions?: readonly EditorHostAction[];
   onDisplayedDocument?(doc: Doc, revision?: number): void;
+  /** E2 M4 (E's Decision Log 28): the quote of a selected block commented whole (a chart's view and caption). */
+  blockCommentQuote?(node: PMNode): string | undefined;
 }
 // P3-E end
 
@@ -41,7 +44,7 @@ export function DocumentPanel(props: DocumentEditorProps & DocumentShellAddition
 
 const NO_SESSION = '' as AppSessionId;
 
-export function DocumentBody({ artifactId, state, scope, visible, onShown, surface, renderChart, artifactKind, additionalActions, onDisplayedDocument /* P3-E */ }: DocumentEditorProps & DocumentShellAdditions & { surface: 'panel' | 'main' }) {
+export function DocumentBody({ artifactId, state, scope, visible, onShown, surface, renderChart, artifactKind, additionalActions, onDisplayedDocument, blockCommentQuote /* P3-E */ }: DocumentEditorProps & DocumentShellAdditions & { surface: 'panel' | 'main' }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
   const title = snapshot.title || 'Document'; // until the artifact's row is read
   const commands = useMemo<DocumentHeaderCommands>(
@@ -111,6 +114,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
         mentions={state.mentions}
         renderChart={renderChart} /* P3-E */
         onDisplayedDocument={onDisplayedDocument}
+        blockCommentQuote={blockCommentQuote}
       />
     </SystemScope>
   );

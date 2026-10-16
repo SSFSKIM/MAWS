@@ -48,6 +48,8 @@ type CommentLead = (anchor: Anchor) => string;
 const ARTIFACT_COMMENT_LEADS: { document: CommentLead } & Partial<Record<ArtifactKind, CommentLead>> = {
   document: (anchor) => `passage "${anchor.locator}"${anchor.artifactId !== undefined ? ` in document ${anchor.artifactId}` : ''}`,
   presentation: (anchor) => `element "${anchor.locator}"${anchor.artifactId !== undefined ? ` in presentation ${anchor.artifactId}` : ''}`,
+  // P3-E (E2 M4; E's Decision Log 28 (5)): prose and chart blocks alike; a block's locator is `<view>: <caption or dataset id>`
+  dashboard: (anchor) => `content "${anchor.locator}"${anchor.artifactId !== undefined ? ` in dashboard ${anchor.artifactId}` : ''}`,
 };
 // P3-C end
 
