@@ -468,6 +468,51 @@ test('a row above a reader scrolled back that grows leaves the reader where they
   expect(await gapOf(page)).toBeGreaterThan(100);
 });
 
+test('a row above a reader scrolled back that collapses leaves the reader where they were', async ({ page, hub }) => {
+  await stageProject(hub);
+  await stageGrowingRun(hub, 25);
+  for (let n = 1; n <= 40; n++) await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rc${n}#0` });
+  await open(page, hub);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(40)).toBeInViewport();
+  await unfoldRun(page); // at the tail, so the view follows it
+  await expect(center(page).getByTestId('agent-run-messages')).toBeAttached();
+  await page.waitForTimeout(300);
+  // Back a little from the tail: less than the run shrinks by, so the browser clamps the scroll position when it does.
+  await center(page).getByTestId('channel-events').evaluate((el) => el.scrollTo({ top: el.scrollHeight - el.clientHeight - 150 }));
+  await expect.poll(() => gapOf(page)).toBeGreaterThan(100);
+  const reading = await line(36).boundingBox();
+  await unfoldRun(page); // folds it again
+  await expect(center(page).getByTestId('agent-run-messages')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect((await line(36).boundingBox())!.y).toBeCloseTo(reading!.y, 0);
+});
+
+test('a card above a reader scrolled back that leaves the stream leaves the reader where they were', async ({ page, hub }) => {
+  await stageProject(hub);
+  await open(page, hub);
+  // A question raised now is placed here, above everything that follows; its card leaves this place once the log holds
+  // the question event (an async question is drawn on its event).
+  const questions = [1, 2, 3, 4, 5].map((q) => ({ question: `Question ${q}?`, header: `Q${q}`, options: [{ label: 'yes' }, { label: 'no' }, { label: 'later' }], multiSelect: false }));
+  await hub.raise(PROJECT, 'mini', { request: 'toolu_gone', session: S.asks, tool: 'AskUserQuestion', input: { questions } });
+  const card = center(page).locator('[data-request="toolu_gone"]');
+  await expect(card).toBeVisible();
+  await hub.settle(PROJECT, 'mini', S.asks, { request: 'toolu_gone', winner: 'terminal', outcome: 'answered', by: 'terminal' });
+  for (let n = 1; n <= 40; n++) await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rr${n}#0` });
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(40)).toBeInViewport();
+  await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'answered', from: 'maws-45', src: 'toolu_gone', text: 'yes' });
+  await expect(center(page)).toContainText('maws-45 was answered: yes');
+  await page.waitForTimeout(300);
+  await center(page).getByTestId('channel-events').evaluate((el) => el.scrollTo({ top: el.scrollHeight - el.clientHeight - 60 }));
+  await expect.poll(() => gapOf(page)).toBeGreaterThan(50);
+  const reading = await line(38).boundingBox();
+  await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'question', from: 'maws-45', to: 'host', text: 'Five questions', choices: [], src: 'toolu_gone' });
+  await expect(card).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect((await line(38).boundingBox())!.y).toBeCloseTo(reading!.y, 0);
+});
+
 test('after a notification lands on its card, an earlier row that grows leaves the card where it was', async ({ page, hub }) => {
   await stageProject(hub);
   await stageGrowingRun(hub, 25);
