@@ -147,7 +147,7 @@ export const test = base.extend<{ maws: MawsLaunch; mawsEnv: Record<string, stri
   },
 });
 
-// Under MAWS_E2E_FOREGROUND=1 (the gate's macOS runner, src/main/window-show.ts) the app activates and its window
+// Under MAWS_E2E_FOREGROUND=1 (src/main/window-show.ts) the app activates and its window
 // becomes key. Whether macOS granted that is said once per worker in the run's output, so a run on a desktop where
 // another app holds focus shows it.
 let foregroundReported = false;
