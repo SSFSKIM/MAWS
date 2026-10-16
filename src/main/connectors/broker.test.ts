@@ -98,6 +98,7 @@ class FakeRoute implements ConnectorRoute {
   answer: (call: RouteCall) => ConnectorRouteAnswer = (call) => ({ ok: true, result: { rows: [this.calls.indexOf(call) + 1] } });
   target: (tool: FakeTool) => unknown = (tool) => tool;
   resolveThrows = false;
+  resolveGate: Promise<void> | null = null; // resolves wait for the test to open it
 
   constructor(readonly route: ConnectorRouteName, readonly sessionId?: string) {}
 
@@ -107,6 +108,7 @@ class FakeRoute implements ConnectorRoute {
   }
   async resolve(_artifactId: string, ref: ConnectorToolRef): Promise<ConnectorRouteTarget | null> {
     this.resolves += 1;
+    if (this.resolveGate) await this.resolveGate;
     if (this.resolveThrows) throw new Error(`${SECRET} route broke`);
     const tool = this.tools.get(JSON.stringify([ref.server, ref.tool]));
     if (!tool) return null;
@@ -1092,7 +1094,7 @@ describe('the owner window’s native visibility (P3 Decision Log 89)', () => {
       broker.setWindowShown(owner, !hiddenNow);
     };
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(asked).toEqual([ME]);
+    expect(asked.length > 0 && asked.every((owner) => owner === ME)).toBe(true); // its own window, as work starts (and as it would publish)
     expect(engine.calls).toHaveLength(1);
     expect(updates).toHaveLength(1);
     expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
@@ -1102,6 +1104,81 @@ describe('the owner window’s native visibility (P3 Decision Log 89)', () => {
     await settle();
     expect(engine.calls).toHaveLength(2);
     expect(updates).toHaveLength(2);
+  });
+
+  // A hide no event announced while a call or refresh awaits its prerequisites or its answer: main's re-read (here, the
+  // `recheck` hook reading `native`) is asked again at the backend's door and at publication, so nothing is dispatched
+  // after the window hid and no result reaches the page.
+  describe('a hide no event announced, heard at admission and at publication', () => {
+    let native: boolean;
+    beforeEach(() => {
+      native = true;
+      recheck = (owner) => {
+        if (owner === ME) broker.setWindowShown(ME, native);
+      };
+    });
+
+    it('during the route’s resolution: nothing is called, and a watch catches up once shown', async () => {
+      const lease = page();
+      let open!: () => void;
+      engine.resolveGate = new Promise<void>((resolve) => (open = resolve));
+      const pending = broker.callTool(ME, lease, ROWS);
+      const { listener, updates } = watcher();
+      broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+      await settle();
+      expect(engine.resolves).toBe(2); // the call's and the watch's, both waiting
+      native = false; // hidden, silently
+      engine.resolveGate = null;
+      open();
+      expect(await pending).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+      await vi.advanceTimersByTimeAsync(10 * MIN);
+      expect(engine.calls).toHaveLength(0);
+      expect(updates).toEqual([]);
+      native = true;
+      broker.setWindowShown(ME, true); // main's re-read finds it shown
+      await settle();
+      expect(engine.calls).toHaveLength(1);
+      expect(updates).toMatchObject([{ ok: true }]);
+    });
+
+    it('during the grant check: nothing is called', async () => {
+      const lease = page();
+      let open!: () => void;
+      grants.checkGate = new Promise<void>((resolve) => (open = resolve));
+      const pending = broker.callTool(ME, lease, ROWS);
+      const { listener, updates } = watcher();
+      broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+      await settle();
+      expect(grants.checks).toHaveLength(2);
+      native = false;
+      grants.checkGate = null;
+      open();
+      expect(await pending).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+      await vi.advanceTimersByTimeAsync(10 * MIN);
+      expect([engine.calls.length, updates.length]).toEqual([0, 0]);
+    });
+
+    it('during a call already admitted: its result reaches neither the caller nor the watch, and a watch catches up once', async () => {
+      const lease = page();
+      engine.hold = true;
+      const pending = broker.callTool(ME, lease, ROWS);
+      const { listener, updates } = watcher();
+      broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+      await settle();
+      expect(engine.calls).toHaveLength(2);
+      native = false;
+      for (const call of engine.calls) call.answer.resolve({ ok: true, result: 'seen while hidden' });
+      expect(await pending).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+      await vi.advanceTimersByTimeAsync(10 * MIN);
+      expect(updates).toEqual([]);
+      expect(engine.calls).toHaveLength(2);
+      engine.hold = false;
+      native = true;
+      broker.setWindowShown(ME, true);
+      await settle();
+      expect(engine.calls).toHaveLength(3); // once
+      expect(updates).toMatchObject([{ ok: true, result: { rows: [3] } }]);
+    });
   });
 
   it('the window’s state outlives its pages (a reload), and a gone owner’s state goes with it', async () => {

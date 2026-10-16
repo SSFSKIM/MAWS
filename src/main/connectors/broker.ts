@@ -11,7 +11,9 @@
 //   only while its surface is (the renderer's report, `setVisible`) and its owner window is shown and not minimized
 //   (main's native report, `setWindowShown`). The two are held apart: the renderer's report never overrides a hidden
 //   window, and a window shown again never revives a hidden surface. An owner whose window main has not reported is
-//   hidden, and main is asked to re-read the window before any work starts, so a hide no event announced calls nothing.
+//   hidden, and main is asked to re-read the window as work starts, again at the backend's door (after the route and
+//   the grant answered, with no await before the call) and again as an outcome is published, while the work is still
+//   registered: a hide no event announced then aborts it, so nothing is dispatched or published after the window hid.
 // - A page calls only the server and tool pairs it declared, and a declaration grants nothing.
 // - Every call, a watch's refresh included, asks the routes for an already-live target, then checks the owner's grant
 //   against the fingerprint that target reports (a non-consuming check); the route's annotations, never the page, say
@@ -55,7 +57,7 @@ import {
   type ConnectorWatchStart,
 } from '@shared/artifacts/connectors';
 import { ARTIFACT_ID } from '@shared/maws/tools';
-import { boundedMessage, jsonBytes, readAnswer, readTarget, type ConnectorGrantAuthority, type ConnectorRoute, type ConnectorRouteTarget } from './route';
+import { boundedMessage, jsonBytes, readAnswer, readTarget, type ConnectorGrantAuthority, type ConnectorRoute, type ConnectorRouteAnswer, type ConnectorRouteTarget } from './route';
 
 export interface ConnectorBrokerOptions {
   // In preference order: the first that already has the tool serves. Production gives route E first and route D after
@@ -198,6 +200,7 @@ export class ConnectorBroker {
     const work = this.work(lease, tool);
     try {
       const outcome = await this.run(lease, tool, args, 'call', work);
+      this.recheckWindow(lease.owner); // P3-H H4: at publication, a hide no event announced aborts it still
       return work.controller.signal.aborted ? (work.controller.signal.reason as ConnectorRefusal) : outcome;
     } finally {
       lease.work.delete(work);
@@ -357,11 +360,12 @@ export class ConnectorBroker {
     if (!this.visible(lease)) return refusal('paused', 'hidden');
     if (this.revoking.has(work.key)) return refusal('revoked', 'revoked');
     lease.work.add(work);
-    const outcome = await this.attempt(lease.artifactId, tool, args, use, work.controller.signal);
+    const outcome = await this.attempt(lease, tool, args, use, work.controller.signal);
     return work.controller.signal.aborted ? (work.controller.signal.reason as ConnectorRefusal) : outcome;
   }
 
-  private async attempt(artifactId: string, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, signal: AbortSignal): Promise<ConnectorCallOutcome> {
+  private async attempt(lease: Lease, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, signal: AbortSignal): Promise<ConnectorCallOutcome> {
+    const { artifactId } = lease;
     const named = `${artifactId}'s ${tool.server} · ${tool.tool}`;
     const found = await this.target(artifactId, tool, signal);
     if ('ok' in found) return found;
@@ -378,7 +382,16 @@ export class ConnectorBroker {
     if (!admits(authorization.mode, target.readOnly, use)) return refusal('revoked', 'wrongMode');
     let answer;
     try {
-      answer = await unlessAborted(Promise.resolve().then(() => target.call(args, { signal, fingerprint: target.fingerprint, mode: authorization.mode })), signal);
+      // The backend's door (P3-H H4): the window re-read in the same turn as the call, so a hide no event announced while
+      // the route or the grant answered aborts the work here and nothing is dispatched.
+      const admitted = authorization;
+      answer = await unlessAborted(
+        Promise.resolve().then<ConnectorRouteAnswer | typeof ABORTED>(() => {
+          this.recheckWindow(lease.owner);
+          return signal.aborted ? ABORTED : target.call(args, { signal, fingerprint: target.fingerprint, mode: admitted.mode });
+        }),
+        signal,
+      );
     } catch (error) {
       return this.failed('toolError', `the ${route} call of ${named} threw: ${boundedMessage(error)}`);
     }
@@ -504,6 +517,7 @@ export class ConnectorBroker {
     watch.running = work;
     const outcome = await this.run(lease, watch.tool, watch.args, 'watch', work);
     delete watch.running;
+    this.recheckWindow(lease.owner); // P3-H H4: at publication, a hide no event announced aborts it still
     // The publication fence, checked now rather than when the run ended: a hide, close, unwatch or revoke since then
     // (another watch's listener, say) has aborted the work, which is still registered, or changed what it would check.
     if (work.controller.signal.aborted || !this.watches.has(watch.id) || !this.visible(lease) || watch.waitingForGrant) {

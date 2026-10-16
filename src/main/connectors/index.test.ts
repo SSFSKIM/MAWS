@@ -28,6 +28,7 @@ class FakeHost {
   readonly streamingListeners = new Set<() => void>();
   streams = true; // past the connection's ready line: its events reach main
   lostAnswers = new Set<string>(); // commands whose effect lands but whose answer never comes back
+  readonly gates = new Map<string, Promise<void>>(); // commands answered only once the test opens their gate
   artifact: Record<string, unknown> = { id: ART, kind: 'html', title: 'Live', createdBy: { kind: 'session', appSessionId: 'app-own' }, projectId: 'proj', createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0 };
   live = [{ appSessionId: 'app-own', launchId: 'L1', cwd: '/repo', process: 'ready', lastUsedAt: '2026-10-16T10:00:00.000Z' }];
   readOnly = true;
@@ -38,6 +39,8 @@ class FakeHost {
     expect(owner).toBe('engine-host');
     expect(validateCommandInput(name, input).ok, `${name} input`).toBe(true);
     this.dispatched.push({ name, input });
+    const gate = this.gates.get(name);
+    if (gate) await gate;
     const value = await this.answer(name, input as Record<string, unknown>);
     expect(validateCommandOutput(name, value).ok, `${name} output`).toBe(true);
     if (this.lostAnswers.has(name)) return { ok: false as const, error: { code: 'timeout' as const, message: `${name} unanswered` } };
@@ -553,6 +556,31 @@ describe('the owner window’s native visibility (P3-H H4)', () => {
     expect(fake.started()).toHaveLength(2); // the refresh that fell due, once
     expect(updatesOf(me)).toHaveLength(2);
     expect(vi.getTimerCount()).toBe(1); // the watch's next refresh alone: no re-read while shown
+  });
+
+  it('a hide no event announced while the route resolves starts no operation', async () => {
+    const leaseId = await visiblePage();
+    let open!: () => void;
+    fake.gates.set('connectors.resolve', new Promise<void>((resolve) => (open = resolve)));
+    const answering = invoke('connectors.call', { leaseId, request: ROWS });
+    await settle();
+    expect(fake.names()).toContain('connectors.resolve');
+    win().visible = false; // hidden, silently
+    open();
+    expect(await answering).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
+    await settle();
+    expect(fake.started()).toEqual([]);
+  });
+
+  it('a hide no event announced while an operation runs keeps its result from the page', async () => {
+    fake.endAtStart = false;
+    const leaseId = await visiblePage();
+    const answering = invoke('connectors.call', { leaseId, request: ROWS });
+    await settle();
+    const [operationId] = fake.started();
+    win().visible = false; // hidden, silently
+    fake.emit('connectors.operation', { operationId }); // its successful outcome, there to take
+    expect(await answering).toEqual({ ok: false, state: 'paused', reason: 'hidden' });
   });
 
   it('keeps the window’s state across a reload of its page, following it once', async () => {
