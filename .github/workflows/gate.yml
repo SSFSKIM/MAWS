@@ -25,8 +25,9 @@ permissions:
   contents: read
 
 env:
-  # tsc over the web project, and vitest's type-check pass in the unit job, ran out of Node's default heap on the 2-core
-  # runner once the artifact kinds landed (Decision Log 17 and 19); the runner has 7 GB. A limit, not an allocation.
+  # tsc over the web project, and vitest's type-check pass in the unit job (dropped since, Decision Log 35), ran out of
+  # Node's default heap on the 2-core runner once the artifact kinds landed (Decision Log 17 and 19); the runner has 7 GB.
+  # A limit, not an allocation.
   NODE_OPTIONS: --max-old-space-size=5120
   # §3.1's class-1 e2e groups, the default set on a macOS lane. A name whose script is not in package.json is skipped,
   # so a child's group joins the default set at the commit that adds its script.
@@ -108,7 +109,7 @@ jobs:
           apt: zsh # the shell suites start /bin/zsh, macOS's login shell
       # The bundle guard among the unit suites reads the built engine-host chunk.
       - run: .github/scripts/gate-run.sh 'built in|error' pnpm build
-      - run: .github/scripts/gate-run.sh '^ *(Test Files|Tests|Type Errors|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$(getconf _NPROCESSORS_ONLN)"
+      - run: .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$(getconf _NPROCESSORS_ONLN)"
 
   unit-darwin:
     name: unit:darwin
@@ -121,7 +122,7 @@ jobs:
       - uses: ./.github/actions/setup
         with:
           apt: zsh # the shared setup skips apt on macOS
-      - run: .github/scripts/gate-run.sh '^ *(Test Files|Tests|Type Errors|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
+      - run: .github/scripts/gate-run.sh '^ *(Test Files|Tests|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
 
   probes:
     needs: plan

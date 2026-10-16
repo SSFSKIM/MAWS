@@ -15,8 +15,8 @@
     "src/artifacts/**/*", // P3-A: the portable artifact layer, typechecked as the host will import it
     "test/**/*",
     // C8a start: test/support/panel-child-fixture.ts measures its fixture through C6's pure model (createState,
-    // applyEvents, rowsOf) and journalToEvents; vitest's typecheck runs this project composite, which refuses a file
-    // the include does not list
+    // applyEvents, rowsOf) and journalToEvents; the project is composite (tsconfig.base.json), which refuses a file the
+    // include does not list
     "src/renderer/src/transcript/model/*.ts",
     "src/renderer/src/transcript/dev/journal.ts",
     // C8a end
