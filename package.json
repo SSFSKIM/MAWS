@@ -66,7 +66,9 @@
     "e2e:document": "scripts/e2e-build.sh harness && MAWS_HARNESS=1 playwright test e2e/document-editor.spec.ts",
     "e2e:document-app": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/document.spec.ts",
     "e2e:document-live": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/document-live.spec.ts",
-    "e2e:document-scale": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/document-scale.spec.ts"
+    "e2e:document-scale": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/document-scale.spec.ts",
+    "e2e:dashboard-spike": "node spikes/p3-dashboard/e2e/build.mjs && vitest run --config spikes/p3-dashboard/vitest.config.ts && playwright test -c spikes/p3-dashboard/e2e/playwright.config.ts",
+    "e2e:dashboard-spike-scale": "MAWS_DASHBOARD_SCALE=1 node spikes/p3-dashboard/measure.mjs"
   },
   "dependencies": {
     "node-pty": "1.1.0",
@@ -133,6 +135,10 @@
     "@tiptap/pm": "3.31.3",
     "@tiptap/react": "3.31.3",
     "@tiptap/suggestion": "3.31.3",
+    "@types/d3-array": "3.2.2",
+    "@types/d3-path": "3.1.1",
+    "@types/d3-scale": "4.0.9",
+    "@types/d3-shape": "3.2.0",
     "@types/node": "^24",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -140,6 +146,10 @@
     "@xterm/headless": "6.0.0",
     "babel-plugin-react-compiler": "^1.0.0",
     "cmdk": "^1.1.1",
+    "d3-array": "3.2.4",
+    "d3-path": "3.1.0",
+    "d3-scale": "4.0.2",
+    "d3-shape": "3.2.0",
     "docx": "9.10.0",
     "electron": "44.4.5",
     "electron-builder": "26.15.3",
