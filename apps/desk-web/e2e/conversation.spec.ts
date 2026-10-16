@@ -409,6 +409,25 @@ test("when a machine disconnects its sessions' presence and depth show as unavai
   await expect(composer.getByTestId('composer-note')).toHaveText('kept in the log; delivered when mini reconnects');
 });
 
+/**
+ * The channel's scroller, read and set by distance from the bottom, whichever way the engine counts its scroll
+ * position (a column-reverse scroller counts 0 at the bottom and negative upwards).
+ */
+function setFromBottom(el: Element, px: number): void {
+  const e = el as HTMLElement;
+  const reversed = getComputedStyle(e).flexDirection === 'column-reverse';
+  e.scrollTop = reversed ? -px : e.scrollHeight - e.clientHeight - px;
+}
+function fromBottom(el: Element): number {
+  const e = el as HTMLElement;
+  return getComputedStyle(e).flexDirection === 'column-reverse' ? -e.scrollTop : e.scrollHeight - e.clientHeight - e.scrollTop;
+}
+const scroller = (page: Page) => center(page).getByTestId('channel-events');
+const scrollToTop = (page: Page) => scroller(page).evaluate((el) => (el as HTMLElement).scrollBy(0, -1e7));
+const scrollToBottom = (page: Page) => scroller(page).evaluate((el) => (el as HTMLElement).scrollBy(0, 1e7));
+const scrollBackBy = (page: Page, px: number) => scroller(page).evaluate(setFromBottom, px);
+const gapOf = (page: Page) => scroller(page).evaluate(fromBottom);
+
 test('a channel opens at its tail and follows it while the reader is at the bottom; scrolled back, or landed on a card, it stays put', async ({ page, hub }) => {
   await stageProject(hub);
   const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rt${n}#0` });
@@ -421,7 +440,7 @@ test('a channel opens at its tail and follows it while the reader is at the bott
   await expect(line(61)).toBeInViewport();
 
   // Scrolled back on purpose: what comes next does not pull the reader down.
-  await center(page).getByTestId('channel-events').evaluate((el) => el.scrollTo({ top: 0 }));
+  await scrollToTop(page);
   await expect(line(1)).toBeInViewport();
   await message(62);
   await expect(line(62)).toBeAttached();
@@ -429,7 +448,7 @@ test('a channel opens at its tail and follows it while the reader is at the bott
   await expect(line(1)).toBeInViewport();
 
   // Back at the bottom, it follows again.
-  await center(page).getByTestId('channel-events').evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+  await scrollToBottom(page);
   await message(63);
   await expect(line(63)).toBeInViewport();
 
@@ -448,7 +467,6 @@ async function stageGrowingRun(hub: HubDouble, says: number) {
 }
 /** Unfolds the run without scrolling to it, as a row above the reader growing would. */
 const unfoldRun = (page: Page) => center(page).getByTestId('agent-run').first().getByRole('button').evaluate((b) => (b as HTMLButtonElement).click());
-const gapOf = (page: Page) => center(page).getByTestId('channel-events').evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
 
 test('a row above a reader scrolled back that grows leaves the reader where they were, never pulled to the tail', async ({ page, hub }) => {
   await stageProject(hub);
@@ -458,7 +476,7 @@ test('a row above a reader scrolled back that grows leaves the reader where they
   const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
   await expect(line(40)).toBeInViewport();
   // Back a little from the tail, on purpose: further than the slack, but less than the run grows by.
-  await center(page).getByTestId('channel-events').evaluate((el) => el.scrollTo({ top: el.scrollHeight - el.clientHeight - 150 }));
+  await scrollBackBy(page, 150);
   await expect.poll(() => gapOf(page)).toBeGreaterThan(100);
   const reading = await line(36).boundingBox();
   await unfoldRun(page);
@@ -479,7 +497,7 @@ test('a row above a reader scrolled back that collapses leaves the reader where 
   await expect(center(page).getByTestId('agent-run-messages')).toBeAttached();
   await page.waitForTimeout(300);
   // Back a little from the tail: less than the run shrinks by, so the browser clamps the scroll position when it does.
-  await center(page).getByTestId('channel-events').evaluate((el) => el.scrollTo({ top: el.scrollHeight - el.clientHeight - 150 }));
+  await scrollBackBy(page, 150);
   await expect.poll(() => gapOf(page)).toBeGreaterThan(100);
   const reading = await line(36).boundingBox();
   await unfoldRun(page); // folds it again
@@ -504,13 +522,74 @@ test('a card above a reader scrolled back that leaves the stream leaves the read
   await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'answered', from: 'maws-45', src: 'toolu_gone', text: 'yes' });
   await expect(center(page)).toContainText('maws-45 was answered: yes');
   await page.waitForTimeout(300);
-  await center(page).getByTestId('channel-events').evaluate((el) => el.scrollTo({ top: el.scrollHeight - el.clientHeight - 60 }));
+  await scrollBackBy(page, 60);
   await expect.poll(() => gapOf(page)).toBeGreaterThan(50);
   const reading = await line(38).boundingBox();
   await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'question', from: 'maws-45', to: 'host', text: 'Five questions', choices: [], src: 'toolu_gone' });
   await expect(card).toHaveCount(0);
   await page.waitForTimeout(300);
   expect((await line(38).boundingBox())!.y).toBeCloseTo(reading!.y, 0);
+});
+
+test("content growing inside a long message, above the paragraph a reader is partway through, leaves that paragraph where it was", async ({ page, hub }) => {
+  await stageProject(hub);
+  const paragraphs = Array.from({ length: 40 }, (_, i) => `paragraph ${i + 1}`).join('\n\n');
+  await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: paragraphs, src: 'rp#0' });
+  for (let n = 1; n <= 3; n++) await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rp${n}#0` });
+  await open(page, hub);
+  const paragraph = (n: number) => center(page).getByText(`paragraph ${n}`, { exact: true });
+  await expect(center(page).getByText('line 3', { exact: true })).toBeInViewport();
+  await paragraph(30).evaluate((p) => p.scrollIntoView({ block: 'start' })); // partway through the long message
+  await page.waitForTimeout(300);
+  const reading = await paragraph(30).boundingBox();
+  // Content above the paragraph, inside the same message, grows by 600 px (a figure loading, a block drawn late).
+  await paragraph(10).evaluate((p) => p.insertAdjacentHTML('afterend', '<div style="height:600px" data-test-growth></div>'));
+  await page.waitForTimeout(300);
+  expect((await paragraph(30).boundingBox())!.y).toBeCloseTo(reading!.y, 0);
+});
+
+test('a scroll back immediately followed by a row above collapsing, before the scroll is reported, leaves the reader where they scrolled', async ({ page, hub }) => {
+  await stageProject(hub);
+  await stageGrowingRun(hub, 25);
+  for (let n = 1; n <= 40; n++) await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rs${n}#0` });
+  await open(page, hub);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(40)).toBeInViewport();
+  await unfoldRun(page);
+  await expect(center(page).getByTestId('agent-run-messages')).toBeAttached();
+  await page.waitForTimeout(300);
+  // In one task: scroll back 150 px, note where line 36 then is, and fold the run above (its collapse commits at once).
+  const scrolled = await scroller(page).evaluate((el, px) => {
+    const e = el as HTMLElement;
+    e.scrollTop = getComputedStyle(e).flexDirection === 'column-reverse' ? -px : e.scrollHeight - e.clientHeight - px;
+    const row = [...e.querySelectorAll('p')].find((p) => p.textContent === 'line 36')!;
+    const y = row.getBoundingClientRect().y;
+    e.querySelector<HTMLButtonElement>('[data-testid="agent-run"] button')!.click();
+    return y;
+  }, 150);
+  await expect(center(page).getByTestId('agent-run-messages')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect((await line(36).boundingBox())!.y).toBeCloseTo(scrolled, 0);
+});
+
+test('a new message arriving below a reader scrolled back leaves the row they read where it was', async ({ page, hub }) => {
+  await stageProject(hub);
+  const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rn${n}#0` });
+  for (let n = 1; n <= 40; n++) await message(n);
+  await open(page, hub);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(40)).toBeInViewport();
+  await scrollBackBy(page, 150);
+  await page.waitForTimeout(300);
+  const reading = await line(36).boundingBox();
+  await message(41);
+  await expect(line(41)).toBeAttached();
+  await page.waitForTimeout(300);
+  // Held by the engine's scroll anchoring; it scrolls by whole pixels while rows are fractional, so up to 1 px remains.
+  const moved = (await line(36).boundingBox())!.y - reading!.y;
+  test.info().annotations.push({ type: 'row moved (px)', description: moved.toFixed(2) });
+  console.log(`row moved ${moved.toFixed(2)} px (a message arriving below)`);
+  expect(Math.abs(moved)).toBeLessThanOrEqual(1);
 });
 
 test('after a notification lands on its card, an earlier row that grows leaves the card where it was', async ({ page, hub }) => {

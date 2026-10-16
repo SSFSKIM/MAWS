@@ -119,7 +119,35 @@ test('@layout request cards fit the phone: a question answerable in place, a per
   await fitsTheWidth(page);
 });
 
-type Shown = { title: string; options: { body?: string; tag?: string; data?: { url?: string }; actions?: unknown[] } };
+test('@layout a channel opens at its tail and follows it; a reader scrolled back keeps their row as a message arrives below', async ({ browserName, page, hub }) => {
+  // Holding a reader in place against a row arriving below them is the engine's scroll anchoring; Safari has it only
+  // from 27.0 (iOS 26 and older have none), so on WebKit the row may move by the new row's height.
+  await stageProject(hub);
+  const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rw${n}#0` });
+  for (let n = 1; n <= 30; n++) await message(n);
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(30)).toBeInViewport();
+  await message(31);
+  await expect(line(31)).toBeInViewport();
+  const events = center(page).getByTestId('channel-events');
+  expect(await events.evaluate((el) => getComputedStyle(el).flexDirection)).toBe('column-reverse');
+  expect(await events.evaluate((el) => el.scrollTop)).toBeCloseTo(0, 0); // the bottom is the scroll origin
+  await events.evaluate((el) => (el.scrollTop = -150));
+  await page.waitForTimeout(300);
+  expect(await events.evaluate((el) => el.scrollTop)).toBeCloseTo(-150, 0); // 0 at the bottom, negative upward
+  const reading = await line(28).boundingBox();
+  await message(32);
+  await expect(line(32)).toBeAttached();
+  await page.waitForTimeout(300);
+  const moved = (await line(28).boundingBox())!.y - reading!.y;
+  test.info().annotations.push({ type: `row moved (px), ${browserName}`, description: moved.toFixed(2) });
+  console.log(`row moved ${moved.toFixed(2)} px in ${browserName}`);
+  expect(Math.abs(moved)).toBeLessThanOrEqual(1);
+});
+
+type Shown ={ title: string; options: { body?: string; tag?: string; data?: { url?: string }; actions?: unknown[] } };
 
 /**
  * The running service worker, with each notification it asks the platform for recorded as it asks (headless Chromium
