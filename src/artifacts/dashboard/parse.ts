@@ -126,7 +126,7 @@ function readDelimited(text: string, delimiter: ',' | '\t', limits: Limits): { n
       if (text.charCodeAt(i) === QUOTE) {
         const opened = line;
         let value = '';
-        let from = ++i;
+        let from = i + 1;
         for (;;) {
           const close = text.indexOf('"', from);
           if (close === -1 || close >= end) throw invalid(opened, `line ${opened} opens a quoted field that never closes`);

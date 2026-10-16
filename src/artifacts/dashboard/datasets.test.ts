@@ -1,5 +1,6 @@
 // The dashboard's datasets root (P3-E2 M2; XE5): one descriptor per dataset id in the dashboard's one Y.Doc.
 import { describe, expect, it } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import { applyV1, diffV1, newDoc } from '../yjs';
 import { DATASET_LIMITS, DATASETS_ROOT, datasetIdProblem, listDatasets, readDataset, removeDataset, setDataset, type DatasetDescriptor } from './datasets';
 
@@ -11,7 +12,7 @@ const descriptor = (over: Partial<DatasetDescriptor> = {}): DatasetDescriptor =>
     { name: 'sales', type: 'number', mismatches: 1 },
   ],
   rows: 2,
-  updated: { at: 1_760_000_000_000, by: { kind: 'session', appSessionId: 'app-1' } },
+  updated: { at: 1_760_000_000_000, by: { kind: 'session', appSessionId: 'app-1' as AppSessionId } },
   state: { status: 'ok', at: 1_760_000_000_000 },
   ...over,
 });

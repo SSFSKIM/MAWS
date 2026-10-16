@@ -32,6 +32,7 @@ import { parseToolArguments, type ArtifactPublishInput, type ArtifactPublishResu
 import { assetWarnings } from '@artifacts/slides/answer'; // P3-C
 import { stateV2 } from '@artifacts/yjs';
 import type { ArtifactStore } from '../documents/store';
+import { dashboardAdapterOf } from '../dashboards'; // P3-E
 import { actorOf, answering, filesOf, lineageOf, loaderFields, opIdOf, pathsOf, publisherOf, refuse, refusedAfterCommit, resolveArtifact, storeOf, ToolRefusal, withDoc, type ArtifactToolDeps } from './artifact-context';
 import { externalReferenceCount } from './artifacts';
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition } from './server';
@@ -57,6 +58,9 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (!artifact) throw refuse(TOOL, { reason: 'notFound', artifactId }, `the artifact ${input.artifact} was deleted`);
       if (artifact.kind === 'file') throw refuse(TOOL, { reason: 'invalid', kind: 'file' }, 'a file artifact is delivered again with send_file, not published');
       if (artifact.kind === 'document') throw refuse(TOOL, { reason: 'invalid', kind: 'document' }, 'a document is edited block by block, not published');
+      // P3-E (E2 M2; ledger X25): a dashboard is a document, its data bound by artifact_dataset (refused once the
+      // dashboard kind is registered; before, a dashboard is the generic file model it was)
+      if (artifact.kind === 'dashboard' && dashboardAdapterOf(store)) throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard' }, 'a dashboard is edited block by block (artifact_edit) and its data bound with artifact_dataset, not published');
       const suggest = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
       if (suggest && !isDocKind(artifact.kind)) {
         const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;

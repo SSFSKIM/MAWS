@@ -108,14 +108,21 @@ export function listDatasets(doc: Doc): { id: string; descriptor: DatasetDescrip
     });
 }
 
-/** Writes `id`'s descriptor whole (a bind or a replacement), as one transaction. Refuses a bad id and a 65th dataset. */
-export function setDataset(doc: Doc, id: string, descriptor: DatasetDescriptor): void {
+/** Why `doc` cannot take a descriptor under `id` now, or null: a bad id, or a new id past the limit of datasets. */
+export function datasetSlotProblem(doc: Doc, id: string): string | null {
   const problem = datasetIdProblem(id);
-  if (problem) throw new Error(`the dataset id ${JSON.stringify(id)} is refused: ${problem}`);
+  if (problem) return `the dataset id ${JSON.stringify(id)} is refused: ${problem}`;
   const root = rootOf(doc);
-  if (root.getAttr(id) === undefined && [...(root.attrKeys() as Iterable<string>)].length >= DATASET_LIMITS.datasets) throw new Error(`a dashboard holds at most ${DATASET_LIMITS.datasets} datasets`);
+  if (root.getAttr(id) === undefined && [...(root.attrKeys() as Iterable<string>)].length >= DATASET_LIMITS.datasets) return `a dashboard holds at most ${DATASET_LIMITS.datasets} datasets`;
+  return null;
+}
+
+/** Writes `id`'s descriptor whole (a bind or a replacement), as one transaction; throws what `datasetSlotProblem` says. */
+export function setDataset(doc: Doc, id: string, descriptor: DatasetDescriptor): void {
+  const problem = datasetSlotProblem(doc, id);
+  if (problem) throw new Error(problem);
   const value = DescriptorSchema.parse(descriptor);
-  transact(doc, () => root.setAttr(id, value));
+  transact(doc, () => rootOf(doc).setAttr(id, value));
 }
 
 export function removeDataset(doc: Doc, id: string): void {
