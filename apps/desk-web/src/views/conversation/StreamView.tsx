@@ -4,7 +4,7 @@
 // drawn whole on one line), a direct channel's working record folded (unfolded, DC6's transcript slot), the requests
 // in place, and this tab's sends on their way to the log. The item a tapped notification landed on is marked and
 // scrolled to once it is drawn. On a phone the working record stays folded: the transcript is desktop-only (§4).
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import { writerMachine, type LogEvent, type Recipient } from 'desk-hub/protocol';
 import { TranscriptActionsProvider, type TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
@@ -23,11 +23,53 @@ const time = (ts: string) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
-export function StreamView({ items, outbox, landed = null }: { items: StreamItem[]; outbox: OutboxItem[]; landed?: string | null }) {
+/** How close to the bottom, in pixels, a reader counts as reading the tail. */
+const TAIL_SLACK = 48;
+
+/**
+ * Keeps a scrolled list at its tail while the reader is there: it opens at the tail, and whatever is added or grows
+ * below (a message, a card, Markdown drawn late) keeps it there; once the reader scrolls up, or a landing scrolls to its
+ * card, it stays where it was put until the reader returns to the bottom.
+ */
+function useTail(items: StreamItem[], outbox: OutboxItem[], landed: string | null) {
+  const list = useRef<HTMLOListElement>(null);
   const landedRow = useRef<HTMLLIElement>(null);
-  useEffect(() => landedRow.current?.scrollIntoView({ block: 'center' }), [landed]);
+  const following = useRef(true);
+  useEffect(() => {
+    const el = list.current;
+    if (!el) return;
+    const onScroll = () => (following.current = el.scrollHeight - el.scrollTop - el.clientHeight <= TAIL_SLACK);
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+  // What was added moves the tail, before it is painted.
+  useLayoutEffect(() => {
+    const el = list.current;
+    if (el && following.current) el.scrollTop = el.scrollHeight;
+  }, [items, outbox]);
+  // Rows that grow after they are drawn (Markdown loaded late, a card's preview) move it too.
+  useEffect(() => {
+    const el = list.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      if (following.current) el.scrollTop = el.scrollHeight;
+    });
+    for (const row of el.children) observer.observe(row);
+    return () => observer.disconnect();
+  }, [items, outbox]);
+  // A landing decides where the reader is.
+  useEffect(() => {
+    if (!landedRow.current) return;
+    following.current = false;
+    landedRow.current.scrollIntoView({ block: 'center' });
+  }, [landed]);
+  return { list, landedRow };
+}
+
+export function StreamView({ items, outbox, landed = null }: { items: StreamItem[]; outbox: OutboxItem[]; landed?: string | null }) {
+  const { list, landedRow } = useTail(items, outbox, landed);
   return (
-    <ol className="m-0 min-h-0 flex-1 list-none overflow-y-auto px-4 py-3" data-testid="channel-events">
+    <ol ref={list} className="m-0 min-h-0 flex-1 list-none overflow-y-auto px-4 py-3" data-testid="channel-events">
       {items.length === 0 && outbox.length === 0 && <li className="text-ui-sm text-fg-muted">Nothing here yet.</li>}
       {items.map((item) => (
         <li

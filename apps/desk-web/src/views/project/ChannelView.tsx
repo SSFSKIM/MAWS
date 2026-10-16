@@ -75,7 +75,8 @@ export function ChannelView(props: {
           )}
         </div>
       )}
-      <StreamView items={items} outbox={outbox} landed={landed.item} />
+      {/* Keyed by channel: each opens at its own tail. */}
+      <StreamView key={channel.kind === 'group' ? 'group' : channel.session} items={items} outbox={outbox} landed={landed.item} />
       {channel.kind === 'group' ? (
         <GroupComposer name={name} />
       ) : (
