@@ -19,6 +19,7 @@ import { sendFileTool } from './send-file';
 import type { McpToolDefinition } from './server';
 import { showPaneTool } from './show-pane';
 import { documentCreateTool, documentReadTool, documentTools, DocumentToolSession } from './documents'; // P3-B (M7)
+import { presentationThreadTools } from '../presentations/threads'; // P3-C (M7)
 
 export function mawsTools(deps: {
   bridge: PaneBridge; capture: CaptureBridge; asks: AskTable; askCancelled: (ask: PendingAsk, reason: AskCancelReason) => void;
@@ -51,7 +52,7 @@ export function mawsTools(deps: {
       // P3-A (M6)
       artifactDescribeTypeTool(artifacts), documentReadTool(documents, artifactReadTool(artifacts)), artifactPublishTool(artifacts), artifactUploadAssetTool(artifacts), artifactListAssetsTool(artifacts),
       artifactExportTool({ ...artifacts, exporter: deps.exporter }),
-      ...documentTools(documents), // P3-B (M7)
+      ...presentationThreadTools(documents, documentTools(documents)), // P3-B (M7); P3-C (M7): B's thread tools answer a deck from its threads
     ].map(afterImport),
   ];
 }

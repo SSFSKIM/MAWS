@@ -137,7 +137,9 @@ module.exports = defineConfig(
   // P3-B start: the one-schema rule (above).
   {
     files: ['src/**/*.{ts,tsx}'],
-    ignores: ['src/artifacts/document/schema.ts', 'src/renderer/src/composer/**'],
+    // P3-C (at the merge of B): the deck's slide-text schema, Claude's inline set and no wider, is the slides' one schema
+    // module, as the composer's is its own
+    ignores: ['src/artifacts/document/schema.ts', 'src/renderer/src/composer/**', 'src/artifacts/slides/editor/text-schema.ts'],
     plugins: { 'maws-schema': mawsSchemaPlugin },
     rules: { 'maws-schema/one-schema': ['error', ...ONE_SCHEMA] },
   },

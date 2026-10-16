@@ -163,6 +163,7 @@ export class ArtifactStore {
   private readonly log: (line: string) => void;
   private readonly changeListeners = new Set<(change: ArtifactChanged) => void>();
   private readonly spaceListeners = new Set<(change: SpaceChanged) => void>();
+  private readonly defaultsListeners = new Set<() => void>(); // P3-C (Decision Log 29)
   private readonly coalescing = new Map<string, { timer: ReturnType<typeof setTimeout>; pending: number | null }>();
   private readonly creating = new Set<string>(); // artifacts whose first content is committing: `created` announces them
   private readonly schedule = new Map<string, { idle?: ReturnType<typeof setTimeout>; every?: ReturnType<typeof setTimeout> }>();
@@ -210,6 +211,14 @@ export class ArtifactStore {
   onSpaceChange(listener: (change: SpaceChanged) => void): () => void {
     this.spaceListeners.add(listener);
     return () => this.spaceListeners.delete(listener);
+  }
+
+  // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 29; the P3 spec's Decision Log 69): told
+  // once main's relay of the design-system defaults (`setDefaults`) has committed, so what the default chain feeds (the
+  // deck's mirror) can follow it.
+  onDefaultsChange(listener: () => void): () => void {
+    this.defaultsListeners.add(listener);
+    return () => this.defaultsListeners.delete(listener);
   }
 
   // A read whose answer reveals store state (an IPC answer, a tool's result), released only once it may be revealed
@@ -689,6 +698,18 @@ export class ArtifactStore {
     }
   }
 
+  // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, Decision Log 25; the parent's 65): an asset of one
+  // artifact copied into another, generic (a deck's pasted picture, a document's): the source's bytes written through
+  // `uploadAsset` on the target, so the bytes and mime arrive unchanged, identical bytes answer the target's existing ref
+  // and a name taken there is made unique. Both artifacts must be live; a deleted or missing one is refused by name.
+  async copyAsset(from: string, ref: string, to: string, actor: Actor): Promise<{ assetId: string; ref: string }> {
+    this.requireLive(from);
+    this.requireLive(to);
+    const asset = this.listAssets(from).find((candidate) => candidate.ref === ref);
+    if (!asset) throw new ArtifactStoreError('notFound', `no asset ${ref} in ${from}`, { artifactId: from, ref });
+    return this.uploadAsset(to, this.files.readAsset(from, asset.sha256), { name: asset.name, mime: asset.mime }, actor);
+  }
+
   listAssets(artifactId: string): Asset[] {
     const rows = this.storage.db.prepare('SELECT * FROM artifact_assets WHERE artifactId = ? ORDER BY createdAt, rowid').all(artifactId) as unknown as (Omit<Asset, 'ref' | 'createdBy'> & { createdBy: string })[];
     return rows.map((row) => ({ assetId: row.assetId, ref: `assets/${row.name}`, name: row.name, mime: row.mime, size: row.size, sha256: row.sha256, createdAt: row.createdAt, createdBy: actorFromKey(row.createdBy) }));
@@ -939,6 +960,14 @@ export class ArtifactStore {
   // Main's relay of the owner's and the Spaces' defaults, kept so a detached host with main absent still honours them.
   async setDefaults(defaults: DesignSystemDefaults): Promise<void> {
     await this.service.inBatch(() => this.storage.setMeta(DEFAULTS_KEY, JSON.stringify({ owner: defaults.owner, spaces: defaults.spaces })));
+    // P3-C (Decision Log 29): the listeners, after the commit
+    for (const listener of this.defaultsListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.log(`an onDefaultsChange listener threw: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   registerDesignSystemContext(provider: (system: Artifact) => Promise<string | null>): void {

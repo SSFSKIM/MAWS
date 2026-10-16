@@ -10,8 +10,8 @@ import type { HistoryController, HistorySnapshot } from './controller';
 import { authorOf, groupVersions, versionSummary, versionTitle, type Entry } from './model';
 
 interface Props {
-  controller: HistoryController;
-  snapshot: HistorySnapshot;
+  controller: Pick<HistoryController, 'select' | 'save' | 'now'>; // P3-C (M8): what the rail drives, so a deck's controller drives it too; `now` names the list's days (gate-offload Decision Log 41)
+  snapshot: Pick<HistorySnapshot, 'versions' | 'selected' | 'loading' | 'status' | 'error'>; // P3-C (M8): the list fields it reads
   sessionTitle?: (appSessionId: string) => string | undefined;
   /** Whether the Save version form is open (the editor holds it, so the header's Save version can open it). */
   saving: boolean;
@@ -22,7 +22,7 @@ interface Props {
 export function HistoryRail({ controller, snapshot, sessionTitle, saving, onSaving: setSaving, onClose }: Props) {
   const [namedOnly, setNamedOnly] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
-  const groups = useMemo(() => groupVersions(snapshot.versions ?? [], { now: Date.now(), namedOnly }), [snapshot.versions, namedOnly]);
+  const groups = useMemo(() => groupVersions(snapshot.versions ?? [], { now: controller.now(), namedOnly }), [controller, snapshot.versions, namedOnly]);
   const select = (version: ArtifactVersion, event: MouseEvent) => void controller.select(version.id, { extend: event.shiftKey });
   const row = (version: ArtifactVersion) => <VersionRow key={version.id} version={version} selected={snapshot.selected.includes(version.id)} sessionTitle={sessionTitle} onSelect={select} />;
   const entry = (item: Entry) => {

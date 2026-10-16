@@ -66,6 +66,7 @@ function fakeHost(systems: Record<string, Doc>, versions: Record<string, Uint8Ar
     acceptSuggestion: async () => ({ revision: 0 }), // P3-D re-merge: A's landed required members
     rejectSuggestion: async () => ({ revision: 0 }),
     uploadAsset: async () => ({ assetId: '', ref: '' }),
+    copyAsset: async () => ({ assetId: '', ref: '' }), // P3-C (Decision Log 25)
     identity: () => ({ actor: { kind: 'human' }, name: 'Owner', color: '#000000' }),
   };
   return { host, open, closed, versionState };

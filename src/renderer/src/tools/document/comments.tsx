@@ -13,6 +13,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, type R
 import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '@artifacts/document/editor/comments/surface';
 import { useThreadStatus } from '@artifacts/document/editor/comments/use-threads';
 import { anchorField, type Anchor } from '@shared/anchor/anchor';
+import type { ArtifactKind } from '@shared/artifacts/entity'; // P3-C
 import type { AppSessionId } from '@shared/graph/ids';
 import { QUIET } from '../../sessions/ui';
 import { CommentCardHost, type CardFrame } from '../../side/card/CardHost';
@@ -23,8 +24,8 @@ const LABEL_MAX = 200; // X10's label cap
 const QUOTE_MAX = 300; // the passage as the lead line and the card's title read it; the thread keeps it whole
 
 /** X10's anchor for a comment on a document's passage: the document and tab as the label, the passage as the locator. */
-export function artifactCommentAnchor({ artifactId, title, threadId, tabTitle, quote }: CommentedPassage & { artifactId: string; title: string }): Anchor {
-  return { kind: 'artifact-comment', label: anchorField(`${title}, ${tabTitle}`, LABEL_MAX), locator: anchorField(quote, QUOTE_MAX), artifactId, threadId };
+export function artifactCommentAnchor({ artifactId, title, threadId, tabTitle, quote, artifactKind }: CommentedPassage & { artifactId: string; title: string; artifactKind?: ArtifactKind /* P3-C */ }): Anchor {
+  return { kind: 'artifact-comment', label: anchorField(`${title}, ${tabTitle}`, LABEL_MAX), locator: anchorField(quote, QUOTE_MAX), artifactId, threadId, ...(artifactKind !== undefined && { artifactKind }) /* P3-C */ };
 }
 
 interface Options {
@@ -42,6 +43,8 @@ interface Options {
    * mounted, until its withdrawal of an unsent draft after it went has been written, and by each send until it settled.
    */
   holdReplica?: () => () => void;
+  /** P3-C (M7 fix wave 1; Decision Log 33, 35): the commented artifact's kind when it is not a document (the lead's wording). */
+  artifactKind?: ArtifactKind;
 }
 
 interface Binding {
@@ -121,7 +124,7 @@ function draftsOf(hostId: string): Drafts {
 }
 
 /** The surface DocumentEditor takes (`comments`), stable while the artifact and the session stay. */
-export function useDocumentComments({ artifactId, appSessionId, title, mode = 'panel', visible = true, holdReplica }: Options): DocumentComments {
+export function useDocumentComments({ artifactId, appSessionId, title, mode = 'panel', visible = true, holdReplica, artifactKind }: Options): DocumentComments {
   const hostId = `document:${useId()}`;
   const titleRef = useRef(title);
   useLayoutEffect(() => {
@@ -130,9 +133,9 @@ export function useDocumentComments({ artifactId, appSessionId, title, mode = 'p
   const opened = useCallback(
     (passage: CommentedPassage) => {
       draftsOf(hostId).opened(passage.threadId);
-      openCommentComposer(artifactCommentAnchor({ artifactId, title: titleRef.current, ...passage }), { appSessionId, placement: { kind: 'card', host: 'artifact', hostId } });
+      openCommentComposer(artifactCommentAnchor({ artifactId, title: titleRef.current, ...passage, ...(artifactKind !== undefined && { artifactKind }) /* P3-C */ }), { appSessionId, placement: { kind: 'card', host: 'artifact', hostId } });
     },
-    [artifactId, appSessionId, hostId],
+    [artifactId, appSessionId, hostId, artifactKind],
   );
   return useMemo(() => {
     const binding: Binding = { artifactId, hostId, mode, visible, holdReplica };

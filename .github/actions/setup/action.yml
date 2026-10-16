@@ -1,9 +1,11 @@
 name: MAWS gate setup
 description: >-
   The shared setup of .github/workflows/gate.yml (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.2), run after
-  the checkout: pnpm from packageManager, Node 22 and the frozen install. Linux jobs cache the pnpm store and Electron's
-  download by its version; the macOS runner relies on its own disk. On Linux, e2e jobs get the virtual display, the CJK
-  fonts and Electron's sandbox, and LibreOffice for the groups that render documents through it.
+  the checkout: pnpm from packageManager, Node 22 and the frozen install. Hosted Linux jobs cache the pnpm store and
+  Electron's download by its version; the self-hosted runners (the macOS runner, ci-kit's pool) rely on their own disks
+  and take pnpm through corepack, never pnpm/action-setup.
+  On Linux, e2e jobs get the virtual display, the CJK fonts and Electron's sandbox, and LibreOffice for the groups that
+  render documents through it.
 inputs:
   e2e:
     description: Install xvfb and the CJK fonts, and lift the apparmor restriction on unprivileged user namespaces.
@@ -17,16 +19,31 @@ inputs:
 runs:
   using: composite
   steps:
-    - uses: pnpm/action-setup@v6
+    - if: runner.environment != 'self-hosted'
+      uses: pnpm/action-setup@v6
     - uses: actions/setup-node@v7
       with:
         node-version: 22
-        cache: ${{ runner.os == 'Linux' && 'pnpm' || '' }}
+        cache: ${{ runner.environment == 'github-hosted' && runner.os == 'Linux' && 'pnpm' || '' }}
+    # On a self-hosted runner (ci-kit's pool, Decision Log 35; the macOS runner, Decision Log 42) pnpm comes through
+    # corepack at packageManager's version, so no job switches versions: on a pool box, whose pnpm store is shared
+    # between jobs, pnpm/action-setup's self-update breaks from the box's second job on; on the Mac the switch (11.19.0
+    # to 11.23.0 in run 38866065402's e2e:tools job) spawned `open`, which put a URL in the owner's browser. The shims go
+    # to the job's own directory, not Node's shared tool cache.
+    - if: runner.environment == 'self-hosted'
+      shell: bash
+      run: |
+        mkdir -p "$RUNNER_TEMP/bin"
+        corepack enable --install-directory "$RUNNER_TEMP/bin"
+        echo "$RUNNER_TEMP/bin" >>"$GITHUB_PATH"
+        echo COREPACK_ENABLE_DOWNLOAD_PROMPT=0 >>"$GITHUB_ENV"
+        COREPACK_ENABLE_DOWNLOAD_PROMPT=0 "$RUNNER_TEMP/bin/pnpm" --version
     - id: electron
       shell: bash
       run: echo "version=$(node -p "require('./package.json').devDependencies.electron")" >> "$GITHUB_OUTPUT"
+    # The pool's caches are baked into its box and shared, so a restore there would unpack under other jobs.
     - uses: actions/cache@v6
-      if: runner.os == 'Linux'
+      if: runner.environment == 'github-hosted' && runner.os == 'Linux'
       with:
         path: ~/.cache/electron
         key: electron-${{ runner.os }}-${{ runner.arch }}-${{ steps.electron.outputs.version }}

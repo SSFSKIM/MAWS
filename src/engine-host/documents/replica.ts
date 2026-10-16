@@ -11,6 +11,7 @@ import { newDoc, stateV2, transact, type Doc } from '@artifacts/yjs';
 export interface Base {
   revision: number;
   state: Uint8Array; // V2
+  files?: Record<string, string>; // P3-C (the parent's Decision Log 58): the state's files as the kind reads them, when known
 }
 
 // What other replicas show of the agent while it works: its cursor and the blocks it is editing (B's shapes), its name

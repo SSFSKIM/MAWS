@@ -28,7 +28,7 @@ import { ENGINE_BIN as ENGINE_BIN_PATH, ENGINE_VERSION } from '../test/support/e
 import { writeScratchShellHome } from '../test/support/shell-home';
 import { synthesise } from '../test/support/synth-transcript';
 import { invoke, value } from './support/c7-replay';
-import { collectConsoleErrors, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { collectConsoleErrors, E2E_APP_ARGS, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { taskEnded, type TaskEventLike } from './support/c12-task-end';
 import { newChatIn, openProject, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 import {
@@ -245,7 +245,7 @@ test('§10.1 real store, read only', async () => {
   mkdirSync(outside, { recursive: true });
 
   const launchedAt = Date.now();
-  const app: ElectronApplication = await _electron.launch({ executablePath: executable!, env, cwd: REPO_ROOT });
+  const app: ElectronApplication = await _electron.launch({ executablePath: executable!, args: E2E_APP_ARGS, env, cwd: REPO_ROOT });
   try {
     const page = await app.firstWindow();
     const firstWindowMs = Date.now() - launchedAt;

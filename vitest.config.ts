@@ -41,7 +41,8 @@ const TIMING_RENDERER_TESTS = [
   'src/renderer/src/App.test.tsx',
   'src/renderer/src/sessions/resource.test.tsx', // a whole-tree mount switched across 20 sessions (gate offload, Decision Log 11)
 ];
-// P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md).
+// P3-B: the portable artifact layer's DOM suites (docs/doperpowers/plans/2026-10-12-p3-b-documents.md); P3-C M4 shares the
+// project (the slide canvas, the deck editor).
 const ARTIFACTS_DOM_TESTS = 'src/artifacts/**/*.dom.test.{ts,tsx}';
 
 // C3 start: the `live` project runs the engine-host suite against the pinned binary through the relay
@@ -77,8 +78,8 @@ export default defineConfig({
           include: ['src/{shared,main,preload,engine-host,pty-host}/**/*.test.ts', 'test/**/*.test.ts', RENDERER_NODE_TESTS],
           exclude: ['**/node_modules/**', 'test/live/**/*.live.test.ts', ...TIMING_NODE_TESTS], // C3: live cases run only in the `live` project; their support's own tests run here
           css: { include: [/\/design_system\/defaults\/.+\.css/] }, // P3-D: the defaults' `document.css` as text (`?raw`) for the host's and main's tests, as in `artifacts`
-          // The compile-time suites (`identifiers are not interchangeable`) run through tsc on the node tsconfig.
-          typecheck: { enabled: true, include: ['src/**/*.test-d.ts'], tsconfig: './tsconfig.node.json' },
+          // The compile-time suites (`src/**/*.test-d.ts`) are checked by `pnpm typecheck` alone, tsconfig.node.json
+          // including them; a second pass here only re-checked them (gate-offload Decision Log 35, P5).
         },
       },
       { resolve: { alias }, test: { name: 'node-timing', environment: 'node', include: TIMING_NODE_TESTS, ...TIMING_TIMEOUTS } },

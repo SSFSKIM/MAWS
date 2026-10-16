@@ -8,13 +8,13 @@
 // missing artifact) is held the same way, so no answer names rows a failed batch takes back.
 import { readFile, stat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
-import { publishFiles, readFiles } from '@artifacts/files';
+import { publishFiles, readFiles, type PublishOutcome } from '@artifacts/files';
 import type { KindAdapter } from '@artifacts/host';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
-import { ARTIFACT_MAX_BYTES, TOOL_ERRORS, type ArtifactEditor, type ArtifactRefusal, type ArtifactToolName } from '@shared/maws/tools';
+import { ARTIFACT_MAX_BYTES, TOOL_ERRORS, type ArtifactEditor, type ArtifactPublishResult, type ArtifactRefusal, type ArtifactToolName } from '@shared/maws/tools';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
 import type { ArtifactStore } from '../documents/store';
 import type { McpToolContext, McpToolResult } from './server';
@@ -144,8 +144,24 @@ export function filesOf(store: ArtifactStore, kind: ArtifactKind, doc: Doc): Rec
   return store.service.adapterFor(kind)?.readFiles?.(doc) ?? readFiles(doc);
 }
 
-export function publisherOf(store: ArtifactStore, kind: ArtifactKind): NonNullable<KindAdapter['publish']> {
+// P3-C: the outcome's loader fields (`added`, `warnings`, `notes`, `held`) reach the answer when the kind gives them
+export function publisherOf(store: ArtifactStore, kind: ArtifactKind): (...args: Parameters<NonNullable<KindAdapter['publish']>>) => PublishOutcome {
   return store.service.adapterFor(kind)?.publish ?? publishFiles;
+}
+
+// P3-C (the parent's Decision Log 58): the doc's file paths in `filesOf`'s order, by the kind's `paths` when it has one
+export function pathsOf(store: ArtifactStore, kind: ArtifactKind, doc: Doc): string[] {
+  return store.service.adapterFor(kind)?.paths?.(doc) ?? Object.keys(filesOf(store, kind, doc));
+}
+
+// P3-C: what a kind's loader said of the files, each field when it says something
+export function loaderFields(outcome: PublishOutcome): Pick<ArtifactPublishResult, 'added' | 'warnings' | 'notes' | 'held'> {
+  return {
+    ...(outcome.added && outcome.added.length > 0 && { added: outcome.added }),
+    ...(outcome.warnings && outcome.warnings.length > 0 && { warnings: outcome.warnings }),
+    ...(outcome.notes !== undefined && outcome.notes > 0 && { notes: outcome.notes }),
+    ...(outcome.held && outcome.held.length > 0 && { held: outcome.held }),
+  };
 }
 
 // A scratch doc holding `state` (V2; null: an empty doc), destroyed after `use`.
