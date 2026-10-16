@@ -13,7 +13,7 @@
 //   ungroup, a board move and an element edit undone from one stack, Insert on the phone at screen type, and text in
 //   place through a Korean composition while another replica edits the same box.
 // - Theme restyles every board through the document medium; a held board is drawn labelled and never written.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject } from './support/sidebar';
@@ -112,6 +112,17 @@ test('a design in the panel and a main tab: two replicas, every board mounted th
     expect(box.x + box.width, b).toBeLessThanOrEqual(world.x + world.width + 1);
     expect(box.y + box.height, b).toBeLessThanOrEqual(world.y + world.height + 1);
   }
+  // each title stays over its own board at any zoom: never wider than the board is drawn, so never into a neighbour's;
+  // its full name and size stay its tooltip
+  const labels = await Promise.all(
+    ORDER.map(async (b) => ({ b, title: (await inMain.locator(`[data-board-title="${b}"]`).boundingBox())!, board: (await inMain.locator(`[data-board-id="${b}"]`).boundingBox())! })),
+  );
+  for (const { b, title, board } of labels) {
+    expect(title.x, b).toBeGreaterThanOrEqual(board.x - 1);
+    expect(title.x + title.width, b).toBeLessThanOrEqual(board.x + board.width + 1);
+  }
+  for (let i = 1; i < labels.length; i++) expect(labels[i]!.title.x, `${labels[i]!.b} after ${labels[i - 1]!.b}`).toBeGreaterThanOrEqual(labels[i - 1]!.title.x + labels[i - 1]!.title.width - 1);
+  await expect(inMain.locator('[data-board-title="poster"]')).toHaveAttribute('title', 'Poster, 1,080 × 9,000');
   await page.locator('[data-region="main"]').screenshot({ path: test.info().outputPath('design-workbench-fit-all.png') });
 
   // a drag on the empty world pans it; every canvas stays mounted: the same nodes before and after
@@ -153,15 +164,52 @@ test('a design in the panel and a main tab: two replicas, every board mounted th
   await inMain.getByRole('button', { name: 'Undo' }).click();
   await expect(inPanel.locator('[data-board-id="tablet"]')).toHaveCSS('left', '490px', { timeout: 1_000 });
 
-  // the narrow panel: the phone picked from the board list (a sheet over the world), fitted, its inspector open; the
-  // narrow evidence screenshot
+  // the narrow panel: the phone picked from the board list (a sheet over the world, closing once picked), the inspector
+  // opened under the world, the phone fitted into what the world has left
   await inPanel.getByRole('button', { name: 'Boards', exact: true }).click();
   await inPanel.getByRole('button', { name: /^Phone, / }).click();
-  await inPanel.getByRole('button', { name: 'Boards', exact: true }).click();
-  await inPanel.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-selection');
+  await expect(inPanel.locator('[data-design-rail="boards"]')).toHaveCount(0);
   await inPanel.getByRole('button', { name: 'Inspector', exact: true }).click();
+  await inPanel.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-selection');
   await expect(inPanel.getByRole('textbox', { name: 'Board width' })).toHaveValue('390');
   await expect(inPanel.locator('[data-board-id="phone"]')).toHaveAttribute('data-frame-selected', 'true');
+  // nothing overflows the panel sideways and nothing is scrolled: the editor fits it, every control lies inside it
+  const panelBox = (await panel.boundingBox())!;
+  const inside = async (what: string, locator: Locator) => {
+    const box = (await locator.boundingBox())!;
+    expect(box.x, what).toBeGreaterThanOrEqual(panelBox.x - 1);
+    expect(box.x + box.width, what).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+    return box;
+  };
+  const overflow = await inPanel.evaluate((n) => {
+    let scrolled = 0;
+    for (let a: HTMLElement | null = n as HTMLElement; a; a = a.parentElement) scrolled += a.scrollLeft;
+    const editor = n.querySelector<HTMLElement>('[data-design-editor]')!;
+    return { scrolled, over: editor.scrollWidth - editor.clientWidth };
+  });
+  expect(overflow.scrolled).toBe(0);
+  expect(overflow.over).toBeLessThanOrEqual(1);
+  await inside('the editor', inPanel.locator('[data-design-editor]'));
+  for (const [what, control] of [
+    ['Inspector', inPanel.getByRole('button', { name: 'Inspector', exact: true })],
+    ['Insert', inPanel.getByRole('button', { name: 'Insert', exact: true })],
+    ['Zoom in', inPanel.getByRole('button', { name: 'Zoom in' })],
+    ['Board width', inPanel.getByRole('textbox', { name: 'Board width' })],
+    ['Board size', inPanel.getByRole('combobox', { name: 'Board size' })],
+  ] as const)
+    await inside(what, control);
+  expect((await inside('Zoom', inPanel.getByRole('combobox', { name: 'Zoom' }))).width).toBeGreaterThanOrEqual(56);
+  expect((await inside('Text style', inPanel.getByRole('button', { name: 'Text style', exact: true }))).height).toBeLessThan(40); // one line, not a letter a line
+  // the world keeps a usable height above the inspector, and shows the selected phone whole in it
+  const worldBox = await inside('the world', inPanel.locator('[data-design-world]'));
+  expect(worldBox.height).toBeGreaterThanOrEqual(150);
+  const inspectorBox = await inside('the inspector', inPanel.locator('[data-design-rail="inspector"]'));
+  expect(inspectorBox.y).toBeGreaterThanOrEqual(worldBox.y + worldBox.height - 1);
+  const phoneBox = (await inPanel.locator('[data-board-id="phone"]').boundingBox())!;
+  expect(phoneBox.x).toBeGreaterThanOrEqual(worldBox.x - 1);
+  expect(phoneBox.y).toBeGreaterThanOrEqual(worldBox.y - 1);
+  expect(phoneBox.x + phoneBox.width).toBeLessThanOrEqual(worldBox.x + worldBox.width + 1);
+  expect(phoneBox.y + phoneBox.height).toBeLessThanOrEqual(worldBox.y + worldBox.height + 1);
   await panel.screenshot({ path: test.info().outputPath('design-panel-phone.png') });
 
   expect(launch!.consoleErrors()).toEqual([]);

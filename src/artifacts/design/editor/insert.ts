@@ -5,6 +5,7 @@
 // h2) apply; every element fits within 80 % of the board, its aspect kept, centred on the board. C's defaults for decks
 // are untouched.
 import type { ElementIR } from '../../slides/ir';
+import { escText } from '../../slides/serialize';
 import { newElement, type NewKind } from '../../slides/writers-elements';
 
 /** How much of the board's width and height a new element may take. */
@@ -47,4 +48,16 @@ export function boardElement(kind: NewKind, size: { w: number; h: number }): Ele
   style.left = px(c.x - Math.round(w) / 2);
   style.top = px(c.y - Math.round(h) / 2);
   return { ...el, style };
+}
+
+/**
+ * Plain text pasted on a board (the task review's fix wave): C's paste places plain text at a slide's sizes (left 560,
+ * width 800, 40 px), off a phone's edge; on a board it is the markup of a text box as Insert makes one there (screen
+ * type, fitted, centred), a line per pasted line, for C's validated paste (`pasteElements`) to load and insert.
+ */
+export function boardTextMarkup(text: string, size: { w: number; h: number }): string {
+  const lines = text.trim().split(/\r?\n/);
+  const { style } = boardElement('text', size);
+  const top = Math.round(size.h / 2 - (lines.length * SCREEN_HEIGHT.text!) / 2);
+  return `<p style="position:absolute; left:${style.left}; top:${top}px; width:${style.width}">${lines.map(escText).join('<br>')}</p>`;
 }

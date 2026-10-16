@@ -44,6 +44,12 @@ function longestRun(seq: number[]): number[] {
   return out;
 }
 
+/** P3-E (E1 M3): a design board's size from its node's plain `w` and `h` keys (both positive numbers), else null. */
+function boardSize(s: Y.Scalars): { w: number; h: number } | null {
+  const { w, h } = s;
+  return typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0 ? { w, h } : null;
+}
+
 // ---- the shared layout pass ----------------------------------------------------------------------------------------
 
 const pending = new Set<SlideCanvas>();
@@ -194,6 +200,9 @@ export class SlideCanvas {
   private applySlideKey(k: string, v: string | undefined): void {
     if (k === 'w' || k === 'h') this.applySize(); // P3-E: a board's size, plain keys on its node (a deck's slide has none)
     else if (k.startsWith('style:')) {
+      // P3-E (E1 M3 fix wave): a board's section is its node's size, whatever width or height its style says (the
+      // style stays the model's, drawn again only if the node stops being a board)
+      if ((k === 'style:width' || k === 'style:height') && boardSize(Y.slideScalars(this.doc, this.slideId)) !== null) return this.applySize();
       if (v === undefined) this.root.style.removeProperty(k.slice(6));
       else this.root.style.setProperty(k.slice(6), drawnValue(k.slice(6), v, this.draw));
     } else if (k.startsWith('attr:')) {
@@ -210,16 +219,21 @@ export class SlideCanvas {
    * every other slide's.
    */
   private applySize(): void {
-    const { w, h } = Y.slideScalars(this.doc, this.slideId);
-    if (typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0) {
-      this.board = { w, h };
-      this.root.style.width = `${w}px`;
-      this.root.style.height = `${h}px`;
+    const scalars = Y.slideScalars(this.doc, this.slideId);
+    const size = boardSize(scalars);
+    if (size) {
+      this.board = size;
+      this.root.style.width = `${size.w}px`;
+      this.root.style.height = `${size.h}px`;
       this.root.dataset.board = '';
     } else if (this.board !== null) {
       this.board = null;
-      this.root.style.removeProperty('width');
-      this.root.style.removeProperty('height');
+      // the section's own width and height styles, if it has them, draw again (fix wave)
+      for (const p of ['width', 'height'] as const) {
+        const v = scalars[`style:${p}`];
+        if (typeof v === 'string') this.root.style.setProperty(p, drawnValue(p, v, this.draw));
+        else this.root.style.removeProperty(p);
+      }
       delete this.root.dataset.board;
     }
   }

@@ -74,6 +74,27 @@ describe('SlideCanvas on a board', () => {
     expect(canvas.root.hasAttribute('data-board')).toBe(false);
   });
 
+  it('a board’s node size wins over a section width or height style, at first and through its patches and removal; the authored style kept', () => {
+    const doc = design();
+    transact(doc, () => {
+      Y.setSlideKey(doc, 'b1', 'style:width', '1920px');
+      Y.setSlideKey(doc, 'b1', 'style:height', '1080px');
+    });
+    const canvas = canvasOf(doc, 'b1');
+    const shown = () => [canvas.root.style.width, canvas.root.style.height];
+    expect(shown()).toEqual(['390px', '844px']);
+    transact(doc, () => Y.setSlideKey(doc, 'b1', 'style:width', '500px'));
+    expect(shown()).toEqual(['390px', '844px']);
+    transact(doc, () => Y.deleteSlideKey(doc, 'b1', 'style:width'));
+    expect(shown()).toEqual(['390px', '844px']);
+    setBoardFrame(doc, 'b1', { w: 834, h: 1194 });
+    expect(shown()).toEqual(['834px', '1194px']);
+    expect(Y.slideScalars(doc, 'b1')['style:height']).toBe('1080px'); // the model's authored style is not touched
+    // no size on the node: the section's own style draws again, as a deck's would
+    transact(doc, () => Y.deleteSlideKey(doc, 'b1', 'w'));
+    expect(shown()).toEqual(['', '1080px']);
+  });
+
   it('a size key removed returns the canvas to the deck default', () => {
     const doc = design();
     const canvas = canvasOf(doc, 'b2');

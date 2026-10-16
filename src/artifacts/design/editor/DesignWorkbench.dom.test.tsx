@@ -13,7 +13,7 @@ import { readSlide, setStyle } from '../../slides/model';
 import { DeckSession } from '../../slides/editor/session';
 import { design, type BoardSeed } from '../fixtures/support';
 import { boardFrame, boardOrder, MISSING_SOURCE_KEY } from '../model';
-import { setBoardFrame } from '../writers';
+import { deleteBoard, setBoardFrame } from '../writers';
 import { DesignWorkbench } from './DesignWorkbench';
 import { DesignView } from './viewport';
 
@@ -25,15 +25,30 @@ const BOARDS: BoardSeed[] = [
 
 afterEach(cleanup);
 
+const ASSET_URL = () => null;
 function mount(options: { doc?: Doc; readOnly?: boolean; zoom?: number } = {}) {
   const doc = options.doc ?? design(BOARDS);
   const session = new DeckSession(doc, 0);
   const view = new DesignView();
   view.setRoom({ w: 1000, h: 800 });
   view.setViewport({ zoom: options.zoom ?? 1, x: 0, y: 0 });
-  const utils = render(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly={options.readOnly ?? false} />);
+  const utils = render(<DesignWorkbench session={session} view={view} assetUrl={ASSET_URL} system={null} readOnly={options.readOnly ?? false} />);
   const world = utils.container.querySelector<HTMLElement>('[data-design-world]')!;
-  return { doc, session, view, world, ...utils };
+  /** The same workbench, read-only now (the replica turned so). */
+  const turnReadOnly = () => utils.rerender(<DesignWorkbench session={session} view={view} assetUrl={ASSET_URL} system={null} readOnly />);
+  return { doc, session, view, world, turnReadOnly, ...utils };
+}
+/** Another replica of `doc`, and how its edits reach `doc` and back. */
+function remoteOf(doc: Doc) {
+  const remote = newDoc();
+  applyV1(remote, diffV1(doc));
+  return { remote, toLocal: () => act(() => applyV1(doc, diffV1(remote, stateVector(doc)), 'remote')), toRemote: () => applyV1(remote, diffV1(doc, stateVector(remote))) };
+}
+/** A paste event carrying `data` by type, as the pasteboard gives it. */
+function paste(target: HTMLElement, data: Record<string, string>) {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { types: Object.keys(data), getData: (type: string) => data[type] ?? '' } });
+  act(() => void target.dispatchEvent(event));
 }
 
 const board = (container: HTMLElement, id: string) => container.querySelector<HTMLElement>(`[data-board-id="${id}"]`)!;
@@ -324,5 +339,97 @@ describe('Insert on a board', () => {
     act(() => flushLayout());
     await act(async () => {});
     expect(drawn).toEqual([3]);
+  });
+});
+
+describe('a frame gesture beside other writers (task review fix wave)', () => {
+  it('a move writes only the position: another replica’s size landing mid-drag stays, in both replicas', () => {
+    const { container, doc, world } = mount();
+    const { remote, toLocal, toRemote } = remoteOf(doc);
+    press(title(container, 'b2'), 0, 0);
+    drag(world, 40, 0);
+    setBoardFrame(remote, 'b2', { w: 1280, h: 900 }, 'remote');
+    toLocal();
+    drag(world, 80, 0);
+    release(world, 80, 0);
+    expect(boardFrame(doc, 'b2')).toEqual({ x: 580, y: 0, w: 1280, h: 900 });
+    toRemote();
+    expect(boardFrame(remote, 'b2')).toEqual({ x: 580, y: 0, w: 1280, h: 900 });
+  });
+
+  it('an east resize writes only the width, measured from the board’s current place: a remote move mid-drag stays', () => {
+    const { container, doc, world } = mount();
+    const { remote, toLocal } = remoteOf(doc);
+    fireEvent.click(title(container, 'b1'));
+    press(container.querySelector('[data-board-handle="e"]')!, 390, 400);
+    drag(world, 400, 400);
+    setBoardFrame(remote, 'b1', { x: 50, y: 60 }, 'remote');
+    toLocal();
+    drag(world, 410, 400);
+    release(world, 410, 400);
+    expect(boardFrame(doc, 'b1')).toEqual({ x: 50, y: 60, w: 410, h: 844 });
+  });
+
+  it('a drag stops writing, and ends, once the replica turns read-only mid-drag', () => {
+    const { container, doc, world, turnReadOnly } = mount();
+    press(title(container, 'b2'), 0, 0);
+    drag(world, 40, 0);
+    expect(boardFrame(doc, 'b2')!.x).toBe(540);
+    turnReadOnly();
+    drag(world, 100, 0);
+    release(world, 100, 0);
+    expect(boardFrame(doc, 'b2')!.x).toBe(540);
+  });
+
+  it('a drag stops writing once its board turns held, goes missing or is deleted, or the session stops taking writes', () => {
+    for (const turn of ['held', 'missing', 'deleted', 'holdWrites'] as const) {
+      const { container, doc, world, session } = mount();
+      const { remote, toLocal } = remoteOf(doc);
+      press(title(container, 'b2'), 0, 0);
+      drag(world, 40, 0);
+      if (turn === 'holdWrites') session.holdWrites(true);
+      else {
+        transact(remote, () => {
+          if (turn === 'held') Y.setSlideKey(remote, 'b2', 'held', { source: '<section id="b2"><blink>x</blink></section>', reasons: ['an unknown tag <blink>'] });
+          else if (turn === 'missing') Y.setSlideKey(remote, 'b2', MISSING_SOURCE_KEY, true);
+        });
+        if (turn === 'deleted') deleteBoard(remote, 'b2', 'remote');
+        toLocal();
+      }
+      drag(world, 100, 0);
+      release(world, 100, 0);
+      if (turn === 'deleted') expect(boardOrder(doc), turn).not.toContain('b2');
+      else expect(boardFrame(doc, 'b2')!.x, turn).toBe(540);
+      expect(container.querySelector('[data-deck-notice]')!.textContent, turn).toBe('');
+      cleanup();
+    }
+  });
+});
+
+describe('plain text pasted on a board (task review fix wave)', () => {
+  it('lands on a phone board readable: at the board’s screen type, fitted and centred, its text whole, selected', () => {
+    const { doc, world, session } = mount();
+    world.focus();
+    paste(world, { 'text/plain': 'Launch week\nShip it' });
+    const added = readSlide(doc, 'b1').children.find((c) => c.tag === 'p' && c.id !== 'body')!;
+    expect(added.style['font-size']).toBeUndefined();
+    expect([added.style.width, added.style.left]).toEqual(['312px', '39px']);
+    expect(added.text).toEqual([{ type: 'p', inline: [{ text: 'Launch week', marks: {} }, { br: true }, { text: 'Ship it', marks: {} }] }]);
+    expect(session.snapshot().selection).toEqual([added.id]);
+  });
+
+  it('leaves MAWS’s own and HTML slide markup to C’s paste, as authored', () => {
+    const { doc, world } = mount();
+    world.focus();
+    paste(world, { 'text/html': '<section id="clip"><p id="note" style="position:absolute; left:10px; top:10px; width:100px; font-size:20px">Hi</p></section>', 'text/plain': 'Hi' });
+    const note = readSlide(doc, 'b1').children.find((c) => c.tag === 'p' && c.id !== 'body')!;
+    expect([note.style.width, note.style['font-size']]).toEqual(['100px', '20px']);
+  });
+
+  it('pastes nothing on a read-only replica', () => {
+    const { doc, world } = mount({ readOnly: true });
+    world.focus();
+    paste(world, { 'text/plain': 'Nope' });
+    expect(readSlide(doc, 'b1').children.map((c) => c.id)).toEqual(['title', 'body']);
   });
 });

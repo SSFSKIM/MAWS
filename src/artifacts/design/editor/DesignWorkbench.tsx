@@ -334,7 +334,10 @@ export function DesignWorkbench({ session, view, assetUrl, system, readOnly, com
             current={active?.id ?? null}
             frame={viewState.frame}
             readOnly={readOnly}
-            onSelect={selectBoard}
+            onSelect={(boardId) => {
+              selectBoard(boardId);
+              if (compact) setBoardsOpen(false); // the panel's sheet over the world: picked, it gets out of the way
+            }}
             onZoomTo={zoomTo}
             onAdd={addBoard}
             onDuplicate={duplicate}

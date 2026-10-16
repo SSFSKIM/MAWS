@@ -22,13 +22,18 @@ import { HANDLES } from '../../slides/geometry';
 import type { DeckSession } from '../../slides/editor/session';
 import { SlideView } from '../../slides/editor/SlideView';
 import { TextBox } from '../../slides/editor/TextBox';
-import type { ImportAsset } from '../../slides/editor/transform/clipboard';
+import { CLIPBOARD_TYPE, type ImportAsset } from '../../slides/editor/transform/clipboard';
+import { pasteElements } from '../../slides/writers-elements';
 import { hitIds } from '../../slides/editor/transform/measure';
 import { Overlay } from '../../slides/editor/transform/Overlay';
 import { pick, slideTree } from '../../slides/editor/transform/selection';
+import * as Y from '../../yjs/slides';
+import { heldOf } from '../../slides/model';
 import type { BoardFrame } from '../canvas';
+import { boardFrame, boardOrder, isMissingSource } from '../model';
 import { BoardError, setBoardFrame } from '../writers';
 import { movedFrame, resizedFrame } from './board-gestures';
+import { boardTextMarkup } from './insert';
 import { boardLabel, type BoardView } from './boards';
 import { DESIGN_COPY as C } from './copy';
 import { panBy, zoomAt, type DesignView, type Viewport } from './viewport';
@@ -65,10 +70,24 @@ export interface WorldProps {
   duplicateBoard: (boardId: string) => void;
 }
 
+// A frame gesture owns the keys it moves (a move the position, a handle the edges it drags) and writes those alone, each
+// frame against the board's current frame: another writer's change of the others (a replica's resize during a move,
+// its move during an east resize) stands, and snapping and the cap are read against where the board is now.
+type FrameKey = keyof BoardFrame;
 type Drag =
   | { kind: 'pan'; pointerId: number; from: Pt; start: Viewport }
-  | { kind: 'move'; pointerId: number; id: string; from: Pt; start: BoardFrame; siblings: BoardFrame[]; moving: boolean; last: string }
-  | { kind: 'resize'; pointerId: number; id: string; handle: Handle; from: Pt; start: BoardFrame; siblings: BoardFrame[]; moving: boolean; last: string };
+  | { kind: 'move' | 'resize'; pointerId: number; id: string; handle: Handle | null; keys: readonly FrameKey[]; from: Pt; start: BoardFrame; moving: boolean; last: string };
+
+/** The frame keys a resize by `handle` drags. */
+function keysOf(handle: Handle): FrameKey[] {
+  const keys: FrameKey[] = [];
+  if (handle.includes('w')) keys.push('x');
+  if (handle.includes('n')) keys.push('y');
+  if (handle.includes('e') || handle.includes('w')) keys.push('w');
+  if (handle.includes('n') || handle.includes('s')) keys.push('h');
+  return keys;
+}
+const keysFrom = (frame: BoardFrame, keys: readonly FrameKey[]): Partial<BoardFrame> => Object.fromEntries(keys.map((k) => [k, frame[k]]));
 
 const writable = (b: BoardView | undefined, readOnly: boolean): b is BoardView & { frame: BoardFrame } => !readOnly && b !== undefined && b.frame !== null && b.held === null && !b.missing;
 
@@ -131,7 +150,19 @@ export function World(props: WorldProps) {
       el.focus({ preventScroll: true });
       el.setPointerCapture?.(e.pointerId);
     };
-    const siblingsOf = (id: string) => latest.current.boards.flatMap((b) => (b.id !== id && b.frame ? [b.frame] : []));
+    // read from the replica at each frame, never from what the press saw
+    const siblingsOf = (id: string) => boardOrder(session.doc).flatMap((b) => (b === id ? [] : (boardFrame(session.doc, b) ?? [])));
+    /** The board's frame now, when a write to it may land now (the replica, the session, the board), else null. */
+    const writableFrame = (id: string): BoardFrame | null =>
+      latest.current.readOnly || !session.writable() || !Y.hasSlide(session.doc, id) || heldOf(session.doc, id) !== null || isMissingSource(session.doc, id) ? null : boardFrame(session.doc, id);
+    /** A gesture that may no longer write ends here: nothing more written, the undo step closed, the pointer let go. */
+    const end = (d: Drag, pointerId: number) => {
+      drag.current = null;
+      if (el.hasPointerCapture?.(pointerId)) el.releasePointerCapture(pointerId);
+      if (d.kind === 'pan') setPanning(false);
+      else if (d.moving) session.endDrag();
+      setGuides([]);
+    };
     const startPan = (e: PointerEvent) => {
       drag.current = { kind: 'pan', pointerId: e.pointerId, from: local(e), start: vp() };
       setPanning(true);
@@ -153,7 +184,8 @@ export function World(props: WorldProps) {
         const id = view.snapshot().frame;
         const b = all.find((x) => x.id === id);
         capture(e);
-        if (writable(b, ro)) drag.current = { kind: 'resize', pointerId: e.pointerId, id: b.id, handle: handle.dataset.boardHandle as Handle, from: local(e), start: b.frame, siblings: siblingsOf(b.id), moving: false, last: '' };
+        const h = handle.dataset.boardHandle as Handle;
+        if (writable(b, ro)) drag.current = { kind: 'resize', pointerId: e.pointerId, id: b.id, handle: h, keys: keysOf(h), from: local(e), start: b.frame, moving: false, last: '' };
         return;
       }
       if (titled) {
@@ -161,7 +193,7 @@ export function World(props: WorldProps) {
         capture(e);
         selectFrame(session, view, id);
         const b = all.find((x) => x.id === id);
-        if (writable(b, ro)) drag.current = { kind: 'move', pointerId: e.pointerId, id, from: local(e), start: b.frame, siblings: siblingsOf(id), moving: false, last: '' };
+        if (writable(b, ro)) drag.current = { kind: 'move', pointerId: e.pointerId, id, handle: null, keys: ['x', 'y'], from: local(e), start: b.frame, moving: false, last: '' };
         return;
       }
       if (content) {
@@ -189,6 +221,8 @@ export function World(props: WorldProps) {
       const dx = p.x - d.from.x;
       const dy = p.y - d.from.y;
       if (d.kind === 'pan') return view.setViewport(panBy(d.start, dx, dy));
+      const now = writableFrame(d.id);
+      if (now === null) return end(d, e.pointerId); // read-only, held, missing, deleted, or the session stopped taking writes
       if (!d.moving) {
         if (Math.hypot(dx, dy) < DRAG_START_PX) return;
         d.moving = true;
@@ -197,14 +231,17 @@ export function World(props: WorldProps) {
       const zoom = vp().zoom;
       const world = { x: dx / zoom, y: dy / zoom };
       const snap = !(e.metaKey || e.ctrlKey);
-      const next = d.kind === 'move' ? { ...movedFrame(d.start, world, d.siblings, zoom, snap), problems: [] as string[] } : resizedFrame(d.id, d.start, d.handle, world, d.siblings, zoom, snap);
+      const base = { ...now, ...keysFrom(d.start, d.keys) }; // the gesture's keys from its start, the rest as they are now
+      const siblings = siblingsOf(d.id);
+      const next = d.handle === null ? { ...movedFrame(base, world, siblings, zoom, snap), problems: [] as string[] } : resizedFrame(d.id, base, d.handle, world, siblings, zoom, snap);
       setGuides(next.guides);
       if (next.problems.length > 0) return latest.current.onNotice(next.problems.join('; ')); // shown, never adjusted
-      const key = JSON.stringify(next.frame);
+      const owned = keysFrom(next.frame, d.keys);
+      const key = JSON.stringify(owned);
       if (key === d.last) return;
       d.last = key;
       try {
-        setBoardFrame(session.doc, d.id, next.frame, session.origin);
+        setBoardFrame(session.doc, d.id, owned, session.origin);
       } catch (error) {
         latest.current.onNotice(error instanceof BoardError ? error.problems.join('; ') : String(error));
       }
@@ -212,12 +249,7 @@ export function World(props: WorldProps) {
 
     const onUp = (e: PointerEvent) => {
       const d = drag.current;
-      if (!d || d.pointerId !== e.pointerId) return;
-      drag.current = null;
-      if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
-      if (d.kind === 'pan') setPanning(false);
-      else if (d.moving) session.endDrag();
-      setGuides([]);
+      if (d && d.pointerId === e.pointerId) end(d, e.pointerId);
     };
 
     const onWheel = (e: WheelEvent) => {
@@ -249,6 +281,32 @@ export function World(props: WorldProps) {
       el.removeEventListener('wheel', onWheel);
     };
   }, [surface, session, view]);
+
+  // ---- plain text pasted while the world has focus lands on the active board at its screen type (boardTextMarkup),
+  // through C's validated paste; MAWS's own clipboard and slide markup stay C's paste, untouched. Taken at the document's
+  // capture, before C's overlay's listener there.
+  useEffect(() => {
+    const el = surface.current;
+    if (!el) return;
+    const doc = el.ownerDocument;
+    const onPaste = (e: ClipboardEvent) => {
+      const data = e.clipboardData;
+      if (doc.activeElement !== el || !data) return;
+      if (data.getData(CLIPBOARD_TYPE) || /<section[\s>]/i.test(data.getData('text/html'))) return; // structured: C's
+      const text = data.getData('text/plain');
+      const { active: board, readOnly: ro } = latest.current;
+      if (!text.trim() || ro || !board?.frame || board.held !== null || board.missing || !session.writable()) return; // C's paste refuses these too
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const markup = boardTextMarkup(text, board.frame);
+      const out: { result: ReturnType<typeof pasteElements> } = { result: { ok: false, reason: 'nothing to paste' } };
+      session.edit((origin) => (out.result = pasteElements(session.doc, board.id, markup, {}, origin)));
+      if (out.result.ok) session.select(out.result.ids);
+      else latest.current.onNotice(out.result.reason);
+    };
+    doc.addEventListener('paste', onPaste, { capture: true });
+    return () => doc.removeEventListener('paste', onPaste, { capture: true });
+  }, [surface, session]);
 
   // ---- the world's own keys, taken before C's overlay (whose listener re-binds on its own schedule, so listening order
   // decides nothing): Space to pan, the view's fits and zooms, and with a board's frame selected (no element selected,
@@ -289,7 +347,7 @@ export function World(props: WorldProps) {
         removeBoard(framed.id); // a held or missing board may be deleted, as C's filmstrip deletes a held slide
         return done();
       }
-      if (!writable(framed, ro)) return;
+      if (!writable(framed, ro) || !session.writable()) return;
       if (mod && e.key.toLowerCase() === 'd') {
         duplicateBoard(framed.id);
         return done();
@@ -322,7 +380,7 @@ export function World(props: WorldProps) {
   const screen = (b: BoardFrame) => ({ left: viewport.x + b.x * zoom, top: viewport.y + b.y * zoom, width: b.w * zoom, height: b.h * zoom });
   const framed = boards.find((b) => b.id === state.frame && b.frame !== null) ?? null;
   const activeEditable = active !== null && active.held === null && !active.missing && !readOnly;
-  const layerStyle = { transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${zoom})`, '--design-inv-zoom': String(1 / zoom) } as CSSProperties;
+  const layerStyle = { transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${zoom})`, '--design-inv-zoom': String(1 / zoom), '--design-zoom': String(zoom) } as CSSProperties;
 
   return (
     <div
@@ -441,9 +499,17 @@ const Board = memo(function Board(props: {
       data-frame-selected={frameSelected || undefined}
       data-held={board.held ? '' : undefined}
       data-missing={board.missing || undefined}
-      style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
+      style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h, '--board-w': String(frame.w) } as CSSProperties}
     >
-      <button type="button" className="design-board-title" data-board-title={id} aria-label={C.boardTitle(label)} aria-pressed={frameSelected} onClick={() => onSelect(id)}>
+      <button
+        type="button"
+        className="design-board-title"
+        data-board-title={id}
+        aria-label={C.boardTitle(label)}
+        title={`${label}, ${C.size(frame.w, frame.h)}`}
+        aria-pressed={frameSelected}
+        onClick={() => onSelect(id)}
+      >
         <span className="design-board-title-name">{label}</span>
         <span className="design-board-title-size">{C.size(frame.w, frame.h)}</span>
         {board.held && <span className="design-board-badge">{C.held}</span>}

@@ -3,6 +3,31 @@
    beside C's deck chrome (chrome.css) whose toolbar, buttons, menus, handles and guides it reuses; the boards paint
    their own ground in the design system's scope. The world dominates; the rails are narrow and quiet. */
 
+/* the editor never overflows its surface sideways (a narrow panel included): its toolbar wraps onto another row
+   rather than squeezing a control, and in a narrow editor its rails stack (below) */
+.design-workbench {
+  min-width: 0;
+  overflow: hidden;
+}
+.design-workbench .deck-toolbar {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 36px;
+  padding: 4px 8px;
+  row-gap: 2px;
+}
+.design-workbench .deck-element-bar {
+  flex-wrap: wrap;
+}
+.design-workbench .deck-toolbar > :not(.deck-notice):not(.deck-toolbar-spacer),
+.design-workbench .deck-element-bar > * {
+  flex-shrink: 0;
+}
+.design-workbench .deck-toolbar button,
+.design-workbench .deck-zoom {
+  white-space: nowrap;
+}
+
 /* the world */
 .design-world {
   position: relative;
@@ -50,6 +75,9 @@
 .design-board > .design-board-canvas {
   contain: layout paint;
 }
+/* the title spans the board's drawn width and no more (its layout px are screen px: the layer's zoom times its own
+   inverse), so titles never run into a neighbour; the name truncates, the size drops out when there is no room for it,
+   and the button's accessible name and tooltip keep both whole */
 .design-board-title {
   position: absolute;
   left: 0;
@@ -57,6 +85,9 @@
   display: flex;
   align-items: baseline;
   gap: 6px;
+  width: calc(var(--board-w) * var(--design-zoom, 1) * 1px);
+  container-type: inline-size;
+  overflow: hidden;
   padding: 0 0 4px;
   border: 0;
   background: none;
@@ -81,9 +112,21 @@
   outline-offset: 1px;
   border-radius: var(--radius-sm);
 }
+.design-board-title-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .design-board-title-size {
+  flex-shrink: 0;
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
+}
+@container (width < 160px) {
+  .design-board-title-size,
+  .design-board-title .design-board-badge {
+    display: none;
+  }
 }
 .design-board-badge {
   padding: 0 4px;
@@ -252,23 +295,29 @@
   display: none;
 }
 
-/* a narrow editor (the panel's widths): the rails lie over the world as sheets instead of squeezing it (C's pattern) */
+/* a narrow editor (the panel's widths): the board list lies over the world as a sheet (C's overlay-rail pattern;
+   picking a board closes it in the panel); the inspector sits under the world, full width and scrolling, so the world
+   keeps the room it is fitted into and every field is reachable */
 @container deck-editor (width < 720px) {
+  .design-workbench .deck-editor-body {
+    flex-direction: column;
+  }
+  .design-workbench .design-world {
+    min-height: 40%;
+  }
   .design-workbench .design-boards {
     position: absolute;
     top: 0;
     left: 0;
     bottom: 0;
     z-index: 20;
+    max-width: 100%;
     box-shadow: var(--shadow-float);
   }
   .design-workbench .design-inspector {
-    position: absolute;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 20;
-    max-width: 100%;
-    box-shadow: var(--shadow-float);
+    width: auto;
+    max-height: 45%;
+    border-left: 0;
+    border-top: 1px solid var(--border);
   }
 }
