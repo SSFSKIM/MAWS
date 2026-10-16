@@ -5,7 +5,8 @@
 // the two requests raised and decided by the web (codes intact), the log's `joined` and `message`, the recorded
 // delivery outcomes; and an RPC through the hub answered `done`.
 //
-// stdin: DESK_ACCESS_TOKEN (the owner's Access app token). The machine is revoked at the end.
+// stdin: DESK_ACCESS_TOKEN (the owner's Access app token). It runs only in the throwaway org `--test-org` names, while
+// the deployment serves it (proof.ts), and revokes the machine however it ends, failing if that fails.
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -18,10 +19,13 @@ import { Dx4Reader } from '../test/support/dx4-reader';
 import { readDeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { enrollmentCode, newOrgKey, Person, sleep, until } from './hub';
+import { Cleanup, revoke, servesOrg, TEST_ORG_OPTION, testOrgArg } from './proof';
 
 export async function main(argv: string[]): Promise<number> {
-  const { values } = parseArgs({ args: argv, options: { config: { type: 'string', default: join(process.env.DESK_HUB_APP!, 'deploy', 'config.json') } } });
+  const { values } = parseArgs({ args: argv, options: { config: { type: 'string', default: join(process.env.DESK_HUB_APP!, 'deploy', 'config.json') }, ...TEST_ORG_OPTION } });
   const config = readDeployConfig(values.config!);
+  const org = testOrgArg(values['test-org'], config.org.id);
+  if (!org) return 2;
   const secrets = await readSecrets();
   if (!secrets.DESK_ACCESS_TOKEN) {
     console.error('DESK_ACCESS_TOKEN on stdin');
@@ -29,6 +33,19 @@ export async function main(argv: string[]): Promise<number> {
   }
   const hub = `https://${config.host}`;
   const owner = new Person(hub, secrets.DESK_ACCESS_TOKEN);
+  if (!(await servesOrg(owner, org))) return 2;
+  const cleanup = new Cleanup();
+  let code: number;
+  try {
+    code = await check(owner, hub, cleanup);
+  } catch (error) {
+    console.error(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
+    code = 1;
+  }
+  return (await cleanup.run()).length ? 1 : code;
+}
+
+async function check(owner: Person, hub: string, cleanup: Cleanup): Promise<number> {
   const me = await owner.json<{ org: { id: string }; member: { id: string } }>('/api/me');
   const name = `fake-${Math.random().toString(36).slice(2, 7)}`;
   const project = randomUUID();
@@ -40,11 +57,12 @@ export async function main(argv: string[]): Promise<number> {
     if (!ok) problems.push(what);
   };
 
+  cleanup.add(`revoke ${name}`, () => revoke(owner, name));
   const code = enrollmentCode(hub, me.org.id, await owner.enrollmentToken(), name, rawKey);
   const redeemed = await FakeMachine.redeem(code);
   // The committed recording, found from the app's directory: this module runs bundled elsewhere.
   const recording = loadRecording(join(process.env.DESK_HUB_APP!, 'fake-machine', 'recordings', 'two-subagents'));
-  const fm = new FakeMachine({ hub, machine: redeemed.machine, credentials: redeemed.credentials, orgKey: redeemed.orgKey, project, projectName: `dc3-m5 fake ${name}`, recordings: [recording], member: me.member.id });
+  const fm: FakeMachine = new FakeMachine({ hub, machine: redeemed.machine, credentials: redeemed.credentials, orgKey: redeemed.orgKey, project, projectName: `dc3-m5 fake ${name}`, recordings: [recording], member: me.member.id });
   for (let tries = 0; ; tries++) {
     try {
       await fm.connect();
@@ -54,9 +72,11 @@ export async function main(argv: string[]): Promise<number> {
       await sleep(2000);
     }
   }
+  cleanup.add('close the fake machine', () => fm.close());
   console.log(`${name} enrolled from a code and connected (generation ${fm.generation}); project ${project}`);
 
   const socket = await owner.socket(`/api/projects/${project}/socket`);
+  cleanup.add('close the browser', async () => socket.close());
   const readers = new Map<string, Dx4Reader>();
   const sessionMessages = (kind: string) => socket.frames.flatMap((f) => (f.frame.t === 'session' && (f.frame.message as SessionMessage).kind === kind ? [f.frame.message as SessionMessage] : []));
   const ofType = (t: string) => socket.frames.filter((f) => f.frame.t === t).map((f) => f.frame);
@@ -117,9 +137,6 @@ export async function main(argv: string[]): Promise<number> {
   const answered = (await until(() => ofType('rpc-state').find((f) => f.nonce === rpc.nonce && (f.state === 'done' || f.state === 'failed')), 'the RPC', 15_000).catch(() => undefined)) as { state: string; outcome?: unknown } | undefined;
   check(answered?.state === 'done', `a model RPC through the hub: ${answered?.state ?? 'no answer'} ${JSON.stringify(answered?.outcome ?? null)}`);
 
-  socket.close();
-  await fm.close();
-  console.log(`revoked ${name}: ${(await owner.fetch(`/api/machines/${name}`, { method: 'DELETE' })).status}`);
   console.log(problems.length ? `FAIL: ${problems.length} check(s)` : 'PASS: the fake machine works against the deployment');
   return problems.length ? 1 : 0;
 }

@@ -16,7 +16,8 @@ import { generateVapidKey } from '../src/push/web-push';
 import { accessPlan, cfApi, reconcileAccess } from './access';
 import { deployVars, readDeployConfig, type DeployConfig } from './config';
 
-const app = process.env.DESK_HUB_APP!;
+/** The app's directory, which bin.ts defines for the bundle it runs (read when used, so a suite can set it). */
+const appDir = () => process.env.DESK_HUB_APP!;
 
 /**
  * Credentials the commands take: from the environment, or as `NAME=value` lines on stdin (so they reach no process's
@@ -42,9 +43,9 @@ export const SECRET_NAMES = ['CF_ACCESS_SETUP_TOKEN', 'CF_DESK_HUB_SERVICE_TOKEN
 /** Runs wrangler from the app's directory; resolves with its stdout, `input` written to its stdin. */
 export function wrangler(args: string[], input?: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const bin = join(dirname(createRequire(join(app, 'package.json')).resolve('wrangler/package.json')), 'bin', 'wrangler.js');
+    const bin = join(dirname(createRequire(join(appDir(), 'package.json')).resolve('wrangler/package.json')), 'bin', 'wrangler.js');
     const child = spawn(process.execPath, [bin, ...args], {
-      cwd: app,
+      cwd: appDir(),
       stdio: ['pipe', 'pipe', 'inherit'],
       env: { ...process.env, WRANGLER_SEND_METRICS: 'false', CF_ACCESS_SETUP_TOKEN: '', CF_DESK_HUB_SERVICE_TOKENS: '' },
     });
@@ -70,7 +71,7 @@ export type DeployOptions = {
 /** The build's name, which every Worker answer carries as `X-Desk-Build`: the hub's commit (`+dirty` when its tree
  * differs from it), and the web build's when one is named. */
 export function buildName(options: DeployOptions): string {
-  const git = (...args: string[]) => execFileSync('git', ['-C', app, ...args], { encoding: 'utf8' }).trim();
+  const git = (...args: string[]) => execFileSync('git', ['-C', appDir(), ...args], { encoding: 'utf8' }).trim();
   const dirty = git('status', '--porcelain', '--', '.') !== '';
   return [`hub@${git('rev-parse', '--short=8', 'HEAD')}${dirty ? '+dirty' : ''}`, options.web && `web@${options.web}`, options.buildSuffix].filter(Boolean).join(' ');
 }
@@ -80,7 +81,7 @@ export function deployArgs(argv: string[], extra: ParseArgsOptionsConfig = {}) {
   const values = parseArgs({
     args: argv,
     options: {
-      config: { type: 'string', default: join(app, 'deploy', 'config.json') },
+      config: { type: 'string', default: join(appDir(), 'deploy', 'config.json') },
       'org-id': { type: 'string' },
       'org-name': { type: 'string' },
       assets: { type: 'string' },
@@ -130,7 +131,7 @@ export async function deployHub(config: DeployConfig, secrets: Record<string, st
 
   // 2. The Worker, with its variables on the command line (wrangler.jsonc's stay empty), and the web app's build:
   // apps/desk-web/dist as wrangler.jsonc names it, or a build made elsewhere (--assets).
-  if (!options.assets) mkdirSync(join(app, '..', 'desk-web', 'dist'), { recursive: true });
+  if (!options.assets) mkdirSync(join(appDir(), '..', 'desk-web', 'dist'), { recursive: true });
   else if (!existsSync(join(options.assets, 'index.html'))) throw new Error(`${options.assets} holds no web build (no index.html)`);
   const vars = deployVars(config, { issuer, aud: access.aud });
   const assets = options.assets ? ['--assets', options.assets] : [];

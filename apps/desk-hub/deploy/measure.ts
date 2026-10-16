@@ -13,7 +13,7 @@
 //   - ramp: 4 browsers, K doubling from 1 — until p95 passes 1 s or anything errs (a refused POST, a gap in a sub's n, an
 //     end, a closed socket), which stops the series.
 //
-// stdin: DESK_ACCESS_TOKEN (the owner's Access app token). Options: --out <file.json>, --ramp-max <K> (default 256),
+// stdin: DESK_ACCESS_TOKEN (the owner's Access app token). Options: --test-org <throwaway org> (required, proof.ts), --out <file.json>, --ramp-max <K> (default 256),
 // --fanout-k <K> (default 1), --step-s <s> (default 60), --series budget,fanout,ramp (default all). Each series stops at its first step past the
 // threshold; the results are written after every step.
 import { randomUUID } from 'node:crypto';
@@ -27,6 +27,7 @@ import type { LogEvent } from '../src/protocol/log';
 import { readDeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { enroll, machineLink, newOrgKey, Person, sleep, until, type Socket } from './hub';
+import { Cleanup, revoke, servesOrg, TEST_ORG_OPTION, testOrgArg } from './proof';
 import { join } from 'node:path';
 
 type Sub = { sub: string; n: number };
@@ -63,9 +64,12 @@ export async function main(argv: string[]): Promise<number> {
       'fanout-k': { type: 'string', default: '1' },
       'step-s': { type: 'string', default: '60' },
       series: { type: 'string', default: 'budget,fanout,ramp' },
+      ...TEST_ORG_OPTION,
     },
   });
   const config = readDeployConfig(values.config!);
+  const org = testOrgArg(values['test-org'], config.org.id);
+  if (!org) return 2;
   const secrets = await readSecrets();
   if (!secrets.DESK_ACCESS_TOKEN) {
     console.error('DESK_ACCESS_TOKEN on stdin');
@@ -73,6 +77,21 @@ export async function main(argv: string[]): Promise<number> {
   }
   const hub = `https://${config.host}`;
   const owner = new Person(hub, secrets.DESK_ACCESS_TOKEN);
+  if (!(await servesOrg(owner, org))) return 2;
+  const cleanup = new Cleanup();
+  let code: number;
+  try {
+    code = await measureRun(owner, hub, values, cleanup);
+  } catch (error) {
+    console.error(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
+    code = 1;
+  }
+  return (await cleanup.run()).length ? 1 : code;
+}
+
+type MeasureOptions = { out?: string; 'ramp-max'?: string; 'fanout-k'?: string; 'step-s'?: string; series?: string };
+
+async function measureRun(owner: Person, hub: string, values: MeasureOptions, cleanup: Cleanup): Promise<number> {
   const tag = Math.random().toString(36).slice(2, 7);
   const project = randomUUID();
   const stepMs = Number(values['step-s']) * 1000;
@@ -81,7 +100,9 @@ export async function main(argv: string[]): Promise<number> {
   const machines: Machine[] = [];
   for (let i = 1; i <= 3; i++) {
     const name = `ms-${i}-${tag}`;
+    cleanup.add(`revoke ${name}`, () => revoke(owner, name));
     const { link, frames } = await machineLink(hub, await enroll(owner, name));
+    cleanup.add(`drop ${name}'s stream`, () => link.drop());
     const m: Machine = { name, session: randomUUID(), link, frames, subs: new Map(), buffer: [], chunkIndex: 0 };
     machines.push(m);
     await link.post([{ t: 'hello', project, name: `dc3-m5 measure ${tag}`, have: {} }]);
@@ -114,6 +135,9 @@ export async function main(argv: string[]): Promise<number> {
   // The batches: every 100 ms each machine queues K chunks per sub; one POST in flight per machine, carrying whatever
   // queued meanwhile (so a slow hub sees bigger, later batches, as it would from a daemon).
   let rates = machines.map(() => 0);
+  // The event loop's lag, so the client's own saturation is told apart from the hub's.
+  let lagMax = 0;
+  let last = Date.now();
   const posts: Array<{ at: number; ms: number; frames: number }> = [];
   let running = true;
   const tick = setInterval(() => {
@@ -131,6 +155,19 @@ export async function main(argv: string[]): Promise<number> {
       }
     }
   }, 100);
+  const lag = setInterval(() => {
+    const now = Date.now();
+    lagMax = Math.max(lagMax, now - last - 50);
+    last = now;
+  }, 50);
+  let cross: ReturnType<typeof setInterval> | undefined;
+  cleanup.add('stop the machines', async () => {
+    running = false;
+    clearInterval(tick);
+    clearInterval(cross);
+    clearInterval(lag);
+    await Promise.all(senders);
+  });
   const senders = machines.map((m) =>
     (async () => {
       while (running) {
@@ -191,14 +228,17 @@ export async function main(argv: string[]): Promise<number> {
     for (const sub of b.subs.keys()) b.socket.send({ t: 'unsubscribe', sub });
     b.subs.clear();
   };
-  for (let i = 0; i < 8; i++) browsers.push(await openBrowser());
+  for (let i = 0; i < 8; i++) {
+    const b = await openBrowser();
+    browsers.push(b);
+    cleanup.add(`close browser ${i + 1}`, async () => b.socket.close());
+  }
   // The first browser follows the log, as a project view does.
   browsers[0].socket.send({ t: 'resume', after: 0 });
 
   // Cross traffic for the budget: the second machine changes its session's presence and writes a log event every 2 s.
   const key = await importOrgKey(newOrgKey());
   let crossSeq = 0;
-  let cross: ReturnType<typeof setInterval> | undefined;
   const startCross = () => {
     const m = machines[1];
     cross = setInterval(() => {
@@ -213,14 +253,6 @@ export async function main(argv: string[]): Promise<number> {
     }, 2000);
   };
 
-  // The event loop's lag, so the client's own saturation is told apart from the hub's.
-  let lagMax = 0;
-  let last = Date.now();
-  const lag = setInterval(() => {
-    const now = Date.now();
-    lagMax = Math.max(lagMax, now - last - 50);
-    last = now;
-  }, 50);
 
   const steps: Step[] = [];
   let verdict = 'the ramp reached its maximum without passing the threshold';
@@ -288,7 +320,7 @@ export async function main(argv: string[]): Promise<number> {
 
   const past = (step: Step) => step.latency.p95 > 1000 || step.errors.length > 0 || Number.isNaN(step.latency.p95);
   const series = new Set(values.series!.split(','));
-  try {
+  {
     if (series.has('budget')) {
       for (const active of [1, 2, 3]) {
         const step = await runStep('budget', [15, 0, 0], active, [machines[0]]);
@@ -307,15 +339,6 @@ export async function main(argv: string[]): Promise<number> {
         break;
       }
     }
-  } finally {
-    running = false;
-    clearInterval(tick);
-    clearInterval(cross);
-    clearInterval(lag);
-    await Promise.all(senders);
-    for (const b of browsers) b.socket.close();
-    for (const m of machines) await m.link.drop();
-    for (const m of machines) console.log(`revoked ${m.name}: ${(await owner.fetch(`/api/machines/${m.name}`, { method: 'DELETE' })).status}`);
   }
   console.log(verdict);
   save();

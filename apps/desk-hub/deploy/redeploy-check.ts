@@ -1,21 +1,25 @@
 // `deployment redeploy-check`: DC3.G2 against the deployment — a redeploy in the middle of a sync loses and duplicates
 // nothing. Two fake machines (M4's, reconnecting by themselves as the daemon does) each write an event to their own feed
-// every 100 ms, and a browser writes a web `human` every second, while the hub is redeployed (every object restarts,
-// every stream and socket is cut). When the writing stops, both machines and a fresh browser resume from 0 must hold
-// exactly the events written, each writer's seqs 1..N once, with distinct rising offsets.
+// every 100 ms, and a browser writes a web `human` every second, while the hub is redeployed with new code. Cloudflare
+// cuts the objects' connections about five minutes after such a deploy (M5 measured +314 to +329 s), so the writing
+// lasts 420 s by default. When the writing stops, both machines and a fresh browser resume from 0 must hold exactly the
+// events written, each writer's seqs 1..N once, with distinct rising offsets, and the redeploy must have cut each
+// machine's stream (otherwise the run proved nothing and fails "not exercised").
 //
 // stdin (deploy.ts, readSecrets): DESK_ACCESS_TOKEN (the owner's Access app token), CF_ACCESS_SETUP_TOKEN and
-// CF_DESK_HUB_SERVICE_TOKENS (the redeploy is `deployment deploy`'s own). Options as `deployment deploy` takes them
-// (--org-id, --assets), plus --seconds (the writing's length, default 60) and --redeploy-at (default 15).
+// CF_DESK_HUB_SERVICE_TOKENS (the redeploy is `deployment deploy`'s own). Options: --test-org (required, the throwaway
+// org the deployment serves and is redeployed under, proof.ts), --org-name, --assets and --web as `deploy` takes them,
+// --seconds (the writing's length, default 420) and --redeploy-at (default 15). It revokes the machines however it ends.
 import { randomUUID } from 'node:crypto';
 import { loadavg } from 'node:os';
 import { FakeMachine } from '../fake-machine/machine';
 import { importOrgKey, newNonce, seal } from '../src/protocol/codes';
 import type { HumanDraft, LogEvent } from '../src/protocol/log';
 import { join } from 'node:path';
-import { readDeployConfig } from './config';
-import { deployArgs, deployHub, readSecrets } from './deploy';
+import { readDeployConfig, type DeployConfig } from './config';
+import { deployArgs, deployHub, readSecrets, type DeployOptions } from './deploy';
 import { enroll, newOrgKey, Person, sleep, type Socket } from './hub';
+import { Cleanup, revoke, servesOrg, TEST_ORG_OPTION, testOrgArg } from './proof';
 
 async function until<T>(read: () => Promise<T | undefined>, what: string, ms: number): Promise<T> {
   const deadline = Date.now() + ms;
@@ -28,20 +32,38 @@ async function until<T>(read: () => Promise<T | undefined>, what: string, ms: nu
 }
 
 export async function main(argv: string[]): Promise<number> {
-  const { config, values } = deployArgs(argv, { seconds: { type: 'string', default: '60' }, 'redeploy-at': { type: 'string', default: '15' } });
+  const { config, values } = deployArgs(argv, { seconds: { type: 'string', default: '420' }, 'redeploy-at': { type: 'string', default: '15' }, ...TEST_ORG_OPTION });
+  const org = testOrgArg(values['test-org'] as string | undefined, readDeployConfig((values.config as string | undefined) ?? join(process.env.DESK_HUB_APP!, 'deploy', 'config.json')).org.id);
+  if (!org) return 2;
+  // The redeploy keeps the deployment on the throwaway org it serves.
+  config.org = { id: org, name: (values['org-name'] as string | undefined) ?? org };
   const secrets = await readSecrets();
   if (!secrets.DESK_ACCESS_TOKEN || !secrets.CF_ACCESS_SETUP_TOKEN || !secrets.CF_DESK_HUB_SERVICE_TOKENS) {
     console.error('DESK_ACCESS_TOKEN, CF_ACCESS_SETUP_TOKEN, and CF_DESK_HUB_SERVICE_TOKENS on stdin');
     return 2;
   }
-  if (config.org.id === readDeployConfig(join(process.env.DESK_HUB_APP!, 'deploy', 'config.json')).org.id) {
-    console.error("redeploy-check registers a project and seals events under a throwaway key: run it under a throwaway org (--org-id), never the owner's");
-    return 2;
+  const owner = new Person(`https://${config.host}`, secrets.DESK_ACCESS_TOKEN);
+  if (!(await servesOrg(owner, org))) return 2;
+  const cleanup = new Cleanup();
+  let code: number;
+  try {
+    code = await check(owner, config, secrets, values, cleanup);
+  } catch (error) {
+    console.error(`FAIL: ${error instanceof Error ? error.message : String(error)}`);
+    code = 1;
   }
-  const hub = `https://${config.host}`;
-  const owner = new Person(hub, secrets.DESK_ACCESS_TOKEN);
+  return (await cleanup.run()).length ? 1 : code;
+}
+
+async function check(
+  owner: Person,
+  config: DeployConfig,
+  secrets: Record<string, string | undefined>,
+  values: Record<string, string | boolean | undefined>,
+  cleanup: Cleanup,
+): Promise<number> {
+  const hub = owner.hub;
   const me = await owner.json<{ org: { id: string }; member: { id: string } }>('/api/me');
-  if (me.org.id !== config.org.id) throw new Error(`the deployment serves org ${me.org.id}, not ${config.org.id}`);
   const tag = Math.random().toString(36).slice(2, 7);
   const project = randomUUID();
   const rawKey = newOrgKey();
@@ -52,6 +74,7 @@ export async function main(argv: string[]): Promise<number> {
   const names = [`rd-a-${tag}`, `rd-b-${tag}`];
   const machines: FakeMachine[] = [];
   for (const name of names) {
+    cleanup.add(`revoke ${name}`, () => revoke(owner, name));
     const credentials = await enroll(owner, name);
     const fm = new FakeMachine({ hub, machine: name, credentials, orgKey: rawKey, project, projectName: `dc3-m5 redeploy ${tag}`, reconnect: true });
     // A fresh service token reaches Access's edge in seconds; until then it is refused 401.
@@ -65,6 +88,7 @@ export async function main(argv: string[]): Promise<number> {
       }
     }
     machines.push(fm);
+    cleanup.add(`close ${name}`, () => fm.close());
   }
   console.log(`machines ${names.join(', ')} connected; project ${project}`);
 
@@ -93,7 +117,13 @@ export async function main(argv: string[]): Promise<number> {
     }
   };
   await openBrowser();
+  cleanup.add('close the browser', async () => socket?.close());
   let writing = true;
+  const timers: { watch?: ReturnType<typeof setInterval> } = {};
+  cleanup.add('stop writing', async () => {
+    writing = false;
+    clearInterval(timers.watch);
+  });
   const browserLoop = (async () => {
     for (let i = 1; writing; i++) {
       const draft: HumanDraft = { kind: 'human', from: 'human', member: me.member.id, to: '*', text: `human ${i}`, created: new Date().toISOString() };
@@ -134,7 +164,7 @@ export async function main(argv: string[]): Promise<number> {
   };
   const last = machines.map((fm) => fm.generation);
   let socketSeen = socket;
-  const watch = setInterval(() => {
+  timers.watch = setInterval(() => {
     machines.forEach((fm, i) => {
       if (fm.generation !== last[i]) cut(`${fm.name} on generation ${(last[i] = fm.generation)} at +${((Date.now() - redeployStart) / 1000).toFixed(1)} s`);
     });
@@ -146,7 +176,8 @@ export async function main(argv: string[]): Promise<number> {
   // Durable Objects restart for new code, not for the same code redeployed or new variables (M5: neither cut a stream
   // in minutes), so this redeploy is a new version of the code, as a real one is: its build's name is new.
   const before = (await owner.fetch('/api/me')).headers.get('X-Desk-Build');
-  await deployHub(config, secrets, { assets: values.assets as string | undefined, web: values.web as string | undefined, buildSuffix: `redeploy@${new Date().toISOString()}`, quiet: true });
+  const options: DeployOptions = { assets: values.assets as string | undefined, web: values.web as string | undefined, quiet: true };
+  await deployHub(config, secrets, { ...options, buildSuffix: `redeploy@${new Date().toISOString()}` });
   const after = await until(async () => {
     const build = (await owner.fetch('/api/me')).headers.get('X-Desk-Build');
     return build !== before ? build : undefined;
@@ -156,7 +187,7 @@ export async function main(argv: string[]): Promise<number> {
   await sleep(Math.max(0, seconds * 1000 - (Date.now() - started)));
   writing = false;
   await Promise.all([...writers, browserLoop]);
-  clearInterval(watch);
+  clearInterval(timers.watch);
   console.log(`connections cut and back: ${cuts.join('; ') || 'none'}`);
   const humans = acked + unacked.size;
   console.log(`writing stopped: ${JSON.stringify(Object.fromEntries(written))}, ${humans} humans (${unacked.size} unacknowledged yet)`);
@@ -178,6 +209,7 @@ export async function main(argv: string[]): Promise<number> {
 
   // The verdict, from a browser that resumes from 0: each writer's seqs exactly 1..N, once each, offsets distinct and rising.
   const fresh = await owner.socket(`/api/projects/${project}/socket`);
+  cleanup.add('close the verdict browser', async () => fresh.close());
   fresh.send({ t: 'resume', after: 0 });
   await fresh.next((f) => f.t === 'caught-up', 'caught-up', 30_000);
   const all = fresh.frames.flatMap((f) => (f.frame.t === 'log' ? (f.frame.events as Array<{ offset: number; event: LogEvent }>) : []));
@@ -212,8 +244,6 @@ export async function main(argv: string[]): Promise<number> {
     const kinds = [...new Set(fm.postErrors.map((e) => e.message.slice(0, 120)))];
     if (kinds.length) console.log(`${fm.name}'s refused POSTs (${fm.postErrors.length}): ${kinds.slice(0, 3).join(' | ')}`);
   }
-  for (const fm of machines) await fm.close();
-  for (const name of names) console.log(`revoked ${name}: ${(await owner.fetch(`/api/machines/${name}`, { method: 'DELETE' })).status}`);
   if (problems.length) {
     console.log(`FAIL\n  ${problems.join('\n  ')}`);
     return 1;
