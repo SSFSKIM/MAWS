@@ -14,12 +14,17 @@
 //   whether a tool is read-only. A read grant admits a read-only tool; a tool that may write runs only under an Allow
 //   once (which the route's own last check consumes) and is never watched.
 // - Work in flight belongs to its lease and its tool: hiding or closing the lease, the owner's revoke and the store's
-//   committed revoke or delete abort it, answer it at once and drop whatever it later returns. The owner's revoke
-//   aborts before it awaits the store, and refuses new calls of the tool until the store has answered; an Allow once
-//   being consumed is the call it admitted going ahead, not a revoke.
+//   committed revoke or delete abort it, answer it at once and drop whatever it later returns. A refresh stays
+//   abortable until its outcome is published, so a listener that hides the page or revokes the tool while another
+//   refresh's outcome waits to be published stops that one too. The owner's revoke aborts before it awaits the store,
+//   and refuses new calls of the tool until the store has answered; an Allow once being consumed is the call it
+//   admitted going ahead, not a revoke.
 // - Watches: 30 s to 24 h, at most 64 across the whole app, one refresh at a time, the next an interval after the last
 //   ended; hidden, none run, and shown, a due one catches up once. A watch with no route reads paused and asks again at
-//   its interval; one with no grant waits, timerless, for a grant; one of a tool that is not read-only ends.
+//   its interval; one with no grant waits, timerless, for a grant (a denial computed before a grant that arrived while
+//   it ran is obsolete: the watch asks again rather than wait); one of a tool that is not read-only ends.
+// - What a page reads of a failure is a state and a reason from a closed list (P3 Decision Log 84); the words of an
+//   error, the route's or main's own, go to main's log only.
 import { randomUUID } from 'node:crypto';
 import * as z from 'zod';
 import {
@@ -49,7 +54,9 @@ import { ARTIFACT_ID } from '@shared/maws/tools';
 import { boundedMessage, jsonBytes, readAnswer, readTarget, type ConnectorGrantAuthority, type ConnectorRoute, type ConnectorRouteTarget } from './route';
 
 export interface ConnectorBrokerOptions {
-  routes: readonly ConnectorRoute[]; // in preference order (Decision Log 24: route D where direct-capable, else E)
+  // In preference order: the first that already has the tool serves. Production gives route E first and route D after
+  // it, so D serves only when no eligible live engine has the server (P3-H's brief, deliverable 4).
+  routes: readonly ConnectorRoute[];
   grants: ConnectorGrantAuthority;
   log?: (line: string) => void;
 }
@@ -83,13 +90,13 @@ interface Watch {
   readonly intervalMs: number;
   readonly listener: ConnectorWatchListener;
   waitingForGrant: boolean; // no grant admits it: no timer until the owner grants
+  waitingSince: number; // the tool's grant generation when it began to wait: a grant since makes the wait obsolete
   endedAt?: number; // when its last refresh that ran ended; the next is due an interval later
   timer?: ReturnType<typeof setTimeout>;
   running?: Work;
 }
 
-const refusal = <S extends ConnectorRefusalState>(state: S, reason: Extract<ConnectorRefusal, { state: S }>['reason'], message?: string): ConnectorRefusal =>
-  ({ ok: false, state, reason, ...(message === undefined ? {} : { message }) }) as ConnectorRefusal;
+const refusal = <S extends ConnectorRefusalState>(state: S, reason: Extract<ConnectorRefusal, { state: S }>['reason']): ConnectorRefusal => ({ ok: false, state, reason }) as ConnectorRefusal;
 const invalid = (reason: ConnectorInvalid['reason']): ConnectorInvalid => ({ ok: false, state: 'invalid', reason });
 
 // The artifact and the tool, unambiguously.
@@ -134,6 +141,7 @@ export class ConnectorBroker {
   private readonly leases = new Map<string, Lease>();
   private readonly watches = new Map<string, Watch>();
   private readonly revoking = new Map<string, number>(); // keys whose owner's revoke the store has not answered yet
+  private readonly grantGenerations = new Map<string, number>(); // per key, the grants announced so far
   private stopped = false;
 
   constructor(options: ConnectorBrokerOptions) {
@@ -174,7 +182,13 @@ export class ConnectorBroker {
     if (!parsed.success || args === null) return invalid('request');
     const tool = { server: parsed.data.server, tool: parsed.data.tool };
     if (!lease.declared.has(connectorToolKey(tool))) return invalid('undeclared');
-    return (await this.run(lease, tool, args, 'call', new AbortController())).outcome;
+    const work = this.work(lease, tool);
+    try {
+      const outcome = await this.run(lease, tool, args, 'call', work);
+      return work.controller.signal.aborted ? (work.controller.signal.reason as ConnectorRefusal) : outcome;
+    } finally {
+      lease.work.delete(work);
+    }
   }
 
   // Starts a watch whose refreshes reach `listener` (never one dropped by a hide, close or revoke).
@@ -187,7 +201,7 @@ export class ConnectorBroker {
     const tool = { server: parsed.data.server, tool: parsed.data.tool };
     if (!lease.declared.has(connectorToolKey(tool))) return invalid('undeclared');
     if (this.watches.size >= CONNECTOR_WATCH_LIMIT) return invalid('watchLimit');
-    const watch: Watch = { id: randomUUID(), lease, tool, key: workKey(lease.artifactId, tool), args, intervalMs: clampWatchInterval(parsed.data.intervalMs), listener, waitingForGrant: false };
+    const watch: Watch = { id: randomUUID(), lease, tool, key: workKey(lease.artifactId, tool), args, intervalMs: clampWatchInterval(parsed.data.intervalMs), listener, waitingForGrant: false, waitingSince: 0 };
     this.watches.set(watch.id, watch);
     lease.watches.add(watch);
     this.schedule(watch);
@@ -205,6 +219,7 @@ export class ConnectorBroker {
   // waits for a grant nor has one in flight.
   refreshWatch(owner: string, leaseId: string, watchId: string): boolean {
     const watch = this.watchOf(owner, leaseId, watchId);
+    if (watch) this.wakeIfGranted(watch);
     if (!watch || !watch.lease.visible || watch.waitingForGrant || watch.running) return false;
     clearTimeout(watch.timer);
     void this.refresh(watch);
@@ -291,22 +306,23 @@ export class ConnectorBroker {
 
   // ── the work ──
 
-  // One call of `tool` under `controller`, which the lease's hide or close or the tool's revoke aborts. `aborted` says
-  // the outcome is the abort's: whoever aborted it has already dealt with what it stopped.
-  private async run(lease: Lease, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, controller: AbortController): Promise<{ outcome: ConnectorCallOutcome; aborted: boolean }> {
-    if (!lease.visible) return { outcome: refusal('paused', 'hidden'), aborted: false };
-    const work: Work = { key: workKey(lease.artifactId, tool), controller };
-    if (this.revoking.has(work.key)) return { outcome: refusal('revoked', 'revoked'), aborted: false };
+  // A call or refresh of `tool` on `lease`, registered with the lease until its caller releases it: the caller keeps it
+  // registered until its outcome is delivered, so a hide, close or revoke up to that moment still aborts it.
+  private work(lease: Lease, tool: ConnectorToolRef): Work {
+    return { key: workKey(lease.artifactId, tool), controller: new AbortController() };
+  }
+
+  // One run of `work`; when it was aborted, the abort's reason (a refusal) is the outcome.
+  private async run(lease: Lease, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, work: Work): Promise<ConnectorCallOutcome> {
+    if (!lease.visible) return refusal('paused', 'hidden');
+    if (this.revoking.has(work.key)) return refusal('revoked', 'revoked');
     lease.work.add(work);
-    try {
-      const outcome = await this.attempt(lease.artifactId, tool, args, use, controller.signal);
-      return controller.signal.aborted ? { outcome: controller.signal.reason as ConnectorRefusal, aborted: true } : { outcome, aborted: false };
-    } finally {
-      lease.work.delete(work);
-    }
+    const outcome = await this.attempt(lease.artifactId, tool, args, use, work.controller.signal);
+    return work.controller.signal.aborted ? (work.controller.signal.reason as ConnectorRefusal) : outcome;
   }
 
   private async attempt(artifactId: string, tool: ConnectorToolRef, args: Record<string, unknown>, use: Use, signal: AbortSignal): Promise<ConnectorCallOutcome> {
+    const named = `${artifactId}'s ${tool.server} · ${tool.tool}`;
     const found = await this.target(artifactId, tool, signal);
     if ('ok' in found) return found;
     const { route, target } = found;
@@ -315,7 +331,7 @@ export class ConnectorBroker {
     try {
       authorization = await unlessAborted(this.authority.check(artifactId, { ...tool, fingerprint: target.fingerprint }), signal);
     } catch (error) {
-      return this.failed('grantCheck', `the grant check of ${artifactId}'s ${tool.server} · ${tool.tool} failed`, error);
+      return this.failed('routeFailed', `the grant check of ${named} failed: ${boundedMessage(error)}`);
     }
     if (authorization === ABORTED || signal.aborted) return signal.reason as ConnectorRefusal;
     if (!authorization.granted) return refusal('revoked', authorization.refusal);
@@ -324,17 +340,20 @@ export class ConnectorBroker {
     try {
       answer = await unlessAborted(Promise.resolve().then(() => target.call(args, { signal, fingerprint: target.fingerprint, mode: authorization.mode })), signal);
     } catch (error) {
-      return this.failed('tool', `a ${route} call of ${tool.server} · ${tool.tool} threw`, error);
+      return this.failed('toolError', `the ${route} call of ${named} threw: ${boundedMessage(error)}`);
     }
     if (answer === ABORTED || signal.aborted) return signal.reason as ConnectorRefusal;
     const read = readAnswer(answer);
-    if (!read) return refusal('failed', 'answer');
-    if (!read.ok) return read.failure === 'unavailable' ? refusal('paused', 'unavailable', read.message) : refusal('failed', 'tool', read.message);
+    if (read === 'malformed' || read === 'tooLarge') return this.failed(read, `the ${route} call of ${named} answered ${read === 'malformed' ? 'malformed' : 'too large a result'}`);
+    if (!read.ok) {
+      this.log(`connectors: the ${route} call of ${named} ${read.failure === 'unavailable' ? 'found the server unavailable' : 'failed'}: ${read.message}`);
+      return read.failure === 'unavailable' ? refusal('paused', 'unavailable') : refusal('failed', 'toolError');
+    }
     return { ok: true, result: read.result, fetchedAt: Date.now(), via: { route, ...(route === 'engine' && target.sessionId !== undefined ? { sessionId: target.sessionId } : {}) } };
   }
 
-  // The first route's already-live target for `tool`, or the refusal: `noRoute` when none has it, `route` when none has
-  // it and one of them failed to say, `answer` when the route answered a malformed target.
+  // The first route's already-live target for `tool`, or the refusal: `noRoute` when none has it, `routeFailed` when
+  // none has it and one of them failed to say, `malformed` when the route answered a malformed target.
   private async target(artifactId: string, tool: ConnectorToolRef, signal: AbortSignal): Promise<{ route: ConnectorRouteName; target: ConnectorRouteTarget } | ConnectorRefusal> {
     let broke: unknown = null;
     for (const route of this.routes) {
@@ -348,13 +367,17 @@ export class ConnectorBroker {
       if (value === ABORTED || signal.aborted) return signal.reason as ConnectorRefusal;
       if (value === null) continue;
       const target = readTarget(value);
-      return target ? { route: route.route, target } : refusal('failed', 'answer');
+      return target ? { route: route.route, target } : this.failed('malformed', `the ${route.route} route answered a malformed target for ${artifactId}'s ${tool.server} · ${tool.tool}`);
     }
-    return broke === null ? refusal('paused', 'noRoute') : this.failed('route', `no route could be asked for ${tool.server} · ${tool.tool}`, broke);
+    return broke === null ? refusal('paused', 'noRoute') : this.failed('routeFailed', `no route could be asked for ${artifactId}'s ${tool.server} · ${tool.tool}: ${boundedMessage(broke)}`);
   }
 
   private abort(work: Iterable<Work>, reason: ConnectorRefusal): void {
     for (const item of [...work]) item.controller.abort(reason);
+  }
+
+  private generation(key: string): number {
+    return this.grantGenerations.get(key) ?? 0;
   }
 
   private revoked(artifactId: string, tool: ConnectorToolRef): void {
@@ -365,21 +388,32 @@ export class ConnectorBroker {
       this.abort([...lease.work].filter((work) => work.key === key), stop);
       for (const watch of lease.watches) {
         if (watch.key !== key || watch.waitingForGrant) continue;
-        watch.waitingForGrant = true;
-        clearTimeout(watch.timer);
+        this.park(watch, this.generation(key));
         this.publish(watch, stop);
       }
     }
   }
 
+  // A grant of the tool: its waiting watches wake now, and a refresh of it in flight that comes back denied asks again.
   private granted(artifactId: string, tool: ConnectorToolRef): void {
     const key = workKey(artifactId, tool);
-    for (const watch of this.watches.values()) {
-      if (watch.key !== key || !watch.waitingForGrant) continue;
-      watch.waitingForGrant = false;
-      delete watch.endedAt;
-      this.schedule(watch);
-    }
+    this.grantGenerations.set(key, this.generation(key) + 1);
+    for (const watch of this.watches.values()) if (watch.key === key && watch.waitingForGrant) this.schedule(watch);
+  }
+
+  // The watch waits, timerless, for a grant after `generation`.
+  private park(watch: Watch, generation: number): void {
+    watch.waitingForGrant = true;
+    watch.waitingSince = generation;
+    clearTimeout(watch.timer);
+    delete watch.timer;
+  }
+
+  // A wait a grant has since answered is over: the watch is due at once.
+  private wakeIfGranted(watch: Watch): void {
+    if (!watch.waitingForGrant || this.generation(watch.key) === watch.waitingSince) return;
+    watch.waitingForGrant = false;
+    delete watch.endedAt;
   }
 
   // Arms the watch's next refresh: at once when it has not run or is overdue, else when it falls due; nothing while
@@ -387,6 +421,7 @@ export class ConnectorBroker {
   private schedule(watch: Watch): void {
     clearTimeout(watch.timer);
     delete watch.timer;
+    this.wakeIfGranted(watch);
     if (!watch.lease.visible || watch.waitingForGrant || watch.running || !this.watches.has(watch.id)) return;
     const delay = watch.endedAt === undefined ? 0 : Math.max(0, watch.endedAt + watch.intervalMs - Date.now());
     watch.timer = setTimeout(() => void this.refresh(watch), delay);
@@ -395,32 +430,45 @@ export class ConnectorBroker {
   private async refresh(watch: Watch): Promise<void> {
     delete watch.timer;
     if (watch.running || watch.waitingForGrant || !watch.lease.visible || !this.watches.has(watch.id)) return;
-    const work = { key: watch.key, controller: new AbortController() };
+    const { lease } = watch;
+    const work = this.work(lease, watch.tool);
+    const generation = this.generation(watch.key);
     watch.running = work;
-    const { outcome, aborted } = await this.run(watch.lease, watch.tool, watch.args, 'watch', work.controller);
+    const outcome = await this.run(lease, watch.tool, watch.args, 'watch', work);
     delete watch.running;
-    if (!this.watches.has(watch.id)) return;
-    if (aborted) {
-      this.schedule(watch); // a hide dropped it: due again once shown (a revoke's watch waits; a close's is gone)
+    // The publication fence, checked now rather than when the run ended: a hide, close, unwatch or revoke since then
+    // (another watch's listener, say) has aborted the work, which is still registered, or changed what it would check.
+    if (work.controller.signal.aborted || !this.watches.has(watch.id) || !lease.visible || watch.waitingForGrant) {
+      lease.work.delete(work);
+      this.schedule(watch); // a hide's watch is due again once shown; a revoke's waits; a closed one is gone
+      return;
+    }
+    const denied = !outcome.ok && outcome.state === 'revoked';
+    if (denied && this.generation(watch.key) !== generation) {
+      // the denial read the grant from before a grant that has since arrived: obsolete, so unpublished, and asked again
+      lease.work.delete(work);
+      delete watch.endedAt;
+      this.schedule(watch);
       return;
     }
     this.publish(watch, outcome);
+    lease.work.delete(work);
     if (!outcome.ok && outcome.state === 'invalid') {
       this.end(watch);
       return;
     }
-    if (!outcome.ok && outcome.state === 'revoked') {
-      watch.waitingForGrant = true;
+    if (denied) {
+      if (!watch.waitingForGrant) this.park(watch, generation);
+      this.schedule(watch); // wakes it if the listener's own gesture granted meanwhile
       return;
     }
     watch.endedAt = Date.now();
     this.schedule(watch);
   }
 
-  // Main's own failure: logged with its error, answered to the page by its reason alone (an error's words may carry a
-  // path or a store's detail that the page has no business reading).
-  private failed(reason: 'tool' | 'grantCheck' | 'route', what: string, error: unknown): ConnectorRefusal {
-    this.log(`connectors: ${what}: ${boundedMessage(error)}`);
+  // Main's own words for a failure go to its log; the page reads the reason alone.
+  private failed(reason: Extract<ConnectorRefusal, { state: 'failed' }>['reason'], detail: string): ConnectorRefusal {
+    this.log(`connectors: ${detail}`);
     return refusal('failed', reason);
   }
 

@@ -44,7 +44,7 @@ export interface ConnectorRouteCallContext {
 }
 
 // `unavailable`: the route no longer has the server (not connected, the engine gone, needs authentication); `failed`:
-// the tool or the route failed otherwise.
+// the tool or the route failed otherwise. `message` is for main's log (and the owner's header), never the page.
 export type ConnectorRouteAnswer = { ok: true; result: unknown } | { ok: false; failure: 'unavailable' | 'failed'; message: string };
 
 // A result larger than an artifact cannot become one (P3-E's dataset snapshot), so it is refused here rather than later.
@@ -68,14 +68,16 @@ export function readTarget(value: unknown): ConnectorRouteTarget | null {
   return TargetSchema.safeParse(value).success ? (value as ConnectorRouteTarget) : null;
 }
 
-// The route's answer, or null when it is malformed or its result is not JSON of a practical size.
-export function readAnswer(value: unknown): ConnectorRouteAnswer | null {
+// The route's answer, or why it cannot be taken: `malformed` (the wrong shape, or a result that is not JSON) or
+// `tooLarge` (a result over CONNECTOR_RESULT_MAX_BYTES as JSON).
+export function readAnswer(value: unknown): ConnectorRouteAnswer | 'malformed' | 'tooLarge' {
   const parsed = AnswerSchema.safeParse(value);
-  if (!parsed.success) return null;
+  if (!parsed.success) return 'malformed';
   const answer = parsed.data;
   if (!answer.ok) return { ok: false, failure: answer.failure, message: answer.message.slice(0, MESSAGE_MAX_LENGTH) };
   const bytes = jsonBytes(answer.result);
-  return bytes !== null && bytes <= CONNECTOR_RESULT_MAX_BYTES ? { ok: true, result: answer.result } : null;
+  if (bytes === null) return 'malformed';
+  return bytes <= CONNECTOR_RESULT_MAX_BYTES ? { ok: true, result: answer.result } : 'tooLarge';
 }
 
 // The size of `value` as JSON, or null when it is not JSON (undefined, a bigint, a cycle).

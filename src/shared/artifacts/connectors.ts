@@ -97,24 +97,25 @@ export interface ConnectorCallResult {
   via: ConnectorVia;
 }
 
-// How a call, or a watch's refresh, ends when it yields no result, each state with the reason a block or the header
-// words. Refusals, where nothing was called: `paused` for want of a visible page or a route (`hidden`, `closed`,
-// `noRoute` no already-live engine or direct route has the server, `unavailable` the route lost it at the call);
-// `revoked` no grant admits it (`notGranted`, `fingerprintChanged` the server or tool changed since the owner granted,
-// `wrongMode` a read grant for a tool that may write or an Allow once for a watch, `revoked` the owner revoked it or its
-// artifact went while it ran); `invalid` the request cannot be served (`request` malformed, `lease` no such page lease
-// of this owner, `undeclared`, `notReadOnly` a watch of, or a read grant for, a tool the route does not mark read-only,
-// `watchLimit`). `failed`: it ran, or tried, and failed (`tool` the tool or the route said so, `answer` the route
-// answered malformed or too large, `grantCheck` the grant could not be read, `route` a route could not be asked).
+// How a call, or a watch's refresh, ends when it yields no result (P3 Decision Log 84): a state and a reason from a
+// closed list, never free text, so no server's or route's error words reach an untrusted page (Decision Log 82's
+// boundary; main logs them). Refusals, where nothing was called: `paused` for want of a visible page or a route
+// (`hidden`, `closed`, `noRoute` no already-live engine or direct route has the server, `unavailable` the route lost it
+// at the call); `revoked` no grant admits it (`notGranted`, `fingerprintChanged` the server or tool changed since the
+// owner granted, `wrongMode` a read grant for a tool that may write or an Allow once for a watch, `revoked` the owner
+// revoked it or its artifact went while it ran); `invalid` the request cannot be served (`request` malformed, `lease` no
+// such page lease of this owner, `undeclared`, `notReadOnly` a watch of, or a read grant for, a tool the route does not
+// mark read-only, `watchLimit`). `failed`: it ran, or tried, and failed (`toolError` the tool or the route said so,
+// `malformed` the route's answer, `tooLarge` its result, `routeFailed` a route or the grant could not be read).
 export const CONNECTOR_REFUSAL_REASONS = {
   paused: ['hidden', 'closed', 'noRoute', 'unavailable'],
   revoked: ['notGranted', 'fingerprintChanged', 'wrongMode', 'revoked'],
   invalid: ['request', 'lease', 'undeclared', 'notReadOnly', 'watchLimit'],
-  failed: ['tool', 'answer', 'grantCheck', 'route'],
+  failed: ['toolError', 'malformed', 'tooLarge', 'routeFailed'],
 } as const;
 export type ConnectorRefusalState = keyof typeof CONNECTOR_REFUSAL_REASONS;
 export type ConnectorRefusal = {
-  [S in ConnectorRefusalState]: { ok: false; state: S; reason: (typeof CONNECTOR_REFUSAL_REASONS)[S][number]; message?: string };
+  [S in ConnectorRefusalState]: { ok: false; state: S; reason: (typeof CONNECTOR_REFUSAL_REASONS)[S][number] };
 }[ConnectorRefusalState];
 export type ConnectorInvalid = Extract<ConnectorRefusal, { state: 'invalid' }>;
 

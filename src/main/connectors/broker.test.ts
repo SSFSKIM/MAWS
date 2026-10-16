@@ -26,6 +26,9 @@ const THEM = 'window-2';
 const ROWS: ConnectorToolRef = { server: 'fixture', tool: 'rows' };
 const SEND: ConnectorToolRef = { server: 'fixture', tool: 'send_document' };
 const MIN = 60_000;
+// Words a route or the store might carry (a path, a header): never to reach a page's answer (P3 Decision Log 84).
+const SECRET = 'sentinel-7f3a /Users/owner/.config Bearer abc';
+const discloses = (value: unknown) => JSON.stringify(value).includes('sentinel-7f3a');
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -60,14 +63,18 @@ class FakeGrants implements ConnectorGrantAuthority {
     if (this.revokeGate) await this.revokeGate;
     return this.rows.delete(grantKey(artifactId, ref));
   }
+  // Reads the grant when asked and answers it once `checkGate` opens: a snapshot that may be stale by then.
   async check(artifactId: string, call: ConnectorCallRef): Promise<ConnectorAuthorization> {
     this.checks.push([artifactId, call]);
-    if (this.checkGate) await this.checkGate;
-    if (this.checkThrows) throw new Error('store unreachable');
     const grant = this.rows.get(grantKey(artifactId, call));
-    if (!grant) return { granted: false, refusal: 'notGranted' };
-    if (grant.fingerprint !== call.fingerprint) return { granted: false, refusal: 'fingerprintChanged' };
-    return { granted: true, mode: grant.mode };
+    const decision: ConnectorAuthorization = !grant
+      ? { granted: false, refusal: 'notGranted' }
+      : grant.fingerprint !== call.fingerprint
+        ? { granted: false, refusal: 'fingerprintChanged' }
+        : { granted: true, mode: grant.mode };
+    if (this.checkGate) await this.checkGate;
+    if (this.checkThrows) throw new Error(`${SECRET} store unreachable`);
+    return decision;
   }
 }
 
@@ -100,7 +107,7 @@ class FakeRoute implements ConnectorRoute {
   }
   async resolve(_artifactId: string, ref: ConnectorToolRef): Promise<ConnectorRouteTarget | null> {
     this.resolves += 1;
-    if (this.resolveThrows) throw new Error('route broke');
+    if (this.resolveThrows) throw new Error(`${SECRET} route broke`);
     const tool = this.tools.get(JSON.stringify([ref.server, ref.tool]));
     if (!tool) return null;
     const shape = this.target(tool) as ConnectorRouteTarget;
@@ -133,7 +140,7 @@ beforeEach(() => {
   direct = new FakeRoute('direct');
   engine = new FakeRoute('engine', 'session-a');
   log = vi.fn<(line: string) => void>();
-  broker = new ConnectorBroker({ routes: [direct, engine], grants, log });
+  broker = new ConnectorBroker({ routes: [engine, direct], grants, log });
 });
 
 afterEach(() => {
@@ -236,16 +243,20 @@ describe('a call (route choice, the grant on every call)', () => {
     ]);
   });
 
-  it('takes the first route that already has the tool, and names it', async () => {
+  it('takes route E while an eligible engine has the tool, and route D only when none does', async () => {
     engine.has(ROWS, { fingerprint: 'fp-engine' });
     direct.has(ROWS, { fingerprint: 'fp-direct' });
-    grants.put(ART, ROWS, 'fp-direct', 'read');
+    grants.put(ART, ROWS, 'fp-engine', 'read');
     const lease = page();
-    expect(await broker.callTool(ME, lease, ROWS)).toMatchObject({ ok: true, via: { route: 'direct' } });
-    expect(engine.resolves).toBe(0);
-    direct.tools.clear();
-    expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'revoked', reason: 'fingerprintChanged' }); // the engine's server is another configuration
-    expect(engine.calls).toHaveLength(0);
+    expect(await broker.callTool(ME, lease, ROWS)).toMatchObject({ ok: true, via: { route: 'engine', sessionId: 'session-a' } });
+    expect(direct.resolves).toBe(0);
+    engine.tools.clear(); // the session went
+    expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'revoked', reason: 'fingerprintChanged' }); // D's server is another configuration
+    grants.put(ART, ROWS, 'fp-direct', 'read');
+    const direct_ = await broker.callTool(ME, lease, ROWS);
+    expect(direct_).toMatchObject({ ok: true, via: { route: 'direct' } });
+    expect((direct_ as { via: object }).via).not.toHaveProperty('sessionId');
+    expect([engine.calls.length, direct.calls.length]).toEqual([1, 1]);
   });
 
   it('pauses with no route, asking the routes and nothing else', async () => {
@@ -281,46 +292,72 @@ describe('a call (route choice, the grant on every call)', () => {
     expect(await broker.callTool(ME, lease, ROWS)).toMatchObject({ ok: true });
   });
 
-  it('turns a route that cannot answer into paused or failed, and a malformed or oversized answer into failed', async () => {
+  it("answers a route's unavailable or failed call by its closed reason alone, its words going to main's log", async () => {
     engine.has(ROWS);
     grants.put(ART, ROWS, 'fp-1', 'read');
     const lease = page();
-    engine.answer = () => ({ ok: false, failure: 'unavailable', message: 'MCP server not connected: fixture' });
-    expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'paused', reason: 'unavailable', message: 'MCP server not connected: fixture' });
-    engine.answer = () => ({ ok: false, failure: 'failed', message: 'e'.repeat(5_000) });
+    const { listener, updates } = watcher();
+    engine.answer = () => ({ ok: false, failure: 'unavailable', message: `${SECRET} MCP server not connected: fixture` });
+    const unavailable = await broker.callTool(ME, lease, ROWS);
+    expect(unavailable).toEqual({ ok: false, state: 'paused', reason: 'unavailable' });
+    broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    await settle();
+    engine.answer = () => ({ ok: false, failure: 'failed', message: `${SECRET} ${'e'.repeat(5_000)}` });
     const failed = await broker.callTool(ME, lease, ROWS);
-    expect(failed).toMatchObject({ ok: false, state: 'failed', reason: 'tool' });
-    expect((failed as { message: string }).message.length).toBeLessThanOrEqual(1_000);
-    for (const answer of [{ ok: true, result: { n: 1n } }, { ok: true, result: 'x'.repeat(17 * 1024 * 1024) }, { ok: true }, { ok: 'yes' }, null]) {
-      engine.answer = () => answer as ConnectorRouteAnswer;
-      expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'failed', reason: 'answer' });
-    }
+    expect(failed).toEqual({ ok: false, state: 'failed', reason: 'toolError' });
+    await vi.advanceTimersByTimeAsync(30_000);
     engine.answer = () => {
-      throw new Error('boom');
+      throw new Error(`${SECRET} boom`);
     };
-    expect(await broker.callTool(ME, lease, ROWS)).toMatchObject({ ok: false, state: 'failed', reason: 'tool' });
+    const threw = await broker.callTool(ME, lease, ROWS);
+    expect(threw).toEqual({ ok: false, state: 'failed', reason: 'toolError' });
+    expect(updates).toEqual([
+      { ok: false, state: 'paused', reason: 'unavailable' },
+      { ok: false, state: 'failed', reason: 'toolError' },
+    ]);
+    expect([unavailable, failed, threw, updates].some(discloses)).toBe(false);
+    const logged = log.mock.calls.map(([line]) => line);
+    expect(logged.filter((line) => line.includes('sentinel-7f3a'))).toHaveLength(5); // three calls, two refreshes
+    expect(logged.every((line) => line.length < 1_200)).toBe(true); // a route's message is bounded in the log too
   });
 
-  it('refuses a malformed route target, a route that throws, and a grant it cannot read', async () => {
+  it('tells a malformed answer from an oversized one, both failed', async () => {
     engine.has(ROWS);
+    grants.put(ART, ROWS, 'fp-1', 'read');
+    const lease = page();
+    for (const answer of [{ ok: true, result: { n: 1n } }, { ok: true }, { ok: 'yes' }, { ok: false, failure: 'other', message: 'x' }, null]) {
+      engine.answer = () => answer as ConnectorRouteAnswer;
+      expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'failed', reason: 'malformed' });
+    }
+    engine.answer = () => ({ ok: true, result: 'x'.repeat(17 * 1024 * 1024) });
+    expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'failed', reason: 'tooLarge' });
+    engine.answer = () => ({ ok: true, result: 'x'.repeat(15 * 1024 * 1024) });
+    expect(await broker.callTool(ME, lease, ROWS)).toMatchObject({ ok: true });
+  });
+
+  it('refuses a malformed route target, a route that throws and a grant it cannot read, saying nothing of why to the page', async () => {
+    engine.has(ROWS);
+    direct.has(ROWS);
     grants.put(ART, ROWS, 'fp-1', 'read');
     const lease = page();
     for (const bad of [{ fingerprint: '', readOnly: true }, { fingerprint: 'fp-1', readOnly: 'yes' }, { fingerprint: 'f'.repeat(513), readOnly: true }]) {
       engine.target = () => bad;
-      expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'failed', reason: 'answer' });
+      expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'failed', reason: 'malformed' });
     }
     engine.target = (tool) => tool;
-    direct.resolveThrows = true; // a broken route does not hide a working one
-    expect(await broker.callTool(ME, lease, ROWS)).toMatchObject({ ok: true, via: { route: 'engine' } });
-    // main's own failures are logged, never worded to the page
-    engine.resolveThrows = true;
-    expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'failed', reason: 'route' });
+    engine.resolveThrows = true; // a broken route does not hide a working one
+    expect(await broker.callTool(ME, lease, ROWS)).toMatchObject({ ok: true, via: { route: 'direct' } });
+    direct.resolveThrows = true;
+    const routeFailed = await broker.callTool(ME, lease, ROWS);
+    expect(routeFailed).toEqual({ ok: false, state: 'failed', reason: 'routeFailed' });
     expect(log).toHaveBeenCalledWith(expect.stringContaining('route broke'));
     engine.resolveThrows = false;
-    grants.checkThrows = true;
-    expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'failed', reason: 'grantCheck' });
+    grants.checkThrows = true; // the grant could not be read: the route the call needed failed
+    const unread = await broker.callTool(ME, lease, ROWS);
+    expect(unread).toEqual({ ok: false, state: 'failed', reason: 'routeFailed' });
     expect(log).toHaveBeenCalledWith(expect.stringContaining('store unreachable'));
-    expect(engine.calls).toHaveLength(1);
+    expect([routeFailed, unread].some(discloses)).toBe(false);
+    expect(engine.calls.length + direct.calls.length).toBe(1);
   });
 
   it('calls the target the route answered, as it answered it', async () => {
@@ -620,6 +657,95 @@ describe('a watch (30 s to 24 h, at most 64 per app, only while visible)', () =>
     expect(updates.slice(1)).toEqual([{ ok: false, state: 'revoked', reason: 'revoked' }]);
     expect(engine.calls).toHaveLength(2);
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // Two refreshes held, then answered in the same turn: the first published outcome's listener acts before the second
+  // is published, and the second must honour what it did.
+  async function twoAnsweredTogether(listen: (name: string, seen: string[]) => (update: ConnectorCallOutcome) => void, second = page()) {
+    const first = page();
+    const seen: string[] = [];
+    engine.hold = true;
+    broker.watchTool(ME, first, { ...ROWS, intervalMs: 30_000, args: { n: 1 } }, listen('a', seen));
+    broker.watchTool(ME, second, { ...ROWS, intervalMs: 30_000, args: { n: 2 } }, listen('b', seen));
+    await settle();
+    expect(engine.calls).toHaveLength(2);
+    engine.calls[0]!.answer.resolve({ ok: true, result: 'a' });
+    engine.calls[1]!.answer.resolve({ ok: true, result: 'b' });
+    await settle();
+    return seen;
+  }
+  const said = (name: string, update: ConnectorCallOutcome) => `${name}:${update.ok ? 'ok' : update.reason}`;
+
+  it('publishes no refresh whose page a listener hid as both completed', async () => {
+    const lease = page();
+    const seen = await twoAnsweredTogether(
+      (name, seen) => (update) => {
+        seen.push(said(name, update));
+        if (update.ok) broker.setVisible(ME, lease, false);
+      },
+      lease,
+    );
+    expect(seen).toHaveLength(1); // the one published before the hide; the other dropped
+    expect(seen[0]).toMatch(/^[ab]:ok$/);
+    expect(vi.getTimerCount()).toBe(1); // the other page's watch, still visible
+    broker.setVisible(ME, lease, true); // the dropped refresh is due at once, the published one an interval on
+    await settle();
+    expect(engine.calls).toHaveLength(3);
+    expect(engine.calls[2]!.args).toEqual({ n: seen[0] === 'a:ok' ? 2 : 1 });
+  });
+
+  it('publishes no success after a revoke a listener made as both completed', async () => {
+    const seen = await twoAnsweredTogether((name, seen) => (update) => {
+      seen.push(said(name, update));
+      if (update.ok) void broker.revokeTool(ART, ROWS);
+    });
+    expect(seen.filter((line) => line.endsWith(':ok'))).toHaveLength(1);
+    expect(seen.slice(1).every((line) => line.endsWith(':revoked'))).toBe(true);
+    expect(seen).toHaveLength(3); // one success, then each watch told once
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect([engine.calls.length, seen.length, vi.getTimerCount()]).toEqual([2, 3, 0]);
+  });
+
+  for (const [shape, before] of [
+    ['notGranted', null],
+    ['fingerprintChanged', 'fp-old'],
+  ] as const) {
+    it(`does not wait on a ${shape} answer read before a grant that arrived while it was in flight`, async () => {
+      grants.rows.clear();
+      if (before) grants.put(ART, ROWS, before, 'read');
+      const gate = deferred<void>();
+      grants.checkGate = gate.promise;
+      const lease = page();
+      const { listener, updates } = watcher();
+      broker.watchTool(ME, lease, { ...ROWS, intervalMs: MIN }, listener);
+      await settle();
+      expect(grants.checks).toHaveLength(1); // its snapshot: no grant, or another fingerprint's
+      grants.put(ART, ROWS, 'fp-1', 'read'); // the owner granted from another window: the store announces it
+      broker.onGrantChange({ artifactId: ART, ...ROWS, change: 'granted' });
+      grants.checkGate = null;
+      gate.resolve();
+      await settle();
+      expect(updates).toMatchObject([{ ok: true }]); // the obsolete denial never published, and no gesture needed
+      expect(engine.calls).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(MIN);
+      expect(engine.calls).toHaveLength(2); // and it goes on at its interval
+    });
+  }
+
+  it("wakes when its own listener's gesture grants on hearing the denial", async () => {
+    grants.rows.clear();
+    const lease = page();
+    const updates: ConnectorCallOutcome[] = [];
+    broker.watchTool(ME, lease, { ...ROWS, intervalMs: MIN }, (update) => {
+      updates.push(update);
+      if (!update.ok && update.reason === 'notGranted') {
+        grants.put(ART, ROWS, 'fp-1', 'read');
+        broker.onGrantChange({ artifactId: ART, ...ROWS, change: 'granted' });
+      }
+    });
+    await settle();
+    await vi.advanceTimersByTimeAsync(1); // the wake's refresh, armed inside the denial's own tick
+    expect(updates).toMatchObject([{ ok: false, reason: 'notGranted' }, { ok: true }]);
   });
 
   it('with no route, reads paused and asks the routes again at its interval, calling nothing until one has the server', async () => {
