@@ -707,7 +707,7 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
 // and an asset named in a style value, in Chromium
 
 const svgOf = (gradient: string) =>
-  `<svg id="chart" viewBox="0 0 200 100" style="position:absolute; left:1200px; top:600px; width:400px; height:200px"><style>body{display:none!important} [data-region]{visibility:hidden!important} .bar{fill:rgb(0,128,0)} @keyframes spin{to{opacity:.5}}</style><defs><linearGradient id="g"><stop offset="0" stop-color="${gradient}"/><stop offset="1" stop-color="${gradient}"/></linearGradient></defs><rect id="r" class="bar" width="50" height="50"/><rect id="filled" x="100" width="50" height="50" fill="url(#g)"/></svg>`;
+  `<svg id="chart" viewBox="0 0 200 100" style="position:absolute; left:1200px; top:600px; width:400px; height:200px"><desc><style>body{display:none!important} [data-region]{visibility:hidden!important}</style></desc><title><style>[data-region]{opacity:0!important}</style></title><style>body{display:none!important} [data-region]{visibility:hidden!important} .bar{fill:rgb(0,128,0)} @keyframes spin{to{opacity:.5}}</style><defs><linearGradient id="g"><stop offset="0" stop-color="${gradient}"/><stop offset="1" stop-color="${gradient}"/></linearGradient></defs><rect id="r" class="bar" width="50" height="50"/><rect id="filled" x="100" width="50" height="50" fill="url(#g)"/></svg>`;
 const CONTAINED: Record<string, string> = {
   'project/deck.json': JSON.stringify({ v: 4, title: 'Contained', cover: 'one', order: ['one', 'two'] }),
   'project/slides/one.html': `<section id="one" style="background:#ffffff; padding:128px">
@@ -730,6 +730,9 @@ test('an svg’s stylesheet and ids stay its own; an explicit flex row is a row;
   expect(await page.evaluate(() => getComputedStyle(document.body).display)).not.toBe('none');
   await expect(page.locator('[data-region="sidebar"]')).toBeVisible();
   expect(await page.locator('[data-region="main"]').evaluate((n) => getComputedStyle(n).visibility)).toBe('visible');
+  // the same from an HTML <style> the parser makes under the svg's <desc> and <title> (B1 re-review 1)
+  expect(await page.locator('[data-region="main"]').evaluate((n) => getComputedStyle(n).opacity)).toBe('1');
+  expect(await tab.locator('.maws-slide svg[data-eid="chart"] style').count()).toBe(9); // three drawings, three sheets each, all drawn
   const drawings = await tab.locator('.maws-slide svg[data-eid="chart"]').evaluateAll((svgs) =>
     svgs.map((svg) => {
       const filled = svg.querySelector('rect[fill]')!;

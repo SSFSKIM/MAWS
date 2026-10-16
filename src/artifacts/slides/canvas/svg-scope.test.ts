@@ -42,6 +42,29 @@ describe('a drawing’s stylesheet, contained', () => {
     expect(sheet('@keyframes other{from{opacity:0}}', n)).toBe(''); // not this drawing's: never the page's
   });
 
+  it('a quoted keyframes name: the animations naming it point at the renamed definition (B1 re-review 3)', () => {
+    const n = names([], ['pulse']);
+    const out = sheet('@keyframes "pulse"{to{opacity:.5}} g{animation-name:"pulse"} rect{animation:"pulse" 2s infinite}', n);
+    const defined = /@keyframes ([^{]+)\{/.exec(out)![1]!;
+    expect(defined).toBe('s1_pulse');
+    expect(out).toContain(`g${W}{animation-name:"s1_pulse";}`);
+    expect(out).toContain(`rect${W}{animation:"s1_pulse" 2s infinite;}`);
+    expect(scopeSvgDeclarations('animation: "pulse" 1s', n)).toBe('animation: "s1_pulse" 1s');
+    // a string elsewhere, or another name, stays as written
+    expect(sheet('text{font-family:"pulse"; animation-name:"other"}', n)).toBe(`text${W}{font-family:"pulse";animation-name:"other";}`);
+  });
+
+  it('attribute selectors naming the drawing’s ids or local references follow the renamed values (B1 re-review 2)', () => {
+    const n = names(['r', 'g']);
+    expect(sheet('[id="r"]{fill:red}', n)).toBe(`[id="s1_r"]${W}{fill:red;}`);
+    expect(sheet('rect[id=r]{fill:red}', n)).toBe(`rect[id="s1_r"]${W}{fill:red;}`);
+    expect(sheet('[id^="r"], [id|=g]{x:y}', n)).toBe(`[id^="s1_r"]${W}, [id|="s1_g"]${W}{x:y;}`);
+    expect(sheet('use[href="#r"], use[xlink|href="#r"], use[xlink\\:href="#r"]{x:y}', n)).toBe(`use[href="#s1_r"]${W}, use[xlink|href="#s1_r"]${W}, use[xlink\\:href="#s1_r"]${W}{x:y;}`);
+    expect(sheet('g:not([id="r"]){x:y}', n)).toBe(`g:not([id="s1_r"])${W}{x:y;}`);
+    // a suffix or a substring still matches the renamed value as written; other attributes are not ids
+    expect(sheet('[id$="r"], [id*=r], [class="r"]{x:y}', n)).toBe(`[id$="r"]${W}, [id*=r]${W}, [class="r"]${W}{x:y;}`);
+  });
+
   it('drops every at-rule that would be the page’s', () => {
     for (const css of ['@font-face{font-family:Inter; src:url(#f)}', '@import "x.css";', '@property --x{syntax:"*"; inherits:true}', '@layer base;', '@layer base{g{x:y}}', '@page{margin:0}', '@namespace svg url(http://www.w3.org/2000/svg);', '@scope (g){rect{x:y}}', '@counter-style c{system:cyclic}'])
       expect(sheet(css)).toBe('');

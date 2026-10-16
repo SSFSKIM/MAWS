@@ -360,8 +360,11 @@ const localTarget = (ref: string, ids: ReadonlyMap<string, string>): string | nu
   return to === undefined ? null : `#${to}`;
 };
 
-/** A token written back, `url(#id)`s and `url("#id")`s renamed, a lone backslash (a parse error) dropped. */
-function written(toks: readonly Tok[], names: SvgNames, renameIdent?: (tok: { raw: string; value: string }, depth: number) => string | null): string {
+/**
+ * Tokens written back: `url(#id)`s and `url("#id")`s renamed, a lone backslash (a parse error) dropped; `rename` may
+ * write another ident or string (not a url's) in place, by its value and its depth in blocks.
+ */
+function written(toks: readonly Tok[], names: SvgNames, rename?: (tok: { t: 'ident' | 'string'; value: string }, depth: number) => string | null): string {
   let out = '';
   let depth = 0; // inside a function or a () or [] block
   for (let k = 0; k < toks.length; k++) {
@@ -374,9 +377,10 @@ function written(toks: readonly Tok[], names: SvgNames, renameIdent?: (tok: { ra
     } else if (tok.t === 'string') {
       // a url("…") function's string; any other string as it reads
       const fn = toks[k - 1]?.t === 'ws' ? toks[k - 2] : toks[k - 1];
-      const to = fn?.t === 'function' && fn.value.toLowerCase() === 'url' ? localTarget(tok.value, names.ids) : null;
-      out += cssString(to ?? tok.value);
-    } else if (tok.t === 'ident' && renameIdent) out += renameIdent(tok, depth) ?? tok.raw;
+      const isUrl = fn?.t === 'function' && fn.value.toLowerCase() === 'url';
+      const to = isUrl ? localTarget(tok.value, names.ids) : (rename?.({ t: 'string', value: tok.value }, depth) ?? null);
+      out += to !== null && !isUrl ? to : cssString(to ?? tok.value);
+    } else if (tok.t === 'ident' && rename) out += rename({ t: 'ident', value: tok.value }, depth) ?? tok.raw;
     else if (tok.t === 'delim' && tok.value === '\\') continue;
     else out += tok.raw;
   }
@@ -385,15 +389,20 @@ function written(toks: readonly Tok[], names: SvgNames, renameIdent?: (tok: { ra
 
 const ANIMATION_PROPS = new Set(['animation', 'animation-name', '-webkit-animation', '-webkit-animation-name']);
 
-/** A declaration: its references renamed, and in an `animation` the keyframes names this drawing defines. */
+/**
+ * A declaration: its references renamed, and in an `animation` the keyframes names this drawing defines, written as
+ * they were (an ident as an ident, a string as a string: `animation-name` takes either).
+ */
 function declaration(toks: readonly Tok[], names: SvgNames): string {
-  const first = toks.find((t) => t.t !== 'ws');
-  const animation = first?.t === 'ident' && ANIMATION_PROPS.has(first.value.toLowerCase());
-  return written(toks, names, (tok, depth) => {
-    if (!animation || tok === first || depth > 0) return null;
-    const to = names.keyframes.get(tok.value);
-    return to === undefined ? null : cssIdent(to);
+  const at = toks.findIndex((t) => t.t !== 'ws');
+  const head = toks[at];
+  if (head?.t !== 'ident') return written(toks, names);
+  const animation = ANIMATION_PROPS.has(head.value.toLowerCase());
+  const value = written(toks.slice(at + 1), names, (tok, depth) => {
+    const to = animation && depth === 0 ? names.keyframes.get(tok.value) : undefined;
+    return to === undefined ? null : tok.t === 'ident' ? cssIdent(to) : cssString(to);
   });
+  return `${toks.slice(0, at + 1).map((t) => t.raw).join('')}${value}`;
 }
 
 /** `style="…"`: a declaration list. */
@@ -410,6 +419,53 @@ function scopeSvgUrls(value: string, names: SvgNames): string {
 
 // ---------------------------------------------------------------- selectors
 
+const ID_PREFIX_OPS = new Set(['', '~', '^', '|']); // = ~= ^= |=: a renamed id starts with the scope, the rest as written
+
+/**
+ * B1 re-review 2: an attribute selector naming the drawing's ids or local references by value (`[id="r"]`,
+ * `[href="#r"]`, `[xlink|href="#r"]`) with the value renamed as the attribute is; `$=` and `*=` still match the renamed
+ * value as written. Other attribute selectors as they are.
+ */
+function renameAttributeSelectors(toks: readonly Tok[], names: SvgNames): Tok[] {
+  const out: Tok[] = [];
+  for (let k = 0; k < toks.length; k++) {
+    const tok = toks[k]!;
+    if (tok.t !== '[') {
+      out.push(tok);
+      continue;
+    }
+    const { past, closed } = blockSpan(toks, k);
+    const inner = toks.slice(k + 1, closed ? past - 1 : past);
+    const eq = inner.findIndex((t) => t.t === 'delim' && t.value === '=');
+    const valueAt = eq < 0 ? -1 : inner.findIndex((t, j) => j > eq && t.t !== 'ws');
+    const value = inner[valueAt];
+    if (eq > 0 && (value?.t === 'ident' || value?.t === 'string')) {
+      const before = inner[eq - 1]!;
+      const op = before.t === 'delim' && '~|^$*'.includes(before.value) ? before.value : '';
+      const nameTok = inner
+        .slice(0, op ? eq - 1 : eq)
+        .filter((t) => t.t === 'ident')
+        .pop();
+      const name = nameTok?.t === 'ident' ? nameTok.value.toLowerCase() : undefined;
+      let renamed: string | null = null;
+      if (name === 'id' && ID_PREFIX_OPS.has(op)) renamed = `${names.scope}_${value.value}`;
+      else if ((name === 'href' || name === 'xlink:href') && value.value.startsWith('#')) {
+        if (op === '') renamed = localTarget(value.value, names.ids);
+        else if (op === '^') renamed = `#${names.scope}_${value.value.slice(1)}`;
+      }
+      if (renamed !== null) {
+        out.push(tok, ...inner.slice(0, valueAt), { t: 'string', raw: cssString(renamed), value: renamed }, ...inner.slice(valueAt + 1));
+        if (closed) out.push(toks[past - 1]!);
+        k = past - 1;
+        continue;
+      }
+    }
+    out.push(...toks.slice(k, past));
+    k = past - 1;
+  }
+  return out;
+}
+
 const LEGACY_PSEUDO_ELEMENTS = new Set(['before', 'after', 'first-line', 'first-letter']);
 const COMBINATOR_DELIMS = new Set(['>', '+', '~']);
 
@@ -418,7 +474,8 @@ const COMBINATOR_DELIMS = new Set(['>', '+', '~']);
  * null when a selector is empty or malformed in a way the constraint would change (the rule is dropped). `nested`: a
  * rule nested in a style rule, whose selectors may begin with a combinator.
  */
-function scopeSelectors(prelude: readonly Tok[], names: SvgNames, nested: boolean): string | null {
+function scopeSelectors(given: readonly Tok[], names: SvgNames, nested: boolean): string | null {
+  const prelude = renameAttributeSelectors(given, names);
   const within = `:where([${SVG_SCOPE_ATTR}="${names.scope}"],[${SVG_SCOPE_ATTR}="${names.scope}"] *)`;
   const out: string[] = [];
   // split at top-level commas, each complex selector into compounds at top-level combinators

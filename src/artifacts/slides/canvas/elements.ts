@@ -64,7 +64,9 @@ export function containSvg(root: Element, scope: string): void {
     const id = el === root ? null : el.getAttribute('id');
     if (id) ids.set(id, `${scope}_${id}`);
   }
-  const sheets = all.filter((el) => el.localName === 'style' && el.namespaceURI === SVG_NS);
+  // every stylesheet in the drawing, whatever its namespace: an HTML <style> the parser makes under the svg's <desc>,
+  // <title> (integration points) is the document's as much as an svg <style> (B1 re-review 1)
+  const sheets = all.filter((el) => el.localName === 'style');
   const keyframes = new Map<string, string>();
   for (const sheet of sheets) for (const name of svgKeyframesNames(sheet.textContent ?? '')) keyframes.set(name, `${scope}_${name}`);
   const names: SvgNames = { scope, ids, keyframes };
