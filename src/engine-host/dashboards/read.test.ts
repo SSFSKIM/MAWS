@@ -105,6 +105,12 @@ describe('DatasetReader', () => {
     expect(refusal(() => reader.read(id, ref, { format: 'json' }))).toMatchObject({ code: 'invalid' });
   });
 
+  it('refuses a JSON snapshot holding a number too large to read, rather than answer rows no JSON page carries (fix wave I3)', async () => {
+    const id = await board();
+    const { ref } = await upload(id, '[{"v": -1e400}]', 'inf.json');
+    expect(refusal(() => new DatasetReader(world.store).read(id, ref, { format: 'json' }))).toMatchObject({ code: 'invalid', data: { line: 1 } });
+  });
+
   it('bounds a page by rows and by encoded bytes, the caller continuing at the rows returned', async () => {
     const id = await board();
     const many = `n\n${Array.from({ length: DATASET_READ_MAX_ROWS + 500 }, (_, i) => String(i)).join('\n')}\n`;

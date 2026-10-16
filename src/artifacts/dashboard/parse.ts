@@ -218,6 +218,8 @@ function readJson(text: string, limits: Limits): { names: string[]; cells: Cell[
     for (const key of Object.keys(record)) {
       const cell = (record as Record<string, unknown>)[key];
       if (cell !== null && typeof cell === 'object') throw invalid(line(), `line ${line()}: record ${r + 1} holds a nested value in ${JSON.stringify(key)}`);
+      // JSON.parse reads 1e400 as Infinity, which no JSON answer can carry: refused, never bound unreadable (fix wave I3)
+      if (typeof cell === 'number' && !Number.isFinite(cell)) throw invalid(line(), `line ${line()}: record ${r + 1} holds a number in ${JSON.stringify(key)} too large to read`);
       if (key.trim() === '') throw invalid(line(), `line ${line()}: record ${r + 1} has a key with no name`);
       if (key.length > limits.columnName) throw invalid(line(), `line ${line()}: record ${r + 1} has a key of ${key.length} characters; a name is at most ${limits.columnName} characters`);
       let column = columns.get(key);
@@ -401,15 +403,22 @@ function infer(names: string[], cells: Cell[][], native: boolean): ParsedDataset
     }
     if (present === 0) return { name, type: 'null' };
     const best = KINDS.reduce((a, b) => (counts[b] > counts[a] ? b : a));
-    if (counts[best] * 2 <= present) return { name, type: 'string' };
-    for (const row of cells) {
-      const value = row[k]!;
-      if (value !== null && kindOf(value, native) === best) row[k] = typed(value, best);
+    let type: ColumnType = best;
+    let mismatches: number;
+    if (counts[best] * 2 <= present) {
+      // text: every value stays as written; a native JSON number or boolean among them is not text, and is counted
+      type = 'string';
+      mismatches = cells.reduce((n, row) => n + (row[k] !== null && typeof row[k] !== 'string' ? 1 : 0), 0);
+    } else {
+      for (const row of cells) {
+        const value = row[k]!;
+        if (value !== null && kindOf(value, native) === best) row[k] = typed(value, best);
+      }
+      mismatches = present - counts[best];
     }
-    const mismatches = present - counts[best];
-    if (mismatches === 0) return { name, type: best };
-    warnings.push(DATASET_STATES.mismatches(mismatches, cells.length, name, best));
-    return { name, type: best, mismatches };
+    if (mismatches === 0) return { name, type };
+    warnings.push(DATASET_STATES.mismatches(mismatches, cells.length, name, type));
+    return { name, type, mismatches };
   });
   return { columns, rows: cells, warnings };
 }

@@ -38,10 +38,9 @@ export interface ArtifactDatasetResult {
   artifactId: string;
   id: string;
   revision: number; // the live revision after the write
-  columns?: { name: string; type: string; mismatches?: number }[]; // a bind
+  columns?: { name: string; type: string; mismatches?: number }[]; // a bind's (a removal answers neither columns nor rows)
   rows?: number;
   warnings?: string[];
-  removed?: true; // a removal
 }
 
 // A dashboard's `artifact_read` closes with its datasets (the parent's §2): each as the read doc's descriptor names it.

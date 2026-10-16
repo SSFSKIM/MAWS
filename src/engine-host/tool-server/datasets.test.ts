@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { readDataset, snapshotOf, type DatasetDescriptor } from '@artifacts/dashboard/datasets';
-import { applyV2, newDoc } from '@artifacts/yjs';
+import { applyV2, newDoc, stateV2 } from '@artifacts/yjs';
 import { datasetReaderOf } from '../dashboards/read';
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
@@ -227,8 +227,10 @@ describe('artifact_dataset', () => {
   it('removes a descriptor and keeps its bytes for history; removing nothing is refused', async () => {
     const { id, revision } = await created();
     const bound = json<Bound>(await bind({ baseRevision: revision, id: 'sales', path: file('a.csv', SALES) }));
-    const removed = json<{ removed?: true; revision: number }>(await bind({ baseRevision: bound.revision, id: 'sales', remove: true }));
-    expect(removed).toMatchObject({ status: 'dataset', id: 'sales', removed: true });
+    const toolUseId = 'toolu_remove' as ToolUseId;
+    const removed = json<Record<string, unknown> & { revision: number }>(await bind({ baseRevision: bound.revision, id: 'sales', remove: true }, { toolUseId }));
+    expect(removed).toEqual({ status: 'dataset', artifactId: id, id: 'sales', revision: world.store.revision(id) }); // parent Decision Log 16: no `removed` field
+    expect(json(await bind({ baseRevision: bound.revision, id: 'sales', remove: true }, { toolUseId }))).toEqual(removed); // the replay records the same
     expect(readDataset(world.service.live(id), 'sales')).toBeNull();
     expect(world.store.listAssets(id)).toHaveLength(1);
     expect(refusal(await bind({ baseRevision: removed.revision, id: 'sales', remove: true }))).toMatchObject({ reason: 'notFound' });
@@ -254,6 +256,50 @@ describe('artifact_dataset', () => {
     expect(names(readDataset(old, 'tab')!)).toEqual(['a,b', 'c']);
     expect(names(readDataset(old, 'comma')!)).toEqual(['a', 'b\tc']);
     old.destroy();
+  });
+
+  it('refuses a JSON number too large to read before anything is written (fix wave I3)', async () => {
+    const { id, revision } = await created();
+    const answer = refusal(await bind({ baseRevision: revision, id: 'big', path: file('big.json', '[\n{"v": 1},\n{"v": 1e400}\n]') }));
+    expect(answer).toMatchObject({ reason: 'invalid', line: 3 });
+    expect(world.store.revision(id)).toBe(revision);
+    expect(world.store.listAssets(id)).toEqual([]);
+    expect(readDataset(world.service.live(id), 'big')).toBeNull();
+  });
+
+  it('holds a dashboard made from files before E2: read raw with its reason, every write refused by name, nothing changed, after a restart and at a version (fix wave I1)', async () => {
+    const legacy = await world.store.create({ kind: 'dashboard', title: 'Old board', handle: 'old', initial: (doc) => {
+      doc.get('files').setAttr('index.html', '<p>old</p>');
+      doc.get('files').setAttr('data/sales.csv', SALES);
+    } }, { kind: 'session', appSessionId: SELF });
+    const version = await world.store.createVersion(legacy.id, { kind: 'named', actor: { kind: 'human' }, label: 'old' });
+    const state = stateV2(world.service.live(legacy.id));
+    const revision = world.store.revision(legacy.id);
+    const check = async () => {
+      const read = json<{ kind: string; files: Record<string, string>; held: { path: string; reasons: string[] }[] }>(await call('artifact_read', { artifact: 'old' }));
+      expect(read.kind).toBe('dashboard');
+      expect(read.files).toEqual({ 'data/sales.csv': SALES, 'index.html': '<p>old</p>' });
+      expect(read.held.map((h) => h.path)).toEqual(['data/sales.csv', 'index.html']);
+      expect(read.held[0]!.reasons[0]).toContain('create a new dashboard from their content');
+      const atVersion = json<{ files: Record<string, string>; held: unknown[] }>(await call('artifact_read', { artifact: 'old', version: version! }));
+      expect(atVersion.files['index.html']).toBe('<p>old</p>');
+      for (const [name, args] of [
+        ['artifact_edit', { artifact: 'old', baseRevision: revision, ops: [{ op: 'insert', after: 'x', markdown: 'Hi' }] }],
+        ['artifact_publish', { artifact: 'old', baseRevision: revision, files: { 'index.html': 'new' } }],
+        ['artifact_dataset', { artifact: 'old', baseRevision: revision, id: 'sales', path: file('n.csv', SALES) }],
+      ] as const) {
+        const answer = await call(name, args);
+        expect(refusal(answer), name).toMatchObject({ reason: 'invalid', kind: 'dashboard', held: ['data/sales.csv', 'index.html'] });
+        expect(text(answer), name).toContain('old: this dashboard was made before dashboards were documents');
+      }
+      expect(world.store.revision(legacy.id)).toBe(revision);
+      expect(stateV2(world.service.live(legacy.id))).toEqual(state);
+      expect(world.store.listAssets(legacy.id)).toEqual([]);
+    };
+    await check();
+    close();
+    world = open();
+    await check();
   });
 
   it('leaves no asset, descriptor or op behind a write that failed before its commit, across a restart', async () => {

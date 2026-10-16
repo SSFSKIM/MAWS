@@ -141,7 +141,7 @@ export function artifactDatasetTool(deps: ArtifactToolDeps): McpToolDefinition {
                   inFrame: (revision) => {
                     recorded = table
                       ? { status: 'dataset', artifactId, id: input.id, revision, columns: table.columns, rows: table.rows.length, ...(table.warnings.length > 0 && { warnings: table.warnings }) }
-                      : { status: 'dataset', artifactId, id: input.id, revision, removed: true };
+                      : { status: 'dataset', artifactId, id: input.id, revision };
                     op.record(recorded);
                   },
                 },

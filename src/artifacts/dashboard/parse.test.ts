@@ -197,6 +197,23 @@ describe('JSON', () => {
     expect(parsed.rows).toEqual([[1, 'x']]);
   });
 
+  it('refuses a number JSON.parse reads as infinite, naming its record’s line (M2 fix wave I3)', () => {
+    for (const text of ['1e400', '-1e400']) expect(refused(`[\n{"a": 1},\n{"a": ${text}}\n]`, 'json'), text).toMatchObject({ kind: 'invalid', line: 3, reason: 'line 3: record 2 holds a number in "a" too large to read' });
+  });
+
+  it('counts the values a text column does not take, with a text majority or none (M2 fix wave I5)', () => {
+    const majority = ok(JSON.stringify([{ v: 'a' }, { v: 'b' }, { v: 'c' }, { v: 1 }]), 'json');
+    expect(majority.columns).toEqual([{ name: 'v', type: 'string', mismatches: 1 }]);
+    expect(majority.rows).toEqual([['a'], ['b'], ['c'], [1]]);
+    expect(majority.warnings).toEqual(['1 of 4 values in v are not string']);
+    const none = ok(JSON.stringify([{ v: 1 }, { v: true }, { v: 'x' }, { v: null }]), 'json');
+    expect(none.columns).toEqual([{ name: 'v', type: 'string', mismatches: 2 }]);
+    expect(none.rows).toEqual([[1], [true], ['x'], [null]]);
+    expect(none.warnings).toEqual(['2 of 4 values in v are not string']);
+    // CSV text is always text: a text column of it counts nothing
+    expect(ok('v\n1\nx\ny\n').columns[0]).toEqual({ name: 'v', type: 'string' });
+  });
+
   it('counts mixed native values without coercing them', () => {
     const parsed = ok(JSON.stringify([{ v: 1 }, { v: 2 }, { v: 'three' }]), 'json');
     expect(parsed.columns).toEqual([{ name: 'v', type: 'number', mismatches: 1 }]);
