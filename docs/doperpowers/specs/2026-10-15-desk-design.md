@@ -1725,7 +1725,7 @@ below); a frame naming a `sub` this socket does not hold (one that just ended, s
 
 | `t` | fields | meaning |
 | --- | --- | --- |
-| `resume` | `after` | every event with an offset above `after` (0 is the start), then `caught-up`, then live |
+| `resume` | `after` | the events with an offset above `after` (0 is the start), one page of about 1 MiB; then `caught-up` and live, or `more` when events remain |
 | `human` | `event` (a sealed `HumanEvent`) | a web `human`; the hub assigns `writer` `hub/<member>`, `seq`, `ts` and answers `human-ack` |
 | `rpc` | `rpc` | a sealed RPC (DX6); answered by `rpc-state` (below) |
 | `subscribe` | `machine`, `session`, `agentId`, `sub` | a DX4 subscription scoped to one transcript (`agentId` null for the main one); `sub` is the browser's own random id, 128 bits in canonical base64url (`newNonce()`), unique at the machine. At most 32 per socket |
@@ -1747,9 +1747,14 @@ answers `human-ack` with the stored event's offset, writer, and seq, so a browse
 sealed event safely; the same nonce with a different payload is refused `conflict`.
 
 **Resume.** `resume {after}` (a non-negative integer) makes the socket follow the log, a mark kept in its attachment
-across hibernation: the hub sends every event with an offset above `after` in `log` frames of about 256 KiB, then
-`caught-up {offset}` with the head, then each new event live as it is stored. A socket that has not resumed gets no
-`log` frames. Resuming again sends the backlog again from the new `after`. `welcome.head` is the latest offset when the
+across hibernation: the hub sends the events with an offset above `after` in `log` frames of about 256 KiB, one page
+of about 1 MiB at a time. When the page reaches the head, `caught-up {offset}` follows with the head, then each new
+event live as it is stored. When events remain, the page ends with `more {offset}` (the last offset sent) instead,
+and the browser sends `resume {after: offset}` for the next page; a socket gets live `log` frames only from its
+`caught-up` on, and a later page carries what was stored meanwhile. The browser's requests pace the backlog, so a
+long-lived project's first open never buffers its whole log in the object or the socket [2026-10-15, DC3's panel
+wave, scalpel-5#3]. A socket that has not resumed gets no `log` frames. Resuming again sends the backlog again from
+the new `after`. `welcome.head` is the latest offset when the
 socket opened.
 
 **On connect**, in this order: `welcome`; `machines`; one `session` frame per session carrying its latest `presence`,
@@ -1762,7 +1767,8 @@ it is unknown, not what was last reported); `pending`; and `deliveries` (one fra
 | --- | --- | --- |
 | `welcome` | `project`, `member`, `head` | first on every socket: whom the hub admitted, and the project's latest offset |
 | `log` | `events`: `[{offset, event}]` | log events with their project offset beside them (never inside: a stored event's code verifies as it did on arrival) |
-| `caught-up` | `offset` | the backlog after `resume` is sent |
+| `caught-up` | `offset` | the backlog after `resume` is sent; live from here |
+| `more` | `offset` | this page of the backlog ends at `offset` and more remain: send `resume {after: offset}` |
 | `human-ack` | `nonce`, `offset`, `writer`, `seq` | the web `human` with this `mac.nonce` is stored |
 | `session` | `message` | a DX4 message. Outside subscriptions, to every socket of the project: `presence` (on connect as above, then as a machine posts it), `raised`, `settled`, `delivery`, `compact`. A subscription's kinds go to the one socket that holds its `sub`, as the machine numbered them; the hub's own `end` for a sub carries the next `n` the browser expects (0 for one it ends before anything was relayed) |
 | `pending` | `requests`: `[{machine, raised, terminal_only}]` | the project's whole pending set, on connect and whenever it changes (a raise, a settlement, a machine's republish, a `deadline` passing); `terminal_only` (below) |
@@ -3471,6 +3477,13 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A browser's `resume` is paged by the browser (DX3): a page of about 1 MiB, then `more {offset}`
+  when events remain, and the browser resumes from there; live frames start at `caught-up`. DC3's xhigh panel
+  (scalpel-5#3) found the hello backlog and a browser's resume suffix enqueued whole; the hello backlog is now
+  paged inside the machine's send queue, but a hibernatable WebSocket gives the hub no send settlement to pace
+  pages against. Rejected: an unbounded suffix (a long-lived project's first open on the phone buffers its whole
+  log at once); pacing on send settlement (none exists). Flags DC3, DC5.
+  Date/Author: 2026-10-15, design session (DC3's panel wave).
 - Decision: The heartbeat is configuration and a close's latency is stated per runtime (DX2). DC5's real-hub
   suite saw a dropped machine go offline only after about 30 s against the local command. DC3 measured why:
   workerd notices a peer's graceful close (FIN) on a streaming response only when a later write fails, and an
