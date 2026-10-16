@@ -22,7 +22,7 @@ import { transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
 import { CONTAINER_TAGS } from './ir';
 import { childLists, readFlat, resolveAnchor, ROOT } from './model';
-import { blocksText, clipQuote as clip, quoteOf, QUOTE_MAX } from './quote';
+import { blocksText, boardQuote /* P3-E */, clipQuote as clip, quoteOf, QUOTE_MAX } from './quote';
 
 export type { ThreadMessage, ThreadStatus };
 
@@ -171,6 +171,7 @@ export function discardThread(doc: Doc, threadId: string, origin?: unknown): boo
 
 /** An element's quote (its text, its descendants' text for a container, else its tag and alt or kind); '' when gone. */
 export function elementQuote(doc: Doc, slideId: string, elementId: string): string {
+  if (elementId === ROOT) return boardQuote(doc, slideId) ?? ''; // P3-E (E1, the P3-E spec's Decision Log 13 (2)): a board's ROOT
   if (!Y.hasElement(doc, slideId, elementId)) return '';
   const flat = readFlat(doc, slideId);
   const e = flat.find((el) => el.id === elementId);
@@ -213,6 +214,7 @@ function liveQuotesBySlide(doc: Doc, anchors: Iterable<{ id: string; slideId: st
     for (const t of threads) {
       const e = byId.get(t.elementId);
       if (e) quotes.set(t.id, quoteOf(e, lists));
+      else if (t.elementId === ROOT && boardQuote(doc, slideId) !== null) quotes.set(t.id, boardQuote(doc, slideId)!); // P3-E: a board's ROOT
     }
   }
   return quotes;

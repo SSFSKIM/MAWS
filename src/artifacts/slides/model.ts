@@ -9,7 +9,7 @@ import { DECK_PATH, serializeDeckJson, slidePath, type DeckFace, type DeckJson, 
 import { CELL_TAGS, CONTAINER_TAGS, TEXT_TAGS, isPinned, type Attrs, type ElementIR, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
 import { ANY, FLOW_LAYER, OVER, UNDER, byKey, keyAfter, rekey, repairCollisions, type Bounds } from './order';
 import { hash4, ID_RE } from './parse';
-import { storeRemovedQuotes } from './quote'; // P3-C M7 fix wave 1
+import { boardQuote, storeRemovedQuotes } from './quote'; // P3-C M7 fix wave 1; P3-E: boardQuote
 import { partition, serializeSlide } from './serialize';
 
 export const ROOT = ''; // the parent value of a section's direct children; as an element id, the section itself
@@ -604,9 +604,11 @@ export interface ElementAnchor {
   slideId: string;
   elementId: string;
 }
-export type AnchorState = { live: true; tag: Tag; parent: string } | { live: false };
+/** P3-E (E1, the P3-E spec's Decision Log 13 (2)): `board`, a design board's ROOT anchor, live while the board has its frame. */
+export type AnchorState = { live: true; tag: Tag; parent: string } | { live: true; board: true } | { live: false };
 /** An anchor resolves by ids alone: no path, index or position enters it, so moves, restyles, re-orders and publishes cannot move it. */
 export function resolveAnchor(doc: Doc, a: ElementAnchor): AnchorState {
+  if (a.elementId === ROOT && boardQuote(doc, a.slideId) !== null) return { live: true, board: true }; // P3-E: a board's ROOT
   if (!Y.hasElement(doc, a.slideId, a.elementId)) return { live: false };
   const s = Y.elementScalars(doc, a.slideId, a.elementId);
   return { live: true, tag: s.tag as Tag, parent: s.parent as string };
