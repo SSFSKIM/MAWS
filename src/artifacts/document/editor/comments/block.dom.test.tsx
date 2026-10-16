@@ -5,7 +5,7 @@
 // resolves and reopens it. Without the callback the selected chart offers nothing to comment (B's behaviour).
 import type { Editor, JSONContent } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { NodeSelection } from '@tiptap/pm/state';
+import { AllSelection, NodeSelection } from '@tiptap/pm/state';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { addThread, getThread, listThreads, liveThreadIds, threadStates } from '../../threads';
@@ -297,5 +297,77 @@ describe('a commented view cut and pasted (P3-E, Decision Log 34)', () => {
     clipboard(m.editor(), 'paste', cut);
     expect(ids(m.editor())).toEqual(['c1']);
     expect(live(m, m.id)).toBe(true);
+  });
+
+  // Review fix (E2's Decision Log 27): a cut holding views whose attributes are identical (only the ids differ) restores
+  // each threaded view's id to the view pasted at its own place in the clipboard slice, unthreaded twins keeping B's fresh
+  // ids, whatever the paste's surroundings (a nested view, a paste into the middle of a paragraph, an untouched twin
+  // elsewhere in the document).
+  const same = (id: string) => chart(id, 'Same view');
+  const thread = (m: { handle: DocumentHandle }, threadId: string, blockId: string) =>
+    act(() => addThread(m.handle.doc, { threadId, tabId: TAB, blockId, quote: 'chart: Same view', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 1, body: `On ${blockId}.` }));
+  const cutAll = (editor: Editor) => {
+    act(() => void editor.view.dispatch(editor.state.tr.setSelection(new AllSelection(editor.state.doc))));
+    return clipboard(editor, 'cut');
+  };
+  const isFresh = (id: string, taken: string[]) => !taken.includes(id);
+
+  it('an unthreaded view and its threaded identical twin, cut together: the twin’s id goes to the second pasted view', async () => {
+    const m = await mount({ seed: doc(para('p1', 'Intro'), same('c1'), same('c2'), para('p2', 'End')) });
+    thread(m, 'tb', 'c2');
+    const cut = cutAll(m.editor());
+    expect(ids(m.editor())).toEqual([]);
+    act(() => void m.editor().commands.setTextSelection(1));
+    clipboard(m.editor(), 'paste', cut);
+    const after = ids(m.editor());
+    expect(after).toHaveLength(2);
+    expect(after[1]).toBe('c2');
+    expect(isFresh(after[0]!, ['c1', 'c2'])).toBe(true);
+    expect(live(m, 'tb')).toBe(true);
+  });
+
+  it('threaded, unthreaded and threaded identical views keep their own ids in order; the unthreaded one is fresh', async () => {
+    const m = await mount({ seed: doc(para('p1', 'Intro'), same('c1'), same('c2'), same('c3'), para('p2', 'End')) });
+    thread(m, 't1', 'c1');
+    thread(m, 't3', 'c3');
+    const cut = cutAll(m.editor());
+    act(() => void m.editor().commands.setTextSelection(1));
+    clipboard(m.editor(), 'paste', cut);
+    const after = ids(m.editor());
+    expect(after).toHaveLength(3);
+    expect([after[0], after[2]]).toEqual(['c1', 'c3']);
+    expect(isFresh(after[1]!, ['c1', 'c2', 'c3'])).toBe(true);
+    expect([live(m, 't1'), live(m, 't3')]).toEqual([true, true]);
+  });
+
+  it('a nested view among identical twins, pasted into the middle of a paragraph beside an untouched twin, gets its own id back', async () => {
+    const seed = doc(
+      para('p1', 'Intro'),
+      same('c1'),
+      { type: 'blockquote', attrs: { id: 'q1' }, content: [para('qp', 'Quoted.'), same('c2')] },
+      para('p2', 'Middle text here.'),
+      same('c9'),
+    );
+    const m = await mount({ seed });
+    thread(m, 't2', 'c2');
+    // the cut: from inside "Intro" to inside "Middle", so c1 and the quote holding c2 go
+    const from = 3;
+    let to = -1;
+    m.editor().state.doc.descendants((node, pos) => {
+      if (node.attrs.id === 'p2') to = pos + 4;
+      return to < 0;
+    });
+    act(() => void m.editor().commands.setTextSelection({ from, to }));
+    const cut = clipboard(m.editor(), 'cut');
+    expect(ids(m.editor())).toEqual(['c9']);
+    // pasted into the middle of the remaining paragraph's text: the slice lands between its two halves
+    act(() => void m.editor().commands.setTextSelection(5));
+    clipboard(m.editor(), 'paste', cut);
+    const after = ids(m.editor());
+    expect(after).toHaveLength(3);
+    expect(after[2]).toBe('c9'); // the untouched twin keeps its id
+    expect(after[1]).toBe('c2'); // the nested view, its own id back
+    expect(isFresh(after[0]!, ['c1', 'c2', 'c9'])).toBe(true);
+    expect(live(m, 't2')).toBe(true);
   });
 });

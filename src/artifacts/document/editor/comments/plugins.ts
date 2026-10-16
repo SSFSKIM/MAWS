@@ -288,15 +288,20 @@ function paste(ydoc: Doc, tabId: string | null): Plugin {
 // live, through undo too. A cut of blocks carrying block threads is recorded in this renderer with a one-shot nonce,
 // which a native `cut` listener running after ProseMirror's own writes onto the clipboard HTML's `[data-pm-slice]`
 // element (copies and plain text stay as B writes them). A paste restores only when its HTML carries the recorded nonce
-// and ids, the pasting editor's artifact is the record's, every recorded original is live nowhere in the document, and
-// the record is unconsumed. A copy, a drag or a cut with no threaded block clears the record; another window, another
+// and ids, the pasting editor's artifact is the record's, every recorded threaded original is live nowhere in the
+// document, and the record is unconsumed; each threaded view's id goes to the view pasted at its own place in the slice. A copy, a drag or a cut with no threaded block clears the record; another window, another
 // artifact or another application restores nothing (a renderer-local record: cross-window carry is a known limit).
 const CUT_ATTR = 'data-maws-cut';
 interface CutRecord {
   nonce: string;
   artifactId: string;
-  /** The cut blocks with block threads, in document order: the id and everything but the id, which a paste matches. */
-  blocks: Array<{ blockId: string; key: string }>;
+  /**
+   * Every cut block of a type that carries a block thread here, threaded or not, in the slice's document order (nested
+   * ones included): its id, everything but the id (`key`), and whether a block thread is on it. The pasted blocks of
+   * those types come back in the same order, so the n-th recorded block is the n-th pasted one of its key; recording the
+   * unthreaded twins keeps an identical threaded view's id on its own place, never on a twin's (E2's Decision Log 27).
+   */
+  blocks: Array<{ blockId: string; key: string; threaded: boolean }>;
 }
 let lastCut: CutRecord | null = null;
 const keyOf = (node: PMNode): string => `${node.type.name}:${JSON.stringify({ ...node.attrs, id: null })}`;
@@ -338,12 +343,14 @@ function blockCarry(ydoc: Doc, artifactId: string): Plugin {
         cut: (view) => {
           const threaded = new Set(blockThreads(ydoc).values());
           const { from, to } = view.state.selection;
-          const blocks: CutRecord['blocks'] = [];
+          const whole: Array<{ node: PMNode; blockId: string }> = []; // every block the cut takes whole, in order
           view.state.doc.nodesBetween(from, to, (node, pos) => {
-            if (typeof node.attrs.id === 'string' && threaded.has(node.attrs.id) && pos >= from && pos + node.nodeSize <= to) blocks.push({ blockId: node.attrs.id, key: keyOf(node) });
+            if (typeof node.attrs.id === 'string' && pos >= from && pos + node.nodeSize <= to) whole.push({ node, blockId: node.attrs.id });
             return !node.isTextblock;
           });
-          lastCut = blocks.length > 0 ? { nonce: crypto.randomUUID(), artifactId, blocks } : null;
+          const types = new Set(whole.filter(({ blockId }) => threaded.has(blockId)).map(({ node }) => node.type.name));
+          const blocks = whole.filter(({ node }) => types.has(node.type.name)).map(({ node, blockId }) => ({ blockId, key: keyOf(node), threaded: threaded.has(blockId) }));
+          lastCut = types.size > 0 ? { nonce: crypto.randomUUID(), artifactId, blocks } : null;
           stamp = lastCut?.nonce ?? null;
           return false;
         },
@@ -361,7 +368,7 @@ function blockCarry(ydoc: Doc, artifactId: string): Plugin {
           const cut = lastCut;
           if (!cut || !nonce || nonce !== cut.nonce || cut.artifactId !== artifactId) return false;
           const live = liveBlockIds(ydoc);
-          const carried = cut.blocks.every(({ blockId }) => html.includes(`data-id="${blockId}"`) && !live.has(blockId));
+          const carried = cut.blocks.every(({ blockId, threaded }) => html.includes(`data-id="${blockId}"`) && !(threaded && live.has(blockId)));
           if (!carried) return false;
           lastCut = null; // consumed: a second paste is B's fresh paste
           armed = { blocks: cut.blocks, before: docIds(view.state.doc) };
@@ -372,25 +379,29 @@ function blockCarry(ydoc: Doc, artifactId: string): Plugin {
     // after UniqueID has minted the pasted blocks' ids, in the same dispatch (one undo step with the paste)
     appendTransaction: (transactions, _old, state) => {
       if (!armed || !transactions.some((tr) => tr.docChanged)) return null;
+      // the paste's blocks of the recorded types: those whose ids the doc did not hold before it, in document order
+      const types = new Set(armed.blocks.map(({ key }) => key.slice(0, key.indexOf(':'))));
       const pasted: Array<{ node: PMNode; pos: number }> = [];
       let pending = false;
-      const keys = new Set(armed.blocks.map((block) => block.key));
       state.doc.descendants((node, pos) => {
-        if (keys.has(keyOf(node))) {
+        if (types.has(node.type.name)) {
           if (node.attrs.id === null) pending = true;
           else if (!armed!.before.has(node.attrs.id as string)) pasted.push({ node, pos });
         }
         return !node.isTextblock;
       });
       if (pending || pasted.length === 0) return null; // UniqueID mints in its own append, before this one sees it
+      // the slice's order: each recorded block takes the next pasted block of its key, threaded or not, so a twin's place
+      // is its own; only a threaded block's id comes back
       const present = docIds(state.doc);
       const tr = state.tr;
-      const used = new Set<number>();
-      for (const { blockId, key } of armed.blocks) {
-        const at = pasted.findIndex((candidate, k) => !used.has(k) && keyOf(candidate.node) === key);
-        if (at < 0 || present.has(blockId)) continue;
-        used.add(at);
-        tr.setNodeAttribute(pasted[at]!.pos, 'id', blockId);
+      let next = 0;
+      for (const { blockId, key, threaded } of armed.blocks) {
+        while (next < pasted.length && keyOf(pasted[next]!.node) !== key) next += 1;
+        if (next >= pasted.length) break;
+        const { pos } = pasted[next]!;
+        next += 1;
+        if (threaded && !present.has(blockId)) tr.setNodeAttribute(pos, 'id', blockId);
       }
       armed = null;
       return tr.steps.length > 0 ? tr : null;
