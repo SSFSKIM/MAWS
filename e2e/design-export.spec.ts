@@ -8,7 +8,8 @@
 //   in their order; a scale taking a page past 19,200 px refused with the scale that fits.
 // - The agent's route on the real tool server (E2's recorded artifact session replayed with its five `maws` calls made
 //   a design's create and four exports): the PNG, the refusal flattened into the tool's (`{reason, board, w, h,
-//   maxScale}`), the fitted PNG and the PDF.
+//   maxScale}`), the fitted PNG and the PDF; the design the session made is the library's row with the session as its
+//   last editor and its chip (M6).
 // - The editor's Export menu and sheet in a main tab: the selected board's PNG saved where the owner chooses; the poster
 //   offered at the stated scale in the sheet (its screenshot kept), exported whole; every board as a PDF; while a
 //   retained version is previewed its board exported as the version draws it, in the system pinned at it and with its
@@ -278,6 +279,17 @@ test('the agent’s route: artifact_export on the real tool server exports a boa
       const sizes = pageSizes(pdf);
       expect(sizes).toHaveLength(4);
       ORDER.forEach((board, k) => expectPage(pdf, sizes, k + 1, BOARDS[board], 1, `the agent’s page ${k + 1} (${board})`));
+
+      // M6 (acceptance 6): the design the session made is the library's row, kind and session named: its last editor
+      // and its session chip, in the product's own library
+      const designId = (JSON.parse(resultText(answer(0))) as { artifactId: string }).artifactId;
+      const { row } = await ok<{ row: { kind: string; lastEditor: unknown; sessions: { appSessionId: string; title: string; roles: string[] }[] } | null }>(s.page, 'library.get', { artifactId: designId });
+      expect(row).toMatchObject({ kind: 'design', lastEditor: { kind: 'session', appSessionId: sessionId } });
+      expect(row!.sessions).toEqual(expect.arrayContaining([expect.objectContaining({ appSessionId: sessionId, title: 'P3-E1: design export' })]));
+      await s.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+      const libraryRow = s.page.locator('[data-library]').getByRole('article', { name: 'Export lab', exact: true });
+      await expect(libraryRow).toContainText('Design');
+      await expect(libraryRow.getByRole('button', { name: 'P3-E1: design export', exact: true })).toBeVisible();
     });
   } finally {
     launch = null; // the scene closed its own app
