@@ -587,6 +587,9 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
             if (kind === 'zoom') await page.mouse.wheel(0, out ? -2.7 : 2.7);
             await page.waitForTimeout(8);
           }
+          // the drag ends at its far turning point, whatever phase the time-bound loop stopped in: 45 × 20 screen px
+          // from the press, far past the six-pixel snap reach, so the frame always lands moved
+          for (let j = 1; j <= 5; j++) await page.mouse.move(from.x + 9 * j, from.y + 4 * j);
         } finally {
           if (kind === 'zoom') await page.keyboard.up('Control');
         }
