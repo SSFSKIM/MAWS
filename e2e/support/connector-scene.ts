@@ -1,17 +1,19 @@
 // P3-H H4: the product-app scene of the connector e2e runs (e2e/connectors.spec.ts's product cases and
 // e2e/connectors-soak.spec.ts). The built app, detached host, on a scratch profile that owns everything the run touches:
 // its user data, a scratch HOME and engine config home (no credentials, the scratch project's trust accepted, onboarding
-// done), the scratch project directory, and the fixture MCP server's call log. The engine is the installed Claude Code
-// (as the naming cases run it), launched by the product's own `session.launch` with the fixture server as its MCP
-// configuration, no replay, no user message: no model turn, no cost. The HTML artifact is the owner's, in a Space
-// linked to the project directory, so the live session running there is its eligible route (P3 Decision Log 83, 85).
+// done), the scratch project directory, and the fixture MCP server's call log. The fixture server is configured in the
+// scratch config home (user scope, as an owner's own server is), so any session the engine starts there has it. The
+// engine is the installed Claude Code (as the naming cases run it), and the only session is the one the owner's Start
+// launches from the header's Connectors sheet (the product's own start: a new session in the artifact's directory,
+// the Direct route the scratch profile prefers, no message, no model turn, no cost). The HTML artifact is the owner's,
+// in a Space linked to the project directory (an indexed project), so that session is its eligible route (P3
+// Decision Log 83, 85).
 //
 // Nothing here grants, revokes or starts on the page's behalf: the specs do that as the owner, through the header's
 // Connectors sheet. The scene only observes: the fixture's call log (which process answered, when), the host's live
 // sessions, the supervisor's pid and the session's journal (its launches), and attaches them as evidence.
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import type { ChildProcess } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type FrameLocator, type Locator, type Page, type TestInfo } from '@playwright/test';
@@ -114,7 +116,8 @@ export class ConnectorScene {
       env: { MAWS_HARNESS: '0', MAWS_HOST_MODE: 'detached', MAWS_E2E_ENGINE_BIN: this.engine.bin, HOME: this.home, DISABLE_AUTOUPDATER: '1' },
       prepare: ({ claudeConfigDir }) => {
         if (!first) return;
-        writeFileSync(join(claudeConfigDir, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, projects: { [this.project]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
+        const mcpServers = { [SERVER]: { type: 'stdio', command: process.execPath, args: [FIXTURE_SERVER, '--id', 'series', '--log', this.log, '--tools', JSON.stringify([TOOL])] } };
+        writeFileSync(join(claudeConfigDir, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, mcpServers, projects: { [this.project]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
       },
     });
     const child = maws.app.process();
@@ -124,6 +127,11 @@ export class ConnectorScene {
     await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1440, 900));
     await expect(maws.page.locator('[data-region="main"]')).toBeVisible();
     await this.supervisor(run.page);
+    if (first) {
+      // the owner's profile: the project indexed, and new sessions on the Direct route (no relay runs here)
+      value(await invoke(run.page, 'session.projects.add', { directory: this.project }));
+      value(await invoke(run.page, 'settings.set', { gateway: { defaultRoute: 'direct' } }));
+    }
     this.note('launched', { pid: child.pid });
     return run;
   }
@@ -153,27 +161,29 @@ export class ConnectorScene {
     }
   }
 
-  // A live session in the project directory whose MCP configuration is the fixture server, launched as the product
-  // launches one (no replay, no message), answered once its process is ready and the fixture server connected.
-  async startEngine(page: Page): Promise<LiveEngine> {
-    const appSessionId = randomUUID() as LaunchSpec['appSessionId'];
-    const mcpConfig = { mcpServers: { [SERVER]: { type: 'stdio', command: process.execPath, args: [FIXTURE_SERVER, '--id', 'series', '--log', this.log, '--tools', JSON.stringify([TOOL])] } } };
-    const spec: LaunchSpec = {
-      appSessionId, cwd: this.project, additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'direct', subagentModel: null,
-      resume: null, sessionId: null, trust: { accepted: true, directory: this.project }, mcpConfig, extraSettings: null, maxBudgetUsd: null, replay: null, inheritGrantsFrom: null,
-    };
-    expect(value(await invoke(page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
-    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId })).process, { timeout: 90_000, message: 'the engine is ready' }).toBe('ready');
+  // The owner's Start from the header's Connectors sheet (offered once the page found no live route): a session started
+  // in the artifact's directory, answered once the sheet says it is ready and its fixture server is connected; the one
+  // new live session it made.
+  async ownerStart(page: Page): Promise<LiveEngine> {
+    const before = new Set((await this.live(page)).map((session) => session.appSessionId));
+    const sheet = await this.openSheet(page);
+    const start = sheet.locator('[data-connectors-start]');
+    await start.getByRole('button', { name: 'Start session' }).click();
+    await expect(start.getByRole('status')).toHaveText('The session is ready', { timeout: 90_000 });
+    await this.closeSheet(page);
+    let started: LiveEngine | undefined;
+    await expect
+      .poll(async () => (started = (await this.live(page)).find((session) => !before.has(session.appSessionId))) !== undefined, { timeout: 30_000, message: 'the owner’s Start made one live session' })
+      .toBe(true);
+    const appSessionId = started!.appSessionId as LaunchSpec['appSessionId'];
     await expect
       .poll(async () => {
         const status = await invoke(page, 'session.mcpStatus', { appSessionId });
         return status.ok ? status.value.mcpServers.find((server) => server.name === SERVER)?.status : 'unanswered';
       }, { timeout: 60_000, message: 'the fixture server is connected' })
       .toBe('connected');
-    const live = await this.live(page);
-    const mine = live.find((session) => session.appSessionId === appSessionId)!;
-    this.note('engine', mine);
-    return mine;
+    this.note('owner start', started);
+    return started!;
   }
 
   // The engine host's sessions whose process is not gone.
@@ -206,9 +216,12 @@ export class ConnectorScene {
   // The owner's HTML artifact, in a Space linked to the project directory.
   async createPage(page: Page): Promise<string> {
     const { space } = value(await invoke(page, 'spaces.create', { name: 'Live data', linkedDir: this.project }));
-    const file = join(this.root, 'index.html');
-    writeFileSync(file, PAGE_HTML);
-    const id = value(await invoke(page, 'artifacts.create', { kind: 'html', title: PAGE_TITLE, spaceId: space.id, content: { path: file } })).artifact.id;
+    // an html artifact's content is its bytes (the store's contract), encoded in the page as the renderer sends them
+    const created = await page.evaluate(
+      ([html, title, spaceId]) => window.maws.invoke('artifacts.create', { kind: 'html', title, spaceId, content: { bytes: new TextEncoder().encode(html), name: 'index.html' } }),
+      [PAGE_HTML, PAGE_TITLE, space.id] as const,
+    );
+    const id = value<'artifacts.create'>(created as CommandResult<'artifacts.create'>).artifact.id;
     this.note('artifact', { id });
     return id;
   }

@@ -1,8 +1,9 @@
 // P3-H H4: the connector soak (`pnpm e2e:connectors-soak`, MAWS_CONNECTORS_SOAK=1; outside the class-1 e2e set, run
 // once before P3-H's hand-back on the Mac lane with `--evidence`; gate-offload Decision Log 49 as amended). The product
 // scene of e2e/connectors.spec.ts (support/connector-scene.ts: the built app, a detached host, a scratch profile and
-// HOME, the installed engine launched by the product with the fixture MCP server, the owner's HTML page watching the
-// fixture's read-only tool at 30 s), held in real time, the fixture's call log the witness:
+// HOME, the fixture MCP server in its scratch config, the owner's HTML page watching the fixture's read-only tool at
+// 30 s, the one session the owner's Start launched from the header), held in real time, the fixture's call log the
+// witness:
 //   1. five real minutes with the window hidden: no call, no engine acquired; shown again, exactly one catch-up call;
 //   2. five real minutes with main closed (killed; the detached supervisor, its engine and the fixture server live on, as
 //      after a crash or a forced quit): no call, the supervisor's, the engine's and the server's pids unchanged;
@@ -25,10 +26,11 @@ test('soak: hidden five minutes and closed five minutes with the engine live, no
     const first = await scene.launch();
     expect(await first.page.evaluate(() => document.visibilityState), 'the app’s window is visible (the e2e quiet mode keeps native visibility)').toBe('visible');
     const supervisor = await scene.supervisor(first.page);
-    const engine = await scene.startEngine(first.page);
     const artifactId = await scene.createPage(first.page);
     let { frame } = await scene.openPage(first.page, artifactId);
-    await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: 20_000 });
+    await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+    const engine = await scene.ownerStart(first.page); // the owner's Start: the one session of the run
+    await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
     let sheet = await scene.openSheet(first.page);
     await row(sheet).getByRole('button', { name: `Allow ${TOOL_NAME} to read` }).click();
     await expect(row(sheet).locator('[data-connector-state]')).toContainText('Allowed to read');
