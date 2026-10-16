@@ -3506,8 +3506,9 @@ a hub that connects into machines (§2).
   anchoring only from 27.0; Playwright's WebKit (26.6) held the row within a pixel, but a phone on iOS 26 or older
   may move about one row when a message arrives below a reader scrolled back, so the owner's iOS version decides
   whether that needs a follow-up. Rejected: a fourth hand-rolled pass (it was rebuilding scroll anchoring case by
-  case); a follow-output component (none fit the stack without a heavy dependency). Flags DC6 (its transcript and
-  subagent views follow the same arrangement).
+  case); a follow-output component (none fit the stack without a heavy dependency). DC6's transcript and subagent
+  panes are unaffected: they follow through MAWS's virtualized `Transcript` list, the desktop app's own chat-mode
+  follow, and hand-roll only the paging of older rows.
   Date/Author: 2026-10-16, design session (DC5's Mac lane).
 - Decision: The real-hub suite bounds a machine's offline step by the local close latency DX2 states, the configured
   heartbeat plus 500 ms; busy, waiting and shell keep 2 s. On the Mac mini (run 38889971966) offline came at
