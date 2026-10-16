@@ -150,7 +150,9 @@ export interface ArtifactDocOption {
 // grant (below) admits a call, and only a visible surface calls anything, its watches included. No answer carries an
 // error's words: a refusal is a state and a reason from `ConnectorRefusal`'s closed lists. A surface whose lease could
 // not be opened, or one already closed, answers `invalid: lease` (false for `unwatchTool` and `refreshWatch`) without
-// asking main; a command main cannot be reached for rejects, as the other methods do.
+// asking main; nothing answered after `close` is published (a call in flight reads `paused: closed`, a declaration or
+// a watch's start `invalid: lease`, and no listener hears anything more); a command main cannot be reached for rejects,
+// as the other methods do.
 export interface ConnectorSurface {
   // Adds `server · tool` pairs the page may call; answers everything the surface has declared.
   declareTools(tools: readonly ConnectorToolRef[]): Promise<ConnectorDeclareOutcome>;

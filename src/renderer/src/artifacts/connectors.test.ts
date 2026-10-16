@@ -2,7 +2,7 @@
 // lease commands (`connectors.*`) and the owner's grants (`artifacts.*`), driven through a fake bridge that records
 // what reaches main and answers when a test says so.
 import { describe, expect, it, vi } from 'vitest';
-import type { ConnectorCallOutcome } from '@shared/artifacts/connectors';
+import { CONNECTOR_WATCH_LIMIT, type ConnectorCallOutcome } from '@shared/artifacts/connectors';
 import type { CommandName, MawsBridge } from '@shared/ipc/schema';
 import { createConnectorHost } from './connectors';
 import { ArtifactCommandError } from './host';
@@ -12,6 +12,7 @@ const LEASE = '22222222-2222-4222-8222-222222222222';
 const OTHER_LEASE = '33333333-3333-4333-8333-333333333333';
 const WATCH = '44444444-4444-4444-8444-444444444444';
 const TOOL = { server: 'fixture', tool: 'read_series' };
+const NO_LEASE_ANSWER = { ok: false, state: 'invalid', reason: 'lease' };
 const RESULT: ConnectorCallOutcome = { ok: true, result: { rows: [1, 2] }, fetchedAt: 5, via: { route: 'engine', sessionId: 's1' } };
 
 type Answer = { ok: true; value: unknown } | { ok: false; error: { code: string; message: string } };
@@ -168,6 +169,78 @@ describe('a page’s connector surface', () => {
       ['connectors.visibility', { leaseId: LEASE, visible: false }],
       ['connectors.refresh', { leaseId: LEASE, watchId: WATCH }],
     ]);
+  });
+});
+
+// The review's I3 and I4 (P3-H H4 fix wave): a close fences both what is sent and what is answered, whatever was in
+// flight; and early refreshes are held for as many watches as main allows, none dropping another's.
+describe('a surface’s close, and early refreshes', () => {
+  const PAUSED_CLOSED = { ok: false, state: 'paused', reason: 'closed' };
+
+  it('sends nothing asked before a close of an open lease, but the close itself', async () => {
+    const b = bridge({ 'connectors.open': () => ({ leaseId: LEASE }), 'connectors.close': () => ({ closed: true }) });
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    await settle(); // the lease is open
+    const called = surface.callTool(TOOL);
+    const declared = surface.declareTools([TOOL]);
+    const watched = surface.watchTool({ ...TOOL, intervalMs: 60_000 }, () => {});
+    surface.setVisible(true);
+    surface.close();
+    await expect(called).resolves.toEqual(NO_LEASE_ANSWER);
+    await expect(declared).resolves.toEqual(NO_LEASE_ANSWER);
+    await expect(watched).resolves.toEqual(NO_LEASE_ANSWER);
+    await settle();
+    expect(b.names()).toEqual(['connectors.open', 'connectors.close']);
+  });
+
+  it('publishes nothing answered after the close: a call reads paused: closed, a late watch start registers nothing', async () => {
+    const b = bridge({ 'connectors.open': () => ({ leaseId: LEASE }), 'connectors.close': () => ({ closed: true }) });
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    const heard = vi.fn();
+    const called = surface.callTool(TOOL);
+    const declared = surface.declareTools([TOOL]);
+    const watched = surface.watchTool({ ...TOOL, intervalMs: 60_000 }, heard);
+    await settle();
+    expect(b.sent.map(({ name }) => name)).toEqual(['connectors.call', 'connectors.declare', 'connectors.watch']);
+    surface.close();
+    b.sent[0]!.answer(RESULT);
+    b.sent[1]!.answer({ ok: true, declared: [TOOL] });
+    b.sent[2]!.answer({ ok: true, watchId: WATCH, intervalMs: 60_000 });
+    await expect(called).resolves.toEqual(PAUSED_CLOSED);
+    await expect(declared).resolves.toEqual(NO_LEASE_ANSWER);
+    await expect(watched).resolves.toEqual(NO_LEASE_ANSWER);
+    b.emit('connectors.watchUpdate', { leaseId: LEASE, watchId: WATCH, update: RESULT });
+    expect(heard).not.toHaveBeenCalled();
+    expect(b.names().at(-1)).toBe('connectors.close');
+  });
+
+  it('stops handing over held refreshes once a listener closes the surface', async () => {
+    const b = bridge({ 'connectors.open': () => ({ leaseId: LEASE }), 'connectors.close': () => ({ closed: true }) });
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    const heard: ConnectorCallOutcome[] = [];
+    const watched = surface.watchTool({ ...TOOL, intervalMs: 60_000 }, (update) => {
+      heard.push(update);
+      surface.close(); // reentrant: the first refresh closes the page
+    });
+    await settle();
+    b.emit('connectors.watchUpdate', { leaseId: LEASE, watchId: WATCH, update: RESULT });
+    b.emit('connectors.watchUpdate', { leaseId: LEASE, watchId: WATCH, update: { ok: false, state: 'paused', reason: 'noRoute' } });
+    b.sent[0]!.answer({ ok: true, watchId: WATCH, intervalMs: 60_000 });
+    await watched;
+    expect(heard).toEqual([RESULT]);
+  });
+
+  it('holds every watch’s first refresh when as many watches as main allows start at once', async () => {
+    const b = bridge({ 'connectors.open': () => ({ leaseId: LEASE }) });
+    const surface = createConnectorHost(b.ipc).openConnectors(ARTIFACT);
+    const ids = Array.from({ length: CONNECTOR_WATCH_LIMIT }, (_, k) => `44444444-4444-4444-8444-${String(k).padStart(12, '0')}`);
+    const heard = new Map<string, ConnectorCallOutcome[]>();
+    const starts = ids.map((id) => surface.watchTool({ ...TOOL, intervalMs: 60_000 }, (update) => heard.set(id, [...(heard.get(id) ?? []), update])));
+    await settle();
+    for (const [k, id] of ids.entries()) b.emit('connectors.watchUpdate', { leaseId: LEASE, watchId: id, update: { ...RESULT, fetchedAt: k } });
+    for (const [k, id] of ids.entries()) b.sent[k]!.answer({ ok: true, watchId: id, intervalMs: 60_000 });
+    await Promise.all(starts);
+    for (const [k, id] of ids.entries()) expect(heard.get(id), id).toEqual([{ ...RESULT, fetchedAt: k }]);
   });
 });
 
