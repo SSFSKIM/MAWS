@@ -34,7 +34,7 @@ import { nanoid8 } from '../schema';
 import { tabBody } from '../tabs';
 import { discardThread, getThread, isBlockAnchor /* P3-E */, reopen, reply, resolve } from '../threads';
 import type { ExtraChange } from '../history'; // P3-E
-import { activeThread, COMMENTS_ORIGIN, commentBlock /* P3-E */, commentSelection, liveRanges } from './comments/plugins';
+import { activeThread, COMMENTS_ORIGIN, commentBlock /* P3-E */, commentSelection, liveRanges, type CommentsOptions /* P3-E */ } from './comments/plugins';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from './comments/surface';
 import { ThreadsRail } from './comments/ThreadsRail';
 import { useOpenThreadCount } from './comments/use-threads';
@@ -307,9 +307,9 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
       if (!surface || editor.isDestroyed || !editor.isEditable) return false;
       const threadId = nanoid8();
       const comment = { threadId, tabId, by: by.actor, at: by.now() };
-      // P3-E: a selected block the caller names is commented whole; otherwise B's passage
-      const quoteBlock = latest.current.blockCommentQuote;
-      const made = (quoteBlock && commentBlock(editor, handle.doc, comment, quoteBlock)) || commentSelection(editor, handle.doc, comment);
+      // P3-E: a selected block the comments' `blockQuote` names is commented whole; otherwise B's passage
+      const { blockQuote } = (editor.extensionManager.extensions.find((extension) => extension.name === 'comments')?.options ?? {}) as Partial<CommentsOptions>;
+      const made = (blockQuote && commentBlock(editor, handle.doc, comment, blockQuote)) || commentSelection(editor, handle.doc, comment);
       if (!made) return false;
       editor.commands.setActiveThread(threadId);
       surface.opened({ threadId, tabId, tabTitle: title, quote: made.quote });
