@@ -155,13 +155,18 @@ function modelHolds(doc: Doc, model: FrameProbeModel): boolean {
   return readFlat(doc, model.boardId).find((e) => e.id === model.elementId)?.style[model.prop] === model.value;
 }
 
-/** M6: the within-a-frame probe (see the header). */
+/** M6: the within-a-frame probe on the tab showing `artifactId` on `surface` (see the header). */
 function armFrameProbe(win: Window, artifactId: string, surface: string, model: FrameProbeModel, dom: FrameProbeDom[]): { result(): FrameProbeResult | null; disarm(): void } {
   const tab = tabOn(artifactId, surface);
   const doc = tab.snapshot().handle?.doc;
   if (!doc) throw new Error(`the ${surface} tab of ${artifactId} has no replica`);
   const root = win.document.querySelector<HTMLElement>(`[data-design-artifact="${artifactId}"][data-design-surface="${surface}"]`);
   if (!root) throw new Error(`no ${surface} body shows ${artifactId}`);
+  return frameProbe(win, doc, root, surface, model, dom);
+}
+
+/** M6: the within-a-frame probe over a receiving replica's doc and the surface `root` drawing it. */
+export function frameProbe(win: Window, doc: Doc, root: HTMLElement, surface: string, model: FrameProbeModel, dom: FrameProbeDom[]): { result(): FrameProbeResult | null; disarm(): void } {
   if (root.querySelector('.deck-textbox')) throw new Error(`a text box is open on the ${surface} surface: its composition hold would hold the edit`);
   if (modelHolds(doc, model)) throw new Error(`the ${surface} replica already holds the expected value`);
   const read = () =>
