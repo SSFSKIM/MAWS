@@ -50,6 +50,7 @@ import { boardKeyLabel, DesignHistoryBar, HistoryBoardList, historyBoards, Histo
 import { boardElement } from './insert';
 import { MoveToBoard } from './MoveToBoard';
 import { BOARD_FIT_MAX, DesignView, unionRect, ZOOM_MAX, ZOOM_MIN, ZOOM_STEPS, type Rect } from './viewport';
+import { useViewFrame, useViewZoom, WithZoom } from './use-view';
 import { World } from './World';
 import '../../slides/editor/chrome.css';
 import '../../slides/editor/deck.css';
@@ -133,7 +134,8 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   const doc = session.doc;
   const { boards, overrides, faces: deckFaces } = useBoards(doc);
   const state = useSyncExternalStore(session.subscribe, session.snapshot);
-  const viewState = useSyncExternalStore(view.subscribe, view.snapshot);
+  // M6: the frame selection alone; the zoom is read where it is drawn (WithZoom), and a pan re-renders none of this
+  const selectedFrame = useViewFrame(view);
   const order = useMemo(() => boards.map((b) => b.id), [boards]);
 
   // the active board follows the design: one deleted (here or elsewhere) gives way to its neighbour
@@ -176,6 +178,8 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
     });
   }, []);
   const activeCanvas = active ? (canvases.get(active.id) ?? null) : null;
+  // the inspector's element box, measured at the zoom of the moment (the inspector does not re-render on a zoom)
+  const measureAtZoom = useCallback((id: string) => measureInHost(activeCanvas, id, view.snapshot().viewport?.zoom ?? 1), [activeCanvas, view]);
   useEffect(() => {
     if (!onCanvases) return;
     onCanvases(canvases);
@@ -387,7 +391,6 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
     }
   };
 
-  const zoom = viewState.viewport?.zoom ?? 1;
   const elementsSelected = state.selection.length > 0;
   const faces = versionFaces ? versionFaces.css : liveFaces.css;
   const focusStop = focus.index === null ? null : (focus.stops[focus.index] ?? null);
@@ -395,7 +398,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
   useEffect(() => void (focusBoard && navigate(focusBoard)), [focusBoard, navigate]);
   const shownBoards = useMemo(() => (shownDoc ? readBoards(shownDoc).boards : []), [shownDoc]);
   const inShown = (id: string | null | undefined) => (id ? (shownBoards.find((b) => b.id === id) ?? null) : null);
-  const exportBoard = inShown(navigated?.doc === shownDoc ? navigated.board : null) ?? inShown(viewState.frame ?? state.currentSlide) ?? shownBoards[0] ?? null;
+  const exportBoard = inShown(navigated?.doc === shownDoc ? navigated.board : null) ?? inShown(selectedFrame ?? state.currentSlide) ?? shownBoards[0] ?? null;
   // the tab's view says what the history shows, so the header's Export (which outlives this body) exports it: the one
   // version previewed with its board, nothing while two are compared, else the live design
   const target = preview?.target ?? null;
@@ -437,25 +440,29 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
           ↷
         </button>
         <span className="deck-toolbar-divider" aria-hidden />
-        <ElementBar
-          session={session}
-          slideId={active?.id ?? null}
-          canvas={activeCanvas}
-          scale={zoom}
-          readOnly={!editable}
-          onInsert={insert}
-          uploadAsset={uploadAsset}
-          onNotice={setNotice}
-          inspectorOpen={inspectorOpen}
-          onToggleInspector={() => setInspectorOpen((open) => !open)}
-        />
+        <WithZoom view={view}>
+          {(zoom) => (
+            <ElementBar
+              session={session}
+              slideId={active?.id ?? null}
+              canvas={activeCanvas}
+              scale={zoom}
+              readOnly={!editable}
+              onInsert={insert}
+              uploadAsset={uploadAsset}
+              onNotice={setNotice}
+              inspectorOpen={inspectorOpen}
+              onToggleInspector={() => setInspectorOpen((open) => !open)}
+            />
+          )}
+        </WithZoom>
         <TextStyleMenu session={session} slideId={active?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
         <DesignCommentButtons api={commentsApi} view={view} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
         <span role="status" className="deck-notice" data-deck-notice>
           {notice}
         </span>
         <span className="deck-toolbar-spacer" />
-        <ZoomControls view={view} zoom={zoom} onFitAll={fitAll} onFitSelection={fitSelection} />
+        <ZoomControls view={view} onFitAll={fitAll} onFitSelection={fitSelection} />
       </div>
       )}
       {preview?.showChanges && projected?.deck && (
@@ -492,7 +499,7 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
             session={session}
             boards={boards}
             current={active?.id ?? null}
-            frame={viewState.frame}
+            frame={selectedFrame}
             readOnly={readOnly}
             onSelect={(boardId) => {
               selectBoard(boardId);
@@ -560,8 +567,8 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
         {inspectorOpen && active && (
           <div className="design-inspector" data-design-rail="inspector" data-board-context={!elementsSelected || undefined}>
             {!elementsSelected && <BoardInspector session={session} board={active} readOnly={readOnly} />}
-            {elementsSelected && <MoveToBoard session={session} boards={boards} active={active} selection={state.selection} canvas={activeCanvas} zoom={zoom} readOnly={!editable} onMoved={onMoved} onNotice={setNotice} />}
-            {scope(<Inspector session={session} slideId={active.id} readOnly={!editable} faces={deckFaces} uploadAsset={uploadAsset} measure={(id) => measureInHost(activeCanvas, id, zoom)} />)}
+            {elementsSelected && <WithZoom view={view}>{(zoom) => <MoveToBoard session={session} boards={boards} active={active} selection={state.selection} canvas={activeCanvas} zoom={zoom} readOnly={!editable} onMoved={onMoved} onNotice={setNotice} />}</WithZoom>}
+            {scope(<Inspector session={session} slideId={active.id} readOnly={!editable} faces={deckFaces} uploadAsset={uploadAsset} measure={measureAtZoom} />)}
           </div>
         )}
           </>
@@ -574,7 +581,8 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
 }
 
 /** Zoom out, the zoom (with Fit all and Fit selection), zoom in: C's toolbar's controls over the tab's view. */
-function ZoomControls({ view, zoom, onFitAll, onFitSelection }: { view: DesignView; zoom: number; onFitAll: () => void; onFitSelection: () => void }) {
+function ZoomControls({ view, onFitAll, onFitSelection }: { view: DesignView; onFitAll: () => void; onFitSelection: () => void }) {
+  const zoom = useViewZoom(view); // M6: these controls alone re-render on a zoom
   return (
     <>
       <button type="button" className="deck-button" aria-label={C.zoomOut} title={`${C.zoomOut} (⌘−)`} disabled={zoom <= ZOOM_MIN + 1e-6} onClick={() => view.step(-1)}>

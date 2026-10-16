@@ -360,7 +360,10 @@ describe('one undo stack, and what writes nothing', () => {
     const { container, world } = mount({ doc });
     expect(board(container, 'b2').hasAttribute('data-held')).toBe(true);
     expect(board(container, 'b3').hasAttribute('data-missing')).toBe(true);
-    expect(board(container, 'b3').textContent).toContain('File not received');
+    // labelled where the board is drawn, in screen px whatever the zoom
+    const label = container.querySelector<HTMLElement>('[data-missing-label="b3"]')!;
+    expect(label.textContent).toBe('File not received');
+    expect(screenBox(label.parentElement!)).toEqual({ left: 2100, top: 0, width: 1080, height: 8192 });
     press(title(container, 'b2'), 500, 0);
     drag(world, 700, 0);
     release(world, 700, 0);
@@ -520,5 +523,65 @@ describe('a fit after the layout moved (the regate: the inspector opened under t
     fireEvent.change(screen.getByRole('combobox', { name: 'Zoom' }), { target: { value: 'fit-selection' } });
     expect(view.snapshot().room).toEqual({ w: 1000, h: 300 });
     expect(view.snapshot().viewport!.zoom).toBeCloseTo((300 - 96) / 844, 6);
+  });
+});
+
+/**
+ * An element's box on the world's screen, from the inline geometry happy-dom keeps: its own left, top, width and height
+ * plus every translation between it and the world (a scaled ancestor makes it unreadable: NaN).
+ */
+function screenBox(el: HTMLElement): { left: number; top: number; width: number; height: number } {
+  let [x, y] = [Number.parseFloat(el.style.left) || 0, Number.parseFloat(el.style.top) || 0];
+  for (let a = el.parentElement; a && !a.hasAttribute('data-design-world'); a = a.parentElement) {
+    const t = a.style.transform;
+    if (!t) continue;
+    const m = /^translate\((-?[\d.]+)px, (-?[\d.]+)px\)$/.exec(t);
+    if (!m) return { left: NaN, top: NaN, width: NaN, height: NaN };
+    x += Number(m[1]);
+    y += Number(m[2]);
+  }
+  return { left: x, top: y, width: Number.parseFloat(el.style.width), height: Number.parseFloat(el.style.height) };
+}
+
+describe('the screen chrome in register with the boards (M6: the pan a transform, titles out of the boards’ layer)', () => {
+  it('through a pan and a zoom: the layer’s transform, and every title, the frame, its handles and the active overlay over their board', () => {
+    const { container, view } = mount();
+    fireEvent.click(title(container, 'b2'));
+    for (const v of [
+      { zoom: 0.5, x: -40, y: 30 },
+      { zoom: 0.5, x: 120, y: -60 }, // a pan alone
+      { zoom: 0.25, x: 120, y: -60 }, // a zoom alone
+    ]) {
+      act(() => view.setViewport(v));
+      expect(container.querySelector<HTMLElement>('[data-design-layer]')!.style.transform).toBe(`translate(${v.x}px, ${v.y}px) scale(${v.zoom})`);
+      const at = (b: (typeof BOARDS)[number]) => ({ left: v.x + b.at.x * v.zoom, top: v.y + b.at.y * v.zoom, width: b.at.w * v.zoom });
+      for (const b of BOARDS) {
+        const t = screenBox(title(container, b.id));
+        expect({ left: t.left, top: t.top, width: t.width }, b.id).toEqual(at(b));
+      }
+      const desktop = { ...at(BOARDS[1]!), height: BOARDS[1]!.at.h * v.zoom };
+      expect(screenBox(container.querySelector<HTMLElement>('[data-active-board="b2"]')!)).toEqual(desktop);
+      expect(screenBox(container.querySelector<HTMLElement>('[data-frame-outline="b2"]')!)).toEqual(desktop);
+      expect(screenBox(container.querySelector<HTMLElement>('[data-board-handle="e"]')!.parentElement!)).toEqual(desktop);
+    }
+  });
+
+  it('a title shows its board’s size only with room for it; its name and size are always its tooltip and name', () => {
+    const { container, view } = mount();
+    const phone = title(container, 'b1');
+    expect(phone.textContent).toBe('Phone390 × 844');
+    act(() => view.setViewport({ zoom: 0.25, x: 0, y: 0 })); // 97.5 px of room
+    expect(phone.textContent).toBe('Phone');
+    expect([phone.getAttribute('title'), phone.getAttribute('aria-label')]).toEqual(['Phone, 390 × 844', 'Board Phone']);
+  });
+
+  it('the toolbar’s zoom follows the view’s zoom, and the inspector’s element box is read at the zoom of the moment', () => {
+    const { view, session } = mount();
+    act(() => view.setZoom(0.5));
+    expect(screen.getByRole('combobox', { name: 'Zoom' }).querySelector('option[value="current"]')!.textContent).toBe('50%');
+    act(() => session.select(['title']));
+    act(() => view.setZoom(2));
+    expect(screen.getByRole('combobox', { name: 'Zoom' }).querySelector('option[value="current"]')!.textContent).toBe('200%');
+    expect(screen.getByRole('complementary', { name: 'Inspector' })).toBeTruthy();
   });
 });

@@ -142,20 +142,65 @@
   color: var(--bg);
   font-size: var(--text-ui-sm);
 }
-.design-board[data-held],
-.design-board[data-missing] {
-  outline: calc(1.5px * var(--design-inv-zoom, 1)) dashed var(--danger);
-}
+/* a board whose file never arrived: its ground (its label is screen chrome, below) */
 .design-board-missing {
   position: absolute;
   inset: 0;
+  background: var(--bg-raised);
+}
+
+/* M6 (the scale gate's frame work): the live world's chrome is drawn in screen px at the zoom from the world's origin,
+   inside one wrapper the pan moves by a transform alone, and the boards' layer carries no custom property its canvases
+   would inherit, so a pan re-lays nothing and a zoom restyles no board. (The history preview's world keeps its own
+   counter-scaled titles above.) */
+.design-world-pan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.design-screen-title {
+  position: absolute;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  padding: 0 0 4px;
+  border: 0;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+  line-height: 16px;
+  white-space: nowrap;
+  transform: translateY(-100%);
+  pointer-events: auto;
+  cursor: default;
+}
+.design-screen-title:hover,
+.design-screen-title[data-active] {
+  color: var(--fg);
+}
+.design-screen-title[data-frame-selected] .design-board-title-name {
+  color: var(--accent);
+}
+.design-screen-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+.design-board-mark {
+  position: absolute;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg-raised);
+  box-sizing: border-box;
+  outline: 1.5px dashed var(--danger);
+}
+.design-board-mark-label {
   color: var(--fg-muted);
   font-family: var(--font-ui);
-  font-size: calc(var(--text-ui) * var(--design-inv-zoom, 1));
+  font-size: var(--text-ui);
 }
 
 /* screen-space chrome over the world: the active board's outline, the selected frame, its handles, the guides */

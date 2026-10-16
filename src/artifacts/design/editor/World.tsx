@@ -14,7 +14,7 @@
 // past the model's cap. A press on the empty world clears the selection and pans; so does Space-drag or the middle
 // button anywhere. The wheel pans; ⌃-wheel (a pinch) or ⌥-wheel zooms about the pointer. A held or missing board, or a
 // read-only replica, is selected and inspected but never written.
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { AssetUrl, SlideCanvas } from '../../slides/canvas';
 import type { FaceAliases } from '../../slides/canvas/faces';
 import type { Guide, Handle, Pt } from '../../slides/geometry';
@@ -36,6 +36,7 @@ import { movedFrame, resizedFrame } from './board-gestures';
 import { boardTextMarkup } from './insert';
 import { boardLabel, type BoardView } from './boards';
 import { DESIGN_COPY as C } from './copy';
+import { useViewFrame, useViewZoom } from './use-view';
 import { panBy, zoomAt, type DesignView, type Viewport } from './viewport';
 
 const DRAG_START_PX = 3; // screen px a title press moves before it is a drag (C's overlay's)
@@ -93,8 +94,23 @@ const writable = (b: BoardView | undefined, readOnly: boolean): b is BoardView &
 
 export function World(props: WorldProps) {
   const { session, view, boards, active, canvases, onCanvas, assetUrl, faces, scope, readOnly, onNotice, artifactId, importAsset, surface } = props;
-  const state = useSyncExternalStore(view.subscribe, view.snapshot);
-  const viewport = state.viewport ?? { zoom: 1, x: 0, y: 0 };
+  // M6 (the scale gate's pan and zoom frame work): the world renders on a change of zoom or of the selected frame alone;
+  // the pan is two transforms written straight from the view (below), so a pan re-renders nothing and re-lays nothing
+  const zoom = useViewZoom(view);
+  const selectedFrame = useViewFrame(view);
+  const layer = useRef<HTMLDivElement | null>(null);
+  const pan = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const apply = () => {
+      const v = view.snapshot().viewport ?? ORIGIN;
+      // the boards: the world's one transform; the screen chrome (titles, outlines, the overlay, handles, guides, drawn
+      // at the zoom from the world's origin): the pan alone, on the compositor
+      if (layer.current) layer.current.style.transform = `translate(${v.x}px, ${v.y}px) scale(${v.zoom})`;
+      if (pan.current) pan.current.style.transform = `translate(${v.x}px, ${v.y}px)`;
+    };
+    apply();
+    return view.subscribe(apply);
+  }, [view]);
   const [guides, setGuides] = useState<readonly Guide[]>([]);
   const [panning, setPanning] = useState(false);
   const [spaceHeld, setSpaceHeld] = useState(false);
@@ -389,11 +405,10 @@ export function World(props: WorldProps) {
     };
   }, [surface, session, view]);
 
-  const { zoom } = viewport;
-  const screen = (b: BoardFrame) => ({ left: viewport.x + b.x * zoom, top: viewport.y + b.y * zoom, width: b.w * zoom, height: b.h * zoom });
-  const framed = boards.find((b) => b.id === state.frame && b.frame !== null) ?? null;
+  // the screen chrome's boxes, at the zoom from the world's origin (the pan wrapper adds the pan)
+  const screen = (b: BoardFrame) => ({ left: b.x * zoom, top: b.y * zoom, width: b.w * zoom, height: b.h * zoom });
+  const framed = boards.find((b) => b.id === selectedFrame && b.frame !== null) ?? null;
   const activeEditable = active !== null && active.held === null && !active.missing && !readOnly;
-  const layerStyle = { transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${zoom})`, '--design-inv-zoom': String(1 / zoom), '--design-zoom': String(zoom) } as CSSProperties;
 
   return (
     <div
@@ -408,33 +423,24 @@ export function World(props: WorldProps) {
       data-space={spaceHeld || undefined}
     >
       <div className="design-world-ground" data-design-ground />
-      <div className="design-world-layer" data-design-layer style={layerStyle}>
+      <div ref={layer} className="design-world-layer" data-design-layer>
         {scope(
           boards.map((b) =>
-            b.frame ? (
-              <Board
-                key={b.id}
-                doc={session.doc}
-                board={b as BoardView & { frame: BoardFrame }}
-                active={b.id === active?.id}
-                frameSelected={b.id === state.frame}
-                assetUrl={assetUrl}
-                faces={faces}
-                onCanvas={onCanvas}
-                onSelect={onSelectBoard}
-              />
-            ) : null,
+            b.frame ? <Board key={b.id} doc={session.doc} board={b as BoardView & { frame: BoardFrame }} active={b.id === active?.id} frameSelected={b.id === selectedFrame} assetUrl={assetUrl} faces={faces} onCanvas={onCanvas} /> : null,
           ),
         )}
       </div>
+      <div ref={pan} className="design-world-pan" data-design-pan>
+      <Titles boards={boards} zoom={zoom} activeId={active?.id ?? null} frameId={selectedFrame} onSelect={onSelectBoard} />
+      <Marks boards={boards} zoom={zoom} />
       <div className="design-world-screen" aria-hidden>
         {active?.frame && <div className="design-active-outline" style={screen(active.frame)} />}
         {framed?.frame && <div className="design-frame-outline" data-frame-outline={framed.id} style={screen(framed.frame)} />}
         {guides.map((g, i) =>
           g.axis === 'x' ? (
-            <div key={i} className="deck-guide" data-guide={g.kind} style={{ left: viewport.x + g.at * zoom, top: viewport.y + g.from * zoom, width: 0, height: (g.to - g.from) * zoom }} />
+            <div key={i} className="deck-guide" data-guide={g.kind} style={{ left: g.at * zoom, top: g.from * zoom, width: 0, height: (g.to - g.from) * zoom }} />
           ) : (
-            <div key={i} className="deck-guide" data-guide={g.kind} style={{ left: viewport.x + g.from * zoom, top: viewport.y + g.at * zoom, width: (g.to - g.from) * zoom, height: 0 }} />
+            <div key={i} className="deck-guide" data-guide={g.kind} style={{ left: g.from * zoom, top: g.at * zoom, width: (g.to - g.from) * zoom, height: 0 }} />
           ),
         )}
       </div>
@@ -464,9 +470,72 @@ export function World(props: WorldProps) {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }
+
+const ORIGIN = { zoom: 1, x: 0, y: 0 } as const;
+/** A title's room on screen below which it shows the board's name alone (no size, no badge). */
+const TITLE_FULL_PX = 160;
+
+/**
+ * The boards' titles in screen px over the world (M6: drawn at the zoom, not counter-scaled inside the boards' layer,
+ * so a zoom restyles no board), each as wide as its board is drawn: the name truncates, and below 160 px the size and
+ * the held badge drop out; the name and size stay the button's accessible name and tooltip.
+ */
+const Titles = memo(function Titles(props: { boards: readonly BoardView[]; zoom: number; activeId: string | null; frameId: string | null; onSelect: (boardId: string) => void }) {
+  const { boards, zoom, activeId, frameId, onSelect } = props;
+  return (
+    <>
+      {boards.map((b) => {
+        if (!b.frame) return null;
+        const f = b.frame;
+        const label = boardLabel(b);
+        const full = f.w * zoom >= TITLE_FULL_PX;
+        const selected = b.id === frameId;
+        return (
+          <button
+            key={b.id}
+            type="button"
+            className="design-screen-title"
+            data-board-title={b.id}
+            data-active={b.id === activeId || undefined}
+            data-frame-selected={selected || undefined}
+            aria-label={C.boardTitle(label)}
+            title={`${label}, ${C.size(f.w, f.h)}`}
+            aria-pressed={selected}
+            style={{ left: f.x * zoom, top: f.y * zoom, width: f.w * zoom }}
+            onClick={() => onSelect(b.id)}
+          >
+            <span className="design-board-title-name">{label}</span>
+            {full && <span className="design-board-title-size">{C.size(f.w, f.h)}</span>}
+            {full && b.held && <span className="design-board-badge">{C.held}</span>}
+          </button>
+        );
+      })}
+    </>
+  );
+});
+
+/** A held or missing board's dashed outline in screen px, and a missing board's label (M6: out of the boards' layer). */
+const Marks = memo(function Marks({ boards, zoom }: { boards: readonly BoardView[]; zoom: number }) {
+  return (
+    <>
+      {boards.map((b) =>
+        b.frame && (b.held || b.missing) ? (
+          <div key={b.id} className="design-board-mark" data-board-mark={b.id} style={{ left: b.frame.x * zoom, top: b.frame.y * zoom, width: b.frame.w * zoom, height: b.frame.h * zoom }}>
+            {b.missing && (
+              <span className="design-board-mark-label" role="note" data-missing-label={b.id}>
+                {C.missing}
+              </span>
+            )}
+          </div>
+        ) : null,
+      )}
+    </>
+  );
+});
 
 /** A board's frame selected: it becomes the board C's overlay acts on, with no element selected. */
 function selectFrame(session: DeckSession, view: DesignView, boardId: string): void {
@@ -489,7 +558,7 @@ function activate(session: DeckSession, view: DesignView, boardId: string, canva
   session.select(pick(slideTree(session.doc, boardId), hits, []).selection);
 }
 
-/** One board in the world: its title (unscaled), its canvas at scale 1, and its held or missing mark. */
+/** One board in the world: its canvas at scale 1 in the boards' layer (its title and marks are screen chrome). */
 const Board = memo(function Board(props: {
   doc: DeckSession['doc'];
   board: BoardView & { frame: BoardFrame };
@@ -498,11 +567,9 @@ const Board = memo(function Board(props: {
   assetUrl: AssetUrl;
   faces: FaceAliases;
   onCanvas: (boardId: string, canvas: SlideCanvas | null) => void;
-  onSelect: (boardId: string) => void;
 }) {
-  const { doc, board, active, frameSelected, assetUrl, faces, onCanvas, onSelect } = props;
+  const { doc, board, active, frameSelected, assetUrl, faces, onCanvas } = props;
   const { id, frame } = board;
-  const label = boardLabel(board);
   const canvasOf = useCallback((canvas: SlideCanvas | null) => onCanvas(id, canvas), [onCanvas, id]);
   return (
     <div
@@ -512,27 +579,10 @@ const Board = memo(function Board(props: {
       data-frame-selected={frameSelected || undefined}
       data-held={board.held ? '' : undefined}
       data-missing={board.missing || undefined}
-      style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h, '--board-w': String(frame.w) } as CSSProperties}
+      style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
     >
-      <button
-        type="button"
-        className="design-board-title"
-        data-board-title={id}
-        aria-label={C.boardTitle(label)}
-        title={`${label}, ${C.size(frame.w, frame.h)}`}
-        aria-pressed={frameSelected}
-        onClick={() => onSelect(id)}
-      >
-        <span className="design-board-title-name">{label}</span>
-        <span className="design-board-title-size">{C.size(frame.w, frame.h)}</span>
-        {board.held && <span className="design-board-badge">{C.held}</span>}
-      </button>
       <SlideView doc={doc} slideId={id} token={board.token} assetUrl={assetUrl} scale={1} size={{ w: frame.w, h: frame.h }} onCanvas={canvasOf} faces={faces} className="design-board-canvas" />
-      {board.missing && (
-        <div className="design-board-missing" role="note">
-          {C.missing}
-        </div>
-      )}
+      {board.missing && <div className="design-board-missing" />}
     </div>
   );
 });
