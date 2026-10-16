@@ -44,6 +44,7 @@ const ONE_SCHEMA = [
 const mawsSchemaPlugin = { rules: { 'one-schema': builtinRules.get('no-restricted-syntax') } };
 // P3-B end
 const DESK_WEB = 'apps/desk-web/src/ runs in a browser (the DC5 plan): no Node or Electron module.'; // DC5
+const DESK_WEB_NO_PRELOAD = 'apps/desk-web/src/ runs in a browser with no MAWS preload: `window.maws` does not exist there (the desk composite, DC6).'; // DC6
 const DESK_PROTOCOL = 'apps/desk-hub/src/protocol/ is runtime-neutral (the DC3 plan, Constraints): WebCrypto and plain TypeScript, no Workers, Node, or DOM API.'; // DC3
 
 module.exports = defineConfig(
@@ -182,4 +183,17 @@ module.exports = defineConfig(
   },
   { files: ['apps/desk-web/{test,e2e}/**/*.ts', 'apps/desk-web/*.config.ts', 'apps/desk-web/scripts/**/*.mjs'], languageOptions: { globals: globals.node } },
   // DC5 end
+  // DC6 start: the browser has no MAWS preload, so nothing under apps/desk-web/src/ reaches for its bridge; MAWS's own
+  // sources (src/) are outside this glob and keep theirs.
+  {
+    files: ['apps/desk-web/src/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-properties': [
+        'error',
+        { object: 'window', property: 'maws', message: DESK_WEB_NO_PRELOAD },
+        { object: 'globalThis', property: 'maws', message: DESK_WEB_NO_PRELOAD },
+      ],
+    },
+  },
+  // DC6 end
 );
