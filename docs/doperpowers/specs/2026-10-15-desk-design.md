@@ -1508,10 +1508,14 @@ All cases use the org key `AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8` (the 32 
 
 **The stream.** The first frame is `welcome {org, machine, generation, heartbeat_ms}`. `generation` counts the
 machine's streams (1, 2, …, kept in the object's storage): a new stream ends the previous one, and every later frame
-and POST belongs to the newest. The object writes `hb {at}` every `heartbeat_ms` (15 000), and the daemon answers each
+and POST belongs to the newest. The object writes `hb {at}` every `heartbeat_ms` (configuration: 15 000 deployed; the machine's lease is three
+periods), and the daemon answers each
 with `hb-ack {generation, at}` (the stream's generation and the answered heartbeat's `at`). The daemon treats a stream
 silent for three periods as dead and reconnects with backoff, and a refused POST likewise (below). A client closing the stream reaches the object at once
-(the request's abort, compatibility flag `enable_request_signal`).
+(the request's abort, compatibility flag `enable_request_signal`) when deployed and on the suites' runtime; under the
+local command (`wrangler dev`, whose own proxy closes its hop gracefully, and workerd notices a graceful close only
+when a later write fails) it reaches the object within one heartbeat, which the local command sets short (2 000 by
+default) [2026-10-15, DC3, from DC5's real-hub suite]. A half-open client is bounded by the lease in either runtime.
 
 **Frames down** (`DownFrame`):
 
@@ -3467,6 +3471,18 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The heartbeat is configuration and a close's latency is stated per runtime (DX2). DC5's real-hub
+  suite saw a dropped machine go offline only after about 30 s against the local command. DC3 measured why:
+  workerd notices a peer's graceful close (FIN) on a streaming response only when a later write fails, and an
+  abrupt one (RST) at once; `wrangler dev` puts its own proxy between the Access stand-in and the hub and closes
+  its hop gracefully. Nothing in the hub's chain lost the close: once the abort fired, the project, the browsers'
+  offline view, the `uncertain` RPC and the grid summary followed within 25 ms. Deployed, the edge cancels into
+  workerd directly (M1's live probe saw the abort at the client's instant). So: the stand-in proxy resets its
+  upstream when its client leaves, `HEARTBEAT_MS` is a variable (unset deployed, 15 s with a 45 s lease; 2 s
+  under the local command), and a regression test pins drop → offline → `uncertain` → grid within a stated
+  bound. Rejected: running the local command on Miniflare directly (immediate close, but it loses wrangler's
+  asset watching and reload); a hub-side workaround for a close only the local hop hides. Flags DC3, DC5.
+  Date/Author: 2026-10-15, design session (DC3, DC5's Task 6).
 - Decision: DC3's G6 is closed and §8 unknown 3 resolved without a
   per-session object (DC3's M5): the session plane stays on one object per
   project, its threshold 1,900 relayed messages/s (chunks/s × subscribed
