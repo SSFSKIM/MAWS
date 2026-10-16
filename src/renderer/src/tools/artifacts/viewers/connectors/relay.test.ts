@@ -11,7 +11,7 @@ const RESULT: ConnectorCallOutcome = { ok: true, result: { rows: [1] }, fetchedA
 
 function fakeSurface(overrides: Partial<ConnectorSurface> = {}) {
   const surface: ConnectorSurface = {
-    declareTools: vi.fn(async (tools) => ({ ok: true, declared: [...tools] }) as const),
+    declareTools: vi.fn(async (tools) => ({ ok: true as const, declared: [...tools] })),
     callTool: vi.fn(async () => RESULT),
     watchTool: vi.fn(async () => ({ ok: true, watchId: 'w1', intervalMs: 60_000 }) as const),
     unwatchTool: vi.fn(async () => true),
@@ -30,7 +30,7 @@ function fakePort() {
     postMessage: (data) => void posted.push(data),
     close: vi.fn(),
     send(data) {
-      this.onmessage?.({ data });
+      this.onmessage?.({ data } as MessageEvent);
     },
   };
   return { port, posted };

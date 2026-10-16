@@ -22,7 +22,7 @@ import {
 
 // The app's end of a page's port (a MessagePort).
 export interface PagePort {
-  onmessage: ((event: { data: unknown }) => void) | null;
+  onmessage: ((event: MessageEvent) => void) | null;
   postMessage(message: unknown): void;
   close(): void;
 }
@@ -50,7 +50,7 @@ export function relayPage(port: PagePort, surface: ConnectorSurface, report: Rel
   const post = (message: unknown) => {
     if (live) port.postMessage(message);
   };
-  const answerWith = <T>(id: number, work: Promise<T>, failed: T) =>
+  const answerWith = (id: number, work: Promise<unknown>, failed: unknown) =>
     void work.then(
       (answer) => post({ id, answer }),
       () => post({ id, answer: failed }),

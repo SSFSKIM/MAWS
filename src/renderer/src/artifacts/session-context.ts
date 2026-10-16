@@ -14,6 +14,7 @@
 // session the earlier one created (started again while it is still an intent, resumed once it is a record). A trust or
 // relay card the attempt meets docks in that session's composer, unanswered: nothing here accepts trust or sends a
 // message, so no model turn runs.
+import { useMemo } from 'react';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -21,6 +22,7 @@ import type { StartOutcome } from '@shared/sessions/setup';
 import { startRefusal } from '../gateway/session-start';
 import { ipc } from '../ipc/client';
 import { acquireSession, acquisitionWords, cardWords, dockFor } from '../sessions/acquire';
+import { useLibrarySpaces } from '../library/store';
 import { createUnstartedSession } from '../sessions/connect';
 import { useSetup } from '../sessions/store';
 import { useSessions } from '../stores/sessions';
@@ -99,4 +101,27 @@ export async function startArtifactSession(context: ArtifactSessionContext, prev
   const created = await createUnstartedSession(context.projectId, client, { kind: 'directory', path: context.path });
   if (created === null) return { status: 'refused', appSessionId: null, words: COULD_NOT_CREATE };
   return start(created, client);
+}
+
+// The context of an artifact as the window knows it now (its index records, projects and the library's Spaces).
+export function useArtifactSessionContext(artifact: ArtifactContextOf | null): ArtifactSessionContext {
+  const spaces = useLibrarySpaces().value;
+  const records = useSessions((s) => s.records);
+  const projects = useSessions((s) => s.projects);
+  return useMemo(() => (artifact === null ? { kind: 'none' } : artifactSessionContext(artifact, { records, projects, spaces: spaces ?? [] })), [artifact, records, projects, spaces]);
+}
+
+// Calls `run` once the session's process is ready (at once if it is); answers what stops waiting.
+export function whenSessionReady(appSessionId: AppSessionId, run: () => void): () => void {
+  const ready = (s: { engine: ReadonlyMap<AppSessionId, { process: string }> }) => s.engine.get(appSessionId)?.process === 'ready';
+  if (ready(useSessions.getState())) {
+    run();
+    return () => {};
+  }
+  const stop = useSessions.subscribe((s) => {
+    if (!ready(s)) return;
+    stop();
+    run();
+  });
+  return stop;
 }
