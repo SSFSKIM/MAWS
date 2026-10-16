@@ -170,6 +170,32 @@ describe('two unlocks with no Lock between them', () => {
     expect(await inner.load('org')).toBeNull(); // B's deletion ran after A's save
   });
 
+  it('a newer unlock abandoned while the older one saved leaves the device holding what the tab shows', async () => {
+    // Locked; A asks to keep the key on the device; B begins while A's save is in the store, and its prompt is cancelled.
+    const { store, inner, open } = gatedStore('save');
+    useKeyHolder.setState({ state: 'locked' });
+    const a = beginUnlock('org', store).finish(vector(), 'device');
+    await new Promise((resolve) => setTimeout(resolve, 0)); // A's save is in the store
+    beginUnlock('org', store); // never finishes
+    open();
+    expect(await a).toBe(false);
+    expect(useKeyHolder.getState()).toMatchObject({ state: 'locked', key: null, kept: null, forgetError: null });
+    expect(await inner.load('org')).toBeNull(); // a reload stays locked, as the tab shows
+  });
+
+  it('… and puts back the key the device kept before, when the tab still shows it kept there', async () => {
+    const { store, inner, open } = gatedStore('save');
+    await unlock('org', vector(), 'device', inner); // the tab shows this key, kept on the device
+    const kept = await inner.load('org');
+    const a = beginUnlock('org', store).finish(vector().reverse(), 'device');
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    beginUnlock('org', store); // abandoned
+    open();
+    expect(await a).toBe(false);
+    expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', kept: 'device' });
+    expect(await inner.load('org')).toBe(kept); // the key the tab shows, as before A
+  });
+
   it("the older one's write, not yet run when the newer one began, is skipped", async () => {
     const inner = memoryKeyStore();
     const held = deferred();

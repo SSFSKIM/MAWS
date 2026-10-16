@@ -9,7 +9,9 @@
 // if its token is still the newest when it finishes; a restore of the device's key, which writes nothing, publishes only
 // if no operation began while it read. Every write of the device key runs on one serial chain, and a step whose token
 // was superseded by the time it runs is skipped — except a Lock's own deletion, which always runs — so the last write to
-// run is the newest writing operation's. The chain's order is the order IndexedDB applies them in.
+// run is the newest writing operation's. An unlock's step that was superseded while it wrote puts back what the device
+// kept before it, so a newer operation that never finishes (a cancelled prompt) leaves the device as the tab shows it.
+// The chain's order is the order IndexedDB applies them in.
 import { create } from 'zustand';
 import type { OrgKey } from 'desk-hub/protocol';
 import { holdKeyBytes, keyFingerprint } from './derive';
@@ -85,17 +87,30 @@ export function beginUnlock(org: string, store: KeyStore = idbKeyStore()): Unloc
         return false;
       }
       const key = opened instanceof Uint8Array ? await holdKeyBytes(opened) : opened;
-      if (!newest()) return false;
-      await serially(async () => {
-        if (!newest()) return;
-        if (keep === 'device') await store.save(org, key.hmac);
-        else await store.forget(org);
-        storedNothingStale(); // the stored key is now the one held, or none
-      });
       const fingerprint = await keyFingerprint(key);
       if (!newest()) return false;
-      useKeyHolder.setState({ state: 'unlocked', key, kept: keep, fingerprint });
-      return true;
+      let published = false;
+      await serially(async () => {
+        if (!newest()) return;
+        // What the device kept before this write, so the write can be undone should this unlock no longer be the newest
+        // operation once it lands.
+        const before = await store.load(org).catch(() => null);
+        if (keep === 'device') await store.save(org, key.hmac);
+        else await store.forget(org);
+        if (!newest()) {
+          // Superseded while it wrote, by an operation that may never finish (an unlock whose prompt was cancelled): the
+          // device goes back to what it kept, which is what the tab still shows. A newer write, if one comes, runs after.
+          if (before) await store.save(org, before);
+          else await store.forget(org);
+          return;
+        }
+        storedNothingStale(); // the stored key is now the one held, or none
+        // Published in the same step as the write it stands on, with nothing awaited between: no operation begins between
+        // the two.
+        useKeyHolder.setState({ state: 'unlocked', key, kept: keep, fingerprint });
+        published = true;
+      });
+      return published;
     },
   };
 }
