@@ -7,8 +7,8 @@
 // The machine here is a DX7/DX2 test client (test/local/machine.ts); the grid's counts and M3's proofs against DC3's
 // session plane and fake machine are session-plane.spec.ts.
 //
-// The local hub's state outlives a run (apps/desk-hub/.wrangler), and an org has one key ever: first setup is proved on
-// a hub whose org has none. It adds the suite's passphrase, which a later run unlocks with instead.
+// Each run's local hub starts from a fresh state (test/local/hub.ts), so first setup is proved on an org with no key; an
+// org has one key ever, and the setup adds the suite's passphrase, which a hub whose state was kept would unlock with.
 //
 // One browser page for the suite: its virtual authenticator holds the org's passkey from the setup on.
 import { randomUUID } from 'node:crypto';
@@ -118,7 +118,7 @@ test('first setup: the passkey locks a random key, a passphrase is added, and a 
   // The other browser's setup came second: one org, one key.
   await newPassphrase(keyDialog(late), 'another org key entirely', 'Set up');
   await expect(keyDialog(late).getByTestId('key-error')).toHaveText('A key was already set up for this org elsewhere. Unlock with one of its methods.', { timeout: 30_000 });
-  await expect(keyDialog(late).getByRole('form', { name: 'Passphrase' })).toBeVisible();
+  await expect(keyDialog(late).getByRole('form', { name: 'Passphrase', exact: true })).toBeVisible();
   expect((await orgKeys()).keys).toHaveLength(2);
   await late.context().close();
 });
@@ -164,7 +164,7 @@ test('the code the browser builds, confirmed by opening the key once more, enrol
   if (setUpHere) {
     await dialog.getByRole('button', { name: 'Confirm with passkey' }).click();
   } else {
-    const confirm = dialog.getByRole('form', { name: 'Passphrase' });
+    const confirm = dialog.getByRole('form', { name: 'Passphrase', exact: true });
     await confirm.getByLabel(/passphrase/).fill(SUITE_PASSPHRASE);
     await confirm.getByRole('button', { name: 'Confirm', exact: true }).click();
   }
@@ -265,13 +265,15 @@ test('a method is removed with the held key, and a browser holding another key i
   await dialog.getByRole('button', { name: 'Add a method' }).click();
   const add = dialog.getByTestId('add-method');
   await newPassphrase(add, 'a spare passphrase to remove', 'Add');
-  const confirm = add.getByRole('form', { name: 'Passphrase' });
+  const confirm = add.getByRole('form', { name: 'Passphrase', exact: true });
   await confirm.getByLabel(/passphrase/).fill(SUITE_PASSPHRASE);
   await confirm.getByRole('button', { name: 'Confirm', exact: true }).click();
   await expect(add).toHaveCount(0, { timeout: 60_000 });
   const spare = (await orgKeys()).keys.find((k) => !before.includes(k.id))!;
-  await dialog.getByRole('button', { name: `Remove ${spare.label}` }).click();
-  await dialog.getByRole('button', { name: 'Remove', exact: true }).click();
+  // By its id: two methods added in one minute share a generated label.
+  const row = dialog.locator(`[data-key="${spare.id}"]`);
+  await row.getByRole('button', { name: `Remove ${spare.label}` }).click();
+  await row.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect.poll(async () => (await orgKeys()).keys.map((k) => k.id)).toEqual(before);
   await page.keyboard.press('Escape');
 
@@ -282,7 +284,7 @@ test('a method is removed with the held key, and a browser holding another key i
   const theirs = await openKeyDialog(stranger);
   await expect(theirs.getByTestId('other-key')).toContainText("This browser holds another key than the org's");
   const target = (await orgKeys()).keys[0];
-  await theirs.getByRole('button', { name: `Remove ${target.label}` }).click();
+  await theirs.locator(`[data-key="${target.id}"]`).getByRole('button', { name: `Remove ${target.label}` }).click();
   await theirs.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect(theirs.getByTestId('key-error')).toHaveText("This browser's key isn't the org's, so the hub refused the change. Lock it, and unlock with one of the org's methods.");
   expect((await orgKeys()).keys.map((k) => k.id)).toEqual(before);

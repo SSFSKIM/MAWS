@@ -31,13 +31,15 @@ export class Link {
     readonly credentials: Credentials,
     private readonly onFrame: (frame: DownFrame) => void,
     private readonly onClose: () => void,
+    /** A POST the hub refused, the hb-acks' included (a write's refusal its caller sees too). */
+    private readonly onRefused: (error: LinkError) => void = () => {},
   ) {}
 
   get isOpen(): boolean {
     return this.open;
   }
 
-  /** Opens the stream and resolves with its `welcome`. */
+  /** Opens the stream and resolves with its `welcome`; rejects when the stream ends before one. */
   async connect(): Promise<Extract<DownFrame, { t: 'welcome' }>> {
     const response = await fetch(`${this.hub}/machine/stream`, { headers: credentialHeaders(this.credentials) });
     if (response.status !== 200) throw new LinkError(`the stream was refused: ${response.status}`, response.status, await response.text());
@@ -46,12 +48,17 @@ export class Link {
     this.parts = new PartAssembler();
     this.open = true;
     let welcomed!: (frame: Extract<DownFrame, { t: 'welcome' }>) => void;
-    const welcome = new Promise<Extract<DownFrame, { t: 'welcome' }>>((resolve) => (welcomed = resolve));
+    let ended!: (error: Error) => void;
+    let hasWelcome = false;
+    const welcome = new Promise<Extract<DownFrame, { t: 'welcome' }>>((resolve, reject) => ((welcomed = resolve), (ended = reject)));
     void this.pump(reader, (frame) => {
-      if (frame.t === 'welcome') {
+      if (frame.t === 'welcome' && !hasWelcome) {
+        hasWelcome = true;
         this.generation = frame.generation;
         welcomed(frame);
       }
+    }).then(() => {
+      if (!hasWelcome) ended(new Error('the stream ended before its welcome'));
     });
     return welcome;
   }
@@ -77,7 +84,7 @@ export class Link {
             frame = whole as DownFrame;
           }
           first(frame);
-          if (frame.t === 'hb' && this.answerHeartbeats) void this.post([{ t: 'hb-ack', generation: this.generation, at: frame.at }]).catch(() => {});
+          if (frame.t === 'hb' && this.answerHeartbeats) void this.post([{ t: 'hb-ack', generation: this.generation, at: frame.at }]).catch((error: unknown) => error instanceof LinkError && this.onRefused(error));
           this.onFrame(frame);
         }
       }

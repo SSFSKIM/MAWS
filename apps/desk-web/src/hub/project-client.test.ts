@@ -102,6 +102,28 @@ describe('the log', () => {
     await until(() => got.length >= 3);
     expect(got.map((e) => e.offset)).toEqual([1, 2, 3]);
   });
+
+  it('pages a backlog: each `more` resumed from its offset, every event once and in order, caught up only at the end', async () => {
+    double.pageBytes = 2000; // a few events a page
+    for (let i = 1; i <= 40; i++) await double.append(PROJECT, say(`event ${i}`));
+    // Stored between the second and third pages: a later page carries it, once.
+    let pages = 0;
+    double.beforePage = async () => {
+      if (++pages === 3) await double.append(PROJECT, say('stored mid-backlog'));
+    };
+    const { got, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    expect(got.length).toBe(41); // caught up only once every page was in
+    await double.append(PROJECT, say('live'));
+    await until(() => got.length === 42);
+    expect(got.map((e) => e.offset)).toEqual(Array.from({ length: 42 }, (_, i) => i + 1));
+    expect(got[40].event.text).toBe('stored mid-backlog');
+    expect(caughtUp).toEqual([41]);
+    const resumes = double.resumes(PROJECT);
+    expect(resumes.length).toBeGreaterThan(3);
+    expect(resumes[0]).toBe(0);
+    for (let i = 1; i < resumes.length; i++) expect(resumes[i]).toBeGreaterThan(resumes[i - 1]); // each from the page's last offset
+  });
 });
 
 describe('what goes up', () => {
@@ -143,6 +165,52 @@ describe('what goes up', () => {
     await until(() => caughtUp.length === 2);
     await new Promise((r) => setTimeout(r, 50));
     expect(double.up.filter((u) => u.frame.t === 'human')).toHaveLength(1);
+  });
+
+  const rpcTo = (nonce = newNonce()) => ({ rpc: 'interrupt' as const, project: PROJECT, machine: 'mini', member: DOUBLE_MEMBER.id, created: new Date().toISOString(), nonce, args: { session: 's' }, mac: 'x' });
+
+  /** Drops the socket and holds the client off until `release()`. */
+  async function disconnect(statuses: ConnectionStatus[]) {
+    double.admit = 'not-a-member';
+    double.dropConnections();
+    await until(() => statuses.at(-1) === 'connecting');
+    return { release: () => (double.admit = 'member') };
+  }
+
+  it('refuses an RPC first issued while the socket is not welcomed, and never sends it after the reconnect', async () => {
+    const { c, caughtUp, statuses } = client();
+    await until(() => caughtUp.length === 1);
+    const { release } = await disconnect(statuses);
+    // The hub queues nothing for an absent party: an Interrupt held until a later welcome could stop a later turn.
+    expect(c.sendRpc(rpcTo())).toBe(false);
+    release();
+    await until(() => caughtUp.length === 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(double.up.filter((u) => u.frame.t === 'rpc')).toHaveLength(0);
+  });
+
+  it('refuses an RPC the socket would not take though the welcome still stands (a connection already closing)', async () => {
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    // The connection is closing; its close callback, which ends the welcome, has not run yet.
+    (c as unknown as { socket: { ws: WebSocket } }).socket.ws.close();
+    expect(c.sendRpc(rpcTo())).toBe(false);
+    await until(() => caughtUp.length === 2);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(double.up.filter((u) => u.frame.t === 'rpc')).toHaveLength(0);
+  });
+
+  it('holds a retry of an RPC it already sent while disconnected, and sends it on the next welcome', async () => {
+    const { c, caughtUp, statuses } = client();
+    await until(() => caughtUp.length === 1);
+    const rpc = rpcTo();
+    expect(c.sendRpc(rpc)).toBe(true);
+    await until(() => double.up.filter((u) => u.frame.t === 'rpc').length === 1);
+    double.answerRpc(PROJECT, rpc.nonce, 'uncertain');
+    const { release } = await disconnect(statuses);
+    c.resendRpc(rpc); // the uncertain one's Retry: the same nonce, already transmitted
+    release();
+    await until(() => double.up.filter((u) => u.frame.t === 'rpc').length === 2);
   });
 
   it('keeps an RPC through `forwarded` and `uncertain`, sending it again after each reconnect, until done or failed', async () => {
@@ -362,6 +430,21 @@ describe('the session plane', () => {
     expect(offline.log).toEqual(['end:machine-offline']);
     await new Promise((r) => setTimeout(r, 100));
     expect(double.up.filter((u) => u.frame.t === 'subscribe')).toHaveLength(34);
+  });
+
+  it('takes a replacement on the same socket once the hub ended one of its 32 subscriptions', async () => {
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    for (let i = 0; i < 32; i++) c.subscribe({ machine: MACHINE, session: SESSION, agentId: `a${i}` }, recorder().listener);
+    await until(() => double.subscriptions(PROJECT).length === 32);
+    double.sendSub(PROJECT, double.subscriptions(PROJECT)[0].sub, 'end', { reason: 'session-ended' });
+    const replacement = recorder();
+    c.subscribe({ machine: MACHINE, session: SESSION, agentId: 'a32' }, replacement.listener);
+    await until(() => double.subscriptions(PROJECT).some((s) => s.agentId === 'a32'));
+    const { sub } = double.subscriptions(PROJECT).find((s) => s.agentId === 'a32')!;
+    double.sendSub(PROJECT, sub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: null, bridge: true }, streaming: [] });
+    await until(() => replacement.log.length === 1);
+    expect(replacement.log).toEqual(['snapshot']);
   });
 
   it('subscribes again after a discontinuity at n 0 only after a backoff, so a bridge still starting cannot loop it', async () => {

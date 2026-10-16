@@ -7,7 +7,7 @@ import type { RequestRecord, RpcEntry } from '../project/conversation';
 import { cardState, isAsyncQuestion, isQuestion } from './card-state';
 
 const raised: Raised = { request: 'toolu_1', session: 's', tool: 'Bash', input: { command: 'pnpm e2e' }, mac: { nonce: 'n', value: 'v' } };
-const record = (over: Partial<RequestRecord> = {}): RequestRecord => ({ request: 'toolu_1', machine: 'mini', raised, at: 0, pending: true, terminalOnly: false, settled: null, ...over });
+const record = (over: Partial<RequestRecord> = {}): RequestRecord => ({ key: 'k1', request: 'toolu_1', machine: 'mini', raised, at: 0, pending: true, terminalOnly: false, settled: null, ...over });
 const rpc = (state: RpcEntry['state'], outcome?: RpcEntry['outcome']): RpcEntry => ({ nonce: 'r', rpc: {} as RpcEntry['rpc'], state, outcome });
 const settled = (winner: Settled['winner'], outcome: Settled['outcome'], by: string): Settled => ({ request: 'toolu_1', winner, outcome, by, mac: { nonce: 'n', value: 'v' } });
 const can = { can: true, reason: null };
@@ -54,6 +54,31 @@ describe('cardState', () => {
   it('is shown, not answerable, while the machine is offline; closed once it left the set unsettled', () => {
     expect(cardState(record(), null, { can: false, reason: 'mini is offline: shown, not answerable' }, false)).toEqual({ kind: 'offline' });
     expect(cardState(record({ pending: false }), null, can)).toEqual({ kind: 'closed' });
+  });
+
+  it('keeps an uncertain decision uncertain, with its retry, when the request left the pending set unsettled', () => {
+    // A daemon's republished set can drop a request with no settlement: that says nothing of whether the decision ran.
+    expect(cardState(record({ pending: false }), rpc('uncertain'), can)).toEqual({ kind: 'uncertain', offline: false });
+  });
+
+  it('follows its Retry to the end once the request left the set unsettled: in flight, then its result; never a new decision', () => {
+    const gone = record({ pending: false });
+    const states = (['uncertain', 'sending', 'forwarded', 'done'] as const).map((s) => cardState(gone, rpc(s, s === 'done' ? { state: 'done', result: {} } : undefined), can).kind);
+    expect(states).toEqual(['uncertain', 'sending', 'sending', 'sent']);
+    // A decision that failed on a request no longer waiting offers no other: the request is gone.
+    expect(cardState(gone, rpc('failed', { state: 'failed', error: { code: 'not-pending', message: '' } }), can)).toEqual({ kind: 'closed' });
+  });
+});
+
+describe('while the project socket is not connected', () => {
+  it('is shown, not answerable; an uncertain decision keeps its Retry', () => {
+    const off = { can: false, reason: 'not connected to the hub' };
+    expect(cardState(record(), null, off, true, false)).toEqual({ kind: 'disconnected' });
+    expect(cardState(record(), rpc('uncertain'), off, true, false)).toEqual({ kind: 'uncertain', offline: false });
+  });
+
+  it('draws a decision refused in the browser for want of a connection as failed, so another can follow', () => {
+    expect(cardState(record(), rpc('not-connected'), can)).toEqual({ kind: 'failed', code: 'not-connected', message: 'not connected to the hub: nothing was sent' });
   });
 });
 

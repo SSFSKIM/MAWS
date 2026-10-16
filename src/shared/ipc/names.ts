@@ -50,6 +50,7 @@ import * as spaces from './names/spaces';
 import * as library from './names/library';
 // P3-L end
 import * as designSystems from './names/design-systems'; // P3-D (the P3 spec's Decision Log 61)
+import * as presentations from './names/presentations'; // P3-C M6
 
 export const NAMESPACES = [
   'session', 'engine', 'fs', 'git', 'pty', 'layout', 'attention', 'settings',
@@ -82,6 +83,7 @@ export const NAMESPACES = [
   'artifacts', 'spaces', // P3-A M4
   'library', // P3-L M1
   'designSystems', // P3-D (Decision Log 61)
+  'presentations', // P3-C M6
 ] as const;
 export type Namespace = (typeof NAMESPACES)[number];
 
@@ -101,6 +103,7 @@ export const NAMES = {
   artifacts, spaces, // P3-A M4
   library, // P3-L M1
   designSystems, // P3-D (Decision Log 61)
+  presentations, // P3-C M6
 } as const satisfies { [N in Namespace]: { commands: readonly `${N}.${string}`[]; events: readonly `${N}.${string}`[] } };
 
 type Names = typeof NAMES;

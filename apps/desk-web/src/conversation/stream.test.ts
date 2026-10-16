@@ -4,11 +4,15 @@
 // where they were first seen; an async question's request is its `question` event's.
 import { describe, expect, it } from 'vitest';
 import type { LogEvent } from 'desk-hub/protocol';
-import { buildStream, placedRequest, type StreamItem } from './stream';
+import { requestKey } from '../project/conversation';
+import { buildStream, placedRequest, type PlacedRequest, type StreamItem } from './stream';
 
 const S1 = '67646a1b-2f5e-4c1d-8a3b-9c0d1e2f3a4b'; // maws-45 @mini
 const S2 = '9b2e4c6d-1a3f-4e5b-8c7d-0f1e2d3c4b5a'; // maws-fe @SK.local
 const M = '4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c';
+const MACHINE: Record<string, string> = { [S1]: 'mini', [S2]: 'SK.local' };
+/** A request as the stream places it, keyed by its session's machine, its session, and its id. */
+const placed = (request: string, session: string, at: number, more: Partial<PlacedRequest> = {}): PlacedRequest => ({ key: requestKey({ machine: MACHINE[session], session, request }), request, session, at, ...more });
 let offset = 0;
 const ev = (writer: string, kind: string, fields: Record<string, unknown>) => ({
   offset: ++offset,
@@ -58,11 +62,32 @@ describe('the group chat', () => {
 
   it('places a pending request after the log it was first seen behind, and joins an async question to its event', () => {
     const items = buildStream({ kind: 'group' }, log(), aliases, [
-      { request: 'toolu_9', session: S2, at: 2 },
-      { request: 'toolu_1', session: S1, at: 7 },
-      { request: 'toolu_late', session: S1, at: 99 },
+      placed('toolu_9', S2, 2),
+      placed('toolu_1', S1, 7),
+      placed('toolu_late', S1, 99),
     ]);
     expect(shape(items)).toEqual(['system:1', 'message:2', 'request:toolu_9', 'agents:3,4,5', 'human:6', 'question:7', 'agents:8', 'system:10', 'request:toolu_late']);
+  });
+
+  it("joins a question event only to its own session's request: another session's request under the same id stays its own card", () => {
+    const items = buildStream({ kind: 'group' }, log(), aliases, [placed('toolu_1', S1, 2), placed('toolu_1', S2, 2)]);
+    expect(shape(items)).toEqual(['system:1', 'message:2', 'request:toolu_1', 'agents:3,4,5', 'human:6', 'question:7', 'agents:8', 'system:10']);
+    expect(items.find((i) => i.kind === 'request')).toMatchObject({ ref: requestKey({ machine: 'SK.local', session: S2, request: 'toolu_1' }) });
+    expect(items.find((i) => i.kind === 'question')).toMatchObject({ ref: requestKey({ machine: 'mini', session: S1, request: 'toolu_1' }) });
+  });
+
+  it("joins an answer only to its own session's question when two sessions asked under the same id", () => {
+    offset = 0;
+    const entries = [
+      ev(`mini/${S1}`, 'question', { from: 'maws-45', to: 'host', text: 'A asks', choices: [], src: 'request-1' }), // 1
+      ev(`SK.local/${S2}`, 'question', { from: 'maws-fe', to: 'host', text: 'B asks', choices: [], src: 'request-1' }), // 2
+      ev(`SK.local/${S2}`, 'answered', { from: 'maws-fe', src: 'request-1', text: 'Answer to B' }), // 3
+    ];
+    const questions = buildStream({ kind: 'group' }, entries, aliases, []).filter((i) => i.kind === 'question');
+    expect(questions.map((q) => [q.text, q.answered?.text ?? null])).toEqual([
+      ['A asks', null],
+      ['B asks', 'Answer to B'],
+    ]);
   });
 });
 
@@ -100,7 +125,7 @@ describe('status and state', () => {
 
 describe('a direct channel', () => {
   it("holds the session's exchange with the human and its own lifecycle, the working record folded before each of its messages", () => {
-    const items = buildStream({ kind: 'session', session: S1 }, log(), aliases, [{ request: 'toolu_2', session: S1, at: 9 }, { request: 'toolu_x', session: S2, at: 9 }]);
+    const items = buildStream({ kind: 'session', session: S1 }, log(), aliases, [placed('toolu_2', S1, 9), placed('toolu_x', S2, 9)]);
     expect(shape(items)).toEqual(['system:1', 'work:2', 'message:2', 'agents:3,4', 'human:6', 'work:7', 'question:7', 'agents:8', 'request:toolu_2', 'system:10']);
     expect(items.find((i) => i.kind === 'question')).toMatchObject({ answered: { text: 'user_id' } });
     // Each fold bounds the working record by the `src` of the session's exchange items around it (null for an open end).
@@ -117,7 +142,7 @@ describe('a direct channel', () => {
   });
 
   it('bounds the working record at a native question, which is a request with no question event, by its call id', () => {
-    const items = buildStream({ kind: 'session', session: S1 }, log().slice(0, 2), aliases, [{ request: 'toolu_native', session: S1, at: 2, question: true }], { live: true });
+    const items = buildStream({ kind: 'session', session: S1 }, log().slice(0, 2), aliases, [placed('toolu_native', S1, 2, { question: true })], { live: true });
     expect(shape(items)).toEqual(['system:1', 'work:2', 'message:2', 'work:2', 'request:toolu_native', 'work:9007199254740991']);
     expect(items.filter((i) => i.kind === 'work').map((i) => (i as { range: unknown }).range)).toEqual([
       { from: null, to: 'r1#0' },
@@ -133,21 +158,21 @@ describe('a direct channel', () => {
         .filter((i) => i.kind === 'work')
         .map((i) => (i as { range: unknown }).range);
     // The ask mod's blocking question: raised under the engine dialog's id, its transcript call the outer one.
-    expect(bounds({ request: 'toolu_plugin_q', raised: raised('toolu_plugin_q', 'toolu_01outer'), at: 2 })).toEqual([
+    expect(bounds({ key: 'k', request: 'toolu_plugin_q', raised: raised('toolu_plugin_q', 'toolu_01outer'), at: 2 })).toEqual([
       { from: null, to: 'r1#0' },
       { from: 'r1#0', to: 'toolu_01outer' },
       { from: 'toolu_01outer', to: null },
     ]);
     // A native question names its own call.
-    expect(bounds({ request: 'toolu_native', raised: raised('toolu_native'), at: 2 })[1]).toEqual({ from: 'r1#0', to: 'toolu_native' });
+    expect(bounds({ key: 'k', request: 'toolu_native', raised: raised('toolu_native'), at: 2 })[1]).toEqual({ from: 'r1#0', to: 'toolu_native' });
     // Decisions still go to `request`: the placed request keeps it.
-    expect(placedRequest({ request: 'toolu_plugin_q', raised: raised('toolu_plugin_q', 'toolu_01outer'), at: 2 })).toMatchObject({ request: 'toolu_plugin_q', call: 'toolu_01outer', question: true });
+    expect(placedRequest({ key: 'k', request: 'toolu_plugin_q', raised: raised('toolu_plugin_q', 'toolu_01outer'), at: 2 })).toMatchObject({ request: 'toolu_plugin_q', call: 'toolu_01outer', question: true });
   });
 
   it('makes one bound of a question that is pending and in the log, and none of a permission prompt', () => {
     const items = buildStream({ kind: 'session', session: S1 }, log(), aliases, [
-      { request: 'toolu_1', session: S1, at: 2, question: true }, // also the `question` event at 7
-      { request: 'toolu_perm', session: S1, at: 7, question: false },
+      placed('toolu_1', S1, 2, { question: true }), // also the `question` event at 7
+      placed('toolu_perm', S1, 7, { question: false }),
     ]);
     expect(items.filter((i) => i.kind === 'work').map((i) => (i as { range: unknown }).range)).toEqual([
       { from: null, to: 'r1#0' },

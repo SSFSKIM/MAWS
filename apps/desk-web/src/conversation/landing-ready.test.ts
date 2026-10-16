@@ -6,6 +6,7 @@ import { importOrgKey, seal, type OrgKey, type PendingRequest } from 'desk-hub/p
 import { VECTOR_KEY, VECTOR_PROJECT as PROJECT } from '../../test/vectors';
 import { memoryLogRecord } from '../log/record';
 import { ProjectConnection } from '../project/connection';
+import { requestKey } from '../project/conversation';
 import { landingReady, landingStatus } from './landing';
 
 afterEach(() => vi.restoreAllMocks());
@@ -43,7 +44,7 @@ describe('a landing waits for verification', () => {
     expect(ready()).toBe(false);
     expect(landingStatus({ landing: { kind: 'request', request: 'toolu_pending' }, found: false, ready: ready(), unverified: false }).kind).toBe('checking');
     release();
-    await vi.waitFor(() => expect(c.conversation.store.getState().requests.toolu_pending?.pending).toBe(true));
+    await vi.waitFor(() => expect(c.conversation.store.getState().requests[requestKey({ machine: 'mini', session: 's1', request: 'toolu_pending' })]?.pending).toBe(true));
     expect(ready()).toBe(true);
   });
 

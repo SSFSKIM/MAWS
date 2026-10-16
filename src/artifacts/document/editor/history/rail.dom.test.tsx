@@ -109,7 +109,7 @@ const previewEditor = (): Editor | null => (document.querySelector('.ProseMirror
 
 describe('the list', () => {
   it('groups by day, folds runs of automatic versions, colours author chips by --author-N and filters Named only', async () => {
-    const now = Date.now();
+    const now = new Date(2026, 9, 15, 12).getTime(); // local noon, so a minute ago is today in every zone (the rail reads `at` too)
     const at = { value: now - 3 * DAY };
     await setup(
       async ({ history: h, agentWrites }) => {

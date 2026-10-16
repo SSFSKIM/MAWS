@@ -32,7 +32,8 @@ const session = (id: string, alias: string, group: DeskSession['group'] = 'idle'
 let say: ReturnType<typeof vi.fn>;
 function mount(ui: React.ReactNode) {
   say = vi.fn(async () => 'nonce');
-  const connection = { project: 'p1', say, rpc: vi.fn(async () => 'nonce'), conversation: { store: { getState: () => ({ compactions: {} }), subscribe: () => () => {} } } } as unknown as ProjectConnection;
+  const store = <T,>(state: T) => ({ getState: () => state, subscribe: () => () => {} });
+  const connection = { project: 'p1', say, rpc: vi.fn(async () => 'nonce'), conversation: { store: store({ compactions: {} }) }, live: store({ connected: true }) } as unknown as ProjectConnection;
   const sessions = new Map([
     [S1, session(S1, 'maws-45')],
     [S2, session(S2, 'maws-fe', 'working')],

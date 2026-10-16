@@ -1,0 +1,87 @@
+{
+  "capture": "T/slides (T = ~/claude-desktop-re/artifact-types/2026-10-12/)",
+  "extracted": [
+    {
+      "file": "skill-1.html",
+      "at": "T/slides/SKILL.md:103-113",
+      "form": "as written"
+    },
+    {
+      "file": "diagram-recipes-1.html",
+      "at": "T/slides/artifact-type/reference/diagram-recipes.md:25",
+      "form": "wrapped in a <section id=\"diagram-recipes-1\">"
+    },
+    {
+      "file": "diagrams-1.html",
+      "at": "T/slides/artifact-type/reference/diagrams.md:55-57",
+      "form": "wrapped in a <section id=\"diagrams-1\">"
+    },
+    {
+      "file": "diagrams-2.html",
+      "at": "T/slides/artifact-type/reference/diagrams.md:102-106",
+      "form": "wrapped in a <section id=\"diagrams-2\">"
+    },
+    {
+      "file": "layout-1.html",
+      "at": "T/slides/artifact-type/reference/layout.md:41",
+      "form": "wrapped in a <section id=\"layout-1\">"
+    },
+    {
+      "file": "layout-2.html",
+      "at": "T/slides/artifact-type/reference/layout.md:85-99",
+      "form": "as written"
+    }
+  ],
+  "skipped": [
+    {
+      "at": "T/slides/SKILL.md:93",
+      "reason": "a snippet with placeholders (…, {X}, a|b), not an example",
+      "snippet": "<svg aria-label>…</svg>"
+    },
+    {
+      "at": "T/slides/artifact-type/reference/deck-files.md:15",
+      "reason": "a snippet with placeholders (…, {X}, a|b), not an example",
+      "snippet": "<section id=\"plan\" …>…<aside>Say hi.</aside></section>"
+    },
+    {
+      "at": "T/slides/artifact-type/reference/diagram-recipes.md:18-21",
+      "reason": "a template with letters in place of coordinates, not an example",
+      "snippet": "<x-connector x1=\"PC\" y1=\"P\" x2=\"PC\" y2=\"B\" head=\"none\"></x-connector>      <!-- "
+    },
+    {
+      "at": "T/slides/artifact-type/reference/diagram-recipes.md:34-36",
+      "reason": "a template with letters in place of coordinates, not an example",
+      "snippet": "<x-connector x1=\"R\" y1=\"T\" x2=\"J\" y2=\"L\" route=\"hv\" head=\"none\"></x-connector>  "
+    },
+    {
+      "at": "T/slides/artifact-type/reference/diagrams.md:44",
+      "reason": "a snippet with placeholders (…, {X}, a|b), not an example",
+      "snippet": "<p style=\"position:absolute; left:{X−23}px; top:{Y−114}px; width:240px; height:3"
+    },
+    {
+      "at": "T/slides/artifact-type/reference/fonts.md:8",
+      "reason": "head markup (fonts): deck.json's faces stand in for it",
+      "snippet": "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=Heading+Fa"
+    },
+    {
+      "at": "T/slides/artifact-type/reference/fonts.md:29-31",
+      "reason": "head markup (fonts): deck.json's faces stand in for it",
+      "snippet": "<style>\n  @font-face { font-family: \"Acme Sans\"; src: url(AcmeSans.woff2) }\n</st"
+    },
+    {
+      "at": "T/slides/artifact-type/reference/format.md:80",
+      "reason": "a snippet with placeholders (…, {X}, a|b), not an example",
+      "snippet": "<svg …>…</svg>"
+    },
+    {
+      "at": "T/slides/artifact-type/reference/format.md:82",
+      "reason": "a snippet with placeholders (…, {X}, a|b), not an example",
+      "snippet": "<x-embed style=\"position:absolute; left; top; width; height\">…a whole small page"
+    },
+    {
+      "at": "T/slides/artifact-type/reference/images.md:33",
+      "reason": "a snippet with placeholders (…, {X}, a|b), not an example",
+      "snippet": "<svg>…</svg>"
+    }
+  ]
+}

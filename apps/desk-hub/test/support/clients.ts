@@ -169,11 +169,13 @@ export function sorted(vector: Vector): Vector {
   return Object.fromEntries(Object.entries(vector).sort(([a], [b]) => (a < b ? -1 : 1)));
 }
 
-/** A browser's project socket. */
+/** A browser's project socket. It follows a paged resume as DX3 has a browser do: each `more {offset}` is answered with
+ * `resume {after: offset}`, unless `followMore` is off (a suite that drives the pages itself). */
 export class BrowserClient {
   readonly frames: ProjectDown[] = [];
   private socket!: WebSocket;
   closed = false;
+  followMore = true;
 
   private constructor(readonly who: Who) {}
 
@@ -181,7 +183,11 @@ export class BrowserClient {
     const client = new BrowserClient(who);
     const socket = new WebSocket(`${hub.url.replace('http', 'ws')}/api/projects/${project}/socket`, { headers: credentials(who) } as unknown as string[]);
     client.socket = socket;
-    socket.addEventListener('message', (event) => client.frames.push(JSON.parse(String(event.data)) as ProjectDown));
+    socket.addEventListener('message', (event) => {
+      const frame = JSON.parse(String(event.data)) as ProjectDown;
+      client.frames.push(frame);
+      if (frame.t === 'more' && client.followMore) client.send({ t: 'resume', after: frame.offset });
+    });
     socket.addEventListener('close', () => (client.closed = true));
     await new Promise<void>((resolve, reject) => {
       socket.addEventListener('open', () => resolve());

@@ -27,6 +27,7 @@ import { ExporterRegistry, printHtmlToPdf, registerHtmlExporters, startExportSer
 import { openDocument } from './open';
 import { appOriginOf, guardPermissions, installFramePolicies } from './policies';
 import { serveArtifacts, type ContentLookup } from './protocol';
+import { presentationEmbeds } from '../presentations/present-embeds'; // P3-C M6
 
 export { registerStoreSchemes } from './protocol';
 export type { ExportContext, Exporter, ExporterRegistry, ExportRequest } from './export';
@@ -57,7 +58,8 @@ export function startArtifacts({ hosts, register, emit, settings, onSettingsChan
   // P3-A M7: the scheme and the export service
   const call = <N extends CommandName>(name: N, input: CommandInput<N>) => hosts.dispatch('engine-host', name, input) as Promise<CommandResult<N>>;
   const content: ContentLookup = (input) => call('artifacts.content', input);
-  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content);
+  const embeds = presentationEmbeds(call); // P3-C M6: the presenter's live embeds, under their own policy (Decision Log 18)
+  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content, embeds);
   const exporters = new ExporterRegistry();
   const stopHtml = registerHtmlExporters(exporters, { content, env });
   const exports = startExportService({

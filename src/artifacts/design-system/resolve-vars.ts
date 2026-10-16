@@ -1,6 +1,9 @@
 // The export helpers of D8 (the ledger's X28): `resolveDsVars`, a system's `var(--ds-*)` as literals. Apart from
 // apply.ts's React and DOM so main's export service, which runs B's document exporters under Node, resolves through the
-// same function as a renderer; apply.ts re-exports it, where the ledger names it.
+// same function as a renderer; apply.ts re-exports it, where the ledger names it. P3-C
+// (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 16, 27 (2)): `literalValues` and
+// `overrideLiterals` exported, the latter split out of the former, so the deck's mirror and Theme panel resolve exactly
+// as a scope and an export do (its M3 `literals.ts` reconciled here, the one home).
 import { tokenProperties, type Medium } from './css';
 import type { TokenSet } from './tokens';
 import { safeOverrides, type TokenOverrides } from './view';
@@ -46,8 +49,12 @@ function literalOf(text: string, lookup: (name: string) => string | undefined): 
  * each override's references resolved against that merged map, following chains (M6 fix wave 1, I1). An override in a
  * reference cycle, or with a reference that resolves to nothing, is dropped, and its name keeps the system's value.
  */
-function literalValues(tokens: TokenSet, medium: Medium, overrides: TokenOverrides | undefined): Map<string, string> {
-  const values = tokenProperties(tokens, medium);
+export function literalValues(tokens: TokenSet, medium: Medium, overrides: TokenOverrides | undefined): Map<string, string> {
+  return overrideLiterals(tokenProperties(tokens, medium), overrides);
+}
+
+/** P3-C: `literalValues` over values already read (`tokenProperties`'s): the overrides set over `values`, resolved likewise. */
+export function overrideLiterals(values: ReadonlyMap<string, string>, overrides: TokenOverrides | undefined): Map<string, string> {
   const raw = new Map(safeOverrides(overrides));
   const settled = new Map<string, string | null>(); // an override's literal, or null when dropped
   const stack: string[] = []; // the overrides being resolved, outermost first

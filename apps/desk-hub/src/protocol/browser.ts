@@ -9,7 +9,8 @@ import type { Delivery, MachinePresence, Raised, SessionMessage, Settled } from 
 
 /** Browser → hub over a project socket. */
 export type ProjectUp =
-  /** Every event with an offset above `after`, then `caught-up`, then live. 0 is the start. */
+  /** The events with an offset above `after` (0 is the start), one page of about 1 MiB: then `caught-up` and live, or
+   * `more` when events remain, answered by `resume` from its offset. */
   | { t: 'resume'; after: number }
   /** A sealed web `human`; the hub assigns `writer` (`hub/<member>`), `seq`, and `ts`, and answers `human-ack`. */
   | { t: 'human'; event: HumanEvent }
@@ -34,6 +35,9 @@ export type ProjectDown =
   | { t: 'welcome'; project: string; member: string; head: number }
   | { t: 'log'; events: Array<{ offset: number; event: LogEvent }> }
   | { t: 'caught-up'; offset: number }
+  /** This page of the backlog ends at `offset` (the last sent) and more remain: send `resume {after: offset}`. The socket
+   * gets live `log` frames only from its `caught-up` on. */
+  | { t: 'more'; offset: number }
   | { t: 'human-ack'; nonce: string; offset: number; writer: string; seq: number }
   | { t: 'session'; message: SessionMessage }
   /**

@@ -103,6 +103,50 @@ describe('ProjectLog', () => {
     expect(await record.load(PROJECT)).toEqual([]);
   });
 
+  it('records only a contiguous prefix: a failed write is retried with the next batch, never skipped', async () => {
+    const record = memoryLogRecord();
+    let fail = 1;
+    const flaky = { ...record, append: async (project: string, entries: Parameters<typeof record.append>[1]) => (fail-- > 0 ? Promise.reject(new Error('quota')) : record.append(project, entries)) };
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = new ProjectLog(PROJECT, flaky);
+    await log.load();
+    log.receive([{ offset: 1, event: await sealed(1, 'one') }]);
+    await settled(log);
+    log.receive([{ offset: 2, event: await sealed(2, 'two') }]);
+    await settled(log);
+    const reloaded = new ProjectLog(PROJECT, record);
+    await reloaded.load();
+    expect(reloaded.held()).toBe(2);
+    expect((await record.load(PROJECT)).map((e) => e.offset)).toEqual([1, 2]);
+  });
+
+  it('resumes after the stored prefix when a write keeps failing, so the hub sends the missing entries again', async () => {
+    const record = memoryLogRecord();
+    // A batch holding offset 1 never fits (a quota): a later, smaller batch must not be stored past it.
+    const quota = { ...record, append: async (project: string, entries: Parameters<typeof record.append>[1]) => (entries.some((e) => e.offset === 1) ? Promise.reject(new Error('quota')) : record.append(project, entries)) };
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = new ProjectLog(PROJECT, quota);
+    await log.load();
+    log.receive([{ offset: 1, event: await sealed(1, 'one') }]);
+    log.receive([{ offset: 2, event: await sealed(2, 'two') }]);
+    await settled(log);
+    expect(log.held()).toBe(2); // this page keeps both
+    const reloaded = new ProjectLog(PROJECT, record);
+    await reloaded.load();
+    expect(reloaded.held()).toBe(0);
+  });
+
+  it('never lets a write queued before the log was replaced store an entry of the new log', async () => {
+    const record = memoryLogRecord();
+    const log = new ProjectLog(PROJECT, record);
+    await log.load();
+    log.receive([{ offset: 5, event: await sealed(1, 'old') }]);
+    log.welcome(0); // replaced before the old write ran
+    log.receive([{ offset: 1, event: await sealed(1, 'new') }]);
+    await settled(log);
+    expect((await record.load(PROJECT)).map((e) => [e.offset, e.event.text])).toEqual([[1, 'new']]);
+  });
+
   it('discards a verification in flight when the log is replaced, so an old verdict never lands on a new entry', async () => {
     const record = memoryLogRecord();
     await record.append(PROJECT, [{ offset: 1, event: await sealed(1, 'old, genuine') }]);

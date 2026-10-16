@@ -14,7 +14,18 @@ export type CapabilityInput = {
   seat: string;
   machineOnline: boolean | null;
   presence: SessionPresence | null;
+  /** The log's latest `retired`, while it stands (DX8's `DeskSession.ended`). */
+  ended?: { by: string; reason: string } | null;
 };
+
+/**
+ * Who retired the session, from the log's `retired`, when it was retired — the owner's deliberate act of taking it out
+ * of the project, which its machine refuses to Resume (DC7's M4) — and not merely ended (a `retired` whose reason is
+ * `ended`, sminos's record of a session that ended); null otherwise.
+ */
+export function retiredBy(s: Pick<CapabilityInput, 'member' | 'ended'>): string | null {
+  return !s.member && s.ended && s.ended.reason !== 'ended' ? s.ended.by : null;
+}
 
 export type SessionKind = 'bridged' | 'seat' | 'terminal' | 'not-running' | 'unknown' | 'offline';
 
@@ -41,7 +52,22 @@ export const turnRunning = (s: CapabilityInput): boolean => {
 const yes = (note?: string): Capability => (note === undefined ? { can: true, reason: null } : { can: true, reason: null, note });
 const no = (reason: string): Capability => ({ can: false, reason });
 
-export function capabilities(s: CapabilityInput): Record<Verb, Capability> {
+/**
+ * `connected`: the project socket is welcomed. While it is not, no RPC is offered, whatever presence last said: the
+ * browser sends none then (the hub queues nothing for an absent party), and presence from before the drop may no longer
+ * hold. A send is a log `human`, held and sent once the socket is back.
+ */
+export function capabilities(s: CapabilityInput, connected = true): Record<Verb, Capability> {
+  const byKind = capabilitiesByKind(s);
+  // A send to a retired session is only recorded, whatever its process or its machine is doing: sminos delivers nothing
+  // to a session that is not a member.
+  const can = retiredBy(s) === null ? byKind : { ...byKind, send: yes('recorded, not delivered: it is retired') };
+  if (connected) return can;
+  const off = no('not connected to the hub');
+  return { send: can.send.can ? yes('sent once the desk reconnects') : can.send, steer: off, interrupt: off, answer: off, decide: off, model: off, compact: off, retire: off, resume: off };
+}
+
+function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
   const kind = kindOf(s);
   const running = turnRunning(s);
   const retire = s.member ? yes(s.seat ? undefined : 'records it retired; the process stays yours to close') : no(`${s.alias} is retired`);
@@ -53,6 +79,9 @@ export function capabilities(s: CapabilityInput): Record<Verb, Capability> {
     }
     case 'not-running': {
       const stopped = no(`${s.alias} is not running`);
+      if (retiredBy(s) !== null) {
+        return { send: yes(), steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no('retired: a retired session is not resumed') };
+      }
       const send = yes(s.seat ? 'resumes the seat to read it' : 'recorded, not delivered: a closed terminal session is reopened only by Resume');
       return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: yes() };
     }

@@ -213,37 +213,45 @@ test("controls a session cannot use are drawn disabled with §5's reason, by kin
   await expect(composer.getByTestId('composer-note')).toHaveText('starts a turn');
 });
 
-test('an ended session keeps its channel with Resume, a send to it shows as recorded, and retire and spawn go out as RPCs', async ({ page, hub }) => {
+test('a retired session keeps its history with no Resume; an ended one offers Resume, a send to it shows as recorded, and retire and spawn go out as RPCs', async ({ page, hub }) => {
   await stageProject(hub);
   hub.setMachines(PROJECT, [
     { machine: 'mini', online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [{ path: '/Users/new/MAWS', branch: 'main' }] },
     { machine: 'SK.local', online: true, policy: { read_only: false, ceiling: 'default' }, checkouts: [] },
   ]);
+  // Retired: taken out of the project by the owner, which its machine refuses to Resume.
   await open(page, hub, S.gone);
+  const header = page.getByTestId('channel-header');
   await expect(center(page)).toContainText('doperpowers-1e joined on SK.local');
   await expect(center(page)).toContainText('doperpowers-1e retired by human');
+  await expect(header.getByTestId('retired-by')).toHaveText('Retired by human');
+  await expect(header.getByRole('button', { name: 'Resume' })).toHaveCount(0);
+
+  // Ended: no live process, never retired.
+  presence(hub, 'mini', S.rests, null);
+  await nav(page).locator(`[data-session="${S.rests}"]`).click();
   await expect(page.getByTestId('composer-note')).toHaveText('recorded, not delivered: a closed terminal session is reopened only by Resume');
-  const box = page.getByRole('textbox', { name: 'Message doperpowers-1e' });
+  const box = page.getByRole('textbox', { name: 'Message cua_repl' });
   await box.fill('a note for when you are back');
   await box.press('Enter');
   await expect.poll(() => hub.logOf(PROJECT).some((e) => e.event.text === 'a note for when you are back')).toBe(true);
   const note = hub.logOf(PROJECT).find((e) => e.event.text === 'a note for when you are back')!.event;
-  await hub.deliver(PROJECT, 'SK.local', { event: { writer: note.writer, seq: note.seq }, session: S.gone, outcome: 'recorded', reason: 'not live' });
-  await expect(center(page).getByTestId('deliveries')).toContainText('doperpowers-1e: recorded, not delivered');
+  await hub.deliver(PROJECT, 'mini', { event: { writer: note.writer, seq: note.seq }, session: S.rests, outcome: 'recorded', reason: 'not live' });
+  await expect(center(page).getByTestId('deliveries')).toContainText('cua_repl: recorded, not delivered');
 
-  await page.getByTestId('channel-header').getByRole('button', { name: 'Resume' }).click();
+  await header.getByRole('button', { name: 'Resume' }).click();
   const resume = await lastRpc(hub, 1);
-  expect(resume).toMatchObject({ rpc: 'resume', machine: 'SK.local', args: { session: S.gone } });
-  hub.answerRpc(PROJECT, resume.nonce, { state: 'done', result: { session: S.gone } });
-  await expect(page.getByTestId('channel-header')).toContainText('Resumed; it rejoins in a moment');
+  expect(resume).toMatchObject({ rpc: 'resume', machine: 'mini', args: { session: S.rests } });
+  hub.answerRpc(PROJECT, resume.nonce, { state: 'done', result: { session: S.rests } });
+  await expect(header).toContainText('Resumed; it rejoins in a moment');
   // The message stayed owed: Resume brought the session back, and the newer outcome replaces the recorded one.
-  await hub.deliver(PROJECT, 'SK.local', { event: { writer: note.writer, seq: note.seq }, session: S.gone, outcome: 'delivered', reason: '' });
-  await expect(center(page).getByTestId('deliveries')).toContainText('doperpowers-1e: delivered');
+  await hub.deliver(PROJECT, 'mini', { event: { writer: note.writer, seq: note.seq }, session: S.rests, outcome: 'delivered', reason: '' });
+  await expect(center(page).getByTestId('deliveries')).toContainText('cua_repl: delivered');
 
-  await nav(page).locator(`[data-session="${S.rests}"]`).click();
-  await page.getByTestId('channel-header').getByRole('button', { name: 'Retire…' }).click();
-  await page.getByTestId('channel-header').getByRole('button', { name: 'Retire', exact: true }).click();
-  expect((await lastRpc(hub, 2)).args).toEqual({ session: S.rests });
+  await nav(page).locator(`[data-session="${S.works}"]`).click();
+  await header.getByRole('button', { name: 'Retire…' }).click();
+  await header.getByRole('button', { name: 'Retire', exact: true }).click();
+  expect((await lastRpc(hub, 2)).args).toEqual({ session: S.works });
 
   await nav(page).getByRole('button', { name: '+ Session' }).click();
   const dialog = page.getByRole('dialog', { name: 'New session' });
@@ -399,4 +407,208 @@ test("when a machine disconnects its sessions' presence and depth show as unavai
   const composer = page.getByTestId('composer');
   await expect(composer.getByRole('button', { name: 'Compact' })).toHaveAttribute('title', 'mini is offline');
   await expect(composer.getByTestId('composer-note')).toHaveText('kept in the log; delivered when mini reconnects');
+});
+
+/**
+ * The channel's scroller, read and set by distance from the bottom, whichever way the engine counts its scroll
+ * position (a column-reverse scroller counts 0 at the bottom and negative upwards).
+ */
+function setFromBottom(el: Element, px: number): void {
+  const e = el as HTMLElement;
+  const reversed = getComputedStyle(e).flexDirection === 'column-reverse';
+  e.scrollTop = reversed ? -px : e.scrollHeight - e.clientHeight - px;
+}
+function fromBottom(el: Element): number {
+  const e = el as HTMLElement;
+  return getComputedStyle(e).flexDirection === 'column-reverse' ? -e.scrollTop : e.scrollHeight - e.clientHeight - e.scrollTop;
+}
+const scroller = (page: Page) => center(page).getByTestId('channel-events');
+const scrollToTop = (page: Page) => scroller(page).evaluate((el) => (el as HTMLElement).scrollBy(0, -1e7));
+const scrollToBottom = (page: Page) => scroller(page).evaluate((el) => (el as HTMLElement).scrollBy(0, 1e7));
+const scrollBackBy = (page: Page, px: number) => scroller(page).evaluate(setFromBottom, px);
+const gapOf = (page: Page) => scroller(page).evaluate(fromBottom);
+
+test('a channel opens at its tail and follows it while the reader is at the bottom; scrolled back, or landed on a card, it stays put', async ({ page, hub }) => {
+  await stageProject(hub);
+  const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rt${n}#0` });
+  const first = await message(1);
+  for (let n = 2; n <= 60; n++) await message(n);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await open(page, hub);
+  await expect(line(60)).toBeInViewport();
+  await message(61);
+  await expect(line(61)).toBeInViewport();
+
+  // Scrolled back on purpose: what comes next does not pull the reader down.
+  await scrollToTop(page);
+  await expect(line(1)).toBeInViewport();
+  await message(62);
+  await expect(line(62)).toBeAttached();
+  await expect(line(62)).not.toBeInViewport();
+  await expect(line(1)).toBeInViewport();
+
+  // Back at the bottom, it follows again.
+  await scrollToBottom(page);
+  await message(63);
+  await expect(line(63)).toBeInViewport();
+
+  // A notification's landing on an early message keeps the reader there as the conversation goes on.
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}?writer=${encodeURIComponent(first.event.writer)}&seq=${first.event.seq}`);
+  await expect(center(page).locator('[data-landed]')).toContainText('line 1');
+  await expect(line(1)).toBeInViewport();
+  await message(64);
+  await expect(line(64)).toBeAttached();
+  await expect(line(1)).toBeInViewport();
+});
+
+/** A run of agent traffic at the head of a channel, which grows by a line per say when unfolded. */
+async function stageGrowingRun(hub: HubDouble, says: number) {
+  for (let n = 1; n <= says; n++) await say(hub, M45, [[S.works, 'maws-fe']], `say ${n}`);
+}
+/** Unfolds the run without scrolling to it, as a row above the reader growing would. */
+const unfoldRun = (page: Page) => center(page).getByTestId('agent-run').first().getByRole('button').evaluate((b) => (b as HTMLButtonElement).click());
+
+test('a row above a reader scrolled back that grows leaves the reader where they were, never pulled to the tail', async ({ page, hub }) => {
+  await stageProject(hub);
+  await stageGrowingRun(hub, 25);
+  for (let n = 1; n <= 40; n++) await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rg${n}#0` });
+  await open(page, hub);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(40)).toBeInViewport();
+  // Back a little from the tail, on purpose: further than the slack, but less than the run grows by.
+  await scrollBackBy(page, 150);
+  await expect.poll(() => gapOf(page)).toBeGreaterThan(100);
+  const reading = await line(36).boundingBox();
+  await unfoldRun(page);
+  await expect(center(page).getByTestId('agent-run-messages')).toBeAttached();
+  await page.waitForTimeout(300); // what follows a resize has run
+  expect((await line(36).boundingBox())!.y).toBeCloseTo(reading!.y, 0);
+  expect(await gapOf(page)).toBeGreaterThan(100);
+});
+
+test('a row above a reader scrolled back that collapses leaves the reader where they were', async ({ page, hub }) => {
+  await stageProject(hub);
+  await stageGrowingRun(hub, 25);
+  for (let n = 1; n <= 40; n++) await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rc${n}#0` });
+  await open(page, hub);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(40)).toBeInViewport();
+  await unfoldRun(page); // at the tail, so the view follows it
+  await expect(center(page).getByTestId('agent-run-messages')).toBeAttached();
+  await page.waitForTimeout(300);
+  // Back a little from the tail: less than the run shrinks by, so the browser clamps the scroll position when it does.
+  await scrollBackBy(page, 150);
+  await expect.poll(() => gapOf(page)).toBeGreaterThan(100);
+  const reading = await line(36).boundingBox();
+  await unfoldRun(page); // folds it again
+  await expect(center(page).getByTestId('agent-run-messages')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect((await line(36).boundingBox())!.y).toBeCloseTo(reading!.y, 0);
+});
+
+test('a card above a reader scrolled back that leaves the stream leaves the reader where they were', async ({ page, hub }) => {
+  await stageProject(hub);
+  await open(page, hub);
+  // A question raised now is placed here, above everything that follows; its card leaves this place once the log holds
+  // the question event (an async question is drawn on its event).
+  const questions = [1, 2, 3, 4, 5].map((q) => ({ question: `Question ${q}?`, header: `Q${q}`, options: [{ label: 'yes' }, { label: 'no' }, { label: 'later' }], multiSelect: false }));
+  await hub.raise(PROJECT, 'mini', { request: 'toolu_gone', session: S.asks, tool: 'AskUserQuestion', input: { questions } });
+  const card = center(page).locator('[data-request="toolu_gone"]');
+  await expect(card).toBeVisible();
+  await hub.settle(PROJECT, 'mini', S.asks, { request: 'toolu_gone', winner: 'terminal', outcome: 'answered', by: 'terminal' });
+  for (let n = 1; n <= 40; n++) await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rr${n}#0` });
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(40)).toBeInViewport();
+  await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'answered', from: 'maws-45', src: 'toolu_gone', text: 'yes' });
+  await expect(center(page)).toContainText('maws-45 was answered: yes');
+  await page.waitForTimeout(300);
+  await scrollBackBy(page, 60);
+  await expect.poll(() => gapOf(page)).toBeGreaterThan(50);
+  const reading = await line(38).boundingBox();
+  await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'question', from: 'maws-45', to: 'host', text: 'Five questions', choices: [], src: 'toolu_gone' });
+  await expect(card).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect((await line(38).boundingBox())!.y).toBeCloseTo(reading!.y, 0);
+});
+
+test("content growing inside a long message, above the paragraph a reader is partway through, leaves that paragraph where it was", async ({ page, hub }) => {
+  await stageProject(hub);
+  const paragraphs = Array.from({ length: 40 }, (_, i) => `paragraph ${i + 1}`).join('\n\n');
+  await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: paragraphs, src: 'rp#0' });
+  for (let n = 1; n <= 3; n++) await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rp${n}#0` });
+  await open(page, hub);
+  const paragraph = (n: number) => center(page).getByText(`paragraph ${n}`, { exact: true });
+  await expect(center(page).getByText('line 3', { exact: true })).toBeInViewport();
+  await paragraph(30).evaluate((p) => p.scrollIntoView({ block: 'start' })); // partway through the long message
+  await page.waitForTimeout(300);
+  const reading = await paragraph(30).boundingBox();
+  // Content above the paragraph, inside the same message, grows by 600 px (a figure loading, a block drawn late).
+  await paragraph(10).evaluate((p) => p.insertAdjacentHTML('afterend', '<div style="height:600px" data-test-growth></div>'));
+  await page.waitForTimeout(300);
+  expect((await paragraph(30).boundingBox())!.y).toBeCloseTo(reading!.y, 0);
+});
+
+test('a scroll back immediately followed by a row above collapsing, before the scroll is reported, leaves the reader where they scrolled', async ({ page, hub }) => {
+  await stageProject(hub);
+  await stageGrowingRun(hub, 25);
+  for (let n = 1; n <= 40; n++) await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rs${n}#0` });
+  await open(page, hub);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(40)).toBeInViewport();
+  await unfoldRun(page);
+  await expect(center(page).getByTestId('agent-run-messages')).toBeAttached();
+  await page.waitForTimeout(300);
+  // In one task: scroll back 150 px, note where line 36 then is, and fold the run above (its collapse commits at once).
+  const scrolled = await scroller(page).evaluate((el, px) => {
+    const e = el as HTMLElement;
+    e.scrollTop = getComputedStyle(e).flexDirection === 'column-reverse' ? -px : e.scrollHeight - e.clientHeight - px;
+    const row = [...e.querySelectorAll('p')].find((p) => p.textContent === 'line 36')!;
+    const y = row.getBoundingClientRect().y;
+    e.querySelector<HTMLButtonElement>('[data-testid="agent-run"] button')!.click();
+    return y;
+  }, 150);
+  await expect(center(page).getByTestId('agent-run-messages')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect((await line(36).boundingBox())!.y).toBeCloseTo(scrolled, 0);
+});
+
+test('a new message arriving below a reader scrolled back leaves the row they read where it was', async ({ page, hub }) => {
+  await stageProject(hub);
+  const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rn${n}#0` });
+  for (let n = 1; n <= 40; n++) await message(n);
+  await open(page, hub);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(40)).toBeInViewport();
+  await scrollBackBy(page, 150);
+  await page.waitForTimeout(300);
+  const reading = await line(36).boundingBox();
+  await message(41);
+  await expect(line(41)).toBeAttached();
+  await page.waitForTimeout(300);
+  // Held by the engine's scroll anchoring; it scrolls by whole pixels while rows are fractional, so up to 1 px remains.
+  const moved = (await line(36).boundingBox())!.y - reading!.y;
+  test.info().annotations.push({ type: 'row moved (px)', description: moved.toFixed(2) });
+  console.log(`row moved ${moved.toFixed(2)} px (a message arriving below)`);
+  expect(Math.abs(moved)).toBeLessThanOrEqual(1);
+});
+
+test('after a notification lands on its card, an earlier row that grows leaves the card where it was', async ({ page, hub }) => {
+  await stageProject(hub);
+  await stageGrowingRun(hub, 25);
+  let landing = { writer: '', seq: 0 };
+  for (let n = 1; n <= 40; n++) {
+    const { event } = await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rl${n}#0` });
+    if (n === 37) landing = { writer: event.writer, seq: event.seq };
+  }
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}?writer=${encodeURIComponent(landing.writer)}&seq=${landing.seq}`);
+  const landed = center(page).locator('[data-landed]');
+  await expect(landed).toContainText('line 37');
+  await expect(landed).toBeInViewport();
+  await page.waitForTimeout(300);
+  const at = await landed.boundingBox();
+  await unfoldRun(page);
+  await expect(center(page).getByTestId('agent-run-messages')).toBeAttached();
+  await page.waitForTimeout(300);
+  expect((await landed.boundingBox())!.y).toBeCloseTo(at!.y, 0);
 });

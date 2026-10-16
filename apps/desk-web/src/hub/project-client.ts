@@ -1,8 +1,9 @@
 // The project socket (DX3): `/api/projects/<id>/socket`. On every connection, after the hub's `welcome`, it resumes
 // after the last offset the browser holds — so a drop, a deploy, or a reload never replays from the start and never
 // skips — and sends again everything the hub has not acknowledged: a web `human` until its `human-ack`, an RPC until
-// the hub reports a state for it. It also serves the session plane (DX8's `SessionPlane`): DX4 subscriptions whose
-// messages reach their listener in order, re-subscribed after any discontinuity.
+// the hub reports its result. A new RPC is refused while the socket is not welcomed; a `human` is held until it is. It
+// also serves the session plane (DX8's `SessionPlane`): DX4 subscriptions whose messages reach their listener in order,
+// re-subscribed after any discontinuity.
 import {
   newNonce,
   type HumanEvent,
@@ -93,6 +94,8 @@ export class ProjectClient implements SessionPlane {
   private visible: boolean | null = null;
   private repeat: ReturnType<typeof setInterval> | null = null;
   private readonly humans = new Map<string, { event: HumanEvent; resolve: (ack: HumanAck) => void; reject: (error: HumanRefused) => void }>();
+  /** Called once no `human` is left unacknowledged. */
+  private readonly humansSent = new Set<() => void>();
   private readonly rpcs = new Map<string, Rpc>();
   private readonly rpcListeners = new Set<(frame: RpcStateFrame) => void>();
   private readonly subs = new Set<OpenSubscription>();
@@ -132,8 +135,35 @@ export class ProjectClient implements SessionPlane {
     });
   }
 
-  /** Sends a sealed RPC, again after each reconnect, until the hub reports its result (`done` or `failed`). */
-  sendRpc(rpc: Rpc): void {
+  /** Whether a `human` sent through this client is still waiting for the hub's acknowledgement (or refusal). */
+  holdsHumans(): boolean {
+    return this.humans.size > 0;
+  }
+
+  /** Calls `done` once no `human` is left waiting: at once when none is. */
+  whenHumansSent(done: () => void): void {
+    if (this.humans.size === 0) done();
+    else this.humansSent.add(done);
+  }
+
+  /**
+   * Sends a newly sealed RPC, again after each reconnect, until the hub reports its result (`done` or `failed`). False,
+   * and nothing kept, when the socket is not welcomed: the hub queues nothing for an absent party (it fails an offline
+   * machine's at once), and an RPC is a decision for the moment it was made — an Interrupt held until a later welcome
+   * could stop a later turn. Kept only once the socket took it: a connection already closing (its close not yet
+   * handled, so the welcome still stands) takes nothing, and the RPC is refused like any other.
+   */
+  sendRpc(rpc: Rpc): boolean {
+    if (!this.welcomed || !this.socket.send({ t: 'rpc', rpc })) return false;
+    this.rpcs.set(rpc.nonce, rpc);
+    return true;
+  }
+
+  /**
+   * Sends an RPC already sent once again, exactly as sealed (an `uncertain` one's retry, DX6): kept and sent after
+   * each reconnect until its result, as when it was first sent.
+   */
+  resendRpc(rpc: Rpc): void {
     this.rpcs.set(rpc.nonce, rpc);
     if (this.welcomed) this.socket.send({ t: 'rpc', rpc });
   }
@@ -173,6 +203,13 @@ export class ProjectClient implements SessionPlane {
         if (open.sub && this.welcomed) this.socket.send({ t: 'unsubscribe', sub: open.sub });
       },
     };
+  }
+
+  private humanSettled(): void {
+    if (this.humans.size > 0) return;
+    const done = [...this.humansSent];
+    this.humansSent.clear();
+    for (const call of done) call();
   }
 
   private disconnected(): void {
@@ -216,6 +253,10 @@ export class ProjectClient implements SessionPlane {
         if (fresh.length > 0) handlers.log?.(fresh);
         return;
       }
+      case 'more':
+        // One page of the backlog is in and more remain (DX3): ask for the next. Only `caught-up` is caught up.
+        this.socket.send({ t: 'resume', after: frame.offset });
+        return;
       case 'caught-up':
         handlers.caughtUp?.(frame.offset);
         return;
@@ -224,6 +265,7 @@ export class ProjectClient implements SessionPlane {
         if (!waiting) return;
         this.humans.delete(frame.nonce);
         waiting.resolve({ offset: frame.offset, writer: frame.writer, seq: frame.seq });
+        this.humanSettled();
         return;
       }
       case 'rpc-state':
@@ -251,6 +293,7 @@ export class ProjectClient implements SessionPlane {
         if (waiting) {
           this.humans.delete(nonce!);
           waiting.reject(new HumanRefused(frame.refusal));
+          this.humanSettled();
         }
         handlers.refused?.(frame.refusal);
         return;

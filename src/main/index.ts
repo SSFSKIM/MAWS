@@ -128,6 +128,8 @@ import { registerDocumentExporters } from './artifacts/export-document'; // P3-B
 // P3-D start
 import { engineHostCall, governDocumentExporter } from './design-systems/documents';
 import { registerDesignSystemExporters } from './design-systems/export';
+import { registerPresentationExporters } from './presentations/export'; // P3-C M9
+import { registerPresenter } from './presentations/present'; // P3-C M6
 // P3-D end
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
@@ -584,6 +586,8 @@ void startWithProfileLock(app, () => {
   // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)
+  registerPresentationExporters(artifacts.exporters, { call: engineHostCall(hosts.dispatch), env: process.env }); // P3-C M9: `presentation` as html, pdf, png, pptx, claude; the governing system from D's `designSystems.governing` (Decision Log 27 (2))
+  shutdown.add('presenter', registerPresenter({ register: registerMainHandler, appUrl, env: process.env }).end); // P3-C M6: `presentations.present`, the show's windows
   // P3-L M1: the library's derived index kept right against the engine host's store (a reconciliation at every host
   // connection, an entry per change) and library.* answered from it, before the first window loads. Its stop runs in the
   // same will-quit pass as the index's close, so no sync step runs between them, and after it applies nothing.

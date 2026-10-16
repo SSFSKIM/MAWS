@@ -1,6 +1,7 @@
 import type { Machine } from './objects/machine';
 import type { Project } from './objects/project';
 import type { Registry } from './objects/registry';
+import { HEARTBEAT_MS } from './protocol/machine';
 
 export interface Env {
   PROJECT: DurableObjectNamespace<Project>;
@@ -22,6 +23,9 @@ export interface Env {
   CF_API_TOKEN: string;
   /** The hub's VAPID key for Web Push (a secret): a P-256 private key as JWK JSON. Pushes name `mailto:<admin>`. */
   VAPID_KEY: string;
+  /** The machine stream's heartbeat in ms (optional; DX2's 15 000 when unset). The local command shortens it: there a
+   * client's close reaches the object only at the next write to its stream (test/stream-close.test.ts). */
+  HEARTBEAT_MS?: string;
 }
 
 export type OrgConfig = { id: string; name: string; adminEmail: string };
@@ -55,9 +59,19 @@ export function hubConfig(env: Env): HubConfig | null {
   };
 }
 
+/** The heartbeat a `Machine` object beats its stream at: HEARTBEAT_MS when it is a whole number of ms from 100 to
+ * 60 000, DX2's default otherwise. */
+export function heartbeatMs(env: Env): number {
+  const configured = /^\d+$/.test(env.HEARTBEAT_MS ?? '') ? Number(env.HEARTBEAT_MS) : NaN;
+  return configured >= 100 && configured <= 60_000 ? configured : HEARTBEAT_MS;
+}
+
 /** Headers the Worker sets on the requests it makes to its objects, after verifying who is asking; objects are
  * reachable only through the Worker, which drops any copy a client sent. */
 export const MEMBER_HEADER = 'X-Desk-Member';
 export const PROJECT_HEADER = 'X-Desk-Project';
 export const ORG_HEADER = 'X-Desk-Org';
 export const MACHINE_HEADER = 'X-Desk-Machine';
+/** The service token's client id the Worker resolved a machine's request from: its `Machine` object refuses one whose
+ * credential was revoked, though the Worker admitted the request before the revocation. */
+export const CLIENT_HEADER = 'X-Desk-Client';

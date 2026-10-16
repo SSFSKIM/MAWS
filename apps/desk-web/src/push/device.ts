@@ -46,7 +46,13 @@ export function browserPushEnv(registration: Promise<ServiceWorkerRegistration> 
   if (registration === null || typeof Notification === 'undefined' || typeof PushManager === 'undefined') return { notifications: null, pushManager: null, standalone };
   return {
     notifications: { permission: () => Notification.permission, requestPermission: () => Notification.requestPermission() },
-    pushManager: async () => (await registration).pushManager as unknown as PushManagerLike,
+    // Through the worker that is active, never the registration as `register` resolved it: on a first install its worker
+    // may still be installing, and subscribing then fails (InvalidStateError) though the permission was granted. The
+    // registration is awaited first, so one that failed rejects rather than waiting on `ready` for good.
+    pushManager: async () => {
+      await registration;
+      return (await navigator.serviceWorker.ready).pushManager as unknown as PushManagerLike;
+    },
     standalone,
   };
 }

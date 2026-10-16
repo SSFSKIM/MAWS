@@ -126,6 +126,9 @@ import { registerDesignSystemEditor } from './artifacts/design-system/editor';
 import { DesignSystemHostProvider } from './artifacts/design-system/provider';
 import { provideDocumentDesignSystem } from './tools/document/design-system';
 // P3-D end
+// P3-C start
+import { registerPresentationEditor } from './tools/presentation';
+// P3-C end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -302,6 +305,10 @@ export function App() {
   // panel's Artifacts tool mount it)
   useEffect(() => registerDesignSystemEditor(), []);
   // P3-D end
+  // P3-C start: the deck editor as the `presentation` kind's editor in L's registry (the library's tab and the panel's
+  // Artifacts tool mount it)
+  useEffect(() => registerPresentationEditor(), []);
+  // P3-C end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {

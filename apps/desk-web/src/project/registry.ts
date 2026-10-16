@@ -1,6 +1,7 @@
 // The projects open in this tab, one connection each, shared by every view of the project and closed shortly after
-// the last view leaves it (a remount — React's development double mount, a route change back — keeps it). The org key
-// reaches every open connection from the key holder.
+// the last view leaves it (a remount — React's development double mount, a route change back — keeps it), or once the
+// hub has acknowledged every send it holds, whichever is later. The org key reaches every open connection from the key
+// holder.
 import { useEffect } from 'react';
 import { idbLogRecord, type LogRecord } from '../log/record';
 import { useKeyHolder } from '../key/holder';
@@ -24,7 +25,7 @@ function held(project: string): Held {
   return h;
 }
 
-function acquire(project: string): void {
+export function acquireProject(project: string): void {
   const h = held(project);
   h.refs++;
   if (h.closing) clearTimeout(h.closing);
@@ -32,23 +33,37 @@ function acquire(project: string): void {
   void h.connection.start();
 }
 
-function release(project: string): void {
+export function releaseProject(project: string): void {
   const h = open.get(project);
   if (!h) return;
   h.refs--;
   if (h.refs > 0) return;
-  h.closing = setTimeout(() => {
-    if (h.refs > 0) return;
-    open.delete(project);
-    h.connection.stop();
-  }, 1_000);
+  h.closing = setTimeout(() => close(project, h), 1_000);
 }
+
+/**
+ * Closes an unreferenced connection — once it holds no send the hub has not acknowledged: such a send (and its status in
+ * the outbox) lives only in the connection, so it stays open, sending it again after each reconnect, until the hub has it.
+ */
+function close(project: string, h: Held): void {
+  h.closing = null;
+  if (h.refs > 0 || open.get(project) !== h) return;
+  if (h.connection.client.holdsHumans()) {
+    h.connection.client.whenHumansSent(() => close(project, h));
+    return;
+  }
+  open.delete(project);
+  h.connection.stop();
+}
+
+/** The project's connection, opened if it is not. */
+export const projectConnection = (project: string): ProjectConnection => held(project).connection;
 
 /** The project's connection, open while any view that asked for it is mounted. */
 export function useProjectConnection(project: string): ProjectConnection {
   useEffect(() => {
-    acquire(project);
-    return () => release(project);
+    acquireProject(project);
+    return () => releaseProject(project);
   }, [project]);
   return held(project).connection;
 }

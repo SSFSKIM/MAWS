@@ -6,10 +6,10 @@
 // scrolled to once it is drawn. On a phone the working record stays folded: the transcript is desktop-only (§4).
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from 'zustand';
-import type { LogEvent, Recipient } from 'desk-hub/protocol';
+import { writerMachine, type LogEvent, type Recipient } from 'desk-hub/protocol';
 import { TranscriptActionsProvider, type TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import { Markdown } from '../../../../../src/renderer/src/transcript/view/markdown/Markdown';
-import type { StreamItem } from '../../conversation/stream';
+import { byWhom, type StreamItem } from '../../conversation/stream';
 import { deliveryKey, type OutboxItem } from '../../project/conversation';
 import { useSlot } from '../../shell/slots';
 import { DELIVERY_TEXT } from '../../conversation/words';
@@ -23,37 +23,60 @@ const time = (ts: string) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 };
 
+/**
+ * The stream scrolls as a chat list does: a `column-reverse` scroller whose one child is the list in reading order, so
+ * the bottom is the scroll origin. The browser then keeps the tail itself (the scroll position stays 0 at the bottom as
+ * rows are added below), a change above a reader who has scrolled back moves nothing they see (it lies at the far end
+ * from the origin), and its own scroll anchoring holds them in place when a row below them arrives or grows. Nothing
+ * here measures or anchors: it opens at the tail because the origin is the tail, and a landing scrolls its card into
+ * view. The scroll position reads 0 at the bottom and negative upward (Chrome, Safari, Firefox).
+ */
 export function StreamView({ items, outbox, landed = null }: { items: StreamItem[]; outbox: OutboxItem[]; landed?: string | null }) {
   const landedRow = useRef<HTMLLIElement>(null);
+  // A landing decides where the reader is: scrolled to its card.
   useEffect(() => landedRow.current?.scrollIntoView({ block: 'center' }), [landed]);
   return (
-    <ol className="m-0 min-h-0 flex-1 list-none overflow-y-auto px-4 py-3" data-testid="channel-events">
-      {items.length === 0 && outbox.length === 0 && <li className="text-ui-sm text-fg-muted">Nothing here yet.</li>}
-      {items.map((item) => (
-        <li
-          key={item.key}
-          ref={item.key === landed ? landedRow : undefined}
-          data-item={item.kind}
-          {...('offset' in item && item.kind !== 'work' ? { 'data-offset': item.offset } : {})}
-          {...(item.key === landed ? { 'data-landed': '', className: '-mx-2 rounded-md bg-bg-waiting px-2 outline-1 outline-warning outline-solid' } : {})}
-        >
-          <Item item={item} />
-        </li>
-      ))}
-      {outbox.map((sent) => (
-        <li key={sent.nonce} data-item="outbox" data-state={sent.state}>
-          <Said who="You" ts={null}>
-            <Prose text={sent.text} />
-            <p className={`m-0 text-ui-sm ${sent.state === 'refused' ? 'text-danger' : 'text-fg-muted'}`}>{sent.state === 'refused' ? `The hub refused it (${sent.reason}); it was not sent.` : 'Sending…'}</p>
-          </Said>
-        </li>
-      ))}
-    </ol>
+    <div className="flex min-h-0 flex-1 flex-col-reverse overflow-y-auto" data-testid="channel-events">
+      <ol className="m-0 list-none px-4 py-3">
+        {items.length === 0 && outbox.length === 0 && <li className="text-ui-sm text-fg-muted">Nothing here yet.</li>}
+        {items.map((item) => (
+          <li
+            key={item.key}
+            ref={item.key === landed ? landedRow : undefined}
+            data-item={item.kind}
+            {...('offset' in item && item.kind !== 'work' ? { 'data-offset': item.offset } : {})}
+            {...(item.key === landed ? { 'data-landed': '', className: '-mx-2 rounded-md bg-bg-waiting px-2 outline-1 outline-warning outline-solid' } : {})}
+          >
+            <Item item={item} />
+          </li>
+        ))}
+        {outbox.map((sent) => (
+          <li key={sent.nonce} data-item="outbox" data-state={sent.state}>
+            <Said who="You" ts={null}>
+              <Prose text={sent.text} />
+              <p className={`m-0 text-ui-sm ${sent.state === 'refused' ? 'text-danger' : 'text-fg-muted'}`}>{sent.state === 'refused' ? `The hub refused it (${sent.reason}); it was not sent.` : 'Sending…'}</p>
+            </Said>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
+/**
+ * Who posted a `human`: a web one by its member, which its code covers — "You" for the member signed in, another by id
+ * (`byWhom`) — and one written on a machine (`<machine>/human`, sminos's own) as a human there.
+ */
+function humanWho(event: LogEvent, member: string): { who: string; machine?: string } {
+  if (typeof event.member === 'string') {
+    const who = byWhom(event.member, member);
+    return { who: who.charAt(0).toUpperCase() + who.slice(1) };
+  }
+  return { who: 'A human', machine: writerMachine(event.writer) ?? undefined };
+}
+
 function Item({ item }: { item: StreamItem }) {
-  const { sessions } = useDesk();
+  const { sessions, member } = useDesk();
   switch (item.kind) {
     case 'message': {
       const session = item.session ? sessions.get(item.session) : undefined;
@@ -63,13 +86,15 @@ function Item({ item }: { item: StreamItem }) {
         </Said>
       );
     }
-    case 'human':
+    case 'human': {
+      const { who, machine } = humanWho(item.event, member);
       return (
-        <Said who="You" ts={item.event.ts}>
+        <Said who={who} machine={machine} ts={item.event.ts}>
           <Prose text={item.text} />
           <Deliveries event={item.event} to={item.to} wake={item.wake} />
         </Said>
       );
+    }
     case 'question':
       return <QuestionItem item={item} />;
     case 'system':
@@ -79,11 +104,11 @@ function Item({ item }: { item: StreamItem }) {
     case 'work':
       return <WorkingRecord session={item.session} range={item.range} />;
     case 'request':
-      return <RequestItem request={item.request} />;
+      return <RequestItem request={item.ref} />;
   }
 }
 
-/** A request that is not a log event, drawn as the session's own message with the card as its body. */
+/** A request that is not a log event, drawn as the session's own message with the card as its body. `request`: its key. */
 function RequestItem({ request }: { request: string }) {
   const { connection, sessions } = useDesk();
   const record = useStore(connection.conversation.store, (s) => s.requests[request]);
@@ -100,7 +125,7 @@ function Said({ who, machine, ts, children }: { who: string; machine?: string; t
   return (
     <div className="py-1.5">
       <div className="flex items-baseline gap-2">
-        <span className="text-ui font-semibold">{who}</span>
+        <span className="text-ui font-semibold" data-testid="said-who">{who}</span>
         {machine && <span className="text-ui-sm text-fg-muted">@{machine}</span>}
         {ts && <span className="text-ui-sm text-fg-faint">{time(ts)}</span>}
       </div>
@@ -152,12 +177,12 @@ function Deliveries({ event, to, wake }: { event: LogEvent; to: '*' | Recipient[
 
 function QuestionItem({ item }: { item: Extract<StreamItem, { kind: 'question' }> }) {
   const { connection, sessions } = useDesk();
-  const pending = useStore(connection.conversation.store, (s) => s.requests[item.request]);
+  const pending = useStore(connection.conversation.store, (s) => s.requests[item.ref]);
   const session = item.session ? sessions.get(item.session) : undefined;
   return (
     <Said who={item.from} machine={session?.machine} ts={item.event.ts}>
       {pending && !item.answered ? (
-        <RequestCard request={item.request} embedded />
+        <RequestCard request={item.ref} embedded />
       ) : (
         <>
           <Prose text={item.text} />

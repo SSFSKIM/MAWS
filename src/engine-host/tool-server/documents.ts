@@ -48,7 +48,6 @@ import {
   DOCUMENT_LIMITS,
   documentRefused,
   parseDocumentArguments,
-  type ArtifactCommentsResult,
   type ArtifactEditResult,
   type ArtifactReplyResult,
   type ArtifactResolveResult,
@@ -371,118 +370,159 @@ function listed(doc: Doc, thread: ThreadState, self: AppSessionId): ListedThread
   };
 }
 
-export function artifactCommentsTool(deps: DocumentToolDeps): McpToolDefinition {
-  const TOOL = 'artifact_comments';
-  return definition(TOOL, (args, ctx) =>
-    answering(TOOL, async () => {
-      const parsed = parseDocumentArguments(TOOL, ArtifactCommentsInputSchema, args);
-      if (!parsed.ok) return toolError(parsed.error);
-      const { status = 'open' } = parsed.data;
-      const store = storeOf(TOOL, deps);
-      const artifact = await documentOf(TOOL, store, parsed.data.artifact, ctx, deps);
-      const result = await store.readCommitted((): ArtifactCommentsResult => {
-        const doc = store.service.live(artifact.id);
-        const threads = threadStates(doc, liveThreadIds(doc)).filter((thread) => status === 'all' || thread.status === status);
-        return { status: 'listed', artifactId: artifact.id, revision: store.revision(artifact.id), threads: threads.map((thread) => listed(doc, thread, ctx.appSessionId)) };
-      });
-      return toolText(result);
-    }),
-  );
+// P3-C start (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, M7 fix wave 1; the architect's ruling, the
+// child's Decision Log 35): one orchestration for the three thread tools, extracted from B's own so a presentation's
+// wrappers (src/engine-host/presentations/threads.ts) share it rather than copy it.
+//
+// Contract. `threadTool(tool, deps, ops)` serves `artifact_comments`, `artifact_reply` or `artifact_resolve` for the
+// artifacts of kind `ops.kind`: it parses the call with B's schema, resolves `artifact` in the session's lineage and
+// refuses (in B's words and reasons: `unavailable`, `notFound`, `invalid` with the kind) a store that is not there, a ref
+// that names nothing, or an artifact of another kind. A listing reads the live doc behind the read barrier and answers
+// `{status: 'listed', artifactId, revision, threads}` with `ops.list`'s threads. A reply or a resolve is one write as the
+// session on its host replica inside `store.withOp` (a repeated tool-use id answers the first result), refused
+// `notFound` when `ops.has` finds no such thread, writing nothing when the thread is already in the state asked for (its
+// answer recorded alone), linking the session `edited` after a write. `ops` owns the kind's thread model only: listing,
+// lookup, status, and the reply, resolve and reopen writes.
+export interface ThreadKindOps {
+  kind: ArtifactKind;
+  list(doc: Doc, status: 'open' | 'resolved' | 'all', self: AppSessionId): unknown[];
+  has(doc: Doc, threadId: string): boolean;
+  status(doc: Doc, threadId: string): 'open' | 'resolved';
+  reply(doc: Doc, threadId: string, message: { id: string; by: Actor; at: number; body: string }): void;
+  resolve(doc: Doc, threadId: string, by: Actor, at: number): void;
+  reopen(doc: Doc, threadId: string, by: Actor, at: number): void;
 }
 
-// One write to a thread as the session, recorded with its answer; a change that writes nothing (resolving a resolved
-// thread) records its answer alone.
-async function threadWrite<R extends { revision: number }>(
-  tool: 'artifact_reply' | 'artifact_resolve',
-  store: ArtifactStore,
-  target: { id: string | null; ref: string },
-  threadId: string,
-  ctx: McpToolContext,
-  write: (doc: Doc, artifact: Artifact) => Omit<R, 'revision'> | { unchanged: Omit<R, 'revision'> },
-): Promise<R> {
-  const actor = actorOf(ctx);
-  return store.writeCommitted(() =>
-    store.withOp(
-      opIdOf(ctx),
-      tool,
-      target.id,
-      async (op) => {
-        const artifact = await liveDocumentIn(tool, store, target.id, target.ref);
-        const outcome: { answer?: Omit<R, 'revision'>; unchanged?: Omit<R, 'revision'>; missing?: boolean; result?: R } = {};
-        await store.service.writeAs(
-          artifact.id,
-          actor,
-          (doc) => {
-            if (!getThread(doc, threadId)) {
-              outcome.missing = true;
-              return;
-            }
-            const written = write(doc, artifact);
-            if ('unchanged' in written) outcome.unchanged = written.unchanged;
-            else outcome.answer = written;
-          },
-          {
-            inFrame: (revision) => {
-              if (!outcome.answer) return;
-              outcome.result = { ...outcome.answer, revision } as R;
-              op.record(outcome.result);
+export function threadTool(tool: 'artifact_comments' | 'artifact_reply' | 'artifact_resolve', deps: DocumentToolDeps, ops: ThreadKindOps): McpToolDefinition {
+  const now = deps.now ?? Date.now;
+  const lineage = (ctx: McpToolContext) => [ctx.appSessionId, ...(deps.artifactScope ?? [])];
+  const wrongKind = (ref: string, kind: ArtifactKind) => refuse(tool, { reason: 'invalid', kind }, `${ref} is a ${kind} artifact; ${tool} works on ${ops.kind}s`);
+  // One write to a thread as the session, recorded with its answer; a change that writes nothing (resolving a resolved
+  // thread) records its answer alone.
+  const write = async <R extends { revision: number }>(
+    ref: string,
+    threadId: string,
+    ctx: McpToolContext,
+    change: (doc: Doc, artifact: Artifact) => Omit<R, 'revision'> | { unchanged: Omit<R, 'revision'> },
+  ): Promise<R> => {
+    const store = storeOf(tool, deps);
+    const target = store.resolve(ref, lineage(ctx));
+    const actor = actorOf(ctx);
+    return store.writeCommitted(() =>
+      store.withOp(
+        opIdOf(ctx),
+        tool,
+        target,
+        async (op) => {
+          const artifact = target === null ? null : store.get(target);
+          if (!artifact) return refusedAfterCommit(store, refuse(tool, { reason: 'notFound', artifact: ref }, `no artifact "${ref}" in this session`));
+          if (artifact.kind !== ops.kind) return refusedAfterCommit(store, wrongKind(ref, artifact.kind));
+          const outcome: { answer?: Omit<R, 'revision'>; unchanged?: Omit<R, 'revision'>; missing?: boolean; result?: R } = {};
+          await store.service.writeAs(
+            artifact.id,
+            actor,
+            (doc) => {
+              if (!ops.has(doc, threadId)) {
+                outcome.missing = true;
+                return;
+              }
+              const written = change(doc, artifact);
+              if ('unchanged' in written) outcome.unchanged = written.unchanged;
+              else outcome.answer = written;
             },
-          },
-        );
-        if (outcome.missing) return refusedAfterCommit(store, refuse(tool, { reason: 'notFound', threadId }, `no comment thread ${threadId} in ${artifact.title}; artifact_comments lists them`));
-        if (outcome.unchanged) {
-          const result = { ...outcome.unchanged, revision: store.revision(artifact.id) } as R;
-          await store.service.inBatch(() => op.record(result));
-          return result;
-        }
-        await store.link(artifact.id, ctx.appSessionId, 'edited');
-        return outcome.result!;
-      },
-      { actor },
-    ),
-  );
+            {
+              inFrame: (revision) => {
+                if (!outcome.answer) return;
+                outcome.result = { ...outcome.answer, revision } as R;
+                op.record(outcome.result);
+              },
+            },
+          );
+          if (outcome.missing) return refusedAfterCommit(store, refuse(tool, { reason: 'notFound', threadId }, `no comment thread ${threadId} in ${artifact.title}; artifact_comments lists them`));
+          if (outcome.unchanged) {
+            const result = { ...outcome.unchanged, revision: store.revision(artifact.id) } as R;
+            await store.service.inBatch(() => op.record(result));
+            return result;
+          }
+          await store.link(artifact.id, ctx.appSessionId, 'edited');
+          return outcome.result!;
+        },
+        { actor },
+      ),
+    );
+  };
+  const calls: Record<typeof tool, McpToolDefinition['call']> = {
+    artifact_comments: (args, ctx) =>
+      answering(tool, async () => {
+        const parsed = parseDocumentArguments(tool, ArtifactCommentsInputSchema, args);
+        if (!parsed.ok) return toolError(parsed.error);
+        const { status = 'open' } = parsed.data;
+        const store = storeOf(tool, deps);
+        const ref = parsed.data.artifact;
+        const artifact = await store.readCommitted(() => {
+          const id = store.resolve(ref, lineage(ctx));
+          return id === null ? null : store.get(id);
+        });
+        if (!artifact) throw refuse(tool, { reason: 'notFound', artifact: ref }, `no artifact "${ref}" in this session`);
+        if (artifact.kind !== ops.kind) throw wrongKind(ref, artifact.kind);
+        const result = await store.readCommitted(() => {
+          const doc = store.service.live(artifact.id);
+          return { status: 'listed' as const, artifactId: artifact.id, revision: store.revision(artifact.id), threads: ops.list(doc, status, ctx.appSessionId) };
+        });
+        return toolText(result);
+      }),
+    artifact_reply: (args, ctx) =>
+      answering(tool, async () => {
+        const parsed = parseDocumentArguments(tool, ArtifactReplyInputSchema, args);
+        if (!parsed.ok) return toolError(parsed.error);
+        const { threadId, body } = parsed.data;
+        const result = await write<ArtifactReplyResult>(parsed.data.artifact, threadId, ctx, (doc, artifact) => {
+          const messageId = `${threadId}:${nanoid8()}`;
+          ops.reply(doc, threadId, { id: messageId, by: actorOf(ctx), at: now(), body });
+          return { status: 'replied', artifactId: artifact.id, threadId, messageId, threadStatus: ops.status(doc, threadId), line: `replied on c:${threadId}` };
+        });
+        return toolText(result);
+      }),
+    artifact_resolve: (args, ctx) =>
+      answering(tool, async () => {
+        const parsed = parseDocumentArguments(tool, ArtifactResolveInputSchema, args);
+        if (!parsed.ok) return toolError(parsed.error);
+        const { threadId, reopen: opening = false } = parsed.data;
+        const result = await write<ArtifactResolveResult>(parsed.data.artifact, threadId, ctx, (doc, artifact) => {
+          const answer = { status: opening ? 'reopened' : 'resolved', artifactId: artifact.id, threadId, line: `${opening ? 'reopened' : 'resolved'} c:${threadId}` } as const;
+          if (ops.status(doc, threadId) === (opening ? 'open' : 'resolved')) return { unchanged: answer };
+          if (opening) ops.reopen(doc, threadId, actorOf(ctx), now());
+          else ops.resolve(doc, threadId, actorOf(ctx), now());
+          return answer;
+        });
+        return toolText(result);
+      }),
+  };
+  return definition(tool, calls[tool]);
+}
+
+// B's thread model, as the helper takes it.
+const DOCUMENT_THREADS: ThreadKindOps = {
+  kind: 'document',
+  list: (doc, status, self) => threadStates(doc, liveThreadIds(doc)).filter((thread) => status === 'all' || thread.status === status).map((thread) => listed(doc, thread, self)),
+  has: (doc, threadId) => getThread(doc, threadId) !== null,
+  status: (doc, threadId) => getThread(doc, threadId)!.status,
+  reply: (doc, threadId, message) => reply(doc, threadId, message),
+  resolve: (doc, threadId, by, at) => resolveThread(doc, threadId, by, at),
+  reopen: (doc, threadId, by, at) => reopen(doc, threadId, by, at),
+};
+// P3-C end
+
+export function artifactCommentsTool(deps: DocumentToolDeps): McpToolDefinition {
+  return threadTool('artifact_comments', deps, DOCUMENT_THREADS); // P3-C: through the shared helper
 }
 
 export function artifactReplyTool(deps: DocumentToolDeps): McpToolDefinition {
-  const TOOL = 'artifact_reply';
-  const now = deps.now ?? Date.now;
-  return definition(TOOL, (args, ctx) =>
-    answering(TOOL, async () => {
-      const parsed = parseDocumentArguments(TOOL, ArtifactReplyInputSchema, args);
-      if (!parsed.ok) return toolError(parsed.error);
-      const { threadId, body } = parsed.data;
-      const store = storeOf(TOOL, deps);
-      const target = { id: opTargetOf(store, parsed.data.artifact, ctx, deps), ref: parsed.data.artifact };
-      const result = await threadWrite<ArtifactReplyResult>(TOOL, store, target, threadId, ctx, (doc, artifact) => {
-        const messageId = `${threadId}:${nanoid8()}`;
-        reply(doc, threadId, { id: messageId, by: actorOf(ctx), at: now(), body });
-        return { status: 'replied', artifactId: artifact.id, threadId, messageId, threadStatus: getThread(doc, threadId)!.status, line: `replied on c:${threadId}` };
-      });
-      return toolText(result);
-    }),
-  );
+  return threadTool('artifact_reply', deps, DOCUMENT_THREADS); // P3-C: through the shared helper
 }
 
 export function artifactResolveTool(deps: DocumentToolDeps): McpToolDefinition {
-  const TOOL = 'artifact_resolve';
-  const now = deps.now ?? Date.now;
-  return definition(TOOL, (args, ctx) =>
-    answering(TOOL, async () => {
-      const parsed = parseDocumentArguments(TOOL, ArtifactResolveInputSchema, args);
-      if (!parsed.ok) return toolError(parsed.error);
-      const { threadId, reopen: opening = false } = parsed.data;
-      const store = storeOf(TOOL, deps);
-      const target = { id: opTargetOf(store, parsed.data.artifact, ctx, deps), ref: parsed.data.artifact };
-      const result = await threadWrite<ArtifactResolveResult>(TOOL, store, target, threadId, ctx, (doc, artifact) => {
-        const answer = { status: opening ? 'reopened' : 'resolved', artifactId: artifact.id, threadId, line: `${opening ? 'reopened' : 'resolved'} c:${threadId}` } as const;
-        if (getThread(doc, threadId)!.status === (opening ? 'open' : 'resolved')) return { unchanged: answer };
-        if (opening) reopen(doc, threadId, actorOf(ctx), now());
-        else resolveThread(doc, threadId, actorOf(ctx), now());
-        return answer;
-      });
-      return toolText(result);
-    }),
-  );
+  return threadTool('artifact_resolve', deps, DOCUMENT_THREADS); // P3-C: through the shared helper
 }
 
 // ── artifact_read (a document) ──────────────────────────────────────────────────────────────────────────────────

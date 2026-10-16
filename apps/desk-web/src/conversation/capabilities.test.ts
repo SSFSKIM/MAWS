@@ -1,7 +1,7 @@
 // The §5 table, as the web reads it to draw what a session cannot do and why — bridged, a `--bg` seat without the
 // bridge, a terminal session without it, a machine offline — instead of failing when a button is pressed.
 import { describe, expect, it } from 'vitest';
-import { capabilities, kindOf, type CapabilityInput } from './capabilities';
+import { capabilities, kindOf, retiredBy, type CapabilityInput } from './capabilities';
 
 const base: CapabilityInput = { alias: 'maws-45', machine: 'mini', member: true, group: 'working', seat: '', machineOnline: true, presence: { record: { status: 'busy' }, bridge: true } };
 const at = (over: Partial<CapabilityInput>) => capabilities({ ...base, ...over });
@@ -66,9 +66,24 @@ describe('capabilities', () => {
     expect(terminal.steer).toEqual({ can: false, reason: 'maws-45 is not running' });
     const seat = at({ group: 'ended', seat: 'maws-45', presence: { record: null, bridge: false } });
     expect(seat.send.note).toBe('resumes the seat to read it');
-    const retired = at({ group: 'ended', member: false, presence: null });
+    // A session whose end sminos recorded (`retired` with reason `ended`) is ended, not retired: Resume stands.
+    const recordedEnd = at({ group: 'ended', member: false, presence: null, ended: { by: '', reason: 'ended' } });
+    expect(recordedEnd.resume.can).toBe(true);
+  });
+
+  it('a retired session: its history stays, and Resume is not offered (the machine refuses it), retired by whom it says', () => {
+    const retired = at({ group: 'ended', member: false, presence: null, ended: { by: 'human', reason: 'retire' } });
     expect(retired.retire).toEqual({ can: false, reason: 'maws-45 is retired' });
-    expect(retired.resume.can).toBe(true);
+    expect(retired.resume).toEqual({ can: false, reason: 'retired: a retired session is not resumed' });
+    expect(retiredBy({ ...base, member: false, ended: { by: 'human', reason: 'retire' } })).toBe('human');
+    expect(retiredBy({ ...base, member: false, ended: { by: '', reason: 'ended' } })).toBeNull();
+    expect(retiredBy(base)).toBeNull();
+    const offline = at({ group: 'ended', member: false, machineOnline: false, ended: { by: 'human', reason: 'retire' } });
+    expect(offline.resume.can).toBe(false);
+    expect(offline.send.note).toBe('recorded, not delivered: it is retired');
+    // A terminal session retired from the project can still be running: the send is still only recorded.
+    const live = at({ member: false, presence: { record: { status: 'busy' }, bridge: false }, ended: { by: 'human', reason: 'retire' } });
+    expect(live.send).toEqual({ can: true, reason: null, note: 'recorded, not delivered: it is retired' });
   });
 
   it('presence not known yet: the log plane only', () => {
@@ -76,5 +91,13 @@ describe('capabilities', () => {
     expect(c.send.can).toBe(true);
     expect(c.steer).toEqual({ can: false, reason: "waiting for maws-45's presence" });
     expect(c.retire.can).toBe(true);
+  });
+});
+
+describe('while the project socket is not connected', () => {
+  it('offers no RPC, whatever presence last said: the hub queues nothing for an absent party; a send waits for the reconnect', () => {
+    const c = capabilities(base, false);
+    for (const verb of ['steer', 'interrupt', 'answer', 'decide', 'model', 'compact', 'retire', 'resume'] as const) expect(c[verb], verb).toEqual({ can: false, reason: 'not connected to the hub' });
+    expect(c.send).toEqual({ can: true, reason: null, note: 'sent once the desk reconnects' });
   });
 });

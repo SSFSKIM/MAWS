@@ -17,7 +17,7 @@ import { canonicalize } from '../protocol/canonical';
 import { isMemberId, type ProjectRecord } from '../protocol/identity';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
 import type { DownFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
-import { FRAME_LIMIT, PartAssembler, toWire, type Part } from '../protocol/parts';
+import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
 import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
 import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
 import { BATCH_BYTES, eventShapeError, LogStore, sameEvent, type AuditRow, type Stored } from './log-store';
@@ -28,7 +28,8 @@ export const PROJECT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
 
 /**
  * A browser socket's attachment (at most 2,048 bytes serialized): its id, which is also its hibernation tag, the member
- * the Worker admitted, whether its tab shows the project, whether it follows the log, and for each of its
+ * the Worker admitted, whether its tab shows the project, whether it follows the log live (from its `caught-up` on;
+ * false while it pages through the backlog), and for each of its
  * subscriptions the `n` the browser expects next (one past the last relayed), so an `end` the hub writes itself carries
  * the right `n` after a hibernation too.
  */
@@ -45,6 +46,8 @@ export type MachineContext = { org: string; project: string; machine: string; ge
 
 /** How many audit entries a browser that resumes is shown after `caught-up`. */
 const AUDIT_REPLAY = 100;
+/** `log` frames (of about BATCH_BYTES, 256 KiB) in one page of a resume: about 1 MiB. */
+const RESUME_PAGE_FRAMES = 4;
 /** Subscriptions one socket may hold: their numbering rides in its attachment, which holds 2,048 bytes. */
 const MAX_SUBS = 32;
 /** A `<message>` pushes when it is this fresh: a machine's first sync uploads its whole backlog, which must not. */
@@ -66,7 +69,7 @@ export class Project extends DurableObject<Env> {
   private readonly plane: SessionStore;
   /** One promise chain per machine stream (`<machine>#<generation>`), so every frame this object sends a stream arrives
    * in the order it was queued; a chain that failed stays failed, its stream ended (`toMachine`). */
-  private readonly queues = new Map<string, Promise<void>>();
+  protected readonly queues = new Map<string, Promise<void>>();
   /** Part sets a socket is sending (lost with a hibernation, as the socket's half-sent frame would be). */
   private readonly parts = new Map<WebSocket, PartAssembler>();
   /** Every subscription's route, rebuilt from storage whenever the object starts, woken or restarted. */
@@ -128,7 +131,8 @@ export class Project extends DurableObject<Env> {
     let whole: unknown;
     try {
       whole = assembler.add(frame as unknown as Part);
-    } catch {
+    } catch (error) {
+      if (error instanceof PartsBudgetError) return this.refuseBrowser(socket, { reason: 'too-large', message: error.message });
       return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'a malformed part' });
     }
     if (whole !== undefined) this.dispatch(socket, whole as { t?: unknown; [key: string]: unknown });
@@ -176,19 +180,43 @@ export class Project extends DurableObject<Env> {
 
   // ---- Machines ------------------------------------------------------------------------------------------------
 
-  /** A frame a machine posted, handed over by its `Machine` object; resolves once every reply is on its stream. */
-  async fromMachine(ctx: MachineContext, frame: UpFrame): Promise<void> {
+  /**
+   * The frames a machine posted for this project, in the POST's order, handed over by its `Machine` object in one call
+   * (one call per frame cost a Durable Object round trip each: M5's measured run). Applied one by one, as before; the
+   * call stops before a frame once this project knows of a newer stream of the machine, and says so, so the POST is
+   * refused `stale-generation` with what it applied. A frame counts as applied once its replies are on the stream; a
+   * frame that throws, or whose reply could not be written, stops the call as `failed`, with the frames before it
+   * counted, so the POST's `503 delivery-failed` still says what was applied.
+   */
+  async fromMachine(ctx: MachineContext, frames: UpFrame[]): Promise<{ applied: number; stale: boolean; failed: boolean }> {
     this.remember(ctx.org, ctx.project);
+    let applied = 0;
+    for (const frame of frames) {
+      if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation) return { applied, stale: true, failed: false };
+      try {
+        if ((await this.fromMachineFrame(ctx, frame)) === 'stale') return { applied, stale: true, failed: false };
+        // Settled at once for a frame that owes no reply, which most of a stream's frames are.
+        await this.queues.get(queueKey(ctx.machine, ctx.generation));
+      } catch {
+        return { applied, stale: false, failed: true };
+      }
+      applied++;
+    }
+    return { applied, stale: false, failed: false };
+  }
+
+  /** One frame from a machine; 'stale' when a newer stream of the machine outlived it while it waited, before it changed
+   * anything. */
+  private async fromMachineFrame(ctx: MachineContext, frame: UpFrame): Promise<'stale' | void> {
     // A lease whose time ran out lapses before anything the machine sent is served, whether or not its alarm ran yet.
     this.sweepLeases();
     if (frame.t === 'hello') await this.hello(ctx, frame);
     else if (!this.isOpen(ctx)) this.refuseMachine(ctx, { reason: 'not-open', message: 'send hello for this project on this stream first' });
-    else if (frame.t === 'events') await this.upload(ctx, frame.events);
+    else if (frame.t === 'events') return this.upload(ctx, frame.events);
     else if (frame.t === 'rejected') this.rejected(ctx, frame);
     else if (frame.t === 'rpc-result') this.rpcResult(ctx, frame);
     else if (frame.t === 'pending') this.pendingSet(ctx, frame.raised);
     else if (frame.t === 'session') this.session(ctx, frame.message);
-    await this.queues.get(queueKey(ctx.machine, ctx.generation));
   }
 
   /** The daemon answered a heartbeat on the stream this lease belongs to: the machine stays online, or is online again
@@ -253,17 +281,25 @@ export class Project extends DurableObject<Env> {
     if (!this.isOpen(ctx)) return;
     this.startLease(ctx);
     this.toMachine(ctx.machine, ctx.generation, { t: 'have', project: ctx.project, have: this.log.vector(), archive: record.archive_machine === ctx.machine });
-    for (const events of this.log.beyond(have as Vector)) this.toMachine(ctx.machine, ctx.generation, { t: 'events', project: ctx.project, events });
+    // The backlog is the log as of now, read a page at a time as the stream takes it: a page is read once the page
+    // before it is written, so a long log is never held whole. An event stored from now on goes out live, queued
+    // behind the whole backlog.
+    const pages = this.log.beyond(have as Vector, this.log.head());
+    this.toMachineAll(ctx.machine, ctx.generation, mapped(pages, (events): DownFrame => ({ t: 'events', project: ctx.project, events })));
   }
 
   // A machine's upload: each event stored once at the next seq of its writer, a copy of a stored one passed over, a
   // gap answered by `resend`, and a writer the machine may not write, or a different payload at a stored position,
   // refused, reported, and recorded. A writer stops at its first refusal or gap in a batch.
-  private async upload(ctx: MachineContext, events: unknown): Promise<void> {
+  private async upload(ctx: MachineContext, events: unknown): Promise<'stale' | void> {
     if (!Array.isArray(events)) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'events is a list' });
-    const archive = events.some((e) => typeof e?.writer === 'string' && e.writer.startsWith(LEGACY_WRITER_PREFIX))
-      ? (await this.registry().project(ctx.project))?.archive_machine
-      : undefined;
+    let archive: string | null | undefined;
+    if (events.some((e) => typeof e?.writer === 'string' && e.writer.startsWith(LEGACY_WRITER_PREFIX))) {
+      archive = await this.archiveMachine(ctx.project);
+      // A newer stream may have opened the project while the Registry answered: this upload is the retired stream's,
+      // and stores nothing.
+      if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || !this.isOpen(ctx)) return 'stale';
+    }
     const accepted: Stored[] = [];
     const stopped = new Set<string>();
     for (const event of events as LogEvent[]) {
@@ -518,7 +554,7 @@ export class Project extends DurableObject<Env> {
     const record = this.plane.rpc(nonce);
     if (record) {
       if (record.member !== member || canonicalize(record.rpc) !== canonicalize(rpc)) return fail('bad-shape', 'this nonce was sent with another RPC');
-      if (record.state === 'uncertain' && this.isOnline(record.machine)) return this.forward(record.rpc, member);
+      if (record.state === 'uncertain' && this.isOnline(record.machine)) return this.forward(record.rpc, member, true);
       return this.toSocket(socket, rpcStateFrame(record));
     }
     if (!(Date.now() - Date.parse(rpc.created) <= RPC_FRESHNESS_MS)) return fail('stale', 'older than 60 seconds: issue it again');
@@ -526,11 +562,15 @@ export class Project extends DurableObject<Env> {
     this.forward(rpc, member);
   }
 
-  private forward(rpc: Rpc, member: string): void {
+  /** Records the RPC as forwarded and writes it to the machine's stream. A send that finds no stream fails it
+   * `machine-offline`; but a `retry` of an uncertain one stays uncertain, since a retry the hub could not deliver says
+   * nothing of what the first forward did. */
+  private forward(rpc: Rpc, member: string, retry = false): void {
     const { generation } = this.plane.lease(rpc.machine)!;
     const record: RpcRecord = { nonce: rpc.nonce, machine: rpc.machine, member, rpc, state: 'forwarded', outcome: null, generation };
     this.updateRpc(record);
-    const unsent = (state: 'failed' | 'uncertain') => {
+    const unsent = (undelivered: 'failed' | 'uncertain') => {
+      const state = retry ? 'uncertain' : undelivered;
       const now = this.plane.rpc(rpc.nonce);
       if (now?.state !== 'forwarded' || now.generation !== generation) return;
       const outcome: RpcOutcome | null = state === 'failed' ? { state: 'failed', error: { code: 'machine-offline', message: `${rpc.machine} is offline` } } : null;
@@ -751,12 +791,29 @@ export class Project extends DurableObject<Env> {
 
   // ---- Browsers' sockets ---------------------------------------------------------------------------------------
 
-  /** A browser resumes after an offset: the backlog, `caught-up`, then the log live; and the audit record's latest. */
+  /**
+   * A browser resumes after an offset: one page of the backlog (RESUME_PAGE_FRAMES frames, about 1 MiB). When the page
+   * reaches the head, `caught-up`, the log live from then on, and the audit record's latest; otherwise `more` with the
+   * last offset sent, and the browser asks for the next page. A hibernatable socket's send gives no settlement, so the
+   * browser's requests are what pace a long backlog. Until its `caught-up`, the socket gets nothing live (the mark is in
+   * its attachment, so a hibernation between pages keeps it): what is stored meanwhile comes in a later page, once.
+   */
   private resume(socket: WebSocket, after: unknown): void {
     if (!Number.isSafeInteger(after) || (after as number) < 0) return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'resume is {after: offset}' });
+    let last = after as number;
+    let frames = 0;
+    for (const events of this.log.after(last)) {
+      this.toSocket(socket, { t: 'log', events });
+      last = events[events.length - 1].offset;
+      if (++frames === RESUME_PAGE_FRAMES) break;
+    }
+    const head = this.log.head();
+    if (last < head) {
+      this.attach(socket, (a) => ({ ...a, log: false }));
+      return this.toSocket(socket, { t: 'more', offset: last });
+    }
     this.attach(socket, (a) => ({ ...a, log: true }));
-    for (const events of this.log.after(after as number)) this.toSocket(socket, { t: 'log', events });
-    this.toSocket(socket, { t: 'caught-up', offset: this.log.head() });
+    this.toSocket(socket, { t: 'caught-up', offset: head });
     for (const row of this.log.audit(AUDIT_REPLAY)) this.toSocket(socket, this.audited(row));
   }
 
@@ -849,8 +906,12 @@ export class Project extends DurableObject<Env> {
     this.dropRoute(route, socket);
   }
 
+  /** Tears a route down: in memory, in storage, and in its socket's attachment. A route that is no longer the sub's (it
+   * ended, and the browser subscribed again with the same sub) is passed over, so a late callback of the old one leaves
+   * its replacement whole. */
   private dropRoute(route: Route, socket = this.socketById(route.socket)): void {
-    if (this.routes.get(route.sub) === route) this.routes.delete(route.sub);
+    if (this.routes.get(route.sub) !== route) return;
+    this.routes.delete(route.sub);
     this.plane.deleteRoute(route.sub);
     if (socket) {
       this.attach(socket, (a) => {
@@ -871,14 +932,21 @@ export class Project extends DurableObject<Env> {
    * POST waiting on the chain (one whose first reply failed, though later replies were queued behind it, included)
    * answers the failure, until the machine's next stream starts a chain of its own.
    */
-  private toMachine(name: string, generation: number, frame: DownFrame): Promise<'written' | 'offline'> {
+  protected toMachine(name: string, generation: number, frame: DownFrame): Promise<'written' | 'offline'> {
+    return this.toMachineAll(name, generation, [frame]);
+  }
+
+  /** `toMachine` for several frames in one place of the queue, each taken from `frames` once the one before it is
+   * written, and none after one that found the stream gone. */
+  private toMachineAll(name: string, generation: number, frames: Iterable<DownFrame>): Promise<'written' | 'offline'> {
     const key = queueKey(name, generation);
-    for (const other of this.queues.keys()) if (other.startsWith(`${name}#`) && other !== key) this.queues.delete(other);
+    // An older stream's queue goes; a newer one's stays (a reply on a retired stream can still be queued).
+    for (const other of this.queues.keys()) if (other.startsWith(`${name}#`) && Number(other.slice(name.length + 1)) < generation) this.queues.delete(other);
     const machine = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${this.orgId}:${name}`));
     const sent = (this.queues.get(key) ?? Promise.resolve()).then(async () => {
-      let result: 'written' | 'offline';
+      let result: 'written' | 'offline' = 'written';
       try {
-        result = await machine.send(frame, generation);
+        for (const frame of frames) if ((result = await machine.send(frame, generation)) === 'offline') break;
       } catch (error) {
         this.leaveFanOut(name, generation);
         void machine.close(generation).catch(() => {});
@@ -914,6 +982,12 @@ export class Project extends DurableObject<Env> {
     return this.registry().registerProject(project, name, machine);
   }
 
+  /** The project's archive machine, from the org's Registry (the suites' Worker holds the lookup to race a newer stream
+   * against it). */
+  protected async archiveMachine(project: string): Promise<string | null | undefined> {
+    return (await this.registry().project(project))?.archive_machine;
+  }
+
   private registry() {
     return this.env.REGISTRY.get(this.env.REGISTRY.idFromName(this.orgId));
   }
@@ -934,6 +1008,10 @@ export class Project extends DurableObject<Env> {
 }
 
 const queueKey = (machine: string, generation: number) => `${machine}#${generation}`;
+
+function* mapped<T, U>(items: Iterable<T>, map: (item: T) => U): Generator<U> {
+  for (const item of items) yield map(item);
+}
 
 const rpcStateFrame = (record: RpcRecord): ProjectDown => ({ t: 'rpc-state', nonce: record.nonce, state: record.state, ...(record.outcome ? { outcome: record.outcome } : {}) });
 

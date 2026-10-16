@@ -19,7 +19,7 @@ import { capabilities } from '../../conversation/capabilities';
 import { cardState, isAsyncQuestion, isQuestion, type CardState } from '../../conversation/card-state';
 import { settledText } from '../../conversation/words';
 import type { RequestRecord, RpcEntry } from '../../project/conversation';
-import { useDesk } from '../conversation/desk-context';
+import { useConnected, useDesk } from '../conversation/desk-context';
 import { RpcStatus } from '../conversation/RpcStatus';
 
 type PermissionEvent = Extract<SessionEvent, { kind: 'permission.requested' }>;
@@ -54,17 +54,19 @@ function latestRpc(rpcs: Record<string, RpcEntry>, request: string): RpcEntry | 
   return latest;
 }
 
-/** `embedded`: the card is the body of the session's own message, which already names it and its machine. */
+/** `request`: the request's key (`requestKey`). `embedded`: the card is the body of the session's own message, which
+ * already names it and its machine. */
 export function RequestCard({ request, embedded = false }: { request: string; embedded?: boolean }) {
   const { connection, member, sessions } = useDesk();
   const record = useStore(connection.conversation.store, (s) => s.requests[request]);
   const rpcs = useStore(connection.conversation.store, (s) => s.rpcs);
+  const connected = useConnected();
   if (!record) return null; // never seen, or its code failed: not drawn (the view reports the failure)
   const session = sessions.get(record.raised.session) ?? null;
   const question = isQuestion(record.raised.tool);
-  const capability = session ? capabilities(session)[question ? 'answer' : 'decide'] : { can: false, reason: 'the session is not in this project’s log yet' };
+  const capability = session ? capabilities(session, connected)[question ? 'answer' : 'decide'] : { can: false, reason: 'the session is not in this project’s log yet' };
   const rpc = latestRpc(rpcs, request);
-  const state = cardState(record, rpc, capability, session?.machineOnline ?? null);
+  const state = cardState(record, rpc, capability, session?.machineOnline ?? null, connected);
   const who = session?.alias ?? record.raised.session.slice(0, 8);
   const agent = record.raised.agentId ?? null;
   const verb = question ? 'asks' : `wants to ${toolVerb(asPermission(record.raised))}`;
@@ -73,7 +75,7 @@ export function RequestCard({ request, embedded = false }: { request: string; em
   return (
     <article
       className={['my-2 flex max-w-[640px] flex-col gap-3 rounded-md border px-3.5 py-3 text-ui', state.kind === 'open' || state.kind === 'failed' || state.kind === 'uncertain' ? 'border-border-strong bg-bg-raised' : 'border-border bg-bg'].join(' ')}
-      data-request={request}
+      data-request={record.request}
       data-card-state={state.kind}
       aria-label={`${who} ${what}`}
     >
@@ -158,7 +160,8 @@ function QuestionCard({ record, state, member }: { record: RequestRecord; state:
       </ul>
     );
   }
-  const item = { id: `desk:${connection.project}:${record.request}` } as unknown as AttentionItem;
+  // MAWS's stepper keeps its draft under this id: the request's whole identity, since an id is minted per bridge.
+  const item = { id: `desk:${connection.project}:${record.key}` } as unknown as AttentionItem;
   const request = { kind: 'question.requested', questions } as unknown as Extract<SessionEvent, { kind: 'question.requested' }>;
   return (
     <>
@@ -211,6 +214,15 @@ function StateLine({ state, machine, rpc, me }: { state: CardState; machine: str
         <p className="m-0 text-ui-sm text-warning" data-testid="offline">
           {machine} is offline: shown, not answerable until it reconnects
         </p>
+      );
+    case 'disconnected':
+      return (
+        <>
+          {rpc && <RpcStatus nonce={rpc} />}
+          <p className="m-0 text-ui-sm text-warning" data-testid="disconnected">
+            Not connected to the hub: shown, not answerable until the desk reconnects
+          </p>
+        </>
       );
     case 'closed':
       return <p className="m-0 text-ui-sm text-fg-muted">No longer waiting</p>;

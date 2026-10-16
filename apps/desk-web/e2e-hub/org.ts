@@ -1,6 +1,6 @@
-// The org key and its dialog as the local-hub suites drive them. The local hub's state outlives a run, and an org has
-// one key ever: a suite that meets an org with no key sets one up with the suite's passphrase; one that meets an org
-// with a key unlocks with that passphrase, which every first setup by these suites adds.
+// The org key and its dialog as the local-hub suites drive them. Each run's local hub starts from a fresh state (no key),
+// and an org has one key ever: a suite that meets an org with no key sets one up with the suite's passphrase; one that
+// meets an org with a key (a hub whose state was kept) unlocks with that passphrase, which every first setup adds.
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { WrappedKeys } from 'desk-hub/protocol';
 import type { LocalHub } from '../test/local/hub';
@@ -22,7 +22,7 @@ export async function openKeyDialog(target: Page): Promise<Locator> {
 
 export async function unlockWithPassphrase(scope: Locator, passphrase: string, keep: boolean) {
   if (keep) await scope.getByLabel('Keep unlocked on this device').check();
-  const form = scope.getByRole('form', { name: 'Passphrase' });
+  const form = scope.getByRole('form', { name: 'Passphrase', exact: true });
   await form.getByLabel(/passphrase/).fill(passphrase);
   await form.getByRole('button', { name: 'Unlock', exact: true }).click();
 }
@@ -58,7 +58,7 @@ export async function enrollInBrowser(page: Page, machine: string): Promise<stri
   await dialog.getByRole('button', { name: 'Enroll a machine' }).click();
   await dialog.getByLabel(/machine's name/).fill(machine);
   await dialog.getByRole('button', { name: 'Continue' }).click();
-  const confirm = dialog.getByRole('form', { name: 'Passphrase' });
+  const confirm = dialog.getByRole('form', { name: 'Passphrase', exact: true });
   await confirm.getByLabel(/passphrase/).fill(SUITE_PASSPHRASE);
   await confirm.getByRole('button', { name: 'Confirm', exact: true }).click();
   const code = dialog.getByTestId('enrollment-code');

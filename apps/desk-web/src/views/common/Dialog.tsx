@@ -15,7 +15,7 @@ export function Dialog(props: { title: string; onClose: () => void; children: Re
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-fg/20 p-6 pt-[12vh]" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-fg/20 p-6 pt-[12vh]" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
       <div role="dialog" aria-modal="true" aria-label={title} className="w-full max-w-[520px] rounded-lg border border-border-strong bg-bg-overlay text-fg shadow-lg">
         <header className="flex items-center border-b border-border px-4 py-2.5">
           <h2 className="m-0 text-ui font-semibold">{title}</h2>

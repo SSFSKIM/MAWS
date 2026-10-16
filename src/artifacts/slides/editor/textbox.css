@@ -1,0 +1,118 @@
+/* The text box (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, D8 "Text in place"; M5). The editor's root
+   lives inside the element's own node on the slide, so it draws nothing of its own: the element's font, size, colour
+   and alignment are inherited, and only what contenteditable needs is set (ProseMirror requires pre-wrap). Beating
+   CANVAS_CSS's `.maws-slide div` (a flex column) keeps its lines in block flow. The mark bar is app chrome over the
+   stage: the app's tokens only. */
+
+.maws-slide .deck-textbox {
+  display: block;
+  outline: none;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  caret-color: currentColor;
+  cursor: text;
+}
+
+.deck-markbar {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--fg);
+  box-shadow: var(--shadow-float);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui);
+  pointer-events: auto;
+  white-space: nowrap;
+}
+.deck-markbar[data-side='above'] {
+  transform: translateY(-100%);
+}
+.deck-markbar-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+}
+.deck-markbar-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border);
+}
+.deck-markbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  cursor: default;
+}
+.deck-markbar-button[data-mark='b'] {
+  font-weight: 700;
+}
+.deck-markbar-button[data-mark='i'] {
+  font-style: italic;
+}
+.deck-markbar-button[data-mark='u'] {
+  text-decoration: underline;
+}
+.deck-markbar-button:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.deck-markbar-button[aria-pressed='true'] {
+  background: var(--bg-active);
+  color: var(--fg);
+}
+.deck-markbar-button:disabled {
+  color: var(--fg-faint);
+}
+.deck-markbar-button:focus-visible,
+.deck-markbar-field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.deck-markbar-apply {
+  border-color: var(--border);
+  color: var(--fg);
+}
+.deck-markbar-swatch {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+}
+.deck-markbar-swatch[data-default] {
+  background: linear-gradient(135deg, transparent 45%, var(--fg-muted) 45% 55%, transparent 55%);
+}
+.deck-markbar-field {
+  width: 180px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--fg);
+  font: inherit;
+}
+.deck-markbar-field[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+.deck-markbar-error {
+  margin: 0 0 0 4px;
+  color: var(--danger);
+  font-size: var(--text-ui-sm);
+}

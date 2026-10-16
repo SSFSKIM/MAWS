@@ -313,10 +313,15 @@ describe('the export service', () => {
 });
 
 // fix wave 2, the re-review's finding 2: one budget from receipt to publication, inside the bridge's 60 s
-describe('the export’s one budget (EXPORT_BUDGET_MS from main’s receipt)', () => {
-  // Real I/O while setTimeout and Date are faked: setImmediate stays real, so the staged writes can finish.
+describe('the export’s one budget (EXPORT_BUDGET_MS from main’s receipt)', { timeout: 30_000 }, () => {
+  // Real I/O while setTimeout and Date are faked: setImmediate stays real, so the staged writes can finish. `io` waits
+  // for the condition up to a liveness ceiling in real time (gate-offload Decision Log 35, P6), read from a clock taken
+  // at load, which no fake reaches (vitest's default fake set includes `process.hrtime`); the cases' 30 s cover it.
+  const IO_CEILING_NS = 10_000_000_000n;
+  const realNs = process.hrtime.bigint;
   const io = async (test: () => boolean | Promise<boolean>) => {
-    for (let i = 0; i < 2_000 && !(await test()); i++) await new Promise((resolve) => setImmediate(resolve));
+    const deadline = realNs() + IO_CEILING_NS;
+    while (!(await test()) && realNs() < deadline) await new Promise((resolve) => setImmediate(resolve));
     expect(await test()).toBe(true);
   };
   const slowHost = (host: ReturnType<typeof fakeHost>, ms: number) => {

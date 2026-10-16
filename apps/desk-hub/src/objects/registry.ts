@@ -251,7 +251,7 @@ export class Registry extends DurableObject<Env> {
       this.sql.exec('UPDATE projects SET archive_machine = NULL WHERE archive_machine = ?', machine.name);
       this.orphan(machine.token_name);
     });
-    await this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org.id}:${machine.name}`)).revoke();
+    await this.env.MACHINE.get(this.env.MACHINE.idFromName(`${org.id}:${machine.name}`)).revoke(machine.client_id);
     await this.sweepOrphans();
     await this.scheduleAlarm();
     return ok({ revoked: machine.name });
@@ -524,17 +524,31 @@ export class Registry extends DurableObject<Env> {
     if (current === null || current > at || current <= now) await this.ctx.storage.setAlarm(at);
   }
 
-  /** The org, created from the deploy configuration the first time it is needed, with its admin as the first member. */
+  /**
+   * The org, created from the deploy configuration the first time it is needed, with its admin as the first member.
+   * This Registry is the one the Worker names by the configured org id, so a stored org of another id was made under a
+   * previous configuration: after a deploy, Durable Objects, new ones included, run the previous version with its
+   * variables for minutes (M5). While nothing was built on the stored id (no machine, enrollment, project, or wrapped
+   * key), the org takes its id and name from the configuration; after that, the stored org stands.
+   */
   private ensureOrg(): OrgRecord {
-    const existing = this.sql.exec<OrgRecord>('SELECT id, name, created, key_check FROM org').toArray()[0];
-    if (existing) return existing;
     const { org: config } = this.config;
+    const existing = this.sql.exec<OrgRecord>('SELECT id, name, created, key_check FROM org').toArray()[0];
+    if (existing && existing.id !== config.id && existing.key_check === null && !this.holdsAnything()) {
+      this.sql.exec('UPDATE org SET id = ?, name = ?', config.id, config.name);
+      return { ...existing, id: config.id, name: config.name };
+    }
+    if (existing) return existing;
     const created = iso(Date.now());
     this.ctx.storage.transactionSync(() => {
       this.sql.exec('INSERT INTO org (id, name, created, key_check) VALUES (?, ?, ?, NULL)', config.id, config.name, created);
       this.sql.exec('INSERT INTO members (id, email, role, created) VALUES (?, ?, ?, ?)', newId(), config.adminEmail.toLowerCase(), 'admin', created);
     });
     return { id: config.id, name: config.name, created, key_check: null };
+  }
+
+  private holdsAnything(): boolean {
+    return ['machines', 'enrollments', 'projects'].some((table) => this.sql.exec(`SELECT 1 FROM ${table} LIMIT 1`).toArray().length > 0);
   }
 
   // ---- The org key's wrapped copies (DX7) ----------------------------------------------------------------------

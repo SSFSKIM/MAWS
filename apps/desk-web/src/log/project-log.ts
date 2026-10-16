@@ -2,6 +2,10 @@
 // connection — or the next page load — resumes after the last one held. Nothing is drawable until it verifies under
 // the org key (§6); without a key the log is locked and draws nothing, and an entry whose code fails is never drawn
 // and is reported instead.
+//
+// The record only ever holds a prefix of what the hub sent: a page load resumes after the highest offset recorded, so
+// an entry missing below it would never come again. Each write therefore carries every entry not yet recorded, in one
+// transaction, and a write that fails leaves its entries for the next one.
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { LogEvent, OrgKey } from 'desk-hub/protocol';
 import type { LogEntry, LogRecord } from './record';
@@ -26,6 +30,10 @@ export class ProjectLog {
   /** Counts the log's replacements and key changes: a verification reached under an older generation is discarded. */
   private generation = 0;
   private work: Promise<void> = Promise.resolve();
+  /** Entries held but not yet in the record, oldest first: the next write carries them all. */
+  private unrecorded: LogEntry[] = [];
+  /** Counts the record's replacements: a write asked for before one carries nothing of the new log. */
+  private recordEpoch = 0;
 
   constructor(
     readonly project: string,
@@ -62,20 +70,25 @@ export class ProjectLog {
     if (fresh.length === 0) return;
     this.last = fresh.at(-1)!.offset;
     this.store.setState((s) => ({ entries: [...s.entries, ...fresh.map((e) => ({ ...e, verdict: 'pending' as const }))] }));
-    this.queue(() => this.record.append(this.project, fresh));
+    this.unrecorded.push(...fresh);
+    this.recordUnrecorded();
     this.verify();
   }
 
   /**
    * The hub's latest offset, from its `welcome`. Offsets only grow, so a hub holding less than this record holds a log
    * that is not the one recorded (a local hub started afresh): the record is dropped and the log taken again from 0.
+   * True when it was.
    */
-  welcome(head: number): void {
-    if (head >= this.last) return;
+  welcome(head: number): boolean {
+    if (head >= this.last) return false;
     this.last = 0;
     this.generation++;
+    this.recordEpoch++;
+    this.unrecorded = [];
     this.store.setState({ entries: [] });
     this.queue(() => this.record.clear(this.project));
+    return true;
   }
 
   /**
@@ -102,6 +115,17 @@ export class ProjectLog {
   /** Resolves once every recorded write and verification asked for so far is done. */
   settled(): Promise<void> {
     return this.work;
+  }
+
+  /** Writes every entry not yet recorded, after every write asked for before; on failure they wait for the next. */
+  private recordUnrecorded(): void {
+    const epoch = this.recordEpoch;
+    this.queue(async () => {
+      if (epoch !== this.recordEpoch || this.unrecorded.length === 0) return;
+      const batch = this.unrecorded.slice();
+      await this.record.append(this.project, batch);
+      if (epoch === this.recordEpoch) this.unrecorded = this.unrecorded.slice(batch.length);
+    });
   }
 
   private queue(task: () => Promise<void>): void {

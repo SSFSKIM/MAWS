@@ -100,6 +100,8 @@ export class HistoryController {
     return () => this.listeners.delete(listener);
   };
   getSnapshot = (): HistorySnapshot => this.snapshot;
+  /** The time the list's days are named against: the history's clock, else the wall clock. */
+  now = (): number => this.api.now?.() ?? Date.now();
 
   /**
    * The editor opened: follow restores (the banner) and new versions; the first time, read the list and the last view,

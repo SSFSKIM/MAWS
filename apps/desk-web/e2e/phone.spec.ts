@@ -89,13 +89,18 @@ test('@layout the grid in two columns; a project opens on its channel list, a ch
   await expect(page.getByTestId('grid')).toBeVisible();
 });
 
-test('@layout an ended session shows Resume in place of the composer', async ({ page, hub }) => {
+test('@layout an ended session shows Resume in place of the composer, and a retired one who retired it', async ({ page, hub }) => {
   await stageProject(hub);
+  hub.sendSession(PROJECT, { project: PROJECT, machine: 'mini', session: S.rests, kind: 'presence', sub: null, n: null, body: { record: null, bridge: true } });
   await seedKey(page, hub);
-  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.gone}`);
-  await expect(page.getByTestId('resume-bar').getByRole('button', { name: 'Resume doperpowers-1e' })).toBeVisible();
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.rests}`);
+  await expect(page.getByTestId('resume-bar').getByRole('button', { name: 'Resume cua_repl' })).toBeVisible();
   await expect(page.getByTestId('composer')).toHaveCount(0);
   await fitsTheWidth(page);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.gone}`);
+  await expect(page.getByTestId('retired-by')).toHaveText('Retired by human');
+  await expect(page.getByTestId('resume-bar')).toHaveCount(0);
+  await expect(page.getByTestId('composer')).toHaveCount(0);
 });
 
 test('@layout request cards fit the phone: a question answerable in place, a permission prompt with Allow and Deny', async ({ page, hub }) => {
@@ -114,7 +119,35 @@ test('@layout request cards fit the phone: a question answerable in place, a per
   await fitsTheWidth(page);
 });
 
-type Shown = { title: string; options: { body?: string; tag?: string; data?: { url?: string }; actions?: unknown[] } };
+test('@layout a channel opens at its tail and follows it; a reader scrolled back keeps their row as a message arrives below', async ({ browserName, page, hub }) => {
+  // Holding a reader in place against a row arriving below them is the engine's scroll anchoring; Safari has it only
+  // from 27.0 (iOS 26 and older have none), so on WebKit the row may move by the new row's height.
+  await stageProject(hub);
+  const message = (n: number) => hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rw${n}#0` });
+  for (let n = 1; n <= 30; n++) await message(n);
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(30)).toBeInViewport();
+  await message(31);
+  await expect(line(31)).toBeInViewport();
+  const events = center(page).getByTestId('channel-events');
+  expect(await events.evaluate((el) => getComputedStyle(el).flexDirection)).toBe('column-reverse');
+  expect(await events.evaluate((el) => el.scrollTop)).toBeCloseTo(0, 0); // the bottom is the scroll origin
+  await events.evaluate((el) => (el.scrollTop = -150));
+  await page.waitForTimeout(300);
+  expect(await events.evaluate((el) => el.scrollTop)).toBeCloseTo(-150, 0); // 0 at the bottom, negative upward
+  const reading = await line(28).boundingBox();
+  await message(32);
+  await expect(line(32)).toBeAttached();
+  await page.waitForTimeout(300);
+  const moved = (await line(28).boundingBox())!.y - reading!.y;
+  test.info().annotations.push({ type: `row moved (px), ${browserName}`, description: moved.toFixed(2) });
+  console.log(`row moved ${moved.toFixed(2)} px in ${browserName}`);
+  expect(Math.abs(moved)).toBeLessThanOrEqual(1);
+});
+
+type Shown ={ title: string; options: { body?: string; tag?: string; data?: { url?: string }; actions?: unknown[] } };
 
 /**
  * The running service worker, with each notification it asks the platform for recorded as it asks (headless Chromium
@@ -206,6 +239,20 @@ test('a tap with the app already open sends that window to the card, in place', 
   await raiseQuestion(hub, 'toolu_q2');
   // What the worker posts to the window it brings forward (`OPEN_MESSAGE`; handlers.test.ts proves the worker's side).
   await page.evaluate((url) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'desk-open', url } })), `/p/${PROJECT}/s/${S.asks}?request=toolu_q2`);
+  await expect(center(page).locator('[data-landed]')).toContainText('Which column do we keep?');
+  await expect(page).toHaveURL(new RegExp(`/p/${PROJECT}/s/${S.asks}$`));
+});
+
+test('a tap reaches a window still waiting on its sign-in, and lands on the card once the desk is drawn', async ({ page, hub }) => {
+  await stageProject(hub);
+  await seedKey(page, hub);
+  let signIn!: () => void;
+  const signedIn = new Promise<void>((resolve) => (signIn = resolve));
+  await page.route('**/api/me', async (route) => (await signedIn, route.continue()));
+  await page.goto(hub.url); // the document is loaded: a message no listener takes is dropped from here on
+  await raiseQuestion(hub, 'toolu_q3');
+  await page.evaluate((url) => navigator.serviceWorker.dispatchEvent(new MessageEvent('message', { data: { type: 'desk-open', url } })), `/p/${PROJECT}/s/${S.asks}?request=toolu_q3`);
+  signIn();
   await expect(center(page).locator('[data-landed]')).toContainText('Which column do we keep?');
   await expect(page).toHaveURL(new RegExp(`/p/${PROJECT}/s/${S.asks}$`));
 });

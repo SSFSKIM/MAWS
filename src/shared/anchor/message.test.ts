@@ -217,6 +217,21 @@ describe('the anchored message (X10)', () => {
     it('leaves every other kind’s tag as it was', () => {
       for (const anchor of ANCHORS) expect(anchorTag(anchor)).not.toMatch(/artifactId|threadId/);
     });
+
+    // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, M7 fix wave 1; Decision Log 33, 35, 36): the lead by the
+    // commented artifact's kind; a document's, with or without the field, is B's to the byte
+    it('writes a deck element’s lead from the kind’s entry, with no slide number, and round-trips it (Decision Log 36)', () => {
+      const deck: Anchor = { kind: 'artifact-comment', locator: 'One path', label: 'Q3 review, slide 3: Plan', artifactId: 'art-9', threadId: 't1', artifactKind: 'presentation' };
+      expect(anchorTag(deck)).toBe('<maws_anchor kind="artifact-comment" label="Q3 review, slide 3: Plan" locator="One path" artifactId="art-9" threadId="t1" artifactKind="presentation"/>');
+      expect(anchorLead(deck, false)).toBe('Comment on "Q3 review, slide 3: Plan" (element "One path" in presentation art-9, thread t1):');
+      const message = anchoredMessage({ anchor: deck, text: 'Shorter?', destination: 'thread', screenshot: false });
+      expect(parseAnchoredText(message)).toEqual({ anchor: deck, text: 'Shorter?', destination: 'thread' });
+      const long = { ...deck, label: `${'T'.repeat(190)}, slide 3: Plan`.slice(0, 200) };
+      expect(anchorLead(long, false)).toBe(`Comment on "${long.label}" (element "One path" in presentation art-9, thread t1):`); // nothing read from the label
+      expect(anchorLead({ ...comment, artifactKind: 'document' }, false)).toBe(anchorLead(comment, false));
+      expect(anchorLead(comment, false)).toBe('Comment on "Q3 plan, Main" (passage "ships quarterly with "design" review" in document art-7f3a, thread k2m9x0qa):');
+      expect(anchorTag(comment)).toBe(TAG); // a document's anchor carries no field
+    });
   });
   // P3-B end
 

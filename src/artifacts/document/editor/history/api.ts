@@ -34,6 +34,8 @@ export interface HistoryApi {
   designTokens?(ref: { id: string; versionSeq: number }): Promise<TokenOverrides>;
   /** A session's title for its author chip; "Claude" without one (§4.7). */
   sessionTitle?(appSessionId: string): string | undefined;
+  /** The clock (epoch ms) the list's days are named by (Today, Yesterday); the wall clock without it. */
+  now?(): number;
   /** New versions exist (an automatic or turn version, another window's save or restore): the list re-reads. */
   onVersions?(listener: () => void): () => void;
   /** Where the rail logs a failure it shows (the surface's log). */

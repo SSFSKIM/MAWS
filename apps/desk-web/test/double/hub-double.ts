@@ -12,7 +12,8 @@
 // is built, the double follows it (DX3 as `interfaces-M3` has it, checked by the local-hub suite): the order of what a
 // socket gets on connect, presence withheld while its machine is offline, the audit record (`refused`, `rejected`,
 // `decided`) replayed after every `caught-up`, the hub's at-once RPC failures sent to the sender and never recorded, an
-// unknown frame refused `bad-shape`, and the subscription limits (32 a socket, `rows` 1 to 1000).
+// unknown frame refused `bad-shape`, the subscription limits (32 a socket, `rows` 1 to 1000), and a resumed backlog
+// paged, each page but the last ended by `more`.
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -98,6 +99,10 @@ export type DoubleOptions = {
 export class HubDouble {
   readonly url: string;
   readonly up: Array<{ project: string; frame: ProjectUp }> = [];
+  /** One page of a resumed backlog, in bytes of JSON (DX3's is about 1 MiB); a suite lowers it to page a short log. */
+  pageBytes = 1 << 20;
+  /** Runs before each page of a resumed backlog is read: a suite stores an event between pages here. */
+  beforePage?: (after: number) => Promise<void>;
   /** Answer each `human` with `human-ack` (true), or hold the acknowledgement as a hub that dropped mid-write would. */
   ackHumans = true;
   admit: 'member' | 'not-a-member';
@@ -216,7 +221,9 @@ export class HubDouble {
   raiseRaw(project: string, machine: string, raised: Raised, options: { terminalOnly?: boolean } = {}): void {
     const state = this.project(project);
     this.sendSession(project, { project, machine, session: raised.session, kind: 'raised', sub: null, n: null, body: raised });
-    this.setPending(project, [...state.pending.filter((p) => p.raised.request !== raised.request), { machine, raised, terminal_only: options.terminalOnly === true }]);
+    // The hub keys a request by (machine, session, request): a synthetic `request-…` id is minted per bridge.
+    const same = (p: PendingRequest) => p.machine === machine && p.raised.session === raised.session && p.raised.request === raised.request;
+    this.setPending(project, [...state.pending.filter((p) => !same(p)), { machine, raised, terminal_only: options.terminalOnly === true }]);
   }
 
   /** The hub's clock passed a background request's deadline: it stays pending, answerable only in the terminal. */
@@ -232,10 +239,11 @@ export class HubDouble {
   async settle(project: string, machine: string, session: string, draft: Omit<Settled, 'mac'>): Promise<Settled> {
     const settled = await seal(this.key, 'settled', project, draft);
     const state = this.project(project);
-    const raised = state.pending.find((p) => p.raised.request === draft.request)?.raised ?? null;
+    const same = (p: PendingRequest) => p.machine === machine && p.raised.session === session && p.raised.request === draft.request;
+    const raised = state.pending.find(same)?.raised ?? null;
     this.sendSession(project, { project, machine, session, kind: 'settled', sub: null, n: null, body: settled });
     this.decide(project, { machine, session, settled, raised });
-    this.setPending(project, state.pending.filter((p) => p.raised.request !== draft.request));
+    this.setPending(project, state.pending.filter((p) => !same(p)));
     return settled;
   }
 
@@ -287,7 +295,11 @@ export class HubDouble {
     if (!open || !target) throw new Error(`no subscription ${sub}`);
     const n = open.next++;
     this.broadcast(project, { t: 'session', message: { project, machine: target.machine, session: target.session, kind, sub, n, body } as SessionMessage });
-    if (kind === 'end') this.project(project).subs.delete(sub);
+    if (kind === 'end') {
+      // An ended sub frees its socket's place too: the 32-a-socket admission counts only what is open.
+      this.project(project).subs.delete(sub);
+      for (const socket of this.project(project).sockets) socket.subs.delete(sub);
+    }
   }
 
   /**
@@ -369,6 +381,14 @@ export class HubDouble {
   /** Closes every socket, as a deploy restarting every object does. */
   dropConnections(): void {
     for (const socket of this.allSockets()) socket.terminate();
+  }
+
+  /** The hub recreated (a local hub started afresh): the project's log, pending set, deliveries, and audit record are
+   * gone, and its sockets dropped. */
+  recreate(project: string): void {
+    const sockets = [...this.project(project).sockets];
+    this.projects.delete(project);
+    for (const socket of sockets) socket.ws.terminate();
   }
 
   connected(project: string): number {
@@ -472,8 +492,24 @@ export class HubDouble {
     const state = this.project(project);
     switch (frame.t) {
       case 'resume': {
+        // One page of the backlog (DX3): `more {offset}` when events remain, which the browser resumes from; live `log`
+        // only from `caught-up` on, so what is stored between pages comes in a later page.
+        socket.resumed = false;
+        await this.beforePage?.(frame.after);
         const backlog = state.log.filter((entry) => entry.offset > frame.after);
-        if (backlog.length > 0) this.sendRaw(socket.ws, { t: 'log', events: backlog });
+        const page: typeof backlog = [];
+        let size = 0;
+        for (const entry of backlog) {
+          const bytes = JSON.stringify(entry).length;
+          if (page.length > 0 && size + bytes > this.pageBytes) break;
+          page.push(entry);
+          size += bytes;
+        }
+        if (page.length > 0) this.sendRaw(socket.ws, { t: 'log', events: page });
+        if (page.length < backlog.length) {
+          this.sendRaw(socket.ws, { t: 'more', offset: page.at(-1)!.offset });
+          return;
+        }
         this.sendRaw(socket.ws, { t: 'caught-up', offset: this.head(project) });
         socket.resumed = true;
         for (const frame of state.audit.slice(-AUDIT_REPLAY)) this.sendRaw(socket.ws, frame);

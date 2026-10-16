@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FRAME_LIMIT, PartAssembler, toWire } from '../../src/protocol/parts';
+import { FRAME_LIMIT, PART_ID_LIMIT, PartAssembler, PARTS_MAX_SETS, PartsBudgetError, toWire } from '../../src/protocol/parts';
 
 const utf8 = (s: string) => new TextEncoder().encode(s).length;
 
@@ -39,5 +39,47 @@ describe('frames over the 1 MiB bound travel as numbered parts', () => {
     assembler.add({ t: 'part', id: 'p', index: 0, count: 2, data: '{"t":' });
     expect(() => assembler.add({ t: 'part', id: 'p', index: 1, count: 3, data: '"x"}' })).toThrow(TypeError);
     expect(() => assembler.add({ t: 'part', id: 'q', index: 2, count: 2, data: '' })).toThrow(TypeError);
+  });
+});
+
+describe("an assembler's unfinished sets are bounded (panel finding scalpel-5#2)", () => {
+  const part = (id: string, index: number, count: number, size: number) => ({ t: 'part' as const, id, index, count, data: 'x'.repeat(size) });
+
+  it('in total: a part that would hold more than the budget is refused and its set dropped; a finished set frees its share', () => {
+    const assembler = new PartAssembler({ maxBytes: 1000 });
+    // Each set's first part opens a JSON string, which its second part closes.
+    const first = (id: string, size: number) => ({ ...part(id, 0, 2, size - 1), data: '"' + 'x'.repeat(size - 1) });
+    for (let i = 0; i < 9; i++) assembler.add(first(`s${i}`, 100)); // 900 held, none finished
+    expect(() => assembler.add(first('big', 200))).toThrow(PartsBudgetError);
+    // The refused set is gone: its next part starts it again, and is refused again while the budget is spent.
+    expect(() => assembler.add(part('big', 1, 2, 200))).toThrow(PartsBudgetError);
+    expect(assembler.add({ t: 'part', id: 's0', index: 1, count: 2, data: '"' })).toBe('x'.repeat(99)); // s0 joins, freeing its 100
+    expect(() => assembler.add(first('big', 100))).not.toThrow();
+    expect(() => assembler.add(first('s9', 101))).toThrow(PartsBudgetError); // 900 held again: one byte too many
+  });
+
+  it('in time: a set that waits longer than its age for its other parts is dropped', () => {
+    let now = 0;
+    const assembler = new PartAssembler({ maxBytes: 1000, maxAgeMs: 60_000, now: () => now });
+    for (let i = 0; i < 9; i++) assembler.add(part(`old${i}`, 0, 2, 100));
+    now = 60_001;
+    expect(() => assembler.add(part('new', 0, 2, 900))).not.toThrow(); // the old sets' 900 were let go
+    // A late part of an expired set starts a set of its own, which never finishes the old frame.
+    expect(assembler.add(part('old0', 1, 2, 50))).toBeUndefined();
+  });
+
+  it('in what the sets themselves cost: the open sets are counted, and an id is short, whatever their data (zero-size and tiny parts)', () => {
+    let now = 0;
+    const assembler = new PartAssembler({ now: () => now });
+    for (let i = 0; i < PARTS_MAX_SETS; i++) assembler.add(part(`empty${i}`, 0, 2, i % 2)); // empty and one-byte data
+    expect(() => assembler.add(part('one-more', 0, 2, 0))).toThrow(PartsBudgetError);
+    // A part of a set already open is still taken.
+    expect(() => assembler.add(part('empty1', 0, 2, 1))).not.toThrow();
+    // An id longer than the bound is malformed, data or not.
+    expect(() => assembler.add(part('i'.repeat(PART_ID_LIMIT + 1), 0, 2, 0))).toThrow(TypeError);
+    expect(() => assembler.add(part('i'.repeat(64 * 1024), 0, 2, 0))).toThrow(TypeError);
+    // Expired sets free their places.
+    now = 60_001;
+    expect(() => assembler.add(part('one-more', 0, 2, 0))).not.toThrow();
   });
 });
