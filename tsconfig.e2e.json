@@ -29,6 +29,11 @@
     // whose seam imports the dialect's IR
     "src/artifacts/slides/ir.ts",
     "src/engine-host/binary-info.ts",
+    // P3-H: the connector runs drive a scratch engine through the host's control client and route E's call
+    "src/engine-host/controls.ts",
+    "src/engine-host/mcp-call.ts",
+    "src/engine-host/outbound-writer.ts",
+    "src/engine-host/rpc.ts",
     "src/engine-host/engine-compat.ts",
     "src/engine-host/fs/paths.ts",
     "src/engine-host/journal.ts",

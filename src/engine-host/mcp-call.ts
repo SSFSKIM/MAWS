@@ -5,8 +5,9 @@
 // (spikes/p3-connectors/fixtures/engine-mcp-call.jsonl, 2.1.296) and the handler it ran (2.1.292 cli.pretty.js
 // 598393-598497; the same strings in 2.1.300 at 76701-76790). The engine's errors carry no code, so a refusal is read
 // from the message the way the engine's own clients read "Unsupported control request subtype" (2.1.300 163300).
+import { randomBytes } from 'node:crypto';
 import type { McpCallResponse } from '@shared/wire/control';
-import { mcpCall } from './controls';
+import { mcpCall, mcpStatus } from './controls';
 import { ControlCancelled, ControlError, ControlTimeout, type ControlClient } from './rpc';
 
 // The engine's name for a server inside a qualified tool name (2.1.292 cli.pretty.js 610421-610425): every character
@@ -65,14 +66,33 @@ export async function callMcpTool(client: ControlClient, call: McpToolCall, opts
   }
 }
 
-// The compatibility check: a call to a server no configuration names, which an engine that handles mcp_call refuses
+// The compatibility check: a call to a server the session does not have, which an engine that handles mcp_call refuses
 // at once as not connected (engine-mcp-call.jsonl seqs 22-23) and one that does not refuses as an unsupported subtype
-// (pass3/mods-gate-served-off seq 30's form). Nothing runs either way. `unknown` when no answer settles it.
-export const MCP_CALL_PROBE_TOOL = qualifiedMcpToolName('maws-compat-probe', 'probe');
+// (pass3/mods-gate-served-off seq 30's form). The server's name is fresh per probe and unguessable, and is checked
+// against every server the session's mcp_status reports, by the normalised name the call resolves through, so the probe
+// never reaches a configured tool. `unknown` when no answer settles it, or when the servers cannot be read.
 export type McpCallSupport = 'supported' | 'unsupported' | 'unknown';
+const PROBE_ATTEMPTS = 4;
+const probeServer = (nonce: string) => `maws_probe_${nonce}`;
 
-export async function probeMcpCall(client: ControlClient, opts: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<McpCallSupport> {
-  const outcome = await callMcpTool(client, { server: 'maws-compat-probe', tool: 'probe' }, opts);
+// `nonce` is for tests; by default 128 random bits.
+export async function probeMcpCall(client: ControlClient, opts: { signal?: AbortSignal; timeoutMs?: number; nonce?: () => string } = {}): Promise<McpCallSupport> {
+  let present: Set<string>;
+  try {
+    const status = await mcpStatus(client, {}, { signal: opts.signal });
+    present = new Set(status.mcpServers.map((server) => normalized(server.name)));
+  } catch (error) {
+    if (error instanceof ControlError) return 'unknown';
+    throw error;
+  }
+  const nonce = opts.nonce ?? (() => randomBytes(16).toString('hex'));
+  let server: string | null = null;
+  for (let attempt = 0; attempt < PROBE_ATTEMPTS && server === null; attempt += 1) {
+    const candidate = probeServer(nonce());
+    if (!present.has(normalized(candidate))) server = candidate;
+  }
+  if (server === null) return 'unknown';
+  const outcome = await callMcpTool(client, { server, tool: 'probe' }, opts);
   if (outcome.ok) return 'supported';
   if (outcome.refusal === 'unsupported') return 'unsupported';
   return outcome.refusal === 'timeout' || outcome.refusal === 'exited' || outcome.refusal === 'cancelled' ? 'unknown' : 'supported';

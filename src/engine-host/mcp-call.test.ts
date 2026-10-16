@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { JournalRow } from '@shared/wire/journal';
 import type { StdinFrame } from '@shared/wire/frames';
 import { mcpCall, REQUEST_TIMEOUT_MS } from './controls';
-import { callMcpTool, MCP_CALL_PROBE_TOOL, probeMcpCall, qualifiedMcpToolName } from './mcp-call';
+import { callMcpTool, probeMcpCall, qualifiedMcpToolName } from './mcp-call';
 import { ControlClient } from './rpc';
 import type { EngineTransport } from './transport';
 
@@ -145,17 +145,46 @@ describe('callMcpTool', () => {
 });
 
 describe('probeMcpCall, the compatibility check', () => {
-  it('asks for a reserved server no configuration names; any answer but the unsupported refusal means the subtype is handled', async () => {
-    const { client, writes } = engine(() => ({ subtype: 'error', error: `MCP server not connected: ${MCP_CALL_PROBE_TOOL.split('__')[1]}` }));
+  // The engine's servers as mcp_status reports them, and its answer to a call naming a server it does not have.
+  const statusOf = (names: string[]) => ({ subtype: 'success', response: { mcpServers: names.map((name) => ({ name, status: 'connected', tools: [{ name: 'probe' }] })) } });
+  const prober = (names: string[], onCall: (tool: string) => Omit<Envelope, 'request_id'> = (tool) => ({ subtype: 'error', error: `MCP server not connected: ${tool.split('__')[1]}` })) =>
+    engine((request) => (request.subtype === 'mcp_status' ? statusOf(names) : onCall(String(request.tool))));
+  const calledTools = (writes: StdinFrame[]) => writes.flatMap((w) => (w.type === 'control_request' && w.request.subtype === 'mcp_call' ? [String((w.request as { tool: unknown }).tool)] : []));
+
+  it('calls an unguessable server absent from the session, never the old fixed sentinel even when one is configured', async () => {
+    const { client, writes } = prober(['maws-compat-probe', 'dyntoy']);
     expect(await probeMcpCall(client)).toBe('supported');
-    expect((writes[0] as { request: unknown }).request).toEqual({ subtype: 'mcp_call', tool: MCP_CALL_PROBE_TOOL, arguments: {} });
+    const [tool, ...more] = calledTools(writes);
+    expect(more).toEqual([]);
+    expect(tool).not.toBe('mcp__maws-compat-probe__probe');
+    expect(tool).toMatch(/^mcp__maws_probe_[0-9a-f]{32}__probe$/);
+    expect((writes.find((w) => w.type === 'control_request' && w.request.subtype === 'mcp_call') as { request: unknown }).request).toEqual({ subtype: 'mcp_call', tool, arguments: {} });
+    const second = prober([]);
+    await probeMcpCall(second.client);
+    expect(calledTools(second.writes)[0]).not.toBe(tool); // a fresh name per probe
   });
 
-  it('answers unsupported on an engine without the subtype, unknown when the engine never answers', async () => {
-    const old = engine(() => ({ subtype: 'error', error: UNSUPPORTED_TEMPLATE.replace('ui_render', 'mcp_call') }));
+  it('skips a candidate that any reported server shares once normalised, and gives up rather than call a present one', async () => {
+    const nonces = ['deadbeef', 'cafe'];
+    const { client, writes } = prober(['maws.probe.deadbeef']); // normalises to maws_probe_deadbeef
+    expect(await probeMcpCall(client, { nonce: () => nonces.shift()! })).toBe('supported');
+    expect(calledTools(writes)).toEqual(['mcp__maws_probe_cafe__probe']);
+    const stuck = prober(['maws_probe_same']);
+    expect(await probeMcpCall(stuck.client, { nonce: () => 'same' })).toBe('unknown');
+    expect(calledTools(stuck.writes)).toEqual([]);
+  });
+
+  it('answers unknown when the servers cannot be read, so absence cannot be checked', async () => {
+    const { client, writes } = engine((request) => (request.subtype === 'mcp_status' ? { subtype: 'error', error: 'no status' } : null));
+    expect(await probeMcpCall(client)).toBe('unknown');
+    expect(calledTools(writes)).toEqual([]);
+  });
+
+  it('answers unsupported on an engine without the subtype, unknown when the engine never answers the call', async () => {
+    const old = prober([], () => ({ subtype: 'error', error: UNSUPPORTED_TEMPLATE.replace('ui_render', 'mcp_call') }));
     expect(await probeMcpCall(old.client)).toBe('unsupported');
     vi.useFakeTimers();
-    const silent = engine(() => null);
+    const silent = engine((request) => (request.subtype === 'mcp_status' ? statusOf([]) : null));
     const probing = probeMcpCall(silent.client, { timeoutMs: 1_000 });
     await vi.advanceTimersByTimeAsync(1_000);
     expect(await probing).toBe('unknown');
