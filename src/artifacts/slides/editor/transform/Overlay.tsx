@@ -74,9 +74,25 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
 
   const remote = useRemoteSelections(session, slideId);
   // the final fix wave's B7: measured again after every layout pass of the canvas too (faces arriving, a design-system
-  // restyle, a fit pass), so the handles and other replicas' outlines follow geometry that moves with no deck write
+  // restyle, a fit pass), so the handles and other replicas' outlines follow geometry that moves with no deck write.
+  // Not while a gesture runs (the B7 follow-up): each of its frames writes, and the write re-measures (`version`), so a
+  // second measure and commit for the same frame's layout pass is the drag's cost and nothing more; a pass the gesture
+  // saw is caught up once, when the gesture ends.
   const [laidOut, setLaidOut] = useState(0);
-  useEffect(() => canvas?.onLayout(() => setLaidOut((n) => n + 1)), [canvas]);
+  const laidOutInGesture = useRef(false);
+  useEffect(
+    () =>
+      canvas?.onLayout(() => {
+        if (gesture.current) laidOutInGesture.current = true;
+        else setLaidOut((n) => n + 1);
+      }),
+    [canvas],
+  );
+  const catchUpLayout = useCallback(() => {
+    if (!laidOutInGesture.current) return;
+    laidOutInGesture.current = false;
+    setLaidOut((n) => n + 1);
+  }, []);
   // the selection's boxes (and other replicas' on this slide), measured again whenever the slide, a selection, the
   // zoom or the layout changes; a selected element another replica removed leaves the selection (and a text edit of it
   // ends)
@@ -187,6 +203,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       if (g) {
         g.end(true);
         setShown(null);
+        catchUpLayout();
         return;
       }
       // a press without a drag inside a multi-selection narrows it to what was pressed
@@ -217,6 +234,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       gesture.current = null;
       pending.current = null;
       setShown(null);
+      catchUpLayout();
     };
 
     el.addEventListener('pointerdown', onDown);
@@ -231,7 +249,7 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
       el.removeEventListener('pointerup', onUp);
       el.removeEventListener('pointercancel', onCancel);
     };
-  }, [surface, ctx, slidePoint, session, slideId, scale, readOnly, editing]);
+  }, [surface, ctx, slidePoint, session, slideId, scale, readOnly, editing, catchUpLayout]);
 
   // ---- keys and the clipboard, while the stage has focus
   useEffect(() => {

@@ -5,14 +5,23 @@
 // insertion bar there. happy-dom lays nothing out: the boxes are given to the nodes here.
 import { act, cleanup, render } from '@testing-library/react';
 import { useRef } from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { newDoc, transact, type Doc } from '../../../yjs';
 import { SlideCanvas } from '../../canvas';
 import { childLists, importSlide, readFlat, writeDeckKeys } from '../../model';
 import { loadSlide } from '../../parse';
 import { DeckSession } from '../session';
 import { startFlowMove } from './gestures';
+import { measureAll } from './measure';
 import { Overlay } from './Overlay';
+
+// the overlay's own measures counted (B7 follow-up): `measureAll` as it is, watched
+vi.mock('./measure', async (original) => {
+  const actual = await original<typeof import('./measure')>();
+  return { ...actual, measureAll: vi.fn(actual.measureAll) };
+});
+/** The overlay's selection measures (a Set of ids; the gestures' and hit tests' measures pass arrays). */
+const overlayMeasures = () => vi.mocked(measureAll).mock.calls.filter(([, ids]) => ids instanceof Set).length;
 
 function deck(html: string): Doc {
   const doc = newDoc();
@@ -93,6 +102,59 @@ describe('B7: the overlay follows a layout pass with no deck write', () => {
     expect(outline()).toBe('500,250 550,250 550,300 500,300');
     mine.destroy();
     theirs.destroy();
+  });
+});
+
+describe('B7 follow-up: a drag measures the overlay once a frame', () => {
+  const SLIDE = `<section id="s" style="background:#ffffff">
+<div id="a" style="position:absolute; left:300px; top:300px; width:200px; height:100px; background:#ff0000"></div></section>`;
+  function mountOverlay() {
+    const doc = deck(SLIDE);
+    const canvas = canvasOf(doc, { a: [300, 300, 200, 100] });
+    const session = new DeckSession(doc, 0);
+    function Harness() {
+      const surface = useRef<HTMLDivElement>(null);
+      const frame = useRef<HTMLDivElement>(null);
+      return (
+        <div ref={surface}>
+          <div ref={frame}>
+            <Overlay session={session} canvas={canvas} slideId="s" scale={0.5} readOnly={false} surface={surface} frame={frame} />
+          </div>
+        </div>
+      );
+    }
+    const { container } = render(<Harness />);
+    act(() => session.select(['a']));
+    const se = () => container.querySelector<HTMLElement>('[data-handle="se"]')!;
+    const pointer = (type: string, target: Element, x: number, y: number) => act(() => void target.dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, pointerId: 1, clientX: x, clientY: y })));
+    // the moves and the release reach the surface (the pointer is captured there; the handles hide while dragging)
+    const surface = container.firstElementChild!;
+    return { doc, canvas, se, pointer, surface };
+  }
+
+  it('each move writes and its layout pass follows: one overlay measure a move, not two', () => {
+    const { doc, canvas, se, pointer, surface } = mountOverlay();
+    pointer('pointerdown', se(), 250, 200);
+    const before = overlayMeasures();
+    const MOVES = 5;
+    for (let i = 1; i <= MOVES; i++) {
+      pointer('pointermove', surface, 250 + 10 * i, 200 + 5 * i); // the resize writes the frame
+      act(() => canvas.layoutNow()); // the canvas's layout pass after the write, as the next animation frame runs it
+    }
+    expect(readFlat(doc, 's').find((e) => e.id === 'a')!.style.width).toBe('300px'); // every move wrote
+    expect(overlayMeasures() - before).toBe(MOVES);
+    pointer('pointerup', surface, 300, 225);
+  });
+
+  it('a layout pass during a gesture is not lost: the overlay catches up when the gesture ends', () => {
+    const { canvas, se, pointer, surface } = mountOverlay();
+    pointer('pointerdown', se(), 250, 200);
+    pointer('pointermove', surface, 260, 205);
+    // geometry the deck never wrote moves during the drag (a face arriving), with the canvas's pass
+    place(canvas, 'a', [600, 400, 200, 100]);
+    act(() => canvas.layoutNow());
+    pointer('pointerup', surface, 260, 205);
+    expect([se().style.left, se().style.top]).toEqual(['400px', '250px']);
   });
 });
 
