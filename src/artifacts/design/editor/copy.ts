@@ -49,6 +49,21 @@ export const DESIGN_COPY = {
   boardHeight: 'Board height',
   boardSize: 'Board size',
   custom: 'Custom',
+  // M4: comments and the move across boards
+  commentTitle: 'Comment on the selected element, or on the board when no element is selected (⌥⌘M)',
+  commentBoard: (label: string) => `Comment on board ${label} (⌥⌘M)`,
+  moveToBoard: 'Move to board…',
+  moveToBoardTitle: 'Move the selected elements to another board (they take new ids there; their comments go with them)',
+  movedTo: (label: string) => `Moved to ${label}.`,
+  // M4: version history (the rail and Restore's question are B's and C's; the design's own words here)
+  historyBack: 'Back to design',
+  historyRestoreBody: 'The design goes back to it as a new version: its boards, their places and sizes, their content and the design’s settings. Everything since stays in history, and comment conversations are kept.',
+  historyWorld: 'Design in this version',
+  historyBoards: 'Boards in this version',
+  historyDeck: (keys: string) => `Design settings changed: ${keys}`,
+  historyBoardRow: (label: string, kind: string | null) => `${label}${kind === 'added' ? ', new' : kind === 'removed' ? ', deleted' : kind === 'changed' ? ', changed' : ''}`,
+  movedFrom: (label: string) => `Moved from ${label}`,
+  movedAway: (label: string) => `Moved to ${label}`,
   // zoom
   zoom: 'Zoom',
   zoomIn: 'Zoom in',

@@ -3,24 +3,15 @@
 // destination) reads as a removal and an addition; the design pairs them through the persisted `moveOrigin` read on both
 // the earlier and the shown element, scanning whole boards added or removed too, and shows one move credited to its
 // author: through collision-fallback ids, several hops, a retained version's bytes, a moved subtree (its descendants
-// grouped under it, a change of their own still counted), a round trip home, and beside unrelated changes. The new-change
-// pill counts the same projection through C's optional `countChanges` hook; a deck's count is C's.
+// grouped under it, a change of their own still counted), a round trip home, and beside unrelated changes. The pill's
+// count through C's `countChanges` hook is editor/history.dom.test.tsx's (C's controller is the editor's).
 import { describe, expect, it } from 'vitest';
-import type { Actor } from '@shared/artifacts/actor';
-import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { HistoryApi } from '../document/editor/history/api';
-import { publishFiles } from '../files';
 import { deckChanges, openDeckDiff } from '../slides/history';
 import { setStyle, setText } from '../slides/model';
-import { DeckHistoryController } from '../slides/editor/history/controller';
-import { applyV1, applyV2, attributionMap, contentIdsOf, encodeMap, mergeMaps, newDoc, onUpdate, stateV2, transact, type ContentMap, type Doc } from '../yjs';
+import { applyV1, applyV2, attributionMap, contentIdsOf, mergeMaps, newDoc, onUpdate, stateV2, transact, type ContentMap, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
-import { CANVAS_PATH } from './canvas';
-import { countDesignChanges, designChanges, designStops, type DesignChanges, type ElementMove } from './history';
-import { designHistoryApi } from './history-api';
-import { isLegacyDesign } from './migrate';
-import { designFiles } from './model';
+import { designChanges, designStops, type DesignChanges, type ElementMove } from './history';
 import { moveElementToBoard } from './move';
 import { deleteBoard, insertBoard, setBoardFrame } from './writers';
 import { boardIR, writeBoards, type BoardSeed } from './fixtures/support';
@@ -194,76 +185,5 @@ describe('the design’s history projection', () => {
     expect(kinds(d, 'a')).toEqual([['added', 'e1']]);
     expect(boardOf(d, 'b')).toBeUndefined();
     expect(moved).not.toBe('e1');
-  });
-});
-
-describe('the new-change pill through C’s `countChanges` hook (Decision Log 23)', () => {
-  const HUMAN: Actor = { kind: 'human' };
-  const AGENT_ACTOR: Actor = { kind: 'session', appSessionId: SESSION };
-
-  function host() {
-    const w = world();
-    const versions: (ArtifactVersion & { state: Uint8Array })[] = [];
-    let viewedAt: number | null = null;
-    const version = (actor: Actor, kind: ArtifactVersion['kind']) => {
-      const m = w.mark();
-      versions.push({ id: versions.length + 1, seq: m.seq, at: w.at(), actor, kind, assetRefs: [], state: m.state } as ArtifactVersion & { state: Uint8Array });
-    };
-    const api: HistoryApi = {
-      versions: async () => versions.map(({ state: _, ...v }) => v),
-      lastViewedAt: async () => viewedAt,
-      versionState: async (id) => versions.find((v) => v.id === id)!.state,
-      attributions: async (from, to) => encodeMap(mergeMaps(w.maps.slice(from, to))),
-      saveVersion: async () => ({ versionId: 0 }),
-      restore: async () => ({ revision: 0, versionId: 0 }),
-      duplicate: async () => ({ artifactId: 'copy' }),
-      markViewed: async () => {},
-    };
-    return { w, version, api, view: (at: number) => (viewedAt = at) };
-  }
-
-  const settle = async (controller: DeckHistoryController) => {
-    for (let i = 0; i < 20 && controller.getSnapshot().pill?.count == null; i++) await new Promise((r) => setTimeout(r, 0));
-    return controller.getSnapshot().pill;
-  };
-
-  it('counts a move once with the design’s projection, and as C does without the hook', async () => {
-    const h = host();
-    h.version(HUMAN, 'manual');
-    h.view(h.w.at());
-    h.w.land(AGENT, (doc) => moveElementToBoard(doc, 'a', 'b', 'e1'));
-    h.version(AGENT_ACTOR, 'auto');
-    const handle = { doc: h.w.host, onRestored: () => () => {} };
-    const design = new DeckHistoryController(handle, h.api, { countChanges: countDesignChanges });
-    const deck = new DeckHistoryController(handle, h.api);
-    const stops = [design.attach(), deck.attach()];
-    expect((await settle(design))?.count).toBe(1);
-    expect((await settle(deck))?.count).toBe(2);
-    stops.forEach((stop) => stop());
-  });
-});
-
-describe('the design’s history api (a retained version read through the design model)', () => {
-  it('answers a legacy version’s bytes as its migration would build them, a model version’s as they are, and never changes either', async () => {
-    const legacy = newDoc();
-    const files = { [CANVAS_PATH]: JSON.stringify({ v: 1, title: 'Old', boards: { p: { x: 0, y: 0, w: 390, h: 844 } }, order: ['p'] }), 'project/boards/p.html': '<section id="p"><p id="hi">Hello</p></section>' };
-    transact(legacy, () => publishFiles(legacy, {}, files, false));
-    const old = stateV2(legacy);
-    const modelDoc = newDoc();
-    transact(modelDoc, () => writeBoards(modelDoc, SEEDS));
-    const current = stateV2(modelDoc);
-    const states = new Map([
-      [1, old],
-      [2, current],
-    ]);
-    const api = designHistoryApi({ versionState: async (id: number) => states.get(id)! } as unknown as HistoryApi);
-    const projected = newDoc();
-    applyV2(projected, await api.versionState(1));
-    expect(isLegacyDesign(projected)).toBe(false);
-    expect(designFiles(projected)['project/boards/p.html']).toContain('Hello');
-    expect(await api.versionState(2)).toBe(current); // the model's own bytes, item identity kept for the diff
-    const reread = newDoc();
-    applyV2(reread, old);
-    expect(isLegacyDesign(reread)).toBe(true); // the retained state is untouched
   });
 });

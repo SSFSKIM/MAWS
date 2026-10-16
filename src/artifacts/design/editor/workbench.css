@@ -302,6 +302,46 @@
   display: none;
 }
 
+/* M4: the comment frame around the world (C's frame, P2's card drawn over it) takes the world's place in the body; the
+   boards' own comment pins at their frames' top-right corners, in screen px over the world */
+.design-workbench .design-comment-frame {
+  min-width: 0;
+}
+.design-board-pins {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.design-board-pins .deck-comment-pin {
+  pointer-events: auto;
+}
+.design-move-to-board {
+  display: flex;
+  padding: 8px 12px 0;
+}
+
+/* M4: a version's world: a changed board's frame edged in its author's colour (C's history edges), a new one badged, a
+   deleted one dashed and faded where it was; the marks over the world are C's */
+.design-history-board[data-history-change] {
+  outline: calc(2px * var(--design-inv-zoom, 1)) solid var(--deck-history-author, var(--accent));
+}
+.design-history-board[data-history-change='removed'] {
+  outline-style: dashed;
+}
+.design-history-board[data-history-change='removed'] > .design-board-canvas {
+  opacity: 0.45;
+}
+.design-history-board[data-focused] {
+  outline-offset: calc(4px * var(--design-inv-zoom, 1));
+}
+.design-history-board .design-board-title {
+  pointer-events: none;
+}
+.design-board-item[data-history-change] {
+  box-shadow: inset 3px 0 0 var(--deck-history-author, var(--accent));
+}
+
 /* a narrow editor (the panel's widths): the board list lies over the world as a sheet (C's overlay-rail pattern;
    picking a board closes it in the panel); the inspector sits under the world, full width and scrolling, so the world
    keeps the room it is fitted into and every field is reachable */
@@ -309,7 +349,8 @@
   .design-workbench .deck-editor-body {
     flex-direction: column;
   }
-  .design-workbench .design-world {
+  .design-workbench .design-world,
+  .design-workbench .design-comment-frame {
     min-height: 40%;
   }
   .design-workbench .design-boards {

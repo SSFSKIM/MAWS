@@ -7,18 +7,28 @@
 // the element bar, the text style menu, the inspector and the Theme panel. The boards draw in the governing design
 // system's `document` medium (a board is a screen, not a slide: E0 (f)) with the deck root's overrides last, and with the
 // design's screen type defaults (board-css.ts). The chrome reads the app's tokens and C's classes; under 720 px of
-// width the rails lie over the world rather than squeezing it (C's narrow-panel pattern). Comments and history (M4)
-// and export (M5) join this tree later; the tab owns the view (`DesignView`), so the header's Zoom to fit and a remount
-// keep their place.
+// width the rails lie over the world rather than squeezing it (C's narrow-panel pattern). Export (M5) joins this tree
+// later; the tab owns the view (`DesignView`), so the header's Zoom to fit and a remount keep their place.
+// M4: comments on boards and elements (comments.tsx over C's controller, rail and pins, P2's card through B's surface),
+// "Move to board…" in the inspector (MoveToBoard.tsx, the one cross-board move), and version history (history.tsx: C's
+// controller and B's rail, the design's projection, bar and read-only world in place of the live one while a version
+// shows; the pill and the restore banner as C's).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { DesignSystemScope, useDesignSystem, type DesignSystemRef } from '../../design-system/apply';
+import type { CommentAuthor, DocumentComments } from '../../document/editor/comments/surface';
 import { onUpdate, type Doc } from '../../yjs';
 import type { AssetUrl, SlideCanvas } from '../../slides/canvas';
 import { insertElements, type NewKind } from '../../slides/writers-elements';
 import { mintSlideId } from '../../slides/writers';
 import { DECK_COPY } from '../../slides/editor/copy';
 import { ElementBar } from '../../slides/editor/ElementBar';
-import { aliasOverrides } from '../../slides/editor/history/faces';
+import { DeckCommentsProvider } from '../../slides/editor/comments/controller';
+import { CommentsRail } from '../../slides/editor/comments/CommentsRail';
+import { DeckHistoryRail } from '../../slides/editor/history/DeckHistoryRail';
+import { HISTORY_COPY } from '../../slides/editor/history/copy';
+import { aliasOverrides, previewFaces } from '../../slides/editor/history/faces';
+import { historyAssets } from '../../slides/editor/history/HistoryPreview';
+import { useDeckHistoryController, useDeckHistorySnapshot, type DeckHistorySource } from '../../slides/editor/history/use-deck-history';
 import { Inspector } from '../../slides/editor/Inspector';
 import { TextStyleMenu } from '../../slides/editor/menus/TextStyle';
 import { ThemePanel, type DeckThemeChoice } from '../../slides/editor/menus/Theme';
@@ -28,14 +38,18 @@ import type { ImportAsset } from '../../slides/editor/transform/clipboard';
 import { measureInHost } from '../../slides/editor/transform/Overlay';
 import { measure } from '../../slides/editor/transform/measure';
 import { BOARD_CSS } from '../board-css';
+import { designChanges } from '../history';
 import { placementAfter, writeBoardEntry } from '../model';
 import { BoardError, deleteBoard, duplicateBoard, insertBoard } from '../writers';
 import { BoardInspector } from './BoardInspector';
 import { BoardList } from './BoardList';
-import { keepEqualBoards, readBoards, type DesignBoards } from './boards';
+import { boardLabel, keepEqualBoards, readBoards, type BoardView, type DesignBoards } from './boards';
 import { DESIGN_COPY as C, type BoardPreset } from './copy';
+import { DesignCommentButtons, DesignCommentFrame, useDesignComments } from './comments';
+import { boardKeyLabel, DesignHistoryBar, HistoryBoardList, historyBoards, HistoryWorld, useDesignFocus } from './history';
 import { boardElement } from './insert';
-import { BOARD_FIT_MAX, unionRect, ZOOM_MAX, ZOOM_MIN, ZOOM_STEPS, type DesignView, type Rect } from './viewport';
+import { MoveToBoard } from './MoveToBoard';
+import { BOARD_FIT_MAX, DesignView, unionRect, ZOOM_MAX, ZOOM_MIN, ZOOM_STEPS, type Rect } from './viewport';
 import { World } from './World';
 import '../../slides/editor/chrome.css';
 import '../../slides/editor/deck.css';
@@ -62,6 +76,16 @@ export interface DesignWorkbenchProps {
   onStage?: (element: HTMLElement | null) => void;
   /** Once, when every board of the first showing has laid out (how many). */
   onDrawn?: (boards: number) => void;
+  /** M4: where a comment goes (P2's card, B's surface); without one, commenting is not offered. */
+  comments?: DocumentComments;
+  /** M4: who writes the editor's thread changes (the owner by default). */
+  commentAuthor?: CommentAuthor;
+  /** M4: the design's version history (B's api through the design model, the replica, the projection's count). */
+  history?: DeckHistorySource;
+  /** M4: a session's title for the history's author chips. */
+  sessionTitle?: (appSessionId: string) => string | undefined;
+  /** M4: an asset's URL at a revision (a version's), for a preview drawn with the version's assets. */
+  assetUrlAt?: (ref: string, revision: number) => string | null;
 }
 
 const NOTICE_MS = 6_000;
@@ -100,7 +124,8 @@ function useBoardCss(): void {
   }, []);
 }
 
-export function DesignWorkbench({ session, view, assetUrl, system, readOnly, compact = false, uploadAsset, artifactId, importAsset, theme, onStage, onDrawn }: DesignWorkbenchProps) {
+export function DesignWorkbench(props: DesignWorkbenchProps) {
+  const { session, view, assetUrl, system, readOnly, compact = false, uploadAsset, artifactId, importAsset, theme, onStage, onDrawn, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt } = props;
   useCanvasCss();
   useBoardCss();
   const doc = session.doc;
@@ -117,11 +142,24 @@ export function DesignWorkbench({ session, view, assetUrl, system, readOnly, com
   }, [session, order]);
   const active = boards.find((b) => b.id === state.currentSlide) ?? boards[0] ?? null; // C's: until the session reconciles
 
-  // no write lands while the replica is read-only (an awaited upload finishing after it turned so)
+  // M4: the history controller (one per replica), its preview, and what the live editor tells it (C's lifecycle)
+  const history = useDeckHistoryController(historySource);
+  const historySnapshot = useDeckHistorySnapshot(history);
+  const preview = historySnapshot?.preview ?? null;
+  // the previous preview's canvases released (this effect runs after their cleanups), its docs may go
+  useEffect(() => history?.applied(preview?.shown ?? null), [history, preview?.shown]);
+  const historyOpen = state.rail === 'history';
+  const previewing = preview !== null || historySnapshot?.loading === true;
+  useEffect(() => {
+    if (!historyOpen && previewing) history?.close(); // the rail closed: back to the live design
+  }, [historyOpen, previewing, history]);
+
+  // no write lands while the replica is read-only (an awaited upload finishing after it turned so), nor behind a version
+  const holdWrites = previewing || readOnly;
   useLayoutEffect(() => {
-    session.holdWrites(readOnly);
+    session.holdWrites(holdWrites);
     return () => session.holdWrites(false);
-  }, [session, readOnly]);
+  }, [session, holdWrites]);
 
   // every board's canvas, by board (the overlay, the element bar and the inspector read the active one's)
   const [canvases, setCanvases] = useState<ReadonlyMap<string, SlideCanvas>>(() => new Map());
@@ -208,6 +246,58 @@ export function DesignWorkbench({ session, view, assetUrl, system, readOnly, com
     if (!view.placed && boards.some((b) => b.frame !== null)) fitAll();
   }, [view, boards, fitAll]);
 
+  // ---- M4: comments, shared by the toolbar, C's overlay pins, the board pins, the rail and the card's frame
+  /** A board out of sight is brought into view (a shown thread's, a move's destination); one in view stays put. */
+  const reveal = useCallback(
+    (boardId: string) => {
+      const frame = boards.find((b) => b.id === boardId)?.frame;
+      const { viewport, room } = view.snapshot();
+      if (!frame) return;
+      const seen = viewport && room && viewport.x + (frame.x + frame.w) * viewport.zoom > 0 && viewport.x + frame.x * viewport.zoom < room.w && viewport.y + (frame.y + frame.h) * viewport.zoom > 0 && viewport.y + frame.y * viewport.zoom < room.h;
+      if (!seen) view.fitTo(frame, BOARD_FIT_MAX);
+    },
+    [boards, view],
+  );
+  const openComments = useCallback(() => void (session.snapshot().rail !== 'comments' && session.toggleRail('comments')), [session]);
+  const commentsApi = useDesignComments({ session, view, surface: comments, author: commentAuthor, readOnly, openRail: openComments, reveal });
+
+  // ---- M4: a version's preview: the projection, ↑ ↓ over it, its own view, its faces and assets
+  // keyed by the comparison (its docs and change set), not the preview object, which Show changes and ↑ ↓ remake
+  const shownDoc = preview?.shown ?? null;
+  const earlierDoc = preview?.earlier ?? null;
+  const previewChanges = preview?.changes ?? null;
+  const projected = useMemo(() => (shownDoc && earlierDoc && previewChanges ? designChanges({ prevDoc: earlierDoc, nextDoc: shownDoc }, previewChanges) : null), [shownDoc, earlierDoc, previewChanges]);
+  const { focus, step } = useDesignFocus(projected);
+  const previewBoards = useMemo(() => (preview && projected ? historyBoards(preview, projected) : []), [preview, projected]);
+  const previewView = useMemo(() => {
+    const seeded = new DesignView();
+    const live = previewing ? view.snapshot().viewport : null;
+    if (live) seeded.setViewport(live); // the preview opens where the live world was
+    return seeded;
+  }, [previewing, view]);
+  const shownRevision = preview?.revision ?? null;
+  const earlierRevision = preview?.earlierRevision ?? null;
+  const previewAssets = useMemo(() => historyAssets({ revision: shownRevision, earlierRevision }, assetUrl, assetUrlAt), [shownRevision, earlierRevision, assetUrl, assetUrlAt]);
+  const versionFaces = useMemo(() => (shownDoc && earlierDoc ? previewFaces({ shown: shownDoc, earlier: earlierDoc }, previewAssets) : null), [shownDoc, earlierDoc, previewAssets]);
+  // the version's design system (its pin; the live one's for the live design) with the version's overrides, its faces aliased
+  const previewSystem = preview ? (preview.system ?? system) : system;
+  const previewOverrides = useMemo(() => (shownDoc && versionFaces ? aliasOverrides(readBoards(shownDoc).overrides, versionFaces.shown) : scopeOverrides), [shownDoc, versionFaces, scopeOverrides]);
+  const previewScope = useCallback(
+    (children: ReactNode) => (
+      <DesignSystemScope system={previewSystem} medium="document" overrides={previewOverrides} className="deck-ds-scope">
+        {children}
+      </DesignSystemScope>
+    ),
+    [previewSystem, previewOverrides],
+  );
+  const fitPreviewBoard = useCallback(
+    (boardId: string) => {
+      const frame = previewBoards.find((b) => b.board.id === boardId)?.board.frame;
+      if (frame) previewView.fitTo(frame, BOARD_FIT_MAX);
+    },
+    [previewBoards, previewView],
+  );
+
   // ---- board commands (each one gesture, one undo step)
   const tryEdit = (write: (origin: object) => void): boolean => {
     try {
@@ -261,7 +351,7 @@ export function DesignWorkbench({ session, view, assetUrl, system, readOnly, com
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const mod = event.metaKey || event.ctrlKey;
-    if (!mod || readOnly) return;
+    if (!mod || readOnly || preview) return; // M4: no undo in history (the live design is not shown)
     const target = event.target as HTMLElement;
     if (event.defaultPrevented || target.isContentEditable) return; // the text box routes its own
     if (target.tagName === 'INPUT' || target.tagName === 'SELECT') return; // a field keeps its own undo
@@ -277,9 +367,29 @@ export function DesignWorkbench({ session, view, assetUrl, system, readOnly, com
 
   const zoom = viewState.viewport?.zoom ?? 1;
   const elementsSelected = state.selection.length > 0;
-  return (
-    <div className="deck-editor design-workbench" data-design-editor data-compact={compact || undefined} onKeyDown={onKeyDown}>
-      {liveFaces.css && <style data-deck-faces>{liveFaces.css}</style>}
+  const faces = versionFaces ? versionFaces.css : liveFaces.css;
+  const focusStop = focus.index === null ? null : (focus.stops[focus.index] ?? null);
+  const historyRail = history && historySnapshot && historyOpen && <DeckHistoryRail controller={history} snapshot={historySnapshot} sessionTitle={sessionTitle} onClose={() => session.toggleRail('history')} />;
+  const onMoved = (to: BoardView, ids: string[]) => {
+    session.show(to.id);
+    session.select(ids);
+    reveal(to.id);
+    setNotice(C.movedTo(boardLabel(to)));
+  };
+  const editor = (
+    <div className="deck-editor design-workbench" data-design-editor data-compact={compact || undefined} data-history-previewing={preview ? '' : undefined} onKeyDown={onKeyDown}>
+      {faces && <style data-deck-faces>{faces}</style>}
+      {!preview && historySnapshot?.banner && (
+        <div className="deck-history-banner" role="status" aria-label={HISTORY_COPY.restoredBanner}>
+          <span>{historySnapshot.banner}</span>
+          <button type="button" className="deck-button" onClick={() => history?.dismissBanner()}>
+            {HISTORY_COPY.dismiss}
+          </button>
+        </div>
+      )}
+      {preview && projected && history ? (
+        <DesignHistoryBar preview={preview} controller={history} count={projected.count} onStep={step} onBack={() => history.close()} />
+      ) : (
       <div className="deck-toolbar" role="toolbar" aria-label={C.toolbar}>
         <button type="button" className="deck-button" aria-label={C.boards} aria-pressed={boardsOpen} title={C.showBoards} onClick={() => setBoardsOpen((open) => !open)}>
           ☷
@@ -305,13 +415,20 @@ export function DesignWorkbench({ session, view, assetUrl, system, readOnly, com
           onToggleInspector={() => setInspectorOpen((open) => !open)}
         />
         <TextStyleMenu session={session} slideId={active?.id ?? null} tokens={tokens} readOnly={!editable} onNotice={setNotice} />
+        <DesignCommentButtons api={commentsApi} view={view} railOpen={state.rail === 'comments'} onToggleRail={() => session.toggleRail('comments')} />
         <span role="status" className="deck-notice" data-deck-notice>
           {notice}
         </span>
         <span className="deck-toolbar-spacer" />
         <ZoomControls view={view} zoom={zoom} onFitAll={fitAll} onFitSelection={fitSelection} />
       </div>
-      {active?.held && (
+      )}
+      {preview?.showChanges && projected?.deck && (
+        <p className="deck-history-deck" role="status" data-focused={focusStop?.part === 'deck' || undefined}>
+          {C.historyDeck(projected.deck.keys.map((k) => boardKeyLabel(k.key)).join(', '))}
+        </p>
+      )}
+      {!preview && active?.held && (
         <div role="status" className="deck-held-banner" data-held-banner>
           <strong>{C.heldBanner}</strong>
           <ul>
@@ -321,12 +438,20 @@ export function DesignWorkbench({ session, view, assetUrl, system, readOnly, com
           </ul>
         </div>
       )}
-      {active?.missing && (
+      {!preview && active?.missing && (
         <div role="status" className="deck-held-banner" data-missing-banner>
           <strong>{C.missingBanner}</strong>
         </div>
       )}
+      {/* one tree in both modes, so B's rail keeps its place (and its open folds) while a version shows */}
       <div className="deck-editor-body">
+        {preview && projected && history ? (
+          <>
+            {boardsOpen && <HistoryBoardList controller={history} boards={previewBoards} showChanges={preview.showChanges} onFit={fitPreviewBoard} />}
+            <HistoryWorld controller={history} preview={preview} projected={projected} boards={previewBoards} focus={focusStop} view={previewView} assets={previewAssets} faces={versionFaces!} scope={previewScope} />
+          </>
+        ) : (
+          <>
         {boardsOpen && (
           <BoardList
             session={session}
@@ -345,11 +470,34 @@ export function DesignWorkbench({ session, view, assetUrl, system, readOnly, com
             onRename={rename}
           />
         )}
+        {historySnapshot?.pill && (
+          <div className="deck-history-pill" data-markup-occluder>
+            <button
+              type="button"
+              className="deck-button"
+              onClick={() => {
+                if (!historyOpen) session.toggleRail('history');
+                void history?.openNewChanges();
+              }}
+            >
+              {HISTORY_COPY.pill(historySnapshot.pill.count)}
+            </button>
+            {historySnapshot.pill.failed !== null && (
+              <button type="button" className="deck-button" aria-label={HISTORY_COPY.pillRetry} title={historySnapshot.pill.failed} onClick={() => void history?.recount()}>
+                ↻
+              </button>
+            )}
+            <button type="button" className="deck-button" aria-label={HISTORY_COPY.pillDismiss} onClick={() => history?.dismissPill()}>
+              ×
+            </button>
+          </div>
+        )}
         {boards.length === 0 ? (
           <div className="design-world design-world-empty">
             <p className="deck-quiet">{C.noBoards}</p>
           </div>
         ) : (
+          <DesignCommentFrame api={commentsApi} surface={comments} view={view} boards={boards} canvases={canvases}>
           <World
             session={session}
             view={view}
@@ -370,17 +518,24 @@ export function DesignWorkbench({ session, view, assetUrl, system, readOnly, com
             removeBoard={remove}
             duplicateBoard={duplicate}
           />
+          </DesignCommentFrame>
         )}
         {state.rail === 'theme' && scope(<ThemePanel session={session} system={system} theme={theme} overrides={overrides} faces={deckFaces} readOnly={readOnly} />)}
+        {state.rail === 'comments' && <CommentsRail api={commentsApi} onClose={() => session.toggleRail('comments')} />}
         {inspectorOpen && active && (
           <div className="design-inspector" data-design-rail="inspector" data-board-context={!elementsSelected || undefined}>
             {!elementsSelected && <BoardInspector session={session} board={active} readOnly={readOnly} />}
+            {elementsSelected && <MoveToBoard session={session} boards={boards} active={active} selection={state.selection} canvas={activeCanvas} zoom={zoom} readOnly={!editable} onMoved={onMoved} onNotice={setNotice} />}
             {scope(<Inspector session={session} slideId={active.id} readOnly={!editable} faces={deckFaces} uploadAsset={uploadAsset} measure={(id) => measureInHost(activeCanvas, id, zoom)} />)}
           </div>
         )}
+          </>
+        )}
+        {historyRail}
       </div>
     </div>
   );
+  return <DeckCommentsProvider value={commentsApi}>{editor}</DeckCommentsProvider>;
 }
 
 /** Zoom out, the zoom (with Fit all and Fit selection), zoom in: C's toolbar's controls over the tab's view. */
