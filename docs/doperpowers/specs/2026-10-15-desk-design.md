@@ -838,7 +838,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
   (stores, never alters).
 - **Design inheritance:** §2 Hub, §3 [binding parts], §6, §8 unknown 3.
 - **Required:** required.
-- **Status:** in-flight (2026-10-15).
+- **Status:** merged (2026-10-15; MAWS PR #14, `c4d4458e`; deployed `hub@b11ea5f8 web@smns-erb-web.3de8a15e`).
 
 ### DC4: The uplink — plan
 
@@ -913,7 +913,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
   taste-heavy surfaces (the grid card, the folded agent-traffic row, the
   request cards) go to the owner as mockups before polish.
 - **Required:** required.
-- **Status:** in-flight (2026-10-15).
+- **Status:** merged (2026-10-16; MAWS PR #13, `76b1de782`).
 
 ### DC6: The web — session depth — plan
 
@@ -932,7 +932,7 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
 - **Design inheritance:** §2 Web client (the adapter), §3 session plane, §4
   right panel.
 - **Required:** required.
-- **Status:** PR open (2026-10-15; MAWS PR #12, stacked on `smns-erb-web`).
+- **Status:** PR open (2026-10-15; MAWS PR #12, retargeted to `master` 2026-10-16 after DC5 merged).
 
 ### DC7: The machine's controls — plan
 
@@ -3246,10 +3246,10 @@ a hub that connects into machines (§2).
 | --- | --- | --- |
 | DC1 bridge spike | findings: `docs/doperpowers/specs/2026-10-15-arkho-desk-c1-findings.md` | **landed 2026-10-15**: 11 items, every primitive promoted, six with a change folded into §2 and §5; probe kept at `/tmp/c1probe` |
 | DC2 bridge | plan: `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md` (doperpowers, branch `worktree-smns-erb`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/195, merge `a6c90a13`, 7.155.0; report `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-report.md` |
-| DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | **PR open 2026-10-15**: M1–M5, the xhigh panel and its fix waves, and the joint re-review clean; PR https://github.com/SSFSKIM/MAWS/pull/14 (`smns-erb` → `master`); Linux gate run 38846390702 green on `36d6bae3`; deployed `hub@b11ea5f8 web@smns-erb-web.3de8a15e`; residue the staging re-measure and the shared per-session stream (Deferred), two tech-debt rows in the PR; report `docs/doperpowers/plans/2026-10-15-desk-dc3-report.md` |
+| DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | **merged 2026-10-15**: M1–M5, the xhigh panel and its fix waves, and the joint re-review clean; PR https://github.com/SSFSKIM/MAWS/pull/14 (`smns-erb` → `master`), merge `c4d4458e` after master was merged in at `349f524f` (gate run 38848788463); Linux gate run 38846390702 green on `36d6bae3`; deployed `hub@b11ea5f8 web@smns-erb-web.3de8a15e`; residue the staging re-measure and the shared per-session stream (Deferred), two tech-debt rows in the PR; report `docs/doperpowers/plans/2026-10-15-desk-dc3-report.md` |
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/194, merge `9e7d3d30`, 7.156.0 (main merged in at `2a864e49` after DC2); report `docs/doperpowers/plans/2026-10-15-desk-dc4-report.md` |
-| DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | **PR open 2026-10-15**: every task reviewed clean; PR https://github.com/SSFSKIM/MAWS/pull/13, stacked on `smns-erb`, retargeted to `master` when DC3 merges; 256 unit tests, the Linux lane 38/38 (runs 38846307022, 38847209275), against the local hub with the fake machine local-hub 7/7 and session-plane 9/9; the owner's phone walk through P2.12, P2.11 pending; the xhigh whole-branch panel (`895e27d1..3de8a15e`) running; report `docs/doperpowers/plans/2026-10-15-desk-dc5-report.md` |
-| DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | **PR open 2026-10-15**: M1–M3 and the branch reviewed clean (`high`, after two final fix waves); PR https://github.com/SSFSKIM/MAWS/pull/12, stacked on `smns-erb-web`, retargeted to `master` when DC5 merges; Linux gate run 38818748087 green (67 browser tests, 8 acceptance specs against the fake machine); report `docs/doperpowers/plans/2026-10-15-desk-dc6-report.md` |
+| DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | **merged 2026-10-16**: every task, the xhigh whole-branch panel (`895e27d1..3de8a15e`, 16 findings, 14 fixed over two reviewed waves, one left to DC5's judgment, one to tech debt) and the tail-follow rework reviewed clean; PR https://github.com/SSFSKIM/MAWS/pull/13, merge `76b1de782` at head `12ca2e89`; 287 unit tests; `e2e:desk-web` 45/45 on the Mac mini (run 38899621892) and 49/49 on Linux with WebKit (38899609623), `static,unit` 38899633797; the real-hub suite, gate group `e2e:desk-web-hub`, 16/16 on the mini (38890504759); the owner's phone walk through P2.12, P2.11 pending; residue the wrapped-key label collision (tech debt) and Safari before 27 (Decision Log); report `docs/doperpowers/plans/2026-10-15-desk-dc5-report.md` |
+| DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | **PR open 2026-10-15**: M1–M3 and the branch reviewed clean (`high`, after two final fix waves); PR https://github.com/SSFSKIM/MAWS/pull/12, retargeted to `master` 2026-10-16 after DC5 merged, its master merge, gates and xhigh panel pending; Linux gate run 38818748087 green (67 browser tests, 8 acceptance specs against the fake machine); report `docs/doperpowers/plans/2026-10-15-desk-dc6-report.md` |
 | DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`; four P2 fixed after the final review, the presence watermark among them); PR https://github.com/SSFSKIM/doperpowers/pull/196 (branch `dc7-controls`), merge `af3a5573`, 7.157.0; sminos 1740/1742 (the two load-timing assertions in TECH-DEBT), mods 298/298; Resume live 5/5 on 2.1.301; report `docs/doperpowers/plans/2026-10-15-desk-dc7-report.md` |
 
 ## Surprises & Discoveries
@@ -3494,6 +3494,30 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: The channel follows its tail as a `column-reverse` scroller with the browser's own scroll anchoring (DC5).
+  The list keeps its chronological DOM, keyboard and accessibility order inside a reversed container, so the bottom
+  is the scroll origin: opening at the tail needs no code, and a reader scrolled back keeps their place through
+  growth, collapse and removal above them and a message arriving below. The only scroll code left is a
+  notification's landing. Three hand-rolled passes came first, and each review found the next case the browser
+  already handles: a scroll event arriving a frame after the row it raced (installed Chrome on the Mac lane, never
+  headless Chromium), growth above the reader (native anchoring moved `scrollTop` and read as a return to the
+  tail), shrink above (the browser clamps before the hook runs), growth inside the one long row being read, and an
+  unreported scroll-up landing with a collapse. Every one of those is now a browser regression. Safari has scroll
+  anchoring only from 27.0; Playwright's WebKit (26.6) held the row within a pixel, but a phone on iOS 26 or older
+  may move about one row when a message arrives below a reader scrolled back, so the owner's iOS version decides
+  whether that needs a follow-up. Rejected: a fourth hand-rolled pass (it was rebuilding scroll anchoring case by
+  case); a follow-output component (none fit the stack without a heavy dependency). Flags DC6 (its transcript and
+  subagent views follow the same arrangement).
+  Date/Author: 2026-10-16, design session (DC5's Mac lane).
+- Decision: The real-hub suite bounds a machine's offline step by the local close latency DX2 states, the configured
+  heartbeat plus 500 ms; busy, waiting and shell keep 2 s. On the Mac mini (run 38889971966) offline came at
+  2,309 ms against the local command's 2 s heartbeat, because workerd sees `wrangler dev`'s graceful close only at
+  the next heartbeat write; the MacBook's earlier 1,344 ms was a drop that landed just before one. Acceptance 1's
+  2 s holds for offline on the deployed hub, where the edge cancels into workerd at once, and the walk proves it
+  there. The suite is the gate group `e2e:desk-web-hub` on the Mac mini, where MAWS's e2e groups now run (the
+  gate-offload plan §3.5–3.6). Rejected: a shorter local heartbeat (DC3's to set, and nothing needs it); keeping
+  the MacBook pass at `3de8a15e` (it predates the panel's fixes to resume and routing, and passed by timing).
+  Date/Author: 2026-10-16, design session (DC5).
 - Decision: A Linux machine is a desk machine, built alongside Phase 1 (Arkho #85): `sminos daemon install`
   writes a systemd user service on Linux (restart on new code, lingering for a machine without a login session),
   and the process-identity check holds on Linux, where `ps -o lstart` reads up to a second early. The owner asked
