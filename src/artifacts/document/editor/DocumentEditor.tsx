@@ -136,9 +136,10 @@ export function DocumentEditor(props: DocumentEditorProps) {
   const shownVersion = previewRevision(preview, snapshot?.versions ?? null);
   const shownDoc = preview ? (preview.view?.ytype.doc ?? null) : pendingSuggestions && suggestionDoc ? suggestionDoc : doc;
   const { onDisplayedDocument } = props;
+  const shownRevision = preview ? shownVersion : undefined;
   useEffect(() => {
-    if (shownDoc) onDisplayedDocument?.(shownDoc, preview ? shownVersion : undefined);
-  }, [shownDoc, shownVersion, preview, onDisplayedDocument]);
+    if (shownDoc) onDisplayedDocument?.(shownDoc, shownRevision);
+  }, [shownDoc, shownRevision, onDisplayedDocument]);
   // P3-E end
   const openRail = (next: Rail) => {
     if (!held) setOwnRail(next);

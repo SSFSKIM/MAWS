@@ -66,6 +66,8 @@ describe('the displayed document', () => {
     host.write((doc) => createDocument(doc, { title: 'Main', id: TAB, body: content('The first version.') }));
     const before = history.version('named', HUMAN, { label: 'Before' });
     host.write((doc) => (tabBody(doc, TAB)!.get(0) as { insert(i: number, s: string): void }).insert(0, 'Edited. '));
+    const middle = history.version('named', HUMAN, { label: 'Middle' });
+    host.write((doc) => (tabBody(doc, TAB)!.get(0) as { insert(i: number, s: string): void }).insert(0, 'Later. '));
     const handle = await open();
     const told: { doc: Doc; revision?: number }[] = [];
     const { seen, renderChart } = recorder();
@@ -85,9 +87,17 @@ describe('the displayed document', () => {
     expect(tabBody(version.doc, TAB)?.toString()).not.toContain('Edited.');
     expect(seen.slice(1)).toEqual([{ doc: version.doc, revision: before.seq }]); // the preview's chart, the live one's untouched
 
+    // another version in the same preview editor: its charts follow the displayed document there
+    act(() => void fireEvent.click(screen.getByRole('button', { name: /^Version Middle/ })));
+    await until(() => told.length === 3, 'the second version');
+    expect(told[2].revision).toBe(middle.seq);
+    expect(told[2].doc).not.toBe(version.doc);
+    await until(() => seen.at(-1)?.doc === told[2].doc, 'the chart on the second version');
+    expect(seen.at(-1)).toEqual({ doc: told[2].doc, revision: middle.seq });
+
     act(() => void fireEvent.click(within(screen.getByRole('toolbar', { name: 'Version preview' })).getByRole('button', { name: 'Back to document' })));
-    await until(() => told.length === 3, 'the live document again');
-    expect(told[2]).toEqual({ doc: handle.doc });
+    await until(() => told.length === 4, 'the live document again');
+    expect(told[3]).toEqual({ doc: handle.doc });
   });
 
   it('is the suggestion replica\'s doc in the review, told to its charts and its caller', async () => {

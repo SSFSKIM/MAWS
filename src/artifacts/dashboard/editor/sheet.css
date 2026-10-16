@@ -4,9 +4,18 @@
    shadow.lg belong to MAWS's own floating UI). No literal colour, no new type size, nothing that slides. */
 
 /* ── a view in the page ── */
+/* B's chart atom is a placeholder box until E draws it (theme.css `.doc-chart`: a dashed flex row); a drawn view is the
+   block itself, the column's full width */
+.ds-doc .doc-chart:has(> .doc-atom-view > .dash-view) {
+  display: block;
+  border: 0;
+  padding: 0;
+  color: inherit;
+}
 .ds-doc .dash-view {
+  display: block;
   margin: 0;
-  container-type: inline-size;
+  min-width: 0;
 }
 .ds-doc .dash-view[aria-busy='true'] .dash-figure > svg {
   opacity: 0.5; /* a replacement's rows are being read: the earlier figure holds its place, dimmed */
