@@ -60,6 +60,7 @@ import * as connectors from './schema/connectors'; // P3-H H3b
 export {
   HostPingSchema,
   HostStateSchema,
+  JsonValueSchema,
   NAMESPACES,
   type CommandSpec,
   type HostPing,

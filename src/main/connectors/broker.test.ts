@@ -348,7 +348,8 @@ describe('a call (route choice, the grant on every call)', () => {
     engine.has(ROWS);
     grants.put(ART, ROWS, 'fp-1', 'read');
     const lease = page();
-    for (const answer of [{ ok: true, result: { n: 1n } }, { ok: true }, { ok: 'yes' }, { ok: false, failure: 'other', message: 'x' }, null]) {
+    const cycle: Record<string, unknown> = {}; cycle.self = cycle;
+    for (const answer of [{ ok: true, result: { n: 1n } }, { ok: true, result: { rows: [{ a: undefined }] } }, { ok: true, result: [1, () => 2] }, { ok: true, result: { n: Number.NaN } }, { ok: true, result: new Date(0) }, { ok: true, result: cycle }, { ok: true }, { ok: 'yes' }, { ok: false, failure: 'other', message: 'x' }, null]) {
       engine.answer = () => answer as ConnectorRouteAnswer;
       expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'failed', reason: 'malformed' });
     }
@@ -356,6 +357,16 @@ describe('a call (route choice, the grant on every call)', () => {
     expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'failed', reason: 'tooLarge' });
     engine.answer = () => ({ ok: true, result: 'x'.repeat(15 * 1024 * 1024) });
     expect(await broker.callTool(ME, lease, ROWS)).toMatchObject({ ok: true });
+  });
+
+  it('takes a null or falsy result as a success, since only a result that is not JSON is malformed', async () => {
+    engine.has(ROWS);
+    grants.put(ART, ROWS, 'fp-1', 'read');
+    const lease = page();
+    for (const result of [null, 0, '', false, [], {}]) {
+      engine.answer = () => ({ ok: true, result });
+      expect(await broker.callTool(ME, lease, ROWS)).toMatchObject({ ok: true, result });
+    }
   });
 
   it('refuses a malformed route target, a route that throws and a grant it cannot read, saying nothing of why to the page', async () => {

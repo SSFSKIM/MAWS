@@ -8,6 +8,7 @@
 import * as z from 'zod';
 import type { ConnectorAuthorization, ConnectorCallRef, ConnectorGrant, ConnectorGrantMode, ConnectorGrantRequest, ConnectorResult, ConnectorRouteName, ConnectorToolRef } from '@shared/artifacts/connectors';
 import { ConnectorGrantRequestSchema } from '@shared/artifacts/connectors';
+import { JsonValueSchema } from '@shared/ipc/schema';
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 
 export interface ConnectorGrantAuthority {
@@ -66,7 +67,7 @@ const TargetSchema = z.object({
 });
 
 const AnswerSchema = z.union([
-  z.object({ ok: z.literal(true), result: z.unknown() }),
+  z.object({ ok: z.literal(true), result: JsonValueSchema }),
   z.object({ ok: z.literal(false), failure: z.enum(['unavailable', 'failed', 'tooLarge']), message: z.string() }),
   z.object({ ok: z.literal(false), failure: z.literal('refused'), refusal: z.enum(['notGranted', 'fingerprintChanged', 'wrongMode', 'revoked']), message: z.string() }), // P3-H H3b
 ]);
@@ -76,7 +77,7 @@ export function readTarget(value: unknown): ConnectorRouteTarget | null {
   return TargetSchema.safeParse(value).success ? (value as ConnectorRouteTarget) : null;
 }
 
-// The route's answer, or why it cannot be taken: `malformed` (the wrong shape, or a result that is not JSON) or
+// The route's answer, or why it cannot be taken: `malformed` (the wrong shape, or a result that is not JSON at any depth) or
 // `tooLarge` (a result over CONNECTOR_RESULT_MAX_BYTES as JSON).
 export function readAnswer(value: unknown): ConnectorRouteAnswer | 'malformed' | 'tooLarge' {
   const parsed = AnswerSchema.safeParse(value);
@@ -85,7 +86,7 @@ export function readAnswer(value: unknown): ConnectorRouteAnswer | 'malformed' |
   if (!answer.ok) return { ...answer, message: answer.message.slice(0, MESSAGE_MAX_LENGTH) };
   const bytes = jsonBytes(answer.result);
   if (bytes === null) return 'malformed';
-  return bytes <= CONNECTOR_RESULT_MAX_BYTES ? { ok: true, result: answer.result as ConnectorResult } : 'tooLarge';
+  return bytes <= CONNECTOR_RESULT_MAX_BYTES ? { ok: true, result: answer.result } : 'tooLarge';
 }
 
 // The size of `value` as JSON, or null when it is not JSON (undefined, a bigint, a cycle).
