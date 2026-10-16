@@ -199,10 +199,11 @@ describe('a malformed or failing RPC', () => {
 });
 
 describe('a decision, against the session it names and the request as it stands', () => {
-  it("is bound to its own session: another session's request, digest and all, is refused digest-mismatch and stays pending", async () => {
-    const { fm, b, raised, call, final, digest } = await setUp({ recordings: [requests, other] });
+  it("is bound to its own session: a digest naming another session is bad-shape before any claim, as the real machine refuses it, and the request stays pending", async () => {
+    const { fm, b, raised, call, final, digest, memory } = await setUp({ recordings: [requests, other] });
     const across = await call('decide', { session: SESSION, decision: 'allow', digest: await digest(raised('toolu_other')) });
-    expect((await final(across)).outcome).toMatchObject({ state: 'failed', error: { code: 'digest-mismatch' } });
+    expect((await final(across)).outcome).toEqual({ state: 'failed', error: { code: 'bad-shape', message: 'the digest names another session' } });
+    expect(memory.ledger[across.nonce]).toBeUndefined();
     expect(fm.pendingRequests().map((r) => r.request)).toContain('toolu_other');
     const own = await call('decide', { session: OTHER, decision: 'allow', digest: await digest(raised('toolu_other')) });
     expect((await final(own)).outcome).toEqual({ state: 'done', result: {} });

@@ -705,8 +705,6 @@ export class FakeMachine {
           const settled = this.settledRequests.get(digest.request);
           return fail('not-pending', settled ? `already settled: ${settled.outcome} (${settled.by})` : 'no such request is pending', settled ? { winner: settled.winner, by: settled.by } : {});
         };
-        // The digest is checked against the request pending in the session the RPC names, never another session's.
-        if (digest.session !== rpc.args.session) return fail('digest-mismatch', `the request as drawn belongs to ${digest.session}, not ${rpc.args.session}`);
         const held = this.pending.get(digest.request);
         if (!held) return notPending();
         const { raised } = held;
@@ -882,6 +880,9 @@ function argumentProblem(rpc: Rpc): string | null {
   const needs = (ok: boolean, what: string) => (ok ? null : `${rpc.rpc}'s args are ${what}`);
   const digest = a.digest as Record<string, unknown> | undefined;
   const digestOk = typeof digest === 'object' && digest !== null && ['session', 'request', 'tool', 'input_sha256'].every((k) => typeof digest[k] === 'string');
+  // A decision acts on the session it names: a digest of another session's request is malformed, as the real machine
+  // has it (sminos_rpc.py's `need`, "the digest names another session").
+  const ownSession = () => (digest!.session === a.session ? null : 'the digest names another session');
   switch (rpc.rpc) {
     case 'steer':
       return needs(str('session') && str('text'), '{session, text}');
@@ -891,11 +892,14 @@ function argumentProblem(rpc: Rpc): string | null {
     case 'resume':
       return needs(str('session'), '{session}');
     case 'decide':
-      return needs(str('session') && digestOk && (a.decision === 'allow' || a.decision === 'deny') && optStr('message'), '{session, digest, decision: allow | deny, message?}');
+      return (
+        needs(str('session') && digestOk && (a.decision === 'allow' || a.decision === 'deny') && optStr('message'), '{session, digest, decision: allow | deny, message?}') ??
+        ownSession()
+      );
     case 'answer': {
       const answers = a.answers as Record<string, unknown> | undefined;
       const answersOk = typeof answers === 'object' && answers !== null && !Array.isArray(answers) && Object.values(answers).every((v) => typeof v === 'string');
-      return needs(str('session') && digestOk && answersOk, '{session, digest, answers: {question: label}}');
+      return needs(str('session') && digestOk && answersOk, '{session, digest, answers: {question: label}}') ?? ownSession();
     }
     case 'model':
       return needs(str('session') && optStr('model') && optStr('effort') && (a.model !== undefined || a.effort !== undefined), '{session, model?, effort?} with at least one');
