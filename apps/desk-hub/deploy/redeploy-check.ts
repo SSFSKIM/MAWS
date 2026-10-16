@@ -18,7 +18,7 @@ import type { HumanDraft, LogEvent } from '../src/protocol/log';
 import { join } from 'node:path';
 import { readDeployConfig, type DeployConfig } from './config';
 import { deployArgs, deployHub, readSecrets, type DeployOptions } from './deploy';
-import { enroll, newOrgKey, Person, sleep, type Socket } from './hub';
+import { enroll, LogFollower, newOrgKey, Person, sleep } from './hub';
 import { Cleanup, revoke, servesOrg, TEST_ORG_OPTION, testOrgArg } from './proof';
 
 async function until<T>(read: () => Promise<T | undefined>, what: string, ms: number): Promise<T> {
@@ -77,6 +77,7 @@ async function check(
     cleanup.add(`revoke ${name}`, () => revoke(owner, name));
     const credentials = await enroll(owner, name);
     const fm = new FakeMachine({ hub, machine: name, credentials, orgKey: rawKey, project, projectName: `dc3-m5 redeploy ${tag}`, reconnect: true });
+    cleanup.add(`close ${name}`, () => fm.close());
     // A fresh service token reaches Access's edge in seconds; until then it is refused 401.
     for (let tries = 0; ; tries++) {
       try {
@@ -88,7 +89,6 @@ async function check(
       }
     }
     machines.push(fm);
-    cleanup.add(`close ${name}`, () => fm.close());
   }
   console.log(`machines ${names.join(', ')} connected; project ${project}`);
 
@@ -97,47 +97,44 @@ async function check(
   const received = new Map<number, LogEvent>();
   const unacked = new Map<string, LogEvent>();
   let acked = 0;
-  let socket: Socket | undefined;
   let browserReopens = 0;
-  const openBrowser = async (): Promise<void> => {
-    for (;;) {
-      try {
-        const s = await owner.socket(`/api/projects/${project}/socket`);
-        s.onFrame = (frame) => {
-          if (frame.t === 'log') for (const { offset, event } of frame.events as Array<{ offset: number; event: LogEvent }>) received.set(offset, event);
-          if (frame.t === 'human-ack' && unacked.delete(String(frame.nonce))) acked++;
-        };
-        s.send({ t: 'resume', after: received.size ? Math.max(...received.keys()) : 0 });
-        for (const event of unacked.values()) s.send({ t: 'human', event });
-        socket = s;
-        return;
-      } catch {
-        await sleep(1000);
-      }
-    }
-  };
-  await openBrowser();
-  cleanup.add('close the browser', async () => socket?.close());
+  const browser = new LogFollower(owner, `/api/projects/${project}/socket`, (s) => {
+    s.onFrame = (frame) => {
+      if (frame.t === 'log') for (const { offset, event } of frame.events as Array<{ offset: number; event: LogEvent }>) received.set(offset, event);
+      if (frame.t === 'human-ack' && unacked.delete(String(frame.nonce))) acked++;
+    };
+    s.send({ t: 'resume', after: received.size ? Math.max(...received.keys()) : 0 });
+    for (const event of unacked.values()) s.send({ t: 'human', event });
+  });
+  // Registered before the first open: stopping it ends any reconnect still trying, and closes its socket.
+  cleanup.add('stop the browser', () => browser.stop());
+  await browser.open();
   let writing = true;
-  const timers: { watch?: ReturnType<typeof setInterval> } = {};
+  const running: { watch?: ReturnType<typeof setInterval>; loops: Array<Promise<unknown>> } = { loops: [] };
+  // Runs before the browser stops (cleanup runs last first): the writing ends, then its loops settle, a browser loop in
+  // a reconnect released by the stop. Bounded, so a loop stuck on the network cannot hold the cleanup.
   cleanup.add('stop writing', async () => {
     writing = false;
-    clearInterval(timers.watch);
+    clearInterval(running.watch);
+    const stopping = browser.stop();
+    await Promise.race([Promise.allSettled([stopping, ...running.loops]), sleep(15_000)]);
   });
   const browserLoop = (async () => {
     for (let i = 1; writing; i++) {
       const draft: HumanDraft = { kind: 'human', from: 'human', member: me.member.id, to: '*', text: `human ${i}`, created: new Date().toISOString() };
       const event = (await seal(key, 'log', project, draft, newNonce())) as unknown as LogEvent;
       unacked.set(event.mac.nonce, event);
+      const socket = browser.socket;
       if (socket && !socket.closed) socket.send({ t: 'human', event });
       if (socket?.closed) {
         browserReopens++;
-        socket = undefined;
-        await openBrowser();
+        browser.socket = undefined;
+        await browser.open();
       }
       await sleep(1000);
     }
   })();
+  running.loops.push(browserLoop);
 
   // The machines write; the hub is redeployed partway.
   const written = new Map<string, number>();
@@ -151,6 +148,7 @@ async function check(
       }
     })(),
   );
+  running.loops.push(...writers);
   const started = Date.now();
   await sleep(redeployAt * 1000);
   const generations = machines.map((fm) => fm.generation);
@@ -163,14 +161,14 @@ async function check(
     console.log(`cut: ${what} (load ${loadavg().map((l) => Math.round(l)).join('/')})`);
   };
   const last = machines.map((fm) => fm.generation);
-  let socketSeen = socket;
-  timers.watch = setInterval(() => {
+  let socketSeen = browser.socket;
+  running.watch = setInterval(() => {
     machines.forEach((fm, i) => {
       if (fm.generation !== last[i]) cut(`${fm.name} on generation ${(last[i] = fm.generation)} at +${((Date.now() - redeployStart) / 1000).toFixed(1)} s`);
     });
-    if (socket !== socketSeen && socket) {
+    if (browser.socket !== socketSeen && browser.socket) {
       cut(`the browser reopened at +${((Date.now() - redeployStart) / 1000).toFixed(1)} s`);
-      socketSeen = socket;
+      socketSeen = browser.socket;
     }
   }, 250);
   // Durable Objects restart for new code, not for the same code redeployed or new variables (M5: neither cut a stream
@@ -187,7 +185,7 @@ async function check(
   await sleep(Math.max(0, seconds * 1000 - (Date.now() - started)));
   writing = false;
   await Promise.all([...writers, browserLoop]);
-  clearInterval(timers.watch);
+  clearInterval(running.watch);
   console.log(`connections cut and back: ${cuts.join('; ') || 'none'}`);
   const humans = acked + unacked.size;
   console.log(`writing stopped: ${JSON.stringify(Object.fromEntries(written))}, ${humans} humans (${unacked.size} unacknowledged yet)`);
@@ -202,7 +200,8 @@ async function check(
     return v;
   };
   while (Date.now() < deadline && !(unacked.size === 0 && machines.every((fm) => complete(fm.vector())) && complete(browserVector()))) {
-    if (socket?.closed || !socket) await openBrowser();
+    const socket = browser.socket;
+    if (socket?.closed || !socket) await browser.open();
     else for (const event of unacked.values()) socket.send({ t: 'human', event });
     await sleep(1000);
   }
@@ -214,7 +213,6 @@ async function check(
   await fresh.next((f) => f.t === 'caught-up', 'caught-up', 30_000);
   const all = fresh.frames.flatMap((f) => (f.frame.t === 'log' ? (f.frame.events as Array<{ offset: number; event: LogEvent }>) : []));
   fresh.close();
-  socket?.close();
   const problems: string[] = [];
   const offsets = all.map((e) => e.offset);
   if (new Set(offsets).size !== offsets.length || offsets.some((o, i) => i > 0 && o <= offsets[i - 1])) problems.push('offsets repeat or fall');

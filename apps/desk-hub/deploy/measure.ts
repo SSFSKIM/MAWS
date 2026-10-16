@@ -197,6 +197,7 @@ async function measureRun(owner: Person, hub: string, values: MeasureOptions, cl
   const crossLog: Array<{ at: number; ms: number }> = [];
   const openBrowser = async (): Promise<Browser> => {
     const socket = await owner.socket(`/api/projects/${project}/socket`);
+    cleanup.add(`close browser ${browsers.length + 1}`, async () => socket.close());
     await socket.next((f) => f.t === 'welcome', 'welcome');
     const b: Browser = { socket, subs: new Map() };
     socket.onFrame = (frame, at) => {
@@ -228,11 +229,7 @@ async function measureRun(owner: Person, hub: string, values: MeasureOptions, cl
     for (const sub of b.subs.keys()) b.socket.send({ t: 'unsubscribe', sub });
     b.subs.clear();
   };
-  for (let i = 0; i < 8; i++) {
-    const b = await openBrowser();
-    browsers.push(b);
-    cleanup.add(`close browser ${i + 1}`, async () => b.socket.close());
-  }
+  for (let i = 0; i < 8; i++) browsers.push(await openBrowser());
   // The first browser follows the log, as a project view does.
   browsers[0].socket.send({ t: 'resume', after: 0 });
 

@@ -140,16 +140,7 @@ export async function main(argv: string[]): Promise<number> {
     {
       id: 'A1',
       what: "a signed-in browser's WebSocket upgrades to a Project and to the Registry",
-      async run() {
-        const view = await owner.socket(`/api/projects/${project}/socket`);
-        const welcome = await view.next((f) => f.t === 'welcome', 'welcome');
-        const grid = await owner.socket('/api/registry/socket');
-        const projects = (await grid.next((f) => f.t === 'grid', 'grid')).projects as Array<{ id: string }>;
-        view.close();
-        grid.close();
-        if (welcome.project !== project || !projects.some((p) => p.id === project)) throw new Error(`welcome ${JSON.stringify(welcome)}`);
-        return `the project socket welcomed member ${String(welcome.member)}; the grid lists ${projects.length} project(s), the probe's among them`;
-      },
+      run: () => browserCase(owner, project, cleanup),
     },
   ];
 
@@ -171,4 +162,18 @@ export async function main(argv: string[]): Promise<number> {
     if (left) failed++;
   }
   return failed ? 1 : 0;
+}
+
+/** Case A1: the person's WebSockets to the project and to the grid, each registered for cleanup as it opens. */
+export async function browserCase(owner: Pick<Person, 'socket'>, project: string, cleanup: Cleanup): Promise<string> {
+  const view = await owner.socket(`/api/projects/${project}/socket`);
+  cleanup.add('close the project socket', async () => view.close());
+  const welcome = await view.next((f) => f.t === 'welcome', 'welcome');
+  const grid = await owner.socket('/api/registry/socket');
+  cleanup.add('close the grid socket', async () => grid.close());
+  const projects = (await grid.next((f) => f.t === 'grid', 'grid')).projects as Array<{ id: string }>;
+  view.close();
+  grid.close();
+  if (welcome.project !== project || !projects.some((p) => p.id === project)) throw new Error(`welcome ${JSON.stringify(welcome)}`);
+  return `the project socket welcomed member ${String(welcome.member)}; the grid lists ${projects.length} project(s), the probe's among them`;
 }

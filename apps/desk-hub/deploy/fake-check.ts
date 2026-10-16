@@ -63,6 +63,7 @@ async function check(owner: Person, hub: string, cleanup: Cleanup): Promise<numb
   // The committed recording, found from the app's directory: this module runs bundled elsewhere.
   const recording = loadRecording(join(process.env.DESK_HUB_APP!, 'fake-machine', 'recordings', 'two-subagents'));
   const fm: FakeMachine = new FakeMachine({ hub, machine: redeemed.machine, credentials: redeemed.credentials, orgKey: redeemed.orgKey, project, projectName: `dc3-m5 fake ${name}`, recordings: [recording], member: me.member.id });
+  cleanup.add('close the fake machine', () => fm.close());
   for (let tries = 0; ; tries++) {
     try {
       await fm.connect();
@@ -72,7 +73,6 @@ async function check(owner: Person, hub: string, cleanup: Cleanup): Promise<numb
       await sleep(2000);
     }
   }
-  cleanup.add('close the fake machine', () => fm.close());
   console.log(`${name} enrolled from a code and connected (generation ${fm.generation}); project ${project}`);
 
   const socket = await owner.socket(`/api/projects/${project}/socket`);
