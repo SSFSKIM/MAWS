@@ -54,6 +54,7 @@
   // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6), typechecked by
   // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise.
   "exclude": [
+    "src/main/artifacts/*.dom.test.tsx",
     "src/artifacts/document/editor/**/*",
     "src/artifacts/document/import/html*",
     "src/artifacts/document/import/docx*",
