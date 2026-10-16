@@ -105,7 +105,19 @@ interrupted() {
 trap interrupted INT TERM
 
 echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${evidence:+ (Evidence: $evidence)}"
-{ git -C "$git_dir" push --quiet --force origin "$pushed:refs/heads/$ref" 2>&1; } | sed '/^remote:/d' || { echo 'ci-gate: push failed' >&2; exit 1; }
+# The ref is this invocation's own and the commit fixed, so a forced re-push is idempotent: a transient rejection
+# (a remote index-pack race while another gate pushes, a "[remote rejected] (failed)") is retried twice; an
+# authentication failure is not (Decision Log 54).
+for attempt in 1 2 3; do
+  if push_out=$(git -C "$git_dir" push --quiet --force origin "$pushed:refs/heads/$ref" 2>&1); then break; fi
+  printf '%s\n' "$push_out" | sed '/^remote:/d' >&2
+  case $push_out in
+    *"Authentication failed"*|*"Permission denied"*|*"could not read Username"*) echo 'ci-gate: push failed (authentication)' >&2; exit 1;;
+  esac
+  [[ $attempt -lt 3 ]] || { echo 'ci-gate: push failed after 3 attempts' >&2; exit 1; }
+  echo "ci-gate: push attempt $attempt failed, retrying" >&2
+  if [[ $attempt -eq 1 ]]; then sleep 3; else sleep 8; fi
+done
 
 # The run appears a few seconds after the push; a minute without it means the workflow did not trigger.
 for _ in $(seq 1 30); do
