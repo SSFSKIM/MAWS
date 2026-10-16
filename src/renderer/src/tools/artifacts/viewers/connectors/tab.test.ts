@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ConnectorSurface } from '@artifacts/host';
 import type { ConnectorCallOutcome, ConnectorGrant } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { ArtifactSessionStart } from '../../../../artifacts/session-context';
+import type { ArtifactSessionEnd, ArtifactSessionStart } from '../../../../artifacts/session-context';
 import type { PagePort } from './relay';
 import { ConnectorsTab, type ConnectorsTabDeps } from './tab';
 
@@ -47,7 +47,6 @@ function portFake() {
 
 function tabWith(over: Partial<ConnectorsTabDeps> = {}) {
   const surfaces: ReturnType<typeof surfaceFake>[] = [];
-  let ready: (() => void) | null = null;
   const deps: ConnectorsTabDeps = {
     host: {
       openConnectors: vi.fn(() => {
@@ -60,14 +59,18 @@ function tabWith(over: Partial<ConnectorsTabDeps> = {}) {
       revokeConnectorTool: vi.fn(async () => true),
     },
     startSession: vi.fn(async (): Promise<ArtifactSessionStart> => ({ status: 'ready', appSessionId: SESSION })),
-    whenReady: vi.fn((_id: AppSessionId, run: () => void) => {
-      ready = run;
-      return () => void (ready = null);
-    }),
     ...over,
   };
   const tab = new ConnectorsTab(ARTIFACT, deps);
-  return { tab, deps, surfaces, ready: () => ready?.() };
+  return { tab, deps, surfaces };
+}
+
+// A start whose setup runs until the test ends it.
+function starting(appSessionId = SESSION) {
+  let end: (value: ArtifactSessionEnd) => void = () => {};
+  const settled = new Promise<ArtifactSessionEnd>((resolve) => (end = resolve));
+  const answer = { status: 'starting' as const, appSessionId, settled, cancel: vi.fn() };
+  return { answer, end: async (value: ArtifactSessionEnd) => (end(value), await settle()) };
 }
 
 describe('an HTML artifact tab’s connectors', () => {
@@ -132,32 +135,63 @@ describe('an HTML artifact tab’s connectors', () => {
   });
 
   it('refreshes the page’s watches once the session the owner started is ready, and not before', async () => {
-    const { tab, deps, surfaces, ready } = tabWith({ startSession: vi.fn(async (): Promise<ArtifactSessionStart> => ({ status: 'starting', appSessionId: SESSION })) });
+    const first = starting();
+    const { tab, deps, surfaces } = tabWith({ startSession: vi.fn(async (): Promise<ArtifactSessionStart> => first.answer) });
     const { port } = portFake();
     tab.attach(port);
     port.send({ id: 1, op: 'watch', request: { ...TOOL, intervalMs: 60_000 } });
     await settle();
-    await tab.start({ kind: 'directory', path: '/work/app', projectId: null });
+    void tab.start({ kind: 'directory', path: '/work/app', projectId: null });
+    await settle();
     expect(tab.view.getState().start).toEqual({ phase: 'starting', appSessionId: SESSION });
     expect(surfaces[0]!.refreshWatch).not.toHaveBeenCalled();
-    expect(deps.whenReady).toHaveBeenCalledWith(SESSION, expect.any(Function));
-    ready();
+    await first.end({ status: 'ready', appSessionId: SESSION });
     expect(surfaces[0]!.refreshWatch).toHaveBeenCalledWith('w1');
     expect(tab.view.getState().start).toEqual({ phase: 'ready', appSessionId: SESSION });
     await tab.start({ kind: 'directory', path: '/work/app', projectId: null }); // again: the same session, not another
     expect(deps.startSession).toHaveBeenLastCalledWith({ kind: 'directory', path: '/work/app', projectId: null }, SESSION);
   });
 
-  it('shows a card’s or a refusal’s words, and drops a wait when the tab goes', async () => {
+  it('settles a start whose setup failed, shows why, and lets the owner start the same session again', async () => {
+    const first = starting();
+    const { tab, deps, surfaces } = tabWith({ startSession: vi.fn(async (): Promise<ArtifactSessionStart> => first.answer) });
+    tab.attach(portFake().port);
+    void tab.start({ kind: 'directory', path: '/work/app', projectId: null });
+    await settle();
+    await first.end({ status: 'refused', appSessionId: SESSION, words: 'the engine would not start' });
+    expect(tab.view.getState().start).toEqual({ phase: 'refused', appSessionId: SESSION, words: 'the engine would not start' });
+    expect(surfaces[0]!.refreshWatch).not.toHaveBeenCalled();
+    const relay = starting();
+    vi.mocked(deps.startSession).mockResolvedValueOnce(relay.answer);
+    void tab.start({ kind: 'directory', path: '/work/app', projectId: null });
+    await settle();
+    expect(deps.startSession).toHaveBeenLastCalledWith({ kind: 'directory', path: '/work/app', projectId: null }, SESSION); // the intent it made
+    await relay.end({ status: 'card', appSessionId: SESSION, words: 'The relay is unreachable · the session offers Run direct' });
+    expect(tab.view.getState().start).toMatchObject({ phase: 'card', appSessionId: SESSION });
+  });
+
+  it('keeps the session a refused start named, and answers a start that threw as a refusal', async () => {
+    const { tab, deps } = tabWith({ startSession: vi.fn(async (): Promise<ArtifactSessionStart> => ({ status: 'refused', appSessionId: SESSION, words: 'A prompt is waiting in this session' })) });
+    await tab.start({ kind: 'directory', path: '/work/app', projectId: null });
+    expect(tab.view.getState().start).toEqual({ phase: 'refused', appSessionId: SESSION, words: 'A prompt is waiting in this session' });
+    vi.mocked(deps.startSession).mockRejectedValueOnce(new Error('main is gone'));
+    await tab.start({ kind: 'directory', path: '/work/app', projectId: null });
+    expect(deps.startSession).toHaveBeenLastCalledWith({ kind: 'directory', path: '/work/app', projectId: null }, SESSION);
+    expect(tab.view.getState().start).toEqual({ phase: 'refused', appSessionId: SESSION, words: 'main is gone' });
+  });
+
+  it('shows a card’s words, and drops a wait when the tab goes', async () => {
     const card = tabWith({ startSession: vi.fn(async (): Promise<ArtifactSessionStart> => ({ status: 'card', appSessionId: SESSION, words: 'Trust this folder in the session to continue' })) });
     await card.tab.start({ kind: 'session', appSessionId: SESSION });
     expect(card.tab.view.getState().start).toEqual({ phase: 'card', appSessionId: SESSION, words: 'Trust this folder in the session to continue' });
-    const waiting = tabWith({ startSession: vi.fn(async (): Promise<ArtifactSessionStart> => ({ status: 'starting', appSessionId: SESSION })) });
-    const { port } = portFake();
-    waiting.tab.attach(port);
-    await waiting.tab.start({ kind: 'session', appSessionId: SESSION });
+    const run = starting();
+    const waiting = tabWith({ startSession: vi.fn(async (): Promise<ArtifactSessionStart> => run.answer) });
+    waiting.tab.attach(portFake().port);
+    void waiting.tab.start({ kind: 'session', appSessionId: SESSION });
+    await settle();
     waiting.tab.dispose();
-    waiting.ready();
+    expect(run.answer.cancel).toHaveBeenCalled();
+    await run.end({ status: 'ready', appSessionId: SESSION });
     expect(waiting.surfaces[0]!.close).toHaveBeenCalled();
     expect(waiting.surfaces[0]!.refreshWatch).not.toHaveBeenCalled();
   });

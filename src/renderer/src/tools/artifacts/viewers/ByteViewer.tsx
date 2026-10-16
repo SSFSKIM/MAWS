@@ -45,7 +45,7 @@ import type { LibraryContent, LibraryRow } from '@shared/ipc/schema/library';
 import { artifactHost } from '../../../artifacts';
 import type { ArtifactOpenAt } from '../../../artifacts/open-at';
 import type { ArtifactEditor, ArtifactEditorProps, ArtifactEditorTarget } from '../../../artifacts/registry';
-import { startArtifactSession, whenSessionReady } from '../../../artifacts/session-context';
+import { startArtifactSession } from '../../../artifacts/session-context';
 import { ipc } from '../../../ipc/client';
 import { toastFailure } from '../../../library/dialogs';
 import { exportArtifact, saveArtifactCopy, useExportFormats } from '../../../library/export';
@@ -450,7 +450,7 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
 
 // P3-H H4: an HTML page's tab keeps its connectors, ended with the tab
 const connectorsFor = (artifactId: string): ConnectorsTab =>
-  new ConnectorsTab(artifactId, { host: artifactHost(), startSession: (context, previous) => startArtifactSession(context, previous), whenReady: whenSessionReady, log: (line) => console.warn(`[connectors] ${line}`) });
+  new ConnectorsTab(artifactId, { host: artifactHost(), startSession: (context, previous) => startArtifactSession(context, previous), log: (line) => console.warn(`[connectors] ${line}`) });
 
 const createState = (kind: ByteKind, target: ArtifactEditorTarget): ByteViewerState => ({
   view: createStore<ViewState>()(() => ({ selected: 'latest', reloads: 0, pickingIn: null })),

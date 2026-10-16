@@ -9,13 +9,14 @@
 // - The owner's grants are read from the store (on mount, on a committed change, after each gesture here); a gesture's
 //   refusal is kept for its tool. A declaration never opens the sheet.
 // - `needsSession`: some tool of the page found no live route (`paused: noRoute`), so the sheet offers the owner's
-//   Start (./session-context.ts's policy). Once the session it started is ready, the page's watches are refreshed now
-//   rather than at their next interval. Nothing here starts a session unasked.
+//   Start (../../../../artifacts/session-context.ts's policy). Once the session it started is ready, the page's watches
+//   are refreshed now rather than at their next interval; a setup that fails, meets a card or is held ends the Start
+//   with its words, and the next Start retries the session it named. Nothing here starts a session unasked.
 import { createStore } from 'zustand/vanilla';
 import type { ArtifactHost, ConnectorSurface } from '@artifacts/host';
 import { connectorToolKey, type ConnectorCallOutcome, type ConnectorGrant, type ConnectorGrantMode, type ConnectorRefusal, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { ArtifactSessionContext, ArtifactSessionStart } from '../../../../artifacts/session-context';
+import type { ArtifactSessionContext, ArtifactSessionEnd, ArtifactSessionStart } from '../../../../artifacts/session-context';
 import { relayPage, type PagePort, type PageRelay } from './relay';
 
 export type StartView =
@@ -38,7 +39,6 @@ export interface ConnectorsView {
 export interface ConnectorsTabDeps {
   host: Pick<ArtifactHost, 'openConnectors' | 'connectorGrants' | 'grantConnectorTool' | 'revokeConnectorTool'>;
   startSession(context: ArtifactSessionContext, previous: AppSessionId | null): Promise<ArtifactSessionStart>;
-  whenReady(appSessionId: AppSessionId, run: () => void): () => void; // calls `run` once the session's process is ready
   log?(line: string): void;
 }
 
@@ -53,7 +53,8 @@ export class ConnectorsTab {
   readonly view = createStore<ConnectorsView>()(initialView);
   private page: { relay: PageRelay; surface: ConnectorSurface } | null = null;
   private visible = false;
-  private stopWaiting: (() => void) | null = null;
+  private waiting: (() => void) | null = null; // stops listening for the setup of the session a Start started
+  private started: AppSessionId | null = null; // the session the last Start named (one it created, retried rather than another)
   private disposed = false;
 
   constructor(
@@ -111,19 +112,32 @@ export class ConnectorsTab {
     });
   }
 
-  // The owner's Start: the context's session started or resumed, and the page's watches refreshed once it is ready.
+  // The owner's Start: the context's session started or resumed, the page's watches refreshed once it is ready. One at
+  // a time; a setup that fails, meets a card or is held ends it with its words, and the next Start retries the same
+  // session.
   async start(context: ArtifactSessionContext): Promise<void> {
-    const current = this.view.getState().start;
-    const previous = current.phase === 'idle' || current.phase === 'asking' ? null : current.appSessionId;
+    const { phase } = this.view.getState().start;
+    if (phase === 'asking' || phase === 'starting' || this.disposed) return;
     this.update({ start: { phase: 'asking' } });
-    this.stopWaiting?.();
-    this.stopWaiting = null;
-    const answer = await this.deps.startSession(context, previous);
-    if (this.disposed) return;
-    if (answer.status === 'card' || answer.status === 'refused') return this.update({ start: { phase: answer.status, appSessionId: answer.appSessionId, words: answer.words } });
-    if (answer.status === 'ready') return this.ready(answer.appSessionId);
+    let answer: ArtifactSessionStart;
+    try {
+      answer = await this.deps.startSession(context, this.started);
+    } catch (error) {
+      answer = { status: 'refused', appSessionId: this.started, words: error instanceof Error ? error.message : String(error) };
+    }
+    if (this.disposed) {
+      if (answer.status === 'starting') answer.cancel();
+      return;
+    }
+    if (answer.appSessionId !== null) this.started = answer.appSessionId;
+    if (answer.status !== 'starting') return this.settle(answer);
     this.update({ start: { phase: 'starting', appSessionId: answer.appSessionId } });
-    this.stopWaiting = this.deps.whenReady(answer.appSessionId, () => this.ready(answer.appSessionId));
+    const { cancel } = answer;
+    this.waiting = cancel;
+    const end = await answer.settled;
+    if (this.waiting !== cancel) return; // the tab went meanwhile
+    this.waiting = null;
+    this.settle(end);
   }
 
   openSheet(): void {
@@ -137,16 +151,15 @@ export class ConnectorsTab {
   // The tab went: its page's relay and any wait for a session end.
   dispose(): void {
     this.disposed = true;
-    this.stopWaiting?.();
-    this.stopWaiting = null;
+    this.waiting?.();
+    this.waiting = null;
     this.page?.relay.dispose();
     this.page = null;
   }
 
-  private ready(appSessionId: AppSessionId): void {
-    this.stopWaiting?.();
-    this.stopWaiting = null;
-    this.update({ start: { phase: 'ready', appSessionId } });
+  private settle(end: ArtifactSessionEnd): void {
+    if (end.status !== 'ready') return this.update({ start: { phase: end.status, appSessionId: end.appSessionId, words: end.words } });
+    this.update({ start: { phase: 'ready', appSessionId: end.appSessionId } });
     this.page?.relay.refreshWatches();
   }
 

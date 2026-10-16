@@ -6,8 +6,8 @@
 // shown) and Allow once (one call of a tool that may change data) while it has no standing grant, Revoke while it has
 // one, Allow again once its server or tool changed since. When some tool found no live session, the sheet offers the
 // owner's Start for the artifact's own session or its durable directory (../../../../artifacts/session-context.ts), or
-// says how to give it one; a trust or relay card that start meets waits in that session's composer, which Open session
-// shows. Nothing here sends a message.
+// says how to give it one; a trust or relay card that start meets waits in that session's composer, and a prompt
+// waiting there refuses the start (P3 Decision Log 88), both of which Open session shows. Nothing here sends a message.
 import { useStore } from 'zustand';
 import { connectorToolKey, type ConnectorToolRef } from '@shared/artifacts/connectors';
 import { NO_SESSION_CONTEXT, useArtifactSessionContext, type ArtifactContextOf, type ArtifactSessionContext } from '../../../../artifacts/session-context';
@@ -96,7 +96,8 @@ function ToolRow({ tab, tool }: { tab: ConnectorsTab; tool: ConnectorToolRef }) 
 function StartRow({ tab, context }: { tab: ConnectorsTab; context: ArtifactSessionContext }) {
   const start = useStore(tab.view, (s) => s.start);
   const words = start.phase === 'asking' ? C.asking : start.phase === 'starting' ? C.starting : start.phase === 'ready' ? C.ready : start.phase === 'card' || start.phase === 'refused' ? start.words : null;
-  const card = start.phase === 'card' ? start.appSessionId : null;
+  // the session a card waits in, or one a refusal names (a prompt waiting there, Decision Log 88): the owner opens it
+  const open = (start.phase === 'card' || start.phase === 'refused') && start.appSessionId !== null ? start.appSessionId : null;
   return (
     <div data-connectors-start="" className="mt-3 flex flex-col gap-2 rounded-md border border-border p-2.5">
       <p className="m-0 text-ui-sm text-fg">{context.kind === 'none' ? NO_SESSION_CONTEXT : C.noSession}</p>
@@ -105,8 +106,8 @@ function StartRow({ tab, context }: { tab: ConnectorsTab; context: ArtifactSessi
           <button type="button" disabled={start.phase === 'asking' || start.phase === 'starting'} onClick={() => void tab.start(context)} className={PRIMARY}>
             {C.start}
           </button>
-          {card !== null && (
-            <button type="button" onClick={() => useLayout.getState().openSession(card, { how: 'tab' })} className={SECONDARY}>
+          {open !== null && (
+            <button type="button" onClick={() => useLayout.getState().openSession(open, { how: 'tab' })} className={SECONDARY}>
               {C.openSession}
             </button>
           )}

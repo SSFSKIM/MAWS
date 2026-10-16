@@ -35,7 +35,7 @@ function setup({ grants = [] as ConnectorGrant[], grantAnswer = null as Connecto
     revokeConnectorTool: vi.fn(async () => true),
   };
   const startSession = vi.fn(async () => startAnswer ?? ({ status: 'ready', appSessionId: SESSION } as const));
-  const tab = new ConnectorsTab(ARTIFACT, { host: host as never, startSession, whenReady: () => () => {} });
+  const tab = new ConnectorsTab(ARTIFACT, { host: host as never, startSession });
   const port: PagePort & { send(data: unknown): void } = {
     onmessage: null,
     postMessage: () => {},
@@ -104,6 +104,23 @@ describe('the Connectors sheet', () => {
     expect(startSession).toHaveBeenCalledWith(context, null);
     expect(screen.getByRole('status').textContent).toBe('Trust this folder in the session to continue');
     expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();
+  });
+
+  it('sends the owner to a session whose waiting prompt refused the Start, and lets them start again', async () => {
+    const words = 'A prompt is waiting in this session · open it to send or discard the prompt first';
+    const { tab, port, startSession } = setup({ callAnswer: { ok: false, state: 'paused', reason: 'noRoute' }, startAnswer: { status: 'refused', appSessionId: SESSION, words } });
+    port.send({ id: 1, op: 'declare', tools: [READ] });
+    port.send({ id: 2, op: 'call', request: READ });
+    await flush();
+    render(<ConnectorsSheet tab={tab} context={{ kind: 'directory', path: '/work/app', projectId: null }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+    await flush();
+    expect(screen.getByRole('status').textContent).toBe(words);
+    expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Start session' }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Start session' }));
+    await flush();
+    expect(startSession).toHaveBeenLastCalledWith({ kind: 'directory', path: '/work/app', projectId: null }, SESSION);
   });
 
   it('says how to give the artifact a session when it has no durable context, with no Start', async () => {
