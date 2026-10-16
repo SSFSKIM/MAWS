@@ -93,16 +93,23 @@ export function beginUnlock(org: string, store: KeyStore = idbKeyStore()): Unloc
       await serially(async () => {
         if (!newest()) return;
         // What the device kept before this write, so the write can be undone should this unlock no longer be the newest
-        // operation once it lands.
-        const before = await store.load(org).catch(() => null);
+        // operation once it lands. Without it nothing is written: a read that fails rejects the unlock, as a failed
+        // write does, and the device keeps what it kept.
+        const before = await store.load(org);
         if (!newest()) return;
         if (keep === 'device') await store.save(org, key.hmac);
         else await store.forget(org);
         if (!newest()) {
           // Superseded while it wrote, by an operation that may never finish (an unlock whose prompt was cancelled): the
           // device goes back to what it kept, which is what the tab still shows. A newer write, if one comes, runs after.
-          if (before) await store.save(org, before);
-          else await store.forget(org);
+          // When that fails the device holds a key the tab does not show, and a reload would load it: that stands
+          // reported (`forgetError`), whoever is newest, until a later write leaves nothing stale.
+          try {
+            if (before) await store.save(org, before);
+            else await store.forget(org);
+          } catch (error) {
+            useKeyHolder.setState({ forgetError: reason(error) });
+          }
           return;
         }
         storedNothingStale(); // the stored key is now the one held, or none

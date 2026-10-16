@@ -18,12 +18,15 @@ function deferred<T = void>() {
   return { promise, resolve, reject };
 }
 
-/** A memory store whose next calls of `method` wait on the returned gate. */
+/** A memory store whose next calls of `method` wait on the returned gate; `entered` settles once one has begun. */
 function gatedStore(method: 'save' | 'load' | 'forget') {
   const inner = memoryKeyStore();
   const gate = deferred();
+  const entered = deferred();
   const wait = async (which: typeof method) => {
-    if (which === method) await gate.promise;
+    if (which !== method) return;
+    entered.resolve();
+    await gate.promise;
   };
   const store: KeyStore = {
     // A read answers with what was stored when it began, however late the answer comes.
@@ -35,7 +38,7 @@ function gatedStore(method: 'save' | 'load' | 'forget') {
     save: async (org, key) => (await wait('save'), inner.save(org, key)),
     forget: async (org) => (await wait('forget'), inner.forget(org)),
   };
-  return { store, inner, open: () => gate.resolve() };
+  return { store, inner, open: () => gate.resolve(), entered: entered.promise };
 }
 
 describe('unlock', () => {
@@ -172,10 +175,10 @@ describe('two unlocks with no Lock between them', () => {
 
   it('a newer unlock abandoned while the older one saved leaves the device holding what the tab shows', async () => {
     // Locked; A asks to keep the key on the device; B begins while A's save is in the store, and its prompt is cancelled.
-    const { store, inner, open } = gatedStore('save');
+    const { store, inner, open, entered } = gatedStore('save');
     useKeyHolder.setState({ state: 'locked' });
     const a = beginUnlock('org', store).finish(vector(), 'device');
-    await new Promise((resolve) => setTimeout(resolve, 0)); // A's save is in the store
+    await entered; // A's save is in the store
     beginUnlock('org', store); // never finishes
     open();
     expect(await a).toBe(false);
@@ -184,16 +187,43 @@ describe('two unlocks with no Lock between them', () => {
   });
 
   it('… and puts back the key the device kept before, when the tab still shows it kept there', async () => {
-    const { store, inner, open } = gatedStore('save');
+    const { store, inner, open, entered } = gatedStore('save');
     await unlock('org', vector(), 'device', inner); // the tab shows this key, kept on the device
     const kept = await inner.load('org');
     const a = beginUnlock('org', store).finish(vector().reverse(), 'device');
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await entered; // A's save is in the store
     beginUnlock('org', store); // abandoned
     open();
     expect(await a).toBe(false);
     expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', kept: 'device' });
     expect(await inner.load('org')).toBe(kept); // the key the tab shows, as before A
+  });
+
+  it('a device that cannot read what it kept is not written: the kept key survives the unlock, which fails', async () => {
+    const { store: gated, inner, open, entered } = gatedStore('save');
+    await unlock('org', vector(), 'device', inner); // the tab shows this key, kept on the device
+    const kept = await inner.load('org');
+    const store: KeyStore = { ...gated, load: async () => Promise.reject(new Error('IndexedDB is unavailable')) };
+    const a = beginUnlock('org', store).finish(vector().reverse(), 'device');
+    const wrote = entered.then(() => beginUnlock('org', store)); // a newer unlock, abandoned, once A writes
+    open();
+    await expect(a).rejects.toThrow('IndexedDB is unavailable');
+    await Promise.race([wrote, new Promise((r) => setTimeout(r, 20))]);
+    expect(await inner.load('org')).toBe(kept);
+    expect(useKeyHolder.getState()).toMatchObject({ state: 'unlocked', kept: 'device', forgetError: null });
+  });
+
+  it('a rollback that fails stands reported, though the unlock was superseded', async () => {
+    const { store: gated, inner, open, entered } = gatedStore('save');
+    const store: KeyStore = { ...gated, forget: async () => Promise.reject(new Error('IndexedDB is unavailable')) };
+    useKeyHolder.setState({ state: 'locked' });
+    const a = beginUnlock('org', store).finish(vector(), 'device');
+    await entered;
+    beginUnlock('org', store); // abandoned
+    open();
+    expect(await a).toBe(false);
+    expect(await inner.load('org')).not.toBeNull(); // the rollback's deletion failed: a reload would load this key
+    expect(useKeyHolder.getState()).toMatchObject({ state: 'locked', key: null, forgetError: 'IndexedDB is unavailable' });
   });
 
   it("the older one's write, not yet run when the newer one began, is skipped", async () => {
