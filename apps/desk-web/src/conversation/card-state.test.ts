@@ -60,6 +60,14 @@ describe('cardState', () => {
     // A daemon's republished set can drop a request with no settlement: that says nothing of whether the decision ran.
     expect(cardState(record({ pending: false }), rpc('uncertain'), can)).toEqual({ kind: 'uncertain', offline: false });
   });
+
+  it('follows its Retry to the end once the request left the set unsettled: in flight, then its result; never a new decision', () => {
+    const gone = record({ pending: false });
+    const states = (['uncertain', 'sending', 'forwarded', 'done'] as const).map((s) => cardState(gone, rpc(s, s === 'done' ? { state: 'done', result: {} } : undefined), can).kind);
+    expect(states).toEqual(['uncertain', 'sending', 'sending', 'sent']);
+    // A decision that failed on a request no longer waiting offers no other: the request is gone.
+    expect(cardState(gone, rpc('failed', { state: 'failed', error: { code: 'not-pending', message: '' } }), can)).toEqual({ kind: 'closed' });
+  });
 });
 
 describe('while the project socket is not connected', () => {

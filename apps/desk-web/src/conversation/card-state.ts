@@ -43,7 +43,12 @@ export function cardState(record: RequestRecord, rpc: RpcEntry | null, capabilit
   // A decision whose result is unknown stays so whatever the machine does, and whether or not the request is still in
   // the pending set (a daemon's republished set drops one without saying how): its retry is the only way to learn it.
   if (rpc?.state === 'uncertain') return { kind: 'uncertain', offline: machineOnline === false };
-  if (!record.pending) return { kind: 'closed' };
+  if (!record.pending) {
+    // No new decision on a request no longer waiting; one already made is followed to its result (a Retry in flight).
+    if (rpc?.state === 'sending' || rpc?.state === 'forwarded') return { kind: 'sending' };
+    if (rpc?.state === 'done') return { kind: 'sent' };
+    return { kind: 'closed' };
+  }
   if (!connected) return { kind: 'disconnected' };
   if (machineOnline === false) return { kind: 'offline' };
   if (record.terminalOnly) return { kind: 'terminal', why: 'window' };
