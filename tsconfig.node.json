@@ -72,6 +72,7 @@
     "src/artifacts/slides/canvas/fit.ts", // P3-C
     "src/artifacts/slides/canvas/index.ts", // P3-C
     "src/artifacts/slides/editor/**/*", // P3-C
+    "src/artifacts/design/editor/**/*.tsx", // P3-E1 M3: the workbench's React and DOM (its pure modules beside them stay in)
     "src/artifacts/**/*.dom.test.tsx" // P3-C
   ]
 }

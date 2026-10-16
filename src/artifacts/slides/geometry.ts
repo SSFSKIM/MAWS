@@ -438,6 +438,8 @@ export interface SnapContext {
   lines: { x: SnapLine[]; y: SnapLine[] };
   /** The boxes of the moving elements' siblings (their rotated bounds), in slide px. */
   siblings: readonly Box[];
+  /** P3-E (E1 M3, X27 additive): the canvas's size the lines' guides span (a design board's); the deck's 1920×1080 when absent. */
+  extent?: { w: number; h: number };
 }
 
 /** The slide's own lines: its edges and centre, and the 128 px margins. */
@@ -467,7 +469,7 @@ function candidates(b: Box, axis: Axis, ctx: SnapContext, parts: readonly ('star
   const [s, e] = span(b, axis);
   const at = { start: s, mid: (s + e) / 2, end: e };
   const out: Candidate[] = [];
-  const full: [number, number] = [0, axis === 'x' ? SLIDE_H : SLIDE_W];
+  const full: [number, number] = [0, axis === 'x' ? (ctx.extent?.h ?? SLIDE_H) : (ctx.extent?.w ?? SLIDE_W)]; // P3-E: extent
   for (const line of ctx.lines[axis])
     for (const p of parts) out.push({ offset: line.at - at[p], guides: () => [{ axis, at: line.at, from: full[0], to: full[1], kind: line.kind }] });
   for (const sib of ctx.siblings) {

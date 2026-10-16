@@ -1,0 +1,274 @@
+/* The design workbench's chrome (docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md, M3): the world around the
+   boards, the boards' titles and frames, the board list and the inspector column. App chrome, so the app's tokens only,
+   beside C's deck chrome (chrome.css) whose toolbar, buttons, menus, handles and guides it reuses; the boards paint
+   their own ground in the design system's scope. The world dominates; the rails are narrow and quiet. */
+
+/* the world */
+.design-world {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--bg-active);
+  touch-action: none;
+  user-select: none;
+}
+.design-world:focus {
+  outline: none;
+}
+.design-world:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.design-world[data-space] {
+  cursor: grab;
+}
+.design-world[data-panning] {
+  cursor: grabbing;
+}
+.design-world-empty {
+  display: flex;
+}
+.design-world-ground {
+  position: absolute;
+  inset: 0;
+}
+.design-world-layer {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* a board: its canvas at scale 1 inside the world's one transform; its title kept at screen size above it */
+.design-board {
+  position: absolute;
+  box-shadow: var(--shadow-float);
+}
+.design-board > .design-board-canvas {
+  contain: layout paint;
+}
+.design-board-title {
+  position: absolute;
+  left: 0;
+  bottom: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 0 4px;
+  border: 0;
+  background: none;
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+  line-height: 16px;
+  white-space: nowrap;
+  transform-origin: 0 100%;
+  transform: scale(var(--design-inv-zoom, 1));
+  cursor: default;
+}
+.design-board-title:hover,
+.design-board[data-active] .design-board-title {
+  color: var(--fg);
+}
+.design-board[data-frame-selected] .design-board-title-name {
+  color: var(--accent);
+}
+.design-board-title:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: var(--radius-sm);
+}
+.design-board-title-size {
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+.design-board-badge {
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+  background: var(--danger);
+  color: var(--bg);
+  font-size: var(--text-ui-sm);
+}
+.design-board[data-held],
+.design-board[data-missing] {
+  outline: calc(1.5px * var(--design-inv-zoom, 1)) dashed var(--danger);
+}
+.design-board-missing {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-raised);
+  color: var(--fg-muted);
+  font-family: var(--font-ui);
+  font-size: calc(var(--text-ui) * var(--design-inv-zoom, 1));
+}
+
+/* screen-space chrome over the world: the active board's outline, the selected frame, its handles, the guides */
+.design-world-screen,
+.design-active,
+.design-frame-handles {
+  position: absolute;
+  pointer-events: none;
+}
+.design-world-screen {
+  inset: 0;
+}
+.design-active-outline,
+.design-frame-outline {
+  position: absolute;
+  box-sizing: border-box;
+}
+.design-active-outline {
+  outline: 1px solid var(--border-strong);
+}
+.design-frame-outline {
+  outline: 1.5px solid var(--accent);
+}
+.design-board-handle {
+  pointer-events: auto;
+}
+
+/* the board list, in the rail */
+.design-boards {
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  flex-shrink: 0;
+  min-height: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.design-boards-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0 6px 0 12px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  font-weight: 600;
+}
+.design-boards-list {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 0 6px 8px;
+  list-style: none;
+  overflow-y: auto;
+}
+.design-board-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+.design-board-item[data-current] {
+  background: var(--bg-hover);
+}
+.design-board-item[data-frame-selected] {
+  background: var(--accent-soft);
+}
+.design-board-item[data-dragging] {
+  z-index: 1;
+  opacity: 0.8;
+}
+.design-board-row {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 28px 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  line-height: 28px;
+  text-align: left;
+  cursor: default;
+  touch-action: none;
+}
+.design-board-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.design-board-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.design-board-size {
+  flex-shrink: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui-sm);
+  font-variant-numeric: tabular-nums;
+}
+.design-board-item .design-board-menu {
+  top: 4px;
+}
+.design-board-item:hover .design-board-menu,
+.design-board-item:focus-within .design-board-menu {
+  opacity: 1;
+}
+.design-board-rename {
+  width: 100%;
+  margin: 2px 0;
+}
+
+/* the inspector column: the board's section above C's; C's "Slide" title is the board's own here */
+.design-inspector {
+  display: flex;
+  flex-direction: column;
+  width: 248px;
+  flex-shrink: 0;
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--bg-raised);
+}
+.design-inspector > .deck-inspector,
+.design-inspector .deck-inspector {
+  width: auto;
+  flex-shrink: 0;
+  overflow: visible;
+  border-left: 0;
+}
+.design-board-inspector {
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-ui-sm);
+}
+.design-inspector[data-board-context] .deck-inspector .deck-inspector-title {
+  display: none;
+}
+
+/* a narrow editor (the panel's widths): the rails lie over the world as sheets instead of squeezing it (C's pattern) */
+@container deck-editor (width < 720px) {
+  .design-workbench .design-boards {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 20;
+    box-shadow: var(--shadow-float);
+  }
+  .design-workbench .design-inspector {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 20;
+    max-width: 100%;
+    box-shadow: var(--shadow-float);
+  }
+}

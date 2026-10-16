@@ -1,0 +1,459 @@
+// P3-E1 M3 (docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md, M3; the parent's §1 "The workbench" and
+// Decision Log 20): the world. Every board is mounted, always (E0's ruling: no cached pictures, no virtual mounting), as
+// C's own canvas (`SlideView` at scale 1 and the board's size) at its `x`, `y` in one layer the view's one CSS transform
+// pans and zooms. The active board (the deck session's current slide) alone carries C's transform overlay, in an unscaled
+// sibling at the board's screen origin and size, given the world's zoom as its scale: C's overlay measures in board px
+// and draws in screen px, so the zoom is applied once. Board chrome (titles, the selected frame's handles, its guides)
+// is the workbench's own.
+//
+// Pointer arbitration (Decision Log 20), decided at the world before C's overlay sees a press: a press on the active
+// board's content, or on the overlay's own handles, text box or pins, is the overlay's; a press on another board's
+// content activates that board and selects the element under it (C's `pick`), and that press does nothing more: no pan,
+// no move, no replayed event; the next gesture edits. A press on a board's title selects its frame (its geometry) and a
+// drag of it moves the board; the frame's handles resize it, snapped to sibling boards, refused (shown, nothing written)
+// past the model's cap. A press on the empty world clears the selection and pans; so does Space-drag or the middle
+// button anywhere. The wheel pans; ⌃-wheel (a pinch) or ⌥-wheel zooms about the pointer. A held or missing board, or a
+// read-only replica, is selected and inspected but never written.
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import type { AssetUrl, SlideCanvas } from '../../slides/canvas';
+import type { FaceAliases } from '../../slides/canvas/faces';
+import type { Guide, Handle, Pt } from '../../slides/geometry';
+import { HANDLES } from '../../slides/geometry';
+import type { DeckSession } from '../../slides/editor/session';
+import { SlideView } from '../../slides/editor/SlideView';
+import { TextBox } from '../../slides/editor/TextBox';
+import type { ImportAsset } from '../../slides/editor/transform/clipboard';
+import { hitIds } from '../../slides/editor/transform/measure';
+import { Overlay } from '../../slides/editor/transform/Overlay';
+import { pick, slideTree } from '../../slides/editor/transform/selection';
+import type { BoardFrame } from '../canvas';
+import { BoardError, setBoardFrame } from '../writers';
+import { movedFrame, resizedFrame } from './board-gestures';
+import { boardLabel, type BoardView } from './boards';
+import { DESIGN_COPY as C } from './copy';
+import { panBy, zoomAt, type DesignView, type Viewport } from './viewport';
+
+const DRAG_START_PX = 3; // screen px a title press moves before it is a drag (C's overlay's)
+/** Where each frame handle sits on the board, as fractions of its width and height (C's overlay's). */
+const HANDLE_AT: Record<Handle, [number, number]> = { nw: [0, 0], n: [0.5, 0], ne: [1, 0], e: [1, 0.5], se: [1, 1], s: [0.5, 1], sw: [0, 1], w: [0, 0.5] };
+/** What C's overlay owns of a press: its handles, the text box and its bar, a comment pin. */
+const OVERLAY_OWN = '[data-handle], .deck-markbar, .deck-textbox, .deck-comment-pin';
+
+export interface WorldProps {
+  session: DeckSession;
+  view: DesignView;
+  boards: readonly BoardView[];
+  /** The board C's overlay acts on (the session's current slide), if it is drawn. */
+  active: BoardView | null;
+  canvases: ReadonlyMap<string, SlideCanvas>;
+  onCanvas: (boardId: string, canvas: SlideCanvas | null) => void;
+  assetUrl: AssetUrl;
+  faces: FaceAliases;
+  /** The design system's scope (the document medium) the boards draw in. */
+  scope: (children: ReactNode) => ReactNode;
+  readOnly: boolean;
+  onNotice: (text: string) => void;
+  artifactId?: string;
+  importAsset?: ImportAsset;
+  /** The world's focusable surface: it takes the pointer, the keys and the clipboard (C's overlay reads it too). */
+  surface: RefObject<HTMLDivElement | null>;
+  /** Fits the selection (the toolbar's and Shift+2's), fits every board (Shift+1). */
+  fitSelection: () => void;
+  fitAll: () => void;
+  /** The board-frame commands the keys share with the list. */
+  removeBoard: (boardId: string) => void;
+  duplicateBoard: (boardId: string) => void;
+}
+
+type Drag =
+  | { kind: 'pan'; pointerId: number; from: Pt; start: Viewport }
+  | { kind: 'move'; pointerId: number; id: string; from: Pt; start: BoardFrame; siblings: BoardFrame[]; moving: boolean; last: string }
+  | { kind: 'resize'; pointerId: number; id: string; handle: Handle; from: Pt; start: BoardFrame; siblings: BoardFrame[]; moving: boolean; last: string };
+
+const writable = (b: BoardView | undefined, readOnly: boolean): b is BoardView & { frame: BoardFrame } => !readOnly && b !== undefined && b.frame !== null && b.held === null && !b.missing;
+
+export function World(props: WorldProps) {
+  const { session, view, boards, active, canvases, onCanvas, assetUrl, faces, scope, readOnly, onNotice, artifactId, importAsset, surface } = props;
+  const state = useSyncExternalStore(view.subscribe, view.snapshot);
+  const viewport = state.viewport ?? { zoom: 1, x: 0, y: 0 };
+  const [guides, setGuides] = useState<readonly Guide[]>([]);
+  const [panning, setPanning] = useState(false);
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  const activeFrame = useRef<HTMLDivElement | null>(null);
+  const onSelectBoard = useCallback((boardId: string) => selectFrame(session, view, boardId), [session, view]);
+
+  // the latest of what the handlers read, without re-binding them every render
+  const latest = useRef(props);
+  useLayoutEffect(() => {
+    latest.current = props;
+  });
+  const space = useRef(false);
+  const drag = useRef<Drag | null>(null);
+
+  // the room the world has: the view fits into it
+  useLayoutEffect(() => {
+    const el = surface.current;
+    if (!el) return;
+    // a body not laid out (a hidden tab) measures nothing: the room it had stands
+    const measure = () => el.clientWidth > 0 && el.clientHeight > 0 && view.setRoom({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [surface, view]);
+
+  // an element selected (here or by the overlay) leaves the frame selection; a frame of a board gone is dropped
+  useEffect(
+    () =>
+      session.subscribe(() => {
+        if (session.snapshot().selection.length > 0 && view.snapshot().frame !== null) view.selectFrame(null);
+      }),
+    [session, view],
+  );
+  useEffect(() => {
+    const frame = view.snapshot().frame;
+    if (frame !== null && !boards.some((b) => b.id === frame)) view.selectFrame(null);
+  }, [boards, view]);
+
+  // ---- the pointer, decided before C's overlay (module header)
+  useEffect(() => {
+    const el = surface.current;
+    if (!el) return;
+    const local = (e: { clientX: number; clientY: number }): Pt => {
+      const r = el.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    };
+    const vp = () => view.snapshot().viewport ?? { zoom: 1, x: 0, y: 0 };
+    const capture = (e: PointerEvent) => {
+      e.stopImmediatePropagation(); // C's overlay, listening on the same surface, never sees it
+      e.preventDefault();
+      el.focus({ preventScroll: true });
+      el.setPointerCapture?.(e.pointerId);
+    };
+    const siblingsOf = (id: string) => latest.current.boards.flatMap((b) => (b.id !== id && b.frame ? [b.frame] : []));
+    const startPan = (e: PointerEvent) => {
+      drag.current = { kind: 'pan', pointerId: e.pointerId, from: local(e), start: vp() };
+      setPanning(true);
+    };
+
+    const onDown = (e: PointerEvent) => {
+      const { boards: all, readOnly: ro } = latest.current;
+      if (e.button === 1 || (e.button === 0 && space.current)) {
+        capture(e);
+        return startPan(e);
+      }
+      if (e.button !== 0) return;
+      const target = e.target as HTMLElement;
+      if (target.closest(OVERLAY_OWN)) return; // the overlay's own
+      const handle = target.closest<HTMLElement>('[data-board-handle]');
+      const titled = target.closest<HTMLElement>('[data-board-title]');
+      const content = target.closest<HTMLElement>('[data-board-id]');
+      if (handle) {
+        const id = view.snapshot().frame;
+        const b = all.find((x) => x.id === id);
+        capture(e);
+        if (writable(b, ro)) drag.current = { kind: 'resize', pointerId: e.pointerId, id: b.id, handle: handle.dataset.boardHandle as Handle, from: local(e), start: b.frame, siblings: siblingsOf(b.id), moving: false, last: '' };
+        return;
+      }
+      if (titled) {
+        const id = titled.dataset.boardTitle!;
+        capture(e);
+        selectFrame(session, view, id);
+        const b = all.find((x) => x.id === id);
+        if (writable(b, ro)) drag.current = { kind: 'move', pointerId: e.pointerId, id, from: local(e), start: b.frame, siblings: siblingsOf(id), moving: false, last: '' };
+        return;
+      }
+      if (content) {
+        const id = content.dataset.boardId!;
+        if (id === session.snapshot().currentSlide) {
+          if (view.snapshot().frame !== null) view.selectFrame(null);
+          return; // the active board's content: C's overlay
+        }
+        // an inactive board: activated, the element under the press selected; nothing else happens on this press
+        capture(e);
+        activate(session, view, id, latest.current.canvases.get(id) ?? null, e, target);
+        return;
+      }
+      // the empty world
+      capture(e);
+      session.select([]);
+      view.selectFrame(null);
+      startPan(e);
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const d = drag.current;
+      if (!d || d.pointerId !== e.pointerId) return;
+      const p = local(e);
+      const dx = p.x - d.from.x;
+      const dy = p.y - d.from.y;
+      if (d.kind === 'pan') return view.setViewport(panBy(d.start, dx, dy));
+      if (!d.moving) {
+        if (Math.hypot(dx, dy) < DRAG_START_PX) return;
+        d.moving = true;
+        session.beginDrag();
+      }
+      const zoom = vp().zoom;
+      const world = { x: dx / zoom, y: dy / zoom };
+      const snap = !(e.metaKey || e.ctrlKey);
+      const next = d.kind === 'move' ? { ...movedFrame(d.start, world, d.siblings, zoom, snap), problems: [] as string[] } : resizedFrame(d.id, d.start, d.handle, world, d.siblings, zoom, snap);
+      setGuides(next.guides);
+      if (next.problems.length > 0) return latest.current.onNotice(next.problems.join('; ')); // shown, never adjusted
+      const key = JSON.stringify(next.frame);
+      if (key === d.last) return;
+      d.last = key;
+      try {
+        setBoardFrame(session.doc, d.id, next.frame, session.origin);
+      } catch (error) {
+        latest.current.onNotice(error instanceof BoardError ? error.problems.join('; ') : String(error));
+      }
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const d = drag.current;
+      if (!d || d.pointerId !== e.pointerId) return;
+      drag.current = null;
+      if (el.hasPointerCapture?.(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      if (d.kind === 'pan') setPanning(false);
+      else if (d.moving) session.endDrag();
+      setGuides([]);
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const v = vp();
+      if (e.ctrlKey || e.altKey) view.setViewport(zoomAt(v, v.zoom * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.002)), local(e)));
+      else view.setViewport(panBy(v, -e.deltaX, -e.deltaY));
+    };
+
+    // the world never scrolls: a focus brought to a node outside the view (a text box opened on a board out of sight)
+    // would scroll this overflow-hidden box and misplace every overlay; the view's pan is the only offset
+    const onScroll = () => {
+      if (el.scrollLeft !== 0) el.scrollLeft = 0;
+      if (el.scrollTop !== 0) el.scrollTop = 0;
+    };
+
+    el.addEventListener('scroll', onScroll);
+    el.addEventListener('pointerdown', onDown, { capture: true });
+    el.addEventListener('pointermove', onMove);
+    el.addEventListener('pointerup', onUp);
+    el.addEventListener('pointercancel', onUp);
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      el.removeEventListener('pointerdown', onDown, { capture: true });
+      el.removeEventListener('pointermove', onMove);
+      el.removeEventListener('pointerup', onUp);
+      el.removeEventListener('pointercancel', onUp);
+      el.removeEventListener('wheel', onWheel);
+    };
+  }, [surface, session, view]);
+
+  // ---- the world's own keys, taken before C's overlay (whose listener re-binds on its own schedule, so listening order
+  // decides nothing): Space to pan, the view's fits and zooms, and with a board's frame selected (no element selected,
+  // so the overlay would act on nothing) the frame's nudge, duplicate and delete; Escape climbs from nothing selected to
+  // the active board's frame. Every other key is the overlay's.
+  useEffect(() => {
+    const el = surface.current;
+    if (!el) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target !== el || e.defaultPrevented) return;
+      const { boards: all, readOnly: ro, fitAll, fitSelection, removeBoard, duplicateBoard } = latest.current;
+      const mod = e.metaKey || e.ctrlKey;
+      const done = () => {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+      };
+      const frameId = view.snapshot().frame;
+      const framed = all.find((b) => b.id === frameId);
+      if (e.key === ' ') {
+        if (!space.current) setSpaceHeld((space.current = true));
+        return done();
+      }
+      const command = e.shiftKey && e.code === 'Digit1' ? fitAll : e.shiftKey && e.code === 'Digit2' ? fitSelection : null;
+      const zoomKey = !mod ? null : e.key === '=' || e.key === '+' ? () => view.step(1) : e.key === '-' ? () => view.step(-1) : e.key === '0' ? () => view.setZoom(1) : null;
+      if (command ?? zoomKey) {
+        (command ?? zoomKey)!();
+        return done();
+      }
+      if (e.key === 'Escape') {
+        const current = session.snapshot().currentSlide;
+        if (frameId !== null) view.selectFrame(null);
+        else if (current !== null && session.snapshot().selection.length === 0) view.selectFrame(current);
+        else return;
+        return done();
+      }
+      if (!framed || ro) return;
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        removeBoard(framed.id); // a held or missing board may be deleted, as C's filmstrip deletes a held slide
+        return done();
+      }
+      if (!writable(framed, ro)) return;
+      if (mod && e.key.toLowerCase() === 'd') {
+        duplicateBoard(framed.id);
+        return done();
+      }
+      if (e.key.startsWith('Arrow') && !mod) {
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+        const dy = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+        session.typing(`board:${framed.id}`, (origin) => setBoardFrame(session.doc, framed.id, { x: framed.frame.x + dx, y: framed.frame.y + dy }, origin));
+        return done();
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === ' ' && space.current) setSpaceHeld((space.current = false));
+    };
+    const onBlur = () => {
+      if (space.current) setSpaceHeld((space.current = false));
+    };
+    el.addEventListener('keydown', onKey, { capture: true });
+    el.addEventListener('keyup', onKeyUp);
+    el.addEventListener('blur', onBlur);
+    return () => {
+      el.removeEventListener('keydown', onKey, { capture: true });
+      el.removeEventListener('keyup', onKeyUp);
+      el.removeEventListener('blur', onBlur);
+    };
+  }, [surface, session, view]);
+
+  const { zoom } = viewport;
+  const screen = (b: BoardFrame) => ({ left: viewport.x + b.x * zoom, top: viewport.y + b.y * zoom, width: b.w * zoom, height: b.h * zoom });
+  const framed = boards.find((b) => b.id === state.frame && b.frame !== null) ?? null;
+  const activeEditable = active !== null && active.held === null && !active.missing && !readOnly;
+  const layerStyle = { transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${zoom})`, '--design-inv-zoom': String(1 / zoom) } as CSSProperties;
+
+  return (
+    <div
+      ref={surface}
+      className="design-world"
+      role="region"
+      aria-label={C.world}
+      tabIndex={0}
+      data-design-world
+      data-stage-surface
+      data-panning={panning || undefined}
+      data-space={spaceHeld || undefined}
+    >
+      <div className="design-world-ground" data-design-ground />
+      <div className="design-world-layer" data-design-layer style={layerStyle}>
+        {scope(
+          boards.map((b) =>
+            b.frame ? (
+              <Board
+                key={b.id}
+                doc={session.doc}
+                board={b as BoardView & { frame: BoardFrame }}
+                active={b.id === active?.id}
+                frameSelected={b.id === state.frame}
+                assetUrl={assetUrl}
+                faces={faces}
+                onCanvas={onCanvas}
+                onSelect={onSelectBoard}
+              />
+            ) : null,
+          ),
+        )}
+      </div>
+      <div className="design-world-screen" aria-hidden>
+        {active?.frame && <div className="design-active-outline" style={screen(active.frame)} />}
+        {framed?.frame && <div className="design-frame-outline" data-frame-outline={framed.id} style={screen(framed.frame)} />}
+        {guides.map((g, i) =>
+          g.axis === 'x' ? (
+            <div key={i} className="deck-guide" data-guide={g.kind} style={{ left: viewport.x + g.at * zoom, top: viewport.y + g.from * zoom, width: 0, height: (g.to - g.from) * zoom }} />
+          ) : (
+            <div key={i} className="deck-guide" data-guide={g.kind} style={{ left: viewport.x + g.from * zoom, top: viewport.y + g.at * zoom, width: (g.to - g.from) * zoom, height: 0 }} />
+          ),
+        )}
+      </div>
+      {active?.frame && (
+        <div ref={activeFrame} className="design-active" data-active-board={active.id} style={screen(active.frame)}>
+          {scope(
+            <Overlay
+              session={session}
+              canvas={canvases.get(active.id) ?? null}
+              slideId={active.id}
+              scale={zoom}
+              readOnly={!activeEditable}
+              surface={surface}
+              frame={activeFrame}
+              onNotice={onNotice}
+              artifactId={artifactId}
+              importAsset={importAsset}
+              renderText={(elementId, canvas) => <TextBox session={session} canvas={canvas} slideId={active.id} elementId={elementId} readOnly={!activeEditable} />}
+            />,
+          )}
+        </div>
+      )}
+      {framed?.frame && writable(framed, readOnly) && (
+        <div className="design-frame-handles" style={screen(framed.frame)}>
+          {HANDLES.map((h) => (
+            <span key={h} className="deck-handle design-board-handle" data-board-handle={h} data-at={h} aria-label={C.resizeBoard(h)} style={{ left: `${HANDLE_AT[h][0] * 100}%`, top: `${HANDLE_AT[h][1] * 100}%` }} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A board's frame selected: it becomes the board C's overlay acts on, with no element selected. */
+function selectFrame(session: DeckSession, view: DesignView, boardId: string): void {
+  session.show(boardId);
+  session.select([]);
+  view.selectFrame(boardId);
+}
+
+/** An inactive board pressed: it becomes the active board and the element under the press is selected (C's `pick`). */
+function activate(session: DeckSession, view: DesignView, boardId: string, canvas: SlideCanvas | null, e: PointerEvent, target: HTMLElement): void {
+  view.selectFrame(null);
+  session.show(boardId);
+  if (!canvas) return;
+  let hits = hitIds(canvas, { x: e.clientX, y: e.clientY }, { x: 0, y: 0 }, 0, []);
+  if (hits.length === 0) {
+    // a page with no hit test of its own (or a press between painted nodes): the pressed node's element chain
+    hits = [];
+    for (let n: HTMLElement | null = target.closest('[data-eid]'); n && canvas.root.contains(n); n = n.parentElement?.closest<HTMLElement>('[data-eid]') ?? null) hits.push(n.dataset.eid!);
+  }
+  session.select(pick(slideTree(session.doc, boardId), hits, []).selection);
+}
+
+/** One board in the world: its title (unscaled), its canvas at scale 1, and its held or missing mark. */
+const Board = memo(function Board(props: {
+  doc: DeckSession['doc'];
+  board: BoardView & { frame: BoardFrame };
+  active: boolean;
+  frameSelected: boolean;
+  assetUrl: AssetUrl;
+  faces: FaceAliases;
+  onCanvas: (boardId: string, canvas: SlideCanvas | null) => void;
+  onSelect: (boardId: string) => void;
+}) {
+  const { doc, board, active, frameSelected, assetUrl, faces, onCanvas, onSelect } = props;
+  const { id, frame } = board;
+  const label = boardLabel(board);
+  const canvasOf = useCallback((canvas: SlideCanvas | null) => onCanvas(id, canvas), [onCanvas, id]);
+  return (
+    <div
+      className="design-board"
+      data-board-id={id}
+      data-active={active || undefined}
+      data-frame-selected={frameSelected || undefined}
+      data-held={board.held ? '' : undefined}
+      data-missing={board.missing || undefined}
+      style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }}
+    >
+      <button type="button" className="design-board-title" data-board-title={id} aria-label={C.boardTitle(label)} aria-pressed={frameSelected} onClick={() => onSelect(id)}>
+        <span className="design-board-title-name">{label}</span>
+        <span className="design-board-title-size">{C.size(frame.w, frame.h)}</span>
+        {board.held && <span className="design-board-badge">{C.held}</span>}
+      </button>
+      <SlideView doc={doc} slideId={id} token={board.token} assetUrl={assetUrl} scale={1} size={{ w: frame.w, h: frame.h }} onCanvas={canvasOf} faces={faces} className="design-board-canvas" />
+      {board.missing && (
+        <div className="design-board-missing" role="note">
+          {C.missing}
+        </div>
+      )}
+    </div>
+  );
+});

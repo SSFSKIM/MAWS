@@ -104,6 +104,16 @@ export class SlideCanvas {
   private readonly editing = new Set<string>();
   /** DOM writes this canvas made, by kind (the "minimal patching" claim's measure). */
   readonly writes = { style: 0, attr: 0, place: 0, text: 0, create: 0, remove: 0, layout: 0 };
+  /** P3-E (E1 M3, X27 additive): a design board's size, read from its node's plain `w` and `h` keys; null for a deck's slide. */
+  private board: { w: number; h: number } | null = null;
+  /** P3-E: the canvas's size in slide px: a board's own, else the deck's 1920×1080. */
+  get size(): { w: number; h: number } {
+    return this.board ?? { w: 1920, h: 1080 };
+  }
+  /** P3-E: whether the canvas draws a design board (its node carries a size). */
+  get isBoard(): boolean {
+    return this.board !== null;
+  }
 
   constructor(
     private readonly doc: Doc,
@@ -182,7 +192,8 @@ export class SlideCanvas {
   }
 
   private applySlideKey(k: string, v: string | undefined): void {
-    if (k.startsWith('style:')) {
+    if (k === 'w' || k === 'h') this.applySize(); // P3-E: a board's size, plain keys on its node (a deck's slide has none)
+    else if (k.startsWith('style:')) {
       if (v === undefined) this.root.style.removeProperty(k.slice(6));
       else this.root.style.setProperty(k.slice(6), drawnValue(k.slice(6), v, this.draw));
     } else if (k.startsWith('attr:')) {
@@ -190,6 +201,26 @@ export class SlideCanvas {
       const name = k === 'attr:hidden' ? 'data-hidden' : k.slice(5);
       if (v === undefined) this.root.removeAttribute(name);
       else this.root.setAttribute(name, v);
+    }
+  }
+
+  /**
+   * P3-E (E1 M3): a board's size onto the section, as the node's `w` and `h` say (both positive numbers), with
+   * `data-board` for the design's screen type defaults (src/artifacts/design/board-css.ts); CANVAS_CSS's 1920×1080 stays
+   * every other slide's.
+   */
+  private applySize(): void {
+    const { w, h } = Y.slideScalars(this.doc, this.slideId);
+    if (typeof w === 'number' && typeof h === 'number' && w > 0 && h > 0) {
+      this.board = { w, h };
+      this.root.style.width = `${w}px`;
+      this.root.style.height = `${h}px`;
+      this.root.dataset.board = '';
+    } else if (this.board !== null) {
+      this.board = null;
+      this.root.style.removeProperty('width');
+      this.root.style.removeProperty('height');
+      delete this.root.dataset.board;
     }
   }
 

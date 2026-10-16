@@ -1,0 +1,166 @@
+// P3-E1 M3 (docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md, M3): the design specs' shared fixture and seam
+// access. A design is created by the human's `artifacts.create` and seeded from files through the renderer's seam
+// (`window.__maws_design`, src/renderer/src/tools/design/e2e-seam.ts: the files published onto a replica by the kind's
+// own publish, forced). The fixture's boards are a phone, a tablet, a desktop screen, a poster taller than 8,192 px and
+// a board whose file does not load (held), every live one drawn on the design system's background.
+import { expect, type Locator, type Page } from '@playwright/test';
+
+export type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
+export async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
+  const result = (await page.evaluate(([n, i]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke(n as string, i), [name, input] as const)) as Result<T>;
+  if (!result.ok) throw new Error(`${name} failed: ${result.error.code} ${result.error.message}`);
+  return result.value;
+}
+
+export interface Frame {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+export interface Viewport {
+  zoom: number;
+  x: number;
+  y: number;
+}
+// The slide IR as the seam answers it (plain data; src/artifacts/slides/ir.ts)
+export interface ElementIR {
+  id: string;
+  tag: string;
+  attrs: Record<string, string>;
+  style: Record<string, string>;
+  children: ElementIR[];
+  text?: { type: 'p' | 'li'; inline: ({ text: string; marks: Record<string, unknown> } | { br: true })[] }[];
+}
+export interface BoardIR {
+  id: string;
+  attrs: Record<string, string>;
+  style: Record<string, string>;
+  children: ElementIR[];
+  notes: string;
+}
+export interface TabView {
+  surface: string;
+  viewport: Viewport | null;
+  frame: string | null;
+  currentBoard: string | null;
+  selection: string[];
+  timings: { openedAt: number; drawnAt?: number; thumbnails?: number };
+}
+export type DesignEdit =
+  | { op: 'setStyle'; boardId: string; elementId: string; props: Record<string, string | null> }
+  | { op: 'prependText'; boardId: string; elementId: string; text: string }
+  | { op: 'setFrame'; boardId: string; frame: Partial<Frame> };
+interface Seam {
+  __maws_design: {
+    seed(artifactId: string, files: Record<string, string>): Promise<{ changed: string[]; held: string[] }>;
+    edit(artifactId: string, edit: DesignEdit): Promise<void>;
+    files(artifactId: string): Promise<Record<string, string>>;
+    boards(artifactId: string): Promise<{ id: string; frame: Frame | null; title: string | null }[]>;
+    board(artifactId: string, boardId: string): Promise<BoardIR>;
+    tabs(artifactId: string): TabView[];
+  };
+}
+export const seamInstalled = (page: Page) => page.evaluate(() => typeof (window as unknown as Partial<Seam>).__maws_design);
+export const seed = (page: Page, id: string, files: Record<string, string>) => page.evaluate(([a, f]) => (window as unknown as Seam).__maws_design.seed(a, f), [id, files] as const);
+export const editDesign = (page: Page, id: string, edit: DesignEdit) => page.evaluate(([a, e]) => (window as unknown as Seam).__maws_design.edit(a, e), [id, edit] as const);
+export const boardsOf = (page: Page, id: string) => page.evaluate((a) => (window as unknown as Seam).__maws_design.boards(a), id);
+export const boardOf = (page: Page, id: string, boardId: string) => page.evaluate(([a, b]) => (window as unknown as Seam).__maws_design.board(a, b), [id, boardId] as const);
+export const tabsOf = (page: Page, id: string) => page.evaluate((a) => (window as unknown as Seam).__maws_design.tabs(a), id);
+
+export async function frameOf(page: Page, id: string, boardId: string): Promise<Frame | null> {
+  return (await boardsOf(page, id)).find((b) => b.id === boardId)?.frame ?? null;
+}
+export async function viewOf(page: Page, id: string, surface: 'main' | 'panel'): Promise<TabView> {
+  const tab = (await tabsOf(page, id)).find((t) => t.surface === surface);
+  if (!tab) throw new Error(`no ${surface} tab shows ${id}`);
+  return tab;
+}
+export function findIn(children: ElementIR[], id: string): ElementIR | undefined {
+  for (const c of children) {
+    if (c.id === id) return c;
+    const inner = findIn(c.children, id);
+    if (inner) return inner;
+  }
+  return undefined;
+}
+export async function elementOf(page: Page, id: string, boardId: string, elementId: string): Promise<ElementIR | undefined> {
+  return findIn((await boardOf(page, id, boardId)).children, elementId);
+}
+export const plain = (e: ElementIR | undefined) => (e?.text ?? []).map((b) => b.inline.map((r) => ('text' in r ? r.text : '\n')).join('')).join('\n');
+export const px = (v: string | undefined) => Number.parseFloat(v ?? 'NaN');
+
+/** A board drawn in `where` (the panel or a main tab), and the screen point of a board px on it at the zoom it is drawn. */
+export async function boardAt(where: Locator, boardId: string, frame: Frame) {
+  const box = (await where.locator(`[data-board-id="${boardId}"]`).boundingBox())!;
+  const zoom = box.width / frame.w;
+  return { box, zoom, at: (x: number, y: number) => ({ x: box.x + x * zoom, y: box.y + y * zoom }) };
+}
+/** The screen point of a world px in `where`'s world, at its view. */
+export async function worldAt(where: Locator, view: Viewport, x: number, y: number) {
+  const box = (await where.locator('[data-design-world]').boundingBox())!;
+  return { x: box.x + view.x + x * view.zoom, y: box.y + view.y + y * view.zoom };
+}
+export async function drag(page: Page, from: { x: number; y: number }, to: { x: number; y: number }, options: { steps?: number; during?: () => Promise<void> } = {}) {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  const steps = options.steps ?? 12;
+  for (let i = 1; i <= steps; i++) await page.mouse.move(from.x + ((to.x - from.x) * i) / steps, from.y + ((to.y - from.y) * i) / steps);
+  await options.during?.();
+  await page.mouse.up();
+}
+export const centre = async (locator: Locator) => {
+  const box = (await locator.boundingBox())!;
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+};
+
+/** A header action by its label: its button, or its entry under More actions when the header folded it there. */
+export async function headerAction(page: Page, label: string): Promise<void> {
+  const header = page.locator('[data-region="main"] [data-editor-header]');
+  const button = header.getByRole('button', { name: label, exact: true });
+  if (await button.isVisible()) return button.click();
+  await header.getByRole('button', { name: 'More actions', exact: true }).click();
+  await page.getByRole('menuitemcheckbox', { name: label }).or(page.getByRole('menuitem', { name: label })).click();
+}
+
+export async function createDesign(page: Page, title: string, files: Record<string, string>): Promise<string> {
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'design', title });
+  await seed(page, artifact.id, files);
+  return artifact.id;
+}
+
+/** The design opened from the library: its workbench in an `artifact` main tab (L's registry). */
+export async function openFromLibrary(page: Page, title: string, artifactId: string): Promise<Locator> {
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  await page.locator('[data-library]').getByRole('article', { name: title, exact: true }).click();
+  const tab = page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`);
+  await expect(tab.locator('[data-design-editor]')).toBeVisible({ timeout: 15_000 });
+  return tab;
+}
+
+// ---- the fixture
+
+const ground = 'background:var(--ds-color-bg, #ffffff)';
+export const FRAMES: Record<string, Frame & { title: string }> = {
+  phone: { x: 0, y: 0, w: 390, h: 844, title: 'Phone' },
+  tablet: { x: 490, y: 0, w: 834, h: 1194, title: 'Tablet' },
+  desktop: { x: 1424, y: 0, w: 1440, h: 1024, title: 'Desktop' },
+  poster: { x: 2964, y: 0, w: 1080, h: 9000, title: 'Poster' },
+  broken: { x: 4144, y: 0, w: 800, h: 600, title: 'Broken' },
+};
+export const ORDER = ['phone', 'tablet', 'desktop', 'poster', 'broken'];
+export const DESIGN_FILES: Record<string, string> = {
+  'project/canvas.json': JSON.stringify({ v: 1, title: 'Launch screens', boards: FRAMES, order: ORDER }),
+  'project/boards/phone.html': `<section id="phone" style="${ground}; padding:24px; gap:12px"><h1 id="title">Launch</h1><p id="lede">Ship the first week.</p><div id="cta" style="position:absolute; left:24px; top:740px; width:342px; height:56px; background:#2b7a78"></div></section>`,
+  'project/boards/tablet.html': `<section id="tablet" style="${ground}; padding:48px"><h2 id="head">Dashboard</h2><p id="body">Three columns of numbers.</p></section>`,
+  'project/boards/desktop.html': `<section id="desktop" style="${ground}; padding:64px; gap:24px">
+<h2 id="head">Overview</h2>
+<p id="para" style="width:600px">Detail of the week</p>
+<div id="a" style="position:absolute; left:200px; top:500px; width:200px; height:120px; background:#ff0000"></div>
+<div id="b" style="position:absolute; left:600px; top:500px; width:200px; height:120px; background:#00aa00"></div>
+<x-shape id="c" kind="ellipse" style="position:absolute; left:1000px; top:600px; width:200px; height:200px; background:#0000ff"></x-shape>
+<p id="note" style="position:absolute; left:200px; top:820px; width:800px">Edit me</p>
+</section>`,
+  'project/boards/poster.html': `<section id="poster" style="${ground}; padding:80px"><h1 id="title">Summer festival</h1><p id="dates">August 1 to 9</p></section>`,
+  'project/boards/broken.html': `<section id="broken" style="${ground}"><h2 id="b">Broken</h2><blink>not a board element</blink></section>`,
+};

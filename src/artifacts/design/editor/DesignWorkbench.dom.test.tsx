@@ -1,0 +1,328 @@
+// P3-E1 M3 (docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md, M3; parent Decision Log 20): the workbench over
+// a replica, under happy-dom: every board mounted as its own canvas in one transformed world, pan and zoom moving only
+// the world, board frames selected, moved, resized (snapped, the cap refused by name) and listed (add from presets,
+// duplicate, delete, reorder, zoom to board), an inactive board's press activating it and selecting the hit element
+// without moving or panning anything, one undo stack for board and element edits, read-only, held and missing boards
+// written nothing, and Insert on a phone board at screen type. Layout, paint and real pointers are the e2e's.
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { afterEach, describe, expect, it } from 'vitest';
+import { applyV1, diffV1, newDoc, stateVector, transact, type Doc } from '../../yjs';
+import * as Y from '../../yjs/slides';
+import { flushLayout } from '../../slides/canvas';
+import { readSlide, setStyle } from '../../slides/model';
+import { DeckSession } from '../../slides/editor/session';
+import { design, type BoardSeed } from '../fixtures/support';
+import { boardFrame, boardOrder, MISSING_SOURCE_KEY } from '../model';
+import { setBoardFrame } from '../writers';
+import { DesignWorkbench } from './DesignWorkbench';
+import { DesignView } from './viewport';
+
+const BOARDS: BoardSeed[] = [
+  { id: 'b1', at: { x: 0, y: 0, w: 390, h: 844 }, title: 'Phone' },
+  { id: 'b2', at: { x: 500, y: 0, w: 1440, h: 1024 }, title: 'Desktop' },
+  { id: 'b3', at: { x: 2100, y: 0, w: 1080, h: 8192 }, title: 'Poster' },
+];
+
+afterEach(cleanup);
+
+function mount(options: { doc?: Doc; readOnly?: boolean; zoom?: number } = {}) {
+  const doc = options.doc ?? design(BOARDS);
+  const session = new DeckSession(doc, 0);
+  const view = new DesignView();
+  view.setRoom({ w: 1000, h: 800 });
+  view.setViewport({ zoom: options.zoom ?? 1, x: 0, y: 0 });
+  const utils = render(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly={options.readOnly ?? false} />);
+  const world = utils.container.querySelector<HTMLElement>('[data-design-world]')!;
+  return { doc, session, view, world, ...utils };
+}
+
+const board = (container: HTMLElement, id: string) => container.querySelector<HTMLElement>(`[data-board-id="${id}"]`)!;
+const title = (container: HTMLElement, id: string) => container.querySelector<HTMLElement>(`[data-board-title="${id}"]`)!;
+const rows = () => within(screen.getByRole('navigation', { name: 'Boards' })).getAllByRole('button', { name: /×/ });
+const press = (el: Element, x: number, y: number, extra: Record<string, unknown> = {}) => fireEvent.pointerDown(el, { button: 0, buttons: 1, clientX: x, clientY: y, pointerId: 1, ...extra });
+const drag = (world: HTMLElement, x: number, y: number) => fireEvent.pointerMove(world, { buttons: 1, clientX: x, clientY: y, pointerId: 1 });
+const release = (world: HTMLElement, x: number, y: number) => fireEvent.pointerUp(world, { button: 0, clientX: x, clientY: y, pointerId: 1 });
+const openMenu = (trigger: HTMLElement) => fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+
+describe('the world', () => {
+  it('mounts every board as its own canvas at its place in one transformed layer, at its size, marked a board', () => {
+    const { container } = mount();
+    expect(container.querySelectorAll('[data-board-id] .maws-slide')).toHaveLength(3);
+    for (const b of BOARDS) {
+      const el = board(container, b.id);
+      expect([el.style.left, el.style.top, el.style.width, el.style.height]).toEqual([`${b.at.x}px`, `${b.at.y}px`, `${b.at.w}px`, `${b.at.h}px`]);
+      const slide = el.querySelector<HTMLElement>('.maws-slide')!;
+      expect(slide.hasAttribute('data-board')).toBe(true);
+      expect(slide.style.width).toBe(`${b.at.w}px`);
+    }
+    // the canvases draw at scale 1: the world's one transform zooms them
+    expect(container.querySelector<HTMLElement>('[data-board-id="b2"] .deck-slide-scaler')!.style.transform).toBe('scale(1)');
+    expect(container.querySelector<HTMLElement>('[data-design-layer]')!.style.transform).toBe('translate(0px, 0px) scale(1)');
+  });
+
+  it('pans and zooms by the world’s transform alone, every board staying mounted', () => {
+    const { container, view } = mount();
+    const canvases = [...container.querySelectorAll('[data-board-id] .maws-slide')];
+    act(() => view.setViewport({ zoom: 0.25, x: -400, y: 30 }));
+    expect(container.querySelector<HTMLElement>('[data-design-layer]')!.style.transform).toBe('translate(-400px, 30px) scale(0.25)');
+    expect([...container.querySelectorAll('[data-board-id] .maws-slide')]).toEqual(canvases); // the same nodes: nothing remounted
+  });
+
+  it('a drag on the empty world pans it and clears the selection; the wheel pans, ⌃/pinch zooms about the pointer', () => {
+    const { container, view, session, world } = mount();
+    act(() => session.select(['title']));
+    const ground = container.querySelector('[data-design-ground]')!;
+    press(ground, 10, 10);
+    drag(world, 60, 30);
+    release(world, 60, 30);
+    expect(view.snapshot().viewport).toEqual({ zoom: 1, x: 50, y: 20 });
+    expect(session.snapshot().selection).toEqual([]);
+    fireEvent.wheel(world, { deltaX: 0, deltaY: 100, clientX: 0, clientY: 0 });
+    expect(view.snapshot().viewport).toEqual({ zoom: 1, x: 50, y: -80 });
+    // happy-dom's WheelEvent takes no mouse fields from its init: a pinch's ⌃ and point set on the event itself
+    const pinch = new WheelEvent('wheel', { deltaY: -50, bubbles: true, cancelable: true });
+    for (const [k, v] of [['ctrlKey', true], ['clientX', 50], ['clientY', -80]] as const) Object.defineProperty(pinch, k, { value: v });
+    act(() => void world.dispatchEvent(pinch));
+    const v = view.snapshot().viewport!;
+    expect(v.zoom).toBeGreaterThan(1);
+    expect([v.x, v.y]).toEqual([50, -80]); // the world's origin under the pointer stays there
+  });
+
+  it('the toolbar zooms by steps, fits all and fits the selected board, 2 %–400 %', () => {
+    const { container, view } = mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
+    expect(view.snapshot().viewport!.zoom).toBe(1.5);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Zoom' }), { target: { value: 'fit-all' } });
+    const all = view.snapshot().viewport!;
+    expect(all.zoom).toBeCloseTo((800 - 96) / 8192, 6); // the poster's height decides
+    fireEvent.click(title(container, 'b1'));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Zoom' }), { target: { value: 'fit-selection' } });
+    expect(view.snapshot().viewport!.zoom).toBe(Math.min(1, (800 - 96) / 844));
+    for (let i = 0; i < 20; i++) fireEvent.click(screen.getByRole('button', { name: 'Zoom out' }));
+    expect(view.snapshot().viewport!.zoom).toBe(0.02);
+  });
+
+  it('a board edited in another replica patches here', () => {
+    const { container, doc } = mount();
+    const remote = newDoc();
+    applyV1(remote, diffV1(doc));
+    setBoardFrame(remote, 'b2', { x: 640, w: 1280 }, 'remote');
+    act(() => applyV1(doc, diffV1(remote, stateVector(doc)), 'remote'));
+    expect([board(container, 'b2').style.left, board(container, 'b2').style.width]).toEqual(['640px', '1280px']);
+    expect(board(container, 'b2').querySelector<HTMLElement>('.maws-slide')!.style.width).toBe('1280px');
+  });
+});
+
+describe('board frames', () => {
+  it('a title press selects the board’s geometry; a drag moves it, snapped to siblings, one undo step', () => {
+    const { container, doc, session, view, world } = mount({ zoom: 0.5 });
+    press(title(container, 'b2'), 300, 0);
+    expect(view.snapshot().frame).toBe('b2');
+    expect(session.snapshot().currentSlide).toBe('b2');
+    expect(board(container, 'b2').hasAttribute('data-frame-selected')).toBe(true);
+    drag(world, 350, 25); // 50 screen px at 50 %: 100 world px
+    drag(world, 400, 50);
+    release(world, 400, 50);
+    expect(boardFrame(doc, 'b2')).toEqual({ x: 700, y: 100, w: 1440, h: 1024 });
+    // dropped 3 world px short of meeting the poster's left edge: snapped to it
+    press(title(container, 'b2'), 0, 0);
+    drag(world, (2100 - 1440 - 700 - 3) / 2 + 0, 0);
+    release(world, 0, 0);
+    expect(boardFrame(doc, 'b2')!.x).toBe(2100 - 1440);
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(boardFrame(doc, 'b2')).toEqual({ x: 700, y: 100, w: 1440, h: 1024 });
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(boardFrame(doc, 'b2')).toEqual({ x: 500, y: 0, w: 1440, h: 1024 });
+  });
+
+  it('resizes by its handles; past the cap the refusal is shown and nothing written', () => {
+    const { container, doc, world } = mount();
+    fireEvent.click(title(container, 'b1'));
+    press(container.querySelector('[data-board-handle="e"]')!, 390, 400);
+    drag(world, 400, 400);
+    release(world, 400, 400);
+    expect(boardFrame(doc, 'b1')).toEqual({ x: 0, y: 0, w: 400, h: 844 });
+    fireEvent.click(title(container, 'b3'));
+    press(container.querySelector('[data-board-handle="s"]')!, 2500, 8192);
+    drag(world, 2500, 8192 + 9000);
+    release(world, 2500, 8192 + 9000);
+    expect(boardFrame(doc, 'b3')).toEqual({ x: 2100, y: 0, w: 1080, h: 8192 });
+    expect(container.querySelector('[data-deck-notice]')!.textContent).toBe('board b3: h is 17192 px (over 16384 px a side)');
+  });
+
+  it('the inspector edits the selected board’s frame and applies a preset; the cap is refused by name', () => {
+    const { container, doc } = mount();
+    fireEvent.click(title(container, 'b1'));
+    const width = screen.getByRole('textbox', { name: 'Board width' });
+    fireEvent.change(width, { target: { value: '834' } });
+    fireEvent.keyDown(width, { key: 'Enter' });
+    expect(boardFrame(doc, 'b1')!.w).toBe(834);
+    fireEvent.change(width, { target: { value: '20000' } });
+    fireEvent.keyDown(width, { key: 'Enter' });
+    expect(screen.getByRole('alert').textContent).toContain('over 16384 px a side');
+    expect(boardFrame(doc, 'b1')!.w).toBe(834);
+    fireEvent.change(screen.getByRole('combobox', { name: 'Board size' }), { target: { value: 'tablet' } });
+    expect(boardFrame(doc, 'b1')).toEqual({ x: 0, y: 0, w: 834, h: 1194 });
+    const name = screen.getByRole('textbox', { name: 'Board name' });
+    fireEvent.change(name, { target: { value: 'Phone, tall' } });
+    fireEvent.keyDown(name, { key: 'Enter' });
+    expect(Y.slideScalars(doc, 'b1').title).toBe('Phone, tall');
+  });
+
+  it('with a frame selected: arrows nudge it, ⌫ deletes the board, Escape from an element climbs to its board', () => {
+    const { container, doc, session, view, world } = mount();
+    fireEvent.click(title(container, 'b2'));
+    world.focus();
+    fireEvent.keyDown(world, { key: 'ArrowRight', shiftKey: true });
+    expect(boardFrame(doc, 'b2')!.x).toBe(510);
+    fireEvent.keyDown(world, { key: 'Backspace' });
+    expect(boardOrder(doc)).toEqual(['b1', 'b3']);
+    act(() => {
+      session.show('b1');
+      session.select(['title']);
+    });
+    expect(view.snapshot().frame).toBeNull();
+    fireEvent.keyDown(world, { key: 'Escape' }); // the element's own Escape: the selection climbs out (C's)
+    fireEvent.keyDown(world, { key: 'Escape' }); // nothing selected: the board's frame
+    expect(view.snapshot().frame).toBe('b1');
+  });
+});
+
+describe('pointer arbitration (Decision Log 20)', () => {
+  it('a press on an inactive board’s content activates it and selects the hit element; the press neither pans nor moves', () => {
+    const { container, doc, session, view, world } = mount();
+    expect(session.snapshot().currentSlide).toBe('b1');
+    const hit = container.querySelector('[data-board-id="b2"] [data-eid="title"]')!;
+    press(hit, 600, 20);
+    drag(world, 700, 120);
+    release(world, 700, 120);
+    expect(session.snapshot().currentSlide).toBe('b2');
+    expect(session.snapshot().selection).toEqual(['title']);
+    expect(view.snapshot().frame).toBeNull();
+    expect(view.snapshot().viewport).toEqual({ zoom: 1, x: 0, y: 0 });
+    expect(boardFrame(doc, 'b2')).toEqual({ x: 500, y: 0, w: 1440, h: 1024 });
+    expect(readSlide(doc, 'b2').children.find((c) => c.id === 'title')!.style.left).toBeUndefined(); // the element did not move
+    // the active board alone carries C's overlay, at its screen origin and size at the zoom
+    const active = container.querySelector<HTMLElement>('[data-active-board]')!;
+    expect(active.dataset.activeBoard).toBe('b2');
+    expect([active.style.left, active.style.top, active.style.width, active.style.height]).toEqual(['500px', '0px', '1440px', '1024px']);
+    expect(container.querySelectorAll('[data-overlay]')).toHaveLength(1);
+  });
+});
+
+describe('the board list', () => {
+  it('lists the boards back to front with their sizes; a click selects one, its options zoom to it', () => {
+    const { session, view } = mount();
+    expect(rows().map((r) => r.getAttribute('aria-label'))).toEqual(['Phone, 390 × 844', 'Desktop, 1,440 × 1,024', 'Poster, 1,080 × 8,192']);
+    fireEvent.click(rows()[2]!);
+    expect(session.snapshot().currentSlide).toBe('b3');
+    expect(view.snapshot().frame).toBe('b3');
+    openMenu(screen.getByRole('button', { name: 'Board Poster options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Zoom to board' }));
+    expect(view.snapshot().viewport!.zoom).toBeCloseTo((800 - 96) / 8192, 6);
+  });
+
+  it('adds from a preset, duplicates, reorders and deletes, each one undo step', () => {
+    const { doc, session } = mount();
+    openMenu(screen.getByRole('button', { name: 'Add board' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Tablet 834 × 1,194' }));
+    const added = boardOrder(doc).at(-1)!;
+    expect(boardFrame(doc, added)).toEqual({ x: 2100 + 1080 + 100, y: 0, w: 834, h: 1194 });
+    expect(Y.slideScalars(doc, added).title).toBe('Tablet');
+    expect(session.snapshot().currentSlide).toBe(added);
+
+    openMenu(screen.getByRole('button', { name: 'Board Phone options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Duplicate board' }));
+    const copy = boardOrder(doc)[1]!;
+    expect(boardFrame(doc, copy)).toEqual({ x: 490, y: 0, w: 390, h: 844 });
+    expect(readSlide(doc, copy).children.map((c) => c.id)).not.toContain('title'); // new element ids
+
+    openMenu(screen.getAllByRole('button', { name: 'Board Phone options' })[0]!); // the copy keeps the title: the original is first
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Move down' }));
+    expect(boardOrder(doc).slice(0, 2)).toEqual([copy, 'b1']);
+
+    openMenu(screen.getByRole('button', { name: 'Board Desktop options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Delete board' }));
+    expect(boardOrder(doc)).not.toContain('b2');
+
+    for (let i = 0; i < 4; i++) fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(boardOrder(doc)).toEqual(['b1', 'b2', 'b3']);
+  });
+
+  it('renames a board in place', () => {
+    const { doc } = mount();
+    openMenu(screen.getByRole('button', { name: 'Board Desktop options' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Rename' }));
+    const field = screen.getByRole('textbox', { name: 'Rename board' });
+    fireEvent.change(field, { target: { value: 'Landing' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(Y.slideScalars(doc, 'b2').title).toBe('Landing');
+  });
+});
+
+describe('one undo stack, and what writes nothing', () => {
+  it('an element restyle and a board move undo in turn from one stack', () => {
+    const { container, doc, session, world } = mount();
+    act(() => session.edit((origin) => setStyle(doc, 'b1', 'title', { color: '#ff0000' }, origin)));
+    press(title(container, 'b1'), 0, 0);
+    drag(world, 40, 0);
+    release(world, 40, 0);
+    expect(boardFrame(doc, 'b1')!.x).toBe(40);
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(boardFrame(doc, 'b1')!.x).toBe(0);
+    expect(Y.elementScalars(doc, 'b1', 'title')['style:color']).toBe('#ff0000');
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(Y.elementScalars(doc, 'b1', 'title')['style:color']).toBeUndefined();
+  });
+
+  it('read-only: a title drag selects but moves nothing; no handles, no Add board', () => {
+    const { container, doc, world, view } = mount({ readOnly: true });
+    press(title(container, 'b2'), 500, 0);
+    drag(world, 600, 0);
+    release(world, 600, 0);
+    expect(view.snapshot().frame).toBe('b2');
+    expect(boardFrame(doc, 'b2')!.x).toBe(500);
+    expect(container.querySelector('[data-board-handle]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add board' })).toBeNull();
+  });
+
+  it('a held board and a board whose file never arrived are drawn labelled and edit nothing', () => {
+    const doc = design(BOARDS);
+    transact(doc, () => {
+      Y.setSlideKey(doc, 'b2', 'held', { source: '<section id="b2"><blink>x</blink></section>', reasons: ['an unknown tag <blink>'] });
+      Y.setSlideKey(doc, 'b3', MISSING_SOURCE_KEY, true);
+    });
+    const { container, world } = mount({ doc });
+    expect(board(container, 'b2').hasAttribute('data-held')).toBe(true);
+    expect(board(container, 'b3').hasAttribute('data-missing')).toBe(true);
+    expect(board(container, 'b3').textContent).toContain('File not received');
+    press(title(container, 'b2'), 500, 0);
+    drag(world, 700, 0);
+    release(world, 700, 0);
+    expect(boardFrame(doc, 'b2')!.x).toBe(500); // a held board's frame is not moved
+    expect(container.querySelector('[data-held-banner]')!.textContent).toContain('an unknown tag <blink>');
+    expect(container.querySelector('[data-board-handle]')).toBeNull();
+  });
+});
+
+describe('Insert on a board', () => {
+  it('puts a text box on a phone board at the board’s screen type, centred', () => {
+    const { doc } = mount();
+    openMenu(screen.getByRole('button', { name: 'Insert' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Text box' }));
+    const added = readSlide(doc, 'b1').children.find((c) => c.tag === 'p' && c.id !== 'body')!;
+    expect(added.style['font-size']).toBeUndefined();
+    expect(added.style.width).toBe('312px');
+    expect(added.style.left).toBe('39px');
+  });
+
+  it('reports the first showing drawn once every board has laid out', async () => {
+    const doc = design(BOARDS);
+    const drawn: number[] = [];
+    const session = new DeckSession(doc, 0);
+    render(<DesignWorkbench session={session} view={new DesignView()} assetUrl={() => null} system={null} readOnly={false} onDrawn={(n) => drawn.push(n)} />);
+    act(() => flushLayout());
+    await act(async () => {});
+    expect(drawn).toEqual([3]);
+  });
+});
