@@ -210,6 +210,10 @@ export const commands = {
   // `format` under the store's directory (`<id>/exports/<revision>-<format>.<ext>`) and answers its path. `pageSize`
   // the paper (omitted: the exporter's default); a PNG is `width` CSS px wide (1280 when omitted) and `height` high (the
   // page's whole height when omitted). A kind and format no exporter serves is refused `exportUnavailable {kind, format}`.
+  // P3-H (P3 Decision Log 91, the X31 `ownFile` row): `ownFile`, or a design's export (E's Decision Log 33), is a file
+  // of its own: main mints `exportId` before it renders, names the file `<revision>-<format>-<exportId>.<ext>` and
+  // answers the id beside its path, so no later export of the same revision and format replaces it. It lives under the
+  // artifact's export storage as the cache files do. Send to is the caller that sets it.
   'artifacts.export': main(
     z.strictObject({
       artifactId: Id,
@@ -219,10 +223,11 @@ export const commands = {
       fonts: z.enum(ARTIFACT_EXPORT_FONTS).optional(), // P3-C: a presentation's PPTX faces (omitted: named)
       width: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
       height: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
+      ownFile: z.literal(true).optional(), // P3-H (Decision Log 91)
     }),
     // the snapshot exported (a document that moved since names a later revision); `blockedRequests`: remote requests the
-    // PDF printer refused
-    z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional() }),
+    // PDF printer refused; `exportId`: the id of an export of its own file (P3-H, Decision Log 91)
+    z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional(), exportId: z.uuid().optional() }),
   ),
   // P3-H H3b start: the owner's connector grants from the editor header (the P3 interface ledger's X23 grant rows), main's:
   // a grant is taken under the fingerprint the route reports now (the gesture carries none), refused when no route has

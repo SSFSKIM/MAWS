@@ -66,7 +66,7 @@ export function SendToSheet({ dialog }: SheetOf<'sendTo'>) {
     <Sheet title={C.title(service)} width="w-[min(480px,90vw)]" onClose={close} data-send-to={target}>
       <SheetForm
         canSubmit={!pending && format !== null && context.kind !== 'none'}
-        onSubmit={() => format !== null && void run.send({ artifactId: artifact.id, title: artifact.title, kind: artifact.kind, target, format, context })}
+        onSubmit={() => format !== null && void run.send({ artifactId: artifact.id, kind: artifact.kind, target, format, context })}
         submitLabel={submitLabel}
         submitClass={PRIMARY}
         extra={

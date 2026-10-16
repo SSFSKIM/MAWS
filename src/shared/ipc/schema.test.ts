@@ -1676,6 +1676,19 @@ describe('ipc schema validates both directions', () => {
       expect(ARTIFACT_REFUSALS).toContain('exportUnavailable');
     });
 
+    // P3 Decision Log 91 (the X31 `ownFile` row) and E's Decision Log 33: an export of its own file, named by the id main
+    // minted, answered beside its path
+    it('takes ownFile only as true, and answers an exportId only as a UUID, on the library’s export and the bridge’s answer', () => {
+      const exportId = '0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a';
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'pdf', ownFile: true }).ok).toBe(true);
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'pdf', ownFile: false }).ok).toBe(false);
+      expect(validateCommandInput('artifacts.export', { artifactId: id, format: 'pdf', exportId }).ok, 'the caller names no id').toBe(false);
+      expect(validateCommandOutput('artifacts.export', { path: `/u/artifacts/x/exports/4-pdf-${exportId}.pdf`, revision: 4, exportId }).ok).toBe(true);
+      expect(validateCommandOutput('artifacts.export', { path: '/u/artifacts/x/exports/4-pdf-x.pdf', revision: 4, exportId: 'x' }).ok).toBe(false);
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, revision: 4, path: `/u/x/exports/4-png-${exportId}.png`, exportId } }).ok).toBe(true);
+      expect(validateCommandInput('maws.artifact.exported', { appSessionId: 'a', requestId: 'r1', answer: { ok: true, revision: 4, path: '/u/x/exports/4-png.png', exportId: '../x' } }).ok).toBe(false);
+    });
+
     it('answers artifacts with their revision and the agent-suggestions flag, and refuses a row without either', () => {
       expect(validateCommandOutput('artifacts.get', { artifact }).ok).toBe(true);
       expect(validateCommandOutput('artifacts.get', { artifact: null }).ok).toBe(true);

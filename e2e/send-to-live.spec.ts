@@ -208,7 +208,9 @@ test('Send to Google Drive from the library: the owner’s gesture, one capped m
     const prompts = promptsOf(rows());
     expect(prompts, 'one prompt, the owner’s Send to request').toHaveLength(1);
     const exportPath = /`([^`]+)`/.exec(prompts[0]!)?.[1] ?? '';
-    expect(exportPath.startsWith(`${store}/${record.id}/exports/`) && /\/\d+-pdf\.pdf$/.test(exportPath), `the request names the artifact's PDF export under the store: ${exportPath}`).toBe(true);
+    // the export is a file of its own (P3 Decision Log 91): `<revision>-pdf-<exportId>.pdf`, which no later export replaces
+    expect(exportPath.startsWith(`${store}/${record.id}/exports/`) && /\/\d+-pdf-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.pdf$/.test(exportPath), `the request names the artifact's own PDF export under the store: ${exportPath}`).toBe(true);
+    expect(prompts[0], 'the artifact’s title is shown, never sent (Decision Log 91)').not.toContain(TITLE);
     note(`G2b: the request names ${exportPath}`);
 
     // ---- the turn: each request answered on its own card; only the connector's upload or a Read of that export allowed

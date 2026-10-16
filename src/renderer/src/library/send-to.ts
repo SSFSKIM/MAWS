@@ -1,7 +1,9 @@
 // P3-H "Send to" a connector (docs/doperpowers/plans/2026-10-12-p3-co-work.md, P3-H; Decision Log 24, 87, 88): from a
 // library row's Export submenu, the owner sends the artifact to Google Drive or Notion as an agent action. The run:
-//   1. the export: `artifacts.export` of the chosen format writes a snapshot under the store's directory and names its
-//      path and revision (no Save dialog); the turn delivers that file, never the artifact's mutable content;
+//   1. the export: `artifacts.export` of the chosen format with `ownFile` writes a file of its own under the store's
+//      directory, its name minted before it renders (Decision Log 91), so no later export of the same revision and
+//      format replaces it while the run waits; it answers that path and revision (no Save dialog); the turn delivers
+//      that file, never the artifact's mutable content;
 //   2. the session (H4's owner-Start context, ../artifacts/session-context.ts): the artifact's own session, else a new
 //      one in its Space's linked directory or its project's, never a guessed root. A live one is used as it is; any
 //      other is started or resumed first, with no message (Decision Log 88: a prompt held in it refuses the start and
@@ -35,9 +37,10 @@ export function defaultSendFormat(target: SendTarget, formats: readonly Artifact
   return SEND_TARGETS[target].prefer.find((format) => formats.includes(format)) ?? formats[0] ?? null;
 }
 
+// The artifact's title is not here: it is the agent's or an import's text, so it is shown in the sheet and never sent
+// (Decision Log 91).
 export interface SendRequest {
   artifactId: string;
-  title: string;
   kind: ArtifactKind;
   target: SendTarget;
   format: ArtifactExportFormat;
@@ -45,15 +48,17 @@ export interface SendRequest {
 }
 
 // The owner's request as the session reads it: the exported file and where it goes. The connector is named by its
-// service, not a tool name: the session has whatever Drive or Notion connector the owner configured.
-export function sendToPrompt(request: Pick<SendRequest, 'title' | 'kind' | 'target' | 'format'>, exported: { path: string; revision: number }): string {
+// service, not a tool name: the session has whatever Drive or Notion connector the owner configured. Every word is the
+// owner's choice (the target, the format) or main's (the path it wrote, the revision); nothing the artifact's author
+// wrote (Decision Log 91).
+export function sendToPrompt(request: Pick<SendRequest, 'kind' | 'target' | 'format'>, exported: { path: string; revision: number }): string {
   const service = SEND_TARGETS[request.target].name;
   return [
     `Send this file to ${service}:`,
     '',
     `\`${exported.path}\``,
     '',
-    `It is “${request.title}” (${KIND_LABELS[request.kind]}, revision ${exported.revision}) exported as ${VIEWERS_COPY.exportFormats[request.format]}, the version the owner chose to send, so upload it as it is with a ${service} connector available in this session.`,
+    `It is the artifact (${KIND_LABELS[request.kind]}, revision ${exported.revision}) exported as ${VIEWERS_COPY.exportFormats[request.format]}, the version the owner chose to send, so upload it as it is with a ${service} connector available in this session.`,
     `If no ${service} connector here can take a file, say so rather than reaching ${service} another way. Once it is uploaded, say where it is.`,
   ].join('\n');
 }
@@ -132,7 +137,7 @@ export function createSendToRun(deps: SendToDeps): SendToRun {
       state.setState({ phase: 'exporting' }, true);
       let exported;
       try {
-        exported = await deps.client.invoke('artifacts.export', { artifactId: request.artifactId, format: request.format });
+        exported = await deps.client.invoke('artifacts.export', { artifactId: request.artifactId, format: request.format, ownFile: true });
       } catch (error) {
         exported = { ok: false as const, error: { message: messageOf(error) } };
       }

@@ -12,16 +12,21 @@ let scratch: string;
 let store: string;
 let exported: string;
 let other: string;
+let cache: string;
+let sibling: string;
 let outside: string;
 
 beforeEach(() => {
   scratch = realpathSync(mkdtempSync(join(tmpdir(), 'maws-send-to-approval-')));
   store = join(scratch, 'user-data', 'artifacts');
   mkdirSync(join(store, 'a1', 'exports'), { recursive: true });
-  exported = join(store, 'a1', 'exports', '3-pdf.pdf');
+  // the Send's export is a file of its own (P3 Decision Log 91): its revision, format and the id main minted
+  exported = join(store, 'a1', 'exports', '3-pdf-0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a.pdf');
   other = join(store, 'a1', 'exports', '2-pdf.pdf');
+  cache = join(store, 'a1', 'exports', '3-pdf.pdf'); // the same revision and format's cache, another export's
+  sibling = join(store, 'a1', 'exports', '3-pdf-1c1f1d4b-9a4f-4d2e-8c8b-3a7e6f5d4c3b.pdf'); // another Send's own file
   outside = join(scratch, 'secret.pdf');
-  for (const file of [exported, other, outside]) writeFileSync(file, '%PDF-');
+  for (const file of [exported, other, cache, sibling, outside]) writeFileSync(file, '%PDF-');
 });
 afterEach(() => rmSync(scratch, { recursive: true, force: true }));
 
@@ -31,12 +36,14 @@ describe('the Send to run’s approvals', () => {
   it('allows the connector’s upload and a Read of exactly the export, by its canonical path', () => {
     expect(approves(TOOL, { local_path: exported })).toBe(true);
     expect(approves('Read', { file_path: exported })).toBe(true);
-    expect(approves('Read', { file_path: join(store, 'a1', 'exports', '..', 'exports', '3-pdf.pdf') }), 'a non-canonical spelling of the same file').toBe(true);
+    expect(approves('Read', { file_path: join(store, 'a1', 'exports', '..', 'exports', '3-pdf-0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a.pdf') }), 'a non-canonical spelling of the same file').toBe(true);
   });
 
   it('denies another file, a file outside the store, a symlink to elsewhere, a relative or missing path', () => {
     symlinkSync(outside, join(store, 'a1', 'exports', 'link.pdf'));
     expect(approves(TOOL, { local_path: other })).toBe(false);
+    expect(approves(TOOL, { local_path: cache }), 'the same revision and format’s cache file').toBe(false);
+    expect(approves('Read', { file_path: sibling }), 'another export’s own file of the same revision and format').toBe(false);
     expect(approves(TOOL, { local_path: outside })).toBe(false);
     expect(approves('Read', { file_path: join(store, 'a1', 'exports', 'link.pdf') })).toBe(false);
     expect(approves(TOOL, { local_path: 'user-data/artifacts/a1/exports/3-pdf.pdf' })).toBe(false);
