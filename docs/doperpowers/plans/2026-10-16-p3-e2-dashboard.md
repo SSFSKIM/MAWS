@@ -10,7 +10,7 @@ The owner and an agent can work on a document containing real charts and tables 
 
 - [x] (2026-10-16) Parent, interface ledger and B/C precedents grounded at 6e1b827fd; execution document drafted.
 - [x] (2026-10-16) Execution document adversarially reviewed; both findings folded; checkpoint rulings recorded in parent Decision Log 6–8. Initial document committed at 1a1faa996; M1 dispatched.
-- [ ] M1 — Renderer comparison: prototype/fixes/evidence committed e2afc56fe..ede04feb6; final mini run 38892044284 green (6 e2e, 37 units, load 3.96). d3 recommended; task review pending before promotion.
+- [ ] M1 — Renderer comparison: prototype/fixes/evidence committed e2afc56fe..ede04feb6; final mini run 38892044284 green (6 e2e, 37 units, load 3.96). d3 recommended; task review found incomplete hover beyond 1,000 points and tint-only grouped bars, both verified. One spike-only fix wave is running before promotion.
 - [ ] M2 — Dataset boundary, atomic tool, bounded reader and dashboard kind (executing independently while M1's verdict is reviewed; base fcd11592d includes master 1dfe24eb1 and the HistoryRail fix).
 - [ ] M3 — Shared rendering and the dashboard editor with source inspection.
 - [ ] M4 — Block comments, history, restore and duplicate.
@@ -136,6 +136,8 @@ After the master merge, final gate runs and whole-branch high review, route all 
 5. **2026-10-16, architect review amendments (parent Decision Log 8).** Required format on immutable-ref reads and the absent-safe `extraChanges(prevDoc,nextDoc,attributions)` history extension approved and recorded in the ledger. CSV/TSV same-bytes and cold historical reads, and replacement-only count/navigation/pill with restart, are explicit acceptance proofs. M1 started at 1a1faa996 independently of these implementation seams.
 
 6. **2026-10-16, architect diagnostic ruling (parent Decision Log 9).** `viewWarnings` accepted on dashboard create/read/edit answers; normalizing unknown keys happens before writes, while reads of retained malformed specs never mutate their states. The E parser owns diagnostics, B's document results stay unchanged, and C's file-warning shape is not misused for block ids.
+
+7. **2026-10-16, M1 task review.** Numerical-helper preference and remote evidence upheld, but promotion held for two verified grade gaps: the 1,000-hover-target cap hides late real GISTEMP observations, and grouped bars use tint alone. One spike-only fix wave restores full hover and non-color identity, with new grade assertions and refreshed timing evidence; the source table is not a substitute for hover. Production integration remains M3/M5/M6, not a spike omission. An inherited setup-node pnpm-selection warning was routed to the architect as nonblocking setup noise; test execution itself passed.
 
 ## Outcomes & Retrospective
 
