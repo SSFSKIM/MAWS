@@ -19,16 +19,30 @@ async function stubHub() {
   let generation = 0;
   let current = 0;
   let refused: { generation: number; status: keyof typeof REFUSALS } | null = null;
+  /** Streams to end at once, before their welcome; POSTs to cut at the transport, unanswered. */
+  let endStreams = 0;
+  let cutPosts = 0;
+  let have: Record<string, number> = {};
   const streams = new Map<number, ServerResponse>();
   const posted: Array<{ generation: number; frames: UpFrame[] }> = [];
   const send = (g: number, frame: DownFrame) => streams.get(g)?.write(`event: ${frame.t}\ndata: ${JSON.stringify(frame)}\n\n`);
   const server = createServer((request, response) => {
     if (request.url === '/machine/stream') {
+      if (endStreams > 0) {
+        endStreams--;
+        response.writeHead(200, { 'Content-Type': 'text/event-stream' }).end();
+        return;
+      }
       const g = ++generation;
       current = g;
       streams.set(g, response);
       response.writeHead(200, { 'Content-Type': 'text/event-stream' });
       send(g, { t: 'welcome', org: 'o', machine: 'm', generation: g, heartbeat_ms: 15_000 });
+      return;
+    }
+    if (cutPosts > 0) {
+      cutPosts--;
+      request.socket.destroy();
       return;
     }
     let body = '';
@@ -42,7 +56,7 @@ async function stubHub() {
       }
       const frames = body.split('\n').filter(Boolean).map((line) => JSON.parse(line) as UpFrame);
       posted.push({ generation: g, frames });
-      for (const frame of frames) if (frame.t === 'hello') send(g, { t: 'have', project: PROJECT, have: {}, archive: false });
+      for (const frame of frames) if (frame.t === 'hello') send(g, { t: 'have', project: PROJECT, have, archive: false });
       response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true, frames: frames.length }));
     });
   });
@@ -52,6 +66,22 @@ async function stubHub() {
     posted,
     get generation() {
       return current;
+    },
+    /** The next `count` streams end at once, with no welcome. */
+    endNextStreams(count: number) {
+      endStreams = count;
+    },
+    /** Ends the current stream from the hub's side. */
+    endCurrent() {
+      streams.get(current)?.end();
+    },
+    /** The next `count` POSTs are cut at the transport: the client's fetch fails, unanswered. */
+    cutNextPosts(count: number) {
+      cutPosts = count;
+    },
+    /** The vector the hub answers `hello` with. */
+    set have(vector: Record<string, number>) {
+      have = vector;
     },
     refuse(status: keyof typeof REFUSALS) {
       refused = { generation: current, status };
@@ -111,4 +141,42 @@ describe('the fake machine reconnecting by itself', () => {
       await until(() => hub.posted.some((p) => p.generation === 2 && p.frames.some((f) => f.t === 'hello')), 'the hello on the new stream');
     });
   }
+});
+
+describe('the handshake and the uploads, at their edges (the branch panel’s findings)', () => {
+  it('rejects a connect whose stream ends before its welcome, and a reconnect loop gets past such a stream', async () => {
+    const { hub, fm } = await connected();
+    // A connect of its own, on a stream that ends at once: it settles, rejected, rather than hang.
+    hub.endNextStreams(1);
+    const lone = new FakeMachine({ hub: hub.url, machine: 'm2', credentials: { clientId: 'c', clientSecret: 's' }, orgKey: new Uint8Array(32).fill(1), project: PROJECT });
+    const settled = await Promise.race([lone.connect().then(() => 'connected', () => 'rejected'), new Promise((r) => setTimeout(() => r('pending'), 3000))]);
+    expect(settled).toBe('rejected');
+    // The machine's stream ends; its first reconnect meets a stream that ends before welcome; the loop goes on.
+    const before = hub.generation;
+    hub.endNextStreams(1);
+    hub.endCurrent();
+    await until(() => hub.generation > before && fm.generation === hub.generation, 'a reconnect past the dead stream');
+    await until(() => hub.posted.some((p) => p.generation === hub.generation && p.frames.some((f) => f.t === 'hello')), 'the hello on the new stream');
+  });
+
+  it("takes the next seq past the hub's vector for its own feed, even before any of the hub's events are imported", async () => {
+    const hub = await stubHub();
+    hub.have = { 'm/feed': 100 };
+    const fm = new FakeMachine({ hub: hub.url, machine: 'm', credentials: { clientId: 'c', clientSecret: 's' }, orgKey: new Uint8Array(32).fill(1), project: PROJECT });
+    close = () => {
+      void fm.close();
+      hub.close();
+    };
+    await fm.connect();
+    const event = await fm.write('w', 'm/feed', { kind: 'say', from: 'm', to: '*', text: 'after a hundred' });
+    expect(event.seq).toBe(101);
+  });
+
+  it('recovers a write whose POST failed at the transport: it reconnects, and the write lands', async () => {
+    const { hub, fm } = await connected();
+    hub.cutNextPosts(1);
+    await fm.write('w', 'm/feed', { kind: 'say', from: 'm', to: '*', text: 'cut once' });
+    await until(() => hub.posted.some((p) => p.frames.some((f) => f.t === 'events' && f.events.some((e) => e.text === 'cut once'))), 'the write uploaded after the cut');
+    expect(fm.postErrors.some((e) => e instanceof TypeError)).toBe(true);
+  });
 });

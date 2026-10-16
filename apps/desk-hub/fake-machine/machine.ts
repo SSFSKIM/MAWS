@@ -201,10 +201,13 @@ export class FakeMachine {
     expireLedger(this.memory);
     await this.link.connect();
     const have = new Promise<Extract<DownFrame, { t: 'have' }>>((resolve) => (this.have = resolve));
+    const answered = Promise.race([have, new Promise((_, reject) => this.onDrop.push(() => reject(new Error('the stream ended before the hub answered hello'))))]);
+    // A write waits for this handshake's `have`, or for the stream's end, never longer.
+    this.handshake = answered.then(() => undefined, () => undefined);
     this.queue({ t: 'hello', project: this.project, name: this.options.projectName ?? this.options.recordings?.[0]?.name ?? 'fake', have: this.vector() });
     await this.flush();
     const timer = setTimeout(() => void this.drop(), 15_000);
-    await Promise.race([have, new Promise((_, reject) => this.onDrop.push(() => reject(new Error('the stream ended before the hub answered hello'))))]).finally(() => clearTimeout(timer));
+    await answered.finally(() => clearTimeout(timer));
     this.queue({ t: 'pending', project: this.project, raised: [...this.pending.values()].map((p) => p.raised) });
     for (const [nonce, r] of Object.entries(this.memory.unacked)) this.queue({ t: 'rpc-result', project: r.project, nonce, outcome: r.outcome });
     this.queue({ t: 'session', message: { project: this.project, machine: this.name, session: null, kind: 'machine', sub: null, n: null, body: this.presence() } });
@@ -231,10 +234,21 @@ export class FakeMachine {
     await this.connect();
   }
 
-  /** Stops the replay and closes the connection. */
+  /**
+   * Stops the replay and closes the connection. Its sessions end with it, so it first publishes each one's presence as
+   * ended (`record: null`), as a machine does when a session's process goes; otherwise a session last seen waiting
+   * would stay waiting on the grid while the machine, back under the same name, serves other sessions.
+   */
   async close(): Promise<void> {
     this.stopped = true;
     for (const resolve of this.waiters.values()) resolve();
+    if (this.link.isOpen && !this.crashed) {
+      for (const depth of this.sessions.values()) {
+        depth.presence = null;
+        this.sendPresence(depth);
+      }
+      await this.flush();
+    }
     await this.link.drop();
   }
 
@@ -338,7 +352,8 @@ export class FakeMachine {
         if (!this.pending.has(step.draft.request)) return;
         const placeholder = this.options.recordings?.find((r) => r.session === depth.id)?.member;
         const by = placeholder && step.draft.by === placeholder && this.options.member ? this.options.member : step.draft.by;
-        return this.settle(step.draft.request, { ...step.draft, by });
+        await this.settle(step.draft.request, { ...step.draft, by });
+        return;
       }
       case 'log':
         return this.writeRecorded(depth, step.id, step.event);
@@ -371,9 +386,10 @@ export class FakeMachine {
     this.sendSessionWide({ project: this.project, machine: this.name, session, kind: 'raised', sub: null, n: null, body: raised });
   }
 
-  private async settle(request: string, draft: Omit<Settled, 'mac' | 'request'> & { request?: string }): Promise<void> {
+  /** Settles a pending request, once: false when it was no longer pending (another side settled it first). */
+  private async settle(request: string, draft: Omit<Settled, 'mac' | 'request'> & { request?: string }): Promise<boolean> {
     const held = this.pending.get(request);
-    if (!held) return;
+    if (!held) return false;
     this.pending.delete(request);
     const settled = await seal(this.key, 'settled', this.project, { request, winner: draft.winner, outcome: draft.outcome, by: draft.by });
     this.settledRequests.set(request, settled);
@@ -381,6 +397,7 @@ export class FakeMachine {
     this.waiters.get(request)?.();
     this.waiters.delete(request);
     await this.flush();
+    return true;
   }
 
   /** The terminal answers a pending request first: settled `terminal`, and a later web decision is refused naming it. */
@@ -491,12 +508,18 @@ export class FakeMachine {
   }
 
   private writeLock: Promise<unknown> = Promise.resolve();
+  /** The hub's vector from the latest `have`: a feed of this machine's never takes a seq at or below it. */
+  private hubHave: Vector = {};
+  /** Settles when the connect in progress has the hub's `have`; a write waits for it, so it never allocates a seq
+   * before the hub's vector is known. */
+  private handshake: Promise<void> = Promise.resolve();
 
   private async writeNow(src: string, writer: string, fields: JsonObject, ts?: string): Promise<LogEvent> {
     const key = `${this.project}:${src}`;
     const known = this.memory.written[key];
     if (known) return this.feed().find((e) => e.writer === known.writer && e.seq === known.seq)!;
-    const seq = (this.vector()[writer] ?? 0) + 1;
+    await this.handshake;
+    const seq = Math.max(this.vector()[writer] ?? 0, this.hubHave[writer] ?? 0) + 1;
     const event = { ts: ts ?? new Date().toISOString(), writer, seq, ...fields };
     const sealed = (await seal(this.key, 'log', this.project, event, await deriveLogNonce(this.key, this.project, event))) as unknown as LogEvent;
     this.feed().push(sealed);
@@ -678,20 +701,26 @@ export class FakeMachine {
       case 'decide':
       case 'answer': {
         const { digest } = rpc.args;
-        const held = this.pending.get(digest.request);
-        if (!held) {
+        const notPending = () => {
           const settled = this.settledRequests.get(digest.request);
           return fail('not-pending', settled ? `already settled: ${settled.outcome} (${settled.by})` : 'no such request is pending', settled ? { winner: settled.winner, by: settled.by } : {});
-        }
+        };
+        // The digest is checked against the request pending in the session the RPC names, never another session's.
+        if (digest.session !== rpc.args.session) return fail('digest-mismatch', `the request as drawn belongs to ${digest.session}, not ${rpc.args.session}`);
+        const held = this.pending.get(digest.request);
+        if (!held) return notPending();
         const { raised } = held;
-        if (digest.session !== raised.session || digest.tool !== raised.tool || digest.input_sha256 !== (await inputSha256(raised.input))) {
+        const inputSha = await inputSha256(raised.input);
+        // The request may have settled (the terminal, the replay) while its input was hashed.
+        if (this.pending.get(digest.request) !== held) return notPending();
+        if (digest.session !== raised.session || digest.tool !== raised.tool || digest.input_sha256 !== inputSha) {
           return fail('digest-mismatch', 'the request as drawn is not the one pending');
         }
         if (raised.deadline && Date.now() > Date.parse(raised.deadline) - 200) {
           return fail('not-pending', 'the window closed; the terminal answers it', { terminalOnly: true });
         }
         const outcome: Settled['outcome'] = rpc.rpc === 'answer' ? 'answered' : rpc.args.decision;
-        await this.settle(digest.request, { winner: 'web', outcome, by: member });
+        if (!(await this.settle(digest.request, { winner: 'web', outcome, by: member }))) return notPending();
         return this.traced(rpc, record, raised.session, {});
       }
       case 'model': {
@@ -768,6 +797,7 @@ export class FakeMachine {
     switch (frame.t) {
       case 'have':
         if (frame.project !== this.project) return;
+        this.hubHave = frame.have;
         this.uploadFrom(frame.have);
         this.have?.(frame);
         this.have = null;
@@ -820,7 +850,12 @@ export class FakeMachine {
       this.flushing = this.flushing.then(() =>
         this.link.post(frames).catch((error: unknown) => {
           this.postErrors.push(error as Error);
-          if (error instanceof LinkError) this.refused(error);
+          if (error instanceof LinkError) return this.refused(error);
+          // The POST never reached an answer (the connection failed): nothing says what the hub took. The frames go
+          // back to the front of the outbox for the next flush, and a machine that reconnects drops the stream, whose
+          // handshake uploads every own event the hub lacks and republishes the rest.
+          this.outbox.unshift(...frames);
+          if (this.options.reconnect && !this.stopped && !this.crashed && !this.reconnecting) void this.drop();
         }),
       );
     }
