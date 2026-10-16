@@ -1,0 +1,19 @@
+diff --git a/.smns b/.smns
+new file mode 100644
+index 0000000..8170e66
+--- /dev/null
++++ b/.smns
+@@ -0,0 +1,5 @@
++{
++  "project": "6162ec3d-571c-4b9c-bb06-1eab347fa0e2",
++  "name": "fakerec",
++  "remote": ""
++}
+diff --git a/recorded.txt b/recorded.txt
+new file mode 100644
+index 0000000..f5ac3db
+--- /dev/null
++++ b/recorded.txt
+@@ -0,0 +1 @@
++blue
+\ No newline at end of file

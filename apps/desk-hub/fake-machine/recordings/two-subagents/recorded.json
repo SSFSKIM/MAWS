@@ -1,0 +1,16 @@
+{
+  "session": "ac0d9312-d6f9-46c7-93d6-a137164c2e41",
+  "cwd": "/tmp/fmr.wd4sp6__/work",
+  "member": "00000000000000000000000000000000",
+  "prompts": [
+    "Do these four steps in order, and nothing else. 1) In one message, launch two subagents in parallel with the Agent tool (subagent_type general-purpose, run_in_background false, so you wait for both). The first is told: 'Reply with exactly: alpha done. Use no tools.' The second is told: 'Write one short sentence about the sea, then reply with exactly: beta done. Use no tools.' 2) After both return, run this Bash command: python3 -c \"open('recorded.txt', 'w').write('blue')\" 3) Then ask me with the AskUserQuestion tool which color to use, with the options red and blue. 4) Finally write one short paragraph to me about the chosen color, wrapped in <message></message> tags.",
+    "Count from one to three hundred in English words, one number per line, with no other text."
+  ],
+  "annotated": {
+    "events.jsonl n=281": "the ask mod's question, raised under the dialog's toolu_plugin_… id, carries toolUseId: the transcript's call toolu_01YLTbS83Smb5RvQKJwQtK2S (the tool call at n=276), as DX4's raised now names it; the bridge that recorded it predates the field"
+  },
+  "synthesized": {
+    "log/SK.local.5e0c1f2a-7b3d-4e8f-9a6b-1c2d3e4f5a6b.jsonl": "a peer session on the same machine, joined, saying two things to the recorded session",
+    "deliveries.jsonl": "the outcomes of delivering the peer's two says: no outside-origin event reached the recorded session"
+  }
+}
