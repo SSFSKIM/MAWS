@@ -66,9 +66,10 @@ test('soak: hidden five minutes and closed five minutes with the engine live, no
     expect(await scene.supervisor(second.page), 'the same supervisor').toBe(supervisor);
     expect(await scene.live(second.page), 'the same launch, no other').toEqual([engine]);
     expect(scene.launches(engine.appSessionId), 'one launch, never exited').toEqual({ spawns: 1, exits: 0 });
-    ({ frame } = await scene.openPage(second.page, artifactId));
+    ({ frame } = await scene.restoredPage(second.page, artifactId)); // the restored page's one load, never navigated again
     await expect(frame.locator('#last')).toHaveText('ok n=3 via=engine', { timeout: 20_000 });
-    expect(scene.toolCalls().at(-1)!.pid, 'the same fixture server answered').toBe(server);
+    await wait(5_000);
+    expect(scene.toolCallsBetween(reopenedAt, Date.now()), 'the restored page read once').toMatchObject([{ pid: server, tool: TOOL }]);
     sheet = await scene.openSheet(second.page);
     await expect(row(sheet).locator('[data-connector-state]')).toContainText('Allowed to read');
 

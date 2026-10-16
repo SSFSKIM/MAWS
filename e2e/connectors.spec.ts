@@ -18,6 +18,9 @@
 //          interval and catches up once shown; revoked from the sheet, it stops at once and calls nothing; one launch
 //          throughout; the grant outlives an ordinary quit and relaunch (nothing acquired until the owner's Start
 //          again) and serves the next session without a new grant; a duplicate holds none, deletion drops it.
+//   hot relaunch (P3-H H4): main killed with the owner's session live in the detached host and relaunched at once on the
+//          same profile: the same supervisor and launch, and the restored page reads exactly once, through that engine
+//          and its server (the soak's relaunch, without its five-minute waits).
 import { createHash } from 'node:crypto';
 import { test, expect, type Locator, type TestInfo } from '@playwright/test';
 import { callMcpTool, probeMcpCall, qualifiedMcpToolName } from '../src/engine-host/mcp-call';
@@ -247,5 +250,36 @@ test('product: the owner starts a session and grants a page’s tool from the he
     const deletedCalls = scene.toolCalls().length;
     await wait(WATCH_MS + 5_000);
     expect(scene.toolCalls(), 'nothing is called for a deleted artifact').toHaveLength(deletedCalls);
+  });
+});
+
+test('hot relaunch: main killed and relaunched at once keeps the owner’s session, and the restored page reads exactly once through it', async () => {
+  test.setTimeout(300_000);
+  await withScene('hot', test.info(), async (scene) => {
+    const first = await scene.launch();
+    expect(await first.page.evaluate(() => document.visibilityState), 'the app’s window is visible').toBe('visible');
+    const supervisor = await scene.supervisor(first.page);
+    const artifactId = await scene.createPage(first.page);
+    let { frame } = await scene.openPage(first.page, artifactId);
+    await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+    const engine = await scene.ownerStart(first.page);
+    await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
+    const sheet = await scene.openSheet(first.page);
+    await sheet.locator(`[data-connector-tool="${TOOL_NAME}"]`).getByRole('button', { name: `Allow ${TOOL_NAME} to read` }).click();
+    await scene.closeSheet(first.page);
+    await expect(frame.locator('#last')).toHaveText('ok n=1 via=engine', { timeout: 20_000 });
+    const server = scene.toolCalls()[0]!.pid;
+
+    await scene.killApp(first);
+    const reopenedAt = Date.now();
+    const second = await scene.launch();
+    expect(await scene.supervisor(second.page), 'the same supervisor').toBe(supervisor);
+    expect(await scene.live(second.page), 'the same launch, no other').toEqual([engine]);
+    expect(scene.launches(engine.appSessionId), 'one launch, never exited').toEqual({ spawns: 1, exits: 0 });
+    ({ frame } = await scene.restoredPage(second.page, artifactId));
+    await expect(frame.locator('#last')).toHaveText('ok n=2 via=engine', { timeout: 20_000 });
+    await wait(5_000);
+    expect(scene.toolCallsBetween(reopenedAt, Date.now()), 'the restored page read once').toMatchObject([{ pid: server, tool: TOOL }]);
+    expect(scene.toolCalls()).toHaveLength(2);
   });
 });

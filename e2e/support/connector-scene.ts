@@ -234,12 +234,25 @@ export class ConnectorScene {
     return id;
   }
 
-  // The artifact in a main tab of its own, from the library; answers the tab and its page's frame.
+  // The artifact in a main tab of its own: the tab already showing it when there is one (opening the library over it
+  // would unmount the page, and its next mount is a new page load whose watch reads at once), else opened from the
+  // library as the owner opens it. Answers the tab and its page's frame.
   async openPage(page: Page, artifactId: string): Promise<{ tab: Locator; frame: FrameLocator }> {
-    await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
-    await page.locator('[data-library]').getByRole('article', { name: PAGE_TITLE, exact: true }).click({ timeout: 15_000 });
     const tab = page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`);
+    if (!(await tab.locator('[data-artifact-frame="html"]').isVisible())) {
+      await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+      await page.locator('[data-library]').getByRole('article', { name: PAGE_TITLE, exact: true }).click({ timeout: 15_000 });
+    }
     await expect(tab.locator('[data-artifact-frame="html"]')).toBeVisible();
+    return { tab, frame: tab.frameLocator('[data-artifact-frame="html"]') };
+  }
+
+  // After a relaunch on the profile: the artifact's tab as the app restored it, never navigated to (a library open would
+  // remount the page, a second load and so a second read). Fails when the app did not restore it.
+  async restoredPage(page: Page, artifactId: string): Promise<{ tab: Locator; frame: FrameLocator }> {
+    const tab = page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`);
+    await expect(tab.locator('[data-artifact-frame="html"]'), 'the app restored the artifact’s tab').toBeVisible({ timeout: 20_000 });
+    this.note('restored page');
     return { tab, frame: tab.frameLocator('[data-artifact-frame="html"]') };
   }
 
