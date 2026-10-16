@@ -15,8 +15,9 @@
 // - Theme restyles every board through the document medium; a held board is drawn labelled and never written.
 // - M6: a board's middle snaps to a sibling's and to an equal gap between two (their guides drawn); an edit in the main
 //   tab patches the panel's replica within a frame, its geometry and its content (the seam's frame probe); the comments
-//   rail and card, the history comparison and the Export sheet, wide in a main tab and narrow in the panel, each
-//   screenshotted and measured before its bounds are read.
+//   rail and card, the history comparison and the Export sheet, wide (the design's main tab; the card in the panel
+//   maximized beside the chat, where a comment goes) and narrow (the panel), each screenshotted and measured before its
+//   bounds are read.
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { launchMaws, type MawsLaunch } from './support/launch';
@@ -546,11 +547,14 @@ test('a held board is drawn labelled and never written; Theme restyles every boa
   expect(launch!.consoleErrors()).toEqual([]);
 });
 
-// M6 (product evidence for the owner's sitting): M4's comments and history surfaces and M5's Export sheet, each wide in a
-// main tab and narrow in the panel, a screenshot and the editor's measured geometry kept first, then the bounds every
-// surface keeps (nothing sideways out of the editor, the rails inside it, the card and the sheet on the window).
-test('the comments, history and Export sheet surfaces, wide in a main tab and narrow in the panel: evidence first, then their bounds', async () => {
-  test.setTimeout(240_000);
+// M6 (product evidence for the owner's sitting): M4's comments and history surfaces and M5's Export sheet, wide and
+// narrow, a screenshot and the editor's measured geometry kept first, then the bounds every surface keeps (nothing
+// sideways out of the editor, the rails inside it, the card and the sheet on the window). A comment goes to the session
+// the main area shows (B's rule), so while the main area shows the design's own tab the rail lists the threads but no
+// new comment is offered there; the wide comment card is the panel's, maximized beside the chat the main area shows, and
+// the narrow surfaces are the panel at its own width beside that chat.
+test('the comments, history and Export sheet surfaces, wide and narrow: evidence first, then their bounds', async () => {
+  test.setTimeout(300_000);
   const page = await ready();
   const id = await createDesign(page, 'Launch screens', DESIGN_FILES);
   await editDesign(page, id, { op: 'addThread', threadId: 'board', boardId: 'phone', elementId: '', body: 'Is this the launch screen?' });
@@ -562,59 +566,83 @@ test('the comments, history and Export sheet surfaces, wide in a main tab and na
   const { panel, inPanel, inMain } = await inPanelAndTab(page, id);
   const mainRegion = page.locator('[data-region="main"]');
   const bounds: [string, SurfaceGeometry][] = [];
+  const keep = async (name: string, body: Locator, shot: Locator | null) => bounds.push([name, await surfaceEvidence(page, name, body, shot)]);
+  const toolbarOf = (body: Locator) => body.getByRole('toolbar', { name: 'Design' });
 
-  for (const [surface, body, shot] of [
-    ['wide', inMain, mainRegion],
-    ['narrow', inPanel, panel],
-  ] as const) {
-    const region = surface === 'wide' ? 'main' : 'panel';
-    const toolbar = body.getByRole('toolbar', { name: 'Design' });
-    await test.step(`${surface}: comments, the rail and a board’s new comment card`, async () => {
-      await toolbar.getByRole('button', { name: /^Comments/ }).click();
-      const rail = body.getByRole('complementary', { name: 'Comments' });
-      await expect(rail.locator('article[data-thread]')).toHaveCount(2);
-      bounds.push([`design-comments-rail-${surface}`, await surfaceEvidence(page, `design-comments-rail-${surface}`, body, shot)]);
-      await toolbar.getByRole('button', { name: /^Comments/ }).click();
-      await expect(rail).toHaveCount(0);
-      await body.getByRole('button', { name: 'Board Phone', exact: true }).click(); // its frame selected
-      await expect.poll(async () => (await viewOf(page, id, region)).frame).toBe('phone');
-      await toolbar.getByRole('button', { name: 'Comment', exact: true }).click();
-      const card = page.locator('[data-comment-card]');
-      await expect(card).toBeVisible();
-      bounds.push([`design-comments-card-${surface}`, await surfaceEvidence(page, `design-comments-card-${surface}`, body, null)]);
-      await page.keyboard.press('Escape'); // focus is in the card's field
-      await expect(card).toHaveCount(0);
-    });
+  const commentsRail = async (surface: string, body: Locator, shot: Locator) => {
+    await toolbarOf(body).getByRole('button', { name: /^Comments/ }).click();
+    const rail = body.getByRole('complementary', { name: 'Comments' });
+    await expect(rail.locator('article[data-thread]')).toHaveCount(2);
+    await keep(`design-comments-rail-${surface}`, body, shot);
+    await toolbarOf(body).getByRole('button', { name: /^Comments/ }).click();
+    await expect(rail).toHaveCount(0);
+  };
+  const commentCard = async (surface: string, body: Locator, region: 'main' | 'panel') => {
+    await body.getByRole('button', { name: 'Board Phone', exact: true }).click(); // its frame selected
+    await expect.poll(async () => (await viewOf(page, id, region)).frame).toBe('phone');
+    await toolbarOf(body).getByRole('button', { name: 'Comment', exact: true }).click();
+    const card = page.locator('[data-comment-card]');
+    await expect(card).toBeVisible();
+    await expect(card).toHaveAttribute('data-anchor-locator', 'Phone');
+    await keep(`design-comments-card-${surface}`, body, null);
+    await page.keyboard.press('Escape'); // focus is in the card's field
+    await expect(card).toHaveCount(0);
+  };
+  const history = async (surface: string, body: Locator, shot: Locator, region: 'main' | 'panel') => {
+    await headerAction(page, 'Version history', region);
+    const rail = body.getByRole('complementary', { name: 'Version history' });
+    await expect(rail).toBeVisible();
+    for (const fold of await rail.getByRole('button', { name: /^\d+ more versions?$/ }).all()) await fold.click();
+    await rail.getByRole('button', { name: /^Version Draft by You/ }).click();
+    const bar = body.getByRole('toolbar', { name: 'Version preview' });
+    await expect(bar.locator('.deck-history-heading')).toContainText('Draft');
+    await rail.getByRole('button', { name: /^Version Reviewed by You/ }).click({ modifiers: ['Shift'] });
+    await expect(bar.locator('.deck-history-heading')).toHaveText('Draft → Reviewed');
+    await expect(body.getByRole('region', { name: 'Design in this version' }).locator('[data-history-board="desktop"]')).toHaveAttribute('data-history-change', 'changed');
+    await keep(`design-history-compare-${surface}`, body, shot);
+    await bar.getByRole('button', { name: 'Back to design' }).click();
+    await expect(toolbarOf(body)).toBeVisible();
+    await headerAction(page, 'Version history', region);
+    await expect(rail).toHaveCount(0);
+  };
+  const exportSheet = async (surface: string, body: Locator, region: 'main' | 'panel') => {
+    await body.locator('[data-board-title="poster"]').click(); // its frame selected: what Export takes
+    await expect.poll(async () => (await viewOf(page, id, region)).frame).toBe('poster');
+    await exportEntry(page, 'PNG (selected board)', region);
+    const sheet = page.getByRole('dialog', { name: 'Export “Poster” at 91.02%?' });
+    await expect(sheet).toBeVisible();
+    await keep(`design-export-sheet-${surface}`, body, null);
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
+  };
 
-    await test.step(`${surface}: history, the two versions compared`, async () => {
-      await headerAction(page, 'Version history', region);
-      const rail = body.getByRole('complementary', { name: 'Version history' });
-      await expect(rail).toBeVisible();
-      for (const fold of await rail.getByRole('button', { name: /^\d+ more versions?$/ }).all()) await fold.click();
-      await rail.getByRole('button', { name: /^Version Draft by You/ }).click();
-      const bar = body.getByRole('toolbar', { name: 'Version preview' });
-      await expect(bar.locator('.deck-history-heading')).toContainText('Draft');
-      await rail.getByRole('button', { name: /^Version Reviewed by You/ }).click({ modifiers: ['Shift'] });
-      await expect(bar.locator('.deck-history-heading')).toHaveText('Draft → Reviewed');
-      await expect(body.getByRole('region', { name: 'Design in this version' }).locator('[data-history-board="desktop"]')).toHaveAttribute('data-history-change', 'changed');
-      bounds.push([`design-history-compare-${surface}`, await surfaceEvidence(page, `design-history-compare-${surface}`, body, shot)]);
-      await bar.getByRole('button', { name: 'Back to design' }).click();
-      await expect(body.getByRole('toolbar', { name: 'Design' })).toBeVisible();
-      await headerAction(page, 'Version history', region);
-      await expect(rail).toHaveCount(0);
-    });
+  await test.step('wide, the design’s main tab: the comments rail (no new comment offered: no session shown), history, the Export sheet', async () => {
+    await commentsRail('wide', inMain, mainRegion);
+    await expect(toolbarOf(inMain).getByRole('button', { name: 'Comment', exact: true })).toHaveCount(0);
+    await history('wide', inMain, mainRegion, 'main');
+    await exportSheet('wide', inMain, 'main');
+  });
 
-    await test.step(`${surface}: the Export sheet stating the poster’s fitting scale`, async () => {
-      await body.locator('[data-board-title="poster"]').click(); // its frame selected: what Export takes
-      await expect.poll(async () => (await viewOf(page, id, region)).frame).toBe('poster');
-      await exportEntry(page, 'PNG (selected board)', region);
-      const sheet = page.getByRole('dialog', { name: 'Export “Poster” at 91.02%?' });
-      await expect(sheet).toBeVisible();
-      bounds.push([`design-export-sheet-${surface}`, await surfaceEvidence(page, `design-export-sheet-${surface}`, body, null)]);
-      await page.keyboard.press('Escape');
-      await expect(sheet).toHaveCount(0);
-    });
-  }
+  // the main area back on the chat: comments in the panel go to it
+  const chat = mainRegion.getByRole('tab', { name: /^New chat/ });
+  await chat.click();
+  await expect(chat).toHaveAttribute('aria-selected', 'true');
+  await expect(inPanel.locator('[data-design-editor]')).toBeVisible();
+
+  await test.step('wide, the panel maximized beside the chat: a board’s new comment card', async () => {
+    await panel.getByRole('button', { name: 'Maximize right panel' }).click();
+    await expect.poll(async () => (await inPanel.boundingBox())?.width ?? 0, { message: 'the maximized panel lays the editor out wide' }).toBeGreaterThanOrEqual(720);
+    await commentCard('wide', inPanel, 'panel');
+    await panel.getByRole('button', { name: 'Restore right panel' }).click();
+    await expect.poll(async () => (await inPanel.boundingBox())?.width ?? Infinity).toBeLessThan(720);
+  });
+
+  await test.step('narrow, the panel beside the chat: the comments rail and card, history, the Export sheet', async () => {
+    await commentsRail('narrow', inPanel, panel);
+    await commentCard('narrow', inPanel, 'panel');
+    await history('narrow', inPanel, panel, 'panel');
+    await exportSheet('narrow', inPanel, 'panel');
+  });
 
   for (const [name, geometry] of bounds) expectSurfaceBounds(name, geometry);
   expect(launch!.consoleErrors()).toEqual([]);

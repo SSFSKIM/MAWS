@@ -280,16 +280,22 @@ test('the agent’s route: artifact_export on the real tool server exports a boa
       expect(sizes).toHaveLength(4);
       ORDER.forEach((board, k) => expectPage(pdf, sizes, k + 1, BOARDS[board], 1, `the agent’s page ${k + 1} (${board})`));
 
-      // M6 (acceptance 6): the design the session made is the library's row, kind and session named: its last editor
-      // and its session chip, in the product's own library
+      // M6 (acceptance 6): the design the session made is the library's row, kind and session named: its creator and
+      // last editor, and its session chip, in the product's own library. The replay's launch bound the session to a new
+      // engine transcript, which forgets the seeded transcript's first-prompt title (the index's rebinding rule) until
+      // that transcript's own summary names one (a replay writes none). The owner names it with a MAWS title through
+      // `session.update`, the override `session.rename` itself writes when no process of the session is ready (the
+      // replay's, here, would be asked through the engine's control instead), and the row and chip read the index's title
       const designId = (JSON.parse(resultText(answer(0))) as { artifactId: string }).artifactId;
+      const SESSION_TITLE = 'Export lab session';
+      await ok(s.page, 'session.update', { appSessionId: sessionId, patch: { title: { text: SESSION_TITLE, source: 'user' } } });
       const { row } = await ok<{ row: { kind: string; lastEditor: unknown; sessions: { appSessionId: string; title: string; roles: string[] }[] } | null }>(s.page, 'library.get', { artifactId: designId });
       expect(row).toMatchObject({ kind: 'design', lastEditor: { kind: 'session', appSessionId: sessionId } });
-      expect(row!.sessions).toEqual(expect.arrayContaining([expect.objectContaining({ appSessionId: sessionId, title: 'P3-E1: design export' })]));
+      expect(row!.sessions).toEqual([expect.objectContaining({ appSessionId: sessionId, title: SESSION_TITLE, roles: expect.arrayContaining(['created']) })]);
       await s.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
       const libraryRow = s.page.locator('[data-library]').getByRole('article', { name: 'Export lab', exact: true });
       await expect(libraryRow).toContainText('Design');
-      await expect(libraryRow.getByRole('button', { name: 'P3-E1: design export', exact: true })).toBeVisible();
+      await expect(libraryRow.getByRole('button', { name: SESSION_TITLE, exact: true })).toBeVisible();
     });
   } finally {
     launch = null; // the scene closed its own app
