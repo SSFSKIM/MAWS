@@ -22,7 +22,8 @@ import { LocalHub } from '../test/local/hub';
 import { TestMachine } from '../test/local/machine';
 import { enrollInBrowser, holdOrgKey } from './org';
 
-test.describe.configure({ mode: 'serial' });
+// Each case opens its own project with its own machines, so one failing does not stop the rest.
+test.describe.configure({ mode: 'default' });
 
 let hub: LocalHub;
 let context: BrowserContext;
@@ -31,6 +32,8 @@ let orgKey: Uint8Array;
 let org: string;
 let member: string;
 const machines: Array<{ close(): Promise<void> }> = [];
+/** Every machine name this run enrolled, revoked at the end (the local hub's state outlives a run). */
+const enrolledNames: string[] = [];
 
 const short = () => randomUUID().slice(0, 8);
 
@@ -40,7 +43,9 @@ test.beforeAll(async ({ browser }) => {
   context = await browser.newContext();
   page = await context.newPage();
   await holdOrgKey(page, hub);
-  const code = await enrollInBrowser(page, `g2-${short()}`);
+  const first = `g2-${short()}`;
+  enrolledNames.push(first);
+  const code = await enrollInBrowser(page, first);
   const enrolled = await FakeMachine.redeem(code);
   orgKey = enrolled.orgKey;
   const me = (await (await fetch(`${hub.url}/api/me`)).json()) as { org: { id: string }; member: { id: string } };
@@ -50,12 +55,14 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   for (const m of machines) await m.close();
+  for (const name of enrolledNames) await fetch(`${hub.url}/api/machines/${encodeURIComponent(name)}`, { method: 'DELETE' }).catch(() => {});
   await context?.close();
   await hub?.stop();
 });
 
 /** An enrollment code for `machine`, as the browser builds one: a one-time token from the hub, and the org key. */
 async function codeFor(machine: string): Promise<string> {
+  enrolledNames.push(machine);
   const response = await fetch(`${hub.url}/api/enrollments`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
   expect(response.status).toBe(201);
   const { token } = (await response.json()) as EnrollmentIssued;
@@ -112,12 +119,16 @@ test("M1: the grid's counts change within 2 s of a change on the machine side", 
   await expect(tile).toHaveAttribute('data-working', '0');
   await expect(tile.getByTestId('machines')).toContainText('1 machine');
   const took: Record<string, number> = {};
-  /** `change` resolves once the hub has taken the machine's frames (its POST answered); the tile follows within 2 s. */
+  /**
+   * From the machine making the change (its frames posted, the hub applying them) to the tile drawing it, on a
+   * monotonic clock: within 2 s. Each change is waited for up to 60 s and timed, and the bound is checked on all of
+   * them at the end, so a miss says by how much.
+   */
   const after = async (what: string, change: () => Promise<void>, attribute: string, value: string) => {
+    const since = performance.now();
     await change();
-    const since = Date.now();
-    await expect(tile).toHaveAttribute(attribute, value, { timeout: 2000 });
-    took[what] = Date.now() - since;
+    await expect(tile).toHaveAttribute(attribute, value, { timeout: 60_000 });
+    took[what] = Math.round(performance.now() - since);
   };
 
   // The session's record goes busy, then waiting on a permission prompt: working, then waiting on you.
@@ -142,12 +153,14 @@ test("M1: the grid's counts change within 2 s of a change on the machine side", 
   await after('offline', () => fm.drop(), 'data-working', '1');
   await expect(tile.getByTestId('machines')).toContainText('1 of 2 machines online');
   test.info().annotations.push({ type: 'grid latency (ms)', description: JSON.stringify(took) });
+  expect(Object.entries(took).filter(([, ms]) => ms > 2000), `the tile's latencies (ms): ${JSON.stringify(took)}`).toEqual([]);
 });
 
 test('G2: the pending set is decided and answered from the web through the routing, and a reload draws each decision again', async () => {
   test.setTimeout(90_000);
   const rec = recording();
   const fm = await fakeMachine({ recordings: [rec], decisions: 'wait' });
+  await fm.play({ speed: 0, until: (step) => step.k === 'log' && step.event.kind === 'joined' && step.event.session === rec.session });
   await open(page, fm.project, rec.session);
 
   await fm.play({ speed: 0, until: (step) => step.k === 'raised' });
@@ -306,10 +319,31 @@ test("G2: §5's controls by the session's kind as the machine's presence says it
   // A bridged session, working.
   const bridged = recording();
   const fm = await fakeMachine({ recordings: [bridged] });
-  await fm.play({ speed: 0, until: (step) => status(step) === 'busy' });
+  const depth = () => fm.sessions.get(bridged.session)!;
+  await fm.play({ speed: 0, until: () => depth().presence?.status === 'busy' && depth().mainTurn !== null });
   await open(page, fm.project, bridged.session);
   const composer = page.getByTestId('composer');
   for (const verb of ['Steer', 'Interrupt', 'Model', 'Compact']) await expect(composer.getByRole('button', { name: verb })).toBeEnabled();
+  // Each goes through the hub to the machine and its result is drawn.
+  const done = composer.locator('[data-rpc-state="done"]');
+  await page.getByRole('textbox', { name: 'Message fakerec' }).fill('use the split store');
+  await composer.getByRole('button', { name: 'Steer' }).click();
+  await expect(done).toHaveText('Steered: read at the next model request', { timeout: 15_000 });
+  await composer.getByRole('button', { name: 'Model' }).click();
+  await page.getByLabel('Model', { exact: true }).fill('default');
+  await page.getByRole('combobox', { name: 'Effort' }).selectOption('high');
+  await page.getByRole('button', { name: 'Apply' }).click();
+  await expect(done).toHaveText("Now the session's own model, high effort", { timeout: 15_000 });
+  await composer.getByRole('button', { name: 'Compact' }).click();
+  await expect(done).toHaveText('Compacts when this turn ends', { timeout: 15_000 });
+  await composer.getByRole('button', { name: 'Interrupt' }).click();
+  await expect(done).toHaveText('Interrupted', { timeout: 15_000 });
+  expect(fm.rpcs.map((r) => [r.rpc, r.executed])).toEqual([
+    ['steer', true],
+    ['model', true],
+    ['compact', true],
+    ['interrupt', true],
+  ]);
   const header = page.getByTestId('channel-header');
   await header.getByRole('button', { name: 'Retire…' }).click();
   await header.getByRole('button', { name: 'Retire', exact: true }).click();
@@ -339,4 +373,65 @@ test("G2: §5's controls by the session's kind as the machine's presence says it
   await composer.getByRole('button', { name: 'Steer' }).click();
   await expect(composer.locator('[data-rpc-state="done"]')).toHaveText('Sent: the session has no bridge, so there is no row to point at', { timeout: 15_000 });
   expect(bare.rpcs).toMatchObject([{ rpc: 'steer', executed: true, outcome: { state: 'done', result: { row: null } } }]);
+});
+
+test('G2: the replayed log draws as §4 says — lifecycle lines, agent traffic folded per run, addressing — in the group chat and each direct channel', async () => {
+  test.setTimeout(90_000);
+  const rec = recording();
+  const fm = await fakeMachine({ recordings: [rec] });
+  await fm.play({ speed: 0 });
+  const PEER = '5e0c1f2a-7b3d-4e8f-9a6b-1c2d3e4f5a6b'; // the recording's peer session, which says two things to it
+  await open(page, fm.project, rec.session, `/p/${fm.project}`);
+
+  const group = center(page);
+  await expect(group).toContainText(`fakerec joined on ${fm.name}`);
+  await expect(group).toContainText(`fakepeer joined on ${fm.name}`);
+  await expect(group).toContainText('You chose blue');
+  const run = group.getByTestId('agent-run');
+  await expect(run).toHaveCount(1);
+  await expect(run).toContainText('2 messages between agents');
+  await expect(group).not.toContainText('I read recorded.txt');
+  await run.getByRole('button').click();
+  await expect(run.getByTestId('agent-run-messages')).toContainText('fakepeer → fakerec');
+  await expect(run.getByTestId('agent-run-messages')).toContainText('I read recorded.txt: blue, as you chose.');
+
+  // A post tagged to one member is that member's: delivered to it, and in its channel only.
+  const box = page.getByTestId('composer').getByRole('textbox');
+  await box.fill('@fakerec keep the blue');
+  await box.press('Enter');
+  const human = group.locator('[data-item="human"]').filter({ hasText: 'keep the blue' });
+  await expect(human.getByTestId('deliveries')).toHaveText(/fakerec: delivered/, { timeout: 15_000 });
+
+  // fakerec's channel: its own message, the traffic it took part in, what was addressed to it, its working record.
+  await nav(page).locator(`[data-session="${rec.session}"]`).click();
+  await expect(center(page)).toContainText('You chose blue');
+  await expect(center(page).getByTestId('agent-run')).toContainText('2 messages between agents');
+  await expect(center(page)).toContainText('keep the blue');
+  await expect(center(page).getByTestId('working-record').first()).toBeVisible();
+  await expect(center(page)).not.toContainText('fakepeer joined');
+
+  // fakepeer's channel: its own traffic, nothing of fakerec's exchange with the human.
+  await nav(page).locator(`[data-session="${PEER}"]`).click();
+  await expect(center(page).getByTestId('agent-run')).toContainText('2 messages between agents');
+  await expect(center(page)).not.toContainText('You chose blue');
+  await expect(center(page)).not.toContainText('keep the blue');
+});
+
+test('G2: a session that ended without being retired keeps its channel and offers Resume, which the machine carries out', async () => {
+  test.setTimeout(90_000);
+  const rec = recording();
+  const fm = await fakeMachine({ recordings: [rec] });
+  await fm.play({ speed: 0 });
+  // Its process went: the machine publishes no live record for it (after a reconnect, as a daemon republishes).
+  fm.sessions.get(rec.session)!.presence = null;
+  await fm.reconnect();
+  await open(page, fm.project, rec.session);
+  await expect(nav(page).locator(`[data-group="ended"] [data-session="${rec.session}"]`)).toBeVisible({ timeout: 15_000 });
+  await expect(center(page)).toContainText('You chose blue');
+  const header = page.getByTestId('channel-header');
+  await expect(header.getByTestId('retired-by')).toHaveCount(0);
+  await header.getByRole('button', { name: 'Resume' }).click();
+  await expect(header).toContainText('Resumed; it rejoins in a moment', { timeout: 15_000 });
+  expect(fm.rpcs).toMatchObject([{ rpc: 'resume', executed: true, outcome: { state: 'done' } }]);
+  await expect(nav(page).locator(`[data-group="idle"] [data-session="${rec.session}"]`)).toBeVisible({ timeout: 15_000 });
 });

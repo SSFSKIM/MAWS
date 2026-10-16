@@ -80,6 +80,10 @@ describe('capabilities', () => {
     expect(retiredBy(base)).toBeNull();
     const offline = at({ group: 'ended', member: false, machineOnline: false, ended: { by: 'human', reason: 'retire' } });
     expect(offline.resume.can).toBe(false);
+    expect(offline.send.note).toBe('recorded, not delivered: it is retired');
+    // A terminal session retired from the project can still be running: the send is still only recorded.
+    const live = at({ member: false, presence: { record: { status: 'busy' }, bridge: false }, ended: { by: 'human', reason: 'retire' } });
+    expect(live.send).toEqual({ can: true, reason: null, note: 'recorded, not delivered: it is retired' });
   });
 
   it('presence not known yet: the log plane only', () => {

@@ -53,6 +53,13 @@ const yes = (note?: string): Capability => (note === undefined ? { can: true, re
 const no = (reason: string): Capability => ({ can: false, reason });
 
 export function capabilities(s: CapabilityInput): Record<Verb, Capability> {
+  const byKind = capabilitiesByKind(s);
+  // A send to a retired session is only recorded, whatever its process or its machine is doing: sminos delivers nothing
+  // to a session that is not a member.
+  return retiredBy(s) === null ? byKind : { ...byKind, send: yes('recorded, not delivered: it is retired') };
+}
+
+function capabilitiesByKind(s: CapabilityInput): Record<Verb, Capability> {
   const kind = kindOf(s);
   const running = turnRunning(s);
   const retire = s.member ? yes(s.seat ? undefined : 'records it retired; the process stays yours to close') : no(`${s.alias} is retired`);
@@ -65,7 +72,7 @@ export function capabilities(s: CapabilityInput): Record<Verb, Capability> {
     case 'not-running': {
       const stopped = no(`${s.alias} is not running`);
       if (retiredBy(s) !== null) {
-        return { send: yes('recorded, not delivered: it is retired'), steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no('retired: a retired session is not resumed') };
+        return { send: yes(), steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no('retired: a retired session is not resumed') };
       }
       const send = yes(s.seat ? 'resumes the seat to read it' : 'recorded, not delivered: a closed terminal session is reopened only by Resume');
       return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: yes() };

@@ -287,7 +287,11 @@ export class HubDouble {
     if (!open || !target) throw new Error(`no subscription ${sub}`);
     const n = open.next++;
     this.broadcast(project, { t: 'session', message: { project, machine: target.machine, session: target.session, kind, sub, n, body } as SessionMessage });
-    if (kind === 'end') this.project(project).subs.delete(sub);
+    if (kind === 'end') {
+      // An ended sub frees its socket's place too: the 32-a-socket admission counts only what is open.
+      this.project(project).subs.delete(sub);
+      for (const socket of this.project(project).sockets) socket.subs.delete(sub);
+    }
   }
 
   /**

@@ -364,6 +364,21 @@ describe('the session plane', () => {
     expect(double.up.filter((u) => u.frame.t === 'subscribe')).toHaveLength(34);
   });
 
+  it('takes a replacement on the same socket once the hub ended one of its 32 subscriptions', async () => {
+    const { c, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    for (let i = 0; i < 32; i++) c.subscribe({ machine: MACHINE, session: SESSION, agentId: `a${i}` }, recorder().listener);
+    await until(() => double.subscriptions(PROJECT).length === 32);
+    double.sendSub(PROJECT, double.subscriptions(PROJECT)[0].sub, 'end', { reason: 'session-ended' });
+    const replacement = recorder();
+    c.subscribe({ machine: MACHINE, session: SESSION, agentId: 'a32' }, replacement.listener);
+    await until(() => double.subscriptions(PROJECT).some((s) => s.agentId === 'a32'));
+    const { sub } = double.subscriptions(PROJECT).find((s) => s.agentId === 'a32')!;
+    double.sendSub(PROJECT, sub, 'snapshot', { rows: [], more: false, subagents: [], presence: { record: null, bridge: true }, streaming: [] });
+    await until(() => replacement.log.length === 1);
+    expect(replacement.log).toEqual(['snapshot']);
+  });
+
   it('subscribes again after a discontinuity at n 0 only after a backoff, so a bridge still starting cannot loop it', async () => {
     const delays: number[] = [];
     const { c, caughtUp } = client({ resubscribeDelay: (attempt) => (delays.push(attempt), 150) });
