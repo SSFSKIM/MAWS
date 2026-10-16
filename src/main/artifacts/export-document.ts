@@ -12,7 +12,7 @@ import type { DesignSystemExport } from '@artifacts/document/export/design-syste
 import { exportDocx } from '@artifacts/document/export/docx';
 import { exportHtml } from '@artifacts/document/export/html';
 import { exportMarkdown } from '@artifacts/document/export/markdown';
-import { exportSource, type ImageLoader } from '@artifacts/document/export/source';
+import { exportSource, type ImageLoader, type ViewRenderer } from '@artifacts/document/export/source';
 import { applyV2, newDoc } from '@artifacts/yjs';
 import type { Exporter, ExportContext, ExportRequest } from './export';
 
@@ -28,10 +28,14 @@ export interface DocumentExportContext extends ExportContext {
   system?: DesignSystemExport;
   /** A comment's author as Word names it; the session's title or "Claude", and "Owner", when absent. */
   authorName?(actor: Actor): string;
+  // P3-E start (E2 M5; E's Decision Log 32): a kind's drawn chart blocks (prepared before the run) and their page CSS
+  renderView?: ViewRenderer;
+  viewCss?: string;
+  // P3-E end
 }
 
 export interface DocumentExporter extends Exporter {
-  kind: 'document';
+  kind: 'document' | 'dashboard'; // P3-E: the dashboard runs B's four (src/main/dashboard/export.ts)
   format: DocumentExportFormat;
   run(request: DocumentExportRequest, context: DocumentExportContext): Promise<void>;
 }
@@ -54,13 +58,13 @@ async function sourceOf(context: DocumentExportContext) {
 }
 
 const html = async (request: DocumentExportRequest, context: DocumentExportContext): Promise<string> =>
-  exportHtml(await sourceOf(context), { system: context.system, pageSize: request.pageSize, images: 'inline', loadImage: imagesOf(context) });
+  exportHtml(await sourceOf(context), { system: context.system, pageSize: request.pageSize, images: 'inline', loadImage: imagesOf(context), renderView: context.renderView, viewCss: context.viewCss /* P3-E */ });
 
 const RUN: Record<DocumentExportFormat, (request: DocumentExportRequest, context: DocumentExportContext) => Promise<void>> = {
-  md: async (request, context) => context.writeFile(request.path, exportMarkdown(await sourceOf(context))),
+  md: async (request, context) => context.writeFile(request.path, exportMarkdown(await sourceOf(context), { renderView: context.renderView /* P3-E */ })),
   html: async (request, context) => context.writeFile(request.path, await html(request, context)),
   docx: async (request, context) =>
-    context.writeFile(request.path, await exportDocx(await sourceOf(context), { system: context.system, pageSize: request.pageSize, loadImage: imagesOf(context), authorName: context.authorName })),
+    context.writeFile(request.path, await exportDocx(await sourceOf(context), { system: context.system, pageSize: request.pageSize, loadImage: imagesOf(context), authorName: context.authorName, renderView: context.renderView /* P3-E */ })),
   pdf: async (request, context) => context.writeFile(request.path, await context.printToPdf(await html(request, context))),
 };
 
