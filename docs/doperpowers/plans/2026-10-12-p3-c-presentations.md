@@ -355,8 +355,10 @@ Final gates at c3830d6e (master merged at 66e29848):
 - The mini then showed a system dialog holding focus (gate-offload Decision Log 28). The architect reports that dialog failing focus-dependent groups, document among them, so both reds await a rerun after its release.
 - Rerun 38850514707 at head and comparison run 38850515465 at e50c8c92 (before the final wave) stopped at the runner's desktop check; no tests ran.
 
+The architect's ruling, refiled at 659dd26b: the class-1 drag case in `e2e/presentations.spec.ts` is a measured bound, so it now runs only under `MAWS_PRESENTATIONS_PERF=1`. The gate never sets that variable. The scale gate (`presentations-scale.spec.ts`, class 2, under the load rule) owns the 16 ms bound.
+
 Owed:
-1. **The drag bound.** Rerun `e2e:presentations` at head and at e50c8c92 on the released mini.
+1. **The drag bound.** The A/B runs at 2e8a3766, which carries the same app code as head and still runs the case unconditionally. Rerun `e2e:presentations` at head and at e50c8c92 on the released mini.
    - If only head misses 16 ms, the cause is B7: the overlay re-measures on every canvas layout pass, one more commit per drag frame. The fix is to skip or coalesce that re-measure while a gesture is active, since the gesture already updates the overlay.
    - If both miss, the bound is a mini-hardware question for the architect.
 2. **`e2e:document`.** Rerun after the release. P3-C's only change in that path passes `artifactKind` through B's comment anchor.
