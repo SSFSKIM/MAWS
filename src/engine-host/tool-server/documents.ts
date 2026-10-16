@@ -62,6 +62,7 @@ import { parseToolArguments } from '@shared/maws/tools';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
 import { documentAdapterOf } from '../documents/kinds/document';
 import { datasetFooter } from '../dashboards/answers'; // P3-E
+import { legacyDashboardFiles, legacyDashboardReason } from '@artifacts/dashboard/legacy'; // P3-E
 import { changesSince, DocumentViews, onSessionReplica, warmInSlices } from '../documents/kinds/document-host';
 import type { AgentReplica } from '../documents/replica';
 import type { ArtifactStore } from '../documents/store';
@@ -291,6 +292,13 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
               actor,
               (doc) => {
                 outcome.doc = doc;
+                // P3-E (E2 M2 fix wave R1): a dashboard made from files before E2 is held, checked here, at the write
+                // itself and after the operation's replay lookup; the batch writes nothing
+                const held = artifact.kind === 'dashboard' ? legacyDashboardFiles(doc) : null;
+                if (held) {
+                  outcome.refusal = refuse(TOOL, { reason: 'invalid', kind: 'dashboard', held }, `${input.artifact}: ${legacyDashboardReason(held)}; nothing was written`);
+                  return;
+                }
                 const view = deps.session.views.base(doc, input.baseRevision);
                 try {
                   // A first proposal has no view of its own yet. Validate against the main replica the session

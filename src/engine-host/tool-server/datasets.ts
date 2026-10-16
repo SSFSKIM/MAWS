@@ -17,6 +17,7 @@ import { basename, isAbsolute, relative } from 'node:path';
 import { DATASET_LIMITS, readDataset, removeDataset, setDataset, datasetSlotProblem, type DatasetDescriptor, type DatasetFormat } from '@artifacts/dashboard/datasets';
 import { DatasetError, parseDataset, rowKeyProblem, type ParsedDataset } from '@artifacts/dashboard/parse';
 import { DATASET_STATES } from '@artifacts/dashboard/states';
+import { legacyDashboardFiles, legacyDashboardReason } from '@artifacts/dashboard/legacy';
 import type { ArtifactDatasetResult } from '@shared/maws/dashboard-tools';
 import { mimeOf } from '@shared/files/mime';
 import { parseToolArguments, TOOL_ERRORS } from '@shared/maws/tools';
@@ -103,9 +104,13 @@ export function artifactDatasetTool(deps: ArtifactToolDeps): McpToolDefinition {
               // the final check, inside the write's savepoint and synchronous with it
               const prepare = () => {
                 if (!store.get(artifactId)) throw new ToolRefusal(TOOL_ERRORS.noArtifact(TOOL, input.artifact));
+                const doc = store.service.live(artifactId);
+                // a dashboard made from files before E2 is held (fix wave R1): checked here, at the write, so one that
+                // became it while the file was read (a restore) is refused with nothing written
+                const held = legacyDashboardFiles(doc);
+                if (held) throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard', held }, `${input.artifact}: ${legacyDashboardReason(held)}; nothing was written`);
                 const live = store.revision(artifactId);
                 if (input.baseRevision > live) throw refuse(TOOL, { reason: 'invalid', liveRevision: live }, `baseRevision ${input.baseRevision} is newer than the live revision ${live}`);
-                const doc = store.service.live(artifactId);
                 existing = readDataset(doc, input.id);
                 if (adapter.lastChange(artifactId, input.id) > input.baseRevision) {
                   const detail = existing ? 'replaced since your read' : 'removed since your read';
