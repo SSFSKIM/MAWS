@@ -49,6 +49,7 @@
     // P3-E1 M6: test/support/design-bundle.test.ts runs the Design final run's bundle checks
     "e2e/support/design-bundle.ts",
     "e2e/support/design-final-reporter.ts", // P3-E1 M6: test/support/design-final-reporter.test.ts drives it at its boundary
+    "e2e/support/design-geometry.ts", // P3-E1 M6: test/support/design-geometry.test.ts runs the evidence probe's hidden-node rule
     // P3-E1 M6: test/support/design-frames.test.ts runs the design scale gate's frame readings
     "e2e/support/design-frames.ts",
     // P2-F S-locale: the transcript model's day words and the agent tools' ages write through the renderer's date

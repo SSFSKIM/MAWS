@@ -549,19 +549,17 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
   // 0.7 s, with a pan (the wheel) or a pinch zoom (⌃-wheel) running through the world's handler all along; at least five
   // seconds of it, so several publications run wholly inside the measured window, which is what the trial claims
   const stressTrial = async (kind: 'pan' | 'zoom', k: number): Promise<{ trial: FrameTrial & { load: number; note?: string }; record: Record<string, unknown> }> => {
-    await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
+    // the first phone brought to the middle of the world by the product's own commands (Zoom to board, then 25 % about
+    // the world's middle), every board still mounted: its title then lies inside the world with room for the drag
+    const dragged: BenchBoard = BOARDS.find((b) => b.size === 'phone')!;
+    await tab.getByRole('button', { name: `Board ${dragged.title} options`, exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Zoom to board' }).click();
     await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('0.25');
+    await expect(tab.locator('[data-board-id] .maws-slide[data-board]')).toHaveCount(BOARDS.length);
     const { box: world } = await worldPoint(tab);
-    // a board whose title lies whole inside the world at this view
-    let dragged: BenchBoard | null = null;
-    for (const b of BOARDS) {
-      const t = await tab.locator(`[data-board-title="${b.id}"]`).boundingBox();
-      if (t && t.x > world.x + 20 && t.y > world.y + 20 && t.x + t.width < world.x + world.width - 300 && t.y + t.height < world.y + world.height - 200) {
-        dragged = b;
-        break;
-      }
-    }
-    if (!dragged) throw new Error('no board title lies inside the world at 25 %');
+    const t = await tab.locator(`[data-board-title="${dragged.id}"]`).boundingBox();
+    if (!(t && t.x > world.x + 20 && t.y > world.y + 20 && t.x + t.width < world.x + world.width - 300 && t.y + t.height < world.y + world.height - 200))
+      throw new Error(`${dragged.id}'s title does not lie inside the world at 25 % (${JSON.stringify(t)} in ${JSON.stringify(world)})`);
     const start = (await frameOf(page, id, dragged.id))!;
     const title = (await tab.locator(`[data-board-title="${dragged.id}"]`).boundingBox())!;
     const from = { x: title.x + Math.min(20, title.width / 2), y: title.y + title.height / 2 };

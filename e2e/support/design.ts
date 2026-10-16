@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { visuallyHidden, type NodeDraw } from './design-geometry';
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 export async function ok<T>(page: Page, name: string, input?: unknown): Promise<T> {
@@ -224,7 +225,9 @@ export interface SurfaceGeometry {
   /** P2's comment card and any dialog, where they are drawn on the window. */
   overlays: { what: string; label: string | null; rect: Rect }[];
   /** The editor's chrome lying outside the editor sideways (the world's own contents excluded: its boards are clipped to it). */
-  outside: { tag: string; className: string; role: string | null; label: string | null; rect: Rect }[];
+  outside: { tag: string; className: string; role: string | null; label: string | null; id?: string; rect: Rect; draw: NodeDraw }[];
+  /** Nodes outside the editor that draw nothing: screen-reader-only utilities (design-geometry.ts), kept as evidence. */
+  hidden: { tag: string; role: string | null; id?: string; rect: Rect }[];
   /** Sideways scroll of the editor's ancestors. */
   scrolled: number;
 }
@@ -239,7 +242,7 @@ export async function surfaceEvidence(page: Page, name: string, body: Locator, s
   const info = test.info();
   if (shot) await shot.screenshot({ path: info.outputPath(`${name}.png`) });
   else await page.screenshot({ path: info.outputPath(`${name}.png`) });
-  const geometry = await body.evaluate((n): SurfaceGeometry => {
+  const measured = await body.evaluate((n): Omit<SurfaceGeometry, 'hidden'> => {
     const rect = (el: Element) => {
       const r = el.getBoundingClientRect();
       return { x: Math.round(r.x * 10) / 10, y: Math.round(r.y * 10) / 10, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 };
@@ -252,7 +255,7 @@ export async function surfaceEvidence(page: Page, name: string, body: Locator, s
           .filter((el) => !(world && world !== el && world.contains(el)))
           .map((el) => ({ el, r: el.getBoundingClientRect() }))
           .filter(({ r }) => r.width > 0 && (r.left < e!.left - 1 || r.right > e!.right + 1))
-          .map(({ el }) => ({ tag: el.tagName.toLowerCase(), className: typeof el.className === 'string' ? el.className : '', role: el.getAttribute('role'), label: el.getAttribute('aria-label'), rect: rect(el) }))
+          .map(({ el, r }) => ({ tag: el.tagName.toLowerCase(), className: typeof el.className === 'string' ? el.className : '', role: el.getAttribute('role'), label: el.getAttribute('aria-label'), ...(el.id && { id: el.id }), rect: rect(el), draw: { w: r.width, h: r.height, clip: getComputedStyle(el).clip, clipPath: getComputedStyle(el).clipPath } }))
       : [];
     let scrolled = 0;
     for (let a: HTMLElement | null = n as HTMLElement; a; a = a.parentElement) scrolled += a.scrollLeft;
@@ -271,6 +274,13 @@ export async function surfaceEvidence(page: Page, name: string, body: Locator, s
       scrolled,
     };
   });
+  // a screen-reader-only node (dnd-kit's live region beside the board list, an sr-only label) draws nothing wherever it
+  // sits: kept as evidence apart, never read as chrome; everything else outside stays for the bounds
+  const geometry: SurfaceGeometry = {
+    ...measured,
+    outside: measured.outside.filter((o) => !visuallyHidden(o.draw)),
+    hidden: measured.outside.filter((o) => visuallyHidden(o.draw)).map((o) => ({ tag: o.tag, role: o.role, ...(o.id && { id: o.id }), rect: o.rect })),
+  };
   await info.attach(`${name}-geometry`, { body: JSON.stringify(geometry, null, 2), contentType: 'application/json' });
   return geometry;
 }
