@@ -145,7 +145,7 @@ function Method({ copy, removable, onRemove }: { copy: WrappedKeyRecord; removab
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   return (
-    <li className="flex flex-wrap items-baseline gap-2 border-b border-border py-1.5 text-ui last:border-b-0" data-method={copy.label}>
+    <li className="flex flex-wrap items-baseline gap-2 border-b border-border py-1.5 text-ui last:border-b-0" data-method={copy.label} data-key={copy.id}>
       <span className="font-medium">{copy.label}</span>
       <span className="text-ui-sm text-fg-muted">{copy.method}</span>
       {removable &&

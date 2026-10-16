@@ -270,8 +270,10 @@ test('a method is removed with the held key, and a browser holding another key i
   await confirm.getByRole('button', { name: 'Confirm', exact: true }).click();
   await expect(add).toHaveCount(0, { timeout: 60_000 });
   const spare = (await orgKeys()).keys.find((k) => !before.includes(k.id))!;
-  await dialog.getByRole('button', { name: `Remove ${spare.label}` }).click();
-  await dialog.getByRole('button', { name: 'Remove', exact: true }).click();
+  // By its id: two methods added in one minute share a generated label.
+  const row = dialog.locator(`[data-key="${spare.id}"]`);
+  await row.getByRole('button', { name: `Remove ${spare.label}` }).click();
+  await row.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect.poll(async () => (await orgKeys()).keys.map((k) => k.id)).toEqual(before);
   await page.keyboard.press('Escape');
 
@@ -282,7 +284,7 @@ test('a method is removed with the held key, and a browser holding another key i
   const theirs = await openKeyDialog(stranger);
   await expect(theirs.getByTestId('other-key')).toContainText("This browser holds another key than the org's");
   const target = (await orgKeys()).keys[0];
-  await theirs.getByRole('button', { name: `Remove ${target.label}` }).click();
+  await theirs.locator(`[data-key="${target.id}"]`).getByRole('button', { name: `Remove ${target.label}` }).click();
   await theirs.getByRole('button', { name: 'Remove', exact: true }).click();
   await expect(theirs.getByTestId('key-error')).toHaveText("This browser's key isn't the org's, so the hub refused the change. Lock it, and unlock with one of the org's methods.");
   expect((await orgKeys()).keys.map((k) => k.id)).toEqual(before);
