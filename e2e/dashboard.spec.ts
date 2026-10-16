@@ -222,11 +222,16 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     await page.keyboard.press('Escape');
   });
 
-  await test.step('the header\'s Datasets opens the sheet on every dataset of the shown document', async () => {
-    await mainHeader.getByRole('button', { name: 'Datasets' }).click();
+  await test.step('the header\'s Datasets (after B\'s actions, in More actions) opens the sheet on every dataset of the shown document', async () => {
+    const datasets = async () => {
+      await mainHeader.getByRole('button', { name: 'More actions' }).click();
+      await page.getByRole('menuitemcheckbox', { name: 'Datasets' }).click();
+    };
+    await datasets();
     const picker = page.getByRole('dialog').getByRole('combobox', { name: 'Dataset' });
     await expect(picker.locator('option')).toHaveText(['세계은행 GDP 성장률 (gdp)', 'Palmer penguins (penguins)']);
-    await mainHeader.getByRole('button', { name: 'Datasets' }).click();
+    await page.screenshot({ path: `${PROOF}/datasets-sheet.png` });
+    await datasets();
     await expect(page.getByRole('dialog')).toBeHidden();
   });
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
