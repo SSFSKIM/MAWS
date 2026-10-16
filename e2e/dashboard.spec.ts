@@ -208,14 +208,19 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     );
     expect(geometry.map((p) => p.inside), 'every name inside its panel').toEqual(COUNTRIES.map(() => true));
     for (const p of geometry) expect(p.rules).toEqual(geometry[0].rules);
+    // the last point is the figure's bottom-right corner: the figure's bottom brought into view, the point under the pointer
     const last = await eight.locator('svg').evaluate((svg) => {
+      svg.scrollIntoView({ block: 'end', inline: 'nearest' });
       const layer = svg.querySelector('[data-hover="nearest"]')!;
       const [x, y] = layer.getAttribute('data-xy')!.split(' ').at(-1)!.split(',').map(Number);
       const box = svg.getBoundingClientRect();
       const scale = box.width / Number(svg.getAttribute('width'));
-      return { x: box.left + x * scale, y: box.top + y * scale, tip: layer.getAttribute('data-tips')!.split('\n').at(-1)! };
+      const at = { x: box.left + x * scale, y: box.top + y * scale };
+      const hit = document.elementFromPoint(at.x, at.y);
+      return { ...at, inFigure: hit !== null && svg.contains(hit), tip: layer.getAttribute('data-tips')!.split('\n').at(-1)! };
     });
     expect(last.tip).toMatch(/^2024 · 미국 · growth_pct: /);
+    expect(last.inFigure, 'the last point is on screen, under the figure').toBe(true);
     await page.mouse.move(last.x, last.y);
     await expect(eight.locator('.dash-tip')).toHaveText(last.tip);
     await eight.screenshot({ path: `${PROOF}/small-multiples.png` });
