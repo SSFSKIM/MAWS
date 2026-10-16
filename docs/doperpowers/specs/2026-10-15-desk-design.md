@@ -1149,8 +1149,8 @@ consumers start after that gate.
   `claimed` with no outcome (the daemon stopped between the two writes) is
   not executed again either: it is reconciled from the action's own trace
   where one exists (a spawned seat carries the nonce that started it; a
-  steer's row is in the transcript) and otherwise answered `failed:
-  interrupted`, for the human to look at. An unknown nonce older than 60
+  steer's answer from the mod is kept by the bridge child under the nonce)
+  and otherwise answered `failed: interrupted`, for the human to look at. An unknown nonce older than 60
   seconds is refused. The hub marks an RPC `uncertain` when
   the machine's connection drops after the RPC was forwarded and before its
   result arrived, and resolves it from the results the daemon republishes
@@ -2535,8 +2535,10 @@ stopped), `interrupted` (below), `failed` (execution failed; `message` says how)
 effect, records the outcome before sending the result, and keeps the entry a day. A nonce the ledger knows is answered
 from the ledger, before the freshness check, and never executed again. A nonce left `claimed` with no outcome (the
 daemon stopped between the two writes) is not executed again either: it is reconciled from the action's own trace
-where one exists (a spawned seat carries its nonce; a steer's row is in the transcript), and otherwise answered
-`failed` with `interrupted`. A browser retry reuses the nonce; the hub answers it from its record or forwards it again
+where one exists (a spawned seat carries its nonce; a steer carries its nonce to the bridge child, which keeps the
+mod's answer under it, the last 100, in its kept file; a Resume's kept job is checked for the session, and a job
+running another session is a copy, stopped and answered `copy-started`), and otherwise answered `failed` with
+`interrupted`, at once for a claim whose job was never kept. A browser retry reuses the nonce; the hub answers it from its record or forwards it again
 once the machine is back. Results reach the hub as DX2 `rpc-result` frames, republished until `rpc-ack`.
 
 **Built at M3:** forwarding, the record per nonce, `uncertain` on a lapsed lease or a closed stream, `rpc-ack`, and
@@ -3487,6 +3489,13 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A steer's trace for reconciling a lost outcome is the mod's answer, kept by the bridge child under the
+  RPC's nonce, not a transcript row (DX6). The recomposition panel (scalpel-2#2) found no reliable link from a
+  transcript row to the claim that caused it. Rejected: answering every orphaned steer `interrupted`, which would
+  call a steer that landed (DC7's G2 restart test) a failure. Interrupt, model, and compact could reconcile the same
+  way (doperpowers TECH-DEBT backlog). Built in doperpowers #201 (7.157.4), with the Resume copy check and the
+  never-kept claim answered `interrupted` at once. Flags DC7.
+  Date/Author: 2026-10-15, design session (the recomposition panel's fix wave).
 - Decision: A `resume` page is counted in frames, not bytes (DX3), and a receiver's open part sets are bounded
   in count and id length as well as bytes (DX2, DX3). As built, a page is four `log` frames of about 256 KiB, so
   about 1 MiB, and up to about 4 MiB when its events approach the 1 MiB event bound. Rejected: a byte cap per page
