@@ -10,10 +10,19 @@
 //          pairs in opposite configuration orders.
 //   probe: the compatibility probe reaches no configured tool, the old fixed sentinel `maws-compat-probe` and a server
 //          holding the probe's first candidate name both configured, while a direct call to the sentinel does run.
+//   product (P3-H H4): the built app on a scratch profile (support/connector-scene.ts), the installed engine launched by
+//          the product with the fixture server, an owner's HTML page in a Space linked to the session's directory: the
+//          page declares and watches the tool, reads `revoked: notGranted` and calls nothing until the owner allows it
+//          from the header's Connectors sheet; then it reads through route E; hidden, it calls nothing for longer than
+//          its interval and catches up once shown; revoked from the sheet, it stops at once and calls nothing; no timer
+//          ever acquires an engine (one launch throughout, none after a restart until the test starts one); the grant
+//          outlives an ordinary quit and relaunch and serves the next live session without a new grant; a duplicate
+//          holds none, and deleting the artifact drops it.
 import { createHash } from 'node:crypto';
-import { test, expect, type TestInfo } from '@playwright/test';
+import { test, expect, type Locator, type TestInfo } from '@playwright/test';
 import { callMcpTool, probeMcpCall, qualifiedMcpToolName } from '../src/engine-host/mcp-call';
 import { startScratchEngine, type FixtureServer, type ScratchEngine } from './support/connector-engine';
+import { invoke, pageState, TOOL, TOOL_NAME, value, wait, WATCH_MS, withScene } from './support/connector-scene';
 
 test.skip(process.env.MAWS_CONNECTORS_E2E !== '1', 'the connector e2e runs under pnpm e2e:connectors (MAWS_CONNECTORS_E2E=1)');
 test.describe.configure({ timeout: 120_000 });
@@ -141,5 +150,97 @@ test('probe: the compatibility probe reaches no configured tool; the old sentine
     // what the fixed sentinel would have done
     expect(await callMcpTool(engine.client, { server: 'maws-compat-probe', tool: 'probe' })).toMatchObject({ ok: true, result: { structuredContent: { server: 'sentinel', tool: 'probe' } } });
     expect(engine.toolCalls()).toMatchObject([{ server: 'sentinel', tool: 'probe' }]);
+  });
+});
+
+test('product: the owner grants a page’s tool from the header, the page reads through route E, hidden or revoked it calls nothing, and the grant outlives a restart but not its artifact', async () => {
+  test.setTimeout(480_000);
+  await withScene('product', test.info(), async (scene) => {
+    let run = await scene.launch();
+    expect(await run.page.evaluate(() => document.visibilityState), 'the app’s window is visible (the e2e quiet mode keeps native visibility)').toBe('visible');
+    const engine = await scene.startEngine(run.page);
+    const artifactId = await scene.createPage(run.page);
+    let { frame } = await scene.openPage(run.page, artifactId);
+    const row = (sheet: Locator) => sheet.locator(`[data-connector-tool="${TOOL_NAME}"]`);
+
+    // declared and watched: with no grant the watch reads notGranted, calls nothing, and nothing opens by itself
+    await expect(frame.locator('#declared')).toHaveText('declared');
+    await expect(frame.locator('#watch')).toHaveText(`watching every ${WATCH_MS}`);
+    await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: 20_000 });
+    expect(scene.toolCalls()).toEqual([]);
+    await expect(run.page.locator('[data-connectors-sheet]')).toHaveCount(0);
+
+    // the owner allows it from the header: the watch wakes and reads through the live engine
+    let sheet = await scene.openSheet(run.page);
+    await expect(row(sheet).locator('[data-connector-state]')).toContainText('Not allowed');
+    await row(sheet).getByRole('button', { name: `Allow ${TOOL_NAME} to read` }).click();
+    await expect(row(sheet).locator('[data-connector-state]')).toContainText('Allowed to read');
+    await scene.closeSheet(run.page);
+    await expect(frame.locator('#last')).toHaveText('ok n=1 via=engine', { timeout: 20_000 });
+    expect(scene.toolCalls()).toMatchObject([{ server: 'series', tool: TOOL, arguments: { series: 'signups' } }]);
+    scene.note('read', await pageState(frame));
+
+    // hidden: nothing for longer than the interval; shown again: the refresh that fell due runs once
+    await scene.hideWindow(run);
+    const hiddenAt = Date.now();
+    await wait(WATCH_MS + 10_000);
+    const shownAt = Date.now();
+    expect(scene.toolCallsBetween(hiddenAt, shownAt), 'no call while hidden').toEqual([]);
+    await scene.showWindow(run);
+    await expect(frame.locator('#last')).toHaveText('ok n=2 via=engine', { timeout: 15_000 });
+
+    // revoked from the header: the page reads it at once, and nothing is called for longer than the interval
+    sheet = await scene.openSheet(run.page);
+    await row(sheet).getByRole('button', { name: `Revoke ${TOOL_NAME}` }).click();
+    await expect(frame.locator('#last')).toHaveText('revoked:revoked');
+    await expect(row(sheet).locator('[data-connector-state]')).toContainText('Not allowed');
+    const revoked = scene.toolCalls().length;
+    await scene.closeSheet(run.page);
+    await wait(WATCH_MS + 10_000);
+    expect(scene.toolCalls(), 'no call after the revoke').toHaveLength(revoked);
+
+    // no timer acquired an engine: the one launch, still live
+    expect((await scene.live(run.page)).map((s) => s.launchId)).toEqual([engine.launchId]);
+    expect(scene.launches(engine.appSessionId)).toEqual({ spawns: 1, exits: 0 });
+
+    // allowed again, then an ordinary quit: the idle engine stops with the app
+    sheet = await scene.openSheet(run.page);
+    await row(sheet).getByRole('button', { name: `Allow ${TOOL_NAME} to read` }).click();
+    await expect(row(sheet).locator('[data-connector-state]')).toContainText('Allowed to read');
+    await scene.closeSheet(run.page);
+    await expect(frame.locator('#last')).toHaveText('ok n=3 via=engine', { timeout: 20_000 });
+    await scene.quit(run);
+    await expect.poll(() => scene.pidAlive(engine.pid), { timeout: 30_000, message: 'the engine stopped with the app' }).toBe(false);
+    const quitCalls = scene.toolCalls().length;
+
+    // relaunched on the same profile: nothing is acquired, the grant is held, the page reads paused with Start offered
+    run = await scene.launch();
+    ({ frame } = await scene.openPage(run.page, artifactId));
+    await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
+    sheet = await scene.openSheet(run.page);
+    await expect(row(sheet).locator('[data-connector-state]')).toContainText('Allowed to read');
+    await expect(sheet.locator('[data-connectors-start]').getByRole('button', { name: 'Start session' })).toBeVisible();
+    await scene.closeSheet(run.page);
+    await wait(WATCH_MS + 5_000); // the paused watch asks for a route again at its interval, and acquires nothing
+    expect(await scene.live(run.page), 'no engine acquired after the restart').toEqual([]);
+    expect(scene.launches(engine.appSessionId).spawns).toBe(1);
+    expect(scene.toolCalls()).toHaveLength(quitCalls);
+
+    // a live session again (the test's own launch): the held grant serves the watch at its next ask, no new grant
+    const next = await scene.startEngine(run.page);
+    await expect(frame.locator('#last')).toHaveText('ok n=1 via=engine', { timeout: WATCH_MS + 20_000 });
+    expect(scene.toolCalls().at(-1)).toMatchObject({ server: 'series', tool: TOOL, pid: expect.any(Number) });
+    expect((await scene.live(run.page)).map((s) => s.launchId)).toEqual([next.launchId]);
+
+    // no inheritance: a duplicate holds no grant, and the artifact's deletion takes its grant with it
+    const copy = value(await invoke(run.page, 'artifacts.duplicate', { artifactId })).artifact.id;
+    expect(value(await invoke(run.page, 'artifacts.connectorGrants', { artifactId: copy })).grants).toEqual([]);
+    expect(value(await invoke(run.page, 'artifacts.connectorGrants', { artifactId })).grants).toMatchObject([{ server: 'fixture', tool: TOOL, mode: 'read' }]);
+    value(await invoke(run.page, 'artifacts.delete', { artifactId }));
+    const after = await invoke(run.page, 'artifacts.connectorGrants', { artifactId });
+    expect(after.ok ? after.value.grants : [], 'a deleted artifact holds no grant').toEqual([]);
+    const deletedCalls = scene.toolCalls().length;
+    await wait(WATCH_MS + 5_000);
+    expect(scene.toolCalls(), 'nothing is called for a deleted artifact').toHaveLength(deletedCalls);
   });
 });
