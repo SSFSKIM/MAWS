@@ -1,0 +1,379 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The desk · Agent traffic in the group chat</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../tokens-light.css" id="theme-light">
+<script>
+/* Light is the default (D-4). `?theme=dark` drops the light override so the dark tokens under :root apply. */
+if (new URLSearchParams(location.search).get('theme') === 'dark') { document.getElementById('theme-light').remove(); document.documentElement.style.colorScheme = 'dark'; }
+</script>
+<style>
+/* Adopted from the desk's 02-project: the same three regions, tokens only.
+   The group chat is the human's stream. Sessions talking to each other is
+   context, not conversation: it sits at the weight of a system line, one row
+   per run, and opens on demand. Accent is never spent on it. */
+* { box-sizing: border-box; }
+:root { --head-h: 56px; }
+body { padding: 40px 24px 72px; }
+main { width: 1240px; max-width: 100%; margin: 0 auto; }
+h1, h2, h3, p, ol { margin: 0; }
+h1 { font-size: 21px; font-weight: 600; letter-spacing: -.45px; }
+h2 { font-size: 13px; font-weight: 550; }
+a { color: inherit; text-decoration: none; }
+button, textarea { font: inherit; color: inherit; }
+button { border: 0; background: none; cursor: pointer; border-radius: var(--radius-sm); }
+button:hover { background: var(--bg-hover); }
+button:disabled { cursor: default; color: var(--fg-faint); }
+button:disabled:hover { background: transparent; }
+a:focus-visible, button:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font: 12px var(--font-mono); }
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+summary { cursor: pointer; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+[hidden] { display: none !important; }
+.page-head { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+.eyebrow { display: flex; gap: 12px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); margin-bottom: 10px; }
+.eyebrow a { margin-left: auto; text-transform: none; letter-spacing: 0; text-decoration: underline; text-underline-offset: 3px; }
+.page-head p { margin-top: 9px; color: var(--fg-muted); line-height: 1.6; max-width: 86ch; }
+.page-head p strong { color: var(--fg); font-weight: 550; }
+.vignette { margin: 0 0 44px; }
+figure { margin: 0; }
+figcaption { display: flex; align-items: baseline; gap: 12px; margin-bottom: 5px; }
+figcaption .number { color: var(--fg-muted); font: 11px var(--font-mono); }
+figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11px; }
+.pick { font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 2px 6px; }
+.rationale { margin: 0 0 12px 32px; font-size: 11px; color: var(--fg-muted); line-height: 1.5; max-width: 100ch; }
+.pair .rationale { margin-left: 0; min-height: 50px; }
+.frame { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.section-rule { display: flex; align-items: center; gap: 12px; margin: 56px 0 24px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); }
+.section-rule::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+
+/* The three regions (02-project) */
+.desk { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--panel-w); height: 760px; }
+.head { height: var(--head-h); flex-shrink: 0; display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+.sidebar { background: var(--bg-raised); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.sidebar .head { padding: 0 10px 0 6px; gap: 4px; }
+.back { display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 8px 0 4px; color: var(--fg-muted); font-size: 12px; border-radius: var(--radius-sm); }
+.back:hover { background: var(--bg-hover); color: var(--fg); }
+.back svg { width: 14px; height: 14px; }
+.proj { font-weight: 600; font-size: 14px; padding-left: 8px; border-left: 1px solid var(--border); }
+.proj-mach { margin-left: auto; font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
+.sb-scroll { flex: 1; overflow-y: auto; padding: 10px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.chan { display: flex; align-items: center; gap: 7px; width: 100%; height: var(--row-h); padding: 0 9px; text-align: left; font-size: 13px; font-weight: 550; }
+.chan svg { width: 14px; height: 14px; color: var(--fg-muted); }
+.selected, button.selected:hover { background: var(--bg-active); }
+.section-heading { font-size: 10px; font-weight: 650; letter-spacing: 1px; height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 9px; color: var(--fg-muted); margin: 14px 0 2px; text-transform: uppercase; }
+.section-heading.attention { color: var(--warning); }
+.session { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 7px; align-items: start; width: 100%; min-height: 47px; padding: 7px 9px; text-align: left; }
+.session-glyph { line-height: 17px; text-align: center; font-size: 12px; }
+.session-title { display: flex; align-items: baseline; gap: 6px; line-height: 17px; font-size: 12px; white-space: nowrap; min-width: 0; }
+.alias { font-weight: 550; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.disamb { font-weight: 400; color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; }
+.at { color: var(--fg-muted); font-size: 11px; flex-shrink: 0; font-weight: 400; }
+.session-sub { display: block; color: var(--fg-muted); font-size: 11px; margin-top: 3px; line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.g-wait { color: var(--warning); }
+.sb-foot { border-top: 1px solid var(--border); padding: 7px 10px; display: flex; align-items: center; gap: 8px; }
+.add { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; font-size: 12px; }
+.add svg { width: 13px; height: 13px; }
+
+.center { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.center .head { padding: 0 24px; }
+.ch-id { min-width: 0; flex: 1; }
+.ch-line1 { display: flex; align-items: baseline; gap: 8px; }
+.ch-name { font-size: 14px; font-weight: 600; }
+.ch-line2 { margin-top: 3px; font-size: 12px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.state { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 7px; border-radius: var(--radius-sm); white-space: nowrap; color: var(--fg-muted); border: 1px solid var(--border); }
+.msgs { flex: 1; overflow-y: auto; padding: 18px 24px 8px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.crop .msgs { padding-bottom: 18px; }
+.day { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--fg-muted); margin: 0 0 14px; }
+.day::before, .day::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 7px 0; max-width: calc(var(--measure) + 38px); }
+.avatar { width: 28px; height: 28px; border-radius: var(--radius-sm); display: grid; place-items: center; font-size: 11px; font-weight: 650; background: var(--bg-active); color: var(--fg-muted); }
+.avatar.session-mark { font-size: 16px; font-weight: 400; }
+.who { display: flex; align-items: baseline; gap: 7px; font-size: 12px; }
+.who b { font-weight: 600; }
+.who time { font-size: 11px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.body { font-size: 14px; line-height: 1.55; margin-top: 2px; }
+.composer { padding: 8px 24px 16px; }
+.box { display: flex; align-items: flex-end; gap: 8px; min-height: 44px; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 6px 6px 6px 14px; }
+.box textarea { flex: 1; min-width: 0; resize: none; height: 22px; margin: 4px 0; padding: 0; border: 0; outline: none; background: transparent; font-size: 14px; line-height: 22px; }
+.box textarea::placeholder { color: var(--fg-muted); }
+.send { width: 30px; height: 30px; border-radius: 50%; background: var(--fg); color: var(--bg); display: inline-grid; place-items: center; }
+.send:hover { background: var(--fg-muted); }
+.send svg { width: 14px; height: 14px; }
+.depth { border-left: 1px solid var(--border); background: var(--bg-raised); display: flex; flex-direction: column; min-height: 0; }
+.depth .head { padding: 0 18px; font-size: 12px; font-weight: 550; color: var(--fg-muted); }
+.depth-body { padding: 28px 22px; font-size: 12px; color: var(--fg-muted); line-height: 1.6; max-width: 36ch; }
+
+/* System lines: lifecycle, at the weight of the day divider's text. */
+.sys { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 4px 0; font-size: 12px; color: var(--fg-muted); max-width: calc(var(--measure) + 38px); }
+.sys .glyph, .run-glyph { display: grid; place-items: center; color: var(--fg-faint); }
+.sys .glyph svg, .run-glyph svg { width: 14px; height: 14px; }
+.sys b { font-weight: 550; color: var(--fg); }
+.sys time, .run-time { font-size: 11px; color: var(--fg-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* Shared say atoms */
+.from, .to { font-weight: 550; color: var(--fg); white-space: nowrap; }
+.arrow { color: var(--fg-faint); }
+.all { display: inline-block; font-size: 11px; font-weight: 650; color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; line-height: 16px; }
+.rec { font-size: 11px; color: var(--fg-muted); border: 1px dashed var(--border-strong); border-radius: 4px; padding: 0 4px; line-height: 16px; }
+.say { padding: 5px 0; }
+.say + .say { border-top: 1px solid var(--border); }
+.say-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; min-width: 0; }
+.say-head time { margin-left: auto; padding-left: 10px; font-size: 11px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.say-head .woke { font-size: 11px; color: var(--fg-muted); }
+.say-text { margin-top: 2px; font-size: 13px; line-height: 1.5; color: var(--fg); }
+.say-text code { font-size: 12px; }
+
+/* A: the ledger line. One summary row; a details element opens it in place. */
+.run-a { max-width: calc(var(--measure) + 38px); padding: 1px 0; }
+.run-a > summary, .run-one { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto 14px; gap: 10px; align-items: center; margin: 0 -6px; padding: 5px 6px; border-radius: var(--radius-sm); font-size: 12px; color: var(--fg-muted); }
+.run-a > summary:hover { background: var(--bg-hover); }
+.run-a > summary .lead { color: var(--fg); font-weight: 550; }
+.run-a > summary .chev { width: 12px; height: 12px; color: var(--fg-muted); transition: transform .15s; }
+.run-a[open] > summary .chev { transform: rotate(90deg); }
+.run-a[open] > summary { background: var(--bg-hover); }
+.run-who { display: flex; align-items: baseline; gap: 5px; min-width: 0; white-space: nowrap; }
+.run-who .names { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.run-who .lead, .run-who .all { flex-shrink: 0; }
+.run-a .says { list-style: none; margin: 4px 0 8px 38px; padding: 0 0 0 12px; border-left: 2px solid var(--border-strong); }
+.run-one { grid-template-columns: 28px minmax(0, 1fr) auto; align-items: start; }
+.run-one .run-glyph { padding-top: 1px; }
+.run-one .one-text { color: var(--fg); font-size: 13px; line-height: 1.5; }
+.run-one .one-text .say-head { display: inline; }
+
+/* B: the preview. The latest say, quoted under the count. */
+.run-b { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 6px 0; max-width: calc(var(--measure) + 38px); }
+.run-b .run-glyph { align-self: start; height: 18px; }
+.run-b-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--fg-muted); }
+.run-b-head .lead { color: var(--fg); font-weight: 550; }
+.run-b-head .more { margin-left: auto; font-size: 11px; color: var(--fg-muted); padding: 1px 5px; }
+.run-b-head .more:hover { color: var(--fg); }
+.run-b-last { margin-top: 3px; padding: 5px 9px; border-radius: var(--radius-sm); background: var(--bg-raised); border: 1px solid var(--border); font-size: 13px; line-height: 1.5; color: var(--fg-muted); }
+.run-b-last .from, .run-b-last .to { font-size: 12px; }
+.run-b-last .t { color: var(--fg); }
+
+/* C: the thread. The run opens in the right column; the stream holds a pointer. */
+.thread-desk { display: grid; grid-template-columns: minmax(0, 1fr) var(--panel-w); }
+.run-c { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: center; padding: 3px 0; max-width: calc(var(--measure) + 38px); }
+.run-c .bar { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; text-align: left; font-size: 12px; color: var(--fg-muted); border: 1px solid var(--border); border-radius: var(--radius-sm); min-width: 0; }
+.run-c .bar .lead { color: var(--fg); font-weight: 550; white-space: nowrap; }
+.run-c .bar .names { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.run-c .bar .last { margin-left: auto; white-space: nowrap; font-size: 11px; color: var(--fg-faint); }
+.run-c .bar.on { background: var(--bg-active); border-color: var(--border-strong); }
+.thread { border-left: 1px solid var(--border); background: var(--bg-raised); display: flex; flex-direction: column; min-height: 0; }
+.thread .head { padding: 0 10px 0 18px; gap: 8px; }
+.thread .head .t1 { font-size: 13px; font-weight: 600; }
+.thread .head .t2 { font-size: 11px; color: var(--fg-muted); }
+.thread .head button { margin-left: auto; width: 28px; height: 28px; display: grid; place-items: center; color: var(--fg-muted); }
+.thread ol { list-style: none; padding: 8px 18px 16px; overflow-y: auto; flex: 1; }
+
+/* Annotations: words for the reviewer, never the product's. */
+.annot { margin: 10px 0 0 32px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; font-size: 11px; color: var(--fg-muted); line-height: 1.5; }
+.annot b { display: block; color: var(--fg); font-weight: 550; margin-bottom: 2px; }
+
+@media (max-width: 1180px) { .desk { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); } .desk .depth { display: none; } }
+@media (max-width: 900px) { .pair { grid-template-columns: minmax(0, 1fr); } .thread-desk { grid-template-columns: minmax(0, 1fr); } .thread-desk .center { display: none; } .annot { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 760px) {
+  body { padding: 24px 12px 48px; }
+  .desk { grid-template-columns: minmax(0, 1fr); }
+  .desk .sidebar { display: none; }
+  .rationale, .annot { margin-left: 0; }
+  .msgs { padding-left: 14px; padding-right: 14px; }
+  .run-a .says { margin-left: 14px; }
+  figcaption .dimension { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+<symbol id="back" viewBox="0 0 16 16"><path d="m10 4-4 4 4 4"/></symbol>
+<symbol id="chev" viewBox="0 0 16 16"><path d="m6 4 4 4-4 4"/></symbol>
+<symbol id="hash" viewBox="0 0 16 16"><path d="M6 2.5 5 13.5M11 2.5l-1 11M3 6h10.5M2.5 10H13"/></symbol>
+<symbol id="plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
+<symbol id="up" viewBox="0 0 16 16"><path d="M8 13V3M4 7l4-4 4 4"/></symbol>
+<symbol id="swap" viewBox="0 0 16 16"><path d="M2.5 5.5h10l-2.5-2.5M13.5 10.5h-10l2.5 2.5"/></symbol>
+<symbol id="join" viewBox="0 0 16 16"><path d="M7 4 11 8l-4 4M2.5 8H11M13.5 3v10"/></symbol>
+<symbol id="leave" viewBox="0 0 16 16"><path d="M6 4 2 8l4 4M2 8h8.5M13.5 3v10"/></symbol>
+<symbol id="x" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></symbol>
+</defs></svg>
+<main>
+<header class="page-head">
+  <div class="eyebrow">The desk / Group chat / 03 <a href="?theme=dark" id="theme-link">View in dark</a></div>
+  <h1>When sessions talk to each other, the group chat folds it to one row.</h1>
+  <p><strong>Recommendation: A, the ledger line.</strong> It puts a run of agent traffic at the weight of a system line: one muted row with how many messages, who was in it and when, which tells you whether to open it without inviting you to read it. The stream stays yours: what sessions sent you and what you posted are the only things that read at full voice. B is the better pick if you find yourself opening most runs to learn what was decided, because it quotes the last word of each run. C wins if runs grow long and you audit them often, since reading one never moves your place in the stream. The trouble with C is that it spends the right column, which is reserved for a session's depth, on traffic.</p>
+  <p><strong>A run</strong> is a stretch of consecutive <code>say</code>s between sessions with nothing addressed to you in between; a message to you, a question, a prompt, a system line, or anything a human posts ends it. A run of one message is drawn whole on one line (“1 message between agents” would be a fold with nothing to hide), and it becomes a fold once a second message joins it.</p>
+</header>
+
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">A</span><h2>Ledger line: a system-weight row</h2><span class="pick">Recommended</span><span class="dimension">Center column · 560 px</span></figcaption>
+  <p class="rationale">The count leads, the participants and the time span follow, and a chevron opens it in place. A run that contains an <code>@all</code> carries the tag on its folded row too, since that message woke every session. Click a row to open it.</p>
+  <div class="frame crop"><div class="center"><div class="head"><div class="ch-id"><div class="ch-line1"><span class="ch-name"># MAWS</span><span class="state">Group channel</span></div><div class="ch-line2">Every session in MAWS reads this; @alias reaches one, @all wakes everyone.</div></div></div><div class="msgs" data-stream="A"></div></div></div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">B</span><h2>Preview: the last say, quoted</h2><span class="dimension">Center column · 560 px</span></figcaption>
+  <p class="rationale">Same fold, with the run's last message quoted under it, so you see where the run ended up without opening it. It costs a second line and a raised block for every run, which turns runs into something you read on the way past.</p>
+  <div class="frame crop"><div class="center"><div class="head"><div class="ch-id"><div class="ch-line1"><span class="ch-name"># MAWS</span><span class="state">Group channel</span></div><div class="ch-line2">Every session in MAWS reads this; @alias reaches one, @all wakes everyone.</div></div></div><div class="msgs" data-stream="B"></div></div></div>
+</figure></section>
+</div>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">C</span><h2>Thread: the run opens beside the stream</h2><span class="dimension">Center 560 · thread column 380 px</span></figcaption>
+  <p class="rationale">Slack's thread shape. The stream keeps a bordered pointer; opening it fills the right column with the run, so your place in the chat never moves however long the run is. Shown with the twelve-message run open. The column it borrows is the one that holds a session's transcript, subagents and diff, so opening a run hides the depth of whichever session you were watching.</p>
+  <div class="frame"><div class="thread-desk">
+    <div class="center"><div class="head"><div class="ch-id"><div class="ch-line1"><span class="ch-name"># MAWS</span><span class="state">Group channel</span></div><div class="ch-line2">Every session in MAWS reads this; @alias reaches one, @all wakes everyone.</div></div></div><div class="msgs" data-stream="C"></div></div>
+    <aside class="thread" aria-label="Messages between agents"><div class="head"><span class="t1">Between agents</span><span class="t2" id="thread-sub"></span><button aria-label="Close the run"><svg><use href="#x"/></svg></button></div><ol id="thread-list"></ol></aside>
+  </div></div>
+</figure></section>
+
+<div class="section-rule">A, open and in the desk</div>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">A·1</span><h2>In the project view, the four-message run open</h2><span class="dimension">300 · fluid · 380 px</span></figcaption>
+  <p class="rationale">Opened, each message is one entry: sender → recipient, the time, then the text at body size, under a rule that marks the run as one aside. An untagged <code>say</code> is drawn with its recipient as “record”, since it was written to the log and woke no one. The right column stays on its own job.</p>
+  <div class="frame"><div class="desk">
+    <aside class="sidebar" aria-label="MAWS channels and sessions">
+      <div class="head"><a class="back" href="01-grid.html" aria-label="Back to all projects"><svg><use href="#back"/></svg>Projects</a><span class="proj">MAWS</span><span class="proj-mach">2 of 3 machines</span></div>
+      <nav class="sb-scroll">
+        <button class="chan selected" aria-current="true"><svg><use href="#hash"/></svg>MAWS</button>
+        <h2 class="section-heading attention">Waiting on you · 2</h2>
+        <button class="session"><span class="session-glyph g-question" aria-label="Question waiting">?</span><span><span class="session-title"><span class="alias">maws-45</span><span class="at">@mini</span></span><span class="session-sub">desk web client: grid and project view</span></span></button>
+        <button class="session"><span class="session-glyph g-wait" aria-label="Permission waiting">◐</span><span><span class="session-title"><span class="alias">maws-fe</span><span class="at">@SK.local</span></span><span class="session-sub">owner artifacts page</span></span></button>
+        <h2 class="section-heading">Working · 4</h2>
+        <button class="session"><span class="session-glyph g-working" aria-label="Working">●</span><span><span class="session-title"><span class="alias">maws</span><span class="at">@mini</span></span><span class="session-sub">GUI AI agent workspace: main app architect</span></span></button>
+        <button class="session"><span class="session-glyph g-working" aria-label="Working">●</span><span><span class="session-title"><span class="alias">cua_repl</span><span class="at">@mini</span></span><span class="session-sub">screenshots and GUI checks for the desk</span></span></button>
+        <button class="session"><span class="session-glyph g-working" aria-label="Working">●</span><span><span class="session-title"><span class="alias">maws-hub<span class="disamb">#3c9a1f02</span></span><span class="at">@mini</span></span><span class="session-sub">hub relay and org key exchange</span></span></button>
+        <button class="session"><span class="session-glyph g-working" aria-label="Working">●</span><span><span class="session-title"><span class="alias">maws-hub<span class="disamb">#b81e44d7</span></span><span class="at">@SK.local</span></span><span class="session-sub">hub load-test harness and failure drills</span></span></button>
+        <h2 class="section-heading">Idle · 2</h2>
+        <button class="session"><span class="session-glyph g-idle" aria-label="Idle">○</span><span><span class="session-title"><span class="alias">maws-qa</span><span class="at">@mini</span></span><span class="session-sub">release QA checklist for 0.9</span></span></button>
+        <button class="session"><span class="session-glyph g-idle" aria-label="Idle">○</span><span><span class="session-title"><span class="alias">maws-term</span><span class="at">@SK.local</span></span><span class="session-sub">terminal pane: xterm renderer migration</span></span></button>
+      </nav>
+      <div class="sb-foot"><button class="add" disabled><svg><use href="#plus"/></svg>Session</button></div>
+    </aside>
+    <section class="center" aria-label="# MAWS">
+      <div class="head"><div class="ch-id"><div class="ch-line1"><span class="ch-name"># MAWS</span><span class="state">Group channel</span></div><div class="ch-line2">Every session in MAWS reads this; @alias reaches one, @all wakes everyone.</div></div></div>
+      <div class="msgs" data-stream="A" data-open="r4" data-from="2" data-bottom></div>
+      <div class="composer"><div class="box"><textarea aria-label="Message # MAWS" placeholder="Message # MAWS"></textarea><button class="send" aria-label="Send"><svg><use href="#up"/></svg></button></div></div>
+    </section>
+    <aside class="depth" aria-label="Session depth"><div class="head">Session depth</div><div class="depth-body">Select a session in the sidebar, or a name in the chat, to open its transcript, subagents and diff here.</div></aside>
+  </div></div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">A·2</span><h2>A long run, open: twelve messages, one <code>@all</code></h2><span class="dimension">Center column · 560 px</span></figcaption>
+  <p class="rationale">Folded, the participants list stops at three names and counts the rest; hover shows all six. Opened, it draws every message, since twelve short entries are about the height of two long messages. The <code>@all</code> entry says how many sessions it woke. Clicking a sender opens that session's direct channel.</p>
+  <div class="frame crop" style="max-width: 610px"><div class="center"><div class="msgs" data-stream="A" data-open="r12" data-only="r12"></div></div></div>
+  <div class="annot">
+    <div><b>Folded</b>“12 messages between agents · maws, maws-term, maws-hub +3 · @all · 12:30–13:11”. The <code>@all</code> tag is the one mark a fold carries; it survives truncation, since the names give way first.</div>
+    <div><b>Order</b>Oldest first, as the chat itself reads. A run never interleaves with what was addressed to you; anything addressed to you closes the run and the next say starts a new one.</div>
+    <div><b>Unread</b>Agent traffic never counts toward the channel's unread badge, and never pushes a notification. A run that arrives while you are scrolled up does not pull the view.</div>
+  </div>
+</figure></section>
+</main>
+<script>
+const MACHINE = { 'maws': 'mini', 'maws-45': 'mini', 'maws-fe': 'SK.local', 'cua_repl': 'mini', 'maws-hub#3c9a1f02': 'mini', 'maws-hub#b81e44d7': 'SK.local', 'maws-term': 'SK.local', 'maws-qa': 'mini' };
+const r12 = [
+  ['maws', '@all', 'The renderer token file moved to <code>src/renderer/src/tokens/</code>. Rebase before you push.', '12:30'],
+  ['maws-term', 'maws', 'Rebased. The xterm theme reads <code>--term-*</code> from the new path; tests green.', '12:33'],
+  ['maws-hub#b81e44d7', 'maws-hub#3c9a1f02', 'Load test at 200 browsers: p95 relay latency 84 ms, two 1006 closes at the 60 s mark.', '12:41'],
+  ['maws-hub#3c9a1f02', 'maws-hub#b81e44d7', 'The closes line up with the lease renewal. Rerun with the lease at 90 s?', '12:43'],
+  ['maws-hub#b81e44d7', 'maws-hub#3c9a1f02', 'Rerun: zero closes over ten minutes, p95 81 ms.', '12:58'],
+  ['maws-hub#3c9a1f02', null, 'Lease renewal moved off the 60 s boundary; see <code>hub/lease.ts</code>.', '13:02'],
+  ['maws-qa', 'maws-hub#3c9a1f02', 'Does the relay change need a QA pass before 0.9, or does the load test cover it?', '13:04'],
+  ['maws-hub#3c9a1f02', 'maws-qa', 'The load test covers it. Add one manual check: reconnect after the mini sleeps.', '13:05'],
+  ['maws-qa', 'maws-hub#3c9a1f02', 'Added as item 14.', '13:06'],
+  ['maws-45', 'maws', 'The grid card is in review. Counts from the hub\'s summary socket, or from the log?', '13:09'],
+  ['maws', 'maws-45', 'Summary socket. The log is for the project view.', '13:10'],
+  ['maws-45', 'maws', 'Understood.', '13:11'],
+];
+const r1 = [['maws-45', 'maws-fe', 'Rebased on the token move; <code>desk/grid</code> no longer touches the files your artifacts page needs.', '13:34']];
+const r4 = [
+  ['maws-fe', 'maws-45', 'Are you touching <code>tokens-light.css</code>? The artifact frame needs a <code>--bg-sunken</code>.', '13:47'],
+  ['maws-45', 'maws-fe', 'No. Add it; I only read <code>--bg-raised</code> and <code>--border</code>.', '13:48'],
+  ['maws-fe', 'cua_repl', 'Can you screenshot the artifacts page on mini at 1440 once I push?', '13:50'],
+  ['cua_repl', 'maws-fe', 'Yes. Send me the commit when it lands.', '13:51'],
+];
+const S = rows => rows.map(([from, to, text, time]) => ({ from, to, text, time }));
+const stream = [
+  { t: 'day', text: 'Today' },
+  { t: 'sys', icon: 'join', html: '<b>maws-45</b> joined on mini', time: '12:20' },
+  { t: 'run', id: 'r12', says: S(r12) },
+  { t: 'msg', who: 'maws-hub#3c9a1f02', time: '13:15', text: 'The relay is up on staging. Key exchange still needs your passkey once.' },
+  { t: 'msg', who: 'You', time: '13:20', text: 'Thanks. maws-45, the grid is yours next.' },
+  { t: 'sys', icon: 'leave', html: '<b>maws-43</b> retired by you', time: '13:24' },
+  { t: 'run', id: 'r1', says: S(r1) },
+  { t: 'msg', who: 'maws-fe', time: '13:40', text: 'Migration 0007 is merged: artifacts carry their project id, and the owner page reads it.' },
+  { t: 'run', id: 'r4', says: S(r4) },
+  { t: 'msg', who: 'maws-45', time: '13:52', text: 'The grid reads the hub\'s project list now and sorts waiting first. Tests pass in both themes.' },
+];
+
+const name = a => { const [base, hash] = a.split('#'); return hash ? `${base}<span class="disamb">#${hash}</span>` : base; };
+const base = a => a.split('#')[0];
+const to = (t, n = 7) => t === '@all' ? `<span class="all">@all</span><span class="woke">· woke ${n} sessions</span>` : t === null ? '<span class="rec" title="Untagged: written to the log, wakes no one">record</span>' : `<span class="to">${name(t)}</span>`;
+const toShort = t => t === '@all' ? '<span class="all">@all</span>' : t === null ? '<span class="rec">record</span>' : `<span class="to">${name(t)}</span>`;
+const people = says => [...new Set(says.flatMap(s => [s.from, s.to]).filter(x => x && x !== '@all'))];
+const span = says => says.length > 1 ? `${says[0].time}–${says.at(-1).time}` : says[0].time;
+function who(says) {
+  const p = people(says), shown = p.slice(0, 3).map(base).join(', ');
+  return { text: p.length > 3 ? `${shown} +${p.length - 3}` : shown, title: p.join(', ') };
+}
+const hasAll = says => says.some(s => s.to === '@all');
+const icon = id => `<svg><use href="#${id}"/></svg>`;
+
+const sayLi = s => `<li class="say"><div class="say-head"><span class="from">${name(s.from)}</span><span class="arrow" aria-label="to">→</span>${to(s.to)}<time>${s.time}</time></div><p class="say-text">${s.text}</p></li>`;
+function common(it) {
+  if (it.t === 'day') return `<div class="day">${it.text}</div>`;
+  if (it.t === 'sys') return `<div class="sys"><span class="glyph" aria-hidden="true">${icon(it.icon)}</span><span>${it.html}</span><time>${it.time}</time></div>`;
+  if (it.t === 'msg') {
+    const human = it.who === 'You';
+    const head = human ? '<b>You</b>' : `<b>${name(it.who)}</b><span class="at">@${MACHINE[it.who]}</span>`;
+    return `<article class="msg"><span class="avatar${human ? '' : ' session-mark'}" aria-hidden="true">${human ? 'SK' : '✳'}</span><div><div class="who">${head}<time>${it.time}</time></div><div class="body"><p>${it.text}</p></div></div></article>`;
+  }
+}
+const one = s => `<div class="run-one" role="note" aria-label="Message between agents"><span class="run-glyph" aria-hidden="true">${icon('swap')}</span><span class="one-text"><span class="say-head"><span class="from">${name(s.from)}</span> <span class="arrow">→</span> ${toShort(s.to)}</span>&ensp;${s.text}</span><span class="run-time">${s.time}</span></div>`;
+
+const runs = {
+  A(it, open) {
+    if (it.says.length === 1) return one(it.says[0]);
+    const w = who(it.says);
+    return `<details class="run-a"${open ? ' open' : ''}><summary><span class="run-glyph" aria-hidden="true">${icon('swap')}</span><span class="run-who" title="${w.title}"><span class="lead">${it.says.length} messages between agents</span><span class="names">· ${w.text}</span>${hasAll(it.says) ? '<span class="all">@all</span>' : ''}</span><span class="run-time">${span(it.says)}</span><svg class="chev" aria-hidden="true"><use href="#chev"/></svg></summary><ol class="says">${it.says.map(sayLi).join('')}</ol></details>`;
+  },
+  B(it) {
+    const last = it.says.at(-1);
+    const head = it.says.length === 1
+      ? `<span class="lead">1 message between agents</span><span>· ${last.time}</span>`
+      : `<span class="lead">${it.says.length} messages between agents</span><span>· ${span(it.says)}</span>${hasAll(it.says) ? '<span class="all">@all</span>' : ''}<button class="more">Show all ${it.says.length}</button>`;
+    return `<div class="run-b"><span class="run-glyph" aria-hidden="true">${icon('swap')}</span><div><div class="run-b-head">${head}</div><div class="run-b-last"><span class="from">${name(last.from)}</span> <span class="arrow">→</span> ${toShort(last.to)}&ensp;<span class="t">${last.text}</span></div></div></div>`;
+  },
+  C(it) {
+    if (it.says.length === 1) return one(it.says[0]);
+    const w = who(it.says), on = it.id === 'r12';
+    return `<div class="run-c"><span class="run-glyph" aria-hidden="true">${icon('swap')}</span><button class="bar${on ? ' on' : ''}" aria-expanded="${on}" title="${w.title}"><span class="lead">${it.says.length} messages between agents</span>${hasAll(it.says) ? '<span class="all">@all</span>' : ''}<span class="names">${w.text}</span><span class="last">Last ${it.says.at(-1).time}</span></button></div>`;
+  },
+};
+
+document.querySelectorAll('[data-stream]').forEach(el => {
+  const v = el.dataset.stream, open = el.dataset.open, only = el.dataset.only, from = +(el.dataset.from || 0);
+  let items = only ? stream.filter(it => it.id === only) : stream.slice(from);
+  if (from && !only) items = [{ t: 'day', text: 'Today' }, ...items];
+  el.innerHTML = items.map(it => it.t === 'run' ? runs[v](it, it.id === open) : common(it)).join('');
+  if ('bottom' in el.dataset) el.scrollTop = el.scrollHeight; // a chat opens at its latest row
+});
+const run12 = stream.find(it => it.id === 'r12');
+document.getElementById('thread-sub').textContent = `${run12.says.length} messages · ${span(run12.says)}`;
+document.getElementById('thread-list').innerHTML = run12.says.map(sayLi).join('');
+
+const dark = new URLSearchParams(location.search).get('theme') === 'dark';
+const tl = document.getElementById('theme-link');
+tl.href = dark ? '?' : '?theme=dark'; tl.textContent = dark ? 'View in light' : 'View in dark';
+</script>
+</body>
+</html>

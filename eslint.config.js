@@ -43,6 +43,7 @@ const ONE_SCHEMA = [
 ];
 const mawsSchemaPlugin = { rules: { 'one-schema': builtinRules.get('no-restricted-syntax') } };
 // P3-B end
+const DESK_WEB = 'apps/desk-web/src/ runs in a browser (the DC5 plan): no Node or Electron module.'; // DC5
 const DESK_PROTOCOL = 'apps/desk-hub/src/protocol/ is runtime-neutral (the DC3 plan, Constraints): WebCrypto and plain TypeScript, no Workers, Node, or DOM API.'; // DC3
 
 module.exports = defineConfig(
@@ -159,4 +160,26 @@ module.exports = defineConfig(
     },
   },
   // DC3 end
+  // DC5 start: the desk's web app (apps/desk-web) runs in a browser: browser globals and React's hook rules in src/, no
+  // Node or Electron module there (its double, configs, and browser suites under Node are outside src/).
+  {
+    files: ['apps/desk-web/src/**/*.{ts,tsx}'],
+    languageOptions: { globals: globals.browser },
+    ...reactHooks.configs.flat.recommended,
+  },
+  {
+    files: ['apps/desk-web/src/**/*.{ts,tsx}'],
+    ignores: ['apps/desk-web/src/**/*.test.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: ['electron', ...NODE_MODULES].map((name) => ({ name, message: DESK_WEB })),
+          patterns: [{ group: ['node:*'], message: DESK_WEB }],
+        },
+      ],
+    },
+  },
+  { files: ['apps/desk-web/{test,e2e}/**/*.ts', 'apps/desk-web/*.config.ts', 'apps/desk-web/scripts/**/*.mjs'], languageOptions: { globals: globals.node } },
+  // DC5 end
 );

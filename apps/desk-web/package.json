@@ -1,0 +1,40 @@
+{
+  "name": "desk-web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The desk's web app: the project grid, the project view, and the conversation (docs/doperpowers/specs/2026-10-15-desk-design.md, DC5)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "e2e": "vite build && playwright test",
+    "e2e:hub": "vite build && playwright test -c playwright.hub.config.ts"
+  },
+  "dependencies": {
+    "@noble/hashes": "1.8.0",
+    "@tanstack/react-query": "^5.104.0",
+    "desk-hub": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/node": "^24",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/ws": "8.18.1",
+    "@vitejs/plugin-react": "^5.2.0",
+    "happy-dom": "^20.14.5",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.6",
+    "vitest": "^5.0.2",
+    "ws": "8.22.0"
+  }
+}
