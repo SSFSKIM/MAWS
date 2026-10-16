@@ -8,7 +8,7 @@ import { applyV2, newDoc, onUpdate, stateV2, stateVector, transact, type Doc } f
 import * as Y from '../yjs/slides';
 import { DECK_PATH, slidePath } from './deck';
 import { claudeExamples } from './fixtures/s6';
-import { deckFiles, deleteElementTree, moveInto, moveSlide, readDeckJson, readFlat, readSlide, reorderFlow, resolveAnchor, setNotes, setStyle, setText, slideOrder, zOrder } from './model';
+import { deckFiles, deleteElementTree, groupOf, moveInto, moveSlide, readDeckJson, readFlat, readSlide, reorderFlow, resolveAnchor, setNotes, setStyle, setText, slideOrder, zOrder } from './model';
 import { GOOGLE_FONTS_WARNING, publishDeck, type DeckPublishOutcome } from './publish';
 
 const P = (id: string) => slidePath(id);
@@ -546,5 +546,88 @@ describe('publishDeck: fix wave 1 (the task review’s probes)', () => {
     const heldBase = deckFiles(doc);
     publishDeck(doc, heldBase, { [S]: '<section id="s1"><p id="a">Owner replacement</p></section>' }, false);
     expect(publish(doc, heldBase, { [S]: '<section id="s1"><p id="a">Agent replacement</p></section>' }).conflicts).toEqual([{ path: S, detail: 'slide: changed since your read' }]);
+  });
+});
+
+// The final whole-branch review's fix wave A (A1, A2): each a regression of a code-traced finding.
+describe('publishDeck: the final review', () => {
+  const S = P('s1');
+  const small = (html: string, extra: Record<string, unknown> = {}): Doc => created({ [DECK_PATH]: JSON.stringify({ v: 4, order: ['s1'], ...extra }), [S]: html });
+  const layerOf = (doc: Doc, id: string) => groupOf(el(doc, 's1', id)!);
+
+  it('A1: refuses the agent’s paint layer when the owner moved the element to another layer since the read; force takes the agent’s', () => {
+    const pin = 'position:absolute; left:10px; top:10px';
+    const doc = small('<section id="s1"><p id="a">A</p><p id="b">B</p></section>');
+    const base = deckFiles(doc);
+    // the owner detaches a and sends it behind the flow
+    publishDeck(doc, deckFiles(doc), { [S]: `<section id="s1"><p id="a" style="${pin}">A</p><p id="b">B</p></section>` }, false);
+    expect(layerOf(doc, 'a')).toBe('under');
+    // the agent pins a the same way, over the flow
+    const sent = `<section id="s1"><p id="b">B</p><p id="a" style="${pin}">A</p></section>`;
+    expect(publish(doc, base, { [S]: sent })).toMatchObject({ changed: [], conflicts: [{ path: S, detail: 'order: changed since your read' }], updates: 0 });
+    expect(layerOf(doc, 'a')).toBe('under');
+    expect(publish(doc, base, { [S]: sent }, true).conflicts).toEqual([]);
+    expect(layerOf(doc, 'a')).toBe('over');
+  });
+
+  it('A1: applies the agent’s layer when the live one is still the base’s, and keeps the owner’s when the agent did not change it', () => {
+    const pin = 'position:absolute; left:10px; top:10px';
+    const doc = small(`<section id="s1"><p id="a" style="${pin}">A</p><p id="b">B</p></section>`);
+    const base = deckFiles(doc);
+    expect(layerOf(doc, 'a')).toBe('under');
+    // the agent's own move over the flow
+    expect(publish(doc, base, { [S]: `<section id="s1"><p id="b">B</p><p id="a" style="${pin}">A</p></section>` }).conflicts).toEqual([]);
+    expect(layerOf(doc, 'a')).toBe('over');
+    // the owner sends it back under; the agent republishes its read (a over) with another change: not its layer change
+    const read = deckFiles(doc);
+    zOrder(doc, 's1', 'a', 'back');
+    expect(layerOf(doc, 'a')).toBe('under');
+    expect(publish(doc, read, { [S]: read[S]!.replace('>B<', '>Bee<') }).conflicts).toEqual([]);
+    expect(layerOf(doc, 'a')).toBe('under');
+  });
+
+  it('A2: refuses, even under force and writing nothing, a merge whose notes the loader would hold (over 4,000 characters)', () => {
+    const notes = 'x'.repeat(3_998);
+    const doc = small(`<section id="s1"><p id="a">A</p><aside>${notes}</aside></section>`);
+    const base = deckFiles(doc);
+    setNotes(doc, 's1', `ab${notes}`); // the owner: 4,000
+    const sent = base[S]!.replace(notes, `${notes}cd`); // the agent: 4,000
+    for (const force of [false, true]) {
+      const out = publish(doc, base, { [S]: sent }, force);
+      expect(out).toMatchObject({ changed: [], updates: 0 });
+      expect(out.conflicts).toEqual([{ path: S, detail: expect.stringMatching(/^slide: merged with the changes since your read, it would not load \(.*4,?002/) }]);
+      expect(Y.readNotes(doc, 's1')).toBe(`ab${notes}`);
+    }
+  });
+
+  it('A2: refuses a merge that leaves a host with more than 24 pinned children, and lands each addition alone', () => {
+    const pinned = (id: string, k: number) => `<p id="${id}" style="position:absolute; left:${k}px; top:0px">${id}</p>`;
+    const many = Array.from({ length: 23 }, (_, k) => pinned(`p${k}`, k)).join('');
+    const doc = small(`<section id="s1"><p id="f">Flow</p>${many}</section>`);
+    const base = deckFiles(doc);
+    publishDeck(doc, deckFiles(doc), { [S]: deckFiles(doc)[S]!.replace('</section>', `${pinned('owner', 100)}</section>`) }, false);
+    const sent = base[S]!.replace('</section>', `${pinned('agent', 200)}</section>`);
+    const out = publish(doc, base, { [S]: sent });
+    expect(out).toMatchObject({ changed: [], updates: 0 });
+    expect(out.conflicts).toEqual([{ path: S, detail: expect.stringMatching(/^slide: merged with the changes since your read, it would not load \(25 pinned children/) }]);
+    expect(Y.elementIds(doc, 's1')).not.toContain('agent');
+    // without the owner's addition, the agent's lands
+    const alone = small(`<section id="s1"><p id="f">Flow</p>${many}</section>`);
+    const read = deckFiles(alone);
+    expect(publish(alone, read, { [S]: read[S]!.replace('</section>', `${pinned('agent', 200)}</section>`) }).conflicts).toEqual([]);
+  });
+
+  it('A2: refuses a merge of the index whose faces exceed four, nothing written; whole-publish atomicity kept', () => {
+    const face = (name: string) => ({ family: name, src: `assets/${name}.woff2` });
+    const doc = small('<section id="s1"><p id="a">A</p></section>', { faces: { a: face('a'), b: face('b'), c: face('c') } });
+    const base = deckFiles(doc);
+    transact(doc, () => Y.setDeckEntry(doc, 'faces', 'owner', face('owner')));
+    const sent = JSON.parse(base[DECK_PATH]!) as { faces: Record<string, unknown> };
+    sent.faces.agent = face('agent');
+    const out = publish(doc, base, { [DECK_PATH]: JSON.stringify(sent), [S]: base[S]!.replace('>A<', '>Changed<') });
+    expect(out).toMatchObject({ changed: [], updates: 0 });
+    expect(out.conflicts).toEqual([{ path: DECK_PATH, detail: expect.stringMatching(/^deck\.json: merged with the changes since your read, it would not load \(.*more than 4 faces/) }]);
+    expect(Object.keys(readDeckJson(doc).faces ?? {}).sort()).toEqual(['a', 'b', 'c', 'owner']);
+    expect(deckFiles(doc)[S]).toContain('>A<');
   });
 });

@@ -52,17 +52,23 @@ interface Row {
 }
 
 
+/**
+ * A dictionary looked up by a name the author wrote: without a prototype, so `__proto__`, `constructor` and their kin
+ * are unknown names like any other, never keys it inherits (the final review's A3).
+ */
+const dict = <T>(entries: Record<string, T>): Readonly<Record<string, T>> => Object.freeze(Object.assign(Object.create(null) as Record<string, T>, entries));
+
 /** A shorthand declared after its longhands resets them (the CSS cascade inside one style attribute). */
-const RESETS: Record<string, readonly string[]> = {
+const RESETS = dict<readonly string[]>({
   border: ['border-top', 'border-right', 'border-bottom', 'border-left', 'border-width', 'border-style'],
   background: ['background-clip'],
   flex: ['flex-grow', 'flex-shrink', 'flex-basis'],
-};
+});
 const SIDES = ['top', 'right', 'bottom', 'left'] as const;
 const CORNERS = ['top-left', 'top-right', 'bottom-right', 'bottom-left'] as const;
 
 /** Accepted as no-ops only (Claude): dropped with a note at these values, with a warning otherwise. */
-const NOOPS: Record<string, (v: string) => boolean> = {
+const NOOPS = dict<(v: string) => boolean>({
   margin: (v) => v.split(/\s+/).every((p) => /^0(px)?$/.test(p)),
   'margin-top': (v) => /^0(px)?$/.test(v),
   'margin-right': (v) => /^0(px)?$/.test(v),
@@ -70,7 +76,7 @@ const NOOPS: Record<string, (v: string) => boolean> = {
   'margin-left': (v) => /^0(px)?$/.test(v),
   'box-sizing': (v) => v === 'border-box',
   'grid-template': (v) => v === 'none',
-};
+});
 
 const NAMED = new Set(('aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood cadetblue ' +
   'chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray darkgreen darkgrey darkkhaki ' +
@@ -250,7 +256,7 @@ function isBare(t: Tok | undefined, min?: number, max?: number): boolean {
   return v !== null && v.unit === '' && between(v.n, min, max);
 }
 const isInt = (t: Tok | undefined, min?: number, max?: number) => isWild(t) || (isBare(t, min, max) && Number.isInteger(numOf(t)!.n));
-const ANGLE_TO_DEG: Record<string, number> = { deg: 1, turn: 360, rad: 180 / Math.PI };
+const ANGLE_TO_DEG = dict<number>({ deg: 1, turn: 360, rad: 180 / Math.PI });
 function isAngle(t: Tok | undefined, maxAbsDeg = Infinity): boolean {
   if (isWild(t)) return true;
   const v = numOf(t);
@@ -468,7 +474,7 @@ function isShadows(ts: Tok[], box: boolean): boolean {
   });
 }
 
-const TRANSFORM_RANK: Record<string, number> = { translate: 0, translatex: 0, translatey: 0, rotate: 1, scale: 2, skew: 3, skewx: 3, skewy: 3 };
+const TRANSFORM_RANK = dict<number>({ translate: 0, translatex: 0, translatey: 0, rotate: 1, scale: 2, skew: 3, skewx: 3, skewy: 3 });
 function isTransform(ts: Tok[]): boolean {
   if (ts.length === 1 && isWild(ts[0])) return true;
   const seen = new Set<string>();
@@ -492,7 +498,7 @@ function isTransform(ts: Tok[]): boolean {
   return ts.length > 0;
 }
 
-const FILTER_ARG: Record<string, (t: Tok | undefined) => boolean> = {
+const FILTER_ARG = dict<(t: Tok | undefined) => boolean>({
   blur: (t) => isLen(t, 0, 20),
   brightness: (t) => isBare(t, 0, 2),
   contrast: (t) => isBare(t, 0, 2),
@@ -501,7 +507,7 @@ const FILTER_ARG: Record<string, (t: Tok | undefined) => boolean> = {
   sepia: (t) => isBare(t, 0, 1),
   invert: (t) => isBare(t, 0, 1),
   'hue-rotate': (t) => isAngle(t),
-};
+});
 function isFilter(ts: Tok[]): boolean {
   if (ts.length === 1 && isWild(ts[0])) return true;
   const seen = new Set<string>();

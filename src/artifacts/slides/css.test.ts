@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { appliesTo, checkValue, normValue, parseStyle, resolveVars, SHARED_DS_NAMES, type StyleDiagnostic, type StyleSite } from './css';
 import type { Style } from './ir';
+import { loadSlide } from './parse';
 
 const DIV: StyleSite = { tag: 'div', attrs: {}, parent: { tag: 'section', style: {} } };
 const P: StyleSite = { tag: 'p', attrs: {}, parent: { tag: 'section', style: {} } };
@@ -276,5 +277,32 @@ describe('S6’s canonical form', () => {
   it('drops line-height outside 0.5–4× its own font-size', () => {
     expect(style('font-size:24px; line-height:34px', P).style).toEqual({ 'font-size': '24px', 'line-height': '34px' });
     expect(style('font-size:24px; line-height:120px', P).style).toEqual({ 'font-size': '24px' });
+  });
+});
+
+// The final review's A3: a property or a function named like an inherited Object key is an unknown name, dropped with a
+// warning naming it; the loader never throws on one.
+describe('names an object inherits', () => {
+  it('drops __proto__, constructor and their kin as properties, with a named warning', () => {
+    for (const prop of ['__proto__', 'constructor', 'toString', 'hasOwnProperty', 'valueOf']) {
+      let out: ReturnType<typeof style> | undefined;
+      expect(() => (out = style(`${prop}:x; color:#ff0000`, P)), prop).not.toThrow();
+      expect(out!.style, prop).toEqual({ color: '#ff0000' });
+      const name = prop.toLowerCase(); // a property's name is read case-insensitively
+      expect(out!.diags, prop).toEqual([{ severity: 'warning', property: name, message: `${name} is not in the dialect; dropped` }]);
+    }
+  });
+
+  it('loads a slide whose element names one, with the warning on that element', () => {
+    const loaded = loadSlide('<section id="s"><p id="a" style="__proto__:x; color:#ff0000">A</p></section>');
+    expect(loaded.ok).toBe(true);
+    expect(loaded.diagnostics).toContainEqual(expect.objectContaining({ severity: 'warning', element: 'a', property: '__proto__' }));
+  });
+
+  it('refuses a transform or filter function named like an inherited key', () => {
+    for (const fn of ['constructor', '__proto__', 'toString']) {
+      expect(checkValue('filter', `${fn}(2px)`).ok, `filter ${fn}`).toBe(false);
+      expect(checkValue('transform', `${fn}(10deg)`).ok, `transform ${fn}`).toBe(false);
+    }
   });
 });

@@ -5,19 +5,22 @@
 // value, is left alone when live already holds the sent value, and otherwise conflicts. Text and notes merge at character
 // level when the agent's changed ranges and the live changes since the read do not overlap. Any conflict refuses the
 // whole publish (A's layer 3) unless `force`, which applies the agent's value for exactly the conflicting keys. The plan
-// is made before anything is written; the writes are one transaction, none at all for a no-op republish.
+// is made before anything is written; the writes are one transaction, none at all for a no-op republish. A merge with
+// changes made since the read is judged by the loader before it is written (the final review's A2): two edits each
+// within the limits (notes, pinned children per host, faces) may add up past them, and a slide or index the loader
+// would hold or trim is refused by name, even under force (force settles keys, and no key is the agent's to win here).
 //
 // Elements are compared by key: an element's id, or for a table cell (positional in the files, D2) its row's id and
 // column. Ids the agent left out are D4's: the base's id at the same place, else minted from base and sent only, so A's
 // two calls of `publish` (the live write and the session's new base) mint the same ids.
 import diff from 'fast-diff';
 import { FilesError, type FileProblem, type PublishOutcome } from '../files';
-import { transact, type Doc } from '../yjs';
+import { newDoc, transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
-import { DECK_LIMITS, DECK_PATH, parseDeckJson, slideIdOf, slidePath, type DeckJson } from './deck';
+import { DECK_LIMITS, DECK_PATH, parseDeckJson, serializeDeckJson, slideIdOf, slidePath, type DeckJson } from './deck';
 import { parseHtml } from './html';
 import { CONTAINER_TAGS, MARK_ORDER, TEXT_TAGS, isPinned, type Attrs, type ElementIR, type Marks, type SlideIR, type Style, type Tag, type TextBlock } from './ir';
-import { cellMinter, childLists, groupOf, GROUP_BOUNDS, GROUPS, groupKey, heldOf, readDeckJson, readFlat, resolveParents, ROOT, slideFile, slideOrder, slideScalarsOf, type Group } from './model';
+import { cellMinter, childLists, groupOf, GROUP_BOUNDS, GROUPS, groupKey, heldOf, readDeckJson, readFlat, resolveParents, ROOT, slideFile, slideOrder, slideScalarsOf, toScalars, type Group } from './model';
 import { ANY, rekey, within } from './order';
 import { loadSlide } from './parse';
 import { partition } from './serialize';
@@ -536,16 +539,17 @@ export function publishDeck(live: Doc, base: Readonly<Record<string, string>>, s
 
   // ---- 2. compare per key; every write deferred to one transaction
   const conflicts: PublishOutcome['conflicts'] = [];
+  const unmergeable: PublishOutcome['conflicts'] = []; // refusals force does not settle (A2)
   const writes: ((w: Writer) => void)[] = [];
   const added: string[] = [];
   for (const l of loaded) {
     if ('removed' in l) {
       if (removedIds.has(l.id)) planRemoval(live, l.id, l.path, base[l.path]!, force, conflicts, writes);
-    } else planSlide(live, l, base[l.path], force, conflicts, writes, added);
+    } else planSlide(live, l, base[l.path], force, conflicts, unmergeable, writes, added);
   }
-  planDeck(live, base, sentDeck, createdIds, removedIds, force, conflicts, writes, warnings);
+  planDeck(live, base, sentDeck, createdIds, removedIds, force, conflicts, unmergeable, writes, warnings);
 
-  if (conflicts.length > 0 && !force) return { changed: [], conflicts, added: [], warnings, notes, held };
+  if (unmergeable.length > 0 || (conflicts.length > 0 && !force)) return { changed: [], conflicts: [...(force ? [] : conflicts), ...unmergeable], added: [], warnings, notes, held };
 
   // ---- 3. write once
   const w = new Writer(live);
@@ -582,7 +586,29 @@ function createSlide(w: Writer, path: string, id: string, scalars: Y.Scalars, no
   added.push(path);
 }
 
-function planSlide(live: Doc, l: Loaded, baseFile: string | undefined, force: boolean, conflicts: PublishOutcome['conflicts'], writes: ((w: Writer) => void)[], added: string[]): void {
+/** The phrase of a refusal the loader makes of a merged state (A2). */
+const unloadable = (what: string, reasons: string[]) => `${what}: merged with the changes since your read, it would not load (${reasons.join('; ')})`;
+
+/**
+ * The loader's reasons for holding the slide this publish would leave, null when it loads: the live slide copied into a
+ * scratch document, the slide's planned writes run there, and the file it then reads as loaded (A2).
+ */
+function projectedHeld(live: Doc, id: string, write: (w: Writer) => void): string[] | null {
+  const scratch = newDoc();
+  try {
+    transact(scratch, () => {
+      Y.createSlide(scratch, id, Y.slideScalars(live, id), Y.readNotes(live, id));
+      for (const e of readFlat(live, id, true)) Y.createElement(scratch, id, e.id, toScalars(e), e.text);
+    });
+    transact(scratch, () => write(new Writer(scratch)));
+    const loaded = loadSlide(slideFile(scratch, id), { fileId: id });
+    return loaded.ok ? null : loaded.held.reasons;
+  } finally {
+    scratch.destroy();
+  }
+}
+
+function planSlide(live: Doc, l: Loaded, baseFile: string | undefined, force: boolean, conflicts: PublishOutcome['conflicts'], unmergeable: PublishOutcome['conflicts'], writes: ((w: Writer) => void)[], added: string[]): void {
   const { path, id, base: baseIr } = l;
   const conflict = (detail: string) => conflicts.some((c) => c.path === path && c.detail === detail) || conflicts.push({ path, detail });
   const exists = Y.hasSlide(live, id);
@@ -639,12 +665,19 @@ function planSlide(live: Doc, l: Loaded, baseFile: string | undefined, force: bo
   const notesMerge = mergeNotes(b.notes, a.notes, lv.notes, force);
   if (notesMerge.kind === 'conflict') conflict('notes: changed since your read');
 
-  writes.push((w) => {
+  const write = (w: Writer) => {
     for (const [key, v] of scalarSets) w.on(path, () => (v === undefined ? Y.deleteSlideKey(w.doc, id, key) : Y.setSlideKey(w.doc, id, key, v)));
     if (notesMerge.kind === 'set') w.on(path, () => Y.patchNotes(w.doc, id, notesMerge.value));
     planned(w);
     if (liveHeld) w.on(path, () => Y.deleteSlideKey(w.doc, id, 'held'));
-  });
+  };
+  // the agent's file loaded, and the live slide did; when the publish merges the two (the slide changed since the read),
+  // the loader judges the merge before anything is written (A2). Live equal to the base leaves the agent's file itself.
+  if (!sameSlide(b, lv) && (force || !conflicts.some((c) => c.path === path))) {
+    const reasons = projectedHeld(live, id, write);
+    if (reasons) return void unmergeable.push({ path, detail: unloadable('slide', reasons) });
+  }
+  writes.push(write);
 }
 
 /**
@@ -722,13 +755,16 @@ function planElements(path: string, b: View, a: View, lv: LiveView, force: boole
       else if (k.startsWith('attr:')) attrs[k.slice(5)] = v;
     }
     const tag = props.get('tag') as Tag;
+    const parent = props.get('parent') ?? ROOT;
     let group: Group = 'flow';
     if (isPinned(tag, style, attrs)) {
+      // the paint layer, three-way like any key (A1): the agent's when it changed it and live did not, else live's
       const [ea, eb, el] = [a.els.get(key), b.els.get(key), lv.els.get(key)];
       const agentLayer = ea && ea.group !== 'flow' && (!eb || eb.group !== ea.group) ? ea.group : undefined;
+      if (agentLayer && el && eb && el.group !== eb.group && el.group !== agentLayer && !force) conflict(parent === ROOT ? 'order: changed since your read' : `order in ${elementName(parent)}: changed since your read`);
       group = agentLayer ?? (el && el.group !== 'flow' ? el.group : ea && ea.group !== 'flow' ? ea.group : 'over');
     }
-    final.set(key, { parent: props.get('parent') ?? ROOT, group });
+    final.set(key, { parent, group });
   }
   // a child whose parent does not survive: the agent placed it in an element removed since, or removed an element
   // someone filled since (with force, it is an orphan the host's repair moves to the section)
@@ -816,6 +852,7 @@ function planDeck(
   removedIds: Set<string>,
   force: boolean,
   conflicts: PublishOutcome['conflicts'],
+  unmergeable: PublishOutcome['conflicts'],
   writes: ((w: Writer) => void)[],
   warnings: DeckWarning[],
 ): void {
@@ -824,6 +861,10 @@ function planDeck(
   const b: DeckJson = baseParsed?.ok ? baseParsed.deck : { order: [] };
   const l = readDeckJson(live);
   const keyWrites: ((w: Writer) => void)[] = [];
+  // the index this publish would leave, for the loader to judge when it merges with changes made since the read (A2);
+  // dictionaries without a prototype, so any key (`__proto__` too) is an entry
+  const projected = Object.assign(Object.create(null) as Record<string, unknown>, l);
+  const mapOf = (name: string) => (projected[name] = Object.assign(Object.create(null) as Record<string, unknown>, projected[name] ?? {})) as Record<string, unknown>;
   if (sentDeck) {
     const maps = ['sections', 'faces', 'dsOverrides'] as const;
     const skip = new Set<string>(['order', ...maps]);
@@ -836,6 +877,8 @@ function planDeck(
         continue;
       }
       const value = own(sentDeck, key);
+      if (value === undefined) delete projected[key];
+      else projected[key] = value;
       keyWrites.push((w) => w.on(DECK_PATH, () => (value === undefined ? Y.deleteDeckKey(w.doc, key) : Y.setDeckKey(w.doc, key, value as Y.Json))));
     }
     for (const name of maps) {
@@ -852,12 +895,29 @@ function planDeck(
         }
         const value = own(ma, entry);
         if (value === undefined) removed.add(entry);
+        if (value === undefined) delete mapOf(name)[entry];
+        else mapOf(name)[entry] = value;
         keyWrites.push((w) => w.on(DECK_PATH, () => (value === undefined ? Y.deleteDeckEntry(w.doc, name, entry) : Y.setDeckEntry(w.doc, name, entry, value as Y.Json))));
       }
-      if (ma !== undefined && mb === undefined && ml === undefined) keyWrites.push((w) => w.on(DECK_PATH, () => Y.ensureDeckMap(w.doc, name)));
+      if (ma !== undefined && mb === undefined && ml === undefined) {
+        mapOf(name);
+        keyWrites.push((w) => w.on(DECK_PATH, () => Y.ensureDeckMap(w.doc, name)));
+      }
       if (ma === undefined && mb !== undefined && ml !== undefined && Object.keys(ml).every((entry) => removed.has(entry))) {
+        delete projected[name];
         keyWrites.push((w) => w.on(DECK_PATH, () => Y.deleteDeckMap(w.doc, name)));
       }
+    }
+    // a merge (the index changed since the read) the loader would refuse or trim is refused by name (A2)
+    const stripped = (deck: DeckJson) => stable({ ...deck, order: undefined });
+    if (keyWrites.length > 0 && stripped(b) !== stripped(l)) {
+      const judged = (deck: object) => {
+        const parsed = parseDeckJson(serializeDeckJson(deck as DeckJson));
+        return parsed.ok ? parsed.diagnostics.filter((d) => d.severity !== 'note').map((d) => `${d.property ? `${d.property}: ` : ''}${d.message}`) : parsed.problems;
+      };
+      const already = new Set(judged(l));
+      const reasons = judged(projected).filter((reason) => !already.has(reason));
+      if (reasons.length > 0) unmergeable.push({ path: DECK_PATH, detail: unloadable('deck.json', reasons) });
     }
   }
 
