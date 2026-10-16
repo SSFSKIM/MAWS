@@ -72,6 +72,7 @@
     "src/artifacts/slides/canvas/fit.ts", // P3-C
     "src/artifacts/slides/canvas/index.ts", // P3-C
     "src/artifacts/slides/editor/**/*", // P3-C
-    "src/artifacts/**/*.dom.test.tsx" // P3-C
+    "src/artifacts/**/*.dom.test.tsx", // P3-C
+    "src/artifacts/dashboard/editor/**/*" // P3-E (E2 M3): the dashboard's node views and source sheet, typechecked by tsconfig.web.json
   ]
 }

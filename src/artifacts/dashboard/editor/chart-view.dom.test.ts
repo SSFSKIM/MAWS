@@ -1,0 +1,217 @@
+// A dashboard's chart block in the editor (P3-E2 M3): the node view's drawing through E's renderer over the displayed
+// document's descriptor and the snapshot it names; its caption, source label and notes; a replacement redrawing it
+// without a stale paint winning; the displayed document moving; its release; and the host's hover around the figure.
+import type { Node as PMNode } from '@tiptap/pm/model';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
+import type { DatasetPage } from '../../host';
+import { displayedDocument, type ViewEnvironment } from '../../document/editor/nodes/views';
+import { newDoc, type Doc } from '../../yjs';
+import { removeDataset, setDataset, type DatasetDescriptor } from '../datasets';
+import { createChartRenderer, type SourceCapture } from './chart-view';
+import { SnapshotReader } from './snapshots';
+
+const AT = Date.UTC(2026, 9, 16, 8, 30);
+const descriptor = (ref: string, over: Partial<DatasetDescriptor> = {}): DatasetDescriptor => ({
+  title: '지역별 매출',
+  source: { kind: 'file', ref, name: 'sales.csv', format: 'csv', sha256: 'a'.repeat(64), size: 42 },
+  columns: [{ name: 'region', type: 'string' }, { name: 'sales', type: 'number' }],
+  rows: 3,
+  updated: { at: AT, by: { kind: 'session', appSessionId: 'app-1' as AppSessionId } },
+  state: { status: 'ok', at: AT },
+  ...over,
+});
+const SNAPSHOTS: Record<string, DatasetPage> = {
+  'assets/sales.csv': { columns: descriptor('').columns, rows: [['서울', 12], ['부산', 7], ['제주', 3]], total: 3, truncated: false },
+  'assets/sales-2.csv': { columns: descriptor('').columns, rows: [['서울', 20], ['부산', 9], ['제주', 4]], total: 3, truncated: false },
+};
+
+interface Pending {
+  ref: string;
+  resolve(): void;
+}
+function world({ hold = false } = {}) {
+  const pending: Pending[] = [];
+  const readDataset = vi.fn((_artifactId: string, ref: string): Promise<DatasetPage> => {
+    const page = SNAPSHOTS[ref];
+    if (!page) return Promise.reject(new Error(`no asset ${ref}`));
+    if (!hold) return Promise.resolve(page);
+    return new Promise((resolve) => pending.push({ ref, resolve: () => resolve(page) }));
+  });
+  const opened: SourceCapture[] = [];
+  const renderChart = createChartRenderer({ reader: new SnapshotReader({ readDataset } as never, 'dash1'), actorName: (actor) => (actor.kind === 'human' ? 'You' : 'Claude'), openSource: (capture) => opened.push(capture) });
+  return { pending, readDataset, opened, renderChart };
+}
+
+const node = (source: string, spec: unknown = { view: 'bar', x: 'region', y: 'sales', title: 'Sales by region' }) => ({ attrs: { id: 'c1', source, spec } }) as unknown as PMNode;
+const settle = async () => {
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+};
+const tips = (into: HTMLElement) => [...into.querySelectorAll('[data-tip]')].map((el) => el.getAttribute('data-tip'));
+const releases: Array<() => void> = [];
+afterEach(() => {
+  for (const release of releases.splice(0)) release();
+  document.body.replaceChildren();
+});
+
+function mount(renderChart: NonNullable<ViewEnvironment['renderChart']>, doc: Doc, n = node('sales'), attach = true) {
+  const into = document.createElement('div');
+  if (attach) document.body.append(into);
+  const shown = displayedDocument(doc);
+  const release = renderChart(into, n, { artifactId: 'dash1', host: {} as never, renderDiagram: async () => '', displayed: shown });
+  releases.push(release);
+  return { into, shown, release };
+}
+
+describe('the chart view', () => {
+  it('draws the descriptor\'s snapshot with its caption and source label, and opens the source on the label', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const w = world();
+    const { into } = mount(w.renderChart, doc);
+    await settle();
+    expect(into.querySelector('.dash-caption')?.textContent).toBe('Sales by region');
+    expect(into.querySelector('svg')?.getAttribute('aria-label')).toBe('Sales by region');
+    expect(tips(into)).toEqual(['서울 · sales: 12', '부산 · sales: 7', '제주 · sales: 3']);
+    const label = into.querySelector<HTMLButtonElement>('button.dash-source-label')!;
+    expect(label.textContent).toBe('지역별 매출 · from sales.csv · updated 2026-10-16 08:30 UTC by Claude');
+    label.click();
+    expect(w.opened).toEqual([{ datasetId: 'sales', descriptor: descriptor('assets/sales.csv') }]);
+    expect(w.readDataset).toHaveBeenCalledWith('dash1', 'assets/sales.csv', { format: 'csv' });
+  });
+
+  it('redraws on a replacement, never letting an earlier snapshot\'s late read paint over it', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const w = world({ hold: true });
+    const { into } = mount(w.renderChart, doc);
+    await settle();
+    setDataset(doc, 'sales', descriptor('assets/sales-2.csv', { updated: { at: AT + 60_000, by: { kind: 'human' } } }));
+    await settle();
+    expect(w.pending.map((p) => p.ref)).toEqual(['assets/sales.csv', 'assets/sales-2.csv']);
+    w.pending[1].resolve();
+    await settle();
+    expect(tips(into)).toEqual(['서울 · sales: 20', '부산 · sales: 9', '제주 · sales: 4']);
+    w.pending[0].resolve(); // the earlier read answers last
+    await settle();
+    expect(tips(into)).toEqual(['서울 · sales: 20', '부산 · sales: 9', '제주 · sales: 4']);
+    expect(into.querySelector('.dash-source-label')?.textContent).toContain('updated 2026-10-16 08:31 UTC by You');
+  });
+
+  it('keeps the earlier figure, dimmed, while a replacement\'s rows are read', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const w = world({ hold: true });
+    const { into } = mount(w.renderChart, doc);
+    await settle();
+    w.pending[0].resolve();
+    await settle();
+    setDataset(doc, 'sales', descriptor('assets/sales-2.csv'));
+    await settle();
+    expect(into.querySelector('.dash-view')?.getAttribute('aria-busy')).toBe('true');
+    expect(tips(into)).toEqual(['서울 · sales: 12', '부산 · sales: 7', '제주 · sales: 3']);
+    w.pending[1].resolve();
+    await settle();
+    expect(into.querySelector('.dash-view')?.getAttribute('aria-busy')).toBeNull();
+  });
+
+  it('draws the named states in place: no dataset, removal, an unreadable snapshot, a missing column; notes mismatches', async () => {
+    const doc = newDoc();
+    const w = world();
+    const { into } = mount(w.renderChart, doc);
+    await settle();
+    expect(into.querySelector('svg')?.textContent).toContain('no dataset "sales"');
+    expect(into.querySelector('.dash-caption')?.textContent).toBe('Sales by region');
+    expect(into.querySelector('.dash-source-label')?.tagName).not.toBe('BUTTON');
+    setDataset(doc, 'sales', descriptor('assets/gone.csv'));
+    await settle();
+    expect(into.querySelector('svg')?.textContent).toContain('the file of "sales" could not be read');
+    setDataset(doc, 'sales', descriptor('assets/sales.csv', { columns: [{ name: 'region', type: 'string' }, { name: 'sales', type: 'number', mismatches: 1 }] }));
+    await settle();
+    expect(into.querySelector('.dash-notes')?.textContent).toContain('1 of 3 values in sales are not number');
+    removeDataset(doc, 'sales');
+    await settle();
+    expect(into.querySelector('svg')?.textContent).toContain('no dataset "sales"');
+    const other = mount(w.renderChart, doc, node('sales', { view: 'bar', x: 'region', y: 'revenue' }));
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    await settle();
+    expect(other.into.querySelector('svg')?.textContent).toContain('dataset "sales" has no column "revenue"');
+  });
+
+  it('follows the displayed document when it moves (a preview put on another version)', async () => {
+    const live = newDoc();
+    setDataset(live, 'sales', descriptor('assets/sales-2.csv'));
+    const version = newDoc();
+    setDataset(version, 'sales', descriptor('assets/sales.csv'));
+    const w = world();
+    const { into, shown } = mount(w.renderChart, live);
+    await settle();
+    expect(tips(into)[0]).toBe('서울 · sales: 20');
+    shown.set(version, 4);
+    await settle();
+    expect(tips(into)[0]).toBe('서울 · sales: 12');
+    setDataset(live, 'sales', descriptor('assets/gone.csv')); // the live doc is no longer the one shown
+    await settle();
+    expect(tips(into)[0]).toBe('서울 · sales: 12');
+  });
+
+  it('waits to draw until it is in the page, and draws nothing once released', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'sales', descriptor('assets/sales.csv'));
+    const w = world();
+    const { into, release } = mount(w.renderChart, doc, node('sales'), false);
+    await settle();
+    expect(into.querySelector('svg')).toBeNull();
+    document.body.append(into);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await settle();
+    expect(into.querySelector('svg')).not.toBeNull();
+    release();
+    const reads = w.readDataset.mock.calls.length;
+    setDataset(doc, 'sales', descriptor('assets/sales-2.csv'));
+    await settle();
+    expect(w.readDataset.mock.calls.length).toBe(reads);
+    expect(tips(into)[0]).toBe('서울 · sales: 12');
+  });
+});
+
+describe('hover', () => {
+  const points = (n: number): DatasetPage => ({ columns: [{ name: 'step', type: 'number' }, { name: 'level', type: 'number' }], rows: Array.from({ length: n }, (_, i) => [i, (i % 7) - 3]), total: n, truncated: false });
+
+  it('shows the value of the point nearest the pointer, the last of 3,000 included', async () => {
+    const doc = newDoc();
+    setDataset(doc, 'walk', descriptor('assets/walk.csv', { columns: points(1).columns, rows: 3_000 }));
+    SNAPSHOTS['assets/walk.csv'] = points(3_000);
+    const w = world();
+    const { into } = mount(w.renderChart, doc, node('walk', { view: 'line', x: 'step', y: 'level' }));
+    await settle();
+    const svg = into.querySelector('svg')!;
+    const layer = svg.querySelector('[data-hover="nearest"]')!;
+    const [x, y] = layer.getAttribute('data-xy')!.split(' ').at(-1)!.split(',').map(Number);
+    // the figure drawn at its own size: one SVG unit per CSS pixel
+    const width = Number(svg.getAttribute('width'));
+    const height = Number(svg.getAttribute('height'));
+    svg.getBoundingClientRect = () => ({ left: 0, top: 0, width, height, right: width, bottom: height, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    svg.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: x + 2, clientY: y - 1 }));
+    const tip = into.querySelector<HTMLElement>('.dash-tip')!;
+    expect(tip.hidden).toBe(false);
+    expect(tip.textContent).toBe(`2999 · level: ${(2999 % 7) - 3}`);
+    svg.dispatchEvent(new PointerEvent('pointerleave', { bubbles: false }));
+    expect(tip.hidden).toBe(true);
+  });
+
+  it('shows a hatched bar\'s own value: the hatching never takes the pointer', async () => {
+    const doc = newDoc();
+    const columns = [{ name: 'region', type: 'string' as const }, { name: 'kind', type: 'string' as const }, { name: 'sales', type: 'number' as const }];
+    SNAPSHOTS['assets/kinds.csv'] = { columns, rows: [['서울', 'a', 1], ['서울', 'b', 2], ['서울', 'c', 3]], total: 3, truncated: false };
+    setDataset(doc, 'kinds', descriptor('assets/kinds.csv', { columns }));
+    const w = world();
+    const { into } = mount(w.renderChart, doc, node('kinds', { view: 'bar', x: 'region', y: 'sales', series: 'kind' }));
+    await settle();
+    const hatched = [...into.querySelectorAll('path[pointer-events="none"]')];
+    expect(hatched.length).toBeGreaterThan(0);
+    const bar = hatched.map((h) => h.previousElementSibling!).find((el) => el.hasAttribute('data-tip'))!; // the legend's keys come first
+    bar.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, clientX: 10, clientY: 10 }));
+    expect(into.querySelector('.dash-tip')?.textContent).toBe('서울 · c · sales: 3');
+  });
+});

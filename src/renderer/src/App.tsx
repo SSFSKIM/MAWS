@@ -129,6 +129,9 @@ import { provideDocumentDesignSystem } from './tools/document/design-system';
 // P3-C start
 import { registerPresentationEditor } from './tools/presentation';
 // P3-C end
+// P3-E start
+import { registerDashboardEditor } from './tools/dashboard';
+// P3-E end
 
 // C10 start: C7's composer binds an unstarted session's chips and Send through C10's hook; registered at module load,
 // before any composer renders, so the function the composer calls as a hook is fixed for the page's life (C7's rule)
@@ -309,6 +312,10 @@ export function App() {
   // Artifacts tool mount it)
   useEffect(() => registerPresentationEditor(), []);
   // P3-C end
+  // P3-E start: the dashboard editor as the `dashboard` kind's editor in L's registry (B's document body with E's charts,
+  // the Datasets action and the source sheet; docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md M3)
+  useEffect(() => registerDashboardEditor(), []);
+  // P3-E end
 
   // index.html ships data-theme="light" for the first paint; from then on main's resolved theme decides.
   useEffect(() => {
