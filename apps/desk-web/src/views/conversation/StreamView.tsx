@@ -6,10 +6,10 @@
 // scrolled to once it is drawn. On a phone the working record stays folded: the transcript is desktop-only (§4).
 import { useEffect, useRef, useState } from 'react';
 import { useStore } from 'zustand';
-import type { LogEvent, Recipient } from 'desk-hub/protocol';
+import { writerMachine, type LogEvent, type Recipient } from 'desk-hub/protocol';
 import { TranscriptActionsProvider, type TranscriptActions } from '../../../../../src/renderer/src/transcript/view/context';
 import { Markdown } from '../../../../../src/renderer/src/transcript/view/markdown/Markdown';
-import type { StreamItem } from '../../conversation/stream';
+import { byWhom, type StreamItem } from '../../conversation/stream';
 import { deliveryKey, type OutboxItem } from '../../project/conversation';
 import { useSlot } from '../../shell/slots';
 import { DELIVERY_TEXT } from '../../conversation/words';
@@ -52,8 +52,20 @@ export function StreamView({ items, outbox, landed = null }: { items: StreamItem
   );
 }
 
+/**
+ * Who posted a `human`: a web one by its member, which its code covers — "You" for the member signed in, another by id
+ * (`byWhom`) — and one written on a machine (`<machine>/human`, sminos's own) as a human there.
+ */
+function humanWho(event: LogEvent, member: string): { who: string; machine?: string } {
+  if (typeof event.member === 'string') {
+    const who = byWhom(event.member, member);
+    return { who: who.charAt(0).toUpperCase() + who.slice(1) };
+  }
+  return { who: 'A human', machine: writerMachine(event.writer) ?? undefined };
+}
+
 function Item({ item }: { item: StreamItem }) {
-  const { sessions } = useDesk();
+  const { sessions, member } = useDesk();
   switch (item.kind) {
     case 'message': {
       const session = item.session ? sessions.get(item.session) : undefined;
@@ -63,13 +75,15 @@ function Item({ item }: { item: StreamItem }) {
         </Said>
       );
     }
-    case 'human':
+    case 'human': {
+      const { who, machine } = humanWho(item.event, member);
       return (
-        <Said who="You" ts={item.event.ts}>
+        <Said who={who} machine={machine} ts={item.event.ts}>
           <Prose text={item.text} />
           <Deliveries event={item.event} to={item.to} wake={item.wake} />
         </Said>
       );
+    }
     case 'question':
       return <QuestionItem item={item} />;
     case 'system':
@@ -100,7 +114,7 @@ function Said({ who, machine, ts, children }: { who: string; machine?: string; t
   return (
     <div className="py-1.5">
       <div className="flex items-baseline gap-2">
-        <span className="text-ui font-semibold">{who}</span>
+        <span className="text-ui font-semibold" data-testid="said-who">{who}</span>
         {machine && <span className="text-ui-sm text-fg-muted">@{machine}</span>}
         {ts && <span className="text-ui-sm text-fg-faint">{time(ts)}</span>}
       </div>
