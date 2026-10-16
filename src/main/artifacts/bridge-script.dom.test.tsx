@@ -23,6 +23,8 @@ function reloadedFrame(initial: { width: number; height: number }) {
   const view = render(<HtmlFrame url="maws-artifact://record/v1/index.html" title="Dashboard" onFrame={(frame) => void (handle = frame)} />);
   const frame = view.container.querySelector('iframe')!;
   const page = frame.contentWindow!;
+  // Vitest's global window is a proxy, not happy-dom's raw parent window. Match the boundary's source identity.
+  Object.defineProperty(page, 'parent', { configurable: true, get: () => window });
   const doc = frame.contentDocument!;
   doc.body.innerHTML = '<h1 id="hero">Sales overview</h1>';
   const hero = doc.querySelector('h1')!;
