@@ -159,8 +159,6 @@ jobs:
         run: |
           display=()
           if [[ $RUNNER_OS == Linux ]]; then display=(xvfb-run -a --server-args='-screen 0 1920x1080x24'); fi
-          # The Mac nobody uses: the app activates and its window is key, as an owner's launch is (src/main/window-show.ts)
-          if [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_FOREGROUND=1; fi
           .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' "${display[@]}" pnpm "$SCRIPT"
       - if: failure()
         uses: actions/upload-artifact@v7
