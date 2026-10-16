@@ -33,6 +33,11 @@ type HarnessWindow = Window & { __maws_harness: HarnessApi };
 const TURN = 120;
 const STREAM_WINDOW_MS = 10_000;
 const WARMUP_MS = 500;
+// The anchoring case's wall-clock and frame budgets (the load, the stream's rate, frame p95 and max) are measured bounds,
+// class 2 of the gate-offload spec (§3.1, §8): asserted only under MAWS_TRANSCRIPT_PERF=1, on the quiet Mac under the
+// load rule, which the gate never sets. Without it the case keeps its anchoring invariants and reports the numbers.
+// The frame budget is one 60 Hz display's: the Mac mini's virtual display paces frames at 18.4 ms with no long task.
+const MEASURED = process.env.MAWS_TRANSCRIPT_PERF === '1';
 
 async function harnessReady(page: Page) {
   await page.waitForFunction(() => (window as unknown as Partial<HarnessWindow>).__maws_harness !== undefined);
@@ -108,7 +113,7 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
   await blockHumanInput(page);
 
   const loaded = await load(page, 'synthetic/500');
-  expect(loaded.ms, 'synthetic/500 loads in under three seconds').toBeLessThan(3000);
+  if (MEASURED) expect(loaded.ms, 'synthetic/500 loads in under three seconds').toBeLessThan(3000);
 
   // Stream the last turn in view, following, then move away to turn 120.
   await play(page, 1);
@@ -169,13 +174,16 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
   console.log(`anchoring: ${JSON.stringify(report)}`);
   test.info().annotations.push({ type: 'anchoring', description: JSON.stringify(report) });
 
-  expect(batches, 'the stream ran at about sixty batches a second throughout the window').toBeGreaterThanOrEqual(540);
+  expect(batches, 'the stream ran throughout the window').toBeGreaterThan(0);
   expect(window10s.connected, 'the expanded cells stayed mounted').toBe(true);
   expect(window10s.scrollDelta, 'scrollTop did not change').toBe(0);
   expect(window10s.drift, 'the expanded cell drifted at most 1 px').toBeLessThanOrEqual(1);
-  expect(framesP95, 'frame interval p95 after the first 500 ms').toBeLessThanOrEqual(17);
-  expect(framesMax, 'frame interval max after the first 500 ms').toBeLessThanOrEqual(50);
   expect(window10s.domRows, 'DOM rows').toBeLessThanOrEqual(40);
+  if (MEASURED) {
+    expect(batches, 'the stream ran at about sixty batches a second throughout the window').toBeGreaterThanOrEqual(540);
+    expect(framesP95, 'frame interval p95 after the first 500 ms').toBeLessThanOrEqual(17);
+    expect(framesMax, 'frame interval max after the first 500 ms').toBeLessThanOrEqual(50);
+  }
 
   // Jump to latest lands at the end and follow mode resumes: the next batches keep the end pinned.
   await page.getByRole('button', { name: 'Jump to latest' }).click();
