@@ -131,6 +131,7 @@ import { registerDesignSystemExporters } from './design-systems/export';
 import { registerPresentationExporters } from './presentations/export'; // P3-C M9
 import { registerPresenter } from './presentations/present'; // P3-C M6
 // P3-D end
+import { startConnectors } from './connectors'; // P3-H H3b
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -583,6 +584,11 @@ void startWithProfileLock(app, () => {
     root: join(app.getPath('userData'), 'artifacts'), // P3-A M7: the store's directory (the host's own rule)
   });
   shutdown.add('artifacts', artifacts.stop);
+  // P3-H H3b: an artifact page's connector calls and watches and the owner's grants (main's broker; route E through the
+  // engine host's main-only commands). Its stop runs before the hosts' (steps run in the order added): every lease,
+  // watch and pending operation ends, each operation withdrawn from the host, while the host can still hear it.
+  const connectors = startConnectors({ hosts, register: registerMainHandler, index });
+  shutdown.add('connectors', connectors.stop);
   // P3-B: document × md, html, docx, pdf. P3-D (the P3 spec's Decision Log 61): each run handed its governing design system
   shutdown.add('document-exporters', registerDocumentExporters((exporter) => artifacts.exporters.register(governDocumentExporter(exporter, engineHostCall(hosts.dispatch))))); // P3-B, P3-D
   registerDesignSystemExporters(artifacts.exporters); // P3-D M7: `design_system` as `claude` (Claude's files, zipped)

@@ -15,6 +15,8 @@ import { AppSessionIdSchema } from '../../graph/ids';
 import { ARTIFACT_EXPORT_FONTS /* P3-C */, ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
 import type { IpcError } from '../errors';
 import type { CommandSpec } from './common';
+import { ConnectorGrantGestureSchema, ConnectorGrantSchema, ConnectorToolRefSchema } from '../../artifacts/connectors'; // P3-H H3b
+import { ConnectorGrantOutcomeSchema } from './connectors'; // P3-H H3b
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
 const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
@@ -238,6 +240,14 @@ export const commands = {
     // PDF printer refused
     z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional() }),
   ),
+  // P3-H H3b start: the owner's connector grants from the editor header (the P3 interface ledger's X23 grant rows), main's:
+  // a grant is taken under the fingerprint the route reports now (the gesture carries none), refused when no route has
+  // the tool or a read grant is asked for a tool the route does not mark read-only; a revoke stops the tool's work in
+  // flight before the store is asked (src/main/connectors/broker.ts).
+  'artifacts.connectorGrants': main(z.strictObject({ artifactId: Id }), z.strictObject({ grants: z.array(ConnectorGrantSchema) })),
+  'artifacts.grantConnectorTool': main(z.strictObject({ artifactId: Id, tool: ConnectorGrantGestureSchema }), ConnectorGrantOutcomeSchema),
+  'artifacts.revokeConnectorTool': main(z.strictObject({ artifactId: Id, ...ConnectorToolRefSchema.shape }), z.strictObject({ revoked: z.boolean() })),
+  // P3-H H3b end
 } as const satisfies Record<`artifacts.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

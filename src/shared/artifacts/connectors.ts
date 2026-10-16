@@ -40,8 +40,9 @@ export type ConnectorCallRef = z.infer<typeof ConnectorCallRefSchema>;
 
 // The store's answer to a call (a `once` grant is consumed, durably, before `granted` is answered): `notGranted` when
 // the artifact holds no grant for the tool (never granted, revoked, a used Allow once), `fingerprintChanged` when it
-// holds one under another fingerprint (the owner re-grants to go on).
-export type ConnectorAuthorization = { granted: true; mode: ConnectorGrantMode } | { granted: false; refusal: 'notGranted' | 'fingerprintChanged' };
+// holds one under another fingerprint (the owner re-grants to go on). H3b: `wrongMode` when the caller said which mode
+// it expects and the grant is the other one (nothing consumed).
+export type ConnectorAuthorization = { granted: true; mode: ConnectorGrantMode } | { granted: false; refusal: 'notGranted' | 'fingerprintChanged' | 'wrongMode' };
 
 // A committed change of one artifact's grant for one tool: `revoked` covers the owner's revoke and the artifact's
 // deletion, `consumed` an Allow once used. What a live watch or call under that grant stops on.

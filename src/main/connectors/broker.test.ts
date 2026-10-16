@@ -321,6 +321,29 @@ describe('a call (route choice, the grant on every call)', () => {
     expect(logged.every((line) => line.length < 1_200)).toBe(true); // a route's message is bounded in the log too
   });
 
+  // P3-H H3b: route E's host makes the last check at the write (the grant as main admitted it, the server's identity);
+  // its refusal is the grant's, so a page reads it as `revoked` with that reason and a watch waits for a grant.
+  it("answers the route's own last refusal as revoked with its reason, and a watch waits, timerless, for a grant", async () => {
+    engine.has(ROWS);
+    grants.put(ART, ROWS, 'fp-1', 'read');
+    const lease = page();
+    for (const refusal of ['notGranted', 'fingerprintChanged', 'wrongMode', 'revoked'] as const) {
+      engine.answer = () => ({ ok: false, failure: 'refused', refusal, message: `${SECRET} the grant changed` });
+      expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'revoked', reason: refusal });
+    }
+    engine.answer = () => ({ ok: false, failure: 'tooLarge', message: `${SECRET} 20000000 bytes` });
+    expect(await broker.callTool(ME, lease, ROWS)).toEqual({ ok: false, state: 'failed', reason: 'tooLarge' });
+    engine.answer = () => ({ ok: false, failure: 'refused', refusal: 'revoked', message: 'x' });
+    const { listener, updates } = watcher();
+    broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    await settle();
+    expect(updates).toEqual([{ ok: false, state: 'revoked', reason: 'revoked' }]);
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect(updates).toHaveLength(1);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(log.mock.calls.every(([line]) => !line.includes('sentinel') || line.startsWith('connectors:'))).toBe(true);
+  });
+
   it('tells a malformed answer from an oversized one, both failed', async () => {
     engine.has(ROWS);
     grants.put(ART, ROWS, 'fp-1', 'read');

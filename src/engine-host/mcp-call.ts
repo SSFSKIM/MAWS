@@ -12,7 +12,8 @@ import { ControlCancelled, ControlError, ControlTimeout, type ControlClient } fr
 
 // The engine's name for a server inside a qualified tool name (2.1.292 cli.pretty.js 610421-610425): every character
 // outside [a-zA-Z0-9_-] becomes `_`, and a claude.ai connector's runs of `_` collapse and its ends are trimmed.
-function normalized(name: string): string {
+// P3-H H3b: exported, route E's collision check compares names by it.
+export function normalizedMcpName(name: string): string {
   const replaced = name.replace(/[^a-zA-Z0-9_-]/g, '_');
   return name.startsWith('claude.ai ') ? replaced.replace(/_+/g, '_').replace(/^_|_$/g, '') : replaced;
 }
@@ -21,7 +22,7 @@ function normalized(name: string): string {
 // and `tool` are the names mcp_status reports (a plugin server's `plugin:<plugin>:<server>`, a connector's
 // `claude.ai <name>`). Two configured names that normalise alike share one qualified name, so a call cannot say which it
 // means.
-export const qualifiedMcpToolName = (server: string, tool: string): string => `mcp__${normalized(server)}__${normalized(tool)}`;
+export const qualifiedMcpToolName = (server: string, tool: string): string => `mcp__${normalizedMcpName(server)}__${normalizedMcpName(tool)}`;
 
 export const MCP_CALL_REFUSALS = [
   'unsupported', // the engine does not handle mcp_call
@@ -80,7 +81,7 @@ export async function probeMcpCall(client: ControlClient, opts: { signal?: Abort
   let present: Set<string>;
   try {
     const status = await mcpStatus(client, {}, { signal: opts.signal });
-    present = new Set(status.mcpServers.map((server) => normalized(server.name)));
+    present = new Set(status.mcpServers.map((server) => normalizedMcpName(server.name)));
   } catch (error) {
     if (error instanceof ControlError) return 'unknown';
     throw error;
@@ -89,7 +90,7 @@ export async function probeMcpCall(client: ControlClient, opts: { signal?: Abort
   let server: string | null = null;
   for (let attempt = 0; attempt < PROBE_ATTEMPTS && server === null; attempt += 1) {
     const candidate = probeServer(nonce());
-    if (!present.has(normalized(candidate))) server = candidate;
+    if (!present.has(normalizedMcpName(candidate))) server = candidate;
   }
   if (server === null) return 'unknown';
   const outcome = await callMcpTool(client, { server, tool: 'probe' }, opts);

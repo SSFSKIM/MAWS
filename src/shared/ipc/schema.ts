@@ -55,6 +55,7 @@ import * as library from './schema/library';
 import * as presentations from './schema/presentations'; // P3-C M6
 // P3-L end
 import * as designSystems from './schema/design-systems'; // P3-D (the P3 spec's Decision Log 61)
+import * as connectors from './schema/connectors'; // P3-H H3b
 
 export {
   HostPingSchema,
@@ -148,6 +149,7 @@ export const commands = {
   ...library.commands, // P3-L M1
   ...designSystems.commands, // P3-D (Decision Log 61)
   ...presentations.commands, // P3-C M6
+  ...connectors.commands, // P3-H H3b
 } as const satisfies Record<`${Namespace}.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
@@ -191,6 +193,7 @@ export const events = {
   ...library.events, // P3-L M1
   ...designSystems.events, // P3-D (Decision Log 61)
   ...presentations.events, // P3-C M6
+  ...connectors.events, // P3-H H3b
 } as const satisfies Record<`${Namespace}.${string}`, z.ZodType>;
 
 export type CommandName = keyof typeof commands;
@@ -226,6 +229,7 @@ export const HOST_EVENTS = [
   'maws.artifact.export', // P3-A M7: `artifact_export` asks main's export service
   'host.supervisorStatus', // the supervisor's own facts (host.status is main's)
   'artifacts.changed', 'spaces.changed', // P3-A M4: the store's change feed
+  'connectors.operation', 'connectors.grantChanged', // P3-H H3b: an operation's end (its id alone) and a committed grant change
 ] as const satisfies readonly EventName[];
 // E10 end
 export type CommandInput<N extends CommandName> = z.input<(typeof commands)[N]['input']>;

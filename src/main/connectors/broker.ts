@@ -96,6 +96,8 @@ interface Watch {
   running?: Work;
 }
 
+const FAILURE_WORDS = { unavailable: 'found the server unavailable', failed: 'failed', tooLarge: 'answered too large a result', refused: 'was refused at the write' } as const; // P3-H H3b: the last two
+
 const refusal = <S extends ConnectorRefusalState>(state: S, reason: Extract<ConnectorRefusal, { state: S }>['reason']): ConnectorRefusal => ({ ok: false, state, reason }) as ConnectorRefusal;
 const invalid = (reason: ConnectorInvalid['reason']): ConnectorInvalid => ({ ok: false, state: 'invalid', reason });
 
@@ -346,7 +348,9 @@ export class ConnectorBroker {
     const read = readAnswer(answer);
     if (read === 'malformed' || read === 'tooLarge') return this.failed(read, `the ${route} call of ${named} answered ${read === 'malformed' ? 'malformed' : 'too large a result'}`);
     if (!read.ok) {
-      this.log(`connectors: the ${route} call of ${named} ${read.failure === 'unavailable' ? 'found the server unavailable' : 'failed'}: ${read.message}`);
+      this.log(`connectors: the ${route} call of ${named} ${FAILURE_WORDS[read.failure]}: ${read.message}`);
+      if (read.failure === 'refused') return refusal('revoked', read.refusal); // P3-H H3b: the route's own last check
+      if (read.failure === 'tooLarge') return refusal('failed', 'tooLarge'); // P3-H H3b
       return read.failure === 'unavailable' ? refusal('paused', 'unavailable') : refusal('failed', 'toolError');
     }
     return { ok: true, result: read.result, fetchedAt: Date.now(), via: { route, ...(route === 'engine' && target.sessionId !== undefined ? { sessionId: target.sessionId } : {}) } };

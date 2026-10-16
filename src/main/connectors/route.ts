@@ -45,7 +45,14 @@ export interface ConnectorRouteCallContext {
 
 // `unavailable`: the route no longer has the server (not connected, the engine gone, needs authentication); `failed`:
 // the tool or the route failed otherwise. `message` is for main's log (and the owner's header), never the page.
-export type ConnectorRouteAnswer = { ok: true; result: unknown } | { ok: false; failure: 'unavailable' | 'failed'; message: string };
+// P3-H H3b: `refused`, the route's own last check before the write found no grant to admit the call as main's check did
+// (route E's host: the grant revoked, re-granted under another mode or fingerprint, or the server's identity changed),
+// named by the page's `revoked` reasons; `tooLarge`, a result the route would not carry over the artifact bound.
+export type ConnectorRouteRefusal = 'notGranted' | 'fingerprintChanged' | 'wrongMode' | 'revoked';
+export type ConnectorRouteAnswer =
+  | { ok: true; result: unknown }
+  | { ok: false; failure: 'unavailable' | 'failed' | 'tooLarge'; message: string }
+  | { ok: false; failure: 'refused'; refusal: ConnectorRouteRefusal; message: string };
 
 // A result larger than an artifact cannot become one (P3-E's dataset snapshot), so it is refused here rather than later.
 export const CONNECTOR_RESULT_MAX_BYTES = ARTIFACT_MAX_BYTES;
@@ -58,9 +65,10 @@ const TargetSchema = z.object({
   call: z.custom<ConnectorRouteTarget['call']>((value) => typeof value === 'function'),
 });
 
-const AnswerSchema = z.discriminatedUnion('ok', [
+const AnswerSchema = z.union([
   z.object({ ok: z.literal(true), result: z.unknown() }),
-  z.object({ ok: z.literal(false), failure: z.enum(['unavailable', 'failed']), message: z.string() }),
+  z.object({ ok: z.literal(false), failure: z.enum(['unavailable', 'failed', 'tooLarge']), message: z.string() }),
+  z.object({ ok: z.literal(false), failure: z.literal('refused'), refusal: z.enum(['notGranted', 'fingerprintChanged', 'wrongMode', 'revoked']), message: z.string() }), // P3-H H3b
 ]);
 
 // The route's target itself when it is well formed (not the schema's copy: its `call` may be a method of it), else null.
@@ -74,7 +82,7 @@ export function readAnswer(value: unknown): ConnectorRouteAnswer | 'malformed' |
   const parsed = AnswerSchema.safeParse(value);
   if (!parsed.success) return 'malformed';
   const answer = parsed.data;
-  if (!answer.ok) return { ok: false, failure: answer.failure, message: answer.message.slice(0, MESSAGE_MAX_LENGTH) };
+  if (!answer.ok) return { ...answer, message: answer.message.slice(0, MESSAGE_MAX_LENGTH) };
   const bytes = jsonBytes(answer.result);
   if (bytes === null) return 'malformed';
   return bytes <= CONNECTOR_RESULT_MAX_BYTES ? { ok: true, result: answer.result } : 'tooLarge';

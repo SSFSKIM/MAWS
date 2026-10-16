@@ -10,6 +10,7 @@ export const commands = [
   'artifacts.copyAsset', // P3-C (Decision Log 25)
   'artifacts.testLoopDelay', 'artifacts.status', 'artifacts.testWrite', 'artifacts.open',
   'artifacts.export', // P3-A M7: main's
+  'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool', // P3-H H3b: main's
 ] as const;
 
 export const events = ['artifacts.changed', 'artifacts.resync' /* P3-A M5: main's */, 'artifacts.console' /* P3-A M7: main's */] as const;
