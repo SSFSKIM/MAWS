@@ -1,115 +1,68 @@
-# DC3 (the hub): controller's report (interim, 2026-10-15)
+# DC3 (the hub): controller's report (2026-10-16)
 
-This report is interim. The harness asked for a hand-back while M2's
-executor was still running, waiting on its own background work (most
-likely its `scripts/ci-gate.sh` run). Execution is not complete.
+Plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md`. Composite:
+`docs/doperpowers/specs/2026-10-15-desk-design.md`, child DC3, pinned at blob
+`f91bc631` and folded forward since. Branch `smns-erb`, which started at
+269f5212; the head is 645a1557 and has been pushed.
 
-## State
+## Status
 
-- Plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md`, parent
-  pinned at composite blob `f91bc631` (re-pinned after the plan review).
-- SDE ledger (gitignored):
-  `.doperpowers/sde/2026-10-15-desk-dc3-hub/progress.md`. It holds the
-  bases, heads, and agent handles a resume needs.
-- **M1** is complete and reviewed clean (4c8d522e, d9a55462, fix 140c834b).
-  The gate is green on d9a55462, run 38714411388. The Interfaces drafts
-  are folded into the composite (cd818262).
-- **G1 amendment** is complete and reviewed clean (52875d3b, fix
-  29294260). It was re-folded into the composite (701f14d0).
-- **DX1 strict base64url** is committed at e6bb0160. It has not had its
-  own task review; it is reviewed as part of M2's package.
-- **M2** is executing. Executor `aeea36f128e79eccd` has committed
-  bd266073: enrollment as a durable state machine, the local stand-in for
-  Access (`pnpm --filter desk-hub local`), the DX2/DX3 log plane, the
-  audit record, and the web app's assets. It has not yet reported, so M2
-  has no task review yet.
-- **M3, M4, and M5** have not started.
+All five milestones are executed and reviewed clean by the subagent-driven
+loop: one task-executor per milestone, a task review at each frontier, and
+fixes resumed on the same executor. The branch's xhigh review is handed to
+the composite's writer as a pinned range (base master, head 645a1557),
+because only a main session can run the panel. The pull request to master
+is opened after the panel converges.
 
-## Decisions, owner rulings, discoveries
+| Milestone | Code commits | Fix commits | Gate (Linux) |
+| --- | --- | --- | --- |
+| M1 protocols, skeleton | 4c8d522e, d9a55462 | 140c834b | green d9a55462 (38714411388) |
+| G1 amendment | 52875d3b | 29294260 | — |
+| M2 enrollment, stand-in, log | e6bb0160, bd266073, 4d2c492f | 4de85ff9, b9e101ca; contract items 230716ae, c776caf5 | green 4de85ff9 (38736563386) |
+| M3 session plane, push, org keys | 068f14f3, f167ca64, f22e0839, 4c0dd37e, d75f2924 | 72321d3a, b7fc7ebd, c23645b9, a190a6d8, eebc7c80, dabd37e8 | green 54a9c171 (38783679574) |
+| M4 fake machine | c547aaa5, 01ba7519, 60bf893c | 8a9ad8e0, c100ed17 | green 8a9ad8e0 (38797084071) |
+| M5 deployed, Access, G6 | 4b5d0a67, 2debd0f4, ea5ae36a, ebde4565, 83756611, 85e83830 | 90ace676, 7305d677, ff0a5407, a1ab1d16, 4495c41e | green 4495c41e (38836876171) |
 
-All of these are in the plan's Decision Log and Surprises & Discoveries:
-- workers.dev as the hub's host;
-- the M5 tokens, stored with project scope, and the team domain
-  `flat-wave-208c.cloudflareaccess.com`;
-- the plan-review revisions 1–6;
-- M1 as built: vitest 5 driving Miniflare, codes, identifiers, transport;
-- the numeric JCS fix;
-- DC2's settlement answers;
-- `block-row`;
-- the G1 amendment;
-- the M1 probe findings (an SSE stream held 11 minutes; WebSockets
-  hibernate within 30 s).
+Hub suite at the last local run: 316/316.
 
-## Update (second interim hand-back)
+## Deployed
 
-- M2 (e6bb0160, bd266073, 4d2c492f) was task-reviewed. The review found
-  six Important issues and one Minor:
-  - an orphan-sweep race that deletes a replacement machine's credential;
-  - generation fencing lost across an in-flight POST;
-  - swallowed `Machine.send` failures;
-  - missing byte bounds;
-  - interfaces-M2.md dropping DX3 `diff {sub}`;
-  - the enrollment code shown as an argument;
-  - (Minor) a bad-shape refusal not stopping the writer's batch.
-  All are with M2's executor (`aeea36f128e79eccd`) as fix wave 1.
-- Coordinator items 1–3: `orgKeyFromCryptoKey` has landed (230716ae).
-  Presence on connect and the idempotent `human-ack` are in progress with
-  the same executor.
-- Items 4–6 (DX6 result shapes, DX3 `diff`, DX4 `usage`) belong to M3.
-- The M2 review worktree `.doperpowers/sde/2026-10-15-desk-dc3-hub/review-m2`
-  is still in place for the re-review.
+`https://desk-hub.opencognita-platform.workers.dev`, behind a scripted
+Access application, build `hub@85e83830`, org `ssfskim`, with nothing
+enrolled. Fix 90ace676 corrects the progress count that
+`503 delivery-failed` reports. It is reviewed and waits for a redeploy that
+the composite's writer schedules around the owner's phone walk.
 
-## Update (third interim hand-back)
+## Where the record is
 
-- M2's fix wave 1 (4de85ff9) and items 1–3 (230716ae, c776caf5) were
-  re-reviewed. Six of the seven findings are closed. One Important remains:
-  a POST answers 200 when an earlier reply in the same POST failed. It is
-  with the executor as fix wave 2. The gate is green on 4de85ff9 (run
-  38736563386).
-- interfaces-M2 was reviewed and sent to the composite's writer, frozen at
-  `interfaces-M2-reviewed-4de85ff9.md`. Fix wave 2 changes no contract
-  text.
-- Plan 2f25d62b records:
-  - M3 now carries the contract items folded since dispatch and the rule
-    that offline presence is withheld;
-  - Surprises gains the untestable send-failure path and the fact that
-    root lint covers the hub;
-  - the tech-debt tracker logs uncapped reassembled part sets.
+- The plan's Decision Log and Surprises & Discoveries hold every decision,
+  ruling, and finding.
+- The plan's Outcomes & Retrospective sets each of DC3's acceptance clauses
+  against its evidence.
+- The executors' reports, the interfaces drafts (`interfaces-M1` …
+  `interfaces-M5`, frozen copies marked `-reviewed-<sha>`), and M5's
+  evidence (`m5-evidence/`) are under
+  `.doperpowers/sde/2026-10-15-desk-dc3-hub/`, which is gitignored. The
+  composite carries everything those drafts said.
 
-## Update (fourth interim hand-back)
+## Environmental friction routed around
 
-- M2 is reviewed clean and ticked (71083dd4). Its last fix was b9e101ca:
-  a failed reply keeps its stream's queue failed, and a test-only seam
-  injects the failure.
-- M3 is executing with executor `a5e8645019cdbbc28`. Its commits:
-  - 068f14f3: the contract types, sent to the composite's writer;
-  - f167ca64: M3 itself;
-  - f22e0839: the wrapped org keys with `auth`, sent.
+- The session's worktree guard refused compound git commands and git
+  commands aimed at a computed `-C` path. Plain, separate
+  `git -C <path>` commands worked.
+- The Mac's load stayed at 40–190 for hours and blocked local workerd
+  runs. The gate's Linux lane (`ci-gate.sh --runner linux`) carried the
+  full-suite evidence.
+- The worktree guard refused a command that set `HOME`. The composite's
+  writer ruled that M5's actual isolation complies: the temporary-`HOME`
+  rule binds runs of sminos code.
 
-  The workerd suites have not run locally, because the Mac's load stayed
-  at 40–190 for hours. The gate on f22e0839 stands in for them and is
-  running now. interfaces-M3.md and M3's report are not written yet.
-- M3's Decisions in the plan list every contract item folded since
-  dispatch (through 6a7cdde0).
+## Residue
 
-## Update (M4 executing)
-
-- M3 is reviewed clean and ticked (b3542038). Its code is final at
-  dabd37e8, and the gate is green on 54a9c171 (run 38783679574).
-- M4 is executing with executor `a7f6c1e8c479535c7` from base b3542038.
-  Two of its commits have landed and their shas have gone to the
-  composite's writer:
-  - c547aaa5: the late-decision `winner`, `by`, and `terminalOnly` types;
-  - 01ba7519: the steer result `{row: string | null}`.
-  The `rpc-result` pass-through is built and uncommitted. It goes into
-  the M4 commit.
-
-## Next, on resume
-
-1. Read M2's report at
-   `.doperpowers/sde/2026-10-15-desk-dc3-hub/task-2-report.md` and fold it.
-2. Review M2 with package `38249c52..<M2 head>`. Name the amendment's
-   commits (already reviewed) and the composite commits in the range.
-3. Send the composite's writer the M2 Interfaces from `interfaces-M2.md`.
-4. Go on to M3, M4, and M5. The branch's xhigh review is handed to the
-   composite's writer, not run here.
+- The redeploy of 90ace676 (the composite's writer).
+- Tech debt in `docs/tech-debt-tracker.md`: a reassembled part set has no
+  joined-size cap, and `redeploy-check`'s cleanup wait has no overall
+  deadline.
+- The composite's Deferred: a re-measure of the phase-1 budget on a
+  staging deployment, and the shared per-session stream if per-browser
+  subscriptions come to dominate a machine's uplink.
