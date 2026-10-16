@@ -15,7 +15,7 @@
 // written here through the human's upload and the host's MAWS_E2E test writer, since this milestone's proof is the
 // editor's; the agent's tool is M2's (unit-proved) and M6's (product). Evidence shots go to test-results/dashboard-proof/.
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { GDP_CSV, PENGUINS_CSV } from '../src/artifacts/dashboard/fixtures/datasets';
@@ -172,11 +172,22 @@ async function hoverLastPoint(page: Page, figure: Locator, evidence: string) {
     };
   }, last);
   expect(shown.inside, `the tip is whole inside the frame's visible box: ${shown.seen}`).toBe(true);
-  // a page clip of the visible frame: no scrolling and no pointer movement, so the hover stays as asserted (run 38945319905
-  // found the tip shown and whole before the capture and hidden after it; the log brackets the capture to say why)
+  // The visible frame captured without disturbing the hover. Playwright's CDP capture made Chromium resync hover with the
+  // OS cursor, which a quiet e2e window (transparent, ignoring the mouse: showAppWindow) never has: run 38946147833's log
+  // shows 'capture start | pointerout … | pointer left the window | pointerleave … | tip hidden | capture end', no SVG
+  // replaced. Electron's own surface copy of the page's window (capturePage, kept hidden) takes the pixels without that
+  // resync; the log still brackets the capture.
   const mark = (text: string) => frame.evaluate((el, t) => void (el as HTMLElement & { hoverLog?: string[] }).hoverLog?.push(t), text);
   await mark('capture start');
-  await page.screenshot({ path: `${PROOF}/${evidence}.png`, clip: shown.clip });
+  const png = await launch!.app.evaluate(
+    async ({ BrowserWindow }, { url, rect }) => {
+      const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL() === url);
+      if (!win) throw new Error(`no window shows ${url}`);
+      return (await win.webContents.capturePage(rect, { stayHidden: true })).toPNG().toString('base64');
+    },
+    { url: page.url(), rect: { x: Math.round(shown.clip.x), y: Math.round(shown.clip.y), width: Math.round(shown.clip.width), height: Math.round(shown.clip.height) } },
+  );
+  writeFileSync(`${PROOF}/${evidence}.png`, Buffer.from(png, 'base64'));
   await mark('capture end');
   const survived = await tip.waitFor({ state: 'visible', timeout: 1_000 }).then(
     () => true,
