@@ -266,18 +266,23 @@ export function World(props: WorldProps) {
       if (el.scrollTop !== 0) el.scrollTop = 0;
     };
 
+    // A gesture's moves and release are followed on the whole window (its capture phase, so nothing below can stop
+    // them), not on the world alone: the pointer capture the press takes did not hold in the product build once a pan
+    // crossed the world's edge into the board list (the post-fix mini gate: 9 of 12 moves landed, the pan stuck), and
+    // a drag must not depend on it. Each handler acts only on the gesture's own pointer.
+    const win = el.ownerDocument.defaultView ?? window;
     el.addEventListener('scroll', onScroll);
     el.addEventListener('pointerdown', onDown, { capture: true });
-    el.addEventListener('pointermove', onMove);
-    el.addEventListener('pointerup', onUp);
-    el.addEventListener('pointercancel', onUp);
+    win.addEventListener('pointermove', onMove, { capture: true });
+    win.addEventListener('pointerup', onUp, { capture: true });
+    win.addEventListener('pointercancel', onUp, { capture: true });
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => {
       el.removeEventListener('scroll', onScroll);
       el.removeEventListener('pointerdown', onDown, { capture: true });
-      el.removeEventListener('pointermove', onMove);
-      el.removeEventListener('pointerup', onUp);
-      el.removeEventListener('pointercancel', onUp);
+      win.removeEventListener('pointermove', onMove, { capture: true });
+      win.removeEventListener('pointerup', onUp, { capture: true });
+      win.removeEventListener('pointercancel', onUp, { capture: true });
       el.removeEventListener('wheel', onWheel);
     };
   }, [surface, session, view]);

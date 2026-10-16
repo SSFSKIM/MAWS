@@ -433,3 +433,30 @@ describe('plain text pasted on a board (task review fix wave)', () => {
     expect(readSlide(doc, 'b1').children.map((c) => c.id)).toEqual(['title', 'body']);
   });
 });
+
+describe('a gesture outside the world (post-fix gate: a pan crossing into the board list)', () => {
+  // The world takes pointer capture, but a drag must not depend on it holding: the mini's pan stopped once the pointer
+  // crossed the world's edge into the board list. Moves and the release are followed wherever the pointer goes.
+  it('a pan keeps following the pointer past the world’s edge, and its release there ends it', () => {
+    const { container, view, world } = mount();
+    const ground = container.querySelector('[data-design-ground]')!;
+    const rail = screen.getByRole('navigation', { name: 'Boards' });
+    press(ground, 60, 300);
+    drag(world, 20, 270);
+    fireEvent.pointerMove(rail, { buttons: 1, clientX: -20, clientY: 240, pointerId: 1 });
+    expect(view.snapshot().viewport).toEqual({ zoom: 1, x: -80, y: -60 });
+    fireEvent.pointerUp(rail, { button: 0, clientX: -20, clientY: 240, pointerId: 1 });
+    fireEvent.pointerMove(document.body, { buttons: 0, clientX: 500, clientY: 500, pointerId: 1 });
+    expect(view.snapshot().viewport).toEqual({ zoom: 1, x: -80, y: -60 }); // ended at the release: no more pan
+    expect(world.hasAttribute('data-panning')).toBe(false);
+  });
+
+  it('a board move keeps following the pointer past the world’s edge', () => {
+    const { container, doc } = mount();
+    const rail = screen.getByRole('navigation', { name: 'Boards' });
+    press(title(container, 'b2'), 500, 0);
+    fireEvent.pointerMove(rail, { buttons: 1, clientX: 440, clientY: 0, pointerId: 1 });
+    fireEvent.pointerUp(rail, { button: 0, clientX: 440, clientY: 0, pointerId: 1 });
+    expect(boardFrame(doc, 'b2')!.x).toBe(440);
+  });
+});
