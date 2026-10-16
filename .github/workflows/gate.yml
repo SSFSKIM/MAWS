@@ -20,6 +20,10 @@ on:
         description: "Class 1a's runner (static, unit, probes), linux, macos or pool; empty takes GATE_RUNNER, then linux."
         type: string
         default: ''
+      evidence:
+        description: 'Upload e2e reports on success as well as failure for this run.'
+        type: boolean
+        default: false
 
 concurrency:
   group: gate-${{ github.ref }}
@@ -78,6 +82,7 @@ jobs:
       unit_runner: ${{ steps.plan.outputs.unit_runner }}
       probes_runner: ${{ steps.plan.outputs.probes_runner }}
       packaged: ${{ steps.plan.outputs.packaged }}
+      evidence: ${{ steps.plan.outputs.evidence }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -91,6 +96,7 @@ jobs:
           INPUT_GATES: ${{ inputs.gates }}
           INPUT_RUNNER: ${{ inputs.runner }}
           INPUT_CLASS1A: ${{ inputs.class1a }}
+          INPUT_EVIDENCE: ${{ inputs.evidence }}
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
@@ -196,7 +202,7 @@ jobs:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/voice-packaged
         run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:voice:packaged
       # Each run's HTML report keeps its screenshots and traces; test-results/ holds the last run's alone.
-      - if: failure()
+      - if: failure() || needs.plan.outputs.evidence == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: e2e-packaged
@@ -236,7 +242,7 @@ jobs:
           # (Decision Log 35); the key is the checked-out commit, whose sha the build stamp carries.
           if [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_BUILD_CACHE=$HOME/Library/Caches/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA; fi
           .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: ' "${display[@]}" pnpm "$SCRIPT"
-      - if: failure()
+      - if: failure() || needs.plan.outputs.evidence == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: e2e-${{ matrix.slug }}
