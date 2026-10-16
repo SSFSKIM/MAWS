@@ -114,6 +114,20 @@ describe('a PNG’s board and size', () => {
     expect(refusal(planDesignExport(source(), { format: 'png', board: 'b3', width: 2160 }))).toMatchObject({ reason: 'exportTooLarge', data: { board: 'b3', maxScale: 1 } });
   });
 
+  it('a width and a height together must both be one scale’s rounded output: a pixel off on a small board refuses, never distorts', () => {
+    const square = source(design([{ id: 'sq', at: { x: 0, y: 0, w: 16, h: 16 } }]));
+    expect(refusal(planDesignExport(square, { format: 'png', width: 16, height: 17 }))).toMatchObject({ reason: 'invalid', data: { board: 'sq', width: 16, height: 17 } });
+    expect(refusal(planDesignExport(square, { format: 'png', width: 17, height: 16 }))).toMatchObject({ reason: 'invalid' });
+    expect(planDesignExport(square, { format: 'png', width: 32, height: 32 })).toMatchObject({ ok: true, width: 32, height: 32, scale: 2 });
+    // fractional rounding that one scale gives on both sides is accepted, at a scale inside both sides' rounding
+    const tall = source(design([{ id: 'p', at: { x: 0, y: 0, w: 1080, h: 9000 } }]));
+    const fitted = planDesignExport(tall, { format: 'png', width: 983, height: 8192 });
+    expect(fitted).toMatchObject({ ok: true, width: 983, height: 8192 });
+    const s = fitted.ok && fitted.format === 'png' ? fitted.scale : NaN;
+    expect([Math.round(1080 * s), Math.round(9000 * s)]).toEqual([983, 8192]);
+    expect(refusal(planDesignExport(tall, { format: 'png', width: 983, height: 8200 }))).toMatchObject({ reason: 'invalid', data: { board: 'p', width: 983, height: 8200 } });
+  });
+
   it('refuses by name an unknown board, boards meant for a PDF, a paper size, an empty design, and a board that cannot be drawn', () => {
     expect(refusal(planDesignExport(source(), { format: 'png', board: 'nope' }))).toMatchObject({ reason: 'notFound', data: { board: 'nope' } });
     expect(refusal(planDesignExport(source(), { format: 'png', boards: ['b1'] }))).toMatchObject({ reason: 'invalid', data: { boards: ['b1'] } });

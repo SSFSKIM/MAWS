@@ -98,6 +98,21 @@ function undrawable(board: DesignExportBoard): DesignExportPlan | null {
 /** C's deck holding only `boards`, in their order. */
 const deckOf = (source: DesignExportSource, boards: readonly DesignExportBoard[]): ExportDeck => ({ ...source.deck, slides: boards.map((b) => source.deck.slides.find((s) => s.id === b.id)!) });
 
+/**
+ * A scale at which the board's sides round to exactly `width` and `height` (`px`'s rounding), or null when none does:
+ * the side's own ratio when it serves both, else the start of the scales both sides' rounding admits.
+ */
+function commonScale(board: Pick<DesignExportBoard, 'w' | 'h'>, width: number, height: number): number | null {
+  const fits = (s: number) => px(board.w * s) === width && px(board.h * s) === height;
+  if (fits(width / board.w)) return width / board.w;
+  if (fits(height / board.h)) return height / board.h;
+  const lo = Math.max((width - 0.5) / board.w, (height - 0.5) / board.h);
+  const hi = Math.min((width + 0.5) / board.w, (height + 0.5) / board.h);
+  if (lo >= hi) return null;
+  const mid = (lo + hi) / 2;
+  return fits(mid) ? mid : null;
+}
+
 function planPng(source: DesignExportSource, request: DesignExportRequest): DesignExportPlan {
   if (request.boards !== undefined) return fail('invalid', { boards: request.boards }, 'a PNG pictures one board: name it with board (boards selects a PDF’s pages)');
   if (source.boards.length === 0) return fail('invalid', { boards: 0 }, 'the design has no board to picture');
@@ -114,12 +129,15 @@ function planPng(source: DesignExportSource, request: DesignExportRequest): Desi
     if ((width !== undefined && width !== out.w) || (height !== undefined && height !== out.h)) {
       return fail('invalid', { board: board.id, scale, ...(width !== undefined && { width }), ...(height !== undefined && { height }) }, `board ${board.id} at scale ${scale} is ${out.w}×${out.h} px, not the ${width ?? out.w}×${height ?? out.h} asked; give a scale or a size, not both`);
     }
+  } else if (width !== undefined && height !== undefined) {
+    // both sides: one scale must round to each exactly (M5 fix wave: never a pixel of distortion)
+    const common = commonScale(board, width, height);
+    if (common === null) return fail('invalid', { board: board.id, width, height }, `board ${board.id} is ${board.w}×${board.h} px; no one scale draws it at ${width}×${height} (a PNG keeps the board’s shape: give the width or the height alone)`);
+    s = common;
+    out = { w: width, h: height };
   } else if (width !== undefined || height !== undefined) {
     s = width !== undefined ? width / board.w : height! / board.h;
     out = { w: width ?? px(board.w * s), h: height ?? px(board.h * s) };
-    if (width !== undefined && height !== undefined && Math.abs(px(board.h * s) - height) > 1) {
-      return fail('invalid', { board: board.id, width, height }, `board ${board.id} is ${board.w}×${board.h} px; ${width}×${height} would distort it (a PNG keeps the board’s shape: give the width or the height alone)`);
-    }
   } else {
     s = 1;
     out = { w: px(board.w), h: px(board.h) };
