@@ -7,6 +7,10 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { DocumentEditor, type DocumentRail } from '@artifacts/document/editor/DocumentEditor';
 import type { Editor } from '@tiptap/core';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { ArtifactKind } from '@shared/artifacts/entity'; // P3-E
+import type { Doc } from '@artifacts/yjs'; // P3-E
+import type { ViewEnvironment } from '@artifacts/document/editor/nodes/views'; // P3-E
+import type { EditorHostAction } from '../../panel/editor-host'; // P3-E
 import type { ArtifactEditorProps } from '../../artifacts/registry';
 import { useRegionMarkupSurface } from '../../markup/surface';
 import { useEditorHost } from '../../panel/editor-host';
@@ -19,13 +23,25 @@ import type { DocumentTabState } from './tab-state';
 
 export type DocumentEditorProps = ArtifactEditorProps<DocumentTabState>;
 
-export function DocumentPanel(props: DocumentEditorProps) {
+// P3-E start (E2 M3; ledger X26 as amended, E's Decision Log 19): what a dashboard adds to B's shell, each optional and
+// absent for a document: its charts' renderer, its kind (the comment card's and the notices' wording), the header actions
+// it adds after B's (Datasets), and the document the editor shows as it changes (the live one, a version's, the
+// suggestion replica's).
+interface DocumentShellAdditions {
+  renderChart?: ViewEnvironment['renderChart'];
+  artifactKind?: ArtifactKind;
+  additionalActions?: readonly EditorHostAction[];
+  onDisplayedDocument?(doc: Doc, revision?: number): void;
+}
+// P3-E end
+
+export function DocumentPanel(props: DocumentEditorProps & DocumentShellAdditions /* P3-E */) {
   return <DocumentBody {...props} surface="panel" />;
 }
 
 const NO_SESSION = '' as AppSessionId;
 
-export function DocumentBody({ artifactId, state, scope, visible, onShown, surface }: DocumentEditorProps & { surface: 'panel' | 'main' }) {
+export function DocumentBody({ artifactId, state, scope, visible, onShown, surface, renderChart, artifactKind, additionalActions, onDisplayedDocument /* P3-E */ }: DocumentEditorProps & DocumentShellAdditions & { surface: 'panel' | 'main' }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
   const title = snapshot.title || 'Document'; // until the artifact's row is read
   const commands = useMemo<DocumentHeaderCommands>(
@@ -39,17 +55,15 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
     }),
     [state],
   );
-  useEditorHost(
-    scope,
-    documentHeader(
-      { title, document: snapshot.document, saving: snapshot.saving, previewing: snapshot.previewing, unresolved: snapshot.unresolved, rail: snapshot.rail, history: true, suggestions: snapshot.suggestions, exporting: snapshot.exporting },
-      commands,
-    ),
+  const header = documentHeader(
+    { title, document: snapshot.document, saving: snapshot.saving, previewing: snapshot.previewing, unresolved: snapshot.unresolved, rail: snapshot.rail, history: true, suggestions: snapshot.suggestions, exporting: snapshot.exporting },
+    commands,
   );
+  useEditorHost(scope, additionalActions?.length ? { ...header, actions: [...(header.actions ?? []), ...additionalActions] } : header); // P3-E: a dashboard's actions after B's
 
   // Comments go to the session the main area shows (its Side thread, or its conversation); none shown, none offered.
   const appSessionId = useLayout((s) => shownSession(s.main));
-  const comments = useDocumentComments({ artifactId, appSessionId: appSessionId ?? NO_SESSION, title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold });
+  const comments = useDocumentComments({ artifactId, appSessionId: appSessionId ?? NO_SESSION, title, mode: surface === 'main' ? 'tab' : 'panel', visible, holdReplica: state.hold, ...(artifactKind !== undefined && { artifactKind }) /* P3-E */ });
 
   // The page is the tab's Mark-up surface while it is on screen.
   const page = useRef<HTMLElement | null>(null);
@@ -95,6 +109,8 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
         onPreviewChange={onPreviewChange}
         onEditor={onEditor}
         mentions={state.mentions}
+        renderChart={renderChart} /* P3-E */
+        onDisplayedDocument={onDisplayedDocument}
       />
     </SystemScope>
   );

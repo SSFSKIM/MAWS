@@ -26,7 +26,7 @@ import 'katex/dist/katex.min.css';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { JointHold, TypingPause, type VersionView } from '../collab';
 import { isDarkGround } from '../export/highlight';
-import { isBindingTransaction, type Carry } from '../../yjs';
+import { isBindingTransaction, type Carry, type Doc } from '../../yjs'; // P3-E: Doc
 import { ySyncPluginKey } from '../../yjs/prosemirror';
 import { coreExtensionOptions } from '../ids';
 import { nanoid8 } from '../schema';
@@ -46,7 +46,7 @@ import { goToChange, setCarried } from './history/paint';
 import { ShowEditorsMenu, useShowEditors } from './history/ShowEditors';
 import { useHistoryController, useHistorySnapshot } from './history/use-history';
 import { cssColor, type DocumentHandle, type EditorHost } from './host-types';
-import type { ViewEnvironment } from './nodes/views';
+import { displayedDocument, type ViewEnvironment } from './nodes/views'; // P3-E: displayedDocument
 import { Tabs } from './Tabs';
 import { useTabs } from './tabs-store';
 import type { MentionSource } from './MentionPicker';
@@ -87,6 +87,11 @@ export interface DocumentEditorProps {
   onPreviewChange?(previewing: boolean): void;
   /** Who and what Insert › Mention can name (people, sessions, artifacts); without it, a mention names the owner. */
   mentions?: MentionSource;
+  // P3-E start (E2 M3; E's Decision Log 19): a dashboard's charts drawn by E (absent: B's placeholder), and the document
+  // the editor shows told as it changes: the live one, a previewed version's with its revision, the suggestion replica's
+  renderChart?: ViewEnvironment['renderChart'];
+  onDisplayedDocument?(doc: Doc, revision?: number): void;
+  // P3-E end
 }
 
 export type DocumentRail = 'comments' | 'history' | null;
@@ -126,6 +131,15 @@ export function DocumentEditor(props: DocumentEditorProps) {
   useEffect(() => {
     onPreviewChange?.(previewing);
   }, [previewing, onPreviewChange]);
+  // P3-E start (E2 M3): the document shown, told as it changes (a preview with no tab to show tells nothing new)
+  const [suggestionDoc, setSuggestionDoc] = useState<Doc | null>(null);
+  const shownVersion = previewRevision(preview, snapshot?.versions ?? null);
+  const shownDoc = preview ? (preview.view?.ytype.doc ?? null) : pendingSuggestions && suggestionDoc ? suggestionDoc : doc;
+  const { onDisplayedDocument } = props;
+  useEffect(() => {
+    if (shownDoc) onDisplayedDocument?.(shownDoc, preview ? shownVersion : undefined);
+  }, [shownDoc, shownVersion, preview, onDisplayedDocument]);
+  // P3-E end
   const openRail = (next: Rail) => {
     if (!held) setOwnRail(next);
     onRailChange?.(next);
@@ -161,7 +175,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
       <div className="doc-editor-body">
         {active && props.suggestions && (
           <div className="doc-tab-editor" style={{ display: preview ? 'none' : pendingSuggestions ? undefined : 'contents' }}>
-            <Suggestions artifactId={props.artifactId} tabId={active.id} base={props.handle} hold={hold} typing={typing} host={props.suggestions} editorHost={props.host} onPending={setPendingSuggestions} pageScope={props.pageScope} />
+            <Suggestions artifactId={props.artifactId} tabId={active.id} base={props.handle} hold={hold} typing={typing} host={props.suggestions} editorHost={props.host} onPending={setPendingSuggestions} pageScope={props.pageScope} renderChart={props.renderChart} onDisplayedDocument={setSuggestionDoc} /* P3-E */ />
           </div>
         )}
         <div className="doc-tab-editor" style={{ display: pendingSuggestions && !preview ? 'none' : undefined }} onKeyDown={() => typing.keystroke()}>
@@ -182,6 +196,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
               historySnapshot={snapshot}
               hold={hold}
               readOnly={readOnly}
+              previewRevision={shownVersion} /* P3-E */
             />
           ) : (
             <div className="doc-editor-loading" role="status">
@@ -230,9 +245,11 @@ interface TabEditorProps extends DocumentEditorProps {
   onActiveThread(threadId: string | null): void;
   /** A click on a highlighted passage activated its thread. */
   onPassageClick(): void;
+  /** P3-E: the previewed version's revision, its charts' displayed one. */
+  previewRevision?: number;
 }
 
-function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, readOnly, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions }: TabEditorProps) {
+function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, onEditor, comments, author, rail, openRail, historyController, historySnapshot, hold, readOnly, showing, onShown, onActiveThread, onPassageClick, pageScope, onPage, mentions, renderChart, previewRevision: shownRevision /* P3-E */ }: TabEditorProps) {
   const [findOpen, setFindOpen] = useState(false);
   const preview = historySnapshot?.preview ?? null;
   const openCount = useOpenThreadCount(handle.doc);
@@ -255,7 +272,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           onRestored: (listener) => handle.onRestored(listener),
         },
         comments: { doc: handle.doc, tabId, onComment: () => commentRef.current(), onActivate: () => latest.current.onPassageClick() },
-        env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}) },
+        env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}), ...(renderChart ? { renderChart, displayed: displayedDocument(handle.doc) } : {}) /* P3-E */ },
       }),
       editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'live' } },
       shouldRerenderOnTransaction: false,
@@ -352,6 +369,8 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           renderDiagram={renderDiagram}
           controller={historyController}
           onEditor={setPreviewEditor}
+          renderChart={renderChart} /* P3-E */
+          revision={shownRevision}
         />
       )}
       {preview && historyController ? (
@@ -571,16 +590,21 @@ interface PreviewEditorProps {
   renderDiagram: DocumentEditorProps['renderDiagram'];
   controller: HistoryController | null;
   onEditor(editor: Editor | null): void;
+  renderChart?: DocumentEditorProps['renderChart']; // P3-E
+  revision?: number; // P3-E: the version's
 }
 
-function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, renderDiagram, controller, onEditor }: PreviewEditorProps) {
+function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, renderDiagram, controller, onEditor, renderChart, revision }: PreviewEditorProps) {
+  // P3-E: the version shown, for its charts; this editor is put on other versions without being made again, so it moves
+  const [displayed] = useState(() => displayedDocument(view.ytype.doc!, revision));
+  useLayoutEffect(() => displayed.set(view.ytype.doc!, revision), [displayed, view, revision]);
   const editor = useEditor(
     {
       coreExtensionOptions,
       extensions: editorExtensions({
         collaboration: { ytype: tabBody(handle.doc, tabId) ?? null, awareness: null, user: null, hold: null, onRestored: null, version: view },
         comments: { doc: handle.doc, tabId, onComment: () => false },
-        env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}) },
+        env: { artifactId, host, ...(renderDiagram ? { renderDiagram } : {}), ...(renderChart ? { renderChart, displayed } : {}) /* P3-E */ },
       }),
       element: detached,
       editorProps: { attributes: { 'aria-label': 'Document', class: 'doc-content', 'data-editor': 'preview' } },
@@ -616,4 +640,13 @@ function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, 
     };
   }, [editor, view, carried, focus, controller]);
   return null;
+}
+
+// P3-E (E2 M3): the revision of the version a preview shows (the later one of a comparison); none for the live state.
+function previewRevision(preview: Preview | null, versions: readonly { id: number; seq: number }[] | null): number | undefined {
+  const target = preview?.target;
+  if (!target || target.kind === 'since') return undefined;
+  const ids = target.kind === 'version' ? [target.versionId] : target.versionIds;
+  const seqs = ids.map((id) => versions?.find((version) => version.id === id)?.seq).filter((seq): seq is number => seq !== undefined);
+  return seqs.length > 0 ? Math.max(...seqs) : undefined;
 }
