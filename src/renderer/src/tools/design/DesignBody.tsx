@@ -121,6 +121,7 @@ function DesignBody({ artifactId, state, scope, visible, onShown, compact }: Des
         theme={theme}
         onStage={onStage}
         onDrawn={onDrawn}
+        onCanvases={state.setCanvases}
         comments={appSessionId === null ? undefined : comments}
         history={history}
         sessionTitle={state.sessionTitle}

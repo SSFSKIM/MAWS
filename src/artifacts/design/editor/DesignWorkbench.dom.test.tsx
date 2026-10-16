@@ -75,6 +75,19 @@ describe('the world', () => {
     expect(container.querySelector<HTMLElement>('[data-design-layer]')!.style.transform).toBe('translate(0px, 0px) scale(1)');
   });
 
+  it('(M6) tells its owner the live canvases by board, each drawing its board, and none once unmounted', () => {
+    const told: ReadonlyMap<string, { slideId: string; root: HTMLElement }>[] = [];
+    const doc = design(BOARDS);
+    const view = new DesignView();
+    view.setRoom({ w: 1000, h: 800 });
+    const { container, unmount } = render(<DesignWorkbench session={new DeckSession(doc, 0)} view={view} assetUrl={ASSET_URL} system={null} readOnly={false} onCanvases={(c) => told.push(c)} />);
+    const last = told.at(-1)!;
+    expect([...last.keys()].sort()).toEqual(BOARDS.map((b) => b.id));
+    for (const b of BOARDS) expect(last.get(b.id)!.root).toBe(board(container, b.id).querySelector('.maws-slide'));
+    unmount();
+    expect(told.at(-1)!.size).toBe(0);
+  });
+
   it('pans and zooms by the world’s transform alone, every board staying mounted', () => {
     const { container, view } = mount();
     const canvases = [...container.querySelectorAll('[data-board-id] .maws-slide')];

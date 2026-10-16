@@ -12,6 +12,7 @@ import { boardFrame, boardOrder } from '@artifacts/design/model';
 import { boardLabel, readBoards } from '@artifacts/design/editor/boards';
 import { BOARD_FIT_MAX, DesignView, unionRect } from '@artifacts/design/editor/viewport';
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
+import type { SlideCanvas } from '@artifacts/slides/canvas';
 import { DeckTabState, openDeckTabs, type DeckTabDeps } from '../presentation/tab-state';
 import type { DesignExportContext } from './exports';
 import { designHistoryApi } from './history-api';
@@ -23,6 +24,11 @@ export class DesignTabState extends DeckTabState {
   readonly view = new DesignView();
   /** M4: the design's version history on A's IPC, its versions read through the design model; null without the IPC. */
   readonly designHistory: HistoryApi | null = this.history && designHistoryApi(this.history);
+  /** M6: the canvases the body's live world draws now, by board (none while no body shows); the e2e seam's re-layout probe reads them. */
+  canvases: ReadonlyMap<string, SlideCanvas> = new Map();
+  setCanvases = (canvases: ReadonlyMap<string, SlideCanvas>): void => {
+    this.canvases = canvases;
+  };
 
   /** Every board in view (the header's Zoom to fit); waits for the body's room when none is measured yet. */
   fitAll = (): void => {

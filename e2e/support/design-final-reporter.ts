@@ -38,7 +38,7 @@ export default class DesignFinalReporter implements Reporter {
     this.outcomes.set(test, result.status === 'skipped' ? 'skipped' : test.outcome());
   }
 
-  onEnd(result: FullResult): { status: FullResult['status'] } | undefined {
+  async onEnd(result: FullResult): Promise<{ status?: FullResult['status'] } | undefined> {
     if (selectedRef(process.env) === null) return undefined;
     const tests = (this.suite?.allTests() ?? []).map((test) => ({ file: basename(test.location.file), title: test.titlePath().slice(1).join(' › '), outcome: this.outcomes.get(test) ?? 'not run' }));
     const run: InvocationSummary = { status: result.status, specs: [...new Set(tests.map((t) => t.file))].sort(), tests, filtered: this.filtered };

@@ -76,6 +76,8 @@ export interface DesignWorkbenchProps {
   onStage?: (element: HTMLElement | null) => void;
   /** Once, when every board of the first showing has laid out (how many). */
   onDrawn?: (boards: number) => void;
+  /** M6: the live world's canvases by board, whenever they change (none once unmounted): the tab keeps them for the scale gate's re-layout measure. */
+  onCanvases?: (canvases: ReadonlyMap<string, SlideCanvas>) => void;
   /** M4: where a comment goes (P2's card, B's surface); without one, commenting is not offered. */
   comments?: DocumentComments;
   /** M4: who writes the editor's thread changes (the owner by default). */
@@ -125,7 +127,7 @@ function useBoardCss(): void {
 }
 
 export function DesignWorkbench(props: DesignWorkbenchProps) {
-  const { session, view, assetUrl, system, readOnly, compact = false, uploadAsset, artifactId, importAsset, theme, onStage, onDrawn, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt } = props;
+  const { session, view, assetUrl, system, readOnly, compact = false, uploadAsset, artifactId, importAsset, theme, onStage, onDrawn, onCanvases, comments, commentAuthor, history: historySource, sessionTitle, assetUrlAt } = props;
   useCanvasCss();
   useBoardCss();
   const doc = session.doc;
@@ -174,6 +176,11 @@ export function DesignWorkbench(props: DesignWorkbenchProps) {
     });
   }, []);
   const activeCanvas = active ? (canvases.get(active.id) ?? null) : null;
+  useEffect(() => {
+    if (!onCanvases) return;
+    onCanvases(canvases);
+    return () => onCanvases(new Map());
+  }, [onCanvases, canvases]);
 
   // the first showing drawn: every board laid out once (the open-to-interactive measure)
   const reported = useRef(false);
