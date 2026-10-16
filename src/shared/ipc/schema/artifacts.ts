@@ -14,7 +14,7 @@ import { ArtifactVersionSchema } from '../../artifacts/version';
 import { AppSessionIdSchema } from '../../graph/ids';
 import { ARTIFACT_EXPORT_FONTS /* P3-C */, ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXPORT_PAGE_SIZES, ARTIFACT_MAX_BYTES } from '../../maws/tools';
 import type { IpcError } from '../errors';
-import type { CommandSpec } from './common';
+import { JsonValueSchema, type CommandSpec } from './common';
 import { ConnectorGrantGestureSchema, ConnectorGrantSchema, ConnectorToolRefSchema } from '../../artifacts/connectors'; // P3-H H3b
 import { ConnectorGrantOutcomeSchema } from './connectors'; // P3-H H3b
 
@@ -49,25 +49,9 @@ export const ArtifactContentInputSchema = z.union([
 // (P3-A M5): what JSON.stringify would drop or rewrite (`undefined`, a function, NaN, Infinity) is refused at any depth,
 // since the detached JSON line would carry something else than was sent. The public type is one level deep and the rest
 // `unknown`, since a recursive JSON type makes Playwright's typed `page.evaluate` over CommandInput infinitely deep
-// (TS2589); the recursion is the runtime check below.
-function isJsonValue(value: unknown, ancestors: Set<object> = new Set()): boolean {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (typeof value !== 'object' || ancestors.has(value)) return false; // undefined, function, bigint, symbol, a cycle
-  const isArray = Array.isArray(value);
-  const prototype = Object.getPrototypeOf(value);
-  if (!isArray && prototype !== Object.prototype && prototype !== null) return false; // a Date, Map, typed array, class instance
-  ancestors.add(value);
-  const keys = Object.keys(value);
-  const ok = (!isArray || keys.length === (value as unknown[]).length) && keys.every((key) => isJsonValue((value as Record<string, unknown>)[key], ancestors));
-  ancestors.delete(value);
-  return ok;
-}
-const TestValueSchema = z
-  .union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.unknown()), z.record(z.string(), z.unknown())])
-  .refine((value) => isJsonValue(value), 'expected a JSON value');
+// (TS2589); the recursion is the runtime check (`JsonValueSchema`, common.ts).
 export const ArtifactTestOpSchema = z.discriminatedUnion('op', [
-  z.strictObject({ op: z.literal('setAttr'), key: z.string().min(1), value: TestValueSchema, root: z.string().min(1).optional() }),
+  z.strictObject({ op: z.literal('setAttr'), key: z.string().min(1), value: JsonValueSchema, root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('insertText'), index: Seq, text: z.string(), root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('deleteText'), index: Seq, length: z.number().int().positive(), root: z.string().min(1).optional() }),
   z.strictObject({ op: z.literal('page'), text: z.string().max(ARTIFACT_MAX_BYTES) }), // M7 fix wave 1: an html page's new content

@@ -6,7 +6,7 @@
 // check that consumes nothing. Both are trusted main-side code, but what a route answers crosses into the broker
 // unchecked by any type, so the broker reads it through `readTarget` and `readAnswer` here.
 import * as z from 'zod';
-import type { ConnectorAuthorization, ConnectorCallRef, ConnectorGrant, ConnectorGrantMode, ConnectorGrantRequest, ConnectorRouteName, ConnectorToolRef } from '@shared/artifacts/connectors';
+import type { ConnectorAuthorization, ConnectorCallRef, ConnectorGrant, ConnectorGrantMode, ConnectorGrantRequest, ConnectorResult, ConnectorRouteName, ConnectorToolRef } from '@shared/artifacts/connectors';
 import { ConnectorGrantRequestSchema } from '@shared/artifacts/connectors';
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 
@@ -50,7 +50,7 @@ export interface ConnectorRouteCallContext {
 // named by the page's `revoked` reasons; `tooLarge`, a result the route would not carry over the artifact bound.
 export type ConnectorRouteRefusal = 'notGranted' | 'fingerprintChanged' | 'wrongMode' | 'revoked';
 export type ConnectorRouteAnswer =
-  | { ok: true; result: unknown }
+  | { ok: true; result: ConnectorResult }
   | { ok: false; failure: 'unavailable' | 'failed' | 'tooLarge'; message: string }
   | { ok: false; failure: 'refused'; refusal: ConnectorRouteRefusal; message: string };
 
@@ -85,7 +85,7 @@ export function readAnswer(value: unknown): ConnectorRouteAnswer | 'malformed' |
   if (!answer.ok) return { ...answer, message: answer.message.slice(0, MESSAGE_MAX_LENGTH) };
   const bytes = jsonBytes(answer.result);
   if (bytes === null) return 'malformed';
-  return bytes <= CONNECTOR_RESULT_MAX_BYTES ? { ok: true, result: answer.result } : 'tooLarge';
+  return bytes <= CONNECTOR_RESULT_MAX_BYTES ? { ok: true, result: answer.result as ConnectorResult } : 'tooLarge';
 }
 
 // The size of `value` as JSON, or null when it is not JSON (undefined, a bigint, a cycle).

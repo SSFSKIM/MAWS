@@ -91,9 +91,13 @@ export interface ConnectorVia {
   sessionId?: string; // the live session whose engine ran the call (route E)
 }
 
+// A tool's answer as a JSON value (`null` included, never `undefined`): both routes refuse an answer that is not JSON,
+// and the wire schemas (src/shared/ipc/schema/connectors.ts) say the same of a success.
+export type ConnectorResult = string | number | boolean | null | unknown[] | Record<string, unknown>;
+
 // A call's result: the tool's answer as the route returned it, when main received it, and how it went.
 export interface ConnectorCallResult {
-  result: unknown;
+  result: ConnectorResult;
   fetchedAt: number;
   via: ConnectorVia;
 }

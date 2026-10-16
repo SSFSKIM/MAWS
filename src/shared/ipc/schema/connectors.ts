@@ -24,7 +24,7 @@ import {
   type ConnectorRefusalState,
 } from '../../artifacts/connectors';
 import { AppSessionIdSchema } from '../../graph/ids';
-import type { CommandSpec } from './common';
+import { JsonValueSchema, type CommandSpec } from './common';
 
 const main = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'main' as const });
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
@@ -42,7 +42,7 @@ export const ConnectorRefusalSchema = z.union([refusalOf('paused'), refusalOf('r
 const InvalidSchema = refusalOf('invalid');
 
 export const ConnectorViaSchema = z.strictObject({ route: z.enum(['engine', 'direct']), sessionId: z.string().min(1).max(256).optional() });
-export const ConnectorCallOutcomeSchema = z.union([z.strictObject({ ok: z.literal(true), result: z.unknown(), fetchedAt: Time, via: ConnectorViaSchema }), ConnectorRefusalSchema]);
+export const ConnectorCallOutcomeSchema = z.union([z.strictObject({ ok: z.literal(true), result: JsonValueSchema, fetchedAt: Time, via: ConnectorViaSchema }), ConnectorRefusalSchema]);
 export const ConnectorDeclareOutcomeSchema = z.union([z.strictObject({ ok: z.literal(true), declared: z.array(ConnectorToolRefSchema) }), InvalidSchema]);
 export const ConnectorWatchStartSchema = z.union([z.strictObject({ ok: z.literal(true), watchId: WatchId, intervalMs: z.number().int().positive() }), InvalidSchema]);
 export const ConnectorGrantOutcomeSchema = z.union([z.strictObject({ ok: z.literal(true), grant: ConnectorGrantSchema }), ConnectorRefusalSchema]);
@@ -80,7 +80,7 @@ export const ConnectorStartSchema = ConnectorSessionToolSchema.extend({
 // `tooLarge`: a result over the artifact bound. `message` is for main's log, never a page.
 const Message = z.string().max(1_000);
 export const ConnectorOperationOutcomeSchema = z.union([
-  z.strictObject({ ok: z.literal(true), result: z.unknown() }),
+  z.strictObject({ ok: z.literal(true), result: JsonValueSchema }),
   z.strictObject({ ok: z.literal(false), failure: z.enum(['unavailable', 'failed', 'tooLarge']), message: Message }),
   z.strictObject({ ok: z.literal(false), failure: z.literal('refused'), refusal: z.enum(CONNECTOR_REFUSAL_REASONS.revoked), message: Message }),
 ]);
