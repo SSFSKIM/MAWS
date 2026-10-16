@@ -7,7 +7,7 @@
 // px (`left`/`top`, connector coordinates) to the slide; gestures read pointer moves back through its inverse.
 import type { SlideCanvas } from '../../canvas';
 import { connectorRoute } from '../../glyphs';
-import { apply, boundsOf, cornersOf, IDENTITY, multiply, shift, transformMatrix, type Affine, type Box, type Pt } from '../../geometry';
+import { apply, boundsOf, cornersOf, IDENTITY, multiply, shift, transformMatrix, type Affine, type Box, type FlowAxis, type Pt } from '../../geometry';
 import { ROOT } from '../../model';
 
 export interface Measured {
@@ -155,13 +155,16 @@ export function measureAll(canvas: SlideCanvas, ids: Iterable<string>, scale: nu
   return out;
 }
 
-/** The flex or grid axis a container lays its flow children along. */
-export function flowDirection(canvas: SlideCanvas, parent: string): 'row' | 'column' {
+/**
+ * How a container lays its flow children: a grid along its rows (the dialect has no `grid-auto-flow`), a flex box along
+ * its direction, reversed or not (the final fix wave's B8).
+ */
+export function flowAxis(canvas: SlideCanvas, parent: string): FlowAxis {
   const n = parent === ROOT ? canvas.root : canvas.node(parent);
-  if (!n) return 'column';
+  if (!n) return { main: 'y', reverse: false };
   const s = n.ownerDocument.defaultView!.getComputedStyle(n);
-  if (s.display === 'grid') return 'row';
-  return s.flexDirection.startsWith('row') ? 'row' : 'column';
+  if (s.display === 'grid') return { main: 'x', reverse: false };
+  return { main: s.flexDirection.startsWith('row') ? 'x' : 'y', reverse: s.flexDirection.endsWith('-reverse') };
 }
 
 /** A child's layout box in its parent's own px (untransformed), for the flow's slots. */

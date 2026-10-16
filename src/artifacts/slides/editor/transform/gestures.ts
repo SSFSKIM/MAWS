@@ -11,7 +11,8 @@
 //
 // - move: pinned elements by left/top px (a right/bottom, %, or calc pin rewritten on the first frame where the element
 //   is), connectors by their coordinates; snapped as one box unless ⌘; Shift keeps to one axis.
-// - flow: a flow child dragged among its siblings along its parent's axis; dropped, it re-orders (one key).
+// - flow: a flow child dragged among its siblings, its slot read on both axes in the direction its parent lays them (a
+//   grid's rows, a reversed row or column; the final fix wave's B8); dropped, it re-orders (one key).
 // - resize: eight handles (a flow child's width and height only, a flow text element's width only), Shift the aspect,
 //   Alt about the centre; the dragged edges snapped when nothing turns, scales or skews the element.
 // - rotate: the handle's angle, Shift by 15°, composed into the element's transform.
@@ -23,7 +24,7 @@ import {
   applyLinear,
   boundsOf,
   cornersOf,
-  flowInsertIndex,
+  flowSlot,
   invert,
   isIdentityLinear,
   linear,
@@ -56,7 +57,7 @@ import { siteOf, writeElements, type ElementWrites } from '../../writers-element
 import { DECK_COPY as C } from '../copy';
 import type { SlideCanvas } from '../../canvas';
 import type { DeckSession } from '../session';
-import { boxInParent, containerMatrix, flowDirection, measure, measureAll, type Measured } from './measure';
+import { boxInParent, containerMatrix, flowAxis, measure, measureAll, type Measured } from './measure';
 import { marquee as marqueeOf, slideTree, type SlideTree } from './selection';
 
 export interface GestureContext {
@@ -244,15 +245,16 @@ export function startFlowMove(ctx: GestureContext, id: string, p0: Pt): Gesture 
   const boxes = others.map((s) => boxInParent(ctx.canvas, parent, s)).filter((b): b is Box => b !== null);
   const frame = containerMatrix(ctx.canvas, parent)?.box ?? null;
   const me = measure(ctx.canvas, id, ctx.scale);
-  const direction = flowDirection(ctx.canvas, parent);
+  const axis = flowAxis(ctx.canvas, parent);
   const startAt = flow.indexOf(id);
   let at = startAt;
   return {
     frame(p) {
       if (!me || !frame || boxes.length !== others.length) return NO_GUIDES;
-      at = flowInsertIndex(boxes, apply(invert(frame), p), direction);
+      const slot = flowSlot(boxes, apply(invert(frame), p), axis);
+      at = slot?.index ?? 0;
       const ghost = { ...me.bounds, x: me.bounds.x + p.x - p0.x, y: me.bounds.y + p.y - p0.y };
-      const bar = insertionBar(boxes, at, direction);
+      const bar = slot?.bar;
       return { guides: [], ghost, insertion: bar && boundsOf(cornersOf(multiply(frame, shift(bar.x, bar.y)), bar.w, bar.h)) };
     },
     end(commit = true) {
@@ -261,18 +263,6 @@ export function startFlowMove(ctx: GestureContext, id: string, p0: Pt): Gesture 
       ctx.session.edit((origin) => reorderFlow(ctx.session.doc, ctx.slideId, id, before, origin));
     },
   };
-}
-
-function insertionBar(boxes: readonly Box[], at: number, direction: 'row' | 'column'): Box | undefined {
-  if (!boxes.length) return undefined;
-  const all = union(boxes)!;
-  const BAR = 4;
-  if (direction === 'column') {
-    const y = at === 0 ? boxes[0]!.y - BAR : at >= boxes.length ? boxes[boxes.length - 1]!.y + boxes[boxes.length - 1]!.h : (boxes[at - 1]!.y + boxes[at - 1]!.h + boxes[at]!.y) / 2 - BAR / 2;
-    return { x: all.x, y, w: all.w, h: BAR };
-  }
-  const x = at === 0 ? boxes[0]!.x - BAR : at >= boxes.length ? boxes[boxes.length - 1]!.x + boxes[boxes.length - 1]!.w : (boxes[at - 1]!.x + boxes[at - 1]!.w + boxes[at]!.x) / 2 - BAR / 2;
-  return { x, y: all.y, w: BAR, h: all.h };
 }
 
 // ---------------------------------------------------------------- resize

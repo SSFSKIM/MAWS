@@ -73,15 +73,20 @@ export function Overlay({ session, canvas, slideId, scale, readOnly, surface, fr
   const pending = useRef<Pending | null>(null);
 
   const remote = useRemoteSelections(session, slideId);
-  // the selection's boxes (and other replicas' on this slide), measured again whenever the slide, a selection or the
-  // zoom changes; a selected element another replica removed leaves the selection (and a text edit of it ends)
+  // the final fix wave's B7: measured again after every layout pass of the canvas too (faces arriving, a design-system
+  // restyle, a fit pass), so the handles and other replicas' outlines follow geometry that moves with no deck write
+  const [laidOut, setLaidOut] = useState(0);
+  useEffect(() => canvas?.onLayout(() => setLaidOut((n) => n + 1)), [canvas]);
+  // the selection's boxes (and other replicas' on this slide), measured again whenever the slide, a selection, the
+  // zoom or the layout changes; a selected element another replica removed leaves the selection (and a text edit of it
+  // ends)
   useLayoutEffect(() => {
     if (canvas) {
       const live = selection.filter((id) => canvas.node(id) !== undefined);
       if (live.length !== selection.length) session.select(live);
     }
     setMeasured(canvas ? measureAll(canvas, new Set([...selection, ...remote.flatMap((r) => r.elementIds)]), scale) : new Map());
-  }, [canvas, selection, remote, scale, version, slideId, session]);
+  }, [canvas, selection, remote, scale, version, slideId, session, laidOut]);
 
   const ctx = useCallback((): ClipboardContext | null => (canvas ? { session, slideId, canvas, scale, artifactId, importAsset } : null), [canvas, session, slideId, scale, artifactId, importAsset]);
 

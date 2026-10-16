@@ -606,12 +606,64 @@ export function pinToLeftTop(style: Readonly<Record<string, string>>, b: Box): R
 
 // ---------------------------------------------------------------- flow
 
-/** The index among `boxes` (a flow parent's children in order) a child dropped at `p` goes before. */
-export function flowInsertIndex(boxes: readonly Box[], p: Pt, direction: 'row' | 'column'): number {
-  const axis: Axis = direction === 'row' ? 'x' : 'y';
-  for (let i = 0; i < boxes.length; i++) {
-    const [s, e] = span(boxes[i]!, axis);
-    if (p[axis] < (s + e) / 2) return i;
+/** How a flow parent places its children: along `main` (x a row, y a column), from its far end when `reverse`. */
+export interface FlowAxis {
+  main: 'x' | 'y';
+  reverse: boolean;
+}
+
+/** Where a dropped flow child goes: before `boxes[index]` (`boxes.length`: after the last), and its insertion bar. */
+export interface FlowSlot {
+  index: number;
+  bar: Box;
+}
+
+/**
+ * The slot among `boxes` (a flow parent's children in order, the parent's px) a child dropped at `p` goes in, read on
+ * both axes (the final fix wave's B8): the children fall into lines across the flow (a grid's rows, a wrapped row's
+ * lines; one line when nothing wraps, whatever its children's sizes across it), the pointer takes the nearest line, and
+ * in it the first child whose leading half it is over (leading in the flow's direction: a row-reverse's right half),
+ * else the slot after the line's last. The bar (`thickness` px, the line's extent) sits at that slot: in the gap between
+ * two children of the line, else outside the edge it was chosen at, so the one slot after a row's end and before the
+ * next row's start is drawn where the pointer is. Null for no children.
+ */
+export function flowSlot(boxes: readonly Box[], p: Pt, flow: FlowAxis, thickness = 4): FlowSlot | null {
+  const { main, reverse } = flow;
+  const cross: Axis = main === 'x' ? 'y' : 'x';
+  // a child overlapping the line so far across the flow by half its extent (or the line's) is in it
+  const lines: { from: number; to: number; at: number[] }[] = [];
+  boxes.forEach((b, i) => {
+    const [s, e] = span(b, cross);
+    const line = lines[lines.length - 1];
+    if (line && Math.min(e, line.to) - Math.max(s, line.from) >= Math.min(e - s, line.to - line.from) / 2) {
+      line.from = Math.min(line.from, s);
+      line.to = Math.max(line.to, e);
+      line.at.push(i);
+    } else lines.push({ from: s, to: e, at: [i] });
+  });
+  const away = (l: { from: number; to: number }) => Math.max(l.from - p[cross], p[cross] - l.to, 0);
+  let line = lines[0];
+  if (!line) return null;
+  for (const l of lines) if (away(l) < away(line)) line = l;
+  const lead = (i: number) => span(boxes[i]!, main)[reverse ? 1 : 0];
+  const trail = (i: number) => span(boxes[i]!, main)[reverse ? 0 : 1];
+  const k = line.at.findIndex((i) => {
+    const mid = (lead(i) + trail(i)) / 2;
+    return reverse ? p[main] > mid : p[main] < mid;
+  });
+  let index: number;
+  let at: number;
+  if (k > 0) {
+    index = line.at[k]!;
+    at = (trail(line.at[k - 1]!) + lead(index)) / 2 - thickness / 2;
+  } else if (k === 0) {
+    index = line.at[0]!;
+    at = lead(index) - (reverse ? 0 : thickness);
+  } else {
+    const last = line.at[line.at.length - 1]!;
+    index = last + 1;
+    at = trail(last) - (reverse ? thickness : 0);
   }
-  return boxes.length;
+  const bar = main === 'x' ? { x: at, y: line.from, w: thickness, h: line.to - line.from } : { x: line.from, y: at, w: line.to - line.from, h: thickness };
+  return { index, bar };
 }

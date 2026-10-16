@@ -14,7 +14,7 @@ import {
   transformMatrix,
   transformOf,
   corners,
-  flowInsertIndex,
+  flowSlot,
   hitTest,
   intersects,
   pinToLeftTop,
@@ -212,14 +212,57 @@ describe('pins', () => {
 });
 
 describe('flow insertion', () => {
+  const ROW = { main: 'x', reverse: false } as const;
+  const COLUMN = { main: 'y', reverse: false } as const;
+  const at = (boxes: Box[], x: number, y: number, flow: Parameters<typeof flowSlot>[2]) => flowSlot(boxes, { x, y }, flow)!.index;
+
   it('finds the slot along the parent’s axis from the pointer', () => {
     const boxes = [box(0, 0, 100, 100), box(0, 120, 100, 100), box(0, 240, 100, 100)];
-    expect(flowInsertIndex(boxes, { x: 50, y: 10 }, 'column')).toBe(0);
-    expect(flowInsertIndex(boxes, { x: 50, y: 160 }, 'column')).toBe(1);
-    expect(flowInsertIndex(boxes, { x: 50, y: 200 }, 'column')).toBe(2);
-    expect(flowInsertIndex(boxes, { x: 50, y: 900 }, 'column')).toBe(3);
+    expect(at(boxes, 50, 10, COLUMN)).toBe(0);
+    expect(at(boxes, 50, 160, COLUMN)).toBe(1);
+    expect(at(boxes, 50, 200, COLUMN)).toBe(2);
+    expect(at(boxes, 50, 900, COLUMN)).toBe(3);
     const row = [box(0, 0, 100, 50), box(200, 0, 100, 50)];
-    expect(flowInsertIndex(row, { x: 260, y: 0 }, 'row')).toBe(2);
+    expect(at(row, 260, 0, ROW)).toBe(2);
+    expect(flowSlot([], { x: 0, y: 0 }, ROW)).toBeNull();
+  });
+
+  // the final fix wave's B8: both axes, and the direction the flow runs in
+  it('in a grid, the row under the pointer and the column in it; the bar at the slot chosen', () => {
+    // three columns, two rows, a 20 px gap
+    const grid = [box(0, 0, 100, 100), box(120, 0, 100, 100), box(240, 0, 100, 100), box(0, 120, 100, 100), box(120, 120, 100, 100)];
+    expect(at(grid, 150, 50, ROW)).toBe(1); // row 1, column 2's left half
+    expect(at(grid, 200, 170, ROW)).toBe(5); // row 2, right of its last
+    expect(at(grid, 30, 160, ROW)).toBe(3); // row 2, column 1's left half
+    expect(at(grid, 60, 160, ROW)).toBe(4);
+    expect(at(grid, 210, 110, ROW)).toBe(2); // the gap between the rows: the nearer row's (the first on a tie)
+    // one slot, after the first row's end or before the second row's start: the bar where the pointer is
+    expect(flowSlot(grid, { x: 330, y: 50 }, ROW)).toEqual({ index: 3, bar: box(340, 0, 4, 100) });
+    expect(flowSlot(grid, { x: 10, y: 170 }, ROW)).toEqual({ index: 3, bar: box(-4, 120, 4, 100) });
+    // between two of a row: in their gap, the row's height
+    expect(flowSlot(grid, { x: 150, y: 170 }, ROW)).toEqual({ index: 4, bar: box(108, 120, 4, 100) });
+  });
+
+  it('in a row-reverse the first child is the rightmost; in a column-reverse the bottom one', () => {
+    const rowReverse = [box(400, 0, 100, 50), box(200, 0, 100, 50), box(0, 0, 100, 50)];
+    const RR = { main: 'x', reverse: true } as const;
+    expect(at(rowReverse, 480, 10, RR)).toBe(0);
+    expect(at(rowReverse, 420, 10, RR)).toBe(1);
+    expect(at(rowReverse, 150, 10, RR)).toBe(2);
+    expect(flowSlot(rowReverse, { x: 10, y: 10 }, RR)).toEqual({ index: 3, bar: box(-4, 0, 4, 50) });
+    expect(flowSlot(rowReverse, { x: 600, y: 10 }, RR)).toEqual({ index: 0, bar: box(500, 0, 4, 50) });
+    const columnReverse = [box(0, 200, 80, 50), box(0, 100, 80, 50), box(0, 0, 80, 50)];
+    const CR = { main: 'y', reverse: true } as const;
+    expect(at(columnReverse, 40, 240, CR)).toBe(0);
+    expect(at(columnReverse, 40, 210, CR)).toBe(1);
+    expect(at(columnReverse, 40, 10, CR)).toBe(3);
+    expect(flowSlot(columnReverse, { x: 40, y: 175 }, CR)).toEqual({ index: 1, bar: box(0, 173, 80, 4) });
+  });
+
+  it('one line whatever its children’s sizes across it: a narrow child beside the pointer does not split it', () => {
+    // a column of a wide title and a narrow body: the pointer far right of the body's lower half is after the body
+    const column = [box(0, 0, 1600, 80), box(0, 100, 300, 50)];
+    expect(at(column, 1000, 140, COLUMN)).toBe(2);
   });
 });
 
