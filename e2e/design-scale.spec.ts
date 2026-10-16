@@ -135,7 +135,8 @@ async function showLibrary(page: Page): Promise<void> {
   await expect(page.locator('[data-library]')).toBeVisible({ timeout: 15_000 });
 }
 
-const mainTab = async (page: Page, id: string): Promise<TabView | undefined> => (await tabsOf(page, id)).find((t) => t.surface === 'main');
+/** The newest main tab showing the design (a closed tab's state never answers for the one opened after it). */
+const mainTab = async (page: Page, id: string): Promise<TabView | undefined> => (await tabsOf(page, id)).filter((t) => t.surface === 'main').sort((a, b) => b.timings.openedAt - a.timings.openedAt)[0];
 
 /** What the main tab draws, read at ready: each board's identity, drawn size and element nodes. */
 async function drawnBoards(tab: Locator): Promise<{ id: string; w: number; h: number; elements: number }[]> {
@@ -255,13 +256,21 @@ async function republishing(agent: DesignAgent, boardId: string, until: Promise<
 
 const TRACE_CATEGORIES = ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame', 'toplevel', 'blink.user_timing', 'benchmark', 'cc'];
 
+/** The window's trace could not be started (nothing of the gesture ran under it). */
+class TraceUnavailable extends Error {}
+
 /** `run` under a DevTools trace of the window (Chromium's Tracing domain on the page's session), its events answered. */
 async function traced<T>(page: Page, run: () => Promise<T>): Promise<{ result: T; events: TraceEvent[] }> {
   const cdp = await page.context().newCDPSession(page);
   const events: TraceEvent[] = [];
   cdp.on('Tracing.dataCollected', ({ value }) => events.push(...(value as unknown as TraceEvent[])));
   const complete = new Promise<void>((resolve) => cdp.once('Tracing.tracingComplete', () => resolve()));
-  await cdp.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { recordMode: 'recordAsMuchAsPossible', includedCategories: TRACE_CATEGORIES, excludedCategories: ['*'] } });
+  try {
+    await cdp.send('Tracing.start', { transferMode: 'ReportEvents', traceConfig: { recordMode: 'recordAsMuchAsPossible', includedCategories: TRACE_CATEGORIES, excludedCategories: ['*'] } });
+  } catch (error) {
+    await cdp.detach().catch(() => {});
+    throw new TraceUnavailable(error instanceof Error ? error.message : String(error));
+  }
   let result: T;
   try {
     result = await run();
@@ -316,7 +325,7 @@ interface FrameTrial {
 /** A gesture measured: its trace's frame work and the rAF proxy, the trace kept on disk. */
 async function measureFrames(page: Page, name: string, gesture: () => Promise<void>): Promise<FrameTrial> {
   const idle = await idleFrames(page);
-  const { result: stamps, events } = await traced(page, async () => {
+  const run = async () => {
     await startFrames(page);
     try {
       await gesture();
@@ -324,15 +333,27 @@ async function measureFrames(page: Page, name: string, gesture: () => Promise<vo
       await sleep(100); // the last input's frame
     }
     return stopFrames(page);
-  });
-  mkdirSync(TRACES, { recursive: true });
-  writeFileSync(join(TRACES, `${name}.trace.json`), JSON.stringify({ traceEvents: events }));
-  const out: FrameTrial = { work: null, drops: null };
+  };
   const errors: string[] = [];
+  let stamps: number[];
+  let events: TraceEvent[] | null = null;
   try {
-    out.work = frameWork(events, 'design-scale-start', 'design-scale-end');
+    ({ result: stamps, events } = await traced(page, run));
   } catch (error) {
-    errors.push(`trace: ${error instanceof Error ? error.message : String(error)}`);
+    if (!(error instanceof TraceUnavailable)) throw error;
+    // no trace could be started: the gesture runs untraced for the rAF proxy alone, the frame work unreadable
+    errors.push(`trace unavailable: ${error.message}`);
+    stamps = await run();
+  }
+  const out: FrameTrial = { work: null, drops: null };
+  if (events) {
+    mkdirSync(TRACES, { recursive: true });
+    writeFileSync(join(TRACES, `${name}.trace.json`), JSON.stringify({ traceEvents: events }));
+    try {
+      out.work = frameWork(events, 'design-scale-start', 'design-scale-end');
+    } catch (error) {
+      errors.push(`trace: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   try {
     out.drops = rafDrops(idle, stamps);
