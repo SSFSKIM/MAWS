@@ -17,7 +17,8 @@ import { HYDRATION } from '../model/copy';
 import { withQueueTail } from '../model/derive';
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
-import { DEFAULT_ACTIONS, listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
+import { DEFAULT_ACTIONS } from './default-actions';
+import { listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
 import { WorkMotion } from './motion';
 import { RowView } from './rows/Row';
 import { useBrowserActivityAttachment } from './rows/BrowserActivity'; // E13

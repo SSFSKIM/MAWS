@@ -1,0 +1,1230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The desk · The phone</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../tokens-light.css" id="theme-light">
+<script>
+/* Light is the default (D-4). `?theme=dark` drops the light override so the dark tokens under :root apply. */
+if (new URLSearchParams(location.search).get('theme') === 'dark') { document.getElementById('theme-light').remove(); document.documentElement.style.colorScheme = 'dark'; }
+</script>
+<style>
+/* Adopted from the desk's 01–04: the same tokens, glyphs, card, fold and settled line, light first.
+   The phone is a stack, not a layout: grid → project → channel, one full screen each, every pushed
+   screen carrying its own back control (a standalone app has no browser back button).
+   Phone sizing: body text 16 px (an input under 16 px makes iOS zoom on focus), controls at least
+   44 px tall, the status bar (47 px) and home indicator (34 px) kept clear with env(safe-area-inset-*).
+   Accent stays on focus and on the one card a notification opened; amber is still only "waiting on you". */
+* { box-sizing: border-box; }
+body { padding: 40px 24px 72px; }
+main { width: 1240px; max-width: 100%; margin: 0 auto; }
+h1, h2, h3, p, ol, ul { margin: 0; }
+ol, ul { padding: 0; list-style: none; }
+h1 { font-size: 21px; font-weight: 600; letter-spacing: -.45px; }
+h2 { font-size: 13px; font-weight: 550; }
+a { color: inherit; text-decoration: none; }
+button, textarea, input, select { font: inherit; color: inherit; }
+button { border: 0; background: none; cursor: pointer; border-radius: var(--radius-sm); padding: 0; }
+button:disabled { cursor: default; }
+a:focus-visible, button:focus-visible, textarea:focus-visible, input:focus-visible, summary:focus-visible, label:focus-within:has(input[type=checkbox]:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font: 12px var(--font-mono); }
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+summary { cursor: pointer; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.page-head { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+.eyebrow { display: flex; gap: 12px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); margin-bottom: 10px; }
+.eyebrow a { margin-left: auto; text-transform: none; letter-spacing: 0; text-decoration: underline; text-underline-offset: 3px; }
+.eyebrow label { text-transform: none; letter-spacing: 0; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.page-head p { margin-top: 9px; color: var(--fg-muted); line-height: 1.6; max-width: 92ch; }
+.page-head p strong { color: var(--fg); font-weight: 550; }
+.vignette { margin: 0 0 52px; }
+figure { margin: 0; }
+figcaption { display: flex; align-items: baseline; gap: 12px; margin-bottom: 5px; }
+figcaption .number, .ph-cap .number { color: var(--fg-muted); font: 11px var(--font-mono); }
+figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11px; }
+.pick { font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 2px 6px; }
+.rationale { margin: 0 0 16px 32px; font-size: 11px; color: var(--fg-muted); line-height: 1.5; max-width: 110ch; }
+.section-rule { display: flex; align-items: center; gap: 12px; margin: 64px 0 24px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); }
+.section-rule::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.annot { margin: 18px 0 0 32px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px 28px; font-size: 11px; color: var(--fg-muted); line-height: 1.55; }
+.annot b { display: block; color: var(--fg); font-weight: 550; margin-bottom: 2px; }
+.annot code { font-size: 11px; }
+.notes { font-size: 12px; color: var(--fg-muted); line-height: 1.6; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 40px; }
+.notes h3 { font-size: 12px; font-weight: 600; color: var(--fg); margin: 0 0 4px; }
+.notes ol { list-style: decimal; padding-left: 18px; }
+.notes li + li { margin-top: 6px; }
+.notes b { color: var(--fg); font-weight: 550; }
+.spec { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 4px; }
+.spec th, .spec td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--border); vertical-align: top; }
+.spec th { font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg-muted); }
+.spec td { color: var(--fg); }
+
+/* ───────── The phone frame: 390 × 844, standalone, no Safari chrome ───────── */
+.phones { display: flex; flex-wrap: wrap; gap: 36px 35px; align-items: flex-start; }
+.ph { width: 390px; flex-shrink: 0; }
+.ph-cap { display: flex; align-items: baseline; gap: 8px; min-height: 22px; margin: 0 0 8px; font-size: 12px; }
+.ph-cap b { font-weight: 550; }
+.ph-cap .pick { margin-left: auto; }
+.screen { position: relative; width: 390px; height: 844px; border: 1px solid var(--border-strong); border-radius: 48px; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; font-size: 15px; line-height: 1.4; isolation: isolate; }
+/* Home indicator: drawn over everything, as iOS draws it. */
+.screen::after { content: ''; position: absolute; bottom: 8px; left: 50%; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: var(--fg); z-index: 20; pointer-events: none; }
+.sb { height: 47px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 4px 26px 0 46px; font-size: 15px; font-weight: 600; letter-spacing: -.2px; font-variant-numeric: tabular-nums; }
+.sb .ic { display: flex; align-items: center; gap: 6px; }
+.sb .ic svg { width: 18px; height: 12px; stroke-width: 0; fill: currentColor; }
+.sb .ic svg.bat { width: 26px; height: 12px; }
+.safe { height: 34px; flex-shrink: 0; }
+/* The safe-area guide, toggled from the page head. */
+.show-safe .sb, .show-safe .safe { background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--info) 22%, transparent) 0 6px, transparent 6px 12px); }
+.show-safe .screen::before { content: 'top 47 · bottom 34'; position: absolute; right: 18px; bottom: 40px; z-index: 21; font: 10px var(--font-mono); color: var(--info); }
+
+/* App chrome */
+.top { flex-shrink: 0; background: var(--bg-raised); border-bottom: 1px solid var(--border); position: relative; z-index: 2; }
+.nav { height: 48px; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; padding: 0 6px; }
+.nav .l { justify-self: start; display: flex; align-items: center; min-width: 0; }
+.nav .c { text-align: center; min-width: 0; max-width: 220px; }
+.nav .c .t { font-size: 16px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav .c .s { font-size: 12px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nav .r { justify-self: end; display: flex; align-items: center; gap: 2px; }
+.nav.flat { display: flex; gap: 10px; padding: 0 8px 0 16px; }
+.wordmark { font-size: 12px; font-weight: 650; letter-spacing: 1.7px; color: var(--fg-muted); }
+.here { font-weight: 600; font-size: 16px; }
+.count { color: var(--fg-muted); font-size: 14px; }
+.conn { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--fg-muted); white-space: nowrap; }
+.conn .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.backbtn { display: inline-flex; align-items: center; gap: 0; height: 44px; padding: 0 8px 0 2px; font-size: 16px; color: var(--fg); border-radius: var(--radius); max-width: 120px; }
+.backbtn svg { width: 22px; height: 22px; stroke-width: 1.8; }
+.backbtn span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.iconbtn { width: 44px; height: 44px; display: inline-grid; place-items: center; border-radius: var(--radius); color: var(--fg); }
+.iconbtn svg { width: 20px; height: 20px; }
+.me { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; font-weight: 650; background: var(--bg-active); color: var(--fg-muted); }
+.subhead { display: flex; align-items: center; gap: 8px; padding: 0 16px 9px; font-size: 13px; color: var(--fg-muted); min-width: 0; }
+.subhead .charge { min-width: 0; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: 12px; padding: 2px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); color: var(--fg-muted); white-space: nowrap; }
+.chip.waiting { color: var(--warning); border-color: transparent; background: color-mix(in srgb, var(--warning) 12%, transparent); font-weight: 600; }
+.pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; animation: pulse 1.6s ease-in-out infinite; flex-shrink: 0; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; overscroll-behavior: contain; }
+.scroll::-webkit-scrollbar { display: none; }
+.scroll.pad-b { padding-bottom: 34px; }
+.strip { display: flex; align-items: flex-start; gap: 8px; padding: 10px 16px; font-size: 13px; line-height: 1.45; color: var(--fg-muted); border-bottom: 1px solid var(--border); background: var(--bg-raised); }
+.strip strong { color: var(--fg); font-weight: 550; }
+.strip button { margin-left: auto; flex-shrink: 0; font-size: 13px; color: var(--fg); height: 32px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); margin-top: -6px; margin-bottom: -6px; }
+.spinner { width: 12px; height: 12px; border: 1.5px solid var(--border-strong); border-top-color: var(--fg-muted); border-radius: 50%; animation: spin 1.1s linear infinite; flex-shrink: 0; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ───────── Lock screen (iOS's surface, drawn in the theme's ink) ───────── */
+.lock { background: linear-gradient(172deg, color-mix(in srgb, var(--info) 34%, var(--fg)) 0%, var(--fg) 55%, color-mix(in srgb, var(--accent) 30%, var(--fg)) 100%); color: var(--bg); }
+.lock::after { background: var(--bg); }
+.lock .sb { color: var(--bg); }
+.lock-lockglyph { text-align: center; margin-top: 2px; }
+.lock-lockglyph svg { width: 16px; height: 16px; }
+.lock-date { text-align: center; margin-top: 8px; font-size: 19px; font-weight: 500; opacity: .9; }
+.lock-time { text-align: center; font-size: 86px; font-weight: 600; letter-spacing: -2.5px; line-height: 1; font-variant-numeric: tabular-nums; }
+.notifs { position: absolute; left: 9px; right: 9px; bottom: 116px; display: flex; flex-direction: column; gap: 8px; }
+.nt { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 11px; align-items: start; padding: 12px 14px 13px; border-radius: 22px; background: color-mix(in srgb, var(--bg) 84%, transparent); -webkit-backdrop-filter: blur(24px) saturate(1.5); backdrop-filter: blur(24px) saturate(1.5); color: var(--fg); }
+.appicon { width: 38px; height: 38px; border-radius: 9px; background: var(--fg); color: var(--bg); display: grid; place-items: center; font-size: 17px; font-weight: 700; letter-spacing: -.5px; box-shadow: inset 0 0 0 1px var(--border); }
+.nt .ttl { display: flex; align-items: baseline; gap: 8px; }
+.nt .ttl b { flex: 1; min-width: 0; font-size: 15px; font-weight: 600; line-height: 1.25; }
+.nt .ttl time { font-size: 13px; color: var(--fg-muted); white-space: nowrap; }
+.nt p { font-size: 15px; line-height: 1.3; margin-top: 1px; }
+.lock-btns { position: absolute; left: 46px; right: 46px; bottom: 48px; display: flex; justify-content: space-between; }
+.lock-btns span { width: 50px; height: 50px; border-radius: 50%; display: grid; place-items: center; background: color-mix(in srgb, var(--bg) 18%, transparent); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); }
+.lock-btns svg { width: 20px; height: 20px; }
+.icon-demo { display: flex; align-items: center; gap: 14px; margin-top: 8px; }
+.icon-demo .home { position: relative; display: grid; justify-items: center; gap: 5px; font-size: 11px; color: var(--fg); }
+.icon-demo .appicon { width: 60px; height: 60px; border-radius: 14px; font-size: 26px; }
+.badge { position: absolute; top: -7px; right: -9px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--danger); color: var(--bg); font-size: 13px; font-weight: 600; display: grid; place-items: center; font-variant-numeric: tabular-nums; }
+
+/* ───────── Grid (01's card B, phone sizing) ───────── */
+.pg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 14px 14px 48px; }
+.tile { display: flex; flex-direction: column; justify-content: space-between; height: 122px; padding: 12px 12px 11px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised); text-align: left; }
+.tile.waiting { background: color-mix(in srgb, var(--warning) 8%, var(--bg-raised)); border-color: color-mix(in srgb, var(--warning) 38%, transparent); }
+.tile.off { background: transparent; border-style: dashed; border-color: var(--border-strong); }
+.tile .top-row { display: flex; align-items: flex-start; gap: 8px; }
+.tile .nm { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.tile.off .nm { color: var(--fg-muted); font-weight: 500; }
+.tile .foot { display: flex; align-items: flex-end; justify-content: space-between; gap: 6px; }
+.num { font-size: 38px; line-height: .9; font-weight: 600; letter-spacing: -1.4px; color: var(--warning); font-variant-numeric: tabular-nums; }
+.numlbl { display: block; margin-top: 5px; font-size: 12px; font-weight: 550; color: var(--warning); }
+.tstate { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; }
+.tstate.quiet { color: var(--fg-muted); }
+.tstate-sub { display: block; margin-top: 3px; font-size: 12px; color: var(--fg-muted); }
+.second { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.machines { display: inline-flex; align-items: center; gap: 3px; padding-top: 5px; }
+.machines i { width: 6px; height: 6px; border-radius: 50%; border: 1.25px solid var(--fg-muted); }
+.machines i.on { background: var(--fg-muted); }
+.stale .tile { opacity: .62; }
+/* One column, the alternative */
+.pl { display: flex; flex-direction: column; gap: 8px; padding: 14px 14px 48px; }
+.trow { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 66px; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-raised); text-align: left; }
+.trow.waiting { background: color-mix(in srgb, var(--warning) 8%, var(--bg-raised)); border-color: color-mix(in srgb, var(--warning) 38%, transparent); }
+.trow.off { background: transparent; border-style: dashed; border-color: var(--border-strong); }
+.trow .nm { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trow.off .nm { color: var(--fg-muted); font-weight: 500; }
+.trow .sub { display: flex; align-items: center; gap: 8px; margin-top: 3px; font-size: 13px; color: var(--fg-muted); }
+.trow .sub .machines { padding-top: 0; }
+.trow .w { text-align: right; }
+.trow .w .num { font-size: 30px; }
+.trow .w .numlbl { margin-top: 3px; font-size: 11px; }
+
+/* First-run notification banner on the grid (frame 9) */
+.nudge { margin: 14px 14px 0; padding: 12px 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-raised); display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 4px 10px; }
+.nudge > svg { width: 20px; height: 20px; color: var(--fg-muted); margin-top: 1px; }
+.nudge b { font-size: 15px; font-weight: 600; }
+.nudge p { grid-column: 2; font-size: 13px; color: var(--fg-muted); line-height: 1.45; }
+.nudge .row { grid-column: 2; display: flex; gap: 8px; margin-top: 8px; }
+
+/* ───────── Channel list (3A) and drawer (3B) ───────── */
+.chl { padding: 6px 0 40px; }
+.crow { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 11px; align-items: center; width: 100%; min-height: 60px; padding: 8px 12px 8px 16px; text-align: left; border-radius: 0; }
+.crow:hover { background: var(--bg-hover); }
+.crow .g { text-align: center; font-size: 15px; line-height: 20px; align-self: start; padding-top: 1px; }
+.crow .g svg { width: 17px; height: 17px; color: var(--fg-muted); margin-top: 1px; }
+.crow .l1 { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
+.crow .alias { font-size: 15px; font-weight: 550; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.crow .at { font-size: 13px; color: var(--fg-muted); flex-shrink: 0; }
+.crow .l2 { display: block; margin-top: 2px; font-size: 13px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crow .end { display: flex; align-items: center; gap: 6px; color: var(--fg-faint); font-size: 12px; }
+.crow .end svg { width: 15px; height: 15px; }
+.crow .unread { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--bg-active); color: var(--fg); font-size: 12px; font-weight: 650; display: grid; place-items: center; }
+.crow.offline .alias, .crow.offline .l2 { color: var(--fg-faint); }
+.crow.group { min-height: 64px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.crow.group .alias { font-weight: 600; }
+.crow.sel { background: var(--bg-active); }
+.offline-tag { font-size: 11px; color: var(--fg-muted); border: 1px dashed var(--border-strong); border-radius: 4px; padding: 0 4px; line-height: 15px; flex-shrink: 0; }
+.disamb { font-weight: 400; color: var(--fg-muted); font-family: var(--font-mono); font-size: 12px; }
+.sec { display: flex; align-items: center; gap: 6px; height: 34px; padding: 10px 16px 0; font-size: 11px; font-weight: 650; letter-spacing: 1px; text-transform: uppercase; color: var(--fg-muted); }
+.sec.attention { color: var(--warning); }
+details > summary.sec svg { width: 12px; height: 12px; transition: transform .15s; }
+details[open] > summary.sec svg { transform: rotate(90deg); }
+.g-wait, .g-question { color: var(--warning); } .g-ended { color: var(--fg-faint); }
+.scrim { position: absolute; inset: 0; z-index: 10; background: color-mix(in srgb, var(--fg) 30%, transparent); }
+.drawer { position: absolute; top: 0; bottom: 0; left: 0; width: 322px; z-index: 11; background: var(--bg-raised); border-right: 1px solid var(--border-strong); display: flex; flex-direction: column; box-shadow: 8px 0 30px color-mix(in srgb, var(--fg) 14%, transparent); }
+.drawer .dh { display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 6px 0 16px; border-bottom: 1px solid var(--border); }
+.drawer .dh b { font-size: 16px; font-weight: 600; flex: 1; }
+.chanbtn { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 18px; font-size: 14px; }
+.chanbtn svg { width: 16px; height: 16px; }
+.chanbtn .wc { color: var(--warning); font-weight: 650; font-variant-numeric: tabular-nums; }
+
+/* ───────── The stream (02–04, phone sizing; no avatars, as 04's narrow breakpoint) ───────── */
+.msgs { padding: 12px 16px 14px; }
+.day { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--fg-muted); margin: 4px 0 10px; }
+.day::before, .day::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.m { padding: 8px 0; }
+.who { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 6px; font-size: 14px; }
+.who b { font-weight: 600; }
+.who .at { font-size: 13px; color: var(--fg-muted); }
+.who .says { color: var(--fg-muted); font-size: 13px; }
+.who time { margin-left: auto; font-size: 12px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.body { font-family: var(--font-prose); font-size: 16px; line-height: 1.5; margin-top: 2px; }
+.body code { font-size: 14px; }
+.deliv { margin-top: 3px; font-size: 12px; color: var(--fg-faint); }
+.sys { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; font-size: 13px; color: var(--fg-muted); }
+.sys svg { width: 15px; height: 15px; color: var(--fg-faint); }
+.sys b { font-weight: 550; color: var(--fg); }
+.sys time, .run time { font-size: 12px; color: var(--fg-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.run { padding: 2px 0; }
+.run > summary { display: grid; grid-template-columns: 18px minmax(0, 1fr) 16px; gap: 2px 8px; align-items: center; min-height: 48px; margin: 0 -8px; padding: 6px 8px; border-radius: var(--radius); font-size: 13px; color: var(--fg-muted); }
+.run > summary:hover, .run[open] > summary { background: var(--bg-hover); }
+.run > summary > svg:first-child { width: 15px; height: 15px; color: var(--fg-faint); grid-row: 1 / 3; align-self: start; margin-top: 2px; }
+.run .lead { color: var(--fg); font-weight: 550; font-size: 14px; }
+.run .meta { grid-column: 2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.run .chev { grid-column: 3; grid-row: 1 / 3; width: 14px; height: 14px; color: var(--fg-muted); transition: transform .15s; }
+.run[open] .chev { transform: rotate(90deg); }
+.all { display: inline-block; font-size: 12px; font-weight: 650; color: var(--fg); border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; line-height: 16px; }
+.rec { font-size: 12px; color: var(--fg-muted); border: 1px dashed var(--border-strong); border-radius: 4px; padding: 0 4px; line-height: 16px; }
+.says-list { margin: 4px 0 6px 9px; padding-left: 14px; border-left: 2px solid var(--border-strong); }
+.say { padding: 7px 0; }
+.say + .say { border-top: 1px solid var(--border); }
+.say-head { display: flex; align-items: baseline; gap: 5px; font-size: 13px; color: var(--fg-muted); }
+.say-head .from, .say-head .to { color: var(--fg); font-weight: 550; }
+.say-head time { margin-left: auto; font-size: 12px; color: var(--fg-faint); }
+.say-text { margin-top: 2px; font-size: 15px; line-height: 1.45; }
+.say-text code { font-size: 13px; }
+/* A direct channel's working record: shown, not openable on a phone. Not a button, so it never looks tappable. */
+.work { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 6px 0; font-size: 13px; color: var(--fg-muted); }
+.work svg { width: 15px; height: 15px; color: var(--fg-faint); }
+.work .where-note { font-size: 12px; color: var(--fg-faint); }
+.work .live { display: inline-flex; align-items: center; gap: 6px; }
+
+/* ───────── Request card (04's option A, phone sizing) ───────── */
+.rc { display: flex; flex-direction: column; gap: 12px; margin-top: 7px; padding: 14px; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-raised); font-size: 15px; }
+.rc.lit { outline: 2px solid var(--accent); outline-offset: 2px; animation: lit 2.4s ease-out 1.2s forwards; }
+@keyframes lit { to { outline-color: transparent; } }
+.kind { display: flex; align-items: center; gap: 6px; font-size: 13px; min-width: 0; }
+.kind .from { color: var(--fg-muted); }
+.kind .age { margin-left: auto; font-size: 12px; color: var(--fg-muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tone-warning { color: var(--warning); } .tone-info { color: var(--info); }
+.tool { font: 12px var(--font-mono); color: var(--fg-muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.pre { margin: 0; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); font: 13px/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.pre.bounded { max-height: calc(13px * 1.55 * 7 + 18px); overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
+.why, .muted-line { font-size: 13px; color: var(--fg-muted); line-height: 1.45; }
+.cwd { font: 12px var(--font-mono); color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hrow { display: flex; align-items: center; gap: 8px; }
+.hchip { font-size: 12px; color: var(--fg-muted); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 7px; }
+.pager { margin-left: auto; display: inline-flex; align-items: center; font-size: 13px; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.pager button { width: 36px; height: 36px; display: grid; place-items: center; color: var(--fg-muted); border-radius: var(--radius-sm); }
+.pager button:disabled { color: var(--fg-faint); }
+.pager svg { width: 16px; height: 16px; }
+.q { font-size: 16px; line-height: 1.45; }
+.opts { display: flex; flex-direction: column; gap: 6px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.opt { display: flex; align-items: flex-start; gap: 10px; min-height: 48px; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--radius); cursor: pointer; }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt:has(input:checked) { border-color: var(--border-strong); background: var(--bg-active); }
+.opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.opt .n { width: 12px; flex-shrink: 0; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.opt .ot { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.opt .od { font-size: 13px; color: var(--fg-muted); margin-top: 1px; }
+.opt .dot { visibility: hidden; color: var(--fg); }
+.opt:has(input:checked) .dot { visibility: visible; }
+.opt.ro { cursor: default; min-height: 0; padding: 8px 12px; }
+.other-input, .field { width: 100%; height: 44px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); font-size: 16px; }
+textarea.reason { width: 100%; min-height: 88px; resize: none; padding: 10px 12px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); font-size: 16px; line-height: 1.45; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.controls.split { display: grid; grid-template-columns: 1fr 1fr; }
+.cb { height: 44px; padding: 0 16px; border: 1px solid var(--border-strong); border-radius: var(--radius); white-space: nowrap; font-size: 15px; color: var(--fg); background: transparent; }
+.cb:hover { background: var(--bg-hover); }
+.cb.primary { border-color: var(--fg); background: var(--fg); color: var(--bg); font-weight: 600; }
+.cb.primary:hover { background: var(--fg-muted); border-color: var(--fg-muted); }
+.cb.danger { color: var(--danger); }
+.cb.ghost { border-color: transparent; color: var(--fg-muted); padding: 0 4px; }
+.cb.wide { width: 100%; }
+.cb:disabled, .cb:disabled:hover { color: var(--fg-faint); background: transparent; }
+.cb.primary:disabled { border-color: var(--fg-faint); background: var(--fg-faint); color: var(--bg); }
+.where { display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); font-size: 14px; line-height: 1.45; color: var(--fg-muted); }
+.where svg { width: 16px; height: 16px; margin-top: 2px; color: var(--fg-muted); }
+.where b { color: var(--fg); font-weight: 550; }
+.status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--fg-muted); }
+.rc.offline { border-style: dashed; background: transparent; }
+.rc.closed { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: baseline; gap: 8px; padding: 9px 12px; background: transparent; border-color: var(--border); font-size: 14px; line-height: 1.5; color: var(--fg-muted); }
+.rc.closed .out { color: var(--fg); }
+.rc.closed code { font-size: 12px; color: var(--fg); background: var(--bg-active); border-radius: 4px; padding: 1px 5px; }
+.rc.closed time { font-size: 12px; color: var(--fg-faint); }
+.ok { color: var(--success); } .gone { color: var(--fg-faint); }
+.skel { display: flex; align-items: center; gap: 10px; margin-top: 7px; min-height: 148px; padding: 14px; border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); font-size: 14px; color: var(--fg-muted); justify-content: center; }
+
+/* ───────── Composers ───────── */
+.comp { flex-shrink: 0; border-top: 1px solid var(--border); background: var(--bg); padding: 8px 12px 0; position: relative; z-index: 2; }
+.box { display: flex; align-items: flex-end; gap: 8px; min-height: 44px; border: 1px solid var(--border-strong); border-radius: 22px; padding: 4px 4px 4px 15px; background: var(--bg-raised); }
+.box:focus-within { border-color: var(--fg-muted); }
+.box textarea { flex: 1; min-width: 0; resize: none; height: 34px; padding: 6px 0; border: 0; outline: none; background: transparent; font-size: 16px; line-height: 22px; }
+.box textarea::placeholder { color: var(--fg-muted); }
+.box .typed { flex: 1; min-width: 0; padding: 6px 0; font-size: 16px; line-height: 22px; }
+.box .typed .caret { display: inline-block; width: 2px; height: 19px; margin-left: 1px; vertical-align: -3px; background: var(--accent); animation: pulse 1s steps(1) infinite; }
+.send { width: 34px; height: 34px; border-radius: 50%; background: var(--fg); color: var(--bg); display: inline-grid; place-items: center; flex-shrink: 0; }
+.send svg { width: 16px; height: 16px; stroke-width: 2; }
+.send:disabled { background: var(--fg-faint); }
+.pillbtn { height: 34px; padding: 0 15px; border-radius: 17px; background: var(--fg); color: var(--bg); font-size: 15px; font-weight: 600; flex-shrink: 0; }
+.hint { padding: 6px 6px 0; font-size: 12px; color: var(--fg-faint); line-height: 1.4; }
+.hint.err { color: var(--danger); }
+.verbs { display: flex; align-items: center; gap: 8px; padding-top: 8px; }
+.vb { display: inline-flex; align-items: center; gap: 6px; height: 40px; padding: 0 14px; border: 1px solid var(--border-strong); border-radius: 20px; font-size: 15px; white-space: nowrap; }
+.vb svg { width: 14px; height: 14px; }
+.vb.more { margin-left: auto; padding: 0 12px; color: var(--fg-muted); }
+.vb.stop svg { fill: currentColor; stroke: none; width: 10px; height: 10px; }
+.five { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding-top: 8px; }
+.five button { height: 36px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); font-size: 13px; padding: 0; }
+.five button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+.endbar { padding: 12px 16px 0; display: flex; flex-direction: column; gap: 10px; }
+.endbar p { font-size: 13px; color: var(--fg-muted); line-height: 1.45; }
+
+/* @-completion above the composer (frame 4c) */
+.complete { position: absolute; left: 0; right: 0; bottom: 100%; background: var(--bg-overlay); border-top: 1px solid var(--border-strong); box-shadow: 0 -10px 24px color-mix(in srgb, var(--fg) 8%, transparent); }
+.complete .ch { padding: 8px 16px 2px; font-size: 11px; font-weight: 650; letter-spacing: 1px; text-transform: uppercase; color: var(--fg-muted); }
+.complete button { display: grid; grid-template-columns: minmax(0, 1fr); width: 100%; min-height: 52px; padding: 7px 16px; text-align: left; border-radius: 0; }
+.complete button:hover, .complete button.hi { background: var(--bg-hover); }
+.complete .l1 { font-size: 15px; font-weight: 550; display: flex; gap: 6px; align-items: baseline; }
+.complete .l1 .at { font-size: 13px; color: var(--fg-muted); font-weight: 400; }
+.complete .l2 { font-size: 13px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.complete mark { background: none; color: var(--fg); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--border-strong); }
+
+/* Keyboard stand-in */
+.kbd { flex-shrink: 0; height: 300px; background: var(--bg-active); padding: 8px 3px 0; display: flex; flex-direction: column; gap: 11px; position: relative; z-index: 3; }
+.kbd .pred { height: 34px; display: grid; grid-template-columns: repeat(3, 1fr); align-items: center; font-size: 15px; color: var(--fg-muted); text-align: center; margin-bottom: -2px; }
+.kbd .pred span + span { border-left: 1px solid var(--border-strong); }
+.kbd .krow { display: flex; justify-content: center; gap: 6px; }
+.kbd .k { height: 42px; flex: 0 0 32px; border-radius: 5px; background: var(--bg-raised); box-shadow: 0 1px 0 var(--border-strong); display: grid; place-items: center; font-size: 19px; color: var(--fg); }
+.kbd .k.w { flex-basis: 42px; background: var(--bg-hover); font-size: 13px; }
+.kbd .k.sp { flex: 1; font-size: 15px; color: var(--fg-muted); }
+.kbd .k.ret { flex-basis: 88px; font-size: 15px; background: var(--bg-hover); }
+
+/* Sheets */
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 11; background: var(--bg-overlay); border-radius: 16px 16px 0 0; border-top: 1px solid var(--border-strong); padding: 8px 16px 46px; box-shadow: 0 -10px 34px color-mix(in srgb, var(--fg) 16%, transparent); }
+.grabber { width: 36px; height: 5px; border-radius: 3px; background: var(--border-strong); margin: 0 auto 10px; }
+.sheet h3 { font-size: 16px; font-weight: 600; }
+.sheet .sh-sub { font-size: 13px; color: var(--fg-muted); margin-top: 2px; }
+.sheet .grp { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+.sheet .grp:first-of-type { border-top: 0; padding-top: 0; }
+.sheet label.lbl { font-size: 13px; color: var(--fg-muted); }
+.seg { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border: 1px solid var(--border-strong); border-radius: var(--radius); overflow: hidden; }
+.seg button { height: 40px; font-size: 13px; border-radius: 0; }
+.seg button + button { border-left: 1px solid var(--border); }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--bg); font-weight: 600; }
+.sheet .item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; text-align: left; font-size: 16px; border-radius: var(--radius); padding: 0 4px; }
+.sheet .item svg { width: 18px; height: 18px; color: var(--fg-muted); }
+.sheet .item.danger, .sheet .item.danger svg { color: var(--danger); }
+.sheet .quiet { font-size: 13px; color: var(--fg-faint); line-height: 1.45; }
+.setrow { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 3px 12px; padding: 12px 0; }
+.setrow + .setrow { border-top: 1px solid var(--border); }
+.setrow > svg { width: 18px; height: 18px; color: var(--fg-muted); margin-top: 2px; }
+.setrow .h { display: flex; align-items: baseline; gap: 8px; font-size: 16px; font-weight: 550; }
+.setrow .h .st { margin-left: auto; font-size: 13px; font-weight: 400; color: var(--fg-muted); white-space: nowrap; }
+.setrow .h .st.on { color: var(--success); }
+.setrow .h .st.bad { color: var(--warning); }
+.setrow p { grid-column: 2; font-size: 13px; color: var(--fg-muted); line-height: 1.45; }
+.setrow .row { grid-column: 2; display: flex; gap: 8px; margin-top: 8px; }
+.setrow code { font-size: 12px; }
+.states { width: 390px; display: flex; flex-direction: column; gap: 10px; }
+.state-card { border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg); padding: 0 16px; }
+.state-card .tag { display: block; padding-top: 10px; font: 10px var(--font-mono); color: var(--fg-faint); letter-spacing: .02em; }
+.state-card .setrow { padding-top: 6px; }
+
+/* Locked */
+.lockpane { padding: 34px 22px 40px; display: flex; flex-direction: column; gap: 18px; }
+.lockpane .lg { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--bg-active); color: var(--fg-muted); }
+.lockpane .lg svg { width: 22px; height: 22px; }
+.lockpane h3 { font-size: 22px; font-weight: 600; letter-spacing: -.3px; line-height: 1.25; }
+.lockpane p { font-size: 15px; color: var(--fg-muted); line-height: 1.5; }
+.lockpane .ctx { font-size: 14px; color: var(--fg); padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); display: flex; gap: 9px; align-items: flex-start; }
+.lockpane .ctx svg { width: 16px; height: 16px; margin-top: 2px; color: var(--fg-muted); }
+.btn-big { height: 50px; width: 100%; border-radius: var(--radius-lg); font-size: 16px; font-weight: 600; background: var(--fg); color: var(--bg); display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.btn-big svg { width: 18px; height: 18px; }
+.btn-big.secondary { background: transparent; color: var(--fg); border: 1px solid var(--border-strong); font-weight: 550; }
+.btn-big:disabled { background: var(--fg-faint); color: var(--bg); }
+.btn-big.secondary:disabled { background: transparent; color: var(--fg-faint); border-color: var(--border); }
+.or { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--fg-muted); }
+.or::before, .or::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.pp { display: flex; flex-direction: column; gap: 8px; }
+.pp .lbl { font-size: 13px; color: var(--fg-muted); }
+.pp .rowf { display: flex; gap: 8px; }
+.pp .rowf .field { flex: 1; }
+.pp .rowf .cb { flex-shrink: 0; }
+.progress { height: 4px; border-radius: 2px; background: var(--bg-active); overflow: hidden; }
+.progress i { display: block; height: 100%; background: var(--fg-muted); border-radius: 2px; }
+.keep { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 2px 10px; align-items: start; font-size: 15px; cursor: pointer; }
+.keep input { width: 20px; height: 20px; margin: 1px 0 0; accent-color: var(--fg); }
+.keep small { grid-column: 2; font-size: 13px; color: var(--fg-muted); line-height: 1.45; }
+.noprf { font-size: 13px; color: var(--fg-muted); line-height: 1.45; }
+
+@media (max-width: 900px) { .annot, .notes { grid-template-columns: minmax(0, 1fr); } .rationale, .annot { margin-left: 0; } }
+@media (max-width: 640px) {
+  body { padding: 24px 12px 48px; }
+  figcaption .dimension { display: none; }
+  .ph, .states { width: 100%; max-width: 390px; }
+  .screen { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } .rc.lit { outline-color: var(--accent); } }
+</style>
+</head>
+<body>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+<symbol id="sig" viewBox="0 0 18 12"><rect x="0" y="8" width="3" height="4" rx=".8"/><rect x="5" y="5.5" width="3" height="6.5" rx=".8"/><rect x="10" y="3" width="3" height="9" rx=".8"/><rect x="15" y="0" width="3" height="12" rx=".8"/></symbol>
+<symbol id="wifi" viewBox="0 0 18 12"><path d="M9 12 6.6 9.3a3.4 3.4 0 0 1 4.8 0z"/><path d="M4.4 7.2a6.6 6.6 0 0 1 9.2 0l-1.4 1.5a4.6 4.6 0 0 0-6.4 0z"/><path d="M2 4.8a10 10 0 0 1 14 0l-1.4 1.5a8 8 0 0 0-11.2 0z"/><path d="M-.3 2.4a13.3 13.3 0 0 1 18.6 0L16.9 3.9a11.3 11.3 0 0 0-15.8 0z"/></symbol>
+<symbol id="bat" viewBox="0 0 26 12"><path fill-rule="evenodd" d="M3.5 0h17A3.5 3.5 0 0 1 24 3.5v5a3.5 3.5 0 0 1-3.5 3.5h-17A3.5 3.5 0 0 1 0 8.5v-5A3.5 3.5 0 0 1 3.5 0zm0 1A2.5 2.5 0 0 0 1 3.5v5A2.5 2.5 0 0 0 3.5 11h17A2.5 2.5 0 0 0 23 8.5v-5A2.5 2.5 0 0 0 20.5 1z" opacity=".4"/><rect x="2" y="2" width="15" height="8" rx="1.6"/><path d="M24.8 4v4a2 2 0 0 0 0-4z" opacity=".4"/></symbol>
+<symbol id="back" viewBox="0 0 16 16"><path d="m10 3.5-4.5 4.5 4.5 4.5"/></symbol>
+<symbol id="chev" viewBox="0 0 16 16"><path d="m6 4 4 4-4 4"/></symbol>
+<symbol id="hash" viewBox="0 0 16 16"><path d="M6 2.5 5 13.5M11 2.5l-1 11M3 6h10.5M2.5 10H13"/></symbol>
+<symbol id="up" viewBox="0 0 16 16"><path d="M8 13V3M4 7l4-4 4 4"/></symbol>
+<symbol id="swap" viewBox="0 0 16 16"><path d="M2.5 5.5h10l-2.5-2.5M13.5 10.5h-10l2.5 2.5"/></symbol>
+<symbol id="join" viewBox="0 0 16 16"><path d="M7 4 11 8l-4 4M2.5 8H11M13.5 3v10"/></symbol>
+<symbol id="leave" viewBox="0 0 16 16"><path d="M6 4 2 8l4 4M2 8h8.5M13.5 3v10"/></symbol>
+<symbol id="lines" viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></symbol>
+<symbol id="more" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".9" fill="currentColor"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="12.5" cy="8" r=".9" fill="currentColor"/></symbol>
+<symbol id="stop" viewBox="0 0 10 10"><rect x="0" y="0" width="10" height="10" rx="1.5"/></symbol>
+<symbol id="lock" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></symbol>
+<symbol id="key" viewBox="0 0 16 16"><circle cx="5.5" cy="10.5" r="3"/><path d="m7.6 8.4 5.9-5.9M11.5 4.5l1.5 1.5M9.8 6.2l1.3 1.3"/></symbol>
+<symbol id="bell" viewBox="0 0 16 16"><path d="M4 11.5V7a4 4 0 0 1 8 0v4.5l1 1H3z"/><path d="M6.5 14a1.6 1.6 0 0 0 3 0"/></symbol>
+<symbol id="term" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3.5"/></symbol>
+<symbol id="off" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="m4.2 11.8 7.6-7.6"/></symbol>
+<symbol id="clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></symbol>
+<symbol id="laptop" viewBox="0 0 16 16"><rect x="3" y="3.5" width="10" height="7" rx="1"/><path d="M1.5 12.5h13"/></symbol>
+<symbol id="torch" viewBox="0 0 16 16"><path d="M5.5 2h5v3l-1.5 2v7h-2V7L5.5 5z"/></symbol>
+<symbol id="cam" viewBox="0 0 16 16"><path d="M2 5.5h2.5l1.2-1.8h4.6l1.2 1.8H14v7H2z"/><circle cx="8" cy="8.8" r="2.2"/></symbol>
+<symbol id="share" viewBox="0 0 16 16"><path d="M8 10V2M5 5l3-3 3 3"/><path d="M4.5 7.5H3.5v6h9v-6h-1"/></symbol>
+<symbol id="moon" viewBox="0 0 16 16"><path d="M13 9.5A5.5 5.5 0 0 1 6.5 3a5.5 5.5 0 1 0 6.5 6.5z"/></symbol>
+<symbol id="x" viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></symbol>
+<symbol id="retire" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M5.5 8h5"/></symbol>
+</defs></svg>
+<main>
+<header class="page-head">
+  <div class="eyebrow">The desk / The phone / 05 <label style="margin-left:auto"><input type="checkbox" id="safe-toggle"> Show safe areas</label><a href="?theme=dark" id="theme-link" style="margin-left:0">View in dark</a></div>
+  <h1>On the phone, the desk is one loop: see what needs you, answer it.</h1>
+  <p>Laptop closed, the phone buzzes: <code>maws-45</code> has a question. The notification only says so. One tap opens the installed app at the question's card, the card draws once its code checks out, and the answer moves the session on mini. Everything on the phone serves that loop: the grid with its waiting counts, a project's channels, the group chat, a direct channel, and request cards answered in place. A session's depth (the live transcript, subagents, the diff) stays on a computer.</p>
+  <p><strong>Recommendations.</strong> The phone is a stack, not a layout: Projects → a project → a channel, one full screen each, and every pushed screen carries its own back control, since an installed app has no browser back button. <strong>3: A</strong>, a project opens on its channel list, so the first thing a project says on the phone is who is waiting on you. <strong>5: A</strong>, a direct channel keeps Steer, Send and Interrupt in reach and puts Model and Compact behind More. The grid keeps card B in <strong>two columns</strong>. A notification opens the session's <strong>direct channel</strong> with the card lit, and back from there walks up the stack (channel → MAWS → Projects), never out of the app.</p>
+  <p><strong>For you to decide</strong> (each one is drawn the way I recommend; the reasons are at the end): whether <em>Keep unlocked on this device</em> starts checked in the installed app (8), whether a notification opens the direct channel or the group chat (6), whether the app icon carries the org's waiting count (1), and whether starting a session stays off the phone (notes).</p>
+</header>
+
+<!-- ═════════════════════════ 1. Notifications ═════════════════════════ -->
+<section class="vignette"><figure>
+  <figcaption><span class="number">1</span><h2>The lock screen: a notification only points</h2><span class="dimension">390 × 844 · iOS lock screen · web push from the installed app</span></figcaption>
+  <p class="rationale">The service worker draws a notification from the push payload alone: the session's alias, the kind, and the project. It holds no org key, so it can neither check that what the hub sent is genuine nor answer anything. A notification therefore carries no Allow, no Deny, no reply and no quoted text. Its body says what tapping it opens, and nothing more.</p>
+  <div class="phones">
+    <div class="ph">
+      <div class="ph-cap"><span class="number">1a</span><b>All three kinds, newest first</b></div>
+      <div class="screen lock" data-time="14:17" aria-label="iPhone lock screen with three notifications from the desk">
+        <div class="sb"></div>
+        <div class="lock-lockglyph" aria-hidden="true"><svg><use href="#lock"/></svg></div>
+        <div class="lock-date">Thursday 15 October</div>
+        <div class="lock-time">14:17</div>
+        <ul class="notifs">
+          <li class="nt"><span class="appicon" aria-hidden="true">D</span><div><div class="ttl"><b>maws-45 has a question for you</b><time>now</time></div><p>MAWS · Opens at the question</p></div></li>
+          <li class="nt"><span class="appicon" aria-hidden="true">D</span><div><div class="ttl"><b>maws-hub#3c9a1f02 is waiting for your approval</b><time>3m ago</time></div><p>MAWS · Opens at the request</p></div></li>
+          <li class="nt"><span class="appicon" aria-hidden="true">D</span><div><div class="ttl"><b>maws-qa sent you a message</b><time>9m ago</time></div><p>MAWS · Opens in maws-qa’s channel</p></div></li>
+        </ul>
+        <div class="lock-btns" aria-hidden="true"><span><svg><use href="#torch"/></svg></span><span><svg><use href="#cam"/></svg></span></div>
+      </div>
+    </div>
+    <div style="flex:1; min-width: 300px; max-width: 760px; padding-top: 30px">
+      <table class="spec" aria-label="Notification text by kind">
+        <thead><tr><th style="width:22%">Kind</th><th>Title</th><th style="width:34%">Body</th></tr></thead>
+        <tbody>
+          <tr><td>Question (native or async)</td><td><code>{alias}</code> has a question for you</td><td><code>{project}</code> · Opens at the question</td></tr>
+          <tr><td>Permission prompt</td><td><code>{alias}</code> is waiting for your approval</td><td><code>{project}</code> · Opens at the request</td></tr>
+          <tr><td><code>&lt;message&gt;</code> to you</td><td><code>{alias}</code> sent you a message</td><td><code>{project}</code> · Opens in <code>{alias}</code>’s channel</td></tr>
+        </tbody>
+      </table>
+      <div class="annot" style="margin-left:0; grid-template-columns: repeat(2, minmax(0, 1fr))">
+        <div><b>No actions, by design</b>Allow or Deny on the notification would need the org key inside the service worker, and §6 does not put it there. Even where a browser draws notification buttons, the desk sends none, so the lock screen never offers a decision it could not verify.</div>
+        <div><b>No message text</b>A <code>&lt;message&gt;</code>’s words would come straight from the hub, unchecked, and show on a locked phone. The title names the sender and the tap opens the checked copy. The alias and project are hub data too, but they only name where the tap leads.</div>
+        <div><b>One notification per request</b>The notification’s <code>tag</code> is the request id, so a repeat push replaces its notification instead of stacking another. An alias two sessions share carries its short id, as it does everywhere in the desk.</div>
+        <div><b>Stale ones stay</b>iOS shows every push it receives, so the hub cannot quietly withdraw a notification once its request is answered in the terminal. The app says so when it is tapped (6c). On open, it clears the notifications for requests that have settled, where iOS allows it (to be confirmed on a device).</div>
+        <div><b>When it fires</b>A question or a permission prompt is raised, or a <code>&lt;message&gt;</code> arrives, and no browser of yours has that project open and visible (§4). Agent-to-agent traffic never notifies (03).</div>
+        <div><b>The icon’s badge</b> <span class="icon-demo"><span class="home"><span class="appicon" aria-hidden="true">D</span><span class="badge">4</span><span>Desk</span></span><span>A decision for you: badge the app icon with the org’s waiting count, set from each push’s payload (Badging API, home-screen apps on iOS 16.4 and later). I recommend it. The count is the grid’s own number and comes from the hub, like the grid’s.</span></span></div>
+      </div>
+    </div>
+  </div>
+</figure></section>
+
+<!-- ═════════════════════════ 2. Grid ═════════════════════════ -->
+<div class="section-rule">2 · The grid</div>
+<section class="vignette"><figure>
+  <figcaption><span class="number">2</span><h2>Projects: card B, two columns</h2><span class="pick">Recommended: two columns</span><span class="dimension">390 × 844 · standalone</span></figcaption>
+  <p class="rationale">Two columns keep the tile you already chose, so the waiting numeral is still the loudest thing on the screen. Eight projects fit without scrolling. This is the 01 grid’s own narrow breakpoint, not a new component. The costs: a long name wraps to two lines and then truncates, and a waiting tile’s second voice shrinks to the pulse and a count. One column gives names their full width and makes every row look alike, which buries the numeral at the right edge. It becomes the better pick only if most of your project names run past about twenty characters.</p>
+  <div class="phones">
+    <div class="ph">
+      <div class="ph-cap"><span class="number">2a</span><b>Two columns</b><span class="pick">Recommended</span></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav flat"><span class="wordmark">DESK</span><span class="here">Projects</span><span class="count">8</span><span class="conn"><span class="dot"></span>Live</span><button class="iconbtn" aria-label="This device: notifications and the org key"><span class="me">SK</span></button></div></header>
+        <div class="scroll pad-b"><div class="pg" data-grid="tiles"></div></div>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">2b</span><b>One column, the alternative</b></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav flat"><span class="wordmark">DESK</span><span class="here">Projects</span><span class="count">8</span><span class="conn"><span class="dot"></span>Live</span><button class="iconbtn" aria-label="This device"><span class="me">SK</span></button></div></header>
+        <div class="scroll pad-b"><div class="pl" data-grid="rows"></div></div>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">2c</span><b>Reconnecting, counts held</b></div>
+      <div class="screen" data-time="14:21">
+        <header class="top"><div class="sb"></div><div class="nav flat"><span class="wordmark">DESK</span><span class="here">Projects</span><span class="count">8</span><span class="conn"><span class="spinner" aria-hidden="true"></span>Reconnecting…</span><button class="iconbtn" aria-label="This device"><span class="me">SK</span></button></div></header>
+        <div class="strip" role="status"><span><strong>Counts as of 14:02.</strong> They may have changed since; the grid updates as soon as the hub answers.</span><button>Retry</button></div>
+        <div class="scroll pad-b stale"><div class="pg" data-grid="tiles"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="annot">
+    <div><b>Same states as 01</b>Connecting draws tile shapes only, never zeros. Empty offers “Enroll a machine” with “Enrolling takes a minute on the Mac itself”. Reconnecting dims the held counts and dates them; tiles still open. Phones lose the hub more often than desks do (sleep, cell handover), so 2c is the state the phone sees most after waking.</div>
+    <div><b>The bar</b>Wordmark, where you are, live or not, and your initials, which open <em>This device</em> (9b): notifications and the org key, the two things that belong to this phone, not to the org. The bar’s ground runs up under the status bar (<code>viewport-fit=cover</code> and <code>black-translucent</code>, padded by <code>safe-area-inset-top</code>).</div>
+    <div><b>Sizes</b>Tile 122 px tall, names at 14 px over two lines, numeral 38 px. The whole tile is the link and stays well over 44 px. Machine dots stay; the “1 of 2 online” words go, as at 01’s narrow breakpoint, since a project with every machine offline already has its dashed tile.</div>
+  </div>
+</figure></section>
+
+<!-- ═════════════════════════ 3. Navigating a project ═════════════════════════ -->
+<div class="section-rule">3 · Navigating a project</div>
+<section class="vignette"><figure>
+  <figcaption><span class="number">3</span><h2>A project opens on its channel list (A), or on its group chat with the list in a drawer (B)</h2><span class="pick">Recommended: A</span><span class="dimension">390 × 844 · standalone</span></figcaption>
+  <p class="rationale"><strong style="color:var(--fg);font-weight:550">A.</strong> The list answers the phone’s question before you read a word: who is waiting, on which machine, about what. It is also the usual iPhone push-and-back stack, so back from anywhere is predictable, including from a notification. The cost is one tap to reach the group chat, which the <code># MAWS</code> row softens by showing its last line and unread count. <strong style="color:var(--fg);font-weight:550">B</strong> gets you into the group chat at once, where every request in the project is answerable. But it hides the sessions behind a button whose amber count does the job A’s list does in plain view, and back from a session lands on the chat rather than the list. B is the better pick if, on the phone, you mostly read the group chat rather than answer one session at a time.</p>
+  <div class="phones">
+    <div class="ph">
+      <div class="ph-cap"><span class="number">3A</span><b>Channel list screen</b><span class="pick">Recommended</span></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#2" aria-label="Back to Projects"><svg><use href="#back"/></svg><span>Projects</span></a></div><div class="c"><div class="t">MAWS</div><div class="s">2 of 3 machines</div></div><div class="r"></div></div></header>
+        <nav class="scroll pad-b chl" aria-label="MAWS channels">
+          <a class="crow group" href="#4"><span class="g"><svg><use href="#hash"/></svg></span><span><span class="l1"><span class="alias">MAWS</span><span class="at">group chat</span></span><span class="l2">maws-45: The hub’s summary and the log disagree on…</span></span><span class="end"><span class="unread" aria-label="2 unread">2</span><svg><use href="#chev"/></svg></span></a>
+          <h3 class="sec attention">Waiting on you · 3</h3>
+          <a class="crow" href="#5"><span class="g g-question" aria-label="Question waiting">?</span><span><span class="l1"><span class="alias">maws-45</span><span class="at">@mini</span></span><span class="l2">desk web client: grid and project view</span></span><span class="end"><svg><use href="#chev"/></svg></span></a>
+          <a class="crow" href="#5"><span class="g g-wait" aria-label="Permission waiting">◐</span><span><span class="l1"><span class="alias">maws-fe</span><span class="at">@SK.local</span></span><span class="l2">owner artifacts page</span></span><span class="end"><svg><use href="#chev"/></svg></span></a>
+          <a class="crow" href="#5"><span class="g g-wait" aria-label="Permission waiting">◐</span><span><span class="l1"><span class="alias">maws-hub<span class="disamb">#3c9a1f02</span></span><span class="at">@mini</span></span><span class="l2">hub relay and org key exchange</span></span><span class="end"><svg><use href="#chev"/></svg></span></a>
+          <h3 class="sec">Working · 3</h3>
+          <a class="crow" href="#5"><span class="g g-working" aria-label="Working">●</span><span><span class="l1"><span class="alias">maws</span><span class="at">@mini</span></span><span class="l2">GUI AI agent workspace: main app architect</span></span><span class="end"><svg><use href="#chev"/></svg></span></a>
+          <a class="crow" href="#5"><span class="g g-working" aria-label="Working">●</span><span><span class="l1"><span class="alias">maws-hub<span class="disamb">#b81e44d7</span></span><span class="at">@SK.local</span></span><span class="l2">hub load-test harness and failure drills</span></span><span class="end"><svg><use href="#chev"/></svg></span></a>
+          <a class="crow" href="#5"><span class="g g-working" aria-label="Working">●</span><span><span class="l1"><span class="alias">maws-term</span><span class="at">@SK.local</span></span><span class="l2">terminal pane: xterm renderer migration</span></span><span class="end"><svg><use href="#chev"/></svg></span></a>
+          <h3 class="sec">Idle · 2</h3>
+          <a class="crow" href="#5"><span class="g g-idle" aria-label="Idle">○</span><span><span class="l1"><span class="alias">maws-qa</span><span class="at">@mini</span></span><span class="l2">release QA checklist for 0.9</span></span><span class="end"><svg><use href="#chev"/></svg></span></a>
+          <a class="crow offline" href="#5"><span class="g g-ended" aria-label="Machine offline">⊘</span><span><span class="l1"><span class="alias">maws-docs</span><span class="at">@studio</span><span class="offline-tag">offline</span></span><span class="l2">charter and research index</span></span><span class="end"><svg><use href="#chev"/></svg></span></a>
+          <details><summary class="sec"><svg><use href="#chev"/></svg>Ended · 2</summary>
+            <a class="crow" href="#5"><span class="g g-ended" aria-label="Ended">✓</span><span><span class="l1"><span class="alias">maws-44</span><span class="at">@mini</span></span><span class="l2">desk hub API: project list endpoint</span></span><span class="end"><svg><use href="#chev"/></svg></span></a>
+            <a class="crow" href="#5"><span class="g g-ended" aria-label="Ended">✓</span><span><span class="l1"><span class="alias">maws-43</span><span class="at">@SK.local</span></span><span class="l2">sidebar drag fix</span></span><span class="end"><svg><use href="#chev"/></svg></span></a>
+          </details>
+        </nav>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">3B</span><b>Group chat first, channels behind a button</b></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#2" aria-label="Back to Projects"><svg><use href="#back"/></svg><span>Projects</span></a></div><div class="c"><div class="t"># MAWS</div><div class="s">group chat</div></div><div class="r"><button class="chanbtn" aria-label="Channels, 3 waiting on you"><svg><use href="#lines"/></svg><span class="wc">3</span></button></div></div></header>
+        <div class="scroll" data-bottom><div class="msgs">
+          <div class="day">Today</div>
+          <div class="m"><div class="who"><b>maws-hub<span class="disamb">#3c9a1f02</span></b><span class="at">@mini</span><time>13:15</time></div><div class="body">The relay is up on staging. Key exchange still needs your passkey once.</div></div>
+          <div class="sys"><svg aria-hidden="true"><use href="#leave"/></svg><span><b>maws-43</b> retired by you</span><time>13:24</time></div>
+          <details class="run"><summary><svg aria-hidden="true"><use href="#swap"/></svg><span class="lead">4 messages between agents</span><span class="meta">maws-fe, maws-45, cua_repl · 13:47–13:51</span><svg class="chev" aria-hidden="true"><use href="#chev"/></svg></summary></details>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><time>13:52</time></div><div class="body">The grid reads the hub’s project list now and sorts waiting first. Tests pass in both themes.</div></div>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">asks</span><time>14:16</time></div>
+            <section class="rc" aria-label="maws-45 asks a question"><div class="kind tone-warning"><span aria-hidden="true">?</span><span>Question</span><span class="age">1 min</span></div><div class="hrow"><span class="hchip">Column name</span></div><p class="q">The hub’s summary and the log disagree on a column name. Which should the grid read?</p><p class="muted-line">waiting · pending_count · Both, mapped in the client · Other…</p></section></div>
+        </div></div>
+        <footer class="comp"><div class="box"><textarea aria-label="Message #MAWS" placeholder="Message #MAWS"></textarea><button class="send" aria-label="Post" disabled><svg><use href="#up"/></svg></button></div><div class="safe"></div></footer>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">3B·open</span><b>The drawer</b></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><span class="backbtn"><svg><use href="#back"/></svg><span>Projects</span></span></div><div class="c"><div class="t"># MAWS</div></div><div class="r"><span class="chanbtn"><svg><use href="#lines"/></svg><span class="wc">3</span></span></div></div></header>
+        <div class="scroll"><div class="msgs"><div class="day">Today</div><div class="m"><div class="who"><b>maws-hub</b><time>13:15</time></div><div class="body">The relay is up on staging. Key exchange still needs your passkey once.</div></div></div></div>
+        <div class="scrim" aria-hidden="true"></div>
+        <aside class="drawer" aria-label="MAWS channels">
+          <div class="sb"></div>
+          <div class="dh"><b>MAWS</b><button class="iconbtn" aria-label="Close"><svg><use href="#x"/></svg></button></div>
+          <nav class="scroll pad-b chl">
+            <a class="crow group sel" href="#4" aria-current="page"><span class="g"><svg><use href="#hash"/></svg></span><span><span class="l1"><span class="alias">MAWS</span></span><span class="l2">group chat</span></span><span></span></a>
+            <h3 class="sec attention">Waiting on you · 3</h3>
+            <a class="crow" href="#5"><span class="g g-question">?</span><span><span class="l1"><span class="alias">maws-45</span><span class="at">@mini</span></span><span class="l2">desk web client: grid and project view</span></span><span></span></a>
+            <a class="crow" href="#5"><span class="g g-wait">◐</span><span><span class="l1"><span class="alias">maws-fe</span><span class="at">@SK.local</span></span><span class="l2">owner artifacts page</span></span><span></span></a>
+            <a class="crow" href="#5"><span class="g g-wait">◐</span><span><span class="l1"><span class="alias">maws-hub<span class="disamb">#3c9a1f02</span></span><span class="at">@mini</span></span><span class="l2">hub relay and org key exchange</span></span><span></span></a>
+            <h3 class="sec">Working · 3</h3>
+            <a class="crow" href="#5"><span class="g g-working">●</span><span><span class="l1"><span class="alias">maws</span><span class="at">@mini</span></span><span class="l2">GUI AI agent workspace: main app architect</span></span><span></span></a>
+            <a class="crow" href="#5"><span class="g g-working">●</span><span><span class="l1"><span class="alias">maws-term</span><span class="at">@SK.local</span></span><span class="l2">terminal pane: xterm renderer migration</span></span><span></span></a>
+          </nav>
+        </aside>
+      </div>
+    </div>
+  </div>
+  <div class="annot">
+    <div><b>Back, from a notification</b>The tap opens <code>/p/MAWS/s/maws-45?request=…</code>. Before it draws, the app rebuilds the history under it as Projects → MAWS → maws-45, so its back control reads “‹ MAWS” and leads to 3A, then to Projects. Under B the same tap leads back to the group chat, and the sessions are one more tap away in the drawer.</div>
+    <div><b>Rows</b>60 px, the whole row the link: status glyph, alias with its short id when two share it, @machine, and the in-charge line. Groups and their order are the sidebar’s (02). Empty groups are hidden, Ended is collapsed, and an offline machine’s session stays in its last group, dimmed and tagged.</div>
+    <div><b>Not here</b>“+ Session”, the machines dialog and the session-depth column. Starting a session asks for a machine, a checkout, a worktree and a brief, which is desk work rather than the phone’s loop (see the notes). The locked state is 8: no channels and no counts, as 02 ruled.</div>
+  </div>
+</figure></section>
+
+<!-- ═════════════════════════ 4. Group chat ═════════════════════════ -->
+<div class="section-rule">4 · The group chat</div>
+<section class="vignette"><figure>
+  <figcaption><span class="number">4</span><h2># MAWS on the phone</h2><span class="dimension">390 × 844 · pushed from 3A</span></figcaption>
+  <p class="rationale">The desk’s stream at phone size. Avatars go, as at 04’s narrow breakpoint, and the name line carries the voice. Body text is 16 px. A question is the session’s own message with the card as its body, answerable in place (04 A). Agent traffic is one row per run (03 A) and opens in place. Lifecycle events are system lines. Each post of yours says how it landed. The desktop header’s sentence about addressing moves under the composer, which is where you need it.</p>
+  <div class="phones">
+    <div class="ph">
+      <div class="ph-cap"><span class="number">4a</span><b>A question, answerable in place</b></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t"># MAWS</div><div class="s">group chat · 9 members</div></div><div class="r"></div></div></header>
+        <div class="scroll" data-bottom><div class="msgs">
+          <div class="day">Today</div>
+          <div class="sys"><svg aria-hidden="true"><use href="#join"/></svg><span><b>maws-45</b> joined on mini</span><time>12:20</time></div>
+          <details class="run"><summary><svg aria-hidden="true"><use href="#swap"/></svg><span class="lead">12 messages between agents</span><span class="meta">maws, maws-term, maws-hub +3 · <span class="all">@all</span> · 12:30–13:11</span><svg class="chev" aria-hidden="true"><use href="#chev"/></svg></summary></details>
+          <div class="m"><div class="who"><b>maws-hub<span class="disamb">#3c9a1f02</span></b><span class="at">@mini</span><time>13:15</time></div><div class="body">The relay is up on staging. Key exchange still needs your passkey once.</div></div>
+          <div class="m"><div class="who"><b>You</b><time>13:20</time></div><div class="body">Thanks. maws-45, the grid is yours next.</div><p class="deliv">A record: delivered to no one</p></div>
+          <div class="sys"><svg aria-hidden="true"><use href="#leave"/></svg><span><b>maws-43</b> retired by you</span><time>13:24</time></div>
+          <details class="run"><summary><svg aria-hidden="true"><use href="#swap"/></svg><span class="lead">4 messages between agents</span><span class="meta">maws-fe, maws-45, cua_repl · 13:47–13:51</span><svg class="chev" aria-hidden="true"><use href="#chev"/></svg></summary></details>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><time>13:52</time></div><div class="body">The grid reads the hub’s project list now and sorts waiting first. Tests pass in both themes.</div></div>
+          <div class="m"><div class="who"><b>You</b><time>14:05</time></div><div class="body">@maws-45 keep projects with every machine offline at the bottom.</div><p class="deliv">maws-45: delivered</p></div>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">asks</span><time>14:16</time></div>
+            <section class="rc" aria-label="maws-45 asks a question">
+              <div class="kind tone-warning"><span aria-hidden="true">?</span><span>Question</span><span class="age">1 min</span></div>
+              <div class="hrow"><span class="hchip">Column name</span></div>
+              <p class="q">The hub’s summary and the log disagree on a column name. Which should the grid read?</p>
+              <fieldset class="opts"><legend class="sr-only">Which should the grid read?</legend>
+                <label class="opt"><input type="radio" name="g4a" checked><span class="n" aria-hidden="true">1</span><span class="ot"><span><code>waiting</code></span><span class="od">The hub’s name. The summary socket already sends it.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g4a"><span class="n" aria-hidden="true">2</span><span class="ot"><span><code>pending_count</code></span><span class="od">The log’s name. Matches the raised events.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g4a"><span class="n" aria-hidden="true">3</span><span class="ot"><span>Both, mapped in the client</span><span class="od">Either source keeps working; one mapping to maintain.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g4a"><span class="n" aria-hidden="true">4</span><span class="ot"><span>Other…</span></span><span class="dot" aria-hidden="true">●</span></label>
+              </fieldset>
+              <div class="controls"><button class="cb ghost" style="margin-right:auto">Deny the question</button><button class="cb">Skip</button><button class="cb primary">Submit</button></div>
+            </section></div>
+        </div></div>
+        <footer class="comp"><div class="box"><textarea aria-label="Message #MAWS" placeholder="Message #MAWS"></textarea><button class="send" aria-label="Post" disabled><svg><use href="#up"/></svg></button></div><p class="hint">Untagged is a record; @alias delivers; @all wakes every live member</p><div class="safe"></div></footer>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">4b</span><b>A run of agent traffic, open</b></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t"># MAWS</div><div class="s">group chat · 9 members</div></div><div class="r"></div></div></header>
+        <div class="scroll"><div class="msgs">
+          <div class="m"><div class="who"><b>You</b><time>13:20</time></div><div class="body">Thanks. maws-45, the grid is yours next.</div><p class="deliv">A record: delivered to no one</p></div>
+          <div class="sys"><svg aria-hidden="true"><use href="#leave"/></svg><span><b>maws-43</b> retired by you</span><time>13:24</time></div>
+          <div class="sys"><svg aria-hidden="true"><use href="#swap"/></svg><span><b>maws-45</b> → <b>maws-fe</b>&ensp;Rebased on the token move; <code>desk/grid</code> no longer touches your files.</span><time>13:34</time></div>
+          <div class="m"><div class="who"><b>maws-fe</b><span class="at">@SK.local</span><time>13:40</time></div><div class="body">Migration 0007 is merged: artifacts carry their project id, and the owner page reads it.</div></div>
+          <details class="run" open><summary><svg aria-hidden="true"><use href="#swap"/></svg><span class="lead">4 messages between agents</span><span class="meta">maws-fe, maws-45, cua_repl · 13:47–13:51</span><svg class="chev" aria-hidden="true"><use href="#chev"/></svg></summary>
+            <ol class="says-list">
+              <li class="say"><div class="say-head"><span class="from">maws-fe</span><span>→</span><span class="to">maws-45</span><time>13:47</time></div><p class="say-text">Are you touching <code>tokens-light.css</code>? The artifact frame needs a <code>--bg-sunken</code>.</p></li>
+              <li class="say"><div class="say-head"><span class="from">maws-45</span><span>→</span><span class="to">maws-fe</span><time>13:48</time></div><p class="say-text">No. Add it; I only read <code>--bg-raised</code> and <code>--border</code>.</p></li>
+              <li class="say"><div class="say-head"><span class="from">maws-fe</span><span>→</span><span class="to">cua_repl</span><time>13:50</time></div><p class="say-text">Can you screenshot the artifacts page on mini at 1440 once I push?</p></li>
+              <li class="say"><div class="say-head"><span class="from">cua_repl</span><span>→</span><span class="to">maws-fe</span><time>13:51</time></div><p class="say-text">Yes. Send me the commit when it lands.</p></li>
+            </ol>
+          </details>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><time>13:52</time></div><div class="body">The grid reads the hub’s project list now and sorts waiting first. Tests pass in both themes.</div></div>
+        </div></div>
+        <footer class="comp"><div class="box"><textarea aria-label="Message #MAWS" placeholder="Message #MAWS"></textarea><button class="send" aria-label="Post" disabled><svg><use href="#up"/></svg></button></div><p class="hint">Untagged is a record; @alias delivers; @all wakes every live member</p><div class="safe"></div></footer>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">4c</span><b>Addressing, with the keyboard up</b></div>
+      <div class="screen" data-time="14:18">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t"># MAWS</div><div class="s">group chat · 9 members</div></div><div class="r"></div></div></header>
+        <div class="scroll" data-bottom><div class="msgs">
+          <div class="m"><div class="who"><b>maws-hub<span class="disamb">#3c9a1f02</span></b><span class="at">@mini</span><time>13:15</time></div><div class="body">The relay is up on staging. Key exchange still needs your passkey once.</div></div>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><time>13:52</time></div><div class="body">The grid reads the hub’s project list now and sorts waiting first.</div></div>
+        </div></div>
+        <footer class="comp">
+          <div class="complete" role="listbox" aria-label="Deliver to">
+            <div class="ch">Deliver to</div>
+            <button role="option" class="hi" aria-selected="true"><span class="l1"><span><mark>maws-h</mark>ub<span class="disamb">#3c9a1f02</span></span><span class="at">@mini</span></span><span class="l2">hub relay and org key exchange</span></button>
+            <button role="option"><span class="l1"><span><mark>maws-h</mark>ub<span class="disamb">#b81e44d7</span></span><span class="at">@SK.local</span></span><span class="l2">hub load-test harness and failure drills</span></button>
+          </div>
+          <div class="box"><div class="typed" aria-label="Message #MAWS">@maws-h<span class="caret"></span></div><button class="send" aria-label="Post" disabled><svg><use href="#up"/></svg></button></div>
+          <p class="hint">@alias delivers to that session; @all wakes every live member</p>
+          <div style="height:8px"></div>
+        </footer>
+        <div class="kbd" data-kbd aria-hidden="true"></div>
+      </div>
+    </div>
+  </div>
+  <div class="annot">
+    <div><b>The question, in place</b>The same card as 04: numbered rows 48 px tall, a pick that waits for Submit, Skip, and Deny the question as the quiet left control. On a phone the whole row is the target, and digits only matter with a hardware keyboard.</div>
+    <div><b>The fold</b>Two lines on a phone: the count, then who and when, with the <code>@all</code> tag kept when the names truncate. Opened, each message is sender → recipient over the text, under one rule. A run of one is drawn whole (13:34). Runs never count as unread and never notify.</div>
+    <div><b>Typing an address</b>Aliases with short ids are hard to type on glass, so <code>@</code> opens a list of this project’s live members, matched as you type, and a pick inserts the exact tag. That prevents the grammar’s refusals (“ambiguous @maws-hub matches: …”, “@maws-44 is retired; say it untagged to leave a note, or resume it”); anything still refused shows in red where the hint is, before anything is sent. Return makes a new line; posting is the button.</div>
+  </div>
+</figure></section>
+
+<!-- ═════════════════════════ 5. Direct channel ═════════════════════════ -->
+<div class="section-rule">5 · A direct channel</div>
+<section class="vignette"><figure>
+  <figcaption><span class="number">5</span><h2>maws-45: the exchange, the working record as a quiet line, the terminal’s verbs</h2><span class="pick">Recommended: A</span><span class="dimension">390 × 844 · pushed from 3A</span></figcaption>
+  <p class="rationale"><strong style="color:var(--fg);font-weight:550">A.</strong> While a turn runs, the primary button beside the field is Steer, since that is what you want mid-turn. Send (queue it for when the turn ends) and Interrupt sit on the row beneath, and Model and Compact go behind More, because on a phone they are occasional. Idle, the primary is Send and the row holds only More. Every control is 40–44 px tall, and the button that moves the session (Steer) is never next to the one that stops it (Interrupt). <strong style="color:var(--fg);font-weight:550">B</strong> fits all five in one row at 66 px each. It does fit, but at 36 px tall, with Model and Compact weighted the same as Steer and Compact one slip from Interrupt. B is the better pick only if you change models from the phone often.</p>
+  <div class="phones">
+    <div class="ph">
+      <div class="ph-cap"><span class="number">5A</span><b>Running: Steer first, More for the rest</b><span class="pick">Recommended</span></div>
+      <div class="screen" data-time="14:19">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t">maws-45</div><div class="s">@mini</div></div><div class="r"><button class="iconbtn" aria-label="maws-45: Retire, and what opens on a computer"><svg><use href="#more"/></svg></button></div></div>
+          <div class="subhead"><span class="chip"><span class="pulse"></span>Working</span><span class="charge">desk web client: grid and project view</span></div></header>
+        <div class="scroll" data-bottom><div class="msgs" data-dm="maws-45"></div></div>
+        <footer class="comp">
+          <div class="box"><textarea aria-label="Message maws-45" placeholder="Steer maws-45"></textarea><button class="pillbtn">Steer</button></div>
+          <div class="verbs"><button class="vb">Send</button><button class="vb stop"><svg><use href="#stop"/></svg>Interrupt</button><button class="vb more" aria-label="More: Model, Compact"><svg style="width:16px;height:16px"><use href="#more"/></svg>Model, Compact</button></div>
+          <p class="hint">Steer is read at its next step; Send waits until the turn ends.</p>
+          <div class="safe"></div>
+        </footer>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">5B</span><b>All five in one row, the alternative</b></div>
+      <div class="screen" data-time="14:19">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t">maws-45</div><div class="s">@mini</div></div><div class="r"><button class="iconbtn" aria-label="More"><svg><use href="#more"/></svg></button></div></div>
+          <div class="subhead"><span class="chip"><span class="pulse"></span>Working</span><span class="charge">desk web client: grid and project view</span></div></header>
+        <div class="scroll" data-bottom><div class="msgs" data-dm="maws-45"></div></div>
+        <footer class="comp">
+          <div class="box"><textarea aria-label="Message maws-45" placeholder="Steer maws-45, or Send to queue it"></textarea></div>
+          <div class="five"><button>Send</button><button class="primary">Steer</button><button>Interrupt</button><button>Model</button><button>Compact</button></div>
+          <p class="hint">Steer is read at its next step; Send waits until the turn ends.</p>
+          <div class="safe"></div>
+        </footer>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">5A·more</span><b>More: model, effort, compact</b></div>
+      <div class="screen" data-time="14:20">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><span class="backbtn"><svg><use href="#back"/></svg><span>MAWS</span></span></div><div class="c"><div class="t">maws-45</div><div class="s">@mini</div></div><div class="r"><span class="iconbtn"><svg><use href="#more"/></svg></span></div></div>
+          <div class="subhead"><span class="chip"><span class="pulse"></span>Working</span><span class="charge">desk web client: grid and project view</span></div></header>
+        <div class="scroll" data-bottom><div class="msgs" data-dm="maws-45"></div></div>
+        <div class="scrim" aria-hidden="true"></div>
+        <section class="sheet" role="dialog" aria-label="Model and compact for maws-45">
+          <div class="grabber"></div>
+          <h3>maws-45’s main loop</h3>
+          <p class="sh-sub">Applies to the main loop only, from its next request</p>
+          <form class="grp" style="margin-top:14px" aria-label="Model and effort">
+            <label class="lbl" for="m5">Model</label>
+            <input class="field" id="m5" list="m5-list" placeholder="a model id, or default" value="claude-opus-5-5">
+            <span class="lbl">Effort</span>
+            <div class="seg" role="group" aria-label="Effort"><button type="button" aria-pressed="true">same</button><button type="button" aria-pressed="false">low</button><button type="button" aria-pressed="false">medium</button><button type="button" aria-pressed="false">high</button><button type="button" aria-pressed="false">xhigh</button><button type="button" aria-pressed="false">max</button></div>
+            <button type="submit" class="cb primary wide">Apply</button>
+          </form>
+          <div class="grp">
+            <div class="hrow"><button class="cb">Compact</button><span class="muted-line">Asked during a turn, it runs when the turn ends.</span></div>
+            <p class="muted-line">Last: Compacted: 182,400 → 41,900 tokens · 11:02</p>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">5·retire</span><b>The ⋯ menu, Retire confirming</b></div>
+      <div class="screen" data-time="14:20">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><span class="backbtn"><svg><use href="#back"/></svg><span>MAWS</span></span></div><div class="c"><div class="t">maws-45</div><div class="s">@mini</div></div><div class="r"><span class="iconbtn"><svg><use href="#more"/></svg></span></div></div>
+          <div class="subhead"><span class="chip"><span class="pulse"></span>Working</span><span class="charge">desk web client: grid and project view</span></div></header>
+        <div class="scroll" data-bottom><div class="msgs" data-dm="maws-45"></div></div>
+        <div class="scrim" aria-hidden="true"></div>
+        <section class="sheet" role="dialog" aria-label="maws-45">
+          <div class="grabber"></div>
+          <h3>Retire maws-45? Its job stops.</h3>
+          <p class="sh-sub">A <code>--bg</code> seat on mini. Its channel and history stay here; Resume brings it back.</p>
+          <div class="grp" style="margin-top:16px">
+            <button class="cb danger wide">Retire</button>
+            <button class="cb wide">Cancel</button>
+          </div>
+          <div class="grp"><p class="quiet">maws-45’s transcript, subagents and diff open on a computer.</p></div>
+        </section>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">5·ended</span><b>An ended session: Resume</b></div>
+      <div class="screen" data-time="14:20">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t">maws-44</div><div class="s">@mini</div></div><div class="r"><button class="iconbtn" aria-label="More"><svg><use href="#more"/></svg></button></div></div>
+          <div class="subhead"><span class="chip">✓ Ended</span><span class="charge">desk hub API: project list endpoint</span></div></header>
+        <div class="scroll" data-bottom><div class="msgs">
+          <div class="day">Today</div>
+          <div class="m"><div class="who"><b>maws-44</b><span class="at">@mini</span><time>12:48</time></div><div class="body">The project list endpoint is merged. <code>GET /projects</code> returns waiting, working and machines online per project.</div></div>
+          <div class="work"><svg aria-hidden="true"><use href="#lines"/></svg><span>Working record · 12:48–13:20</span><span class="where-note">on a computer</span></div>
+          <div class="m"><div class="who"><b>maws-44</b><span class="at">@mini</span><time>13:20</time></div><div class="body">Load test passes at 200 browsers. Nothing left on my list.</div></div>
+          <div class="sys"><svg aria-hidden="true"><use href="#leave"/></svg><span><b>maws-44</b> retired by you</span><time>13:22</time></div>
+        </div></div>
+        <footer class="comp" style="padding:0">
+          <div class="endbar"><p>maws-44 ended at 13:22. Its history stays here. Resume reopens it on mini where it left off, and it rejoins MAWS.</p><button class="cb primary wide">Resume</button></div>
+          <div class="safe"></div>
+        </footer>
+      </div>
+    </div>
+  </div>
+  <div class="annot">
+    <div><b>The working record, quietly</b>Between your exchanges the session’s work is one line, “Working record · 13:58–14:06”, with “on a computer” at its end. It is not a button: no border, no chevron, no press state, so nothing invites a tap that would open nothing. The run in progress shows the pulse.</div>
+    <div><b>What a session can’t do</b>As on the desk (§5’s table), a verb the session cannot take is drawn disabled with the reason in the hint line: “maws-term runs without the bridge: Interrupt needs it”, “mini is offline”. A terminal session without the bridge takes Steer as a send, and the hint says so: “Steer is sent as a message: it arrives at its next tool round”.</div>
+    <div><b>Header</b>Alias, @machine, a state chip, the in-charge line. Retire goes behind ⋯ because it is rare and stops a job, and the sheet is also where the phone says depth is on a computer. An ended session swaps the composer for Resume, at thumb height; Send to it would only be recorded. The RPC’s words show in the hint line: “resumed; it rejoins in a moment”.</div>
+  </div>
+</figure></section>
+
+<!-- ═════════════════════════ 6. Landing from a push ═════════════════════════ -->
+<div class="section-rule">6 · Landing from a notification</div>
+<section class="vignette"><figure>
+  <figcaption><span class="number">6</span><h2>The tap opens maws-45’s channel at the card, once the card checks out</h2><span class="dimension">390 × 844 · cold start from 1a</span></figcaption>
+  <p class="rationale">The notification only names a request. The app opens that session’s direct channel and holds the card’s place with “Checking the request…” until the request’s code verifies against the org key. Only then does it draw the card, scroll to it, and light it. Hours later the same tap can find nothing waiting, and the app says so first rather than leaving you to look for a card that isn’t there. If the app is locked, 8a comes first and then this.</p>
+  <div class="phones">
+    <div class="ph">
+      <div class="ph-cap"><span class="number">6a</span><b>Checking the request</b></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t">maws-45</div><div class="s">@mini</div></div><div class="r"><button class="iconbtn" aria-label="More"><svg><use href="#more"/></svg></button></div></div>
+          <div class="subhead"><span class="chip waiting">? Waiting on you</span><span class="charge">desk web client: grid and project view</span></div></header>
+        <div class="scroll" data-bottom><div class="msgs">
+          <div class="day">Today</div>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><time>14:06</time></div><div class="body">Done: offline projects sort last. Pushed to <code>desk/grid</code>.</div></div>
+          <div class="work"><svg aria-hidden="true"><use href="#lines"/></svg><span>Working record · 14:06–14:16</span><span class="where-note">on a computer</span></div>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">asks</span><time>14:16</time></div>
+            <div class="skel" role="status" aria-live="polite"><span class="spinner" aria-hidden="true"></span>Checking the request…</div></div>
+        </div></div>
+        <footer class="comp"><div class="box"><textarea aria-label="Message maws-45" placeholder="Message maws-45"></textarea><button class="pillbtn" disabled style="background:var(--fg-faint)">Send</button></div><div class="verbs"><button class="vb more"><svg style="width:16px;height:16px"><use href="#more"/></svg>Model, Compact</button></div><div class="safe"></div></footer>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">6b</span><b>Verified: the card, lit</b></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t">maws-45</div><div class="s">@mini</div></div><div class="r"><button class="iconbtn" aria-label="More"><svg><use href="#more"/></svg></button></div></div>
+          <div class="subhead"><span class="chip waiting">? Waiting on you</span><span class="charge">desk web client: grid and project view</span></div></header>
+        <div class="scroll" data-bottom><div class="msgs">
+          <div class="work"><svg aria-hidden="true"><use href="#lines"/></svg><span>Working record · 14:06–14:16</span><span class="where-note">on a computer</span></div>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">asks</span><time>14:16</time></div>
+            <section class="rc lit" aria-label="maws-45 asks a question" tabindex="-1">
+              <div class="kind tone-warning"><span aria-hidden="true">?</span><span>Question</span><span class="age">1 min</span></div>
+              <div class="hrow"><span class="hchip">Column name</span></div>
+              <p class="q">The hub’s summary and the log disagree on a column name. Which should the grid read?</p>
+              <fieldset class="opts"><legend class="sr-only">Which should the grid read?</legend>
+                <label class="opt"><input type="radio" name="g6b"><span class="n" aria-hidden="true">1</span><span class="ot"><span><code>waiting</code></span><span class="od">The hub’s name. The summary socket already sends it.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g6b"><span class="n" aria-hidden="true">2</span><span class="ot"><span><code>pending_count</code></span><span class="od">The log’s name. Matches the raised events.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g6b"><span class="n" aria-hidden="true">3</span><span class="ot"><span>Both, mapped in the client</span><span class="od">Either source keeps working; one mapping to maintain.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g6b"><span class="n" aria-hidden="true">4</span><span class="ot"><span>Other…</span></span><span class="dot" aria-hidden="true">●</span></label>
+              </fieldset>
+              <div class="controls"><button class="cb ghost" style="margin-right:auto">Deny the question</button><button class="cb">Skip</button><button class="cb primary" disabled title="Choose an option or skip this question">Submit</button></div>
+            </section></div>
+        </div></div>
+        <footer class="comp"><div class="box"><textarea aria-label="Message maws-45" placeholder="Message maws-45"></textarea><button class="pillbtn">Send</button></div><div class="verbs"><button class="vb more"><svg style="width:16px;height:16px"><use href="#more"/></svg>Model, Compact</button></div><div class="safe"></div></footer>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">6c</span><b>Hours later: no longer waiting</b></div>
+      <div class="screen" data-time="17:40">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t">maws-45</div><div class="s">@mini</div></div><div class="r"><button class="iconbtn" aria-label="More"><svg><use href="#more"/></svg></button></div></div>
+          <div class="subhead"><span class="chip">○ Idle</span><span class="charge">desk web client: grid and project view</span></div></header>
+        <div class="strip" role="status"><span><strong>No longer waiting.</strong> maws-45’s question was answered in the terminal at 14:02.</span></div>
+        <div class="scroll" data-bottom><div class="msgs">
+          <div class="day">Today</div>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><time>13:52</time></div><div class="body">The grid reads the hub’s project list now and sorts waiting first. Tests pass in both themes.</div></div>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">asked</span><time>13:55</time></div>
+            <div class="rc closed lit" role="status" tabindex="-1"><span class="ok" aria-hidden="true">✓</span><span><span>Column name</span> · <span class="out">Answered in the terminal at 14:02:</span> <code>waiting</code></span><time>14:02</time></div></div>
+          <div class="work"><svg aria-hidden="true"><use href="#lines"/></svg><span>Working record · 14:02–14:31</span><span class="where-note">on a computer</span></div>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><time>14:31</time></div><div class="body">The grid reads <code>waiting</code> from the summary socket. PR is up for review.</div></div>
+        </div></div>
+        <footer class="comp"><div class="box"><textarea aria-label="Message maws-45" placeholder="Message maws-45"></textarea><button class="pillbtn">Send</button></div><div class="verbs"><button class="vb more"><svg style="width:16px;height:16px"><use href="#more"/></svg>Model, Compact</button></div><div class="safe"></div></footer>
+      </div>
+    </div>
+  </div>
+  <div class="annot">
+    <div><b>Checking, then drawing</b>On a cold start the app checks the log first and the request second. The channel draws whatever has verified so far, and the card’s slot keeps its height so nothing jumps when the card arrives. A request whose code fails is never drawn. The slot then reads “This request’s code didn’t check out, so it isn’t shown. Answer it in the terminal on mini.”</div>
+    <div><b>Lit, then plain</b>The card scrolls into view and takes the accent ring, the focus colour, which fades after about two seconds; with reduced motion it stays until your first tap. Focus moves to the card, so VoiceOver reads it first. If several requests are waiting in this channel, only the one the notification named is lit.</div>
+    <div><b>No longer waiting, said first</b>The strip names how it ended, in the settled line’s words: “answered in the terminal at 14:02”, “allowed from the web at 14:05”, “withdrawn: the session moved on without an answer”. A request the app can’t find at all reads “No longer waiting.” and nothing more. The settled line in the stream is lit the same way.</div>
+  </div>
+</figure></section>
+
+<!-- ═════════════════════════ 7. Request cards ═════════════════════════ -->
+<div class="section-rule">7 · Request cards on the phone</div>
+<section class="vignette"><figure>
+  <figcaption><span class="number">7</span><h2>Questions are the common case; permission prompts are rare</h2><span class="dimension">390 × 844 · in a channel</span></figcaption>
+  <p class="rationale">Background jobs run in permission mode <code>auto</code>, so what reaches the phone is mostly questions. The card is 04’s, at phone size: rows and buttons 44–48 px, text at 15–16 px, inputs at 16 px so iOS does not zoom when you type. Where the web cannot answer, the card keeps its content and swaps its controls for one sentence saying where it can be answered.</p>
+  <div class="phones">
+    <div class="ph">
+      <div class="ph-cap"><span class="number">7a</span><b>A question with options, two of them</b></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t">maws-45</div><div class="s">@mini</div></div><div class="r"><button class="iconbtn" aria-label="More"><svg><use href="#more"/></svg></button></div></div>
+          <div class="subhead"><span class="chip waiting">? Waiting on you</span><span class="charge">desk web client: grid and project view</span></div></header>
+        <div class="scroll" data-bottom><div class="msgs">
+          <div class="work"><svg aria-hidden="true"><use href="#lines"/></svg><span>Working record · 14:06–14:16</span><span class="where-note">on a computer</span></div>
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">asks</span><time>14:16</time></div>
+            <section class="rc" aria-label="maws-45 asks two questions">
+              <div class="kind tone-warning"><span aria-hidden="true">?</span><span>Question</span><span class="age">1 min</span></div>
+              <div class="hrow"><span class="hchip">Column name</span><span class="pager"><button aria-label="Show previous question" disabled><svg><use href="#back"/></svg></button><span aria-live="polite">1 of 2</span><button aria-label="Show next question" disabled><svg><use href="#chev"/></svg></button></span></div>
+              <p class="q">The hub’s summary and the log disagree on a column name. Which should the grid read?</p>
+              <fieldset class="opts"><legend class="sr-only">Which should the grid read?</legend>
+                <label class="opt"><input type="radio" name="g7a" checked><span class="n" aria-hidden="true">1</span><span class="ot"><span><code>waiting</code></span><span class="od">The hub’s name. The summary socket already sends it.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g7a"><span class="n" aria-hidden="true">2</span><span class="ot"><span><code>pending_count</code></span><span class="od">The log’s name. Matches the raised events.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g7a"><span class="n" aria-hidden="true">3</span><span class="ot"><span>Both, mapped in the client</span><span class="od">Either source keeps working; one mapping to maintain.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g7a"><span class="n" aria-hidden="true">4</span><span class="ot"><span>Other…</span></span><span class="dot" aria-hidden="true">●</span></label>
+              </fieldset>
+              <div class="controls"><button class="cb ghost" style="margin-right:auto">Deny the question</button><button class="cb">Skip</button><button class="cb primary">Next</button></div>
+            </section></div>
+        </div></div>
+        <footer class="comp"><div class="box"><textarea aria-label="Message maws-45" placeholder="Message maws-45"></textarea><button class="pillbtn">Send</button></div><div class="safe"></div></footer>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">7b</span><b>An async question: it keeps working</b></div>
+      <div class="screen" data-time="14:22">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t">maws-fe</div><div class="s">@SK.local</div></div><div class="r"><button class="iconbtn" aria-label="More"><svg><use href="#more"/></svg></button></div></div>
+          <div class="subhead"><span class="chip"><span class="pulse"></span>Working</span><span class="charge">owner artifacts page</span></div></header>
+        <div class="scroll" data-bottom><div class="msgs">
+          <div class="m"><div class="who"><b>maws-fe</b><span class="at">@SK.local</span><span class="says">asks</span><time>14:18</time></div>
+            <section class="rc" aria-label="maws-fe asks a question; it keeps working">
+              <div class="kind tone-info"><span aria-hidden="true">?</span><span>Question waiting</span><span class="age">4 min</span></div>
+              <div class="hrow"><span class="hchip">Empty state</span></div>
+              <p class="q">A fresh org has no artifacts yet. What should the empty artifacts page offer?</p>
+              <fieldset class="opts"><legend class="sr-only">What should the empty artifacts page offer?</legend>
+                <label class="opt"><input type="radio" name="g7b"><span class="n" aria-hidden="true">1</span><span class="ot"><span>Open the newest session</span><span class="od">Takes you to where artifacts get made.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g7b"><span class="n" aria-hidden="true">2</span><span class="ot"><span>A link to the docs</span><span class="od">Explains what an artifact is; no action.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g7b"><span class="n" aria-hidden="true">3</span><span class="ot"><span>Only the sentence</span><span class="od">Quietest; the page fills itself as sessions publish.</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="opt"><input type="radio" name="g7b" checked><span class="n" aria-hidden="true">4</span><span class="ot"><span>Other…</span></span><span class="dot" aria-hidden="true">●</span></label>
+                <label class="sr-only" for="o7b">Other answer to: What should the empty artifacts page offer?</label><input class="other-input" id="o7b" placeholder="Type your own answer" value="The sentence, and a link to the newest session">
+              </fieldset>
+              <div class="controls"><span class="status" style="margin-right:auto"><svg aria-hidden="true" style="width:14px;height:14px"><use href="#clock"/></svg>maws-fe keeps working while this waits</span></div>
+              <div class="controls split"><button class="cb">Skip</button><button class="cb primary">Submit</button></div>
+            </section></div>
+        </div></div>
+        <footer class="comp"><div class="box"><textarea aria-label="Message maws-fe" placeholder="Steer maws-fe, or Send to queue it"></textarea><button class="pillbtn">Steer</button></div><div class="safe"></div></footer>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">7c</span><b>The rarer permission prompt</b></div>
+      <div class="screen" data-time="14:15">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t">maws-hub<span class="disamb">#3c9a1f02</span></div><div class="s">@mini</div></div><div class="r"><button class="iconbtn" aria-label="More"><svg><use href="#more"/></svg></button></div></div>
+          <div class="subhead"><span class="chip waiting">◐ Waiting on you</span><span class="charge">hub relay and org key exchange</span></div></header>
+        <div class="scroll" data-bottom><div class="msgs">
+          <div class="m"><div class="who"><b>maws-hub<span class="disamb">#3c9a1f02</span></b><span class="at">@mini</span><time>14:13</time></div><div class="body">Rerun clean: zero closes over ten minutes. Shipping the lease fix to staging.</div></div>
+          <div class="m"><div class="who"><b>maws-hub<span class="disamb">#3c9a1f02</span></b><span class="at">@mini</span><span class="says">wants to run a command</span><time>14:14</time></div>
+            <section class="rc" aria-label="maws-hub wants to run a command">
+              <div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="tool">Bash</span><span class="age">1 min</span></div>
+              <pre class="pre bounded" tabindex="0" aria-label="The command, 11 lines; scroll to read all of it">cd hub &amp;&amp; pnpm build &amp;&amp; \
+wrangler deploy --env staging \
+  --var LEASE_RENEW_S:90 \
+  --var RELAY_MAX_BROWSERS:400 \
+  --var LOG_LEVEL:info \
+  --minify &amp;&amp; \
+sleep 5 &amp;&amp; \
+curl -fsS https://hub-staging.maws.dev/health \
+  | jq -e '.relay == "up"' &amp;&amp; \
+git tag staging-$(date +%Y%m%d-%H%M) &amp;&amp; \
+git push origin --tags</pre>
+              <p class="muted-line" style="margin-top:-6px">11 lines · scroll inside to read all of it</p>
+              <p class="why">Why: Ship the lease-renewal fix to the staging hub</p>
+              <p class="cwd">~/Developer/GitHub/MAWS/.claude/worktrees/maws-hub</p>
+              <button class="cb ghost" style="align-self:flex-start">Deny with a reason…</button>
+              <div class="controls split"><button class="cb">Deny</button><button class="cb primary">Allow</button></div>
+              <p class="muted-line" style="font-size:12px">The decision carries a digest of exactly this request: if it changed, nothing is decided.</p>
+            </section></div>
+        </div></div>
+        <footer class="comp"><div class="box"><textarea aria-label="Message maws-hub" placeholder="Message maws-hub#3c9a1f02"></textarea><button class="pillbtn">Send</button></div><div class="safe"></div></footer>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">7d</span><b>Deny with a reason, keyboard up</b></div>
+      <div class="screen" data-time="14:15">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t">maws-hub<span class="disamb">#3c9a1f02</span></div><div class="s">@mini</div></div><div class="r"><button class="iconbtn" aria-label="More"><svg><use href="#more"/></svg></button></div></div></header>
+        <div class="scroll" data-bottom><div class="msgs" style="padding-bottom:10px">
+          <div class="m"><div class="who"><b>maws-hub<span class="disamb">#3c9a1f02</span></b><span class="at">@mini</span><span class="says">wants to run a command</span><time>14:14</time></div>
+            <section class="rc" aria-label="maws-hub wants to run a command">
+              <div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="tool">Bash</span><span class="age">1 min</span></div>
+              <pre class="pre">cd hub &amp;&amp; pnpm build &amp;&amp; \
+wrangler deploy --env staging \
+  …</pre>
+              <label class="sr-only" for="r7d">Reason for denying, sent to maws-hub</label>
+              <textarea class="reason" id="r7d">Not the tag push. Deploy and check health, then stop; I’ll tag it after the drill.</textarea>
+              <button class="cb danger wide">Deny with this reason</button>
+              <div class="controls split"><button class="cb">Cancel</button><button class="cb primary">Allow</button></div>
+            </section></div>
+        </div></div>
+        <div class="kbd" data-kbd aria-hidden="true"></div>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">7e</span><b>Terminal only, and offline</b></div>
+      <div class="screen" data-time="14:25">
+        <header class="top"><div class="sb"></div><div class="nav"><div class="l"><a class="backbtn" href="#3" aria-label="Back to MAWS"><svg><use href="#back"/></svg><span>MAWS</span></a></div><div class="c"><div class="t"># MAWS</div><div class="s">group chat · 9 members</div></div><div class="r"></div></div></header>
+        <div class="scroll" data-bottom><div class="msgs">
+          <div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">· subagent <b>e2e-runner</b> wants to run a command</span><time>14:21</time></div>
+            <section class="rc" aria-label="Waiting in the terminal on mini">
+              <div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="from">from e2e-runner</span><span class="age">1 min</span></div>
+              <pre class="pre">pnpm playwright test --project=webkit</pre>
+              <p class="why">Why: Run the WebKit project of the e2e suite</p>
+              <div class="where"><svg aria-hidden="true"><use href="#term"/></svg><span><b>Waiting in the terminal on mini.</b> A background subagent’s prompt can be answered from the web only in its first few seconds; answer it where maws-45 runs.</span></div>
+            </section></div>
+          <div class="m"><div class="who"><b>maws-docs</b><span class="at">@studio</span><span class="says">asks</span><time>11:38</time></div>
+            <section class="rc offline" aria-label="maws-docs asks a question; studio is offline">
+              <div class="kind tone-warning"><span aria-hidden="true">?</span><span>Question</span><span class="age">as of 11:40</span></div>
+              <div class="hrow"><span class="hchip">Index</span></div>
+              <p class="q">Split the research index by year, or keep one page?</p>
+              <div class="opts" role="list"><div class="opt ro" role="listitem"><span class="n" aria-hidden="true">1</span><span class="ot"><span>By year</span></span></div><div class="opt ro" role="listitem"><span class="n" aria-hidden="true">2</span><span class="ot"><span>One page</span></span></div></div>
+              <div class="where"><svg aria-hidden="true"><use href="#off"/></svg><span><b>studio is offline</b> · answer when it reconnects. Last seen 11:40.</span></div>
+            </section></div>
+        </div></div>
+        <footer class="comp"><div class="box"><textarea aria-label="Message #MAWS" placeholder="Message #MAWS"></textarea><button class="send" aria-label="Post" disabled><svg><use href="#up"/></svg></button></div><p class="hint">Untagged is a record; @alias delivers; @all wakes every live member</p><div class="safe"></div></footer>
+      </div>
+    </div>
+  </div>
+  <div class="annot">
+    <div><b>The stepper</b>MAWS’s, unchanged: the header chip and “‹ 1 of 2 ›” on one line, one question at a time, a pick that waits for Next, Skip for this question only, and Submit on the last step sends every answer as one reply. The arrows are 36 px targets inside a 48 px row. Picks are kept beside the request, so leaving the screen and coming back resumes them.</div>
+    <div><b>Async versus blocking</b>Blue “Question waiting” and the clock line, “maws-fe keeps working while this waits”, mark a question that blocks nothing. It has no Deny, since there is no turn to decline. Other… opens a 16 px field in place, and Submit takes it. A blocking question keeps amber and Deny the question.</div>
+    <div><b>Permission prompts</b>The command sits in a box bounded to seven lines that scrolls inside, so a long script cannot push the decision off screen. The line under it says how long it is. The decision binds to the whole input, and the line says so too. Deny and Allow split the width, with Allow on the right under the thumb. “Deny with a reason…” opens a field, and the keyboard pushes the card up rather than covering it. A subagent’s short window and the uncertain and failed states are 04’s, unchanged.</div>
+  </div>
+</figure></section>
+
+<!-- ═════════════════════════ 8. Locked ═════════════════════════ -->
+<div class="section-rule">8 · Locked, in the installed app</div>
+<section class="vignette"><figure>
+  <figcaption><span class="number">8</span><h2>The installed app unlocks the org key again, once</h2><span class="dimension">390 × 844 · standalone, first open</span></figcaption>
+  <p class="rationale">A home-screen app keeps its own storage, apart from Safari’s, so a key unlocked in Safari is not there on its first open. Until it is unlocked, nothing from any log can be checked, so nothing is drawn: no channels and no counts, as on the desk. If a notification opened the app, the unlock screen names it, and unlocking goes straight on to 6. The passkey is first, because on a phone it is one Face ID. The passphrase does its key derivation on the phone and takes a few seconds, so it shows progress.</p>
+  <div class="phones">
+    <div class="ph">
+      <div class="ph-cap"><span class="number">8a</span><b>Opened from a notification, locked</b></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav flat"><span class="wordmark">DESK</span><span class="conn"><span class="dot"></span>Live</span></div></header>
+        <div class="scroll pad-b"><div class="lockpane">
+          <span class="lg" aria-hidden="true"><svg><use href="#lock"/></svg></span>
+          <h3>Unlock the desk on this iPhone</h3>
+          <p>This app keeps its own storage, apart from Safari’s, so it needs your org key once here even if Safari has it. Your org key checks who wrote each project’s log and signs what you send.</p>
+          <div class="ctx"><svg aria-hidden="true"><use href="#bell"/></svg><span>You opened a notification about maws-45 in MAWS. It opens once the desk is unlocked.</span></div>
+          <button class="btn-big"><svg><use href="#key"/></svg>Unlock with passkey</button>
+          <div class="or">or</div>
+          <form class="pp" aria-label="Passphrase"><label class="lbl" for="p8a">The passphrase</label><div class="rowf"><input class="field" id="p8a" type="password" autocomplete="current-password"><button class="cb" disabled>Unlock</button></div></form>
+          <label class="keep"><input type="checkbox" checked><span>Keep unlocked on this device</span><small>Otherwise it is forgotten when iOS closes the app, and the next notification asks again.</small></label>
+        </div></div>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">8b</span><b>The passphrase, deriving</b></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav flat"><span class="wordmark">DESK</span><span class="conn"><span class="dot"></span>Live</span></div></header>
+        <div class="scroll pad-b"><div class="lockpane">
+          <span class="lg" aria-hidden="true"><svg><use href="#lock"/></svg></span>
+          <h3>Unlock the desk on this iPhone</h3>
+          <p>This app keeps its own storage, apart from Safari’s, so it needs your org key once here even if Safari has it.</p>
+          <button class="btn-big secondary" disabled><svg><use href="#key"/></svg>Unlock with passkey</button>
+          <div class="or">or</div>
+          <form class="pp" aria-label="Passphrase" aria-busy="true"><label class="lbl" for="p8b">The passphrase (this browser used it last)</label><div class="rowf"><input class="field" id="p8b" type="password" value="correct horse battery" disabled><button class="cb primary" disabled>Unlock</button></div>
+            <div class="progress" role="progressbar" aria-valuenow="62" aria-valuemin="0" aria-valuemax="100" aria-label="Deriving the key"><i style="width:62%"></i></div>
+            <p class="muted-line" role="status">Deriving the key… 62%. This takes a few seconds on a phone; keep the app open.</p>
+          </form>
+          <label class="keep"><input type="checkbox" checked disabled><span>Keep unlocked on this device</span><small>Otherwise it is forgotten when iOS closes the app, and the next notification asks again.</small></label>
+        </div></div>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">8c</span><b>No passkey here: the passphrase</b></div>
+      <div class="screen" data-time="14:17">
+        <header class="top"><div class="sb"></div><div class="nav flat"><span class="wordmark">DESK</span><span class="conn"><span class="dot"></span>Live</span></div></header>
+        <div class="scroll pad-b"><div class="lockpane">
+          <span class="lg" aria-hidden="true"><svg><use href="#lock"/></svg></span>
+          <h3>Unlock the desk on this iPhone</h3>
+          <p>This app keeps its own storage, apart from Safari’s, so it needs your org key once here even if Safari has it.</p>
+          <button class="btn-big secondary" disabled><svg><use href="#key"/></svg>Unlock with passkey</button>
+          <p class="noprf">This browser can’t use a passkey for the org key: it has no WebAuthn PRF, the extension the key’s copies are locked with. Use the passphrase.</p>
+          <form class="pp" aria-label="Passphrase"><label class="lbl" for="p8c">The passphrase</label><div class="rowf"><input class="field" id="p8c" type="password" autocomplete="current-password"><button class="cb primary" disabled>Unlock</button></div></form>
+          <label class="keep"><input type="checkbox" checked><span>Keep unlocked on this device</span><small>Otherwise it is forgotten when iOS closes the app, and the next notification asks again.</small></label>
+        </div></div>
+      </div>
+    </div>
+  </div>
+  <div class="annot">
+    <div><b>Keep unlocked starts checked, here only (your decision)</b>On a desktop the default is this tab only. On a phone iOS closes a backgrounded app whenever it likes, so “this tab only” would mean an unlock before almost every notification, which breaks the loop the phone exists for. I recommend starting it checked in the installed app and unchecked everywhere else. The cost is a key that stays on the phone until you lock it from <em>This device</em> (9b).</div>
+    <div><b>Wording</b>The app’s own: “Unlock with passkey”, “The passphrase (this browser used it last)”, “Deriving the key… 62%”, and the no-PRF sentence as written. The phone adds the reason it asks again (separate storage) and the line that says what happens next. While the passphrase derives, the passkey and the checkbox are held, since where the key is kept is fixed when the attempt starts.</div>
+    <div><b>To check on a device</b>A passkey opens the key only where the browser evaluates WebAuthn PRF (recent iOS with iCloud Keychain passkeys; confirm the floor before relying on it). Whether iOS ever clears a home-screen app’s storage on its own also needs checking. Either way, the app shows this screen again.</div>
+  </div>
+</figure></section>
+
+<!-- ═════════════════════════ 9. Notifications on ═════════════════════════ -->
+<div class="section-rule">9 · Turning notifications on</div>
+<section class="vignette"><figure>
+  <figcaption><span class="number">9</span><h2>Asked once on the grid, kept under This device</h2><span class="dimension">390 × 844 · standalone</span></figcaption>
+  <p class="rationale">iOS asks for notification permission only after a tap inside the installed app, and it asks only once: a “Don’t Allow” can be undone only in iOS Settings. So the app never asks on launch. After the first unlock in the installed app, the grid shows one banner. Its Turn on is the tap iOS needs, and Not now hides the banner for good. The lasting control is a row under <em>This device</em>, opened from your initials on the grid, next to the org key: both belong to this phone, not to the org.</p>
+  <div class="phones">
+    <div class="ph">
+      <div class="ph-cap"><span class="number">9a</span><b>The first-run banner</b></div>
+      <div class="screen" data-time="14:12">
+        <header class="top"><div class="sb"></div><div class="nav flat"><span class="wordmark">DESK</span><span class="here">Projects</span><span class="count">8</span><span class="conn"><span class="dot"></span>Live</span><button class="iconbtn" aria-label="This device"><span class="me">SK</span></button></div></header>
+        <div class="scroll pad-b">
+          <section class="nudge" aria-label="Notifications"><svg aria-hidden="true"><use href="#bell"/></svg><b>Get a notification when a session needs you</b><p>A question, a permission prompt or a message to you, from any project, when no browser of yours has it open. iOS asks you once.</p><div class="row"><button class="cb primary">Turn on</button><button class="cb ghost">Not now</button></div></section>
+          <div class="pg" data-grid="tiles" data-limit="6"></div>
+        </div>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="ph-cap"><span class="number">9b</span><b>This device, notifications on</b></div>
+      <div class="screen" data-time="14:20">
+        <header class="top"><div class="sb"></div><div class="nav flat"><span class="wordmark">DESK</span><span class="here">Projects</span><span class="count">8</span><span class="conn"><span class="dot"></span>Live</span><span class="iconbtn"><span class="me">SK</span></span></div></header>
+        <div class="scroll"><div class="pg" data-grid="tiles"></div></div>
+        <div class="scrim" aria-hidden="true"></div>
+        <section class="sheet" role="dialog" aria-label="This device">
+          <div class="grabber"></div>
+          <h3>This iPhone</h3>
+          <p class="sh-sub">Signed in as SK · installed on the Home Screen</p>
+          <div class="grp" style="margin-top:12px; gap:0">
+            <div class="setrow"><svg aria-hidden="true"><use href="#bell"/></svg><div class="h">Notifications<span class="st on">On for this iPhone</span></div><p>Questions, permission prompts and messages to you, when no browser of yours has the project open.</p><div class="row"><button class="cb">Send a test</button><button class="cb ghost">Turn off</button></div></div>
+            <div class="setrow"><svg aria-hidden="true"><use href="#key"/></svg><div class="h">Org key<span class="st">Unlocked, kept on this device</span></div><p>Locking forgets it here; the next open asks for your passkey or passphrase.</p><div class="row"><button class="cb">Lock</button></div></div>
+            <div class="setrow"><svg aria-hidden="true"><use href="#laptop"/></svg><div class="h">On a computer</div><p>Machines, enrolling, the org key’s methods, starting a session, and each session’s transcript, subagents and diff.</p></div>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div class="states" aria-label="The notifications row in each state">
+      <div class="ph-cap"><span class="number">9c</span><b>The notifications row, every state</b></div>
+      <div class="state-card"><span class="tag">off · installed, not asked yet</span><div class="setrow"><svg aria-hidden="true"><use href="#bell"/></svg><div class="h">Notifications<span class="st">Off</span></div><p>Get a notification on this iPhone when a session asks you something, wants approval, or sends you a message. iOS asks you once.</p><div class="row"><button class="cb primary">Turn on</button></div></div></div>
+      <div class="state-card"><span class="tag">turning on · after the tap</span><div class="setrow"><svg aria-hidden="true"><use href="#bell"/></svg><div class="h">Notifications<span class="st"><span class="spinner" aria-hidden="true"></span> Asking iOS…</span></div><p>Answer iOS’s prompt. Then this iPhone is registered with the hub.</p></div></div>
+      <div class="state-card"><span class="tag">on · this device subscribed</span><div class="setrow"><svg aria-hidden="true"><use href="#bell"/></svg><div class="h">Notifications<span class="st on">On for this iPhone</span></div><p>Last sent 14:16: maws-45 has a question for you.</p><div class="row"><button class="cb">Send a test</button><button class="cb ghost">Turn off</button></div></div></div>
+      <div class="state-card"><span class="tag">blocked · permission denied</span><div class="setrow"><svg aria-hidden="true"><use href="#bell"/></svg><div class="h">Notifications<span class="st bad">Blocked in iOS Settings</span></div><p>iOS won’t ask again. Turn them on in Settings › Notifications › Desk, then come back here.</p></div></div>
+      <div class="state-card"><span class="tag">lost · the subscription expired or was dropped</span><div class="setrow"><svg aria-hidden="true"><use href="#bell"/></svg><div class="h">Notifications<span class="st bad">Stopped</span></div><p>The hub can no longer reach this iPhone. Turn them on again to register it.</p><div class="row"><button class="cb primary">Turn on again</button></div></div></div>
+      <div class="state-card"><span class="tag">not available · a Safari tab, or not installed</span><div class="setrow"><svg aria-hidden="true"><use href="#bell"/></svg><div class="h">Notifications<span class="st">Not in a Safari tab</span></div><p>Add the desk to your Home Screen (<svg style="width:13px;height:13px;vertical-align:-2px" aria-label="Share"><use href="#share"/></svg> Share › Add to Home Screen) and open it from there. Needs iOS 16.4 or later.</p></div></div>
+      <div class="state-card"><span class="tag">hub · no push key configured</span><div class="setrow"><svg aria-hidden="true"><use href="#bell"/></svg><div class="h">Notifications<span class="st">Not set up on the hub</span></div><p>This hub has no push key (VAPID) yet, so it can’t send notifications to any device. Set it on the hub, then turn them on here.</p></div></div>
+    </div>
+  </div>
+  <div class="annot">
+    <div><b>Turn on, in order</b>The tap calls <code>Notification.requestPermission()</code>. Once granted, the app subscribes with the hub’s public key and stores the subscription in the registry under this member and device (DX7). The row turns “On” only when the hub has the subscription, not when iOS says yes. Send a test makes the hub push one now, the quickest way to see the whole path works.</div>
+    <div><b>Per device</b>Each device holds its own subscription. Turning it off here unsubscribes and removes this device from the registry, and leaves the laptop’s alone. The row says “for this iPhone” so that is never in doubt. Notifications follow the member, not the project: there is no per-project switch in phase 1.</div>
+    <div><b>States the app can tell apart</b><code>Notification.permission</code> gives off, on or blocked. No <code>PushManager</code>, or <code>display-mode</code> not <code>standalone</code>, means a Safari tab. The hub says whether it has a push key. A push endpoint answering 404 or 410 tells the hub a subscription is gone, and the row shows Stopped. Each state gets its one next step or plainly has none.</div>
+  </div>
+</figure></section>
+
+<!-- ═════════════════════════ Notes ═════════════════════════ -->
+<div class="section-rule">What the phone leaves out, and what is yours to decide</div>
+<div class="notes">
+  <div>
+    <h3>Session depth stays on a computer</h3>
+    <p>The live transcript, the subagent tree, the diff and session info (cwd, worktree, model, context, cost) need width and long reading, and they are not part of the loop of seeing what needs you and answering it. The phone does not draw dead doors to them. The working record is a quiet line ending “on a computer”, and the ⋯ sheet says it once. If depth arrives on the phone later, that line is where it opens from.</p>
+    <h3>Notifications carry no actions and no text</h3>
+    <p>The service worker holds no org key, so it can neither check what the hub sent nor sign an answer. Allow, Deny or a reply on the notification would mean putting the key in the service worker, a §6 decision not taken. Quoting a message would show the hub’s unchecked words on a locked screen. A notification is a pointer; the card, checked, is where you decide.</p>
+    <h3>Also left out</h3>
+    <p>Starting a session (+ Session asks for a machine, a checkout, a worktree and a brief), enrolling a machine (which happens on the Mac anyway), managing the org key’s methods, the machines dialog, and keyboard shortcuts. <em>This device</em> lists them under “On a computer”, so their absence reads as a choice, not a gap.</p>
+  </div>
+  <div>
+    <h3>For you to decide</h3>
+    <ol>
+      <li><b>Keep unlocked on this device, checked by default in the installed app.</b> Recommended. Without it, iOS closing the app means an unlock before most notifications. The cost is that the key stays on the phone until you lock it under <em>This device</em>. (8)</li>
+      <li><b>Where a notification lands: the session’s direct channel.</b> Recommended over the group chat: the card arrives with that session’s own lead-up and none of the other sessions’ traffic, and back goes to the project’s list. The group chat is the better landing if you would rather clear every waiting request in a project in one scroll. (6)</li>
+      <li><b>The app icon’s badge shows the org’s waiting count.</b> Recommended: the home screen then answers the grid’s question unopened. It needs the count in every push payload, which the hub already has. (1)</li>
+      <li><b>Starting a session stays off the phone in phase 1.</b> Recommended: it is a form, not an answer. If “start a session from the train” is a real scene for you, it is a small sheet away and I would draw it. (notes)</li>
+    </ol>
+    <h3 style="margin-top:16px">For the implementer</h3>
+    <p>Manifest <code>display: standalone</code>; <code>viewport-fit=cover</code>; <code>apple-mobile-web-app-status-bar-style: black-translucent</code>, with the top bar padded by <code>env(safe-area-inset-top)</code> and the composer by <code>env(safe-area-inset-bottom)</code>. Keep every input at 16 px or larger. Hold the composer above the keyboard with <code>visualViewport</code>. Deep links need a history built under them, or back closes the app. “Show safe areas” at the top of this page draws the 47 px and 34 px insets on every frame.</p>
+  </div>
+</div>
+</main>
+<script>
+/* Status bars */
+const sbHTML = t => `<span>${t}</span><span class="ic" aria-hidden="true"><svg><use href="#sig"/></svg><svg><use href="#wifi"/></svg><svg class="bat"><use href="#bat"/></svg></span>`;
+document.querySelectorAll('.screen').forEach(s => s.querySelectorAll('.sb').forEach(sb => { sb.innerHTML = sbHTML(s.dataset.time || '14:17'); sb.setAttribute('aria-hidden', 'true'); }));
+
+/* Keyboard stand-in */
+const rows = ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+document.querySelectorAll('[data-kbd]').forEach(k => {
+  k.innerHTML = '<div class="pred"><span>maws-hub</span><span>the</span><span>I’ll</span></div>'
+    + `<div class="krow">${[...rows[0]].map(c => `<span class="k">${c}</span>`).join('')}</div>`
+    + `<div class="krow">${[...rows[1]].map(c => `<span class="k">${c}</span>`).join('')}</div>`
+    + `<div class="krow"><span class="k w">⇧</span>${[...rows[2]].map(c => `<span class="k">${c}</span>`).join('')}<span class="k w">⌫</span></div>`
+    + '<div class="krow"><span class="k w">123</span><span class="k w">@</span><span class="k sp">space</span><span class="k ret">return</span></div>';
+});
+
+/* Grid tiles (01's data and sort) */
+const projects = [
+  { name: 'doperpowers', machines: 2, machines_online: 2, working: 3, waiting: 1 },
+  { name: 'arkho', machines: 2, machines_online: 1, working: 2, waiting: 0 },
+  { name: 'daily-journal', machines: 2, machines_online: 0, working: 0, waiting: 0 },
+  { name: 'MAWS', machines: 3, machines_online: 2, working: 3, waiting: 3 },
+  { name: 'afleet', machines: 1, machines_online: 1, working: 0, waiting: 0 },
+  { name: 'cua_repl', machines: 2, machines_online: 2, working: 1, waiting: 0 },
+  { name: '뉴런 교재', machines: 1, machines_online: 1, working: 1, waiting: 1 },
+  { name: 'claude-usage-menubar-and-reset-countdown-experiments', machines: 1, machines_online: 1, working: 1, waiting: 0 },
+];
+const offline = p => p.machines_online === 0;
+projects.sort((a, b) => offline(a) - offline(b) || b.waiting - a.waiting || b.working - a.working || a.name.localeCompare(b.name));
+const esc = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function label(p) {
+  if (offline(p)) return `${p.name}: offline, 0 of ${p.machines} machines online`;
+  return `${p.name}: ${p.waiting ? `${p.waiting} waiting on you` : 'nothing waiting'}, ${p.working ? `${p.working} working` : 'none working'}, ${p.machines_online} of ${p.machines} machines online`;
+}
+const dots = p => `<span class="machines" aria-hidden="true">${Array.from({ length: p.machines }, (_, i) => `<i class="${i < p.machines_online ? 'on' : ''}"></i>`).join('')}</span>`;
+function tile(p) {
+  let foot;
+  if (offline(p)) foot = `<span><span class="tstate quiet">⊘ Offline</span><span class="tstate-sub">0 of ${p.machines} online</span></span>`;
+  else if (p.waiting) foot = `<span><span class="num">${p.waiting}</span><span class="numlbl">waiting on you</span></span>${p.working ? `<span class="second"><span class="pulse"></span>${p.working}</span>` : ''}`;
+  else if (p.working) foot = `<span class="tstate"><span class="pulse"></span>${p.working} working</span>`;
+  else foot = `<span><span class="tstate quiet">Quiet</span><span class="tstate-sub">Nothing running</span></span>`;
+  const cls = offline(p) ? ' off' : p.waiting ? ' waiting' : '';
+  return `<a class="tile${cls}" href="#3" aria-label="${esc(label(p))}"><span class="top-row" aria-hidden="true"><span class="nm" title="${esc(p.name)}">${esc(p.name)}</span>${offline(p) ? '' : dots(p)}</span><span class="foot" aria-hidden="true">${foot}</span></a>`;
+}
+function row(p) {
+  const sub = offline(p) ? `⊘ Offline · 0 of ${p.machines} online` : `${dots(p)}${p.working ? `<span class="pulse"></span>${p.working} working` : 'Quiet'}`;
+  const right = !offline(p) && p.waiting ? `<span class="w"><span class="num">${p.waiting}</span><span class="numlbl">waiting</span></span>` : '<span></span>';
+  const cls = offline(p) ? ' off' : p.waiting ? ' waiting' : '';
+  return `<a class="trow${cls}" href="#3" aria-label="${esc(label(p))}"><span aria-hidden="true" style="min-width:0"><span class="nm" style="display:block" title="${esc(p.name)}">${esc(p.name)}</span><span class="sub">${sub}</span></span><span aria-hidden="true">${right}</span></a>`;
+}
+document.querySelectorAll('[data-grid]').forEach(el => {
+  const list = el.dataset.limit ? projects.slice(0, +el.dataset.limit) : projects;
+  el.innerHTML = list.map(el.dataset.grid === 'rows' ? row : tile).join('');
+});
+document.querySelectorAll('.stale a').forEach(a => a.setAttribute('aria-label', a.getAttribute('aria-label') + ' (as of 14:02)'));
+
+/* maws-45's direct channel, shared by the 5 frames */
+const dm = `<div class="day">Today</div>
+<div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><time>13:52</time></div><div class="body">The grid reads the hub’s project list now and sorts waiting first. Tests pass in both themes.</div></div>
+<div class="m"><div class="who"><b>You</b><time>13:58</time></div><div class="body">Go with the tiles. Keep projects with every machine offline at the bottom, whatever their counts.</div><p class="deliv">maws-45: delivered</p></div>
+<div class="work"><svg aria-hidden="true"><use href="#lines"/></svg><span>Working record · 13:58–14:06</span><span class="where-note">on a computer</span></div>
+<div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><time>14:06</time></div><div class="body">Done: offline projects sort last. Pushed to <code>desk/grid</code>.</div></div>
+<div class="work"><svg aria-hidden="true"><use href="#lines"/></svg><span>Working record · 14:06–14:16</span><span class="where-note">on a computer</span></div>
+<div class="m"><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">asked</span><time>14:16</time></div><div class="rc closed" role="status"><span class="ok" aria-hidden="true">✓</span><span><span>Column name</span> · <span class="out">Answered from the web by you:</span> <code>waiting</code></span><time>14:17</time></div></div>
+<div class="work"><svg aria-hidden="true"><use href="#lines"/></svg><span class="live"><span class="pulse"></span>Working record · since 14:17</span><span class="where-note">on a computer</span></div>`;
+document.querySelectorAll('[data-dm="maws-45"]').forEach(el => { el.innerHTML = dm; });
+
+/* A chat opens at its latest row */
+document.querySelectorAll('[data-bottom]').forEach(el => { el.scrollTop = el.scrollHeight; });
+
+/* Safe-area guide */
+document.getElementById('safe-toggle').addEventListener('change', e => document.body.classList.toggle('show-safe', e.target.checked));
+
+const dark = new URLSearchParams(location.search).get('theme') === 'dark';
+const tl = document.getElementById('theme-link');
+tl.href = dark ? '?' : '?theme=dark'; tl.textContent = dark ? 'View in light' : 'View in dark';
+</script>
+</body>
+</html>
