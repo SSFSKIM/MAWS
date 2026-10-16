@@ -590,10 +590,11 @@ function createSlide(w: Writer, path: string, id: string, scalars: Y.Scalars, no
 const unloadable = (what: string, reasons: string[]) => `${what}: merged with the changes since your read, it would not load (${reasons.join('; ')})`;
 
 /**
- * The loader's reasons for holding the slide this publish would leave, null when it loads: the live slide copied into a
- * scratch document, the slide's planned writes run there, and the file it then reads as loaded (A2).
+ * The loader's reasons for holding the slide this publish would leave, or for what it would drop loading it; null when it
+ * loads whole: the live slide copied into a scratch document, the slide's planned writes run there, and the file it then
+ * reads as loaded (A2).
  */
-function projectedHeld(live: Doc, id: string, write: (w: Writer) => void): string[] | null {
+function projectedLoss(live: Doc, id: string, write: (w: Writer) => void): string[] | null {
   const scratch = newDoc();
   try {
     transact(scratch, () => {
@@ -602,7 +603,17 @@ function projectedHeld(live: Doc, id: string, write: (w: Writer) => void): strin
     });
     transact(scratch, () => write(new Writer(scratch)));
     const loaded = loadSlide(slideFile(scratch, id), { fileId: id });
-    return loaded.ok ? null : loaded.held.reasons;
+    if (!loaded.ok) return loaded.held.reasons;
+    // loading only by losing something counts as not loading: a warning is the loader's drop or trim of what the file
+    // held (a property out of its range, a pair out of its ratio, one that no longer applies); a note heals to an
+    // equivalent and never refuses. A warning the live slide's own file already gives is not the merge's.
+    const lossy = (diagnostics: typeof loaded.diagnostics) => diagnostics.filter((d) => d.severity === 'warning').map((d) => `${d.element !== undefined ? `element ${d.element}: ` : ''}${d.message}`);
+    const lost = lossy(loaded.diagnostics);
+    if (!lost.length) return null;
+    const before = loadSlide(slideFile(live, id), { fileId: id });
+    const already = new Set(lossy(before.diagnostics));
+    const added = lost.filter((reason) => !already.has(reason));
+    return added.length ? added : null;
   } finally {
     scratch.destroy();
   }
@@ -674,7 +685,7 @@ function planSlide(live: Doc, l: Loaded, baseFile: string | undefined, force: bo
   // the agent's file loaded, and the live slide did; when the publish merges the two (the slide changed since the read),
   // the loader judges the merge before anything is written (A2). Live equal to the base leaves the agent's file itself.
   if (!sameSlide(b, lv) && (force || !conflicts.some((c) => c.path === path))) {
-    const reasons = projectedHeld(live, id, write);
+    const reasons = projectedLoss(live, id, write);
     if (reasons) return void unmergeable.push({ path, detail: unloadable('slide', reasons) });
   }
   writes.push(write);
@@ -756,12 +767,14 @@ function planElements(path: string, b: View, a: View, lv: LiveView, force: boole
     }
     const tag = props.get('tag') as Tag;
     const parent = props.get('parent') ?? ROOT;
+    // the paint layer (flow, under or over), three-way like any key (A1): both sides moving it from the base's layer to
+    // different ones conflicts, whatever the merge then pins or unpins
+    const [ea, eb, el] = [a.els.get(key), b.els.get(key), lv.els.get(key)];
+    if (ea && eb && el && ea.group !== eb.group && el.group !== eb.group && el.group !== ea.group && !force) conflict(parent === ROOT ? 'order: changed since your read' : `order in ${elementName(parent)}: changed since your read`);
     let group: Group = 'flow';
     if (isPinned(tag, style, attrs)) {
-      // the paint layer, three-way like any key (A1): the agent's when it changed it and live did not, else live's
-      const [ea, eb, el] = [a.els.get(key), b.els.get(key), lv.els.get(key)];
+      // the agent's layer when it changed it, else live's
       const agentLayer = ea && ea.group !== 'flow' && (!eb || eb.group !== ea.group) ? ea.group : undefined;
-      if (agentLayer && el && eb && el.group !== eb.group && el.group !== agentLayer && !force) conflict(parent === ROOT ? 'order: changed since your read' : `order in ${elementName(parent)}: changed since your read`);
       group = agentLayer ?? (el && el.group !== 'flow' ? el.group : ea && ea.group !== 'flow' ? ea.group : 'over');
     }
     final.set(key, { parent, group });

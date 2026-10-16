@@ -630,4 +630,42 @@ describe('publishDeck: the final review', () => {
     expect(Object.keys(readDeckJson(doc).faces ?? {}).sort()).toEqual(['a', 'b', 'c', 'owner']);
     expect(deckFiles(doc)[S]).toContain('>A<');
   });
+
+  // the re-review's follow-ups
+  it('A1: refuses the agent’s move into the flow when the owner moved the element to another layer since the read', () => {
+    const pin = 'position:absolute; left:10px; top:10px';
+    const doc = small(`<section id="s1"><p id="b">B</p><p id="a" style="${pin}">A</p></section>`);
+    const base = deckFiles(doc);
+    expect(layerOf(doc, 'a')).toBe('over');
+    zOrder(doc, 's1', 'a', 'back'); // the owner: behind the flow
+    expect(layerOf(doc, 'a')).toBe('under');
+    // the agent unpins a and places it in the flow before b
+    const sent = '<section id="s1"><p id="a">A</p><p id="b">B</p></section>';
+    expect(publish(doc, base, { [S]: sent })).toMatchObject({ changed: [], conflicts: [{ path: S, detail: 'order: changed since your read' }], updates: 0 });
+    expect(layerOf(doc, 'a')).toBe('under');
+    expect(publish(doc, base, { [S]: sent }, true).conflicts).toEqual([]);
+    expect(layerOf(doc, 'a')).toBe('flow');
+  });
+
+  it('A2: refuses a merge the loader would load only by dropping a property (each side’s line height fits, the pair does not)', () => {
+    const doc = small('<section id="s1"><p id="t" style="font-size:20px; line-height:40px">T</p></section>');
+    const base = deckFiles(doc);
+    setStyle(doc, 's1', 't', { 'font-size': '40px' }); // the owner: 40/40
+    const sent = base[S]!.replace('line-height:40px', 'line-height:15px'); // the agent: 15/20
+    for (const force of [false, true]) {
+      const out = publish(doc, base, { [S]: sent }, force);
+      expect(out).toMatchObject({ changed: [], updates: 0 });
+      expect(out.conflicts).toEqual([{ path: S, detail: expect.stringMatching(/^slide: merged with the changes since your read, it would not load \(element t: line-height:15px .*dropped/) }]);
+      expect(el(doc, 's1', 't')!.style).toMatchObject({ 'font-size': '40px', 'line-height': '40px' });
+    }
+  });
+
+  it('A2: lands a merge whose reload only adds notes (healed to an equivalent, nothing lost)', () => {
+    const doc = small('<section id="s1"><p id="t" style="color:#111111">T</p><p id="u">U</p></section>');
+    const base = deckFiles(doc);
+    setStyle(doc, 's1', 'u', { color: '#222222' }); // the owner
+    const sent = base[S]!.replace('color:#111111', 'color:var(--ds-brandx)'); // the agent: a token not every system defines (a note)
+    expect(publish(doc, base, { [S]: sent }).conflicts).toEqual([]);
+    expect(el(doc, 's1', 't')!.style.color).toBe('var(--ds-brandx)');
+  });
 });

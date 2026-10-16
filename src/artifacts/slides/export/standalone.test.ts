@@ -63,7 +63,7 @@ describe('the deck’s standalone page', () => {
     expect(html).toContain('<x-icon data-eid="star" data-layer="under" name="Star"');
     expect(html).toMatch(/<x-icon[^>]*><svg viewBox="0 0 24 24"[^>]*><path d="M /);
     expect(html).toMatch(/<x-embed data-eid="live"[^>]*><iframe sandbox="allow-scripts" tabindex="-1" srcdoc="[^"]*default-src &#39;none&#39;|<x-embed data-eid="live"[^>]*><iframe sandbox="allow-scripts" tabindex="-1" srcdoc="[^"]*default-src 'none'/);
-    expect(html).toContain('<svg data-eid="chart" data-layer="under" aria-label="A dot" data-svg-scope="esvg-body-chart" viewBox="0 0 100 100"');
+    expect(html).toContain('<svg data-eid="chart" data-layer="under" aria-label="A dot" data-svg-scope="esvg4-body-chart" viewBox="0 0 100 100"');
     expect(html).toContain('<x-embed data-eid="live" style=');
     const under = exportDeckOf(fixtureDoc({ ...FIXTURE_FILES, 'project/slides/body.html': '<section id="body"><div id="back" style="position:absolute; left:0; top:0; width:100px; height:100px; background:#ff0000"></div><p id="t">Over</p></section>' }), 'x');
     const drawn = deckPage(under, { mode: 'html', resolveVar: () => undefined, asset, facesCss: '' });
@@ -166,5 +166,19 @@ describe('the deck’s standalone page: the final review', () => {
       expect(svg).toContain(`href="#${scope}_r"`);
       expect(sheets[0]).toContain(`#${scope}_grad`);
     });
+  });
+
+  // the re-review: ids may hold hyphens, so slide `a-b` with svg `c` and slide `a` with svg `b-c` must not share a scope
+  it('A16: names each drawing’s scope unambiguously, the same in every pass', () => {
+    const drawing = (slide: string, id: string) =>
+      `<section id="${slide}"><svg id="${id}" viewBox="0 0 10 10" style="position:absolute; left:0px; top:0px; width:10px; height:10px"><rect id="g" width="1" height="1"></rect><use href="#g"></use></svg></section>`;
+    const files = { 'project/deck.json': JSON.stringify({ v: 4, order: ['a-b', 'a'] }), 'project/slides/a-b.html': drawing('a-b', 'c'), 'project/slides/a.html': drawing('a', 'b-c') };
+    const deck = exportDeckOf(fixtureDoc(files), 'x');
+    const scopesOf = (mode: PageOptions['mode']) => [...deckPage(deck, { mode, resolveVar: () => undefined, asset, facesCss: '' }).matchAll(/data-svg-scope="([^"]+)"/g)].map((m) => m[1]);
+    const scopes = scopesOf('html');
+    expect(scopes).toHaveLength(2);
+    expect(scopes[0]).not.toBe(scopes[1]);
+    expect(scopesOf('measure')).toEqual(scopes);
+    expect(scopesOf('print')).toEqual(scopes);
   });
 });

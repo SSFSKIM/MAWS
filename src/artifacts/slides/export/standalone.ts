@@ -202,7 +202,9 @@ function elementHtml(el: ElementIR, w: Writer, under: boolean): string {
   if (el.id) attrs.push(`data-eid="${escAttr(el.id)}"`);
   if (under) attrs.push('data-layer="under"');
   // an svg drawing contained as the canvas contains it: its stylesheets and ids its own on the one page (A16)
-  const drawing = el.tag === 'svg' ? containSvgMarkup(el.attrs, el.raw ?? '', `esvg-${w.slideId}-${el.id}`) : null;
+  // its scope names the slide and the element unambiguously (ids may hold hyphens: the slide id's length goes first) and
+  // the same in every pass of the page
+  const drawing = el.tag === 'svg' ? containSvgMarkup(el.attrs, el.raw ?? '', `esvg${w.slideId.length}-${w.slideId}-${el.id}`) : null;
   const own = drawing?.attrs ?? el.attrs;
   for (const k of Object.keys(own).sort()) {
     if (el.tag === 'img' && k === 'src') continue;
