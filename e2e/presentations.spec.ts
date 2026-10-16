@@ -254,12 +254,12 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
   const filmGeometry = () =>
     inMain.locator('.deck-filmstrip-list').evaluate((el) => ({
       list: { top: Math.round(el.getBoundingClientRect().top), client: el.clientHeight, scrollTop: el.scrollTop, scrollHeight: el.scrollHeight },
-      thumbs: [...el.querySelectorAll('[data-slide-thumb]')].slice(0, 3).map((t) => {
+      thumbs: Array.from(el.querySelectorAll('[data-slide-thumb]')).slice(0, 3).map((t) => {
         const r = t.getBoundingClientRect();
         return [t.getAttribute('data-slide-thumb'), Math.round(r.top), Math.round(r.height), (t as HTMLElement).style.transform];
       }),
       window: [window.innerWidth, window.innerHeight],
-      live: [...document.querySelectorAll('[id^="DndLiveRegion"]')].map((n) => n.textContent),
+      live: Array.from(document.querySelectorAll('[id^="DndLiveRegion"]')).map((n) => n.textContent),
     }));
   console.log(`[filmstrip kbd] lifted ${JSON.stringify(await filmGeometry())}`);
   // the sensor starts listening a tick after the lift: an arrow pressed before that moves nothing, so press until it moves
@@ -272,8 +272,26 @@ test('a deck in the panel and a main tab: two replicas, the filmstrip’s gestur
     await expect(lifted).toHaveAttribute('style', /translate3d\(0px, [1-9]/, { timeout: 250 });
   }).toPass();
   console.log(`[filmstrip kbd] moved after ${presses} press(es) ${JSON.stringify(await filmGeometry())}`);
-  await page.waitForTimeout(1_000);
-  console.log(`[filmstrip kbd] 1 s later ${JSON.stringify(await filmGeometry())}`);
+  // when the announcement names the next slide, and how the page is painting meanwhile (visibility, focus, frames per s)
+  const timeline = await page.evaluate(async (next) => {
+    const start = performance.now();
+    let frames = 0;
+    let counting = true;
+    const tick = () => {
+      frames++;
+      if (counting) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+    let overAt: number | null = null;
+    while (performance.now() - start < 3_000 && overAt === null) {
+      if (Array.from(document.querySelectorAll('[id^="DndLiveRegion"]')).some((n) => n.textContent?.includes(`over droppable area ${next}.`))) overAt = performance.now() - start;
+      else await new Promise((r) => setTimeout(r, 20));
+    }
+    const elapsed = performance.now() - start;
+    counting = false;
+    return { overAt: overAt === null ? null : Math.round(overAt), framesPerS: Math.round((frames * 1000) / elapsed), visibility: document.visibilityState, focus: document.hasFocus() };
+  }, before[1]!);
+  console.log(`[filmstrip kbd] timeline ${JSON.stringify(timeline)} ${JSON.stringify(await filmGeometry())}`);
   // dropped once the sensor has the next slide under it (its announcement says so)
   await expect(page.locator('[id^="DndLiveRegion"]').filter({ hasText: `over droppable area ${before[1]}.` })).toHaveCount(1);
   await page.keyboard.press('Space');
@@ -523,7 +541,8 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
 // MAWS_DOCUMENT_PERF and MAWS_ARTIFACTS_PERF). The scale gate (presentations-scale.spec.ts, class 2, under the load rule)
 // owns the 16 ms; the transform layer's case keeps a drag's function in the gate.
 test('the scale gate’s drag: move to frame p95 within 16 ms on the 100-slide deck while an agent republishes', async () => {
-  test.skip(process.env.MAWS_PRESENTATIONS_PERF !== '1', 'measured only under MAWS_PRESENTATIONS_PERF=1');
+  // DIAGNOSIS (temporary): the case runs once more on the mini for the record's head-code drag number
+  // test.skip(process.env.MAWS_PRESENTATIONS_PERF !== '1', 'measured only under MAWS_PRESENTATIONS_PERF=1');
   test.setTimeout(150_000);
   const page = await ready();
   const id = await createDeck(page, 'Bench drag', benchDeckFiles(100));
