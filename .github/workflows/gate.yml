@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       gates:
-        description: 'A comma list over static, unit, unit:darwin, probes, e2e:<group> (e2e:default is the bare `pnpm e2e`); empty runs the default set.'
+        description: 'A comma list over static, unit, unit:darwin, probes, packaged, e2e:<group> (e2e:default is the bare `pnpm e2e`); empty runs the default set.'
         type: string
         default: ''
       runner:
@@ -68,6 +68,7 @@ jobs:
       probes: ${{ steps.plan.outputs.probes }}
       e2e: ${{ steps.plan.outputs.e2e }}
       e2e_runner: ${{ steps.plan.outputs.e2e_runner }}
+      packaged: ${{ steps.plan.outputs.packaged }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -133,6 +134,57 @@ jobs:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - run: .github/scripts/gate-run.sh '^(ℹ|#) (tests|suites|pass|fail|cancelled|skipped|todo) ' pnpm test:probes
+
+  # The unsigned packaged app (Decision Log 35): one `pnpm build:app`, then its fuses and the e2e scripts that run against
+  # dist/ (the bare set, the detached supervisor, voice's packaged case). Only by `Gates: packaged`; always on the Mac.
+  packaged:
+    needs: plan
+    if: needs.plan.outputs.packaged == 'true'
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 30
+    env:
+      MAWS_E2E_QUIET: '1'
+      SHELL: /bin/zsh
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # The voice helper compiles with swiftc. Without a developer directory, xcrun's shim would offer to install the
+      # tools in a dialog on the runner's desktop, so it is asked first; nothing is ever installed here.
+      - run: |
+          if ! dir=$(xcode-select -p 2>/dev/null) || [[ ! -d $dir ]]; then
+            echo '::error::packaged: no Xcode command-line tools on this runner (xcode-select -p finds none); build:app compiles the voice helper with swiftc. The owner installs them; the job installs nothing.'
+            exit 1
+          fi
+          xcrun swiftc --version
+      - id: build
+        env:
+          MAWS_SIGN_IDENTITY: '' # unsigned: build:app passes CSC_IDENTITY_AUTO_DISCOVERY=false itself
+        run: .github/scripts/gate-run.sh 'built in|error|⨯|code signing' pnpm build:app
+      # Each check runs whatever the one before it did, over the same build.
+      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: .github/scripts/gate-run.sh 'RunAsNode|verify:fuses' pnpm verify:fuses
+      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/packaged
+        run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:packaged
+      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/supervisor-packaged
+        run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:supervisor:packaged
+      - if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/voice-packaged
+        run: .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' pnpm e2e:voice:packaged
+      # Each run's HTML report keeps its screenshots and traces; test-results/ holds the last run's alone.
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-packaged
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
 
   e2e:
     needs: plan
