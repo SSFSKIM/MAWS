@@ -161,29 +161,35 @@ export class ConnectorScene {
     }
   }
 
-  // The owner's Start from the header's Connectors sheet (offered once the page found no live route): a session started
-  // in the artifact's directory, answered once the sheet says it is ready and its fixture server is connected; the one
-  // new live session it made.
+  // The owner's Start from the header's Connectors sheet (offered once the page found no live route): the real button,
+  // then the durable outcome, never the sheet's passing words (a page that reads its new route at once hides the Start
+  // row): one new session live and ready, its fixture server connected. A card or a refusal the Start row shows ends the
+  // wait at once with its words. Answers the one new live session.
   async ownerStart(page: Page): Promise<LiveEngine> {
     const before = new Set((await this.live(page)).map((session) => session.appSessionId));
     const sheet = await this.openSheet(page);
     const start = sheet.locator('[data-connectors-start]');
     await start.getByRole('button', { name: 'Start session' }).click();
-    await expect(start.getByRole('status')).toHaveText('The session is ready', { timeout: 90_000 });
-    await this.closeSheet(page);
+    const passing = new Set(['', 'Starting…', 'Starting the session…', 'The session is ready']);
     let started: LiveEngine | undefined;
-    await expect
-      .poll(async () => (started = (await this.live(page)).find((session) => !before.has(session.appSessionId))) !== undefined, { timeout: 30_000, message: 'the owner’s Start made one live session' })
-      .toBe(true);
-    const appSessionId = started!.appSessionId as LaunchSpec['appSessionId'];
+    for (const deadline = Date.now() + 90_000; started === undefined; await wait(500)) {
+      const words = (await start.getByRole('status').textContent({ timeout: 250 }).catch(() => null))?.trim() ?? '';
+      if (!passing.has(words)) throw new Error(`the owner’s Start did not start a session: ${words}`);
+      if (Date.now() > deadline) throw new Error(`the owner’s Start made no live, ready session within 90 s (the sheet said “${words}”)`);
+      const fresh = value(await invoke(page, 'engine.sessions', undefined)).find((session) => !before.has(session.appSessionId) && session.process === 'ready');
+      if (fresh) started = { appSessionId: fresh.appSessionId, launchId: fresh.launchId, pid: fresh.pid ?? 0 };
+    }
+    await this.closeSheet(page);
+    const appSessionId = started.appSessionId as LaunchSpec['appSessionId'];
     await expect
       .poll(async () => {
         const status = await invoke(page, 'session.mcpStatus', { appSessionId });
         return status.ok ? status.value.mcpServers.find((server) => server.name === SERVER)?.status : 'unanswered';
       }, { timeout: 60_000, message: 'the fixture server is connected' })
       .toBe('connected');
+    expect((await this.live(page)).filter((session) => !before.has(session.appSessionId)), 'exactly one new session').toHaveLength(1);
     this.note('owner start', started);
-    return started!;
+    return started;
   }
 
   // The engine host's sessions whose process is not gone.

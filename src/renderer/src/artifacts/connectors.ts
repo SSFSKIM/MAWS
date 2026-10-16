@@ -115,14 +115,15 @@ export function createConnectorHost(ipc: Pick<MawsBridge, 'invoke' | 'on'>): Con
         starting += 1;
         try {
           const start = await under(NO_LEASE, NO_LEASE, (leaseId) => call('connectors.watch', { leaseId, request }));
-          if (!start.ok) return start;
+          if (!start.ok) return start; // a close before the answer: `under` answered the lease refusal
           listeners.set(start.watchId, listener);
           for (const update of held.get(start.watchId) ?? []) {
             if (closed || listeners.get(start.watchId) !== listener) break; // a listener closed the page, or unwatched
             listener(update);
           }
           held.delete(start.watchId);
-          return start;
+          // a listener that closed the page while its held refreshes were handed over: no watch was started for it
+          return closed ? NO_LEASE : start;
         } finally {
           starting -= 1;
           if (starting === 0) held.clear();

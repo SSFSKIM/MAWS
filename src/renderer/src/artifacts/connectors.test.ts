@@ -226,8 +226,17 @@ describe('a surface’s close, and early refreshes', () => {
     b.emit('connectors.watchUpdate', { leaseId: LEASE, watchId: WATCH, update: RESULT });
     b.emit('connectors.watchUpdate', { leaseId: LEASE, watchId: WATCH, update: { ok: false, state: 'paused', reason: 'noRoute' } });
     b.sent[0]!.answer({ ok: true, watchId: WATCH, intervalMs: 60_000 });
-    await watched;
+    // closed by its own first refresh: the start answers the closed surface's lease refusal, never a started watch
+    await expect(watched).resolves.toEqual(NO_LEASE_ANSWER);
     expect(heard).toEqual([RESULT]);
+    b.emit('connectors.watchUpdate', { leaseId: LEASE, watchId: WATCH, update: RESULT }); // a refresh after the close
+    expect(heard).toEqual([RESULT]);
+    const count = b.invoke.mock.calls.length;
+    await expect(surface.unwatchTool(WATCH)).resolves.toBe(false);
+    await expect(surface.refreshWatch(WATCH)).resolves.toBe(false);
+    await settle();
+    expect(b.invoke.mock.calls.slice(count).map(([name]) => name)).toEqual([]);
+    expect(b.names().filter((name) => name === 'connectors.close')).toHaveLength(1);
   });
 
   it('holds every watch’s first refresh when as many watches as main allows start at once', async () => {
