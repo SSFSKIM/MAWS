@@ -240,7 +240,10 @@ function cartesian(v: View): Rendered {
   const valueLabels = spec.view === 'bar' && barCount <= 16;
   const plotTop = top + lg.height + (valueLabels ? theme.caption + 10 : 6);
   const negative = yValues.some((y) => y < 0);
-  const plotBottom = plotTop + PLOT_H - (valueLabels && negative ? theme.caption + 10 : 0);
+  // A negative bar's value sits below its tip, so the scale stops short of the axis labels by one label's room.
+  const room = valueLabels && negative ? theme.caption + 10 : 0;
+  const plotBottom = plotTop + PLOT_H - room;
+  const axisY = plotBottom + room;
   const yScale = kit.linear(domainOf(kit, yValues, spec.view === 'bar' || spec.view === 'area'), [plotBottom, plotTop], 5, true);
   const yLabels = tickLabels(yScale.ticks, 'linear', yFormat);
   const left = Math.ceil(Math.max(...yLabels.map((l) => textWidth(l, theme.caption)))) + 10;
@@ -266,7 +269,7 @@ function cartesian(v: View): Rendered {
     });
     if (shortened) warnings.push('some category labels are shortened; the source table has them whole');
     const every = thinning(wrapped.map((lines) => Math.max(...lines.map((l) => textWidth(l, theme.caption)))), band.bandwidth / 0.8);
-    const svg = wrapped.map((lines, i) => (i % every === 0 ? text(band.starts[i] + band.bandwidth / 2, plotBottom + theme.caption + 8, lines, { anchor: 'middle', fill: theme.muted, line: lineH }) : '')).join('');
+    const svg = wrapped.map((lines, i) => (i % every === 0 ? text(band.starts[i] + band.bandwidth / 2, axisY + theme.caption + 8, lines, { anchor: 'middle', fill: theme.muted, line: lineH }) : '')).join('');
     xAxis = { svg, height: theme.caption + 8 + (Math.max(...wrapped.map((l) => l.length)) - 1) * lineH + 8, map: (x) => (keys.includes(seriesKey(x)) ? band.starts[keys.indexOf(seriesKey(x))] + band.bandwidth / 2 : null), band: { ...band, keys } };
   } else {
     const xs = series.flatMap((s) => s.marks.map((m) => xValue(m.x)!));
@@ -276,7 +279,7 @@ function cartesian(v: View): Rendered {
       labels.map((l) => textWidth(l, theme.caption)),
       scale.ticks.length > 1 ? Math.abs(scale.map(scale.ticks[1]) - scale.map(scale.ticks[0])) : theme.width,
     );
-    const svg = scale.ticks.map((t, i) => (i % every === 0 ? text(scale.map(t), plotBottom + theme.caption + 8, labels[i], { anchor: edgeAnchor(scale.map(t), labels[i], theme), fill: theme.muted }) : '')).join('');
+    const svg = scale.ticks.map((t, i) => (i % every === 0 ? text(scale.map(t), axisY + theme.caption + 8, labels[i], { anchor: edgeAnchor(scale.map(t), labels[i], theme), fill: theme.muted }) : '')).join('');
     xAxis = { svg, height: theme.caption + 16, map: (x) => (xValue(x) === null ? null : scale.map(xValue(x)!)) };
   }
 
@@ -314,7 +317,7 @@ function cartesian(v: View): Rendered {
   }
   if (tips > MAX_TIPS) warnings.push(`${tips} marks; hover values for the first ${MAX_TIPS}, every value in the source table`);
 
-  const height = plotBottom + xAxis.height + (valueLabels && negative ? theme.caption + 10 : 0);
+  const height = axisY + xAxis.height;
   const points = series.reduce((n, s) => n + s.marks.length, 0);
   const desc = `${cap(spec.view)} chart of ${ys.join(', ')} by ${spec.x}${spec.series ? ` and ${spec.series}` : ''}, ${points} ${points === 1 ? 'value' : 'values'}${series.length > 1 ? ` in ${series.length} series (${series.map((s) => s.label).join(', ')})` : ''}. The values are in the source table under the figure.`;
   return { svg: frame(theme, height, v.caption, desc, body), warnings };

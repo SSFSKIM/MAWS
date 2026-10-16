@@ -146,8 +146,8 @@ test('DOCX: the canonical SVG embedded byte for byte with a picture fallback, ca
       expect(fallback.blocked).toEqual([]);
       const scale = 624 / lib.theme.width; // Letter with one-inch margins: 6.5 in at 96 px
       children.push(
-        new Paragraph({ children: [new TextRun({ text: (c.spec as { title: string }).title, bold: true, size: 26 })], spacing: { before: 240, after: 120 } }),
-        new Paragraph({ children: [new ImageRun({ type: 'svg', data: Buffer.from(svg, 'utf8'), fallback: { type: 'png', data: Buffer.from(fallback.png, 'base64') }, transformation: { width: Math.round(lib.theme.width * scale), height: Math.round(h * scale) }, altText: { name: (c.spec as { title: string }).title, description: (c.spec as { title: string }).title, title: (c.spec as { title: string }).title } })] }),
+        new Paragraph({ keepNext: true, children: [new TextRun({ text: (c.spec as { title: string }).title, bold: true, size: 26 })], spacing: { before: 240, after: 120 } }),
+        new Paragraph({ keepNext: true, children: [new ImageRun({ type: 'svg', data: Buffer.from(svg, 'utf8'), fallback: { type: 'png', data: Buffer.from(fallback.png, 'base64') }, transformation: { width: Math.round(lib.theme.width * scale), height: Math.round(h * scale) }, altText: { name: (c.spec as { title: string }).title, description: (c.spec as { title: string }).title, title: (c.spec as { title: string }).title } })] }),
         new Paragraph({ children: [new TextRun({ text: lib.sourceLabel(c.datasetId), size: 20, color: lib.theme.muted.slice(1) })], spacing: { after: 240 } }),
       );
     }
@@ -185,6 +185,7 @@ test('DOCX: the canonical SVG embedded byte for byte with a picture fallback, ca
 test('Korean labels and values fit: every text box inside the frame, no two labels overlapping, estimates never narrower than Chromium', async () => {
   const ids = [...sheets().map((c) => c.id), 'edge-long-korean', 'edge-long-korean-table', 'edge-hostile', 'edge-missing-column'];
   let widest = 0;
+  const failures: string[] = [];
   for (const candidate of CANDIDATES)
     for (const id of ids) {
       const c = lib.CASES.find((item) => item.id === id)!;
@@ -220,12 +221,11 @@ test('Korean labels and values fit: every text box inside the frame, no two labe
       });
       widest = Math.max(widest, m.ratio);
       report(`geometry-${candidate}-${id}`, m);
-      expect(m.outside, `${candidate} ${id}`).toEqual([]);
-      expect(m.overlaps, `${candidate} ${id}`).toEqual([]);
-      expect(m.under, `${candidate} ${id}`).toEqual([]);
+      for (const [kind, list] of [['outside', m.outside], ['overlap', m.overlaps], ['wider than estimated', m.under]] as const) for (const item of list) failures.push(`${candidate} ${id} ${kind}: ${item}`);
       if (candidate === 'd3' && id === 'edge-long-korean') emitPng('chromium-long-korean', (await page.screenshot({ fullPage: true })).toString('base64'));
     }
   report('geometry-widest-real-over-estimate', Number(widest.toFixed(3)));
+  expect(failures).toEqual([]);
 });
 
 test('a host reads hover values and opens the source table by keyboard around the figure; the figure is a named image', async () => {

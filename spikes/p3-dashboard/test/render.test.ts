@@ -82,6 +82,17 @@ describe.each([d3Kit, houseKit])('candidate $name', (kit) => {
     expect(drawn).toHaveLength(6);
   });
 
+  it('keeps a negative bar\'s value label clear of the category labels under the axis', () => {
+    for (const id of ['bar-gdp-2024', 'edge-negative-bar']) {
+      const { svg } = draw(id);
+      const baselines = (fill: string) => [...svg.matchAll(new RegExp(`<text x="[\\d.]+" y="([\\d.]+)" text-anchor="middle" fill="${fill}"`, 'g'))].map((m) => Number(m[1]));
+      const values = baselines(theme.ink);
+      const categories = baselines(theme.muted);
+      expect(values.length).toBeGreaterThan(0);
+      expect(Math.max(...values), id).toBeLessThan(Math.min(...categories) - theme.caption);
+    }
+  });
+
   it('counts rows for pie slices and keeps series identity from the unfiltered snapshot', () => {
     const pie = tips(draw('pie-penguins-island').svg);
     expect(pie).toEqual(['토르게르센섬: 52 (15.1%)', '비스코섬: 168 (48.8%)', '드림섬: 124 (36%)']);

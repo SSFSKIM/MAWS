@@ -9,7 +9,7 @@ const WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꥠ-꥿가-힯豈-﫿︰-﹏�
 function advance(ch: string): number {
   if (WIDE.test(ch)) return 1;
   if (ch === ' ') return 0.3;
-  if (/[0-9]/.test(ch)) return 0.62;
+  if (/[0-9]/.test(ch)) return 0.66; // SF Pro's tabular digits measure 0.63 em in Chromium (e2e run 38890516278)
   if (/[il.,:;'|!]/.test(ch)) return 0.32;
   if (/[mwMW@%]/.test(ch)) return 0.95;
   if (/[A-Z]/.test(ch)) return 0.72;
