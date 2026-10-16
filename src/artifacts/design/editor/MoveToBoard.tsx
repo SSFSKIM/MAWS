@@ -4,15 +4,20 @@
 // moves with its subtree, under new ids, its comments rewritten in the same transaction, the whole gesture one undo
 // step. A pinned element keeps its place on the destination, nudged inside it when the destination is smaller; flow
 // content joins the end of the destination's flow. Boards that cannot take a write (held, missing, the active one)
-// are not offered; a refusal (a limit of the destination) is shown and writes nothing. Drag-across-boards is not this
+// are not offered; a refusal (a limit of the destination) is shown and writes nothing. The menu may stay open while the
+// design changes under it, so a choice is checked again as it is made, against the replica as it is then: the session
+// still takes writes (not read-only, no version shown), both boards still take a write, the board is still the active
+// one and the selected elements still on it; else nothing is written. Drag-across-boards is not this
 // cut's (deferred to the owner's sitting with first-press drag-through).
 import { DropdownMenu } from 'radix-ui';
 import { isPinned } from '../../slides/ir';
-import { readFlat, resolveParents, ROOT } from '../../slides/model';
+import { heldOf, readFlat, resolveParents, ROOT } from '../../slides/model';
 import type { SlideCanvas } from '../../slides/canvas';
 import type { DeckSession } from '../../slides/editor/session';
 import { measure } from '../../slides/editor/transform/measure';
 import { applyV2, newDoc, stateV2 } from '../../yjs';
+import * as Y from '../../yjs/slides';
+import { boardFrame, isMissingSource } from '../model';
 import { moveElementToBoard } from '../move';
 import { BoardError } from '../writers';
 import { boardLabel, type BoardView } from './boards';
@@ -32,19 +37,27 @@ export function movedRoots(session: DeckSession, boardId: string, selection: rea
 
 const px = (v: string | undefined): number | null => (v !== undefined && /^-?\d+(\.\d+)?px$/.test(v.trim()) ? Number.parseFloat(v) : null);
 
+/** Whether a board takes a write now: it exists with its frame, and is neither held nor missing its file. */
+const boardWritable = (session: DeckSession, id: string): boolean => Y.hasSlide(session.doc, id) && boardFrame(session.doc, id) !== null && heldOf(session.doc, id) === null && !isMissingSource(session.doc, id);
+
 /**
- * Moves the selection's roots from `from` to `to` as one gesture; answers each root's id on `to`. A pinned root keeps its
- * left and top, kept inside the destination by its drawn size (`canvas` at `zoom`).
+ * Moves the selection's roots from board `fromId` to board `toId` as one gesture; answers each root's id on `toId`, or
+ * null, writing nothing, when the move no longer holds (module header). A pinned root keeps its left and top, kept
+ * inside the destination by its drawn size (`canvas` at `zoom`).
  */
-export function moveSelectionToBoard(session: DeckSession, from: BoardView, to: BoardView, selection: readonly string[], canvas: SlideCanvas | null, zoom: number): string[] {
-  const flat = new Map(readFlat(session.doc, from.id, false).map((e) => [e.id, e]));
-  const plans = movedRoots(session, from.id, selection).map((id) => {
+export function moveSelectionToBoard(session: DeckSession, fromId: string, toId: string, selection: readonly string[], canvas: SlideCanvas | null, zoom: number): string[] | null {
+  if (fromId === toId || !session.writable() || !boardWritable(session, fromId) || !boardWritable(session, toId)) return null;
+  const present = selection.filter((id) => Y.hasElement(session.doc, fromId, id));
+  if (present.length === 0) return null;
+  const to = boardFrame(session.doc, toId)!;
+  const flat = new Map(readFlat(session.doc, fromId, false).map((e) => [e.id, e]));
+  const plans = movedRoots(session, fromId, present).map((id) => {
     const e = flat.get(id)!;
     const [left, top] = [px(e.style.left), px(e.style.top)];
-    if (!isPinned(e.tag, e.style, e.attrs) || left === null || top === null || !to.frame) return { id, options: {} };
+    if (!isPinned(e.tag, e.style, e.attrs) || left === null || top === null) return { id, options: {} };
     const box = canvas ? measure(canvas, id, zoom)?.bounds : undefined;
     const [w, h] = [box?.w ?? 0, box?.h ?? 0];
-    return { id, options: { at: { left: Math.max(0, Math.min(left, to.frame.w - w)), top: Math.max(0, Math.min(top, to.frame.h - h)) } } };
+    return { id, options: { at: { left: Math.max(0, Math.min(left, to.w - w)), top: Math.max(0, Math.min(top, to.h - h)) } } };
   });
   // the writer refuses one move whole; several are tried together on a copy first, so a refusal of a later one leaves
   // nothing of the earlier ones written
@@ -52,14 +65,14 @@ export function moveSelectionToBoard(session: DeckSession, from: BoardView, to: 
     const scratch = newDoc();
     try {
       applyV2(scratch, stateV2(session.doc));
-      for (const { id, options } of plans) moveElementToBoard(scratch, from.id, to.id, id, options);
+      for (const { id, options } of plans) moveElementToBoard(scratch, fromId, toId, id, options);
     } finally {
       scratch.destroy();
     }
   }
   const moved: string[] = [];
   session.edit((origin) => {
-    for (const { id, options } of plans) moved.push(moveElementToBoard(session.doc, from.id, to.id, id, options, origin).ids.get(id)!);
+    for (const { id, options } of plans) moved.push(moveElementToBoard(session.doc, fromId, toId, id, options, origin).ids.get(id)!);
   });
   return moved;
 }
@@ -83,9 +96,12 @@ export function MoveToBoard({ session, boards, active, selection, canvas, zoom, 
   const targets = boards.filter((b) => b.id !== active.id && takesWrites(b));
   const disabled = readOnly || !takesWrites(active) || selection.length === 0 || targets.length === 0;
   const move = (to: BoardView) => {
+    // the menu may have stayed open while the design changed: the choice is taken against the replica as it is now
+    const now = session.snapshot();
+    if (readOnly || now.currentSlide !== active.id) return;
     try {
-      const ids = moveSelectionToBoard(session, active, to, selection, canvas, zoom);
-      onMoved(to, ids);
+      const ids = moveSelectionToBoard(session, active.id, to.id, now.selection, canvas, zoom);
+      if (ids) onMoved(to, ids);
     } catch (error) {
       onNotice(error instanceof BoardError ? error.problems.join('; ') : error instanceof Error ? error.message : String(error));
     }
@@ -101,7 +117,7 @@ export function MoveToBoard({ session, boards, active, selection, canvas, zoom, 
         <DropdownMenu.Portal>
           <DropdownMenu.Content align="start" sideOffset={4} className="deck-menu" aria-label={C.moveToBoard}>
             {targets.map((b) => (
-              <DropdownMenu.Item key={b.id} className="deck-menu-item" data-move-target={b.id} onSelect={() => move(b)}>
+              <DropdownMenu.Item key={b.id} className="deck-menu-item" data-move-target={b.id} disabled={disabled} onSelect={() => move(b)}>
                 {boardLabel(b)}
               </DropdownMenu.Item>
             ))}

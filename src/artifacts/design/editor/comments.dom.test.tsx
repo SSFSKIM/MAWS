@@ -11,6 +11,7 @@ import type { CommentOverlayProps, CommentedPassage, DocumentComments } from '..
 import { readFlat, ROOT } from '../../slides/model';
 import { addThread, threadStates } from '../../slides/threads';
 import { DeckSession } from '../../slides/editor/session';
+import { transact } from '../../yjs';
 import * as Y from '../../yjs/slides';
 import { design, type BoardSeed } from '../fixtures/support';
 import { moveOriginOf } from '../move';
@@ -42,7 +43,9 @@ function mount() {
     },
   };
   const utils = render(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly={false} comments={surface} />);
-  return { doc, session, view, opened, overlay: () => overlay!, ...utils };
+  /** The same workbench, read-only now (the replica turned so). */
+  const turnReadOnly = () => utils.rerender(<DesignWorkbench session={session} view={view} assetUrl={() => null} system={null} readOnly comments={surface} />);
+  return { doc, session, view, opened, overlay: () => overlay!, turnReadOnly, ...utils };
 }
 const toolbar = () => screen.getByRole('toolbar', { name: 'Design' });
 const openMenu = (trigger: HTMLElement) => fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
@@ -170,6 +173,34 @@ describe('Move to board…', () => {
     act(() => session.undoStep());
     expect(Y.hasElement(doc, 'b1', 'cta') && Y.hasElement(doc, 'b1', 'lede')).toBe(true);
     expect(Y.threadScalars(doc, 't1')).toMatchObject({ slideId: 'b1', elementId: 'cta' });
+  });
+
+  it('an open menu writes nothing once its choice no longer holds: read-only, writes held, the selection or a board gone', () => {
+    const cases: [string, (m: ReturnType<typeof mount>) => void][] = [
+      ['the replica turned read-only', (m) => m.turnReadOnly()],
+      ['writes held (a version shown)', (m) => m.session.holdWrites(true)],
+      ['the selection cleared', (m) => m.session.select([])],
+      ['the selected element deleted elsewhere', (m) => transact(m.doc, () => Y.deleteElement(m.doc, 'b1', 'cta'), 'remote')],
+      ['the destination deleted elsewhere', (m) => transact(m.doc, () => Y.deleteSlide(m.doc, 'b2'), 'remote')],
+      ['the destination held elsewhere', (m) => transact(m.doc, () => Y.setSlideKey(m.doc, 'b2', 'held', { source: '<section id="b2"></section>', reasons: ['broken'] }), 'remote')],
+    ];
+    for (const [what, turn] of cases) {
+      const m = mount();
+      addThread(m.doc, { threadId: 't1', slideId: 'b1', elementId: 'cta', quote: '', by: { kind: 'human' }, at: 1 }, 'deck-comments');
+      act(() => {
+        m.session.show('b1');
+        m.session.select(['cta']);
+      });
+      openMenu(screen.getByRole('button', { name: 'Move to board…' }));
+      const item = screen.getByRole('menuitem', { name: 'Desktop' });
+      const state = () => ({ b1: Y.elementIds(m.doc, 'b1').sort(), b2: Y.hasSlide(m.doc, 'b2') ? Y.elementIds(m.doc, 'b2').sort() : null, thread: { ...Y.threadScalars(m.doc, 't1') } });
+      act(() => turn(m));
+      const before = state(); // as the change left it
+      if (item.isConnected) fireEvent.click(item);
+      expect(state(), what).toEqual(before);
+      expect(m.session.snapshot().canUndo, what).toBe(false);
+      cleanup();
+    }
   });
 
   it('refuses a move the destination cannot take whole, writing nothing, and says why', () => {
