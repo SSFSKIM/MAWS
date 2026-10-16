@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs MAWS's class-1 gates for one tree on GitHub Actions (docs/doperpowers/plans/2026-10-14-gate-offload.md §3.4, §3.6).
 #
-#   scripts/ci-gate.sh <worktree-or-sha> [--gates static,unit,probes,e2e:<group>,…] [--runner linux|macos]
+#   scripts/ci-gate.sh <worktree-or-sha> [--gates static,unit,unit:darwin,probes,e2e:<group>,…] [--runner linux|macos]
 #                      [--label <name>] [--keep]
 #
 # Pushes the tree, plus one empty commit, to refs/heads/ci/<label>-<short> (force), waits for the run of
@@ -10,8 +10,8 @@
 # ref (unless --keep) and exits with the run's status (0 green, 1 anything else).
 #
 #   <worktree-or-sha>  a worktree path (its HEAD is tested) or a commit
-#   --gates            narrow the set; without it the run takes the default (class 1a: static, unit, probes; with every
-#                      class-1 e2e group too when the e2e lane is macOS)
+#   --gates            narrow to static, unit, unit:darwin (always macOS), probes or e2e:<group>; default: class 1a
+#                      (static, unit, probes), plus unit:darwin and every class-1 e2e group when the e2e lane is macOS
 #   --runner           the e2e lane, linux or macos (default: $MAWS_GATE_RUNNER, else the repository's variables)
 #   --label            the ref's name before the short sha (default: the worktree's branch, else `gate`)
 #   --keep             leave the ci/ ref in place
