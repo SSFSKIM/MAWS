@@ -75,6 +75,13 @@ describe('the design mirror writer', () => {
     expect(reads).toEqual(['assets/logo.png']);
   });
 
+  it('copies the uploads a held board’s source names, quoted or not, as a valid board’s would be (M2 fix wave)', () => {
+    const held = `<section id="broken" style="background:url("assets/unused.png")"><div id="box">loose text</div><img id="logo" src='assets/logo.png'></section>`;
+    const files = write(model({ ...FILES, [boardPath('broken')]: held }));
+    expect(files[`${FOLDER}/boards/broken.html`]).toBe(held);
+    expect(Object.keys(files).filter((file) => file.includes('/assets/')).sort()).toEqual([`${FOLDER}/assets/brand.woff2`, `${FOLDER}/assets/logo.png`, `${FOLDER}/assets/unused.png`]);
+  });
+
   it('mirrors a legacy generic-file state as its migration would build it, writing nothing to the state', () => {
     const doc = legacy();
     const before = stateV2(doc);

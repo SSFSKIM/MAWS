@@ -878,7 +878,8 @@ export class ArtifactStore {
   // read or write answers from it. The live state is tested on a scratch copy first, so a document already in the model
   // costs no write (and, once found so, nothing more this run); one that needs it is migrated in one `writeAs` credited
   // to `actor`, the actor whose access triggered it, rechecked inside the write, and this resolves once that write
-  // committed. Concurrent calls share the first one's migration and its actor. Input the kind cannot migrate, and a
+  // committed; a state found already in the model is remembered only once the batch it was read in has committed.
+  // Concurrent calls share the first one's migration and its actor. Input the kind cannot migrate, and a
   // read-only store when a migration is needed, refuse `invalid` naming the artifact, with nothing written. Retained
   // versions are never migrated; a restore forgets what this run found (`restore` above). A kind without the hook, a
   // byte kind, a deleted or unknown artifact: nothing to do.
@@ -908,6 +909,9 @@ export class ArtifactStore {
       scratch.destroy();
     }
     if (!needed) {
+      // certified only once committed: the live state read may hold rows of an open batch (a restore's in-frame migration)
+      // that a failed commit takes back, its rejection then this call's
+      if (this.storage.batchOpen) await this.service.whenCommitted();
       this.migrated.add(row.id);
       return;
     }

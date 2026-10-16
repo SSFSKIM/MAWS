@@ -121,8 +121,11 @@ export type ArtifactConsole = z.infer<typeof ArtifactConsoleSchema>;
 
 export const commands = {
   'artifacts.list': host(z.strictObject({ filter: ArtifactListFilterSchema.optional() }), z.strictObject({ artifacts: z.array(ArtifactRowSchema) })),
-  // null when there is no such artifact (or it is deleted and `includeDeleted` is not set)
-  'artifacts.get': host(z.strictObject({ artifactId: Id, includeDeleted: z.boolean().optional() }), z.strictObject({ artifact: ArtifactRowSchema.nullable() })),
+  // null when there is no such artifact (or it is deleted and `includeDeleted` is not set). P3-E (docs/doperpowers/plans/
+  // 2026-10-16-p3-e-design-dashboard.md Decision Log 21 and 22): a live document an earlier build stored in another
+  // shape is migrated first, as the human, or the read refused naming why; `prepare: false` (the default is true) reads
+  // the row alone, for a caller that then reads a retained version and never the live document
+  'artifacts.get': host(z.strictObject({ artifactId: Id, includeDeleted: z.boolean().optional(), prepare: z.boolean().optional() /* P3-E */ }), z.strictObject({ artifact: ArtifactRowSchema.nullable() })),
   // The human's create: a byte kind with its content, a document kind empty.
   'artifacts.create': host(
     z.strictObject({ kind: ArtifactKindSchema, title: z.string().min(1).max(1_000), spaceId: Id.optional(), designSystemId: Id.optional(), content: ArtifactContentInputSchema.optional() }),

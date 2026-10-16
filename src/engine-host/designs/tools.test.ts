@@ -154,6 +154,20 @@ describe('a design through A’s tool server', () => {
   });
 });
 
+describe('a design whose adapter is not registered (the parent’s Decision Log 21 (2))', () => {
+  it('still refuses a suggestion, writing nothing: no design takes suggestions in this build', async () => {
+    documents = openDocuments(userData, () => {})!;
+    designs = { close: () => {} }; // no design module: the generic file model
+    session = new ArtifactSession();
+    const created = jsonOf<{ artifactId: string; revision: number }>(await artifactCreateTool(deps()).call({ kind: 'design', title: 'Site', files: { 'a.html': 'A' } }, ctx()));
+    const read = jsonOf<{ revision: number }>(await artifactReadTool(deps()).call({ artifact: created.artifactId }, ctx()));
+    const asked = await publish({ artifact: created.artifactId, baseRevision: read.revision, files: { 'a.html': 'A2' }, mode: 'suggest' });
+    expect(artifactRefusalOf(textOf(asked))).toMatchObject({ reason: 'invalid', kind: 'design', mode: 'suggest' });
+    expect(documents.store.revision(created.artifactId)).toBe(read.revision);
+    expect(logRows(userData, `${created.artifactId}:suggest`)).toEqual([]);
+  });
+});
+
 describe('a design an earlier build stored as generic files', () => {
   it('is migrated once by the session’s first live read, credited to it, before the read answers; its version reads as its files', async () => {
     const { id, versionId } = await makeLegacyDesign(userData, { version: true });

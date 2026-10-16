@@ -63,11 +63,9 @@ export function artifactPublishTool(deps: ArtifactToolDeps): McpToolDefinition {
         const why = input.mode === 'suggest' ? 'mode "suggest" asks for a suggestion' : `the user set ${artifact.title} to take agent edits as suggestions`;
         throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}, and an html page takes none; nothing was written`);
       }
-      // P3-C (the parent's Decision Log 53 (2)): nothing shows or settles a deck's suggestions in P3. P3-E: nor a design's
-      // model (E1's M2); a design with no adapter registered is the generic file model, whose suggestions A serves (the
-      // stand-in A's own tests use, the parent's Decision Log 16 (1))
-      const ownModel = artifact.kind === 'presentation' || (artifact.kind === 'design' && store.service.adapterFor('design') !== undefined);
-      if (suggest && ownModel) {
+      // P3-C (the parent's Decision Log 53 (2)): nothing shows or settles a deck's suggestions in P3; P3-E: nor a design's,
+      // whether or not its adapter is registered (the parent's Decision Log 21 (2))
+      if (suggest && (artifact.kind === 'presentation' || artifact.kind === 'design')) {
         const a = artifact.kind === 'design' ? 'a design' : 'a presentation';
         const why = input.mode === 'suggest' ? `mode "suggest" asks for a suggestion, and ${a} takes none in this build of MAWS: publish with mode "direct"` : `the user set ${artifact.title} to take agent edits as suggestions, and ${a} takes none in this build of MAWS: ask the user to turn off agent edits as suggestions for it`;
         throw refuse(TOOL, { reason: 'invalid', kind: artifact.kind, mode: 'suggest', setting: artifact.agentEditsAsSuggestions }, `${why}; nothing was written`);

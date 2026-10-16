@@ -8,9 +8,10 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { boardPath, CANVAS_PATH } from '@artifacts/design/canvas';
 import { boardFrame, designFiles } from '@artifacts/design/model';
+import { isLegacyDesign } from '@artifacts/design/migrate';
 import { publishFiles, readFiles } from '@artifacts/files';
 import { slideOrder } from '@artifacts/slides/model';
 import { addThread, reply, threadStates } from '@artifacts/slides/threads';
@@ -178,5 +179,44 @@ describe('a restore that brings a legacy state back', () => {
     await expect(documents.store.restore(id, versionId!, HUMAN)).rejects.toThrow(/canvas\.json is not JSON/);
     expect(logRows(userData, id)).toEqual(rows);
     expect(designFiles(stateOf(id))).toEqual(files);
+  });
+});
+
+describe('a no-op certified only once committed (M2 fix wave)', () => {
+  it('does not trust a restore’s in-frame migration whose commit fails: the next access migrates the state that stands', async () => {
+    const { id, versionId } = await makeLegacyDesign(userData, { version: true });
+    start();
+    // an access arriving while the restore's batch (its migration of the legacy version inside) waits to commit, and
+    // that commit failing
+    let concurrent: Promise<void> | null = null;
+    const off = documents.service.onBeforeCommit((ids) => {
+      const live = documents.service.loaded(id);
+      if (concurrent || !ids.includes(id) || !live || isLegacyDesign(live)) return;
+      concurrent = documents.store.ensureMigrated(id, OTHER);
+      concurrent.catch(() => {});
+    });
+    const commit = documents.storage.commit.bind(documents.storage);
+    let failed = false;
+    const spy = vi.spyOn(documents.storage, 'commit').mockImplementation(() => {
+      if (concurrent && !failed) {
+        failed = true;
+        throw new Error('disk full');
+      }
+      commit();
+    });
+    const error = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await expect(documents.store.restore(id, versionId!, HUMAN)).rejects.toThrow();
+    expect(failed).toBe(true);
+    await expect(concurrent!).rejects.toThrow(/failed to commit/); // nothing certified from rows a failed batch took back
+    spy.mockRestore();
+    error.mockRestore();
+    off();
+
+    expect(readFiles(stateOf(id))).toEqual(LEGACY_FILES); // the durable state: still the earlier build's
+    await documents.store.ensureMigrated(id, HUMAN);
+    const doc = stateOf(id);
+    expect(readFiles(doc)).toEqual({});
+    expect(slideOrder(doc)).toEqual(['phone', 'poster']);
+    expect(logRows(userData, id).map((r) => r.actor)).toEqual(['session:app-legacy', 'human']);
   });
 });

@@ -268,7 +268,8 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   // version's, else the live doc's read with its revision), which then names the file. A byte kind's content at the
   // request's revision is immutable, so its request stands as it was asked.
   const snapshot = async (request: ExportRequest, time: ExportBudget): Promise<{ request: ExportRequest; sources: ExportSources }> => {
-    const { artifact } = await time.within(required('artifacts.get', { artifactId: request.artifactId }));
+    // P3-E (Decision Log 22): a retained version's export reads the row alone, never preparing the live document
+    const { artifact } = await time.within(required('artifacts.get', { artifactId: request.artifactId, ...(request.versionId !== undefined && { prepare: false }) }));
     if (!artifact) throw new Error(`no artifact ${request.artifactId}`);
     let state: Uint8Array | null = null;
     let taken = request;
@@ -342,7 +343,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
       const time = new ExportBudget(EXPORT_BUDGET_MS);
       let artifact: CommandOutput<'artifacts.get'>['artifact'];
       try {
-        ({ artifact } = await time.within(required('artifacts.get', { artifactId })));
+        ({ artifact } = await time.within(required('artifacts.get', { artifactId, ...(versionId !== undefined && { prepare: false }) /* P3-E: Decision Log 22 */ })));
       } catch (error) {
         time.end();
         throw error;

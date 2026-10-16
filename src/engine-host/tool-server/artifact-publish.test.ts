@@ -260,7 +260,7 @@ describe('artifact_publish of a file kind (the generic file model)', () => {
 });
 
 describe('artifact_publish as a suggestion (M8; parent Decision Log 27)', () => {
-  const design = () => create({ kind: 'design', title: 'Site', files: { 'a.html': 'A', 'b.css': 'B' } });
+  const design = () => create({ kind: 'design_system', title: 'Site', files: { 'a.html': 'A', 'b.css': 'B' } }); // P3-E (parent Decision Log 21): a design takes no suggestions; design_system is the generic unregistered Y kind here
   const suggested = (id: string): Record<string, string> => Object.fromEntries([...w.service.live(w.service.suggestionDoc(id)).get('files').attrEntries()].map(([k, v]) => [String(k), v as string]));
   const rowsOf = (key: string) => (w.storage.db.prepare('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq').all(key) as { actor: string }[]).map((r) => r.actor);
 
@@ -269,7 +269,7 @@ describe('artifact_publish as a suggestion (M8; parent Decision Log 27)', () => 
     await w.store.endTurn(SELF);
     const versions = w.store.listVersions(created.artifactId).length;
     const answer = ArtifactPublishResultSchema.parse(jsonOf(await publish({ artifact: created.artifactId, baseRevision: created.revision, mode: 'suggest', files: { 'a.html': 'A2', 'b.css': null, 'c.js': 'C' } })));
-    expect(answer).toMatchObject({ status: 'suggested', artifactId: created.artifactId, kind: 'design', revision: created.revision, changed: ['a.html', 'c.js'], removed: ['b.css'], kept: [] });
+    expect(answer).toMatchObject({ status: 'suggested', artifactId: created.artifactId, kind: 'design_system' /* P3-E: the helper's kind (Decision Log 21) */, revision: created.revision, changed: ['a.html', 'c.js'], removed: ['b.css'], kept: [] });
     expect(liveFiles(created.artifactId)).toEqual({ 'a.html': 'A', 'b.css': 'B' });
     expect(suggested(created.artifactId)).toEqual({ 'a.html': 'A2', 'c.js': 'C' });
     expect(rowsOf(created.artifactId)).toEqual([`session:${SELF}`]);

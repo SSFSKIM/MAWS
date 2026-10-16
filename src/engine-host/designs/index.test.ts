@@ -113,6 +113,32 @@ describe('the host’s design module', () => {
   });
 });
 
+describe('a mirrored board that becomes held (M2 fix wave)', () => {
+  it('keeps the uploaded assets its held source still names on disk, and drops one no file names any more', async () => {
+    start();
+    await startMirror();
+    const space = await documents.store.createSpace({ name: 'Launch', linkedDir: project });
+    const design = await documents.store.create({ kind: 'design', title: 'Launch', spaceId: space.id }, HUMAN);
+    await documents.store.uploadAsset(design.id, new Uint8Array([4, 2]), { name: 'hero.png', mime: 'image/png' }, HUMAN);
+    await documents.store.uploadAsset(design.id, new Uint8Array([7]), { name: 'bg.png', mime: 'image/png' }, HUMAN);
+    await documents.store.uploadAsset(design.id, new Uint8Array([9]), { name: 'old.png', mime: 'image/png' }, HUMAN);
+    await publish(design.id, { [boardPath('desktop')]: '<section id="desktop" style="background:url(assets/bg.png) center / cover"><img id="hero" src="assets/hero.png" alt=""><img id="old" src="assets/old.png" alt=""></section>' });
+    await settle();
+    await mirror!.flush();
+    expect(listed(design).filter((file) => file.startsWith('assets/'))).toEqual(['assets/bg.png', 'assets/hero.png', 'assets/old.png']);
+
+    // the board turns held (loose text in a div); its source still names two of the three pictures, one in quoted CSS
+    const held = `<section id="desktop" style="background:url('assets/bg.png') center / cover"><div id="box">loose text</div><img id="hero" src="assets/hero.png" alt=""></section>`;
+    await publish(design.id, { [boardPath('desktop')]: held });
+    await settle();
+    await mirror!.flush();
+    expect(readFileSync(out(design, 'boards', 'desktop.html'), 'utf8')).toBe(held);
+    expect([...readFileSync(out(design, 'assets', 'hero.png'))]).toEqual([4, 2]);
+    expect([...readFileSync(out(design, 'assets', 'bg.png'))]).toEqual([7]);
+    expect(existsSync(out(design, 'assets', 'old.png'))).toBe(false);
+  });
+});
+
 describe('the design mirror’s freshness under its governing system', () => {
   const official = DEFAULT_SYSTEMS.find((system) => system.key === 'official')!;
 

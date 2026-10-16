@@ -109,9 +109,11 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     const store = storeOf();
     return store.readCommitted(() => ({ artifacts: store.list(filter).map((artifact) => ({ ...artifact, revision: store.revision(artifact.id) })) }));
   });
-  serve('artifacts.get', async ({ artifactId, includeDeleted }) => {
+  serve('artifacts.get', async ({ artifactId, includeDeleted, prepare = true }) => {
     const store = storeOf();
-    await prepared(store, artifactId); // P3-E: main's open preflight, so a document that cannot be opened is refused by name
+    // P3-E: main's open preflight, so a document that cannot be opened is refused by name; `prepare: false` (Decision Log
+    // 22) is a retained version's reader, which never touches the live document
+    if (prepare) await prepared(store, artifactId);
     return store.readCommitted(() => ({ artifact: row(store, artifactId, includeDeleted) }));
   });
   serve('artifacts.create', async ({ content, ...input }) => {
