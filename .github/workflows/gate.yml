@@ -159,7 +159,10 @@ jobs:
         run: |
           display=()
           if [[ $RUNNER_OS == Linux ]]; then display=(xvfb-run -a --server-args='-screen 0 1920x1080x24'); fi
-          .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)' "${display[@]}" pnpm "$SCRIPT"
+          # The one-job Mac builds each out/ variant once per run: scripts/e2e-build.sh restores it from this disk
+          # (Decision Log 35); the key is the checked-out commit, whose sha the build stamp carries.
+          if [[ $RUNNER_OS == macOS ]]; then export MAWS_E2E_BUILD_CACHE=$HOME/Library/Caches/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA; fi
+          .github/scripts/gate-run.sh '^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: ' "${display[@]}" pnpm "$SCRIPT"
       - if: failure()
         uses: actions/upload-artifact@v7
         with:
