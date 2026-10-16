@@ -437,3 +437,25 @@ describe('task-review fix wave 2', () => {
     expect(slideOrder(doc)).toEqual(['b3', 'b4', 'b1']);
   });
 });
+
+describe('Decision Log 38: C’s refusal on the single live pass writes nothing', () => {
+  it('leaves the live doc untouched when only C’s half conflicts beside a clean manifest change', () => {
+    const doc = design();
+    const base = designFiles(doc);
+    setStyle(doc, 'b1', 'title', { color: '#ff0000' });
+    const before = designFiles(doc);
+    const { out, updates } = publish(doc, base, sentWith(base, (c) => (c.boards.b2!.w = 1200), { [B1]: restyled(base) }));
+    expect(out.conflicts).toEqual([{ path: B1, detail: 'element title: color changed since your read' }]);
+    expect(updates).toBe(0);
+    expect(designFiles(doc)).toEqual(before);
+  });
+
+  it('throws C’s plan FilesError beside a clean manifest change, writing nothing', () => {
+    const doc = design();
+    const base = designFiles(doc);
+    let problems: string[] = [];
+    expect(updatesOf(doc, () => (problems = refused(() => publishCanvas(doc, base, sentWith(base, (c) => (c.boards.b2!.w = 1200), { [B2]: '<section id="other"><script></script></section>' }), false))))).toHaveLength(0);
+    expect(problems).toEqual([`${B2}: the section’s id is "other", not the file name’s "b2"`]);
+    expect(designFiles(doc)).toEqual(base);
+  });
+});

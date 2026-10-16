@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDesignAdapter } from '@artifacts/design/adapter';
+import { FilesError } from '@artifacts/files';
 import { boardPath, CANVAS_PATH, parseCanvasJson, serializeCanvasJson, type CanvasJson } from '@artifacts/design/canvas';
 import { boardFrame, designFiles, writeBoardEntry } from '@artifacts/design/model';
 import { moveElementToBoard, moveOriginOf } from '@artifacts/design/move';
@@ -125,6 +126,60 @@ describe('the design adapter on the document service', () => {
     expect(rows(id)).toHaveLength(logged + 1);
     expect(events.length).toBeGreaterThan(0);
     off();
+  });
+
+  // the parent's Decision Log 38: C's half runs once, on the live state inside the one transaction, when Design's own
+  // plan refuses nothing; its refusal or its plan's FilesError must leave everything as it was
+  const settled = async (id: string, run: () => Promise<unknown>) => {
+    await service.whenCommitted();
+    const events: unknown[] = [];
+    const off = service.onCommitted((change) => events.push(change));
+    const before = [service.revision(id), rows(id).length, designFiles(replicaOf(id))] as const;
+    const result = await run();
+    await service.whenCommitted();
+    off();
+    expect([service.revision(id), rows(id).length, designFiles(replicaOf(id)), events]).toEqual([...before, []]);
+    return result;
+  };
+  const restyle = (base: Record<string, string>) => base[boardPath('b1')]!.replace('font-size:72px', 'font-size:72px; color:#123456');
+
+  it('(Decision Log 38) leaves the state, the revision, the log and the announcements untouched when only C’s half conflicts beside a clean manifest change', async () => {
+    const id = await createDesign();
+    const base = designFiles(replicaOf(id));
+    await service.writeAs(id, human, (doc) => setStyle(doc, 'b1', 'title', { color: '#ff0000' }));
+    const out = (await settled(id, () => publishAs(id, agent, base, sentWith(base, (c) => (c.boards.b2!.w = 1200), { [boardPath('b1')]: restyle(base) })))) as { conflicts: unknown[] };
+    expect(out.conflicts).toEqual([{ path: boardPath('b1'), detail: 'element title: color changed since your read' }]);
+  });
+
+  it('(Decision Log 38) leaves everything untouched when C’s plan throws its FilesError beside a clean manifest change (answered as A answers it)', async () => {
+    const id = await createDesign();
+    const base = designFiles(replicaOf(id));
+    let failure: unknown;
+    await settled(id, () =>
+      service.writeAs(id, agent, (doc) => {
+        try {
+          kind().publish!(doc, base, sentWith(base, (c) => (c.boards.b2!.w = 1200), { [boardPath('b2')]: '<section id="other"><script></script></section>' }), false);
+        } catch (error) {
+          if (!(error instanceof FilesError)) throw error;
+          failure = error; // `artifact_publish` answers the kind's documented refusal after the write (isFilesRefusal)
+        }
+      }),
+    );
+    expect((failure as FilesError).problems).toEqual([{ path: boardPath('b2'), message: 'the section’s id is "other", not the file name’s "b2"' }]);
+  });
+
+  it('(Decision Log 38) answers C’s conflicts beside Design’s own when Design refuses, leaving everything untouched', async () => {
+    const id = await createDesign();
+    const base = designFiles(replicaOf(id));
+    await service.writeAs(id, human, (doc) => {
+      setStyle(doc, 'b1', 'title', { color: '#ff0000' });
+      setBoardFrame(doc, 'b2', { w: 999 });
+    });
+    const out = (await settled(id, () => publishAs(id, agent, base, sentWith(base, (c) => (c.boards.b2!.w = 1200), { [boardPath('b1')]: restyle(base) })))) as { conflicts: unknown[] };
+    expect(out.conflicts).toEqual([
+      { path: CANVAS_PATH, detail: 'board b2: w changed since your read' },
+      { path: boardPath('b1'), detail: 'element title: color changed since your read' },
+    ]);
   });
 
   it('lands an agent publish mid-drag with the drag intact, and the owner’s ⌘Z takes back the drag alone', async () => {

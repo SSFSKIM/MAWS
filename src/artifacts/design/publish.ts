@@ -6,9 +6,10 @@
 // entries. A key the agent did not change (sent = base) is left alone even under force; one it changed applies when live
 // still holds the base value, is left alone when live already holds the sent one, and otherwise conflicts naming the
 // board and the key; `force` settles exactly the conflicting keys. A frame the merge would leave outside the cap is
-// refused even under force. Atomicity (Decision Log 13 (1)): C's publish plans and writes in one private call, so the
-// whole publish runs first on a scratch copy of the live state; only a publish that lands there is applied, synchronously
-// and in one transaction, to the live state it was planned against, so a refusal anywhere writes nothing.
+// refused even under force. Atomicity (Decision Log 13 (1), its means ruled by Decision Log 38): a refusal anywhere writes
+// nothing. Design plans its half first, writing nothing; when it refuses, C's half runs on a scratch copy only, so both
+// halves' conflicts are answered; otherwise C's publish runs once on the live state inside the one transaction, relying on
+// C's contract (every FilesError and conflict before its single write), and Design's validated writes follow.
 //
 // Absent pieces (the parent's §1): a board whose file came without geometry is placed after the right-most board at its
 // `data-size` or 1920×1080, with a warning; a manifest entry with no file is held as a missing-source board (the model
@@ -122,8 +123,30 @@ function prepare(base: Readonly<Record<string, string>>, sent: Readonly<Record<s
   return { sent, base, sentCanvas, baseCanvas, boards, sizes, warnings, notes };
 }
 
-/** Plans and writes the whole publish on `doc` (the caller's transaction); a refusal returns its conflicts. */
-function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
+/** Design's half of a publish, read from `doc` and writing nothing: its refusals, C's arguments, and its deferred writes. */
+interface Plan {
+  conflicts: PublishOutcome['conflicts'];
+  /** Refusals force does not settle. */
+  unmergeable: PublishOutcome['conflicts'];
+  warnings: PublishWarning[];
+  deckBase: Record<string, string>;
+  deckSent: Record<string, string | null>;
+  /** The deck-level writes, bound to the planned doc. */
+  writes: (() => boolean)[];
+  manifestCreated: Set<string>;
+  entries: Map<string, Record<string, unknown>>;
+  arrivals: string[];
+  ownRemovals: string[];
+  partial: Map<string, string[]>;
+  fills: Map<string, { w: number; h: number }>;
+  order: ReturnType<typeof mergeBoardOrder>;
+}
+
+/**
+ * Plans Design's half against `doc` without writing (Decision Log 38): the manifest key by key, frames, order and the
+ * boards removed, created or given their first file. Throws `FilesError` for what the design cannot hold.
+ */
+function plan(doc: Doc, input: Input, force: boolean): Plan {
   const { sentCanvas: A, baseCanvas: B } = input;
   const L = readCanvas(doc);
   const live = new Set(Y.slideIds(doc));
@@ -296,25 +319,46 @@ function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
   const order = mergeBoardOrder(B.order, A?.order ?? null, survivors, created, force);
   for (const id of order.clashes) conflict(`board ${id}: order changed since your read`);
 
-  // ---- C's half, then ours, on this doc; C refusing writes nothing of its own
+  return { conflicts, unmergeable, warnings, deckBase, deckSent, writes, manifestCreated, entries, arrivals, ownRemovals, partial, fills, order };
+}
+
+interface DeckHalf {
+  deck: DeckPublishOutcome | null;
+  conflicts: PublishOutcome['conflicts'];
+  held: CanvasPublishOutcome['held'];
+  notes: number;
+}
+
+/**
+ * C's half on `doc`, its answer in the design's paths, its warnings added to the plan's. C's contract (`publishDeck`):
+ * every `FilesError` thrown and every conflict returned before its one write, so a refusal or throw writes nothing.
+ */
+function runDeck(doc: Doc, input: Input, p: Plan, force: boolean): DeckHalf {
   let deck: DeckPublishOutcome | null = null;
-  if (Object.keys(deckSent).length > 0) {
+  if (Object.keys(p.deckSent).length > 0) {
     try {
-      deck = publishDeck(doc, deckBase, deckSent, force);
+      deck = publishDeck(doc, p.deckBase, p.deckSent, force);
     } catch (e) {
-      if (e instanceof FilesError) throw new FilesError(e.problems.map((p) => ({ path: fromDeck(p.path), message: p.message })));
+      if (e instanceof FilesError) throw new FilesError(e.problems.map((pr) => ({ path: fromDeck(pr.path), message: pr.message })));
       throw e;
     }
   }
-  const held = (deck?.held ?? []).map((h) => ({ ...h, path: fromDeck(h.path) }));
-  for (const w of deck?.warnings ?? []) warnings.push({ ...w, path: fromDeck(w.path) }); // `data-size` is only a loader note
-  const notes = input.notes + (deck?.notes ?? 0);
-  const deckConflicts = (deck?.conflicts ?? []).map((c) => ({ path: fromDeck(c.path), ...(c.detail !== undefined && { detail: fromDeckDetail(c.detail) }) }));
-  const refusal = [...(force ? [] : conflicts), ...unmergeable, ...deckConflicts];
-  if (refusal.length > 0) return { changed: [], conflicts: refusal, added: [], warnings, notes, held };
+  for (const w of deck?.warnings ?? []) p.warnings.push({ ...w, path: fromDeck(w.path) }); // `data-size` is only a loader note
+  return {
+    deck,
+    conflicts: (deck?.conflicts ?? []).map((c) => ({ path: fromDeck(c.path), ...(c.detail !== undefined && { detail: fromDeckDetail(c.detail) }) })),
+    held: (deck?.held ?? []).map((h) => ({ ...h, path: fromDeck(h.path) })),
+    notes: input.notes + (deck?.notes ?? 0),
+  };
+}
 
+/** Design's planned writes on `doc` after C's landed (the caller's transaction), and the publish's answer. */
+function write(doc: Doc, input: Input, p: Plan, c: DeckHalf): CanvasPublishOutcome {
+  const { writes, manifestCreated, entries, arrivals, ownRemovals, partial, fills, order, warnings } = p;
+  const { deck, held, notes } = c;
+  const warn = (message: string) => warnings.push({ path: CANVAS_PATH, message });
   let manifest = 0;
-  for (const write of writes) if (write()) manifest++;
+  for (const deferred of writes) if (deferred()) manifest++;
   for (const id of manifestCreated) {
     Y.createSlide(doc, id, { [MISSING_SOURCE_KEY]: true }, '');
     manifest++;
@@ -354,27 +398,39 @@ function apply(doc: Doc, input: Input, force: boolean): CanvasPublishOutcome {
 
   const changed = new Set((deck?.changed ?? []).map(fromDeck));
   if (manifest > 0) changed.add(CANVAS_PATH);
-  const added = new Set([...(deck?.added ?? []).map(fromDeck), ...arrivals.map(boardPath).filter((p) => changed.has(p))]);
+  const added = new Set([...(deck?.added ?? []).map(fromDeck), ...arrivals.map(boardPath).filter((path) => changed.has(path))]);
   return { changed: [...changed].sort(), conflicts: [], added: [...added].sort(), warnings, notes, held };
 }
 
 /**
  * The design's publish: `live` the host replica the write goes through, `base` the files the session last read, `sent`
  * its files (`null` removes a board). Throws `FilesError` naming every path or manifest the design cannot hold, before
- * writing. Planned on a scratch copy first; applied to `live` in one transaction only when it lands there.
+ * writing. Design's half is planned first, writing nothing (Decision Log 38): when it refuses, C's half runs on a scratch
+ * copy only, so the answer names both halves' conflicts and the live state is untouched; otherwise C's publish runs once
+ * on `live` inside one transaction and Design's already-validated writes follow it, a refusal or throw of C's (made
+ * before its own write) leaving nothing written.
  */
 export function publishCanvas(live: Doc, base: Readonly<Record<string, string>>, sent: Readonly<Record<string, string | null>>, force: boolean): CanvasPublishOutcome {
   const input = prepare(base, sent);
-  const scratch = newDoc();
-  let trial: CanvasPublishOutcome;
-  try {
-    applyV2(scratch, stateV2(live));
-    trial = apply(scratch, input, force);
-  } finally {
-    scratch.destroy();
+  const p = plan(live, input, force);
+  const own = [...(force ? [] : p.conflicts), ...p.unmergeable];
+  if (own.length > 0) {
+    let c: DeckHalf = { deck: null, conflicts: [], held: [], notes: input.notes };
+    if (Object.keys(p.deckSent).length > 0) {
+      const scratch = newDoc();
+      try {
+        applyV2(scratch, stateV2(live));
+        c = runDeck(scratch, input, p, force);
+      } finally {
+        scratch.destroy();
+      }
+    }
+    return { changed: [], conflicts: [...own, ...c.conflicts], added: [], warnings: p.warnings, notes: c.notes, held: c.held };
   }
-  if (trial.conflicts.length > 0) return trial;
-  let outcome = trial;
-  transact(live, () => void (outcome = apply(live, input, force)));
+  let outcome!: CanvasPublishOutcome;
+  transact(live, () => {
+    const c = runDeck(live, input, p, force);
+    outcome = c.conflicts.length > 0 ? { changed: [], conflicts: c.conflicts, added: [], warnings: p.warnings, notes: c.notes, held: c.held } : write(live, input, p, c);
+  });
   return outcome;
 }
