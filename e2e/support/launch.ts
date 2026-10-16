@@ -13,6 +13,12 @@ import { launchEnvironment } from './scratch-env';
 
 export const REPO_ROOT = resolve(__dirname, '../..');
 
+// Every e2e launch runs the app in en-US, whatever the machine's languages (gate-offload §3.6: the Mac mini's are
+// Korean). Chromium's application locale, which the renderer's Intl default and so the app's dates follow, is Cocoa's
+// preferred language unless `--lang` names one (Electron 44 resolves it on macOS too). The specs' expectations come from
+// the test process's Intl default, which playwright.config.ts pins to the same locale.
+export const E2E_APP_ARGS = ['--lang=en-US'];
+
 export interface MawsLaunch {
   app: ElectronApplication;
   page: Page; // the first window
@@ -113,8 +119,8 @@ export async function launchMaws(opts: ShellLaunchOptions = {}): Promise<MawsLau
     opts.prepare?.({ userData, shellHome: shellHome.dir, claudeConfigDir: env.CLAUDE_CONFIG_DIR }); // E6: inside, so a throw still cleans up
     const launchedAt = Date.now();
     app = executable
-      ? await _electron.launch({ executablePath: executable, env, cwd: REPO_ROOT })
-      : await _electron.launch({ args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), main], env, cwd: REPO_ROOT });
+      ? await _electron.launch({ executablePath: executable, args: E2E_APP_ARGS, env, cwd: REPO_ROOT })
+      : await _electron.launch({ args: [...(opts.requireFirst ? ['-r', opts.requireFirst] : []), ...E2E_APP_ARGS, main], env, cwd: REPO_ROOT });
     launchedHook?.(app); // E4b
     app.on('close', () => (closed = true));
     const page = await app.firstWindow();

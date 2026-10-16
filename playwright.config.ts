@@ -1,5 +1,12 @@
 import { defineConfig } from '@playwright/test';
 
+// The test process formats its expectations as the app formats its dates (a spec computes "in 1m" with the app's own
+// formatters), and the app runs in en-US (launch.ts's E2E_APP_ARGS). Node's Intl default follows LC_ALL, then
+// LC_MESSAGES, then LANG, read when a process starts, so it is set here, before the workers are forked (gate-offload
+// §3.6: on the Mac mini the runner has no LANG, so the test process wrote English while the app wrote the machine's
+// Korean; on a Korean MacBook both wrote Korean).
+process.env.LC_MESSAGES = 'en_US.UTF-8';
+
 // The Electron end-to-end smoke (charter §12 C1 *Test runners*). Playwright drives Electron through `_electron` only;
 // no browser is installed. One worker: every test launches its own app, and the app owns real processes on this Mac.
 export default defineConfig({
