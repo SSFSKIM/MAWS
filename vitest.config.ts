@@ -148,9 +148,6 @@ export default defineConfig({
             // never showed (its formats read from the module's cache in render, memoized on the kind)
             'src/renderer/src/library/**/*.test.tsx',
           ],
-          // P3-H: ArtifactTab's held-editor read (`heldArtifactEditorState` in render) is the same class of defect, outside
-          // H's ruled fix; its suite joins this project with that fix (tracker debt, the wider audit of Decision Log 92)
-          exclude: [...configDefaults.exclude, 'src/renderer/src/library/ArtifactTab.test.tsx'],
           env: { MAWS_REACT_COMPILER: '1' },
         },
       },
