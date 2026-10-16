@@ -44,6 +44,8 @@ beforeEach(() => {
   localStorage.clear();
   vi.stubGlobal('Notification', { get permission() { return permission; }, requestPermission: async () => (permission = 'granted') });
   vi.stubGlobal('PushManager', function PushManager() {});
+  // The worker is active: the push manager is reached through `serviceWorker.ready`.
+  Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: { ready: Promise.resolve({ pushManager }) } });
   hub.hubPushKey.mockResolvedValue('BAEC');
   hub.keepSubscription.mockResolvedValue();
   hub.hubSubscriptions.mockImplementation(async () => (held ? [{ endpoint: held.endpoint }] : []));

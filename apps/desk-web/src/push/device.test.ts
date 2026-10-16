@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { base64urlDecode, base64urlEncode } from 'desk-hub/protocol';
 import { DOUBLE_MEMBER } from '../../test/double/hub-double';
 import { PushDouble } from '../../test/double/push';
-import { disablePush, enablePush, pushState, resyncPush, retryPush, type PushEnv } from './device';
+import { browserPushEnv, disablePush, enablePush, pushState, resyncPush, retryPush, type PushEnv } from './device';
 import { HubRequestError } from '../hub/http';
 
 type FakeSubscription = { endpoint: string; options: { applicationServerKey: ArrayBuffer | null }; toJSON(): PushSubscriptionJSON; unsubscribe(): Promise<boolean> };
@@ -196,5 +196,27 @@ describe('resyncPush', () => {
     await resyncPush(device.env);
     expect(device.subscribeCalls).toEqual([{ applicationServerKey: hub.key }]);
     expect(hub.subscriptions.map((s) => s.endpoint)).toEqual([device.current()!.endpoint]);
+  });
+});
+
+describe("this browser's push pieces", () => {
+  it('reach the push manager only through the active worker (`serviceWorker.ready`), never a registration still installing', async () => {
+    const installing = { pushManager: 'installing' };
+    let activate!: (registration: { pushManager: string }) => void;
+    const ready = new Promise<{ pushManager: string }>((resolve) => (activate = resolve));
+    vi.stubGlobal('Notification', { permission: 'granted', requestPermission: async () => 'granted' });
+    vi.stubGlobal('PushManager', function PushManager() {});
+    vi.stubGlobal('navigator', { serviceWorker: { ready } });
+    try {
+      const env = browserPushEnv(Promise.resolve(installing as unknown as ServiceWorkerRegistration));
+      let got: unknown = null;
+      void env.pushManager!().then((manager) => (got = manager));
+      await new Promise((r) => setTimeout(r, 10));
+      expect(got).toBeNull(); // registered, not yet active: subscribe would fail with InvalidStateError
+      activate({ pushManager: 'active' });
+      await vi.waitFor(() => expect(got).toBe('active'));
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });
