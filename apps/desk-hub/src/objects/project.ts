@@ -17,7 +17,7 @@ import { canonicalize } from '../protocol/canonical';
 import { isMemberId, type ProjectRecord } from '../protocol/identity';
 import { HUB_WRITER_PREFIX, hubWriter, isHubPosition, isIsoMillis, LEGACY_WRITER_PREFIX, withoutPosition, writerMachine, type LogEvent, type Vector } from '../protocol/log';
 import type { DownFrame, Refusal, Rejection, UpFrame } from '../protocol/machine';
-import { FRAME_LIMIT, PartAssembler, toWire, type Part } from '../protocol/parts';
+import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
 import { RPC_FRESHNESS_MS, RPC_NAMES, type Rpc, type RpcErrorCode, type RpcOutcome } from '../protocol/rpc';
 import { SESSION_WIDE_KINDS, SUBSCRIPTION_KINDS, type Delivery, type MachinePresence, type Raised, type SessionKind, type SessionMessage, type Settled } from '../protocol/session';
 import { BATCH_BYTES, eventShapeError, LogStore, sameEvent, type AuditRow, type Stored } from './log-store';
@@ -128,7 +128,8 @@ export class Project extends DurableObject<Env> {
     let whole: unknown;
     try {
       whole = assembler.add(frame as unknown as Part);
-    } catch {
+    } catch (error) {
+      if (error instanceof PartsBudgetError) return this.refuseBrowser(socket, { reason: 'too-large', message: error.message });
       return this.refuseBrowser(socket, { reason: 'bad-shape', message: 'a malformed part' });
     }
     if (whole !== undefined) this.dispatch(socket, whole as { t?: unknown; [key: string]: unknown });

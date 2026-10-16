@@ -15,7 +15,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { readLimited } from '../drain';
 import { CLIENT_HEADER, heartbeatMs, MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
 import { GENERATION_HEADER, LEASE_PERIODS, POST_LIMIT, type DownFrame, type UpFrame } from '../protocol/machine';
-import { FRAME_LIMIT, PartAssembler, toWire, type Part } from '../protocol/parts';
+import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire, type Part } from '../protocol/parts';
 import { PROJECT_ID, type MachineContext } from './project';
 
 type Stream = {
@@ -194,8 +194,9 @@ export class Machine extends DurableObject<Env> {
       if (posted.t === 'part') {
         try {
           frame = stream.parts.add(posted as Part) as UpFrame | undefined;
-        } catch {
-          return (await flush()) ?? json(400, { error: 'bad-shape', message: 'a malformed part' });
+        } catch (error) {
+          const refusal = error instanceof PartsBudgetError ? json(413, { error: 'too-large', message: error.message }) : json(400, { error: 'bad-shape', message: 'a malformed part' });
+          return (await flush()) ?? refusal;
         }
         if (frame === undefined) {
           carry++;
