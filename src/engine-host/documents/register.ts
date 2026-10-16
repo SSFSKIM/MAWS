@@ -30,7 +30,7 @@ import type { Documents } from '.';
 import type { ArtifactStore, ByteContent } from './store';
 import { datasetReaderOf } from '../dashboards/read'; // P3-E
 
-type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.open' | 'artifacts.export'> | keyof typeof SpaceCommands;
+type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.open' | 'artifacts.export' | 'artifacts.downloadAsset' /* P3-E: main's */> | keyof typeof SpaceCommands;
 
 export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShape> = {
   'artifacts.list': 'immediate', 'artifacts.get': 'immediate', 'artifacts.create': 'immediate', 'artifacts.update': 'immediate',

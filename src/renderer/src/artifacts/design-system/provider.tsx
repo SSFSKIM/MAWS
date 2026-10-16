@@ -22,6 +22,7 @@ function lazyHost(get: () => ArtifactHost): ArtifactHost {
     uploadAsset: (artifactId, bytes, meta) => get().uploadAsset(artifactId, bytes, meta),
     copyAsset: (from, ref, to) => get().copyAsset(from, ref, to), // P3-C (Decision Log 25)
     readDataset: (artifactId, ref, options) => get().readDataset(artifactId, ref, options), // P3-E (E2 M2)
+    downloadAsset: (artifactId, ref, options) => get().downloadAsset(artifactId, ref, options), // P3-E (E2 M3)
     identity: () => get().identity(),
   };
 }

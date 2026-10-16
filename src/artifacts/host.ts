@@ -163,5 +163,9 @@ export interface ArtifactHost {
   // `limit` rows (DATASET_READ_MAX_ROWS) and DATASET_READ_MAX_BYTES of JSON, so a caller continues at `offset` plus the
   // rows answered, never assuming `limit`. The only route to a dataset's rows (the renderer never fetches bytes).
   readDataset(artifactId: string, ref: string, options: { format: DatasetFormat; offset?: number; limit?: number }): Promise<DatasetPage>;
+  // P3-E (E2 M3; ledger X23, E's Decision Log 18): the owner saves one of the artifact's own assets (a dataset snapshot,
+  // by the displayed descriptor's ref) where they choose, `name` the suggestion; `path` null when they cancel. Main reads
+  // and copies the bytes; the editor never fetches them.
+  downloadAsset(artifactId: string, ref: string, options?: { name?: string }): Promise<{ path: string | null }>;
   identity(): { actor: Actor; name: string; color: string };
 }

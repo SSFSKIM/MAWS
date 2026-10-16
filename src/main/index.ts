@@ -131,6 +131,9 @@ import { registerDesignSystemExporters } from './design-systems/export';
 import { registerPresentationExporters } from './presentations/export'; // P3-C M9
 import { registerPresenter } from './presentations/present'; // P3-C M6
 // P3-D end
+// P3-E start
+import { registerAssetDownload } from './dashboard/download';
+// P3-E end
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
 guardStdio([process.stdout, process.stderr]);
@@ -614,6 +617,18 @@ void startWithProfileLock(app, () => {
     },
   });
   shutdown.add('library', library.stop);
+  // P3-E start (E2 M3; E's Decision Log 18): a dashboard source sheet's Download, the artifact's own asset saved through
+  // main's dialog under Downloads
+  registerAssetDownload(registerMainHandler, {
+    call: (name, input) => hosts.dispatch('engine-host', name, input) as never,
+    downloads: () => app.getPath('downloads'),
+    showSaveDialog: (options, sender) => {
+      const win = sender ? BrowserWindow.fromWebContents(sender) : null;
+      return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+    },
+    env: process.env,
+  });
+  // P3-E end
   openWindow();
 
   // E5 start: each window's unsaved editor files for the quit guard (E5 execution document, M5): the page pushes its

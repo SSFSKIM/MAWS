@@ -252,6 +252,14 @@ export const commands = {
     // PDF printer refused
     z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional() }),
   ),
+  // P3-E (docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md M3; ledger X23 as amended by E's Decision Log 18): a
+  // dashboard's source sheet Download. Main resolves the artifact's own asset `ref` through `artifacts.content` (a ref
+  // it does not hold is `notFound`), shows Save under Downloads suggesting `name` (the displayed descriptor's source
+  // name, cut to a basename) and copies the bytes; `path` null when the owner cancels. The renderer fetches no bytes.
+  'artifacts.downloadAsset': main(
+    z.strictObject({ artifactId: Id, ref: z.string().startsWith('assets/').max(1_000), name: z.string().min(1).max(1_000).optional() }),
+    z.strictObject({ path: z.string().nullable() }),
+  ),
 } as const satisfies Record<`artifacts.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

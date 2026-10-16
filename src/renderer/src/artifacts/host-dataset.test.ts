@@ -18,3 +18,17 @@ describe('ArtifactHost.readDataset', () => {
     ]);
   });
 });
+
+// P3-E (E2 M3; ledger X23 as amended by E's Decision Log 18): the source sheet's Download is main's command
+describe('ArtifactHost.downloadAsset', () => {
+  it('asks main to save the asset under the suggested name, and answers its path or null', async () => {
+    const invoke = vi.fn(async (_name: string, input: { name?: string }) => ({ ok: true as const, value: { path: input.name ? `/Downloads/${input.name}` : null } }));
+    const host = createArtifactHost({ ipc: { invoke, on: () => () => {} } as never, ports: { take: () => Promise.reject(new Error('no ports')) } });
+    expect(await host.downloadAsset(ARTIFACT, 'assets/a.csv', { name: 'sales.tsv' })).toEqual({ path: '/Downloads/sales.tsv' });
+    expect(await host.downloadAsset(ARTIFACT, 'assets/a.csv')).toEqual({ path: null });
+    expect(invoke.mock.calls).toEqual([
+      ['artifacts.downloadAsset', { artifactId: ARTIFACT, ref: 'assets/a.csv', name: 'sales.tsv' }],
+      ['artifacts.downloadAsset', { artifactId: ARTIFACT, ref: 'assets/a.csv' }],
+    ]);
+  });
+});
