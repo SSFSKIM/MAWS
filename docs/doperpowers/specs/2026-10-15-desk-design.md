@@ -174,8 +174,9 @@ Terms used throughout:
 - **Access** — Cloudflare Access, the identity gate in front of the
   Worker; a **service token** is Access's credential for a non-human
   client.
-- **Daemon** — `sminos daemon` (smns §8), one per machine, a launchd agent;
-  its **uplink** is the part that talks to the hub.
+- **Daemon** — `sminos daemon` (smns §8), one per machine, a launchd agent
+  on macOS (a systemd user service on Linux, Arkho #85, built alongside
+  Phase 1); its **uplink** is the part that talks to the hub.
 - **Bridge** — the doperpowers mod (a function-hook module the engine loads
   into every session when `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`) that gives
   the daemon control of the session it is loaded in.
@@ -3492,6 +3493,16 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A Linux machine is a desk machine, built alongside Phase 1 (Arkho #85): `sminos daemon install`
+  writes a systemd user service on Linux (restart on new code, lingering for a machine without a login session),
+  and the process-identity check holds on Linux, where `ps -o lstart` reads up to a second early. The owner asked
+  whether the daemon assumed Linux; nothing in smns §8 or here planned it, though the desk exists to control
+  projects wherever their sessions run, the owner's cloud Linux machines included. The hub and the web are
+  already OS-neutral (DX2 is HTTP and SSE), so the gap is the machine side alone. Proven on a throwaway Ubuntu VM
+  against a local hub, never by enrolling it into `ssfskim`. Phase 1's acceptance stays the two Macs and the
+  phone. Rejected: making a Linux machine part of Phase 1's acceptance (it would gate the close on a machine the
+  owner does not yet run); deferring it past Phase 1 (the gap is small and independent of the walk).
+  Date/Author: 2026-10-15, owner ruling (design session).
 - Decision: A manual compaction's rows are named from the transcript (DX5, Arkho #78). The live engine (2.1.301)
   raises no `session.append` for any manual compaction's rows, the person's typed `/compact` included, not only a
   plugin's own; an automatic compaction's rows it raises. A compaction's result carries each message's `handle`,
