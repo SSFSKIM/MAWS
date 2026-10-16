@@ -208,23 +208,28 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     );
     expect(geometry.map((p) => p.inside), 'every name inside its panel').toEqual(COUNTRIES.map(() => true));
     for (const p of geometry) expect(p.rules).toEqual(geometry[0].rules);
-    // the last point is near the figure's bottom-right corner: the figure centred in view, the point under the pointer
-    const last = await eight.locator('svg').evaluate((svg) => {
-      svg.scrollIntoView({ block: 'center', inline: 'nearest' });
+    await eight.locator('svg').evaluate((svg) => svg.scrollIntoView({ block: 'center', inline: 'nearest' }));
+    await eight.screenshot({ path: `${PROOF}/small-multiples.png` });
+    // The last point is at the figure's right edge. A column narrower than the figure's 480 px minimum scrolls the figure
+    // in its frame rather than shrinking it (run 38940311997: figure 480 px wide at x 372, the point at x 846 beyond the
+    // column), so the frame is scrolled to the point, as the owner would, before the point's place is read.
+    const last = await eight.locator('.dash-figure').evaluate((frame) => {
+      const svg = frame.querySelector('svg')!;
       const layer = svg.querySelector('[data-hover="nearest"]')!;
       const [x, y] = layer.getAttribute('data-xy')!.split(' ').at(-1)!.split(',').map(Number);
+      const scale = svg.getBoundingClientRect().width / Number(svg.getAttribute('width'));
+      frame.scrollLeft = Math.max(0, x * scale - frame.clientWidth + 16);
       const box = svg.getBoundingClientRect();
-      const scale = box.width / Number(svg.getAttribute('width'));
       const at = { x: box.left + x * scale, y: box.top + y * scale };
       const hit = document.elementFromPoint(at.x, at.y);
-      const seen = { ...at, figure: [box.left, box.top, box.width, box.height].map(Math.round), viewport: [innerWidth, innerHeight], hit: hit ? `${hit.tagName}.${hit.getAttribute('class') ?? ''}` : null };
+      const seen = { ...at, figure: [box.left, box.top, box.width, box.height].map(Math.round), frame: [frame.clientWidth, frame.scrollLeft], viewport: [innerWidth, innerHeight], hit: hit ? `${hit.tagName}.${hit.getAttribute('class') ?? ''}` : null };
       return { ...at, inFigure: hit !== null && svg.contains(hit), seen: JSON.stringify(seen), tip: layer.getAttribute('data-tips')!.split('\n').at(-1)! };
     });
     expect(last.tip).toMatch(/^2024 · 미국 · growth_pct: /);
     expect(last.inFigure, `the last point is on screen, under the figure: ${last.seen}`).toBe(true);
     await page.mouse.move(last.x, last.y);
     await expect(eight.locator('.dash-tip')).toHaveText(last.tip);
-    await eight.screenshot({ path: `${PROOF}/small-multiples.png` });
+    await eight.screenshot({ path: `${PROOF}/small-multiples-hover.png` });
     await figures(main).nth(5).screenshot({ path: `${PROOF}/small-multiples-pair.png` });
   });
 
