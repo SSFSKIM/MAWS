@@ -25,6 +25,7 @@ import {
   InterruptResponseSchema,
   ListModelsResponseSchema,
   ListPermissionRulesResponseSchema,
+  McpCallResponseSchema, // P3-H
   McpStatusResponseSchema,
   ReloadPluginsResponseSchema,
   ReloadSkillsResponseSchema,
@@ -118,6 +119,9 @@ export const CONTROLS = {
   ui_prompt_edit: control<C.UiPromptEditRequest, typeof UiPromptEditResponseSchema>(UiPromptEditResponseSchema, 'mutate'),
   // E8: the skills reload, a long control like its plugins sibling (an operation, never awaited by a bounded command)
   reload_skills: control<C.EmptyRequest, typeof ReloadSkillsResponseSchema>(ReloadSkillsResponseSchema, 'long'),
+  // P3-H: route E's tool call, long because the engine may first wait up to 30 s for the server to connect, then runs the
+  // tool for as long as it takes; main-only (src/engine-host/mcp-call.ts), never a renderer read
+  mcp_call: control<C.McpCallRequest, typeof McpCallResponseSchema>(McpCallResponseSchema, 'long'),
 } as const;
 
 export type OutboundSubtype = keyof typeof CONTROLS;
@@ -195,3 +199,5 @@ export const uiFocus = fn('ui_focus');
 export const uiPromptEdit = fn('ui_prompt_edit');
 // E8
 export const reloadSkills = fn('reload_skills');
+// P3-H
+export const mcpCall = fn('mcp_call');
