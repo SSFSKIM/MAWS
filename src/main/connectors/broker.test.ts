@@ -808,6 +808,92 @@ describe('a watch (30 s to 24 h, at most 64 per app, only while visible)', () =>
     expect(engine.calls).toHaveLength(3);
   });
 
+  // P3-H H3b: a grant the store committed whose announcement never arrived (the host's event dropped while main was not
+  // connected, or the grant gesture's own answer lost) must not leave a watch parked for good: a reconnect, the owner's
+  // Refresh and showing the page re-read the store's grants (a read, consuming nothing, resolving no route).
+  describe('a grant whose announcement was lost', () => {
+    async function parked() {
+      grants.rows.clear(); // the describe's grants: none here until a test commits one
+      const lease = page();
+      const { listener, updates } = watcher();
+      const start = broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+      if (!start.ok) throw new Error('refused');
+      await settle();
+      expect(updates).toEqual([{ ok: false, state: 'revoked', reason: 'notGranted' }]);
+      return { lease, watchId: start.watchId, updates };
+    }
+
+    it('recovers on a reconnect’s re-read, with no new grant gesture', async () => {
+      const { updates } = await parked();
+      grants.put(ART, ROWS, 'fp-1', 'read'); // committed, never announced
+      await vi.advanceTimersByTimeAsync(10 * MIN);
+      expect(updates).toHaveLength(1); // still parked: nothing told it
+      broker.recheckGrants();
+      await settle();
+      expect(updates.at(-1)).toMatchObject({ ok: true });
+    });
+
+    it('recovers on the owner’s Refresh and on showing the page again', async () => {
+      const { lease, watchId, updates } = await parked();
+      grants.put(ART, ROWS, 'fp-1', 'read');
+      expect(broker.refreshWatch(ME, lease, watchId)).toBe(true);
+      await settle();
+      expect(updates.at(-1)).toMatchObject({ ok: true });
+
+      const other = await parked();
+      grants.rows.clear();
+      broker.onGrantChange({ artifactId: ART, ...ROWS, change: 'revoked' });
+      grants.put(ART, ROWS, 'fp-1', 'read');
+      broker.setVisible(ME, other.lease, false);
+      broker.setVisible(ME, other.lease, true);
+      await settle();
+      expect(other.updates.at(-1)).toMatchObject({ ok: true });
+    });
+
+    it('an absent grant stays absent: re-read, nothing resolved, checked or called, no timer, no update', async () => {
+      const { lease, watchId, updates } = await parked();
+      const list = vi.spyOn(grants, 'list');
+      const resolves = engine.resolves;
+      const checks = grants.checks.length;
+      broker.recheckGrants();
+      expect(broker.refreshWatch(ME, lease, watchId)).toBe(true);
+      await settle();
+      expect(list).toHaveBeenCalled();
+      expect(engine.resolves).toBe(resolves);
+      expect(grants.checks).toHaveLength(checks);
+      expect(engine.calls).toHaveLength(0);
+      expect(updates).toHaveLength(1);
+      expect(vi.getTimerCount()).toBe(0);
+      // an Allow once is no grant for a watch
+      grants.put(ART, ROWS, 'fp-1', 'once');
+      broker.recheckGrants();
+      await settle();
+      expect(updates).toHaveLength(1);
+      expect(engine.calls).toHaveLength(0);
+    });
+
+    it('a re-read that raced a revoke does not wake the watch', async () => {
+      const { updates } = await parked();
+      grants.put(ART, ROWS, 'fp-1', 'read');
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const list = grants.list.bind(grants);
+      vi.spyOn(grants, 'list').mockImplementation(async (artifactId) => {
+        const answer = await list(artifactId); // read before the revoke
+        await gate;
+        return answer;
+      });
+      broker.recheckGrants();
+      await settle();
+      grants.rows.clear();
+      broker.onGrantChange({ artifactId: ART, ...ROWS, change: 'revoked' });
+      release();
+      await vi.advanceTimersByTimeAsync(10 * MIN);
+      expect(updates).toHaveLength(1);
+      expect(engine.calls).toHaveLength(0);
+    });
+  });
+
   it('clears every timer and aborts its refresh on close, owner teardown and stop', async () => {
     const one = page(ME);
     const two = page(THEM);

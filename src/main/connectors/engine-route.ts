@@ -8,7 +8,13 @@
 // the operation is registered here before `connectors.start` is sent (so an end announced before the start's answer
 // is not lost), its end arrives as `connectors.operation` (`operationEnded`), and its outcome is fetched with
 // `connectors.take`. An abort sends `connectors.cancel`; the host leaving `ready` (`hostLost`) or main stopping answers
-// every operation still pending, so nothing waits on a host that will never answer.
+// every operation still pending (and withdraws it), so nothing waits on a host that will never answer.
+//
+// The host's events reach main only from its streaming `ready` line on (X13: a host emits nothing to a client before
+// it, and drops what it would have); a dispatch can be answered earlier, during the connection's resync. So an
+// operation starts only while the connection streams; when a connection starts streaming every operation still pending
+// is reconciled by `take` (an end announced before then is not lost); and each operation has a deadline past the
+// host's own bounds, at which main takes or withdraws it, so no lost event ever leaves a call waiting.
 import { randomUUID } from 'node:crypto';
 import type { ConnectorToolRef } from '@shared/artifacts/connectors';
 import type { CommandInput, CommandOutput, CommandResult } from '@shared/ipc/schema';
@@ -23,11 +29,13 @@ export interface EngineRouteDeps {
   sessions: { get(appSessionId: string): { projectId: string | null; directory: string } | null }; // main's index
   projects: { list(opts: { includeHidden?: boolean }): readonly { id: string; directory: string }[] }; // main's index
   realpath(path: string): string | null;
+  streaming(): boolean; // the engine host's events reach main (hosts.streaming)
   log?: (line: string) => void;
 }
 
 export interface EngineRoute extends ConnectorRoute {
   operationEnded(operationId: string): void; // `connectors.operation`
+  reconcile(): void; // the engine host's connection started streaming
   hostLost(): void; // the engine host left `ready`
   stop(): void;
 }
@@ -35,6 +43,10 @@ export interface EngineRoute extends ConnectorRoute {
 interface Pending {
   settle(answer: ConnectorRouteAnswer): void;
 }
+
+// Past the host's own bound on an operation (two mcp_status reads of 8 s, the store, mcp_call's 120 s long deadline):
+// main then takes the outcome, or withdraws an operation the host still runs or has forgotten.
+export const CONNECTOR_OPERATION_DEADLINE_MS = 180_000;
 
 const unavailable = (message: string): ConnectorRouteAnswer => ({ ok: false, failure: 'unavailable', message });
 
@@ -59,19 +71,41 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
     return eligibleSessions({ artifact, links, space, creator: record && { projectId: record.projectId, directory: record.directory }, project, live, realpath: deps.realpath });
   }
 
+  // The operation's outcome from the host: settled when there is one; `whenNone` otherwise (null: still running).
+  function fetch(operationId: string, whenNone: ConnectorRouteAnswer | null): void {
+    if (!pending.has(operationId)) return;
+    void deps.call('connectors.take', { operationId }).then(
+      (taken) => {
+        const operation = pending.get(operationId);
+        if (!operation) return;
+        if (!taken.ok) return operation.settle(unavailable(`connectors.take failed: ${taken.error.code} ${taken.error.message}`));
+        if (taken.value.outcome !== null) return operation.settle(taken.value.outcome);
+        if (whenNone !== null) withdraw(operationId, whenNone);
+      },
+      (error: unknown) => pending.get(operationId)?.settle(unavailable(`connectors.take failed: ${error instanceof Error ? error.message : String(error)}`)),
+    );
+  }
+
+  // Answers the operation now and withdraws it from the host (which may still run it, or never have heard of it).
+  function withdraw(operationId: string, answer: ConnectorRouteAnswer): void {
+    const operation = pending.get(operationId);
+    if (!operation) return;
+    operation.settle(answer);
+    void deps.call('connectors.cancel', { operationId }).catch(() => {});
+  }
+
   function call(session: EligibleSession, artifactId: string, tool: ConnectorToolRef, args: Record<string, unknown>, context: ConnectorRouteCallContext): Promise<ConnectorRouteAnswer> {
+    // its end could not reach main yet: refused before anything is started
+    if (!deps.streaming()) return Promise.resolve(unavailable('the engine host is not streaming its events yet'));
     const operationId = randomUUID();
     const { signal } = context;
     return new Promise<ConnectorRouteAnswer>((resolve) => {
-      const cancel = () => {
-        if (!pending.delete(operationId)) return;
-        signal.removeEventListener('abort', cancel);
-        void deps.call('connectors.cancel', { operationId }).catch(() => {});
-        resolve(unavailable('cancelled'));
-      };
+      const deadline = setTimeout(() => fetch(operationId, unavailable('the operation outlived its deadline')), CONNECTOR_OPERATION_DEADLINE_MS);
+      const cancel = () => withdraw(operationId, unavailable('cancelled'));
       pending.set(operationId, {
         settle: (answer) => {
           if (!pending.delete(operationId)) return;
+          clearTimeout(deadline);
           signal.removeEventListener('abort', cancel);
           resolve(answer);
         },
@@ -81,12 +115,10 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
       const start = { operationId, artifactId, appSessionId: session.appSessionId, launchId: session.launchId, cwd: session.cwd, ...tool, arguments: args, fingerprint: context.fingerprint, mode: context.mode };
       void deps.call('connectors.start', start).then(
         (started) => {
-          if (started.ok || !pending.has(operationId)) return;
           // the host may still have it (a dispatch that timed out): withdraw it, and answer now
-          void deps.call('connectors.cancel', { operationId }).catch(() => {});
-          pending.get(operationId)?.settle(unavailable(`connectors.start failed: ${started.error.code} ${started.error.message}`));
+          if (!started.ok) withdraw(operationId, unavailable(`connectors.start failed: ${started.error.code} ${started.error.message}`));
         },
-        (error: unknown) => pending.get(operationId)?.settle(unavailable(`connectors.start failed: ${error instanceof Error ? error.message : String(error)}`)),
+        (error: unknown) => withdraw(operationId, unavailable(`connectors.start failed: ${error instanceof Error ? error.message : String(error)}`)),
       );
     });
   }
@@ -105,22 +137,20 @@ export function createEngineRoute(deps: EngineRouteDeps): EngineRoute {
       }
       return null;
     },
+    // an end announced: its outcome, or (taken already, expired) a failure
     operationEnded(operationId) {
-      const operation = pending.get(operationId);
-      if (!operation) return; // cancelled, or another main's
-      void deps.call('connectors.take', { operationId }).then(
-        (taken) => operation.settle(!taken.ok ? unavailable(`connectors.take failed: ${taken.error.code} ${taken.error.message}`) : (taken.value.outcome ?? { ok: false, failure: 'failed', message: 'the host kept no outcome for the operation' })),
-        (error: unknown) => operation.settle(unavailable(`connectors.take failed: ${error instanceof Error ? error.message : String(error)}`)),
-      );
+      fetch(operationId, { ok: false, failure: 'failed', message: 'the host kept no outcome for the operation' });
+    },
+    // streaming again: an end announced before then was dropped, so each pending operation's outcome is asked for; one
+    // still running announces its end now that events flow
+    reconcile() {
+      for (const operationId of [...pending.keys()]) fetch(operationId, null);
     },
     hostLost() {
-      for (const operation of [...pending.values()]) operation.settle(unavailable('the engine host is no longer ready'));
+      for (const operationId of [...pending.keys()]) withdraw(operationId, unavailable('the engine host is no longer ready'));
     },
     stop() {
-      for (const [operationId, operation] of [...pending]) {
-        operation.settle(unavailable('main is stopping'));
-        void deps.call('connectors.cancel', { operationId }).catch(() => {});
-      }
+      for (const operationId of [...pending.keys()]) withdraw(operationId, unavailable('main is stopping'));
     },
   };
 }

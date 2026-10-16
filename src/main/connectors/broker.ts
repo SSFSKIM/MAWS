@@ -91,6 +91,7 @@ interface Watch {
   readonly listener: ConnectorWatchListener;
   waitingForGrant: boolean; // no grant admits it: no timer until the owner grants
   waitingSince: number; // the tool's grant generation when it began to wait: a grant since makes the wait obsolete
+  rechecking?: boolean; // P3-H H3b: its grant being re-read from the store
   endedAt?: number; // when its last refresh that ran ended; the next is due an interval later
   timer?: ReturnType<typeof setTimeout>;
   running?: Work;
@@ -144,6 +145,7 @@ export class ConnectorBroker {
   private readonly watches = new Map<string, Watch>();
   private readonly revoking = new Map<string, number>(); // keys whose owner's revoke the store has not answered yet
   private readonly grantGenerations = new Map<string, number>(); // per key, the grants announced so far
+  private readonly revocations = new Map<string, number>(); // P3-H H3b: per key, the revokes heard so far
   private stopped = false;
 
   constructor(options: ConnectorBrokerOptions) {
@@ -218,10 +220,15 @@ export class ConnectorBroker {
   }
 
   // The page's Refresh (after the owner's Start, say): a refresh now, when the lease is visible and the watch neither
-  // waits for a grant nor has one in flight.
+  // waits for a grant nor has one in flight. P3-H H3b: a visible watch waiting for a grant has its grant re-read from the
+  // store instead (a grant whose announcement was lost wakes it); true when either was started.
   refreshWatch(owner: string, leaseId: string, watchId: string): boolean {
     const watch = this.watchOf(owner, leaseId, watchId);
     if (watch) this.wakeIfGranted(watch);
+    if (watch?.waitingForGrant && watch.lease.visible) {
+      void this.recheck(watch);
+      return true;
+    }
     if (!watch || !watch.lease.visible || watch.waitingForGrant || watch.running) return false;
     clearTimeout(watch.timer);
     void this.refresh(watch);
@@ -237,6 +244,7 @@ export class ConnectorBroker {
     lease.visible = visible;
     if (visible) {
       for (const watch of lease.watches) this.schedule(watch);
+      for (const watch of lease.watches) if (watch.waitingForGrant) void this.recheck(watch); // P3-H H3b
     } else {
       for (const watch of lease.watches) clearTimeout(watch.timer);
       this.abort(lease.work, refusal('paused', 'hidden'));
@@ -294,6 +302,13 @@ export class ConnectorBroker {
       if (left === 0) this.revoking.delete(key);
       else this.revoking.set(key, left);
     }
+  }
+
+  // P3-H H3b: the store's grant announcements may have been lost (the host's connection was not streaming, or a grant
+  // gesture's answer never came back): every watch waiting for a grant has it re-read. Main calls this whenever the
+  // engine host's connection starts streaming.
+  recheckGrants(): void {
+    for (const watch of [...this.watches.values()]) if (watch.waitingForGrant) void this.recheck(watch);
   }
 
   // The store's committed grant changes (H2's `onConnectorGrantChange`), wherever they came from: a revoke (the owner's
@@ -386,6 +401,7 @@ export class ConnectorBroker {
 
   private revoked(artifactId: string, tool: ConnectorToolRef): void {
     const key = workKey(artifactId, tool);
+    this.revocations.set(key, (this.revocations.get(key) ?? 0) + 1); // P3-H H3b
     const stop = refusal('revoked', 'revoked');
     for (const lease of this.leases.values()) {
       if (lease.artifactId !== artifactId) continue;
@@ -403,6 +419,31 @@ export class ConnectorBroker {
     const key = workKey(artifactId, tool);
     this.grantGenerations.set(key, this.generation(key) + 1);
     for (const watch of this.watches.values()) if (watch.key === key && watch.waitingForGrant) this.schedule(watch);
+  }
+
+  // P3-H H3b: a waiting watch's grant re-read from the store's committed grants: a read grant of its tool there is a
+  // grant (announced, as if its event had come), so the watch and its siblings wake and refresh through the full check;
+  // none leaves it waiting. A read only: no route resolved, no grant checked or consumed, no engine reached. A revoke
+  // heard while it read, or a grant announced meanwhile, makes the read moot.
+  private async recheck(watch: Watch): Promise<void> {
+    if (watch.rechecking || this.stopped) return;
+    watch.rechecking = true;
+    const { key, tool } = watch;
+    const { artifactId } = watch.lease;
+    const revocations = this.revocations.get(key) ?? 0;
+    const generation = this.generation(key);
+    let held: ConnectorGrant[];
+    try {
+      held = await this.authority.list(artifactId);
+    } catch (error) {
+      this.log(`connectors: the grants of ${artifactId} could not be re-read: ${boundedMessage(error)}`);
+      return;
+    } finally {
+      watch.rechecking = false;
+    }
+    if (this.stopped || !this.watches.has(watch.id) || !watch.waitingForGrant || this.revoking.has(key)) return;
+    if ((this.revocations.get(key) ?? 0) !== revocations || this.generation(key) !== generation) return;
+    if (held.some((grant) => grant.server === tool.server && grant.tool === tool.tool && grant.mode === 'read')) this.granted(artifactId, tool);
   }
 
   // The watch waits, timerless, for a grant after `generation`.

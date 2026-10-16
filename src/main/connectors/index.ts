@@ -8,7 +8,10 @@
 //   and a watch's refreshes go to that window alone (`connectors.watchUpdate`, validated as `emit` would), never to all.
 // - The store's committed grant changes (the host's `connectors.grantChanged`) feed the broker: a revoke or a delete
 //   stops the tool's work, a grant wakes its watches, an Allow once consumed stops nothing.
-// - The engine host leaving `ready` answers every route E operation pending; each later call resolves afresh.
+// - The engine host leaving `ready` answers (and withdraws) every route E operation pending; each later call resolves
+//   afresh. Its events reach main only once its connection streams, so route E starts operations only then, and each
+//   time a connection starts streaming main reconciles what an event dropped before it: the pending operations'
+//   outcomes are taken, and every watch waiting for a grant has its grant re-read from the store.
 import { realpathSync } from 'node:fs';
 import type { WebContents } from 'electron';
 import type { ConnectorCallOutcome } from '@shared/artifacts/connectors';
@@ -24,7 +27,7 @@ import type { ConnectorGrantAuthority, ConnectorRoute } from './route';
 export type ConnectorSender = Pick<WebContents, 'id' | 'isDestroyed' | 'send' | 'on' | 'once'>;
 
 export interface ConnectorsDeps {
-  hosts: Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState'>;
+  hosts: Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming'>;
   register: typeof registerMainHandler;
   index: { sessions: EngineRouteDeps['sessions']; projects: EngineRouteDeps['projects'] };
   realpath?: (path: string) => string | null;
@@ -52,7 +55,7 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
     revoke: async (artifactId, tool) => (await host('connectors.revoke', { artifactId, server: tool.server, tool: tool.tool })).revoked,
     check: (artifactId, ref) => host('connectors.check', { artifactId, call: ref }),
   };
-  const engine = createEngineRoute({ call, sessions: index.sessions, projects: index.projects, realpath, log });
+  const engine = createEngineRoute({ call, sessions: index.sessions, projects: index.projects, realpath, streaming: () => hosts.streaming('engine-host'), log });
   const routes: ConnectorRoute[] = [engine]; // route D joins after it (P3-H's brief: E first)
   const broker = new ConnectorBroker({ routes, grants, log });
 
@@ -109,11 +112,16 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
   const stopState = hosts.onState('engine-host', (state: HostState) => {
     if (state.state !== 'ready') engine.hostLost();
   });
+  const stopStreaming = hosts.onStreaming('engine-host', () => {
+    engine.reconcile();
+    broker.recheckGrants();
+  });
   return {
     stop: () => {
       stopEnded();
       stopGrants();
       stopState();
+      stopStreaming();
       broker.stop();
       engine.stop();
     },

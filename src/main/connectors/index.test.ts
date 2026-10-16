@@ -9,6 +9,7 @@ import { eventChannel, type CommandName, type EventName, type HostState } from '
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import type { MainContext } from '../ipc/router';
 import { startConnectors, type ConnectorSender } from '.';
+import { CONNECTOR_OPERATION_DEADLINE_MS } from './engine-route';
 
 const ART = '11111111-1111-4111-8111-111111111111';
 const FP = 'f'.repeat(64);
@@ -24,6 +25,9 @@ class FakeHost {
   readonly outcomes = new Map<string, unknown>(); // by operation id, what take answers
   readonly listeners = new Map<string, Set<(payload: unknown) => void>>();
   readonly stateListeners = new Set<(state: HostState) => void>();
+  readonly streamingListeners = new Set<() => void>();
+  streams = true; // past the connection's ready line: its events reach main
+  lostAnswers = new Set<string>(); // commands whose effect lands but whose answer never comes back
   artifact: Record<string, unknown> = { id: ART, kind: 'html', title: 'Live', createdBy: { kind: 'session', appSessionId: 'app-own' }, projectId: 'proj', createdAt: 0, updatedAt: 0, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'human' }, lastEditedAt: 0 };
   live = [{ appSessionId: 'app-own', launchId: 'L1', cwd: '/repo', process: 'ready', lastUsedAt: '2026-10-16T10:00:00.000Z' }];
   readOnly = true;
@@ -36,6 +40,7 @@ class FakeHost {
     this.dispatched.push({ name, input });
     const value = await this.answer(name, input as Record<string, unknown>);
     expect(validateCommandOutput(name, value).ok, `${name} output`).toBe(true);
+    if (this.lostAnswers.has(name)) return { ok: false as const, error: { code: 'timeout' as const, message: `${name} unanswered` } };
     return { ok: true as const, value };
   };
   private async answer(name: string, input: Record<string, unknown>): Promise<unknown> {
@@ -89,8 +94,19 @@ class FakeHost {
     this.stateListeners.add(listener);
     return () => void this.stateListeners.delete(listener);
   };
+  onStreaming = (_owner: string, listener: () => void) => {
+    this.streamingListeners.add(listener);
+    return () => void this.streamingListeners.delete(listener);
+  };
+  streaming = () => this.streams;
+  // the host emits: dropped unless the connection streams (X13), as the runtime drops it
   emit(name: string, payload: unknown): void {
+    if (!this.streams) return;
     for (const listener of this.listeners.get(name) ?? []) listener(payload);
+  }
+  startStreaming(): void {
+    this.streams = true;
+    for (const listener of this.streamingListeners) listener();
   }
   started(): string[] {
     return this.dispatched.filter((entry) => entry.name === 'connectors.start').map((entry) => (entry.input as { operationId: string }).operationId);
@@ -135,7 +151,7 @@ beforeEach(() => {
   them = new FakeSender(8);
   records = new Map([['app-own', { projectId: 'proj', directory: '/repo' }]]);
   service = startConnectors({
-    hosts: { dispatch: fake.dispatch as never, onEvent: fake.onEvent as never, onState: fake.onState as never },
+    hosts: { dispatch: fake.dispatch as never, onEvent: fake.onEvent as never, onState: fake.onState as never, onStreaming: fake.onStreaming as never, streaming: fake.streaming as never },
     register: ((name: string, handler: (input: unknown, context: MainContext) => unknown) => void handlers.set(name, handler)) as never,
     index: { sessions: { get: (id) => records.get(id) ?? null }, projects: { list: () => [{ id: 'proj', directory: '/repo' }] } },
     realpath: (path) => path,
@@ -290,6 +306,111 @@ describe('main’s connector service (P3-H H3b)', () => {
     expect(await invoke('artifacts.grantConnectorTool', { artifactId: ART, tool: { ...SEND, mode: 'once' } })).toMatchObject({ ok: true });
     expect(await invoke('artifacts.connectorGrants', { artifactId: ART })).toEqual({ grants: [expect.objectContaining({ tool: 'rows', mode: 'read' }), expect.objectContaining({ tool: 'send_document', mode: 'once' })] });
     expect(await invoke('artifacts.revokeConnectorTool', { artifactId: ART, ...SEND })).toEqual({ revoked: true });
+  });
+
+  // P3-H H3b fix wave: the host's events reach main only once its connection streams (X13); a dispatch can be answered
+  // before, during the connection's resync, and an event emitted then is dropped.
+  describe('the streaming boundary', () => {
+    it('starts nothing while the connection is not streaming: the call is answered at once, nothing left behind', async () => {
+      fake.grants.set(JSON.stringify(['fixture', 'rows']), 'read');
+      const leaseId = await visiblePage();
+      fake.streams = false; // ready, resyncing: a start's end could not reach main
+      expect(await invoke('connectors.call', { leaseId, request: ROWS })).toEqual({ ok: false, state: 'paused', reason: 'unavailable' });
+      expect(fake.names()).not.toContain('connectors.start');
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('takes, when the connection starts streaming, an operation whose end was dropped before it', async () => {
+      fake.grants.set(JSON.stringify(['fixture', 'rows']), 'read');
+      const leaseId = await visiblePage();
+      const answering = invoke('connectors.call', { leaseId, request: ROWS });
+      await settle();
+      const [operationId] = fake.started();
+      fake.streams = false;
+      fake.emit('connectors.operation', { operationId }); // dropped
+      fake.startStreaming();
+      expect(await answering).toMatchObject({ ok: true, result: { content: 'rows 107' } });
+    });
+
+    it('a still-running operation found at the reconcile waits for its end, which now arrives', async () => {
+      fake.grants.set(JSON.stringify(['fixture', 'rows']), 'read');
+      const leaseId = await visiblePage();
+      const answering = invoke('connectors.call', { leaseId, request: ROWS });
+      await settle();
+      const [operationId] = fake.started();
+      const outcome = fake.outcomes.get(operationId);
+      fake.outcomes.delete(operationId); // the host still runs it: take answers null
+      fake.startStreaming();
+      await settle();
+      fake.outcomes.set(operationId, outcome);
+      fake.emit('connectors.operation', { operationId });
+      expect(await answering).toMatchObject({ ok: true });
+    });
+
+    it('never waits past the deadline for an end that never comes: takes it, or withdraws it', async () => {
+      fake.grants.set(JSON.stringify(['fixture', 'rows']), 'read');
+      const leaseId = await visiblePage();
+      const taken = invoke('connectors.call', { leaseId, request: ROWS });
+      await settle();
+      await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS);
+      expect(await taken).toMatchObject({ ok: true }); // its outcome was there all along
+      const withdrawn = invoke('connectors.call', { leaseId, request: ROWS });
+      await settle();
+      const operationId = fake.started().at(-1)!;
+      fake.outcomes.delete(operationId); // the host forgot it (or runs it still)
+      await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS);
+      expect(await withdrawn).toEqual({ ok: false, state: 'paused', reason: 'unavailable' });
+      expect(fake.dispatched.filter((entry) => entry.name === 'connectors.cancel').map((entry) => entry.input)).toEqual([{ operationId }]);
+      expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it('withdraws from the host what it answers when the host leaves ready', async () => {
+      fake.grants.set(JSON.stringify(['fixture', 'rows']), 'read');
+      const leaseId = await visiblePage();
+      const answering = invoke('connectors.call', { leaseId, request: ROWS });
+      await settle();
+      const [operationId] = fake.started();
+      for (const listener of fake.stateListeners) listener({ state: 'restarting', pid: null, restarts: 1, revision: 2 });
+      expect(await answering).toEqual({ ok: false, state: 'paused', reason: 'unavailable' });
+      await settle();
+      expect(fake.dispatched.filter((entry) => entry.name === 'connectors.cancel').map((entry) => entry.input)).toEqual([{ operationId }]);
+    });
+
+    it('a durable grant whose event was dropped wakes its watch at the reconnect, with no new gesture', async () => {
+      fake.endAtStart = true;
+      const leaseId = await visiblePage();
+      await invoke('connectors.watch', { leaseId, request: { ...ROWS, intervalMs: 30_000 } });
+      await settle();
+      expect(updatesOf(me).map((entry) => entry.update)).toEqual([{ ok: false, state: 'revoked', reason: 'notGranted' }]);
+      fake.streams = false;
+      fake.grants.set(JSON.stringify(['fixture', 'rows']), 'read');
+      fake.emit('connectors.grantChanged', { artifactId: ART, ...ROWS, change: 'granted' }); // dropped
+      fake.startStreaming();
+      await settle();
+      expect(updatesOf(me).at(-1)?.update).toMatchObject({ ok: true });
+    });
+
+    it('a grant whose own answer was lost wakes its watch on the owner’s Refresh; an absent one stays blocked', async () => {
+      fake.endAtStart = true;
+      const leaseId = await visiblePage();
+      const { watchId } = (await invoke('connectors.watch', { leaseId, request: { ...ROWS, intervalMs: 30_000 } })) as { watchId: string };
+      await settle();
+      // an absent grant: Refresh re-reads it and stays blocked, starting nothing
+      expect(await invoke('connectors.refresh', { leaseId, watchId })).toEqual({ refreshing: true });
+      await settle();
+      expect(updatesOf(me)).toHaveLength(1);
+      expect(fake.started()).toEqual([]);
+      // the gesture's grant commits, its answer is lost, and the host's event too
+      fake.lostAnswers.add('connectors.grant');
+      fake.streams = false;
+      await expect(invoke('artifacts.grantConnectorTool', { artifactId: ART, tool: { ...ROWS, mode: 'read' } })).rejects.toThrow();
+      fake.streams = true; // no reconnect to tell main
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(updatesOf(me)).toHaveLength(1);
+      expect(await invoke('connectors.refresh', { leaseId, watchId })).toEqual({ refreshing: true });
+      await settle();
+      expect(updatesOf(me).at(-1)?.update).toMatchObject({ ok: true });
+    });
   });
 
   it('at stop, answers and withdraws every pending operation and opens no lease again', async () => {

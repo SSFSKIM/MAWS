@@ -40,26 +40,49 @@ const fixtureServer = (): Server => ({
   tools: [{ name: 'rows', annotations: { readOnly: true } }, { name: 'send_document', annotations: {} }],
 });
 
+// The engine's stdin as the production transport serialises it (src/engine-host/transport.ts `write`): each frame waits
+// its turn behind the writes ahead of it, and one whose signal aborted before its turn starts never reaches stdin.
+// `stall` holds the writes ahead of the tool's own call (a large frame still draining, say) until released.
 function scriptedEngine() {
-  const writes: StdinFrame[] = [];
+  const writes: StdinFrame[] = []; // what reached stdin
+  const queued: StdinFrame[] = []; // what was handed to the transport
   const state = {
     servers: [fixtureServer()] as Server[],
     // the engine's answer to an mcp_call; null leaves it running
     call: ((): Envelope | null => ({ subtype: 'success', response: { content: [{ type: 'text', text: 'rows 107 110' }], structuredContent: { rows: [107, 110] } } })) as (request: Request) => Envelope | null,
   };
+  let stalled: Promise<void> | null = null;
+  let chain: Promise<void> = Promise.resolve();
+  const answer = (frame: StdinFrame) => {
+    if (frame.type !== 'control_request') return;
+    const request = frame.request as Request;
+    const envelope: Envelope | null = request.subtype === 'mcp_status' ? { subtype: 'success', response: { mcpServers: structuredClone(state.servers) } } : request.subtype === 'mcp_call' ? state.call(request) : null;
+    if (envelope) queueMicrotask(() => client.observe({ type: 'control_response', response: { ...envelope, request_id: frame.request_id } } as never));
+  };
+  const isToolCall = (frame: StdinFrame) => frame.type === 'control_request' && (frame.request as Request).subtype === 'mcp_call' && !String((frame.request as Request).tool).startsWith('mcp__maws_probe_');
   const transport: EngineTransport = {
     pid: null,
     frames: (async function* () {})(),
     stderr: (async function* () {})(),
-    write: (frame) => {
-      writes.push(frame);
-      if (frame.type === 'control_request') {
-        const request = frame.request as Request;
-        const envelope: Envelope | null = request.subtype === 'mcp_status' ? { subtype: 'success', response: { mcpServers: structuredClone(state.servers) } } : request.subtype === 'mcp_call' ? state.call(request) : null;
-        if (envelope) queueMicrotask(() => client.observe({ type: 'control_response', response: { ...envelope, request_id: frame.request_id } } as never));
-      }
-      return Promise.resolve();
-    },
+    write: (frame, signal) =>
+      new Promise<void>((resolve, reject) => {
+        queued.push(frame);
+        const onAbort = () => reject(new Error('write aborted'));
+        if (signal?.aborted) return onAbort();
+        signal?.addEventListener('abort', onAbort, { once: true });
+        const ahead = isToolCall(frame) ? stalled : null;
+        const turn = chain.then(async () => {
+          await ahead; // the writes ahead of it, still draining
+          if (signal?.aborted) return; // production's check as its turn starts: the frame never reaches stdin
+          writes.push(frame);
+          answer(frame);
+        });
+        chain = turn.catch(() => {});
+        void turn.then(() => {
+          signal?.removeEventListener('abort', onAbort);
+          resolve();
+        }, reject);
+      }),
     endInput: () => {},
     kill: () => {},
     exited: new Promise(() => {}),
@@ -68,7 +91,17 @@ function scriptedEngine() {
   const client = new ControlClient(transport, { row: (direction, frame) => { const row = { seq: rows.length + 1, direction, at: '', frame }; rows.push(row); return row; } }, 'L1', { warn: () => {} });
   const calls = () => writes.filter((frame) => frame.type === 'control_request' && (frame.request as Request).subtype === 'mcp_call').map((frame) => (frame as { request: Request }).request);
   const cancels = () => writes.filter((frame) => frame.type === 'control_cancel_request');
-  return { client, writes, state, calls, cancels };
+  const queuedCalls = () => queued.filter(isToolCall);
+  // Holds the tool's next call behind the stdin until the returned release runs.
+  const stall = () => {
+    let release!: () => void;
+    stalled = new Promise((resolve) => (release = resolve));
+    return () => {
+      stalled = null;
+      release();
+    };
+  };
+  return { client, writes, state, calls, cancels, queuedCalls, stall };
 }
 
 // ── the store and the session ──
@@ -270,7 +303,7 @@ describe('ConnectorCalls: an operation’s life', () => {
     await vi.waitFor(() => expect(engine.calls()).toHaveLength(1));
     const cancelled = engine.cancels().length; // the early one's mcp_status read, withdrawn
     expect(calls.cancel(late.operationId)).toBe(true);
-    expect(engine.cancels()).toHaveLength(cancelled + 1);
+    await vi.waitFor(() => expect(engine.cancels()).toHaveLength(cancelled + 1));
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(completed).toEqual([]);
     expect(calls.cancel(late.operationId)).toBe(false);
@@ -291,7 +324,7 @@ describe('ConnectorCalls: an operation’s life', () => {
     calls.start(running);
     await vi.waitFor(() => expect(engine.calls()).toHaveLength(2));
     calls.close(); // the client gone, or the host shutting down
-    expect(engine.cancels()).toHaveLength(1);
+    await vi.waitFor(() => expect(engine.cancels()).toHaveLength(1));
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect(completed).toEqual([untaken.operationId]);
     expect(calls.take(running.operationId)).toBeNull();
@@ -380,6 +413,58 @@ describe('ConnectorCalls: the final fence before mcp_call', () => {
     const twin = startOf();
     expect(await raceAuthorization(twin, () => engine.state.servers.push({ ...fixtureServer(), scope: 'user' }))).toMatchObject({ ok: false, failure: 'unavailable' });
     expect(engine.calls()).toEqual([]);
+  });
+
+  // The request is queued for the engine's stdin, which may be busy: what was checked before the queue must still hold
+  // when the frame's turn comes, so a revoke or delete asked for in between (not yet committed) stops it there.
+  for (const [what, ask] of [
+    ['a revoke', () => store.revokeConnectorTool(artifactId, { server: 'fixture', tool: 'rows' })],
+    ['a delete', () => store.delete(artifactId)],
+  ] as const) {
+    it(`a call queued behind a busy stdin never reaches it after ${what} is asked for, even uncommitted`, async () => {
+      await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
+      store.close();
+      service.close();
+      storage.close();
+      make({ manual: true });
+      const release = engine.stall();
+      const start = startOf();
+      calls.start(start);
+      await vi.waitFor(() => expect(engine.queuedCalls()).toHaveLength(1)); // past the final mcp_status and the fence
+      const asked = ask(); // its rows in the open batch, nothing committed
+      release();
+      await settle();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(engine.calls(), 'no mcp_call reached stdin').toEqual([]);
+      tick();
+      await asked;
+      expect(await ended(start.operationId)).toMatchObject({ ok: false, failure: 'refused', refusal: 'revoked' });
+      expect((store as unknown as { fences: Map<string, unknown> }).fences.size, 'the fence released').toBe(0);
+    });
+  }
+
+  it('a call queued behind a busy stdin is written when nothing was asked meanwhile, and its fence released after', async () => {
+    await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
+    const release = engine.stall();
+    const start = startOf();
+    calls.start(start);
+    await vi.waitFor(() => expect(engine.queuedCalls()).toHaveLength(1));
+    expect((store as unknown as { fences: Map<string, unknown> }).fences.size, 'held while it is queued').toBe(1);
+    release();
+    expect(await ended(start.operationId)).toMatchObject({ ok: true });
+    expect(engine.calls()).toHaveLength(1);
+    expect((store as unknown as { fences: Map<string, unknown> }).fences.size).toBe(0);
+  });
+
+  it('a revoke asked for while the tool runs cancels it through the engine and answers revoked', async () => {
+    await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
+    engine.state.call = () => null; // the tool runs on
+    const start = startOf();
+    calls.start(start);
+    await vi.waitFor(() => expect(engine.calls()).toHaveLength(1));
+    await store.revokeConnectorTool(artifactId, { server: 'fixture', tool: 'rows' });
+    expect(await ended(start.operationId)).toMatchObject({ ok: false, failure: 'refused', refusal: 'revoked' });
+    expect(engine.cancels()).toHaveLength(1);
   });
 
   it('refuses a call main admitted under a fingerprint the session no longer reports, consuming nothing', async () => {

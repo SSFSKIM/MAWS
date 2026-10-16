@@ -169,7 +169,7 @@ export class ArtifactStore {
   private readonly spaceListeners = new Set<(change: SpaceChanged) => void>();
   private readonly defaultsListeners = new Set<() => void>(); // P3-C (Decision Log 29)
   private readonly grantListeners = new Set<(change: ConnectorGrantChange) => void>(); // P3-H
-  private readonly fenceEpochs = new Map<string, number>(); // P3-H H3b: per artifact and per artifact's tool, the revokes and deletes asked for
+  private readonly fences = new Map<string, Set<ConnectorFence>>(); // P3-H H3b: per artifact, the dispatch fences held now
   private readonly coalescing = new Map<string, { timer: ReturnType<typeof setTimeout>; pending: number | null }>();
   private readonly creating = new Set<string>(); // artifacts whose first content is committing: `created` announces them
   private readonly schedule = new Map<string, { idle?: ReturnType<typeof setTimeout>; every?: ReturnType<typeof setTimeout> }>();
@@ -417,7 +417,7 @@ export class ArtifactStore {
       if (users.length > 0) throw new ArtifactStoreError('designSystemInUse', `the design system governs ${users.length} artifact(s)`, { artifactIds: users });
     }
     const at = this.now();
-    this.breakFences(artifactId); // P3-H H3b: no connector call fenced before the delete writes
+    this.breakFences(artifactId, null); // P3-H H3b: no connector call fenced before the delete writes
     const revoked = await this.service.inBatch(() => {
       this.storage.db.prepare('UPDATE artifacts SET deletedAt = ?, updatedAt = ? WHERE id = ?').run(at, at, artifactId);
       const grants = this.grantRows(artifactId); // P3-H
@@ -1056,7 +1056,7 @@ export class ArtifactStore {
     return this.writeCommitted(async () => {
       const tool = connectorInput(TOOL_INPUT, ref, 'tool');
       this.requireLive(artifactId);
-      this.breakFences(fenceToolKey(artifactId, tool)); // H3b: asked for, so no call fenced before it writes
+      this.breakFences(artifactId, tool); // H3b: asked for, so no call fenced before it writes
       const removed = await this.service.inBatch(() => Number(this.storage.db.prepare('DELETE FROM artifact_connector_grants WHERE artifactId = ? AND server = ? AND tool = ?').run(artifactId, tool.server, tool.tool).changes) > 0);
       if (removed) this.emitGrant(artifactId, tool, 'revoked');
       return removed;
@@ -1087,18 +1087,29 @@ export class ArtifactStore {
     });
   }
 
-  // H3b: the dispatch fence. Taken before the authorization, held (or not) synchronously at the write: a revoke of the
-  // tool or a delete of the artifact asked for since — committed or still in its batch — breaks it, and a read call
-  // also needs its grant still there as authorized (the same fingerprint, still `read`). An Allow once's own
-  // consumption is the use it authorized, so its fence needs no row; its revoke still breaks it.
-  connectorFence(artifactId: string, ref: ConnectorToolRef): ConnectorFence {
-    return { artifactId, key: connectorToolKey(ref), artifact: this.fenceEpochs.get(artifactId) ?? 0, tool: this.fenceEpochs.get(fenceToolKey(artifactId, ref)) ?? 0 };
+  // H3b: the dispatch fence. Taken before the authorization and held until the call it guards has ended: a revoke of
+  // the tool or a delete of the artifact asked for meanwhile — committed, still in its batch, or later rolled back —
+  // breaks it at once, synchronously, and calls its `onBreak` (the holder aborts its operation there, so a write still
+  // queued behind the engine's stdin is dropped by the transport before it starts). A read call also needs its grant
+  // still there as authorized (the same fingerprint, still `read`); an Allow once's own consumption is the use it
+  // authorized, so its fence needs no row. The holder releases it when its call ends, so nothing is retained.
+  connectorFence(artifactId: string, ref: ConnectorToolRef, onBreak?: () => void): ConnectorFence {
+    const fence: ConnectorFence = { artifactId, key: connectorToolKey(ref), broken: false, onBreak };
+    let held = this.fences.get(artifactId);
+    if (!held) this.fences.set(artifactId, (held = new Set()));
+    held.add(fence);
+    return fence;
+  }
+
+  releaseConnectorFence(fence: ConnectorFence): void {
+    const held = this.fences.get(fence.artifactId);
+    if (!held?.delete(fence)) return;
+    if (held.size === 0) this.fences.delete(fence.artifactId);
   }
 
   connectorFenceHolds(fence: ConnectorFence, call: ConnectorCallRef, mode: ConnectorGrantMode): 'held' | 'revoked' | 'fingerprintChanged' | 'wrongMode' {
     const { artifactId } = fence;
-    if (fence.key !== connectorToolKey(call)) return 'revoked';
-    if ((this.fenceEpochs.get(artifactId) ?? 0) !== fence.artifact || (this.fenceEpochs.get(fenceToolKey(artifactId, call)) ?? 0) !== fence.tool) return 'revoked';
+    if (fence.broken || fence.key !== connectorToolKey(call) || !this.fences.get(artifactId)?.has(fence)) return 'revoked';
     const row = this.closed || this.storage.readOnly ? undefined : this.entity(artifactId);
     if (!row || row.deletedAt !== null) return 'revoked';
     if (mode === 'once') return 'held';
@@ -1108,9 +1119,19 @@ export class ArtifactStore {
     return grant.mode === 'read' ? 'held' : 'wrongMode';
   }
 
-  // A revoke or delete asked for: every fence taken before it of the tool (or of any tool of the artifact) breaks.
-  private breakFences(key: string): void {
-    this.fenceEpochs.set(key, (this.fenceEpochs.get(key) ?? 0) + 1);
+  // A revoke of `tool` (null: a delete of the artifact) asked for: every fence held of it breaks now.
+  private breakFences(artifactId: string, tool: ConnectorToolRef | null): void {
+    const key = tool && connectorToolKey(tool);
+    for (const fence of [...(this.fences.get(artifactId) ?? [])]) {
+      if (key !== null && fence.key !== key) continue;
+      fence.broken = true;
+      this.releaseConnectorFence(fence);
+      try {
+        fence.onBreak?.();
+      } catch (error) {
+        this.log(`a connector fence's onBreak threw: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
   }
 
   // What the artifact's grant says of `call`, read now. A store a newer MAWS wrote authorizes nothing: its grant rows
@@ -1355,14 +1376,13 @@ const GRANT_INPUT = z.object(ConnectorGrantRequestSchema.shape);
 const TOOL_INPUT = z.object(ConnectorToolRefSchema.shape);
 const CALL_INPUT = z.object(ConnectorCallRefSchema.shape);
 
-// H3b: what a connector call's fence remembers (`connectorFence`): the tool, and the revokes and deletes asked for so far.
+// H3b: a connector call's dispatch fence (`connectorFence`): its tool, and whether a revoke or delete broke it.
 export interface ConnectorFence {
   readonly artifactId: string;
   readonly key: string;
-  readonly artifact: number;
-  readonly tool: number;
+  broken: boolean;
+  readonly onBreak?: () => void;
 }
-const fenceToolKey = (artifactId: string, ref: ConnectorToolRef): string => JSON.stringify([artifactId, ref.server, ref.tool]);
 
 function connectorInput<T>(schema: z.ZodType<T>, value: unknown, what: string): T {
   const parsed = schema.safeParse(value);

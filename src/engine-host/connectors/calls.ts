@@ -7,9 +7,12 @@
 // - `start` answers at once (main's dispatch is bounded at 10 s, a tool is not) and runs the operation: the session's
 //   mcp_status checked against what main admitted, the grant authorized with the mode main expects (so a grant swapped
 //   since is refused before an Allow once is consumed), mcp_status read again, and then, synchronously up to the
-//   write, the fence: not cancelled, the same live process in the same directory, the store's fence of the grant held
-//   (no revoke or delete asked for since the authorization began, a read grant still as authorized). Only then is
-//   mcp_call written. Its end is announced by id alone (`completed`), its outcome kept for one `take`.
+//   request: not cancelled, the same live process in the same directory, the store's fence of the grant held (no
+//   revoke or delete asked for since the authorization began, a read grant still as authorized). The request is then
+//   queued for the engine's stdin, which may still be busy: the fence stays held until the call ends, and a revoke or
+//   delete asked for meanwhile breaks it synchronously and aborts the operation, so the transport drops a request not
+//   yet started (and a running one is cancelled). Its end is announced by id alone (`completed`), its outcome kept for
+//   one `take`.
 // - Nothing here launches, acquires or marks a session used; nothing outlives its bound: a running operation ends with
 //   mcp_call's long deadline, an untaken outcome after `resultTtlMs`, and all of them when main goes (`close`).
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
@@ -32,7 +35,8 @@ export interface ConnectorSessionView {
 
 // The store's grant authority as the host's last check uses it (an ArtifactStore is one).
 export interface ConnectorGrantStore {
-  connectorFence(artifactId: string, ref: ConnectorToolRef): ConnectorFence;
+  connectorFence(artifactId: string, ref: ConnectorToolRef, onBreak?: () => void): ConnectorFence;
+  releaseConnectorFence(fence: ConnectorFence): void;
   authorizeConnectorCall(artifactId: string, call: ConnectorCallRef, expected?: ConnectorGrantMode): Promise<ConnectorAuthorization>;
   connectorFenceHolds(fence: ConnectorFence, call: ConnectorCallRef, mode: ConnectorGrantMode): 'held' | 'revoked' | 'fingerprintChanged' | 'wrongMode';
 }
@@ -60,6 +64,7 @@ const MESSAGE_MAX = 1_000;
 interface Operation {
   readonly id: string;
   readonly controller: AbortController;
+  revoked?: boolean; // its fence broke: a revoke or delete asked for while it ran
   outcome?: ConnectorOperationOutcome;
   expiry?: ReturnType<typeof setTimeout>;
 }
@@ -106,7 +111,7 @@ export class ConnectorCalls {
     const operation: Operation = { id: input.operationId, controller: new AbortController() };
     this.operations.set(operation.id, operation);
     void this.execute(operation, input).then(
-      (outcome) => this.finish(operation, outcome),
+      (outcome) => this.finish(operation, operation.revoked ? refused('revoked', `${input.artifactId}'s ${input.server} · ${input.tool} was revoked or deleted while it ran`) : outcome),
       (error: unknown) => this.finish(operation, failed(`the connector call failed in the host: ${words(error)}`)),
     );
     return { operationId: operation.id };
@@ -156,7 +161,6 @@ export class ConnectorCalls {
 
   private async execute(operation: Operation, input: ConnectorStart): Promise<ConnectorOperationOutcome> {
     const { signal } = operation.controller;
-    const named = `${input.artifactId}'s ${input.server} · ${input.tool} in ${input.appSessionId}`;
     const store = this.options.store();
     if (!store) return failed('the artifact store is unavailable this run');
     const first = this.live(input);
@@ -165,8 +169,22 @@ export class ConnectorCalls {
     const before = await this.admitted(first.client, input, signal);
     if (before !== null) return before;
     const ref = { server: input.server, tool: input.tool };
-    const call = { ...ref, fingerprint: input.fingerprint };
-    const fence = store.connectorFence(input.artifactId, ref);
+    // Broken by a revoke or delete the moment it is asked for: the operation aborts there, so a call not yet written
+    // (still queued behind the engine's stdin) never is, and one running is cancelled through control_cancel_request.
+    const fence = store.connectorFence(input.artifactId, ref, () => {
+      operation.revoked = true;
+      operation.controller.abort();
+    });
+    try {
+      return await this.fenced(store, fence, first.client, input, signal);
+    } finally {
+      store.releaseConnectorFence(fence);
+    }
+  }
+
+  private async fenced(store: ConnectorGrantStore, fence: ConnectorFence, client: ControlClient, input: ConnectorStart, signal: AbortSignal): Promise<ConnectorOperationOutcome> {
+    const named = `${input.artifactId}'s ${input.server} · ${input.tool} in ${input.appSessionId}`;
+    const call = { server: input.server, tool: input.tool, fingerprint: input.fingerprint };
     let authorization: ConnectorAuthorization;
     try {
       authorization = await store.authorizeConnectorCall(input.artifactId, call, input.mode);
@@ -176,12 +194,12 @@ export class ConnectorCalls {
       throw error;
     }
     if (!authorization.granted) return refused(authorization.refusal, `no grant admits ${named} (${authorization.refusal})`);
-    const after = await this.admitted(first.client, input, signal);
+    const after = await this.admitted(client, input, signal);
     if (after !== null) return after;
-    // ── the fence: synchronous from here through the write ──
+    // ── synchronous from here to the request: the fence held now, and its break aborting the request after ──
     if (signal.aborted) return unavailable('cancelled');
     const live = this.live(input);
-    if (!live || live.client !== first.client) return unavailable(`${input.appSessionId} exited, relaunched or moved before the call`);
+    if (!live || live.client !== client) return unavailable(`${input.appSessionId} exited, relaunched or moved before the call`);
     const held = store.connectorFenceHolds(fence, call, input.mode);
     if (held !== 'held') return refused(held, `${named}'s grant changed before the call (${held})`);
     const answer = await callMcpTool(live.client, { server: input.server, tool: input.tool, arguments: input.arguments }, { signal });
