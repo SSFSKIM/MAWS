@@ -2328,7 +2328,7 @@ listed stand as M1–M3 left them. Changed rows are marked **[M4]**.
 | `type` | Built | Fields |
 | --- | --- | --- |
 | `block-row` | M3, **[M4]** | `uuid, turnId, agentId, step, index` — **[M4]** also the response row's **notice**: emitted in the `session.append` hook once the append resolves (the row is written), so notice order is write order within a loop. The child moves the loop's cut to `uuid` in the same step that settles the block |
-| `row-seen` | **[M4]** | `uuid, agentId, door` — the notice of every other row the session keeps, once its append resolves: <ul><li>any door but `response` and `queue`;</li><li>a response row whose block never streamed, the rows of an excluded request (the seed, below) included: nothing of theirs ever streamed;</li><li>door `note` (a plugin's own append) only once kept, never when refused;</li><li>the bridge's own steer row from the append's returned uuid (door `note`), after it is written.</li></ul> None for door `queue`, and none for a `hook_success` with no text (raised but never written by 2.1.300). Rows a plugin's own calls write that pass no hook of the plugin's get none: a compaction the bridge runs, the engine's reload notice |
+| `row-seen` | **[M4]** | `uuid, agentId, door` — the notice of every other row the session keeps, once its append resolves: <ul><li>any door but `response` and `queue`;</li><li>a response row whose block never streamed, the rows of an excluded request (the seed, below) included: nothing of theirs ever streamed;</li><li>door `note` (a plugin's own append) only once kept, never when refused;</li><li>the bridge's own steer row from the append's returned uuid (door `note`), after it is written.</li></ul> None for door `queue`, and none for a `hook_success` with no text (raised but never written by 2.1.300). **[#78]** A manual compaction's rows (the person's `/compact`, a command run, any plugin's `$.session.compact`, the bridge's own included) pass no `session.append` hook, so once the compaction stands the mod holds its poster, reads the loop's rows past its cut from the child (`GET /rows`) until the summary row is on disk, and names each unnamed one `row-seen` with `door: "compaction"`, in disk order, ahead of anything later of its loop. An automatic compaction's rows pass the hook and are named as they are written. The engine's reload line passes `session.append` (door `notice`) and is named by the new module |
 | `step` (`phase: "end"`) | M1, **[M4, fix wave 1]** | unchanged fields. **Ordered after every `block-row` of its step**: the engine can append a response row after the request's result (it withholds a refusal or max-output row until the stream is done, and closes a block the stream left open), so the mod holds the end until each block that streamed has its row named, at most 1 s (`STEP_END_WAIT_MS`), and posts it before anything later of its loop (the next request, the turn's end, the subagent's stop). **[fix wave 2]** Once a step's end is out, whichever released it, the step's pairing is closed: a row of it that comes later is named by `row-seen`, never a `block-row` after its step's end. DX4's `step-end` relies on this order. **The child removes the step's whole message from `streaming` at its end, under the lock that applies events (as M1 said; M3's per-block settling did not change it), whether or not a `block-row` came for each block**, so a block aborted mid-response is in no later snapshot; a turn's `complete` removes its messages too |
 | `turn` (`phase: "start"`) | M1, **[final-review wave]** | may carry **`recovered: true`** with `text: null`: a main turn the module saw no `turn.start` of (it was reloaded while the turn ran), taken from the turn's next main-loop request (`turn.step`'s `turnId`, the id `turn.complete` and `$.turn.abort` use). The turn's own `complete` follows as usual |
 | `export` | **[M4]** | `records: [{type: "assistant"\|"user", uuid, message: {content}}]` — main-loop rows as the transcript keeps them: <ul><li>a text row that may hold a mark (its text blocks; not sent past 65,536 characters);</li><li>an async ask's call row with its result row.</li></ul> **Consumed by the child, never handed to subscribers.** The child appends their host events to the project's log with `sminos.export_live`: the Stop hook's writer, `host_events` and `(kind, src)` dedup (`message`: `<row uuid>#<span index>`; `question`: the call id). Membership on sight; one export at a time, in order, off the stream's lock |
@@ -2428,8 +2428,11 @@ transcript line carrying a `uuid`. The stream ending is the other discontinuity:
 subscribes again and starts over from the fresh snapshot.
 
 Known rows with no notice, released unnamed (on the next notice of their loop, or 2 s when
-last on disk): the bridge's own compaction rows (boundary, summary, the attachments after),
-and the engine's line for a module reload.
+last on disk), since doperpowers #202 (7.158.3) only the compactions the mod cannot place: one
+whose summary row is not on disk within 1.5 s, one before the module's first hello, one whose
+cut lies more than 4 MiB back, one whose result carries no row handles (a hook answered it
+with messages of its own), and the person's `/compact` where an organization manages Claude
+Code (the engine runs no `session.compact` hook of a person-installed plugin there).
 
 `tests/sminos/bridge_order.py` (`Consumer`) is the reference implementation, run against
 the real child.
@@ -3489,6 +3492,14 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A manual compaction's rows are named from the transcript (DX5, Arkho #78). The live engine (2.1.301)
+  raises no `session.append` for any manual compaction's rows, the person's typed `/compact` included, not only a
+  plugin's own; an automatic compaction's rows it raises. A compaction's result carries each message's `handle`,
+  which is the row's uuid, so the mod waits for the summary row on disk and names what lies past its cut before
+  anything later. The reload line was never unnamed (it passes `session.append`, door `notice`). Rejected: asking
+  upstream for `session.append` on a plugin's own writes (it would not cover a typed `/compact`); accepting the 2 s
+  stall per compaction. Flags DC4 (the uplink's ordering is unchanged), DC6, DC7.
+  Date/Author: 2026-10-15, design session (Arkho #78, doperpowers #202).
 - Decision: A steer's trace for reconciling a lost outcome is the mod's answer, kept by the bridge child under the
   RPC's nonce, not a transcript row (DX6). The recomposition panel (scalpel-2#2) found no reliable link from a
   transcript row to the claim that caused it. Rejected: answering every orphaned steer `interrupted`, which would
