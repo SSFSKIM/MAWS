@@ -242,8 +242,15 @@ Cloudflare's limits shape the hub (Durable Objects documentation, read
 2026-10-15): 1,000 requests per second per object (soft), 30 seconds of CPU
 per request by default, 10 GB of storage per object, 2 MB per stored row
 or string, 32 MiB per received WebSocket message; hibernation only when the
-object is a WebSocket server, and on eviction "in-memory state is reset";
-every deploy restarts every object and disconnects every connection. So:
+object is a WebSocket server, and on eviction "in-memory state is reset".
+A deploy does not cut connections at once (measured, DC3's M5, 2026-10-15):
+new requests reach the new version within seconds, but an object holding a
+connection keeps running the previous one for about five minutes (+314 to
++329 s in three observations), and an object created soon after a deploy
+can still read the previous deploy's variables. Then the objects restart:
+browser WebSockets close, while a machine's SSE stream can stay open and
+beating from the old instance as every POST reaches the new one and is
+refused `stale-generation`. So:
 
 - **Presence, the pending set, and delivery outcomes are kept in the
   object's storage**, not only in memory. A hibernating object can be
@@ -260,9 +267,14 @@ every deploy restarts every object and disconnects every connection. So:
   arrives.
 - **Every frame is bounded at 1 MiB**; a larger payload (a big tool result
   in a transcript row, a snapshot) is split into numbered parts.
-- **After a deploy** browsers and daemons reconnect with backoff, and the
-  daemon republishes presence, pending requests, and unacknowledged RPC
-  results (DX2, DX6).
+- **After a deploy** browsers reconnect with backoff when their socket
+  closes, and a daemon reconnects as soon as a POST of its stream is
+  refused (`409 stale-generation` or `503 delivery-failed`, an `hb-ack`'s
+  included), even while that stream still beats; it then republishes
+  presence, pending requests, and unacknowledged RPC results (DX2, DX6).
+  A deploy's new behavior reaches a busy object only when the object
+  restarts, so a change that must take effect at once would end each
+  machine's stream after the deploy (not built for phase 1).
 
 **Daemon uplink.** **[binding — the hub never connects into a machine,
 which is what makes the machine's own policy the execution boundary]** Each
@@ -668,9 +680,19 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
    the stream is open; acceptable for a few machines, and the trade is
    recorded with the choice.
 3. **Durable Object throughput** (DC3): streaming chunks from several active
-   sessions through one project's object, measured (DC3.G6); one object per
-   session for the session plane is the fallback, taken when the
-   measurement crosses the threshold DC3 records.
+   sessions through one project's object, measured (DC3.G6). **Resolved
+   2026-10-15 (DC3's M5):** once a POST's frames for one project reach it in
+   one call (MAWS `ebde4565`; before that a serial RPC per frame, about
+   9 ms each, saturated a project at about 117 relayed chunks/s), a project
+   object held chunk p95 ≤ 1 s up to 3,814 relayed messages/s and broke at
+   twice that. The threshold, at half: **1,900 relayed messages/s per
+   project object**, counted as each streaming session's chunks/s times its
+   subscribed browsers (about four sessions at 150 chunks/s, three browsers
+   each). One object per session is not the fallback: at the limit the
+   project used about a quarter of one core, and what broke was the
+   machine's uplink, whose serial POSTs carry about 600–750 frames/s. The
+   lever past that is one shared stream per session in place of one per
+   browser (a DX4 change), in the backlog.
 4. **WebAuthn PRF and Access on the phone** (DC5): PRF support in the
    owner's browsers with an iCloud Keychain passkey, and inside an iOS
    home-screen app, whose storage is separate from Safari's, so the key is
@@ -795,7 +817,9 @@ Phases 2–4 are this product's later units, each cut at its dispatch.
   - **G6 (measured):** three fake machines streaming chunks every 100 ms
     into one project, with several browsers subscribed; the report gives
     chunks per second per object, the fan-out cost, and the threshold at
-    which the session plane moves to one object per session.
+    which the session plane moves to one object per session. **[measured
+    2026-10-15]** 1,900 relayed messages/s per project object; the nearer
+    limit is a busy machine's uplink, not the object (§8 unknown 3).
   - **G4 (deployed):** deployed to the owner's Cloudflare account behind
     Access; enrollment issues a service token and claims a machine name,
     refusing a name already enrolled; the designated archive machine is
@@ -1486,7 +1510,7 @@ All cases use the org key `AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8` (the 32 
 machine's streams (1, 2, …, kept in the object's storage): a new stream ends the previous one, and every later frame
 and POST belongs to the newest. The object writes `hb {at}` every `heartbeat_ms` (15 000), and the daemon answers each
 with `hb-ack {generation, at}` (the stream's generation and the answered heartbeat's `at`). The daemon treats a stream
-silent for three periods as dead and reconnects with backoff. A client closing the stream reaches the object at once
+silent for three periods as dead and reconnects with backoff, and a refused POST likewise (below). A client closing the stream reaches the object at once
 (the request's abort, compatibility flag `enable_request_signal`).
 
 **Frames down** (`DownFrame`):
@@ -1590,14 +1614,18 @@ anything later. The POST itself is refused whole, with nothing applied, as `409 
 <0-based>}` for a line that is not a JSON object with a string `t`. Blank lines are skipped. A frame naming no `.smns`
 project id (a lowercase uuid) is refused `bad-shape` down the stream. `part` frames may span POSTs of one stream; a
 set is joined when its last part arrives. The stream is checked again once the body has been read and before each
-frame: when a newer stream of the machine opened meanwhile, the POST stops there with `409 {"error":
+run of frames for one project (a run reaches its project in one call), and a project stops a run before a frame once
+a newer stream of the machine has reached it: when a newer stream opened meanwhile, the POST stops there with `409 {"error":
 "stale-generation", "frames": <frames applied>}`, and nothing it would still apply reaches the newer stream's
 projects (a `hello` that was already on its way never takes a newer stream's place in the project). When a reply
 could not be written for a reason other than the stream having gone, the hub ends the stream and answers `503
 {"error": "delivery-failed", "frames": <frames applied>}`: reconnect, send `hello` again, and the handshake heals
 whatever was missed. A live event the hub could not deliver to a stream likewise ends that stream. A machine should
 post serially: two POSTs in flight are applied interleaved, which the handshake heals (a gap is resent) but costs a
-round.
+round. A `409 stale-generation` or `503 delivery-failed` on any POST, an `hb-ack`'s included, means the stream the
+daemon holds is not the one the hub serves, even while it is still open and beating (after a deploy an old instance
+can keep it so, §2): the daemon drops it and reconnects (a new stream, `hello`, the handshake). [2026-10-15, DC3's
+M5; DC4's uplink already does this: a POST not answered 200 ends its stream.]
 
 **The session plane, up.** Every frame below needs the project opened on the current stream (`not-open` otherwise),
 and one the hub cannot read is refused `bad-shape` down the stream and recorded in the audit record, as an upload's is.
@@ -2512,7 +2540,9 @@ with an Access bypass of their own (M5's deployment), because iOS fetches them f
 Access cookie; they carry nothing of the org.
 
 **The org** is made from deploy configuration on first use, with `ORG_ADMIN_EMAIL` as its admin — never by whoever
-signs in first.
+signs in first. A stored org whose id is not the configured one (made under a previous deploy's variables, which
+Durable Objects can keep for a while after a deploy) takes the configured id and name while nothing was built on it
+(no machine, enrollment, project, or wrapped key) [2026-10-15, DC3's M5, MAWS `85e83830`].
 
 **Records** (`identity.ts`):
 
@@ -3083,6 +3113,8 @@ doperpowers; DC3, DC5, and DC6 change the MAWS repository (`apps/desk-hub`,
   questions are the terminal's alone, as the §5 table's no-bridge columns
   say. Not the owner's machines; it matters for the org phase.
 - **One Durable Object per project may not carry the stream** (unknown 3).
+  Measured: it carries 1,900 relayed messages/s with margin, and a busy
+  machine's own uplink is the nearer limit (§8).
 - **Bringing MAWS's renderer to the web is the largest piece of work.** DC5
   imports what MAWS keeps free of Electron and copies the skeleton of what
   is entangled, not the app; Electron-only surfaces (the in-app browser,
@@ -3109,7 +3141,12 @@ session depth (§6); a message reviving a closed terminal session by itself
 (§3: Resume is the explicit act instead); a cross-project inbox as the
 phone's landing view, listing every pending request across projects (the
 grid's waiting counts and pushes that open the card carry phase 1; an inbox
-needs a registry index the project objects update on raise and settle).
+needs a registry index the project objects update on raise and settle);
+one shared stream per session in place of one per browser (DX4; the lever
+past a busy machine's uplink, §8 unknown 3); a staging deployment, so
+measurements and proofs never switch the production Worker's org, and on
+it a re-measure of the phase-1 streaming budget from a quiet client (DC3's
+M5).
 
 **Explicitly out of scope (standing exclusions):** the hub storing
 transcripts (§3); hosting sessions on the SDK wire (§2); depending on
@@ -3122,7 +3159,7 @@ a hub that connects into machines (§2).
 | --- | --- | --- |
 | DC1 bridge spike | findings: `docs/doperpowers/specs/2026-10-15-arkho-desk-c1-findings.md` | **landed 2026-10-15**: 11 items, every primitive promoted, six with a change folded into §2 and §5; probe kept at `/tmp/c1probe` |
 | DC2 bridge | plan: `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md` (doperpowers, branch `worktree-smns-erb`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/195, merge `a6c90a13`, 7.155.0; report `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-report.md` |
-| DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | in-flight (dispatched 2026-10-15) |
+| DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | in-flight: M1–M5 built (2026-10-15); deployed behind Access in the org `ssfskim` (hub `85e83830`, web `fdb7b406`), nothing enrolled; final review, panel, and PR next |
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/194, merge `9e7d3d30`, 7.156.0 (main merged in at `2a864e49` after DC2); report `docs/doperpowers/plans/2026-10-15-desk-dc4-report.md` |
 | DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
 | DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | **PR open 2026-10-15**: M1–M3 and the branch reviewed clean (`high`, after two final fix waves); PR https://github.com/SSFSKIM/MAWS/pull/12, stacked on `smns-erb-web`, retargeted to `master` when DC5 merges; Linux gate run 38818748087 green (67 browser tests, 8 acceptance specs against the fake machine); report `docs/doperpowers/plans/2026-10-15-desk-dc6-report.md` |
@@ -3209,6 +3246,22 @@ a hub that connects into machines (§2).
   captured earlier. A mod that must keep posting through an abort posts
   from a loop it started at `session.start`, as the bridge now does.
   Evidence: DC2's M3 (doperpowers `3a33efcd`, 2026-10-15).
+- Observation: a Workers deploy does not cut what is connected. Objects
+  holding a connection ran the previous version for about five minutes
+  (+314.0, +315.3, +328.6 s); then they restarted, browser sockets closed,
+  but machines' SSE streams kept beating from the old instance while every
+  POST was refused `stale-generation`. A fake machine that reconnected only
+  on silence lost about two thirds of its events in one run. A Registry
+  created 25 s after a deploy that changed the org ran the previous
+  variables and stored the old org's id.
+  Evidence: DC3's M5, `interfaces-M5.md` "Findings that bear on the
+  contracts" (MAWS smns-erb, 2026-10-15).
+- Observation: a Durable Object RPC costs about 9 ms on the deployment;
+  one Machine-to-Project RPC per frame was the whole session-plane limit
+  (about 117 relayed chunks/s per project) until a POST's frames went in
+  one call. A freshly minted Access service token is refused 401 for a few
+  seconds.
+  Evidence: DC3's M5 `frame-cost` and report (MAWS `ebde4565`, `83756611`).
 
 ## Decision Log
 
@@ -3354,6 +3407,42 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: DC3's G6 is closed and §8 unknown 3 resolved without a
+  per-session object (DC3's M5): the session plane stays on one object per
+  project, its threshold 1,900 relayed messages/s (chunks/s × subscribed
+  browsers), half the measured limit, after a POST's frames for one project
+  went to it in one call (`ebde4565`; no shape changed). The phase-1
+  budget (one session at 150 chunks/s, 1–3 browsers) met its log-plane
+  bound in every step and chunk p95 ≤ 1 s in four of six; the two misses
+  are accepted as explained, not re-measured now: the first began two
+  minutes after the batched deploy, inside the window in which objects ran
+  the per-frame code (which measured p95 3.8 s at that load), and in the
+  second the other machine's presence and log events slowed fourfold in
+  the same step, pointing at the measuring client, not the chunk path. A
+  re-measure needs the Worker under a test org, which would now mean
+  switching the owner's org out; it waits for a staging deployment
+  (Deferred). The shared per-session stream stays in the backlog.
+  Rejected: one object per session (moves CPU that was a quarter of a
+  core and leaves the binding limit, the machine's serial uplink, as it
+  was); building the shared stream now (a DX4 change, and the budget is
+  met on throughput by a factor of about 25). Flags DC3.
+  Date/Author: 2026-10-15, design session (DC3's M5).
+- Decision: A refused POST means reconnect (DX2), and §2's deploy line
+  is corrected to what DC3's M5 measured: a deploy leaves connected objects
+  on the old version for about five minutes, and then a machine's stream
+  can beat on from the old instance while every POST is refused
+  `stale-generation`. A daemon reconnects on `409 stale-generation` or
+  `503 delivery-failed` from any POST, an `hb-ack`'s included; DC4's
+  merged uplink already does (any POST not answered 200 ends its stream),
+  and DC3's fake machine does since `ea5ae36a`. The hub forces no cut in
+  phase 1. The org takes its configured identity while nothing was built
+  on a stored one (DX7, `85e83830`), and every answer names its build in
+  `X-Desk-Build` so anyone can see what is deployed. Rejected: a forced
+  cut from inside the hub (an object cannot reach the old instance holding
+  a stream); a deploy script that ends every stream (only needed for a
+  change that must take effect at once; noted in §2, not built). Flags
+  DC3, DC4, DC5.
+  Date/Author: 2026-10-15, design session (DC3's M5).
 - Decision: Resume restores a session that ended, never one that was
   retired (DC7's M4): a retired session's Resume is refused `unsupported`,
   and its channel keeps its history with no Resume, naming who retired it.
