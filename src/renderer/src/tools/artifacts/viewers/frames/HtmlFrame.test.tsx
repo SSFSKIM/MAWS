@@ -144,3 +144,50 @@ describe('the HTML frame’s locate handle', () => {
     expect(await result).toBeNull();
   });
 });
+
+// P3-H H4: the page's connector port. Every load of the frame's page (a self-reload included: the frame's window can stay
+// the same object) gets a port of its own, the previous load's relay ending first; the frame unmounting ends the last.
+describe('the HTML frame’s connector port', () => {
+  function mountWithPort() {
+    const relays: { port: MessagePort; dispose: ReturnType<typeof vi.fn> }[] = [];
+    const onPagePort = vi.fn((port: MessagePort) => {
+      const dispose = vi.fn();
+      relays.push({ port, dispose });
+      return dispose;
+    });
+    const view = render(<HtmlFrame url="maws-artifact://a/1/index.html" title="Dashboard" onPagePort={onPagePort} />);
+    const frame = document.querySelector('iframe')!;
+    const posted: { data: unknown; origin: string; transfer: unknown[] }[] = [];
+    frame.contentWindow!.postMessage = ((data: unknown, origin: string, transfer: unknown[] = []) => void posted.push({ data, origin, transfer })) as typeof window.postMessage;
+    return { view, frame, posted, relays };
+  }
+
+  it('hands each load’s page a fresh port and the app its other end, ending the previous load’s relay first', () => {
+    const { view, frame, posted, relays } = mountWithPort();
+    expect(posted).toEqual([]); // nothing before the page has loaded
+    act(() => void frame.dispatchEvent(new Event('load')));
+    expect(posted).toHaveLength(1);
+    expect(posted[0]!.data).toEqual({ type: 'maws:connectors' });
+    expect(posted[0]!.origin).toBe('*');
+    expect(posted[0]!.transfer).toHaveLength(1);
+    expect(relays).toHaveLength(1);
+    expect(posted[0]!.transfer[0]).not.toBe(relays[0]!.port);
+    act(() => void frame.dispatchEvent(new Event('load'))); // the page reloaded itself
+    expect(relays[0]!.dispose).toHaveBeenCalledTimes(1);
+    expect(relays).toHaveLength(2);
+    expect(posted[1]!.transfer[0]).not.toBe(posted[0]!.transfer[0]);
+    expect(relays[1]!.dispose).not.toHaveBeenCalled();
+    view.unmount();
+    expect(relays[1]!.dispose).toHaveBeenCalledTimes(1);
+    expect(relays[0]!.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('posts no port without a relay to take it', () => {
+    render(<HtmlFrame url="maws-artifact://a/1/index.html" title="Dashboard" />);
+    const frame = document.querySelector('iframe')!;
+    const posted: unknown[] = [];
+    frame.contentWindow!.postMessage = ((data: unknown) => void posted.push(data)) as typeof window.postMessage;
+    act(() => void frame.dispatchEvent(new Event('load')));
+    expect(posted).toEqual([]);
+  });
+});
