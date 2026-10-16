@@ -19,6 +19,7 @@ import * as Y from '@artifacts/yjs/slides';
 import type { Actor } from '@shared/artifacts/actor';
 import { DesignSystemChain } from '../design-systems/chain';
 import { openDocuments, type Documents } from '../documents';
+import { CHANGE_COALESCE_MS } from '../documents/store';
 import { LibraryMirror } from '../library/mirror';
 import { registerPresentations, type Presentations } from '.';
 
@@ -86,6 +87,45 @@ describe('the host’s presentation module (D7)', () => {
     expect(cover).toContain(`font-size:${house.get('--ds-type-title-size')}`);
     expect(readFileSync(out('slides', 'broken.html'), 'utf8')).toBe(HELD);
     expect(existsSync(join(project, 'artifacts', '.maws-mirror.json'))).toBe(true);
+  });
+
+  // The final review's A14 (Decision Log 37 (1)): the assets the deck references are copied beside its slides, each read
+  // once (a copy already in place is kept), and an asset uploaded after the slide naming it reaches the mirror with no
+  // write to the deck (`inputs`).
+  it('copies the deck’s referenced assets into its folder, once, and follows an upload that comes after its reference', async () => {
+    mirror = new LibraryMirror(documents, { log: () => {} });
+    await mirror.start();
+    const space = await documents.store.createSpace({ name: 'Talks', linkedDir: project });
+    const deck = await documents.store.create({ kind: 'presentation', title: 'Kickoff', spaceId: space.id }, HUMAN);
+    const { ref } = await documents.store.uploadAsset(deck.id, new Uint8Array([1, 2, 3]), { name: 'logo.png', mime: 'image/png' }, HUMAN);
+    await documents.store.uploadAsset(deck.id, new Uint8Array([7]), { name: 'unused.png', mime: 'image/png' }, HUMAN);
+    const settle = () => new Promise((resolve) => setTimeout(resolve, CHANGE_COALESCE_MS + 50)); // the store's feed holds a second commit this long
+    const slide = (src: string, text: string) => `<section id="s1"><img id="logo" src="${src}" alt=""><p id="t">${text}</p></section>`;
+    await documents.service.writeAs(deck.id, HUMAN, (doc) => void publishDeck(doc, deckFiles(doc), { [slidePath('s1')]: slide(ref, 'One') }, false));
+    await mirror.flush();
+    const out = (...parts: string[]) => join(project, 'artifacts', mirrorSlug(deck), ...parts);
+    expect([...readFileSync(out('assets', 'logo.png'))]).toEqual([1, 2, 3]);
+    expect(existsSync(out('assets', 'unused.png'))).toBe(false);
+
+    const reads: string[] = [];
+    const readAsset = documents.store.files.readAsset.bind(documents.store.files);
+    documents.store.files.readAsset = (artifactId, sha256) => (reads.push(sha256), readAsset(artifactId, sha256));
+    await documents.service.writeAs(deck.id, HUMAN, (doc) => void publishDeck(doc, deckFiles(doc), { [slidePath('s1')]: slide(ref, 'Two') }, false));
+    await settle();
+    await mirror.flush();
+    expect(readFileSync(out('slides', 's1.html'), 'utf8')).toContain('>Two<');
+    expect(reads).toEqual([]); // the copy in place is kept, not read again
+    expect([...readFileSync(out('assets', 'logo.png'))]).toEqual([1, 2, 3]);
+
+    await documents.service.writeAs(deck.id, HUMAN, (doc) => void publishDeck(doc, deckFiles(doc), { [slidePath('s1')]: slide('assets/late.png', 'Three') }, false));
+    await settle();
+    await mirror.flush();
+    expect(existsSync(out('assets', 'late.png'))).toBe(false);
+    expect(existsSync(out('assets', 'logo.png'))).toBe(false); // no longer referenced
+    await documents.store.uploadAsset(deck.id, new Uint8Array([4, 5]), { name: 'late.png', mime: 'image/png' }, HUMAN);
+    await settle();
+    await mirror.flush();
+    expect([...readFileSync(out('assets', 'late.png'))]).toEqual([4, 5]);
   });
 });
 

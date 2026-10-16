@@ -9,6 +9,8 @@
 // governing ref and that system's revision, so L's mirror rewrites a deck whose system changed with no write to the deck;
 // the module asks the mirror to refresh every deck when a design system changes and when the chain's defaults do
 // (`artifacts.setDefaults`), the `inputs` compare deciding which decks are rewritten (no inverse of the chain kept).
+// The inputs also count the deck's assets, so an upload a slide already names reaches the mirror's copies (Decision Log
+// 37 (1)).
 import { readSystem } from '@artifacts/design-system/model';
 import type { TokenSet } from '@artifacts/design-system/tokens';
 import { builtinView } from '@artifacts/design-system/view';
@@ -62,10 +64,16 @@ export function registerPresentations({ documents, chain, refresh, env = process
 
 const governingRef = (chain: PresentationsDeps['chain'], artifact: Artifact) => chain?.governing({ designSystemId: artifact.designSystemId, spaceId: artifact.spaceId }) ?? { builtin: 'maws' as const };
 
-/** The deck mirror's inputs: the system governing it and that system's revision (the floor's has none). */
+/**
+ * The deck mirror's inputs: the system governing it and that system's revision (the floor's has none), and how many
+ * assets the deck holds (the final review's A14: an upload changes no revision, yet a slide may already name it; assets
+ * are only ever added, so the count moves with every addition).
+ */
 function governingInputs(store: ArtifactStore, chain: PresentationsDeps['chain'], artifact: Artifact): string {
   const ref = governingRef(chain, artifact);
-  return 'builtin' in ref ? `builtin:${ref.builtin}` : `${ref.id}@${store.revision(ref.id)}`;
+  const governing = 'builtin' in ref ? `builtin:${ref.builtin}` : `${ref.id}@${store.revision(ref.id)}`;
+  const assets = store.listAssets(artifact.id).length;
+  return assets > 0 ? `${governing} assets:${assets}` : governing;
 }
 
 /** The tokens of the system governing a deck, live: its own, its Space's, the owner's, the house system, else the floor. */

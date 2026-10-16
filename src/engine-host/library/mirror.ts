@@ -30,7 +30,7 @@
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { mirrorSlug, mirrorWriterFor } from '@artifacts/library/mirror';
+import { isMirrorCopy, mirrorSlug, mirrorWriterFor, type MirrorOutput } from '@artifacts/library/mirror';
 import { applyV2, newDoc } from '@artifacts/yjs';
 import { isDocKind, type Artifact, type Space } from '@shared/artifacts/entity';
 import { byteContentOf, fileBytes, type LibraryDocuments } from './reads';
@@ -312,8 +312,14 @@ export class LibraryMirror {
           this.log(`${artifactId}: ${target} lies under a link; not written`);
           continue;
         }
+        // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md Decision Log 37 (1)): a copy already in place keeps
+        // its bytes (they never change under its name); one the mirror lacks is read now
+        if (isMirrorCopy(data) && mine.has(file) && existsSync(target)) {
+          written.push(file);
+          continue;
+        }
         if (sameAs !== undefined) renameSync(join(root, sameAs), target); // the entry takes the new name's case first
-        writeReadOnly(root, file, data);
+        writeReadOnly(root, file, isMirrorCopy(data) ? data.read() : data);
       } catch (error) {
         failure ??= { error };
         break;
@@ -346,7 +352,7 @@ export class LibraryMirror {
   // The kind's writer over what was read; a document's replica lives only for the call. M6b: the assets listed, each
   // read from the store's content-addressed file when the writer asks (a failed read fails this artifact's write, which
   // the next change retries, as any write does).
-  private produce(artifact: Artifact, content: Exclude<ContentRead, null>, listed: AssetsRead): Record<string, string | Uint8Array> {
+  private produce(artifact: Artifact, content: Exclude<ContentRead, null>, listed: AssetsRead): MirrorOutput['files'] {
     const writer = mirrorWriterFor(artifact.kind)!;
     const byRef = new Map(listed.map((asset) => [asset.ref, asset]));
     const assets = {

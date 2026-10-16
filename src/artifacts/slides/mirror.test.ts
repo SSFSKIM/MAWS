@@ -6,7 +6,12 @@ import { describe, expect, it } from 'vitest';
 import { tokenProperties } from '../design-system/css';
 import { literalValues } from '../design-system/resolve-vars';
 import { builtinView } from '../design-system/view';
-import { deckTokenValues } from './mirror';
+import { isMirrorCopy, mirrorSlug, type MirrorCopy } from '../library/mirror';
+import { newDoc } from '../yjs';
+import type { Artifact } from '@shared/artifacts/entity';
+import { DECK_PATH, slidePath } from './deck';
+import { deckTokenValues, presentationMirrorWriter } from './mirror';
+import { publishDeck } from './publish';
 
 const tokens = builtinView().tokens;
 const system = tokenProperties(tokens, 'deck');
@@ -43,5 +48,47 @@ describe('the mirror’s token values (parity with P3-D’s resolver)', () => {
   it('applies the overrides alone when there is no system to read', () => {
     expect(deckTokenValues(null, { '--ds-color-bg': '#101010' })('--ds-color-bg')).toBe('#101010');
     expect(deckTokenValues(null, {})('--ds-color-bg')).toBeUndefined();
+  });
+});
+
+// The final review's A14 (Decision Log 37 (1)): the mirror copies the assets the deck references into `<slug>/assets/`,
+// where the deck-root references (`assets/<name>`) name them; each copy is read only when the mirror lacks it.
+describe('the deck mirror’s assets', () => {
+  const ARTIFACT = { id: '0f0e0d0c-0b0a-4908-8706-050403020100', kind: 'presentation', title: 'Kickoff' } as Artifact;
+  const files = {
+    [DECK_PATH]: JSON.stringify({ v: 4, order: ['s1'], faces: { brand: { family: 'Brand', src: 'assets/brand.woff2' } } }),
+    [slidePath('s1')]: '<section id="s1" style="background:url(assets/bg.png) center / cover"><img id="logo" src="assets/logo.png" alt="Logo"><h1 id="t" style="background:url(assets/gold.png); background-clip:text; -webkit-text-fill-color:transparent">Gold</h1></section>',
+  };
+  const listed = ['brand.woff2', 'bg.png', 'logo.png', 'gold.png', 'unused.png'].map((name) => ({ ref: `assets/${name}`, name, mime: 'application/octet-stream', size: 1 }));
+  const bytesOf = (ref: string) => new TextEncoder().encode(ref);
+
+  it('copies every referenced asset (picture, CSS background, face) and no other, reading none while it writes', () => {
+    const doc = newDoc();
+    publishDeck(doc, {}, files, false);
+    const reads: string[] = [];
+    const readAsset = (ref: string) => {
+      reads.push(ref);
+      return bytesOf(ref);
+    };
+    const out = presentationMirrorWriter(() => null)({ artifact: ARTIFACT, doc, assets: listed, readAsset }).files;
+    const slug = mirrorSlug(ARTIFACT);
+    const copies = Object.keys(out).filter((path) => path.startsWith(`${slug}/assets/`)).sort();
+    expect(copies).toEqual(['bg.png', 'brand.woff2', 'gold.png', 'logo.png'].map((name) => `${slug}/assets/${name}`));
+    expect(reads).toEqual([]);
+    const copy = out[`${slug}/assets/logo.png`];
+    expect(isMirrorCopy(copy)).toBe(true);
+    expect(new TextDecoder().decode((copy as MirrorCopy).read())).toBe('assets/logo.png');
+    // the references are the deck root's, which the folder is
+    expect(out[`${slug}/slides/s1.html`]).toContain('src="assets/logo.png"');
+    expect(out[`${slug}/slides/s1.html`]).toContain('url(assets/bg.png)');
+    expect((JSON.parse(out[`${slug}/deck.json`] as string) as { faces: Record<string, { src: string }> }).faces.brand!.src).toBe('assets/brand.woff2');
+  });
+
+  it('copies nothing the artifact does not hold (a reference ahead of its upload), and nothing without a reader', () => {
+    const doc = newDoc();
+    publishDeck(doc, {}, files, false);
+    const out = presentationMirrorWriter(() => null)({ artifact: ARTIFACT, doc, assets: listed.filter((a) => a.name !== 'logo.png'), readAsset: bytesOf }).files;
+    expect(Object.keys(out)).not.toContain(`${mirrorSlug(ARTIFACT)}/assets/logo.png`);
+    expect(Object.keys(presentationMirrorWriter(() => null)({ artifact: ARTIFACT, doc }).files).some((path) => path.includes('/assets/'))).toBe(false);
   });
 });

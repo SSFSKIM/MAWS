@@ -441,6 +441,44 @@ describe('the linked-directory mirror (M2)', () => {
     expect(manifest().artifacts[doc.id].files).toEqual(['keep/one.txt', 'keep/three.txt']);
   });
 
+  // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md, the final review's A14; Decision Log 37 (1)): a copy
+  // (a file whose bytes never change under its name, as a content-addressed asset's) is read and written only when the
+  // mirror lacks it, and dropped like any file once the writer no longer names it
+  it('writes a copy only where the mirror lacks it, reading its bytes only then', async () => {
+    let reads = 0;
+    const copy = { read: () => (reads++, new Uint8Array([5, 6])) };
+    offs.push(registerMirrorWriter('document', ({ doc }): MirrorOutput => ({ files: { 'd/text.txt': doc!.get('root').toString(), ...(doc!.get('root').toString().includes('drop') ? {} : { 'd/assets/a.bin': copy }) } })));
+    await startMirror();
+    const space = await linkedSpace();
+    const doc = await store().create({ kind: 'document', title: 'Doc', spaceId: space.id }, human);
+    await store().testWrite(doc.id, 'w1', [{ op: 'insertText', index: 0, text: 'v1' }], human);
+    await mirror!.flush();
+    expect([...readFileSync(out('d', 'assets', 'a.bin'))]).toEqual([5, 6]);
+    expect(mode('d', 'assets', 'a.bin')).toBe(0o444);
+    const before = reads;
+    expect(before).toBeGreaterThan(0);
+
+    await store().testWrite(doc.id, 'w2', [{ op: 'insertText', index: 0, text: 'v2 ' }], human);
+    await new Promise((resolve) => setTimeout(resolve, CHANGE_COALESCE_MS + 50));
+    await mirror!.flush();
+    expect(read('d', 'text.txt')).toContain('v2');
+    expect(reads).toBe(before); // in place: kept, not read
+    expect(manifest().artifacts[doc.id].files).toEqual(['d/assets/a.bin', 'd/text.txt']);
+
+    rmSync(out('d', 'assets', 'a.bin'));
+    await store().testWrite(doc.id, 'w3', [{ op: 'insertText', index: 0, text: 'v3 ' }], human);
+    await new Promise((resolve) => setTimeout(resolve, CHANGE_COALESCE_MS + 50));
+    await mirror!.flush();
+    expect(reads).toBe(before + 1); // gone from the mirror: read and written again
+    expect([...readFileSync(out('d', 'assets', 'a.bin'))]).toEqual([5, 6]);
+
+    await store().testWrite(doc.id, 'w4', [{ op: 'insertText', index: 0, text: 'drop ' }], human);
+    await new Promise((resolve) => setTimeout(resolve, CHANGE_COALESCE_MS + 50));
+    await mirror!.flush();
+    expect(existsSync(out('d', 'assets', 'a.bin'))).toBe(false);
+    expect(manifest().artifacts[doc.id].files).toEqual(['d/text.txt']);
+  });
+
   it('remembers an unlinked directory whose cleanup failed and cleans it at a later change', async () => {
     await startMirror();
     const space = await linkedSpace();
