@@ -159,7 +159,7 @@ Exact names go to the P3 interface ledger through the architect (the appendix pr
 | Child | Grain | Document | Status |
 |---|---|---|---|
 | E0 Prove variable-artboard reuse | spike | `spikes/p3-design/findings.txt` | landed 2026-10-16 (yes on (a) to (g); Decision Log 10) |
-| E1 Artboard workbench | plan | `docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md` | dispatched 2026-10-16 (Decision Log 10) |
+| E1 Artboard workbench | plan | `docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md` | dispatched 2026-10-16 (Decision Log 10); M1 the portable Design kind ticked (c41553ef8; Decision Log 17) |
 | E2 File-backed dashboard documents | plan | `docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md` | dispatched 2026-10-16 (Decision Log 5); M1 the renderer promoted (Decision Log 14) |
 | E3 Granted live datasets | brief, or plan at its checkpoint | `docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md` | not-dispatched (blocked-by E2; waiting-external: P3-H's bridge) |
 
