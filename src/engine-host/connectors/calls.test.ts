@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
-import type { ConnectorGrantRequest } from '@shared/artifacts/connectors';
+import type { ConnectorGrantMode, ConnectorGrantRequest } from '@shared/artifacts/connectors';
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
 import { DocumentService } from '../documents/service';
@@ -161,6 +161,14 @@ const startOf = (patch: Partial<ConnectorStart> = {}): ConnectorStart => ({
 async function ended(operationId: string) {
   await vi.waitFor(() => expect(completed).toContain(operationId));
   return calls.take(operationId);
+}
+const printOf = async (tool: string) => ((await calls.resolve({ appSessionId: SESSION, launchId: 'L1', cwd: '/work/project', server: 'fixture', tool })) as { fingerprint: string }).fingerprint;
+// The store reopened with its commits driven by hand (`tick`), its grants kept.
+function reopenManual(): void {
+  store.close();
+  service.close();
+  storage.close();
+  make({ manual: true });
 }
 async function grant(request: Omit<ConnectorGrantRequest, 'fingerprint'> & { fingerprint?: string }) {
   const granting = store.grantConnectorTool(artifactId, { fingerprint, ...request });
@@ -440,6 +448,69 @@ describe('ConnectorCalls: the final fence before mcp_call', () => {
       await asked;
       expect(await ended(start.operationId)).toMatchObject({ ok: false, failure: 'refused', refusal: 'revoked' });
       expect((store as unknown as { fences: Map<string, unknown> }).fences.size, 'the fence released').toBe(0);
+    });
+  }
+
+  // The same for a re-grant that changes the permission the call was admitted under (its fingerprint, the mode main's
+  // check saw), an Allow once's included though its own use already took its row: the queued call is never written, and
+  // the replacement grant is left unused for the call it was given for.
+  const OTHER_PRINT = 'f'.repeat(64);
+  for (const [what, tool, mode, replacement] of [
+    ['a read grant replaced by Allow once', 'rows', 'read', { mode: 'once' }],
+    ['a read grant replaced under another fingerprint', 'rows', 'read', { fingerprint: OTHER_PRINT }],
+    ['an Allow once, used, re-granted under another fingerprint', 'send_document', 'once', { fingerprint: OTHER_PRINT }],
+    ['an Allow once, used, replaced by a read grant', 'rows', 'once', { mode: 'read' }],
+  ] as [string, string, ConnectorGrantMode, Partial<ConnectorGrantRequest>][]) {
+    it(`a call queued behind a busy stdin never reaches it after ${what} is asked for, even uncommitted`, async () => {
+      const print = await printOf(tool);
+      await grant({ server: 'fixture', tool, fingerprint: print, mode });
+      reopenManual();
+      const release = engine.stall();
+      const start = startOf({ tool, fingerprint: print, mode });
+      calls.start(start);
+      await vi.waitFor(() => {
+        tick(); // an Allow once's consumption commits
+        expect(engine.queuedCalls()).toHaveLength(1); // past the final mcp_status and the fence
+      });
+      const replaced = { server: 'fixture', tool, fingerprint: print, mode, ...replacement };
+      const asked = store.grantConnectorTool(artifactId, replaced); // its row in the open batch, nothing committed
+      release();
+      await settle();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(engine.calls(), 'no mcp_call reached stdin').toEqual([]);
+      tick();
+      await asked;
+      expect(await ended(start.operationId)).toMatchObject({ ok: false, failure: 'refused', refusal: 'revoked' });
+      expect(await store.connectorGrants(artifactId), 'the replacement unused').toEqual([expect.objectContaining({ tool, fingerprint: replaced.fingerprint, mode: replaced.mode })]);
+      expect((store as unknown as { fences: Map<string, unknown> }).fences.size, 'the fence released').toBe(0);
+    });
+  }
+
+  // A re-grant of the very permission the call was admitted under withdraws nothing: the call is written, and an Allow
+  // once granted again is left for the next call.
+  for (const [what, tool, mode] of [
+    ['the same read grant', 'rows', 'read'],
+    ['Allow once again', 'send_document', 'once'],
+  ] as const) {
+    it(`a call queued behind a busy stdin is written after ${what} is asked for meanwhile`, async () => {
+      const print = await printOf(tool);
+      await grant({ server: 'fixture', tool, fingerprint: print, mode });
+      reopenManual();
+      const release = engine.stall();
+      const start = startOf({ tool, fingerprint: print, mode });
+      calls.start(start);
+      await vi.waitFor(() => {
+        tick();
+        expect(engine.queuedCalls()).toHaveLength(1);
+      });
+      const asked = store.grantConnectorTool(artifactId, { server: 'fixture', tool, fingerprint: print, mode });
+      release();
+      tick();
+      await asked;
+      expect(await ended(start.operationId)).toMatchObject({ ok: true });
+      expect(engine.calls()).toHaveLength(1);
+      expect(await store.connectorGrants(artifactId)).toEqual([expect.objectContaining({ tool, fingerprint: print, mode })]);
+      expect((store as unknown as { fences: Map<string, unknown> }).fences.size).toBe(0);
     });
   }
 

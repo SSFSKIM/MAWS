@@ -407,10 +407,10 @@ describe('ArtifactStore: the connector dispatch fence (P3-H H3b)', () => {
     const a = await store.create({ kind: 'html', title: 'Live page', content: page('<p>a</p>') }, human);
     await store.grantConnectorTool(a.id, rows);
     await store.grantConnectorTool(a.id, send);
-    const readFence = store.connectorFence(a.id, ROWS);
+    const readFence = store.connectorFence(a.id, rowsCall, 'read');
     expect(await store.authorizeConnectorCall(a.id, rowsCall, 'read')).toEqual({ granted: true, mode: 'read' });
     expect(store.connectorFenceHolds(readFence, rowsCall, 'read')).toBe('held');
-    const onceFence = store.connectorFence(a.id, SEND);
+    const onceFence = store.connectorFence(a.id, sendCall, 'once');
     expect(await store.authorizeConnectorCall(a.id, sendCall, 'once')).toEqual({ granted: true, mode: 'once' });
     expect(store.connectorFenceHolds(onceFence, sendCall, 'once')).toBe('held');
   });
@@ -424,7 +424,7 @@ describe('ArtifactStore: the connector dispatch fence (P3-H H3b)', () => {
     tick();
     await granting;
 
-    const fence = store.connectorFence(a.id, ROWS);
+    const fence = store.connectorFence(a.id, rowsCall, 'read');
     const authorizing = store.authorizeConnectorCall(a.id, rowsCall, 'read'); // reads the grant now, answers at the commit
     const revoking = store.revokeConnectorTool(a.id, ROWS); // joins the batch the authorization waits for
     tick();
@@ -433,7 +433,7 @@ describe('ArtifactStore: the connector dispatch fence (P3-H H3b)', () => {
     expect(store.connectorFenceHolds(fence, rowsCall, 'read')).toBe('revoked');
 
     // the same for an Allow once already consumed: its row is gone either way, the revoke is what the fence sees
-    const onceFence = store.connectorFence(a.id, SEND);
+    const onceFence = store.connectorFence(a.id, sendCall, 'once');
     const using = store.authorizeConnectorCall(a.id, sendCall, 'once');
     tick();
     expect(await using).toEqual({ granted: true, mode: 'once' });
@@ -451,7 +451,7 @@ describe('ArtifactStore: the connector dispatch fence (P3-H H3b)', () => {
     const granting = store.grantConnectorTool(a.id, rows);
     tick();
     await granting;
-    const fence = store.connectorFence(a.id, ROWS);
+    const fence = store.connectorFence(a.id, rowsCall, 'read');
     const authorizing = store.authorizeConnectorCall(a.id, rowsCall, 'read');
     tick();
     expect(await authorizing).toEqual({ granted: true, mode: 'read' });
@@ -462,15 +462,67 @@ describe('ArtifactStore: the connector dispatch fence (P3-H H3b)', () => {
     expect(store.connectorFenceHolds(fence, rowsCall, 'read')).toBe('revoked');
   });
 
-  it('refuses a read call whose grant was replaced since: another fingerprint, or Allow once', async () => {
+  it('refuses a read call whose grant had been replaced when its fence was taken: another fingerprint, or Allow once', async () => {
+    const a = await store.create({ kind: 'html', title: 'Live page', content: page('<p>a</p>') }, human);
+    await store.grantConnectorTool(a.id, { ...rows, fingerprint: 'fp-2' });
+    expect(store.connectorFenceHolds(store.connectorFence(a.id, rowsCall, 'read'), rowsCall, 'read')).toBe('fingerprintChanged');
+    await store.grantConnectorTool(a.id, { ...rows, mode: 'once' });
+    expect(store.connectorFenceHolds(store.connectorFence(a.id, rowsCall, 'read'), rowsCall, 'read')).toBe('wrongMode');
+  });
+
+  // A re-grant replaces the tool's grant whole. One that changes the authority a fence was taken for (the call's
+  // fingerprint, the mode its check admitted) withdraws that authority as a revoke would, whether or not the old row is
+  // still there to compare: an Allow once's own consumption took its row before the call was written.
+  for (const [what, held, heldMode, replacement] of [
+    ['a read grant replaced by Allow once', rowsCall, 'read', { ...rows, mode: 'once' }],
+    ['a read grant replaced under another fingerprint', rowsCall, 'read', { ...rows, fingerprint: 'fp-2' }],
+    ['an Allow once, used, re-granted under another fingerprint', sendCall, 'once', { ...send, fingerprint: 'fp-2' }],
+    ['an Allow once, used, replaced by a read grant', sendCall, 'once', { ...send, mode: 'read' }],
+  ] as const) {
+    it(`breaks a fence the moment ${what} is asked for, before it commits, telling its holder synchronously`, async () => {
+      reopen({ manual: true });
+      const creation = store.create({ kind: 'html', title: 'Live page', content: page('<p>a</p>') }, human);
+      tick();
+      const a = await creation;
+      const granting = Promise.all([store.grantConnectorTool(a.id, rows), store.grantConnectorTool(a.id, send)]);
+      tick();
+      await granting;
+      const told: string[] = [];
+      const fence = store.connectorFence(a.id, held, heldMode, () => told.push(held.tool));
+      const other = store.connectorFence(a.id, held === rowsCall ? sendCall : rowsCall, held === rowsCall ? 'once' : 'read', () => told.push('other'));
+      const authorizing = store.authorizeConnectorCall(a.id, held, heldMode); // an Allow once's use taken: its row goes
+      tick();
+      expect(await authorizing).toEqual({ granted: true, mode: heldMode });
+      const regranting = store.grantConnectorTool(a.id, replacement);
+      expect(told).toEqual([held.tool]); // asked for, nothing committed yet; the other tool's fence untouched
+      expect(store.connectorFenceHolds(fence, held, heldMode)).toBe('revoked');
+      tick();
+      await regranting;
+      expect(told).toEqual([held.tool]);
+      expect(store.connectorFenceHolds(fence, held, heldMode)).toBe('revoked');
+      expect(store.connectorFenceHolds(other, held === rowsCall ? sendCall : rowsCall, held === rowsCall ? 'once' : 'read')).toBe('held');
+      expect(grantsInFile(a.id)).toContainEqual({ server: 'fixture', tool: held.tool, fingerprint: replacement.fingerprint, mode: replacement.mode }); // the replacement, unused
+    });
+  }
+
+  it('leaves a fence held through an identical re-grant: the same read grant, or Allow once again after its use', async () => {
     const a = await store.create({ kind: 'html', title: 'Live page', content: page('<p>a</p>') }, human);
     await store.grantConnectorTool(a.id, rows);
-    const fence = store.connectorFence(a.id, ROWS);
+    await store.grantConnectorTool(a.id, send);
+    const told: string[] = [];
+    const readFence = store.connectorFence(a.id, rowsCall, 'read', () => told.push('rows'));
+    const onceFence = store.connectorFence(a.id, sendCall, 'once', () => told.push('send'));
     expect(await store.authorizeConnectorCall(a.id, rowsCall, 'read')).toEqual({ granted: true, mode: 'read' });
-    await store.grantConnectorTool(a.id, { ...rows, fingerprint: 'fp-2' });
-    expect(store.connectorFenceHolds(fence, rowsCall, 'read')).toBe('fingerprintChanged');
-    await store.grantConnectorTool(a.id, { ...rows, mode: 'once' });
-    expect(store.connectorFenceHolds(fence, rowsCall, 'read')).toBe('wrongMode');
+    expect(await store.authorizeConnectorCall(a.id, sendCall, 'once')).toEqual({ granted: true, mode: 'once' });
+    await store.grantConnectorTool(a.id, rows);
+    await store.grantConnectorTool(a.id, send); // a second Allow once, for the next call
+    expect(told).toEqual([]);
+    expect(store.connectorFenceHolds(readFence, rowsCall, 'read')).toBe('held');
+    expect(store.connectorFenceHolds(onceFence, sendCall, 'once')).toBe('held');
+    expect(grantsInFile(a.id)).toEqual([
+      { server: 'fixture', tool: 'rows', fingerprint: 'fp-1', mode: 'read' },
+      { server: 'fixture', tool: 'send_document', fingerprint: 'fp-1', mode: 'once' },
+    ]);
   });
 
   it('breaks a fence the moment a revoke or delete is asked for, before it commits, telling its holder synchronously', async () => {
@@ -482,8 +534,8 @@ describe('ArtifactStore: the connector dispatch fence (P3-H H3b)', () => {
     tick();
     await granting;
     const told: string[] = [];
-    const rowsFence = store.connectorFence(a.id, ROWS, () => told.push('rows'));
-    const sendFence = store.connectorFence(a.id, SEND, () => told.push('send'));
+    const rowsFence = store.connectorFence(a.id, rowsCall, 'read', () => told.push('rows'));
+    const sendFence = store.connectorFence(a.id, sendCall, 'once', () => told.push('send'));
     const revoking = store.revokeConnectorTool(a.id, ROWS);
     expect(told).toEqual(['rows']); // asked for, nothing committed yet
     expect(store.connectorFenceHolds(rowsFence, rowsCall, 'read')).toBe('revoked');
@@ -495,33 +547,39 @@ describe('ArtifactStore: the connector dispatch fence (P3-H H3b)', () => {
     expect(told).toEqual(['rows', 'send']); // each told once
   });
 
-  it('breaks even when the revoke’s batch is then lost (a refusal errs toward no call)', async () => {
-    reopen({ manual: true });
-    const creation = store.create({ kind: 'html', title: 'Live page', content: page('<p>a</p>') }, human);
-    tick();
-    const a = await creation;
-    const granting = store.grantConnectorTool(a.id, rows);
-    tick();
-    await granting;
-    const told: string[] = [];
-    const fence = store.connectorFence(a.id, ROWS, () => told.push('rows'));
-    const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
-      throw new Error('disk full');
+  for (const [what, ask] of [
+    ['revoke', (id: string) => store.revokeConnectorTool(id, ROWS)],
+    ['replacing re-grant', (id: string) => store.grantConnectorTool(id, { ...rows, mode: 'once' })],
+  ] as const) {
+    it(`breaks even when the ${what}’s batch is then lost (a refusal errs toward no call)`, async () => {
+      reopen({ manual: true });
+      const creation = store.create({ kind: 'html', title: 'Live page', content: page('<p>a</p>') }, human);
+      tick();
+      const a = await creation;
+      const granting = store.grantConnectorTool(a.id, rows);
+      tick();
+      await granting;
+      const told: string[] = [];
+      const fence = store.connectorFence(a.id, rowsCall, 'read', () => told.push('rows'));
+      const commit = vi.spyOn(storage, 'commit').mockImplementationOnce(() => {
+        throw new Error('disk full');
+      });
+      const asked = ask(a.id);
+      await settle();
+      tick();
+      await expect(asked).rejects.toThrow();
+      commit.mockRestore();
+      expect(grantsInFile(a.id)).toEqual([{ server: 'fixture', tool: 'rows', fingerprint: 'fp-1', mode: 'read' }]); // rolled back
+      expect(told).toEqual(['rows']);
+      expect(store.connectorFenceHolds(fence, rowsCall, 'read')).toBe('revoked');
     });
-    const revoking = store.revokeConnectorTool(a.id, ROWS);
-    await settle();
-    tick();
-    await expect(revoking).rejects.toThrow();
-    commit.mockRestore();
-    expect(told).toEqual(['rows']);
-    expect(store.connectorFenceHolds(fence, rowsCall, 'read')).toBe('revoked');
-  });
+  }
 
   it('a released fence is no longer told, and the store keeps nothing of it', async () => {
     const a = await store.create({ kind: 'html', title: 'Live page', content: page('<p>a</p>') }, human);
     await store.grantConnectorTool(a.id, rows);
     const told: string[] = [];
-    const fence = store.connectorFence(a.id, ROWS, () => told.push('rows'));
+    const fence = store.connectorFence(a.id, rowsCall, 'read', () => told.push('rows'));
     store.releaseConnectorFence(fence);
     await store.revokeConnectorTool(a.id, ROWS);
     expect(told).toEqual([]);
@@ -532,7 +590,7 @@ describe('ArtifactStore: the connector dispatch fence (P3-H H3b)', () => {
     const a = await store.create({ kind: 'html', title: 'Live page', content: page('<p>a</p>') }, human);
     await store.grantConnectorTool(a.id, rows);
     await store.grantConnectorTool(a.id, send);
-    const fence = store.connectorFence(a.id, ROWS);
+    const fence = store.connectorFence(a.id, rowsCall, 'read');
     expect(await store.authorizeConnectorCall(a.id, rowsCall, 'read')).toEqual({ granted: true, mode: 'read' });
     await store.revokeConnectorTool(a.id, SEND);
     expect(store.connectorFenceHolds(fence, rowsCall, 'read')).toBe('held');

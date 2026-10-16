@@ -1033,11 +1033,15 @@ export class ArtifactStore {
   }
 
   // The owner's grant of one tool to one artifact; a grant already held for the tool is replaced whole (a re-grant under
-  // a changed fingerprint, or Allow once again).
+  // a changed fingerprint, or Allow once again). H3b: asked for, it breaks every fence of the tool taken for another
+  // fingerprint or mode, as a revoke would (the authority that call was admitted under is withdrawn, its row present or
+  // already consumed); one taken for this very fingerprint and mode stays held, so a second Allow once does not stop
+  // the call the first admitted.
   grantConnectorTool(artifactId: string, request: ConnectorGrantRequest): Promise<ConnectorGrant> {
     return this.writeCommitted(async () => {
       const { server, tool, fingerprint, mode } = connectorInput(GRANT_INPUT, request, 'grant');
       this.requireLive(artifactId);
+      this.breakFences(artifactId, { server, tool }, (fence) => fence.fingerprint === fingerprint && fence.mode === mode);
       const grant: ConnectorGrant = { server, tool, fingerprint, mode, grantedAt: this.now() };
       await this.service.inBatch(() =>
         this.storage.db
@@ -1087,14 +1091,15 @@ export class ArtifactStore {
     });
   }
 
-  // H3b: the dispatch fence. Taken before the authorization and held until the call it guards has ended: a revoke of
-  // the tool or a delete of the artifact asked for meanwhile — committed, still in its batch, or later rolled back —
-  // breaks it at once, synchronously, and calls its `onBreak` (the holder aborts its operation there, so a write still
-  // queued behind the engine's stdin is dropped by the transport before it starts). A read call also needs its grant
+  // H3b: the dispatch fence. Taken for a call's fingerprint and expected mode before the authorization and held until
+  // the call it guards has ended: a revoke of the tool, a grant replacing it under another fingerprint or mode
+  // (`grantConnectorTool`) or a delete of the artifact asked for meanwhile — committed, still in its batch, or later
+  // rolled back — breaks it at once, synchronously, and calls its `onBreak` (the holder aborts its operation there, so a
+  // write still queued behind the engine's stdin is dropped by the transport before it starts). A read call also needs its grant
   // still there as authorized (the same fingerprint, still `read`); an Allow once's own consumption is the use it
   // authorized, so its fence needs no row. The holder releases it when its call ends, so nothing is retained.
-  connectorFence(artifactId: string, ref: ConnectorToolRef, onBreak?: () => void): ConnectorFence {
-    const fence: ConnectorFence = { artifactId, key: connectorToolKey(ref), broken: false, onBreak };
+  connectorFence(artifactId: string, call: ConnectorCallRef, mode: ConnectorGrantMode, onBreak?: () => void): ConnectorFence {
+    const fence: ConnectorFence = { artifactId, key: connectorToolKey(call), fingerprint: call.fingerprint, mode, broken: false, onBreak };
     let held = this.fences.get(artifactId);
     if (!held) this.fences.set(artifactId, (held = new Set()));
     held.add(fence);
@@ -1119,11 +1124,12 @@ export class ArtifactStore {
     return grant.mode === 'read' ? 'held' : 'wrongMode';
   }
 
-  // A revoke of `tool` (null: a delete of the artifact) asked for: every fence held of it breaks now.
-  private breakFences(artifactId: string, tool: ConnectorToolRef | null): void {
+  // A revoke of `tool` (null: a delete of the artifact), or a grant replacing it, asked for: every fence held of it
+  // breaks now, but those the replacing grant still `admits`.
+  private breakFences(artifactId: string, tool: ConnectorToolRef | null, admits?: (fence: ConnectorFence) => boolean): void {
     const key = tool && connectorToolKey(tool);
     for (const fence of [...(this.fences.get(artifactId) ?? [])]) {
-      if (key !== null && fence.key !== key) continue;
+      if ((key !== null && fence.key !== key) || admits?.(fence)) continue;
       fence.broken = true;
       this.releaseConnectorFence(fence);
       try {
@@ -1376,10 +1382,13 @@ const GRANT_INPUT = z.object(ConnectorGrantRequestSchema.shape);
 const TOOL_INPUT = z.object(ConnectorToolRefSchema.shape);
 const CALL_INPUT = z.object(ConnectorCallRefSchema.shape);
 
-// H3b: a connector call's dispatch fence (`connectorFence`): its tool, and whether a revoke or delete broke it.
+// H3b: a connector call's dispatch fence (`connectorFence`): its tool and authority, and whether a revoke, a replacing
+// grant or a delete broke it.
 export interface ConnectorFence {
   readonly artifactId: string;
   readonly key: string;
+  readonly fingerprint: string; // the authority it was taken for: the call's fingerprint and the mode its check admitted
+  readonly mode: ConnectorGrantMode;
   broken: boolean;
   readonly onBreak?: () => void;
 }

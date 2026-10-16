@@ -8,15 +8,15 @@
 //   mcp_status checked against what main admitted, the grant authorized with the mode main expects (so a grant swapped
 //   since is refused before an Allow once is consumed), mcp_status read again, and then, synchronously up to the
 //   request: not cancelled, the same live process in the same directory, the store's fence of the grant held (no
-//   revoke or delete asked for since the authorization began, a read grant still as authorized). The request is then
-//   queued for the engine's stdin, which may still be busy: the fence stays held until the call ends, and a revoke or
-//   delete asked for meanwhile breaks it synchronously and aborts the operation, so the transport drops a request not
-//   yet started (and a running one is cancelled). Its end is announced by id alone (`completed`), its outcome kept for
-//   one `take`.
+//   revoke, delete or grant replacing its fingerprint or mode asked for since the authorization began, a read grant
+//   still as authorized). The request is then queued for the engine's stdin, which may still be busy: the fence stays
+//   held until the call ends, and any of those asked for meanwhile breaks it synchronously and aborts the operation,
+//   so the transport drops a request not yet started (and a running one is cancelled). Its end is announced by id
+//   alone (`completed`), its outcome kept for one `take`.
 // - Nothing here launches, acquires or marks a session used; nothing outlives its bound: a running operation ends with
 //   mcp_call's long deadline, an untaken outcome after `resultTtlMs`, and all of them when main goes (`close`).
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
-import type { ConnectorAuthorization, ConnectorCallRef, ConnectorGrantMode, ConnectorToolRef } from '@shared/artifacts/connectors';
+import type { ConnectorAuthorization, ConnectorCallRef, ConnectorGrantMode } from '@shared/artifacts/connectors';
 import type { CommandInput } from '@shared/ipc/schema';
 import type { ConnectorOperationOutcome, ConnectorResolveAnswer } from '@shared/ipc/schema/connectors';
 import { mcpStatus } from '../controls';
@@ -35,7 +35,7 @@ export interface ConnectorSessionView {
 
 // The store's grant authority as the host's last check uses it (an ArtifactStore is one).
 export interface ConnectorGrantStore {
-  connectorFence(artifactId: string, ref: ConnectorToolRef, onBreak?: () => void): ConnectorFence;
+  connectorFence(artifactId: string, call: ConnectorCallRef, mode: ConnectorGrantMode, onBreak?: () => void): ConnectorFence;
   releaseConnectorFence(fence: ConnectorFence): void;
   authorizeConnectorCall(artifactId: string, call: ConnectorCallRef, expected?: ConnectorGrantMode): Promise<ConnectorAuthorization>;
   connectorFenceHolds(fence: ConnectorFence, call: ConnectorCallRef, mode: ConnectorGrantMode): 'held' | 'revoked' | 'fingerprintChanged' | 'wrongMode';
@@ -168,10 +168,11 @@ export class ConnectorCalls {
     // what main admitted, against the session's mcp_status now, before the grant is asked (and an Allow once used)
     const before = await this.admitted(first.client, input, signal);
     if (before !== null) return before;
-    const ref = { server: input.server, tool: input.tool };
-    // Broken by a revoke or delete the moment it is asked for: the operation aborts there, so a call not yet written
-    // (still queued behind the engine's stdin) never is, and one running is cancelled through control_cancel_request.
-    const fence = store.connectorFence(input.artifactId, ref, () => {
+    const call = { server: input.server, tool: input.tool, fingerprint: input.fingerprint };
+    // Broken by a revoke, a delete or a grant replacing this fingerprint and mode the moment it is asked for: the
+    // operation aborts there, so a call not yet written (still queued behind the engine's stdin) never is, and one
+    // running is cancelled through control_cancel_request.
+    const fence = store.connectorFence(input.artifactId, call, input.mode, () => {
       operation.revoked = true;
       operation.controller.abort();
     });
