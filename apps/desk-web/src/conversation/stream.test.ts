@@ -75,6 +75,20 @@ describe('the group chat', () => {
     expect(items.find((i) => i.kind === 'request')).toMatchObject({ ref: requestKey({ machine: 'SK.local', session: S2, request: 'toolu_1' }) });
     expect(items.find((i) => i.kind === 'question')).toMatchObject({ ref: requestKey({ machine: 'mini', session: S1, request: 'toolu_1' }) });
   });
+
+  it("joins an answer only to its own session's question when two sessions asked under the same id", () => {
+    offset = 0;
+    const entries = [
+      ev(`mini/${S1}`, 'question', { from: 'maws-45', to: 'host', text: 'A asks', choices: [], src: 'request-1' }), // 1
+      ev(`SK.local/${S2}`, 'question', { from: 'maws-fe', to: 'host', text: 'B asks', choices: [], src: 'request-1' }), // 2
+      ev(`SK.local/${S2}`, 'answered', { from: 'maws-fe', src: 'request-1', text: 'Answer to B' }), // 3
+    ];
+    const questions = buildStream({ kind: 'group' }, entries, aliases, []).filter((i) => i.kind === 'question');
+    expect(questions.map((q) => [q.text, q.answered?.text ?? null])).toEqual([
+      ['A asks', null],
+      ['B asks', 'Answer to B'],
+    ]);
+  });
 });
 
 describe('status and state', () => {

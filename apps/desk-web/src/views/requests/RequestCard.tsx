@@ -160,7 +160,8 @@ function QuestionCard({ record, state, member }: { record: RequestRecord; state:
       </ul>
     );
   }
-  const item = { id: `desk:${connection.project}:${record.request}` } as unknown as AttentionItem;
+  // MAWS's stepper keeps its draft under this id: the request's whole identity, since an id is minted per bridge.
+  const item = { id: `desk:${connection.project}:${record.key}` } as unknown as AttentionItem;
   const request = { kind: 'question.requested', questions } as unknown as Extract<SessionEvent, { kind: 'question.requested' }>;
   return (
     <>

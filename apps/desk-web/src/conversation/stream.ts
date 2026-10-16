@@ -60,7 +60,10 @@ export const writerSession = (writer: string): string | null => {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) ? id : null;
 };
 
-/** The key of the request a session's `question` event was raised as: its writer's machine and session, and its `src`. */
+/**
+ * The key of the request a session's `question` (or its `answered`) event belongs to: its writer's machine and session,
+ * and its `src`.
+ */
 const questionRef = (event: LogEvent): string =>
   requestKey({ machine: writerMachine(event.writer) ?? '', session: writerSession(event.writer) ?? '', request: str(event.src) });
 
@@ -130,10 +133,10 @@ export function buildStream(
 ): StreamItem[] {
   const alias = (id: unknown) => (typeof id === 'string' ? (aliases.get(id) ?? id.slice(0, 8)) : '');
   const shown = entries.filter((e) => inChannel(e.event, channel));
-  // A question's answer, wherever its channel draws it (a direct channel does not draw `answered` on its own).
+  // A question's answer, wherever its channel draws it (a direct channel does not draw `answered` on its own), joined
+  // by the session that asked as well as the call's id: an id may be minted per bridge.
   const answers = new Map<string, Entry>();
-  for (const e of entries) if (e.event.kind === 'answered' && str(e.event.src)) answers.set(str(e.event.src), e);
-  const questionCalls = new Set(shown.filter((e) => e.event.kind === 'question').map((e) => str(e.event.src)));
+  for (const e of entries) if (e.event.kind === 'answered' && str(e.event.src)) answers.set(questionRef(e.event), e);
   const questionRefs = new Set(shown.filter((e) => e.event.kind === 'question').map((e) => questionRef(e.event)));
   const placed = requests
     .filter((r) => (channel.kind === 'group' || r.session === channel.session) && !questionRefs.has(r.key))
@@ -189,7 +192,7 @@ export function buildStream(
       }
       case 'question': {
         const session = writerSession(event.writer);
-        const answer = answers.get(str(event.src));
+        const answer = answers.get(questionRef(event));
         workBefore(`work:${offset}`, offset, session, str(event.src));
         push({
           kind: 'question',
@@ -207,7 +210,7 @@ export function buildStream(
         break;
       }
       case 'answered':
-        if (!questionCalls.has(str(event.src))) push({ kind: 'system', key, offset, event, text: `${str(event.from)} was answered: ${str(event.text)}` });
+        if (!questionRefs.has(questionRef(event))) push({ kind: 'system', key, offset, event, text: `${str(event.from)} was answered: ${str(event.text)}` });
         break;
       case 'state': {
         const session = str(event.session);
