@@ -2,8 +2,10 @@
 // `dashboard` kind's adapter with A's document service, B's document adapter under the dashboard kind (portable,
 // src/artifacts/dashboard/adapter.ts) wrapped here with the derived change index its hooks keep in the store's metadata
 // in the frame of each write (changes.ts). B's tools reach the adapter by the artifact's kind (`documentAdapterOf`),
-// `artifact_dataset` reaches its `lastChange` through `dashboardAdapterOf`. Wired by one line in src/engine-host/index.ts.
+// `artifact_dataset` reaches its `lastChange` through `dashboardAdapterOf`. M5: the mirror writer, registered beside it. Wired by one line in src/engine-host/index.ts.
 import { dashboardAdapter } from '@artifacts/dashboard/adapter';
+import { dashboardMirrorWriter } from '@artifacts/dashboard/mirror'; // E2 M5
+import { registerMirrorWriter } from '@artifacts/library/mirror'; // E2 M5
 import type { DocumentAdapter } from '@artifacts/document/adapter';
 import { mainOf } from '../documents/service';
 import type { Documents } from '../documents';
@@ -46,7 +48,14 @@ export function registerDashboards({ documents }: { documents: Pick<Documents, '
   const off = store.onChange((change) => {
     if (change.kind === 'dashboard' && change.change === 'deleted') adapter.forgetArtifact(change.artifactId);
   });
-  return { close: off };
+  // E2 M5: a linked Space mirrors the dashboard's dialect, its bindings and its snapshots (src/artifacts/dashboard/mirror.ts)
+  const offMirror = registerMirrorWriter('dashboard', dashboardMirrorWriter);
+  return {
+    close: () => {
+      off();
+      offMirror();
+    },
+  };
 }
 
 /** The dashboard adapter registered with `store`, or null when the dashboard kind is not registered. */
