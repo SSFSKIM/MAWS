@@ -63,7 +63,7 @@ describe('the deck’s standalone page', () => {
     expect(html).toContain('<x-icon data-eid="star" data-layer="under" name="Star"');
     expect(html).toMatch(/<x-icon[^>]*><svg viewBox="0 0 24 24"[^>]*><path d="M /);
     expect(html).toMatch(/<x-embed data-eid="live"[^>]*><iframe sandbox="allow-scripts" tabindex="-1" srcdoc="[^"]*default-src &#39;none&#39;|<x-embed data-eid="live"[^>]*><iframe sandbox="allow-scripts" tabindex="-1" srcdoc="[^"]*default-src 'none'/);
-    expect(html).toContain('<svg data-eid="chart" data-layer="under" aria-label="A dot" data-svg-scope="esvg4-body-chart" viewBox="0 0 100 100"');
+    expect(html).toContain('<svg data-eid="chart" data-layer="under" aria-label="A dot" data-svg-scope="esvg1" viewBox="0 0 100 100"');
     expect(html).toContain('<x-embed data-eid="live" style=');
     const under = exportDeckOf(fixtureDoc({ ...FIXTURE_FILES, 'project/slides/body.html': '<section id="body"><div id="back" style="position:absolute; left:0; top:0; width:100px; height:100px; background:#ff0000"></div><p id="t">Over</p></section>' }), 'x');
     const drawn = deckPage(under, { mode: 'html', resolveVar: () => undefined, asset, facesCss: '' });
@@ -180,5 +180,27 @@ describe('the deck’s standalone page: the final review', () => {
     expect(scopes[0]).not.toBe(scopes[1]);
     expect(scopesOf('measure')).toEqual(scopes);
     expect(scopesOf('print')).toEqual(scopes);
+  });
+
+  // the follow-up review: the renamed ids too (element `art` with `a_b`, element `art_a` with `b`), and the scope the same
+  // in a pass that writes a hidden slide (measure) and one that does not (html, print)
+  it('A16: renames every drawing’s ids unambiguously, the same in every pass, hidden slides or not', () => {
+    const svg = (id: string, grad: string, left: number) =>
+      `<svg id="${id}" viewBox="0 0 10 10" style="position:absolute; left:${left}px; top:0px; width:10px; height:10px"><linearGradient id="${grad}"><stop offset="0" stop-color="#ff0000"></stop></linearGradient><rect width="1" height="1" fill="url(#${grad})"></rect></svg>`;
+    const files = {
+      'project/deck.json': JSON.stringify({ v: 4, order: ['h', 's'] }),
+      'project/slides/h.html': `<section id="h" hidden>${svg('art', 'g', 0)}</section>`,
+      'project/slides/s.html': `<section id="s">${svg('art', 'a_b', 0)}${svg('art_a', 'b', 20)}</section>`,
+    };
+    const deck = exportDeckOf(fixtureDoc(files), 'x');
+    const page = (mode: PageOptions['mode']) => deckPage(deck, { mode, resolveVar: () => undefined, asset, facesCss: '' });
+    const gradients = (html: string) => [...html.matchAll(/<lineargradient id="([^"]+)"|<linearGradient id="([^"]+)"/g)].map((m) => m[1] ?? m[2]);
+    const shown = gradients(page('html'));
+    expect(shown).toHaveLength(2);
+    expect(shown[0]).not.toBe(shown[1]);
+    expect(gradients(page('print'))).toEqual(shown);
+    const measured = gradients(page('measure'));
+    expect(measured).toHaveLength(3);
+    expect(measured.slice(1)).toEqual(shown); // the hidden slide's drawing shifts nothing
   });
 });

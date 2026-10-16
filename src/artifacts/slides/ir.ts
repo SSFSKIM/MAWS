@@ -57,8 +57,10 @@ export interface SlideIR {
 export type Severity = 'warning' | 'note';
 /**
  * What the loader dropped or changed, shaped for the agent's tool answer (X25): the slide, the element (its id; absent
- * for the section itself) and the property or attribute concerned. A warning changed something visible; a note healed
- * to an equivalent.
+ * for the section itself) and the property or attribute concerned. A note healed to an equivalent. A warning dropped or
+ * trimmed something the file held (lossy) unless it is `advisory`: content kept as written, with advice about how it
+ * draws. Each warning site in the loader makes the call itself (parse.ts `warn` or `advise`; every css.ts and deck.ts
+ * warning drops); the publish refuses a merge only for a lossy one (the final review's A2).
  */
 export interface Diagnostic {
   severity: Severity;
@@ -66,6 +68,8 @@ export interface Diagnostic {
   element?: string;
   property?: string;
   message: string;
+  /** A warning about content kept as written (nothing dropped or changed). */
+  advisory?: true;
 }
 
 export type LoadResult =

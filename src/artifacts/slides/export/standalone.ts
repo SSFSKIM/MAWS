@@ -155,7 +155,8 @@ const VIEWER = `(function () {
 })();`;
 
 interface Writer {
-  slideId: string;
+  /** Each svg drawing's number on the page by element id (this slide's). */
+  drawings: ReadonlyMap<string, number>;
   options: PageOptions;
   measured: Map<string, MeasuredElement>;
   pictures: ReadonlyMap<string, string> | undefined;
@@ -202,9 +203,8 @@ function elementHtml(el: ElementIR, w: Writer, under: boolean): string {
   if (el.id) attrs.push(`data-eid="${escAttr(el.id)}"`);
   if (under) attrs.push('data-layer="under"');
   // an svg drawing contained as the canvas contains it: its stylesheets and ids its own on the one page (A16)
-  // its scope names the slide and the element unambiguously (ids may hold hyphens: the slide id's length goes first) and
-  // the same in every pass of the page
-  const drawing = el.tag === 'svg' ? containSvgMarkup(el.attrs, el.raw ?? '', `esvg${w.slideId.length}-${w.slideId}-${el.id}`) : null;
+  // its scope is the drawing's number in the deck (`esvg<n>`, so `esvg<n>_<id>` never meets another drawing's renamed id)
+  const drawing = el.tag === 'svg' ? containSvgMarkup(el.attrs, el.raw ?? '', `esvg${w.drawings.get(el.id) ?? 0}`) : null;
   const own = drawing?.attrs ?? el.attrs;
   for (const k of Object.keys(own).sort()) {
     if (el.tag === 'img' && k === 'src') continue;
@@ -242,9 +242,30 @@ function elementHtml(el: ElementIR, w: Writer, under: boolean): string {
   return el.tag === 'img' || el.tag === 'hr' ? head : `${head}${inner}</${el.tag}>`;
 }
 
-function slideHtml(slide: ExportSlide, options: PageOptions): string {
+/**
+ * Every svg drawing of the deck numbered in deck order, hidden slides and slides a pass leaves out included, so the
+ * measure, html and print passes give each drawing the same number (A16).
+ */
+function drawingNumbers(deck: ExportDeck): Map<string, Map<string, number>> {
+  const numbers = new Map<string, Map<string, number>>();
+  let n = 0;
+  for (const slide of deck.slides) {
+    const own = new Map<string, number>();
+    const walk = (els: ElementIR[]) => {
+      for (const el of els) {
+        if (el.tag === 'svg') own.set(el.id, ++n);
+        walk(el.children);
+      }
+    };
+    walk(slide.ir.children);
+    numbers.set(slide.id, own);
+  }
+  return numbers;
+}
+
+function slideHtml(slide: ExportSlide, options: PageOptions, drawings: ReadonlyMap<string, number>): string {
   const measuredSlide = options.measured?.slides.find((s) => s.id === slide.id);
-  const w: Writer = { slideId: slide.id, options, measured: new Map((measuredSlide?.elements ?? []).map((e) => [e.id, e])), pictures: options.pictures?.get(slide.id) };
+  const w: Writer = { drawings, options, measured: new Map((measuredSlide?.elements ?? []).map((e) => [e.id, e])), pictures: options.pictures?.get(slide.id) };
   const attrs = [`class="maws-slide"`, `data-slide="${escAttr(slide.id)}"`];
   for (const k of Object.keys(slide.ir.attrs).sort()) {
     if (k === 'hidden') attrs.push('data-hidden=""');
@@ -261,7 +282,8 @@ function slideHtml(slide: ExportSlide, options: PageOptions): string {
 export function deckPage(deck: ExportDeck, options: PageOptions): string {
   const ids = options.only ? new Set(options.only) : null;
   const slides = deck.slides.filter((s) => (ids ? ids.has(s.id) : options.mode === 'measure' || !s.hidden));
-  const body = slides.map((s) => slideHtml(s, options)).join('\n');
+  const drawings = drawingNumbers(deck);
+  const body = slides.map((s) => slideHtml(s, options, drawings.get(s.id) ?? new Map())).join('\n');
   const script = options.mode === 'html' ? `<script>${VIEWER}</script>` : '';
   return [
     '<!doctype html>',

@@ -126,6 +126,7 @@ interface Pending {
   subject: Subject;
   property?: string;
   message: string;
+  advisory?: true;
 }
 
 class Loader {
@@ -155,8 +156,13 @@ class Loader {
   private report(severity: Diagnostic['severity'], subject: Subject, message: string, property?: string) {
     this.pending.push({ severity, subject, message, ...(property === undefined ? {} : { property }) });
   }
+  /** A lossy warning: something the file held is dropped, trimmed or replaced. */
   private warn(subject: Subject, message: string, property?: string) {
     this.report('warning', subject, message, property);
+  }
+  /** An advisory warning: the content is kept as written (the final review's A2: a merge is never refused for one). */
+  private advise(subject: Subject, message: string, property?: string) {
+    this.pending.push({ severity: 'warning', subject, message, ...(property === undefined ? {} : { property }), advisory: true });
   }
   private note(subject: Subject, message: string, property?: string) {
     this.report('note', subject, message, property);
@@ -176,6 +182,7 @@ class Loader {
         ...(element === undefined ? {} : { element }),
         ...(p.property === undefined ? {} : { property: p.property }),
         message: cell === undefined ? p.message : `cell ${cell + 1}: ${p.message}`,
+        ...(p.advisory && { advisory: true as const }),
       });
     }
     this.pending = [];
@@ -319,7 +326,7 @@ class Loader {
       if (byteLength(raw) > SLIDE_LIMITS.svgBytes) this.hold(`an <svg> over ${SLIDE_LIMITS.svgBytes / 1024} KB`);
       const problem = svgProblem(n);
       if (problem !== null) this.hold(problem);
-      if (/<text[\s>]/i.test(raw)) this.warn(subject, 'an <svg> <text> draws without the deck’s fonts; put labels in <p> elements over it');
+      if (/<text[\s>]/i.test(raw)) this.advise(subject, 'an <svg> <text> draws without the deck’s fonts; put labels in <p> elements over it');
       el.raw = raw;
     } else if (tag === 'x-embed') {
       if (parent.tag !== 'section') this.hold('<x-embed> is not a direct child of the section');

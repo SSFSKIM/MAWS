@@ -604,10 +604,11 @@ function projectedLoss(live: Doc, id: string, write: (w: Writer) => void): strin
     transact(scratch, () => write(new Writer(scratch)));
     const loaded = loadSlide(slideFile(scratch, id), { fileId: id });
     if (!loaded.ok) return loaded.held.reasons;
-    // loading only by losing something counts as not loading: a warning is the loader's drop or trim of what the file
-    // held (a property out of its range, a pair out of its ratio, one that no longer applies); a note heals to an
-    // equivalent and never refuses. A warning the live slide's own file already gives is not the merge's.
-    const lossy = (diagnostics: typeof loaded.diagnostics) => diagnostics.filter((d) => d.severity === 'warning').map((d) => `${d.element !== undefined ? `element ${d.element}: ` : ''}${d.message}`);
+    // loading only by losing something counts as not loading: a lossy warning (each loader site classifies its own, ir.ts
+    // `Diagnostic`) is a drop or trim of what the file held (a property out of its range, a pair out of its ratio, one
+    // that no longer applies); an advisory warning keeps the content as written and a note heals to an equivalent, so
+    // neither refuses. A lossy warning the live slide's own file already gives is not the merge's.
+    const lossy = (diagnostics: typeof loaded.diagnostics) => diagnostics.filter((d) => d.severity === 'warning' && !d.advisory).map((d) => `${d.element !== undefined ? `element ${d.element}: ` : ''}${d.message}`);
     const lost = lossy(loaded.diagnostics);
     if (!lost.length) return null;
     const before = loadSlide(slideFile(live, id), { fileId: id });

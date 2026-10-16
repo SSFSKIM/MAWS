@@ -668,4 +668,16 @@ describe('publishDeck: the final review', () => {
     expect(publish(doc, base, { [S]: sent }).conflicts).toEqual([]);
     expect(el(doc, 's1', 't')!.style.color).toBe('var(--ds-brandx)');
   });
+
+  it('A2: lands a merge whose reload only adds an advisory warning (an svg <text>, kept as written)', () => {
+    const doc = small('<section id="s1"><p id="t">T</p></section>');
+    const base = deckFiles(doc);
+    setText(doc, 's1', 't', [{ type: 'p', inline: [{ text: 'Owner', marks: {} }] }]); // the owner, after the read
+    const sent = base[S]!.replace('</section>', '<svg id="chart" viewBox="0 0 10 10" style="position:absolute; left:0px; top:0px; width:100px; height:100px"><text x="1" y="5">Label</text></svg></section>');
+    const out = publish(doc, base, { [S]: sent });
+    expect(out.conflicts).toEqual([]);
+    expect(out.warnings).toContainEqual(expect.objectContaining({ element: 'chart', message: expect.stringContaining('<text>') }));
+    expect(Y.elementIds(doc, 's1')).toContain('chart');
+    expect(textOf(doc, 's1', 't')).toContain('Owner');
+  });
 });
