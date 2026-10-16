@@ -114,7 +114,7 @@ describe('the host’s design module', () => {
 });
 
 describe('a mirrored board that becomes held (M2 fix wave)', () => {
-  it('keeps the uploaded assets its held source still names on disk, and drops one no file names any more', async () => {
+  it('keeps every upload on disk while any board is held, whatever spelling its source uses, and cleans up once all boards load again', async () => {
     start();
     await startMirror();
     const space = await documents.store.createSpace({ name: 'Launch', linkedDir: project });
@@ -122,20 +122,28 @@ describe('a mirrored board that becomes held (M2 fix wave)', () => {
     await documents.store.uploadAsset(design.id, new Uint8Array([4, 2]), { name: 'hero.png', mime: 'image/png' }, HUMAN);
     await documents.store.uploadAsset(design.id, new Uint8Array([7]), { name: 'bg.png', mime: 'image/png' }, HUMAN);
     await documents.store.uploadAsset(design.id, new Uint8Array([9]), { name: 'old.png', mime: 'image/png' }, HUMAN);
+    const assetsOnDisk = () => listed(design).filter((file) => file.startsWith('assets/'));
     await publish(design.id, { [boardPath('desktop')]: '<section id="desktop" style="background:url(assets/bg.png) center / cover"><img id="hero" src="assets/hero.png" alt=""><img id="old" src="assets/old.png" alt=""></section>' });
     await settle();
     await mirror!.flush();
-    expect(listed(design).filter((file) => file.startsWith('assets/'))).toEqual(['assets/bg.png', 'assets/hero.png', 'assets/old.png']);
+    expect(assetsOnDisk()).toEqual(['assets/bg.png', 'assets/hero.png', 'assets/old.png']);
 
-    // the board turns held (loose text in a div); its source still names two of the three pictures, one in quoted CSS
-    const held = `<section id="desktop" style="background:url('assets/bg.png') center / cover"><div id="box">loose text</div><img id="hero" src="assets/hero.png" alt=""></section>`;
+    // the board turns held (loose text in a div); its source names its pictures through a numeric HTML entity and a CSS
+    // escape, spellings no literal match finds
+    const held = String.raw`<section id="desktop" style="background:url('assets/bge png') center / cover"><div id="box">loose text</div><img id="hero" src="assets/hero&#46;png" alt=""></section>`;
     await publish(design.id, { [boardPath('desktop')]: held });
     await settle();
     await mirror!.flush();
     expect(readFileSync(out(design, 'boards', 'desktop.html'), 'utf8')).toBe(held);
     expect([...readFileSync(out(design, 'assets', 'hero.png'))]).toEqual([4, 2]);
     expect([...readFileSync(out(design, 'assets', 'bg.png'))]).toEqual([7]);
-    expect(existsSync(out(design, 'assets', 'old.png'))).toBe(false);
+    expect([...readFileSync(out(design, 'assets', 'old.png'))]).toEqual([9]); // retained while a board is held
+
+    // every board loads again: only what the boards name stays
+    await publish(design.id, { [boardPath('desktop')]: '<section id="desktop"><img id="hero" src="assets/hero.png" alt=""></section>' });
+    await settle();
+    await mirror!.flush();
+    expect(assetsOnDisk()).toEqual(['assets/hero.png']);
   });
 });
 

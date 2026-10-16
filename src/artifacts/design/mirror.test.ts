@@ -52,7 +52,8 @@ const write = (doc: Doc, reads: string[] = []) =>
 describe('the design mirror writer', () => {
   it('writes the manifest without the overrides and each board with its tokens resolved in the document medium', () => {
     const files = write(model());
-    expect(Object.keys(files).sort()).toEqual([`${FOLDER}/assets/brand.woff2`, `${FOLDER}/assets/logo.png`, `${FOLDER}/boards/broken.html`, `${FOLDER}/boards/phone.html`, `${FOLDER}/canvas.json`]);
+    // a held board (`broken`) keeps every upload in the mirror, `unused.png` too, until all boards load
+    expect(Object.keys(files).sort()).toEqual([`${FOLDER}/assets/brand.woff2`, `${FOLDER}/assets/logo.png`, `${FOLDER}/assets/unused.png`, `${FOLDER}/boards/broken.html`, `${FOLDER}/boards/phone.html`, `${FOLDER}/canvas.json`]);
     const canvas = JSON.parse(files[`${FOLDER}/canvas.json`] as string) as Record<string, unknown>;
     expect(canvas).toMatchObject({ v: 1, title: 'Launch', order: ['phone', 'broken', 'ghost'], boards: { phone: { x: 0, y: 0, w: 390, h: 844, title: 'Phone' }, ghost: { w: 390 } } });
     expect(canvas.dsOverrides).toBeUndefined();
@@ -75,11 +76,13 @@ describe('the design mirror writer', () => {
     expect(reads).toEqual(['assets/logo.png']);
   });
 
-  it('copies the uploads a held board’s source names, quoted or not, as a valid board’s would be (M2 fix wave)', () => {
-    const held = `<section id="broken" style="background:url("assets/unused.png")"><div id="box">loose text</div><img id="logo" src='assets/logo.png'></section>`;
+  it('keeps every upload while a board is held, however its source spells a reference; only named ones once all boards load (M2 fix wave)', () => {
+    const held = String.raw`<section id="broken" style="background:url(assets/unused\2e png)"><div id="box">loose text</div><img id="logo" src="assets/logo&#46;png"></section>`;
     const files = write(model({ ...FILES, [boardPath('broken')]: held }));
     expect(files[`${FOLDER}/boards/broken.html`]).toBe(held);
     expect(Object.keys(files).filter((file) => file.includes('/assets/')).sort()).toEqual([`${FOLDER}/assets/brand.woff2`, `${FOLDER}/assets/logo.png`, `${FOLDER}/assets/unused.png`]);
+    const loaded = write(model({ ...FILES, [boardPath('broken')]: '<section id="broken"><p id="t">Fixed</p></section>' }));
+    expect(Object.keys(loaded).filter((file) => file.includes('/assets/')).sort()).toEqual([`${FOLDER}/assets/brand.woff2`, `${FOLDER}/assets/logo.png`]);
   });
 
   it('mirrors a legacy generic-file state as its migration would build it, writing nothing to the state', () => {
