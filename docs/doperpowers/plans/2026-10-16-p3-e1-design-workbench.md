@@ -9,8 +9,8 @@ An owner and an agent can work on a design containing phone screens, desktop scr
 ## Progress
 
 - [x] (2026-10-16) Parent, interface ledger and E0 findings grounded against C's model, editor, export and host seams; one frozen offline-preferred install completed through the shared slot.
-- [ ] Execution-document adversarial review and architect checkpoint.
-- [ ] M1 — Manifest, board mutations, property-level publish and adapter.
+- [ ] Execution-document adversarial review running; architect checkpoint approved (parent Decision Log 11, master 68a9784e4).
+- [ ] M1 — Manifest, board mutations, property-level publish and adapter (executing from bcc7e3214 while the independent plan review runs).
 - [ ] M2 — Host migration, tools, mirror and agent guides.
 - [ ] M3 — Mounted-board workbench and C's additive dimensions.
 - [ ] M4 — Object comments and board history.
@@ -54,7 +54,7 @@ These are the parent's eight E1 acceptance items, with E0's settled measurements
 
 ## Checkpoint residue
 
-The following proposals require the architect's shared-name ruling; M1's portable implementation does not depend on them.
+The architect approved all four proposals in the parent's Decision Log 11 (master 68a9784e4), with X23/X27 ledger rows. They are the execution rulings below, not open questions; conditional additions still require the code proof they name.
 
 1. **Migration before access.** A's `readFiles` reads a temporary doc and `DocumentService.attach` is synchronous, so neither is an honest async committed migration hook. Recommend an additive `KindAdapter.migrate?(doc): boolean` portable operation plus `ArtifactStore.ensureMigrated(artifactId, actor): Promise<void>` host entry point, awaited before live renderer open and live tool read/write. It tests on a scratch/read doc before opening a write, rechecks inside `writeAs`, and resolves after commit. The design migration empties `files` only after the complete model validates. Version reads remain unmigrated. The host entry points, not all synchronous service readers, invoke it; migrated state is its own marker, so no SQL/schema slot. Exact access sites and restored-legacy behavior are proved in M2. An unparseable legacy manifest refuses without erasing its files.
 2. **Capture helper.** C's `measurePass` is private and takes private `Prepared`; recommend export it with the narrower structural parameter `Pick<Prepared, 'deck' | 'page'>`, unchanged implementation/default behavior. Reuse `withDeckWindow`, `deckSystem`, `systemFacesCss` and the portable standalone generator, not a second capture path. `ExportSlide.size?` and node-derived size follow E0. If design screen CSS needs a shared standalone option, recommend `PageOptions.extraCss?: string`, empty by default, supplied only by trusted design code.
@@ -150,6 +150,8 @@ Record every run id, tested sha, counts and actual measures here before hand-bac
 ## Decision Log
 
 1. **2026-10-16, E1 authoring.** Verification: an adversarial execution-document review, task-executor/task-reviewer per milestone at dependency frontiers, then whole-branch `doperpowers:reviewer-high` and one combined fix wave for verified findings. The plan preserves the approved design and adopts E0's always-mounted/document-medium/model-cap/id rulings rather than reopening them. Report artifacts return directly to the controller (the harness prohibits report-shaped Markdown files); durable task state is recorded in this document and a non-report text ledger if needed.
+
+2. **2026-10-16, architect checkpoint 1 (parent Decision Log 11).** All four residue recommendations approved and recorded on X23/X27: the portable migration hook and host committed-access method; exported narrow `measurePass` and optional trusted `extraCss`; missing-source board marker; provider composition for board comments, optional callback only if composition proves insufficient. E0's scale table ratified unchanged. The architect adds `design` to the default gate list at landing (not before its script exists). M1 proceeds while the plan review runs; requested hooks are not implemented before their milestone.
 
 ## Outcomes & Retrospective
 
