@@ -5,11 +5,11 @@ name: gate
 
 on:
   push:
-    branches: ['ci/**']
+    branches: ['ci/**', master]
   workflow_dispatch:
     inputs:
       gates:
-        description: 'A comma list over static, unit, probes, e2e:<group> (e2e:default is the bare `pnpm e2e`); empty runs the default set.'
+        description: 'A comma list over static, unit, unit:darwin, probes, e2e:<group> (e2e:default is the bare `pnpm e2e`); empty runs the default set.'
         type: string
         default: ''
       runner:
@@ -45,7 +45,18 @@ defaults:
     shell: bash
 
 jobs:
+  # Master's caches are readable by fresh ci/ refs, unlike another ci/ ref's caches (Decision Log 26).
+  # Warm them once on landing so matching Linux jobs restore without re-saving.
+  warm:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+
   plan:
+    if: github.ref != 'refs/heads/master'
     # Class 1a's runner is chosen here alone (the jobs below repeat the anchor): Linux, or the self-hosted Mac when the
     # repository variable GATE_RUNNER is `macos` (§3.6). The e2e jobs take the lane the plan resolves.
     runs-on: &runner ${{ vars.GATE_RUNNER == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-24.04' }}
@@ -53,6 +64,7 @@ jobs:
     outputs:
       static: ${{ steps.plan.outputs.static }}
       unit: ${{ steps.plan.outputs.unit }}
+      unit_darwin: ${{ steps.plan.outputs.unit_darwin }}
       probes: ${{ steps.plan.outputs.probes }}
       e2e: ${{ steps.plan.outputs.e2e }}
       e2e_runner: ${{ steps.plan.outputs.e2e_runner }}
@@ -98,6 +110,19 @@ jobs:
       # The bundle guard among the unit suites reads the built engine-host chunk.
       - run: .github/scripts/gate-run.sh 'built in|error' pnpm build
       - run: .github/scripts/gate-run.sh '^ *(Test Files|Tests|Type Errors|Errors|Duration) |^ *FAIL ' pnpm test --maxWorkers="$(getconf _NPROCESSORS_ONLN)"
+
+  unit-darwin:
+    name: unit:darwin
+    needs: plan
+    if: needs.plan.outputs.unit_darwin == 'true'
+    runs-on: [self-hosted, macOS, ARM64]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+        with:
+          apt: zsh # the shared setup skips apt on macOS
+      - run: .github/scripts/gate-run.sh '^ *(Test Files|Tests|Type Errors|Errors|Duration) |^ *FAIL ' pnpm exec vitest run --maxWorkers="$(getconf _NPROCESSORS_ONLN)" $(scripts/darwin-unit-files.sh)
 
   probes:
     needs: plan

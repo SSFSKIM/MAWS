@@ -87,7 +87,7 @@ export default defineConfig({
         test: {
           name: 'renderer',
           environment: 'happy-dom',
-          include: ['src/renderer/**/*.test.{ts,tsx}'],
+          include: ['src/renderer/**/*.test.{ts,tsx}', 'src/main/artifacts/*.dom.test.tsx'],
           exclude: [...configDefaults.exclude, RENDERER_NODE_TESTS, ...TIMING_RENDERER_TESTS],
         },
       },

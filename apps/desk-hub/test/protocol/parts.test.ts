@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FRAME_LIMIT, PartAssembler, PartsBudgetError, toWire } from '../../src/protocol/parts';
+import { FRAME_LIMIT, PART_ID_LIMIT, PartAssembler, PARTS_MAX_SETS, PartsBudgetError, toWire } from '../../src/protocol/parts';
 
 const utf8 = (s: string) => new TextEncoder().encode(s).length;
 
@@ -66,5 +66,20 @@ describe("an assembler's unfinished sets are bounded (panel finding scalpel-5#2)
     expect(() => assembler.add(part('new', 0, 2, 900))).not.toThrow(); // the old sets' 900 were let go
     // A late part of an expired set starts a set of its own, which never finishes the old frame.
     expect(assembler.add(part('old0', 1, 2, 50))).toBeUndefined();
+  });
+
+  it('in what the sets themselves cost: the open sets are counted, and an id is short, whatever their data (zero-size and tiny parts)', () => {
+    let now = 0;
+    const assembler = new PartAssembler({ now: () => now });
+    for (let i = 0; i < PARTS_MAX_SETS; i++) assembler.add(part(`empty${i}`, 0, 2, i % 2)); // empty and one-byte data
+    expect(() => assembler.add(part('one-more', 0, 2, 0))).toThrow(PartsBudgetError);
+    // A part of a set already open is still taken.
+    expect(() => assembler.add(part('empty1', 0, 2, 1))).not.toThrow();
+    // An id longer than the bound is malformed, data or not.
+    expect(() => assembler.add(part('i'.repeat(PART_ID_LIMIT + 1), 0, 2, 0))).toThrow(TypeError);
+    expect(() => assembler.add(part('i'.repeat(64 * 1024), 0, 2, 0))).toThrow(TypeError);
+    // Expired sets free their places.
+    now = 60_001;
+    expect(() => assembler.add(part('one-more', 0, 2, 0))).not.toThrow();
   });
 });

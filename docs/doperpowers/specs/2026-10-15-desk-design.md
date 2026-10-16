@@ -1149,8 +1149,8 @@ consumers start after that gate.
   `claimed` with no outcome (the daemon stopped between the two writes) is
   not executed again either: it is reconciled from the action's own trace
   where one exists (a spawned seat carries the nonce that started it; a
-  steer's row is in the transcript) and otherwise answered `failed:
-  interrupted`, for the human to look at. An unknown nonce older than 60
+  steer's answer from the mod is kept by the bridge child under the nonce)
+  and otherwise answered `failed: interrupted`, for the human to look at. An unknown nonce older than 60
   seconds is refused. The hub marks an RPC `uncertain` when
   the machine's connection drops after the RPC was forwarded and before its
   result arrived, and resolves it from the results the daemon republishes
@@ -1688,7 +1688,12 @@ browser's larger frame is refused `too-large`, unread. A larger frame travels as
 one logical frame, which may be larger than 1 MiB (the bound is the wire's):
 each holds a slice of the frame's JSON text (`data`), all with one random `id` and the set's `count`, `index` from 0;
 the receiver joins the slices in index order when the last arrives, in whatever order they came, and parses the
-whole. A slice never splits a surrogate pair. (`toWire` and `PartAssembler` in `parts.ts`.)
+whole. A slice never splits a surrogate pair. (`toWire` and `PartAssembler` in `parts.ts`.) A receiver's unfinished
+sets are bounded, one assembler per machine stream and per browser socket: at most 16 MiB of part data held across
+its sets, at most 64 sets open, an `id` of at most 128 characters (the hub's own are 22, a 128-bit nonce), and a set
+waiting more than 60 s for its other parts is dropped (a late part of it starts a set of its own). A part that would
+pass the byte budget or open a 65th set is refused `too-large` (a machine's POST `413`, a browser's `refused`) and its
+set dropped; a longer `id` is `bad-shape` [2026-10-15, DC3's panel wave].
 
 **Measured (M1's probe on the owner's account, 2026-10-15):** an SSE stream held by a Durable Object for 11 minutes
 with 15-second heartbeats, never evicted; a second stream idle 150 seconds between heartbeats also held, so the
@@ -1725,7 +1730,7 @@ below); a frame naming a `sub` this socket does not hold (one that just ended, s
 
 | `t` | fields | meaning |
 | --- | --- | --- |
-| `resume` | `after` | the events with an offset above `after` (0 is the start), one page of about 1 MiB; then `caught-up` and live, or `more` when events remain |
+| `resume` | `after` | the events with an offset above `after` (0 is the start), one page of four `log` frames; then `caught-up` and live, or `more` when events remain |
 | `human` | `event` (a sealed `HumanEvent`) | a web `human`; the hub assigns `writer` `hub/<member>`, `seq`, `ts` and answers `human-ack` |
 | `rpc` | `rpc` | a sealed RPC (DX6); answered by `rpc-state` (below) |
 | `subscribe` | `machine`, `session`, `agentId`, `sub` | a DX4 subscription scoped to one transcript (`agentId` null for the main one); `sub` is the browser's own random id, 128 bits in canonical base64url (`newNonce()`), unique at the machine. At most 32 per socket |
@@ -1748,13 +1753,16 @@ sealed event safely; the same nonce with a different payload is refused `conflic
 
 **Resume.** `resume {after}` (a non-negative integer) makes the socket follow the log, a mark kept in its attachment
 across hibernation: the hub sends the events with an offset above `after` in `log` frames of about 256 KiB, one page
-of about 1 MiB at a time. When the page reaches the head, `caught-up {offset}` follows with the head, then each new
-event live as it is stored. When events remain, the page ends with `more {offset}` (the last offset sent) instead,
-and the browser sends `resume {after: offset}` for the next page; a socket gets live `log` frames only from its
-`caught-up` on, and a later page carries what was stored meanwhile. The browser's requests pace the backlog, so a
-long-lived project's first open never buffers its whole log in the object or the socket [2026-10-15, DC3's panel
-wave, scalpel-5#3]. A socket that has not resumed gets no `log` frames. Resuming again sends the backlog again from
-the new `after`. `welcome.head` is the latest offset when the
+of four frames at a time. A frame holds at least one event and an event is at most 1 MiB, so a page is about 1 MiB
+and at most about 4 MiB. When the page reaches the head, `caught-up {offset}` follows with the head, then each new
+event live as it is stored; a page that sends nothing (`after` at or above the head) is just `caught-up`. When events
+remain, the page ends with `more {offset}` (the last offset the page sent) instead, and the browser sends `resume
+{after: offset}` for the next page; a socket gets live `log` frames only from its `caught-up` on, and a later page
+carries what was stored meanwhile. The hub keeps no cursor, so a browser that never asks for the next page stays not
+following and holds nothing at the hub. The browser's requests pace the backlog, so a long-lived project's first open
+never buffers its whole log in the object or the socket [2026-10-15, DC3's panel wave, scalpel-5#3]. A socket that
+has not resumed gets no `log` frames. Resuming again sends the backlog again from the new `after`, and the socket gets
+nothing live until that resume's `caught-up`. `welcome.head` is the latest offset when the
 socket opened.
 
 **On connect**, in this order: `welcome`; `machines`; one `session` frame per session carrying its latest `presence`,
@@ -2527,8 +2535,10 @@ stopped), `interrupted` (below), `failed` (execution failed; `message` says how)
 effect, records the outcome before sending the result, and keeps the entry a day. A nonce the ledger knows is answered
 from the ledger, before the freshness check, and never executed again. A nonce left `claimed` with no outcome (the
 daemon stopped between the two writes) is not executed again either: it is reconciled from the action's own trace
-where one exists (a spawned seat carries its nonce; a steer's row is in the transcript), and otherwise answered
-`failed` with `interrupted`. A browser retry reuses the nonce; the hub answers it from its record or forwards it again
+where one exists (a spawned seat carries its nonce; a steer carries its nonce to the bridge child, which keeps the
+mod's answer under it, the last 100, in its kept file; a Resume's kept job is checked for the session, and a job
+running another session is a copy, stopped and answered `copy-started`), and otherwise answered `failed` with
+`interrupted`, at once for a claim whose job was never kept. A browser retry reuses the nonce; the hub answers it from its record or forwards it again
 once the machine is back. Results reach the hub as DX2 `rpc-result` frames, republished until `rpc-ack`.
 
 **Built at M3:** forwarding, the record per nonce, `uncertain` on a lapsed lease or a closed stream, `rpc-ack`, and
@@ -3042,9 +3052,11 @@ deployment, so they never switch the production Worker's org, is deferred.
 **The owner's first steps** (DX7's ordering): sign in, set up the org key first (the first unlock method), then
 enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the code pasted at its hidden prompt).
 
-**State** (2026-10-15, evening):
-- **Deployed:** `hub@85e83830 web@smns-erb-web.fdb7b406`. DC3's `90ace676` (a `503 delivery-failed` keeps the
-  frames its batched call applied) is reviewed and waits for a redeploy scheduled around the owner's phone walk.
+**State** (2026-10-15, night):
+- **Deployed:** `hub@b11ea5f8 web@smns-erb-web.3de8a15e` (Worker version `bf5e8232`): DC3's whole branch after its
+  panel wave (the hub's code at `36d6bae3`) and DC5's web after its Task 6, so DX3's paged `resume` runs on both
+  sides. The deploy reconciled Access with no change and left the walk's machine, project, push subscription, and
+  org key as they were. Before it: `hub@85e83830 web@smns-erb-web.fdb7b406`.
 - **Org key:** set up by the owner in the phone walk's Part 2 (fingerprint `8133-6dc8-be8e`), with a passkey and a
   passphrase.
 - **Machines:** `phone-walk`, the fake machine enrolled from an owner-made code for the walk's pushed requests, with
@@ -3229,9 +3241,9 @@ a hub that connects into machines (§2).
 | --- | --- | --- |
 | DC1 bridge spike | findings: `docs/doperpowers/specs/2026-10-15-arkho-desk-c1-findings.md` | **landed 2026-10-15**: 11 items, every primitive promoted, six with a change folded into §2 and §5; probe kept at `/tmp/c1probe` |
 | DC2 bridge | plan: `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-bridge.md` (doperpowers, branch `worktree-smns-erb`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/195, merge `a6c90a13`, 7.155.0; report `docs/doperpowers/plans/2026-10-15-arkho-desk-c2-report.md` |
-| DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | in-flight: M1–M5 built (2026-10-15); deployed behind Access in the org `ssfskim` (hub `85e83830`, web `fdb7b406`), nothing enrolled; final review, panel, and PR next |
+| DC3 hub | plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md` (MAWS, branch `smns-erb`) | **PR open 2026-10-15**: M1–M5, the xhigh panel and its fix waves, and the joint re-review clean; PR https://github.com/SSFSKIM/MAWS/pull/14 (`smns-erb` → `master`); Linux gate run 38846390702 green on `36d6bae3`; deployed `hub@b11ea5f8 web@smns-erb-web.3de8a15e`; residue the staging re-measure and the shared per-session stream (Deferred), two tech-debt rows in the PR; report `docs/doperpowers/plans/2026-10-15-desk-dc3-report.md` |
 | DC4 uplink | plan: `docs/doperpowers/plans/2026-10-15-desk-dc4-uplink.md` (doperpowers, branch `worktree-agent-a6d7f69a8ab5f500f`, worktree `.claude/worktrees/agent-a6d7f69a8ab5f500f`) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`); PR https://github.com/SSFSKIM/doperpowers/pull/194, merge `9e7d3d30`, 7.156.0 (main merged in at `2a864e49` after DC2); report `docs/doperpowers/plans/2026-10-15-desk-dc4-report.md` |
-| DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | in-flight (dispatched 2026-10-15, parent pin 1c4f1c42) |
+| DC5 web: conversation | plan: `docs/doperpowers/plans/2026-10-15-desk-dc5-web.md` (MAWS, branch `smns-erb-web`) | **PR open 2026-10-15**: every task reviewed clean; PR https://github.com/SSFSKIM/MAWS/pull/13, stacked on `smns-erb`, retargeted to `master` when DC3 merges; 256 unit tests, the Linux lane 38/38 (runs 38846307022, 38847209275), against the local hub with the fake machine local-hub 7/7 and session-plane 9/9; the owner's phone walk through P2.12, P2.11 pending; the xhigh whole-branch panel (`895e27d1..3de8a15e`) running; report `docs/doperpowers/plans/2026-10-15-desk-dc5-report.md` |
 | DC6 web: depth | plan: `docs/doperpowers/plans/2026-10-15-desk-dc6-depth.md` (MAWS, branch `smns-erb-depth`) | **PR open 2026-10-15**: M1–M3 and the branch reviewed clean (`high`, after two final fix waves); PR https://github.com/SSFSKIM/MAWS/pull/12, stacked on `smns-erb-web`, retargeted to `master` when DC5 merges; Linux gate run 38818748087 green (67 browser tests, 8 acceptance specs against the fake machine); report `docs/doperpowers/plans/2026-10-15-desk-dc6-report.md` |
 | DC7 machine's controls | plan: `docs/doperpowers/plans/2026-10-15-desk-dc7-controls.md` (doperpowers, at eb26c82d on `worktree-smns-erb`; built on branch `worktree-agent-ab2de4f299f415dbf`, worktree `.claude/worktrees/agent-ab2de4f299f415dbf`, merging DC4 at 7252a5d7) | **merged 2026-10-15**: M1–M4 and the branch reviewed clean (`high`; four P2 fixed after the final review, the presence watermark among them); PR https://github.com/SSFSKIM/doperpowers/pull/196 (branch `dc7-controls`), merge `af3a5573`, 7.157.0; sminos 1740/1742 (the two load-timing assertions in TECH-DEBT), mods 298/298; Resume live 5/5 on 2.1.301; report `docs/doperpowers/plans/2026-10-15-desk-dc7-report.md` |
 
@@ -3477,6 +3489,20 @@ a hub that connects into machines (§2).
   Rationale: measured in real sessions (findings file); each change keeps
   the design's intent with the primitive that actually delivers it.
   Date/Author: 2026-10-15, design session.
+- Decision: A steer's trace for reconciling a lost outcome is the mod's answer, kept by the bridge child under the
+  RPC's nonce, not a transcript row (DX6). The recomposition panel (scalpel-2#2) found no reliable link from a
+  transcript row to the claim that caused it. Rejected: answering every orphaned steer `interrupted`, which would
+  call a steer that landed (DC7's G2 restart test) a failure. Interrupt, model, and compact could reconcile the same
+  way (doperpowers TECH-DEBT backlog). Built in doperpowers #201 (7.157.4), with the Resume copy check and the
+  never-kept claim answered `interrupted` at once. Flags DC7.
+  Date/Author: 2026-10-15, design session (the recomposition panel's fix wave).
+- Decision: A `resume` page is counted in frames, not bytes (DX3), and a receiver's open part sets are bounded
+  in count and id length as well as bytes (DX2, DX3). As built, a page is four `log` frames of about 256 KiB, so
+  about 1 MiB, and up to about 4 MiB when its events approach the 1 MiB event bound. Rejected: a byte cap per page
+  (an event alone may be 1 MiB, so a cap still sends near-1 MiB pages, and holding to it exactly would split events
+  for no bound the four-frame page lacks). The part-set count (64) and id length (128) close the panel's finding
+  that sets with empty data piled up metadata past the byte budget. Flags DC3, DC5.
+  Date/Author: 2026-10-15, design session (DC3's panel wave, as built).
 - Decision: A browser's `resume` is paged by the browser (DX3): a page of about 1 MiB, then `more {offset}`
   when events remain, and the browser resumes from there; live frames start at `caught-up`. DC3's xhigh panel
   (scalpel-5#3) found the hello backlog and a browser's resume suffix enqueued whole; the hello backlog is now
