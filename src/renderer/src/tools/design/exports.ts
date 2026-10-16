@@ -88,7 +88,8 @@ export async function exportDesign(artifactId: string, request: DesignExportRequ
     exported = await client.invoke('artifacts.export', { artifactId, ...request, scale: data.maxScale });
     if (!exported.ok) return toastFailure(VIEWERS_COPY.exportFailed(exported.error.message));
   }
-  const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision: exported.value.revision, format: request.format } } });
+  const { revision, exportId } = exported.value; // the export's own file (Decision Log 33)
+  const saved = await client.invoke('library.saveAs', { artifactId, source: { export: { revision, format: request.format, ...(exportId !== undefined && { exportId }) } } });
   if (!saved.ok) return toastFailure(VIEWERS_COPY.exportFailed(saved.error.message));
   if (saved.value.saved) void toast({ level: 'info', text: VIEWERS_COPY.saved(saved.value.path), actions: [], dismissible: true });
 }

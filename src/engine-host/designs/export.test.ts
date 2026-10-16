@@ -26,11 +26,13 @@ import type { McpToolContext, McpToolResult } from '../tool-server/server';
 import { publishFiles, readFiles } from '@artifacts/files';
 import { registerDesigns, type Designs } from '.';
 import { logRows, makeLegacyDesign } from './legacy.fixture';
+import { commands as libraryCommands } from '@shared/ipc/schema/library';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 const { ExporterRegistry, startExportService } = await import('../../main/artifacts/export');
 const { registerDesignExporters } = await import('../../main/design/export');
 const { CommandFailure } = await import('../../main/ipc/router');
+const { createLibraryFiles } = await import('../../main/library/files');
 
 const SELF = 'app-self' as AppSessionId;
 
@@ -39,6 +41,8 @@ let documents: Documents;
 let designs: Designs;
 let surface: { close(): void };
 let service: ReturnType<typeof startExportService>;
+let hostCall: (name: CommandName, input: unknown) => Promise<CommandResult<CommandName>>;
+const asked: [string, unknown][] = [];
 let calls = 0;
 const captured: { slideId: string; size?: { width?: number; height?: number } }[] = [];
 const loaded: string[] = [];
@@ -57,6 +61,7 @@ function start(): void {
   surface = registerArtifacts(on, () => true, { onDocPort: () => {} }, { documents, env: {} });
   // main's `call` over the host's handlers as the router answers it; the governing system is the bundled floor here
   const call = async (name: CommandName, input: unknown): Promise<CommandResult<CommandName>> => {
+    asked.push([name, input]);
     if (name === 'designSystems.governing') return { ok: true, value: { system: { builtin: 'maws' } } } as CommandResult<CommandName>;
     try {
       return { ok: true, value: await handlers.get(name)!(input) } as CommandResult<CommandName>;
@@ -65,6 +70,7 @@ function start(): void {
       throw error;
     }
   };
+  hostCall = call;
   const registry = new ExporterRegistry();
   registerDesignExporters(registry, {
     call: call as never,
@@ -113,7 +119,29 @@ afterEach(() => {
   loaded.length = 0;
   printed.length = 0;
   bridged.length = 0;
+  asked.length = 0;
 });
+
+/**
+ * L's `library.saveAs` over the same host and the store's export directory, its Save dialog answered when `answer`
+ * settles (held open while other exports run) at a path under the test's directory.
+ */
+function libraryFiles(dialog: () => Promise<string>) {
+  return createLibraryFiles({
+    call: hostCall as never,
+    exporters: { get: () => undefined },
+    root: join(userData, 'artifacts'),
+    downloads: () => userData,
+    showSaveDialog: async () => ({ canceled: false, filePath: await dialog() }),
+    openPath: async () => '',
+    readFile: async () => {
+      throw new Error('not read here');
+    },
+    showItemInFolder: () => {},
+    env: {},
+  });
+}
+const MANAGED = /\/exports\/\d+-png-[0-9a-f-]{36}\.png$/;
 
 let exporter: ExportBridge;
 const deps = (): ArtifactToolDeps & { exporter: ExportBridge } => ({ artifacts: () => documents.store, session: new ArtifactSession(), log: () => {}, exporter });
@@ -142,6 +170,7 @@ describe('the agent’s route: artifact_export to main’s design exporter and b
 
     const phone = exported(await tool.call({ artifact: id, format: 'png', board: 'phone' }, ctx()));
     expect(readFileSync(phone.path, 'utf8')).toBe('png:phone');
+    expect(phone.path).toMatch(MANAGED); // Decision Log 33: its own file, in the directory the host named
     expect(captured).toEqual([{ slideId: 'phone' }]);
 
     const refused = await tool.call({ artifact: id, format: 'png', board: 'poster' }, ctx());
@@ -152,6 +181,8 @@ describe('the agent’s route: artifact_export to main’s design exporter and b
 
     const fitted = exported(await tool.call({ artifact: id, format: 'png', board: 'poster', scale: 0.9102 }, ctx()));
     expect(readFileSync(fitted.path, 'utf8')).toBe('png:poster');
+    expect(fitted.path).not.toBe(phone.path); // the same revision and format, two files
+    expect(readFileSync(phone.path, 'utf8')).toBe('png:phone');
     expect(captured.at(-1)).toEqual({ slideId: 'poster', size: { width: 983, height: 8192 } });
     expect(bridged.at(-1)).toMatchObject({ artifactId: id, kind: 'design', format: 'png', board: 'poster', scale: 0.9102 });
   });
@@ -199,7 +230,55 @@ describe('a retained version of a design whose live legacy state cannot migrate 
     expect(logRows(userData, id)).toEqual(rows);
     const tooLarge = await service.exportForLibrary({ artifactId: id, format: 'png', versionId: versionId!, board: 'poster' }).catch((error: unknown) => error);
     expect((tooLarge as InstanceType<typeof CommandFailure>).error.issues).toEqual({ reason: 'exportTooLarge', data: { board: 'poster', w: 1080, h: 10_000, maxScale: 0.8192 } });
+    // Decision Log 33: L's Save As reads the row without preparing the live design, and copies the version's bytes
+    const row = async () => ((await hostCall('artifacts.get', { artifactId: id, prepare: false })) as { ok: true; value: { artifact: { revision: number } } }).value.artifact.revision;
+    const revision = await row();
+    asked.length = 0;
+    const to = join(userData, 'saved-version.png');
+    const saved = await libraryFiles(async () => to).saveAs({ artifactId: id, source: { export: { revision: exported.revision, format: 'png', exportId: exported.exportId! } } });
+    expect(saved).toEqual({ saved: true, path: to });
+    expect(readFileSync(to, 'utf8')).toBe('png:phone');
+    expect(asked).toEqual([['artifacts.get', { artifactId: id, prepare: false }]]);
     await expect(service.exportForLibrary({ artifactId: id, format: 'png' })).rejects.toThrow(/canvas\.json is not JSON/);
     expect(logRows(userData, id)).toEqual(rows);
+    expect(await row()).toBe(revision); // the malformed live state as it was: no migration, no write
+  });
+});
+
+describe('managed export files (Decision Log 33)', () => {
+  it('two same-revision exports keep their own files: the first Save As, its dialog held while the second completes, copies the first', async () => {
+    const id = await created();
+    const first = await service.exportForLibrary({ artifactId: id, format: 'png', board: 'phone' });
+    expect(first.exportId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(first.path).toMatch(MANAGED);
+    expect(first.path).toContain(first.exportId!);
+    let release!: (path: string) => void;
+    const held = new Promise<string>((resolve) => (release = resolve));
+    const files = libraryFiles(() => held);
+    const saving = files.saveAs({ artifactId: id, source: { export: { revision: first.revision, format: 'png', exportId: first.exportId! } } });
+    await vi.waitFor(() => expect(asked.some(([name]) => name === 'artifacts.get')).toBe(true));
+    const second = await service.exportForLibrary({ artifactId: id, format: 'png', board: 'poster', scale: 0.9102 });
+    expect(second.revision).toBe(first.revision);
+    expect(second.exportId).not.toBe(first.exportId);
+    const firstTo = join(userData, 'first.png');
+    release(firstTo);
+    expect(await saving).toEqual({ saved: true, path: firstTo });
+    expect(readFileSync(firstTo, 'utf8')).toBe('png:phone');
+    const secondTo = join(userData, 'second.png');
+    await libraryFiles(async () => secondTo).saveAs({ artifactId: id, source: { export: { revision: second.revision, format: 'png', exportId: second.exportId! } } });
+    expect(readFileSync(secondTo, 'utf8')).toBe('png:poster');
+    expect([readFileSync(first.path, 'utf8'), readFileSync(second.path, 'utf8')]).toEqual(['png:phone', 'png:poster']);
+  });
+
+  it('Save As takes an export id only as an id: a path is refused by the schema, an id with no file by name', async () => {
+    const id = await created();
+    const exported = await service.exportForLibrary({ artifactId: id, format: 'png', board: 'phone' });
+    const input = libraryCommands['library.saveAs'].input;
+    for (const exportId of ['../../store.sqlite', `${exported.exportId}/../x`, 'not-an-id']) expect(input.safeParse({ artifactId: id, source: { export: { revision: exported.revision, format: 'png', exportId } } }).success).toBe(false);
+    expect(input.safeParse({ artifactId: id, source: { export: { revision: exported.revision, format: 'png', exportId: exported.exportId } } }).success).toBe(true);
+    const unknown = '00000000-0000-4000-8000-00000000abcd';
+    await expect(libraryFiles(async () => join(userData, 'x.png')).saveAs({ artifactId: id, source: { export: { revision: exported.revision, format: 'png', exportId: unknown } } })).rejects.toThrow(/no export/);
+    // without its id the shared name is not the design's file
+    await expect(libraryFiles(async () => join(userData, 'y.png')).saveAs({ artifactId: id, source: { export: { revision: exported.revision, format: 'png' } } })).rejects.toThrow(/no export/);
   });
 });

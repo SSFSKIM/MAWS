@@ -46,11 +46,12 @@ describe('an export from the menu', () => {
   const tooLarge = { ok: false as const, error: { code: 'invalid_input', message: 'board poster is 1080×9000 px …', issues: { reason: 'exportTooLarge', data: { board: 'poster', w: 1080, h: 9000, maxScale: 0.9102 } } } };
 
   it('saves the board’s export where the owner chooses', async () => {
-    const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: '/store/x/exports/7-png.png', revision: 7 }) : ok({ saved: true, path: '/Users/me/Downloads/Screens.png' })));
+    const exportId = '00000000-0000-4000-8000-0000000000e7';
+    const main = installFakeMain((name) => (name === 'artifacts.export' ? ok({ path: `/store/x/exports/7-png-${exportId}.png`, revision: 7, exportId }) : ok({ saved: true, path: '/Users/me/Downloads/Screens.png' })));
     await act(() => exportDesign(A, { format: 'png', board: 'phone', versionId: 3 }, { ask: async () => true, boardName: (id) => id }));
     expect(main.calls).toEqual([
       { name: 'artifacts.export', input: { artifactId: A, format: 'png', board: 'phone', versionId: 3 } },
-      { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 7, format: 'png' } } } },
+      { name: 'library.saveAs', input: { artifactId: A, source: { export: { revision: 7, format: 'png', exportId } } } }, // its own file (Decision Log 33)
     ]);
     expect(toasts()).toEqual([['info', 'Saved to /Users/me/Downloads/Screens.png']]);
   });

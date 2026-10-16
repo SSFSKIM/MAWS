@@ -67,6 +67,8 @@ export interface ExportRequest {
   board?: string;
   boards?: string[];
   scale?: number;
+  // P3-E (E1 M5; Decision Log 33): a design export's own id, minted by the service as it takes the request, in its file's name
+  exportId?: string;
 }
 
 // What the service gives an exporter (A's side of P3-B's `DocumentExportContext`).
@@ -234,7 +236,7 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
       await rename(temp, path);
       temps.delete(temp);
     }
-    return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }) };
+    return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }), ...(request.exportId !== undefined && { exportId: request.exportId }) /* P3-E */ };
   } catch (error) {
     // P3-E (E1 M5; Decision Log 26): a refusal the exporter named (A's command failure) is kept for the caller
     const refusal = error instanceof CommandFailure ? artifactRefusalOf(error.error) : null;
@@ -285,7 +287,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
       } else {
         const live = await time.within(required('artifacts.state', { artifactId: request.artifactId }));
         state = live.bytes;
-        taken = { ...request, revision: live.revision, path: join(dirname(request.path), artifactExportName(live.revision, request.format)) };
+        taken = { ...request, revision: live.revision, path: join(dirname(request.path), artifactExportName(live.revision, request.format, request.exportId /* P3-E */)) };
       }
     }
     return {
@@ -319,11 +321,15 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   };
   // A request run in its turn within `time`, the budget its receipt started (a kind and format no exporter serves is
   // answered at once). Never rejects; ends the budget.
-  const queued = async (request: ExportRequest, time: ExportBudget): Promise<MawsArtifactExportAnswer> => {
-    if (!registry.get(request.kind, request.format)) {
+  const queued = async (asked: ExportRequest, time: ExportBudget): Promise<MawsArtifactExportAnswer> => {
+    if (!registry.get(asked.kind, asked.format)) {
       time.end();
-      return { ok: false, unavailable: true, error: unavailableMessage(request.kind, request.format) };
+      return { ok: false, unavailable: true, error: unavailableMessage(asked.kind, asked.format) };
     }
+    // P3-E (E1 M5; Decision Log 33): a design export writes a file of its own (its id minted here, as the export starts),
+    // in the directory asked, so another export of the same revision and format never replaces it before it is read
+    const exportId = asked.kind === 'design' ? randomUUID() : undefined;
+    const request = exportId === undefined ? asked : { ...asked, exportId, path: join(dirname(asked.path), artifactExportName(asked.revision, asked.format, exportId)) };
     const answered = await slot(async () => {
       let taken: Awaited<ReturnType<typeof snapshot>>;
       try {
@@ -377,7 +383,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
       const result = await queued(request, time);
       if (!result.ok && result.refusal) throw new CommandFailure(ipcError('invalid_input', result.error, result.refusal)); // P3-E (Decision Log 26): the exporter's refusal, as named
       if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new CommandFailure(ipcError('internal', result.error));
-      return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }) };
+      return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }), ...(result.exportId !== undefined && { exportId: result.exportId }) /* P3-E */ };
     },
     stop,
   };

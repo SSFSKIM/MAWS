@@ -244,7 +244,8 @@ export const commands = {
     }),
     // the snapshot exported (a document that moved since names a later revision); `blockedRequests`: remote requests the
     // PDF printer refused
-    z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional() }),
+    // P3-E (E1 M5; Decision Log 33): a design export's own id, the one `library.saveAs` names it by
+    z.strictObject({ path: z.string(), revision: Seq, blockedRequests: z.number().int().positive().optional(), exportId: z.uuid().optional() }),
   ),
 } as const satisfies Record<`artifacts.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

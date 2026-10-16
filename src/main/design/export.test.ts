@@ -21,7 +21,7 @@ import { MawsArtifactExportAnswerSchema } from '@shared/ipc/schema/maws';
 
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 
-import { ExporterRegistry, runExport, type ExportRequest, type ExportSources } from '../artifacts/export';
+import { ExporterRegistry, runExport, startExportService, type ExportRequest, type ExportSources } from '../artifacts/export';
 import type { DeckWindow } from '../presentations/export';
 import { registerDesignExporters, type DesignExportDeps } from './export';
 
@@ -209,3 +209,43 @@ describe('what a version draws in', () => {
     expect(seen.captures).toEqual([{ job: expect.objectContaining({ slideId: 'a', box: { x: 0, y: 0, w: 640, h: 480 } }) }]);
   });
 });
+
+describe('managed export names (Decision Log 33)', () => {
+  it('a design export gets an id of its own in its file’s name, in the directory asked; every other kind keeps its name', async () => {
+    const doc = design();
+    const registry = new ExporterRegistry();
+    registerDesignExporters(registry, world().deps);
+    registry.register({ kind: 'presentation', format: 'png', run: async (req, context) => context.writeFile(req.path, 'deck') });
+    const answered: { answer: { ok: boolean; path?: string; exportId?: string } }[] = [];
+    let listener: ((request: never) => void) | null = null;
+    const ok = (value: unknown) => ({ ok: true as const, value });
+    const call = async (name: CommandName, input: unknown): Promise<never> => {
+      const { artifactId } = input as { artifactId: string };
+      if (name === 'artifacts.get') return ok({ artifact: { id: artifactId, title: 'T', kind: artifactId === ID ? 'design' : 'presentation', revision: 3 } }) as never;
+      if (name === 'artifacts.state') return ok({ revision: 3, bytes: stateV2(doc) }) as never;
+      if (name === 'designSystems.governing') return ok({ system: { builtin: 'maws' } }) as never;
+      return { ok: false, error: { code: 'not_found', message: `no ${name}` } } as never;
+    };
+    const service = startExportService({ registry, root, call: call as never, onEvent: (_n, l) => ((listener = l as never), () => {}), answer: async (input) => void answered.push(input as never) });
+    try {
+      const a = await service.exportForLibrary({ artifactId: ID, format: 'png' });
+      const b = await service.exportForLibrary({ artifactId: ID, format: 'png' });
+      expect(a.exportId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+      expect([a.path, b.path]).toEqual([join(root, ID, 'exports', `3-png-${a.exportId}.png`), join(root, ID, 'exports', `3-png-${b.exportId}.png`)]);
+      expect(a.exportId).not.toBe(b.exportId);
+      const deck = await service.exportForLibrary({ artifactId: SYSTEM, format: 'png' });
+      expect(deck).toEqual({ path: join(root, SYSTEM, 'exports', '3-png.png'), revision: 3 });
+      // the agent's route: the host names the directory, main the file in it
+      const asked = join(root, ID, 'exports', '3-png.png');
+      listener!({ appSessionId: 'App-A', requestId: 'r1', artifactId: ID, kind: 'design', format: 'png', revision: 3, path: asked } as never);
+      await vi.waitFor(() => expect(answered).toHaveLength(1));
+      const answer = answered[0]!.answer;
+      expect(answer).toMatchObject({ ok: true, exportId: expect.any(String) });
+      expect(answer.path).toBe(join(root, ID, 'exports', `3-png-${answer.exportId}.png`));
+      expect(MawsArtifactExportAnswerSchema.safeParse(answer).success).toBe(true);
+    } finally {
+      service.stop();
+    }
+  });
+});
+

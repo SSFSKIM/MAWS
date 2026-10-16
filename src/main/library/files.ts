@@ -105,12 +105,14 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
     },
 
     async saveAs({ artifactId, source }: CommandInput<'library.saveAs'>, sender?: WebContents): Out<'library.saveAs'> {
-      const { artifact } = await required('artifacts.get', { artifactId });
+      // P3-E (E1 M5; Decision Log 33): an export's save reads the row alone (`prepare: false`, Decision Log 22), so a
+      // retained version's file saves whatever the live document's state
+      const { artifact } = await required('artifacts.get', { artifactId, ...('export' in source && { prepare: false }) });
       if (!artifact) throw new CommandFailure(ipcError('invalid_input', `no artifact ${artifactId}`, { reason: 'notFound', data: {} }));
       let from: string;
       let defaultName: string;
       if ('export' in source) {
-        const name = artifactExportName(source.export.revision, source.export.format);
+        const name = artifactExportName(source.export.revision, source.export.format, source.export.exportId); // P3-E: the managed name, the id a UUID (the schema's)
         from = join(deps.root, artifactId, 'exports', name);
         if (!(await lstat(from).catch(() => null))?.isFile()) throw new CommandFailure(ipcError('invalid_input', `no export ${name} of ${artifactId}; export it again`));
         defaultName = `${fileNameOf(artifact.title)}${extname(name)}`;

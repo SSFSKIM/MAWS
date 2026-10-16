@@ -79,7 +79,7 @@ export type MawsArtifactExport = z.infer<typeof MawsArtifactExportSchema>;
 // a later revision, in the directory the request named), and how many remote requests its PDF printer refused. P3-E
 // (E1 M5; Decision Log 26): a failure an exporter named as an artifact refusal carries it (`refusal`, the IPC's shape).
 export const MawsArtifactExportAnswerSchema = z.discriminatedUnion('ok', [
-  z.strictObject({ ok: z.literal(true), revision: z.number().int().nonnegative(), path: AbsolutePathSchema, blockedRequests: z.number().int().positive().optional() }),
+  z.strictObject({ ok: z.literal(true), revision: z.number().int().nonnegative(), path: AbsolutePathSchema, blockedRequests: z.number().int().positive().optional(), exportId: z.uuid().optional() /* P3-E (Decision Log 33) */ }),
   z.strictObject({ ok: z.literal(false), unavailable: z.boolean().optional(), error: z.string(), refusal: ArtifactRefusalSchema.optional() /* P3-E */ }),
 ]);
 export type MawsArtifactExportAnswer = z.infer<typeof MawsArtifactExportAnswerSchema>;
