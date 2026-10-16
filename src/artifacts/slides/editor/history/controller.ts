@@ -146,6 +146,9 @@ export class DeckHistoryController {
   }
 
   /** A row clicked: preview it against the version before it; with `extend` (shift-click), compare it with the selected one. */
+  /** The time the rail names the list's days against: the wall clock (B's rail reads it; a deck's history has no clock of its own). */
+  now = (): number => Date.now();
+
   select(versionId: number, { extend = false }: { extend?: boolean } = {}): Promise<void> {
     const [first] = this.snapshot.selected;
     if (extend && first !== undefined && first !== versionId) return this.open({ kind: 'compare', versionIds: [first, versionId] });
