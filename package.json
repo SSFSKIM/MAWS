@@ -63,6 +63,7 @@
     "e2e:document-app": "MAWS_HARNESS=0 electron-vite build && MAWS_HARNESS=0 playwright test e2e/document.spec.ts",
     "e2e:document-live": "MAWS_HARNESS=0 electron-vite build && MAWS_HARNESS=0 playwright test e2e/document-live.spec.ts",
     "e2e:desk-web": "pnpm --filter desk-web e2e",
+    "e2e:desk-web-hub": "pnpm --filter desk-web e2e:hub",
     "e2e:document-scale": "MAWS_HARNESS=0 electron-vite build && MAWS_HARNESS=0 playwright test e2e/document-scale.spec.ts"
   },
   "dependencies": {
