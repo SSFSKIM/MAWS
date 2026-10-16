@@ -2982,6 +2982,66 @@ retried nonce from it. `--loop` replays again as a fresh session each round. Aga
 - It opens one project, writes no `legacy/` feed, and is never an archive machine.
 - `usage` comes from the recording alone.
 
+### The deployment (owner DC3; built at M5; for every child, the walks, and recomposition)
+
+Folded 2026-10-15 from DC3's `interfaces-M5-reviewed-4495c41e.md`.
+
+**Where.** `https://desk-hub.opencognita-platform.workers.dev`: the Worker `desk-hub` on the owner's Cloudflare
+account (60c19eec070f0ed2457828c5d88a8b28), serving the org `ssfskim` ("SSFSKIM"), whose admin is
+supremekim17@gmail.com. One Worker serves one org, named by the deploy's variables. The web app (DC5's build) is
+served on every path the Worker does not run first for. Every answer except a WebSocket upgrade and a machine's SSE
+stream names what is deployed in `X-Desk-Build: hub@<commit>[+dirty] web@<label>` (`dev` for a bundle that named
+none), so anyone can check without credentials:
+
+    curl -sI -X POST https://desk-hub.opencognita-platform.workers.dev/machine/enroll | grep -i x-desk-build
+
+**Access in front of it** (Zero Trust team `flat-wave-208c.cloudflareaccess.com`; identity provider "Cloudflare",
+restricted to the account's members):
+
+| Application | Destinations | Policies |
+| --- | --- | --- |
+| `desk-hub` (self-hosted, hostname-level, session 24 h, 401 for a failed service token) | `desk-hub.opencognita-platform.workers.dev` | `desk-hub owner`: Allow, the owner's email. `desk-hub machines`: Service Auth, any Access service token |
+| `desk-hub public paths` (self-hosted, more specific, so it takes precedence) | `…/machine/enroll`, `…/manifest.webmanifest`, `…/icons/*` | `desk-hub public paths`: Bypass, everyone |
+
+A hostname-level application is used, not the Worker's own Access toggle, which refuses WebSocket upgrades. The
+`desk-hub` application's AUD is the Worker's `ACCESS_AUD`.
+
+**How each party reaches it:**
+- **A person**, in a browser: open the URL and sign in; the Access cookie rides every fetch and both WebSockets. From
+  a script: `cloudflared access login <url>` once, then `cf-access-token: $(cloudflared access token -app=<url>)` on
+  each request and upgrade.
+- **A machine**: the `CF-Access-Client-Id` and `CF-Access-Client-Secret` of the service token its enrollment returned,
+  on every request (DX2's admission). A freshly minted token is refused `401` by Access for a few seconds, so a daemon
+  retries its first connect. A client id the Registry never enrolled passes Access and is refused `403 not-enrolled`.
+- **Enrollment's redemption** (`POST /machine/enroll`), the manifest, and the icons need nothing.
+- **Unauthenticated:** a person is redirected (302) to the team's login; a bad service token gets Access's own 401.
+
+**Deploying.** Only through `pnpm --filter desk-hub deployment deploy --assets <desk-web's dist> --web <label>`
+(`apps/desk-hub/deploy/README.md`): it reconciles Access, deploys with the variables on the command line, and puts
+`CF_API_TOKEN` and `VAPID_KEY` only when missing (`VAPID_KEY` is generated once and never rotated, since push
+subscriptions bind to it). `wrangler.jsonc` keeps the variables empty, so any other deploy answers `503
+not-configured`. DC5 deploys its web build through the same command. A deploy of new code reaches a busy object only
+when it restarts, about five minutes later (§2). Every deploy is scheduled with the composite's writer while an owner
+walk runs against the deployment.
+
+**The proof commands** (`probe`, `fake-check`, `redeploy-check`, `measure`, `frame-cost`) enroll throwaway machines
+and write projects, so they require `--test-org`, refuse the configured org, and check `/api/me` before any write;
+they run only after a deploy under a throwaway org (`deploy --org-id <test org>`), never in `ssfskim`. A staging
+deployment, so they never switch the production Worker's org, is deferred.
+
+**The owner's first steps** (DX7's ordering): sign in, set up the org key first (the first unlock method), then
+enroll machines from the web app's "Enroll a machine" (`sminos hub enroll`, the code pasted at its hidden prompt).
+
+**State** (2026-10-15, evening):
+- **Deployed:** `hub@85e83830 web@smns-erb-web.fdb7b406`. DC3's `90ace676` (a `503 delivery-failed` keeps the
+  frames its batched call applied) is reviewed and waits for a redeploy scheduled around the owner's phone walk.
+- **Org key:** set up by the owner in the phone walk's Part 2 (fingerprint `8133-6dc8-be8e`), with a passkey and a
+  passphrase.
+- **Machines:** `phone-walk`, the fake machine enrolled from an owner-made code for the walk's pushed requests, with
+  its project "phone walk"; removed when the walk ends. No real machine is enrolled yet.
+- **Leftovers:** the proofs' throwaway org `dc3-m5-test` keeps its Durable Objects' storage on the same Worker,
+  unreachable from `ssfskim`.
+
 ### DX8 — The web shell's slots (owner DC5; G1)
 
 Folded from DC5's plan (MAWS `66eabe92`,
