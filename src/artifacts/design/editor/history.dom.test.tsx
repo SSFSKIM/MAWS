@@ -62,7 +62,7 @@ function host() {
   land(HUMAN, (d) => transact(d, () => writeBoards(d, SEEDS)));
   const restore = vi.fn(async (versionId: number) => ({ revision: 0, versionId }));
   const api: HistoryApi = {
-    versions: async () => versions.map(({ state: _, ...v }) => v),
+    versions: async () => versions.map((v) => ({ id: v.id, seq: v.seq, at: v.at, actor: v.actor, kind: v.kind, assetRefs: v.assetRefs, ...(v.label !== undefined && { label: v.label }) }) as ArtifactVersion),
     lastViewedAt: async () => viewedAt,
     versionState: async (id) => versions.find((v) => v.id === id)!.state,
     attributions: async (from, to) => encodeMap(mergeMaps(maps.slice(from, to))),

@@ -241,7 +241,7 @@ describe('the anchored message (X10)', () => {
       expect(anchorLead(board, false)).toBe('Comment on "Launch screens, Phone" (board "Phone" in design art-d1, thread t2):');
       const element: Anchor = { ...board, locator: 'Ship the first week.', artifactTarget: 'element' };
       expect(anchorLead(element, false)).toBe('Comment on "Launch screens, Phone" (element "Ship the first week." in design art-d1, thread t2):');
-      const { artifactTarget: _, ...unnamed } = element;
+      const unnamed: Anchor = { kind: 'artifact-comment', locator: element.locator, label: element.label, artifactId: 'art-d1', threadId: 't2', artifactKind: 'design' };
       expect(anchorLead(unnamed, false)).toBe(anchorLead(element, false)); // absent: an element's
       for (const anchor of [board, element, unnamed]) {
         const message = anchoredMessage({ anchor, text: 'Tighter?', destination: 'main', screenshot: false });

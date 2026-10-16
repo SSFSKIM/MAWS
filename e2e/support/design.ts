@@ -3,6 +3,8 @@
 // (`window.__maws_design`, src/renderer/src/tools/design/e2e-seam.ts: the files published onto a replica by the kind's
 // own publish, forced). The fixture's boards are a phone, a tablet, a desktop screen, a poster taller than 8,192 px and
 // a board whose file does not load (held), every live one drawn on the design system's background.
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
@@ -51,7 +53,19 @@ export interface TabView {
 export type DesignEdit =
   | { op: 'setStyle'; boardId: string; elementId: string; props: Record<string, string | null> }
   | { op: 'prependText'; boardId: string; elementId: string; text: string }
-  | { op: 'setFrame'; boardId: string; frame: Partial<Frame> };
+  | { op: 'setFrame'; boardId: string; frame: Partial<Frame> }
+  | { op: 'addThread'; threadId: string; boardId: string; elementId: string; body: string }; // M4
+/** M4: a thread as the seam reads it (C's derived state). */
+export interface SeamThread {
+  id: string;
+  slideId: string;
+  elementId: string;
+  quote: string;
+  status: string;
+  live: boolean;
+  orphan: boolean;
+  messages: { body: string; by: string }[];
+}
 interface Seam {
   __maws_design: {
     seed(artifactId: string, files: Record<string, string>): Promise<{ changed: string[]; held: string[] }>;
@@ -60,6 +74,8 @@ interface Seam {
     boards(artifactId: string): Promise<{ id: string; frame: Frame | null; title: string | null }[]>;
     board(artifactId: string, boardId: string): Promise<BoardIR>;
     tabs(artifactId: string): TabView[];
+    threads(artifactId: string): Promise<SeamThread[]>; // M4
+    derivedId(artifactId: string, from: string, to: string, elementId: string): Promise<string>; // M4
   };
 }
 export const seamInstalled = (page: Page) => page.evaluate(() => typeof (window as unknown as Partial<Seam>).__maws_design);
@@ -68,6 +84,38 @@ export const editDesign = (page: Page, id: string, edit: DesignEdit) => page.eva
 export const boardsOf = (page: Page, id: string) => page.evaluate((a) => (window as unknown as Seam).__maws_design.boards(a), id);
 export const boardOf = (page: Page, id: string, boardId: string) => page.evaluate(([a, b]) => (window as unknown as Seam).__maws_design.board(a, b), [id, boardId] as const);
 export const tabsOf = (page: Page, id: string) => page.evaluate((a) => (window as unknown as Seam).__maws_design.tabs(a), id);
+export const threadsOf = (page: Page, id: string) => page.evaluate((a) => (window as unknown as Seam).__maws_design.threads(a), id); // M4
+export const derivedIdOf = (page: Page, id: string, from: string, to: string, elementId: string) => page.evaluate(([a, f, t, e]) => (window as unknown as Seam).__maws_design.derivedId(a, f, t, e), [id, from, to, elementId] as const); // M4
+export const filesOf = (page: Page, id: string) => page.evaluate((a) => (window as unknown as Seam).__maws_design.files(a), id); // M4
+
+// ---- M4: the host's design seam (src/engine-host/designs/history-seam.ts), an agent session's writes in the product
+// build with no engine: the launch names its channel's directory (MAWS_DESIGN_HISTORY), commands go in as files
+export const AGENT_SESSION = '00000000-0000-4000-8000-0000000000e4';
+export type AgentEdit =
+  | { op: 'setStyle'; boardId: string; elementId: string; props: Record<string, string | null> }
+  | { op: 'setFrame'; boardId: string; frame: Partial<Frame> }
+  | { op: 'move'; from: string; to: string; elementId: string }
+  | { op: 'reply'; threadId: string; body: string }
+  | { op: 'resolve'; threadId: string };
+/** One edit as the agent's session, then its `auto` version; answers the moved element's new id for a move. */
+export async function asAgent(channel: string, artifactId: string, edit: AgentEdit): Promise<{ ok: boolean; error?: string; moved?: string }> {
+  const name = `${Date.now()}-${Math.random().toString(36).slice(2)}.json`;
+  mkdirSync(join(channel, 'in'), { recursive: true });
+  writeFileSync(join(channel, 'in', `${name}.tmp`), JSON.stringify({ cmd: 'write', artifactId, session: AGENT_SESSION, edit }));
+  renameSync(join(channel, 'in', `${name}.tmp`), join(channel, 'in', name));
+  const out = join(channel, 'out', name);
+  await expect.poll(() => existsSync(out), { timeout: 15_000, message: 'the design seam answers' }).toBe(true);
+  const answer = JSON.parse(readFileSync(out, 'utf8')) as { ok: boolean; error?: string; moved?: string };
+  expect(answer, answer.error).toMatchObject({ ok: true });
+  return answer;
+}
+
+/** How far a pin sits from the top-right corner of what it marks (its point on the corner), in screen px. */
+export async function pinOffset(pin: Locator, target: Locator): Promise<number> {
+  const [p, t] = [await pin.boundingBox(), await target.boundingBox()];
+  if (!p || !t) return Number.POSITIVE_INFINITY;
+  return Math.max(Math.abs(p.x - (t.x + t.width)), Math.abs(p.y + p.height - t.y));
+}
 
 export async function frameOf(page: Page, id: string, boardId: string): Promise<Frame | null> {
   return (await boardsOf(page, id)).find((b) => b.id === boardId)?.frame ?? null;

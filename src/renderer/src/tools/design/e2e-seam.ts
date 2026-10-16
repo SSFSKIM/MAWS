@@ -6,15 +6,20 @@
 // the kind's first board (the agent's `artifact_create` with files is the live run's). It also writes through the
 // model's writers on a replica of its own (what an agent's or another replica's edit looks like to the workbench),
 // reads the design back, and reports each open tab's view (its zoom, pan, active board, selection, selected frame) and
-// its open-to-drawn timings.
+// its open-to-drawn timings. M4: it adds a thread as the owner (a comment the e2e cannot send through a session), reads
+// the threads as C's model derives them, and answers the id a cross-board move would derive (so a spec can put an
+// element under that id on the destination first: XE4's collision case).
 import type { ArtifactHost, DocumentHandle } from '@artifacts/host';
 import { boardIdOf, CANVAS_PATH, type BoardFrame } from '@artifacts/design/canvas';
 import { boardFrame, boardOrder, designFiles } from '@artifacts/design/model';
 import { publishCanvas } from '@artifacts/design/publish';
+import { moveElementToBoard } from '@artifacts/design/move';
 import { setBoardFrame } from '@artifacts/design/writers';
 import type { Viewport } from '@artifacts/design/editor/viewport';
 import type { SlideIR } from '@artifacts/slides/ir';
 import { readFlat, setStyle, setText, slideFile } from '@artifacts/slides/model';
+import { addThread, threadStates } from '@artifacts/slides/threads';
+import { applyV2, newDoc, stateV2 } from '@artifacts/yjs';
 import { loadSlide } from '@artifacts/slides/parse';
 import type { DeckTimings } from '@artifacts/slides/editor/session';
 import * as Y from '@artifacts/yjs/slides';
@@ -24,7 +29,21 @@ export type DesignSeamEdit =
   | { op: 'setStyle'; boardId: string; elementId: string; props: Record<string, string | null> }
   // text put before an element's first line (a remote edit landing in a text box being edited)
   | { op: 'prependText'; boardId: string; elementId: string; text: string }
-  | { op: 'setFrame'; boardId: string; frame: Partial<BoardFrame> };
+  | { op: 'setFrame'; boardId: string; frame: Partial<BoardFrame> }
+  // M4: a thread on a board (`elementId` '') or an element, opened by the owner with its first message
+  | { op: 'addThread'; threadId: string; boardId: string; elementId: string; body: string };
+
+/** M4: a thread as C's model derives it, plain. */
+export interface DesignSeamThread {
+  id: string;
+  slideId: string;
+  elementId: string;
+  quote: string;
+  status: string;
+  live: boolean;
+  orphan: boolean;
+  messages: { body: string; by: string }[];
+}
 
 export interface DesignTabView {
   surface: string;
@@ -48,6 +67,10 @@ export interface DesignSeam {
   board(artifactId: string, boardId: string): Promise<SlideIR>;
   /** The open tabs showing the design, with their views. */
   tabs(artifactId: string): DesignTabView[];
+  /** M4: every thread with its derived state. */
+  threads(artifactId: string): Promise<DesignSeamThread[]>;
+  /** M4: the id a move of `elementId` from `from` to `to` would give it now (on a copy; nothing written). */
+  derivedId(artifactId: string, from: string, to: string, elementId: string): Promise<string>;
 }
 
 declare global {
@@ -93,6 +116,7 @@ export function installDesignSeam(win: Window, host: () => ArtifactHost): void {
       withReplica(artifactId, ({ doc }) => {
         if (edit.op === 'setStyle') setStyle(doc, edit.boardId, edit.elementId, edit.props, 'e2e');
         else if (edit.op === 'setFrame') setBoardFrame(doc, edit.boardId, edit.frame, 'e2e');
+        else if (edit.op === 'addThread') addThread(doc, { threadId: edit.threadId, slideId: edit.boardId, elementId: edit.elementId, quote: '', by: { kind: 'human' }, at: Date.now(), body: edit.body }, 'deck-comments');
         else {
           const blocks = readFlat(doc, edit.boardId).find((e) => e.id === edit.elementId)?.text ?? [{ type: 'p' as const, inline: [] }];
           const [first, ...rest] = blocks;
@@ -112,6 +136,20 @@ export function installDesignSeam(win: Window, host: () => ArtifactHost): void {
         const loaded = loadSlide(slideFile(doc, boardId), { fileId: boardId });
         if (!loaded.ok) throw new Error(`board ${boardId} is held: ${loaded.held.reasons.join('; ')}`);
         return loaded.slide;
+      }),
+    threads: (artifactId) =>
+      withReplica(artifactId, ({ doc }) =>
+        threadStates(doc).map((t) => ({ id: t.id, slideId: t.slideId, elementId: t.elementId, quote: t.quote, status: t.status, live: t.live, orphan: t.orphan, messages: t.messages.map((m) => ({ body: m.body, by: m.by.kind === 'session' ? `session:${m.by.appSessionId}` : m.by.kind })) })),
+      ),
+    derivedId: (artifactId, from, to, elementId) =>
+      withReplica(artifactId, ({ doc }) => {
+        const scratch = newDoc();
+        try {
+          applyV2(scratch, stateV2(doc));
+          return moveElementToBoard(scratch, from, to, elementId).ids.get(elementId)!;
+        } finally {
+          scratch.destroy();
+        }
       }),
     tabs: (artifactId) =>
       openDesignTabs()

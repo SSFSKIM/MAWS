@@ -38,7 +38,7 @@ describe('a design comment’s anchor', () => {
     expect(anchoredMessage({ anchor: board, text: 'Taller?', destination: 'main', screenshot: false }).split('\n')[0]).toBe('Comment on "Launch screens, Phone" (board "Phone" in design design-1, thread t1):');
     const element = artifactCommentAnchor({ artifactId: 'design-1', title: 'Launch screens', ...onElement, artifactKind: 'design' });
     expect(anchoredMessage({ anchor: element, text: 'Shorter?', destination: 'main', screenshot: false }).split('\n')[0]).toBe('Comment on "Launch screens, Phone" (element "Ship the first week." in design design-1, thread t2):');
-    const { artifactTarget: _, ...deckPassage } = onElement;
+    const deckPassage: CommentedPassage = { threadId: 't2', tabId: 's1', tabTitle: 'slide 1: Plan', quote: 'One path' };
     expect(artifactCommentAnchor({ artifactId: 'deck-1', title: 'Q3 review', ...deckPassage, artifactKind: 'presentation' })).not.toHaveProperty('artifactTarget'); // a deck's, as C writes it
   });
 

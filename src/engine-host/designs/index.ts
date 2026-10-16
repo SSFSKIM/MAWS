@@ -10,6 +10,7 @@
 // design when a design system changes and when the chain's defaults do. The writer resolves tokens in the `document`
 // medium the workbench draws boards in. A startup mirror reads a design no actor has opened since E1 without migrating
 // it: the writer projects a legacy state on a temporary copy (Decision Log 13 (3)).
+// M4: under MAWS_E2E=1 with MAWS_DESIGN_HISTORY named, the e2e seam that writes as an agent's session (./history-seam.ts).
 import { createDesignAdapter } from '@artifacts/design/adapter';
 import { designMirrorWriter } from '@artifacts/design/mirror';
 import { readSystem } from '@artifacts/design-system/model';
@@ -22,6 +23,7 @@ import type { DesignSystemChain } from '../design-systems/chain';
 import type { Documents } from '../documents';
 import type { DocumentService } from '../documents/service';
 import type { ArtifactStore } from '../documents/store';
+import { designSeamDir, startDesignSeam } from './history-seam';
 
 export interface Designs {
   close(): void;
@@ -32,9 +34,11 @@ export interface DesignsDeps {
   chain: Pick<DesignSystemChain, 'governing'> | null; // P3-D's default chain; null while the store is unavailable
   /** L's mirror's `refresh`: schedules the designs named, as their own change would. */
   refresh(artifactIds: string[]): void;
+  /** M4: the host's environment (the e2e seam opens under MAWS_E2E=1 only); `process.env` by default. */
+  env?: Record<string, string | undefined>;
 }
 
-export function registerDesigns({ documents, chain, refresh }: DesignsDeps): Designs {
+export function registerDesigns({ documents, chain, refresh, env = process.env }: DesignsDeps): Designs {
   if (!documents) return { close: () => {} };
   const { store, service } = documents;
   store.registerAdapter(createDesignAdapter());
@@ -48,6 +52,8 @@ export function registerDesigns({ documents, chain, refresh }: DesignsDeps): Des
     if (ids.length > 0) refresh(ids);
   };
   const offs = [store.onChange(({ kind }) => kind === 'design_system' && refreshDesigns()), store.onDefaultsChange(refreshDesigns)];
+  const seamDir = designSeamDir(env); // M4: an agent's writes, replies and resolutions, for the e2e
+  if (seamDir) offs.push(startDesignSeam({ store, service }, seamDir).close);
   return {
     close: () => {
       for (const off of offs) off();
