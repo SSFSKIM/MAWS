@@ -10,7 +10,7 @@ import { copyFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { artifactExportName, parseToolArguments, TOOL_ERRORS, type ArtifactExportResult } from '@shared/maws/tools';
-import { answering, lineageOf, messageOf, pathUnderCwd, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
+import { actorOf, answering, lineageOf, messageOf, pathUnderCwd, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
 import type { HostBridge } from './bridge';
 import { defineMawsTool, toolError, toolText, type McpToolDefinition } from './server';
 
@@ -38,6 +38,9 @@ export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportB
         if (!version) throw refuse('artifact_export', { reason: 'notFound', version: input.version }, `version ${input.version} does not exist; artifact_read lists the versions it has`);
         return { kind: artifact.kind, revision: version.seq, versionId: version.id };
       });
+      // P3-E (E1's M2; Decision Log 11 (1)): main reads the live state as the human, so an earlier build's shape is
+      // migrated by this session first (a version is exported as it was)
+      if (target.versionId === undefined) await store.ensureMigrated(artifactId, actorOf(ctx));
       const unavailable = (why: string) => refuse('artifact_export', { reason: 'exportUnavailable', format: input.format, kind: target.kind }, why);
       if (!deps.exporter) throw unavailable(`this build of MAWS cannot export a ${target.kind} artifact as ${input.format}`);
       const path = join(store.files.dirOf(artifactId), 'exports', artifactExportName(target.revision, input.format));

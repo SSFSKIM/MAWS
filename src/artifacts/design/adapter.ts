@@ -5,6 +5,7 @@
 // a restore), and a restore that keeps every conversation since the version (`conversationsSince`). The design replaces
 // the seed, the files and their paths, the publish (its manifest beside C's board publish), the turn's summary, and adds
 // its frame repair beside C's. Portable: M2 registers it in the engine host; P4's network store the same.
+import { readFiles } from '../files';
 import type { KindAdapter } from '../host';
 import { createPresentationAdapter } from '../slides/adapter';
 import { importSlide } from '../slides/model';
@@ -12,6 +13,7 @@ import { captureQuotes, storeDeletedQuotes } from '../slides/threads';
 import { transact, type Doc } from '../yjs';
 import * as Y from '../yjs/slides';
 import { boardIdOf, CANVAS_PATH, FRAME_KEYS, frameProblems } from './canvas';
+import { isLegacyDesign, migrateDesign, withDesignModel } from './migrate';
 import { designFiles, designPaths, repairBoards, writeBoardEntry, writeCanvasKeys } from './model';
 import { publishCanvas } from './publish';
 import { blankBoard } from './writers';
@@ -69,8 +71,10 @@ export function createDesignAdapter(options: { now?: () => Date } = {}): KindAda
     ...deck,
     kind: 'design',
     initial: (doc, { title }) => writeInitialDesign(doc, title),
-    readFiles: designFiles,
-    paths: designPaths,
+    // M2: a legacy state (a retained version from before the migration) reads as the files it was (Decision Log 11 (1))
+    readFiles: (doc) => (isLegacyDesign(doc) ? readFiles(doc) : designFiles(doc)),
+    paths: (doc) => (isLegacyDesign(doc) ? Object.keys(readFiles(doc)) : designPaths(doc)),
+    migrate: migrateDesign, // M2: the store's `ensureMigrated` runs it before live access
     // the agent's publish: the commented elements' quotes read first, stored for those its removals take away (C's rule)
     publish: (live, base, sent, force) => {
       const quotes = captureQuotes(live);
@@ -93,7 +97,10 @@ export function createDesignAdapter(options: { now?: () => Date } = {}): KindAda
     },
     // A restore writes the version's boards as they were: one whose frame breaks the rules (a state no writer of this
     // build makes) is refused before anything is written, never clamped.
+    // M2: a version from before the migration is checked as its migration would build it, so a restore that could not
+    // migrate is refused before it writes; `afterRestore` then migrates it in the restore's own frame.
     revertScope: (live, old, info) => {
+      if (isLegacyDesign(old)) withDesignModel(old, () => undefined);
       const problems = Y.slideIds(old).flatMap((id) => {
         const s = Y.slideScalars(old, id);
         if (FRAME_KEYS.some((k) => s[k] === undefined)) return [`board ${id}: a frame has x, y, w and h`];
@@ -101,6 +108,12 @@ export function createDesignAdapter(options: { now?: () => Date } = {}): KindAda
       });
       if (problems.length > 0) throw new Error(`the version cannot be restored: ${problems.join('; ')}`);
       return deck.revertScope!(live, old, info);
+    },
+    // M2: a restore that brought back a legacy state migrates it synchronously inside the restore's frame, before its
+    // version and announcement, as the restorer; C's after-effects then see the boards (and their anchors) it rebuilt.
+    afterRestore: (live, info) => {
+      migrateDesign(live);
+      return deck.afterRestore!(live, info);
     },
     summarizeTurn: summarizeDesignTurn,
   };

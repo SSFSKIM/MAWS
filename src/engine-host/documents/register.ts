@@ -95,6 +95,13 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     if (!found) throw new ArtifactStoreError('notFound', `no space ${spaceId}`);
     return found;
   };
+  // P3-E (docs/doperpowers/plans/2026-10-16-p3-e-design-dashboard.md Decision Log 11 (1); E1's M2): before a live read
+  // that answers from a document, an earlier build's shape is migrated by the human (`ArtifactStore.ensureMigrated`),
+  // or the read is refused naming why; a kind without the hook goes on at once.
+  const prepared = async (store: ArtifactStore, artifactId: string) => {
+    const kind = store.get(artifactId)?.kind;
+    if (kind && isDocKind(kind) && store.service.adapterFor(kind)?.migrate) await store.ensureMigrated(artifactId, HUMAN);
+  };
   // A write's answer: the row as it stands, read once the write committed, released after any batch open at that read.
   const written = (store: ArtifactStore, artifactId: string) => store.readCommitted(() => ({ artifact: required(store, artifactId) }));
 
@@ -102,8 +109,9 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     const store = storeOf();
     return store.readCommitted(() => ({ artifacts: store.list(filter).map((artifact) => ({ ...artifact, revision: store.revision(artifact.id) })) }));
   });
-  serve('artifacts.get', ({ artifactId, includeDeleted }) => {
+  serve('artifacts.get', async ({ artifactId, includeDeleted }) => {
     const store = storeOf();
+    await prepared(store, artifactId); // P3-E: main's open preflight, so a document that cannot be opened is refused by name
     return store.readCommitted(() => ({ artifact: row(store, artifactId, includeDeleted) }));
   });
   serve('artifacts.create', async ({ content, ...input }) => {
@@ -227,8 +235,9 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
       return { assets: store.listAssets(artifactId).map(({ ref, name, mime, size }) => ({ ref, name, mime, size })) };
     });
   });
-  serve('artifacts.state', ({ artifactId }) => {
+  serve('artifacts.state', async ({ artifactId }) => {
     const store = storeOf();
+    await prepared(store, artifactId); // P3-E: the live state is the kind's model
     return store.readCommitted(() => {
       const { kind } = required(store, artifactId);
       if (!isDocKind(kind)) throw new ArtifactStoreError('invalid', `a ${kind} artifact has no document state`);
@@ -277,7 +286,21 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
       port.close();
       return;
     }
-    documents.service.attach(doc === 'suggestions' ? documents.service.suggestionDoc(artifactId) : artifactId, fromMessagePortMain(port), actor);
+    const open = () => documents.service.attach(doc === 'suggestions' ? documents.service.suggestionDoc(artifactId) : artifactId, fromMessagePortMain(port), actor);
+    if (!documents.service.adapterFor(artifact.kind)?.migrate) return void open();
+    // P3-E (E1's M2): a kind with a migration is brought into its model first, as the port's actor; the port's close is
+    // watched before that wait, so a port its window closed meanwhile is never attached, and a refusal closes it
+    let closed = false;
+    port.on('close', () => void (closed = true));
+    documents.store
+      .ensureMigrated(artifactId, actor)
+      .then(() => {
+        if (!closed) open();
+      })
+      .catch((error: unknown) => {
+        console.error(`[artifacts] closed document channel ${channel}: ${error instanceof Error ? error.message : String(error)}`);
+        port.close();
+      });
   });
 
   return {

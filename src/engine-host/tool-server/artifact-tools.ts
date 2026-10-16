@@ -13,6 +13,7 @@ import { basename, extname, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readRoots } from '@artifacts/files';
 import { assetWarnings, heldSlides } from '@artifacts/slides/answer'; // P3-C
+import { boardAssetWarnings, heldBoards } from '@artifacts/design/answer'; // P3-E
 import { KIND_GUIDES } from '@artifacts/types/guides';
 import { isDocKind, type Artifact, type ArtifactKind } from '@shared/artifacts/entity';
 import type { ArtifactVersion } from '@shared/artifacts/version';
@@ -210,6 +211,9 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
       const input = parsed.data;
       const store = storeOf('artifact_read', deps);
       const artifactId = await resolveArtifact('artifact_read', store, input.artifact, lineageOf(ctx, deps));
+      // P3-E (E1's M2; Decision Log 11 (1)): a live read answers from the kind's model, an earlier build's shape migrated
+      // first as this session (a version is read as it was)
+      if (input.version === undefined) await store.ensureMigrated(artifactId, actorOf(ctx));
       const read = await store.readCommitted(() => {
         const artifact = store.get(artifactId);
         if (!artifact) throw new ToolRefusal(TOOL_ERRORS.noArtifact('artifact_read', input.artifact));
@@ -221,10 +225,11 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
           if (input.revision !== undefined) throw new ToolRefusal(TOOL_ERRORS.refused('artifact_read', { reason: 'invalid' }, `a ${artifact.kind} artifact is read live or by version, not by revision`));
           const { revision, state } = version ? { revision: version.seq, state: store.versionState(artifactId, version.id) } : store.service.readState(artifactId);
           const ownFiles = store.service.adapterFor(artifact.kind)?.readFiles !== undefined; // P3-C: its roots are its files
-          const assets = artifact.kind === 'presentation' ? new Set(store.listAssets(artifactId).map((asset) => asset.ref)) : null; // P3-C
+          const assets = artifact.kind === 'presentation' || artifact.kind === 'design' ? new Set(store.listAssets(artifactId).map((asset) => asset.ref)) : null; // P3-C; P3-E: a design's too
           const body = withDoc(state, (doc) => ({
             files: filesOf(store, artifact.kind, doc), json: ownFiles ? {} : readRoots(doc),
-            ...(assets && { warnings: assetWarnings(doc, assets), held: heldSlides(doc) }), // P3-C
+            ...(assets && artifact.kind === 'presentation' && { warnings: assetWarnings(doc, assets), held: heldSlides(doc) }), // P3-C
+            ...(assets && artifact.kind === 'design' && { warnings: boardAssetWarnings(doc, assets), held: heldBoards(doc) }), // P3-E: by board path
           }));
           return { kind: 'doc' as const, head: { ...head, revision }, body, base: version ? null : { revision, state, files: body.files /* P3-C */ } };
         }

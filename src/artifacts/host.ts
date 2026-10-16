@@ -105,6 +105,12 @@ export interface KindAdapter {
   // P3-C (the parent's Decision Log 58): the paths `readFiles` would answer, in its order, without their text; a publish
   // builds its answer's `kept` and `removed` from them. Without it, the paths of `readFiles` (or the generic file model).
   paths?(doc: Doc): string[];
+  // P3-E (docs/doperpowers/plans/2026-10-16-p3-e-design-dashboard.md Decision Log 11 (1)): brings a document an earlier
+  // build stored in another shape into the kind's current model, in the caller's transaction, answering whether it
+  // wrote; a document already in the model answers false and writes nothing. Input it cannot migrate throws before
+  // anything is written. The store runs it through `ArtifactStore.ensureMigrated` (a scratch test, then one write
+  // credited to the triggering actor) before a live open, read or write; retained versions are never migrated.
+  migrate?(doc: Doc): boolean;
 }
 
 // What an editor shows of an open document (P3-G's header maps it: `unsaved > 0` while live is saving, phase `off` is
