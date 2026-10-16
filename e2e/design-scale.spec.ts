@@ -14,15 +14,20 @@
 //               BeginFrame intervals; e2e/support/design-frames.ts), p95 over the active frames             ≤ 4 ms
 //   2 drops     the rAF-gap proxy over its calibrated idle interval (≤ 2 %); the compositor's own PipelineReporter drops
 //               beside it, separately labelled (≤ 2 %, or unavailable when the trace carries none)
-//   2 stress    the same frame rows while the owner drags a board by its title and the agent republishes that board (a
-//               card's fill, content unrelated to the frame) every 0.7 s, its actual start cadence and changed paths
-//               recorded; the dragged frame and the agent's fill both stand after it
+//   2 stress    the same frame rows, a pan and a pinch zoom each in its own rows, for at least 5 s while the owner drags a
+//               board by its title and the agent republishes that board (a card's fill, content unrelated to the frame)
+//               on a 0.7 s grid: the gesture's window and every publication's request and answer on one clock, at least
+//               3 publications asked and answered inside the window or the trial is unreadable; the cadence and changed
+//               paths recorded; the dragged frame and the agent's fill both stand after it
 //   3 relayout  a Theme background change through the Theme rail (the design's overrides: the scope moves, every canvas
-//               invalidated in one batch): its Enter's timestamp to the last of 24 fresh onLayout observations  ≤ 50 ms
+//               invalidated in one batch): its Enter's timestamp to the last of 24 fresh onLayout observations, an
+//               upper-bound latency (first, last and spread noted; the spread never stands for the pass)      ≤ 50 ms
 //   4 memory    the renderer's working set (its window's own PID in Electron's metrics, KiB → MiB), ordinary and after a
-//               forced collection, with every export window closed: ordinary ≤ 500 MB (500 × 10⁶ bytes)
-//   5 publish   the host loop's busy time over one agent publish (one board; the whole design's 24 boards); its longest
-//               gap and wall time beside it                                                     ≤ 50 ms; ≤ 300 ms
+//               forced collection, with every export window closed (a missing, non-finite or non-positive reading is
+//               unreadable): ordinary ≤ 500 MB (500 × 10⁶ bytes)
+//   5 publish   the host loop's busy time over one agent publish (one board, the 4,096×8,192 and the heaviest among the
+//               seven; the whole design's 24 boards with the manifest sent unchanged); its longest gap and wall time
+//               beside it                                                                       ≤ 50 ms; ≤ 300 ms
 //   6 pdf       every board as one PDF through main's export service: the request to the committed file, its 24 pages
 //               checked against each board's native size                                                    < 55 s
 // Raw trials, frame lists, publish cadences, the machine and its loads go to test-results/design-scale.json, each trial's
@@ -34,7 +39,7 @@ import { cpus, loadavg, release, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { BENCH_CARD, BENCH_CARD_FILLS, benchBoards, benchDesignFiles, type BenchBoard } from '../src/artifacts/design/fixtures/bench';
-import { frameWork, rafDrops, type FrameWork, type RafDrops, type TraceEvent } from './support/design-frames';
+import { frameWork, inside, rafDrops, type FrameWork, type RafDrops, type Span, type TraceEvent } from './support/design-frames';
 import { armLayoutProbe, boardOf, boardsOf, disarmLayoutProbe, findIn, frameOf, headerAction, layoutProbeResult, ok, seamInstalled, seed, tabsOf, type TabView } from './support/design';
 import { PerfSeam, type LoopStats } from './support/document-scale';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -49,6 +54,7 @@ const TRIALS = 3;
 const LOAD_LIMIT = 10;
 const QUIET_WAIT_MS = 10 * 60_000;
 const PUBLISH_EVERY_MS = 700;
+const STRESS_MS = 5_000; // a contention gesture's least length: several publications fit wholly inside it
 const TITLE = 'Scale 24';
 const AGENT = 'design-agent';
 const POPPLER = '/opt/homebrew/bin';
@@ -207,8 +213,11 @@ class DesignAgent {
     return fill;
   }
 
-  /** One publish restyling each board's card (its fill toggled), from the revision it last saw. */
-  async publish(boardIds: string[]): Promise<ToolCall<PublishResult> & { fills: Record<string, string> }> {
+  /**
+   * One publish restyling each board's card (its fill toggled), from the revision it last saw; with `manifest`, the
+   * manifest as last read rides along unchanged (sent, not changed).
+   */
+  async publish(boardIds: string[], options: { manifest?: boolean } = {}): Promise<ToolCall<PublishResult> & { fills: Record<string, string>; sent: number }> {
     const sent: Record<string, string> = {};
     const fills: Record<string, string> = {};
     for (const boardId of boardIds) {
@@ -219,11 +228,13 @@ class DesignAgent {
       if (sent[path] === this.files[path]) throw new Error(`${path}: the card's fill did not change`);
       fills[boardId] = next;
     }
+    const boards = Object.keys(sent).sort();
+    if (options.manifest) sent['project/canvas.json'] = this.files['project/canvas.json']!;
     const answer = await this.seam.send<ToolCall<PublishResult>>({ cmd: 'call', session: AGENT, tool: 'artifact_publish', args: { artifact: this.artifactId, baseRevision: 'last', files: sent } });
     if (answer.isError) throw new Error(`the agent's publish was refused: ${answer.text}`);
-    expect([...answer.result!.changed].sort(), 'the publish changed exactly what was sent').toEqual(Object.keys(sent).sort());
+    expect([...answer.result!.changed].sort(), 'the publish changed exactly the restyled boards').toEqual(boards);
     Object.assign(this.files, sent);
-    return { ...answer, fills };
+    return { ...answer, fills, sent: Object.keys(sent).length };
   }
 }
 
@@ -320,16 +331,21 @@ const stopFrames = (page: Page) =>
 interface FrameTrial {
   work: FrameWork | null;
   drops: RafDrops | null;
+  /** The gesture's own start and end on the test's clock (Date.now(), as a publication's requestedAt and answeredAt). */
+  span: Span;
   error?: string;
 }
 /** A gesture measured: its trace's frame work and the rAF proxy, the trace kept on disk. */
 async function measureFrames(page: Page, name: string, gesture: () => Promise<void>): Promise<FrameTrial> {
   const idle = await idleFrames(page);
+  let span: Span = { startedAt: NaN, endedAt: NaN };
   const run = async () => {
     await startFrames(page);
+    const startedAt = Date.now();
     try {
       await gesture();
     } finally {
+      span = { startedAt, endedAt: Date.now() };
       await sleep(100); // the last input's frame
     }
     return stopFrames(page);
@@ -345,7 +361,7 @@ async function measureFrames(page: Page, name: string, gesture: () => Promise<vo
     errors.push(`trace unavailable: ${error.message}`);
     stamps = await run();
   }
-  const out: FrameTrial = { work: null, drops: null };
+  const out: FrameTrial = { work: null, drops: null, span };
   if (events) {
     mkdirSync(TRACES, { recursive: true });
     writeFileSync(join(TRACES, `${name}.trace.json`), JSON.stringify({ traceEvents: events }));
@@ -375,6 +391,7 @@ async function rendererMemory(launch: MawsLaunch): Promise<{ pid: number; window
     return { pid, windows: windows.length, workingSetKiB: metric ? metric.memory.workingSetSize : null };
   });
   if (read.workingSetKiB === null) throw new Error(`no metrics entry for the window's renderer pid ${read.pid}`);
+  if (!Number.isFinite(read.workingSetKiB) || read.workingSetKiB <= 0) throw new Error(`the window's renderer pid ${read.pid} reads a working set of ${read.workingSetKiB} KiB`);
   return { pid: read.pid, windows: read.windows, workingSetKiB: read.workingSetKiB, mib: read.workingSetKiB / 1024, bytes: read.workingSetKiB * 1024 };
 }
 
@@ -447,22 +464,27 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
 
   await test.step('5: the agent’s publishes through A’s real publish, the design open: one board, seven times; all 24 boards, five times', async () => {
     await agent.publish([BOARDS[0]!.id]); // warm-up: the session's base becomes its own publish
+    // seven single boards: the 4,096×8,192 board and the heaviest by elements among them, the rest spread over the mix
+    const tall = BOARDS.find((b) => b.size === 'tall')!;
+    const heaviest = [...BOARDS].sort((a, b) => b.elements - a.elements)[0]!;
+    const singles = [...new Set([tall.id, heaviest.id, ...BOARDS.map((b) => b.id).filter((_, i) => i % 4 === 1)])].slice(0, 7);
     const one: Trial[] = [];
-    for (let k = 0; k < 7; k++) {
+    for (const boardId of singles) {
       const load = await quiet();
-      const answer = await agent.publish([BOARDS[(1 + k * 5) % BOARDS.length]!.id]);
-      one.push({ value: answer.busyMs, load: Math.max(load, load1()), note: `longest loop gap ${answer.loop.max.toFixed(1)} ms; wall ${answer.wallMs.toFixed(1)} ms; changed ${answer.result!.changed.join(', ')}` });
+      const answer = await agent.publish([boardId]);
+      const board = BOARDS.find((b) => b.id === boardId)!;
+      one.push({ value: answer.busyMs, load: Math.max(load, load1()), note: `${boardId} (${board.w}×${board.h}, ${board.elements} elements); longest loop gap ${answer.loop.max.toFixed(1)} ms; wall ${answer.wallMs.toFixed(1)} ms; changed ${answer.result!.changed.join(', ')}` });
       await sleep(300);
     }
     const whole: Trial[] = [];
     for (let k = 0; k < 5; k++) {
       const load = await quiet();
-      const answer = await agent.publish(BOARDS.map((b) => b.id));
-      whole.push({ value: answer.busyMs, load: Math.max(load, load1()), note: `longest loop gap ${answer.loop.max.toFixed(1)} ms; wall ${answer.wallMs.toFixed(1)} ms; ${answer.result!.changed.length} paths changed` });
+      const answer = await agent.publish(BOARDS.map((b) => b.id), { manifest: true });
+      whole.push({ value: answer.busyMs, load: Math.max(load, load1()), note: `longest loop gap ${answer.loop.max.toFixed(1)} ms; wall ${answer.wallMs.toFixed(1)} ms; ${answer.sent} files sent (the manifest unchanged among them), ${answer.result!.changed.length} changed` });
       await sleep(1_000);
     }
-    rows.add('5 publish one board', 'one board’s publish by the agent’s session through A’s real artifact_publish: the host loop’s busy time over the call (the 1 ms sampler’s gaps past its tick)', 'ms', 50, '≤ 50 ms', one);
-    rows.add('5 publish whole design', 'all 24 boards in one publish, each changed: the host loop’s busy time over the call', 'ms', 300, '≤ 300 ms', whole);
+    rows.add('5 publish one board', 'one board’s publish (the 4,096×8,192 board and the heaviest among the seven) by the agent’s session through A’s real artifact_publish: the host loop’s busy time over the call (the 1 ms sampler’s gaps past its tick)', 'ms', 50, '≤ 50 ms', one);
+    rows.add('5 publish whole design', 'the whole design in one publish: all 24 boards, each changed, and the manifest sent unchanged: the host loop’s busy time over the call', 'ms', 300, '≤ 300 ms', whole);
   });
 
   const frameRows = (label: string, what: string, trials: (FrameTrial & { load: number; note?: string })[]) => {
@@ -523,72 +545,110 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
     frameRows('zoom', 'a pinch (⌃-wheel) zoom from fit in and back out about a desktop board, 240 real wheel events', zooms);
   });
 
-  await test.step('2 (stress): a pan while the owner drags a board by its title and the agent republishes that board every 0.7 s, three times', async () => {
-    const trials: (FrameTrial & { load: number; note?: string })[] = [];
-    const cadences: Record<string, unknown>[] = [];
-    for (let k = 0; k < TRIALS; k++) {
-      await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
-      await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('0.25');
-      const { box: world } = await worldPoint(tab);
-      // a board whose title lies whole inside the world at this view
-      let dragged: BenchBoard | null = null;
-      for (const b of BOARDS) {
-        const t = await tab.locator(`[data-board-title="${b.id}"]`).boundingBox();
-        if (t && t.x > world.x + 20 && t.y > world.y + 20 && t.x + t.width < world.x + world.width - 300 && t.y + t.height < world.y + world.height - 200) {
-          dragged = b;
-          break;
-        }
+  // the gesture under contention: the owner's title drag of a board while the agent republishes that board's card every
+  // 0.7 s, with a pan (the wheel) or a pinch zoom (⌃-wheel) running through the world's handler all along; at least five
+  // seconds of it, so several publications run wholly inside the measured window, which is what the trial claims
+  const stressTrial = async (kind: 'pan' | 'zoom', k: number): Promise<{ trial: FrameTrial & { load: number; note?: string }; record: Record<string, unknown> }> => {
+    await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
+    await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('0.25');
+    const { box: world } = await worldPoint(tab);
+    // a board whose title lies whole inside the world at this view
+    let dragged: BenchBoard | null = null;
+    for (const b of BOARDS) {
+      const t = await tab.locator(`[data-board-title="${b.id}"]`).boundingBox();
+      if (t && t.x > world.x + 20 && t.y > world.y + 20 && t.x + t.width < world.x + world.width - 300 && t.y + t.height < world.y + world.height - 200) {
+        dragged = b;
+        break;
       }
-      if (!dragged) throw new Error('no board title lies inside the world at 25 %');
-      const start = (await frameOf(page, id, dragged.id))!;
-      const title = (await tab.locator(`[data-board-title="${dragged.id}"]`).boundingBox())!;
-      const from = { x: title.x + Math.min(20, title.width / 2), y: title.y + title.height / 2 };
-      const load = await quiet();
-      let release!: () => void;
-      const released = new Promise<void>((resolve) => (release = resolve));
-      const publishes = republishing(agent, dragged.id, released);
-      publishes.catch(() => {}); // settled below
-      let published: PromiseSettledResult<Publication[]>;
-      let frames: FrameTrial;
-      try {
-        await page.mouse.move(from.x, from.y);
-        await page.mouse.down();
-        frames = await measureFrames(page, `stress-${k + 1}`, async () => {
-          for (let i = 0; i < 240; i++) {
-            await page.mouse.move(from.x + i * 0.75, from.y + (i % 40) * 0.5);
-            if (i % 2 === 0) await page.mouse.wheel(i < 120 ? 10 : -10, i < 120 ? 14 : -14);
+    }
+    if (!dragged) throw new Error('no board title lies inside the world at 25 %');
+    const start = (await frameOf(page, id, dragged.id))!;
+    const title = (await tab.locator(`[data-board-title="${dragged.id}"]`).boundingBox())!;
+    const from = { x: title.x + Math.min(20, title.width / 2), y: title.y + title.height / 2 };
+    const load = await quiet();
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    const publishes = republishing(agent, dragged.id, released);
+    publishes.catch(() => {}); // settled below
+    let published: PromiseSettledResult<Publication[]>;
+    let frames: FrameTrial;
+    try {
+      await page.mouse.move(from.x, from.y);
+      await page.mouse.down();
+      frames = await measureFrames(page, `stress-${kind}-${k + 1}`, async () => {
+        if (kind === 'zoom') await page.keyboard.down('Control');
+        try {
+          const t0 = Date.now();
+          for (let i = 0; i < 240 || Date.now() - t0 < STRESS_MS; i++) {
+            const leg = i % 120; // there and back again, every 120 steps
+            const out = Math.floor(i / 60) % 2 === 0;
+            await page.mouse.move(from.x + (leg < 60 ? leg : 120 - leg) * 0.75, from.y + (i % 40) * 0.5);
+            if (kind === 'pan' && i % 2 === 0) await page.mouse.wheel(out ? 10 : -10, out ? 14 : -14);
+            if (kind === 'zoom') await page.mouse.wheel(0, out ? -2.7 : 2.7);
             await page.waitForTimeout(8);
           }
-        });
-        await page.mouse.up();
-      } finally {
-        release(); // the agent's workload ends with the drag, whether it finished or threw (its error wins)
-        [published] = await Promise.allSettled([publishes]);
-      }
-      if (published.status === 'rejected') throw published.reason;
-      const pubs = published.value;
-      const lastFill = pubs.length > 0 ? agent.fillOf(dragged.id) : null;
-      // the dragged frame stands (moved, written, drawn) and the agent's restyle of its card with it
-      await sleep(500);
-      const end = (await frameOf(page, id, dragged.id))!;
-      const drawn = await tab.locator(`[data-board-id="${dragged.id}"]`).evaluate((n) => [(n as HTMLElement).style.left, (n as HTMLElement).style.top]);
-      const card = findIn((await boardOf(page, id, dragged.id)).children, BENCH_CARD)?.style.background;
-      const cardDrawn = await tab.locator(`[data-board-id="${dragged.id}"] .design-board-canvas [data-eid="${BENCH_CARD}"]`).evaluate((n) => (n as HTMLElement).style.getPropertyValue('background-color'));
-      const intervals = pubs.slice(1).map((p, j) => p.requestedAt - pubs[j]!.requestedAt);
-      const cadence = { board: dragged.id, publishes: pubs.length, everyMs: PUBLISH_EVERY_MS, intervalsMs: intervals, intervalP50: intervals.length ? median(intervals) : null, intervalMax: intervals.length ? Math.max(...intervals) : null, lateMs: pubs.map((p) => p.requestedAt - p.due), hostStartApproxMs: pubs.map((p) => +(p.answeredAt - p.wallMs - pubs[0]!.requestedAt).toFixed(1)), changed: pubs.map((p) => p.changed), busyMs: pubs.map((p) => +p.busyMs.toFixed(2)) };
-      cadences.push(cadence);
-      const problems: string[] = [];
-      if (pubs.length < 3) problems.push(`only ${pubs.length} publications during the drag`);
-      if (pubs.some((p) => p.changed.length !== 1 || p.changed[0] !== boardPath(dragged.id))) problems.push('a publication changed something other than the dragged board');
-      if (end.x === start.x && end.y === start.y) problems.push(`the dragged frame did not move (${JSON.stringify(start)})`);
-      if (drawn[0] !== `${end.x}px` || drawn[1] !== `${end.y}px`) problems.push(`the world draws ${drawn.join(', ')} for the frame ${end.x}, ${end.y}`);
-      if (lastFill !== null && card !== lastFill) problems.push(`the card's fill is ${card}, not the agent's last ${lastFill}`);
-      if (lastFill !== null && cardDrawn !== rgbOf(lastFill)) problems.push(`the world draws the card in ${cardDrawn}, not the agent's last ${lastFill}`);
-      if (problems.length > 0) failures.push(`stress ${k + 1}: ${problems.join('; ')}`);
-      trials.push({ ...frames!, load: Math.max(load, load1()), note: `dragged ${dragged.id} ${JSON.stringify(start)} → ${JSON.stringify(end)}; ${pubs.length} publications every ${intervals.length ? median(intervals) : '—'} ms (max ${intervals.length ? Math.max(...intervals) : '—'}); card ${card} (drawn ${cardDrawn})` });
+        } finally {
+          if (kind === 'zoom') await page.keyboard.up('Control');
+        }
+      });
+      await page.mouse.up();
+    } finally {
+      release(); // the agent's workload ends with the drag, whether it finished or threw (its error wins)
+      [published] = await Promise.allSettled([publishes]);
     }
-    rows.write({ stressPublications: cadences });
-    frameRows('stress', 'a pan by real wheel events during an owner’s title drag of a board while the agent republishes that board every 0.7 s', trials);
+    if (published.status === 'rejected') throw published.reason;
+    const pubs = published.value;
+    const within = inside(pubs, frames!.span);
+    const lastFill = pubs.length > 0 ? agent.fillOf(dragged.id) : null;
+    // the dragged frame stands (moved, written, drawn) and the agent's restyle of its card with it
+    await sleep(500);
+    const end = (await frameOf(page, id, dragged.id))!;
+    const drawn = await tab.locator(`[data-board-id="${dragged.id}"]`).evaluate((n) => [(n as HTMLElement).style.left, (n as HTMLElement).style.top]);
+    const card = findIn((await boardOf(page, id, dragged.id)).children, BENCH_CARD)?.style.background;
+    const cardDrawn = await tab.locator(`[data-board-id="${dragged.id}"] .design-board-canvas [data-eid="${BENCH_CARD}"]`).evaluate((n) => (n as HTMLElement).style.getPropertyValue('background-color'));
+    const intervals = pubs.slice(1).map((p, j) => p.requestedAt - pubs[j]!.requestedAt);
+    const record = {
+      gesture: kind,
+      trial: k + 1,
+      board: dragged.id,
+      window: { ...frames!.span, ms: frames!.span.endedAt - frames!.span.startedAt },
+      inside: { indexes: within.indexes, count: within.count, intervalsMs: within.intervalsMs },
+      publishes: pubs.length,
+      everyMs: PUBLISH_EVERY_MS,
+      intervalsMs: intervals,
+      requestedAt: pubs.map((p) => p.requestedAt),
+      answeredAt: pubs.map((p) => p.answeredAt),
+      lateMs: pubs.map((p) => p.requestedAt - p.due),
+      hostStartApproxMs: pubs.map((p) => +(p.answeredAt - p.wallMs - pubs[0]!.requestedAt).toFixed(1)),
+      changed: pubs.map((p) => p.changed),
+      busyMs: pubs.map((p) => +p.busyMs.toFixed(2)),
+    };
+    const problems: string[] = [];
+    if (pubs.some((p) => p.changed.length !== 1 || p.changed[0] !== boardPath(dragged.id))) problems.push('a publication changed something other than the dragged board');
+    if (end.x === start.x && end.y === start.y) problems.push(`the dragged frame did not move (${JSON.stringify(start)})`);
+    if (drawn[0] !== `${end.x}px` || drawn[1] !== `${end.y}px`) problems.push(`the world draws ${drawn.join(', ')} for the frame ${end.x}, ${end.y}`);
+    if (lastFill !== null && card !== lastFill) problems.push(`the card's fill is ${card}, not the agent's last ${lastFill}`);
+    if (lastFill !== null && cardDrawn !== rgbOf(lastFill)) problems.push(`the world draws the card in ${cardDrawn}, not the agent's last ${lastFill}`);
+    if (problems.length > 0) failures.push(`stress ${kind} ${k + 1}: ${problems.join('; ')}`);
+    const note = `dragged ${dragged.id} ${JSON.stringify(start)} → ${JSON.stringify(end)}; window ${record.window.ms} ms; ${within.count} of ${pubs.length} publications asked and answered inside it (indexes ${within.indexes.join(', ')}; every ${within.intervalsMs.length ? median(within.intervalsMs) : '—'} ms, max ${within.intervalsMs.length ? Math.max(...within.intervalsMs) : '—'}); card ${card} (drawn ${cardDrawn})`;
+    // under three publications inside the window the trial proves no contention: unreadable, never a passing figure
+    const contended = within.count >= 3;
+    const trial = contended ? { ...frames!, load: Math.max(load, load1()), note } : { ...frames!, work: null, drops: null, load: Math.max(load, load1()), note, error: `only ${within.count} publications asked and answered inside the measured window (${record.window.ms} ms); at least 3 are required` };
+    return { trial, record };
+  };
+
+  await test.step('2 (stress): a pan, then a pinch zoom, while the owner drags a board by its title and the agent republishes that board every 0.7 s, three times each', async () => {
+    const records: Record<string, unknown>[] = [];
+    for (const kind of ['pan', 'zoom'] as const) {
+      const trials: (FrameTrial & { load: number; note?: string })[] = [];
+      for (let k = 0; k < TRIALS; k++) {
+        const { trial, record } = await stressTrial(kind, k);
+        trials.push(trial);
+        records.push(record);
+        rows.write({ stressPublications: records });
+      }
+      frameRows(`stress ${kind}`, kind === 'pan' ? 'a pan by real wheel events during an owner’s title drag of a board while the agent republishes that board every 0.7 s (at least 3 publications inside the window)' : 'a pinch (⌃-wheel) zoom in and out during an owner’s title drag of a board while the agent republishes that board every 0.7 s (at least 3 publications inside the window)', trials);
+    }
   });
 
   await test.step('3: re-layout every board after a Theme background change, three times: the Enter to the last fresh onLayout', async () => {
@@ -625,7 +685,7 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
       }
       await expect.poll(() => tab.locator(`[data-board-id="${BOARDS[0]!.id}"] .maws-slide`).evaluate((n) => getComputedStyle(n).backgroundColor)).not.toBe('');
     }
-    rows.add('3 relayout', 'a Theme background change (the design’s overrides, the scope moved): its Enter’s timestamp to the last of 24 fresh onLayout observations, one per canvas', 'ms', 50, '≤ 50 ms (E0 13.5 ms)', trials);
+    rows.add('3 relayout', 'a Theme background change (the design’s overrides, the scope moved): its Enter’s timestamp to the last of 24 fresh onLayout observations, one per canvas; an upper-bound latency (the input, the scope’s restyle, the wait for the layout frame and the batched pass), not E0’s CPU cost; the observations’ first, last and spread noted beside it, the spread never standing for the pass', 'ms', 50, '≤ 50 ms (E0 13.5 ms)', trials);
   });
 
   await test.step('6: every board as one PDF through main’s export service, three times: the request to the committed file, its 24 pages checked', async () => {
@@ -654,9 +714,16 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
   });
 
   await test.step('4: the renderer’s working set with every export window closed, ordinary and after a forced collection', async () => {
-    await expect.poll(async () => (await rendererMemory(launch!)).windows, { timeout: 30_000, message: 'every export window closed' }).toBe(1);
+    await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), { timeout: 30_000, message: 'every export window closed' }).toBe(1);
     const load = await quiet();
-    const ordinary = await rendererMemory(launch!);
+    const reading = async () => {
+      try {
+        return await rendererMemory(launch!);
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    };
+    const ordinary = await reading();
     const cdp = await page.context().newCDPSession(page);
     try {
       await cdp.send('HeapProfiler.collectGarbage');
@@ -664,10 +731,13 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
       await cdp.detach();
     }
     await sleep(1_000);
-    const collected = await rendererMemory(launch!);
-    if (collected.pid !== ordinary.pid) failures.push(`the renderer's pid changed between the readings (${ordinary.pid} → ${collected.pid})`);
-    rows.add('4 renderer memory', `the window’s renderer working set (pid ${ordinary.pid}), ordinary, with the design open after every row above and every export window closed; the bound read as 500 × 10⁶ bytes`, 'MiB', 500e6 / 2 ** 20, '≤ 500 MB (476.8 MiB; E0 276)', [{ value: ordinary.mib, load: Math.max(load, load1()), note: `${ordinary.workingSetKiB} KiB; after a forced collection ${collected.mib.toFixed(1)} MiB (${collected.workingSetKiB} KiB)` }]);
-    rows.add('4 renderer memory (after collection)', `the same renderer (pid ${collected.pid}) after HeapProfiler.collectGarbage`, 'MiB', null, 'recorded beside row 4', [{ value: collected.mib, load: Math.max(load, load1()) }]);
+    const collected = await reading();
+    const pids = [ordinary, collected].map((r) => (typeof r === 'string' ? null : r.pid));
+    if (pids[0] !== null && pids[1] !== null && pids[0] !== pids[1]) failures.push(`the renderer's pid changed between the readings (${pids[0]} → ${pids[1]})`);
+    // a missing, non-finite or non-positive working set is unreadable, never a passing figure
+    const trial = (r: Awaited<ReturnType<typeof reading>>, note?: string): Trial => (typeof r === 'string' ? { value: null, load: Math.max(load, load1()), error: r } : { value: r.mib, load: Math.max(load, load1()), note: `pid ${r.pid}, ${r.workingSetKiB} KiB${note ? `; ${note}` : ''}` });
+    rows.add('4 renderer memory', 'the window’s renderer working set (its own pid in the metrics), ordinary, with the design open after every row above and every export window closed; the bound read as 500 × 10⁶ bytes', 'MiB', 500e6 / 2 ** 20, '≤ 500 MB (476.8 MiB; E0 276)', [trial(ordinary, typeof collected === 'string' ? `after a forced collection: ${collected}` : `after a forced collection ${collected.mib.toFixed(1)} MiB`)]);
+    rows.add('4 renderer memory (after collection)', 'the same renderer after HeapProfiler.collectGarbage', 'MiB', null, 'recorded beside row 4', [trial(collected)]);
   });
 
   loads.end = load1();

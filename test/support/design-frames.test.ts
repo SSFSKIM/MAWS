@@ -3,7 +3,7 @@
 // frame), not the frame's length; idle frames are kept but the bound reads the active ones; the compositor's drops are
 // reported only when the trace carries its reporter; the rAF proxy counts skipped frames against a calibrated interval.
 import { describe, expect, it } from 'vitest';
-import { distribution, frameWork, rafDrops, type TraceEvent } from '../../e2e/support/design-frames';
+import { distribution, frameWork, inside, rafDrops, type TraceEvent } from '../../e2e/support/design-frames';
 
 const PID = 7;
 const MAIN = 1;
@@ -94,5 +94,19 @@ describe('distribution', () => {
     const d = distribution(Array.from({ length: 100 }, (_, k) => k + 1));
     expect([d.n, d.p50, d.p95, d.max, d.mean]).toEqual([100, 50, 95, 100, 50.5]);
     expect(distribution([]).n).toBe(0);
+  });
+});
+
+describe('the publications inside a measured window', () => {
+  it('counts only those asked at or after its start and answered by its end, with their request intervals', () => {
+    const pubs = [
+      { requestedAt: 900, answeredAt: 950 }, // during calibration: before the window
+      { requestedAt: 1_000, answeredAt: 1_040 }, // at its start
+      { requestedAt: 1_700, answeredAt: 1_760 },
+      { requestedAt: 2_400, answeredAt: 2_430 },
+      { requestedAt: 3_100, answeredAt: 3_200 }, // asked inside, answered after its end
+    ];
+    expect(inside(pubs, { startedAt: 1_000, endedAt: 3_150 })).toEqual({ indexes: [1, 2, 3], count: 3, intervalsMs: [700, 700] });
+    expect(inside(pubs, { startedAt: 3_300, endedAt: 4_000 })).toEqual({ indexes: [], count: 0, intervalsMs: [] });
   });
 });

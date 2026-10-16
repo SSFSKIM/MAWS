@@ -139,3 +139,25 @@ export function rafDrops(idle: number[], stamps: number[]): RafDrops {
   const expected = Math.max(1, Math.round((stamps.at(-1)! - stamps[0]!) / intervalMs));
   return { intervalMs, expected, dropped, share: dropped / expected, longestGapMs: Math.max(...run) };
 }
+
+/** A measured window on the test's clock (Date.now()): the gesture's own start and end. */
+export interface Span {
+  startedAt: number;
+  endedAt: number;
+}
+/** What a contention run needs of each publication: when it was asked and when its answer came (the same clock). */
+export interface Timed {
+  requestedAt: number;
+  answeredAt: number;
+}
+
+/**
+ * The publications that ran wholly inside the measured window (asked at or after its start, answered by its end), by
+ * their index in `all`, with the intervals between their requests: what a stress trial may claim as contention. A
+ * publication before the gesture (during calibration or the trace's start) or still running at its end does not count.
+ */
+export function inside<T extends Timed>(all: readonly T[], span: Span): { indexes: number[]; count: number; intervalsMs: number[] } {
+  const indexes = all.flatMap((p, k) => (p.requestedAt >= span.startedAt && p.answeredAt <= span.endedAt ? [k] : []));
+  const intervalsMs = indexes.slice(1).map((k, j) => all[k]!.requestedAt - all[indexes[j]!]!.requestedAt);
+  return { indexes, count: indexes.length, intervalsMs };
+}
