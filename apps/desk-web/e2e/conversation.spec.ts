@@ -441,3 +441,50 @@ test('a channel opens at its tail and follows it while the reader is at the bott
   await expect(line(64)).toBeAttached();
   await expect(line(1)).toBeInViewport();
 });
+
+/** A run of agent traffic at the head of a channel, which grows by a line per say when unfolded. */
+async function stageGrowingRun(hub: HubDouble, says: number) {
+  for (let n = 1; n <= says; n++) await say(hub, M45, [[S.works, 'maws-fe']], `say ${n}`);
+}
+/** Unfolds the run without scrolling to it, as a row above the reader growing would. */
+const unfoldRun = (page: Page) => center(page).getByTestId('agent-run').first().getByRole('button').evaluate((b) => (b as HTMLButtonElement).click());
+const gapOf = (page: Page) => center(page).getByTestId('channel-events').evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+
+test('a row above a reader scrolled back that grows leaves the reader where they were, never pulled to the tail', async ({ page, hub }) => {
+  await stageProject(hub);
+  await stageGrowingRun(hub, 25);
+  for (let n = 1; n <= 40; n++) await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rg${n}#0` });
+  await open(page, hub);
+  const line = (n: number) => center(page).getByText(`line ${n}`, { exact: true });
+  await expect(line(40)).toBeInViewport();
+  // Back a little from the tail, on purpose: further than the slack, but less than the run grows by.
+  await center(page).getByTestId('channel-events').evaluate((el) => el.scrollTo({ top: el.scrollHeight - el.clientHeight - 150 }));
+  await expect.poll(() => gapOf(page)).toBeGreaterThan(100);
+  const reading = await line(36).boundingBox();
+  await unfoldRun(page);
+  await expect(center(page).getByTestId('agent-run-messages')).toBeAttached();
+  await page.waitForTimeout(300); // what follows a resize has run
+  expect((await line(36).boundingBox())!.y).toBeCloseTo(reading!.y, 0);
+  expect(await gapOf(page)).toBeGreaterThan(100);
+});
+
+test('after a notification lands on its card, an earlier row that grows leaves the card where it was', async ({ page, hub }) => {
+  await stageProject(hub);
+  await stageGrowingRun(hub, 25);
+  let landing = { writer: '', seq: 0 };
+  for (let n = 1; n <= 40; n++) {
+    const { event } = await hub.append(PROJECT, { writer: `mini/${S.asks}`, kind: 'message', from: 'maws-45', to: 'host', text: `line ${n}`, src: `rl${n}#0` });
+    if (n === 37) landing = { writer: event.writer, seq: event.seq };
+  }
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}?writer=${encodeURIComponent(landing.writer)}&seq=${landing.seq}`);
+  const landed = center(page).locator('[data-landed]');
+  await expect(landed).toContainText('line 37');
+  await expect(landed).toBeInViewport();
+  await page.waitForTimeout(300);
+  const at = await landed.boundingBox();
+  await unfoldRun(page);
+  await expect(center(page).getByTestId('agent-run-messages')).toBeAttached();
+  await page.waitForTimeout(300);
+  expect((await landed.boundingBox())!.y).toBeCloseTo(at!.y, 0);
+});
