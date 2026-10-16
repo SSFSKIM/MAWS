@@ -18,7 +18,8 @@ import type * as LibModule from '../src/lib';
 type Lib = typeof LibModule;
 const SPIKE = resolve(__dirname, '..');
 const OUT = join(SPIKE, 'out');
-const PROOF = join(OUT, 'proof');
+// Written beneath the repository's test-results/, which the gate uploads (`ci-gate.sh --evidence`).
+const PROOF = join(SPIKE, '../../test-results/dashboard-spike-proof');
 const BIN = '/opt/homebrew/bin';
 const POPPLER = existsSync(join(BIN, 'pdftoppm')) ? BIN : null;
 const SOFFICE = ['/opt/homebrew/bin/soffice', '/Applications/LibreOffice.app/Contents/MacOS/soffice'].find((p) => existsSync(p)) ?? null;
@@ -27,6 +28,7 @@ const PAGE_W = 816;
 
 const report = (key: string, value: unknown) => console.log(`SPIKE ${JSON.stringify({ key, value })}`);
 const emitPng = (name: string, base64: string) => {
+  writeFileSync(join(PROOF, `${name}.png`), Buffer.from(base64, 'base64'));
   const chunks = base64.match(/.{1,8000}/g) ?? [];
   chunks.forEach((chunk, i) => console.log(`SPIKE-PNG ${name} ${i + 1}/${chunks.length} ${chunk}`));
 };
@@ -252,6 +254,40 @@ test('a host reads hover values and opens the source table by keyboard around th
   const aria = await page.locator('figure').ariaSnapshot();
   report('aria', aria);
   expect(aria).toContain('img "2024년 실질 GDP 성장률 (%)"');
+});
+
+test('a host’s nearest-point handler reaches every point: the last GISTEMP month and points far beyond the first 1,000', async () => {
+  const nearest =
+    `for(const svg of document.querySelectorAll('svg')){const layer=svg.querySelector('[data-hover="nearest"]');if(!layer)continue;` +
+    `const xy=layer.getAttribute('data-xy').split(' ').map(p=>p.split(',').map(Number)),tips=layer.getAttribute('data-tips').split('\\n');` +
+    `svg.addEventListener('pointermove',e=>{const p=new DOMPoint(e.clientX,e.clientY).matrixTransform(svg.getScreenCTM().inverse());let best=-1,bd=576;` +
+    `for(let i=0;i<xy.length;i++){const dx=xy[i][0]-p.x,dy=xy[i][1]-p.y,d=dx*dx+dy*dy;if(d<bd){bd=d;best=i}}document.querySelector('.tip').textContent=best<0?'':tips[best]})}`;
+  const targets: [string, number | 'last'][] = [['line-gistemp-monthly', 'last'], ['line-gistemp-monthly', 1500], ['stress-line-10k', 9999], ['stress-scatter-10k', 5000], ['stress-scatter-10k', 8765]];
+  for (const [id, which] of targets) {
+    const c = lib.CASES.find((item) => item.id === id)!;
+    for (const candidate of CANDIDATES) {
+      const { svg } = lib.renderers[candidate](c.spec, c.table, lib.theme, c.datasetId);
+      await page.goto(await call<string>('writeTemp', `nearest-${candidate}-${id}.html`, `<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0">${svg}<div class="tip"></div><script>${nearest}</script></body></html>`));
+      const at = await page.evaluate((w) => {
+        const svgEl = document.querySelector('svg')!;
+        const layer = svgEl.querySelector('[data-hover="nearest"]')!;
+        const xy = layer.getAttribute('data-xy')!.split(' ').map((p) => p.split(',').map(Number));
+        const tips = layer.getAttribute('data-tips')!.split('\n');
+        const i = w === 'last' ? xy.length - 1 : w;
+        // The last point is approached from its right, where nothing else lies; others accept any point within 1 px.
+        const [x, y] = [xy[i][0] + (w === 'last' ? 0.4 : 0), xy[i][1]];
+        const m = svgEl.getScreenCTM()!;
+        const near = xy.map((p, k) => [k, Math.hypot(p[0] - xy[i][0], p[1] - xy[i][1])] as const).filter(([, d]) => d <= 1).map(([k]) => k);
+        return { count: xy.length, index: i, tip: tips[i], clientX: m.a * x + m.c * y + m.e, clientY: m.b * x + m.d * y + m.f, near, nearTips: near.map((k) => tips[k]) };
+      }, which);
+      await page.mouse.move(at.clientX, at.clientY);
+      const shown = (await page.locator('.tip').textContent()) ?? '';
+      report(`nearest-${candidate}-${id}-${which}`, { points: at.count, index: at.index, target: at.tip, shown, within1px: at.near.length, minIndexWithin1px: Math.min(...at.near) });
+      if (which === 'last') expect(shown).toBe('2026-09-01 · anomaly_c: 1.38');
+      else expect(at.nearTips, `${candidate} ${id} ${which}`).toContain(shown);
+      expect(Math.min(...at.near)).toBeGreaterThan(1000);
+    }
+  }
 });
 
 test('positive control: the printer’s request policy reports a page that names the network', async () => {

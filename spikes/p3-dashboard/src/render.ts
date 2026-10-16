@@ -5,7 +5,10 @@
 //
 // The house law has no categorical palette, so a figure is drawn in text ink: series part by dash, marker shape and
 // fill tint, always with a legend (two or more series) or a direct label, never by colour alone; status colours are
-// never borrowed. Hover reads `data-tip` through a handler the host puts around the figure; the figure carries none.
+// never borrowed. Hover is the host's handler around the figure; the figure carries none. A discrete mark (a bar, a
+// wedge) names its value in `data-tip`; the points of a line, an area or a scatter, every drawable one, sit in one
+// empty layer, `<g data-hover="nearest" data-xy="x,y …" data-tips="…">` (tips one per line), which the host searches
+// for the point nearest the pointer, so hover reaches every value without one element per point.
 import { instantOf, type Cell, type Column, type Table } from './model';
 import { SHAPES, type Kit, type Point, type Ticks } from './kit';
 import { parseSpec, type Format, type ViewSpec } from './spec';
@@ -22,8 +25,16 @@ export type RenderView = (spec: unknown, table: Table | null, theme: Theme, data
 
 const DASHES = ['', '6 4', '2 3', '10 3 2 3', '1 3', '14 4'];
 const TINTS = [0.88, 0.5, 0.24, 0.7, 0.36, 0.12];
+// A bar series' identity without colour: solid, hollow, hatched at 45° or 135°, cross-hatched, a dashed hollow.
+const BAR_FILLS: { solid: boolean; hatch: (45 | 135)[]; dash?: string }[] = [
+  { solid: true, hatch: [] },
+  { solid: false, hatch: [] },
+  { solid: false, hatch: [45] },
+  { solid: false, hatch: [135] },
+  { solid: false, hatch: [45, 135] },
+  { solid: false, hatch: [], dash: '3 2' },
+];
 const MAX_SERIES = 6;
-const MAX_TIPS = 1000;
 const PLOT_H = 260;
 const TABLE_ROWS = 25;
 
@@ -290,8 +301,10 @@ function cartesian(v: View): Rendered {
   if (yScale.domain[0] < 0 && yScale.domain[1] > 0) body += hline(left, right, yScale.map(0), theme.muted);
   body += xAxis.svg;
 
-  let tips = 0;
-  const tipTarget = (x: number, y: number, tip: string) => (++tips <= MAX_TIPS ? `<circle cx="${px(x)}" cy="${px(y)}" r="10" fill="${theme.ground}" fill-opacity="0" data-tip="${esc(tip)}"/>` : '');
+  const hover: { x: number; y: number; tip: string }[] = [];
+  const hoverAll = () => {
+    for (const s of series) for (const m of s.marks) if (m.y !== null) hover.push({ x: xAxis.map(m.x)!, y: yScale.map(m.y), tip: m.tip });
+  };
   const pointsOf = (s: Series): Point[] => s.marks.map((m) => [xAxis.map(m.x)!, m.y === null ? null : yScale.map(m.y)] as const);
 
   if (spec.view === 'bar') body += bars(series, xAxis.band!, yScale, theme, valueLabels, yFormat);
@@ -300,7 +313,7 @@ function cartesian(v: View): Rendered {
       const centres = pointsOf(s).filter((p): p is [number, number] => p[1] !== null);
       body += `<path d="${kit.symbols(SHAPES[s.style % SHAPES.length], 64, centres)}" fill="${theme.ink}" fill-opacity="0.72" stroke="${theme.ground}" stroke-width="1"/>`;
     }
-    body += series.map((s) => s.marks.map((m) => (m.y === null ? '' : tipTarget(xAxis.map(m.x)!, yScale.map(m.y), m.tip))).join('')).join('');
+    hoverAll();
   } else {
     const base = yScale.map(Math.max(yScale.domain[0], Math.min(0, yScale.domain[1])));
     for (const s of series) {
@@ -314,9 +327,10 @@ function cartesian(v: View): Rendered {
       }
     }
     body += ends.map((e) => text(xAxis.map(e.m.x)! + 8, e.y + theme.caption * 0.35, e.label)).join('');
-    body += series.map((s) => s.marks.map((m) => (m.y === null ? '' : tipTarget(xAxis.map(m.x)!, yScale.map(m.y), m.tip))).join('')).join('');
+    hoverAll();
   }
-  if (tips > MAX_TIPS) warnings.push(`${tips} marks; hover values for the first ${MAX_TIPS}, every value in the source table`);
+  if (hover.length > 0)
+    body += `<g data-hover="nearest" data-xy="${hover.map((h) => `${px(h.x)},${px(h.y)}`).join(' ')}" data-tips="${hover.map((h) => esc(h.tip.replace(/[\r\n]+/g, ' '))).join('&#10;')}"/>`;
 
   const height = axisY + xAxis.height;
   const points = series.reduce((n, s) => n + s.marks.length, 0);
@@ -355,7 +369,7 @@ function edgeAnchor(x: number, label: string, theme: Theme): 'start' | 'middle' 
 }
 
 function keyMark(view: string, style: number, x: number, y: number, theme: Theme, kit: Kit): string {
-  if (view === 'bar') return `<rect x="${px(x)}" y="${px(y - 6)}" width="14" height="12" rx="2" fill="${theme.ink}" fill-opacity="${TINTS[style % TINTS.length]}"/>`;
+  if (view === 'bar') return treated(`M${px(x)},${px(y - 6)}h14v12h-14Z`, { x0: x, y0: y - 6, x1: x + 14, y1: y + 6 }, style, theme);
   if (view === 'scatter') return `<path d="${kit.symbols(SHAPES[style % SHAPES.length], 64, [[x + 7, y]])}" fill="${theme.ink}" fill-opacity="0.72"/>`;
   const dash = DASHES[style % DASHES.length];
   return `<path d="M${px(x)},${px(y)}H${px(x + 16)}" stroke="${theme.ink}" stroke-width="2" stroke-linecap="round"${dash ? ` stroke-dasharray="${dash}"` : ''}/>` + `<path d="${kit.symbols(SHAPES[style % SHAPES.length], 36, [[x + 8, y]])}" fill="${theme.ink}"/>`;
@@ -374,7 +388,7 @@ function bars(series: Series[], band: { starts: number[]; bandwidth: number; key
       const i = band.keys.indexOf(seriesKey(m.x));
       const x = band.starts[i] + slot * k + (slot - thick) / 2;
       const tip = y.map(m.y);
-      out += `<path d="${roundedBar(x, thick, zero, tip)}" fill="${theme.ink}" fill-opacity="${n === 1 ? TINTS[0] : TINTS[s.style % TINTS.length]}" data-tip="${esc(m.tip)}"/>`;
+      out += treated(roundedBar(x, thick, zero, tip), { x0: x, y0: Math.min(zero, tip), x1: x + thick, y1: Math.max(zero, tip) }, n === 1 ? 0 : s.style, theme, ` data-tip="${esc(m.tip)}"`);
       if (labels) {
         const below = m.y < 0;
         out += text(x + thick / 2, below ? tip + theme.caption + 4 : tip - 6, formatCell(m.y, undefined, format), { anchor: 'middle', fill: theme.ink });
@@ -382,6 +396,33 @@ function bars(series: Series[], band: { starts: number[]; bandwidth: number; key
     }
   });
   return out;
+}
+
+/** A bar or legend key in its series' treatment (BAR_FILLS): the shape, then any hatching inside its box. */
+function treated(d: string, box: { x0: number; y0: number; x1: number; y1: number }, style: number, theme: Theme, extra = ''): string {
+  const fill = BAR_FILLS[style % BAR_FILLS.length];
+  if (fill.solid) return `<path d="${d}" fill="${theme.ink}" fill-opacity="${TINTS[0]}"${extra}/>`;
+  let out = `<path d="${d}" fill="${theme.ground}" stroke="${theme.ink}" stroke-width="1.5"${fill.dash ? ` stroke-dasharray="${fill.dash}"` : ''}${extra}/>`;
+  const lines = fill.hatch.map((angle) => hatch(box.x0 + 2, box.y0 + 2, box.x1 - 2, box.y1 - 2, angle)).join('');
+  if (lines !== '') out += `<path d="${lines}" fill="none" stroke="${theme.ink}" stroke-width="1"/>`;
+  return out;
+}
+
+/** Parallel lines 4 px apart across a box, rising at 45° or falling at 135°, each clipped to the box. */
+function hatch(x0: number, y0: number, x1: number, y1: number, angle: 45 | 135): string {
+  const w = x1 - x0;
+  const h = y1 - y0;
+  if (w <= 0 || h <= 0) return '';
+  let d = '';
+  for (let c = 2 - h; c < w; c += 4) {
+    const t0 = Math.max(0, -c);
+    const t1 = Math.min(h, w - c);
+    if (t1 <= t0) continue;
+    let [ax, bx] = [x0 + c + t0, x0 + c + t1];
+    if (angle === 135) [ax, bx] = [x0 + x1 - ax, x0 + x1 - bx];
+    d += `M${px(ax)},${px(y1 - t0)}L${px(bx)},${px(y1 - t1)}`;
+  }
+  return d;
 }
 
 function roundedBar(x: number, w: number, base: number, tip: number): string {
@@ -424,17 +465,26 @@ function pieView(v: View): Rendered {
     body += `<path d="${kit.arc(angles[i].start, angles[i].end, r)}" fill="${theme.ink}" fill-opacity="${TINTS[i % TINTS.length]}" stroke="${theme.ground}" stroke-width="2" stroke-linejoin="round" data-tip="${esc(tip)}"/>`;
   });
   body += '</g>';
-  // The labels: a list beside the pie (key tint, name, value, share), so no label crowds a thin slice.
+  // Each wedge carries its number, the list's key, so a wedge is told from its neighbour by more than its tint: inside
+  // a wide wedge (ground on a dark tint, ink on a light one), just outside the rim of a thin one.
+  kept.forEach((_, i) => {
+    const mid = (angles[i].start + angles[i].end) / 2;
+    const wide = angles[i].end - angles[i].start >= 0.45;
+    const at = wide ? r * 0.62 : r + 10;
+    const dark = TINTS[i % TINTS.length] >= 0.7;
+    body += text(cx + Math.sin(mid) * at, cy - Math.cos(mid) * at + theme.caption * 0.35, String(i + 1), { anchor: 'middle', fill: wide && dark ? theme.ground : theme.ink });
+  });
+  // The labels: a numbered list beside the pie (key tint, number, name, value, share), so no label crowds a thin slice.
   const lx = cx + r + 32;
   const lineH = theme.caption * 2;
   const listTop = cy - (kept.length * lineH) / 2 + theme.caption;
   kept.forEach((s, i) => {
     const y = listTop + i * lineH;
     const share = `${formatNumber((s.value / total) * 100, 1)}%`;
-    const room = theme.width - lx - 22 - textWidth(`  ${formatNumber(s.value, 2)}  ${share}`, theme.caption);
+    const room = theme.width - lx - 40 - textWidth(`  ${formatNumber(s.value, 2)}  ${share}`, theme.caption);
     body += `<rect x="${px(lx)}" y="${px(y - theme.caption * 0.85)}" width="14" height="12" rx="2" fill="${theme.ink}" fill-opacity="${TINTS[i % TINTS.length]}"/>`;
     const label = wrap(s.label, theme.caption, Math.max(40, room), 1).lines[0];
-    body += text(lx + 22, y, label) + text(theme.width - 8, y, `${formatNumber(s.value, 2)}  ${share}`, { anchor: 'end', fill: theme.muted });
+    body += text(lx + 22, y, String(i + 1)) + text(lx + 40, y, label) + text(theme.width - 8, y, `${formatNumber(s.value, 2)}  ${share}`, { anchor: 'end', fill: theme.muted });
   });
   const desc = `Pie chart of ${yName} by ${spec.x}, ${kept.length} slices: ${kept.map((s) => `${s.label} ${formatNumber((s.value / total) * 100, 1)}%`).join(', ')}. The values are in the source table under the figure.`;
   return { svg: frame(theme, cy * 2, v.caption, desc, body), warnings };

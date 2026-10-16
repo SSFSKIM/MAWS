@@ -11,5 +11,5 @@ export default defineConfig({
   retries: 0,
   timeout: 300_000,
   reporter: [['list']],
-  outputDir: '../out/test-results',
+  outputDir: '../../../test-results/dashboard-spike',
 });

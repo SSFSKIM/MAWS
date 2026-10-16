@@ -6,6 +6,7 @@ import { parseCsv } from '../src/model';
 import { makeRenderer } from '../src/render';
 import { themeFrom } from '../src/svg';
 import { textWidth } from '../src/text';
+import { DOMParser } from '@xmldom/xmldom';
 import { CASES, grade, texts, theme } from './support';
 
 const byId = (id: string) => CASES.find((c) => c.id === id)!;
@@ -168,12 +169,62 @@ describe.each([d3Kit, houseKit])('candidate $name', (kit) => {
     expect(grade(draw('edge-long-korean').svg).texts.join(' ')).toContain('서울특별시');
   });
 
-  it('renders the synthetic 10,000-point inputs with bounded hover targets', () => {
+  it('carries a hover value for every drawable point, the last GISTEMP month and all 10,000 synthetic points included', () => {
+    const layer = (svg: string) => {
+      const m = /<g data-hover="nearest" data-xy="([^"]*)" data-tips="([^"]*)"\/>/.exec(svg)!;
+      return { xy: m[1].split(' '), tips: m[2].split('&#10;') };
+    };
+    const monthly = layer(draw('line-gistemp-monthly').svg);
+    expect(monthly.xy).toHaveLength(1761);
+    expect(monthly.tips).toHaveLength(1761);
+    expect(monthly.tips.at(-1)).toBe('2026-09-01 · anomaly_c: 1.38');
+    expect(monthly.tips[1200]).toBe('1980-01-01 · anomaly_c: 0.3');
     for (const id of ['stress-line-10k', 'stress-scatter-10k']) {
-      const { svg, warnings } = draw(id);
-      expect(tips(svg)).toHaveLength(1000);
-      expect(warnings.some((w) => w.startsWith('10000 marks'))).toBe(true);
+      const { xy, tips: list } = layer(draw(id).svg);
+      expect(xy, id).toHaveLength(10_000);
+      expect(new Set(list).size, id).toBe(10_000);
     }
+    expect(layer(draw('scatter-penguins').svg).tips).toHaveLength(342);
+  });
+
+  it('tells series apart by more than colour: legend keys and marks differ in form, not only in opacity', () => {
+    const doc = (svg: string) => new DOMParser().parseFromString(svg, 'image/svg+xml').documentElement!;
+    // A mark's form: its element, every non-positional attribute but opacity, and its path relative to its first point.
+    const form = (el: Element) => {
+      const attrs = [...Array.from(el.attributes)].filter((a) => !['x', 'y', 'cx', 'cy', 'd', 'fill-opacity', 'data-tip'].includes(a.name)).map((a) => `${a.name}=${a.value}`);
+      const nums = (el.getAttribute('d') ?? '').match(/-?\d+(?:\.\d+)?/g)?.map(Number) ?? [];
+      const rel = nums.map((v, i) => Math.round((v - nums[i % 2]) * 10) / 10);
+      return `${el.tagName}[${attrs.sort().join(' ')}](${(el.getAttribute('d') ?? '').replace(/-?\d+(?:\.\d+)?/g, '#')}|${rel.join(',')})`;
+    };
+    for (const id of ['bar-penguins-mass', 'line-gdp-three', 'line-gistemp-seasons', 'scatter-penguins']) {
+      const root = doc(draw(id).svg);
+      const legend = Array.from(root.getElementsByTagName('g'))[0];
+      const keys: string[][] = [[]];
+      for (let el = legend.firstChild as Element | null; el; el = el.nextSibling as Element | null) {
+        if (el.tagName === 'text') keys.push([]);
+        else keys[keys.length - 1].push(form(el));
+      }
+      const signatures = keys.filter((k) => k.length > 0).map((k) => k.join('+'));
+      expect(signatures.length, id).toBeGreaterThanOrEqual(2);
+      expect(new Set(signatures).size, `${id}: ${signatures.join(' / ')}`).toBe(signatures.length);
+    }
+    // Each grouped bar wears its series' treatment, the same for every bar of the series and different between series.
+    const root = doc(draw('bar-penguins-mass').svg);
+    const bySeries = new Map<string, Set<string>>();
+    for (const bar of Array.from(root.getElementsByTagName('path')).filter((p) => p.hasAttribute('data-tip'))) {
+      const series = bar.getAttribute('data-tip')!.split(' · ')[1];
+      const next = bar.nextSibling as Element | null;
+      const hatched = next?.tagName === 'path' && !next.hasAttribute('data-tip') && next.getAttribute('fill') === 'none';
+      const treatment = `${bar.getAttribute('fill')}|${bar.getAttribute('stroke')}|${bar.getAttribute('stroke-dasharray')}|${hatched}`;
+      bySeries.set(series, (bySeries.get(series) ?? new Set()).add(treatment));
+    }
+    expect([...bySeries.values()].map((t) => t.size)).toEqual([1, 1]);
+    expect(new Set([...bySeries.values()].map((t) => [...t][0])).size).toBe(2);
+  });
+
+  it('numbers each pie wedge with its list entry', () => {
+    const texts = grade(draw('pie-penguins-island').svg).texts;
+    expect(texts.filter((t) => ['1', '2', '3'].includes(t))).toEqual(['1', '2', '3', '1', '2', '3']);
   });
 });
 

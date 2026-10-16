@@ -21,7 +21,7 @@ const ELEMENTS = new Set(['svg', 'title', 'desc', 'g', 'path', 'rect', 'circle',
 const ATTRIBUTES = new Set([
   'xmlns', 'viewBox', 'width', 'height', 'role', 'aria-label', 'font-family', 'font-size', 'font-weight', 'fill', 'fill-opacity', 'style',
   'd', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-linejoin', 'stroke-linecap', 'paint-order', 'transform',
-  'x', 'y', 'dy', 'rx', 'cx', 'cy', 'r', 'text-anchor', 'data-tip',
+  'x', 'y', 'dy', 'rx', 'cx', 'cy', 'r', 'text-anchor', 'data-tip', 'data-hover', 'data-xy', 'data-tips',
 ]);
 
 export interface Grade {
@@ -43,7 +43,7 @@ export function grade(svg: string): Grade {
       const { name, value } = node.attributes[i];
       if (!ATTRIBUTES.has(name)) problems.push(`attribute ${name} on <${node.tagName}>`);
       if (name === 'style' && (node.tagName !== 'svg' || value !== 'font-variant-numeric:tabular-nums')) problems.push(`style "${value}"`);
-      if (/url\(|javascript:|https?:|data:/i.test(value) && name !== 'xmlns' && name !== 'data-tip' && name !== 'aria-label') problems.push(`reference in ${name}="${value}"`);
+      if (/url\(|javascript:|https?:|data:/i.test(value) && name !== 'xmlns' && name !== 'data-tip' && name !== 'data-tips' && name !== 'aria-label') problems.push(`reference in ${name}="${value}"`);
     }
     for (let child = node.firstChild; child; child = child.nextSibling) {
       if (child.nodeType === 1) walk(child as Element);
