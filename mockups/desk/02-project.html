@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The desk · Project view</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../tokens-light.css" id="theme-light">
+<script>
+/* Light is the default (D-4). `?theme=dark` drops the light override so the dark tokens under :root apply. */
+if (new URLSearchParams(location.search).get('theme') === 'dark') { document.getElementById('theme-light').remove(); document.documentElement.style.colorScheme = 'dark'; }
+</script>
+<style>
+/* Adopted from the MAWS shell (01-shell): three persistent regions, the sidebar's
+   attention section first, Codex-density rows. Afleet's Slack shape on top of it:
+   one group channel, then every session as a direct channel. Tokens only. */
+* { box-sizing: border-box; }
+:root { --head-h: 56px; }
+body { padding: 40px 24px 72px; }
+main { width: 1240px; max-width: 100%; margin: 0 auto; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 21px; font-weight: 600; letter-spacing: -.45px; }
+h2 { font-size: 13px; font-weight: 550; }
+a { color: inherit; text-decoration: none; }
+button, textarea { font: inherit; color: inherit; }
+button { border: 0; background: none; cursor: pointer; border-radius: var(--radius-sm); }
+button:hover { background: var(--bg-hover); }
+button:disabled { cursor: default; color: var(--fg-faint); }
+button:disabled:hover { background: transparent; }
+a:focus-visible, button:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font: 12px var(--font-mono); }
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+summary { cursor: pointer; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+[hidden] { display: none !important; }
+.page-head { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+.eyebrow { display: flex; gap: 12px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); margin-bottom: 10px; }
+.eyebrow a { margin-left: auto; text-transform: none; letter-spacing: 0; text-decoration: underline; text-underline-offset: 3px; }
+.page-head p { margin-top: 9px; color: var(--fg-muted); line-height: 1.6; max-width: 84ch; }
+.vignette { margin: 0 0 44px; }
+figure { margin: 0; }
+figcaption { display: flex; align-items: baseline; gap: 12px; margin-bottom: 5px; }
+figcaption .number { color: var(--fg-muted); font: 11px var(--font-mono); }
+figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11px; }
+.rationale { margin: 0 0 12px 32px; font-size: 11px; color: var(--fg-muted); line-height: 1.5; max-width: 100ch; }
+.frame { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+
+/* The three regions */
+.desk { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr) var(--panel-w); height: 680px; }
+.desk.locked { height: 440px; }
+.head { height: var(--head-h); flex-shrink: 0; display: flex; align-items: center; border-bottom: 1px solid var(--border); }
+
+/* Left: the project's channels */
+.sidebar { background: var(--bg-raised); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+.sidebar .head { padding: 0 10px 0 6px; gap: 4px; }
+.back { display: inline-flex; align-items: center; gap: 2px; height: 28px; padding: 0 8px 0 4px; color: var(--fg-muted); font-size: 12px; border-radius: var(--radius-sm); }
+.back:hover { background: var(--bg-hover); color: var(--fg); }
+.back svg { width: 14px; height: 14px; }
+.proj { font-weight: 600; font-size: 14px; padding-left: 8px; border-left: 1px solid var(--border); }
+.proj-mach { margin-left: auto; font-size: 11px; color: var(--fg-muted); white-space: nowrap; }
+.sb-scroll { flex: 1; overflow-y: auto; padding: 10px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.chan { display: flex; align-items: center; gap: 7px; width: 100%; height: var(--row-h); padding: 0 9px; text-align: left; font-size: 13px; font-weight: 550; }
+.chan svg { width: 14px; height: 14px; color: var(--fg-muted); }
+.chan .unread-count { margin-left: auto; font-size: 10px; font-weight: 650; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.selected { background: var(--bg-active); }
+button.selected:hover { background: var(--bg-active); }
+.section-heading { font-size: 10px; font-weight: 650; letter-spacing: 1px; height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 9px; color: var(--fg-muted); margin: 14px 0 2px; text-transform: uppercase; }
+.section-heading.attention { color: var(--warning); }
+details > summary.section-heading svg { width: 11px; height: 11px; transition: transform .15s; }
+details[open] > summary.section-heading svg { transform: rotate(90deg); }
+.session { display: grid; grid-template-columns: 14px minmax(0, 1fr); gap: 7px; align-items: start; width: 100%; min-height: 47px; padding: 7px 9px; text-align: left; }
+.session-glyph { line-height: 17px; text-align: center; font-size: 12px; }
+.session-title { display: flex; align-items: baseline; gap: 6px; line-height: 17px; font-size: 12px; white-space: nowrap; min-width: 0; }
+.alias { font-weight: 550; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.alias .disamb { font-weight: 400; color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; }
+.at { color: var(--fg-muted); font-size: 11px; flex-shrink: 0; }
+.session-sub { display: block; color: var(--fg-muted); font-size: 11px; margin-top: 3px; line-height: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.session.offline .alias, .session.offline .session-sub { color: var(--fg-faint); }
+.offline-tag { font-size: 10px; color: var(--fg-muted); border: 1px dashed var(--border-strong); border-radius: 4px; padding: 0 4px; line-height: 14px; flex-shrink: 0; }
+.g-wait { color: var(--warning); }
+.g-ended { color: var(--fg-faint); }
+.sb-foot { border-top: 1px solid var(--border); padding: 7px 10px; display: flex; align-items: center; gap: 8px; }
+.add { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; font-size: 12px; }
+.add svg { width: 13px; height: 13px; }
+.sb-foot .later { margin-left: auto; font-size: 10px; color: var(--fg-faint); }
+
+/* Center: the selected channel */
+.center { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.center .head { padding: 0 24px; }
+.ch-id { min-width: 0; flex: 1; }
+.ch-line1 { display: flex; align-items: baseline; gap: 8px; }
+.ch-name { font-size: 14px; font-weight: 600; }
+.ch-line2 { margin-top: 3px; font-size: 12px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.state { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 7px; border-radius: var(--radius-sm); white-space: nowrap; }
+.state.waiting { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, transparent); font-weight: 600; }
+.state.channel { color: var(--fg-muted); border: 1px solid var(--border); }
+.msgs { flex: 1; overflow-y: auto; padding: 18px 24px 8px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.day { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--fg-muted); margin: 0 0 14px; }
+.day::before, .day::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 7px 0; max-width: calc(var(--measure) + 38px); }
+.avatar { width: 28px; height: 28px; border-radius: var(--radius-sm); display: grid; place-items: center; font-size: 11px; font-weight: 650; background: var(--bg-active); color: var(--fg-muted); }
+.avatar.session-mark { font-size: 16px; font-weight: 400; }
+.who { display: flex; align-items: baseline; gap: 7px; font-size: 12px; }
+.who b { font-weight: 600; }
+.who time { font-size: 11px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.body { font-size: 14px; line-height: 1.55; margin-top: 2px; }
+.body p + p { margin-top: 6px; }
+.composer { padding: 8px 24px 16px; }
+.box { display: flex; align-items: flex-end; gap: 8px; min-height: 44px; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 6px 6px 6px 14px; }
+.box:focus-within { border-color: var(--fg-muted); }
+.box textarea { flex: 1; min-width: 0; resize: none; height: 22px; margin: 4px 0; padding: 0; border: 0; outline: none; background: transparent; font-size: 14px; line-height: 22px; }
+.box textarea::placeholder { color: var(--fg-muted); }
+.send { width: 30px; height: 30px; border-radius: 50%; background: var(--fg); color: var(--bg); display: inline-grid; place-items: center; }
+.send:hover { background: var(--fg-muted); }
+.send svg { width: 14px; height: 14px; }
+.composer-hint { margin: 6px 4px 0; font-size: 11px; color: var(--fg-faint); }
+
+/* Right: the depth slot, reserved */
+.depth { border-left: 1px solid var(--border); background: var(--bg-raised); display: flex; flex-direction: column; min-height: 0; }
+.depth .head { padding: 0 18px; font-size: 12px; font-weight: 550; color: var(--fg-muted); }
+.depth .head .for { margin-left: 6px; font-weight: 400; color: var(--fg-faint); }
+.depth-body { padding: 28px 22px; }
+.depth-body p { font-size: 12px; color: var(--fg-muted); line-height: 1.6; margin: 0 0 18px; max-width: 34ch; }
+.ghost { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 2px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--fg-muted); }
+.ghost:first-of-type { border-top: 1px solid var(--border); }
+.ghost svg { width: 14px; height: 14px; color: var(--fg-faint); }
+.ghost .later { margin-left: auto; font-size: 10px; color: var(--fg-faint); letter-spacing: .04em; text-transform: uppercase; }
+
+/* Locked */
+.lock-side { padding: 18px 19px; }
+.lock-side .row { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 550; }
+.lock-side .row svg { width: 14px; height: 14px; color: var(--fg-muted); }
+.lock-side p { margin-top: 6px; font-size: 11px; color: var(--fg-muted); line-height: 1.55; }
+.lock-main { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; }
+.lock-main svg.big { width: 28px; height: 28px; color: var(--fg-muted); stroke-width: 1.3; margin-bottom: 12px; }
+.lock-main h3 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+.lock-main p { font-size: 13px; color: var(--fg-muted); line-height: 1.6; max-width: 46ch; margin: 0 auto; }
+.btn { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; margin-top: 18px; font-size: 12px; font-weight: 600; background: var(--fg); color: var(--bg); }
+.btn:hover { background: var(--fg-muted); }
+.btn svg { width: 14px; height: 14px; }
+.lock-main .hint { margin-top: 14px; font-size: 11px; color: var(--fg-faint); }
+
+@media (max-width: 1180px) { .desk { grid-template-columns: var(--sidebar-w) minmax(0, 1fr); } .depth { display: none; } }
+@media (max-width: 760px) {
+  body { padding: 24px 12px 48px; }
+  .desk { grid-template-columns: minmax(0, 1fr); }
+  .desk:not(.locked) .sidebar { display: none; }
+  .desk.locked .center { display: none; }
+  .rationale { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+<symbol id="back" viewBox="0 0 16 16"><path d="m10 4-4 4 4 4"/></symbol>
+<symbol id="chev" viewBox="0 0 16 16"><path d="m6 4 4 4-4 4"/></symbol>
+<symbol id="hash" viewBox="0 0 16 16"><path d="M6 2.5 5 13.5M11 2.5l-1 11M3 6h10.5M2.5 10H13"/></symbol>
+<symbol id="plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></symbol>
+<symbol id="up" viewBox="0 0 16 16"><path d="M8 13V3M4 7l4-4 4 4"/></symbol>
+<symbol id="lock" viewBox="0 0 16 16"><rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 0 1 5 0v2"/></symbol>
+<symbol id="key" viewBox="0 0 16 16"><circle cx="5.5" cy="10.5" r="3"/><path d="m7.6 8.4 5.9-5.9M11.5 4.5l1.5 1.5M9.8 6.2l1.3 1.3"/></symbol>
+<symbol id="lines" viewBox="0 0 16 16"><path d="M3 4h10M3 8h10M3 12h6"/></symbol>
+<symbol id="agents" viewBox="0 0 16 16"><circle cx="8" cy="4" r="1.8"/><circle cx="4" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><path d="M8 6v2M8 8 4.8 10.4M8 8l3.2 2.4"/></symbol>
+<symbol id="diff" viewBox="0 0 16 16"><path d="M5 2.5v6M2 5.5h6M9 12.5h5"/><rect x="1.5" y="1.5" width="13" height="13" rx="2"/></symbol>
+<symbol id="info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 7.2V11M8 5h.01"/></symbol>
+</defs></svg>
+<main>
+<header class="page-head">
+  <div class="eyebrow">The desk / Project view / 02 <a href="?theme=dark" id="theme-link">View in dark</a></div>
+  <h1>One project: its channel, its sessions, and room for depth.</h1>
+  <p>Opened from a grid tile. The sidebar is the project's people: the group channel first, then each session as a direct channel, grouped by what it needs from you. Empty groups are hidden; Ended is collapsed, since it only grows. A session on an offline machine stays in the group of its last known state, dimmed and tagged, so it does not jump around while the machine sleeps. Click <code># MAWS</code> or a session to see the selected state move.</p>
+</header>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">01</span><h2>Unlocked: maws-45 selected</h2><span class="dimension">300 · fluid · 380 px</span></figcaption>
+  <p class="rationale">Center keeps the conversation plain (name, time, text) because its real design comes later. The right column is held at full width now so nothing reflows when depth arrives; it says what will live there rather than sitting blank.</p>
+  <div class="frame"><div class="desk">
+    <aside class="sidebar" aria-label="MAWS channels and sessions">
+      <div class="head"><a class="back" href="01-grid.html" aria-label="Back to all projects"><svg><use href="#back"/></svg>Projects</a><span class="proj">MAWS</span><span class="proj-mach" title="@mini and @SK.local online; @studio offline">2 of 3 machines</span></div>
+      <nav class="sb-scroll" id="channels">
+        <button class="chan" data-ch="group" aria-current="false"><svg><use href="#hash"/></svg>MAWS<span class="unread-count" aria-label="2 unread">2</span></button>
+
+        <h2 class="section-heading attention">Waiting on you · 3</h2>
+        <button class="session selected" data-ch="maws-45" aria-current="true"><span class="session-glyph g-question" aria-label="Question waiting">?</span><span><span class="session-title"><span class="alias">maws-45</span><span class="at">@mini</span></span><span class="session-sub">desk web client: grid and project view</span></span></button>
+        <button class="session" data-ch="maws-fe"><span class="session-glyph g-wait" aria-label="Permission waiting">◐</span><span><span class="session-title"><span class="alias">maws-fe</span><span class="at">@SK.local</span></span><span class="session-sub">owner artifacts page</span></span></button>
+        <button class="session" data-ch="maws-hub#3c9a1f02"><span class="session-glyph g-wait" aria-label="Permission waiting">◐</span><span><span class="session-title"><span class="alias">maws-hub<span class="disamb">#3c9a1f02</span></span><span class="at">@mini</span></span><span class="session-sub">hub relay and org key exchange</span></span></button>
+
+        <h2 class="section-heading">Working · 3</h2>
+        <button class="session" data-ch="maws"><span class="session-glyph g-working" aria-label="Working">●</span><span><span class="session-title"><span class="alias">maws</span><span class="at">@mini</span></span><span class="session-sub">GUI AI agent workspace: main app architect</span></span></button>
+        <button class="session" data-ch="maws-hub#b81e44d7"><span class="session-glyph g-working" aria-label="Working">●</span><span><span class="session-title"><span class="alias">maws-hub<span class="disamb">#b81e44d7</span></span><span class="at">@SK.local</span></span><span class="session-sub">hub load-test harness and failure drills</span></span></button>
+        <button class="session" data-ch="maws-term"><span class="session-glyph g-working" aria-label="Working">●</span><span><span class="session-title"><span class="alias">maws-term</span><span class="at">@SK.local</span></span><span class="session-sub">terminal pane: xterm renderer migration</span></span></button>
+
+        <h2 class="section-heading">Idle · 2</h2>
+        <button class="session" data-ch="maws-qa"><span class="session-glyph g-idle" aria-label="Idle">○</span><span><span class="session-title"><span class="alias">maws-qa</span><span class="at">@mini</span></span><span class="session-sub">release QA checklist for 0.9</span></span></button>
+        <button class="session offline" data-ch="maws-docs" title="@studio is offline. Last seen 11:40."><span class="session-glyph g-ended" aria-label="Machine offline">⊘</span><span><span class="session-title"><span class="alias">maws-docs</span><span class="at">@studio</span><span class="offline-tag">offline</span></span><span class="session-sub">charter and research index</span></span></button>
+
+        <details><summary class="section-heading"><svg><use href="#chev"/></svg>Ended · 2</summary>
+          <button class="session" data-ch="maws-44"><span class="session-glyph g-ended" aria-label="Ended">✓</span><span><span class="session-title"><span class="alias">maws-44</span><span class="at">@mini</span></span><span class="session-sub">desk hub API: project list endpoint</span></span></button>
+          <button class="session" data-ch="maws-43"><span class="session-glyph g-ended" aria-label="Ended">✓</span><span><span class="session-title"><span class="alias">maws-43</span><span class="at">@SK.local</span></span><span class="session-sub">sidebar drag fix</span></span></button>
+        </details>
+      </nav>
+      <div class="sb-foot"><button class="add" disabled title="Starting a session from the desk lands in a later milestone"><svg><use href="#plus"/></svg>Session</button><span class="later">later</span></div>
+    </aside>
+
+    <section class="center" aria-label="Selected channel">
+      <div id="pane-dm">
+        <div class="head"><div class="ch-id"><div class="ch-line1"><span class="ch-name">maws-45</span><span class="at">@mini</span><span class="state waiting">? Waiting on you</span></div><div class="ch-line2">desk web client: grid and project view</div></div></div>
+      </div>
+      <div id="pane-group" hidden>
+        <div class="head"><div class="ch-id"><div class="ch-line1"><span class="ch-name"># MAWS</span><span class="state channel">Group channel</span></div><div class="ch-line2">Every session in MAWS reads this; @alias reaches one, @all wakes everyone.</div></div></div>
+      </div>
+      <div class="msgs" id="msgs-dm">
+        <div class="day">Today</div>
+        <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><time>13:52</time></div><div class="body"><p>The grid reads the hub's project list now and sorts waiting first. Tests pass in both themes.</p></div></div></article>
+        <article class="msg"><span class="avatar" aria-hidden="true">SK</span><div><div class="who"><b>You</b><time>13:58</time></div><div class="body"><p>Go with the tiles. Keep projects with every machine offline at the bottom, whatever their counts.</p></div></div></article>
+        <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><time>14:06</time></div><div class="body"><p>Done: offline projects sort last. Pushed to <code>desk/grid</code>.</p></div></div></article>
+        <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><time>14:09</time></div><div class="body"><p>One question before the project view: when the browser is locked, should the sidebar stay empty, or show session counts from the hub? The hub knows how many sessions there are, but not their aliases.</p></div></div></article>
+      </div>
+      <div class="msgs" id="msgs-group" hidden>
+        <div class="day">Today</div>
+        <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws</b><time>12:30</time></div><div class="body"><p>@all The renderer token file moved. Rebase before you push.</p></div></div></article>
+        <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-hub#3c9a1f02</b><time>13:15</time></div><div class="body"><p>The relay is up on staging. Key exchange still needs your passkey once.</p></div></div></article>
+        <article class="msg"><span class="avatar" aria-hidden="true">SK</span><div><div class="who"><b>You</b><time>13:20</time></div><div class="body"><p>Thanks. maws-45, the grid is yours next.</p></div></div></article>
+      </div>
+      <div class="msgs" id="msgs-other" hidden><div class="day">Today</div><p class="composer-hint">This mockup draws only maws-45's and # MAWS's conversations.</p></div>
+      <div class="composer"><div class="box"><textarea id="composer" aria-label="Message maws-45" placeholder="Message maws-45"></textarea><button class="send" aria-label="Send"><svg><use href="#up"/></svg></button></div></div>
+    </section>
+
+    <aside class="depth" aria-label="Session depth">
+      <div class="head">Session depth<span class="for" id="depth-for">maws-45</span></div>
+      <div class="depth-body">
+        <p>This column will open into the selected session: what it has done, what it is running, and what it changed. It arrives in a later milestone.</p>
+        <div class="ghost"><svg><use href="#lines"/></svg>Transcript<span class="later">Later</span></div>
+        <div class="ghost"><svg><use href="#agents"/></svg>Subagents<span class="later">Later</span></div>
+        <div class="ghost"><svg><use href="#diff"/></svg>Diff<span class="later">Later</span></div>
+        <div class="ghost"><svg><use href="#info"/></svg>Session info<span class="later">Later</span></div>
+      </div>
+    </aside>
+  </div></div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">02</span><h2>Locked: this browser holds no org key yet</h2><span class="dimension">Same regions, nothing from the log</span></figcaption>
+  <p class="rationale">Channels, sessions and messages all come from the project's log, which is signed with the org key, not encrypted; a browser draws only what it has verified, so without the key all three columns stay empty and the sidebar says so too: it stays empty, with no session counts, though the hub knows them (the owner's ruling, 2026-10-15). The machine count in the top bar comes from the hub, which is why it can still show. The layout does not change, so unlocking fills it in place.</p>
+  <div class="frame"><div class="desk locked">
+    <aside class="sidebar" aria-label="MAWS channels and sessions, locked">
+      <div class="head"><a class="back" href="01-grid.html" aria-label="Back to all projects"><svg><use href="#back"/></svg>Projects</a><span class="proj">MAWS</span><span class="proj-mach">2 of 3 machines</span></div>
+      <div class="lock-side"><div class="row"><svg><use href="#lock"/></svg>Locked</div><p>Channels and sessions appear once this browser can read MAWS's log.</p></div>
+      <div class="sb-foot" style="margin-top:auto"><button class="add" disabled><svg><use href="#plus"/></svg>Session</button><span class="later">later</span></div>
+    </aside>
+    <section class="center lock-main" aria-label="Locked">
+      <div><svg class="big" aria-hidden="true"><use href="#lock"/></svg><h3>MAWS is locked in this browser</h3><p>This browser can't check who wrote MAWS's log until it holds your org key, so nothing is shown.</p><button class="btn"><svg><use href="#key"/></svg>Unlock with your passkey</button><p class="hint">Unlock once per browser.</p></div>
+    </section>
+    <aside class="depth" aria-label="Session depth"><div class="head">Session depth</div></aside>
+  </div></div>
+</figure></section>
+</main>
+<script>
+const nav = document.getElementById('channels');
+const composer = document.getElementById('composer');
+nav.addEventListener('click', e => {
+  const b = e.target.closest('[data-ch]');
+  if (!b) return;
+  nav.querySelectorAll('[data-ch]').forEach(x => { x.classList.toggle('selected', x === b); x.setAttribute('aria-current', String(x === b)); });
+  const ch = b.dataset.ch, group = ch === 'group';
+  document.getElementById('pane-group').hidden = !group;
+  document.getElementById('msgs-group').hidden = !group;
+  document.getElementById('pane-dm').hidden = group;
+  document.getElementById('msgs-dm').hidden = ch !== 'maws-45';
+  document.getElementById('msgs-other').hidden = group || ch === 'maws-45';
+  if (!group) {
+    document.querySelector('#pane-dm .ch-name').textContent = ch;
+    document.querySelector('#pane-dm .at').textContent = b.querySelector('.at').textContent;
+    document.querySelector('#pane-dm .ch-line2').textContent = b.querySelector('.session-sub').textContent;
+    const st = document.querySelector('#pane-dm .state');
+    const label = b.querySelector('.session-glyph').getAttribute('aria-label');
+    st.className = 'state ' + (/waiting/i.test(label) ? 'waiting' : 'channel');
+    st.textContent = /waiting/i.test(label) ? b.querySelector('.session-glyph').textContent + ' Waiting on you' : label;
+  }
+  const name = group ? '# MAWS' : ch;
+  composer.placeholder = 'Message ' + name; composer.setAttribute('aria-label', 'Message ' + name);
+  document.getElementById('depth-for').textContent = group ? '' : ch;
+});
+const dark = new URLSearchParams(location.search).get('theme') === 'dark';
+const tl = document.getElementById('theme-link');
+tl.href = dark ? '?' : '?theme=dark'; tl.textContent = dark ? 'View in light' : 'View in dark';
+</script>
+</body>
+</html>

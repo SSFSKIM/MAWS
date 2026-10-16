@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The desk · Request cards</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../tokens-light.css" id="theme-light">
+<script>
+/* Light is the default (D-4). `?theme=dark` drops the light override so the dark tokens under :root apply. */
+if (new URLSearchParams(location.search).get('theme') === 'dark') { document.getElementById('theme-light').remove(); document.documentElement.style.colorScheme = 'dark'; }
+</script>
+<style>
+/* Adopted from MAWS's request card (request-card/controls.tsx, Permission.tsx, Question.tsx, ToolPreview.tsx):
+   the kind line in its tone, the bounded preview, numbered option rows, CardButton. Tokens only.
+   In the desk a request is something a session says to you, so it is drawn as that session's
+   message with the card as its body. What the web can do about it is stated on the card, never
+   discovered by pressing a button that fails. */
+* { box-sizing: border-box; }
+:root { --head-h: 56px; }
+body { padding: 40px 24px 72px; }
+main { width: 1240px; max-width: 100%; margin: 0 auto; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: 21px; font-weight: 600; letter-spacing: -.45px; }
+h2 { font-size: 13px; font-weight: 550; }
+a { color: inherit; text-decoration: none; }
+button, textarea, input { font: inherit; color: inherit; }
+button { border: 0; background: none; cursor: pointer; border-radius: var(--radius-sm); }
+a:focus-visible, button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+code { font: 12px var(--font-mono); }
+svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+[hidden] { display: none !important; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.page-head { padding-bottom: 28px; border-bottom: 1px solid var(--border); margin-bottom: 32px; }
+.eyebrow { display: flex; gap: 12px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); margin-bottom: 10px; }
+.eyebrow a { margin-left: auto; text-transform: none; letter-spacing: 0; text-decoration: underline; text-underline-offset: 3px; }
+.page-head p { margin-top: 9px; color: var(--fg-muted); line-height: 1.6; max-width: 86ch; }
+.page-head p strong { color: var(--fg); font-weight: 550; }
+.vignette { margin: 0 0 44px; }
+figure { margin: 0; }
+figcaption { display: flex; align-items: baseline; gap: 12px; margin-bottom: 5px; }
+figcaption .number { color: var(--fg-muted); font: 11px var(--font-mono); }
+figcaption .dimension { margin-left: auto; color: var(--fg-muted); font-size: 11px; }
+.pick { font-size: 10px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--fg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 2px 6px; }
+.rationale { margin: 0 0 12px; font-size: 11px; color: var(--fg-muted); line-height: 1.5; max-width: 96ch; }
+.frame { border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg); overflow: hidden; }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; align-items: start; }
+.section-rule { display: flex; align-items: center; gap: 12px; margin: 56px 0 24px; font-size: 11px; letter-spacing: .09em; text-transform: uppercase; color: var(--fg-muted); }
+.section-rule::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.annot { margin-top: 10px; padding-left: 10px; border-left: 2px solid var(--border-strong); font-size: 11px; color: var(--fg-muted); line-height: 1.5; max-width: 72ch; }
+.annot b { color: var(--fg); font-weight: 550; }
+.notes { font-size: 12px; color: var(--fg-muted); line-height: 1.6; }
+.notes h3 { font-size: 12px; font-weight: 600; color: var(--fg); margin: 0 0 4px; }
+.notes p + h3 { margin-top: 16px; }
+
+/* The channel (02-project) */
+.head { height: var(--head-h); flex-shrink: 0; display: flex; align-items: center; border-bottom: 1px solid var(--border); padding: 0 24px; }
+.ch-id { min-width: 0; flex: 1; }
+.ch-line1 { display: flex; align-items: baseline; gap: 8px; }
+.ch-name { font-size: 14px; font-weight: 600; }
+.ch-line2 { margin-top: 3px; font-size: 12px; color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.state { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 7px; border-radius: var(--radius-sm); white-space: nowrap; color: var(--fg-muted); border: 1px solid var(--border); }
+.msgs { padding: 16px 24px; }
+.day { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--fg-muted); margin: 0 0 14px; }
+.day::before, .day::after { content: ''; flex: 1; border-top: 1px solid var(--border); }
+.msg { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; padding: 7px 0; max-width: calc(var(--measure) + 38px); }
+.avatar { width: 28px; height: 28px; border-radius: var(--radius-sm); display: grid; place-items: center; font-size: 11px; font-weight: 650; background: var(--bg-active); color: var(--fg-muted); }
+.avatar.session-mark { font-size: 16px; font-weight: 400; }
+.who { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 7px; font-size: 12px; }
+.who b { font-weight: 600; }
+.who .at, .at { color: var(--fg-muted); font-size: 11px; }
+.who .says { color: var(--fg); }
+.who time { font-size: 11px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.disamb { font-weight: 400; color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; }
+.body { font-size: 14px; line-height: 1.55; margin-top: 2px; }
+.composer { padding: 8px 24px 16px; }
+.box { display: flex; align-items: flex-end; gap: 8px; min-height: 44px; background: var(--bg-raised); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); padding: 6px 6px 6px 14px; }
+.box textarea { flex: 1; min-width: 0; resize: none; height: 22px; margin: 4px 0; padding: 0; border: 0; outline: none; background: transparent; font-size: 14px; line-height: 22px; }
+.box textarea::placeholder { color: var(--fg-muted); }
+.send { width: 30px; height: 30px; border-radius: 50%; background: var(--fg); color: var(--bg); display: inline-grid; place-items: center; }
+.send svg { width: 14px; height: 14px; }
+
+/* The request card (MAWS RequestCard). */
+.rc { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; max-width: 500px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); color: var(--fg); }
+.kind { display: flex; align-items: center; gap: 6px; font-size: 12px; min-width: 0; }
+.kind .from { color: var(--fg-muted); }
+.kind .age { margin-left: auto; font-size: 11px; color: var(--fg-muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tone-warning { color: var(--warning); } .tone-info { color: var(--info); }
+.tool { font: 11px var(--font-mono); color: var(--fg-muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
+.mono { margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); font: var(--text-ui-sm)/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.why, .muted-line { font-size: 12px; color: var(--fg-muted); line-height: 1.5; }
+.cwd { font: 11px var(--font-mono); color: var(--fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.cb { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 4px 10px; white-space: nowrap; color: var(--fg); background: transparent; }
+.cb:hover { background: var(--bg-hover); }
+.cb.primary { border-color: var(--fg); background: var(--fg); color: var(--bg); }
+.cb.primary:hover { background: var(--fg-muted); border-color: var(--fg-muted); }
+.cb.danger { color: var(--danger); }
+.cb.ghost { border-color: transparent; color: var(--fg-muted); margin-right: auto; }
+.cb.ghost:hover { color: var(--fg); }
+.cb:disabled, .cb:disabled:hover { color: var(--fg-faint); background: transparent; cursor: default; }
+.cb.primary:disabled { border-color: var(--fg-faint); background: var(--fg-faint); color: var(--bg); }
+.hchip { font-size: 11px; color: var(--fg-muted); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1px 6px; align-self: flex-start; }
+.q { font-size: 14px; line-height: 1.5; }
+.opts { display: flex; flex-direction: column; gap: 4px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.opt { display: flex; align-items: flex-start; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: pointer; }
+.opt:hover { background: var(--bg-hover); }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt:has(input:checked) { border-color: var(--border-strong); background: var(--bg-active); }
+.opt:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.opt .n { width: 12px; flex-shrink: 0; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+.opt .ot { display: flex; flex-direction: column; min-width: 0; }
+.opt .od { font-size: 12px; color: var(--fg-muted); }
+.opt .dot { margin-left: auto; visibility: hidden; }
+.opt:has(input:checked) .dot { visibility: visible; }
+.opt.ro { cursor: default; }
+.opt.ro:hover { background: transparent; }
+.other-input { width: 100%; padding: 4px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg); }
+textarea.reason { width: 100%; min-height: 54px; resize: vertical; padding: 6px 8px; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--bg); font-size: var(--text-ui); line-height: 1.45; }
+
+/* What the web can and cannot do, said on the card */
+.where { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); font-size: 12px; line-height: 1.5; color: var(--fg-muted); }
+.where svg { width: 14px; height: 14px; margin-top: 2px; color: var(--fg-muted); }
+.where b { color: var(--fg); font-weight: 550; }
+.window { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--fg); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 1px 7px; white-space: nowrap; }
+.window i { width: 6px; height: 6px; border-radius: 50%; background: var(--warning); animation: pulse 1.2s ease-in-out infinite; }
+.status { display: inline-flex; align-items: center; gap: 7px; margin-right: auto; font-size: 12px; color: var(--fg-muted); }
+.spinner { width: 11px; height: 11px; border: 1.5px solid var(--border-strong); border-top-color: var(--fg-muted); border-radius: 50%; animation: spin 1.1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.alert { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--danger); border-radius: var(--radius-sm); color: var(--danger); font-size: 12px; line-height: 1.45; }
+.alert.unsure { border-color: color-mix(in srgb, var(--warning) 55%, transparent); color: var(--fg); }
+.alert.unsure .g { color: var(--warning); }
+.alert span.t { flex: 1; }
+.rc.offline { border-style: dashed; border-color: var(--border-strong); background: transparent; }
+.rc.offline .opt { cursor: default; }
+
+/* Settled: the card closes to one line in the same place. */
+.rc.closed { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; align-items: baseline; gap: 8px; padding: 6px 10px; background: transparent; font-size: 12px; line-height: 1.6; color: var(--fg-muted); }
+.rc.closed .mid { min-width: 0; }
+.rc.closed .mid > * + * { margin-left: 6px; }
+.rc.closed code { font-size: 11px; color: var(--fg); background: var(--bg-active); border-radius: 4px; padding: 1px 5px; }
+.rc.closed .out { color: var(--fg); }
+.rc.closed time { font-size: 11px; color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.rc.closed .note { display: block; margin: 2px 0 0 !important; font-size: 11px; color: var(--fg-muted); }
+.ok { color: var(--success); } .no { color: var(--danger); } .gone { color: var(--fg-faint); }
+
+/* Option B: the banded card, outside the message grid */
+.band { margin: 8px 0; max-width: calc(var(--measure) + 38px); border: 1px solid var(--border-strong); border-top: 2px solid var(--warning); border-radius: var(--radius); background: var(--bg-raised); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.band .bh { display: flex; align-items: baseline; gap: 7px; font-size: 13px; }
+.band .bh b { font-weight: 600; }
+.band .bh time { margin-left: auto; font-size: 11px; color: var(--fg-faint); }
+
+/* Option C: a stub in the stream, the card docked above the composer */
+.stub { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 4px 0; font-size: 12px; color: var(--fg-muted); max-width: calc(var(--measure) + 38px); }
+.stub .g { text-align: center; }
+.stub b { color: var(--fg); font-weight: 550; }
+.stub time { font-size: 11px; color: var(--fg-faint); }
+.dock { margin: 0 24px 10px; border: 1px solid var(--border-strong); border-radius: var(--radius-lg); background: var(--bg-raised); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.dock .dh { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.dock .dh .pager { margin-left: auto; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+
+@media (max-width: 900px) { .pair { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) {
+  body { padding: 24px 12px 48px; }
+  .msgs { padding: 14px; }
+  .msg { grid-template-columns: minmax(0, 1fr); }
+  .msg > .avatar { display: none; }
+  figcaption .dimension { display: none; }
+  .controls .cb.ghost { margin-right: 0; flex-basis: 100%; text-align: left; padding-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<svg aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden"><defs>
+<symbol id="up" viewBox="0 0 16 16"><path d="M8 13V3M4 7l4-4 4 4"/></symbol>
+<symbol id="term" viewBox="0 0 16 16"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="m4.5 6.5 2 1.5-2 1.5M8 10h3.5"/></symbol>
+<symbol id="off" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="m4.2 11.8 7.6-7.6"/></symbol>
+<symbol id="clock" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/></symbol>
+</defs></svg>
+<main>
+<header class="page-head">
+  <div class="eyebrow">The desk / Request cards / 04 <a href="?theme=dark" id="theme-link">View in dark</a></div>
+  <h1>A request is answered where it appears in the chat, or says why it can't be.</h1>
+  <p><strong>Recommendation: A, the card as the session's message.</strong> A prompt or a question is something a session says to you, so it is drawn with the same name, machine and time as everything else that session says, and its card is the body of that message. That keeps three pending requests from three sessions readable as three voices instead of three alarms. It also gives every later state a place to land: the same slot shrinks to one line once the request settles. B is louder and fits a channel where requests are rare. C is right for a direct channel, where only one session can be waiting and the card can take the composer's place as it does in MAWS. In the group chat, though, C stacks every session's request into one tray and moves each one away from the moment it was asked.</p>
+  <p>Every state below is drawn in A. Each one follows MAWS's request card: the kind line in its tone (◐ amber for approval, ? amber for a blocking question, ? blue for a question that does not block), a bounded preview, numbered option rows, and CardButtons (secondary has a strong border, primary is drawn in the text colour with the background colour for its label). A request the web cannot answer keeps its content and swaps its controls for one sentence saying where it can be answered.</p>
+</header>
+
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">A</span><h2>The card as the session's message</h2><span class="pick">Recommended</span><span class="dimension">Center column · 560 px</span></figcaption>
+  <p class="rationale">The message line carries who is asking (“maws-45 @mini wants to run a command”); the card carries the kind, the evidence and the decision. Two pending requests read as two sessions speaking.</p>
+  <div class="frame"><div class="head"><div class="ch-id"><div class="ch-line1"><span class="ch-name"># MAWS</span><span class="state">Group channel</span></div><div class="ch-line2">Every session in MAWS reads this; @alias reaches one, @all wakes everyone.</div></div></div>
+  <div class="msgs">
+    <div class="day">Today</div>
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-fe</b><span class="at">@SK.local</span><time>14:08</time></div><div class="body"><p>The artifacts page is up on the branch. cua_repl is taking screenshots at 1440.</p></div></div></article>
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">wants to run a command</span><time>14:12</time></div>
+      <section class="rc" aria-label="maws-45 wants to run a command"><div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="tool">Bash</span><span class="age">2 min</span></div><pre class="mono">pnpm e2e</pre><p class="why">Why: Run the e2e suite</p><p class="cwd">~/Developer/GitHub/MAWS/.claude/worktrees/maws-45</p><div class="controls"><button class="cb ghost">Deny with a reason…</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></section>
+    </div></article>
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-hub<span class="disamb">#3c9a1f02</span></b><span class="at">@mini</span><span class="says">wants to run a command</span><time>14:14</time></div>
+      <section class="rc" aria-label="maws-hub wants to run a command"><div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="tool">Bash</span><span class="age">now</span></div><pre class="mono">wrangler deploy --env staging</pre><p class="why">Why: Ship the lease-renewal fix to the staging hub</p><div class="controls"><button class="cb ghost">Deny with a reason…</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></section>
+    </div></article>
+  </div>
+  <div class="composer"><div class="box"><textarea aria-label="Message # MAWS" placeholder="Message # MAWS"></textarea><button class="send" aria-label="Send"><svg><use href="#up"/></svg></button></div></div></div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">B</span><h2>The banded card, across the column</h2><span class="dimension">Center column · 560 px</span></figcaption>
+  <p class="rationale">The card leaves the message grid, takes the column's full width and an amber top rule, and names the session inside itself. It cannot be missed. With two at once the amber starts to repeat, and the bands bury the messages between them.</p>
+  <div class="frame"><div class="head"><div class="ch-id"><div class="ch-line1"><span class="ch-name"># MAWS</span><span class="state">Group channel</span></div><div class="ch-line2">Every session in MAWS reads this; @alias reaches one, @all wakes everyone.</div></div></div>
+  <div class="msgs">
+    <div class="day">Today</div>
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-fe</b><span class="at">@SK.local</span><time>14:08</time></div><div class="body"><p>The artifacts page is up on the branch. cua_repl is taking screenshots at 1440.</p></div></div></article>
+    <section class="band" aria-label="maws-45 wants to run a command"><div class="bh"><span class="tone-warning" aria-hidden="true">◐</span><b>maws-45</b><span class="at">@mini</span><span>wants to run a command</span><time>14:12</time></div><pre class="mono">pnpm e2e</pre><p class="why">Why: Run the e2e suite</p><div class="controls"><button class="cb ghost">Deny with a reason…</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></section>
+    <section class="band" aria-label="maws-hub wants to run a command"><div class="bh"><span class="tone-warning" aria-hidden="true">◐</span><b>maws-hub<span class="disamb">#3c9a1f02</span></b><span class="at">@mini</span><span>wants to run a command</span><time>14:14</time></div><pre class="mono">wrangler deploy --env staging</pre><p class="why">Why: Ship the lease-renewal fix to the staging hub</p><div class="controls"><button class="cb ghost">Deny with a reason…</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></section>
+  </div>
+  <div class="composer"><div class="box"><textarea aria-label="Message # MAWS" placeholder="Message # MAWS"></textarea><button class="send" aria-label="Send"><svg><use href="#up"/></svg></button></div></div></div>
+</figure></section>
+</div>
+
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">C</span><h2>A stub in the stream, the card docked</h2><span class="dimension">Center column · 560 px</span></figcaption>
+  <p class="rationale">MAWS's docked card, brought to the group chat: the stream keeps a one-line stub where the request was raised, and the card takes the composer's place, with a pager when several are waiting. Your hands stay at the bottom of the screen.</p>
+  <div class="frame"><div class="head"><div class="ch-id"><div class="ch-line1"><span class="ch-name"># MAWS</span><span class="state">Group channel</span></div><div class="ch-line2">Every session in MAWS reads this; @alias reaches one, @all wakes everyone.</div></div></div>
+  <div class="msgs">
+    <div class="day">Today</div>
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-fe</b><span class="at">@SK.local</span><time>14:08</time></div><div class="body"><p>The artifacts page is up on the branch. cua_repl is taking screenshots at 1440.</p></div></div></article>
+    <div class="stub"><span class="g tone-warning" aria-hidden="true">◐</span><span><b>maws-45</b> wants to run a command · below</span><time>14:12</time></div>
+    <div class="stub"><span class="g tone-warning" aria-hidden="true">◐</span><span><b>maws-hub</b> wants to run a command · below</span><time>14:14</time></div>
+  </div>
+  <section class="dock" aria-label="Waiting requests"><div class="dh"><span class="tone-warning" aria-hidden="true">◐</span><b>maws-45</b><span class="at">@mini</span><span>wants to run a command</span><span class="pager">‹ 1 of 2 ›</span></div><pre class="mono">pnpm e2e</pre><p class="why">Why: Run the e2e suite</p><div class="controls"><button class="cb ghost">Deny with a reason…</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></section>
+  </div>
+</figure></section>
+<div class="notes" style="padding-top: 26px">
+  <h3>Why A over C here, and C in a direct channel</h3>
+  <p>The group chat is many sessions at once. Docking pulls every request out of the moment it was raised and queues them behind a pager in arrival order, which is not the order you want to answer them in. A leaves each request where it was asked and lets you take them in any order.</p>
+  <h3>Where C belongs</h3>
+  <p>A direct channel has one session and, at most, one request waiting from its main loop. There the docked card is the right call, as in MAWS: the composer is paused anyway while the session waits, and the card stands in its place. The card body is the same component in both places.</p>
+  <h3>Keyboard, in A</h3>
+  <p>The newest pending card in view takes Enter and Esc only after it is focused (a click, or ⌘⇧J to jump to the next request). A group chat must never answer a request because you pressed Enter while typing a message.</p>
+</div>
+</div>
+
+<div class="section-rule">A, every state</div>
+
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">1</span><h2>Permission prompt, pending</h2><span class="dimension">Bridged session · main loop</span></figcaption>
+  <p class="rationale">The command in a mono block, the engine's description as “Why”, the working directory beneath. Allow is the one primary button. The deny split (Deny and stop the turn) is left out, since the desk does not offer it in phase 1.</p>
+  <div class="frame"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">wants to run a command</span><time>14:12</time></div>
+      <section class="rc" aria-label="maws-45 wants to run a command"><div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="tool">Bash</span><span class="age">2 min</span></div><pre class="mono">pnpm e2e</pre><p class="why">Why: Run the e2e suite</p><p class="cwd">~/Developer/GitHub/MAWS/.claude/worktrees/maws-45</p><div class="controls"><button class="cb ghost">Deny with a reason…</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></section>
+    </div></article>
+  </div></div>
+  <p class="annot"><b>The decision is bound to what you see.</b> Allow and Deny carry a digest of exactly what this card shows: the session, the request, the tool, and a hash of the command's input. mini runs the decision only if it matches the request still pending there, so a request that changed after it was drawn is refused rather than approved.</p>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">1b</span><h2>Deny with a reason, open</h2><span class="dimension">Same card</span></figcaption>
+  <p class="rationale">The reason goes to the session as the deny's message, so the model reads why. ⌘Enter sends it. Allow stays available, since opening the box is not a decision.</p>
+  <div class="frame"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">wants to run a command</span><time>14:12</time></div>
+      <section class="rc" aria-label="maws-45 wants to run a command"><div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="tool">Bash</span><span class="age">2 min</span></div><pre class="mono">pnpm e2e</pre><p class="why">Why: Run the e2e suite</p>
+        <label class="sr-only" for="r1">Reason for denying, sent to maws-45</label><textarea class="reason" id="r1">Run the unit suite first; e2e takes nine minutes on the mini and the grid change does not touch the hub.</textarea>
+        <p class="muted-line" style="margin-top:-4px">⌘Enter sends the deny with this reason.</p>
+        <div class="controls"><button class="cb">Cancel</button><button class="cb danger">Deny with this reason</button><button class="cb primary">Allow</button></div></section>
+    </div></article>
+  </div></div>
+</figure></section>
+</div>
+
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">2</span><h2>Question, native AskUserQuestion</h2><span class="dimension">Blocks the turn</span></figcaption>
+  <p class="rationale">The header as a chip, the question at body size, numbered rows with their descriptions, then Other… which opens a text field. A pick waits for Submit, so it can be changed. Deny declines the whole question: maws-45 is told you declined and goes on. Skip sends no answer to this question.</p>
+  <div class="frame"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">asks</span><time>14:16</time></div>
+      <section class="rc" aria-label="maws-45 asks a question"><div class="kind tone-warning"><span aria-hidden="true">?</span><span>Question</span><span class="age">just now</span></div>
+        <span class="hchip">Column name</span>
+        <p class="q">The hub's summary and the log disagree on a column name. Which should the grid read?</p>
+        <fieldset class="opts"><legend class="sr-only">Which should the grid read?</legend>
+          <label class="opt"><input type="radio" name="q2" checked><span class="n" aria-hidden="true">1</span><span class="ot"><span><code>waiting</code></span><span class="od">The hub's name. The summary socket already sends it.</span></span><span class="dot" aria-hidden="true">●</span></label>
+          <label class="opt"><input type="radio" name="q2"><span class="n" aria-hidden="true">2</span><span class="ot"><span><code>pending_count</code></span><span class="od">The log's name. Matches the raised events.</span></span><span class="dot" aria-hidden="true">●</span></label>
+          <label class="opt"><input type="radio" name="q2"><span class="n" aria-hidden="true">3</span><span class="ot"><span>Both, mapped in the client</span><span class="od">Either source keeps working; one mapping to maintain.</span></span><span class="dot" aria-hidden="true">●</span></label>
+          <label class="opt"><input type="radio" name="q2"><span class="n" aria-hidden="true">4</span><span class="ot"><span>Other…</span></span><span class="dot" aria-hidden="true">●</span></label>
+        </fieldset>
+        <div class="controls"><button class="cb ghost" title="Decline the question; maws-45 is told you declined and continues">Deny</button><button class="cb">Skip</button><button class="cb primary">Submit</button></div></section>
+    </div></article>
+  </div></div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">3</span><h2>Async question, from the ask mod</h2><span class="dimension">Does not block</span></figcaption>
+  <p class="rationale">The same card in its non-blocking tone, MAWS's “Question waiting”. The session keeps working while it waits, and the card says so. There is no Deny: an async question has no turn to decline, only an answer it may or may not get. Nothing is picked yet, so Submit waits.</p>
+  <div class="frame"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-fe</b><span class="at">@SK.local</span><span class="says">asks</span><time>14:18</time></div>
+      <section class="rc" aria-label="maws-fe asks a question; it keeps working"><div class="kind tone-info"><span aria-hidden="true">?</span><span>Question waiting</span><span class="age">4 min</span></div>
+        <span class="hchip">Empty state</span>
+        <p class="q">A fresh org has no artifacts yet. What should the empty artifacts page offer?</p>
+        <fieldset class="opts"><legend class="sr-only">What should the empty artifacts page offer?</legend>
+          <label class="opt"><input type="radio" name="q3"><span class="n" aria-hidden="true">1</span><span class="ot"><span>Open the newest session</span><span class="od">Takes you to where artifacts get made.</span></span><span class="dot" aria-hidden="true">●</span></label>
+          <label class="opt"><input type="radio" name="q3"><span class="n" aria-hidden="true">2</span><span class="ot"><span>A link to the docs</span><span class="od">Explains what an artifact is; no action.</span></span><span class="dot" aria-hidden="true">●</span></label>
+          <label class="opt"><input type="radio" name="q3"><span class="n" aria-hidden="true">3</span><span class="ot"><span>Only the sentence</span><span class="od">Quietest; the page fills itself as sessions publish.</span></span><span class="dot" aria-hidden="true">●</span></label>
+          <label class="opt"><input type="radio" name="q3"><span class="n" aria-hidden="true">4</span><span class="ot"><span>Other…</span></span><span class="dot" aria-hidden="true">●</span></label>
+        </fieldset>
+        <div class="controls"><span class="status"><svg aria-hidden="true" style="width:13px;height:13px"><use href="#clock"/></svg>maws-fe keeps working while this waits</span><button class="cb">Skip</button><button class="cb primary" disabled title="Choose an option or skip">Submit</button></div></section>
+    </div></article>
+  </div></div>
+</figure></section>
+</div>
+
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">4a</span><h2>Terminal only: a subagent's prompt, its window closed</h2><span class="dimension">Background subagent · past its deadline</span></figcaption>
+  <p class="rationale">The prompt is still pending, but only the terminal can answer it now. The card keeps the command, so you know what is waiting and can walk to the machine, and replaces the buttons with where to answer it.</p>
+  <div class="frame"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">· subagent <b>e2e-runner</b> wants to run a command</span><time>14:21</time></div>
+      <section class="rc" aria-label="Waiting in the terminal on mini"><div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="from">from e2e-runner</span><span class="tool">Bash</span><span class="age">1 min</span></div><pre class="mono">pnpm playwright test --project=webkit</pre><p class="why">Why: Run the WebKit project of the e2e suite</p>
+        <div class="where"><svg aria-hidden="true"><use href="#term"/></svg><span><b>Waiting in the terminal on mini.</b> A background subagent's prompt can be answered from the web only in its first few seconds; answer it where maws-45 runs.</span></div></section>
+    </div></article>
+  </div></div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">4b</span><h2>Terminal only: a session without the bridge</h2><span class="dimension">Terminal session, no bridge</span></figcaption>
+  <p class="rationale">The same shape for a question: the options are listed but cannot be picked, so nothing suggests an answer is possible here. The sentence names why, which is also what to fix.</p>
+  <div class="frame"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-term</b><span class="at">@SK.local</span><span class="says">asks</span><time>14:22</time></div>
+      <section class="rc" aria-label="Waiting in the terminal on SK.local"><div class="kind tone-warning"><span aria-hidden="true">?</span><span>Question</span><span class="age">just now</span></div>
+        <span class="hchip">Renderer</span>
+        <p class="q">Keep the canvas renderer as a fallback, or ship WebGL only?</p>
+        <div class="opts" role="list">
+          <div class="opt ro" role="listitem"><span class="n" aria-hidden="true">1</span><span class="ot"><span>WebGL only</span><span class="od">Smaller bundle; old GPUs get a blank pane.</span></span></div>
+          <div class="opt ro" role="listitem"><span class="n" aria-hidden="true">2</span><span class="ot"><span>Keep canvas as fallback</span><span class="od">Detect at start and fall back once.</span></span></div>
+        </div>
+        <div class="where"><svg aria-hidden="true"><use href="#term"/></svg><span><b>Waiting in the terminal on SK.local.</b> maws-term runs without the bridge, so the desk can show this question but cannot answer it.</span></div></section>
+    </div></article>
+  </div></div>
+</figure></section>
+</div>
+
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">5</span><h2>A subagent's prompt, its short window open</h2><span class="dimension">Background subagent · within its deadline</span></figcaption>
+  <p class="rationale">Answerable, and marked as briefly so. There is no countdown: the web does not hold the deadline against its own clock, and the hub says when it has passed. At that point this card becomes 4a in place, keeping its position and content.</p>
+  <div class="frame"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">· subagent <b>e2e-runner</b> wants to run a command</span><time>14:21</time></div>
+      <section class="rc" aria-label="maws-45 subagent e2e-runner wants to run a command"><div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="from">from e2e-runner</span><span class="age"><span class="window"><i aria-hidden="true"></i>Answer from the web for a few seconds</span></span></div><pre class="mono">pnpm playwright test --project=webkit</pre><p class="why">Why: Run the WebKit project of the e2e suite</p><div class="controls"><button class="cb ghost">Deny with a reason…</button><button class="cb">Deny</button><button class="cb primary">Allow</button></div></section>
+    </div></article>
+  </div></div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">8</span><h2>From a machine that is offline</h2><span class="dimension">mini's daemon unreachable</span></figcaption>
+  <p class="rationale">Shown as last known, not answerable. The card loses its ground and takes a dashed edge, the same mark an offline project tile carries on the grid, and states when it can be answered. Nothing is queued: a decision made now would reach mini stale.</p>
+  <div class="frame"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">wants to run a command</span><time>14:12</time></div>
+      <section class="rc offline" aria-label="maws-45 wants to run a command; mini is offline"><div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="tool">Bash</span><span class="age">as of 14:24</span></div><pre class="mono">pnpm e2e</pre><p class="why">Why: Run the e2e suite</p>
+        <div class="where"><svg aria-hidden="true"><use href="#off"/></svg><span><b>mini is offline</b> · answer when it reconnects. Last seen 14:24.</span></div></section>
+    </div></article>
+  </div></div>
+</figure></section>
+</div>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">6</span><h2>Settled: the card closes to one line</h2><span class="dimension">Every winner, in the stream</span></figcaption>
+  <p class="rationale">Once a request settles, its card shrinks to one line in the same place, and the message line turns to the past tense. The line says who answered, where, and what was decided. A decision of yours that arrived after the terminal answered is drawn as what it is, a request the terminal settled, with a note that your answer came second. It is not drawn as an error, because nothing went wrong. A withdrawn request is one whose turn ended before anyone answered.</p>
+  <div class="frame" style="max-width: 610px"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">asked to run a command</span><time>14:12</time></div>
+      <div class="rc closed" role="status"><span class="ok" aria-hidden="true">✓</span><span class="mid"><code>pnpm e2e</code><span class="out">Allowed by you from the web</span></span><time>14:13</time></div></div></article>
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-hub<span class="disamb">#3c9a1f02</span></b><span class="at">@mini</span><span class="says">asked to run a command</span><time>14:14</time></div>
+      <div class="rc closed" role="status"><span class="no" aria-hidden="true">✕</span><span class="mid"><code>wrangler deploy --env staging</code><span class="out">Denied by you</span><span>· “Wait for the load test to finish.”</span></span><time>14:15</time></div></div></article>
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">asked</span><time>14:16</time></div>
+      <div class="rc closed" role="status"><span class="ok" aria-hidden="true">✓</span><span class="mid"><span>Column name</span><span class="out">Answered in the terminal on mini:</span><code>waiting</code></span><time>14:17</time></div></div></article>
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">· subagent <b>e2e-runner</b> asked to run a command</span><time>14:21</time></div>
+      <div class="rc closed" role="status"><span class="ok" aria-hidden="true">✓</span><span class="mid"><code>pnpm playwright test --project=webkit</code><span class="out">Allowed in the terminal on mini</span><span class="note">Your Deny reached mini after the terminal had answered, so the terminal's answer stands.</span></span><time>14:22</time></div></div></article>
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-fe</b><span class="at">@SK.local</span><span class="says">asked to edit a file</span><time>14:25</time></div>
+      <div class="rc closed" role="status"><span class="gone" aria-hidden="true">–</span><span class="mid"><code>src/web/artifacts/Empty.tsx</code><span class="out">Withdrawn</span><span>· the turn ended before anyone answered</span></span><time>14:26</time></div></div></article>
+  </div></div>
+</figure></section>
+
+<div class="section-rule">A, while a decision is in flight</div>
+
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">7a</span><h2>Sending</h2><span class="dimension">RPC forwarded, no result yet</span></figcaption>
+  <p class="rationale">Every control is held so a second decision cannot race the first, and the status names the machine it went to. A result normally lands within a second.</p>
+  <div class="frame"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">wants to run a command</span><time>14:12</time></div>
+      <section class="rc" aria-busy="true" aria-label="maws-45 wants to run a command"><div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="tool">Bash</span><span class="age">2 min</span></div><pre class="mono">pnpm e2e</pre><p class="why">Why: Run the e2e suite</p><div class="controls"><span class="status" role="status"><span class="spinner" aria-hidden="true"></span>Sending Allow to mini…</span><button class="cb" disabled>Deny</button><button class="cb primary" disabled>Allow</button></div></section>
+    </div></article>
+  </div></div>
+</figure></section>
+
+<section class="vignette"><figure>
+  <figcaption><span class="number">7b</span><h2>Failed, with mini's reason</h2><span class="dimension">RPC result: failed</span></figcaption>
+  <p class="rationale">The reason is mini's own words. Nothing is retried for you. When the reason is that the request is no longer pending, its settled line follows a moment later and replaces the card, as in 6.</p>
+  <div class="frame"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">wants to run a command</span><time>14:12</time></div>
+      <section class="rc" aria-label="maws-45 wants to run a command"><div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="tool">Bash</span><span class="age">2 min</span></div><pre class="mono">pnpm e2e</pre><p class="why">Why: Run the e2e suite</p>
+        <div class="alert" role="alert"><span aria-hidden="true">!</span><span class="t">mini refused: the request is no longer pending</span></div>
+        <div class="controls"><button class="cb ghost" disabled>Deny with a reason…</button><button class="cb" disabled>Deny</button><button class="cb primary" disabled>Allow</button></div></section>
+    </div></article>
+  </div></div>
+</figure></section>
+</div>
+
+<div class="pair">
+<section class="vignette"><figure>
+  <figcaption><span class="number">7c</span><h2>Uncertain</h2><span class="dimension">mini dropped after the RPC was forwarded</span></figcaption>
+  <p class="rationale">Amber, not red: this is not known to be a failure. Retry sends the same decision under the same id, so mini runs it at most once whether or not the first one landed. Without a Retry the card resolves itself when mini reconnects and reports. Allow and Deny stay held, so a different decision cannot follow an unknown one.</p>
+  <div class="frame"><div class="msgs">
+    <article class="msg"><span class="avatar session-mark" aria-hidden="true">✳</span><div><div class="who"><b>maws-45</b><span class="at">@mini</span><span class="says">wants to run a command</span><time>14:12</time></div>
+      <section class="rc" aria-label="maws-45 wants to run a command"><div class="kind tone-warning"><span aria-hidden="true">◐</span><span>Approval needed</span><span class="tool">Bash</span><span class="age">2 min</span></div><pre class="mono">pnpm e2e</pre><p class="why">Why: Run the e2e suite</p>
+        <div class="alert unsure" role="status"><span class="g" aria-hidden="true">◐</span><span class="t">mini dropped before answering. Your Allow may or may not have taken effect.</span><button class="cb">Retry</button></div>
+        <div class="controls"><button class="cb ghost" disabled>Deny with a reason…</button><button class="cb" disabled>Deny</button><button class="cb primary" disabled>Allow</button></div></section>
+    </div></article>
+  </div></div>
+</figure></section>
+<div class="notes" style="padding-top: 26px">
+  <h3>What decides which state a card is in</h3>
+  <p>The hub, never the browser's own reckoning. Pending, terminal only, settled (with its winner), and an RPC's forwarded, done, failed or uncertain all arrive as the hub's frames. The card draws the latest one, so two browsers looking at the same request always agree.</p>
+  <h3>The tone ladder</h3>
+  <p>Amber means waiting on you or not yet known. Blue means a question that does not block. Red marks a refusal, yours or mini's: a Deny, or mini refusing what you sent. Green appears only on a settled Allow or answer. Each state also has words, so none rests on colour alone.</p>
+</div>
+</div>
+</main>
+<script>
+const dark = new URLSearchParams(location.search).get('theme') === 'dark';
+const tl = document.getElementById('theme-link');
+tl.href = dark ? '?' : '?theme=dark'; tl.textContent = dark ? 'View in light' : 'View in dark';
+</script>
+</body>
+</html>

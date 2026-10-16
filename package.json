@@ -12,8 +12,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "dev:stub": "node scripts/dev-stub.js",
-    "build": "electron-vite build && pnpm --filter desk-hub build",
-    "typecheck": "tsc --noEmit -p tsconfig.node.json --tsBuildInfoFile /dev/null && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --tsBuildInfoFile /dev/null && pnpm --filter desk-hub typecheck",
+    "build": "electron-vite build && pnpm --filter desk-web build && pnpm --filter desk-hub build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json --tsBuildInfoFile /dev/null && tsc --noEmit -p tsconfig.web.json --composite false && tsc --noEmit -p tsconfig.e2e.json --tsBuildInfoFile /dev/null && pnpm --filter desk-hub typecheck && pnpm --filter desk-web typecheck",
     "lint": "eslint .",
     "test": "NODE_OPTIONS=\"$NODE_OPTIONS --disable-warning=ExperimentalWarning\" vitest run",
     "test:probes": "node --test spikes/protocol-probe/*.test.mjs",
@@ -66,6 +66,8 @@
     "e2e:document": "scripts/e2e-build.sh harness && MAWS_HARNESS=1 playwright test e2e/document-editor.spec.ts",
     "e2e:document-app": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/document.spec.ts",
     "e2e:document-live": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/document-live.spec.ts",
+    "e2e:desk-web": "pnpm --filter desk-web e2e",
+    "e2e:desk-web-hub": "pnpm --filter desk-web e2e:hub",
     "e2e:document-scale": "scripts/e2e-build.sh plain && MAWS_HARNESS=0 playwright test e2e/document-scale.spec.ts"
   },
   "dependencies": {
