@@ -1,6 +1,8 @@
-// P3-E2 M1 spike: the SVG writing helpers both candidates share: XML escaping, coordinate and label number formats,
-// and the theme, resolved from D's document-medium `--ds-*` values and validated before any value enters an attribute.
-// Nothing here reads a DOM, the locale, the clock or randomness, so equal inputs write equal bytes.
+// The SVG writing helpers of the renderer (P3-E2 M3, promoted from M1's spike): XML escaping, coordinate and label number
+// formats, and the theme, resolved from D's document-medium `--ds-*` values (the same input in the editor and the
+// exporters) and validated before any value enters an attribute. Nothing here reads a DOM, the locale, the clock or
+// randomness, so equal inputs write equal bytes.
+import { HOUSE_TOKENS } from '../../document/export/design-system';
 
 /** Text and attribute content, escaped for XML; control characters other than tab and newline are dropped. */
 export function esc(value: string): string {
@@ -74,30 +76,46 @@ export interface Theme {
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const FONT = /^[\p{L}\p{N} ,"'\-_.]{1,300}$/u;
 
-/** The theme from resolved `--ds-*` properties; an invalid value is refused with a warning and the house value kept. */
-export function themeFrom(props: Readonly<Record<string, string>>, width = 672): { theme: Theme; warnings: string[] } {
+/** The figure's width in px when the page names none: the house page's text column (8.5 in less two 0.75 in margins). */
+export const FIGURE_WIDTH = 672;
+
+/** The `--ds-*` names a figure reads. */
+export const THEME_PROPERTIES = ['--ds-color-bg-raised', '--ds-color-text', '--ds-color-text-muted', '--ds-color-border', '--ds-font-body', '--ds-font-mono', '--ds-type-caption-size', '--ds-type-body-size'] as const;
+
+/** The theme from resolved `--ds-*` properties (an absent or empty one is the house system's, D's `maws` default); a value
+ * the figure cannot take safely (not a six-digit hex colour, a font list with markup, a size outside 8 to 40 px) is
+ * refused with a warning and the house value kept. */
+export function themeFrom(props: Readonly<Record<string, string | undefined>>, width = FIGURE_WIDTH): { theme: Theme; warnings: string[] } {
   const warnings: string[] = [];
-  const pick = (name: string, test: RegExp, fallback: string) => {
+  const house = HOUSE_TOKENS.properties as Readonly<Record<string, string>>;
+  const given = (name: string) => {
     const value = props[name]?.trim();
+    return value === undefined || value === '' ? undefined : value;
+  };
+  const pick = (name: string, test: RegExp) => {
+    const value = given(name);
     if (value !== undefined && test.test(value)) return value;
     if (value !== undefined) warnings.push(`theme value ${name} refused`);
-    return fallback;
+    return house[name];
   };
-  const size = (name: string, fallback: number) => {
-    const match = /^(\d{1,2}(?:\.\d+)?)px$/.exec(props[name]?.trim() ?? '');
-    return match ? Number(match[1]) : fallback;
+  const size = (name: string) => {
+    const value = given(name);
+    const match = value === undefined ? null : /^(\d{1,2}(?:\.\d+)?)px$/.exec(value);
+    if (match && Number(match[1]) >= 8 && Number(match[1]) <= 40) return Number(match[1]);
+    if (value !== undefined) warnings.push(`theme value ${name} refused`);
+    return Number.parseFloat(house[name]);
   };
   return {
     theme: {
-      ground: pick('--ds-color-bg-raised', HEX, '#ffffff'),
-      ink: pick('--ds-color-text', HEX, '#1f1e1b'),
-      muted: pick('--ds-color-text-muted', HEX, '#72716e'),
-      rule: pick('--ds-color-border', HEX, '#e3e2df'),
-      fontBody: pick('--ds-font-body', FONT, 'sans-serif'),
-      fontMono: pick('--ds-font-mono', FONT, 'monospace'),
-      caption: size('--ds-type-caption-size', 13),
-      body: size('--ds-type-body-size', 16),
-      width: Number.isFinite(width) && width >= 240 && width <= 2000 ? Math.round(width) : 672,
+      ground: pick('--ds-color-bg-raised', HEX),
+      ink: pick('--ds-color-text', HEX),
+      muted: pick('--ds-color-text-muted', HEX),
+      rule: pick('--ds-color-border', HEX),
+      fontBody: pick('--ds-font-body', FONT),
+      fontMono: pick('--ds-font-mono', FONT),
+      caption: size('--ds-type-caption-size'),
+      body: size('--ds-type-body-size'),
+      width: Number.isFinite(width) && width >= 240 && width <= 2000 ? Math.round(width) : FIGURE_WIDTH,
     },
     warnings,
   };

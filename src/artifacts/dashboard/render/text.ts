@@ -1,7 +1,7 @@
-// P3-E2 M1 spike: text geometry without a DOM. A label's width is estimated from per-character advances that err wide
-// of SF Pro, Apple SD Gothic Neo, Segoe UI and Malgun Gothic (Hangul and CJK a full em, Latin by class), so a label
-// placed by this estimate is never clipped by its neighbour or the frame. The e2e proof measures real glyph boxes in
-// Chromium against these estimates.
+// Text geometry without a DOM (P3-E2 M3, promoted from M1's spike): a label's width is estimated from per-character
+// advances that err wide of SF Pro, Apple SD Gothic Neo, Segoe UI and Malgun Gothic (Hangul and CJK a full em, Latin by
+// class), so a label placed by this estimate is never clipped by its neighbour or the frame. M1's e2e measured real
+// glyph boxes in Chromium against these estimates (widest real to estimate 0.986; spikes/p3-dashboard/findings.txt).
 
 const WIDE = /[ᄀ-ᅟ⺀-〾ぁ-㏿㐀-䶿一-鿿ꥠ-꥿가-힯豈-﫿︰-﹏＀-｠￠-￦]/;
 

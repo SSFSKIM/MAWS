@@ -233,3 +233,14 @@ HOW TO RUN
 - Measurement (CI): `pnpm e2e:dashboard-spike-scale`, with MAWS_DASHBOARD_SCALE=1 set inline. It waits up to 5 min for
   the one-minute load to fall below 10 and records each reading; a load still at or above 10 is reported NOT QUIET.
 - Data: `node spikes/p3-dashboard/datasets/derive.mjs` regenerates the four tables from raw/ and prints their sha256.
+
+PROMOTION (P3-E2 M3, 2026-10-16)
+
+Candidate A's approach is promoted into src/artifacts/dashboard/ with its own production tests: spec.ts (the grammar),
+render/geometry.ts (d3's helpers, one implementation, no Kit seam), render/{render,svg,text,transform}.ts (the shared
+layout), states.ts (the wording). The spike's code, both kits, its parity tests, its Electron proof harness and its
+measurement script are removed, with the package scripts `e2e:dashboard-spike` and `e2e:dashboard-spike-scale`; this
+file and datasets/ (the raw downloads, derive.mjs, SOURCES.txt and the derived tables) stay as the evidence above. The
+production tests vendor two of the derived tables byte for byte (src/artifacts/dashboard/fixtures/datasets.ts). The
+review's decorative-hatch debt is closed there: a bar's hatching is drawn `pointer-events="none"`, a pie's wedge numbers
+too, so the mark beneath is the hit target. The commits before this one hold the removed files.
