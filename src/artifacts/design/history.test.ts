@@ -88,11 +88,12 @@ describe('who a move and the edits since it are credited to (C’s element histo
       w.land(AGENT, (doc) => (moved = moveElementToBoard(doc, 'a', 'b', 'e1').ids.get('e1')!));
       w.land('human', (doc) => setStyle(doc, 'b', moved, { color: '#ff0000' }), { sameMinute });
       const [move] = movesOn(w.project(v).d, 'b');
-      expect(move, `same minute: ${sameMinute}`).toMatchObject({ by: AGENT, keys: [expect.objectContaining({ key: 'style:color', by: 'human' })] });
+      expect(move, `same minute: ${sameMinute}`).toMatchObject({ by: AGENT });
+      expect(move!.keys.find((k) => k.key === 'style:color'), `same minute: ${sameMinute}`).toMatchObject({ by: 'human' });
     }
   });
 
-  it('keeps a later restack of the moved element by its author, or by the mover in a later minute; the move’s own paint key stays out', () => {
+  it('keeps every real difference in the moved element’s stacking, a restack since by anyone in any minute included, and counts the move once', () => {
     const restack = (actor: string, sameMinute: boolean) => {
       const w = world();
       const v = w.mark();
@@ -104,12 +105,14 @@ describe('who a move and the edits since it are credited to (C’s element histo
     expect(restack('human', false)).toEqual([expect.objectContaining({ key: 'z', by: 'human' })]);
     expect(restack('human', true)).toEqual([expect.objectContaining({ key: 'z', by: 'human' })]);
     expect(restack(AGENT, false)).toEqual([expect.objectContaining({ key: 'z', by: AGENT })]);
-    // the boundary: the mover's own restack within the move's minute reads as the move's paint key
-    expect(restack(AGENT, true)).toEqual([]);
+    expect(restack(AGENT, true)).toEqual([expect.objectContaining({ key: 'z', by: AGENT })]); // the mover's own restack, same minute: kept, not inferred away
     const w = world();
     const v = w.mark();
     w.land(AGENT, (doc) => moveElementToBoard(doc, 'a', 'b', 'card'));
-    expect(movesOn(w.project(v).d, 'b')[0]!.keys.map((k) => k.key)).toEqual([]); // a plain move: no paint or parent noise
+    const plainMove = w.project(v).d;
+    // a plain move: its new place in the destination's stack is a real difference, shown as the mover's; no parent noise
+    expect(movesOn(plainMove, 'b')[0]!.keys).toEqual([expect.objectContaining({ key: 'z', by: AGENT })]);
+    expect(plainMove.count).toBe(1);
   });
 });
 
@@ -122,7 +125,8 @@ describe('the design’s history projection', () => {
     const { c, d } = w.project(v);
     expect(c.count).toBe(2);
     expect(d.count).toBe(1);
-    expect(movesOn(d, 'b')).toEqual([expect.objectContaining({ kind: 'moved', id: moved, from: { board: 'a', id: 'e1' }, by: AGENT, at: T0 + 2 * MIN, keys: [], descendants: [] })]);
+    expect(movesOn(d, 'b')).toEqual([expect.objectContaining({ kind: 'moved', id: moved, from: { board: 'a', id: 'e1' }, by: AGENT, at: T0 + 2 * MIN, descendants: [] })]);
+    expect(movesOn(d, 'b')[0]!.keys.every((k) => k.key === 'order' && k.by === AGENT)).toBe(true); // at most its new place in the flow, the mover's
     expect(kinds(d, 'a')).toEqual([['movedAway', 'e1']]);
     expect(boardOf(d, 'a')!.elements[0]).toMatchObject({ to: { board: 'b', id: moved } });
     expect(designStops(d)).toEqual([{ part: 'element', boardId: 'b', elementId: moved }]);
@@ -166,7 +170,7 @@ describe('the design’s history projection', () => {
     const [move] = movesOn(d, 'b');
     expect(move).toMatchObject({ id: ids.get('card'), from: { board: 'a', id: 'card' }, by: AGENT });
     expect(move!.descendants.sort()).toEqual([ids.get('note'), ids.get('small')].sort());
-    expect(move!.keys.map((k) => k.key).sort()).toEqual(['style:left', 'style:top']); // the move's geometry; not its place in the stack
+    expect(move!.keys.map((k) => k.key).sort()).toEqual(['style:left', 'style:top', 'z']); // the move's geometry and its new place in the stack
     // its text, changed after the move by someone else: credited to its author (C's leaf), not to the mover
     expect(boardOf(d, 'b')!.elements.find((e) => e.id === ids.get('note'))).toMatchObject({ kind: 'changed', by: 'human', keys: [expect.objectContaining({ key: 'text', by: 'human' })] });
     expect(kinds(d, 'a')).toEqual(expect.arrayContaining([['changed', 'keep'], ['movedAway', 'card']]));

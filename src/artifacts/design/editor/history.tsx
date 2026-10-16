@@ -31,6 +31,17 @@ export function boardKeyLabel(key: string): string {
 }
 const keysLabel = (keys: readonly KeyChange[], label: (key: string) => string = keyLabel) => [...new Set(keys.map((k) => label(k.key)))].join(', ');
 
+/** Changed keys grouped by who changed them and when, in their order: each group's words and its touch. */
+function keyCredits(keys: readonly KeyChange[]): { label: string; by: string | null; at: number | null }[] {
+  const groups: { keys: KeyChange[]; by: string | null; at: number | null }[] = [];
+  for (const k of keys) {
+    const group = groups.find((g) => g.by === k.by && g.at === k.at);
+    if (group) group.keys.push(k);
+    else groups.push({ keys: [k], by: k.by, at: k.at });
+  }
+  return groups.map((g) => ({ label: keysLabel(g.keys), by: g.by, at: g.at }));
+}
+
 /** Where ↑ ↓ stand in the projection: its stops and the one reached (null before the first step). */
 export interface DesignFocus {
   stops: DesignStop[];
@@ -362,17 +373,20 @@ export function HistoryWorld({ controller, preview, projected, boards, focus, vi
           const m = canvas ? measure(canvas, e.id, zoom) : null;
           if (!m) continue;
           const author = e.by ? controller.author(e.by) : null;
-          const what =
+          const credited = (what: string, touch: { by: string | null; at: number | null }) => {
+            const who = touch.by ? controller.author(touch.by) : null;
+            return who ? `${what} — ${HISTORY_COPY.by(who.name, who.when(touch.at))}` : what;
+          };
+          // a move is its mover's; each key changed in it, or in a changed element, is its own author's
+          const title =
             e.kind === 'moved'
-              ? [C.movedFrom(labels.get(e.from.board) ?? e.from.board), keysLabel(e.keys)].filter(Boolean).join('; ')
+              ? [credited(C.movedFrom(labels.get(e.from.board) ?? e.from.board), e), ...keyCredits(e.keys).map((g) => credited(g.label, g))].join('; ')
               : e.kind === 'movedAway'
-                ? C.movedAway(labels.get(e.to.board) ?? e.to.board)
+                ? credited(C.movedAway(labels.get(e.to.board) ?? e.to.board), e)
                 : e.kind === 'changed'
-                  ? keysLabel(e.keys)
-                  : e.kind === 'added'
-                    ? HISTORY_COPY.newBadge
-                    : HISTORY_COPY.deletedBadge;
-          next.push({ board: b.id, id: e.id, kind: e.kind, box: m.bounds, color: author?.color ?? null, title: author ? `${what} — ${HISTORY_COPY.by(author.name, author.when(e.at))}` : what });
+                  ? keyCredits(e.keys).map((g) => credited(g.label, g)).join('; ')
+                  : credited(e.kind === 'added' ? HISTORY_COPY.newBadge : HISTORY_COPY.deletedBadge, e);
+          next.push({ board: b.id, id: e.id, kind: e.kind, box: m.bounds, color: author?.color ?? null, title });
         }
       }
       setMarks((now) => (sameMarks(now, next) ? now : next));

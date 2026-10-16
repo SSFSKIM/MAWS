@@ -6,7 +6,7 @@
 // ghosted where it was, a deleted board drawn where it was; Back returns to the live world, Restore asks A's restore.
 // Real layout and the product's IPC are the e2e's.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -100,6 +100,7 @@ describe('a version’s preview in the workbench', () => {
     h.version(HUMAN, 'named', 'Draft');
     let moved = '';
     h.land(AGENT, (d) => (moved = moveElementToBoard(d, 'a', 'b', 'e1').ids.get('e1')!));
+    h.land(HUMAN, (d) => setStyle(d, 'b', moved, { color: '#00aa00' })); // the owner restyles what the agent moved
     h.land(HUMAN, (d) => setBoardFrame(d, 'b', { x: 600 }));
     h.land(HUMAN, (d) => setStyle(d, 'b', 'title', { color: '#ff0000' }));
     h.land(HUMAN, (d) => deleteBoard(d, 'c'));
@@ -138,6 +139,24 @@ describe('a version’s preview in the workbench', () => {
     await settle();
     expect(world.querySelector('[data-history-board="a"] .deck-history-ghosts [data-eid="e1"][data-ghost]')).not.toBeNull();
     expect(world.querySelector(`[data-history-board="b"] [data-eid="${moved}"]`)).not.toBeNull();
+  });
+
+  it('credits a move to its mover and each later edit of the moved element to its own author, in the mark’s words', async () => {
+    // happy-dom lays nothing out: every element of a board places against its board's slide, so its mark is measured
+    const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetParent');
+    Object.defineProperty(HTMLElement.prototype, 'offsetParent', { configurable: true, get(this: HTMLElement) { return this.classList.contains('maws-slide') ? null : this.closest('.maws-slide'); } });
+    onTestFinished(() => void (own && Object.defineProperty(HTMLElement.prototype, 'offsetParent', own)));
+    const { moved } = mount();
+    await settle();
+    fireEvent.click(within(screen.getByRole('complementary', { name: 'Version history' })).getByRole('button', { name: /^Version Reviewed/ }));
+    await settle();
+    await settle();
+    const mark = screen.getByRole('region', { name: 'Design in this version' }).querySelector<HTMLElement>(`[data-history-mark="${moved}"]`)!;
+    expect(mark.getAttribute('data-kind')).toBe('moved');
+    const title = mark.getAttribute('title')!;
+    expect(title).toMatch(/^Moved from Phone — Claude · [^;]+; /); // the move, the agent's
+    expect(title).toMatch(/; color — You · /); // the restyle since, the owner's
+    expect(title).not.toMatch(/Moved from Phone; color/); // never one author for both
   });
 
   it('steps through the projection’s changes, and Back returns to the live world', async () => {

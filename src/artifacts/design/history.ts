@@ -13,12 +13,12 @@
 // `elementHistory`, the P3-E spec's Decision Log 30: the element's own item in the window's provenance, never the board's
 // creator), carrying what else differs in it, each key credited by its own leaf as C credits a node re-created under a
 // kept id (a later edit by its author, the same-minute rule C's), and its moved descendants grouped under it, each
-// counted only for a change of its own. What the relocation itself writes stays out: the association always; the
-// parent when it is the same one (the root's: the destination's top level, where every move puts it); the root's paint
-// key (`order`, `z`) only when credited to the move itself (its inserter, the same minute). A paint key or a parent
-// credited otherwise is a later, authored edit and is kept. The boundary: through `{inserted, keys}` a restack of the
-// moved root by its own mover within the same minute cannot be told from the move's own key, and is read as the move's.
-// Without C's accessor (a preview made elsewhere), the keys are compared plainly and credited to the move. A pair on
+// counted only for a change of its own. What the relocation itself writes and is no difference stays out: the
+// association always, and the parent when it is the same one (the root's: the destination's top level, where every move
+// puts it). Any other differing key is kept with its own credit, the root's paint key (`order`, `z`) included: neither
+// author nor minute tells the move's own place in the destination's stack from a restack since, so a real difference is
+// never dropped, and the move still counts once however many keys it carries. Without C's accessor (a preview made
+// elsewhere), the keys are compared plainly and credited to the move, its paint key left out. A pair on
 // one board is an element that went away and came back: shown as a change of what actually differs, or nothing. The
 // source keeps a ghost entry, `movedAway`, that counts nothing. The count and ↑ ↓'s stops are this projection's: the
 // workbench's bar and navigation read them, and the new-change pill counts them through C's `countChanges` hook, so the
@@ -134,7 +134,6 @@ function plainHistory(prev: Doc, next: Doc, touch: Touch): ElementHistory {
 }
 
 const touchOf = (t: Touch): Touch => ({ by: t.by, at: t.at });
-const sameTouch = (a: Touch, b: Touch): boolean => a.by === b.by && a.at === b.at;
 const PAINT = new Set(['order', 'z']);
 
 /**
@@ -180,8 +179,8 @@ export function designChanges(docs: Pick<DeckDiff, 'prevDoc' | 'nextDoc'>, chang
       .filter((k) => k.key !== MOVE_ORIGIN_KEY)
       // the parent the move gave it: the same one mapped through the pairs, or the top level a moved root lands at
       .filter((k) => k.key !== 'parent' || !(mappedParent === shownParent || (crossRoot && shownParent === ROOT)))
-      // the root's paint key the move wrote, credited to the move itself; a later, authored restack stays
-      .filter((k) => !(crossRoot && PAINT.has(k.key) && (history === undefined || sameTouch(k, touch))))
+      // without C's history the paint key cannot be credited at all: the move's, left out
+      .filter((k) => !(crossRoot && PAINT.has(k.key) && history === undefined))
       .map((k) => (history === undefined ? { ...k, ...touch } : k));
     if (!crossRoot) {
       // home again, or a descendant moved with its root: what actually differs, or nothing
