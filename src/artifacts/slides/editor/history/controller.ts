@@ -70,6 +70,14 @@ const LIVE = Number.MAX_SAFE_INTEGER;
 const EMPTY: DeckHistorySnapshot = { versions: null, selected: [], loading: false, preview: null, pill: null, banner: null, status: null, error: null };
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
+/**
+ * P3-E (E1 M4; the P3-E spec's Decision Log 23): an optional count for the new-change pill, read from the diff and its
+ * change set before the diff is discarded (a design counts a cross-board move once); absent, the change set's own count.
+ */
+export interface DeckHistoryOptions {
+  countChanges?(diff: DeckDiff, changes: DeckChanges): number;
+}
+
 export class DeckHistoryController {
   private snapshot: DeckHistorySnapshot = EMPTY;
   private readonly listeners = new Set<() => void>();
@@ -82,6 +90,7 @@ export class DeckHistoryController {
   constructor(
     private readonly handle: Pick<DocumentHandle, 'doc' | 'onRestored'>,
     private readonly api: HistoryApi,
+    private readonly options: DeckHistoryOptions = {}, // P3-E
   ) {}
 
   subscribe = (listener: () => void): (() => void) => {
@@ -363,7 +372,8 @@ export class DeckHistoryController {
       const diff = openDeckDiff({ prevState, nextState: stateV2(this.handle.doc), attributions: decodeMap(attributions) });
       let count: number;
       try {
-        count = deckChanges(diff).count;
+        const changes = deckChanges(diff);
+        count = this.options.countChanges ? this.options.countChanges(diff, changes) : changes.count; // P3-E: the hook's count when given
       } finally {
         diff.destroy();
       }
