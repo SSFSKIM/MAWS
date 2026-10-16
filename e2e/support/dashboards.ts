@@ -146,3 +146,24 @@ export async function edit(launch: MawsLaunch, command: 'copy' | 'cut' | 'paste'
     win!.webContents[which]();
   }, command);
 }
+
+// P3-E2 M5 (moved from dashboard-comments.spec.ts, shared with dashboard-export.spec.ts): the owner's block comment steps.
+/** Selects the drawn chart as a person does, with a click on its caption: the block selected whole, the editor focused. */
+export async function selectChart(record: Locator): Promise<void> {
+  await figures(record).first().locator('.dash-caption').click();
+  await expect(record.locator('.doc-chart.ProseMirror-selectednode')).toHaveCount(1);
+  await expect.poll(() => record.locator('.ds-doc .ProseMirror').first().evaluate((el) => el.contains(document.activeElement)), { message: 'the editor has the focus' }).toBe(true);
+}
+
+export async function railOf(record: Locator): Promise<Locator> {
+  const rail = record.getByRole('complementary', { name: 'Comments' });
+  if (!(await rail.isVisible())) await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: /^Comments/ }).click();
+  await expect(rail).toBeVisible();
+  return rail;
+}
+
+export async function reply(rail: Locator, threadId: string, text: string): Promise<void> {
+  const field = rail.locator(`article[data-thread="${threadId}"]`).getByRole('textbox', { name: 'Reply' });
+  await field.fill(text);
+  await field.press('Enter');
+}

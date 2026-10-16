@@ -7,7 +7,7 @@
 // tab); deleted, it is orphaned again and is resolved and reopened in the rail; a restore of the version brings the chart
 // back to its first tab with the thread live, every reply kept. Evidence shots go to test-results/dashboard-proof/.
 import { expect, test, type Locator } from '@playwright/test';
-import { bindCsv, chart, durable, edit, figures, insertBlocks, ok, openInPanel, paragraph, pinArtifactsTool, startApp, type DashboardApp } from './support/dashboards';
+import { bindCsv, chart, durable, edit, figures, insertBlocks, ok, openInPanel, paragraph, pinArtifactsTool, railOf, reply, selectChart, startApp, type DashboardApp } from './support/dashboards';
 
 const PROOF = 'test-results/dashboard-proof';
 const SALES_CSV = 'region,total\nNorth,10\nSouth,20\nWest,15\n';
@@ -32,26 +32,6 @@ const replicaRead = (record: Locator, threadId: string) =>
       const tabs = Object.fromEntries([...doc.get('tabs').attrEntries()].map(([tabId, tab]) => [String((tab as Y).getAttr('title')), tabId]));
       return { tabs, tabId: thread?.getAttr('tabId') as string | undefined, blockId: thread?.getAttr('blockId') as string | undefined, anchor: thread?.getAttr('anchor'), status: thread?.getAttr('status') as string | undefined };
     }, threadId);
-
-/** Selects the drawn chart as a person does, with a click on its caption: the block selected whole, the editor focused. */
-async function selectChart(record: Locator): Promise<void> {
-  await figures(record).first().locator('.dash-caption').click();
-  await expect(record.locator('.doc-chart.ProseMirror-selectednode')).toHaveCount(1);
-  await expect.poll(() => record.locator('.ds-doc .ProseMirror').first().evaluate((el) => el.contains(document.activeElement)), { message: 'the editor has the focus' }).toBe(true);
-}
-
-async function railOf(record: Locator): Promise<Locator> {
-  const rail = record.getByRole('complementary', { name: 'Comments' });
-  if (!(await rail.isVisible())) await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: /^Comments/ }).click();
-  await expect(rail).toBeVisible();
-  return rail;
-}
-
-async function reply(rail: Locator, threadId: string, text: string): Promise<void> {
-  const field = rail.locator(`article[data-thread="${threadId}"]`).getByRole('textbox', { name: 'Reply' });
-  await field.fill(text);
-  await field.press('Enter');
-}
 
 test('a chart’s comment follows it through a cut and a paste into another tab, is orphaned with its quote when deleted, resolves and reopens, and a restore brings it back live with every reply', async () => {
   test.setTimeout(180_000);
