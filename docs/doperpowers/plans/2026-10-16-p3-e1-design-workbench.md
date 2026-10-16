@@ -1,0 +1,156 @@
+# P3-E1 — The artboard workbench: execution document (2026-10-16)
+
+> **Parent:** `docs/doperpowers/plans/2026-10-16-p3-e-design-dashboard.md`, child **E1**, parent pin **blob 9690ee03dda5d806b01c504f25602b182689f1f4 at master 1dfe24eb1**. Its parent is `docs/doperpowers/plans/2026-10-12-p3-co-work.md`. The approved design lives in the parent's E1 section and §1, §4, XE2, XE3, XE4 (amended by Decision Log 10), XE6, XE7 and XE9; P3 §4.5, §4.7 and §4.10 bind. Interface names come from `docs/doperpowers/plans/2026-10-12-p3-interface-ledger.md` (X23, X25, X27, X28, X31, X32, X10/X21 and §7). E0's findings are `spikes/p3-design/findings.txt`; its throwaway branch is reference only, never merged. Starting branch: `worktree-agent-a7602357e5096487d`, isolated checkout `/Users/new/Developer/GitHub/MAWS/.claude/worktrees/agent-a7602357e5096487d`.
+
+## Purpose
+
+An owner and an agent can work on a design containing phone screens, desktop screens and tall posters together, without turning presentations into an infinite canvas. Boards and their elements remain one durable collaborative artifact: editing, comments, history, restore, read-only directory mirrors and uncropped PNG/PDF exports carry the same geometry and content. The work uses C's slide dialect and element editor rather than a second renderer or file runtime.
+
+## Progress
+
+- [x] (2026-10-16) Parent, interface ledger and E0 findings grounded against C's model, editor, export and host seams; one frozen offline-preferred install completed through the shared slot.
+- [ ] Execution-document adversarial review and architect checkpoint.
+- [ ] M1 — Manifest, board mutations, property-level publish and adapter.
+- [ ] M2 — Host migration, tools, mirror and agent guides.
+- [ ] M3 — Mounted-board workbench and C's additive dimensions.
+- [ ] M4 — Object comments and board history.
+- [ ] M5 — Native-size exports and their UI.
+- [ ] M6 — Product acceptance, live/scale gates and whole-branch review.
+
+## Acceptance
+
+These are the parent's eight E1 acceptance items, with E0's settled measurements replacing speculative thresholds. A tick requires evidence, not implementation alone.
+
+1. **Agent and persistence.** Create a Design with `project/canvas.json` and four boards (phone, tablet, desktop, poster taller than 8,192 px); its guide is attached, read returns its files, and multi-file publish commits all or none. A human's move merges with an agent's restyle on the same board. Competing writes to a board coordinate or element property refuse with the board/path and property; rereading allows a deliberate retry. Held source is never trimmed. Generic-file designs migrate once in a host-committed, actor-credited operation before live open/read/write, old versions remain readable as their original files, and publish after restart works.
+2. **Workbench.** In the product build the panel and main tab are two replicas. Every board stays mounted. Pan, zoom 2–400%, fit all/selection, board move/resize with sibling edge/centre/equal-gap snapping, presets, add/duplicate/delete/reorder and zoom-to-board work. C's selected-board engine supports selection, move, resize, rotate, snapping, inspector, Detach, z-order, grouping and in-place text including Korean composition. Board and element edits share one undo stack. Theme changes restyle every board using the document medium; an edit patches the other replica within a frame.
+3. **Comments.** Board and element comments open P2's artifact card with the design lead. Pins follow board moves, element moves, cross-board moves with and without existing id collisions and republish. Every cross-board move mints derived ids, rewriting all moved descendants' threads in the same transaction. Deletion preserves the last quote and orphans, Resolve/Reopen work, and all three agent thread tools work.
+4. **History.** Versions, Compare, Show changes, change navigation and the new-changes pill work per board; moves/resizes and element restyles are marked, deleted elements ghosted, and preview uses its pinned system/assets. Restore creates a new version, restores geometry/content/status and preserves later conversations.
+5. **Export.** Selected-board PNG at native size or explicit scale; a native request over 8,192 px on either side refuses with board, dimensions and fitting scale, then succeeds at that scale. PDF emits one native-sized page per selected board (all by default), never crops or fits Letter. The 19,200 px PDF-side policy applies to scaled output too. Both agent and menu routes are proved.
+6. **Mirror and library.** The linked Space contains read-only `canvas.json` and `boards/<id>.html`, tokens resolved and overrides removed. Changing a governing system/default refreshes the mirror without a design write; assets are copied through L's existing writer contract. The library lists the Design and its sessions.
+7. **Scale.** At one-minute load below 10 on the mini, the 24-board mixed fixture including a 4,096×8,192 board meets the table below. Pan/zoom measurements also run during board dragging and agent publication every 0.7 s. These rows are ratified at the checkpoint; no warmed world-only measure substitutes for cold product open.
+8. **Compatibility and gates.** C's corpus `src/artifacts/slides/parse.test.ts:42-59`, C's unit suites and `e2e:presentations` stay unchanged and green. CI runs static, unit, probes, build/bundle guard and `unit:darwin`; new `e2e:design` covers design, export, comments and history. Explicit live and scale groups run once at the end; the live cycle uses the installed unmodified engine, scratch config and a US$1 cap. Task reviews and a final reviewer-high review close before hand-back.
+
+| Measured behavior, 24 boards | Bound | E0 evidence (not E1 verification) |
+|---|---:|---:|
+| Cold open to interactive | ≤ 1,000 ms | 123 ms world-only warm open |
+| Pan/zoom main-thread frame work p95 | ≤ 4 ms | 0.4 ms |
+| Dropped frames | ≤ 2% | 0–0.4% |
+| Re-layout every board | ≤ 50 ms | 13.5 ms |
+| Renderer memory | ≤ 500 MB | 276 MB |
+| Host loop, one-board publish | ≤ 50 ms | E1 to measure |
+| Host loop, whole-design publish | ≤ 300 ms | E1 to measure |
+| PDF of all 24 boards | < 55 s | E1 to measure |
+
+## Execution constraints
+
+- One model owner: `src/artifacts/design/` owns manifest parsing, geometry, mutations and publish; exports and mirror consume it. C's module is imported, not copied. Every change to C is additive, deck-default-preserving and P3-E-marked (XE3); a non-additive change goes to the architect as `[parent-impact]` before writing it.
+- The board is C's slide node with plain `x`, `y`, `w`, `h` and optional title, its `notes` node retained. C's `deck`, `slides`, `threads` roots and undo/history scopes stay. A side is positive and at most 16,384 CSS px; area at most 67,108,864 px. Invalid frames are refused, not clamped. Publish, renderer mutations, duplicate, repair and migration use the same validation.
+- Source and destination plus old element id determine each moved id, with C's minter on a collision at the mover's state; the complete subtree and its anchor rewrites commit together. A duplicated board gets new board/element ids, keeps its notes and geometry, and does not duplicate conversations. C's `duplicateSlide` is not used.
+- Publication is planned before a transaction: refusals write nothing. Unsent board files stay; manifest property comparison ignores unchanged sent values even under force. Missing geometry uses the parent's warned defaults; missing files retain their manifest entries with warnings, not fabricated source. Unknown manifest keys survive round trips. The manifest order is projected onto each board's fractional `order` so unrelated board reorders can merge and conflicts name a board.
+- `src/artifacts/**` imports no Electron, Node or `window.maws`; Yjs only through `src/artifacts/yjs/`. No dependencies are planned. Existing light-theme app tokens and C's chrome are the UI authority; D's document tokens style the board. No new global visual law or palette is introduced. The world dominates, the board rail provides navigation, and the inspector is contextual; narrow panels use C's overlay-rail pattern rather than squeezing the canvas.
+- All boards mounted (E0's ruling); no cached-image or virtual-mount branch. C's `SlideCanvas` reads live `w`/`h`, preserving its deck defaults. Screen type defaults are design-owned CSS (body 16/1.5, headings 32/24/20 at 600), used by editor and export. C's original `CANVAS_CSS` remains unchanged.
+- Comments, history, saved-state/close guard and header lifetimes reuse C/B/G's interfaces. A header action reads tab-owned state, not a component that may be unmounted. History is read-only, restores clear local undo, and late conversations survive XE7.
+- Never edit the charter, parent specs, ledgers, workflow class lists, the owner's running app/user data or `~/.claude`; never merge to master. New shared names go to the architect first. E2 may touch shared registrations; merge master before every CI gate and again when it advances. Explicitly stage only E1 files, never `node_modules`, `.playwright-cli/` or `spikes/gws-onboarding/`. Commit incrementally without attribution lines.
+
+## Checkpoint residue
+
+The following proposals require the architect's shared-name ruling; M1's portable implementation does not depend on them.
+
+1. **Migration before access.** A's `readFiles` reads a temporary doc and `DocumentService.attach` is synchronous, so neither is an honest async committed migration hook. Recommend an additive `KindAdapter.migrate?(doc): boolean` portable operation plus `ArtifactStore.ensureMigrated(artifactId, actor): Promise<void>` host entry point, awaited before live renderer open and live tool read/write. It tests on a scratch/read doc before opening a write, rechecks inside `writeAs`, and resolves after commit. The design migration empties `files` only after the complete model validates. Version reads remain unmigrated. The host entry points, not all synchronous service readers, invoke it; migrated state is its own marker, so no SQL/schema slot. Exact access sites and restored-legacy behavior are proved in M2. An unparseable legacy manifest refuses without erasing its files.
+2. **Capture helper.** C's `measurePass` is private and takes private `Prepared`; recommend export it with the narrower structural parameter `Pick<Prepared, 'deck' | 'page'>`, unchanged implementation/default behavior. Reuse `withDeckWindow`, `deckSystem`, `systemFacesCss` and the portable standalone generator, not a second capture path. `ExportSlide.size?` and node-derived size follow E0. If design screen CSS needs a shared standalone option, recommend `PageOptions.extraCss?: string`, empty by default, supplied only by trusted design code.
+3. **Missing-entry persistence.** Recommend keep a manifest-only board as a slide node with a design-owned missing-source marker and required notes/elements, rendered as a labelled held frame; `designFiles` emits the manifest entry but no invented HTML. Publishing the real file clears the marker. This keeps geometry in C's existing scopes and preserves the no-loss rule without a new root. This is an E-owned model detail, not a shared dialect change.
+4. **Board comments.** B's surface already admits `artifactKind`, but C's comment controller currently requires exactly one element selection. Recommend an optional callback for comment target/label on `useDeckComments`, defaulting to C's current behavior; design supplies ROOT for board selection and its board title. If the existing provider is sufficient without changing C, use it instead and add no shared name.
+
+## Plan of Work
+
+### M1 — Manifest, mutations, publication and adapter
+
+Produce the portable Design kind under `src/artifacts/design/`: canvas parser/serializer, model reads, `designFiles`, `publishCanvas`, `createDesignAdapter` and the six ledger-named geometry/identity writers. The adapter composes C's hooks for repair, quotes, threads and conversation-preserving restore while replacing seed/files/paths/publish/summary. Board HTML goes through C's loader and property-level writer, not a new parser. Plan both manifest and board edits before applying either, so a late geometry conflict cannot leave an element edit behind. The missing-entry behavior follows the checkpoint ruling. Production code does not import spike files.
+
+Expose X27's names (Interfaces below) to M2–M5. Do not wire host/renderer or change C's visual files in this milestone. Prove acceptance 1's portable half and 3/4's identity/state halves with test-first named unit files: fixed-point reads including unknown keys and held source; all caps and malformed frames; absent manifest/geometry/file cases; element-vs-frame merge, same-key/refused deletion/creation/order races, force and no-op; two replicas with x/w writes; one undo step; duplicate distinct ids/geometry; derived-id cross-board insertion races in both clientID orders including subtree threads; atomic refusal; adapter restore preserving replies and geometry on A's real store. Port E0's proofs as tests rather than merging its prototype. Host-loop timing waits for M6.
+
+### M2 — Host access, tools, mirror and guides
+
+Register `registerDesigns` in `src/engine-host/designs/index.ts`, its lifecycle beside C's in `src/engine-host/index.ts`; implement the approved migration access seam in A's host/store and the design's portable migrator. Audit renderer open (in-process and detached), agent read/publish/thread tools, live export state and legacy restore so no live consumer sees half-migrated roots. Read-only stores do not attempt writes and refuse clearly when migration is required. Keep retained version reads file-shaped and migration idempotent across restart/concurrent opens. Add the design thread wrapper through B's `threadTool`; refuse suggestions as C does.
+
+Write `src/artifacts/design/mirror.ts`, registering through L with D's governing tokens in the document medium and refresh inputs; use C's asset-reference helpers and L's lazy copies. Fill `src/artifacts/types/design/{SKILL,format}.md`, teaching ids, read/publish conflicts, limits, grouping under the dialect's 24-pinned-children hold, screen defaults, missing entries, safe export scale and the governing design law. Consume M1 only; no editor or exporter implementation. Prove acceptance 1 and 6 through the real tool/store fixtures: create/read/publish/replay/refusal, migrate old generic files once as triggering actor, old-version read, restart then publish, and mirrors after system/default/asset changes. Run class-1a development gate once the module is wired.
+
+### M3 — The workbench on C's element engine
+
+Implement `src/artifacts/design/editor/` and `src/renderer/src/tools/design/` registration/tab adapter with the all-mounted world layer, pan/zoom/fit, selectable frames, snapped board gestures, board list and presets. Use C's `DeckSession`, `SlideView`, `Overlay`, `TextBox`, inspector, element menus, clipboard, undo and D scope; the selected board alone has an active interaction overlay. World transform and board-coordinate overlays must not double-apply zoom. Frame drags consume the same undo origin with capture boundaries, not element selection. Handle read-only and held frames without writing; board-cap errors are shown, never silently adjusted. Theme and screen defaults cover every board. Reuse C's tab-owned lifetime/close-guard implementation where its APIs already suffice.
+
+C's additive edits here are E0's `SlideCanvas.size/isBoard` and live node sizes; `SlideView.size?`; `SlideEntry.size?` and `Stage` forwarding (deck default unchanged); overlay guide dimensions; gesture margin/extent; `SnapContext.extent`. Do not alter `DeckEditor`, filmstrip, layouts or presenter. Add DOM project admits and React excludes only as needed. Create `e2e/design.spec.ts`, shared design fixture/seam and `e2e:design` using the plain product build. Prove acceptance 2 with real pointer/keyboard/text gestures, dual replicas, board and element undo, snapping and presets, mounted canvases across pan, theme change, held/read-only safety and Korean composition under remote update; C corpus/unit and presentations e2e are regression gates. Comments/history/export remain M4/M5.
+
+### M4 — Object comments and board history
+
+Consume M1's identity and M3's workbench. Reuse C's comment pins/rail/controller and B's card surface, adding only the approved optional target seam if needed; add `ARTIFACT_COMMENT_LEADS.design` with board versus element wording without changing existing leads. Board/element selection determines the comment target and cross-board UI action uses M1's writer. Reuse C's history controller/diff and B's HistoryRail; preview shows the design's geometry read-only with authored change edges on board frames/list, element outlines/ghosts and the pinned system/assets. C's `HistoryPreview` learns optional per-board sizes only if the reusable preview is used; do not copy C's renderer. The workbench history can compose its own world around C's canvas and history data.
+
+Add `e2e/design-comments.spec.ts` and `e2e/design-history.spec.ts`. Prove acceptance 3 and 4 including board ROOT comments, move-race anchors, orphan quotes after undo/restore/reconnect, agent reply/resolve, moved geometry and element change counts, Compare/new-change pill and artifact-wide restore with later replies intact. B/C tests remain unchanged. No new history model or thread storage is introduced.
+
+### M5 — Export without cropping
+
+Consume M1's single manifest/board interpretation and M3's screen CSS. Implement `src/main/design/export.ts` and portable export preparation/policy under `src/artifacts/design/`, registering PNG/PDF via `registerDesignExporters`. Add X23/X25 `board`, `boards`, `scale` through every request/bridge layer; input validation must not strip them. Reuse C's capture window, measurement and standalone page, extending `ExportSlide.size?`, named print pages and the approved trusted extra CSS option with deck defaults. The whole-slide capture box comes from the shown frame (E0). C's PDF behavior stays byte/meaning-compatible absent design sizes.
+
+PNG selects exactly one valid board, defaults to the first, preserves aspect ratio and rejects incompatible dimension requests rather than distorting. `scale` and explicit width/height must specify one consistent output; scaled dimensions are validated before capture. Refusal includes board, native w/h and largest fitting scale. PDF validates every selected board and explicit output scale before printing, pages at each scaled native size, no Letter fallback. Invalid/missing board ids and empty selection refuse by name. The UI's Export sheet offers native output or the stated fitting scale and sends selected-board identity from tab state. Retained-version exports read their captured state/system/assets. Held boards refuse by name rather than exporting stale content.
+
+Wire main and both wiring test mocks after C, and add `e2e/design-export.spec.ts`. Prove acceptance 5: native/explicit scale PNG dimensions and corner pixels; over-cap refusal followed by fitted output; mixed PDF page count/MediaBoxes within Chromium's subpixel rounding tolerance and markers at native positions; both menu and agent routes; cancel/budget lifecycle remains C's. No HTML/Claude/PPTX format is registered for design.
+
+### M6 — Product acceptance and final evidence
+
+Consume every prior milestone. Complete the four product specs and run all eight acceptance items. Add `src/artifacts/design/fixtures/bench.ts` and `e2e/design-scale.spec.ts` for the exact 24-board mix and scale table; report actual load and measurements, never pass by skipping a missed row. The e2e-only probe measures actual product work, host publish and 24-board export, not E0's stand-in. Add `e2e/design-live.spec.ts`, reusing the installed-engine scratch lifecycle and budget helpers: create four boards, read, arrange a property conflict while preserving an unrelated owner edit, refuse, reread, publish and export. Live run exactly once with a hard US$1 cap; an unavailable mini login goes to the architect, not an unauthorized local engine run.
+
+`e2e:design-live` sets `MAWS_LIVE=1` inline; `e2e:design-scale` sets `MAWS_DESIGN_SCALE=1` inline. Neither belongs to default e2e lists. The architect adds only `design` to CLASS1_E2E. Merge current master, run final class 1a, `unit:darwin`, own/sibling groups, the explicit live and scale groups once, and the whole class-1b set once for hand-back. After task review run reviewer-high over merge-base..HEAD, fix verified material findings through a worker, record the final measured matrix and any bounded debt. Hand back, never merge master.
+
+## Interfaces and dependencies
+
+No new library pins. M1 → M2 → M3 → M4 → M5 → M6, with a task review before each consumer dispatch; at most two subagents active, only one implementation writer in this worktree.
+
+- X27, M1: `parseCanvasJson`, `serializeCanvasJson`, `CANVAS_PATH`, `boardPath(id)`, `CANVAS_LIMITS`, `designFiles`, `publishCanvas(live, base, sent, force)`, `createDesignAdapter()`, `setBoardFrame`, `insertBoard`, `duplicateBoard`, `deleteBoard`, `moveElementToBoard`, under `src/artifacts/design/`. Export/mirror/editor all read this module; no independent geometry parser.
+- X23/X25, M2: `registerDesigns`, design adapter answers and mirror writer; migration additions await checkpoint. B's `threadTool` is reused, not forked. The generic `files` root becomes empty only in the migration commit.
+- X27/X28/X32, M3: C's size/extent additions above; `DesignSystemScope` and `useGoverningSystem`, `document` medium; L's `registerArtifactEditor('design', …)` and tab-owned header `{title,saved,unresolved,actions:[History,Comments,Export,Zoom to fit],exports:[png,pdf]}`.
+- X10/X21, M4: `artifactKind: 'design'` and `ARTIFACT_COMMENT_LEADS.design`; C's `{slideId,elementId}` anchors, ROOT for boards, C/B history interfaces.
+- X23/X25/X31, M5: `board?: string`, `boards?: string[]`, `scale?: number` (0.1–4), `exportTooLarge {board,w,h,maxScale}`, `registerDesignExporters(registry,deps)`. Shared capture names await checkpoint as above.
+
+### Shared-file touch ledger
+
+| Ledger row | Files and reason |
+|---|---|
+| X23/X25 | `src/artifacts/host.ts`, `src/shared/maws/tools.ts`, `src/shared/ipc/schema/artifacts.ts`, export request/bridge declarations and renderer host: optional design export fields; migration seam only after ruling |
+| X25/§7 | `src/engine-host/tool-server/artifact-tools.ts`, `artifact-publish.ts`, `documents.ts` and tool registration: migration-before-read/write, design thread dispatch and suggestion refusal |
+| X27 | `src/artifacts/slides/canvas/slide-canvas.ts`, `editor/SlideView.tsx`, `editor/deck-view.ts`, `editor/Stage.tsx`, `editor/transform/Overlay.tsx`, `editor/transform/gestures.ts`, `geometry.ts`, `export/standalone.ts`, optional history preview; all additive with E0's defaults |
+| X10/X21 | `src/shared/anchor/message.ts`: design lead; optional C comment-target seam only if approved |
+| X31 | `src/main/presentations/export.ts`: frame-sized capture and reusable measure; `src/main/index.ts`, `src/main/lifecycle.test.ts`, `src/main/sessions/main-wiring.test.ts`: design exporter wiring/mocks |
+| §7/X32 | `src/engine-host/index.ts`, `src/renderer/src/App.tsx`: registration after C/D, preserving E2's blocks |
+| §7 | `vitest.config.ts`, `tsconfig.node.json`, `package.json`: design tests, portable React exclusion and three e2e scripts; no dependency changes |
+| Architect only | `.github/workflows/gate.yml`: default group `design`; parent/ledger amendments |
+
+## Concrete Steps
+
+All commands name the isolated checkout, abbreviated `W` below. Export `pnpm_config_verify_deps_before_run=false`. Install already completed once using `/tmp/maws-review/with-slot.sh pnpm -C "$W" install --frozen-lockfile --prefer-offline`; never link another checkout's dependencies.
+
+Local checks are only `/tmp/maws-review/with-slot.sh pnpm -C "$W" exec vitest run <named files>`, `/tmp/maws-review/with-slot.sh pnpm -C "$W" typecheck`, and `/tmp/maws-review/with-slot.sh pnpm -C "$W" exec eslint <touched files>`. Tests must pass with a named-file summary; a timing-only failure under load is run alone once and reported, not weakened. Do not run builds, the whole unit suite or Electron locally.
+
+Before CI: `git -C "$W" merge master`, preserving both siblings' registrations, then commit the checked tree. Launch in one shell:
+
+```sh
+mkdir -p /tmp/maws-review/gates
+nohup "$W/scripts/ci-gate.sh" "$W" --gates static,unit,probes,unit:darwin,e2e:design,e2e:presentations --label e1-development > /tmp/maws-review/gates/e1-development-ci.log 2>&1 &
+```
+
+Await in a second background shell with `until grep -qE '^ci-gate: run [0-9]+ [a-z_]+$' /tmp/maws-review/gates/e1-development-ci.log; do sleep 30; done; tail -50 /tmp/maws-review/gates/e1-development-ci.log`. The harness completion notification wakes the controller; no hand polling. Narrow development gates to groups actually implemented/touched. Static/unit/probes use the Linux pool; all Electron and measured work uses the mini. Named live/scale groups run separately, once at the end. The final default gate covers the whole class-1b set once. Report a mini queue wait over 30 minutes with run id; billing refusal is infrastructure, not a tree failure. Failed reports are under `/tmp/maws-review/gates/ci-<short>/`; screenshots requiring artifact return use an explicitly documented deliberate final failure only in an evidence run, never misreported as a clean gate.
+
+Record every run id, tested sha, counts and actual measures here before hand-back. The branch return includes branch/head/merge-base, reviewed ranges, as-built ledger symbols with paths/lines, tracker proposals and anything not done.
+
+## Surprises & Discoveries
+
+- E0's node geometry already participates in C's undo and history; no new root or scope is needed. `duplicateSlide` does not carry geometry and retains ids, so it is not the Design duplication operation.
+- `measurePass` is private although `withDeckWindow` is exported; exposing the narrow helper avoids copying the measured-render pipeline.
+- C's comment controller accepts only a selected element, whereas the parent also requires a board ROOT comment. M4 must provide an explicit target seam or compose the existing provider.
+
+## Decision Log
+
+1. **2026-10-16, E1 authoring.** Verification: an adversarial execution-document review, task-executor/task-reviewer per milestone at dependency frontiers, then whole-branch `doperpowers:reviewer-high` and one combined fix wave for verified findings. The plan preserves the approved design and adopts E0's always-mounted/document-medium/model-cap/id rulings rather than reopening them. Report artifacts return directly to the controller (the harness prohibits report-shaped Markdown files); durable task state is recorded in this document and a non-report text ledger if needed.
+
+## Outcomes & Retrospective
+
+Pending — written at finish.
