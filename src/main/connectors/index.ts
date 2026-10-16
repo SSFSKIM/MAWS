@@ -15,7 +15,9 @@
 //   state outlives a reload of its page and goes with its webContents. No window owning the webContents: its pages stay
 //   paused (fail closed), and main says so.
 // - The store's committed grant changes (the host's `connectors.grantChanged`) feed the broker: a revoke or a delete
-//   stops the tool's work, a grant wakes its watches, an Allow once consumed stops nothing.
+//   stops the tool's work, a grant wakes its watches, an Allow once consumed stops nothing. P3 Decision Log 91: the
+//   artifact's deletion is heard on the store's change feed too (`artifacts.changed`), apart from any grant row, so a
+//   call whose Allow once its own use consumed stops as well, before main takes or publishes its outcome.
 // - The engine host leaving `ready` answers (and withdraws) every route E operation pending; each later call resolves
 //   afresh. Its events reach main only once its connection streams, so route E starts operations only then, and each
 //   time a connection starts streaming main reconciles what an event dropped before it: the pending operations'
@@ -157,6 +159,9 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
 
   const stopEnded = hosts.onEvent('connectors.operation', ({ operationId }) => engine.operationEnded(operationId));
   const stopGrants = hosts.onEvent('connectors.grantChanged', (change) => broker.onGrantChange(change));
+  const stopDeletes = hosts.onEvent('artifacts.changed', (change) => {
+    if (change.change === 'deleted') broker.onArtifactDeleted(change.artifactId);
+  });
   const stopState = hosts.onState('engine-host', (state: HostState) => {
     if (state.state !== 'ready') engine.hostLost();
   });
@@ -168,6 +173,7 @@ export function startConnectors({ hosts, register, index, realpath = canonical, 
     stop: () => {
       stopEnded();
       stopGrants();
+      stopDeletes();
       stopState();
       stopStreaming();
       stopped = true; // P3-H H4: no window followed again

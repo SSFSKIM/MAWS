@@ -1097,7 +1097,8 @@ export class ArtifactStore {
   // rolled back — breaks it at once, synchronously, and calls its `onBreak` (the holder aborts its operation there, so a
   // write still queued behind the engine's stdin is dropped by the transport before it starts). A read call also needs its grant
   // still there as authorized (the same fingerprint, still `read`); an Allow once's own consumption is the use it
-  // authorized, so its fence needs no row. The holder releases it when its call ends, so nothing is retained.
+  // authorized, so its fence needs no row. The holder releases it when its work ends (P3 Decision Log 91: the host's
+  // connector calls when the call's outcome is taken, cancelled or expired), so nothing is retained past that bound.
   connectorFence(artifactId: string, call: ConnectorCallRef, mode: ConnectorGrantMode, onBreak?: () => void): ConnectorFence {
     const fence: ConnectorFence = { artifactId, key: connectorToolKey(call), fingerprint: call.fingerprint, mode, broken: false, onBreak };
     let held = this.fences.get(artifactId);

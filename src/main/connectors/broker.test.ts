@@ -502,6 +502,40 @@ describe('in-flight work stops on hide, close and revoke, and its result is neve
     expect(engine.calls[1]!.context.signal.aborted).toBe(true);
   });
 
+  // P3 Decision Log 91: an Allow once the host consumed leaves no row, so the artifact's deletion announces no revoke of
+  // it; the deletion itself stops every tool's work for the artifact.
+  it('stops every tool’s work and watch of a deleted artifact on the deletion itself, with no grant announcement', async () => {
+    engine.has(ROWS).has(SEND, { readOnly: false });
+    grants.put(ART, ROWS, 'fp-1', 'read');
+    grants.put(ART, SEND, 'fp-1', 'once');
+    grants.put(OTHER_ART, ROWS, 'fp-1', 'read');
+    const lease = page();
+    const { listener, updates } = watcher();
+    broker.watchTool(ME, lease, { ...ROWS, intervalMs: 30_000 }, listener);
+    await settle();
+    expect(updates).toEqual([expect.objectContaining({ ok: true })]);
+    engine.hold = true;
+    const other = page(ME, OTHER_ART);
+    const send = broker.callTool(ME, lease, SEND);
+    const elsewhere = broker.callTool(ME, other, ROWS);
+    await settle();
+    expect(engine.calls).toHaveLength(3);
+    broker.onGrantChange({ artifactId: ART, ...SEND, change: 'consumed' }); // its row gone with the call
+    grants.rows.delete(grantKey(ART, SEND));
+    broker.onArtifactDeleted(ART);
+    expect(await send).toEqual({ ok: false, state: 'revoked', reason: 'revoked' });
+    expect(engine.calls[1]!.context.signal.aborted, 'its route told').toBe(true);
+    expect(updates.slice(1), 'the watch says revoked once').toEqual([{ ok: false, state: 'revoked', reason: 'revoked' }]);
+    // another artifact's work goes on
+    expect(engine.calls[2]!.context.signal.aborted).toBe(false);
+    engine.calls[2]!.answer.resolve({ ok: true, result: 'there' });
+    expect(await elsewhere).toMatchObject({ ok: true, result: 'there' });
+    // the deleted artifact's watch waits, timerless, and its page's later work asks afresh (the routes find no artifact)
+    await vi.advanceTimersByTimeAsync(10 * MIN);
+    expect(engine.calls).toHaveLength(3);
+    expect(updates).toHaveLength(2);
+  });
+
   it('answers a call in flight paused when its lease closes, and when its owner goes', async () => {
     engine.has(ROWS);
     grants.put(ART, ROWS, 'fp-1', 'read');

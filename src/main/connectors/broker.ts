@@ -22,9 +22,10 @@
 // - Work in flight belongs to its lease and its tool: hiding or closing the lease, the owner's revoke and the store's
 //   committed revoke or delete abort it, answer it at once and drop whatever it later returns. A refresh stays
 //   abortable until its outcome is published, so a listener that hides the page or revokes the tool while another
-//   refresh's outcome waits to be published stops that one too. The owner's revoke aborts before it awaits the store,
-//   and refuses new calls of the tool until the store has answered; an Allow once being consumed is the call it
-//   admitted going ahead, not a revoke.
+//   refresh's outcome waits to be published stops that one too. The artifact's deletion stops every tool's work for
+//   it, whether or not a grant row was left to announce (P3 Decision Log 91). The owner's revoke aborts before it
+//   awaits the store, and refuses new calls of the tool until the store has answered; an Allow once being consumed is
+//   the call it admitted going ahead, not a revoke.
 // - Watches: 30 s to 24 h, at most 64 across the whole app, one refresh at a time, the next an interval after the last
 //   ended; hidden, none run, and shown, a due one catches up once. A watch with no route reads paused and asks again at
 //   its interval; one with no grant waits, timerless, for a grant (a denial computed before a grant that arrived while
@@ -344,6 +345,17 @@ export class ConnectorBroker {
     const ref = { server: change.server, tool: change.tool };
     if (change.change === 'revoked') this.revoked(change.artifactId, ref);
     else if (change.change === 'granted') this.granted(change.artifactId, ref);
+  }
+
+  // P3 Decision Log 91: the artifact's deletion, heard on the store's change feed apart from its grant announcements (an
+  // Allow once its call consumed has no row left for the deletion to announce revoked): every tool its pages declared
+  // stops as a revoke stops it, its work in flight answered revoked (its route withdrawing it, an outcome not yet taken
+  // included) and its watches waiting, timerless, for a grant.
+  onArtifactDeleted(artifactId: string): void {
+    if (this.stopped) return;
+    const tools = new Map<string, ConnectorToolRef>();
+    for (const lease of this.leases.values()) if (lease.artifactId === artifactId) for (const [key, tool] of lease.declared) tools.set(key, tool);
+    for (const tool of tools.values()) this.revoked(artifactId, tool);
   }
 
   // ── the work ──

@@ -339,6 +339,41 @@ describe('main’s connector service (P3-H H3b)', () => {
     expect(updatesOf(me).at(-1)).toEqual({ leaseId, watchId, update: { ok: false, state: 'revoked', reason: 'revoked' } });
   });
 
+  // P3 Decision Log 91: an Allow once's row went with its call, so the artifact's deletion announces no grant; main hears
+  // the deletion itself on the store's change feed and withdraws the operation, its outcome taken or not.
+  it('on the artifact’s deletion alone, withdraws a call whose ended outcome still awaits main’s take, and one still running', async () => {
+    fake.grants.set(JSON.stringify(['fixture', 'send_document']), 'once');
+    const leaseId = await visiblePage();
+    const answering = invoke('connectors.call', { leaseId, request: SEND });
+    await settle();
+    const [operationId] = fake.started();
+    let open!: () => void;
+    fake.gates.set('connectors.take', new Promise<void>((resolve) => (open = resolve)));
+    fake.emit('connectors.operation', { operationId }); // ended: main asks for its outcome, not yet answered
+    await settle();
+    expect(fake.names()).toContain('connectors.take');
+    fake.emit('artifacts.changed', { artifactId: '22222222-2222-4222-8222-222222222222', kind: 'html', revision: 1, change: 'deleted' }); // another's
+    fake.emit('artifacts.changed', { artifactId: ART, kind: 'html', revision: 1, change: 'updated' });
+    await settle();
+    expect(fake.names()).not.toContain('connectors.cancel');
+    fake.emit('artifacts.changed', { artifactId: ART, kind: 'html', revision: 2, change: 'deleted' });
+    expect(await answering).toEqual({ ok: false, state: 'revoked', reason: 'revoked' });
+    open(); // the success the take then answers is never published
+    await settle();
+    expect(fake.dispatched.filter((entry) => entry.name === 'connectors.cancel').map((entry) => entry.input)).toEqual([{ operationId }]);
+
+    fake.gates.delete('connectors.take');
+    fake.grants.set(JSON.stringify(['fixture', 'send_document']), 'once');
+    const running = invoke('connectors.call', { leaseId, request: SEND });
+    await settle();
+    const second = fake.started().at(-1)!;
+    fake.emit('artifacts.changed', { artifactId: ART, kind: 'html', revision: 3, change: 'deleted' });
+    expect(await running).toEqual({ ok: false, state: 'revoked', reason: 'revoked' });
+    await settle();
+    expect(fake.dispatched.filter((entry) => entry.name === 'connectors.cancel').map((entry) => entry.input)).toEqual([{ operationId }, { operationId: second }]);
+    expect(fake.names().filter((name) => name === 'connectors.grants' || name === 'connectors.revoke'), 'no grant row read or revoked to get there').toEqual([]);
+  });
+
   it('grants from the header under the route’s fingerprint, refusing a read grant of a tool that may write', async () => {
     expect(await invoke('artifacts.grantConnectorTool', { artifactId: ART, tool: { ...ROWS, mode: 'read' } })).toEqual({ ok: true, grant: { ...ROWS, fingerprint: FP, mode: 'read', grantedAt: 1 } });
     expect(await invoke('artifacts.grantConnectorTool', { artifactId: ART, tool: { ...SEND, mode: 'read' } })).toEqual({ ok: false, state: 'invalid', reason: 'notReadOnly' });

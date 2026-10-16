@@ -339,6 +339,116 @@ describe('ConnectorCalls: an operation’s life', () => {
   });
 });
 
+// P3 Decision Log 91 (H's whole-branch review): a completed outcome main has not taken yet is still the grant's work. Its
+// fence stays held until the outcome is taken, cancelled, expired or dropped with main, so a revoke, a replacing grant or
+// the artifact's deletion before the take withdraws it, an Allow once whose row the call already consumed included.
+describe('ConnectorCalls: a completed outcome awaiting its take', () => {
+  const fences = () => (store as unknown as { fences: Map<string, Set<unknown>> }).fences;
+  const held = () => [...fences().values()].reduce((sum, set) => sum + set.size, 0);
+
+  for (const [what, tool, mode] of [
+    ['an Allow once (its row consumed by the call)', 'send_document', 'once'],
+    ['a read grant', 'rows', 'read'],
+  ] as const) {
+    it(`under ${what}: the artifact deleted after the call ended and before the take, the take answers revoked, never the result`, async () => {
+      const print = await printOf(tool);
+      await grant({ server: 'fixture', tool, fingerprint: print, mode });
+      const start = startOf({ tool, fingerprint: print, mode });
+      calls.start(start);
+      await vi.waitFor(() => expect(completed).toContain(start.operationId));
+      expect(engine.calls(), 'the call ran').toHaveLength(1);
+      if (mode === 'once') expect(await store.connectorGrants(artifactId), 'no grant row survives the consumed Allow once').toEqual([]);
+      expect(held(), 'the fence held while the outcome waits').toBe(1);
+      await store.delete(artifactId);
+      expect(calls.take(start.operationId)).toMatchObject({ ok: false, failure: 'refused', refusal: 'revoked' });
+      expect(held(), 'released').toBe(0);
+      expect(calls.take(start.operationId)).toBeNull();
+    });
+  }
+
+  it('a revoke or a grant replacing it under another mode, after the end and before the take, withdraws the result', async () => {
+    await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
+    const revokedOne = startOf();
+    calls.start(revokedOne);
+    await vi.waitFor(() => expect(completed).toContain(revokedOne.operationId));
+    await store.revokeConnectorTool(artifactId, { server: 'fixture', tool: 'rows' });
+    expect(calls.take(revokedOne.operationId)).toMatchObject({ ok: false, failure: 'refused', refusal: 'revoked' });
+
+    await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
+    const replacedOne = startOf();
+    calls.start(replacedOne);
+    await vi.waitFor(() => expect(completed).toContain(replacedOne.operationId));
+    await grant({ server: 'fixture', tool: 'rows', mode: 'once' });
+    expect(calls.take(replacedOne.operationId)).toMatchObject({ ok: false, failure: 'refused', refusal: 'revoked' });
+    expect(held()).toBe(0);
+  });
+
+  it('the same grant given again after the end leaves the result to its take', async () => {
+    await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
+    const start = startOf();
+    calls.start(start);
+    await vi.waitFor(() => expect(completed).toContain(start.operationId));
+    await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
+    expect(calls.take(start.operationId)).toMatchObject({ ok: true, result: { structuredContent: { rows: [107, 110] } } });
+    expect(held()).toBe(0);
+  });
+
+  it('a deletion of another artifact leaves it alone; the take hands over the result and lets go of the fence', async () => {
+    const otherId = (await store.create({ kind: 'html', title: 'Other page', content: page('<p>b</p>') }, human)).id;
+    await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
+    const start = startOf();
+    calls.start(start);
+    await vi.waitFor(() => expect(completed).toContain(start.operationId));
+    await store.delete(otherId);
+    expect(calls.take(start.operationId)).toMatchObject({ ok: true });
+    expect(held()).toBe(0);
+    expect(fences().size, 'no empty entry kept').toBe(0);
+  });
+
+  it('a cancel, the outcome’s expiry or main going lets go of its fence, and nothing is retained', async () => {
+    calls.close();
+    calls = makeCalls({ resultTtlMs: 250 });
+    await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
+    const cancelled = startOf();
+    calls.start(cancelled);
+    await vi.waitFor(() => expect(completed).toContain(cancelled.operationId));
+    expect(held()).toBe(1);
+    expect(calls.cancel(cancelled.operationId)).toBe(true);
+    expect(held(), 'cancelled').toBe(0);
+
+    const expired = startOf();
+    calls.start(expired);
+    await vi.waitFor(() => expect(completed).toContain(expired.operationId));
+    expect(held()).toBe(1);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect(held(), 'expired').toBe(0);
+    expect(calls.take(expired.operationId)).toBeNull();
+
+    const closed = startOf();
+    calls.start(closed);
+    await vi.waitFor(() => expect(completed).toContain(closed.operationId));
+    expect(held()).toBe(1);
+    calls.close();
+    expect(held(), 'main gone').toBe(0);
+    expect(fences().size).toBe(0);
+  });
+
+  it('a cancel before the fence is even taken leaves none behind once the operation ends', async () => {
+    await grant({ server: 'fixture', tool: 'rows', mode: 'read' });
+    for (let i = 0; i < 6; i++) {
+      // cancelled at successive points of its run: before its first status read answered, after it, at the authorization
+      const start = startOf();
+      calls.start(start);
+      for (let j = 0; j < i; j++) await Promise.resolve();
+      calls.cancel(start.operationId);
+    }
+    await settle();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(held()).toBe(0);
+    expect(completed).toEqual([]);
+  });
+});
+
 // The host's last word: main's check consumed nothing and may be stale by the write, so the host compares the grant
 // with what main admitted (before an Allow once is consumed) and fences the write itself.
 describe('ConnectorCalls: the final fence before mcp_call', () => {

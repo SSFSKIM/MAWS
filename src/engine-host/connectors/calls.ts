@@ -13,8 +13,13 @@
 //   held until the call ends, and any of those asked for meanwhile breaks it synchronously and aborts the operation,
 //   so the transport drops a request not yet started (and a running one is cancelled). Its end is announced by id
 //   alone (`completed`), its outcome kept for one `take`.
+// - P3 Decision Log 91: the fence outlives the call and is let go of only with the operation itself (its take, cancel,
+//   expiry or main's going), so a revoke, a replacing grant or the artifact's deletion while the outcome waits for its
+//   take turns it into the revoke's refusal: no result reaches main for an artifact deleted before main took it, though
+//   an Allow once's row went with the call and the deletion announces no grant.
 // - Nothing here launches, acquires or marks a session used; nothing outlives its bound: a running operation ends with
-//   mcp_call's long deadline, an untaken outcome after `resultTtlMs`, and all of them when main goes (`close`).
+//   mcp_call's long deadline, an untaken outcome (and its fence) after `resultTtlMs`, and all of them when main goes
+//   (`close`).
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 import type { ConnectorAuthorization, ConnectorCallRef, ConnectorGrantMode } from '@shared/artifacts/connectors';
 import type { CommandInput } from '@shared/ipc/schema';
@@ -64,15 +69,17 @@ const MESSAGE_MAX = 1_000;
 interface Operation {
   readonly id: string;
   readonly controller: AbortController;
-  revoked?: boolean; // its fence broke: a revoke or delete asked for while it ran
+  revoked?: boolean; // its fence broke: a revoke or delete asked for while it ran, or while its outcome waits
   outcome?: ConnectorOperationOutcome;
   expiry?: ReturnType<typeof setTimeout>;
+  release?: () => void; // lets go of its fence (Decision Log 91: with the operation, not the call)
 }
 
 const unavailable = (message: string): ConnectorOperationOutcome => ({ ok: false, failure: 'unavailable', message: message.slice(0, MESSAGE_MAX) });
 const failed = (message: string): ConnectorOperationOutcome => ({ ok: false, failure: 'failed', message: message.slice(0, MESSAGE_MAX) });
 const refused = (refusal: 'notGranted' | 'fingerprintChanged' | 'wrongMode' | 'revoked', message: string): ConnectorOperationOutcome => ({ ok: false, failure: 'refused', refusal, message });
 const words = (error: unknown) => (error instanceof Error ? error.message : String(error));
+const revokedWhile = (input: ConnectorStart, when: string) => refused('revoked', `${input.artifactId}'s ${input.server} · ${input.tool} was revoked or deleted while ${when}`);
 
 export class ConnectorCalls {
   private readonly operations = new Map<string, Operation>();
@@ -111,13 +118,14 @@ export class ConnectorCalls {
     const operation: Operation = { id: input.operationId, controller: new AbortController() };
     this.operations.set(operation.id, operation);
     void this.execute(operation, input).then(
-      (outcome) => this.finish(operation, operation.revoked ? refused('revoked', `${input.artifactId}'s ${input.server} · ${input.tool} was revoked or deleted while it ran`) : outcome),
+      (outcome) => this.finish(operation, operation.revoked ? revokedWhile(input, 'it ran') : outcome),
       (error: unknown) => this.finish(operation, failed(`the connector call failed in the host: ${words(error)}`)),
     );
     return { operationId: operation.id };
   }
 
-  // The ended operation's outcome, once; null for one unknown, still running, already taken, cancelled or expired.
+  // The ended operation's outcome, once; null for one unknown, still running, already taken, cancelled or expired. A
+  // fence broken while it waited answers the revoke's refusal instead (Decision Log 91).
   take(operationId: string): ConnectorOperationOutcome | null {
     const operation = this.operations.get(operationId);
     if (!operation?.outcome) return null;
@@ -146,6 +154,7 @@ export class ConnectorCalls {
   private drop(operation: Operation): void {
     clearTimeout(operation.expiry);
     this.operations.delete(operation.id);
+    operation.release?.();
   }
 
   private finish(operation: Operation, outcome: ConnectorOperationOutcome): void {
@@ -172,15 +181,17 @@ export class ConnectorCalls {
     // Broken by a revoke, a delete or a grant replacing this fingerprint and mode the moment it is asked for: the
     // operation aborts there, so a call not yet written (still queued behind the engine's stdin) never is, and one
     // running is cancelled through control_cancel_request.
+    // Decision Log 91: held past the call, until the operation is taken, cancelled, expired or dropped with main (`drop`),
+    // so a break while the outcome waits for its take replaces the outcome with the revoke's refusal.
     const fence = store.connectorFence(input.artifactId, call, input.mode, () => {
       operation.revoked = true;
       operation.controller.abort();
+      if (operation.outcome) operation.outcome = revokedWhile(input, 'its outcome waited for main');
     });
-    try {
-      return await this.fenced(store, fence, first.client, input, signal);
-    } finally {
-      store.releaseConnectorFence(fence);
-    }
+    // Taken synchronously after `admitted` found the operation not cancelled, so it is still registered here, and its
+    // `drop` (take, cancel, expiry, close) is what lets go of the fence.
+    operation.release = () => store.releaseConnectorFence(fence);
+    return this.fenced(store, fence, first.client, input, signal);
   }
 
   private async fenced(store: ConnectorGrantStore, fence: ConnectorFence, client: ControlClient, input: ConnectorStart, signal: AbortSignal): Promise<ConnectorOperationOutcome> {
