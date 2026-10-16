@@ -344,6 +344,41 @@ describe('refusals', () => {
     await m.close();
   });
 
+  it("hands a POST's frames for one project to its object in one call, in order", async () => {
+    const project = newProject();
+    const m = await machine('batched');
+    await m.sync(project);
+    const before = await hub.projectCalls(project);
+    // Forty uploads of one event each in one POST: one call, every event stored in its seq order (a gap would be
+    // answered with a resend, and the count would fall short).
+    await m.postOk(Array.from({ length: 40 }, (_, i) => ({ t: 'events', project, events: [say(m, project, i + 1)] })));
+    const after = await hub.projectCalls(project);
+    expect(after.calls - before.calls).toBe(1);
+    expect(after.frames - before.frames).toBe(40);
+    expect((await hubCounts(project)).counts).toEqual({ [`${m.name}/${SESSION}`]: 40 });
+    await m.close();
+  });
+
+  it('stops a POST at a frame its project finds a newer stream of the machine has reached, and answers stale-generation', async () => {
+    const project = newProject();
+    const m = await machine('outlived');
+    await hub.holdHellos(project, true);
+    // The hello waits on the Registry while the project learns of a newer stream (its close, as a newer stream's would
+    // arrive); the events after it in the same POST are not applied.
+    const post = m.post([
+      { t: 'hello', project, name: 'demo', have: {} },
+      { t: 'events', project, events: [say(m, project, 1)] },
+    ]);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await hub.lease(project, { op: 'closed', machine: m.name, generation: m.generation + 1 });
+    await hub.holdHellos(project, false);
+    const answer = await post;
+    expect(answer.status).toBe(409);
+    expect(await answer.json()).toMatchObject({ error: 'stale-generation', frames: 1 });
+    expect((await hubCounts(project)).counts).toEqual({});
+    await m.close();
+  });
+
   it("records a daemon's report of an event it refused and shows it to the project's browsers", async () => {
     const project = newProject();
     const a = await machine('rejecter');
@@ -549,6 +584,23 @@ describe('delivery failures', () => {
     expect(countsOf(target, project)).toEqual({ [event.writer]: 1 });
     await source.close();
     await target.close();
+  });
+
+  it("answers 503 counting the frames applied before the one whose reply failed, though they reached the project in one call", async () => {
+    const project = newProject();
+    const m = await machine('progress');
+    await m.sync(project);
+    // One call to the project: an upload that owes no reply and is stored, then one with a gap, which owes `resend`.
+    await hub.failNextSend(m.name, 'resend');
+    const response = await m.post([
+      { t: 'events', project, events: [say(m, project, 1)] },
+      { t: 'events', project, events: [say(m, project, 3)] },
+    ]);
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: 'delivery-failed', frames: 1 });
+    expect((await hubCounts(project)).counts).toEqual({ [`${m.name}/${SESSION}`]: 1 });
+    await until(() => m.isEnded);
+    await m.close();
   });
 
   it('ends a stream a live event could not be sent to; the machine reconnects, and its hello heals what it missed', async () => {

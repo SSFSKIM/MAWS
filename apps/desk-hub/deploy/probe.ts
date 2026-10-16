@@ -11,7 +11,8 @@
 //
 // Credentials as NAME=value lines on stdin (deploy.ts, readSecrets): DESK_ACCESS_TOKEN, the owner's Access app token
 // (`cloudflared access token -app=<hub>`), and CF_DESK_HUB_SERVICE_TOKENS, to mint the never-enrolled token of case 3
-// (deleted after). The machines the probe enrolls are revoked at its end, which deletes their service tokens.
+// (deleted after). It runs only in the throwaway org `--test-org` names, while the deployment serves it (proof.ts),
+// and revokes what it enrolled and deletes what it minted however it ends, failing if any of that fails.
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -21,12 +22,15 @@ import type { DownFrame } from '../src/protocol/machine';
 import { readDeployConfig } from './config';
 import { readSecrets } from './deploy';
 import { enroll, machineLink, Person, redeem, serviceTokenApi, until } from './hub';
+import { Cleanup, revoke, servesOrg, TEST_ORG_OPTION, testOrgArg } from './proof';
 
 type Case = { id: string; what: string; run: () => Promise<string> };
 
 export async function main(argv: string[]): Promise<number> {
-  const { values } = parseArgs({ args: argv, options: { config: { type: 'string', default: join(process.env.DESK_HUB_APP!, 'deploy', 'config.json') } } });
+  const { values } = parseArgs({ args: argv, options: { config: { type: 'string', default: join(process.env.DESK_HUB_APP!, 'deploy', 'config.json') }, ...TEST_ORG_OPTION } });
   const config = readDeployConfig(values.config!);
+  const org = testOrgArg(values['test-org'], config.org.id);
+  if (!org) return 2;
   const hub = `https://${config.host}`;
   const secrets = await readSecrets();
   if (!secrets.DESK_ACCESS_TOKEN || !secrets.CF_DESK_HUB_SERVICE_TOKENS) {
@@ -38,10 +42,9 @@ export async function main(argv: string[]): Promise<number> {
   const tag = Math.random().toString(36).slice(2, 7);
   const machine = `probe-${tag}`;
   const project = randomUUID();
-  const enrolled: string[] = [];
-  const minted: string[] = [];
   let link: Awaited<ReturnType<typeof machineLink>> | undefined;
-  const org = (await owner.json<{ org: { id: string } }>('/api/me')).org.id;
+  if (!(await servesOrg(owner, org))) return 2;
+  const cleanup = new Cleanup();
 
   const cases: Case[] = [
     {
@@ -72,9 +75,10 @@ export async function main(argv: string[]): Promise<number> {
       id: 'A2',
       what: 'a freshly minted machine token is admitted (enrollment issues it and claims the name)',
       async run() {
+        cleanup.add(`revoke ${machine}`, () => revoke(owner, machine));
         const credentials = await enroll(owner, machine);
-        enrolled.push(machine);
         link = await machineLink(hub, credentials);
+        cleanup.add('drop the stream', () => link!.link.drop());
         const welcome = link.frames.find((f) => f.t === 'welcome') as Extract<DownFrame, { t: 'welcome' }>;
         const record = (await owner.json<{ machines: MachineRecord[] }>('/api/machines')).machines.find((m) => m.name === machine);
         if (record?.state !== 'active' || record.client_id !== credentials.clientId) throw new Error(`the record: ${JSON.stringify(record)}`);
@@ -95,8 +99,13 @@ export async function main(argv: string[]): Promise<number> {
       id: 'A3',
       what: 'a token minted but never enrolled is refused by the Worker',
       async run() {
-        const token = await api.create(`desk-probe-unenrolled-${tag}`);
-        minted.push(token.id);
+        // Deleted by name, so a token whose create answer was lost is found too.
+        const name = `desk-probe-unenrolled-${tag}`;
+        cleanup.add(`delete the never-enrolled token ${name}`, async () => {
+          for (const token of await api.named(name)) await api.delete(token.id);
+          if ((await api.named(name)).length) throw new Error('still listed');
+        });
+        const token = await api.create(name);
         const credentials = { clientId: token.client_id, clientSecret: token.client_secret };
         // Access admits any service token of the account once the new one reaches its edge (a 401 until then).
         const deadline = Date.now() + 60_000;
@@ -131,40 +140,40 @@ export async function main(argv: string[]): Promise<number> {
     {
       id: 'A1',
       what: "a signed-in browser's WebSocket upgrades to a Project and to the Registry",
-      async run() {
-        const view = await owner.socket(`/api/projects/${project}/socket`);
-        const welcome = await view.next((f) => f.t === 'welcome', 'welcome');
-        const grid = await owner.socket('/api/registry/socket');
-        const projects = (await grid.next((f) => f.t === 'grid', 'grid')).projects as Array<{ id: string }>;
-        view.close();
-        grid.close();
-        if (welcome.project !== project || !projects.some((p) => p.id === project)) throw new Error(`welcome ${JSON.stringify(welcome)}`);
-        return `the project socket welcomed member ${String(welcome.member)}; the grid lists ${projects.length} project(s), the probe's among them`;
-      },
+      run: () => browserCase(owner, project, cleanup),
     },
   ];
 
   let failed = 0;
   console.log(`probing ${hub} (org ${org})`);
-  for (const c of cases) {
-    try {
-      console.log(`PASS ${c.id} ${c.what}\n     ${await c.run()}`);
-    } catch (error) {
-      failed++;
-      console.log(`FAIL ${c.id} ${c.what}\n     ${error instanceof Error ? error.message : String(error)}`);
+  try {
+    for (const c of cases) {
+      try {
+        console.log(`PASS ${c.id} ${c.what}\n     ${await c.run()}`);
+      } catch (error) {
+        failed++;
+        console.log(`FAIL ${c.id} ${c.what}\n     ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
+  } finally {
+    if ((await cleanup.run()).length) failed++;
+    const left = (await api.named(`desk-${org}-${machine}`).catch(() => [{}])).length;
+    console.log(`service tokens left under desk-${org}-${machine}: ${left}`);
+    if (left) failed++;
   }
+  return failed ? 1 : 0;
+}
 
-  await link?.link.drop();
-  for (const name of enrolled) {
-    const response = await owner.fetch(`/api/machines/${name}`, { method: 'DELETE' });
-    console.log(`revoked ${name}: ${response.status} ${await response.text()}`);
-  }
-  for (const id of minted) {
-    await api.delete(id);
-    console.log(`deleted the never-enrolled token ${id}`);
-  }
-  const left = (await api.named(`desk-${org}-${machine}`)).length;
-  console.log(`service tokens left under desk-${org}-${machine}: ${left}`);
-  return failed || left ? 1 : 0;
+/** Case A1: the person's WebSockets to the project and to the grid, each registered for cleanup as it opens. */
+export async function browserCase(owner: Pick<Person, 'socket'>, project: string, cleanup: Cleanup): Promise<string> {
+  const view = await owner.socket(`/api/projects/${project}/socket`);
+  cleanup.add('close the project socket', async () => view.close());
+  const welcome = await view.next((f) => f.t === 'welcome', 'welcome');
+  const grid = await owner.socket('/api/registry/socket');
+  cleanup.add('close the grid socket', async () => grid.close());
+  const projects = (await grid.next((f) => f.t === 'grid', 'grid')).projects as Array<{ id: string }>;
+  view.close();
+  grid.close();
+  if (welcome.project !== project || !projects.some((p) => p.id === project)) throw new Error(`welcome ${JSON.stringify(welcome)}`);
+  return `the project socket welcomed member ${String(welcome.member)}; the grid lists ${projects.length} project(s), the probe's among them`;
 }

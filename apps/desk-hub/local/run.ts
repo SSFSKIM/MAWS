@@ -6,9 +6,13 @@
 //   --port <n>      the proxy's port (default 8747; 8787, wrangler's own default, is often taken); wrangler dev listens on the next one, on 127.0.0.1 only
 //   --user <email>  who a request with no other identity is signed in as (default owner@example.com, the org's admin);
 //                   --user '' makes such a request refused, as Access refuses it
+//   --heartbeat-ms <n>  the machine stream's heartbeat (default 2000; the deployed hub's is 15000). wrangler dev's own
+//                   proxy closes its hop to the hub gracefully, so a machine's close reaches the hub at the next write to
+//                   its stream: this bounds how long a dropped machine stays online here (test/stream-close.test.ts)
+//   --state <dir>   where state is kept (default apps/desk-hub/.wrangler); a suite passes a directory of its own
 //
-// State survives restarts: the Worker's objects in .wrangler/state (wrangler's), the stand-in's signing key and the
-// service tokens it minted in .wrangler/standin.json, the hub's VAPID key in .wrangler/vapid.json. Delete .wrangler/ to
+// State survives restarts: the Worker's objects in <state>/state (wrangler's), the stand-in's signing key and the
+// service tokens it minted in <state>/standin.json, the hub's VAPID key in <state>/vapid.json. Delete the directory to
 // start from nothing.
 import { spawn } from 'node:child_process';
 import { randomBytes, webcrypto } from 'node:crypto';
@@ -21,7 +25,10 @@ import { startProxy } from './proxy.ts';
 import { AccessStandin, enrollmentCode, IDENTITY_HEADER, type StandinState } from './standin.ts';
 
 const app = resolve(import.meta.dirname, '..');
-const { values } = parseArgs({ options: { port: { type: 'string', default: '8747' }, user: { type: 'string', default: 'owner@example.com' } } });
+const { values } = parseArgs({
+  options: { port: { type: 'string', default: '8747' }, user: { type: 'string', default: 'owner@example.com' }, state: { type: 'string', default: join(app, '.wrangler') }, 'heartbeat-ms': { type: 'string', default: '2000' } },
+});
+const stateDir = resolve(values.state);
 const port = Number(values.port);
 const hubPort = port + 1;
 const origin = `http://127.0.0.1:${port}`;
@@ -44,7 +51,7 @@ for (const taken of [port, hubPort]) {
 // wrangler refuses a configured assets directory that does not exist; the web app (DC5) may not be built yet.
 mkdirSync(resolve(app, '../desk-web/dist'), { recursive: true });
 
-const statePath = join(app, '.wrangler', 'standin.json');
+const statePath = join(stateDir, 'standin.json');
 mkdirSync(dirname(statePath), { recursive: true });
 const standin = await AccessStandin.create({
   issuer: `${origin}/standin`,
@@ -57,7 +64,7 @@ const standin = await AccessStandin.create({
 
 // The hub's VAPID key for Web Push: generated on the first run and kept beside the stand-in's state (git-ignored, never
 // committed), since a browser's push subscription is bound to the key it subscribed with.
-const vapidPath = join(app, '.wrangler', 'vapid.json');
+const vapidPath = join(stateDir, 'vapid.json');
 if (!existsSync(vapidPath)) {
   const pair = (await webcrypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])) as CryptoKeyPair;
   const { kty, crv, x, y, d } = await webcrypto.subtle.exportKey('jwk', pair.privateKey);
@@ -75,6 +82,7 @@ const vars: Record<string, string> = {
   CF_ACCOUNT_ID: standin.account,
   CF_API_TOKEN: standin.apiToken,
   VAPID_KEY: readFileSync(vapidPath, 'utf8'),
+  HEARTBEAT_MS: values['heartbeat-ms'],
 };
 const wranglerBin = join(dirname(createRequire(import.meta.url).resolve('wrangler/package.json')), 'bin', 'wrangler.js');
 const wrangler = spawn(
@@ -86,6 +94,8 @@ const wrangler = spawn(
     '127.0.0.1',
     '--port',
     String(hubPort),
+    '--persist-to',
+    join(stateDir, 'state'),
     '--show-interactive-dev-session=false',
     ...Object.entries(vars).flatMap(([name, value]) => ['--var', `${name}:${value}`]),
   ],
@@ -131,7 +141,8 @@ console.log(`
 The local hub, behind its stand-in for Access: ${proxy.url}
   (wrangler dev on http://127.0.0.1:${hubPort}; talk to ${proxy.url} only)
 
-  org ${ORG}; admin ${ADMIN}; a request with no identity is ${standin.defaultUser ? `signed in as ${standin.defaultUser}` : 'refused, as Access refuses it'}
+  org ${ORG}; admin ${ADMIN}; a machine's stream beats every ${values['heartbeat-ms']} ms (deployed: 15000)
+  a request with no identity is ${standin.defaultUser ? `signed in as ${standin.defaultUser}` : 'refused, as Access refuses it'}
   another person:  header ${IDENTITY_HEADER}: <email>, or a browser at ${proxy.url}/standin/login?email=<email>
   a machine:       CF-Access-Client-Id / CF-Access-Client-Secret from its enrollment, as with Access
 

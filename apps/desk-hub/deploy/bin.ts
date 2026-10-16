@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build } from 'esbuild';
 
-const COMMANDS = ['deploy', 'probe', 'fake-check', 'redeploy-check', 'measure'];
+const COMMANDS = ['deploy', 'probe', 'fake-check', 'redeploy-check', 'measure', 'frame-cost'];
 const [command, ...args] = process.argv.slice(2);
 if (!COMMANDS.includes(command)) {
   console.error(`usage: deployment <${COMMANDS.join('|')}> [options]; see apps/desk-hub/deploy/README.md`);
@@ -28,4 +28,7 @@ await build({
 });
 const { main } = (await import(pathToFileURL(outfile).href)) as { main: (argv: string[]) => Promise<number> };
 rmSync(dir, { recursive: true, force: true });
-process.exitCode = await main(args);
+// The command's status ends the process once its own cleanup has run, so nothing it started (a socket, a reconnect, a
+// timer) can outlive it; stdout is flushed first.
+const status = await main(args);
+process.stdout.write('', () => process.exit(status));

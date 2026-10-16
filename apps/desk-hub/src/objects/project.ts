@@ -176,9 +176,32 @@ export class Project extends DurableObject<Env> {
 
   // ---- Machines ------------------------------------------------------------------------------------------------
 
-  /** A frame a machine posted, handed over by its `Machine` object; resolves once every reply is on its stream. */
-  async fromMachine(ctx: MachineContext, frame: UpFrame): Promise<void> {
+  /**
+   * The frames a machine posted for this project, in the POST's order, handed over by its `Machine` object in one call
+   * (one call per frame cost a Durable Object round trip each: M5's measured run). Applied one by one, as before; the
+   * call stops before a frame once this project knows of a newer stream of the machine, and says so, so the POST is
+   * refused `stale-generation` with what it applied. A frame counts as applied once its replies are on the stream; a
+   * frame that throws, or whose reply could not be written, stops the call as `failed`, with the frames before it
+   * counted, so the POST's `503 delivery-failed` still says what was applied.
+   */
+  async fromMachine(ctx: MachineContext, frames: UpFrame[]): Promise<{ applied: number; stale: boolean; failed: boolean }> {
     this.remember(ctx.org, ctx.project);
+    let applied = 0;
+    for (const frame of frames) {
+      if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation) return { applied, stale: true, failed: false };
+      try {
+        await this.fromMachineFrame(ctx, frame);
+        // Settled at once for a frame that owes no reply, which most of a stream's frames are.
+        await this.queues.get(queueKey(ctx.machine, ctx.generation));
+      } catch {
+        return { applied, stale: false, failed: true };
+      }
+      applied++;
+    }
+    return { applied, stale: false, failed: false };
+  }
+
+  private async fromMachineFrame(ctx: MachineContext, frame: UpFrame): Promise<void> {
     // A lease whose time ran out lapses before anything the machine sent is served, whether or not its alarm ran yet.
     this.sweepLeases();
     if (frame.t === 'hello') await this.hello(ctx, frame);
@@ -188,7 +211,6 @@ export class Project extends DurableObject<Env> {
     else if (frame.t === 'rpc-result') this.rpcResult(ctx, frame);
     else if (frame.t === 'pending') this.pendingSet(ctx, frame.raised);
     else if (frame.t === 'session') this.session(ctx, frame.message);
-    await this.queues.get(queueKey(ctx.machine, ctx.generation));
   }
 
   /** The daemon answered a heartbeat on the stream this lease belongs to: the machine stays online, or is online again

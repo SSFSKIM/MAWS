@@ -1,6 +1,7 @@
 import type { Machine } from './objects/machine';
 import type { Project } from './objects/project';
 import type { Registry } from './objects/registry';
+import { HEARTBEAT_MS } from './protocol/machine';
 
 export interface Env {
   PROJECT: DurableObjectNamespace<Project>;
@@ -22,6 +23,9 @@ export interface Env {
   CF_API_TOKEN: string;
   /** The hub's VAPID key for Web Push (a secret): a P-256 private key as JWK JSON. Pushes name `mailto:<admin>`. */
   VAPID_KEY: string;
+  /** The machine stream's heartbeat in ms (optional; DX2's 15 000 when unset). The local command shortens it: there a
+   * client's close reaches the object only at the next write to its stream (test/stream-close.test.ts). */
+  HEARTBEAT_MS?: string;
 }
 
 export type OrgConfig = { id: string; name: string; adminEmail: string };
@@ -53,6 +57,13 @@ export function hubConfig(env: Env): HubConfig | null {
     api: { url: env.CF_API_URL, account: env.CF_ACCOUNT_ID, token: env.CF_API_TOKEN },
     vapidKey: env.VAPID_KEY,
   };
+}
+
+/** The heartbeat a `Machine` object beats its stream at: HEARTBEAT_MS when it is a whole number of ms from 100 to
+ * 60 000, DX2's default otherwise. */
+export function heartbeatMs(env: Env): number {
+  const configured = /^\d+$/.test(env.HEARTBEAT_MS ?? '') ? Number(env.HEARTBEAT_MS) : NaN;
+  return configured >= 100 && configured <= 60_000 ? configured : HEARTBEAT_MS;
 }
 
 /** Headers the Worker sets on the requests it makes to its objects, after verifying who is asking; objects are

@@ -76,14 +76,19 @@ means enrolling every machine again.
 
 ## The checks (DC3.G2, G4, G6)
 
-Each runs against the deployment through Access, enrolls throwaway machines,
-and revokes them at its end, which deletes their service tokens:
+Each runs against the deployment through Access and enrolls throwaway
+machines. Each requires `--test-org <id>`: a throwaway org, never
+`config.json`'s, which the deployment must be serving (`deploy --org-id <id>`
+first). Before enrolling or writing anything, each checks that `/api/me` names
+that org, and refuses otherwise. Their projects and events outlive the machines'
+revocation, and their events are sealed with a throwaway org key.
+
+Each revokes what it enrolled, which deletes the machines' service tokens, and
+deletes what it minted, however it ends. It fails if any of that fails.
 
 - `probe`: the admission probe's five cases, plus enrollment's name refusal and the archive designation. Needs `DESK_ACCESS_TOKEN` and `CF_DESK_HUB_SERVICE_TOKENS`, the latter for minting the one never-enrolled token, which it deletes.
 - `fake-check`: M4's fake machine, enrolled from a code, replays its recording, and a browser sees every row, request, decision, log event, and outcome, plus one RPC answered.
-- `redeploy-check`: two fake machines and a browser write while the hub is redeployed mid-run. The redeploy is new code, since its build's name is new: Cloudflare restarts objects for new code only. Nothing may be lost or duplicated, and the check fails as "not exercised" when the redeploy cut no machine's stream. See M5's findings in DC3's plan: on 2026-10-15, Cloudflare kept the old version's connections open after a deploy.
-- `measure`: three machines streaming chunks into one project, with browsers subscribed. It reports the throughput and the latency, as DC3's plan records them (G6).
+- `redeploy-check`: two fake machines and a browser write while the hub is redeployed mid-run, under the same throwaway org. The writing lasts 420 s by default (`--seconds`), because the cut came +314 to +329 s after the deploy. The redeploy is new code, since its build's name is new: Cloudflare restarts objects for new code only. Nothing may be lost or duplicated, and the check fails as "not exercised" when the redeploy cut no machine's stream. See M5's findings in DC3's plan: on 2026-10-15, Cloudflare kept the old version's connections open after a deploy.
+- `measure`: machines streaming chunks into one project, with browsers subscribed. It runs three series: the phase-1 budget (one session at 150 chunks/s watched by 1 to 3 browsers, with another machine's presence and log events crossing it), fan-out, and a ramp. It reports throughput, latency, and the load average per step, as DC3's plan records them (G6).
+- `frame-cost`: what a POST and each frame in it cost on the path from a machine to its project.
 
-Run them under a throwaway org (`deploy --org-id <test org>` first), never in
-the owner's real org: their events are sealed with a throwaway org key, and the
-projects they register stay in the org's registry.

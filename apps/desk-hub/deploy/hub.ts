@@ -97,6 +97,49 @@ export class Socket {
   }
 }
 
+/**
+ * A browser's project socket that reopens after a cut until it is stopped. `open` tries until a socket opens or `stop`
+ * is called; `stop` ends the loop, waits for it to settle, and closes the socket, closing one that opens too late.
+ */
+export class LogFollower {
+  socket: Socket | undefined;
+  private stopped = false;
+  private opening: Promise<void> | null = null;
+
+  constructor(
+    private readonly person: Pick<Person, 'socket'>,
+    private readonly path: string,
+    /** Called with each socket that opens, before it is the follower's: set its handlers, resume, resend. */
+    private readonly onOpen: (socket: Socket) => void,
+    private readonly retryMs = 1000,
+  ) {}
+
+  open(): Promise<void> {
+    return (this.opening ??= this.loop().finally(() => (this.opening = null)));
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+    await this.opening;
+    this.socket?.close();
+    this.socket = undefined;
+  }
+
+  private async loop(): Promise<void> {
+    while (!this.stopped) {
+      try {
+        const socket = await this.person.socket(this.path);
+        if (this.stopped) return socket.close();
+        this.onOpen(socket);
+        this.socket = socket;
+        return;
+      } catch {
+        if (!this.stopped) await sleep(this.retryMs);
+      }
+    }
+  }
+}
+
 /** Redeems a token for a machine name at the redeem path, which takes no Access session. */
 export async function redeem(hub: string, token: string, machine: string): Promise<Response> {
   return fetch(`${hub}/machine/enroll`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ token, machine }) });
