@@ -160,7 +160,7 @@ Exact names go to the P3 interface ledger through the architect (the appendix pr
 |---|---|---|---|
 | E0 Prove variable-artboard reuse | spike | `spikes/p3-design/findings.txt` | landed 2026-10-16 (yes on (a) to (g); Decision Log 10) |
 | E1 Artboard workbench | plan | `docs/doperpowers/plans/2026-10-16-p3-e1-design-workbench.md` | dispatched 2026-10-16 (Decision Log 10); M1 the portable Design kind ticked (c41553ef8; Decision Log 17); M2 the host boundary ticked (311fbacac; Decision Logs 21, 22); M3 the workbench ticked (c1f10faf0; Decision Logs 20, 25); M4 comments and history ticked (2256b84ee; Decision Logs 23, 29, 30) |
-| E2 File-backed dashboard documents | plan | `docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md` | dispatched 2026-10-16 (Decision Log 5); M1 the renderer promoted (Decision Log 14); M2 the host boundary ticked (39317fbae; Decision Logs 16, 18) |
+| E2 File-backed dashboard documents | plan | `docs/doperpowers/plans/2026-10-16-p3-e2-dashboard.md` | dispatched 2026-10-16 (Decision Log 5); M1 the renderer promoted (Decision Log 14); M2 the host boundary ticked (39317fbae; Decision Logs 16, 18); M3 views and the source sheet ticked (786134b27; Decision Logs 24, 27) |
 | E3 Granted live datasets | brief, or plan at its checkpoint | `docs/doperpowers/plans/2026-10-16-p3-e3-live-datasets.md` | not-dispatched (blocked-by E2; waiting-external: P3-H's bridge) |
 
 ## Surprises & Discoveries
