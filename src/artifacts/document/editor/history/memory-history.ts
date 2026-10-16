@@ -37,7 +37,8 @@ export class MemoryHistory implements HistoryApi {
   private readonly stored: Stored[] = [];
   private readonly listeners = new Set<() => void>();
   private readonly offLanded: () => void;
-  private readonly now: () => number;
+  /** The option's clock, else the wall clock; also the rail's (`HistoryApi.now`). */
+  readonly now: () => number;
 
   constructor(
     private readonly host: MemoryDocumentHost,

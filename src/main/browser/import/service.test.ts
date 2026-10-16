@@ -470,7 +470,11 @@ describe('BrowserImportService', () => {
     const big = buildChromeUserData(join(root, 'ChromeBig'));
     const db = new DatabaseSync(big.profiles.Default.history.file);
     const insert = db.prepare('INSERT INTO urls (url, title, visit_count, typed_count, last_visit_time, hidden) VALUES (?, NULL, 1, 0, 13300000000000000, 0)');
+    // One transaction, as the index's `Db.transaction` writes: 1,200 autocommits are 1,200 fsyncs, which outlast the
+    // case's 5 s on a disk TMPDIR under load (gate-offload Decision Log 35, P6).
+    db.exec('BEGIN IMMEDIATE');
     for (let i = 0; i < 1200; i++) insert.run(`https://bulk.test/${i}`);
+    db.exec('COMMIT');
     db.close();
     let clock = 0;
     const importRows = vi.spyOn(index.browserHistory, 'importRows');
