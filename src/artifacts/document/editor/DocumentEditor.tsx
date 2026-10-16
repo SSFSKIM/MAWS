@@ -33,6 +33,7 @@ import { coreExtensionOptions } from '../ids';
 import { nanoid8 } from '../schema';
 import { tabBody } from '../tabs';
 import { discardThread, getThread, isBlockAnchor /* P3-E */, reopen, reply, resolve } from '../threads';
+import type { ExtraChange } from '../history'; // P3-E
 import { activeThread, COMMENTS_ORIGIN, commentBlock /* P3-E */, commentSelection, liveRanges } from './comments/plugins';
 import type { CommentAuthor, CommentOverlayProps, DocumentComments, PassageRect } from './comments/surface';
 import { ThreadsRail } from './comments/ThreadsRail';
@@ -43,7 +44,7 @@ import type { HistoryApi } from './history/api';
 import type { HistoryController, HistorySnapshot, Preview } from './history/controller';
 import { HistoryBar } from './history/HistoryBar';
 import { HistoryRail } from './history/HistoryRail';
-import { goToChange, setCarried } from './history/paint';
+import { goToChange, setCarried, setExtra /* P3-E */ } from './history/paint';
 import { ShowEditorsMenu, useShowEditors } from './history/ShowEditors';
 import { useHistoryController, useHistorySnapshot } from './history/use-history';
 import { cssColor, type DocumentHandle, type EditorHost } from './host-types';
@@ -100,6 +101,7 @@ export interface DocumentEditorProps {
 export type DocumentRail = 'comments' | 'history' | null;
 type Rail = DocumentRail;
 const NO_CARRIES: ReadonlyMap<string, Carry['kind']> = new Map();
+const NO_EXTRAS: readonly ExtraChange[] = []; // P3-E
 
 /** A request to show a thread's passage: a new serial for each ask, so asking twice shows twice. */
 interface Showing {
@@ -380,6 +382,7 @@ function TabEditor({ tabId, tabTitle, artifactId, handle, host, renderDiagram, o
           onEditor={setPreviewEditor}
           renderChart={renderChart} /* P3-E */
           revision={shownRevision}
+          extras={preview.extras}
         />
       )}
       {preview && historyController ? (
@@ -606,7 +609,7 @@ function PreviewMount({ editor }: { editor: Editor }) {
 interface PreviewEditorProps {
   view: VersionView;
   carried: ReadonlyMap<string, Carry['kind']>;
-  focus: number | 'tab' | null;
+  focus: Preview['focus']; // P3-E: an unbound extra's too
   handle: DocumentHandle;
   tabId: string;
   artifactId: string;
@@ -616,9 +619,12 @@ interface PreviewEditorProps {
   onEditor(editor: Editor | null): void;
   renderChart?: DocumentEditorProps['renderChart']; // P3-E
   revision?: number; // P3-E: the version's
+  extras?: readonly ExtraChange[]; // P3-E (E2 M4): the comparison's extra changes, the shown tab's merged into its list
 }
 
-function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, renderDiagram, controller, onEditor, renderChart, revision }: PreviewEditorProps) {
+function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, renderDiagram, controller, onEditor, renderChart, revision, extras }: PreviewEditorProps) {
+  // P3-E: this tab's extra changes, as a value that changes only when they do
+  const tabExtras = useMemo(() => extras?.filter((extra) => extra.tabId === tabId && extra.blockId !== null) ?? NO_EXTRAS, [extras, tabId]);
   // P3-E: the version shown, for its charts; this editor is put on other versions without being made again, so it moves
   const [displayed] = useState(() => displayedDocument(view.ytype.doc!, revision));
   useLayoutEffect(() => displayed.set(view.ytype.doc!, revision), [displayed, view, revision]);
@@ -648,8 +654,9 @@ function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, 
     // a view other than the one the editor is on (or being bound to at its creation)
     if (sync()?.ytype != null && !bound()) editor.commands.showVersion(view);
     setCarried(editor, carried);
+    if (extras) setExtra(editor, tabExtras); // P3-E: only with the hook, so B's preview dispatches nothing new
     const drawn = () => {
-      if (focus !== null) goToChange(editor, focus === 'tab' ? null : focus);
+      if (focus !== null) goToChange(editor, typeof focus === 'number' ? focus : null); // P3-E: an extra's focus is the bar's
       controller?.applied(view);
     };
     if (bound()) return void drawn();
@@ -662,7 +669,7 @@ function PreviewEditor({ view, carried, focus, handle, tabId, artifactId, host, 
     return () => {
       editor.off('transaction', once);
     };
-  }, [editor, view, carried, focus, controller]);
+  }, [editor, view, carried, focus, controller, extras, tabExtras]);
   return null;
 }
 

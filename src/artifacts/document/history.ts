@@ -104,17 +104,64 @@ export interface TabChanges {
 /**
  * The changes of a whole comparison, tab by tab in the comparison's tab order: the one list behind every "N changes"
  * (the pill's and the preview's) and the preview's ↑ ↓. A new tab counts by its content, which reads as inserted.
+ * P3-E: a tab's body counts its extra block changes too (`mergeExtraChanges`); without extras, B's list.
  */
-export function documentChanges(diff: Diff): TabChanges[] {
-  return diffTabs(diff).map((tab) => ({
-    tab,
-    entry: tab.change === 'renamed' || tab.change === 'removed' ? tab.change : null,
-    body: tab.change === 'removed' ? 0 : changeList(renderDiff(tabBody(diff.nextDoc, tab.id)!, diff.renderer)).length,
-  }));
+export function documentChanges(diff: Diff, extras?: readonly ExtraChange[]): TabChanges[] {
+  return diffTabs(diff).map((tab) => {
+    if (tab.change === 'removed') return { tab, entry: tab.change, body: 0 };
+    const doc = renderDiff(tabBody(diff.nextDoc, tab.id)!, diff.renderer);
+    const mine = extras?.filter((extra) => extra.tabId === tab.id) ?? []; // P3-E
+    return { tab, entry: tab.change === 'renamed' ? tab.change : null, body: (mine.length > 0 ? mergeExtraChanges(doc, changeList(doc), mine) : changeList(doc)).length };
+  });
 }
 
-/** "N changes" of a whole comparison. */
-export const countChanges = (diff: Diff): number => documentChanges(diff).reduce((n, tab) => n + (tab.entry ? 1 : 0) + tab.body, 0);
+/** "N changes" of a whole comparison; P3-E: with its extras, an unbound one an entry of its own. */
+export const countChanges = (diff: Diff, extras?: readonly ExtraChange[]): number =>
+  documentChanges(diff, extras).reduce((n, tab) => n + (tab.entry ? 1 : 0) + tab.body, 0) + unboundExtras(extras).length;
+
+// P3-E start (E2 M4; E's Decision Log 8 and 28 (3), (4)): changes B's text diff cannot see, given by the artifact's
+// kind (`HistoryApi.extraChanges`): a dashboard's dataset replaced under byte-identical chart attributes is a change
+// of each block bound to it, and a dataset no block binds is an entry of its own. Documents and decks give none.
+export interface ExtraChange {
+  /** Unique within one comparison (the history bar's stop for an unbound entry). */
+  key: string;
+  /** What changed, in words (the history bar names an unbound entry so). */
+  label: string;
+  /** The tab and block it shows on; both null for an unbound entry. */
+  tabId: string | null;
+  blockId: string | null;
+  /** The actor key (X29's `actorKey`) and time of the change itself, null when provenance does not say. */
+  who: string | null;
+  at: number | null;
+}
+
+/** The extras on no block: entries of their own, after every tab's changes. */
+export const unboundExtras = (extras: readonly ExtraChange[] | undefined): ExtraChange[] => extras?.filter((extra) => extra.tabId === null) ?? [];
+
+/**
+ * A rendered tab's changes with its extras merged in, in document order: each extra a change spanning its block, unless a
+ * change already touches that block (counted once) or the tab does not hold it. `runs` is 0: no attributed run made it.
+ */
+export function mergeExtraChanges(doc: PMNode, changes: readonly Change[], extras: readonly ExtraChange[]): Change[] {
+  const wanted = new Map<string, ExtraChange>();
+  for (const extra of extras) if (extra.blockId !== null && !wanted.has(extra.blockId)) wanted.set(extra.blockId, extra);
+  const added: Change[] = [];
+  if (wanted.size > 0) {
+    doc.descendants((node, pos) => {
+      const extra = typeof node.attrs.id === 'string' ? wanted.get(node.attrs.id) : undefined;
+      if (extra) {
+        wanted.delete(node.attrs.id as string);
+        const to = pos + node.nodeSize;
+        if (!changes.some((change) => change.from < to && change.to > pos)) {
+          added.push({ from: pos, to, kinds: ['attrs'], who: extra.who === null ? [] : [extra.who], at: extra.at, where: `${node.type.name}#${node.attrs.id as string}`, runs: 0 });
+        }
+      }
+      return wanted.size > 0 && !node.isTextblock;
+    });
+  }
+  return added.length === 0 ? [...changes] : [...changes, ...added].sort((a, b) => a.from - b.from || b.to - a.to);
+}
+// P3-E end
 
 export type RunKind = 'ins' | 'del' | 'fmt' | 'attrs';
 

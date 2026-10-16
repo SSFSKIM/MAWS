@@ -22,9 +22,11 @@ export interface HistoryApiDeps {
   whenShown?(): Promise<void>;
   sessionTitle?(appSessionId: string): string | undefined;
   log(line: string): void;
+  /** P3-E (E2 M4): the kind's extra history changes (a dashboard's datasets), handed to the rail as given. */
+  extraChanges?: HistoryApi['extraChanges'];
 }
 
-export function createHistoryApi({ artifactId, ipc, host, viewedAt, whenShown, sessionTitle, log }: HistoryApiDeps): HistoryApi {
+export function createHistoryApi({ artifactId, ipc, host, viewedAt, whenShown, sessionTitle, log, extraChanges /* P3-E */ }: HistoryApiDeps): HistoryApi {
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandOutput<N>> => {
     const result = await ipc.invoke(name, input);
     if (!result.ok) throw new Error(result.error.message);
@@ -63,5 +65,6 @@ export function createHistoryApi({ artifactId, ipc, host, viewedAt, whenShown, s
     },
     ...(sessionTitle ? { sessionTitle } : {}),
     log,
+    ...(extraChanges ? { extraChanges } : {}), // P3-E
   };
 }

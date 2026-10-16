@@ -3,9 +3,10 @@
 // dashboard's own beside it: the snapshot reader every view and the source sheet share, the charts' renderer, the
 // source sheet's state, and the datasets of the document the editor shows (captured as values whenever it changes, so
 // the header's Datasets action reads what is on screen, a version's in history included, without keeping a preview's
-// document past its life).
+// document past its life). M4: its dataset changes join B's history through the tab's history hook.
 import { actorDisplay, type Actor } from '@shared/artifacts/actor';
 import { listDatasets } from '@artifacts/dashboard/datasets';
+import { datasetChanges } from '@artifacts/dashboard/history';
 import { createChartRenderer } from '@artifacts/dashboard/editor/chart-view';
 import { SourceSheetState, type SheetDataset } from '@artifacts/dashboard/editor/sheet';
 import { SnapshotReader } from '@artifacts/dashboard/editor/snapshots';
@@ -27,7 +28,7 @@ export class DashboardTabState {
     private readonly deps: DocumentTabDeps,
   ) {
     this.artifactId = target.artifactId;
-    this.document = new DocumentTabState(target, deps);
+    this.document = new DocumentTabState(target, { ...deps, extraChanges: datasetChanges }); // M4: B's history counts its dataset changes
     this.reader = new SnapshotReader(deps.host, target.artifactId);
     this.renderChart = createChartRenderer({
       reader: this.reader,
