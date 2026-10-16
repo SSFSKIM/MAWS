@@ -5,7 +5,28 @@ Plan: `docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md`. Composite:
 `f91bc631` and folded forward since. Branch `smns-erb`, which started at
 269f5212; the head is 645a1557 and has been pushed.
 
-## Status
+## Update, 2026-10-16: the panel, its fix waves, and the redeploy
+
+The branch's xhigh panel (wf_c388e070-28b, run by the composite's writer
+on 645a1557) confirmed 13 findings, 2 of them P1. The fixes ran as two
+waves:
+- **Hub.** One executor fixed the eight hub findings in the shared
+  checkout (b6bee9aa, a9dc048c, 3d87b957, 3e2697c7). It also fixed DC5's
+  local close-latency report (0f2a6461) and browser-paged resume, a DX3
+  ruling (895e27d1).
+- **Fake machine.** The M4 executor worked in a separate worktree and its
+  commits were cherry-picked: 2d691778, plus 3c45130b to match the real
+  machine's `bad-shape`.
+
+The joint re-review found one more defect, part-set metadata (36d6bae3).
+It is closed, and the re-review is clean. The Linux gate is green on
+36d6bae3 (run 38846390702).
+
+The hub was redeployed with every fix, beside DC5's web build at
+3de8a15e9: `X-Desk-Build: hub@b11ea5f8 web@smns-erb-web.3de8a15e`. The
+owner's walk data in ssfskim was not touched. The PR to master is open.
+
+## Status (at the close of execution, before the panel)
 
 All five milestones are executed and reviewed clean by the subagent-driven
 loop: one task-executor per milestone, a task review at each frontier, and
