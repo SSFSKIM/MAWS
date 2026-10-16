@@ -144,7 +144,13 @@ export default defineConfig({
             // P3-D (the P3 spec's Decision Log 61): B's page bound to D's scope as built, where the compiler would memoize a hook
             // B called inside a memo
             'src/renderer/src/artifacts/design-system/documents.test.tsx',
+            // P3-H (the P3 spec's Decision Log 92): the library's components as built, where the first Export of a kind
+            // never showed (its formats read from the module's cache in render, memoized on the kind)
+            'src/renderer/src/library/**/*.test.tsx',
           ],
+          // P3-H: ArtifactTab's held-editor read (`heldArtifactEditorState` in render) is the same class of defect, outside
+          // H's ruled fix; its suite joins this project with that fix (tracker debt, the wider audit of Decision Log 92)
+          exclude: [...configDefaults.exclude, 'src/renderer/src/library/ArtifactTab.test.tsx'],
           env: { MAWS_REACT_COMPILER: '1' },
         },
       },

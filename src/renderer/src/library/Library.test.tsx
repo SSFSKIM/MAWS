@@ -411,6 +411,22 @@ describe('the row actions', () => {
     expect(within(menu).queryByRole('menuitem', { name: 'Export' })).toBeNull();
   });
 
+  // P3-H (P3 Decision Log 92): the first menu to ask for a kind shows Export once main answers, in the same opening. Run
+  // in `renderer-compiled` too, where a format read from the module's cache in render was memoized on the kind and the
+  // answer never showed until the menu was opened again.
+  it('Export appears in the opening that asked, when main answers after the menu opened', async () => {
+    const answer = deferred<unknown>();
+    answers['library.exportFormats'] = (input) => (input.kind === 'html' ? answer.promise : ok({ formats: [] }));
+    const user = userEvent.setup();
+    render(<Library />);
+    const menu = await openMenu(user, 'Pricing page');
+    await waitFor(() => expect(main.callsOf('library.exportFormats')).toEqual([{ kind: 'html' }]));
+    expect(within(menu).queryByRole('menuitem', { name: 'Export' })).toBeNull();
+    await act(async () => answer.resolve(ok({ formats: ['pdf', 'png'] })));
+    expect(await within(menu).findByRole('menuitem', { name: 'Export' })).toBeTruthy();
+    expect(screen.getAllByRole('menu')).toEqual([menu]); // the same opening
+  });
+
   // P3-H (Decision Log 87): Send to Google Drive and Notion, inside Export only, for a kind with a format to send
   it('Export › Send to Google Drive… and Send to Notion… follow the formats and open the confirmation; a kind with no format has neither', async () => {
     answers['library.exportFormats'] = (input) => ok({ formats: input.kind === 'html' ? ['pdf', 'png'] : [] });
