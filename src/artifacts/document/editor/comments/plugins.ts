@@ -22,8 +22,8 @@ import { Fragment, Slice, type Mark, type Node as PMNode } from '@tiptap/pm/mode
 import { NodeSelection /* P3-E */, Plugin, PluginKey, type EditorState, type Transaction } from '@tiptap/pm/state';
 import { Decoration, DecorationSet, type EditorView } from '@tiptap/pm/view';
 import type { Actor } from '@shared/artifacts/actor';
-import type { Doc } from '../../../yjs';
-import { relativePositionToJSON } from '../../../yjs/document';
+import type { Doc, Node as YType } from '../../../yjs'; // P3-E: Node
+import { YNode, relativePositionToJSON } from '../../../yjs/document'; // P3-E: YNode
 import { resolvedPositionsToRelativePositions } from '../../../yjs/prosemirror';
 import { listTabs, tabBody } from '../../tabs';
 import { addThread, blockThreads /* P3-E */, getThread, liveIdsY, observeThreads, threadStatus } from '../../threads';
@@ -282,7 +282,144 @@ function paste(ydoc: Doc, tabId: string | null): Plugin {
   });
 }
 
+// P3-E start (E2 M4; E's Decision Log 34): an owner's cut and paste of a commented view block is a move. UniqueID gives
+// every pasted block a fresh id (B's invariant, kept for every other paste); for a real cut within one artifact the
+// pasted view block gets its original id back, in the editor's own transaction, so its thread (never written here) stays
+// live, through undo too. A cut of blocks carrying block threads is recorded in this renderer with a one-shot nonce,
+// which a native `cut` listener running after ProseMirror's own writes onto the clipboard HTML's `[data-pm-slice]`
+// element (copies and plain text stay as B writes them). A paste restores only when its HTML carries the recorded nonce
+// and ids, the pasting editor's artifact is the record's, every recorded original is live nowhere in the document, and
+// the record is unconsumed. A copy, a drag or a cut with no threaded block clears the record; another window, another
+// artifact or another application restores nothing (a renderer-local record: cross-window carry is a known limit).
+const CUT_ATTR = 'data-maws-cut';
+interface CutRecord {
+  nonce: string;
+  artifactId: string;
+  /** The cut blocks with block threads, in document order: the id and everything but the id, which a paste matches. */
+  blocks: Array<{ blockId: string; key: string }>;
+}
+let lastCut: CutRecord | null = null;
+const keyOf = (node: PMNode): string => `${node.type.name}:${JSON.stringify({ ...node.attrs, id: null })}`;
+
+/** Every block id the document holds, in any tab. */
+function liveBlockIds(ydoc: Doc): Set<string> {
+  const ids = new Set<string>();
+  const walk = (node: YType): void => {
+    for (const child of node.toArray()) {
+      if (!(child instanceof YNode)) continue;
+      const id: unknown = child.getAttr('id');
+      if (typeof id === 'string') ids.add(id);
+      walk(child);
+    }
+  };
+  for (const tab of listTabs(ydoc)) {
+    const body = tabBody(ydoc, tab.id);
+    if (body) walk(body);
+  }
+  return ids;
+}
+
+function blockCarry(ydoc: Doc, artifactId: string): Plugin {
+  let stamp: string | null = null; // the nonce this editor's cut, in progress, stamps on the clipboard
+  // a qualifying paste in progress: the originals to restore, and the ids the doc held before it
+  let armed: { blocks: CutRecord['blocks']; before: Set<string> } | null = null;
+  const docIds = (doc: PMNode): Set<string> => {
+    const ids = new Set<string>();
+    doc.descendants((node) => {
+      if (typeof node.attrs.id === 'string') ids.add(node.attrs.id);
+      return !node.isTextblock;
+    });
+    return ids;
+  };
+  return new Plugin({
+    key: new PluginKey('commentBlockCarry'),
+    props: {
+      handleDOMEvents: {
+        cut: (view) => {
+          const threaded = new Set(blockThreads(ydoc).values());
+          const { from, to } = view.state.selection;
+          const blocks: CutRecord['blocks'] = [];
+          view.state.doc.nodesBetween(from, to, (node, pos) => {
+            if (typeof node.attrs.id === 'string' && threaded.has(node.attrs.id) && pos >= from && pos + node.nodeSize <= to) blocks.push({ blockId: node.attrs.id, key: keyOf(node) });
+            return !node.isTextblock;
+          });
+          lastCut = blocks.length > 0 ? { nonce: crypto.randomUUID(), artifactId, blocks } : null;
+          stamp = lastCut?.nonce ?? null;
+          return false;
+        },
+        copy: () => {
+          lastCut = null;
+          return false;
+        },
+        dragstart: () => {
+          lastCut = null;
+          return false;
+        },
+        paste: (view, event) => {
+          const html = (event as ClipboardEvent).clipboardData?.getData('text/html') ?? '';
+          const nonce = new RegExp(`${CUT_ATTR}="([\\w-]+)"`).exec(html)?.[1];
+          const cut = lastCut;
+          if (!cut || !nonce || nonce !== cut.nonce || cut.artifactId !== artifactId) return false;
+          const live = liveBlockIds(ydoc);
+          const carried = cut.blocks.every(({ blockId }) => html.includes(`data-id="${blockId}"`) && !live.has(blockId));
+          if (!carried) return false;
+          lastCut = null; // consumed: a second paste is B's fresh paste
+          armed = { blocks: cut.blocks, before: docIds(view.state.doc) };
+          return false;
+        },
+      },
+    },
+    // after UniqueID has minted the pasted blocks' ids, in the same dispatch (one undo step with the paste)
+    appendTransaction: (transactions, _old, state) => {
+      if (!armed || !transactions.some((tr) => tr.docChanged)) return null;
+      const pasted: Array<{ node: PMNode; pos: number }> = [];
+      let pending = false;
+      const keys = new Set(armed.blocks.map((block) => block.key));
+      state.doc.descendants((node, pos) => {
+        if (keys.has(keyOf(node))) {
+          if (node.attrs.id === null) pending = true;
+          else if (!armed!.before.has(node.attrs.id as string)) pasted.push({ node, pos });
+        }
+        return !node.isTextblock;
+      });
+      if (pending || pasted.length === 0) return null; // UniqueID mints in its own append, before this one sees it
+      const present = docIds(state.doc);
+      const tr = state.tr;
+      const used = new Set<number>();
+      for (const { blockId, key } of armed.blocks) {
+        const at = pasted.findIndex((candidate, k) => !used.has(k) && keyOf(candidate.node) === key);
+        if (at < 0 || present.has(blockId)) continue;
+        used.add(at);
+        tr.setNodeAttribute(pasted[at]!.pos, 'id', blockId);
+      }
+      armed = null;
+      return tr.steps.length > 0 ? tr : null;
+    },
+    view: (view) => {
+      // after ProseMirror's own cut handler has written the clipboard: the cut's HTML carries its nonce
+      const onCut = (event: ClipboardEvent) => {
+        const nonce = stamp;
+        stamp = null;
+        const data = event.clipboardData;
+        if (!nonce || !data) return;
+        const html = data.getData('text/html');
+        if (html.includes('data-pm-slice="')) data.setData('text/html', html.replace('data-pm-slice="', `${CUT_ATTR}="${nonce}" data-pm-slice="`));
+      };
+      view.dom.addEventListener('cut', onCut);
+      return {
+        update: () => {
+          armed = null; // a paste that restored nothing by now restores nothing
+        },
+        destroy: () => view.dom.removeEventListener('cut', onCut),
+      };
+    },
+  });
+}
+// P3-E end
+
 export interface CommentsOptions {
+  /** P3-E (E2 M4; E's Decision Log 34): the artifact this editor shows; a cut view block pasted within it keeps its id. */
+  artifactId?: string | null;
   /** P3-E (E2 M4): the quote of a selected block commented whole; absent, or undefined for a node, only text is commented. */
   blockQuote?: ((node: PMNode) => string | undefined) | null;
   /** The replica's doc, whose threads map the editor reads and writes; none, no comment plugins. */
@@ -325,6 +462,6 @@ export const Comments = Extension.create<CommentsOptions>({
   addProseMirrorPlugins() {
     const { doc, tabId } = this.options;
     if (!doc) return [];
-    return [display(doc, this.options.onActivate), ...(this.options.paste ? [paste(doc, tabId)] : [])];
+    return [display(doc, this.options.onActivate), ...(this.options.paste ? [paste(doc, tabId)] : []), ...(this.options.artifactId ? [blockCarry(doc, this.options.artifactId)] : []) /* P3-E */];
   },
 });
