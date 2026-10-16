@@ -11,6 +11,10 @@ import { join, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '../../../..');
 
+/** The machine stream's heartbeat this suite runs the local hub with: the local command's own default, passed
+ * explicitly so the suites can derive DX2's local close latency (a close is seen within one heartbeat) from it. */
+const HEARTBEAT_MS = 2000;
+
 async function free(port: number): Promise<boolean> {
   return new Promise((done) => {
     const server = createServer();
@@ -35,6 +39,9 @@ export class LocalHub {
     private readonly state: string,
   ) {}
 
+  /** The machine stream's heartbeat (`HEARTBEAT_MS`) the hub runs with. */
+  readonly heartbeatMs = HEARTBEAT_MS;
+
   /** The hub's origin as `localhost` (WebAuthn admits `localhost` as a relying party; an IP address it refuses). */
   get localhost(): string {
     return this.url.replace('127.0.0.1', 'localhost');
@@ -44,7 +51,7 @@ export class LocalHub {
     const port = await freePair();
     const output: string[] = [];
     const state = mkdtempSync(join(tmpdir(), 'desk-local-hub-'));
-    const child = spawn('pnpm', ['--filter', 'desk-hub', 'local', '--port', String(port), '--state', state], { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('pnpm', ['--filter', 'desk-hub', 'local', '--port', String(port), '--state', state, '--heartbeat-ms', String(HEARTBEAT_MS)], { cwd: ROOT, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     for (const stream of [child.stdout!, child.stderr!]) stream.on('data', (chunk: Buffer) => output.push(chunk.toString()));
     const hub = new LocalHub(`http://127.0.0.1:${port}`, child, output, state);
     const deadline = Date.now() + 120_000;
