@@ -1,0 +1,42 @@
+{
+  // The desk's hub (docs/doperpowers/specs/2026-10-15-desk-design.md, DC3; docs/doperpowers/plans/2026-10-15-desk-dc3-hub.md).
+  // One Worker, three Durable Object classes on SQLite storage: `Project` (one per project, named `<org>:<project id>`),
+  // `Machine` (one per enrolled machine, `<org>:<machine name>`), and `Registry` (one per org, named by the org id).
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "desk-hub",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  // A Durable Object sees a client close its SSE stream through the request's signal (the M1 probe).
+  "compatibility_flags": ["enable_request_signal"],
+  "workers_dev": true,
+  // The web app (apps/desk-web, DC5), served as static assets; every path the Worker answers runs it first, the
+  // enrollment redeem (`/machine/enroll`) included. scripts/assets-dir.mjs makes the directory when desk-web has not
+  // been built, since wrangler refuses a missing one.
+  "assets": {
+    "directory": "../desk-web/dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/machine/*"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "PROJECT", "class_name": "Project" },
+      { "name": "MACHINE", "class_name": "Machine" },
+      { "name": "REGISTRY", "class_name": "Registry" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Project", "Machine", "Registry"] }],
+  // Deploy configuration, set at deployment (M5). The Worker refuses every request until all of them are set: there is
+  // no mode in which it trusts a request Access did not sign.
+  "vars": {
+    "ORG_ID": "",
+    "ORG_NAME": "",
+    "ORG_ADMIN_EMAIL": "",
+    "ACCESS_ISSUER": "",
+    "ACCESS_AUD": "",
+    "ACCESS_CERTS_URL": "",
+    "CF_API_URL": "",
+    "CF_ACCOUNT_ID": ""
+  }
+  // CF_API_TOKEN and VAPID_KEY (Web Push's P-256 private key, JWK JSON) are secrets (`wrangler secret put`, M5); the
+  // local command passes the stand-in's token and a key it generated, the suites one generated per run.
+}

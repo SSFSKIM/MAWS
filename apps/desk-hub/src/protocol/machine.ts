@@ -1,0 +1,120 @@
+// DX2 — machine ↔ hub. One connection per machine, opened outbound and multiplexing its projects: an SSE stream down
+// (`GET /machine/stream`), held by the machine's `Machine` object, and frames up by POST (`POST /machine/frames`, one
+// JSON frame per line), each addressed to a project and routed by the Worker to that `Project` object.
+import type { LogEvent, Vector } from './log';
+import type { Part } from './parts';
+import type { Rpc, RpcOutcome } from './rpc';
+import type { Raised, SessionMessage } from './session';
+
+/**
+ * The `Machine` object writes a `hb` frame this often; the daemon treats a stream silent for three periods as dead, and
+ * answers each `hb` with an `hb-ack` up. Only the daemon's traffic renews the machine's lease (M3): the hub's own
+ * heartbeat never does, so a suspended daemon or a half-open stream lapses. This is the deployed hub's; a hub may be
+ * configured with another (the local command's is shorter), and `welcome.heartbeat_ms` says which a stream has.
+ */
+export const HEARTBEAT_MS = 15_000;
+
+/**
+ * How long a machine stays online in a project after its last renewal (the `hello` that opened the project on the
+ * stream, then each `hb-ack` of that stream's generation): three heartbeat periods, the same span after which the
+ * daemon gives its stream up as dead. A lease that lapses, or the close of the stream it belongs to, puts the machine
+ * offline: its subscriptions end and its forwarded RPCs without a result become `uncertain`.
+ */
+export const LEASE_MS = 3 * HEARTBEAT_MS;
+
+/** The lease in heartbeat periods, whatever the heartbeat (the local command configures a shorter one). */
+export const LEASE_PERIODS = LEASE_MS / HEARTBEAT_MS;
+
+/** A POST body holds at most this many bytes (each frame in it at most FRAME_LIMIT). */
+export const POST_LIMIT = 4 * 1024 * 1024;
+
+/** The header a POST carries: the generation of the stream it belongs to (from `welcome`). */
+export const GENERATION_HEADER = 'X-Desk-Generation';
+
+export type Refusal = {
+  reason:
+    | 'writer-not-yours' // a writer outside `<machine>/`, or `legacy/` from a machine not the project's archive machine
+    | 'conflict' // a payload at an existing (writer, seq) whose canonical form differs
+    | 'gap' // a seq not one past the writer's last; answered by `resend`
+    | 'bad-shape'
+    | 'too-large'
+    | 'stale-generation'
+    | 'not-open'; // events (or a rejection) for a project this stream has not opened with `hello`
+  writer?: string;
+  seq?: number;
+  message: string;
+};
+
+/** Hub → machine, one per SSE event (`event: <t>`, `data: <the frame's JSON>`). */
+export type DownFrame =
+  /** First on every stream. `generation` counts this machine's streams; a newer one supersedes every older one. */
+  | { t: 'welcome'; org: string; machine: string; generation: number; heartbeat_ms: number }
+  | { t: 'hb'; at: string }
+  /** The answer to `hello`: the hub's vector for the project, and whether this machine writes its archive. */
+  | { t: 'have'; project: string; have: Vector; archive: boolean }
+  /** Events the machine lacks, each writer's in seq order, then live as they arrive. */
+  | { t: 'events'; project: string; events: LogEvent[] }
+  | { t: 'resend'; project: string; writer: string; from: number }
+  | { t: 'refused'; project: string; refusal: Refusal }
+  | { t: 'rpc'; rpc: Rpc }
+  /** The hub recorded this result; the daemon stops republishing it. */
+  | { t: 'rpc-ack'; project: string; nonce: string }
+  /**
+   * Serve a DX4 subscription, scoped to one transcript: the session's main one (`agentId` null) or one subagent's. The
+   * snapshot and every `rows` page come from that transcript alone; a main-scope sub also carries every agent's
+   * chunks and the subagent tree, an agent-scope sub that agent's rows and chunks.
+   */
+  | { t: 'subscribe'; project: string; session: string; agentId: string | null; sub: string }
+  | { t: 'unsubscribe'; project: string; sub: string }
+  /** Older transcript rows for a subscription, before the row `before`, newest first, from the sub's transcript. */
+  | { t: 'rows'; project: string; session: string; agentId: string | null; sub: string; before: string; limit: number }
+  /** The session's working-tree diff against its base branch, answered as DX4 `diff` on the sub (a main-scope sub's). */
+  | { t: 'diff'; project: string; session: string; sub: string }
+  | Part;
+
+/**
+ * Why a daemon refused an event the hub sent it (DX1): its code does not verify (`bad-code`, which includes a `hub/`
+ * event whose position fails its shape and an event transplanted from another project), its nonce was seen before
+ * (`seen-nonce`), it is not a log event the daemon can read (`bad-shape`), or its code verifies but the daemon already
+ * holds a different event at that `(writer, seq)` (`conflict`; in a `hub/` feed, the hub re-sequenced one). Whatever
+ * the reason, the refused position is spent on that daemon: its `hello` vector moves past it, and the hub, which
+ * streams strictly beyond the vector a daemon sends, never sends it again.
+ */
+export type RejectionReason = 'bad-code' | 'seen-nonce' | 'bad-shape' | 'conflict';
+
+/**
+ * A daemon's report of an event it refused; the hub keeps it in the project's audit record and shows it to browsers.
+ * The event is named by what it carried, never by anything the daemon makes up: its position when it had one, its
+ * `mac.nonce` when it had one, either or both. An event that carried neither is still reported (`event` null, no
+ * `nonce`), so the refusal shows; `message` then says what it was.
+ */
+export type Rejection = {
+  /**
+   * The event's `writer` and `seq` exactly as they arrived, when `writer` was a string and `seq` a number (however
+   * wrong otherwise: a `hub/` writer that fails its shape is reported as it came); null when either was missing or of
+   * another type.
+   */
+  event: { writer: string; seq: number } | null;
+  /** Its `mac.nonce` exactly as it arrived, when that was a string. */
+  nonce?: string;
+  reason: RejectionReason;
+  message?: string;
+};
+
+/** Machine → hub, one per line of a POST body. */
+export type UpFrame =
+  /** The answer to each `hb`: the stream's `generation` and the answered heartbeat's `at`. The one frame that renews the
+   * machine's lease, fenced by the generation. */
+  | { t: 'hb-ack'; generation: number; at: string }
+  /** An event the daemon refused on import (it kept it out of its log). Distinct from the hub's own `refused`. */
+  | ({ t: 'rejected'; project: string } & Rejection)
+  /** Opens a project on this stream: the machine's vector, and the project's name from `.smns`. */
+  | { t: 'hello'; project: string; name: string; have: Vector }
+  /** Only the machine's own writers' events (and `legacy/` from the archive machine), each writer's in seq order. */
+  | { t: 'events'; project: string; events: LogEvent[] }
+  /** A result the daemon's ledger holds; republished after every reconnect until `rpc-ack`. */
+  | { t: 'rpc-result'; project: string; nonce: string; outcome: RpcOutcome }
+  | { t: 'session'; message: SessionMessage }
+  /** The machine's complete pending set for the project, sent after every reconnect; anything missing is dropped. */
+  | { t: 'pending'; project: string; raised: Raised[] }
+  | Part;

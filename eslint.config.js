@@ -43,9 +43,10 @@ const ONE_SCHEMA = [
 ];
 const mawsSchemaPlugin = { rules: { 'one-schema': builtinRules.get('no-restricted-syntax') } };
 // P3-B end
+const DESK_PROTOCOL = 'apps/desk-hub/src/protocol/ is runtime-neutral (the DC3 plan, Constraints): WebCrypto and plain TypeScript, no Workers, Node, or DOM API.'; // DC3
 
 module.exports = defineConfig(
-  { ignores: ['.doperpowers/', 'out/', 'dist/', 'node_modules/', 'mockups/', 'research/', 'spikes/', 'plugins/', 'test-results/', 'playwright-report/', '.claude/'] },
+  { ignores: ['.doperpowers/', 'out/', 'dist/', 'node_modules/', 'mockups/', 'research/', 'spikes/', 'plugins/', 'test-results/', 'playwright-report/', '.claude/', 'apps/*/dist/', 'apps/*/.wrangler/'] }, // DC3: the desk apps' build and wrangler state
   js.configs.recommended,
   tseslint.configs.recommended,
   {
@@ -142,4 +143,20 @@ module.exports = defineConfig(
     rules: { 'maws-schema/one-schema': ['error', ...ONE_SCHEMA] },
   },
   // P3-B end
+  // DC3 start: the desk hub's protocol module (apps/desk-hub/src/protocol/) is imported by the Worker, the web app, and
+  // the fake machine as it stands, so it imports no runtime's module; apps/desk-hub/tsconfig.protocol.json holds its
+  // globals to WebCrypto, text encoding, and URL.
+  {
+    files: ['apps/desk-hub/src/protocol/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: ['electron', ...NODE_MODULES].map((name) => ({ name, message: DESK_PROTOCOL })),
+          patterns: [{ group: ['node:*', 'cloudflare:*'], message: DESK_PROTOCOL }],
+        },
+      ],
+    },
+  },
+  // DC3 end
 );

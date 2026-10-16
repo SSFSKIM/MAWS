@@ -1,0 +1,28 @@
+{
+  "name": "desk-hub",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The desk's hub: a Cloudflare Worker and its Durable Objects (docs/doperpowers/specs/2026-10-15-desk-design.md, DC3)",
+  "type": "module",
+  "exports": {
+    "./protocol": "./src/protocol/index.ts",
+    "./fake-machine": "./fake-machine/index.ts"
+  },
+  "scripts": {
+    "local": "node --experimental-strip-types --disable-warning=ExperimentalWarning local/run.ts",
+    "fake-machine": "node --experimental-strip-types --disable-warning=ExperimentalWarning fake-machine/bin.ts",
+    "deployment": "node --experimental-strip-types --disable-warning=ExperimentalWarning deploy/bin.ts",
+    "build":"node -e \"require('node:fs').mkdirSync('../desk-web/dist', { recursive: true })\" && WRANGLER_SEND_METRICS=false wrangler deploy --dry-run --outdir dist",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.protocol.json && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261012.1",
+    "@types/node": "^24",
+    "esbuild": "0.28.2",
+    "miniflare": "5.20261012.0-beta",
+    "typescript": "^5.9.3",
+    "vitest": "^5.0.2",
+    "wrangler": "4.151.0"
+  }
+}
