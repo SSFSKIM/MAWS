@@ -500,7 +500,11 @@ test('the transform layer: select, move with guides, resize, rotate, nudge, flow
   expect(launch!.consoleErrors()).toEqual([]);
 });
 
+// A measured bound inside a class-1 group: it runs only under MAWS_PRESENTATIONS_PERF=1, which the gate never sets (as
+// MAWS_DOCUMENT_PERF and MAWS_ARTIFACTS_PERF). The scale gate (presentations-scale.spec.ts, class 2, under the load rule)
+// owns the 16 ms; the transform layer's case keeps a drag's function in the gate.
 test('the scale gate’s drag: move to frame p95 within 16 ms on the 100-slide deck while an agent republishes', async () => {
+  test.skip(process.env.MAWS_PRESENTATIONS_PERF !== '1', 'measured only under MAWS_PRESENTATIONS_PERF=1');
   test.setTimeout(150_000);
   const page = await ready();
   const id = await createDeck(page, 'Bench drag', benchDeckFiles(100));
