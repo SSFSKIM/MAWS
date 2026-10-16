@@ -103,7 +103,7 @@ function useLanded(channel: Channel, items: ReturnType<typeof buildStream>) {
   const { landing } = landed;
   const bad =
     landing.kind === 'request'
-      ? unverified.some((u) => u.what === 'request' && u.id === landing.request)
+      ? unverified.some((u) => u.what === 'request' && u.id === landing.request && u.session === landed.session)
       : refused(failed).some((e) => e.event?.writer === landing.writer && e.event?.seq === landing.seq);
   const status = landingStatus({ landing, found: item !== null, ready: landingReady(caughtUp, { checked }, failed), unverified: bad });
   return { item, notice: status.kind === 'shown' ? null : status };

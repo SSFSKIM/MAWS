@@ -221,7 +221,9 @@ export class HubDouble {
   raiseRaw(project: string, machine: string, raised: Raised, options: { terminalOnly?: boolean } = {}): void {
     const state = this.project(project);
     this.sendSession(project, { project, machine, session: raised.session, kind: 'raised', sub: null, n: null, body: raised });
-    this.setPending(project, [...state.pending.filter((p) => p.raised.request !== raised.request), { machine, raised, terminal_only: options.terminalOnly === true }]);
+    // The hub keys a request by (machine, session, request): a synthetic `request-…` id is minted per bridge.
+    const same = (p: PendingRequest) => p.machine === machine && p.raised.session === raised.session && p.raised.request === raised.request;
+    this.setPending(project, [...state.pending.filter((p) => !same(p)), { machine, raised, terminal_only: options.terminalOnly === true }]);
   }
 
   /** The hub's clock passed a background request's deadline: it stays pending, answerable only in the terminal. */
@@ -237,10 +239,11 @@ export class HubDouble {
   async settle(project: string, machine: string, session: string, draft: Omit<Settled, 'mac'>): Promise<Settled> {
     const settled = await seal(this.key, 'settled', project, draft);
     const state = this.project(project);
-    const raised = state.pending.find((p) => p.raised.request === draft.request)?.raised ?? null;
+    const same = (p: PendingRequest) => p.machine === machine && p.raised.session === session && p.raised.request === draft.request;
+    const raised = state.pending.find(same)?.raised ?? null;
     this.sendSession(project, { project, machine, session, kind: 'settled', sub: null, n: null, body: settled });
     this.decide(project, { machine, session, settled, raised });
-    this.setPending(project, state.pending.filter((p) => p.raised.request !== draft.request));
+    this.setPending(project, state.pending.filter((p) => !same(p)));
     return settled;
   }
 
@@ -378,6 +381,14 @@ export class HubDouble {
   /** Closes every socket, as a deploy restarting every object does. */
   dropConnections(): void {
     for (const socket of this.allSockets()) socket.terminate();
+  }
+
+  /** The hub recreated (a local hub started afresh): the project's log, pending set, deliveries, and audit record are
+   * gone, and its sockets dropped. */
+  recreate(project: string): void {
+    const sockets = [...this.project(project).sockets];
+    this.projects.delete(project);
+    for (const socket of sockets) socket.ws.terminate();
   }
 
   connected(project: string): number {

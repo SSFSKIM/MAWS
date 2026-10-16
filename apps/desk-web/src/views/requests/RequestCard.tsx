@@ -54,7 +54,8 @@ function latestRpc(rpcs: Record<string, RpcEntry>, request: string): RpcEntry | 
   return latest;
 }
 
-/** `embedded`: the card is the body of the session's own message, which already names it and its machine. */
+/** `request`: the request's key (`requestKey`). `embedded`: the card is the body of the session's own message, which
+ * already names it and its machine. */
 export function RequestCard({ request, embedded = false }: { request: string; embedded?: boolean }) {
   const { connection, member, sessions } = useDesk();
   const record = useStore(connection.conversation.store, (s) => s.requests[request]);
@@ -73,7 +74,7 @@ export function RequestCard({ request, embedded = false }: { request: string; em
   return (
     <article
       className={['my-2 flex max-w-[640px] flex-col gap-3 rounded-md border px-3.5 py-3 text-ui', state.kind === 'open' || state.kind === 'failed' || state.kind === 'uncertain' ? 'border-border-strong bg-bg-raised' : 'border-border bg-bg'].join(' ')}
-      data-request={request}
+      data-request={record.request}
       data-card-state={state.kind}
       aria-label={`${who} ${what}`}
     >

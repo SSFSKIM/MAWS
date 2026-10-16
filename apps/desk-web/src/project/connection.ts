@@ -82,11 +82,13 @@ export class ProjectConnection {
       handlers: {
         held: () => this.log.held(),
         welcome: (frame) => {
-          this.log.welcome(frame.head);
+          const replaced = this.log.welcome(frame.head);
           this.head = frame.head;
           // Presence from before the drop may no longer hold; until the hub sends it again a session's group reads the
           // log's last `state`, which is the record for exactly that case.
           this.live.setState({ caughtUp: false, presence: {} });
+          // A hub holding another log (started afresh) reported nothing that belongs to it: the conversation starts over.
+          if (replaced) this.conversation.reset();
           this.conversation.restart();
         },
         log: (entries) => {
@@ -170,13 +172,13 @@ export class ProjectConnection {
   /** Allow or deny a pending permission prompt, with the digest of exactly the request as drawn. */
   async decide(member: string, request: RequestRecord, decision: 'allow' | 'deny', message?: string): Promise<string> {
     const digest = await digestOf(request.raised);
-    return this.rpc(member, request.machine, 'decide', { session: request.raised.session, digest, decision, ...(message && { message }) }, request.request);
+    return this.rpc(member, request.machine, 'decide', { session: request.raised.session, digest, decision, ...(message && { message }) }, request.key);
   }
 
   /** Answer a pending question, with the digest of exactly the request as drawn. */
   async answer(member: string, request: RequestRecord, answers: Record<string, string>): Promise<string> {
     const digest = await digestOf(request.raised);
-    return this.rpc(member, request.machine, 'answer', { session: request.raised.session, digest, answers }, request.request);
+    return this.rpc(member, request.machine, 'answer', { session: request.raised.session, digest, answers }, request.key);
   }
 
   /** Sends an RPC again exactly as it was sealed — the same nonce, the same bytes — as DX6 has a retry do. */
@@ -214,7 +216,7 @@ export class ProjectConnection {
         this.conversation.raised(message.machine, message.body as Raised);
         return;
       case 'settled':
-        this.conversation.settled(message.machine, message.body as Settled);
+        this.conversation.settled(message.machine, message.session as string, message.body as Settled);
         return;
       case 'delivery':
         this.conversation.delivery(message.machine, message.body as Delivery);

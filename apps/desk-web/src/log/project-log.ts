@@ -78,15 +78,17 @@ export class ProjectLog {
   /**
    * The hub's latest offset, from its `welcome`. Offsets only grow, so a hub holding less than this record holds a log
    * that is not the one recorded (a local hub started afresh): the record is dropped and the log taken again from 0.
+   * True when it was.
    */
-  welcome(head: number): void {
-    if (head >= this.last) return;
+  welcome(head: number): boolean {
+    if (head >= this.last) return false;
     this.last = 0;
     this.generation++;
     this.recordEpoch++;
     this.unrecorded = [];
     this.store.setState({ entries: [] });
     this.queue(() => this.record.clear(this.project));
+    return true;
   }
 
   /**

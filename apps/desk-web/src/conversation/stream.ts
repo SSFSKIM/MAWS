@@ -15,7 +15,8 @@
 // Each working-record fold carries its bounds for DX8's `transcript` slot: the `src` of the session's exchange item
 // before it and of the one after it (a `<message>` span's `<row uuid>#<span index>`; a question's call id), null for
 // an open end; a live session's channel ends with an open-ended fold after its last item.
-import type { LogEvent, Raised, Recipient } from 'desk-hub/protocol';
+import { writerMachine, type LogEvent, type Raised, type Recipient } from 'desk-hub/protocol';
+import { requestKey } from '../project/conversation';
 import type { Channel } from '../shell/layout';
 import { isQuestion } from './card-state';
 
@@ -24,27 +25,29 @@ export type Entry = { offset: number; event: LogEvent };
 export type StreamItem =
   | { kind: 'message'; key: string; offset: number; event: LogEvent; session: string | null; from: string; text: string }
   | { kind: 'human'; key: string; offset: number; event: LogEvent; text: string; to: '*' | Recipient[]; wake: boolean }
-  | { kind: 'question'; key: string; offset: number; event: LogEvent; session: string | null; from: string; text: string; choices: string[]; request: string; answered: { text: string; event: LogEvent } | null }
+  /** `request`: the call's id (the event's `src`); `ref`: the key of the request raised for it, if any (`requestKey`). */
+  | { kind: 'question'; key: string; offset: number; event: LogEvent; session: string | null; from: string; text: string; choices: string[]; request: string; ref: string; answered: { text: string; event: LogEvent } | null }
   | { kind: 'system'; key: string; offset: number; event: LogEvent; text: string }
   | { kind: 'agents'; key: string; says: Entry[] }
   | { kind: 'work'; key: string; offset: number; session: string; range: { from: string | null; to: string | null } }
-  | { kind: 'request'; key: string; request: string };
+  /** `request`: the request's id; `ref`: its key in the conversation's `requests`. */
+  | { kind: 'request'; key: string; request: string; ref: string };
 
 /**
- * A request as the stream places it: `at` is the offset of the last log entry the browser held when it first saw it;
+ * A request as the stream places it: `key` is its key in the conversation's `requests` (machine, session, id); `at` is the offset of the last log entry the browser held when it first saw it;
  * `question` whether it is a question (an exchange item, so it bounds the working record: a native one has no
  * `question` event to do it); `call` the transcript's tool-use id of the call it belongs to, the bound a question
  * gives the working record (its `request` when absent).
  */
-export type PlacedRequest = { request: string; session: string; at: number; question?: boolean; call?: string };
+export type PlacedRequest = { key: string; request: string; session: string; at: number; question?: boolean; call?: string };
 
 /**
  * A request the browser holds, placed: a raised request names its transcript call as `toolUseId ?? request` (DX4,
  * composite 43a27604) — `toolUseId` is there only where the two differ, as for the ask mod's blocking question, raised
  * under the engine dialog's id while the transcript holds the outer call. Decisions and answers still go to `request`.
  */
-export function placedRequest(record: { request: string; raised: Raised; at: number }): PlacedRequest {
-  return { request: record.request, session: record.raised.session, at: record.at, question: isQuestion(record.raised.tool), call: record.raised.toolUseId ?? record.request };
+export function placedRequest(record: { key: string; request: string; raised: Raised; at: number }): PlacedRequest {
+  return { key: record.key, request: record.request, session: record.raised.session, at: record.at, question: isQuestion(record.raised.tool), call: record.raised.toolUseId ?? record.request };
 }
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
@@ -56,6 +59,10 @@ export const writerSession = (writer: string): string | null => {
   const id = writer.slice(writer.indexOf('/') + 1);
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) ? id : null;
 };
+
+/** The key of the request a session's `question` event was raised as: its writer's machine and session, and its `src`. */
+const questionRef = (event: LogEvent): string =>
+  requestKey({ machine: writerMachine(event.writer) ?? '', session: writerSession(event.writer) ?? '', request: str(event.src) });
 
 /** A web member's id (DX7: 128 bits as 32 lowercase hex), which `retired` and spawn's `joined` record as `by`. */
 const MEMBER_ID = /^[0-9a-f]{32}$/;
@@ -127,8 +134,9 @@ export function buildStream(
   const answers = new Map<string, Entry>();
   for (const e of entries) if (e.event.kind === 'answered' && str(e.event.src)) answers.set(str(e.event.src), e);
   const questionCalls = new Set(shown.filter((e) => e.event.kind === 'question').map((e) => str(e.event.src)));
+  const questionRefs = new Set(shown.filter((e) => e.event.kind === 'question').map((e) => questionRef(e.event)));
   const placed = requests
-    .filter((r) => (channel.kind === 'group' || r.session === channel.session) && !questionCalls.has(r.request))
+    .filter((r) => (channel.kind === 'group' || r.session === channel.session) && !questionRefs.has(r.key))
     .map((r, i) => ({ ...r, i }))
     .sort((a, b) => a.at - b.at || a.i - b.i);
 
@@ -154,8 +162,8 @@ export function buildStream(
     while (next < placed.length && placed[next].at < offset) {
       const r = placed[next];
       // A question with no `question` event (a native one) is the exchange item that bounds the working record.
-      if (r.question) workBefore(`work:request:${r.request}`, r.at, r.session, r.call ?? r.request);
-      push({ kind: 'request', key: `request:${r.request}`, request: r.request });
+      if (r.question) workBefore(`work:request:${r.key}`, r.at, r.session, r.call ?? r.request);
+      push({ kind: 'request', key: `request:${r.key}`, request: r.request, ref: r.key });
       next++;
     }
   };
@@ -193,6 +201,7 @@ export function buildStream(
           text: str(event.text),
           choices: Array.isArray(event.choices) ? event.choices.filter((c): c is string => typeof c === 'string') : [],
           request: str(event.src),
+          ref: questionRef(event),
           answered: answer ? { text: str(answer.event.text), event: answer.event } : null,
         });
         break;

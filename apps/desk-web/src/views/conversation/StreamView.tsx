@@ -79,11 +79,11 @@ function Item({ item }: { item: StreamItem }) {
     case 'work':
       return <WorkingRecord session={item.session} range={item.range} />;
     case 'request':
-      return <RequestItem request={item.request} />;
+      return <RequestItem request={item.ref} />;
   }
 }
 
-/** A request that is not a log event, drawn as the session's own message with the card as its body. */
+/** A request that is not a log event, drawn as the session's own message with the card as its body. `request`: its key. */
 function RequestItem({ request }: { request: string }) {
   const { connection, sessions } = useDesk();
   const record = useStore(connection.conversation.store, (s) => s.requests[request]);
@@ -152,12 +152,12 @@ function Deliveries({ event, to, wake }: { event: LogEvent; to: '*' | Recipient[
 
 function QuestionItem({ item }: { item: Extract<StreamItem, { kind: 'question' }> }) {
   const { connection, sessions } = useDesk();
-  const pending = useStore(connection.conversation.store, (s) => s.requests[item.request]);
+  const pending = useStore(connection.conversation.store, (s) => s.requests[item.ref]);
   const session = item.session ? sessions.get(item.session) : undefined;
   return (
     <Said who={item.from} machine={session?.machine} ts={item.event.ts}>
       {pending && !item.answered ? (
-        <RequestCard request={item.request} embedded />
+        <RequestCard request={item.ref} embedded />
       ) : (
         <>
           <Prose text={item.text} />
