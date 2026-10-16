@@ -63,7 +63,7 @@ describe('the deck’s standalone page', () => {
     expect(html).toContain('<x-icon data-eid="star" data-layer="under" name="Star"');
     expect(html).toMatch(/<x-icon[^>]*><svg viewBox="0 0 24 24"[^>]*><path d="M /);
     expect(html).toMatch(/<x-embed data-eid="live"[^>]*><iframe sandbox="allow-scripts" tabindex="-1" srcdoc="[^"]*default-src &#39;none&#39;|<x-embed data-eid="live"[^>]*><iframe sandbox="allow-scripts" tabindex="-1" srcdoc="[^"]*default-src 'none'/);
-    expect(html).toContain('<svg data-eid="chart" data-layer="under" aria-label="A dot" viewBox="0 0 100 100"');
+    expect(html).toContain('<svg data-eid="chart" data-layer="under" aria-label="A dot" data-svg-scope="esvg-body-chart" viewBox="0 0 100 100"');
     expect(html).toContain('<x-embed data-eid="live" style=');
     const under = exportDeckOf(fixtureDoc({ ...FIXTURE_FILES, 'project/slides/body.html': '<section id="body"><div id="back" style="position:absolute; left:0; top:0; width:100px; height:100px; background:#ff0000"></div><p id="t">Over</p></section>' }), 'x');
     const drawn = deckPage(under, { mode: 'html', resolveVar: () => undefined, asset, facesCss: '' });
@@ -133,5 +133,38 @@ describe('the deck’s standalone page: the final review', () => {
     expect(html).not.toMatch(/url\(["']?assets\//);
     expect(html).toContain(`<section class="maws-slide" data-slide="body" style="background:url(&quot;${LOGO}&quot;) center / cover"`);
     expect(html).toContain(`<h1 data-eid="t" style="background:url(&quot;${LOGO}&quot;); background-clip:text`);
+  });
+
+  // A16 (fixer B's B1 carried to the export page; Decision Log 37 (3)): every svg drawing on the page is contained as the
+  // canvas contains it (canvas/svg-scope.ts): its stylesheets (an HTML <style> under <desc> or <title> too) match only
+  // its own elements, and its ids and their references are its own. At text level: no DOM here applies an svg's sheet.
+  it('A16: contains each svg drawing: its stylesheets its own, its ids renamed per drawing with their references', () => {
+    const drawing = (slide: string) =>
+      `<section id="${slide}"><svg id="art" viewBox="0 0 100 100" style="position:absolute; left:0px; top:0px; width:100px; height:100px">` +
+      '<style>body{display:none!important} .bar{fill:url(#grad)}</style>' +
+      '<desc><style>body{display:none!important}</style></desc>' +
+      '<linearGradient id="grad"><stop offset="0" stop-color="#ff0000"></stop></linearGradient>' +
+      '<rect id="r" class="bar" width="10" height="10"></rect><use href="#r" x="20"></use></svg></section>';
+    const files = { ...FIXTURE_FILES, 'project/slides/cover.html': drawing('cover'), 'project/slides/body.html': drawing('body') };
+    const html = deckPage(exportDeckOf(fixtureDoc(files), 'x'), { mode: 'html', resolveVar: () => undefined, asset, facesCss: '' });
+    const svgs = [...html.matchAll(/<svg data-eid="art"[\s\S]*?<\/svg>/g)].map((m) => m[0]);
+    expect(svgs).toHaveLength(2);
+    const scopes = svgs.map((svg) => /data-svg-scope="([^"]+)"/.exec(svg)?.[1]);
+    expect(scopes[0]).toBeTruthy();
+    expect(scopes[1]).toBeTruthy();
+    expect(scopes[0]).not.toBe(scopes[1]);
+    svgs.forEach((svg, k) => {
+      const scope = scopes[k]!;
+      const sheets = [...svg.matchAll(/<style>([\s\S]*?)<\/style>/g)].map((m) => m[1]!);
+      expect(sheets).toHaveLength(2); // the svg's own, and the HTML one under <desc>
+      for (const sheet of sheets) {
+        expect(sheet).not.toMatch(/(^|[}\s])body\s*\{/); // never the page's body
+        expect(sheet).toContain(`body:where([data-svg-scope="${scope}"],[data-svg-scope="${scope}"] *)`);
+      }
+      expect(svg).toContain(`id="${scope}_grad"`);
+      expect(svg).toContain(`id="${scope}_r"`);
+      expect(svg).toContain(`href="#${scope}_r"`);
+      expect(sheets[0]).toContain(`#${scope}_grad`);
+    });
   });
 });

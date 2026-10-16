@@ -24,6 +24,7 @@ import { cropStyle, embedDocument } from '../render-rules';
 import { canonicalOrder, escAttr, escText, partition, serializeInline } from '../serialize';
 import type { Doc } from '../../yjs';
 import { connectorSvg, iconSvg, shapeSvg } from './glyphs-svg';
+import { containSvgMarkup } from './svg-contain';
 import type { MeasuredDeck, MeasuredElement } from './measure';
 
 export interface ExportSlide {
@@ -154,6 +155,7 @@ const VIEWER = `(function () {
 })();`;
 
 interface Writer {
+  slideId: string;
   options: PageOptions;
   measured: Map<string, MeasuredElement>;
   pictures: ReadonlyMap<string, string> | undefined;
@@ -199,9 +201,12 @@ function elementHtml(el: ElementIR, w: Writer, under: boolean): string {
   const attrs: string[] = [];
   if (el.id) attrs.push(`data-eid="${escAttr(el.id)}"`);
   if (under) attrs.push('data-layer="under"');
-  for (const k of Object.keys(el.attrs).sort()) {
+  // an svg drawing contained as the canvas contains it: its stylesheets and ids its own on the one page (A16)
+  const drawing = el.tag === 'svg' ? containSvgMarkup(el.attrs, el.raw ?? '', `esvg-${w.slideId}-${el.id}`) : null;
+  const own = drawing?.attrs ?? el.attrs;
+  for (const k of Object.keys(own).sort()) {
     if (el.tag === 'img' && k === 'src') continue;
-    attrs.push(el.attrs[k] === '' ? k : `${k}="${escAttr(el.attrs[k]!)}"`);
+    attrs.push(own[k] === '' ? k : `${k}="${escAttr(own[k]!)}"`);
   }
   // a sized text box: marked for the measure pass's fit, or (once measured) drawn at the size it fitted
   if (TEXT_TAGS.has(el.tag) && style.height !== undefined && style.height !== 'auto') {
@@ -214,7 +219,7 @@ function elementHtml(el: ElementIR, w: Writer, under: boolean): string {
     const src = el.attrs.src?.startsWith('assets/') ? options.asset(el.attrs.src) : null;
     attrs.push(src ? `src="${escAttr(src)}"` : `data-placeholder="${escAttr(el.attrs.src ?? '')}"`);
     Object.assign(style, cropStyle(el.attrs['data-crop']) ?? {}); // the canvas's crop (render-rules.ts)
-  } else if (el.tag === 'svg') inner = el.raw ?? '';
+  } else if (drawing) inner = drawing.inner;
   else if (el.tag === 'x-icon') inner = iconSvg(el.attrs.name);
   else if (el.tag === 'x-embed') {
     const picture = w.pictures?.get(el.id);
@@ -237,7 +242,7 @@ function elementHtml(el: ElementIR, w: Writer, under: boolean): string {
 
 function slideHtml(slide: ExportSlide, options: PageOptions): string {
   const measuredSlide = options.measured?.slides.find((s) => s.id === slide.id);
-  const w: Writer = { options, measured: new Map((measuredSlide?.elements ?? []).map((e) => [e.id, e])), pictures: options.pictures?.get(slide.id) };
+  const w: Writer = { slideId: slide.id, options, measured: new Map((measuredSlide?.elements ?? []).map((e) => [e.id, e])), pictures: options.pictures?.get(slide.id) };
   const attrs = [`class="maws-slide"`, `data-slide="${escAttr(slide.id)}"`];
   for (const k of Object.keys(slide.ir.attrs).sort()) {
     if (k === 'hidden') attrs.push('data-hidden=""');
