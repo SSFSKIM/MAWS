@@ -93,6 +93,13 @@ describe.each([d3Kit, houseKit])('candidate $name', (kit) => {
     }
   });
 
+  it('names every category under a bar chart, wrapping long Korean names rather than dropping any', () => {
+    const texts = grade(draw('edge-long-korean').svg).texts.join(' ');
+    for (const name of ['서울특별시', '부산광역시 해운대구', '제주특별자치도']) expect(texts).toContain(name);
+    const gdp = grade(draw('bar-gdp-2024').svg).texts;
+    for (const name of ['미국', '캐나다', '대한민국', '프랑스', '영국', '이탈리아', '일본', '독일']) expect(gdp).toContain(name);
+  });
+
   it('counts rows for pie slices and keeps series identity from the unfiltered snapshot', () => {
     const pie = tips(draw('pie-penguins-island').svg);
     expect(pie).toEqual(['토르게르센섬: 52 (15.1%)', '비스코섬: 168 (48.8%)', '드림섬: 124 (36%)']);

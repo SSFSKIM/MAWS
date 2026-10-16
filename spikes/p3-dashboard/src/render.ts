@@ -268,8 +268,9 @@ function cartesian(v: View): Rendered {
       return w.lines;
     });
     if (shortened) warnings.push('some category labels are shortened; the source table has them whole');
-    const every = thinning(wrapped.map((lines) => Math.max(...lines.map((l) => textWidth(l, theme.caption)))), band.bandwidth / 0.8);
-    const svg = wrapped.map((lines, i) => (i % every === 0 ? text(band.starts[i] + band.bandwidth / 2, axisY + theme.caption + 8, lines, { anchor: 'middle', fill: theme.muted, line: lineH }) : '')).join('');
+    // Every category keeps its label (a bar without one has no identity): each is wrapped to its band's step less 4 px,
+    // so neighbours never touch and nothing is thinned.
+    const svg = wrapped.map((lines, i) => text(band.starts[i] + band.bandwidth / 2, axisY + theme.caption + 8, lines, { anchor: 'middle', fill: theme.muted, line: lineH })).join('');
     xAxis = { svg, height: theme.caption + 8 + (Math.max(...wrapped.map((l) => l.length)) - 1) * lineH + 8, map: (x) => (keys.includes(seriesKey(x)) ? band.starts[keys.indexOf(seriesKey(x))] + band.bandwidth / 2 : null), band: { ...band, keys } };
   } else {
     const xs = series.flatMap((s) => s.marks.map((m) => xValue(m.x)!));
