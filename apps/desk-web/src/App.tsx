@@ -12,7 +12,7 @@ import { hubBase } from './hub/base';
 import { recordPushOutcome } from './push/outcome';
 import { browserPushEnv, resyncPush } from './push/device';
 import { orgWaiting, showBadge } from './pwa/badge';
-import { followLandings, registerServiceWorker } from './pwa/service-worker';
+import { registerServiceWorker } from './pwa/service-worker';
 import { followHistory, useDeskLayout } from './shell/layout';
 import { usePhoneProject } from './shell/phone';
 import { useNarrow } from './shell/viewport';
@@ -67,7 +67,6 @@ function Desk({ me }: { me: Me }) {
     useSecondMethodPrompt.setState({ due: false });
   }, []);
   useEffect(() => followHistory(), []);
-  useEffect(() => followLandings(), []);
   useEffect(() => startGrid(hubBase()), []);
   useEffect(() => void loadDeviceKey(me.org.id), [me.org.id]);
   // A device already subscribed hands its subscription to the hub again; what came of it is kept for the

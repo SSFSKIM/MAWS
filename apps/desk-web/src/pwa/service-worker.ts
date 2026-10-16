@@ -31,7 +31,10 @@ export function land(url: URL, navigate: boolean): void {
   if (url.search) history.replaceState(history.state, '', url.pathname);
 }
 
-/** Lands on the start URL's card, then on each card the worker sends an open window to. */
+/**
+ * Lands on the start URL's card, then on each card the worker sends an open window to. Called once, as the page starts
+ * (main.tsx), before the sign-in is known: a message that reaches a loaded page with no listener is dropped.
+ */
 export function followLandings(): () => void {
   land(new URL(location.href), false);
   if (!('serviceWorker' in navigator)) return () => {};
