@@ -1,7 +1,8 @@
 // The fake machine's reconnect, against what M5 saw on the deployment: minutes after a deploy, Cloudflare restarted the
 // `Machine` object for new requests while the old instance kept the machine's stream open and beating. Every POST then
 // reached an object with no stream and was refused `409 stale-generation`, the hb-acks too, and nothing ever closed the
-// stream from the client's side. A machine that reconnects by itself must take that refusal as its cue to reconnect.
+// stream from the client's side. A `503 delivery-failed` says the same of a stream the hub could not write to. A machine
+// that reconnects by itself must take either refusal, on a write or on a heartbeat's ack, as its cue to reconnect.
 // The hub here is a stub speaking DX2's stream and POST, which can play that rollover.
 import { createServer, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -10,11 +11,14 @@ import { FakeMachine } from '../../fake-machine';
 import type { DownFrame, UpFrame } from '../../src/protocol/machine';
 
 const PROJECT = '5d4e0a8e-3b2d-4c5e-9f70-0000000000ff';
+const REFUSALS = { 409: 'stale-generation', 503: 'delivery-failed' } as const;
 
-/** A stub hub: one stream per generation; `rollover()` makes every later POST stale while the old stream beats on. */
+/** A stub hub: one stream per generation; `refuse(status)` refuses every later POST on the current stream with that
+ * status while the stream itself stays open, as after a deploy's rollover. */
 async function stubHub() {
   let generation = 0;
   let current = 0;
+  let refused: { generation: number; status: keyof typeof REFUSALS } | null = null;
   const streams = new Map<number, ServerResponse>();
   const posted: Array<{ generation: number; frames: UpFrame[] }> = [];
   const send = (g: number, frame: DownFrame) => streams.get(g)?.write(`event: ${frame.t}\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -31,8 +35,9 @@ async function stubHub() {
     request.on('data', (chunk: Buffer) => (body += chunk.toString()));
     request.on('end', () => {
       const g = Number(request.headers['x-desk-generation']);
-      if (g !== current) {
-        response.writeHead(409, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: 'stale-generation' }));
+      const status = refused?.generation === g ? refused.status : g !== current ? 409 : null;
+      if (status) {
+        response.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: REFUSALS[status] }));
         return;
       }
       const frames = body.split('\n').filter(Boolean).map((line) => JSON.parse(line) as UpFrame);
@@ -48,10 +53,12 @@ async function stubHub() {
     get generation() {
       return current;
     },
-    /** New requests reach a fresh object, which holds no stream: the old one stays open and beats. */
-    rollover() {
-      current = -1;
-      send(1, { t: 'hb', at: new Date().toISOString() });
+    refuse(status: keyof typeof REFUSALS) {
+      refused = { generation: current, status };
+    },
+    /** A heartbeat on the stream that is still open, which the machine acks. */
+    beat() {
+      send(current, { t: 'hb', at: new Date().toISOString() });
     },
     close() {
       for (const s of streams.values()) s.end();
@@ -72,21 +79,35 @@ async function until(test: () => boolean, what: string, ms = 10_000) {
   }
 }
 
-describe('the fake machine reconnecting by itself', () => {
-  it('takes a 409 stale-generation, on a write or on an hb-ack, as a cue to reconnect, and its writes land on the new stream', async () => {
-    const hub = await stubHub();
-    const fm = new FakeMachine({ hub: hub.url, machine: 'm', credentials: { clientId: 'c', clientSecret: 's' }, orgKey: new Uint8Array(32).fill(1), project: PROJECT, reconnect: true });
-    close = () => {
-      void fm.close();
-      hub.close();
-    };
-    await fm.connect();
-    expect(fm.generation).toBe(1);
+async function connected() {
+  const hub = await stubHub();
+  const fm = new FakeMachine({ hub: hub.url, machine: 'm', credentials: { clientId: 'c', clientSecret: 's' }, orgKey: new Uint8Array(32).fill(1), project: PROJECT, reconnect: true });
+  close = () => {
+    void fm.close();
+    hub.close();
+  };
+  await fm.connect();
+  expect(fm.generation).toBe(1);
+  return { hub, fm };
+}
 
-    hub.rollover();
-    await fm.write('w1', 'm/feed', { kind: 'say', from: 'm', to: '*', text: 'one' });
-    await until(() => fm.generation === 2 && hub.generation === 2, 'a reconnect after the stale refusal');
-    // The new stream's hello carries the vector, the stub answers `have {}`, and the machine uploads its own suffix.
-    await until(() => hub.posted.some((p) => p.generation === 2 && p.frames.some((f) => f.t === 'events' && f.events.some((e) => e.seq === 1))), 'the write uploaded again');
-  });
+describe('the fake machine reconnecting by itself', () => {
+  for (const status of [409, 503] as const) {
+    it(`takes a ${status} on a write as its cue to reconnect, and the write lands on the new stream`, async () => {
+      const { hub, fm } = await connected();
+      hub.refuse(status);
+      await fm.write('w1', 'm/feed', { kind: 'say', from: 'm', to: '*', text: 'one' });
+      await until(() => fm.generation === 2 && hub.generation === 2, `a reconnect after a ${status}`);
+      // The new stream's hello carries the vector, the stub answers `have {}`, and the machine uploads its own suffix.
+      await until(() => hub.posted.some((p) => p.generation === 2 && p.frames.some((f) => f.t === 'events' && f.events.some((e) => e.seq === 1))), 'the write uploaded again');
+    });
+
+    it(`takes a ${status} on a heartbeat's ack alone as its cue to reconnect`, async () => {
+      const { hub, fm } = await connected();
+      hub.refuse(status);
+      hub.beat();
+      await until(() => fm.generation === 2 && hub.generation === 2, `a reconnect after an hb-ack's ${status}`);
+      expect(hub.posted.some((p) => p.generation === 2 && p.frames.some((f) => f.t === 'hello'))).toBe(true);
+    });
+  }
 });
