@@ -8,6 +8,11 @@ type ShownWindow = Pick<BrowserWindow, 'show' | 'showInactive' | 'setOpacity' | 
 // CDP with its focus emulated, so no test needs the window key; one that needs native focus asks for it (`win.focus()`).
 export function showAppWindow(win: ShownWindow, env: NodeJS.ProcessEnv): void {
   if (env.MAWS_E2E !== '1') return win.show();
+  // Foreground e2e (gate-offload §3.6): on a Mac nobody uses, the gate's macOS runner, the window is shown as an owner's
+  // launch shows it, opaque, the app activated and the window key, so a case meets the OS state a person's MAWS has
+  // (a key window, an active app) rather than an app left behind whatever else is frontmost. It overrides quiet: the
+  // runner sets MAWS_E2E_QUIET for every e2e job and this only on the macOS one.
+  if (env.MAWS_E2E_FOREGROUND === '1') return win.show();
   // Quiet e2e (owner's ruling 2026-10-06): the window must exist for Chromium to paint, but it need not be seen. It is
   // shown fully transparent and lets clicks pass through, so a run of many launches no longer covers the desktop;
   // Playwright's input and screenshots go over CDP and never touch the window's alpha. Quiet is the default (owner's
