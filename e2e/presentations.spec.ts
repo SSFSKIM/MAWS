@@ -702,3 +702,62 @@ test('the inspector restyles, Insert makes each kind, text is edited in place th
 
   expect(launch!.consoleErrors()).toEqual([]);
 });
+
+// ---- the final fix wave B (B1, B2, B3): what the canvas draws of an svg's stylesheet and ids, a container's display
+// and an asset named in a style value, in Chromium
+
+const svgOf = (gradient: string) =>
+  `<svg id="chart" viewBox="0 0 200 100" style="position:absolute; left:1200px; top:600px; width:400px; height:200px"><style>body{display:none!important} [data-region]{visibility:hidden!important} .bar{fill:rgb(0,128,0)} @keyframes spin{to{opacity:.5}}</style><defs><linearGradient id="g"><stop offset="0" stop-color="${gradient}"/><stop offset="1" stop-color="${gradient}"/></linearGradient></defs><rect id="r" class="bar" width="50" height="50"/><rect id="filled" x="100" width="50" height="50" fill="url(#g)"/></svg>`;
+const CONTAINED: Record<string, string> = {
+  'project/deck.json': JSON.stringify({ v: 4, title: 'Contained', cover: 'one', order: ['one', 'two'] }),
+  'project/slides/one.html': `<section id="one" style="background:#ffffff; padding:128px">
+<div id="row" style="display:flex; gap:32px"><div id="c1" style="width:200px; height:100px; background:#ff0000"></div><div id="c2" style="width:200px; height:100px; background:#0000ff"></div></div>
+<div id="col" style="gap:32px"><div id="d1" style="width:200px; height:100px; background:#ff0000"></div><div id="d2" style="width:200px; height:100px; background:#0000ff"></div></div>
+<div id="art" style="position:absolute; left:1200px; top:200px; width:200px; height:200px; background:#eeeeee"></div>
+${svgOf('#ff0000')}
+</section>`,
+  'project/slides/two.html': `<section id="two" style="background:#ffffff">${svgOf('#0000ff')}</section>`,
+};
+
+test('an svg’s stylesheet and ids stay its own; an explicit flex row is a row; a style’s asset draws from the store (final fix wave B)', async () => {
+  test.setTimeout(180_000);
+  const page = await ready();
+  const id = await createDeck(page, 'Contained', CONTAINED);
+  const tab = await openFromLibrary(page, 'Contained', id);
+  await expect(tab.locator('[data-slide-thumb]')).toHaveCount(2);
+
+  // B1: the app's document keeps its look; each drawing (the stage, both thumbnails) keeps its own rule and its own #g
+  expect(await page.evaluate(() => getComputedStyle(document.body).display)).not.toBe('none');
+  await expect(page.locator('[data-region="sidebar"]')).toBeVisible();
+  expect(await page.locator('[data-region="main"]').evaluate((n) => getComputedStyle(n).visibility)).toBe('visible');
+  const drawings = await tab.locator('.maws-slide svg[data-eid="chart"]').evaluateAll((svgs) =>
+    svgs.map((svg) => {
+      const filled = svg.querySelector('rect[fill]')!;
+      const ref = /#([^)"']+)/.exec(filled.getAttribute('fill') ?? '')?.[1] ?? '';
+      const gradient = svg.ownerDocument.getElementById(ref);
+      return { own: gradient !== null && svg.contains(gradient), stop: gradient?.querySelector('stop')?.getAttribute('stop-color'), slide: svg.closest('.maws-slide')!.getAttribute('data-slide'), bar: getComputedStyle(svg.querySelector('.bar')!).fill };
+    }),
+  );
+  expect(drawings.length).toBe(3); // the stage's slide and the two thumbnails
+  for (const d of drawings) {
+    expect(d.own).toBe(true);
+    expect(d.stop).toBe(d.slide === 'one' ? '#ff0000' : '#0000ff');
+    expect(d.bar).toBe('rgb(0, 128, 0)');
+  }
+
+  // B2: an explicit display:flex with no direction lays its children in a row; no display, a column
+  const box = async (eid: string) => (await tab.locator(`[data-stage-slide] [data-eid="${eid}"]`).boundingBox())!;
+  const [c1, c2, d1, d2] = [await box('c1'), await box('c2'), await box('d1'), await box('d2')];
+  expect(c2.x).toBeGreaterThan(c1.x + c1.width - 1);
+  expect(Math.abs(c2.y - c1.y)).toBeLessThan(1);
+  expect(d2.y).toBeGreaterThan(d1.y + d1.height - 1);
+  expect(Math.abs(d2.x - d1.x)).toBeLessThan(1);
+
+  // B3: an uploaded asset named in a style value draws from the store
+  await tab.locator('[data-insert-image]').setInputFiles({ name: 'mark.svg', mimeType: 'image/svg+xml', buffer: MARK_SVG });
+  await expect.poll(async () => (await slideOf(page, id, 'one')).children.some((c) => c.tag === 'img' && c.attrs.src === 'assets/mark.svg')).toBe(true);
+  await editDeck(page, id, { op: 'setStyle', slideId: 'one', elementId: 'art', props: { background: 'url(assets/mark.svg) center / cover' } });
+  await expect.poll(() => tab.locator('[data-stage-slide] [data-eid="art"]').evaluate((n) => getComputedStyle(n).backgroundImage)).toMatch(/^url\("maws-artifact:/);
+
+  expect(launch!.consoleErrors()).toEqual([]);
+});

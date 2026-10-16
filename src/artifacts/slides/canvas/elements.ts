@@ -6,6 +6,8 @@ import { LIST_TAGS, TEXT_TAGS, type TextBlock } from '../ir';
 import type { FlatElement } from '../model';
 import { cropStyle, embedDocument } from '../render-rules';
 import { escAttr, serializeInline } from '../serialize';
+import { aliasFamilyList, type FaceAliases } from './faces';
+import { scopeSvgAttribute, scopeSvgStyleSheet, SVG_SCOPE_ATTR, svgKeyframesNames, type SvgNames } from './svg-scope';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -20,23 +22,85 @@ export type EmbedUrl = (elementId: string, raw: string) => string;
 // An x-embed runs in a sandboxed frame with no network (render-rules.ts, shared with the export page).
 export { embedDocument } from '../render-rules';
 
+/** Svg drawings made in this window: each one's scope (B1), unique among every canvas's. */
+let drawings = 0;
+
+/** What a style value draws through: the deck's assets and its uploaded faces' private names. */
+export interface DrawContext {
+  assetUrl: AssetUrl;
+  faces: FaceAliases;
+}
+
+const CSS_URL = /url\(\s*(?:"([^"]*)"|'([^']*)'|([^'")\s]*))\s*\)/gi;
+const cssQuoted = (value: string) => `"${value.replace(/[\\"]/g, (c) => `\\${c}`).replace(/\n/g, '\\a ')}"`;
+
+/**
+ * A model style value as the canvas writes it (final fix wave B3, B6): an asset a value names (`url(assets/<name>)`,
+ * the dialect's picture fill) through the store's URL, as an image's `src` is, and any other `url()` (an asset the deck
+ * lacks, Claude's `/_blob/` and `project/ds/` paths) as no image, so nothing loads from the app's origin; a font-family
+ * naming the deck's uploads by their private names (canvas/faces.ts). The model keeps the value as written.
+ */
+export function drawnValue(prop: string, value: string, draw: DrawContext): string {
+  let out = prop === 'font-family' ? aliasFamilyList(value, draw.faces) : value;
+  if (/url\(/i.test(out)) {
+    out = out.replace(CSS_URL, (_m, dq: string | undefined, sq: string | undefined, bare: string | undefined) => {
+      const ref = dq ?? sq ?? bare ?? '';
+      const url = ref.startsWith('assets/') ? draw.assetUrl(ref) : null;
+      return url ? `url(${cssQuoted(url)})` : 'none';
+    });
+  }
+  return out;
+}
+
+/**
+ * B1: contains a drawn svg in place (its root and every descendant; svg-scope.ts): its ids and their references renamed
+ * into `scope`, its stylesheets constrained to it, the root marked with the scope. `scope` names this drawing alone in
+ * its document.
+ */
+export function containSvg(root: Element, scope: string): void {
+  const all = [root, ...Array.from(root.querySelectorAll('*'))];
+  const ids = new Map<string, string>();
+  for (const el of all) {
+    const id = el === root ? null : el.getAttribute('id');
+    if (id) ids.set(id, `${scope}_${id}`);
+  }
+  const sheets = all.filter((el) => el.localName === 'style' && el.namespaceURI === SVG_NS);
+  const keyframes = new Map<string, string>();
+  for (const sheet of sheets) for (const name of svgKeyframesNames(sheet.textContent ?? '')) keyframes.set(name, `${scope}_${name}`);
+  const names: SvgNames = { scope, ids, keyframes };
+  for (const el of all) {
+    const element = { tag: el.localName, attributeName: el.getAttribute('attributeName') };
+    for (const attr of Array.from(el.attributes)) {
+      if (el === root && attr.name === 'id') continue;
+      const next = scopeSvgAttribute(element, attr.name, attr.value, names);
+      if (next === null) el.removeAttributeNode(attr);
+      else if (next !== attr.value) attr.value = next;
+    }
+  }
+  for (const sheet of sheets) sheet.textContent = scopeSvgStyleSheet(sheet.textContent ?? '', names);
+  root.setAttribute(SVG_SCOPE_ATTR, scope);
+}
+
 /** The element's node, its inline style and attributes as the model holds them (the section's `hidden` excepted). */
-export function createNode(document: Document, e: FlatElement, text: TextBlock[] | undefined, assetUrl: AssetUrl, thumbnail = false, embedUrl?: EmbedUrl): HTMLElement {
+export function createNode(document: Document, e: FlatElement, text: TextBlock[] | undefined, draw: DrawContext, thumbnail = false, embedUrl?: EmbedUrl): HTMLElement {
   let n: HTMLElement;
   if (e.tag === 'svg') {
-    // the opaque markup parses in the SVG namespace through a template, as it does in the file
+    // the opaque markup parses in the SVG namespace through a template, as it does in the file (inert until placed),
+    // and is contained before it is: its stylesheet and ids this drawing's alone (B1, svg-scope.ts)
     const t = document.createElement('template');
     t.innerHTML = `<svg${Object.entries(e.attrs).map(([k, v]) => ` ${k}="${escAttr(v)}"`).join('')}>${e.raw ?? ''}</svg>`;
-    n = (t.content.firstElementChild as HTMLElement | null) ?? document.createElement('div');
+    const svg = t.content.firstElementChild;
+    if (svg) containSvg(svg, `msvg${++drawings}`);
+    n = (svg as HTMLElement | null) ?? document.createElement('div');
   } else {
     n = document.createElement(e.tag);
     for (const [k, v] of Object.entries(e.attrs)) if (!(e.tag === 'img' && k === 'src')) n.setAttribute(k, v);
   }
   n.dataset.eid = e.id;
-  for (const [k, v] of Object.entries(e.style)) n.style.setProperty(k, v);
+  for (const [k, v] of Object.entries(e.style)) n.style.setProperty(k, drawnValue(k, v, draw));
   if (TEXT_TAGS.has(e.tag)) renderText(n, e.tag, text ?? []);
   else if (e.tag === 'img') {
-    setImageSource(n as HTMLImageElement, e.attrs.src, assetUrl);
+    setImageSource(n as HTMLImageElement, e.attrs.src, draw.assetUrl);
     applyCrop(n, e.attrs['data-crop']);
   }
   else if (e.tag === 'x-icon') renderIcon(document, n, e.attrs.name);

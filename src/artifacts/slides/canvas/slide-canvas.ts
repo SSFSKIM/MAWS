@@ -9,7 +9,8 @@
 import type { Doc } from '../../yjs';
 import { childLists, groupOf, readFlat, ROOT, type FlatElement } from '../model';
 import * as Y from '../../yjs/slides';
-import { applyCrop, createNode, drawConnector, drawShape, drawsInLayout, renderText, setImageSource, type AssetUrl, type EmbedUrl } from './elements';
+import { applyCrop, createNode, drawConnector, drawnValue, drawShape, drawsInLayout, renderText, setImageSource, type AssetUrl, type DrawContext, type EmbedUrl } from './elements';
+import type { FaceAliases } from './faces';
 import { clearFit, fitText, isSizedText } from './fit';
 
 export interface SlideCanvasOptions {
@@ -19,6 +20,8 @@ export interface SlideCanvasOptions {
   thumbnail?: boolean;
   /** M6: where an x-embed's page is served (the presenter's; Decision Log 18), by slide, element and markup. */
   embedUrl?: (slideId: string, elementId: string, raw: string) => string;
+  /** B6: the deck's uploaded faces' private names, for its font-family values (canvas/faces.ts); none by default. */
+  faces?: FaceAliases;
 }
 
 /** A longest strictly increasing subsequence of `seq` (values, in order). */
@@ -89,7 +92,8 @@ export class SlideCanvas {
   readonly root: HTMLElement;
   private readonly nodes = new Map<string, HTMLElement>();
   private readonly stop: () => void;
-  private readonly assetUrl: AssetUrl;
+  /** What a style value draws through: the assets and the faces' private names (B3, B6). */
+  private readonly draw: DrawContext;
   private readonly thumbnail: boolean;
   private readonly embedUrl: EmbedUrl | undefined;
   private laidOut = false;
@@ -107,7 +111,7 @@ export class SlideCanvas {
     host: HTMLElement,
     options: SlideCanvasOptions = {},
   ) {
-    this.assetUrl = options.assetUrl ?? (() => null);
+    this.draw = { assetUrl: options.assetUrl ?? (() => null), faces: options.faces ?? new Map() };
     this.thumbnail = options.thumbnail ?? false;
     const embedUrl = options.embedUrl;
     this.embedUrl = embedUrl && ((id, raw) => embedUrl(slideId, id, raw));
@@ -180,7 +184,7 @@ export class SlideCanvas {
   private applySlideKey(k: string, v: string | undefined): void {
     if (k.startsWith('style:')) {
       if (v === undefined) this.root.style.removeProperty(k.slice(6));
-      else this.root.style.setProperty(k.slice(6), v);
+      else this.root.style.setProperty(k.slice(6), drawnValue(k.slice(6), v, this.draw));
     } else if (k.startsWith('attr:')) {
       // a hidden slide still draws (the filmstrip dims it); `hidden` on the canvas would hide it
       const name = k === 'attr:hidden' ? 'data-hidden' : k.slice(5);
@@ -190,7 +194,7 @@ export class SlideCanvas {
   }
 
   private create(e: FlatElement): HTMLElement {
-    const n = createNode(this.root.ownerDocument, e, e.text, this.assetUrl, this.thumbnail, this.embedUrl);
+    const n = createNode(this.root.ownerDocument, e, e.text, this.draw, this.thumbnail, this.embedUrl);
     this.nodes.set(e.id, n);
     this.writes.create++;
     return n;
@@ -285,14 +289,14 @@ export class SlideCanvas {
             const v = s[k] as string | undefined;
             if (k.startsWith('style:')) {
               if (v === undefined) n.style.removeProperty(k.slice(6));
-              else n.style.setProperty(k.slice(6), v);
+              else n.style.setProperty(k.slice(6), drawnValue(k.slice(6), v, this.draw));
               this.writes.style++;
               if (k === 'style:position') {
                 reparents.add(this.parentKeyOf(n));
                 reparents.add(s.parent as string);
               }
             } else if (k === 'attr:src' && s.tag === 'img') {
-              setImageSource(n as HTMLImageElement, v, this.assetUrl);
+              setImageSource(n as HTMLImageElement, v, this.draw.assetUrl);
               this.writes.attr++;
             } else if (k === 'attr:data-crop' && s.tag === 'img') {
               if (v === undefined) n.removeAttribute('data-crop');
@@ -300,6 +304,7 @@ export class SlideCanvas {
               applyCrop(n, v);
               this.writes.attr++;
             } else if ((k === 'attr:name' && s.tag === 'x-icon') || (k === 'attr:kind' && s.tag === 'x-shape')) replace.add(c.id); // another drawing
+            else if (s.tag === 'svg' && k.startsWith('attr:')) replace.add(c.id); // a root attribute is contained with the drawing (B1)
             else if (k.startsWith('attr:')) {
               if (v === undefined) n.removeAttribute(k.slice(5));
               else n.setAttribute(k.slice(5), v);

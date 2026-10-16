@@ -4,8 +4,11 @@
 // slide's own look), not app chrome.
 //
 // - The slide: 1920×1080, isolated (so the under-layer's z-index:-1 stays inside it), a flex column by default.
-// - A div without `display` is a column; margins are zero; text defaults are Claude's (h1–h3 96/64/44 px at 600 and
-//   1.1/1.15/1.2, body 32 px at 1.4; font-size and font-weight never inherit into h1–h3).
+// - A div (or the section) without `display` is a column; one with an explicit `display:flex` and no direction is a row,
+//   as CSS and the loader read it (final fix wave B2): the model's style is the element's inline style in every page
+//   that draws slides (the canvas, the export page), so the rule reads whether that style names a display. Margins are
+//   zero; text defaults are Claude's (h1–h3 96/64/44 px at 600 and 1.1/1.15/1.2, body 32 px at 1.4; font-size and
+//   font-weight never inherit into h1–h3).
 // - A pinned child listed before the first flow child of the section paints under the flow layer (`data-layer`).
 // - The dialect's own elements: x-shape (its outline drawn as an inline SVG; the box itself unpainted unless `rect`),
 //   x-icon (a line glyph in its colour), x-connector (a stroked polyline with heads, never a box), x-embed (a sandboxed
@@ -14,6 +17,8 @@ export const CANVAS_CSS = `
 .maws-slide { position: relative; width: 1920px; height: 1080px; overflow: hidden; isolation: isolate; box-sizing: border-box; display: flex; flex-direction: column; margin: 0;
   background: #ffffff; color: #000000; font-family: system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif; font-size: 32px; line-height: 1.4; font-weight: 400; text-align: left; }
 .maws-slide div { display: flex; flex-direction: column; }
+.maws-slide[style^="display:"], .maws-slide[style*=" display:"], .maws-slide[style*=";display:"],
+.maws-slide div[style^="display:"], .maws-slide div[style*=" display:"], .maws-slide div[style*=";display:"] { flex-direction: row; }
 .maws-slide * { margin: 0; box-sizing: border-box; }
 .maws-slide h1 { font-size: 96px; font-weight: 600; line-height: 1.1; }
 .maws-slide h2 { font-size: 64px; font-weight: 600; line-height: 1.15; }
