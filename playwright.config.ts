@@ -1,4 +1,5 @@
-import { defineConfig } from '@playwright/test';
+import { defineConfig, type ReporterDescription } from '@playwright/test';
+import { finalBundleOption } from './e2e/support/final-bundle-reporter';
 
 // The test process formats its expectations as the app formats its dates (a spec computes "in 1m" with the app's own
 // formatters), and the app runs in en-US (launch.ts's E2E_APP_ARGS). Node's Intl default follows LC_ALL, then
@@ -35,5 +36,13 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   timeout: 60_000,
-  reporter: [['list'], ['html', { open: 'never' }]],
+  // Gate-offload Decision Log 50: a child's acceptance script names its reserved final label and the variant its live
+  // spec needs (MAWS_E2E_FINAL_BUNDLE=<label>:<variant>); the final reporter then writes that build into the evidence
+  // when the whole invocation passed on that final gate (e2e/support/final-bundle-reporter.ts). Unset: as before.
+  reporter: [['list'], ['html', { open: 'never' }], ...finalBundleReporter()],
 });
+
+function finalBundleReporter(): ReporterDescription[] {
+  const options = finalBundleOption(process.env.MAWS_E2E_FINAL_BUNDLE);
+  return options === null ? [] : [['./e2e/support/final-bundle-reporter.ts', options]];
+}
