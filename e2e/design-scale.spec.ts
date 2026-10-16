@@ -405,6 +405,21 @@ const worldPoint = async (tab: Locator) => {
   const box = (await tab.locator('[data-design-world]').boundingBox())!;
   return { box, mid: { x: box.x + box.width / 2, y: box.y + box.height / 2 } };
 };
+/** How many boards the world shows now, wholly or in part (what a pan's frames actually draw). */
+const boardsInView = (tab: Locator) =>
+  tab.locator('[data-design-world]').evaluate((world) => {
+    const w = world.getBoundingClientRect();
+    return Array.from(world.querySelectorAll('[data-board-id]')).filter((b) => {
+      const r = b.getBoundingClientRect();
+      return r.right > w.left && r.left < w.right && r.bottom > w.top && r.top < w.bottom;
+    }).length;
+  });
+/** The first board brought to the middle of the world by the product's own commands: Zoom to board, then 25 % about it. */
+const toFirstBoardAt25 = async (page: Page, tab: Locator, board: BenchBoard) => {
+  await tab.getByRole('button', { name: `Board ${board.title} options`, exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Zoom to board' }).click();
+  await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('0.25');
+};
 
 test('the design scale gate on the 24-board bench: cold open, pan and zoom frame work and drops (alone and under a drag with the agent publishing), re-layout, memory, host publishes, the PDF', async () => {
   const loads: Record<string, number> = { start: load1() };
@@ -500,11 +515,15 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
     const pans: (FrameTrial & { load: number; note?: string })[] = [];
     const zooms: (FrameTrial & { load: number; note?: string })[] = [];
     for (let k = 0; k < TRIALS; k++) {
-      await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
-      await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('0.25');
+      // anchored on real boards: the first phone at the world's middle at 25 %, so the pan's path (right and down, then
+      // back) runs over the phones, tablets, desktops, slides, posters and the square rather than the empty middle of
+      // the whole world's fit (the first run's setup, which panned over nothing)
+      await toFirstBoardAt25(page, tab, BOARDS[0]!);
       const { mid } = await worldPoint(tab);
       await page.mouse.move(mid.x, mid.y);
       const before = (await mainTab(page, id))!.viewport!;
+      const seenBefore = await boardsInView(tab);
+      if (seenBefore === 0) failures.push(`pan ${k + 1}: no board in view at its start`);
       let load = await quiet();
       const pan = await measureFrames(page, `pan-${k + 1}`, async () => {
         for (let i = 0; i < 240; i++) {
@@ -513,7 +532,8 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
         }
       });
       const after = (await mainTab(page, id))!.viewport!;
-      pans.push({ ...pan, load: Math.max(load, load1()), note: `the view panned through (${before.x.toFixed(0)}, ${before.y.toFixed(0)}) → turned back at its far end (${after.x.toFixed(0)}, ${after.y.toFixed(0)}) at zoom ${after.zoom}` });
+      const seenAfter = await boardsInView(tab);
+      pans.push({ ...pan, load: Math.max(load, load1()), note: `the view panned through (${before.x.toFixed(0)}, ${before.y.toFixed(0)}) → turned back at its far end (${after.x.toFixed(0)}, ${after.y.toFixed(0)}) at zoom ${after.zoom}; ${seenBefore} boards in view at the start, ${seenAfter} at the end` });
       if (after.zoom !== 0.25) failures.push(`pan ${k + 1}: the zoom moved (${after.zoom})`);
 
       await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('fit-all');
@@ -548,18 +568,23 @@ test('the design scale gate on the 24-board bench: cold open, pan and zoom frame
   // the gesture under contention: the owner's title drag of a board while the agent republishes that board's card every
   // 0.7 s, with a pan (the wheel) or a pinch zoom (⌃-wheel) running through the world's handler all along; at least five
   // seconds of it, so several publications run wholly inside the measured window, which is what the trial claims
+  // the stress drag's reach from its press, screen px: its loop goes 59 × 0.75 right and 39 × 0.5 down, its far turning
+  // point 45 right and 20 down (the loop below)
+  const STRESS_REACH = { x: 45, y: 20 };
+  const STRESS_MARGIN = 20;
   const stressTrial = async (kind: 'pan' | 'zoom', k: number): Promise<{ trial: FrameTrial & { load: number; note?: string }; record: Record<string, unknown> }> => {
     // the first phone brought to the middle of the world by the product's own commands (Zoom to board, then 25 % about
     // the world's middle), every board still mounted: its title then lies inside the world with room for the drag
     const dragged: BenchBoard = BOARDS.find((b) => b.size === 'phone')!;
-    await tab.getByRole('button', { name: `Board ${dragged.title} options`, exact: true }).click();
-    await page.getByRole('menuitem', { name: 'Zoom to board' }).click();
-    await tab.getByRole('combobox', { name: 'Zoom' }).selectOption('0.25');
+    await toFirstBoardAt25(page, tab, dragged);
     await expect(tab.locator('[data-board-id] .maws-slide[data-board]')).toHaveCount(BOARDS.length);
     const { box: world } = await worldPoint(tab);
     const t = await tab.locator(`[data-board-title="${dragged.id}"]`).boundingBox();
-    if (!(t && t.x > world.x + 20 && t.y > world.y + 20 && t.x + t.width < world.x + world.width - 300 && t.y + t.height < world.y + world.height - 200))
-      throw new Error(`${dragged.id}'s title does not lie inside the world at 25 % (${JSON.stringify(t)} in ${JSON.stringify(world)})`);
+    // the press must land on the title, and the drag's own reach (its loop and its far turning point, at most 45 × 20
+    // screen px from the press) must stay inside the world with a margin: a guard on the actual room, whatever width the
+    // panel and the inspector leave the world (the first run's fixed 300 px assumed a world about 700 px wide; it is 452)
+    if (!(t && t.x > world.x + STRESS_MARGIN && t.y > world.y + STRESS_MARGIN && t.x + Math.min(20, t.width / 2) + STRESS_REACH.x < world.x + world.width - STRESS_MARGIN && t.y + t.height / 2 + STRESS_REACH.y < world.y + world.height - STRESS_MARGIN))
+      throw new Error(`${dragged.id}'s title does not lie inside the world at 25 % with room for the drag (${JSON.stringify(t)} in ${JSON.stringify(world)})`);
     const start = (await frameOf(page, id, dragged.id))!;
     const title = (await tab.locator(`[data-board-title="${dragged.id}"]`).boundingBox())!;
     const from = { x: title.x + Math.min(20, title.width / 2), y: title.y + title.height / 2 };
