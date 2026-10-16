@@ -12,7 +12,8 @@
 // is built, the double follows it (DX3 as `interfaces-M3` has it, checked by the local-hub suite): the order of what a
 // socket gets on connect, presence withheld while its machine is offline, the audit record (`refused`, `rejected`,
 // `decided`) replayed after every `caught-up`, the hub's at-once RPC failures sent to the sender and never recorded, an
-// unknown frame refused `bad-shape`, and the subscription limits (32 a socket, `rows` 1 to 1000).
+// unknown frame refused `bad-shape`, the subscription limits (32 a socket, `rows` 1 to 1000), and a resumed backlog
+// paged, each page but the last ended by `more`.
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
@@ -98,6 +99,10 @@ export type DoubleOptions = {
 export class HubDouble {
   readonly url: string;
   readonly up: Array<{ project: string; frame: ProjectUp }> = [];
+  /** One page of a resumed backlog, in bytes of JSON (DX3's is about 1 MiB); a suite lowers it to page a short log. */
+  pageBytes = 1 << 20;
+  /** Runs before each page of a resumed backlog is read: a suite stores an event between pages here. */
+  beforePage?: (after: number) => Promise<void>;
   /** Answer each `human` with `human-ack` (true), or hold the acknowledgement as a hub that dropped mid-write would. */
   ackHumans = true;
   admit: 'member' | 'not-a-member';
@@ -476,8 +481,24 @@ export class HubDouble {
     const state = this.project(project);
     switch (frame.t) {
       case 'resume': {
+        // One page of the backlog (DX3): `more {offset}` when events remain, which the browser resumes from; live `log`
+        // only from `caught-up` on, so what is stored between pages comes in a later page.
+        socket.resumed = false;
+        await this.beforePage?.(frame.after);
         const backlog = state.log.filter((entry) => entry.offset > frame.after);
-        if (backlog.length > 0) this.sendRaw(socket.ws, { t: 'log', events: backlog });
+        const page: typeof backlog = [];
+        let size = 0;
+        for (const entry of backlog) {
+          const bytes = JSON.stringify(entry).length;
+          if (page.length > 0 && size + bytes > this.pageBytes) break;
+          page.push(entry);
+          size += bytes;
+        }
+        if (page.length > 0) this.sendRaw(socket.ws, { t: 'log', events: page });
+        if (page.length < backlog.length) {
+          this.sendRaw(socket.ws, { t: 'more', offset: page.at(-1)!.offset });
+          return;
+        }
         this.sendRaw(socket.ws, { t: 'caught-up', offset: this.head(project) });
         socket.resumed = true;
         for (const frame of state.audit.slice(-AUDIT_REPLAY)) this.sendRaw(socket.ws, frame);

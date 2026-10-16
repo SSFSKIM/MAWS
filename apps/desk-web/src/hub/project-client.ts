@@ -216,6 +216,10 @@ export class ProjectClient implements SessionPlane {
         if (fresh.length > 0) handlers.log?.(fresh);
         return;
       }
+      case 'more':
+        // One page of the backlog is in and more remain (DX3): ask for the next. Only `caught-up` is caught up.
+        this.socket.send({ t: 'resume', after: frame.offset });
+        return;
       case 'caught-up':
         handlers.caughtUp?.(frame.offset);
         return;

@@ -102,6 +102,28 @@ describe('the log', () => {
     await until(() => got.length >= 3);
     expect(got.map((e) => e.offset)).toEqual([1, 2, 3]);
   });
+
+  it('pages a backlog: each `more` resumed from its offset, every event once and in order, caught up only at the end', async () => {
+    double.pageBytes = 2000; // a few events a page
+    for (let i = 1; i <= 40; i++) await double.append(PROJECT, say(`event ${i}`));
+    // Stored between the second and third pages: a later page carries it, once.
+    let pages = 0;
+    double.beforePage = async () => {
+      if (++pages === 3) await double.append(PROJECT, say('stored mid-backlog'));
+    };
+    const { got, caughtUp } = client();
+    await until(() => caughtUp.length === 1);
+    expect(got.length).toBe(41); // caught up only once every page was in
+    await double.append(PROJECT, say('live'));
+    await until(() => got.length === 42);
+    expect(got.map((e) => e.offset)).toEqual(Array.from({ length: 42 }, (_, i) => i + 1));
+    expect(got[40].event.text).toBe('stored mid-backlog');
+    expect(caughtUp).toEqual([41]);
+    const resumes = double.resumes(PROJECT);
+    expect(resumes.length).toBeGreaterThan(3);
+    expect(resumes[0]).toBe(0);
+    for (let i = 1; i < resumes.length; i++) expect(resumes[i]).toBeGreaterThan(resumes[i - 1]); // each from the page's last offset
+  });
 });
 
 describe('what goes up', () => {
