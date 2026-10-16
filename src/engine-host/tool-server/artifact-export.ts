@@ -9,7 +9,7 @@
 import { copyFile, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
-import { artifactExportName, parseToolArguments, TOOL_ERRORS, type ArtifactExportResult } from '@shared/maws/tools';
+import { ARTIFACT_REFUSAL_REASONS, artifactExportName, parseToolArguments, TOOL_ERRORS, type ArtifactExportResult, type ArtifactRefusalReason } from '@shared/maws/tools';
 import { actorOf, answering, lineageOf, messageOf, pathUnderCwd, refuse, resolveArtifact, storeOf, ToolRefusal, type ArtifactToolDeps } from './artifact-context';
 import type { HostBridge } from './bridge';
 import { defineMawsTool, toolError, toolText, type McpToolDefinition } from './server';
@@ -45,7 +45,7 @@ export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportB
       if (!deps.exporter) throw unavailable(`this build of MAWS cannot export a ${target.kind} artifact as ${input.format}`);
       const path = join(store.files.dirOf(artifactId), 'exports', artifactExportName(target.revision, input.format));
       await mkdir(dirname(path), { recursive: true });
-      const outcome = await deps.exporter.request({ requestId: ctx.requestId, appSessionId: ctx.appSessionId, artifactId, format: input.format, ...target, path, ...(input.pageSize !== undefined && { pageSize: input.pageSize }), ...(input.fonts !== undefined && { fonts: input.fonts }) /* P3-C */ }, ctx.signal);
+      const outcome = await deps.exporter.request({ requestId: ctx.requestId, appSessionId: ctx.appSessionId, artifactId, format: input.format, ...target, path, ...(input.pageSize !== undefined && { pageSize: input.pageSize }), ...(input.fonts !== undefined && { fonts: input.fonts }) /* P3-C */, ...(input.board !== undefined && { board: input.board }), ...(input.boards !== undefined && { boards: input.boards }), ...(input.scale !== undefined && { scale: input.scale }) /* P3-E (E1 M5) */ }, ctx.signal);
       switch (outcome.kind) {
         case 'timeout':
           throw new ToolRefusal('artifact_export: MAWS did not answer in time');
@@ -59,6 +59,8 @@ export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportB
           break;
       }
       const answer = outcome.answer;
+      // P3-E (E1 M5; Decision Log 26): a refusal the exporter named, flattened into the tool's (`{reason, ...data}`)
+      if (!answer.ok && answer.refusal && (ARTIFACT_REFUSAL_REASONS as readonly string[]).includes(answer.refusal.reason)) throw refuse('artifact_export', { reason: answer.refusal.reason as ArtifactRefusalReason, ...answer.refusal.data }, answer.error);
       if (!answer.ok) throw answer.unavailable ? unavailable(answer.error) : new ToolRefusal(`artifact_export: MAWS could not export the artifact: ${answer.error}`);
       // the snapshot main exported (a document that moved since names a later revision), in the directory named here
       if (dirname(answer.path) !== dirname(path)) throw new ToolRefusal(`artifact_export: MAWS wrote the export outside ${dirname(path)}`);

@@ -34,7 +34,7 @@ import { artifactUrl } from '@shared/artifacts/scheme';
 import { mimeOf } from '@shared/files/mime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
-import type { ArtifactRefusal } from '@shared/ipc/schema/artifacts';
+import { artifactRefusalOf, type ArtifactRefusal } from '@shared/ipc/schema/artifacts'; // P3-E: artifactRefusalOf
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { artifactExportName, type ArtifactExportFonts /* P3-C */, type ArtifactExportFormat, type ArtifactExportPageSize } from '@shared/maws/tools';
 import { CAPTURE_PARTITION, loadSettled, openCaptureWindow, settled, slots } from './capture';
@@ -63,6 +63,10 @@ export interface ExportRequest {
   fonts?: ArtifactExportFonts; // P3-C (H2-4): a presentation's PPTX faces; omitted, named
   width?: number;
   height?: number;
+  // P3-E (E1 M5; X23): a design's PNG board, its PDF's boards, the output's scale
+  board?: string;
+  boards?: string[];
+  scale?: number;
 }
 
 // What the service gives an exporter (A's side of P3-B's `DocumentExportContext`).
@@ -232,7 +236,9 @@ export async function runExport(registry: ExporterRegistry, request: ExportReque
     }
     return { ok: true, revision: request.revision, path: request.path, ...(blocked > 0 && { blockedRequests: blocked }) };
   } catch (error) {
-    return { ok: false, error: messageOf(error) };
+    // P3-E (E1 M5; Decision Log 26): a refusal the exporter named (A's command failure) is kept for the caller
+    const refusal = error instanceof CommandFailure ? artifactRefusalOf(error.error) : null;
+    return { ok: false, error: messageOf(error), ...(refusal && { refusal }) };
   } finally {
     time.end(); // the exporter is done or abandoned: anything it still writes is refused
     for (const temp of temps) await rm(temp, { force: true }).catch(() => {});
@@ -339,7 +345,7 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
   });
 
   return {
-    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height }) {
+    async exportForLibrary({ artifactId, format, versionId, pageSize, fonts /* P3-C */, width, height, board, boards, scale /* P3-E */ }) {
       const time = new ExportBudget(EXPORT_BUDGET_MS);
       let artifact: CommandOutput<'artifacts.get'>['artifact'];
       try {
@@ -367,8 +373,9 @@ export function startExportService({ registry, root, call, onEvent, answer, prin
         revision = version.seq;
       }
       const path = join(root, artifactId, 'exports', artifactExportName(revision, format));
-      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }) };
+      const request: ExportRequest = { artifactId, kind: artifact.kind, format, revision, path, ...(versionId !== undefined && { versionId }), ...(pageSize !== undefined && { pageSize }), ...(fonts !== undefined && { fonts }) /* P3-C */, ...(width !== undefined && { width }), ...(height !== undefined && { height }), ...(board !== undefined && { board }), ...(boards !== undefined && { boards }), ...(scale !== undefined && { scale }) /* P3-E */ };
       const result = await queued(request, time);
+      if (!result.ok && result.refusal) throw new CommandFailure(ipcError('invalid_input', result.error, result.refusal)); // P3-E (Decision Log 26): the exporter's refusal, as named
       if (!result.ok) throw result.unavailable ? refusal('exportUnavailable', result.error, { kind: artifact.kind, format }) : new CommandFailure(ipcError('internal', result.error));
       return { path: result.path, revision: result.revision, ...(result.blockedRequests !== undefined && { blockedRequests: result.blockedRequests }) };
     },

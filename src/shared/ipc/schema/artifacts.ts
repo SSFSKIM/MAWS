@@ -91,7 +91,7 @@ const ItemIdSchema = z.strictObject({ client: z.number().int().nonnegative().max
 export const SuggestionRangeSchema = z.strictObject({ start: ItemIdSchema, end: ItemIdSchema });
 const SuggestionRanges = z.array(SuggestionRangeSchema).min(1).max(1_000);
 
-export const ARTIFACT_REFUSALS = ['notFound', 'invalid', 'tooLarge', 'handleTaken', 'designSystemInUse', 'storeTooNew', 'unavailable', 'exportUnavailable' /* M7 */] as const;
+export const ARTIFACT_REFUSALS = ['notFound', 'invalid', 'tooLarge', 'handleTaken', 'designSystemInUse', 'storeTooNew', 'unavailable', 'exportUnavailable' /* M7 */, 'exportTooLarge' /* P3-E (E1 M5; Decision Log 26): {board, w, h, maxScale} */] as const;
 export const ArtifactRefusalSchema = z.strictObject({ reason: z.enum(ARTIFACT_REFUSALS), data: z.record(z.string(), z.unknown()) });
 export type ArtifactRefusal = z.infer<typeof ArtifactRefusalSchema>;
 
@@ -227,6 +227,8 @@ export const commands = {
   // `format` under the store's directory (`<id>/exports/<revision>-<format>.<ext>`) and answers its path. `pageSize`
   // the paper (omitted: the exporter's default); a PNG is `width` CSS px wide (1280 when omitted) and `height` high (the
   // page's whole height when omitted). A kind and format no exporter serves is refused `exportUnavailable {kind, format}`.
+  // P3-E (E1 M5; X23, the parent's Decision Log 26): a design's `board` (its PNG's one board), `boards` (its PDF's pages)
+  // and `scale` (0.1 to 4); a PNG over the picture cap is refused `exportTooLarge {board, w, h, maxScale}`.
   'artifacts.export': main(
     z.strictObject({
       artifactId: Id,
@@ -236,6 +238,9 @@ export const commands = {
       fonts: z.enum(ARTIFACT_EXPORT_FONTS).optional(), // P3-C: a presentation's PPTX faces (omitted: named)
       width: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
       height: z.number().int().min(16).max(EXPORT_SIZE_MAX).optional(),
+      board: z.string().min(1).max(64).optional(), // P3-E
+      boards: z.array(z.string().min(1).max(64)).max(200).optional(), // P3-E
+      scale: z.number().min(0.1).max(4).optional(), // P3-E
     }),
     // the snapshot exported (a document that moved since names a later revision); `blockedRequests`: remote requests the
     // PDF printer refused

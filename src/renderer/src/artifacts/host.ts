@@ -223,6 +223,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     export: async (artifactId, format, version, options) => {
       const { path } = await call('artifacts.export', {
         artifactId, format: format as CommandInput<'artifacts.export'>['format'], ...(version !== undefined && { versionId: version }), ...(options?.pageSize !== undefined && { pageSize: options.pageSize }), ...(options?.fonts !== undefined && { fonts: options.fonts }) /* P3-C */,
+        ...(options?.board !== undefined && { board: options.board }), ...(options?.boards !== undefined && { boards: options.boards }), ...(options?.scale !== undefined && { scale: options.scale }), // P3-E (E1 M5)
       });
       return { path };
     },
