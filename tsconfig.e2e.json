@@ -85,7 +85,12 @@
     "src/artifacts/document/ids.ts",
     "src/artifacts/document/schema.ts",
     "src/artifacts/document/tabs.ts",
-    "src/artifacts/document/threads.ts"
+    "src/artifacts/document/threads.ts",
+    // P3-E (E2 M3): e2e/dashboard.spec.ts binds M1's vendored tables, parsed by the host's own parser
+    "src/artifacts/dashboard/fixtures/datasets.ts",
+    "src/artifacts/dashboard/parse.ts",
+    "src/artifacts/dashboard/datasets.ts",
+    "src/artifacts/dashboard/states.ts"
   ],
   "exclude": ["src/shared/**/*.test.ts", "src/shared/**/*.test-d.ts", "src/artifacts/**/*.test.ts"]
 }
