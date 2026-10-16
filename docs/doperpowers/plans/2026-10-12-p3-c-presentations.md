@@ -319,4 +319,50 @@ Deck suggestions (H2-2); the loader's dependence on parse5 7.3.0's internal `Par
 
 ## Outcomes & Retrospective
 
-(Written at the end.)
+**2026-10-16, at c3830d6e (handed back with the final e2e verdict owed; M10 not ticked).**
+
+What landed: the presentation kind end to end. That covers:
+- the dialect's loader and serializer, shared by the publish, the editor, the mirror and every exporter;
+- the deck Y.Doc model;
+- the three-way publish refusing at property level;
+- the editor with its transform layer, inspector, text in place, notes, layouts, theme and presenter;
+- object comments on B's card;
+- per-slide history on B's rail;
+- PPTX (three font variants; `embedded` peeled, Decision Log 21), PDF, PNG, standalone HTML and For Claude.
+
+Each milestone was reviewed clean. A whole-branch review in two areas (23 findings) closed after one fix wave per area plus follow-ups: area 2 in two rounds, area 1 in three, the last checked by the controller (Decision Log 37 to 39).
+
+Acceptance as observed:
+- 1, the dialect: the corpus of 33 slides is identical through a pass.
+- 2, the live cycle (M10, once, US$0.0195):
+  - the refusal named `project/slides/courses.html`, element `title`, `font-family`;
+  - a five-file publish landed at one revision;
+  - the PPTX shapes are named by element id.
+- 3 to 6: the e2e specs `presentations{,-export,-present,-comments,-history}.spec.ts`. Their last full green run on this branch is per milestone, listed in Progress. The final run is below.
+- 7, scale, measured at M10 at loads 17.7 to 31.7 (no sub-10 window on the MacBook):
+  - open 120.9 ms;
+  - drag p95 9.2 ms;
+  - renderer 241 MB;
+  - one-slide publish 28.2 ms, whole deck 161.4 ms;
+  - preview 68.1 ms, heavy preview 120.1 ms.
+
+Final gates at c3830d6e (master merged at 66e29848):
+- Linux class 1a, run 38846641440: static, unit (14,644 passed, 71 skipped, no type errors) and probes all green.
+- Mac mini, run 38846641554:
+  - green: `unit:darwin` (the 13 guarded files), artifacts, browser-comment, deliverables, design-systems, library, panel, side and tools.
+  - red, `e2e:presentations`: 17 passed. The scale gate's drag measured move→frame p95 18.2 ms against 16 at load 1.5 (move→transaction p95 15.9; open 132.4 ms).
+  - red, `e2e:document`: `document-editor.spec.ts:225` read no thread 73 ms after the card opened, while the page showed one open.
+- The mini then showed a system dialog holding focus (gate-offload Decision Log 28). The architect reports that dialog failing focus-dependent groups, document among them, so both reds await a rerun after its release.
+- Rerun 38850514707 at head and comparison run 38850515465 at e50c8c92 (before the final wave) stopped at the runner's desktop check; no tests ran.
+
+Owed:
+1. **The drag bound.** Rerun `e2e:presentations` at head and at e50c8c92 on the released mini.
+   - If only head misses 16 ms, the cause is B7: the overlay re-measures on every canvas layout pass, one more commit per drag frame. The fix is to skip or coalesce that re-measure while a gesture is active, since the gesture already updates the overlay.
+   - If both miss, the bound is a mini-hardware question for the architect.
+2. **`e2e:document`.** Rerun after the release. P3-C's only change in that path passes `artifactKind` through B's comment anchor.
+3. **M10's preview rows.** Re-measure them on M8's final code at a load below 10; the MacBook never offered one.
+
+Lessons:
+- Code-traced review findings on a security-shaped fix (SVG containment) kept surfacing new edges: namespaces, attribute selectors, quoted names, scope boundaries. The test environment hid them: happy-dom applies no svg `<style>` and keeps no integration points. Such a fix wants its real-browser regression written first.
+- A classification should live where the fact is known. The loader marking each warning lossy or advisory beat a severity heuristic in the publish.
+- Measured bounds belong on a machine whose load is controlled. Ten days of load 15 to 450 on the MacBook left every bound "marginal". The first quiet measurement (the mini) found the one real question.
