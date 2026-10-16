@@ -149,7 +149,7 @@ describe('probeMcpCall, the compatibility check', () => {
   const statusOf = (names: string[]) => ({ subtype: 'success', response: { mcpServers: names.map((name) => ({ name, status: 'connected', tools: [{ name: 'probe' }] })) } });
   const prober = (names: string[], onCall: (tool: string) => Omit<Envelope, 'request_id'> = (tool) => ({ subtype: 'error', error: `MCP server not connected: ${tool.split('__')[1]}` })) =>
     engine((request) => (request.subtype === 'mcp_status' ? statusOf(names) : onCall(String(request.tool))));
-  const calledTools = (writes: StdinFrame[]) => writes.flatMap((w) => (w.type === 'control_request' && w.request.subtype === 'mcp_call' ? [String((w.request as { tool: unknown }).tool)] : []));
+  const calledTools = (writes: StdinFrame[]) => writes.flatMap((w) => (w.type === 'control_request' && w.request.subtype === 'mcp_call' ? [String(w.request.tool)] : []));
 
   it('calls an unguessable server absent from the session, never the old fixed sentinel even when one is configured', async () => {
     const { client, writes } = prober(['maws-compat-probe', 'dyntoy']);
