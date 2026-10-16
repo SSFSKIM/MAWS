@@ -228,8 +228,29 @@ test('a dashboard draws its views in the main tab and the panel, hovers every po
     expect(last.tip).toMatch(/^2024 · 미국 · growth_pct: /);
     expect(last.inFigure, `the last point is on screen, under the figure: ${last.seen}`).toBe(true);
     await page.mouse.move(last.x, last.y);
-    await expect(eight.locator('.dash-tip')).toHaveText(last.tip);
-    await eight.screenshot({ path: `${PROOF}/small-multiples-hover.png` });
+    const tip = eight.locator('.dash-tip');
+    await expect(tip).toHaveText(last.tip);
+    await expect(tip).toBeVisible();
+    // readable, not only present (Decision Log 21): the tip's rendered box whole inside the frame's visible box (the
+    // frame scrolls and clips its figure) and the window
+    const shown = await eight.locator('.dash-figure').evaluate((frame) => {
+      const box = frame.getBoundingClientRect();
+      const at = frame.querySelector('.dash-tip')!.getBoundingClientRect();
+      const visible = {
+        left: Math.max(box.left + frame.clientLeft, 0),
+        top: Math.max(box.top + frame.clientTop, 0),
+        right: Math.min(box.left + frame.clientLeft + frame.clientWidth, innerWidth),
+        bottom: Math.min(box.top + frame.clientTop + frame.clientHeight, innerHeight),
+      };
+      const rendered = { left: at.left, top: at.top, right: at.right, bottom: at.bottom };
+      const inside = at.width > 0 && at.height > 0 && rendered.left >= visible.left - 0.5 && rendered.right <= visible.right + 0.5 && rendered.top >= visible.top - 0.5 && rendered.bottom <= visible.bottom + 0.5;
+      return { inside, seen: JSON.stringify({ rendered, visible }), clip: { x: visible.left, y: visible.top, width: visible.right - visible.left, height: visible.bottom - visible.top } };
+    });
+    expect(shown.inside, `the tip is whole inside the frame's visible box: ${shown.seen}`).toBe(true);
+    // a page clip of the visible frame: no scrolling and no pointer movement, so the hover stays as asserted
+    await page.screenshot({ path: `${PROOF}/small-multiples-hover.png`, clip: shown.clip });
+    await expect(tip, 'the hover survives its capture').toHaveText(last.tip);
+    await expect(tip).toBeVisible();
     await figures(main).nth(5).screenshot({ path: `${PROOF}/small-multiples-pair.png` });
   });
 

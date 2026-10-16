@@ -2,9 +2,11 @@
 // script inside it). A discrete mark carries its value in `data-tip` and is its own hit target; the points of a line,
 // an area or a scatter sit in the figure's one `data-hover="nearest"` layer, searched here for the point nearest the
 // pointer (within a reach of 32 figure units), so every point has a value, the last of thousands included. The tip is
-// text (`textContent`: labels are the data's), shown beside the pointer and hidden when it leaves; the same values are
+// text (`textContent`: labels are the data's), shown beside the pointer, whole inside the frame's visible box (E2's
+// Decision Log 21), and hidden when it leaves; the same values are
 // in the source sheet for the keyboard and a screen reader.
 const REACH = 32;
+const OFFSET = 12; // px between the pointer and its tip
 
 interface Layer {
   xy: Float64Array;
@@ -31,12 +33,26 @@ export function attachHover(frame: HTMLElement, tip: HTMLElement): () => void {
   const hide = () => {
     tip.hidden = true;
   };
+  // The frame is the tip's positioning ancestor and also the figure's scroller (a figure wider than its column scrolls
+  // in it), which clips what lies outside its visible box. The tip is placed in that visible box, measured: beside the
+  // pointer, on its other side where it would cross the right or bottom edge, clamped inside; then written in the
+  // frame's content coordinates (its scroll added), where an absolutely placed child of a scroller lives.
   const show = (text: string, event: PointerEvent) => {
     const box = frame.getBoundingClientRect();
     tip.textContent = text;
     tip.hidden = false;
-    tip.style.left = `${Math.max(0, event.clientX - box.left + 12)}px`;
-    tip.style.top = `${Math.max(0, event.clientY - box.top + 12)}px`;
+    tip.style.left = '0px'; // measured at the frame's start, where the whole width is free (shrink-to-fit narrows it at an edge)
+    tip.style.top = '0px';
+    const size = tip.getBoundingClientRect();
+    const place = (pointer: number, extent: number, room: number) => {
+      const after = pointer + OFFSET;
+      const at = after + extent <= room ? after : pointer - OFFSET - extent;
+      return Math.max(0, Math.min(at, room - extent));
+    };
+    const x = place(event.clientX - box.left - frame.clientLeft, size.width, frame.clientWidth);
+    const y = place(event.clientY - box.top - frame.clientTop, size.height, frame.clientHeight);
+    tip.style.left = `${x + frame.scrollLeft}px`;
+    tip.style.top = `${y + frame.scrollTop}px`;
   };
   const move = (event: PointerEvent) => {
     const target = event.target as Element | null;
