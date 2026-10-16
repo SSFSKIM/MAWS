@@ -175,8 +175,9 @@ Terms used throughout:
   Worker; a **service token** is Access's credential for a non-human
   client.
 - **Daemon** — `sminos daemon` (smns §8), one per machine, a launchd agent
-  on macOS (a systemd user service on Linux, Arkho #85, built alongside
-  Phase 1); its **uplink** is the part that talks to the hub.
+  on macOS, a systemd user service on Linux (doperpowers #203, 7.159.0,
+  proven on an Ubuntu VM against a local hub: logout with lingering, reboot,
+  restart on new code); its **uplink** is the part that talks to the hub.
 - **Bridge** — the doperpowers mod (a function-hook module the engine loads
   into every session when `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1`) that gives
   the daemon control of the session it is loaded in.
