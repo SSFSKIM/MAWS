@@ -22,7 +22,7 @@ export async function openKeyDialog(target: Page): Promise<Locator> {
 
 export async function unlockWithPassphrase(scope: Locator, passphrase: string, keep: boolean) {
   if (keep) await scope.getByLabel('Keep unlocked on this device').check();
-  const form = scope.getByRole('form', { name: 'Passphrase' });
+  const form = scope.getByRole('form', { name: 'Passphrase', exact: true });
   await form.getByLabel(/passphrase/).fill(passphrase);
   await form.getByRole('button', { name: 'Unlock', exact: true }).click();
 }
@@ -58,7 +58,7 @@ export async function enrollInBrowser(page: Page, machine: string): Promise<stri
   await dialog.getByRole('button', { name: 'Enroll a machine' }).click();
   await dialog.getByLabel(/machine's name/).fill(machine);
   await dialog.getByRole('button', { name: 'Continue' }).click();
-  const confirm = dialog.getByRole('form', { name: 'Passphrase' });
+  const confirm = dialog.getByRole('form', { name: 'Passphrase', exact: true });
   await confirm.getByLabel(/passphrase/).fill(SUITE_PASSPHRASE);
   await confirm.getByRole('button', { name: 'Confirm', exact: true }).click();
   const code = dialog.getByTestId('enrollment-code');

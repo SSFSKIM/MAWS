@@ -118,7 +118,7 @@ test('first setup: the passkey locks a random key, a passphrase is added, and a 
   // The other browser's setup came second: one org, one key.
   await newPassphrase(keyDialog(late), 'another org key entirely', 'Set up');
   await expect(keyDialog(late).getByTestId('key-error')).toHaveText('A key was already set up for this org elsewhere. Unlock with one of its methods.', { timeout: 30_000 });
-  await expect(keyDialog(late).getByRole('form', { name: 'Passphrase' })).toBeVisible();
+  await expect(keyDialog(late).getByRole('form', { name: 'Passphrase', exact: true })).toBeVisible();
   expect((await orgKeys()).keys).toHaveLength(2);
   await late.context().close();
 });
@@ -164,7 +164,7 @@ test('the code the browser builds, confirmed by opening the key once more, enrol
   if (setUpHere) {
     await dialog.getByRole('button', { name: 'Confirm with passkey' }).click();
   } else {
-    const confirm = dialog.getByRole('form', { name: 'Passphrase' });
+    const confirm = dialog.getByRole('form', { name: 'Passphrase', exact: true });
     await confirm.getByLabel(/passphrase/).fill(SUITE_PASSPHRASE);
     await confirm.getByRole('button', { name: 'Confirm', exact: true }).click();
   }
@@ -265,7 +265,7 @@ test('a method is removed with the held key, and a browser holding another key i
   await dialog.getByRole('button', { name: 'Add a method' }).click();
   const add = dialog.getByTestId('add-method');
   await newPassphrase(add, 'a spare passphrase to remove', 'Add');
-  const confirm = add.getByRole('form', { name: 'Passphrase' });
+  const confirm = add.getByRole('form', { name: 'Passphrase', exact: true });
   await confirm.getByLabel(/passphrase/).fill(SUITE_PASSPHRASE);
   await confirm.getByRole('button', { name: 'Confirm', exact: true }).click();
   await expect(add).toHaveCount(0, { timeout: 60_000 });
