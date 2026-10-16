@@ -8,8 +8,8 @@
 // them too, so the lease ends at once. Neither is relied on alone: an object can restart without running any of this,
 // and the projects then find the lease lapsed (Project's alarm).
 import { DurableObject } from 'cloudflare:workers';
-import { MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
-import { GENERATION_HEADER, HEARTBEAT_MS, LEASE_MS, POST_LIMIT, type DownFrame, type UpFrame } from '../protocol/machine';
+import { heartbeatMs, MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
+import { GENERATION_HEADER, LEASE_PERIODS, POST_LIMIT, type DownFrame, type UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, toWire, type Part } from '../protocol/parts';
 import { PROJECT_ID, type MachineContext } from './project';
 
@@ -73,9 +73,11 @@ export class Machine extends DurableObject<Env> {
     this.end(this.stream);
   }
 
-  /** The deployed timing; the suites' Worker shortens it per machine (test/support/worker-under-test.ts). */
+  /** The configured heartbeat (DX2's 15 s deployed; shorter under the local command) and a lease of LEASE_PERIODS of
+   * it; the suites' Worker sets both per machine (test/support/worker-under-test.ts). */
   protected timing(): Timing {
-    return { heartbeatMs: HEARTBEAT_MS, leaseMs: LEASE_MS };
+    const heartbeat = heartbeatMs(this.env);
+    return { heartbeatMs: heartbeat, leaseMs: LEASE_PERIODS * heartbeat };
   }
 
   private open(request: Request): Response {

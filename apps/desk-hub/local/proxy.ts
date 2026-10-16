@@ -59,9 +59,13 @@ export async function startProxy(options: {
       res.end(JSON.stringify({ error: 'upstream', message: error.message }));
     });
     // A client that goes away before its answer is done takes its upstream request with it, so the hub sees an SSE
-    // stream close. (`close` also follows a finished answer; destroying then would be at best useless.)
+    // stream close. The connection is reset, not closed: workerd notices a graceful close of a streaming response only
+    // when its next write fails (a heartbeat later), and a reset at once, as Cloudflare's edge passes a close on at once.
+    // (`close` also follows a finished answer; destroying then would be at best useless.)
     res.on('close', () => {
-      if (!res.writableFinished) forwarded.destroy();
+      if (res.writableFinished) return;
+      forwarded.socket?.resetAndDestroy();
+      forwarded.destroy();
     });
   }
 

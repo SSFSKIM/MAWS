@@ -29,9 +29,10 @@ const SECOND = '0d9e8f7a-6b5c-4d3e-a2f1-0e9d8c7b6a59';
 let projects = 0;
 const newProject = () => `7a1c0a8e-3b2d-4c5e-9f70-${(++projects).toString(16).padStart(12, '0')}`;
 
-/** For a test that closes its machine's stream: Miniflare reports a client's disconnect as the request's abort only
- * when the next write to the stream fails (deployed, it arrives at once: M1's probe), so the stream beats often enough
- * for the close to land within a test's wait. The lease keeps the deployed length: it is the close that ends it. */
+/** For a test that closes its machine's stream. workerd reports a client's graceful close as the request's abort only
+ * when the next write to the stream fails; the stand-in resets the connection instead, so the close lands at once, as it
+ * does deployed (test/stream-close.test.ts proves that with the deployed timing). The short heartbeat is a second
+ * bound. The lease keeps the deployed length: it is the close that ends it. */
 const CLOSES = { heartbeatMs: 250, leaseMs: 45_000 };
 
 let machines = 0;

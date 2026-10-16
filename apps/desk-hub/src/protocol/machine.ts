@@ -9,7 +9,8 @@ import type { Raised, SessionMessage } from './session';
 /**
  * The `Machine` object writes a `hb` frame this often; the daemon treats a stream silent for three periods as dead, and
  * answers each `hb` with an `hb-ack` up. Only the daemon's traffic renews the machine's lease (M3): the hub's own
- * heartbeat never does, so a suspended daemon or a half-open stream lapses.
+ * heartbeat never does, so a suspended daemon or a half-open stream lapses. This is the deployed hub's; a hub may be
+ * configured with another (the local command's is shorter), and `welcome.heartbeat_ms` says which a stream has.
  */
 export const HEARTBEAT_MS = 15_000;
 
@@ -20,6 +21,9 @@ export const HEARTBEAT_MS = 15_000;
  * offline: its subscriptions end and its forwarded RPCs without a result become `uncertain`.
  */
 export const LEASE_MS = 3 * HEARTBEAT_MS;
+
+/** The lease in heartbeat periods, whatever the heartbeat (the local command configures a shorter one). */
+export const LEASE_PERIODS = LEASE_MS / HEARTBEAT_MS;
 
 /** A POST body holds at most this many bytes (each frame in it at most FRAME_LIMIT). */
 export const POST_LIMIT = 4 * 1024 * 1024;
