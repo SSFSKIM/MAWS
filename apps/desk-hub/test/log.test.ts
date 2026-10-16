@@ -223,6 +223,61 @@ describe('sync', () => {
   });
 });
 
+describe('a stream a newer one outlived, and a long backlog', () => {
+  it('an upload that a newer stream outlived while it waited on the archive lookup stores nothing and is refused stale (scalpel-2#1)', async () => {
+    const project = newProject();
+    const m = await machine('outlived');
+    await m.sync(project);
+    const legacy: LogEvent = {
+      ts: '2025-01-01T00:00:00.000Z',
+      writer: 'legacy/seat-9',
+      seq: 1,
+      kind: 'say',
+      from: 'old',
+      to: '*',
+      text: 'pre-.smns',
+      mac: { nonce: newNonce(), value: base64urlEncode(new Uint8Array(32).fill(9)) },
+    };
+    const own = say(m, project, 1);
+    m.log.get(project)!.delete(own.writer); // posted by hand below, never uploaded by a sync
+    const calls = (await hub.projectCalls(project)).calls;
+    await hub.holdArchiveLookups(project, true);
+    const pending = m.post([{ t: 'events', project, events: [legacy, own] }]);
+    while ((await hub.projectCalls(project)).calls === calls) await new Promise((resolve) => setTimeout(resolve, 20));
+    // A newer stream opens the project while the upload waits on the lookup.
+    await m.connect();
+    await m.sync(project);
+    await hub.holdArchiveLookups(project, false);
+    const answer = await pending;
+    expect(answer.status).toBe(409);
+    expect(await answer.json()).toMatchObject({ error: 'stale-generation', frames: 0 });
+    expect((await hubCounts(project)).counts).toEqual({});
+    await m.close();
+  });
+
+  it("a hello's backlog is read a page at a time, the next once the page before it is written (scalpel-5#3)", async () => {
+    const project = newProject();
+    const a = await machine('pages-a');
+    await a.sync(project);
+    const events = Array.from({ length: 8 }, (_, i) => say(a, project, i + 1, 'x'.repeat(100_000)));
+    await a.postOk([{ t: 'events', project, events }]);
+    const b = await machine('pages-b');
+    const before = await hub.backlogPages(project);
+    await hub.holdSend(b.name, 'events');
+    const hello = b.post([{ t: 'hello', project, name: 'demo', have: {} }]);
+    await b.next((f) => f.t === 'have', 'have');
+    // The first page waits at the machine's object; nothing past it has been read.
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    expect((await hub.backlogPages(project)) - before).toBe(1);
+    await hub.releaseSend(b.name);
+    expect((await hello).status).toBe(200);
+    await b.reaches(project, a.vector(project));
+    expect((await hub.backlogPages(project)) - before).toBeGreaterThan(1);
+    await a.close();
+    await b.close();
+  });
+});
+
 describe('refusals', () => {
   it("refuses a forged writer at that connection and records it in the project's audit record", async () => {
     const project = newProject();

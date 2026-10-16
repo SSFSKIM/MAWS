@@ -66,7 +66,7 @@ export class Project extends DurableObject<Env> {
   private readonly plane: SessionStore;
   /** One promise chain per machine stream (`<machine>#<generation>`), so every frame this object sends a stream arrives
    * in the order it was queued; a chain that failed stays failed, its stream ended (`toMachine`). */
-  private readonly queues = new Map<string, Promise<void>>();
+  protected readonly queues = new Map<string, Promise<void>>();
   /** Part sets a socket is sending (lost with a hibernation, as the socket's half-sent frame would be). */
   private readonly parts = new Map<WebSocket, PartAssembler>();
   /** Every subscription's route, rebuilt from storage whenever the object starts, woken or restarted. */
@@ -191,7 +191,7 @@ export class Project extends DurableObject<Env> {
     for (const frame of frames) {
       if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation) return { applied, stale: true, failed: false };
       try {
-        await this.fromMachineFrame(ctx, frame);
+        if ((await this.fromMachineFrame(ctx, frame)) === 'stale') return { applied, stale: true, failed: false };
         // Settled at once for a frame that owes no reply, which most of a stream's frames are.
         await this.queues.get(queueKey(ctx.machine, ctx.generation));
       } catch {
@@ -202,12 +202,14 @@ export class Project extends DurableObject<Env> {
     return { applied, stale: false, failed: false };
   }
 
-  private async fromMachineFrame(ctx: MachineContext, frame: UpFrame): Promise<void> {
+  /** One frame from a machine; 'stale' when a newer stream of the machine outlived it while it waited, before it changed
+   * anything. */
+  private async fromMachineFrame(ctx: MachineContext, frame: UpFrame): Promise<'stale' | void> {
     // A lease whose time ran out lapses before anything the machine sent is served, whether or not its alarm ran yet.
     this.sweepLeases();
     if (frame.t === 'hello') await this.hello(ctx, frame);
     else if (!this.isOpen(ctx)) this.refuseMachine(ctx, { reason: 'not-open', message: 'send hello for this project on this stream first' });
-    else if (frame.t === 'events') await this.upload(ctx, frame.events);
+    else if (frame.t === 'events') return this.upload(ctx, frame.events);
     else if (frame.t === 'rejected') this.rejected(ctx, frame);
     else if (frame.t === 'rpc-result') this.rpcResult(ctx, frame);
     else if (frame.t === 'pending') this.pendingSet(ctx, frame.raised);
@@ -276,17 +278,25 @@ export class Project extends DurableObject<Env> {
     if (!this.isOpen(ctx)) return;
     this.startLease(ctx);
     this.toMachine(ctx.machine, ctx.generation, { t: 'have', project: ctx.project, have: this.log.vector(), archive: record.archive_machine === ctx.machine });
-    for (const events of this.log.beyond(have as Vector)) this.toMachine(ctx.machine, ctx.generation, { t: 'events', project: ctx.project, events });
+    // The backlog is the log as of now, read a page at a time as the stream takes it: a page is read once the page
+    // before it is written, so a long log is never held whole. An event stored from now on goes out live, queued
+    // behind the whole backlog.
+    const pages = this.log.beyond(have as Vector, this.log.head());
+    this.toMachineAll(ctx.machine, ctx.generation, mapped(pages, (events): DownFrame => ({ t: 'events', project: ctx.project, events })));
   }
 
   // A machine's upload: each event stored once at the next seq of its writer, a copy of a stored one passed over, a
   // gap answered by `resend`, and a writer the machine may not write, or a different payload at a stored position,
   // refused, reported, and recorded. A writer stops at its first refusal or gap in a batch.
-  private async upload(ctx: MachineContext, events: unknown): Promise<void> {
+  private async upload(ctx: MachineContext, events: unknown): Promise<'stale' | void> {
     if (!Array.isArray(events)) return this.refuseMachine(ctx, { reason: 'bad-shape', message: 'events is a list' });
-    const archive = events.some((e) => typeof e?.writer === 'string' && e.writer.startsWith(LEGACY_WRITER_PREFIX))
-      ? (await this.registry().project(ctx.project))?.archive_machine
-      : undefined;
+    let archive: string | null | undefined;
+    if (events.some((e) => typeof e?.writer === 'string' && e.writer.startsWith(LEGACY_WRITER_PREFIX))) {
+      archive = await this.archiveMachine(ctx.project);
+      // A newer stream may have opened the project while the Registry answered: this upload is the retired stream's,
+      // and stores nothing.
+      if ((this.plane.lease(ctx.machine)?.generation ?? 0) > ctx.generation || !this.isOpen(ctx)) return 'stale';
+    }
     const accepted: Stored[] = [];
     const stopped = new Set<string>();
     for (const event of events as LogEvent[]) {
@@ -541,7 +551,7 @@ export class Project extends DurableObject<Env> {
     const record = this.plane.rpc(nonce);
     if (record) {
       if (record.member !== member || canonicalize(record.rpc) !== canonicalize(rpc)) return fail('bad-shape', 'this nonce was sent with another RPC');
-      if (record.state === 'uncertain' && this.isOnline(record.machine)) return this.forward(record.rpc, member);
+      if (record.state === 'uncertain' && this.isOnline(record.machine)) return this.forward(record.rpc, member, true);
       return this.toSocket(socket, rpcStateFrame(record));
     }
     if (!(Date.now() - Date.parse(rpc.created) <= RPC_FRESHNESS_MS)) return fail('stale', 'older than 60 seconds: issue it again');
@@ -549,11 +559,15 @@ export class Project extends DurableObject<Env> {
     this.forward(rpc, member);
   }
 
-  private forward(rpc: Rpc, member: string): void {
+  /** Records the RPC as forwarded and writes it to the machine's stream. A send that finds no stream fails it
+   * `machine-offline`; but a `retry` of an uncertain one stays uncertain, since a retry the hub could not deliver says
+   * nothing of what the first forward did. */
+  private forward(rpc: Rpc, member: string, retry = false): void {
     const { generation } = this.plane.lease(rpc.machine)!;
     const record: RpcRecord = { nonce: rpc.nonce, machine: rpc.machine, member, rpc, state: 'forwarded', outcome: null, generation };
     this.updateRpc(record);
-    const unsent = (state: 'failed' | 'uncertain') => {
+    const unsent = (undelivered: 'failed' | 'uncertain') => {
+      const state = retry ? 'uncertain' : undelivered;
       const now = this.plane.rpc(rpc.nonce);
       if (now?.state !== 'forwarded' || now.generation !== generation) return;
       const outcome: RpcOutcome | null = state === 'failed' ? { state: 'failed', error: { code: 'machine-offline', message: `${rpc.machine} is offline` } } : null;
@@ -872,8 +886,12 @@ export class Project extends DurableObject<Env> {
     this.dropRoute(route, socket);
   }
 
+  /** Tears a route down: in memory, in storage, and in its socket's attachment. A route that is no longer the sub's (it
+   * ended, and the browser subscribed again with the same sub) is passed over, so a late callback of the old one leaves
+   * its replacement whole. */
   private dropRoute(route: Route, socket = this.socketById(route.socket)): void {
-    if (this.routes.get(route.sub) === route) this.routes.delete(route.sub);
+    if (this.routes.get(route.sub) !== route) return;
+    this.routes.delete(route.sub);
     this.plane.deleteRoute(route.sub);
     if (socket) {
       this.attach(socket, (a) => {
@@ -894,14 +912,21 @@ export class Project extends DurableObject<Env> {
    * POST waiting on the chain (one whose first reply failed, though later replies were queued behind it, included)
    * answers the failure, until the machine's next stream starts a chain of its own.
    */
-  private toMachine(name: string, generation: number, frame: DownFrame): Promise<'written' | 'offline'> {
+  protected toMachine(name: string, generation: number, frame: DownFrame): Promise<'written' | 'offline'> {
+    return this.toMachineAll(name, generation, [frame]);
+  }
+
+  /** `toMachine` for several frames in one place of the queue, each taken from `frames` once the one before it is
+   * written, and none after one that found the stream gone. */
+  private toMachineAll(name: string, generation: number, frames: Iterable<DownFrame>): Promise<'written' | 'offline'> {
     const key = queueKey(name, generation);
-    for (const other of this.queues.keys()) if (other.startsWith(`${name}#`) && other !== key) this.queues.delete(other);
+    // An older stream's queue goes; a newer one's stays (a reply on a retired stream can still be queued).
+    for (const other of this.queues.keys()) if (other.startsWith(`${name}#`) && Number(other.slice(name.length + 1)) < generation) this.queues.delete(other);
     const machine = this.env.MACHINE.get(this.env.MACHINE.idFromName(`${this.orgId}:${name}`));
     const sent = (this.queues.get(key) ?? Promise.resolve()).then(async () => {
-      let result: 'written' | 'offline';
+      let result: 'written' | 'offline' = 'written';
       try {
-        result = await machine.send(frame, generation);
+        for (const frame of frames) if ((result = await machine.send(frame, generation)) === 'offline') break;
       } catch (error) {
         this.leaveFanOut(name, generation);
         void machine.close(generation).catch(() => {});
@@ -937,6 +962,12 @@ export class Project extends DurableObject<Env> {
     return this.registry().registerProject(project, name, machine);
   }
 
+  /** The project's archive machine, from the org's Registry (the suites' Worker holds the lookup to race a newer stream
+   * against it). */
+  protected async archiveMachine(project: string): Promise<string | null | undefined> {
+    return (await this.registry().project(project))?.archive_machine;
+  }
+
   private registry() {
     return this.env.REGISTRY.get(this.env.REGISTRY.idFromName(this.orgId));
   }
@@ -957,6 +988,10 @@ export class Project extends DurableObject<Env> {
 }
 
 const queueKey = (machine: string, generation: number) => `${machine}#${generation}`;
+
+function* mapped<T, U>(items: Iterable<T>, map: (item: T) => U): Generator<U> {
+  for (const item of items) yield map(item);
+}
 
 const rpcStateFrame = (record: RpcRecord): ProjectDown => ({ t: 'rpc-state', nonce: record.nonce, state: record.state, ...(record.outcome ? { outcome: record.outcome } : {}) });
 

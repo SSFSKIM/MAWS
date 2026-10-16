@@ -238,6 +238,47 @@ describe('RPCs', () => {
     b.close();
     await m.close();
   });
+
+  it("a retry of an uncertain RPC that cannot be delivered stays uncertain, and the result republished later resolves it (scalpel-4#1)", async () => {
+    const project = newProject();
+    const m = await machine(project, CLOSES);
+    const b = await browser(project);
+    const call = await rpc(project, m.name, 'spawn', { checkout: '/src/maws', brief: 'one session' });
+    b.send({ t: 'rpc', rpc: call });
+    await m.next((f) => f.t === 'rpc', 'the rpc');
+    await m.close();
+    await b.next((f) => f.t === 'rpc-state' && f.state === 'uncertain', 'uncertain');
+    // Back, and gone again without a word: its lease is fresh, its stream is not.
+    await m.connect();
+    await m.sync(project);
+    await hub.terminate(m.name);
+    const from = b.frames.length;
+    b.send({ t: 'rpc', rpc: call });
+    // Forwarded again, and the send finds no stream: that says nothing of the spawn the first one may have run.
+    expect(await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce && f.state !== 'forwarded', 'the retry undelivered', from, 10_000)).toEqual({
+      t: 'rpc-state',
+      nonce: call.nonce,
+      state: 'uncertain',
+    });
+    await m.connect();
+    await m.sync(project);
+    await m.postOk([{ t: 'rpc-result', project, nonce: call.nonce, outcome: { state: 'done', result: { session: SECOND, alias: 'maws-47' } } }]);
+    expect(await b.next((f) => f.t === 'rpc-state' && f.nonce === call.nonce && f.state === 'done', 'resolved', from)).toMatchObject({ outcome: { result: { session: SECOND } } });
+    b.close();
+    await m.close();
+  });
+
+  it("a reply queued on a retired stream leaves the current stream's queue alone (scalpel-2#1)", async () => {
+    const project = newProject();
+    const m = await machine(project);
+    await m.connect();
+    await m.sync(project);
+    const current = m.name + '#' + m.generation;
+    expect(await hub.projectQueues(project)).toContain(current);
+    await hub.projectSend(project, m.name, m.generation - 1, { t: 'refused', project, refusal: { reason: 'not-open', message: 'late' } });
+    expect(await hub.projectQueues(project)).toContain(current);
+    await m.close();
+  });
 });
 
 describe('subscriptions', () => {
@@ -308,6 +349,37 @@ describe('subscriptions', () => {
     const from = m.frames.length;
     await m.postOk([{ t: 'session', message: envelope(m, project, 'row', { row: { uuid: 'late' }, agentId: null }, SECOND, early, 1) }]);
     await m.next((f) => f.t === 'unsubscribe' && f.sub === early, 'unsubscribe after the end', from);
+    b.close();
+    await m.close();
+  });
+
+  it("a subscribe whose send finds its stream replaced leaves the replacement sub's route, through a hibernation (scalpel-2#2)", async () => {
+    const project = newProject();
+    const m = await machine(project);
+    const b = await browser(project);
+    const sub = newNonce();
+    await hub.holdSend(m.name, 'subscribe');
+    b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub });
+    // The stream goes while the subscribe's send waits: the sub ends at the browser.
+    await m.close();
+    await b.next((f) => f.t === 'session' && f.message.sub === sub && f.message.kind === 'end', 'the end');
+    // Back on a new stream, the browser subscribes again with the same sub, and the machine serves it.
+    await m.connect();
+    await m.sync(project);
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'machine', machinePresence, null) }]);
+    const from = b.frames.length;
+    b.send({ t: 'subscribe', machine: m.name, session: SESSION, agentId: null, sub });
+    await m.next((f) => f.t === 'subscribe' && f.sub === sub, 'the replacement subscribe');
+    // The first send now goes on, to a stream that is no longer the machine's: offline.
+    await hub.releaseSend(m.name);
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    const life = await hub.projectLife(project);
+    await hub.evict('Project', `${ORG}:${project}`, 'hibernate');
+    expect(await hub.projectLife(project)).not.toBe(life);
+    await m.postOk([{ t: 'session', message: envelope(m, project, 'snapshot', { rows: [], more: false, subagents: [], presence: presence('busy'), streaming: [] }, SESSION, sub, 0) }]);
+    expect(await b.next((f) => f.t === 'session' && f.message.sub === sub && f.message.kind === 'snapshot', 'the snapshot, routed after the hibernation', from)).toMatchObject({
+      message: { kind: 'snapshot', sub, n: 0 },
+    });
     b.close();
     await m.close();
   });
