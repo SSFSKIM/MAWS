@@ -28,11 +28,30 @@ Execution used doperpowers:subagent-driven-execution with a fresh executor per t
   - the grid within 2 s: busy 79 ms, waiting 72 ms, shell 33 ms, offline 1,344 ms.
 - **The owner's walk, Part 1 and Part 2:** recorded in the plan. It closes §8 unknown 4's first half. P2.11 is pending.
 
+## After the xhigh review (2026-10-16)
+
+The xhigh panel found 16 issues (3 P1, 13 P2). The composite's writer triaged them: 14 to fix, 1 left to the controller, 1 to debt. One executor fixed them in two waves, and each wave was reviewed clean. The waves:
+- keyed requests by (machine, session, request);
+- refused new RPCs while the socket is not welcomed or is closing;
+- resumed from the contiguous log prefix;
+- made the preview CSP a host seam, `setPreviewPolicy`, leaving the desktop byte-identical;
+- made key rollback failure-safe;
+- fixed the push and landing fixes.
+
+Then the default e2e lane moved to the Mac mini, where the channel's tail-follow failed in installed Chrome. Three passes of a hand-rolled anchoring hook each surfaced the next anchoring case. The channel then became a `column-reverse` chat list with native anchoring, as the writer ruled, and that review was clean.
+
+Final runs on the code at 32bf66b9a:
+- mini `e2e:desk-web`: 45/45, run 38899621892;
+- Linux `e2e:desk-web`, with WebKit: 49/49, run 38899609623;
+- `static,unit`: run 38899633797.
+
+The local-hub suite (`e2e:desk-web-hub`) passed 16/16 on the mini at 121c4b381, run 38890504759. Nothing since then touches what it covers. Its offline step is bounded by the configured heartbeat plus a margin, the local close latency DX2 gives. The final head adds only the Decision Log and two debt rows on top.
+
 ## Still owed
 
-- **The xhigh whole-branch review** over `895e27d10..3de8a15e9`. It is running from the writer's session (run wf_2647f569-98e). Its fix wave comes back here.
 - **P2.11:** a push tapped 4 hours or more later. The owner runs it.
-- **The redeploy of web 3de8a15e9,** which carries DX3 paging. That is DC3's.
+- **The web redeploy** of the merged head. The writer schedules it.
+- **iOS 26 or older:** a row may move when a message arrives below a reader who has scrolled back, because Safari has no scroll anchoring before 27.0. The writer is following up from the owner's iOS version.
 
 ## Deferred minor findings
 
