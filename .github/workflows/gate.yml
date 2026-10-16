@@ -5,7 +5,7 @@ name: gate
 
 on:
   push:
-    branches: ['ci/**', master]
+    branches: ['ci/**']
   workflow_dispatch:
     inputs:
       gates:
@@ -55,22 +55,13 @@ defaults:
     shell: bash
 
 jobs:
-  # Master's caches are readable by fresh ci/ refs, unlike another ci/ ref's caches (Decision Log 26).
-  # Warm them once on landing so matching Linux jobs restore without re-saving.
-  warm:
-    if: github.ref == 'refs/heads/master'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-      - uses: ./.github/actions/setup
-
   plan:
-    if: github.ref != 'refs/heads/master'
-    # Linux, or the self-hosted Mac when the repository variable GATE_RUNNER is `macos` (§3.6); hosted under `pool`, since
-    # it is what makes the pool's box. The jobs below take the runners the plan resolves: class 1a's from the `Class1a:`
-    # trailer or GATE_RUNNER (linux, macos or pool), the e2e jobs' lane.
-    runs-on: ${{ vars.GATE_RUNNER == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-24.04' }}
+    # The smallest hosted runner (ubuntu-slim, 1 vCPU; the plan only computes outputs and takes seconds), or the self-hosted Mac
+    # when the repository variable GATE_RUNNER is `macos` (§3.6); hosted under `pool`, since it is what makes the pool's box
+    # (Decision Log 53). The jobs below take the runners the plan resolves: class 1a's from the `Class1a:` trailer or
+    # GATE_RUNNER (linux, macos or pool), the e2e jobs' lane. A push to master runs nothing here (the warm job of Decision
+    # Log 26 left with Decision Log 53); master's class 1a is the landing gate's.
+    runs-on: ${{ vars.GATE_RUNNER == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-slim' }}
     timeout-minutes: 30
     outputs:
       static: ${{ steps.plan.outputs.static }}
