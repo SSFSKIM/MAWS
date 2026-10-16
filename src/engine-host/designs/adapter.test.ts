@@ -17,7 +17,7 @@ import { boardFrame, designFiles, writeBoardEntry } from '@artifacts/design/mode
 import { moveElementToBoard, moveOriginOf } from '@artifacts/design/move';
 import { setBoardFrame } from '@artifacts/design/writers';
 import { readSlide, ROOT, setStyle } from '@artifacts/slides/model';
-import { addThread, reply, threadStates } from '@artifacts/slides/threads';
+import { addThread, reply, resolve, threadStates } from '@artifacts/slides/threads';
 import { applyV1, applyV2, diffV1, newDoc, onUpdate, stateVector, transact, type Doc } from '@artifacts/yjs';
 import { createDeckUndo } from '@artifacts/yjs/slides-undo';
 import type { Actor } from '@shared/artifacts/actor';
@@ -185,22 +185,24 @@ describe('the design adapter on the document service', () => {
     await service.writeAs(id, agent, (doc) => {
       reply(doc, 'te', { id: 'te:a', by: agent, at: 2_000, body: 'Done.' });
       reply(doc, 'tg', { id: 'tg:a', by: agent, at: 2_001, body: 'Removed it.' });
+      resolve(doc, 'te', agent, 2_002); // M6: resolved since the version, where it was open
     });
     const before = replicaOf(id);
-    expect(threadStates(before).map((t) => [t.id, t.live, t.quote])).toEqual([
-      ['te', true, 'Title b1'],
-      ['tb', true, 'Tablet'],
-      ['tg', false, 'b2'],
+    expect(threadStates(before).map((t) => [t.id, t.live, t.quote, t.status])).toEqual([
+      ['te', true, 'Title b1', 'resolved'],
+      ['tb', true, 'Tablet', 'open'],
+      ['tg', false, 'b2', 'open'],
     ]);
 
     await store.restore(id, at, human);
     const live = replicaOf(id);
     expect(designFiles(live)).toEqual(atVersion);
     expect(boardFrame(live, 'b1')).toEqual({ x: 0, y: 0, w: 390, h: 844 });
-    expect(threadStates(live).map((t) => [t.id, t.live, t.orphan, t.quote, t.messages.map((m) => m.body)])).toEqual([
-      ['te', true, false, 'Title b1', ['Bigger?', 'Done.']],
-      ['tb', true, false, 'Phone', ['This screen?']],
-      ['tg', true, false, 'b2', ['And this?', 'Removed it.']],
+    // M6: the status comes back with the version (the resolved thread open again), the reply posted since stays
+    expect(threadStates(live).map((t) => [t.id, t.live, t.orphan, t.quote, t.status, t.messages.map((m) => m.body)])).toEqual([
+      ['te', true, false, 'Title b1', 'open', ['Bigger?', 'Done.']],
+      ['tb', true, false, 'Phone', 'open', ['This screen?']],
+      ['tg', true, false, 'b2', 'open', ['And this?', 'Removed it.']],
     ]);
     expect(store.listVersions(id).map((v) => v.kind)).toContain('restore');
   });
