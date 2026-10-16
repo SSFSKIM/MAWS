@@ -3,7 +3,7 @@
 // assertion is enrollment's redemption (`/machine/enroll`), which Access does not guard either: its one-time token
 // does. Every path it answers is under `/api/*` or `/machine/*`, the routes wrangler.jsonc runs it first for; the web
 // app's assets answer the rest.
-import { drain } from './drain';
+import { drain, readLimited } from './drain';
 import { CLIENT_HEADER, hubConfig, MACHINE_HEADER, MEMBER_HEADER, ORG_HEADER, PROJECT_HEADER, type Env } from './env';
 import { AccessError, certsKeySource, verifyAccessAssertion, type KeySource } from './identity/access';
 import type { Principal, Registry, Result } from './objects/registry';
@@ -44,8 +44,8 @@ const answer = <T>(result: Result<T>, status = 200) =>
 /** A small JSON body; undefined when it is missing, too large, or not JSON (the callee answers `bad-shape`). */
 async function body(request: Request): Promise<unknown> {
   if (Number(request.headers.get('Content-Length') ?? 0) > BODY_LIMIT) return undefined;
-  const bytes = await request.arrayBuffer();
-  if (bytes.byteLength > BODY_LIMIT) return undefined;
+  const bytes = await readLimited(request.body, BODY_LIMIT);
+  if (!bytes) return undefined;
   try {
     return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
   } catch {

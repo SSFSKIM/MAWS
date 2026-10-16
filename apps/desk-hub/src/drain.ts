@@ -50,3 +50,33 @@ export async function drain(body: ReadableStream<Uint8Array>, limit = DRAIN_LIMI
   }
   return read;
 }
+
+/**
+ * A body read to its end when it is at most `limit` bytes; null as soon as it passes the limit, so a large or endless
+ * body is never read whole before it is refused. What is left past the limit is drained as `drain` drains it (bounded in
+ * bytes and time), so the refusal reaches the client. A missing body is empty.
+ */
+export async function readLimited(body: ReadableStream<Uint8Array> | null, limit: number): Promise<Uint8Array | null> {
+  if (!body) return new Uint8Array(0);
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      reader.releaseLock();
+      await drain(body);
+      return null;
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return bytes;
+}

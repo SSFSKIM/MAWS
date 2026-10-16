@@ -12,6 +12,7 @@
 // one the Worker admitted before the revocation and delivered after it opens nothing, and the name enrolled again (a
 // new credential) is served.
 import { DurableObject } from 'cloudflare:workers';
+import { readLimited } from '../drain';
 import { CLIENT_HEADER, heartbeatMs, MACHINE_HEADER, ORG_HEADER, type Env } from '../env';
 import { GENERATION_HEADER, LEASE_PERIODS, POST_LIMIT, type DownFrame, type UpFrame } from '../protocol/machine';
 import { FRAME_LIMIT, PartAssembler, toWire, type Part } from '../protocol/parts';
@@ -136,8 +137,10 @@ export class Machine extends DurableObject<Env> {
       return json(409, { error: 'stale-generation', message: 'the POST names no current stream of this machine; open the stream and use its generation' });
     }
     if (Number(request.headers.get('Content-Length') ?? 0) > POST_LIMIT) return json(413, { error: 'too-large' });
-    const text = await request.text();
-    if (utf8Length(text) > POST_LIMIT) return json(413, { error: 'too-large' });
+    // Read only to the limit: a body past it is refused as it passes, never read whole first.
+    const body = await readLimited(request.body, POST_LIMIT);
+    if (!body) return json(413, { error: 'too-large' });
+    const text = new TextDecoder().decode(body);
     const stale = (applied: number) =>
       json(409, { error: 'stale-generation', message: 'a newer stream of this machine opened while this POST was read; send it again on that one', frames: applied });
     if (this.stream !== stream) return stale(0);
