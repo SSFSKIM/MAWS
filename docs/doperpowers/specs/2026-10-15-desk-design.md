@@ -3940,7 +3940,7 @@ Report · Transcript choice is kept per transcript key for the page's life
 
 | slot | props | where the shell mounts it |
 | --- | --- | --- |
-| `depth` | `{project, session: DeskSession \| null, plane: SessionPlane}` | the project view's right column while it is open; `session` is the selected direct channel's, null on the group chat and while the browser is locked |
+| `depth` | `{project, session: DeskSession \| null, plane: SessionPlane}` | the project view's right column while it is open; `session` is the selected direct channel's, null on the group chat and while the browser is locked. **[2026-10-17]** Its tabs are Subagents (the default), Jobs, Diff and Info, in that order (`DepthColumn.tsx`, DC9's M5); the Transcript tab is gone with the slot |
 
 **[2026-10-17]** The `transcript` slot (`{project, session, plane, range}`;
 a direct channel's working record, unfolded in the center at one fold) is
