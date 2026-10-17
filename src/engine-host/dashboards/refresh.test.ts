@@ -76,6 +76,23 @@ describe('a query refresh at the host boundary', () => {
     expect(store().revision(id)).toBeGreaterThan(before);
   });
 
+  // E3 M2 residual: a failed collection neither changes the committed outcome nor withholds the scope's end
+  it('ends the publication as committed when the collection after it throws, and reports the failure', async () => {
+    const id = await board();
+    const logs: string[] = [];
+    vi.spyOn(store(), 'collectRetiredAssets').mockImplementation(() => {
+      throw new Error('unlink EBUSY');
+    });
+    const ends: unknown[] = [];
+    const admission = await datasetRefresher(store(), { now: () => now, log: (line) => logs.push(line) }).admit(start(id), { ...page(), ended: (end) => ends.push(end) });
+    if (!admission.ok) throw new Error(admission.refusal);
+    const publication = await admission.publish({ kind: 'result', result: envelope(rowsOf(1, 2)) }, HELD);
+    expect(publication).toMatchObject({ published: { status: 'dataset', rows: 2, revision: store().revision(id) } });
+    expect(ends).toEqual([publication]);
+    expect(live(id)).toMatchObject({ rows: 2, state: { status: 'ok' } });
+    expect(logs).toEqual([expect.stringMatching(/could not be collected.*unlink EBUSY/)]);
+  });
+
   it('collects the snapshot its retention retired right after the commit, not at the next hold release or maintenance', async () => {
     const id = await board();
     const collect = vi.spyOn(store(), 'collectRetiredAssets');

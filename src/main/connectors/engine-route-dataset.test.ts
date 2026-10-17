@@ -13,6 +13,7 @@ type Sent = { name: string; input: Record<string, unknown> };
 let sent: Sent[];
 let takes: Record<string, unknown>[]; // what each `connectors.take` answers, in order (none left: H's `{outcome: null}`)
 let gate: Promise<void> | null; // while set, each take's answer waits for it
+let cancelled: boolean; // what `connectors.cancel` answers (E3 M2 residual: false once the host admitted the commit)
 let route: EngineRoute;
 let order: string[];
 const LIVE = [
@@ -27,6 +28,7 @@ beforeEach(() => {
   sent = [];
   takes = [];
   gate = null;
+  cancelled = true;
   order = [];
   route = createEngineRoute({
     call: (async (name: string, input: CommandInput<never>) => {
@@ -44,7 +46,7 @@ beforeEach(() => {
           return ok(takes.shift() ?? { outcome: null });
         }
         case 'connectors.cancel':
-          return ok({ cancelled: true });
+          return ok({ cancelled });
         default:
           throw new Error(`unexpected ${name}`);
       }
@@ -71,10 +73,12 @@ const takesSent = () => sentNames().filter((name) => name === 'connectors.take')
 
 async function started(publishable: () => boolean, dataset: Record<string, unknown> = { id: 'live' }) {
   const target = (await route.resolveSession('app-asker', '11111111-1111-4111-8111-111111111111', { server: 'fixture', tool: 'rows' }, new AbortController().signal))!;
-  const answer = target.call({ series: 'revenue' }, { signal: new AbortController().signal, fingerprint: 'fp-1', mode: 'read', dataset: dataset as never, publishable: () => (order.push('publishable'), publishable()) });
+  const work = new AbortController();
+  const answer = target.call({ series: 'revenue' }, { signal: work.signal, fingerprint: 'fp-1', mode: 'read', dataset: dataset as never, publishable: () => (order.push('publishable'), publishable()) });
   await settle();
-  return { answer }; // not the answer itself, which an async function's return would await
+  return { answer, work }; // not the answer itself, which an async function's return would await
 }
+const TIMEOUT = ended({ status: 'failed', reason: 'timeout' }); // the host's end of an operation whose cancel won
 
 describe('route E with a dataset sink', () => {
   it('resolves the asking session alone: its live launch and directory, ready, and asked of the host for that session only', async () => {
@@ -148,36 +152,67 @@ describe('route E with a dataset sink', () => {
     expect(await answer).toMatchObject({ ok: false, failure: 'refused', refusal: 'revoked' });
   });
 
-  it('withdraws, never takes, a dataset operation that may no longer publish when its end is heard', async () => {
+  // E3 M2 residual (the architect's terminal-ownership ruling): a dataset operation is stopped through the host's
+  // `connectors.cancel`, never settled blindly: a cancel that won (before the commit's admission) ends it as nothing
+  // published, its retained end collected; one answered false awaits the host's durable end
+  it('cancels, never takes first, a dataset operation that may no longer publish when its end is heard', async () => {
     let publishable = true;
     const { answer } = await started(() => publishable);
     publishable = false;
+    takes.push(TIMEOUT);
     route.operationEnded(operationId());
     await settle();
     expect(await answer).toMatchObject({ ok: false, failure: 'unavailable' });
-    expect(sentNames()).not.toContain('connectors.take');
-    expect(sentNames()).toContain('connectors.cancel');
+    expect(order.slice(-3)).toEqual(['publishable', 'connectors.cancel', 'connectors.take']); // the take only collects its end
   });
 
-  it('rechecks before the reconciliation’s and the deadline’s takes too, and withdraws at the deadline what has not published', async () => {
+  it('rechecks before the reconciliation’s take, and at the deadline cancels through the host what has not published', async () => {
     const { answer } = await started(() => true);
     route.reconcile(); // still calling: H's null, no failure
     await settle();
     expect(order.slice(-2)).toEqual(['publishable', 'connectors.take']);
+    takes.push(TIMEOUT);
     await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS);
-    expect(order.slice(-3)).toEqual(['publishable', 'connectors.take', 'connectors.cancel']);
+    expect(order.slice(-2)).toEqual(['connectors.cancel', 'connectors.take']);
     expect(await answer).toMatchObject({ ok: false, failure: 'unavailable', message: expect.stringContaining('deadline') });
   });
 
-  it('withdraws at the deadline a publication still running: the budget is not extended for it', async () => {
+  it('awaits at the deadline the durable end of a publication the host admitted: its cancel answers false', async () => {
     const { answer } = await started(() => true);
     takes.push(publishing());
     route.operationEnded(operationId());
     await settle();
+    cancelled = false;
     takes.push(publishing());
     await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS);
-    expect(order.slice(-3)).toEqual(['publishable', 'connectors.take', 'connectors.cancel']);
-    expect(await answer).toMatchObject({ ok: false, failure: 'unavailable', message: expect.stringContaining('deadline') });
+    expect(order.slice(-2)).toEqual(['connectors.cancel', 'connectors.take']);
+    let done = false;
+    void answer.then(() => (done = true));
+    await settle();
+    expect(done).toBe(false);
+    takes.push(ended(META));
+    route.operationEnded(operationId()); // the commit's end
+    await settle();
+    expect(await answer).toEqual({ ok: true, result: META });
+  });
+
+  it('cancels through the host when its work is aborted, and answers an admitted publication’s durable end, its rollback included', async () => {
+    const aborted = await started(() => true);
+    takes.push(TIMEOUT);
+    aborted.work.abort();
+    await settle();
+    expect(await aborted.answer).toMatchObject({ ok: false, failure: 'unavailable', message: 'cancelled' });
+    sent = [];
+    cancelled = false;
+    const admitted = await started(() => true);
+    takes.push(publishing());
+    admitted.work.abort();
+    await settle();
+    expect(sentNames().slice(-2)).toEqual(['connectors.cancel', 'connectors.take']);
+    takes.push({ outcome: { ok: false, failure: 'failed', message: 'the dataset publication failed in the host: the artifact store failed to commit' } });
+    route.operationEnded(operationId());
+    await settle();
+    expect(await admitted.answer).toMatchObject({ ok: false, failure: 'failed' }); // rolled back: nothing published
   });
 
   it('fails an operation the host no longer holds when an end is heard: no outcome and no phase', async () => {

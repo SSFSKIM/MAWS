@@ -47,7 +47,9 @@ export interface ConnectorRouteCallContext {
   // `requestId` names an agent's refresh request (the host issued it), never a page's. `publishable` is main's
   // synchronous recheck that the work may still publish (the native window read now for a page, the request not ended
   // for an agent): the route asks it in the same turn as each step that would let the backend publish, and withdraws the
-  // work when it answers false.
+  // work when it answers false. E3 M2 residual: once dispatched, a dataset call is not raced against `signal` by the
+  // broker: the route settles it when the signal aborts, as nothing published when its backend's cancel won, else with
+  // the publication's durable end (the host owns that end once its commit is admitted).
   dataset?: { id: string; baseRevision?: number; requestId?: string };
   publishable?: () => boolean;
 }

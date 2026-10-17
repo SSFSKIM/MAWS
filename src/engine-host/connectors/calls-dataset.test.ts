@@ -76,6 +76,9 @@ let artifactId: string;
 let fingerprint: string;
 // a hook run once just before the sink's publication (between main's take and the commit)
 let beforePublish: (() => void | Promise<void>) | null;
+// the store's flushes run at once, or wait in `turns` while `deferring` (E3 M2 residual: a commit admitted, not flushed)
+let deferring: boolean;
+let turns: (() => void)[];
 
 const QUERY = { kind: 'query' as const, server: 'fixture', tool: 'rows', args: { series: 'revenue' } };
 const unfetched: DatasetDescriptor = { title: 'Live', source: { ...QUERY, snapshot: null }, columns: [], rows: 0, state: { status: 'ok', at: 1 } };
@@ -84,7 +87,9 @@ const live = () => readDataset(store.service.live(artifactId), 'live');
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'maws-connector-datasets-'));
   storage = SqliteDocumentStorage.open(join(dir, 'store.sqlite'), { log: () => {} });
-  service = new DocumentService(storage, { now: () => Date.now(), log: () => {}, kindOf: (id) => storage.kindOf(id) });
+  deferring = false;
+  turns = [];
+  service = new DocumentService(storage, { now: () => Date.now(), log: () => {}, kindOf: (id) => storage.kindOf(id), defer: (run) => (deferring ? turns.push(run) : setImmediate(run)) });
   store = new ArtifactStore(service, storage, { root: dir, log: () => {} });
   dashboards = registerDashboards({ documents: { store, service } });
   engine = scriptedEngine();
@@ -102,7 +107,7 @@ beforeEach(async () => {
       admit: async (input, cancel) => {
         const admission = await sink.admit(input, cancel);
         if (!('publish' in admission)) return admission;
-        return { publish: async (raw, guard) => (await beforePublish?.(), (beforePublish = null), admission.publish(raw, guard)) };
+        return { publish: async (raw, guard, admitted) => (await beforePublish?.(), (beforePublish = null), admission.publish(raw, guard, admitted)) };
       },
     },
   });
@@ -196,16 +201,90 @@ describe('ConnectorCalls with a dataset sink', () => {
     await store.grantConnectorTool(artifactId, { server: 'fixture', tool: 'rows', fingerprint, mode: 'read' });
     const { operationId } = calls.start(startOf());
     await announced(operationId, 1);
-    beforePublish = () => void calls.cancel(operationId);
+    // E3 M2 residual: main's cancel before the commit's admission wins: nothing published, its end kept for the next take
+    let cancelled: boolean | null = null;
+    beforePublish = () => void (cancelled = calls.cancel(operationId));
     expect(take(operationId)).toEqual(publishing(operationId));
     await vi.waitFor(() => expect(beforePublish).toBeNull());
     for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(cancelled).toBe(true);
     expect(announcements(operationId)).toBe(1); // a cancelled operation is never announced again
+    expect(take(operationId)).toEqual(failedTake('timeout'));
+    expect(take(operationId)).toEqual({ outcome: null }); // once
     expect(store.revision(artifactId)).toBe(before);
     // E3 M2 fix (reviewer finding 5): a concurrent change of the dataset is a typed conflict, never a tool's failure
     await race(() => store.writeWithAssets(artifactId, human, [], (doc) => setDataset(doc, 'live', { ...unfetched, title: 'Replaced' })), failedTake('stale'));
     expect(live()).toEqual({ ...unfetched, title: 'Replaced' });
     expect(store.listAssets(artifactId)).toEqual([]);
+  });
+
+  // E3 M2 residual (the architect's terminal-ownership ruling, a page's path): the host owns a dataset operation's end
+  describe('main’s cancel and the commit’s admission', () => {
+    const flush = async () => {
+      deferring = false;
+      for (const run of turns.splice(0)) run();
+      for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
+    };
+    // the publication admitted into its savepoint, its commit's flush deferred
+    async function admitted(): Promise<string> {
+      const { operationId } = calls.start(startOf());
+      await announced(operationId, 1);
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve)); // no flush already scheduled
+      deferring = true;
+      expect(take(operationId)).toEqual(publishing(operationId));
+      await vi.waitFor(() => expect(turns.length).toBeGreaterThan(0));
+      return operationId;
+    }
+
+    it('wins while the call still runs: nothing is published and the next take answers failed timeout', async () => {
+      engine.state.call = () => null;
+      const { operationId } = calls.start(startOf());
+      await vi.waitFor(() => expect(engine.calls()).toHaveLength(1));
+      const before = store.revision(artifactId);
+      expect(calls.cancel(operationId)).toBe(true);
+      engine.release(); // the engine answers after all: too late to publish
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+      expect(take(operationId)).toEqual(failedTake('timeout'));
+      expect(store.revision(artifactId)).toBe(before);
+      expect(live()).toEqual(unfetched);
+      expect(store.listAssets(artifactId)).toEqual([]);
+    });
+
+    it('answers cancelled false once the commit is admitted; the next take answers its durable dataset', async () => {
+      const operationId = await admitted();
+      expect(calls.cancel(operationId)).toBe(false);
+      expect(take(operationId)).toEqual(publishing(operationId));
+      await flush();
+      await announced(operationId, 2);
+      expect(take(operationId)).toMatchObject({ outcome: null, dataset: { status: 'dataset', rows: 2 } });
+      expect(live()).toMatchObject({ rows: 2, state: { status: 'ok' } });
+      expect(store.listAssets(artifactId)).toHaveLength(1);
+    });
+
+    it('answers cancelled false for an admitted error state too, whose failure the next take answers', async () => {
+      engine.state.call = () => success({ data: ROWS });
+      const operationId = await admitted();
+      expect(calls.cancel(operationId)).toBe(false);
+      await flush();
+      await announced(operationId, 2);
+      expect(take(operationId)).toEqual(failedTake('validation'));
+      expect(live()!.state.status).toBe('error');
+    });
+
+    it('answers a rollback after the admission as its failure, nothing published', async () => {
+      const operationId = await admitted();
+      expect(calls.cancel(operationId)).toBe(false);
+      const commit = storage.commit.bind(storage);
+      storage.commit = () => {
+        storage.commit = commit;
+        throw new Error('disk full');
+      };
+      await flush();
+      await announced(operationId, 2);
+      expect(take(operationId)).toEqual({ outcome: expect.objectContaining({ ok: false, failure: 'failed' }) });
+      expect(live()).toEqual(unfetched);
+      expect(store.listAssets(artifactId)).toEqual([]);
+    });
   });
 
   it('writes a malformed result or a tool failure as the error state alone, its end the typed failure', async () => {

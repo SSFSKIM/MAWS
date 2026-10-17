@@ -122,6 +122,30 @@ describe('an agent’s refresh between its admission and its deferred commit', (
     expect(p.cancels).toEqual([1]);
   });
 
+  // E3 M2 residual: the post-commit collection is best effort; the committed answer is the request's regardless
+  it('answers the committed publication when the collection after the commit fails, the failure reported', async () => {
+    const logs: string[] = [];
+    const collect = vi.spyOn(store, 'collectRetiredAssets').mockImplementation(() => {
+      throw new Error('unlink EBUSY');
+    });
+    const ids: string[] = [];
+    const requests = new DatasetRefreshRequests({ announce: (requestId) => ids.push(requestId), hasClient: () => true });
+    const base = store.revision(artifactId);
+    const opId = `${SESSION}/toolu_collect`;
+    const asked = requests.ask({ artifactId, datasetId: 'live', baseRevision: base, appSessionId: SESSION, opId, ...QUERY }, new AbortController().signal);
+    const admission = await connectorDatasetSink({ store: () => store, requests, log: (line) => logs.push(line) }).admit({ appSessionId: SESSION, artifactId, server: QUERY.server, tool: QUERY.tool, arguments: QUERY.args, dataset: { id: 'live', baseRevision: base, requestId: ids[0]! } }, () => {});
+    if (!('publish' in admission)) throw new Error(admission.refusal);
+    const publication = await admission.publish({ kind: 'result', result: { content: '', structuredContent: { rows: ROWS } } }, () => 'held');
+    expect(collect).toHaveBeenCalledWith(artifactId);
+    const settlement = await asked;
+    expect(settlement).toMatchObject({ kind: 'published', answer: { status: 'dataset', rows: 2 } });
+    expect(publication).toEqual({ published: (settlement as { answer: unknown }).answer });
+    expect(await store.replayOf(opId)).toEqual({ found: true, result: (settlement as { answer: unknown }).answer });
+    expect(live()).toMatchObject({ rows: 2, state: { status: 'ok' } });
+    expect(requests.answer(ids[0]!, { ok: false, state: 'failed', reason: 'toolError' })).toBe('not_pending'); // not stranded
+    expect(logs).toEqual([expect.stringMatching(/could not be collected.*unlink EBUSY/)]);
+  });
+
   it('writes nothing for an end heard before the admission', async () => {
     const ids: string[] = [];
     const requests = new DatasetRefreshRequests({ announce: (requestId) => ids.push(requestId), hasClient: () => true });

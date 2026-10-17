@@ -40,7 +40,10 @@
 //   serves it, never another session's, under the same read grant; the owner's revoke, the store's revoke or delete and
 //   main's stop end it as they end a page's work. E3 M2 fix: a dataset work, a page's or an agent's, runs on one
 //   budget (CONNECTOR_OPERATION_DEADLINE_MS) from its admission here through the route, the grant, the call and the
-//   host's publication; at its end the work is aborted (`paused: unavailable`) and may no longer publish.
+//   host's publication; at its end the work is aborted (`paused: unavailable`) and may no longer publish. E3 M2
+//   residual (the architect's terminal-ownership ruling): an aborted dataset call is not answered "nothing published"
+//   while its commit may land. Once dispatched, its route settles it through the host's cancel: the abort's refusal
+//   when the cancel won, else the publication's durable end, which stands as the outcome (`settledBy`).
 import { randomUUID } from 'node:crypto';
 import * as z from 'zod';
 import {
@@ -232,7 +235,7 @@ export class ConnectorBroker {
     try {
       const outcome = await this.run(lease, tool, args, 'call', work, sink ?? undefined);
       this.recheckWindow(lease.owner); // P3-H H4: at publication, a hide no event announced aborts it still
-      return work.controller.signal.aborted ? (work.controller.signal.reason as ConnectorRefusal) : outcome;
+      return settledBy(work, outcome, sink); // E3: an admitted publication's durable end stands
     } finally {
       lease.work.delete(work);
     }
@@ -347,7 +350,7 @@ export class ConnectorBroker {
       if ('ok' in found) return signal.aborted ? (signal.reason as ConnectorRefusal) : found;
       const publishable = () => !signal.aborted && this.agentWork.has(work);
       const outcome = await this.callTarget(request.artifactId, found.route, found.target, tool, args, 'call', signal, null, { sink: request.dataset, publishable });
-      return signal.aborted ? (signal.reason as ConnectorRefusal) : outcome;
+      return settledBy(work, outcome, request.dataset); // E3 M2 residual
     } finally {
       unbound();
       this.agentWork.delete(work);
@@ -434,7 +437,7 @@ export class ConnectorBroker {
     const unbound = sink ? bounded(work) : null; // E3
     try {
       const outcome = await this.attempt(lease, tool, args, use, work.controller.signal, sink);
-      return work.controller.signal.aborted ? (work.controller.signal.reason as ConnectorRefusal) : outcome;
+      return settledBy(work, outcome, sink); // E3 M2 residual
     } finally {
       unbound?.();
     }
@@ -489,18 +492,18 @@ export class ConnectorBroker {
       // The backend's door (P3-H H4): the window re-read in the same turn as the call, so a hide no event announced while
       // the route or the grant answered aborts the work here and nothing is dispatched.
       const admitted = authorization;
-      answer = await unlessAborted(
-        Promise.resolve().then<ConnectorRouteAnswer | typeof ABORTED>(() => {
-          if (owner !== null) this.recheckWindow(owner);
-          return signal.aborted ? ABORTED : target.call(args, { signal, fingerprint: target.fingerprint, mode: admitted.mode, ...(dataset && { dataset: dataset.sink, publishable: dataset.publishable }) /* E3 */ });
-        }),
-        signal,
-      );
+      const dispatched = Promise.resolve().then<ConnectorRouteAnswer | typeof ABORTED>(() => {
+        if (owner !== null) this.recheckWindow(owner);
+        return signal.aborted ? ABORTED : target.call(args, { signal, fingerprint: target.fingerprint, mode: admitted.mode, ...(dataset && { dataset: dataset.sink, publishable: dataset.publishable }) /* E3 */ });
+      });
+      // E3 M2 residual: a dataset call, once dispatched, is settled by its route even when aborted (never raced)
+      answer = await (dataset ? dispatched : unlessAborted(dispatched, signal));
     } catch (error) {
       return this.failed('toolError', `the ${route} call of ${named} threw: ${boundedMessage(error)}`);
     }
-    if (answer === ABORTED || signal.aborted) return signal.reason as ConnectorRefusal;
+    if (answer === ABORTED || (signal.aborted && !dataset)) return signal.reason as ConnectorRefusal;
     const read = readAnswer(answer);
+    if (signal.aborted && (typeof read === 'string' || !read.ok)) return signal.reason as ConnectorRefusal; // E3: nothing published
     if (read === 'malformed' || read === 'tooLarge') return this.failed(read, `the ${route} call of ${named} answered ${read === 'malformed' ? 'malformed' : 'too large a result'}`);
     if (!read.ok) {
       this.log(`connectors: the ${route} call of ${named} ${FAILURE_WORDS[read.failure]}: ${read.message}`);
@@ -710,6 +713,13 @@ export class ConnectorBroker {
     const watch = typeof watchId === 'string' ? this.watches.get(watchId) : undefined;
     return lease !== undefined && watch?.lease === lease ? watch : undefined;
   }
+}
+
+// A run's outcome once its work ended: an aborted work's is its abort's refusal, except (E3 M2 residual) the durable
+// end of a dataset publication its host had admitted before the abort, which stands.
+function settledBy(work: Work, outcome: ConnectorCallOutcome, sink: ConnectorDatasetSink | null | undefined): ConnectorCallOutcome {
+  const { signal } = work.controller;
+  return signal.aborted && !(sink && outcome.ok) ? (signal.reason as ConnectorRefusal) : outcome;
 }
 
 // E3 M2 fix: a dataset work's one budget, from now: at its end the work is aborted (and so no longer publishable).

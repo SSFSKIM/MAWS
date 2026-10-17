@@ -36,4 +36,12 @@ describe('a dataset operation’s take', () => {
     expect(validateCommandOutput('connectors.take', { outcome: { ok: true, result: { any: 'json' } } }).ok).toBe(true);
     expect(validateCommandOutput('connectors.take', { outcome: null, dataset: { status: 'failed', reason: 'nope' } }).ok).toBe(false);
   });
+
+  // E3 M2 residual: a dataset phase means H's outcome is null; both populated is no answer the host gives
+  it('refuses H’s outcome populated beside a dataset phase, and keeps H’s bare null as not ready', () => {
+    expect(validateCommandOutput('connectors.take', { outcome: { ok: true, result: 1 }, dataset: { status: 'publishing', operationId: OP } }).ok).toBe(false);
+    expect(validateCommandOutput('connectors.take', { outcome: { ok: false, failure: 'unavailable', message: 'gone' }, dataset: META }).ok).toBe(false);
+    expect(validateCommandOutput('connectors.take', { outcome: null, dataset: { status: 'publishing', operationId: OP } }).ok).toBe(true);
+    expect(validateCommandOutput('connectors.take', { outcome: null }).ok).toBe(true);
+  });
 });

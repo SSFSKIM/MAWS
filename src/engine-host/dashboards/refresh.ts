@@ -66,7 +66,10 @@ export type RefreshFailure = 'validation' | 'toolError' | 'timeout';
 /** The publication's end: its durable answer (with the failure an error state records), or why nothing was written. */
 export type RefreshPublication = { published: ArtifactDatasetResult; failed?: RefreshFailure } | { discarded: 'revoked' | 'cancelled' | 'stale'; detail: string };
 /** `stale`: the dashboard or the dataset went, or the dataset changed since the base (a concurrent mutation). */
-export type RefreshAdmission = { ok: true; publish(raw: RefreshRaw, guard: RefreshGuard): Promise<RefreshPublication> } | { ok: false; refusal: string; stale?: true };
+/** `admitted` (E3 M2 residual): told, synchronously in the prepare and after every check, that the commit is admitted,
+ * so the caller's own cancel can no longer stop it (the host's connector leg answers it `cancelled: false`). */
+export type RefreshPublish = (raw: RefreshRaw, guard: RefreshGuard, admitted?: () => void) => Promise<RefreshPublication>;
+export type RefreshAdmission = { ok: true; publish: RefreshPublish } | { ok: false; refusal: string; stale?: true };
 
 // The closed words a failed refresh records (never a server's text), and which failure each is.
 const FAILED = {
@@ -107,8 +110,9 @@ export const sameJson = (a: unknown, b: unknown): boolean => canonical(a) === ca
 export const sameQueryIdentity = (a: Pick<QuerySource, 'server' | 'tool' | 'args'>, b: Pick<QuerySource, 'server' | 'tool' | 'args'>): boolean => a.server === b.server && a.tool === b.tool && sameJson(a.args, b.args);
 const sameQuery = (source: QuerySource, call: Pick<RefreshStart, 'server' | 'tool' | 'arguments'>) => sameQueryIdentity(source, { server: call.server, tool: call.tool, args: call.arguments });
 
-export function datasetRefresher(store: ArtifactStore, options: { now?: () => number } = {}): { admit(start: RefreshStart, scope: RefreshScope): Promise<RefreshAdmission> } {
+export function datasetRefresher(store: ArtifactStore, options: { now?: () => number; log?: (line: string) => void } = {}): { admit(start: RefreshStart, scope: RefreshScope): Promise<RefreshAdmission> } {
   const now = options.now ?? Date.now;
+  const log = options.log ?? ((line: string) => console.warn(`[datasets] ${line}`));
 
   async function admit(start: RefreshStart, scope: RefreshScope): Promise<RefreshAdmission> {
     const adapter = dashboardAdapterOf(store);
@@ -136,7 +140,7 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
     });
     if ('refusal' in found) return { ok: false, ...found };
     const { prior, identity } = found;
-    return { ok: true, publish: (raw, guard) => publish(start, scope, prior, identity, raw, guard) };
+    return { ok: true, publish: (raw, guard, admitted) => publish(start, scope, prior, identity, raw, guard, admitted) };
   }
 
   // The candidate, validated before the frame: the parsed rows and their bytes, or the error state's words and failure.
@@ -153,7 +157,7 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
     return { table, bytes };
   }
 
-  async function publish(start: RefreshStart, scope: RefreshScope, prior: DatasetDescriptor & { source: QuerySource }, identity: number, raw: RefreshRaw, guard: RefreshGuard): Promise<RefreshPublication> {
+  async function publish(start: RefreshStart, scope: RefreshScope, prior: DatasetDescriptor & { source: QuerySource }, identity: number, raw: RefreshRaw, guard: RefreshGuard, admitted?: () => void): Promise<RefreshPublication> {
     const adapter = dashboardAdapterOf(store)!;
     const { artifactId } = start;
     const { id } = start.dataset;
@@ -174,6 +178,7 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
       if (current?.source.kind !== 'query' || !sameQuery(current.source, start)) throw changed();
       // last, so nothing after it refuses: from here the scope's owner holds the publication's end until `ended`
       if (!scope.admit()) throw new Discard('cancelled', `${artifactId}'s dataset "${id}": the request ended before the publication`);
+      admitted?.();
     };
     const write = (op: OpScope | null) =>
       store.writeWithAssets(
@@ -216,7 +221,15 @@ export function datasetRefresher(store: ArtifactStore, options: { now?: () => nu
       if (end) return end;
       throw error;
     }
-    if (recorded && 'table' in made) store.collectRetiredAssets(artifactId); // what this publication's retention retired, at once
+    // what this publication's retention retired, at once; best effort (E3 M2 residual): a failed collection changes
+    // nothing committed and never withholds the publication's end, and what it left is collected later
+    if (recorded && 'table' in made) {
+      try {
+        store.collectRetiredAssets(artifactId);
+      } catch (error) {
+        log(`${artifactId}'s dataset "${id}": its retired snapshots could not be collected after the commit: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     // the failure an error state records (a replayed answer is the op's first, whatever this call brought)
     const failed = answer.state === undefined ? undefined : 'problem' in made ? made.failure : 'validation';
     const end: RefreshPublication = { published: answer, ...(failed && { failed }) };

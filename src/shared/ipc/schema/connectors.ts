@@ -153,7 +153,12 @@ export const commands = {
   // null: no such operation (taken, cancelled, expired, or still running). E3: `dataset`, a dataset operation's phase
   // or end (its `outcome` then null); a dataset operation that ended before its call (refused, unavailable) answers
   // its `outcome` as H's do.
-  'connectors.take': host(z.strictObject({ operationId: OperationId }), z.strictObject({ outcome: ConnectorOperationOutcomeSchema.nullable(), dataset: ConnectorDatasetTakeSchema.optional() /* E3 */ })),
+  'connectors.take': host(
+    z.strictObject({ operationId: OperationId }),
+    z
+      .strictObject({ outcome: ConnectorOperationOutcomeSchema.nullable(), dataset: ConnectorDatasetTakeSchema.optional() /* E3 */ })
+      .refine((taken) => taken.dataset === undefined || taken.outcome === null, 'a dataset phase comes with a null outcome'), // E3 M2 residual
+  ),
   'connectors.cancel': host(z.strictObject({ operationId: OperationId }), z.strictObject({ cancelled: z.boolean() })),
 } as const satisfies Record<`connectors.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 

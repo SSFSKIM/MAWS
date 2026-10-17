@@ -29,6 +29,11 @@
 //   lets go of the fence. Until then the operation stays registered: a cancel, main's going, the request's end or a
 //   broken fence stops it before the commit. H's own `take` keeps its nullable outcome; a dataset operation that ended
 //   before its call (refused, unavailable) answers that outcome as H's do.
+// - E3 M2 residual (the architect's terminal-ownership ruling): main's `cancel` of a dataset operation is answered by
+//   the host's own end. Before its commit is admitted (synchronously, in the commit's prepare) the cancel wins: nothing
+//   is published, and the operation is kept for the next take, which answers `failed: timeout`. Once admitted (or its
+//   end already decided) the cancel answers false and stops nothing: the commit or its rollback is announced as any
+//   end, and the next take answers it. Main's cancel of any other operation is H's.
 import { ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
 import type { ConnectorAuthorization, ConnectorCallRef, ConnectorGrantMode } from '@shared/artifacts/connectors';
 import type { CommandInput } from '@shared/ipc/schema';
@@ -40,7 +45,7 @@ import { callMcpTool, probeMcpCall, type McpCallSupport } from '../mcp-call';
 import { ControlError, type ControlClient } from '../rpc';
 import { connectorToolState } from './status';
 import type { ConnectorDatasetSink } from './dataset-sink'; // E3
-import type { RefreshGuard, RefreshPublication, RefreshRaw } from '../dashboards/refresh'; // E3
+import type { RefreshPublication, RefreshPublish, RefreshRaw } from '../dashboards/refresh'; // E3
 
 // The host's view of a session (an EngineSession is one).
 export interface ConnectorSessionView {
@@ -86,6 +91,9 @@ interface Operation {
   expiry?: ReturnType<typeof setTimeout>;
   release?: () => void; // lets go of its fence (Decision Log 91: with the operation, not the call)
   dataset?: DatasetPhase; // E3: a dataset operation past its call
+  sink?: true; // E3: a dataset operation
+  committing?: boolean; // E3 M2 residual: its publication admitted into its savepoint, not yet ended
+  cancelled?: true; // E3 M2 residual: main's cancel won before the admission; its end is `failed: timeout`
 }
 
 // E3: a dataset operation's result in the host: waiting for main's take (`publish`), publishing, or its end (`take`).
@@ -137,7 +145,7 @@ export class ConnectorCalls {
 
   start(input: ConnectorStart): { operationId: string } {
     if (this.operations.has(input.operationId)) throw new Error(`connector operation ${input.operationId} is already known`);
-    const operation: Operation = { id: input.operationId, controller: new AbortController() };
+    const operation: Operation = { id: input.operationId, controller: new AbortController(), ...(input.dataset && { sink: true as const }) /* E3 */ };
     this.operations.set(operation.id, operation);
     void this.execute(operation, input).then(
       (outcome) => {
@@ -178,6 +186,18 @@ export class ConnectorCalls {
   cancel(operationId: string): boolean {
     const operation = this.operations.get(operationId);
     if (!operation) return false;
+    // E3 M2 residual: a dataset operation not yet ended, H's outcome aside: its admitted commit (or decided end) stands
+    // for the next take; before the admission the cancel wins, its end kept for that take
+    if (operation.sink && operation.outcome === undefined) {
+      if (operation.committing || operation.dataset?.take) return false;
+      operation.cancelled = true;
+      operation.controller.abort();
+      operation.dataset = { take: { status: 'failed', reason: 'timeout' } };
+      clearTimeout(operation.expiry);
+      operation.expiry = setTimeout(() => this.drop(operation), this.ttlMs);
+      (operation.expiry as { unref?: () => void }).unref?.();
+      return true;
+    }
     this.drop(operation);
     operation.controller.abort();
     return true;
@@ -199,6 +219,7 @@ export class ConnectorCalls {
 
   private finish(operation: Operation, outcome: ConnectorOperationOutcome): void {
     if (this.operations.get(operation.id) !== operation) return; // cancelled or closed: nobody waits for it
+    if (operation.cancelled) return; // E3 M2 residual: main's cancel won; its end is kept for the take
     delete operation.dataset; // E3
     operation.outcome = outcome;
     this.announce(operation);
@@ -218,7 +239,7 @@ export class ConnectorCalls {
   // E3: a dataset operation past its call: its result kept in the host for main's take, or its end already (a dataset
   // found changed before the call); announced either way.
   private keep(operation: Operation, execution: DatasetExecution): void {
-    if (this.operations.get(operation.id) !== operation) return;
+    if (this.operations.get(operation.id) !== operation || operation.cancelled) return;
     if ('publish' in execution && operation.controller.signal.aborted) return this.finish(operation, unavailable('cancelled'));
     operation.dataset = 'take' in execution ? { take: execution.take } : { publish: execution.publish };
     this.announce(operation);
@@ -230,12 +251,16 @@ export class ConnectorCalls {
     clearTimeout(operation.expiry);
     void phase.publish!().then(
       (end) => {
+        delete operation.committing;
         if ('ok' in end) return this.finish(operation, end);
-        if (this.operations.get(operation.id) !== operation) return; // cancelled or closed: nobody waits for it
+        if (this.operations.get(operation.id) !== operation || operation.cancelled) return; // nobody waits for it
         phase.take = end;
         this.announce(operation);
       },
-      (error: unknown) => this.finish(operation, failed(`the dataset publication failed in the host: ${words(error)}`)),
+      (error: unknown) => {
+        delete operation.committing; // rolled back with its write: nothing published
+        this.finish(operation, failed(`the dataset publication failed in the host: ${words(error)}`));
+      },
     );
   }
 
@@ -254,7 +279,7 @@ export class ConnectorCalls {
     if (!store) return failed('the artifact store is unavailable this run');
     // E3: a dataset's call is admitted by its sink first, under a read grant only; a dataset found changed or gone since
     // it was asked for ends `stale` there, nothing called
-    let sink: { publish(raw: RefreshRaw, guard: RefreshGuard): Promise<RefreshPublication> } | null = null;
+    let sink: { publish: RefreshPublish } | null = null;
     if (input.dataset) {
       if (input.mode !== 'read') return refused('wrongMode', `a dataset refresh of ${input.server} · ${input.tool} needs a read grant`);
       if (!this.options.datasets) return failed('this host publishes no datasets');
@@ -300,7 +325,7 @@ export class ConnectorCalls {
       return store.connectorFenceHolds(fence, call, input.mode) === 'held' ? 'held' : 'revoked';
     };
     const publishing = sink!;
-    return { publish: async () => takeOf(await publishing.publish(outcome.raw, guard)) };
+    return { publish: async () => takeOf(await publishing.publish(outcome.raw, guard, () => (operation.committing = true))) };
   }
 
   private async fenced(store: ConnectorGrantStore, fence: ConnectorFence, client: ControlClient, input: ConnectorStart, signal: AbortSignal, dataset = false): Promise<ConnectorOperationOutcome | { raw: RefreshRaw }> {

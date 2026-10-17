@@ -44,6 +44,9 @@ class Route implements ConnectorRoute {
   resolves = 0;
   readOnly = true;
   hold = false;
+  // E3 M2 residual: a route settles a dataset call it is aborted from through the host's cancel: at once when the cancel
+  // won (nothing published), or with the durable end when the host had admitted the commit (`admitted`)
+  admitted = false;
   constructor(readonly route: ConnectorRouteName, readonly has = true) {}
   async resolve(): Promise<ConnectorRouteTarget | null> {
     this.resolves += 1;
@@ -57,6 +60,7 @@ class Route implements ConnectorRoute {
       call: (args, context) =>
         new Promise((resolve) => {
           this.calls.push({ args, context, answer: resolve });
+          if (context.dataset) context.signal.addEventListener('abort', () => !this.admitted && resolve({ ok: false, failure: 'unavailable', message: 'cancelled' }));
           if (!this.hold) resolve({ ok: true, result: META });
         }),
     };
@@ -248,6 +252,31 @@ describe('a dataset work’s one budget', () => {
     expect(signal.aborted).toBe(true);
     expect(publishable!()).toBe(false);
     expect(await running).toEqual({ ok: false, state: 'paused', reason: 'unavailable' });
+  });
+
+  it('awaits, after its deadline or a hide, the durable end of a publication the host admitted; a rollback is the abort’s refusal', async () => {
+    grants.put(ROWS, 'read');
+    const lease = page();
+    engine.hold = true;
+    engine.admitted = true;
+    const late = broker.callTool(ME, lease, ROWS, { dataset: { id: 'live' } });
+    await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS);
+    expect(await pending(late)).toBe(true); // not "nothing published" while the commit may land
+    expect(engine.calls[0]!.context.publishable!()).toBe(false); // nor may it start another
+    engine.calls[0]!.answer({ ok: true, result: META });
+    expect(await late).toMatchObject({ ok: true, result: META });
+    const hidden = broker.callTool(ME, lease, ROWS, { dataset: { id: 'live' } });
+    await vi.waitFor(() => expect(engine.calls).toHaveLength(2));
+    broker.setVisible(ME, lease, false);
+    expect(await pending(hidden)).toBe(true);
+    engine.calls[1]!.answer({ ok: true, result: { status: 'failed', reason: 'validation' } });
+    expect(await hidden).toMatchObject({ ok: true, result: { status: 'failed', reason: 'validation' } });
+    broker.setVisible(ME, lease, true);
+    const rolledBack = broker.refreshForSession(agentRefresh());
+    await vi.waitFor(() => expect(engine.calls).toHaveLength(3));
+    await vi.advanceTimersByTimeAsync(CONNECTOR_OPERATION_DEADLINE_MS);
+    engine.calls[2]!.answer({ ok: false, failure: 'failed', message: 'the artifact store failed to commit' });
+    expect(await rolledBack).toEqual({ ok: false, state: 'paused', reason: 'unavailable' });
   });
 
   it('bounds a page’s dataset call the same way, and adds no bound to a call without a sink', async () => {

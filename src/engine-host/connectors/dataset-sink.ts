@@ -5,7 +5,7 @@
 // (../dashboards/refresh.ts) then checks the call against the dataset's query and captures its identity, and publishes
 // the result once main takes it.
 import type { Actor } from '@shared/artifacts/actor';
-import { datasetRefresher, type RefreshGuard, type RefreshPublication, type RefreshRaw, type RefreshScope, type RefreshStart } from '../dashboards/refresh';
+import { datasetRefresher, type RefreshPublish, type RefreshScope, type RefreshStart } from '../dashboards/refresh';
 import type { ArtifactStore } from '../documents/store';
 import type { DatasetRefreshRequests, DatasetRefreshScope, DatasetRefreshStart } from './dataset-requests';
 
@@ -15,12 +15,12 @@ export interface ConnectorDatasetSink {
   // The start admitted, its publication to run once main takes the result; or why not (`stale`: the dataset changed
   // or went since it was asked for), nothing asked of the engine. `cancel` withdraws the operation (an agent's request
   // that ended otherwise than by its publication).
-  admit(start: ConnectorDatasetStart, cancel: () => void): Promise<{ publish(raw: RefreshRaw, guard: RefreshGuard): Promise<RefreshPublication> } | { refusal: string; stale?: true }>;
+  admit(start: ConnectorDatasetStart, cancel: () => void): Promise<{ publish: RefreshPublish } | { refusal: string; stale?: true }>;
 }
 
 const HUMAN: Actor = { kind: 'human' };
 
-export function connectorDatasetSink(deps: { store: () => ArtifactStore | null; requests: DatasetRefreshRequests | null; now?: () => number }): ConnectorDatasetSink {
+export function connectorDatasetSink(deps: { store: () => ArtifactStore | null; requests: DatasetRefreshRequests | null; now?: () => number; log?: (line: string) => void }): ConnectorDatasetSink {
   return {
     async admit(start, cancel) {
       const store = deps.store();
@@ -34,7 +34,7 @@ export function connectorDatasetSink(deps: { store: () => ArtifactStore | null; 
         if (!claimed) return { refusal: `no pending dataset refresh request ${requestId} is this call` };
         scope = claimed;
       }
-      const admission = await datasetRefresher(store, { now: deps.now }).admit(start, scope);
+      const admission = await datasetRefresher(store, { now: deps.now, log: deps.log }).admit(start, scope);
       if (!admission.ok) {
         scope.refused?.(admission.refusal, admission.stale === true);
         return { refusal: admission.refusal, ...(admission.stale && { stale: true as const }) };
