@@ -207,6 +207,25 @@ test('G1: a marked answer streams per block into its folded turn, its record wor
   await expect(workingDots(records(view))).toHaveCount(1); // the record says it works
   expect(fm.depth.rows.get('main')!.some((row) => row.uuid === uuid)).toBe(false); // and its row is not written yet
 
+  // Unmarked text streaming later in the marked turn (a block after the answer, in the same response) stays inside the
+  // closed record; opened, the record shows it. The response's step-end drops it, as no row was written for it.
+  const named = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
+  if (named.k !== 'block-row') throw new Error('no block-row');
+  // The answer's last text chunk (the response's `stop` chunk comes after its block-row, and is then behind the aside's).
+  const lastChunk = recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === named.body.turnId && s.agentId === null && s.step === named.body.step && s.chunk.kind === 'text');
+  fm.step(lastChunk + 1 - fm.played);
+  const chunk = recording.steps[lastChunk];
+  if (chunk.k !== 'chunk') throw new Error('no chunk');
+  const ASIDE = 'An unmarked aside, still streaming.';
+  fm.depth.apply({ ...chunk, chunkIndex: chunk.chunkIndex + 1, chunk: { kind: 'text', index: Number(chunk.chunk.index) + 1, text: ASIDE } });
+  await page.waitForTimeout(300);
+  await expect(view).not.toContainText(ASIDE); // folded: the record below proves it arrived
+  const working = records(view).filter({ has: page.locator('.transcript-working-dots') });
+  await working.getByRole('button').first().click();
+  await expect(view).toContainText(ASIDE);
+  await view.getByText('Fold to report').click();
+  await expect(view).not.toContainText(ASIDE);
+
   // Settled: the row replaces the live text, drawn once. Then the engine's turn_duration closes the turn.
   const at = recording.rows.main.findIndex((row) => row.uuid === uuid);
   const duration = recording.rows.main.slice(at).find((row) => row.type === 'system' && row.subtype === 'turn_duration')!;
@@ -214,6 +233,7 @@ test('G1: a marked answer streams per block into its folded turn, its record wor
   presence(hub, fm.session, { status: 'idle' });
   await expect(streamingRows(view)).toHaveCount(0);
   await expect.poll(() => occurrences(view, ANSWER)).toBe(1);
+  await expect(view).not.toContainText(ASIDE);
   // Finished: no working dots anywhere (the record's, the jump control's), and the transcript's divider is not "Working".
   await expect(workingDots(view)).toHaveCount(0);
   await toggle(page, 'Transcript').click();
@@ -426,6 +446,24 @@ for (const [shape, interrupt] of INTERRUPTS) {
     }
   });
 }
+
+test("G3: with the fake machine disconnected, the channel is the log's, its working record a label", async ({ page, hub }) => {
+  const { fm, view } = await openSession(page, hub);
+  fm.step(endOf(fm.recording));
+  const [message] = fm.recordedMessages();
+  const draft: JsonObject = { ...message, writer: `${MACHINE}/${fm.session}` };
+  delete draft.ts;
+  delete draft.seq;
+  await hub.append(PROJECT, draft as never);
+  await expect(view.locator('[data-owner-card="to-human"]').filter({ hasText: ANSWER })).toBeVisible();
+  hub.dropMachine(PROJECT, MACHINE);
+  const center = page.getByRole('region', { name: 'Channel' });
+  await expect(page.getByTestId('machine-offline')).toBeVisible();
+  await expect(center.getByTestId('session-view')).toHaveCount(0);
+  await expect(center).toContainText(ANSWER); // the log's `message`
+  await expect(center.getByTestId('working-record').first()).toHaveText(`Working record · ${MACHINE} is offline`);
+  await expect(center.getByRole('button', { name: /working record/i })).toHaveCount(0);
+});
 
 test("a notification's landing on a <message> opens the session view at its row, marked", async ({ page, hub }) => {
   // Opened as a tapped notification opens it, cold: the channel's URL naming the log's `message` event.
