@@ -26,7 +26,7 @@
 - [~] S2 — Shared edit: shell and monitor starts and `task_status` in MAWS's backfill — **parked** (2026-10-17; branch `desk-backfill-jobs` pushed, no PR; Decision Log)
 - [x] T0 — Mockups of the four taste surfaces (2026-10-17: `desk-dc9-mockups` 73ecf8f0, the owner's choices marked c73916fa)
 - [x] M1 — The hub's `output`, the widened bodies, and DX8's `output()` (2026-10-17, reviewed clean: d2c8fec5..af560476, fix 7098835a..89b2e560)
-- [ ] M2 — The fake machine's part: the session-view recording, jobs and status, `output`, pages after the replay
+- [x] M2 — The fake machine's part: the session-view recording, jobs and status, `output`, pages after the replay (2026-10-17, reviewed clean: 36131d48..6bb8bb4f, fixes 45c4d172..62c4fbd3 and 62c4fbd3..c4a17632)
 - [ ] M3 — The per-session owner and the session view
 - [ ] M4 — The channel around the view: tail rows, the inline requests, the overlay, the end marker, the fallbacks, the retirements
 - [ ] M5 — The column: agents with real status, the jobs view, `output`, MCP names
@@ -743,6 +743,19 @@ in their own worktrees.
   preamble form too; that belongs to the parked S2 follow-up.)
   Date/Author: 2026-10-17, the composite's writer relaying DC8, folded by
   the controller.
+
+- Decision (M2 fix waves): under the DC8 producer an agent joins the tree
+  at its spawn, a seed naming it, or its first row, whichever comes first
+  (DC3's still only at a spawn); an agent-scope sub carries that agent's
+  own `jobs` and `mcp` in its snapshot and updates (its agent list stays
+  empty); `output` resolves the named path as the filesystem does —
+  component by component, every symlink expanded where it stands, dangling
+  ones included, `..` applied to the resolved prefix, at most 32 links,
+  refused on any lookup failure but "no such file" or on `..` past a
+  missing component — and opens the path it checked; the normalization
+  table is an own-property lookup; a plain-row notification needs the
+  engine's `origin.kind` (two-subagents' own rows carry it).
+  Date/Author: 2026-10-17, M2 executor, folded by the controller.
 
 ## Surprises & Discoveries
 - 2026-10-17 (M2): engine 2.1.300 also writes a `<task-notification>` as a
