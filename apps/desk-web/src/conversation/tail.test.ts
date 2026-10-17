@@ -169,6 +169,15 @@ describe("a send at the session view's tail", () => {
     for (const row of delivered('[sminos message from human id=5e551e17]\nr')) expect(tailSends(base({ entries: [machineHuman], transcript: { rows: [assistantRow('x'), row], complete: false } }))).toEqual([]);
   });
 
+  it("is never taken by the bridge's steer row, even one carrying the send's frame: a steer matches only the row its result names", () => {
+    const send = human(1, 'x');
+    // The bridge's steer appends a user row (`$.session.append`, a text block) that is no submission as the user: it
+    // marks no origin, or a plugin's without `asUser`.
+    const appended = (origin: JsonObject | null) => ({ ...userRow([{ type: 'text', text: framed(1, 'x') }], undefined, origin), uuid: 'steer-row', session_id: S }) as JsonObject;
+    for (const row of [appended(null), appended({ kind: 'plugin', name: 'doperpowers' })])
+      expect(tailSends(base({ entries: [send], transcript: { rows: [assistantRow('x'), row], complete: false } })).map((s) => s.key), JSON.stringify(row.origin)).toEqual([`chat:${WEB}:1`]);
+  });
+
   it("matches a frame however the engine carries the prompt: the row's text, a text block, a queued command", () => {
     const send = human(1, 'x');
     const forms = [userRow([{ type: 'text', text: framed(1, 'x') }]), { type: 'attachment', uuid: 'q1', timestamp: '2026-10-15T09:00:05.000Z', attachment: { type: 'queued_command', prompt: framed(1, 'x'), commandMode: 'prompt', origin: { kind: 'peer' } } } as JsonObject];
