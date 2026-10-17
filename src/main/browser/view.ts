@@ -57,12 +57,19 @@ export function tabWebPreferences(): WebPreferences {
   return { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, backgroundThrottling: true, safeDialogs: true };
 }
 
+// P3-F1 (docs/doperpowers/ledgers/2026-10-17-P3-F1.md): main turns WebRtcHideLocalIpsWithMdns off app-wide
+// (../chromium-features.ts), so Chromium no longer hides a page's host candidates behind .local names. A tab's page
+// therefore gathers ICE only on the default route's public interface: a site's WebRTC keeps working (through STUN and
+// TURN) and no local address reaches it. Set before the page loads; an adopted child before Chromium navigates it.
+const TAB_WEBRTC_IP_POLICY = 'default_public_interface_only';
+
 // A tab's view in its partition; or, for an adopted `window.open` child, the view over Chromium's child webContents.
 export function createTabView(partitions: Pick<Partitions, 'session'>): (tab: BrowserTab, adopted?: WebContents) => WebContentsView {
   return (tab, adopted) => {
     partitions.session(tab.partition); // prepared (its preload registered) before its first page loads
-    if (adopted) return new WebContentsView({ webContents: adopted });
-    return new WebContentsView({ webPreferences: { partition: tab.partition, ...tabWebPreferences() } });
+    const view = adopted ? new WebContentsView({ webContents: adopted }) : new WebContentsView({ webPreferences: { partition: tab.partition, ...tabWebPreferences() } });
+    view.webContents.setWebRTCIPHandlingPolicy(TAB_WEBRTC_IP_POLICY); // P3-F1
+    return view;
   };
 }
 

@@ -29,7 +29,9 @@ const fakes = await vi.hoisted(async () => {
       },
     });
     const history = { canGoBack: () => false, canGoForward: () => false, getActiveIndex: () => 0, getEntryAtIndex: () => ({ title: '' }) };
-    return Object.assign(new EventEmitter(), {
+    const page = Object.assign(new EventEmitter(), {
+      webRTCIPHandlingPolicy: null as string | null, // P3-F1: what the tab's setup asked of it
+      setWebRTCIPHandlingPolicy: (policy: string) => void (page.webRTCIPHandlingPolicy = policy), // P3-F1
       debugger: dbg,
       navigationHistory: history,
       loadURL: () => Promise.resolve(),
@@ -41,6 +43,7 @@ const fakes = await vi.hoisted(async () => {
       getZoomFactor: () => 1,
       setWindowOpenHandler: () => {},
     });
+    return page; // P3-F1: named, so its policy setter can record
   };
   class View {
     readonly webContents = webContents();
@@ -153,6 +156,15 @@ describe('startBrowser (E4a Design §2, G4)', () => {
       vi.useRealTimers();
     }
     expect(JSON.parse(readFileSync(file, 'utf8')).tabs).toHaveLength(1);
+  });
+
+  // P3-F1: main turns the .local candidate names off app-wide (chromium-features.ts), so each tab's page is held to its
+  // default public interface for WebRTC, as startBrowser's store makes it
+  it('holds a tab\'s page to the default public interface for WebRTC (P3-F1)', () => {
+    const browser = start(fakeIndex([A]).index);
+    const { tab } = browser.store.open({ appSessionId: A, url: 'https://a.test/', select: true });
+    expect(browser.store.entry(tab.tabId)!.view!.webContents).toMatchObject({ webRTCIPHandlingPolicy: 'default_public_interface_only' });
+    browser.stop();
   });
 
   it('refuses a client certificate to a request no page made (a favicon fetch), and leaves a page\'s own to its handler', () => {
