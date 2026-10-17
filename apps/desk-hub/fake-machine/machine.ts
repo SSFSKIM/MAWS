@@ -4,7 +4,7 @@
 //   - syncs one project's log (the recordings' log events, sealed with the org key, under its own writers) and imports
 //     the hub's, refusing what does not verify and reporting it up (`rejected`);
 //   - publishes its presence, each session's presence, pending requests, settlements, and delivery outcomes;
-//   - serves subscriptions (session.ts), and the depth's `rows` and `diff`;
+//   - serves subscriptions (session.ts), and the depth's `rows`, `diff`, and (as DC8's producer) `output`;
 //   - answers RPCs from a script, with a ledger of its own: a nonce is claimed before the effect and its outcome recorded
 //     before the result, and a nonce the ledger knows is never executed again;
 //   - can drop its connection, crash after an RPC's effect and before recording its outcome, end its subscriptions as
@@ -22,7 +22,7 @@ import type { Delivery, MachinePresence, Raised, SessionMessage, Settled } from 
 import { Link, LinkError, type Credentials } from './link';
 import { emptyMemory, expireLedger, type Memory } from './memory';
 import type { Recording, Row, Step } from './recording';
-import { SessionDepth, type SnapshotOptions } from './session';
+import { SessionDepth, type Producer, type SnapshotOptions } from './session';
 
 /** What a script answers an RPC with: an outcome, or undefined for the fake machine's own default. */
 export type RpcScript = { [N in RpcName]?: (rpc: Rpc<N>, machine: FakeMachine) => RpcOutcome<N> | undefined | Promise<RpcOutcome<N> | undefined> };
@@ -78,6 +78,11 @@ export type FakeMachineOptions = {
   reconnect?: boolean;
   /** The branch each session's working-tree diff is against (DX4 `diff`'s `base`); `main` when this gives none. */
   diffBase?: (session: string) => string | undefined;
+  /**
+   * The daemon it stands for (`Producer`): `dc8` carries DX4's widened `subagents` body, `jobs` and `mcp`, and answers
+   * `output`; `dc3` (the default, as DC3 built it) sends each agent's id and meta alone and passes `output` by.
+   */
+  producer?: Producer;
 };
 
 /** What happened to an RPC this machine received, for a test to read. */
@@ -139,7 +144,7 @@ export class FakeMachine {
     );
     const where = { project: this.project, machine: this.name };
     for (const recording of options.recordings ?? []) {
-      const depth = new SessionDepth(recording.session, recording, (m) => this.queue({ t: 'session', message: m }), where, options.bridge !== false, this.diffBase(recording.session));
+      const depth = new SessionDepth(recording.session, recording, (m) => this.queue({ t: 'session', message: m }), where, options.bridge !== false, this.diffBase(recording.session), this.producer);
       this.sessions.set(recording.session, depth);
       for (const step of recording.steps) this.timeline.push({ session: depth, step });
     }
@@ -147,7 +152,7 @@ export class FakeMachine {
     // A steer the machine ran before a crash left its row in the transcript (DX6's trace).
     for (const trace of Object.values(this.memory.trace)) {
       if (trace.rpc === 'steer' && trace.row && trace.session) this.sessions.get(trace.session)?.appendRow(null, trace.row as Row);
-      else if (trace.rpc === 'spawn' && trace.session && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where, true, this.diffBase(trace.session)));
+      else if (trace.rpc === 'spawn' && trace.session && !this.sessions.has(trace.session)) this.sessions.set(trace.session, new SessionDepth(trace.session, null, (m) => this.queue({ t: 'session', message: m }), where, true, this.diffBase(trace.session), this.producer));
     }
   }
 
@@ -169,6 +174,10 @@ export class FakeMachine {
 
   private diffBase(session: string): string {
     return this.options.diffBase?.(session) ?? 'main';
+  }
+
+  private get producer(): Producer {
+    return this.options.producer ?? 'dc3';
   }
 
   // The connection.
@@ -743,7 +752,7 @@ export class FakeMachine {
         if (!checkouts.some((c) => c.path === rpc.args.checkout)) return fail('unknown-checkout', `${rpc.args.checkout} is not a known checkout here`);
         const session = randomUUID();
         const alias = `fake-${session.slice(0, 4)}`;
-        const depth = new SessionDepth(session, null, (m) => this.queue({ t: 'session', message: m }), { project: this.project, machine: this.name }, true, this.diffBase(session));
+        const depth = new SessionDepth(session, null, (m) => this.queue({ t: 'session', message: m }), { project: this.project, machine: this.name }, true, this.diffBase(session), this.producer);
         this.sessions.set(session, depth);
         await this.write(`rpc:${rpc.nonce}:joined`, `${this.name}/${session}`, {
           kind: 'joined', session, alias, name_source: 'seat', machine: this.name, cwd: rpc.args.checkout, worktree: rpc.args.worktree ?? '', role: rpc.args.brief, seat: alias, by: member,
@@ -827,6 +836,9 @@ export class FakeMachine {
         return;
       case 'diff':
         this.sessions.get(frame.session)?.diff(frame.sub);
+        return;
+      case 'output':
+        this.sessions.get(frame.session)?.output(frame.sub, frame.taskId, frame.tail);
         return;
       default:
         return;

@@ -1,0 +1,14 @@
+{"_ms":0,"record":{"status":"idle","waitingFor":null,"needs":null}}
+{"_ms":613,"record":{"status":"busy","waitingFor":null,"needs":null}}
+{"_ms":6562,"record":{"status":"idle","waitingFor":null,"needs":null}}
+{"_ms":6620,"record":{"status":"busy","waitingFor":null,"needs":null}}
+{"_ms":8345,"record":{"status":"waiting","waitingFor":"permission prompt","needs":null}}
+{"_ms":8804,"record":{"status":"busy","waitingFor":null,"needs":null}}
+{"_ms":16443,"record":{"status":"waiting","waitingFor":"input needed","needs":null}}
+{"_ms":16779,"record":{"status":"busy","waitingFor":null,"needs":null}}
+{"_ms":18979,"record":{"status":"idle","waitingFor":null,"needs":null}}
+{"_ms":19532,"record":{"status":"busy","waitingFor":null,"needs":null}}
+{"_ms":20232,"record":{"status":"idle","waitingFor":null,"needs":null}}
+{"_ms":24566,"record":{"status":"busy","waitingFor":null,"needs":null}}
+{"_ms":27219,"record":{"status":"idle","waitingFor":null,"needs":null}}
+{"_ms":30000,"record":null}

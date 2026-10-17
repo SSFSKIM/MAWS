@@ -10,13 +10,17 @@
 // (accepted by the composite's writer; recomposition's walk covers DX2). The double answers a `diff` request itself, numbered
 // on the subscription, so the producer's subscription messages are renumbered by the double (`sendSub`) and the
 // double is handed the recording's diff to answer with, as the producer's `diff` would.
+//
+// DC9 replays `SESSION_VIEW` with `producer: 'dc8'`: the widened `subagents` body, `jobs` and `mcp` in the snapshot and
+// as they change, and `output` answered on a subscription from the recording's `tasks/`; the subscription stays open after
+// the replayed session ends, answering `rows` and `output`. The defaults (`TWO_SUBAGENTS`, `dc3`) are DC6's.
 import type { SessionMessage } from 'desk-hub/protocol';
-import { loadRecording, SessionDepth, TWO_SUBAGENTS, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
+import { loadRecording, SessionDepth, TWO_SUBAGENTS, type Producer, type Recording, type SnapshotOptions, type Step } from 'desk-hub/fake-machine';
 import type { JsonObject, Raised } from 'desk-hub/protocol';
 import type { HubDouble } from '../test/double/hub-double';
 
 export class FakeMachineReplay {
-  readonly recording: Recording = loadRecording(TWO_SUBAGENTS);
+  readonly recording: Recording;
   readonly depth: SessionDepth;
   /** How many steps of the timeline have been applied. */
   played = 0;
@@ -28,8 +32,10 @@ export class FakeMachineReplay {
   constructor(
     private readonly hub: HubDouble,
     readonly where: { project: string; machine: string },
+    options: { recording?: string; producer?: Producer } = {},
   ) {
-    this.depth = new SessionDepth(this.recording.session, this.recording, (message) => this.relay(message), where);
+    this.recording = loadRecording(options.recording ?? TWO_SUBAGENTS);
+    this.depth = new SessionDepth(this.recording.session, this.recording, (message) => this.relay(message), where, true, 'main', options.producer ?? 'dc3');
     this.hub.diffs.set(this.recording.session, { base: 'main', text: this.depth.diffText });
     this.timer = setInterval(() => this.poll(), 5);
   }
@@ -114,10 +120,7 @@ export class FakeMachineReplay {
 
   private apply(step: Step): void {
     this.depth.apply(step);
-    if (step.k === 'presence') {
-      this.depth.presence = step.record;
-      this.sendPresence();
-    }
+    if (step.k === 'presence') this.sendPresence();
   }
 
   private poll(): void {
@@ -130,6 +133,7 @@ export class FakeMachineReplay {
         void this.depth.subscribe(frame.sub, frame.agentId, raced?.options ?? {});
       } else if (frame.t === 'unsubscribe') this.depth.end(frame.sub, 'unsubscribed');
       else if (frame.t === 'rows') this.depth.page(frame.sub, frame.before, frame.limit);
+      else if (frame.t === 'output') this.depth.output(frame.sub, frame.taskId, frame.tail);
     }
   }
 }

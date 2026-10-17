@@ -10,6 +10,8 @@
 //                                        machine's daemon settled delivering a log event (one under log/, named by its
 //                                        recorded position) to a session: DX4's `delivery` without its code
 //   diff.patch                           optional: the working tree's diff against its base branch
+//   tasks/<taskId>.output                optional: background tasks' output files, as the engine wrote them under its
+//                                        temporary directory (the fake machine maps the session's tasks roots here)
 //   recorded.json                        `{session, cwd, member}`: the session id, its working directory, and the member
 //                                        placeholder the recording's web answers name in `by`
 //
@@ -18,11 +20,15 @@
 // row's block is streamed in small chunks, then its `block-row`, then the row, then its step's end. Either way the
 // recording becomes one timeline of steps, each at a time in ms, which the fake machine plays.
 import { readdirSync, readFileSync, existsSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import type { JsonObject } from '../src/protocol/json';
 import type { BlockRow, Delivery, Raised, Settled, StepEnd, Usage } from '../src/protocol/session';
+import type { BridgeAgent } from './jobs';
 
 export type Row = JsonObject & { uuid: string };
+
+/** A spawn record as the bridge's `agent` event carries it. */
+export type Spawn = Omit<BridgeAgent, 'agentId' | 'running'>;
 
 /** One step of a session's timeline. `agentId` is null for the main loop. */
 export type Step = { at: number } & (
@@ -34,8 +40,14 @@ export type Step = { at: number } & (
   | { k: 'step-end'; body: StepEnd }
   /** The row is on disk: subscribers of its transcript receive it. */
   | { k: 'row'; agentId: string | null; row: Row }
-  /** A subagent started: its `meta.json` joins the session's tree. */
-  | { k: 'agent'; agentId: string }
+  /** A subagent started: its `meta.json` joins the session's tree, and the bridge holds it running when it saw the
+   * spawn (DX5's `agent` spawn record). */
+  | { k: 'agent'; agentId: string; spawn?: Spawn }
+  /** The bridge saw a subagent stop (DX5's `agent` stop). */
+  | { k: 'agent-stop'; agentId: string }
+  /** The bridge's agent state whole, as its snapshot or a `resync` carries it: what a module (re)loaded mid-session
+   * seeds from `$.agent.list()`. */
+  | { k: 'agents'; agents: BridgeAgent[] }
   | { k: 'usage'; body: Usage }
   | { k: 'presence'; record: JsonObject | null }
   | { k: 'raised'; draft: Omit<Raised, 'mac' | 'session'> }
@@ -49,6 +61,9 @@ export type Step = { at: number } & (
 export type Recording = {
   /** The directory's name. */
   name: string;
+  /** The directory itself, whose `tasks/<taskId>.output` files are the session's task outputs; absent for a recording
+   * made in memory, which has none. */
+  dir?: string;
   session: string;
   cwd: string;
   /** The member id the recording's web answers carry in `by`; the fake machine puts its own member in its place. */
@@ -119,6 +134,7 @@ export function loadRecording(dir: string, options: LoadOptions = {}): Recording
   steps.sort((a, b) => a.at - b.at);
   return {
     name: basename(dir),
+    dir: resolve(dir),
     session: options.session ?? recorded.session,
     cwd: recorded.cwd,
     member: recorded.member ?? null,
@@ -202,7 +218,11 @@ function fromBridge(events: JsonObject[], rows: { main: Row[]; agents: Record<st
     } else if (e.type === 'turn' && e.phase === 'complete') {
       steps.push({ at, k: 'turn-end', turnId: String(e.turnId), agentId, reason: String(e.reason) });
     } else if (e.type === 'agent' && e.phase === 'spawn') {
-      steps.push({ at, k: 'agent', agentId: String(e.agentId) });
+      steps.push({ at, k: 'agent', agentId: String(e.agentId), spawn: spawnOf(e) });
+    } else if (e.type === 'agent' && e.phase === 'stop') {
+      steps.push({ at, k: 'agent-stop', agentId: String(e.agentId) });
+    } else if ((e.type === 'snapshot' || e.type === 'resync') && Array.isArray(e.agents)) {
+      steps.push({ at, k: 'agents', agents: (e.agents as JsonObject[]).map((a) => ({ agentId: String(a.agentId), ...spawnOf(a), running: a.running === true })) });
     } else {
       steps.push(...sideSteps(e, at));
     }
@@ -211,6 +231,13 @@ function fromBridge(events: JsonObject[], rows: { main: Row[]; agents: Record<st
   const end = steps.at(-1)?.at ?? 0;
   for (const [uuid, { agentId }] of byUuid) if (!released.has(uuid)) release(agentId, uuid, end);
   return steps;
+}
+
+/** The spawn fields an `agent` event (or a snapshot's agent entry) carries, as it carries them. */
+function spawnOf(e: JsonObject): Spawn {
+  const spawn: Record<string, unknown> = { parentAgentId: (e.parentAgentId as string | null | undefined) ?? null, subagentType: String(e.subagentType ?? ''), description: String(e.description ?? '') };
+  for (const k of ['name', 'background', 'model', 'toolUseId', 'agentType'] as const) if (k in e) spawn[k] = e[k];
+  return spawn as Spawn;
 }
 
 /** How long, in ms, the synthesized stream takes per chunk, and how many characters a chunk carries. */
