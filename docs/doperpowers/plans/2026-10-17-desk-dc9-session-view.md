@@ -163,7 +163,9 @@ tail}` up (shape-checked: `taskId` `[A-Za-z0-9_-]{1,64}`, `tail` an
 integer 1 to 524288, else `bad-shape`), DX2's `output {project, session,
 agentId, sub, taskId, tail}` down, and DX4's `output` kind in
 `SUBSCRIPTION_KINDS` with its four variants typed as a discriminated
-union (`ok`, `missing`, `refused`, `unknown-task`); the `subagents` body
+union (`ok`, `missing`, `refused`, `unknown-task`; `missing.path` is
+`string | null`, null for a known task whose `outputFile` is still null —
+the second review's correction, Decision Log); the `subagents` body
 and the snapshot are widened as DX4's `subagents` row says (`status`,
 `evidence`, `running?`, `spawn?`, `outcome?`, `file?`; `jobs: Job[]`;
 `mcp: {name}[]`), the new fields optional on the wire where a producer
@@ -207,7 +209,7 @@ typechecks; desk-web's `project-client.test.ts` covers `output()` and the
 - **Jobs and status.** `SessionDepth` carries the widened `subagents` body
   in the snapshot and in each `subagents` message, derived from the
   recording's rows by DX4's rules: the one normalization table, the
-  precedence (the fake has no bridge state beyond what its recording's
+  precedence as the second review restated it (Decision Log; the fake has no bridge state beyond what its recording's
   timeline declares; a module-reload case is a recorded seed), nested
   agents from their parent's transcript, `exited` once the replayed session
   ends, `jobs` and `mcp`. A `subagents` message is sent whenever any of it
@@ -215,9 +217,11 @@ typechecks; desk-web's `project-client.test.ts` covers `output()` and the
 - **`output`.** The fake answers DX2 `output` on the sub with each DX4
   variant: `ok` (the last `tail` bytes, cut forward to a line break when
   the window does not start the file, `from`, `size`, `truncated`),
-  `missing`, `unknown-task`, `refused` with its reason (a path that does
-  not carry `<session>/tasks/<taskId>.output`, or one outside the
-  recording's tasks directory once resolved); `FakeMachineReplay`
+  `missing` (a path that passed and is not there, or `path: null` for a
+  known task whose `outputFile` is still null), `unknown-task`, `refused`
+  with its reason, containment only (a path that does not carry
+  `<session>/tasks/<taskId>.output`, or one outside the recording's tasks
+  directory once resolved); `FakeMachineReplay`
   (desk-web's e2e double) answers it the same way.
 - **After the replay.** A subscription stays open and answers `rows` (and
   `output`) after the replayed session ends; the fake sends
@@ -229,7 +233,13 @@ can pin it directly. Until DC8's fixture is relayed, a fixture of this
 child's own (rows → expected body; DX4's every raw word, the module-reload
 case, a nested agent whose parent still runs and one whose parent is over,
 an unknown task, a deleted output file, a monitor just started with no
-path) pins it.
+path) pins it. Each synthesized row is copied from a real transcript
+row's shape (a background Bash, a Monitor, a task-notification, a
+`task_status`, an `mcp_instructions_delta`, an agent's rows), scrubbed,
+never invented; the Decision Log names where each shape came from, and the
+rows are aligned with DC8's fixture once it lands. The precedence gives a
+cold open and an already-open subscription the same status for the same
+rows.
 
 **Proves:** the fake machine's tests: the derivation against the fixture;
 each `output` variant; `rows` answered after the replay's end to the first
@@ -297,13 +307,15 @@ session view beside them; `apps/desk-web/e2e/`.
   session — is a tail row in MAWS's held-prompt shape (`heldRow`), with
   the desk's delivery line (DX4 `delivery`; an RPC's `uncertain`), passed
   as `Transcript`'s `tail`. It stays, whatever the delivery state says,
-  until a matching user row is observed; matching is one to one, by the
-  delivery frame's first line naming the send's `(writer, seq)`
-  (`[sminos chat <project> <writer_short>:<seq> from human → @you…]`, with
-  `hub/<member>:<seq>` for a web send; `compose_chat_frame`, `event_ref`,
-  `writer_short` in doperpowers' `sminos.py` give the exact grammar), then
-  ordered text containment for rows without a frame, oldest unmatched send
-  to oldest unmatched row. A send whose delivery ends `failed`,
+  until its own user row is observed; matching is one to one and only by
+  identity (Decision Log, the second review): the delivery frame's first
+  line naming the send's `(writer, seq)` (`[sminos chat <project>
+  <writer_short>:<seq> from human → @you…]`, with `hub/<member>:<seq>` for
+  a web send; `compose_chat_frame`, `event_ref`, `writer_short` in
+  doperpowers' `sminos.py` give the exact grammar), or an exact row uuid
+  (the bridge's optional `delivered.uuid`). There is no text-containment
+  fallback: a row without a frame (a prompt typed at the terminal) never
+  matches a web send. A send whose delivery ends `failed`,
   `refused-read-only` or `recorded` keeps its tail row with that state; a
   second outcome for the same key (`failed` after `delivered`) replaces
   the first.
@@ -329,11 +341,13 @@ session view beside them; `apps/desk-web/e2e/`.
   `connectDepth()` registers `depth` alone; this document's Decision Log
   records DX8's amendment as built, for the composite's writer to fold.
 
-**Proves:** unit tests for the matcher (the three acceptance cases — the
-`delivered` outcome before the row; two identical sends consuming one row
-each in order, by frame then containment; a submission delayed then
-refused keeping its tail row as `failed` — plus a frame naming another
-send, and a row with no frame); browser tests for the band (a permission
+**Proves:** unit tests for the matcher (the acceptance cases — the
+`delivered` outcome before the row; two identical sends each consuming its
+own framed row; a submission delayed then refused keeping its tail row as
+`failed` — plus a frame naming another send, an exact-uuid match, and the
+second review's case: an earlier terminal prompt "continue", then a web
+send "continue" acknowledged while the session is busy, whose tail row
+stays until its own framed row arrives); browser tests for the band (a permission
 and a question answered, cards gone), the overlay, the end marker with
 Resume, each fallback, and the phone drawing no transcript; DC5's
 conversation and phone suites pass.
@@ -349,7 +363,8 @@ conversation and phone suites pass.
 - **Subagents with real status.** `depth/agents/task-feed.ts` patches each
   node's status on the desk side from the widened `subagents` body: DX4's
   `status` replaces `unknown` (never a status the held rows' events
-  already made terminal, by DX4's precedence), a nested agent sits under
+  already made terminal, by DX4's precedence as the second review restated
+  it), a nested agent sits under
   the parent its meta or spawn record names, and no recorded agent sits
   under "On disk / status unavailable"; an entry DX4 leaves `unknown` (the
   three cases §9.3 names) is shown as such. A producer older than DC8
@@ -362,7 +377,9 @@ conversation and phone suites pass.
   (`tools/agents/background/TaskRows.tsx`), adapting a `Job` to what they
   read; a shell's Output asks `output(taskId, tail)` and draws the answer
   by variant as DX4's consumer paragraph says (`ok` the tail as plain text
-  with how many bytes precede it; `missing` keeps the row's summary;
+  with how many bytes precede it; `missing` keeps the row's summary, and
+  with `path: null` (no file named yet) it may be asked again once a later
+  `subagents` names the job's `outputFile`;
   `refused` its reason, no retry; `unknown-task` waits for the next
   `subagents` to carry the task, then says the task is unknown); the MCP
   names listed below.
@@ -454,6 +471,28 @@ in their own worktrees.
   while M1–M3 run; M4 and M5 build the surfaces functionally and M6
   polishes them to the verdict.
   Date/Author: 2026-10-17, controller.
+
+- Decision: The second adversarial review of the composite
+  (`4943edea9..77e82d832`, spec edits in flight from the composite's
+  writer) corrects three rules, built to now: (1) §9.1, a web send's tail
+  row matches only by the event identity its delivery frame carries or by
+  an exact row uuid — no ordered text-containment fallback, and an
+  unframed (terminal-typed) row never matches a web send; the tail row
+  stays until its own row arrives. (2) DX4's status precedence, highest
+  first: an explicit terminal outcome in a row; then known process death
+  (the session's process gone, the parent agent ended, or the bridge
+  stopped without a terminal word), giving `exited`; then running or
+  pending evidence; then `unknown` only with no evidence. Cached
+  bridge-running evidence stops counting once the process is gone, and a
+  cold open and an already-open view agree. (3) DX4 `output`: a known task
+  whose `outputFile` is null answers `missing` with `path: null`, retry
+  eligible once a later update supplies a path; `refused` is the
+  containment refusal only. Also a condition on the `session-view`
+  recording: each synthesized row is copied from a real row shape, its
+  source named here, and aligned with DC8's fixture when it lands.
+  Supersedes the plan's earlier matcher and `missing` wording (M1, M2, M4,
+  M5 edited in place).
+  Date/Author: 2026-10-17, the composite's writer, folded by the controller.
 
 ## Surprises & Discoveries
 
