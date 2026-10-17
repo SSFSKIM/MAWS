@@ -816,18 +816,24 @@ What only the log or the hub knows joins the transcript:
   <project> <writer_short>:<seq> from human → @you…]` (`compose_chat_frame`,
   `event_ref`, `writer_short` in `sminos.py`; `hub/<member>:<seq>` for a web
   send, since a `hub/` writer has no session part), so a row whose frame
-  names the send's `(writer, seq)` is its row. A row without such a frame
-  (a text that entered another way, a frame the engine rewrote) falls back
-  to ordered text containment, oldest unmatched send to oldest unmatched
-  row, each used once. The bridge's `delivered.uuid` (9.7) stays optional:
-  an exact row id where the frame is not enough. A send whose delivery
-  ends `failed`, `refused-read-only` or `recorded` keeps its tail row with
-  that state; one whose submission the engine later refuses (`drop`) gets
-  a second outcome for the same key, `failed` with the bridge's reason —
-  the bridge's `delivered {outcome: "refused"}` reaches no DX4 outcome
-  today (the child keeps `submitted` keys alone, `sminos_bridge.py:642-646`),
-  so DC8 relays it — and the tail row shows that state; its row never
-  comes.
+  names the send's `(writer, seq)` is its row; the only other match is an
+  exact row id, the bridge's optional `delivered.uuid` (9.7). **A row
+  without a frame never matches a web send** (the review's round 2,
+  2026-10-17): a prompt typed in the terminal, a text that entered another
+  way, is not the send's, however equal its text — a text-containment
+  fallback was dropped, since "continue" typed and "continue" sent would
+  take each other's row. So the tail row stays visible, with its state
+  (sent; delivered, waiting for its row), until its own framed row or its
+  named uuid arrives, and if none ever does — the session ends first, the
+  frame never reaches the transcript — it stays as a delivered entry at
+  the tail, ahead of the session's end marker, never silently hidden. A
+  send whose delivery ends `failed`, `refused-read-only` or `recorded`
+  keeps its tail row with that state; one whose submission the engine
+  later refuses (`drop`) gets a second outcome for the same key, `failed`
+  with the bridge's reason — the bridge's `delivered {outcome: "refused"}`
+  reaches no DX4 outcome today (the child keeps `submitted` keys alone,
+  `sminos_bridge.py:642-646`), so DC8 relays it — and the tail row shows
+  that state; its row never comes.
 - **Pending requests** are a band of request cards above the composer,
   the cards the channel draws today from the hub's pending set, so a
   request is answered in the session view as in the channel. Rejected:
@@ -977,11 +983,14 @@ transcript. Its sources, per transcript:
 
 The engine's raw status words are normalized by one table (DX4), the one
 MAWS applies (`backfill.ts` `parseTaskNotification`, `task-graph.ts`
-`statusOfPatch`), and evidence has a precedence (DX4): the bridge's word
-on an agent it holds, then terminal evidence from rows, then non-terminal
-evidence, then inference (a nested agent whose parent is over; any agent
-of a session that is not running), then `unknown`; an unrecognized or
-non-terminal word never overrides a terminal one. `unknown` is allowed
+`statusOfPatch`), and evidence has a precedence (DX4; the review's round
+2): an explicit terminal outcome in a row first; then known process death
+— the session's process gone, the parent agent ended, the bridge
+reporting the agent stopped without a terminal word — as `exited`; then
+`running` or `pending` evidence from the rows or the bridge, which stops
+counting once the session's process is gone; then `unknown`. A cold
+reconstruction (a subscribe to an ended session) and a view that was open
+while it ended reach the same status. `unknown` is allowed
 only where no evidence exists, and those cases are named: a nested agent
 whose parent is not over and whose parent transcript is gone or
 unreadable; an agent of a running session without a bridge (no function
@@ -1024,9 +1033,11 @@ refused (the review, 2026-10-17); an agent task's `.output`, which the
 engine makes a symlink into the agent's transcript (SPEC ch. 20), is
 refused the same way, since an agent's transcript is read through its own
 subscription. The answer has explicit shapes for what is absent — a task
-the index does not hold, a file that is gone, a refusal with its reason
-(DX4) — and a job's `outputFile` is null until a row names one (a monitor
-names none at its start). The hub refuses a frame
+the index does not hold, a file that is gone or not yet named, a refusal
+with its reason (DX4) — and a job's `outputFile` is null until a row names
+one (a monitor names none at its start): asked for such a task, the
+machine answers `missing` with no path, never `refused`, which stays the
+containment refusal. The hub refuses a frame
 it does not know (`objects/project.ts` `dispatch`, `bad-shape`) and a
 session message of a kind it does not list (`:391-392`,
 `SUBSCRIPTION_KINDS`), and the uplink passes an unknown frame by
@@ -1387,39 +1398,49 @@ predates the module has no evidence while it runs.
     loaded (the module reloaded mid-session), nested agents whose parent
     still runs and nested agents whose parent is over, and agents running
     now, every entry of `subagents` carries a `status` other than
-    `unknown` within 1 s of its evidence being written — `running` from
-    the bridge, seeded from `$.agent.list()` for agents the module did not
-    see spawn; `completed`, `failed` or `stopped` from the call's result,
-    the notification or the `task_status`, a nested agent's from its
-    parent's transcript file; `exited` for a nested agent whose parent is
-    over or for any agent of a session that is not running — with its
-    evidence, the engine's raw word normalized by DX4's one table, and the
-    agent's spawn record and file facts; a nested agent names its parent;
-    `unknown` appears only in the cases §9.3 names (a parent transcript
-    gone or unreadable while the parent is not over; a running session
-    without a bridge whose agent's call has no outcome yet; a meta with no
-    `toolUseId` and no spawn record), each shown as such; the 158 agent
-    files of a large session are stat'ed, not read, on each check, read
-    only when size or mtime changed. The shared fixture pins the
-    module-reload case, the nested-agent-whose-parent-still-runs case,
-    and each raw status word of DX4's table.
+    `unknown` within 1 s of its evidence being written, in DX4's order —
+    `completed`, `failed` or `stopped` from the call's result, the
+    notification or the `task_status`, a nested agent's from its parent's
+    transcript file; else `exited` for any agent of a session whose
+    process is gone, a nested agent whose parent has ended, or an agent
+    the bridge reports stopped without a terminal word; else `running`
+    from the bridge (seeded from `$.agent.list()` for agents the module
+    did not see spawn) or from a row — with its evidence, the engine's raw
+    word normalized by DX4's one table, and the agent's spawn record and
+    file facts; a nested agent names its parent; `unknown` appears only in
+    the cases §9.3 names (a parent transcript gone or unreadable while the
+    parent is not over; a running session without a bridge whose agent's
+    call has no outcome yet; a meta with no `toolUseId` and no spawn
+    record), each shown as such; a cold subscribe to an ended session and
+    a subscription that was open while it ended show the same statuses (a
+    `running` held from the bridge turns `exited` when the process is
+    gone); the 158 agent files of a large session are stat'ed, not read,
+    on each check, read only when size or mtime changed. The shared
+    fixture pins the module-reload case, the nested-agent-whose-parent-
+    still-runs case, a cold open of an ended session holding an agent with
+    a `running` status and no completion notification (`exited`), a nested
+    agent under an ended parent (`exited`), and each raw status word of
+    DX4's table.
   - **G4 (jobs and output):** a background Bash and a Monitor started
     before the subscription opened appear in `jobs` with kind, command or
     description, start time, status and output path (null for the monitor
     until a row names one), and end on their notification, `task_status`
     or `TaskStop`; `output {taskId, tail}` answers `ok` with the last
-    `tail` bytes of the task's file, `missing` when the file is gone,
-    `unknown-task` for a task the index does not hold, and `refused` with
-    its reason for any path other than the one the session's rows named,
-    for a path whose resolved target lies outside the resolved canonical
-    root the machine derives (DX4), including a symlink whose target
-    keeps all three suffix components (`…/<same session>/tasks/<same
-    task>.output` elsewhere) and an ordinary symlink to a file of another
-    name; MCP names from the rows; the machine side proved by the plane's
-    tests with the frames DX2 names, and end to end on the deployment once
-    DC9's hub is deployed (the hub ships first, DX4). The shared fixture
-    holds an unknown task, a deleted file, and a monitor just started with
-    no path.
+    `tail` bytes of the task's file, `missing` with the path when the file
+    is gone and `missing` with `path: null` for a known task no row has
+    named a file for yet (the fixture's monitor; the same request after a
+    row names its path answers `ok` or `missing` with that path, never
+    `refused`), `unknown-task` for a task the index does not hold, and
+    `refused` with its reason for any path other than the one the
+    session's rows named, for a path whose resolved target lies outside
+    the resolved canonical root the machine derives (DX4), including a
+    symlink whose target keeps all three suffix components (`…/<same
+    session>/tasks/<same task>.output` elsewhere) and an ordinary symlink
+    to a file of another name; MCP names from the rows; the machine side
+    proved by the plane's tests with the frames DX2 names, and end to end
+    on the deployment once DC9's hub is deployed (the hub ships first,
+    DX4). The shared fixture holds an unknown task, a deleted file, and a
+    monitor just started with no path.
   - **G5 (deliveries):** a web send whose submission the engine refuses
     after the bridge answered `submitted` (a `drop`) gets a second DX4
     `delivery` for the same key, `failed` with the bridge's reason, within
@@ -1470,14 +1491,19 @@ predates the module has no evidence while it runs.
     back; the text streams per content block as DC6's did; a reload shows
     the same rows; the ask mod's question row draws as a question with the
     log's answer overlaid; a send is a tail row with its delivery state
-    until its user row is observed, and then the row replaces it without
-    a double, in three cases: the `delivered` outcome arrives before the
-    row (a long-running turn: the tail row stays, saying delivered, until
-    the row lands); two identical sends in a row (each consumes one row,
-    in order, by the frame's `(writer, seq)` first and ordered containment
-    where a frame is absent); a submission delayed and then refused (the
-    tail row stays and shows the `failed` state); a pending permission and
-    a pending question are answered from the band and the cards leave; the
+    until its framed row (or the row its `delivered.uuid` names) is
+    observed, and then the row replaces it without a double, in five
+    cases: the `delivered` outcome arrives before the row (a long-running
+    turn: the tail row stays, saying delivered, until the row lands); two
+    identical sends in a row (each takes the row whose frame names its
+    `(writer, seq)`); an earlier terminal-typed prompt "continue" exists
+    and a web send "continue" is acknowledged while the session is busy
+    (the web send stays visible until its framed row arrives; the typed
+    row is never taken for it); a submission delayed and then refused (the
+    tail row stays and shows the `failed` state); a send whose row never
+    arrives because the session ends first (it stays as a delivered entry
+    at the tail, ahead of the end marker); a pending permission and a
+    pending question are answered from the band and the cards leave; the
     ended session's channel shows its end marker and Resume. Streaming in
     the report: a marked response folds its turn and shows the mark live
     before its first row flush; unmarked streaming text later in an
@@ -1511,9 +1537,12 @@ predates the module has no evidence while it runs.
     `output` from a recording's `tasks/<taskId>.output`, with each DX4
     variant (`ok`, `missing`, `unknown-task`, `refused`); it carries the
     widened `subagents` body derived from its recording's rows by DX4's
-    rules and normalization table, pinned by the fixture DC8 shares (the
-    module-reload and nested-parent-still-runs cases, each raw status
-    word, an unknown task, a deleted file, a monitor with no path);
+    rules, normalization table and precedence, pinned by the fixture DC8
+    shares (the module-reload and nested-parent-still-runs cases, a cold
+    open of an ended session with a `running` agent and no notification,
+    a nested agent under an ended parent, each raw status word, an unknown
+    task, a deleted file, a monitor with no path answering `missing` with
+    `path: null`);
     `test/session-plane.test.ts` covers the new frame and kind.
   - **G6 (shared edits):** two MAWS PRs, each reviewed on its own:
     `mcp__doperpowers__AskUserQuestion` classified as a question; shell
@@ -2457,7 +2486,7 @@ and `streaming` are that agent's own.
 | `rows` | yes | `{rows, before, more}`: older rows of the sub's transcript, newest first, answering a `rows` request |
 | `subagents` | yes | `{subagents: [{agentId, meta, status, evidence, running?, spawn?, outcome?, file?}], jobs: [Job], mcp: [{name}]}` **[2026-10-17]**: each `meta` a `subagents/*.meta.json` verbatim (a main-scope sub's the session's tree, an agent-scope sub's that agent's own, as before); `status` one of `running \| completed \| failed \| stopped \| exited \| unknown` (MAWS's `TaskStatus` words, so the web patches without a mapping) and `evidence` what it rests on, `bridge \| rows \| parent \| session \| none` (below); `running` the bridge's, present while the bridge holds the agent; `spawn` the bridge's spawn record, `{parentAgentId, subagentType, description, name, background, model, toolUseId}` (DX5 `agent` spawn, or the `$.agent.list()` seed's `{parentAgentId, subagentType, description, name}` for an agent the module did not see spawn), present when it holds one; `outcome` from the rows — the loop's, or for a nested agent its parent agent's transcript — `{status, raw, at, summary?, outputFile?}`, `raw` the engine's own word before the normalization table below; `file` the agent transcript's `{size, mtimeMs, firstAt, lastAt}`, read only when size or mtime changed. `jobs`: the loop's background shells and monitors, `{taskId, kind: "shell" \| "monitor", toolUseId, startedAt, description, command?, outputFile: string \| null, status, endedAt?, summary?}`, `status` as above less `unknown`, `outputFile` null until a row names one (a Monitor's result names none; a notification or a `task_status` may). `mcp`: the server names the loop's `mcp_instructions_delta` attachments added and did not remove, in order; names only. Sent in the snapshot and whenever any of it changes (the metas today, every `METAS_EVERY`; now also a status, a job, a name). A consumer older than DC9 reads `subagents[*].agentId` and `meta` and ignores the rest; a producer older than DC8 sends the two fields alone, and the web then shows an agent as it does today |
 | `diff` | yes | `{base, text}`: unified diff of the working tree against the base branch |
-| `output` | yes | **[2026-10-17]** `{taskId, result, …}`, answering an `output` request, one of four variants by `result`: **`ok`** `{taskId, result: "ok", path, size, from, text, truncated}` — `path` the output file as the session's rows named it, `size` the file's bytes, `text` its last `tail` bytes decoded UTF-8 with replacement, cut forward to the first line break inside the window when the window does not start the file, `from` the byte offset `text` starts at, `truncated` whether anything precedes it; **`missing`** `{taskId, result: "missing", path}` — the path is known and passed containment, and no file is there (the engine writes them under the temporary directory); **`refused`** `{taskId, result: "refused", path, reason}` — the path the rows named fails containment (below), `reason` a sentence for the human; **`unknown-task`** `{taskId, result: "unknown-task"}` — the loop's index holds no such task. No variant carries a field another variant's rule leaves out. The consumer: `ok` draws the tail, with how many bytes precede it when `truncated`; `missing` says the file is gone and leaves the row's own summary standing; `refused` says so with `reason` and offers no retry; `unknown-task` waits for the next `subagents` to carry the task (the request raced the index) and otherwise says the task is unknown to the machine. Read on the thread that reads pages |
+| `output` | yes | **[2026-10-17]** `{taskId, result, …}`, answering an `output` request, one of four variants by `result`: **`ok`** `{taskId, result: "ok", path, size, from, text, truncated}` — `path` the output file as the session's rows named it, `size` the file's bytes, `text` its last `tail` bytes decoded UTF-8 with replacement, cut forward to the first line break inside the window when the window does not start the file, `from` the byte offset `text` starts at, `truncated` whether anything precedes it; **`missing`** `{taskId, result: "missing", path: string \| null}` — the task is known and there is nothing to read: `path` a string when the rows named a file, it passed containment, and no file is there (the engine writes them under the temporary directory), or null when no row has named a file for the task yet (a monitor just started; `Job.outputFile` null) — never `refused`, which is the containment refusal alone (the review's round 2); **`refused`** `{taskId, result: "refused", path, reason}` — the path the rows named fails containment (below), `reason` a sentence for the human; **`unknown-task`** `{taskId, result: "unknown-task"}` — the loop's index holds no such task. No variant carries a field another variant's rule leaves out. The consumer: `ok` draws the tail, with how many bytes precede it when `truncated`; `missing` says the file is gone, or that the task has no output file yet when `path` is null, leaves the row's own summary standing, and stays retry-eligible — when a later `subagents` supplies or changes the task's `outputFile`, the web may ask again; `refused` draws as a warning with `reason` and offers no retry; `unknown-task` waits for the next `subagents` to carry the task (the request raced the index) and otherwise says the task is unknown to the machine. Read on the thread that reads pages |
 | `usage` | yes | `{context: {tokens?, window, percent?}, cost: {usd} \| null}`: the bridge's `usage` event (DX5) verbatim (`tokens` and `percent` absent until a response has reported the window's fill; `cost` null where the engine keeps no ledger), after each main turn, on main-transcript subscriptions only. It is the one source of a session's context use and cost on the web: the transcript's rows do not carry them (the engine's `cost-state` records have no `uuid` and are not rows here), so a session without a bridge shows both as unavailable |
 | `end` | yes | `{reason: "unsubscribed" \| "machine-offline" \| "session-ended" \| "discontinuity" \| "error", message?}`. **[2026-10-17]** `session-ended` is sent at `n` 0 only, for a session whose transcript the machine does not hold; a subscription whose session ends is not ended (below) |
 | `presence` | no | `{record, bridge}`: `record` is `status`, `waitingFor`, `needs` of `~/.claude/sessions/<pid>.json` verbatim, null when no process is live |
@@ -2543,22 +2572,30 @@ two mappings (`backfill.ts` `parseTaskNotification`; `task-graph.ts` `statusOfPa
 
 A result row is terminal: `completed`, or `failed` when `is_error`; a `TaskStop` with a non-error result is `stopped`.
 
-**Precedence**, highest first — better evidence is never overridden by worse: (1) the bridge's word on an agent it
-holds (`running` true from spawn, the seed or a refresh; false from its stop), the engine's own account of the
-process, `evidence: bridge` — when it says stopped, the status is the rows' terminal word, else `exited`; (2) terminal
-evidence from the rows, the newest in row order (`rows`; for a background agent, by `meta.requestShape` or
-`spawn.background`, the result row is its start and does not count); (3) non-terminal evidence from the rows
-(`running`, `pending`), which sets `running` only where nothing terminal is known and never un-ends a task; (4)
-inference — nested (`meta.parentAgentId` or `spawn.parentAgentId`) with its parent's status terminal, `exited`
-(`parent`); the session's process gone, `exited` (`session`); (5) `unknown` (`none`), allowed only in the cases §9.3
-names: a parent transcript gone or unreadable while the parent is not over; a running session without a bridge whose
-agent's call has no result, notification or `task_status` yet; a meta with no `toolUseId` and no spawn record. An
-unrecognized raw word changes nothing at any level. A job is `running` from its start row, ends on its notification,
-`task_status` or `TaskStop` through the same table, and is `exited` once the session's process is gone. The web
-patches these onto MAWS's task graph on the desk side (`task-feed.ts`), never in MAWS's `mergeSidecars`. One fixture
-of rows and the body they yield pins the plane's and the fake machine's derivations, as DX1's vectors pin its two
-code implementations; it holds the module-reload case, a nested agent whose parent still runs, each raw word of the
-table, an unknown task, a deleted output file, and a monitor just started with no path.
+**Precedence** (the review's round 2, 2026-10-17), highest first — better evidence is never overridden by worse:
+(1) an explicit terminal outcome in a row — `completed`, `failed` or `stopped` after the table, the newest in row
+order (`evidence: rows`; for a background agent, by `meta.requestShape` or `spawn.background`, the result row is its
+start and does not count); (2) known process death, `exited`: the session's process is gone (`session`), the parent
+agent (`meta.parentAgentId` or `spawn.parentAgentId`) has ended — a terminal status or `exited` of its own
+(`parent`) — or the bridge reports the agent stopped without a terminal word (`bridge`); (3) `running` or `pending`
+evidence, `running`: the bridge's word on an agent it holds (true from spawn, the seed or a refresh; `bridge`) or a
+row's non-terminal word (`rows`) — and cached bridge-running evidence stops counting once the session's process is
+gone, so (2) holds then; (4) `unknown` (`none`), only with no evidence, the cases §9.3 names: a parent transcript gone
+or unreadable while the parent is not over; a running session without a bridge whose agent's call has no result,
+notification or `task_status` yet; a meta with no `toolUseId` and no spawn record. An unrecognized raw word changes
+nothing at any level. **The same status from cold and from live:** a subscription opened on an ended session
+(reconstruction from disk alone) and one that was open while the session ended reach the same statuses, so the
+producer re-derives every entry when the process goes (presence `record` null) and sends a `subagents` message for
+what changed; a `running` held from the bridge turns `exited` then. Accepted residual: a background agent resumed
+after its notification shows `completed` until its next notification, since a row's terminal word outranks the
+bridge's `running`. A job is `running` from its start row, ends on its notification, `task_status` or `TaskStop`
+through the same table, and is `exited` once the session's process is gone. The web patches these onto MAWS's task
+graph on the desk side (`task-feed.ts`), never in MAWS's `mergeSidecars`. One fixture of rows and the body they yield
+pins the plane's and the fake machine's derivations, as DX1's vectors pin its two code implementations; it holds the
+module-reload case, a nested agent whose parent still runs, a cold open of an ended session holding an agent with a
+`running` status and no completion notification (`exited`), a nested agent under an ended parent (`exited`), each raw
+word of the table, an unknown task, a deleted output file (`missing` with its path), and a monitor just started with
+no path (`missing` with `path: null`).
 
 **`output` [2026-10-17, §9.4].** The browser asks `output {sub, taskId, tail}` (DX3); the hub carries it (DX2); the
 machine answers `output` on the sub. **Containment** (the review, 2026-10-17): the machine first derives the
@@ -4321,9 +4358,10 @@ a hub that connects into machines (§2).
   session (the survey).
   2026-10-17, after the adversarial review (six findings, all adopted): a
   send's tail row stays until its transcript row is observed, matched one
-  to one by the delivery frame's `(writer, seq)` then ordered containment,
-  since `delivered` means submitted, not written, and DC8 reports a
-  refusal after `submitted` as a `failed` delivery (§9.1, DC8.G5, DX5);
+  to one by the delivery frame's `(writer, seq)` (round 1 kept an ordered
+  text-containment fallback; round 2, below, removed it), since
+  `delivered` means submitted, not written, and DC8 reports a refusal
+  after `submitted` as a `failed` delivery (§9.1, DC8.G5, DX5);
   DC9 bridges DX4's streaming identities into the report's turn and
   live-buffer model, which DC6's turnless tail rows never reached (§9.1,
   DC9.G1); the `$.agent.list()` seed is mandatory and a nested agent's
@@ -4335,6 +4373,18 @@ a hub that connects into machines (§2).
   nullable (DX4, DX3, DX8); one normalization table and an evidence
   precedence, from MAWS's own mappings, bind both producers, pinned by the
   shared fixture (DX4, §9.3).
+  2026-10-17, after the review's round 2 (three findings, all adopted): a
+  web send is matched only by the frame's `(writer, seq)` or an exact row
+  uuid — an unframed row, a terminal-typed prompt, never matches it, and
+  the tail row stays, as a delivered entry if its row never comes (§9.1,
+  DC9.G1); the status precedence is terminal row outcome, then known
+  process death as `exited` (session gone, parent ended, bridge stopped
+  without a word), then running or pending evidence, which stops counting
+  once the process is gone, then `unknown`, with cold reconstruction and
+  an open view reaching the same status (DX4, §9.3, DC8.G3, DC9.G5); a
+  known task with no output file yet answers `missing` with `path: null`,
+  retry-eligible, never `refused`, which stays the containment warning
+  (DX4, §9.4, DC8.G4, DC9.G5).
 - Decision: The design session deploys desk builds of MAWS master to the `ssfskim` Worker without asking each time:
   the two-Mac walk's Part F redeploy and the fixes the walk turns up. Every deploy goes through the scripted
   `deployment deploy`, and the owner is told the build's `X-Desk-Build` each time. A migration, a change to Access, or
