@@ -14,6 +14,10 @@ export interface SheetDataset {
   view?: { spec: unknown; caption: string };
 }
 
+/** E3: a fresh capture of the latest for the datasets `ids` names (the opener's, once the displayed document has synced
+ * again after the host's restart), or null when none can be had. */
+export type SheetRecapture = (ids: string[]) => Promise<{ datasets: readonly SheetDataset[]; hold: SnapshotLease } | null>;
+
 export interface SourceSheetSnapshot {
   open: boolean;
   datasets: readonly SheetDataset[];
@@ -22,9 +26,13 @@ export interface SourceSheetSnapshot {
   opened: number;
   /** E3: whether the captured snapshots are held yet (`pending`), held, or could not be (`unavailable`: never shown). */
   hold: 'pending' | 'held' | 'unavailable';
+  /** E3: a new serial for each capture the opening shows (its first, then a recapture after the host's restart). */
+  capture: number;
 }
 
-const CLOSED: SourceSheetSnapshot = { open: false, datasets: [], selected: null, opened: 0, hold: 'held' };
+const CLOSED: SourceSheetSnapshot = { open: false, datasets: [], selected: null, opened: 0, hold: 'held', capture: 0 };
+
+const copiesOf = (datasets: readonly SheetDataset[]): SheetDataset[] => datasets.map(({ id, descriptor, view }) => ({ id, descriptor: structuredClone(descriptor), ...(view && { view: structuredClone(view) }) }));
 
 export class SourceSheetState {
   private current = CLOSED;
@@ -38,18 +46,13 @@ export class SourceSheetState {
   snapshot = (): SourceSheetSnapshot => this.current;
 
   /** Opens on `datasets` (copied), `selected` shown first (else the first, else none). E3: `hold`, the lease over the
-   * snapshots they name, gates what the sheet shows until it is in place and is let go when the sheet closes or reopens. */
-  open(datasets: readonly SheetDataset[], selected?: string, hold?: SnapshotLease): void {
-    const copies = datasets.map(({ id, descriptor, view }) => ({ id, descriptor: structuredClone(descriptor), ...(view && { view: structuredClone(view) }) }));
+   * snapshots they name, gates what the sheet shows until it is in place and is let go when the sheet closes or reopens;
+   * a hold lost while open (the host restarted) is answered by one `recapture` of the latest, else by `unavailable`. */
+  open(datasets: readonly SheetDataset[], selected?: string, hold?: SnapshotLease, recapture?: SheetRecapture): void {
+    const copies = copiesOf(datasets);
     const shown = copies.find((dataset) => dataset.id === selected)?.id ?? copies[0]?.id ?? null;
-    this.lease?.release();
-    this.lease = hold ?? null;
     const opened = this.current.opened + 1;
-    this.set({ open: true, datasets: copies, selected: shown, opened, hold: hold ? 'pending' : 'held' });
-    hold?.ready.then(
-      () => this.settled(opened, hold, 'held'),
-      () => this.settled(opened, hold, 'unavailable'),
-    );
+    this.take(hold ?? null, { open: true, datasets: copies, selected: shown, opened, hold: hold ? 'pending' : 'held', capture: 0 }, recapture);
   }
   select(id: string): void {
     if (this.current.datasets.some((dataset) => dataset.id === id)) this.set({ ...this.current, selected: id });
@@ -60,10 +63,34 @@ export class SourceSheetState {
     if (this.current.open) this.set({ ...CLOSED, opened: this.current.opened });
   }
 
-  // E3: the opening's hold settled; a later opening or a close made it moot
-  private settled(opened: number, hold: SnapshotLease, outcome: 'held' | 'unavailable'): void {
-    if (this.lease !== hold || this.current.opened !== opened || !this.current.open) return;
-    this.set({ ...this.current, hold: outcome });
+  // E3: shows `next` on `hold`, letting the earlier lease go, and follows the new one's settling and loss
+  private take(hold: SnapshotLease | null, next: SourceSheetSnapshot, recapture: SheetRecapture | undefined): void {
+    this.lease?.release();
+    this.lease = hold;
+    this.set(next);
+    if (!hold) return;
+    const mine = () => this.lease === hold && this.current.open && this.current.opened === next.opened;
+    hold.ready.then(
+      () => mine() && this.set({ ...this.current, hold: 'held' }),
+      () => mine() && this.set({ ...this.current, hold: 'unavailable' }),
+    );
+    void hold.invalidated.then(async () => {
+      if (!mine()) return;
+      if (!recapture) {
+        hold.release();
+        return this.set({ ...this.current, hold: 'unavailable' }); // the one recapture is spent, or none is offered
+      }
+      this.set({ ...this.current, hold: 'pending' });
+      const fresh = await recapture(this.current.datasets.map((dataset) => dataset.id)).catch(() => null);
+      if (this.lease !== hold || !this.current.open || this.current.opened !== next.opened) return fresh?.hold.release();
+      if (!fresh) {
+        hold.release();
+        return this.set({ ...this.current, hold: 'unavailable' });
+      }
+      const copies = copiesOf(fresh.datasets);
+      const selected = copies.find((dataset) => dataset.id === this.current.selected)?.id ?? copies[0]?.id ?? null;
+      this.take(fresh.hold, { ...this.current, datasets: copies, selected, hold: 'pending', capture: this.current.capture + 1 }, undefined);
+    });
   }
 
   private set(next: SourceSheetSnapshot): void {

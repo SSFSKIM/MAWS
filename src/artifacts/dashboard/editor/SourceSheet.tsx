@@ -78,7 +78,7 @@ export function SourceSheet({ artifactId, sheet, reader, host, actorName }: Sour
         </label>
       )}
       {shown ? (
-        <DatasetDetail key={`${state.opened}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} view={shown.view} hold={state.hold} reader={reader} host={host} actorName={actorName} />
+        <DatasetDetail key={`${state.opened}:${state.capture}:${shown.id}`} artifactId={artifactId} id={shown.id} descriptor={shown.descriptor} view={shown.view} hold={state.hold} reader={reader} host={host} actorName={actorName} />
       ) : (
         <p className="dash-sheet-empty">No data is bound to this dashboard yet. An agent binds a file with artifact_dataset.</p>
       )}

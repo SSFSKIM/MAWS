@@ -117,3 +117,127 @@ describe('the snapshot reader’s holds (E3)', () => {
     lease.release();
   });
 });
+
+// E3 M1 fix wave (task review findings 1 and 6): the cache's ownership of a snapshot and a read still paging through it are
+// apart. An evicted or disposed snapshot keeps its hold until its read has completed or stopped (no page is asked after
+// a disposal); a hold the host lost (`invalidated`, a host restart) takes a settled snapshot out of the cache, and an
+// in-flight read re-holds the same immutable ref once and pages on, or fails as unavailable.
+function pagedHost() {
+  const log: string[] = [];
+  const held = new Map<number, string>();
+  const invalidations = new Map<number, () => void>();
+  let next = 0;
+  const gates = new Map<string, () => void>(); // `${ref}@${offset}` held open until released
+  const holdDatasets = vi.fn(async (_artifactId: string, refs: readonly string[]) => {
+    const id = ++next;
+    held.set(id, refs.join(','));
+    let invalidate!: () => void;
+    const invalidated = new Promise<void>((resolve) => (invalidate = resolve));
+    invalidations.set(id, invalidate);
+    log.push(`hold#${id} ${refs.join(',')}`);
+    return { release: () => void (held.delete(id) && log.push(`release#${id}`)), invalidated };
+  });
+  const totalOf = (ref: string) => (ref === 'assets/long.json' ? 4 : 3); // rows of a snapshot, one a page
+  const readDataset = vi.fn(async (_artifactId: string, ref: string, options: { offset?: number }) => {
+    const offset = options.offset ?? 0;
+    log.push(`page ${ref}@${offset}`);
+    const key = `${ref}@${offset}`;
+    if (wanted.has(key)) await new Promise<void>((resolve) => gates.set(key, resolve));
+    const total = totalOf(ref);
+    return { columns: [{ name: 'v', type: 'string' as const }], rows: [[`${ref}:${offset}`]], total, truncated: offset + 1 < total };
+  });
+  const wanted = new Set<string>();
+  return {
+    host: { holdDatasets, readDataset },
+    log,
+    heldRefs: () => [...held.values()].sort(),
+    gate: (key: string) => wanted.add(key),
+    open: (key: string) => {
+      wanted.delete(key);
+      gates.get(key)?.();
+    },
+    invalidate: (id: number) => invalidations.get(id)!(),
+  };
+}
+
+describe('the snapshot reader’s holds and its reads in flight (E3)', () => {
+  it('an evicted snapshot keeps its hold while its pages are still read, and lets it go once the read completes', async () => {
+    const h = pagedHost();
+    const reader = new SnapshotReader(h.host, 'dash1', 2);
+    h.gate('assets/a.json@1');
+    const reading = reader.read(snap('assets/a.json'));
+    await vi.waitFor(() => expect(h.log).toContain('page assets/a.json@1'));
+    for (const ref of ['assets/b.json', 'assets/c.json', 'assets/d.json']) await reader.read(snap(ref)); // a evicted meanwhile
+    await settle();
+    expect(h.heldRefs()).toContain('assets/a.json'); // its read still needs the bytes
+    h.open('assets/a.json@1');
+    expect((await reading).rows).toHaveLength(3);
+    await settle();
+    expect(h.heldRefs()).not.toContain('assets/a.json');
+  });
+
+  it('disposal during a read asks no further page, then lets the hold go', async () => {
+    const h = pagedHost();
+    const reader = new SnapshotReader(h.host, 'dash1');
+    h.gate('assets/a.json@1');
+    const reading = reader.read(snap('assets/a.json'));
+    await vi.waitFor(() => expect(h.log).toContain('page assets/a.json@1'));
+    reader.dispose();
+    expect(h.heldRefs()).toEqual(['assets/a.json']); // the page in flight still reads the bytes
+    h.open('assets/a.json@1');
+    await expect(reading).rejects.toThrow(/closed/);
+    await settle();
+    expect(h.log.filter((line) => line.startsWith('page'))).toEqual(['page assets/a.json@0', 'page assets/a.json@1']);
+    expect(h.heldRefs()).toEqual([]);
+  });
+
+  it('a settled snapshot whose hold the host lost leaves the cache: the next read holds and reads it afresh', async () => {
+    const h = pagedHost();
+    const reader = new SnapshotReader(h.host, 'dash1');
+    await reader.read(snap('assets/a.json'));
+    h.invalidate(1);
+    await settle();
+    expect(h.heldRefs()).toEqual([]);
+    await reader.read(snap('assets/a.json'));
+    expect(h.log.filter((line) => line.startsWith('hold'))).toEqual(['hold#1 assets/a.json', 'hold#2 assets/a.json']);
+  });
+
+  it('a read whose hold is lost mid-way holds the same ref again once and pages on; lost again, it fails as unavailable', async () => {
+    const h = pagedHost();
+    const reader = new SnapshotReader(h.host, 'dash1');
+    h.gate('assets/a.json@1');
+    const reading = reader.read(snap('assets/a.json'));
+    await vi.waitFor(() => expect(h.log).toContain('page assets/a.json@1'));
+    h.invalidate(1);
+    h.open('assets/a.json@1');
+    expect((await reading).rows).toEqual([['assets/a.json:0'], ['assets/a.json:1'], ['assets/a.json:2']]);
+    expect(h.log).toEqual(['hold#1 assets/a.json', 'page assets/a.json@0', 'page assets/a.json@1', 'release#1', 'hold#2 assets/a.json', 'page assets/a.json@2']);
+    h.gate('assets/long.json@1');
+    h.gate('assets/long.json@2');
+    const twice = reader.read(snap('assets/long.json'));
+    await vi.waitFor(() => expect(h.log).toContain('page assets/long.json@1'));
+    h.invalidate(3);
+    h.open('assets/long.json@1');
+    await vi.waitFor(() => expect(h.log).toContain('page assets/long.json@2')); // held again (#4), paging on
+    h.invalidate(4);
+    h.open('assets/long.json@2');
+    await expect(twice).rejects.toThrow(/unavailable/);
+    expect(h.log.filter((line) => line.startsWith('page assets/long'))).toEqual(['page assets/long.json@0', 'page assets/long.json@1', 'page assets/long.json@2']); // never a page past the second loss
+    await settle();
+    expect(h.heldRefs()).toEqual(['assets/a.json']);
+  });
+
+  it('a lease is invalidated when a hold it rests on is lost', async () => {
+    const h = pagedHost();
+    const reader = new SnapshotReader(h.host, 'dash1');
+    await reader.read(snap('assets/a.json'));
+    const lease = reader.holdAll(['assets/a.json', 'assets/b.json']);
+    await lease.ready;
+    let lost = false;
+    void lease.invalidated.then(() => (lost = true));
+    h.invalidate(2); // the group holding b
+    await settle();
+    expect(lost).toBe(true);
+    lease.release();
+  });
+});

@@ -55,6 +55,15 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     return result.value;
   };
 
+  // E3: the window's dataset holds the host's restart takes away (holdDatasets below)
+  let resyncs = 0;
+  const lostOnResync = new Set<() => void>();
+  ipc.on('artifacts.resync', () => {
+    resyncs += 1;
+    for (const invalidate of [...lostOnResync]) invalidate();
+    lostOnResync.clear();
+  });
+
   ipc.on('engine.hostState', (state) => {
     if (state.revision <= hostRevision) return;
     hostRevision = state.revision;
@@ -234,14 +243,23 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     readDataset: (artifactId, ref, { format, offset, limit }) => call('artifacts.readDataset', { artifactId, ref, format, ...(offset !== undefined && { offset }), ...(limit !== undefined && { limit }) }),
     // P3-E (E2 M3): the source sheet's Download, main's Save dialog over the artifact's own asset
     downloadAsset: (artifactId, ref, options) => call('artifacts.downloadAsset', { artifactId, ref, ...(options?.name !== undefined && { name: options.name }) }),
-    // E3: main's window-bound hold over snapshot bytes, its release sent once
+    // E3: main's window-bound hold over snapshot bytes, its release sent once. `invalidated`: the host's hold behind it is
+    // gone (main's `artifacts.resync`, each time the host's connection streams again); a resync while it was being asked
+    // for invalidates it as soon as it is answered (the generation is read before asking), and a release stops listening.
     holdDatasets: async (artifactId, refs) => {
+      const asked = resyncs;
       const { holdId } = await call('artifacts.holdDatasets', { artifactId, refs: [...refs] });
+      let invalidate!: () => void;
+      const invalidated = new Promise<void>((resolve) => (invalidate = resolve));
+      if (resyncs !== asked) invalidate();
+      else lostOnResync.add(invalidate);
       let released = false;
       return {
+        invalidated,
         release: () => {
           if (released) return;
           released = true;
+          lostOnResync.delete(invalidate);
           call('artifacts.releaseDatasets', { holdId }).catch((error: unknown) => log(`a dataset hold was not released: ${error instanceof Error ? error.message : String(error)}`));
         },
       };

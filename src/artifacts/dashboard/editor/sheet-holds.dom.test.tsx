@@ -32,11 +32,13 @@ function mount() {
   render(<SourceSheet artifactId="dash1" sheet={sheet} reader={new SnapshotReader({ readDataset }, 'dash1')} host={{ downloadAsset }} actorName={() => 'You'} />);
   return { sheet, readDataset, downloadAsset };
 }
-function lease(): SnapshotLease & { resolve(): void; reject(error: Error): void; released: number } {
+function lease(): SnapshotLease & { resolve(): void; reject(error: Error): void; lose(): void; released: number } {
   let resolve!: () => void;
   let reject!: (error: Error) => void;
+  let lose!: () => void;
   const ready = new Promise<void>((yes, no) => ((resolve = yes), (reject = no)));
-  const out = { ready, resolve: () => resolve(), reject: (error: Error) => reject(error), released: 0, release: () => void (out.released += 1) };
+  const invalidated = new Promise<void>((yes) => (lose = yes));
+  const out = { ready, invalidated, resolve: () => resolve(), reject: (error: Error) => reject(error), lose: () => lose(), released: 0, release: () => void (out.released += 1) };
   return out;
 }
 
@@ -84,5 +86,57 @@ describe('the source sheet’s hold (E3)', () => {
     act(() => m.sheet.close());
     expect(second.released).toBe(1);
     first.resolve();
+  });
+});
+
+// E3 M1 fix wave (task review finding 6; the architect's restart ruling): a hold the host lost while the sheet is open is
+// never taken as still held. The sheet stops showing its capture, asks its opener once for a fresh capture of the latest
+// (the opener answers once the displayed document has synced again), and shows that one whole, its label and its rows
+// from one descriptor; lost again, or with no fresh capture to be had, it says the snapshot is unavailable.
+describe('the source sheet across a host restart (E3)', () => {
+  it('recaptures the latest once and shows it whole, letting the lost hold go', async () => {
+    const m = mount();
+    const first = lease();
+    const second = lease();
+    const recapture = vi.fn(async (ids: string[]) => {
+      expect(ids).toEqual(['live']);
+      return { datasets: [{ id: 'live', descriptor: { ...fetched('assets/q2.json'), title: 'Live sales, later' } }], hold: second };
+    });
+    act(() => m.sheet.open([{ id: 'live', descriptor: fetched('assets/q1.json') }], 'live', first, recapture));
+    first.resolve();
+    await settle();
+    expect(m.readDataset).toHaveBeenCalledWith('dash1', 'assets/q1.json', { format: 'json' });
+    first.lose();
+    await settle();
+    expect(recapture).toHaveBeenCalledTimes(1);
+    expect(first.released).toBe(1);
+    expect(screen.getByRole('dialog').getAttribute('aria-label')).toBe('Source of Live sales, later'); // the new capture, its rows still pending
+    expect(within(screen.getByRole('dialog')).getByText('Reading the rows…')).toBeTruthy();
+    second.resolve();
+    await settle();
+    expect(m.readDataset).toHaveBeenLastCalledWith('dash1', 'assets/q2.json', { format: 'json' });
+    expect(within(screen.getByRole('dialog')).queryAllByRole('row')).toHaveLength(2);
+  });
+
+  it('lost a second time, or with no fresh capture, says the snapshot is unavailable', async () => {
+    const m = mount();
+    const first = lease();
+    const second = lease();
+    act(() => m.sheet.open([{ id: 'live', descriptor: fetched('assets/q1.json') }], 'live', first, async () => ({ datasets: [{ id: 'live', descriptor: fetched('assets/q2.json') }], hold: second })));
+    first.resolve();
+    first.lose();
+    await settle();
+    second.resolve();
+    await settle();
+    second.lose();
+    await settle();
+    expect(within(screen.getByRole('dialog')).getByRole('alert').textContent).toMatch(/no longer available/);
+    expect(second.released).toBe(1);
+    const third = lease();
+    act(() => m.sheet.open([{ id: 'live', descriptor: fetched('assets/q1.json') }], 'live', third, async () => null));
+    third.resolve();
+    third.lose();
+    await settle();
+    expect(within(screen.getByRole('dialog')).getByRole('alert').textContent).toMatch(/no longer available/);
   });
 });

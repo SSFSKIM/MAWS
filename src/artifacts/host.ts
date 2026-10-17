@@ -215,7 +215,9 @@ export interface ArtifactHost {
   // them while this window still reads them (the source sheet's captured snapshots, the painted cache's). It is main's,
   // bound to this window: released by `release` (once, however often called) or when the window closes or navigates.
   // Rejects with nothing held when a ref is no longer available or the artifact's hold bounds are reached.
-  holdDatasets(artifactId: string, refs: readonly string[]): Promise<{ release(): void }>;
+  // `invalidated` resolves once the host's hold behind it is gone (the engine host restarted: holds live as long as its
+  // process), including a restart while the hold was being asked for; it never resolves after `release`.
+  holdDatasets(artifactId: string, refs: readonly string[]): Promise<{ release(): void; readonly invalidated: Promise<void> }>;
   identity(): { actor: Actor; name: string; color: string };
   // P3-H H4 (the X9 amendment, Decision Log 80): a page's connector surface, and the owner's grants of one artifact's
   // tools (the editor header's, never a page's). A grant is taken under the fingerprint of the route that has the tool
