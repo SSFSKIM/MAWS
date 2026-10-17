@@ -38,11 +38,11 @@ Every view draws the snapshot its dataset's descriptor names at the version show
 | `format` | per column: `number`, `percent` (0.25 shows `25%`), `date` or `text` (a year column as `text` reads `2024`, not `2,024`) |
 | `title` | the caption above the view; without it, `Bar chart of sales` |
 
-The rows are filtered, then grouped and aggregated (only with `agg`; without it every row is drawn), sorted, then limited. After aggregating, a measure is named by its `y`, `count` for the counted rows. A bar, line, area or scatter needs `x` and `y`; a pie needs `x` and `y` or `agg: "count"`. A row without a number to draw is left out and counted under the view, never drawn as 0. Up to six series are told apart by line dashes, marker shapes and fills, with a legend; more draw as small multiples, one labelled panel per series, up to 24. A pie draws at most six slices, the smallest beyond five as one.
+The rows are filtered, then grouped and aggregated (only with `agg`; without it every row is drawn), sorted, then limited. After aggregating, a measure is named by its `y`, `count` for the counted rows. A bar, line, area or scatter needs `x` and `y`; a pie needs `x` and `y` or `agg: "count"`. A row without a number to draw is left out and counted under the view, never drawn as 0. Up to six series are told apart by line dashes, marker shapes and fills, with a legend; more draw as small multiples, one labelled panel per series, up to 24. Without `agg`, bars that repeat a category in one series stand on one another, and the view says so under it: `<column> repeats <names>; bars overlap. Set agg to combine repeated categories.` A pie draws at most six slices: past six it says `<n> slices; the five largest are shown individually and the rest are drawn as one`.
 
 A table view shows its first 25 rows, or `limit` rows up to 100, and says `first 25 of 140 rows` when there are more. The source sheet the user opens from a label shows every row, raw and transformed.
 
-**States** drawn in place: `no dataset "<id>"`, `dataset "<id>" has no column "<name>"`, `unknown view "<kind>"`, `a bar view needs a y column`, `the file of "<id>" could not be read`, `too many series: <n>; filter or aggregate`.
+**States** drawn in place: `no dataset "<id>"`, `dataset "<id>" has no column "<name>"`, `unknown view "<kind>"`, `a bar view needs a y column`, `the file of "<id>" could not be read`, `too many series: <n>; filter or aggregate`, `<column> has a numeric range that cannot be drawn`.
 
 ## Limits
 

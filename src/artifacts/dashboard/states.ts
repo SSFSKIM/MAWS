@@ -32,7 +32,7 @@ export const VIEW_STATES = {
   repeatedX: (column: string, names: string[], more: number) => `${column} repeats ${names.join(', ')}${more > 0 ? ` and ${more} more` : ''}; bars overlap. Set agg to combine repeated categories.`,
   noPositive: (column: string) => `no positive ${column} to draw`,
   slicesDropped: (count: number, column: string) => `${count} ${count === 1 ? 'slice has' : 'slices have'} no positive ${column}; not drawn`,
-  slicesFolded: (count: number) => `${count} slices; the smallest after the first five are drawn as one`,
+  slicesFolded: (count: number) => `${count} slices; the five largest are shown individually and the rest are drawn as one`,
   labelsShortened: 'some category labels are shortened; the source table has them whole',
   kept: 'The caption, comments and edits on this block are kept.',
 } as const;

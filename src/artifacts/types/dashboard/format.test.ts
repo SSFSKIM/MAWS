@@ -87,6 +87,6 @@ describe('the dashboard format reference', () => {
     const number = (value: number) => value.toLocaleString('en-US');
     for (const value of [DATASET_LIMITS.bytes, DATASET_LIMITS.rows, DATASET_LIMITS.columns, DATASET_LIMITS.columnName, DATASET_LIMITS.datasets, SPEC_LIMITS.title, SPEC_LIMITS.ys, SPEC_LIMITS.inValues, SPEC_LIMITS.limit, TABLE_VIEW_MAX_ROWS]) expect(limits).toContain(number(value));
     expect(format).toContain(`first ${TABLE_VIEW_ROWS} rows`);
-    for (const state of [DATASET_STATES.noDataset('<id>'), DATASET_STATES.noColumn('<id>', '<name>'), DATASET_STATES.unreadable('<id>'), VIEW_STATES.needs('bar', 'a y column'), VIEW_STATES.tooManySeries(0).replace('0', '<n>'), VIEW_STATES.tablePreview(25, 140), DATASET_STATES.mismatches(2, 40, 'total', 'number')]) expect(format).toContain(state);
+    for (const state of [DATASET_STATES.noDataset('<id>'), DATASET_STATES.noColumn('<id>', '<name>'), DATASET_STATES.unreadable('<id>'), VIEW_STATES.needs('bar', 'a y column'), VIEW_STATES.tooManySeries(0).replace('0', '<n>'), VIEW_STATES.tablePreview(25, 140), DATASET_STATES.mismatches(2, 40, 'total', 'number'), VIEW_STATES.unsupportedDomain('<column>'), VIEW_STATES.repeatedX('<column>', ['<names>'], 0), VIEW_STATES.slicesFolded(9).replace('9', '<n>')]) expect(format).toContain(state);
   });
 });
