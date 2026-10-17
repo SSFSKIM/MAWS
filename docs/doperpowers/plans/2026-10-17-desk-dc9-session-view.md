@@ -401,6 +401,10 @@ conversation and phone suites pass.
   `refused` its reason, no retry; `unknown-task` waits for the next
   `subagents` to carry the task, then says the task is unknown); the MCP
   names listed below.
+- **Agent-message rows name their agent.** MAWS's `agent_message` row reads
+  a raw id ("To @ a912e224…"); where a desk-side seam can give it the
+  agent's description or type from the tree without editing MAWS, it
+  does, else a tech-debt row for the MAWS app (maws-fe).
 
 **Proves:** unit tests for the patch (each DX4 status and evidence,
 nested placement, precedence over held-row events, an old producer's
@@ -423,6 +427,11 @@ DC5's group-chat tests unchanged; the gate green (`static,unit` and
 owner's verdict on T0. A screenshot set of the session view, the inline requests,
 the end marker and the jobs view under the workspace for the composite's
 writer.
+
+G2's proof pages across a compaction boundary: rows before a
+`compact_boundary` in the same transcript file load and draw above MAWS's
+"Compacted earlier" divider, never stopping there (the owner's ask is the
+full history).
 
 **Touches:** `apps/desk-web/e2e/` and whatever the acceptance finds.
 
